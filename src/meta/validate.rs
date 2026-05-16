@@ -1,23 +1,38 @@
 use std::collections::BTreeSet;
 
-use super::{MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType, TableMeta};
+use super::{
+    FieldMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType, TableMeta,
+};
 
 pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
     let mut diagnostics = Vec::new();
     validate_unique_names(model, &mut diagnostics);
     validate_enums(model, &mut diagnostics);
     for struct_meta in &model.structs {
-        validate_field_names(
-            &format!("struct `{}`", struct_meta.name),
-            struct_meta.fields.iter().map(|field| field.name.as_str()),
-            &mut diagnostics,
-        );
+        validate_struct_meta(model, struct_meta, &mut diagnostics);
     }
     for table in &model.tables {
         validate_table_meta(model, table, &mut diagnostics);
     }
     diagnostics.sort();
     diagnostics
+}
+
+fn validate_struct_meta(
+    model: &MetaModel,
+    struct_meta: &super::StructMeta,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    let owner = format!("struct `{}`", struct_meta.name);
+    validate_field_names(
+        &owner,
+        struct_meta.fields.iter().map(|field| field.name.as_str()),
+        diagnostics,
+    );
+
+    for field in &struct_meta.fields {
+        validate_default_value(model, &owner, field, diagnostics);
+    }
 }
 
 fn validate_unique_names(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic>) {
@@ -86,7 +101,12 @@ fn validate_table_meta(
     );
 
     for field in &table.fields {
-        validate_default_value(model, table, field, diagnostics);
+        validate_default_value(
+            model,
+            &format!("table `{}`", table.name),
+            field,
+            diagnostics,
+        );
     }
 
     let mut index_names = BTreeSet::new();
@@ -197,8 +217,8 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
 
 fn validate_default_value(
     model: &MetaModel,
-    table: &TableMeta,
-    field: &super::FieldMeta,
+    owner: &str,
+    field: &FieldMeta,
     diagnostics: &mut Vec<MetaDiagnostic>,
 ) {
     let default = if let Some(default) = &field.default {
@@ -233,8 +253,8 @@ fn validate_default_value(
         diagnostics.push(MetaDiagnostic::new(
             MetaDiagnosticCode::InvalidDefaultValue,
             format!(
-                "table `{}` field `{}` default value does not match type `{}`",
-                table.name, field.name, field.field_type
+                "{} field `{}` default value does not match type `{}`",
+                owner, field.name, field.field_type
             ),
         ));
     }

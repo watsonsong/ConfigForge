@@ -715,6 +715,26 @@ fn validates_primitive_and_enum_default_values() {
 }
 
 #[test]
+fn validates_struct_field_default_values() {
+    let diagnostics = diagnostics(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+            default = "one"
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::InvalidDefaultValue
+            && diagnostic.message.contains("struct `Reward` field `count`")
+    }));
+}
+
+#[test]
 fn rejects_duplicate_enum_struct_enum_value_and_index_names() {
     let diagnostics = diagnostics(
         r#"

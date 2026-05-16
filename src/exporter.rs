@@ -3,9 +3,9 @@ use std::{fs, path::Path};
 use serde::Serialize;
 
 use crate::{
+    data::{DataLoadPlan, DataLoader, DataRow, DataTable},
     meta::{LinkedFieldMeta, LinkedTableMeta, MetaModel, PrimitiveFieldType, TableMeta},
-    source::DataTable,
-    validation::{apply_field_defaults, validate_table},
+    validation::{normalize_data_set, validate_data_set, validate_normalized_data_set},
     ConfigForgeError, Result,
 };
 
@@ -19,46 +19,42 @@ pub struct ExportOptions<'a> {
 #[derive(Debug, Clone, Serialize)]
 struct ExportedTable<'a> {
     meta: &'a TableMeta,
-    rows: &'a [crate::source::DataRow],
+    rows: &'a [DataRow],
 }
 
 pub fn validate_project(meta_path: &Path, data_dir: &Path) -> Result<()> {
     let meta_set = MetaModel::from_path(meta_path)?;
+    let data_plan = DataLoadPlan::from_meta_model(&meta_set)?;
     let linked_meta = meta_set.link().map_err(ConfigForgeError::MetaValidation)?;
-    for table_meta in &linked_meta.tables {
-        let table = load_table(data_dir, table_meta.meta)?;
-        validate_table(table_meta, &table)?;
-    }
-    Ok(())
+    let data_set = DataLoader::new(data_dir).load(&data_plan)?;
+    validate_data_set(&linked_meta, &data_set)
 }
 
 pub fn export_project(options: ExportOptions<'_>) -> Result<()> {
     let meta_set = MetaModel::from_path(options.meta_path)?;
+    let data_plan = DataLoadPlan::from_meta_model(&meta_set)?;
     let linked_meta = meta_set.link().map_err(ConfigForgeError::MetaValidation)?;
+    let data_set = DataLoader::new(options.data_dir).load(&data_plan)?;
+    let data_set = normalize_data_set(&linked_meta, &data_set)?;
+    validate_normalized_data_set(&linked_meta, &data_set)?;
+
     fs::create_dir_all(options.out_dir).map_err(|source| ConfigForgeError::WriteFile {
         path: options.out_dir.to_path_buf(),
         source,
     })?;
 
     for table_meta in &linked_meta.tables {
-        let table = load_table(options.data_dir, table_meta.meta)?;
-        validate_table(table_meta, &table)?;
-        let table = apply_field_defaults(table_meta, &table)?;
-        write_table_json(options.out_dir, table_meta.meta, &table)?;
+        let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "data set is missing table `{}`",
+                table_meta.meta.name
+            ))
+        })?;
+        write_table_json(options.out_dir, table_meta.meta, table)?;
         write_table_rust_stub(options.out_dir, table_meta)?;
     }
 
     Ok(())
-}
-
-fn load_table(data_dir: &Path, table_meta: &TableMeta) -> Result<DataTable> {
-    let source_path = table_meta.source_path().ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` does not declare a source",
-            table_meta.name
-        ))
-    })?;
-    DataTable::from_csv_path(&table_meta.name, data_dir.join(source_path))
 }
 
 fn write_table_json(out_dir: &Path, table_meta: &TableMeta, table: &DataTable) -> Result<()> {

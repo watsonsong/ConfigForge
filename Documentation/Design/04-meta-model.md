@@ -1,5 +1,20 @@
 # 04. Meta 模型设计
 
+## 4.0 当前实现状态
+
+本文档同时包含目标态设计和当前阶段实现。当前代码实现状态如下：
+
+| 能力 | 状态 | 说明 |
+| --- | --- | --- |
+| TOML Meta | Implemented | 当前 loader 支持 TOML parse、imports merge、link 与基础 validate。 |
+| XML Meta | Planned | 文档中的 XML 仅为目标态示例，当前 loader 不支持 XML。 |
+| primitive types | Implemented | 当前支持 `int`、`float`、`bool`、`string`、`text`、`asset`。 |
+| enum | Partial | 当前支持 enum 类型链接、default 校验与数据值校验。 |
+| struct | Reserved | 当前支持 struct 类型链接；struct 数据值解析/校验暂未实现，验证时会显式报 unsupported。 |
+| default | Partial | 当前支持 primitive / enum scalar default。 |
+| multi-source / override / fragments | Reserved | 当前会显式报 unsupported，避免静默忽略配置。 |
+| builtin value types / foreign key / ObjectTable 特化语义 | Planned | 当前尚未实现。 |
+
 ## 4.1 MetaModel
 
 MetaModel 是所有 Meta 文件 import、parse、merge 后得到的 canonical 模型。
@@ -151,6 +166,8 @@ desc = "商店购买价格。"
 | `special_exports` | 是否允许特殊导出器读取。 |
 
 ## 4.5 Missing、Default、Required
+
+> 实现状态：Partial。当前实现已支持 primitive / enum 字段的 scalar `default` 校验，并会在数据验证/导出前把 Missing 或 Empty 值替换为 default；struct、array、table 等复合 default 暂未实现。
 
 字段值状态：
 
@@ -347,6 +364,8 @@ desc = "引用奖励物品。"
 
 ## 4.10 Multi-source 与 Override
 
+> 实现状态：Reserved。当前版本只支持单个 CSV source；multiple `sources`、`override_sources`、非 `csv` provider 与 `fragments` 会在 Meta 校验阶段显式报错，避免静默忽略。
+
 Base `sources` 用于 split merge：
 
 - CollectionTable：多个 source 的 records 追加为一个集合。
@@ -360,6 +379,8 @@ Base `sources` 用于 split merge：
 - 按列表顺序应用，不使用 priority。
 
 ## 4.11 Polymorphic Fragment
+
+> 实现状态：Reserved。当前版本尚未实现 polymorphic fragments；配置 `fragments` 会报 unsupported diagnostic。
 
 多态表使用 composition，不使用继承。
 

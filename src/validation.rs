@@ -1,25 +1,64 @@
 use std::collections::HashSet;
 
 use crate::{
-    meta::{LinkedField, LinkedFieldMeta, LinkedTableMeta, PrimitiveFieldType},
-    source::DataTable,
+    data::{DataSet, DataTable},
+    meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedTableMeta, PrimitiveFieldType},
     ConfigForgeError, Result,
 };
 
-pub fn validate_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
-    let table = apply_field_defaults(meta, table)?;
+pub fn validate_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataSet) -> Result<()> {
+    let data_set = normalize_data_set(meta, data_set)?;
+    validate_normalized_data_set(meta, &data_set)
+}
 
-    for field in &meta.fields {
-        validate_field_presence(meta, &table, field)?;
-        validate_field_values(meta, &table, field)?;
-        validate_field_uniqueness(meta, &table, field)?;
+pub fn normalize_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataSet) -> Result<DataSet> {
+    let mut tables = Vec::with_capacity(data_set.tables().len());
+    for table in data_set.tables() {
+        if let Some(table_meta) = meta.table(&table.name) {
+            tables.push(normalize_table(table_meta, table)?);
+        } else {
+            tables.push(table.clone());
+        }
     }
+    DataSet::try_new(tables)
+}
 
-    for index in &meta.indexes {
-        validate_index_uniqueness(meta, &table, index)?;
+pub fn validate_normalized_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataSet) -> Result<()> {
+    for table_meta in &meta.tables {
+        let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "data set is missing table `{}`",
+                table_meta.meta.name
+            ))
+        })?;
+        validate_normalized_table(table_meta, table)?;
     }
 
     Ok(())
+}
+
+pub fn validate_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
+    let table = normalize_table(meta, table)?;
+    validate_normalized_table(meta, &table)
+}
+
+pub fn validate_normalized_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
+    for field in &meta.fields {
+        validate_supported_field_type(meta, field)?;
+        validate_field_presence(meta, table, field)?;
+        validate_field_values(meta, table, field)?;
+        validate_field_uniqueness(meta, table, field)?;
+    }
+
+    for index in &meta.indexes {
+        validate_index_uniqueness(meta, table, index)?;
+    }
+
+    Ok(())
+}
+
+pub fn normalize_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<DataTable> {
+    apply_field_defaults(meta, table)
 }
 
 pub fn apply_field_defaults(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<DataTable> {
@@ -146,6 +185,20 @@ fn validate_field_values(
     Ok(())
 }
 
+fn validate_supported_field_type(
+    meta: &LinkedTableMeta<'_>,
+    field: &LinkedFieldMeta<'_>,
+) -> Result<()> {
+    if let LinkedField::Struct(_) = field.linked_field {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` field `{}` uses struct type `{}`, but struct value validation is not implemented yet",
+            meta.meta.name, field.meta.name, field.meta.field_type
+        )));
+    }
+
+    Ok(())
+}
+
 fn validate_value_type(
     meta: &LinkedTableMeta<'_>,
     field: &LinkedFieldMeta<'_>,
@@ -225,7 +278,7 @@ mod tests {
 
     use crate::meta::{
         EnumMeta, EnumValueMeta, FieldMeta, LinkedField, LinkedFieldMeta, LinkedTableMeta,
-        PrimitiveFieldType, TableMeta,
+        MetaModel, PrimitiveFieldType, TableMeta,
     };
 
     use super::*;
@@ -381,5 +434,135 @@ mod tests {
 
         assert!(validate_table(&linked_meta, &valid_table).is_ok());
         assert!(validate_table(&linked_meta, &invalid_table).is_err());
+    }
+
+    #[test]
+    fn rejects_struct_field_even_when_empty() {
+        let struct_meta = crate::meta::StructMeta {
+            name: "Reward".to_owned(),
+            desc: None,
+            fields: Vec::new(),
+        };
+        let meta = TableMeta {
+            name: "items".to_owned(),
+            kind: crate::meta::TableKind::Collection,
+            desc: None,
+            source: Some("items.csv".to_owned()),
+            sources: vec![],
+            override_sources: vec![],
+            fields: vec![FieldMeta {
+                name: "reward".to_owned(),
+                desc: None,
+                field_type: "Reward".to_owned(),
+                required: false,
+                default: None,
+                layout: None,
+                export: true,
+                tool_only: false,
+                filter_field: false,
+                validator_only: false,
+                field_number: None,
+                unique: false,
+            }],
+            indexes: vec![],
+            primary_index: None,
+            preserve_source_order: false,
+            polymorphic: false,
+        };
+        let linked_meta = LinkedTableMeta::new(
+            &meta,
+            vec![LinkedFieldMeta {
+                meta: &meta.fields[0],
+                linked_field: LinkedField::Struct(&struct_meta),
+            }],
+            vec![],
+        );
+        let table = DataTable {
+            name: "items".to_owned(),
+            rows: vec![BTreeMap::from([("reward".to_owned(), String::new())])],
+        };
+        let error = validate_table(&linked_meta, &table).unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("struct value validation is not implemented yet"))
+        );
+    }
+
+    #[test]
+    fn validates_complete_data_set() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+            "#,
+        )
+        .expect("meta should load");
+        let linked_meta = meta.link().expect("meta should link");
+        let data_set = DataSet::new(vec![DataTable::new(
+            "items",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        )]);
+
+        assert!(validate_data_set(&linked_meta, &data_set).is_ok());
+    }
+
+    #[test]
+    fn rejects_data_set_missing_required_table() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+            "#,
+        )
+        .expect("meta should load");
+        let linked_meta = meta.link().expect("meta should link");
+        let data_set = DataSet::new(vec![]);
+        let error = validate_data_set(&linked_meta, &data_set).unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("missing table `items`"))
+        );
+    }
+
+    #[test]
+    fn normalizes_data_set_before_validation() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "max_stack"
+                type = "int"
+                required = true
+                default = 1
+            "#,
+        )
+        .expect("meta should load");
+        let linked_meta = meta.link().expect("meta should link");
+        let data_set = DataSet::new(vec![DataTable::new("items", vec![BTreeMap::new()])]);
+
+        let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
+
+        assert!(validate_normalized_data_set(&linked_meta, &normalized).is_ok());
+        assert_eq!(
+            normalized.table("items").unwrap().rows[0]
+                .get("max_stack")
+                .map(String::as_str),
+            Some("1")
+        );
     }
 }

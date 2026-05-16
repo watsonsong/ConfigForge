@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod data;
 pub mod error;
 pub mod exporter;
 pub mod meta;
