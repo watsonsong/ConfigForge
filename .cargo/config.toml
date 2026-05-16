@@ -7,3 +7,9 @@ coverage-html = "llvm-cov --workspace --all-features --html"
 
 # Generate LCOV file for CI integrations.
 coverage-lcov = "llvm-cov --workspace --all-features --lcov --output-path target/llvm-cov/lcov.info"
+
+# Run the default project lint profile. Requires the rustup clippy component.
+lint = "clippy --workspace --all-targets --all-features -- -F unsafe_code -W clippy::all"
+
+# Run a stricter exploratory lint pass for API/design cleanup candidates.
+lint-strict = "clippy --workspace --all-targets --all-features -- -F unsafe_code -W clippy::all -W clippy::pedantic"

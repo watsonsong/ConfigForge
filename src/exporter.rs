@@ -9,7 +9,7 @@ use crate::{
     ConfigForgeError, Result,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ExportOptions<'a> {
     pub meta_path: &'a Path,
     pub data_dir: &'a Path,

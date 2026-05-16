@@ -778,7 +778,7 @@ fn reports_parse_errors_for_string_and_file_inputs() {
     let file_error = MetaModel::from_path(&invalid_path).unwrap_err();
     match file_error {
         ConfigForgeError::ParseMeta { path, .. } => {
-            assert_eq!(path, invalid_path.canonicalize().unwrap())
+            assert_eq!(path, invalid_path.canonicalize().unwrap());
         }
         other => panic!("expected ParseMeta error, got {other}"),
     }
@@ -804,7 +804,7 @@ fn reports_read_errors_for_missing_meta_or_import_files() {
     match import_error {
         ConfigForgeError::ReadFile { path, .. } => {
             assert_eq!(
-                path.file_name().and_then(|name| name.to_str()),
+                path.file_name().and_then(std::ffi::OsStr::to_str),
                 Some("missing-import.toml")
             );
         }

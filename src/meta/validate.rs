@@ -169,18 +169,17 @@ fn validate_primary_index(
         None => return,
     };
 
-    let primary_index = match table.index(primary_index_name) {
-        Some(primary_index) => primary_index,
-        None => {
-            diagnostics.push(MetaDiagnostic::new(
-                MetaDiagnosticCode::InvalidPrimaryIndex,
-                format!(
-                    "table `{}` primary_index `{}` does not exist",
-                    table.name, primary_index_name
-                ),
-            ));
-            return;
-        }
+    let primary_index = if let Some(primary_index) = table.index(primary_index_name) {
+        primary_index
+    } else {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::InvalidPrimaryIndex,
+            format!(
+                "table `{}` primary_index `{}` does not exist",
+                table.name, primary_index_name
+            ),
+        ));
+        return;
     };
 
     if !primary_index.unique {

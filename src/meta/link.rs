@@ -5,9 +5,7 @@ use super::{
     LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
 };
 
-pub fn link_meta_model<'meta>(
-    model: &'meta MetaModel,
-) -> (Option<LinkedMetaModel<'meta>>, Vec<MetaDiagnostic>) {
+pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<MetaDiagnostic>) {
     let mut diagnostics = Vec::new();
     let enum_index = model
         .enums

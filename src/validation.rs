@@ -97,8 +97,8 @@ fn validate_field_values(
             Some(PrimitiveFieldType::Bool) => matches!(value, "true" | "false" | "1" | "0"),
             Some(
                 PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset,
-            ) => true,
-            None => true,
+            )
+            | None => true,
         };
 
         if !valid {
