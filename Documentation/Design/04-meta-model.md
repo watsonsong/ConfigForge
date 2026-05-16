@@ -291,6 +291,7 @@ rewards[1].count
 设计建议：
 
 - 数组 slot 使用 0-based index。
+- 对 Lua 等习惯 1-based 下标的目标语言，数组下标差异由代码生成器或 runtime adapter 处理；Meta 和 source mapping 的 canonical 表达仍使用 0-based。
 - 同一元素的字段应相邻排列，避免 `rewards[0].x, rewards[1].x, rewards[0].y` 这种交错布局。
 - 如果能通过连续相邻列推断元素分组，未来可考虑省略显式 `[0]`，但当前 canonical 写法仍保留 index。
 - expanded value 中的 array index 默认必须连续；不支持 sparse，除非未来显式设计。

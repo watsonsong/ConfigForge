@@ -143,6 +143,8 @@ Text 字段第一阶段推荐使用原文驱动模型：
 - source cell 默认表示待翻译原文；
 - 可选 text key/context 由字段或 target policy 补充；
 - POT exporter 使用 ExportView 中的 text 生成 msgid 和 source reference；
+- source reference 默认使用 source 表名和行列号，确保翻译人员和策划可以定位原始表格位置；
+- text 字段可以通过额外的映射列或映射行提供 translator comment，用于解释翻译语境、语气、变量含义或 UI 使用场景；
 - 被 filter 排除的记录不进入该 target 的 POT。
 
 ## 5.9 Special Exporter 输入
@@ -186,4 +188,3 @@ error[field.required_missing]: items.name is required but missing
 - 错误码稳定，可用于 QA 断言和 CI 分析。
 - 多位置错误应提供 related locations。
 - 并行执行不影响诊断顺序。
-

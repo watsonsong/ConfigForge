@@ -159,6 +159,7 @@ config-forge export --project ConfigForge.toml --target client_json_shipping
 - CSV 文件不存在。
 - CSV header 缺失。
 - CSV 重复 header。
+- 空行、空列和未映射注释列不会进入 DataSet。
 - XLSX 多 sheet 未指定 sheet。
 - 远程 provider 缺少 auth_ref。
 
@@ -206,7 +207,16 @@ config-forge export --project ConfigForge.toml --target client_json_shipping
 - POT 只包含 ExportView 中 text。
 - Asset manifest 只包含 ExportView 中 asset。
 - 被 shipping filter 排除的记录不进入 POT / asset manifest。
+- POT source reference 使用 source 表名和行列号。
+- text 字段的额外注释列/行能进入 translator comments。
 - special exporter 输出路径冲突报错。
+
+### Artifact Writer
+
+- `temp_commit` 模式下导出失败不提交部分最终产物。
+- `direct` 模式下按项目配置直接写目标路径。
+- 路径冲突在任何写入前报错。
+- 并行 artifact 生成不影响 manifest 稳定排序。
 
 ### CLI
 

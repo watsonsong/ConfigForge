@@ -335,6 +335,7 @@
           <div class="step"><div><h3>DataSet 与 ExportView</h3><p>先形成完整 DataSet，再按 target/context 派生过滤后的 ExportView。</p></div></div>
           <div class="step"><div><h3>校验与导出</h3><p>校验当前视图，通过后规划和生成 artifact，manifest 按路径稳定排序。</p></div></div>
         </div>
+        <div class="callout"><strong>并发策略：</strong>I/O 任务优先使用异步接口或操作系统 I/O 机制，计算任务使用线程池；可按 source、table、target、artifact 等数据粒度拆分，但所有 diagnostics 和 manifest 必须稳定排序。</div>
       </section>
 
       <section id="config">
@@ -356,7 +357,14 @@
         </div>
 
         <h3>核心配置片段</h3>
-        <pre><code>[[tables]]
+        <pre><code>[project]
+name = "sample"
+copyright = "Copyright 2026 Example Studio."
+
+[artifact_writer]
+write_mode = "temp_commit"
+
+[[tables]]
 name = "items"
 kind = "collection"
 desc = "所有可获得物品的基础配置。"
@@ -369,6 +377,7 @@ language = "typescript"
 data_format = "json"
 tags = ["shipping"]
 output = "Generated/Client"</code></pre>
+        <div class="callout ok"><strong>Project 元信息：</strong><code>copyright</code> 可用于生成代码、schema、manifest 等文件头；Artifact Writer 支持 <code>temp_commit</code> 与 <code>direct</code>，推荐正式导出使用 <code>temp_commit</code>。</div>
       </section>
 
       <section id="meta">
@@ -392,6 +401,7 @@ output = "Generated/Client"</code></pre>
         </table>
 
         <div class="callout ok"><strong>Primary Index：</strong>设计取消 <code>primary_key</code> 概念，只保留 <code>primary_index</code> 或 index 上的 <code>primary = true</code>。Primary index 必须是 unique index。</div>
+        <div class="callout"><strong>数组下标：</strong><code>expanded_value</code> 中的数组 slot 使用 0-based，例如 <code>rewards[0].item_id</code>；Lua 等 1-based 目标语言差异由 code generator 或 runtime adapter 处理。</div>
       </section>
 
       <section id="views">
@@ -428,6 +438,7 @@ override_sources = [
   { provider = "csv", path = "Data/items_hotfix.csv" },
   { provider = "csv", path = "Data/items_shipping.csv" },
 ]</code></pre>
+        <div class="callout"><strong>表格注释与中间数据：</strong>Source sheet 允许空行、空列和未映射行/列；没有映射到 field path 的内容不会进入 DataSet，可作为策划注释、公式中间结果或视觉分隔。</div>
       </section>
 
       <section id="export">
@@ -447,6 +458,10 @@ override_sources = [
             <tr><td><code>protobuf</code></td><td>未来</td><td>未来需要字段级 <code>field_number</code>，不使用 stable_hash 作为生产策略。</td></tr>
           </tbody>
         </table>
+        <div class="grid grid-2">
+          <div class="card"><h3>POT 与 text</h3><p>POT source reference 默认使用 source 表名和行列号；text 可通过额外映射列/行提供 translator comment，也可合并字段 <code>desc</code>。</p></div>
+          <div class="card"><h3>Artifact Writer</h3><p><code>temp_commit</code> 先写临时文件再统一提交，<code>direct</code> 直接写目标路径；两种策略都必须先完成路径冲突检查。</p></div>
+        </div>
       </section>
 
       <section id="qa">
@@ -454,11 +469,12 @@ override_sources = [
         <p class="lead">QA 测试应优先断言结构化输出和产物内容，而不是只断言人类可读 message。</p>
         <div class="grid grid-3">
           <div class="card"><h3>配置解析</h3><p>Project/Meta 路径不存在、import 循环、TOML/XML 语法、等价语义。</p></div>
-          <div class="card"><h3>Source Provider</h3><p>CSV/XLSX 正常读取、header 缺失/重复、远程 provider auth_ref。</p></div>
+          <div class="card"><h3>Source Provider</h3><p>CSV/XLSX 正常读取、header 缺失/重复、空行空列不进入 DataSet、远程 provider auth_ref。</p></div>
           <div class="card"><h3>Field Type</h3><p>required、default、color channel、vector3、datetime timezone。</p></div>
           <div class="card"><h3>Multi-source</h3><p>base merge、unique 冲突、override 整行替换、后者覆盖前者。</p></div>
           <div class="card"><h3>Export Filtering</h3><p>shipping 过滤、tool-only 字段、过滤后集合级校验。</p></div>
-          <div class="card"><h3>Desc / 注释</h3><p>desc 进入 inspect 和生成代码注释，多行与特殊字符正确转义。</p></div>
+          <div class="card"><h3>Desc / 注释</h3><p>desc 进入 inspect、生成代码注释和 translator comments，多行与特殊字符正确转义。</p></div>
+          <div class="card"><h3>Artifact Writer</h3><p><code>temp_commit</code> 失败不提交最终产物，<code>direct</code> 按配置直接写入，manifest 稳定排序。</p></div>
         </div>
         <h3>推荐断言字段</h3>
         <p><code>exit code</code>、<code>diagnostic code</code>、<code>severity</code>、<code>table</code>、<code>field_path</code>、<code>record_key</code>、<code>artifact path</code>、<code>manifest</code>、runtime data 中是否包含/排除指定 record/field。</p>
@@ -473,6 +489,9 @@ override_sources = [
           <div class="card"><h3>Primary Index</h3><p>取消 primary_key，仅保留 primary_index 或 <code>primary = true</code>。</p></div>
           <div class="card"><h3>Default / Required</h3><p>缺值时先用 default；required 且无值、无 default 才报错。</p></div>
           <div class="card"><h3>Special Exporter</h3><p>默认读取 ExportView，被 shipping 过滤的数据不进入 POT 和 asset manifest。</p></div>
+          <div class="card"><h3>Source 注释区</h3><p>空行、空列和未映射行/列可用于表格注释或中间数据，不进入 DataSet。</p></div>
+          <div class="card"><h3>并发与写入</h3><p>I/O 与计算任务分开调度；Artifact Writer 可配置 <code>temp_commit</code> 或 <code>direct</code>。</p></div>
+          <div class="card"><h3>配置兼容</h3><p>当前不引入通用 schema version；依赖稳定字符串 name，Protobuf 未来通过显式 <code>field_number</code> 处理兼容。</p></div>
           <div class="card"><h3>Builtin</h3><p>Vector3 等优先作为 builtin；禁止 <code>color_channel = "auto"</code>。</p></div>
           <div class="card"><h3>暂不支持</h3><p>fragment join mode、独立子表式明细布局、模糊 custom runtime format。</p></div>
         </div>

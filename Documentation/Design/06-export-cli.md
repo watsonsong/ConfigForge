@@ -17,6 +17,8 @@
 | `type_mappings` | logical type 到 target type 的映射。 |
 | `special_exporters` | POT、asset manifest 等辅助产物。 |
 
+Project-level `copyright` 可被 target 的代码生成器、schema exporter 或 manifest exporter 用于生成文件头。Target 可在未来扩展覆盖文件头策略，但第一阶段推荐继承 Project Config。
+
 ## 6.2 Runtime Data Format
 
 当前推荐：
@@ -53,6 +55,12 @@ Protobuf 未来规则：
 - source reference；
 - table / field / record key；
 - translator comments。
+
+规则：
+
+- source reference 默认来自 source 表名和 row/column 坐标。
+- translator comments 可来自 text 字段声明、`desc`，或 source 中显式映射的额外注释列/行；如果多个来源同时存在，应按 exporter policy 稳定合并。
+- 被 ExportView 过滤掉的 text 不产生 POT 条目，也不产生 translator comments。
 
 ### Asset Manifest CSV
 
@@ -111,8 +119,18 @@ Artifact 类型：
 
 - 导出前发现路径冲突。
 - 产物写入通过 Artifact Writer。
+- Artifact Writer 支持 `temp_commit` 和 `direct` 写入策略；推荐默认 `temp_commit`。
 - 并行生成不影响 manifest 顺序。
 - 失败 target 不应提交部分产物。
+
+写入策略：
+
+| 策略 | 说明 |
+| --- | --- |
+| `temp_commit` | 先写入临时文件或临时目录，所有 artifact 成功后再确定性提交到最终路径。 |
+| `direct` | 直接写入最终路径，适合本地调试或项目明确选择该行为的场景。 |
+
+无论使用哪种策略，都必须在写入前完成 export plan 和路径冲突检查。
 
 ## 6.6 CLI 总体形式
 

@@ -40,6 +40,7 @@ Project Config 定义工程根、Meta 根文件、默认输出目录、插件、
 [project]
 name = "game_config"
 root = "."
+copyright = "Copyright 2026 Example Studio. All rights reserved."
 
 meta = [
   "Meta/common.toml",
@@ -58,6 +59,9 @@ default_output = "Generated"
 format = "human"
 fail_on_warning = false
 
+[artifact_writer]
+write_mode = "temp_commit"
+
 [[plugins]]
 id = "com.game.lark_sheet"
 version = "1.2.0"
@@ -68,9 +72,22 @@ override = false
 要求：
 
 - `project.name` 必须稳定。
+- `project.copyright` 可选；用于生成代码、schema、manifest 或其他文本产物的文件头。
 - `meta` 可指向 TOML 或 XML。
 - `targets` 可指向独立 target 文件，也可直接内联在 Project Config。
 - 插件 path 不应写入 target config；target 只引用稳定 exporter/provider/generator ID。
+
+Artifact Writer 配置：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `artifact_writer.write_mode` | `temp_commit` | 产物写入策略。`temp_commit` 表示先写临时文件再确定性提交；`direct` 表示直接写目标路径。 |
+
+要求：
+
+- `temp_commit` 是推荐默认值，适合 CI 和正式导出，失败时不应留下部分最终产物。
+- `direct` 可用于本地调试或项目明确接受部分写入风险的场景。
+- 无论使用哪种写入策略，输出路径冲突都必须在写入前发现。
 
 ## 3.3 Meta 文件与 Import
 
@@ -153,6 +170,8 @@ Source declaration 描述 provider 和定位信息。
 | `lark_sheet` | Lark/飞书表格 | `uri` 或 provider-specific id，通常需要 `auth_ref` |
 | `google_sheet` | Google Sheet | `uri` 或 sheet id，通常需要 `auth_ref` |
 
+Source sheet 允许出现空行和空列。未映射到 field path 的行/列不会进入导出结果，可用于策划注释、公式中间结果或视觉分隔。
+
 单 source：
 
 ```toml
@@ -226,6 +245,8 @@ deduplicate = true
 | `protobuf` | 未来设计 | 当前不要求实现；未来需要字段级 `field_number`。 |
 
 不使用模糊的 `custom`。项目自定义格式必须注册明确的 exporter ID 和 format ID。
+
+当前不引入通用配置 schema version 或自动兼容机制。表、字段、enum、struct 等定义依赖稳定字符串 `name` 作为长期身份；如果未来启用 Protobuf，则通过显式 `field_number` 和对应 schema evolution 策略处理二进制格式兼容。
 
 ## 3.6 Field Export Policy 配置
 

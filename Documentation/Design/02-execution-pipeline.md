@@ -105,6 +105,10 @@ Source Provider 负责把 CSV、XLSX、Lark Sheet、Google Sheet 等外部数据
 - provider 的输出不解释业务类型，只保留 row、column、raw cell、source location。
 - Source 加载可以并行，但诊断输出必须稳定排序。
 - 一个 source 加载失败不应阻止其他互不依赖 source 的加载。
+- Source Provider 涉及文件或网络 I/O 时应优先使用异步接口或操作系统 I/O 机制，避免为大量 I/O 等待创建阻塞线程。
+- 计算密集型解析或校验任务可以使用线程池并行执行。
+- 并发拆分既可以按任务类型拆分，也可以在合理粒度下按数据拆分，例如按 source、table、target 或 artifact 拆分。
+- 并发执行不得改变语义结果、诊断排序和 manifest 排序。
 
 ## 2.6 Sheet Mapping 与 DataSet Materialization
 
@@ -126,6 +130,23 @@ Source Provider 负责把 CSV、XLSX、Lark Sheet、Google Sheet 等外部数据
 - CollectionTable 的 override 以整行 record 为单位覆盖，匹配依据是 `primary_index`。
 - `override_sources` 后声明的 source 覆盖先声明的 override 结果。
 - override row 默认必须匹配已有 base row；是否允许 insert 是未来策略，当前默认报错。
+- Source sheet 允许存在空行和空列。
+- 未映射到 field path 的行或列不进入 DataSet，可作为表格注释、中间计算或人工分隔使用。
+- 如果某行/列部分映射到 field path，则只有映射字段参与解析；未映射单元格不产生字段值。
+
+## 2.6.1 并发流水线约束
+
+并发策略应服务于总体执行阶段，而不是改变阶段依赖关系。
+
+推荐约束：
+
+- Project Configuration Resolution、Plugin Registry Initialization、Meta merge/link 是后续阶段的前置依赖。
+- 多个互不依赖的 Meta 文件解析可以并行，但 import 图解析、循环检测和 merge/link 需要在稳定顺序下汇总。
+- 多个 source 可以并行加载；同一 source 内部是否按 sheet/range 并行由 provider 决定。
+- Sheet Mapping、type parse、DataSet materialization 可按 table/source 分片并行，但最终 DataSet 组合顺序必须确定。
+- 多 target 的 ExportView、Validation 和 Export Planning 可以在共享不可变 Full DataSet 的前提下并行。
+- 多 artifact 可以并行生成；Artifact Writer 负责统一冲突检查、写入策略和最终提交。
+- 所有阶段的 diagnostics 必须进入统一 collector，并按稳定 key 输出。
 
 ## 2.7 Target Context 与 ExportView 阶段
 
@@ -206,4 +227,3 @@ ConfigForge 的功能性校验在 source 读取、组合、过滤后执行。对
 9. message。
 
 CLI 应支持 human、json、jsonl、summary 等输出格式。
-
