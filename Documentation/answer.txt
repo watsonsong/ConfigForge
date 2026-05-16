@@ -1,0 +1,21 @@
+1. 所有的检查都是针对所有Source读取完成之后，对最终结果进行检查的。例如required不用对每个单独的source或者override进行检查，而检查最终读取完毕的完整数据；
+2. override source以数据表的”行“为单位进行覆盖。也就是如果是对象表(列表)，那么则支持只覆盖制定的字段，如果是集合表(行表)，则只支持整个对象整体替换；
+3. 由于我们支持了shipping过程中排除掉某些行，所以对于对整个集合进行的检查工具，只用检查过滤之后的数据；
+4. 我们的Special Exporter，例如在shipping包中如果不到处某行配置，那么对应的资源或者国际化文本都不应该出现在最终的导出中；
+5. 对于索引，我们取消掉primary_key这个概念，只有primary_index; 也可以某个index中增加一个primary = true的选项来实现；
+6. meta中的字段倾向于都定义一个默认值，如果不明确写出来就使用默认值；
+7. rewards[0]中的[0]的角度来看，如果我们确保同一个元素一定是排列在一起的，不会出现rewards[0].x, rewards[1].x, rewards[0].y, rewards[1].y这样的排列的话，那确实可以省略；可以考虑一下是否有这样的必要；
+8. 设计上没有对expanded_rows有名气要求，可以是误写。如果不需要可以删掉；
+9. source_provider中，csv和xlsx就是local_file，没必要有单独的local_file的provider；选择方案A；
+10. 对于override_source，没必要定义priority字段了，直接按列表顺序进行覆盖即可；
+11. 我们暂时不需要根据ID拼接的fragment join mode模式；
+12. data-design.md中我们不需要不明确的custom导出。另外考虑lua_table是一种有趣的模式，其他到处模式下代码和数据都是分离的：根据meta生成代码，根据meta+data生成运行时候数据。但由于Lua的特殊性，我们在Lua中很可能代码就是数据；
+13. 我们暂时不考虑到处成protobuf的实现，只用设计上作为一种考量。如果真的需求做设计，我们会在meta描述中加字段，为每个field定义个filed_number的整数作为额外数据；
+14. Vector3根据建议应该优先作为内置数据；
+15. color_channel = "auto"我们禁止auto模式，不要设计设计；
+16. meta中会定义required的字段，如果required为ture则必须有值否则报错。同时可以提供一个default的配置，如果配置了default，在数据Data中没有配置的可以用这个default字段；
+17. 外键是否可以为空，也建议有对应的required作为可选字段；
+
+附加要求：
+1. 我们的meta需要支持多文件配置，也就是一个toml或者xml要能够支持import另外一个toml或者xml的定义，类似其他语言中的include一样；
+2. 我们需要给出工具CLI需要支持各种参数的详细设计；

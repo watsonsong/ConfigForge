@@ -1,0 +1,385 @@
+# 04. Meta 模型设计
+
+## 4.1 MetaModel
+
+MetaModel 是所有 Meta 文件 import、parse、merge 后得到的 canonical 模型。
+
+包含：
+
+- tables；
+- enums；
+- named structs；
+- builtin type options；
+- validators；
+- source declarations；
+- target references 或内联 target；
+- imports metadata。
+
+MetaModel 不包含 target-specific engine 类型名，例如 `UnityEngine.Vector3`、`FLinearColor`。这些属于 target type mapping。
+
+## 4.2 `desc` 描述字段
+
+Meta 支持在各个定义层级声明 `desc`，用于描述该定义的业务含义、使用方式或注意事项。
+
+`desc` 的用途：
+
+1. 作为 Meta 配置中的原生文档说明，替代只能依赖 TOML/XML 注释的做法。
+2. 被 inspect/debug 命令展示，帮助用户理解合并后的 MetaModel。
+3. 被代码生成器转换为目标语言中的文档注释，例如 TypeScript `/** ... */`、C# XML doc、Lua annotation 注释等。
+4. 被特殊导出器或辅助文档生成器用作 translator comment、字段说明或配置文档内容。
+
+支持 `desc` 的推荐层级：
+
+| 层级 | 示例 |
+| --- | --- |
+| enum | 枚举整体说明。 |
+| enum value | 单个枚举值的说明。 |
+| named struct | 结构体整体说明。 |
+| struct field | 结构体字段说明。 |
+| table | 表整体说明。 |
+| table field | 表字段说明。 |
+| fragment | 多态 fragment 说明。 |
+| fragment field | fragment 字段说明。 |
+| index | 索引用途说明。 |
+| foreign key | 引用关系说明。 |
+| validator / export filter | 业务规则说明。 |
+
+规则：
+
+- `desc` 是可选字段，不参与数据解析、校验结果和 runtime data，除非某个 exporter 明确把它作为生成注释或辅助文档输入。
+- `desc` 可以是单行字符串，也可以是多行字符串；实现应保留换行。
+- `desc` 内容不应包含 target language 专属语法；代码生成器负责按目标语言转义和格式化。
+- 如果 TOML/XML 本身还有普通注释，普通注释只用于人读源文件；`desc` 才是进入 MetaModel 和生成代码的结构化说明。
+- `desc` 在 import/merge 后随定义一起保留。若同一逻辑定义被重复声明且 `desc` 不一致，应按重复定义冲突处理，除非未来设计明确的扩展/覆盖机制。
+
+TOML 示例：
+
+```toml
+[[enums]]
+name = "ItemRarity"
+desc = "物品稀有度，影响掉落表现和 UI 颜色。"
+
+[[enums.values]]
+name = "common"
+desc = "普通物品。"
+
+[[enums.values]]
+name = "epic"
+desc = "史诗物品，通常有特殊表现。"
+
+[[tables]]
+name = "items"
+kind = "collection"
+desc = "所有可获得物品的基础配置。"
+
+[[tables.fields]]
+name = "display_name"
+type = "text"
+required = true
+desc = "物品在背包和详情界面展示的名称。"
+```
+
+XML 示例：
+
+```xml
+<enum name="ItemRarity" desc="物品稀有度，影响掉落表现和 UI 颜色。">
+  <value name="common" desc="普通物品。" />
+  <value name="epic" desc="史诗物品，通常有特殊表现。" />
+</enum>
+
+<table name="items" kind="collection" desc="所有可获得物品的基础配置。">
+  <field name="display_name" type="text" required="true" desc="物品在背包和详情界面展示的名称。" />
+</table>
+```
+
+## 4.3 Table
+
+ConfigForge 支持两类表。
+
+### ObjectTable
+
+ObjectTable 表示一个整体配置对象，例如全局游戏规则、经济参数、服务器开关。
+
+特点：
+
+- 导出一个 object。
+- 不需要 index。
+- 多 source 时，不同 source 可提供不同 field path。
+- override source 以 field path 为单位覆盖。
+
+### CollectionTable
+
+CollectionTable 表示多条记录，例如 items、quests、levels。
+
+特点：
+
+- 每行 source data 通常对应一条 record。
+- 可定义一个或多个 index。
+- 可定义 `primary_index`。
+- override source 以整条 record 为单位覆盖，必须通过 primary index 匹配。
+- 可选择 `preserve_source_order = true` 暴露源顺序数组访问。
+
+## 4.4 Field
+
+字段定义逻辑数据形状和工具策略。
+
+示例：
+
+```toml
+[[tables.fields]]
+name = "price"
+type = "int"
+required = true
+default = 0
+desc = "商店购买价格。"
+```
+
+核心属性：
+
+| 属性 | 含义 |
+| --- | --- |
+| `name` | 字段名。 |
+| `desc` | 字段描述，可用于 Meta 文档和生成代码注释。 |
+| `type` | 字段逻辑类型。 |
+| `required` | 当前验证视图中是否必须有值。 |
+| `default` | 数据未提供值时使用的默认值。 |
+| `layout` | 复合值在 source 中的书写方式，例如 scalar cell、JSON cell、expanded value。 |
+| `export` | 是否进入常规 runtime data。 |
+| `tool_only` | 是否仅用于工具流程。 |
+| `filter_field` | 是否可被 export filter 引用。 |
+| `validator_only` | 是否仅用于 Validator。 |
+| `special_exports` | 是否允许特殊导出器读取。 |
+
+## 4.5 Missing、Default、Required
+
+字段值状态：
+
+| 状态 | 含义 |
+| --- | --- |
+| Missing | source 中没有提供该字段或 field path。 |
+| Empty | 提供了空字符串、空数组、空对象等值。 |
+| Null | source 明确写入 null，通常仅 JSON cell 中出现。 |
+| Value | 成功解析出的 typed value。 |
+
+规则：
+
+1. 如果字段 Missing 且配置了 `default`，使用 default。
+2. 如果字段 Missing 且 `required = true` 且无 default，报 required error。
+3. 如果字段 Empty 是否满足 required，由类型决定：
+   - string/text：空字符串默认不满足 required，除非字段允许 empty；
+   - array：空数组默认不满足 non-empty 要求，但是否满足 required 由 field policy 决定；
+   - struct：空对象缺少 required child 时错误。
+4. Null 默认不满足 required。
+5. default 必须能按字段类型解析和校验。
+
+## 4.6 字段类型
+
+### Primitive Types
+
+| 类型 | 含义 |
+| --- | --- |
+| `int` | 整数。 |
+| `float` | 浮点数。 |
+| `bool` | 布尔值。 |
+| `string` | 普通字符串。 |
+| `text` | 国际化文本逻辑值。 |
+| `asset` | 资源引用逻辑值。 |
+
+### Builtin Value Types
+
+优先使用 builtin value type 表达通用游戏值：
+
+| 类型 | 含义 |
+| --- | --- |
+| `color_rgb` / `color_rgba` | 颜色。 |
+| `vector2` / `vector3` / `vector4` | 浮点向量。 |
+| `vector2_int` / `vector3_int` | 整数向量。 |
+| `rotation` | Euler 旋转。 |
+| `datetime` / `date` / `time` / `duration` | 时间相关值。 |
+| `int_range` / `float_range` | 范围。 |
+| `rect` / `bounds3` | 区域和包围盒。 |
+
+确认规则：
+
+- `vector3` 等数学类型优先作为 builtin value type。
+- 项目不应使用 named struct 重新定义同名 builtin 类型。
+- `color_channel` 必须显式为 `byte` 或 `normalized`，禁止 `auto`。
+- `rotation_unit` 推荐默认 `degrees`，可字段级或项目级配置。
+- local datetime 如果要表示 instant，必须声明 timezone policy。
+
+### Enum
+
+Enum 定义允许值集合。
+
+```toml
+[[enums]]
+name = "ItemRarity"
+desc = "物品稀有度。"
+
+[[enums.values]]
+name = "common"
+desc = "普通。"
+
+[[enums.values]]
+name = "rare"
+desc = "稀有。"
+
+[[enums.values]]
+name = "epic"
+desc = "史诗。"
+```
+
+### Named Struct
+
+Named struct 用于业务复合对象，例如 Reward、Cost、Condition、StatBlock。
+
+```toml
+[[structs]]
+name = "Reward"
+desc = "奖励条目，表示获得指定数量的物品。"
+
+[[structs.fields]]
+name = "item_id"
+type = "int"
+required = true
+desc = "奖励物品 ID，引用 items 表。"
+
+[[structs.fields]]
+name = "count"
+type = "int"
+default = 1
+desc = "奖励数量。"
+```
+
+Named struct 不能形成直接或间接循环引用，除非未来引入显式 indirection 类型。
+
+## 4.7 复合值书写方式
+
+这里描述的是 **struct / array 等复合值如何在二维数据表中书写**，而不是固定使用“列展开”或“行展开”这样的物理名词。
+
+ObjectTable 和 CollectionTable 的基础组织方式不同：
+
+- ObjectTable 通常是一行表示一个 field path，例如 `field,value` 布局中每行写一个字段。
+- CollectionTable 通常是一列表示一个 field path，每行写一条 record。
+
+因此，同一个复合值的“展开书写”在不同表类型中会落到不同物理方向上：
+
+- 在 CollectionTable 中，展开后的 field path 通常表现为多个列。
+- 在 ObjectTable 中，展开后的 field path 通常表现为多行 field/value 项。
+
+为避免把逻辑书写方式绑定到物理方向，本文档使用以下术语：
+
+| Layout | 用途 |
+| --- | --- |
+| `scalar_cell` | primitive、builtin value 或简单值写在一个 cell 中。 |
+| `json_cell` | struct、array、深层嵌套数据聚合写入一个 JSON cell。 |
+| `expanded_value` | struct 或固定槽 array 按 field path 展开书写；具体表现为列还是行由 table kind 和 source mapping 决定。 |
+
+当前不要求支持“独立子表式明细布局”，即不要求把某个 array 的元素放在另一张明细表中再通过 parent key / child key 关联回来。
+
+### Array FieldPath
+
+如果复合值使用 `expanded_value`，固定槽 array 可用数组 slot：
+
+```text
+rewards[0].item_id
+rewards[0].count
+rewards[1].item_id
+rewards[1].count
+```
+
+设计建议：
+
+- 数组 slot 使用 0-based index。
+- 同一元素的字段应相邻排列，避免 `rewards[0].x, rewards[1].x, rewards[0].y` 这种交错布局。
+- 如果能通过连续相邻列推断元素分组，未来可考虑省略显式 `[0]`，但当前 canonical 写法仍保留 index。
+- expanded value 中的 array index 默认必须连续；不支持 sparse，除非未来显式设计。
+
+## 4.8 Index 与 Primary Index
+
+CollectionTable 可定义多个 index。
+
+```toml
+[[tables.indexes]]
+name = "by_id"
+fields = ["id"]
+unique = true
+primary = true
+desc = "按物品 ID 精确查找。"
+```
+
+规则：
+
+- 取消 `primary_key` 概念。
+- `primary_index = "by_id"` 和 index 上 `primary = true` 都可表达主索引；如果两者同时存在必须一致。
+- Primary index 必须是 unique index。
+- Foreign key 默认指向目标表 primary index。
+- Override source 对 CollectionTable 的行替换依赖 primary index。
+
+Index cardinality：
+
+- `unique = true`：一个 key 至多对应一条 record。
+- `unique = false`：一个 key 可对应多条 record。
+
+## 4.9 Foreign Key
+
+外键声明字段值引用另一张表的 unique index。
+
+```toml
+[[tables.fields]]
+name = "item_id"
+type = "int"
+required = true
+
+[tables.fields.foreign_key]
+table = "items"
+desc = "引用奖励物品。"
+```
+
+规则：
+
+- 外键是否可为空由字段 `required` 决定。
+- required foreign key 缺值时报 required error。
+- optional foreign key 全空时跳过 FK resolution。
+- composite foreign key 全空可跳过，部分为空应报 partial key error。
+- foreign key target 必须是 unique index 或 primary index。
+
+## 4.10 Multi-source 与 Override
+
+Base `sources` 用于 split merge：
+
+- CollectionTable：多个 source 的 records 追加为一个集合。
+- ObjectTable：多个 source 提供同一对象的不同字段。
+- 唯一索引冲突在最终组合视图中检查。
+
+`override_sources` 用于覆盖：
+
+- ObjectTable：按 field path 覆盖。
+- CollectionTable：按 primary index 匹配整条 record 并替换。
+- 按列表顺序应用，不使用 priority。
+
+## 4.11 Polymorphic Fragment
+
+多态表使用 composition，不使用继承。
+
+当前只支持 variant source mode：
+
+```toml
+[[tables]]
+name = "items"
+kind = "collection"
+polymorphic = true
+primary_index = "by_id"
+sources = [
+  { provider = "csv", path = "items/weapons.csv", fragments = ["stats", "skills"] },
+  { provider = "csv", path = "items/equipment.csv", fragments = ["stats"] },
+  { provider = "csv", path = "items/usable.csv", fragments = ["usable"] },
+]
+```
+
+规则：
+
+- 每个 source 贡献完整 record 加声明的 fragments。
+- base sources 中同 ID 冲突，即使 fragments 不同也冲突。
+- 不支持多个 source 按 ID 拼接 fragment。
+- source 声明了某 fragment，则该 source 的每行都必须满足该 fragment schema。

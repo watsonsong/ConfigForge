@@ -23,6 +23,7 @@ ConfigForge is a Rust CLI tool for game data export workflows. It lets game desi
 - `Documentation/export-design.md` — export target design and target-specific logical-to-runtime type mapping.
 - `Documentation/validator-design.md` — Validator scopes, phases, code structure, configuration model, diagnostics, and recommended correctness checks.
 - `Documentation/implementation-requirements.md` — implementation-level requirements for dynamic plugins, parallel execution, async I/O, and debuggable structured diagnostics.
+- `Documentation/Design/` — consolidated canonical design set for product behavior, execution stages, configuration, Meta model, validation/export semantics, CLI, user workflows, and QA input.
 - `Documentation/features/0001-project-foundation.md` — first feature spec for this foundation work.
 - `Documentation/features/0002-meta-field-layout-design.md` — feature spec for Field model, struct/array layout, asset validation, text/i18n semantics, and header mapping.
 - `Documentation/features/0003-meta-syntax-index-foreign-key-design.md` — feature spec for TOML/XML Meta syntax, XML Schema support, indexes, generated query semantics, and foreign keys.
@@ -35,6 +36,8 @@ ConfigForge is a Rust CLI tool for game data export workflows. It lets game desi
 - `Documentation/features/0010-source-ordered-collection-access.md` — feature spec for CollectionTable source-ordered array access without requiring indexes.
 - `Documentation/features/0011-builtin-value-types.md` — feature spec for builtin color, vector, rotation, date/time, duration, and range value types.
 - `Documentation/features/0012-implementation-technical-requirements.md` — feature spec for pluginization, parallelization, async I/O, and debuggability requirements.
+- `Documentation/features/0013-consolidated-design-docs.md` — feature spec for the consolidated design documentation set.
+- `Documentation/features/0014-meta-desc-documentation.md` — feature spec for `desc` metadata on Meta definitions and generated comments.
 
 ## Current Source Layout
 

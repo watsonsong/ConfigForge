@@ -13,6 +13,7 @@ This directory contains durable project knowledge for ConfigForge.
 - `export-design.md` records export target and target-specific type mapping design.
 - `validator-design.md` records Validator scopes, phases, code structure, configuration model, diagnostics, and valuable checks.
 - `implementation-requirements.md` records implementation-level requirements for plugins, parallel execution, async I/O, and debuggable diagnostics.
+- `Design/` stores the consolidated canonical design set, reorganized from the earlier multi-round design documents and clarified decisions.
 - `features/` stores one spec per feature or development conversation.
 - `features/0001-project-foundation.md` records the initial project foundation spec.
 - `features/0002-meta-field-layout-design.md` records advanced Meta field type and sheet layout design.
@@ -26,6 +27,23 @@ This directory contains durable project knowledge for ConfigForge.
 - `features/0010-source-ordered-collection-access.md` records CollectionTable source-ordered array access without requiring indexes.
 - `features/0011-builtin-value-types.md` records builtin color, vector, rotation, date/time, duration, and range value types.
 - `features/0012-implementation-technical-requirements.md` records pluginization, parallelization, async I/O, and debuggability requirements.
+- `features/0013-consolidated-design-docs.md` records the consolidated design documentation work.
+- `features/0014-meta-desc-documentation.md` records the `desc` metadata design for Meta definitions and generated comments.
+
+## Canonical Design Set
+
+For future technical overview design, detailed design, user manual writing, and QA test planning, prefer the consolidated documents under `Design/`:
+
+- `Design/README.md` — consolidated design index and current confirmed decisions.
+- `Design/01-overview.md` — tool purpose, users, solved problems, terms, and scope.
+- `Design/02-execution-pipeline.md` — execution phases from CLI/config resolution to diagnostics and artifacts.
+- `Design/03-configuration.md` — project, Meta, source, target, plugin, and field policy configuration.
+- `Design/04-meta-model.md` — canonical Meta model for tables, fields, types, indexes, foreign keys, multi-source, and fragments.
+- `Design/05-data-validation.md` — data views, filtering, validation semantics, special exporter inputs, and diagnostics.
+- `Design/06-export-cli.md` — export targets, runtime data formats, special exporters, artifact model, and CLI commands.
+- `Design/07-user-manual-and-qa.md` — user workflows, common operations, QA dimensions, and assertion guidance.
+
+The older topic-specific design files remain useful historical background and detailed reference. If they conflict with `Design/`, treat `Design/` as the current canonical product design.
 
 ## Maintenance Rules
 
