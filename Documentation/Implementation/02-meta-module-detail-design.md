@@ -1,93 +1,113 @@
 # 02. Meta 模块详细设计
 
-本文档用于指导下一步优先开发 Meta 模块，使基础 Meta 加载和单元测试先跑起来。产品语义以 `Documentation/Design/04-meta-model.md` 为准；本文档描述 Rust 实现中的类型边界、类/结构体关系、主要方法和测试组织。
+本文档描述当前 Meta 模块的实际实现设计，用于指导后续继续扩展 Meta 能力。产品语义以 `Documentation/Design/04-meta-model.md` 为准；本文档聚焦 Rust 类型边界、生命周期表达、Load-then-Link 策略、主要方法和测试组织。
 
 ## 2.1 设计目标
 
-Meta 模块负责把一个或多个 Meta 文件转换为 canonical `MetaModel`。
+Meta 模块负责把一个或多个 Meta 文件转换为可被后续模块使用的两类数据：
 
-近期目标聚焦基础能力：
+1. **`MetaModel`**：纯 serde-owned 配置数据，保留从 TOML 加载出的业务声明。
+2. **`LinkedMetaModel<'meta>`**：从 `&'meta MetaModel` 派生出的只读借用视图，包含运行期索引和解析后的跨对象引用。
 
-1. TOML Meta 加载。
-2. 单文件解析。
-3. 基础 table / field / index / field type 建模。
-4. `desc`、`kind`、`primary_index`、`required`、`default` 等字段保留。
-5. 基础结构校验与稳定诊断。
-6. 单元测试可独立运行。
+当前已实现的基础能力：
 
-暂缓但需预留扩展点：
-
-- XML Meta。
-- 多文件 import/include。
-- enum、named struct、fragment、validator。
-- source declaration 和 target reference 的完整解析。
-- Protobuf `field_number` 等目标格式兼容字段。
+- TOML Meta 加载。
+- `imports` 多文件递归加载和 canonical path 去重。
+- project / enum / struct / table / field / index 建模。
+- `FieldMeta.field_type` 以字符串保存，Link 后解析为 primitive / enum / struct。
+- `IndexMeta.fields` 以字符串保存，Link 后解析为 `Vec<&FieldMeta>`。
+- 基础结构校验与稳定诊断。
+- 模块内单元测试覆盖加载、Link、imports、诊断。
 
 ## 2.2 Rust 中的“类”和继承策略
 
 Rust 不使用面向对象继承。本文档中的“类”对应 Rust 的 `struct`、`enum`、`trait`：
 
-- **数据类**：使用 `struct`，例如 `MetaModel`、`TableMeta`、`FieldMeta`。
-- **多态变体**：使用 `enum`，例如 `TableKind`、`FieldType`、`MetaFormat`。
-- **行为抽象**：使用 `trait`，例如未来的 `MetaParser` 或 `MetaSourceResolver`。
-- **继承关系**：用组合、枚举分发或 trait 约束替代，不设计父类/子类继承树。
+- **数据结构**：`MetaModel`、`TableMeta`、`FieldMeta`、`LinkedMetaModel<'meta>`。
+- **多态变体**：`TableKind`、`PrimitiveFieldType`、`LinkedField<'meta>`。
+- **行为入口**：`impl MetaModel`、`link_meta_model`、`validate_meta_model`。
+- **继承关系**：不设计父类/子类；用组合、枚举分发和借用视图表达关系。
 
-Meta 模块第一阶段不需要复杂 trait 层级；先使用清晰的数据结构和 builder/validator 函数即可。
+Object table 与 collection table 通过 `TableKind` 区分，不拆成继承体系。Field 的 primitive / enum / struct 类型在 Link 阶段通过 `LinkedField<'meta>` 区分。
 
-## 2.3 建议模块结构
-
-短期可继续放在 `src/meta.rs`，但实现时按以下边界组织代码块；迁移为目录模块时直接拆分：
+## 2.3 当前模块结构
 
 ```text
 src/meta/
-  mod.rs
-  document.rs
-  loader.rs
-  syntax.rs
-  model.rs
-  field_type.rs
-  path.rs
-  index.rs
-  builder.rs
-  validate.rs
-  diagnostic.rs
+  mod.rs              # 对外 API 与 re-export
+  model.rs            # 纯配置模型、Linked* 借用视图、查询方法
+  loader.rs           # TOML 字符串/路径加载、imports 递归、合并、加载后校验
+  link.rs             # MetaModel -> LinkedMetaModel<'meta> 的链接过程
+  validate.rs         # Meta 结构校验
+  diagnostic.rs       # MetaDiagnosticCode、MetaDiagnostic
+  tests.rs            # Meta 单元测试
 ```
 
-各子模块职责：
+职责约束：
 
 | 子模块 | 责任 |
 | --- | --- |
-| `document` | 表示 Meta 文档、格式、文件路径、导入来源。 |
-| `loader` | 从文件系统读取 Meta 文档；未来处理 import 递归和循环检测。 |
-| `syntax` | serde 反序列化结构，尽量贴近 TOML/XML 原始格式。 |
-| `model` | canonical MetaModel 类型，对外暴露的主要数据结构。 |
-| `field_type` | 字段类型、内置值类型、类型引用与解析。 |
-| `path` | field path 和 array slot 解析，例如 `rewards[0].count`。 |
-| `index` | index、primary index、唯一性规则。 |
-| `builder` | 从 raw syntax 构建 canonical model，做默认值补齐和规范化。 |
-| `validate` | Meta 结构校验。 |
-| `diagnostic` | Meta 诊断 code、位置、排序。 |
+| `mod.rs` | 只负责声明子模块和 re-export 对外 API。 |
+| `model.rs` | 定义 serde 数据结构、linked 数据结构、查询方法和 primitive 类型解析。 |
+| `loader.rs` | 文件读取、TOML 反序列化、imports 递归、模型合并、加载后 link/validate。 |
+| `link.rs` | 构建 `LinkedMetaModel<'meta>`，解析字段类型和索引字段引用。 |
+| `validate.rs` | 独立结构校验；不构造运行时数据。 |
+| `diagnostic.rs` | 诊断 code、message、排序和展示。 |
+| `tests.rs` | 使用内联 TOML 和临时目录 fixture 测试 Meta 行为。 |
 
-## 2.4 核心数据结构
+## 2.4 Load-then-Link 架构
 
-### 2.4.1 `MetaModel`
+### 2.4.1 阶段划分
+
+```text
+TOML input
+  --serde load--> MetaModel
+  --imports-----> Vec<MetaModel>
+  --merge-------> MetaModel
+  --link--------> LinkedMetaModel<'meta>
+  --validate----> diagnostics
+```
+
+Load 阶段只得到可拥有、可序列化、可反序列化的配置数据；Link 阶段要求所有 Meta 都已加载完成，因此能用 Rust 生命周期表达“linked view 不能长于原始 MetaModel”。
+
+### 2.4.2 为什么不把引用写回 `MetaModel`
+
+如果把 `LinkedField` 或 `&FieldMeta` 写回 `MetaModel` 内部，会形成“结构体拥有数据，同时字段又引用自己内部数据”的自引用结构，普通 Rust 安全借用模型不适合这样表达。
+
+当前设计避免该问题：
+
+```text
+MetaModel owns all strings/vectors
+LinkedMetaModel<'meta> borrows from &'meta MetaModel
+```
+
+因此：
+
+- `MetaModel` 可以自由移动、序列化、测试比较。
+- `LinkedMetaModel<'meta>` 不能比被借用的 `MetaModel` 活得更久。
+- Link 完成后整体只读，不需要单独释放其中某个对象。
+- 运行期索引可以保存 `&'meta str`、`&'meta FieldMeta`、`&'meta EnumMeta` 等引用。
+
+## 2.5 纯配置数据结构
+
+### 2.5.1 `MetaModel`
 
 ```rust
 pub struct MetaModel {
+    pub imports: Vec<String>,
     pub project: Option<ProjectMeta>,
-    pub tables: Vec<TableMeta>,
     pub enums: Vec<EnumMeta>,
     pub structs: Vec<StructMeta>,
-    pub fragments: Vec<FragmentMeta>,
-    pub validators: Vec<ValidatorMeta>,
+    pub tables: Vec<TableMeta>,
 }
 ```
 
 说明：
 
-- 第一阶段可只实现 `tables`，其他字段可先预留为空集合或暂不暴露。
-- `MetaModel` 是 canonical 输出，后续 `data`、`validation`、`exporter` 依赖它。
-- `MetaModel` 不保留 TOML/XML 语法细节，但应保留业务字段、`desc` 和必要 source location。
+- `MetaModel` 是 serde 直接加载的 owned model。
+- 不包含 `HashMap` 索引，不包含内部引用。
+- `MetaSet` 当前是 `MetaModel` 的兼容别名。
+- `imports` 只参与加载；合并后仍保留导入声明，便于调试或后续展示。
 
 主要方法：
 
@@ -95,14 +115,18 @@ pub struct MetaModel {
 impl MetaModel {
     pub fn from_toml_str(input: &str) -> Result<Self>;
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self>;
-    pub fn table(&self, name: &str) -> Option<&TableMeta>;
+    pub fn from_paths<I, P>(paths: I) -> Result<Self>;
+    pub fn link(&self) -> Result<LinkedMetaModel<'_>, Vec<MetaDiagnostic>>;
     pub fn validate(&self) -> Result<(), Vec<MetaDiagnostic>>;
+
+    pub fn table(&self, name: &str) -> Option<&TableMeta>;
+    pub fn enum_meta(&self, name: &str) -> Option<&EnumMeta>;
+    pub fn struct_meta(&self, name: &str) -> Option<&StructMeta>;
+    pub fn collection_tables(&self) -> impl Iterator<Item = &TableMeta>;
 }
 ```
 
-第一阶段如果保留现有 `MetaSet` 名称，建议将其定位为兼容别名或临时 raw set，最终对外名称收敛到 `MetaModel`。
-
-### 2.4.2 `ProjectMeta`
+### 2.5.2 `ProjectMeta`
 
 ```rust
 pub struct ProjectMeta {
@@ -112,18 +136,43 @@ pub struct ProjectMeta {
 }
 ```
 
+`copyright` 可被 exporter 用于生成文件头。Project Config 与 Meta 顶层 project 的合并优先级后续再单独设计；当前 Meta 模块只负责保留字段。
+
+### 2.5.3 enum 与 struct
+
+```rust
+pub struct EnumMeta {
+    pub name: String,
+    pub desc: Option<String>,
+    pub values: Vec<EnumValueMeta>,
+}
+
+pub struct EnumValueMeta {
+    pub name: String,
+    pub desc: Option<String>,
+}
+
+pub struct StructMeta {
+    pub name: String,
+    pub desc: Option<String>,
+    pub fields: Vec<FieldMeta>,
+}
+```
+
 说明：
 
-- `copyright` 来自近期确认的设计决策，可用于生成文件头。
-- Project Config 与 Meta 顶层 project 需要在后续设计中明确合并优先级；第一阶段只做 Meta 文件内保留。
+- enum value 名称在 enum 内唯一。
+- struct field 与 table field 共用 `FieldMeta`。
+- struct 的 field type 同样在 Link 阶段解析为 primitive / enum / struct。
 
-### 2.4.3 `TableMeta`
+### 2.5.4 `TableMeta`
 
 ```rust
 pub struct TableMeta {
     pub name: String,
     pub kind: TableKind,
     pub desc: Option<String>,
+    pub source: Option<String>,
     pub sources: Vec<SourceRef>,
     pub override_sources: Vec<SourceRef>,
     pub fields: Vec<FieldMeta>,
@@ -136,14 +185,14 @@ pub struct TableMeta {
 
 说明：
 
-- 当前 `src/meta.rs` 中的 `source: String` 是早期简化形式。下一步可兼容解析为 `sources = [{ provider = "csv", path = "..." }]`，也可短期保留单 source 字段用于 fixture。
-- `kind` 默认策略建议：没有声明时先按 `collection` 处理，或要求必填。为了避免歧义，推荐第一阶段要求必填并在错误样例中覆盖。
-- `ObjectTable` 和 `CollectionTable` 不需要定义成继承子类；通过 `TableKind` 区分，并在 validator 中执行不同规则。
+- `source` 是历史兼容入口；canonical 写法应使用 `sources`。
+- `source_path()` 优先返回 `sources.first().path`，否则回退到 `source`。
+- `kind` 默认 `collection`。
+- `primary_index` 当前仍是字符串，校验阶段确认引用 index 是否存在并且唯一。
 
-### 2.4.4 `TableKind`
+### 2.5.5 `TableKind`
 
 ```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TableKind {
     Object,
@@ -153,292 +202,348 @@ pub enum TableKind {
 
 规则：
 
-- `Object`：不需要 index；override 可按 field path 覆盖。
-- `Collection`：可定义 index；override 依赖 primary index。
+- `Object`：可以没有 index。
+- `Collection`：可以定义 index；override 等后续逻辑会依赖 primary index。
 
-### 2.4.5 `FieldMeta`
+### 2.5.6 `FieldMeta`
 
 ```rust
 pub struct FieldMeta {
     pub name: String,
     pub desc: Option<String>,
-    pub field_type: FieldType,
+    #[serde(rename = "type")]
+    pub field_type: String,
     pub required: bool,
-    pub default: Option<DefaultValue>,
+    pub default: Option<toml::Value>,
     pub layout: Option<ValueLayout>,
     pub export: bool,
     pub tool_only: bool,
     pub filter_field: bool,
     pub validator_only: bool,
-    pub special_exports: SpecialExportPolicy,
-    pub foreign_key: Option<ForeignKeyMeta>,
     pub field_number: Option<u32>,
+    pub unique: bool,
 }
 ```
 
-第一阶段建议实现：
+关键点：
 
-- `name`
-- `desc`
-- `field_type`
-- `required`
-- `default`
-- `layout`
-- `export` 默认 `true`
-- `field_number` 先保留为可选字段但不参与逻辑
+- `field_type` 必须保持 `String`，因为它可能是 primitive，也可能是后续文件中定义的 enum / struct 名称。
+- `default` 暂保留 `toml::Value`；后续可在 Link 或单独 default-link 阶段按字段类型解析为 typed default。
+- `unique` 是兼容字段；正式唯一性建议优先通过 `IndexMeta { unique = true }` 表达。
 
-现有 `unique: bool` 不建议继续作为 field 级正式概念；唯一性应通过 `IndexMeta { unique: true }` 表达。短期为了兼容旧 fixture 可以解析，但新文档和新测试应使用 index。
-
-### 2.4.6 `FieldType`
+### 2.5.7 primitive 类型
 
 ```rust
-pub enum FieldType {
+pub enum PrimitiveFieldType {
     Int,
     Float,
     Bool,
     String,
     Text,
     Asset,
-    Builtin(BuiltinValueType),
-    Enum(TypeName),
-    Struct(TypeName),
-    Array(Box<FieldType>),
 }
 ```
 
-第一阶段建议至少支持：
+`PrimitiveFieldType::parse` 支持：
 
-```rust
-Int, Float, Bool, String, Text, Asset
-```
-
-为了尽快跑通基础测试，可以先使用 serde string 解析：
-
-| Meta 字符串 | FieldType |
+| Meta 字符串 | Primitive |
 | --- | --- |
-| `int` | `FieldType::Int` |
-| `float` | `FieldType::Float` |
-| `bool` | `FieldType::Bool` |
-| `string` | `FieldType::String` |
-| `text` | `FieldType::Text` |
-| `asset` | `FieldType::Asset` |
+| `int` / `i64` | `Int` |
+| `float` / `f64` | `Float` |
+| `bool` | `Bool` |
+| `string` | `String` |
+| `text` | `Text` |
+| `asset` | `Asset` |
 
-历史兼容：当前代码使用 `i64` / `f64`。下一步可以临时同时接受 `i64 -> int`、`f64 -> float`，但 canonical 输出应使用 `int` / `float`。
-
-### 2.4.7 `ValueLayout`
-
-```rust
-#[serde(rename_all = "snake_case")]
-pub enum ValueLayout {
-    ScalarCell,
-    JsonCell,
-    ExpandedValue,
-}
-```
-
-规则：
-
-- primitive 默认 `scalar_cell`。
-- struct/array 如果未声明 layout，后续 builder 可根据类型给出默认值。
-- 第一阶段只解析并保留，不必实现 sheet mapping。
-
-### 2.4.8 `IndexMeta`
+### 2.5.8 `IndexMeta`
 
 ```rust
 pub struct IndexMeta {
     pub name: String,
     pub desc: Option<String>,
-    pub fields: Vec<FieldPath>,
+    pub fields: Vec<String>,
     pub unique: bool,
     pub primary: bool,
 }
 ```
 
-规则：
+说明：
 
-- `fields` 至少一个。
-- `unique = true` 表示唯一索引。
-- `primary = true` 与 table `primary_index = "..."` 等价；二者同时存在必须一致。
-- primary index 必须是 unique index。
-- index 引用的 field path 必须存在。
+- Raw `fields` 仍保存字段名字符串，方便 serde 加载和错误展示。
+- Link 后通过 `LinkedIndexMeta.fields: Vec<&FieldMeta>` 获得真实字段引用。
+- 当前只支持 table 顶层简单字段名；后续如支持 `a.b[0].c`，应引入 `FieldPath` 和 `LinkedFieldPath<'meta>`。
 
-### 2.4.9 `FieldPath`
+## 2.6 Linked 数据结构
+
+### 2.6.1 `LinkedField<'meta>`
 
 ```rust
-pub struct FieldPath {
-    pub segments: Vec<FieldPathSegment>,
-}
-
-pub enum FieldPathSegment {
-    Name(String),
-    ArraySlot(usize),
+pub enum LinkedField<'meta> {
+    Primitive(PrimitiveFieldType),
+    Enum(&'meta EnumMeta),
+    Struct(&'meta StructMeta),
 }
 ```
 
-示例：
+这是 Link 字段类型的核心结果：
 
-```text
-rewards[0].item_id
+- primitive 保存 copyable enum。
+- enum / struct 保存对 `MetaModel` 内部 owned meta 的借用引用。
+- 未解析成功时产生 `UnknownFieldType`，该字段不会进入 linked fields。
+
+### 2.6.2 `LinkedFieldMeta<'meta>`
+
+```rust
+pub struct LinkedFieldMeta<'meta> {
+    pub meta: &'meta FieldMeta,
+    pub linked_field: LinkedField<'meta>,
+}
 ```
 
-解析为：
+`meta` 指向原始字段配置；`linked_field` 是解析后的字段类型。后续 validation/exporter 需要字段名、desc、default 等原始属性时从 `meta` 读取，需要类型时从 `linked_field` 读取。
 
-```text
-Name("rewards"), ArraySlot(0), Name("item_id")
+### 2.6.3 `LinkedIndexMeta<'meta>`
+
+```rust
+pub struct LinkedIndexMeta<'meta> {
+    pub meta: &'meta IndexMeta,
+    pub fields: Vec<&'meta FieldMeta>,
+}
 ```
 
-规则：
+`meta.fields` 保留原始字符串；`fields` 是解析到同一 table 字段列表中的真实字段引用。
 
-- array slot 使用 0-based。
-- 第一阶段 index 字段可以先只支持简单字段名；但 `FieldPath` 类型应预留 expanded value 需要的路径结构。
+### 2.6.4 `LinkedTableMeta<'meta>`
 
-### 2.4.10 `MetaDiagnostic`
+```rust
+pub struct LinkedTableMeta<'meta> {
+    pub meta: &'meta TableMeta,
+    pub fields: Vec<LinkedFieldMeta<'meta>>,
+    pub indexes: Vec<LinkedIndexMeta<'meta>>,
+    primary_index: Option<usize>,
+    field_index: HashMap<&'meta str, usize>,
+    index_index: HashMap<&'meta str, usize>,
+}
+```
+
+查询方法：
+
+```rust
+impl<'meta> LinkedTableMeta<'meta> {
+    pub fn field(&self, name: &str) -> Option<&LinkedFieldMeta<'meta>>;
+    pub fn index(&self, name: &str) -> Option<&LinkedIndexMeta<'meta>>;
+    pub fn primary_index(&self) -> Option<&LinkedIndexMeta<'meta>>;
+}
+```
+
+说明：
+
+- table 内字段和索引用 `HashMap<&str, usize>` 加速查询。
+- `primary_index` 保存选中主索引在 `indexes` 中的下标，避免在结构体内保存指向自身 `Vec` 元素的自引用；查询时通过 `primary_index()` 返回 `&LinkedIndexMeta<'meta>`。
+- `fields` 中只包含类型成功解析的字段；加载入口会把 Link diagnostics 和 validate diagnostics 合并后返回错误，避免下游拿到部分错误模型。
+
+### 2.6.5 `LinkedStructMeta<'meta>`
+
+```rust
+pub struct LinkedStructMeta<'meta> {
+    pub meta: &'meta StructMeta,
+    pub fields: Vec<LinkedFieldMeta<'meta>>,
+    field_index: HashMap<&'meta str, usize>,
+}
+```
+
+struct 的字段 Link 规则与 table 相同。
+
+### 2.6.6 `LinkedMetaModel<'meta>`
+
+```rust
+pub struct LinkedMetaModel<'meta> {
+    pub model: &'meta MetaModel,
+    pub tables: Vec<LinkedTableMeta<'meta>>,
+    pub structs: Vec<LinkedStructMeta<'meta>>,
+    enum_index: HashMap<&'meta str, &'meta EnumMeta>,
+    struct_meta_index: HashMap<&'meta str, &'meta StructMeta>,
+    table_index: HashMap<&'meta str, usize>,
+    struct_index: HashMap<&'meta str, usize>,
+}
+```
+
+查询方法：
+
+```rust
+impl<'meta> LinkedMetaModel<'meta> {
+    pub fn enum_meta(&self, name: &str) -> Option<&'meta EnumMeta>;
+    pub fn raw_struct_meta(&self, name: &str) -> Option<&'meta StructMeta>;
+    pub fn table(&self, name: &str) -> Option<&LinkedTableMeta<'meta>>;
+    pub fn struct_meta(&self, name: &str) -> Option<&LinkedStructMeta<'meta>>;
+}
+```
+
+`HashMap` 用于运行期查询加速。需要稳定诊断顺序时，不依赖 HashMap 遍历顺序，而是在诊断列表上排序。
+
+## 2.7 Link 流程
+
+入口：
+
+```rust
+pub fn link_meta_model<'meta>(
+    model: &'meta MetaModel,
+) -> (Option<LinkedMetaModel<'meta>>, Vec<MetaDiagnostic>);
+
+impl MetaModel {
+    pub fn link(&self) -> Result<LinkedMetaModel<'_>, Vec<MetaDiagnostic>>;
+}
+```
+
+流程：
+
+1. 从 `model.enums` 构建临时 `HashMap<&str, &EnumMeta>`。
+2. 从 `model.structs` 构建临时 `HashMap<&str, &StructMeta>`。
+3. 遍历 tables：
+   - 为当前 table 构建 field name -> `&FieldMeta` 的临时 HashMap。
+   - 调用 `link_fields` 解析每个 field 的 `field_type`。
+   - 调用 `link_indexes` 将 `IndexMeta.fields` 解析为 `Vec<&FieldMeta>`。
+   - 根据 `TableMeta.primary_index` 或 `IndexMeta.primary` 解析当前 table 选中的 primary index。
+   - 构造 `LinkedTableMeta<'meta>`。
+4. 遍历 structs，按同样方式构造 `LinkedStructMeta<'meta>`。
+5. 如果没有 Link diagnostics，返回 `Some(LinkedMetaModel<'meta>)`；否则返回 `None` 和 diagnostics。
+
+字段类型解析顺序：
+
+```text
+PrimitiveFieldType::parse(field.field_type)
+  -> enum_index.get(field.field_type)
+  -> struct_index.get(field.field_type)
+  -> UnknownFieldType
+```
+
+## 2.8 Loader 与 imports
+
+入口：
+
+```rust
+impl MetaModel {
+    pub fn from_toml_str(input: &str) -> Result<Self>;
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self>;
+    pub fn from_paths<I, P>(paths: I) -> Result<Self>;
+}
+
+pub fn load_meta_path(path: &Path) -> Result<MetaModel>;
+```
+
+加载策略：
+
+- `from_toml_str`：直接 TOML 反序列化为 `MetaModel`，随后执行 `finish_loading`。
+- `from_path`：调用 `load_meta_path`。
+- `from_paths`：多个入口文件共用一个 visited set，合并所有加载结果。
+- `load_recursive`：
+  - 先 `fs::canonicalize(path)`。
+  - canonical path 已访问则跳过，避免重复导入和简单循环。
+  - 读取文件并 TOML 反序列化。
+  - 以当前文件所在目录为 base，递归加载 `imports`。
+  - imports 先入 `loaded`，当前文件后入 `loaded`。
+- `merge_models`：按 loaded 顺序合并 project、imports、enums、structs、tables；第一个非空 project 生效。
+- `finish_loading`：先 `link_meta_model` 收集未知类型等 Link diagnostics，再 `validate_meta_model` 收集结构 diagnostics，排序并去重后返回。
+
+## 2.9 校验与诊断
+
+### 2.9.1 `MetaDiagnostic`
 
 ```rust
 pub struct MetaDiagnostic {
     pub code: MetaDiagnosticCode,
-    pub severity: DiagnosticSeverity,
     pub message: String,
-    pub location: Option<SourceLocation>,
 }
+```
 
+当前诊断不包含 source location；通过 `PartialOrd` / `Ord` 对 code 和 message 排序，保证输出稳定。
+
+### 2.9.2 `MetaDiagnosticCode`
+
+```rust
 pub enum MetaDiagnosticCode {
     DuplicateTableName,
+    DuplicateEnumName,
+    DuplicateStructName,
+    DuplicateEnumValueName,
     DuplicateFieldName,
     DuplicateIndexName,
     MissingFieldReference,
     InvalidPrimaryIndex,
     PrimaryIndexMismatch,
     EmptyIndexFields,
-    UnsupportedFieldType,
-    ParseError,
+    UnknownFieldType,
 }
 ```
 
-排序规则：
+### 2.9.3 当前校验内容
 
-1. source path。
-2. line。
-3. column。
-4. diagnostic code。
-5. message。
+`validate_meta_model` 当前覆盖：
 
-第一阶段若还没有完整 `SourceLocation`，也应保证诊断向量按 code/message/table name 稳定排序。
-
-## 2.5 Raw Syntax 与 Canonical Model 分层
-
-建议区分两层结构：
-
-```text
-TomlMetaDocument / XmlMetaDocument  --parse-->  RawMetaDocument
-RawMetaDocument                     --build-->  MetaModel
-MetaModel                           --validate--> diagnostics
-```
-
-原因：
-
-- serde 结构需要兼容 TOML/XML 写法，不应直接污染 canonical model。
-- builder 可以集中处理默认值、别名、历史兼容和规范化。
-- validator 可以只面对已经规范化的模型。
-
-第一阶段可简化为：
-
-```text
-TomlMetaDocument --try_into--> MetaModel --validate
-```
-
-但代码中应保留 `build_from_document` 这样的边界函数，方便后续拆分。
-
-## 2.6 主要 API 设计
-
-### 2.6.1 加载入口
-
-```rust
-pub struct MetaLoader {
-    options: MetaLoadOptions,
-}
-
-impl MetaLoader {
-    pub fn new(options: MetaLoadOptions) -> Self;
-    pub fn load_path(&self, path: impl AsRef<Path>) -> Result<MetaModel>;
-    pub fn load_str(&self, input: &str, format: MetaFormat) -> Result<MetaModel>;
-}
-```
-
-第一阶段可以先不引入 `MetaLoader`，直接提供：
-
-```rust
-impl MetaModel {
-    pub fn from_toml_str(input: &str) -> Result<Self>;
-    pub fn from_path(path: impl AsRef<Path>) -> Result<Self>;
-}
-```
-
-### 2.6.2 解析入口
-
-```rust
-pub fn parse_toml_document(input: &str) -> Result<TomlMetaDocument>;
-pub fn build_meta_model(document: TomlMetaDocument) -> Result<MetaModel>;
-```
-
-要求：
-
-- parse 阶段只处理语法错误。
-- build 阶段处理默认值、字段别名、类型字符串到 enum 的转换。
-- validate 阶段处理跨引用和唯一性规则。
-
-### 2.6.3 查询方法
-
-```rust
-impl MetaModel {
-    pub fn table(&self, name: &str) -> Option<&TableMeta>;
-    pub fn collection_tables(&self) -> impl Iterator<Item = &TableMeta>;
-}
-
-impl TableMeta {
-    pub fn field(&self, name: &str) -> Option<&FieldMeta>;
-    pub fn index(&self, name: &str) -> Option<&IndexMeta>;
-    pub fn primary_index(&self) -> Option<&IndexMeta>;
-}
-```
-
-查询方法用于后续 data/validation/exporter，避免调用方反复手写 `iter().find(...)`。
-
-### 2.6.4 校验方法
-
-```rust
-pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic>;
-```
-
-校验内容按阶段逐步增加：
-
-第一阶段：
-
-- table name 非空且全局唯一。
-- field name 在 table 内唯一。
-- index name 在 table 内唯一。
+- table name 全局唯一。
+- enum name 全局唯一。
+- struct name 全局唯一。
+- enum value name 在 enum 内唯一。
+- struct field name 在 struct 内唯一。
+- table field name 在 table 内唯一。
+- table index name 在 table 内唯一。
 - index fields 非空。
-- index field path 引用存在字段。
-- table `primary_index` 引用存在 index。
-- index `primary = true` 与 table `primary_index` 一致。
-- primary index 必须 `unique = true`。
+- index fields 引用存在字段。
+- `index.primary = true` 时 index 必须 unique。
+- table `primary_index` 必须引用存在的 index。
+- table `primary_index` 指向的 index 必须 unique。
+- 多个 `primary = true` 或 `primary_index` 与 `primary = true` 冲突时产生 `PrimaryIndexMismatch`。
 
-第二阶段：
+`link_meta_model` 当前覆盖：
 
-- enum/struct 类型引用存在。
-- named struct 无循环依赖。
-- default 能按 field type 解析。
-- foreign key target 合法。
-- fragment source mode 合法。
+- field type 不是 primitive、enum、struct 时产生 `UnknownFieldType`。
 
-## 2.7 TOML 输入格式建议
+## 2.10 已 Link 与后续可 Link 的部分
 
-第一阶段推荐测试以下 canonical TOML：
+### 2.10.1 当前已 Link
+
+| 原始配置位置 | Raw 表达 | Linked 表达 | 当前收益 |
+| --- | --- | --- | --- |
+| table field `type` | `FieldMeta.field_type: String` | `LinkedFieldMeta.linked_field` | 支持 primitive / enum / struct，发现未知类型。 |
+| struct field `type` | `FieldMeta.field_type: String` | `LinkedFieldMeta.linked_field` | struct 字段与 table 字段共享解析逻辑。 |
+| table index fields | `IndexMeta.fields: Vec<String>` | `LinkedIndexMeta.fields: Vec<&FieldMeta>` | 索引字段引用不再需要下游重复查找。 |
+| table primary index | `TableMeta.primary_index: Option<String>` + `IndexMeta.primary` | `LinkedTableMeta::primary_index() -> Option<&LinkedIndexMeta>` | 直接取得当前 table 选中的主索引。 |
+| table 查询 | `MetaModel.tables: Vec<TableMeta>` | `LinkedMetaModel.table_index` | 按名称快速查 linked table。 |
+| struct 查询 | `MetaModel.structs: Vec<StructMeta>` | `LinkedMetaModel.struct_index` / `struct_meta_index` | 同时支持 linked struct 和 raw struct 查询。 |
+| enum 查询 | `MetaModel.enums: Vec<EnumMeta>` | `LinkedMetaModel.enum_index` | enum 类型解析和查询加速。 |
+
+### 2.10.2 建议后续 Link
+
+| 候选位置 | Raw 表达 | 建议 Linked 表达 | 触发条件 |
+| --- | --- | --- | --- |
+| field path | `String` | `LinkedFieldPath<'meta>` | 支持 expanded value、嵌套 struct、数组 slot 后补充。 |
+| foreign key | table/index/field 名字符串 | `LinkedForeignKey<'meta>` | 外键 Meta 字段落地后补充。 |
+| source fragments | `SourceRef.fragments: Vec<String>` | `Vec<&FragmentMeta>` | FragmentMeta 落地后补充。 |
+| validator 引用 | validator 名字符串 | `LinkedValidator<'meta>` 或 compiled handle | validator registry 落地后补充。 |
+| default value | `toml::Value` | `LinkedDefaultValue` / typed value | 需要按 `LinkedField` 判断 TOML 值是否合法。 |
+| export/filter 字段引用 | 字符串或表达式 | linked field refs / compiled predicate | export view 和 filter 表达式设计落地后补充。 |
+| struct dependency graph | struct field type 字符串 | DAG / topological order | 代码生成需要 struct 输出顺序或循环检测时补充。 |
+| source provider | `SourceRef.provider: String` | provider registry handle | source plugin/registry 落地后补充。 |
+
+## 2.11 TOML 输入格式
+
+推荐 canonical TOML：
 
 ```toml
 [project]
 name = "demo"
 copyright = "Copyright 2026 Demo Studio."
+
+[[enums]]
+name = "ItemRarity"
+[[enums.values]]
+name = "common"
+
+[[structs]]
+name = "Reward"
+[[structs.fields]]
+name = "count"
+type = "int"
 
 [[tables]]
 name = "items"
@@ -454,10 +559,12 @@ required = true
 desc = "物品 ID。"
 
 [[tables.fields]]
-name = "display_name"
-type = "text"
-required = true
-desc = "展示名称。"
+name = "rarity"
+type = "ItemRarity"
+
+[[tables.fields]]
+name = "reward"
+type = "Reward"
 
 [[tables.indexes]]
 name = "by_id"
@@ -467,7 +574,7 @@ primary = true
 desc = "按物品 ID 查询。"
 ```
 
-兼容当前最小 fixture 时，可临时接受：
+兼容写法：
 
 ```toml
 [[tables]]
@@ -480,154 +587,56 @@ type = "i64"
 required = true
 ```
 
-但新测试应优先使用 canonical 写法。
+## 2.12 单元测试组织
 
-## 2.8 单元测试组织方式
+Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和临时目录构造多文件 imports。
 
-### 2.8.1 模块内测试
-
-基础 parser、builder、validator 测试放在 `src/meta.rs` 或未来 `src/meta/tests.rs`：
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_collection_table_with_primary_index() { }
-
-    #[test]
-    fn rejects_duplicate_field_names() { }
-}
-```
-
-优点：
-
-- 与实现代码距离近。
-- 适合快速 TDD。
-- 不需要完整工程 fixture。
-
-### 2.8.2 fixture 测试
-
-当 Meta 样例变长后，放到：
-
-```text
-tests/fixtures/meta/
-  valid_basic_collection.toml
-  valid_object_table.toml
-  invalid_duplicate_field.toml
-  invalid_missing_index_field.toml
-  invalid_primary_index_mismatch.toml
-```
-
-fixture 命名规则：
-
-- `valid_*.toml`：期望成功。
-- `invalid_*.toml`：期望返回指定 diagnostic code。
-- 一个 invalid fixture 聚焦一个主要错误，避免断言不稳定。
-
-### 2.8.3 集成测试
-
-Meta 模块基础稳定后，再在 `tests/cli_integration.rs` 中补充：
-
-- CLI inspect meta 能读取标准工程。
-- CLI 对无效 Meta 返回非 0 exit code。
-- 错误输出包含稳定 diagnostic code。
-
-第一阶段不要求 CLI 集成测试先完成。
-
-## 2.9 第一阶段测试内容要点
-
-建议按以下顺序写测试：
+当前测试重点：
 
 1. `parses_basic_collection_table`
-   - 输入一个 collection table。
-   - 断言 table name、kind、field type、desc、source、index。
-2. `parses_basic_object_table`
-   - 输入一个 object table。
-   - 断言无需 index 也合法。
-3. `parses_project_copyright`
-   - 输入 `[project] copyright = "..."`。
-   - 断言保留到 `ProjectMeta`。
-4. `accepts_canonical_primitive_field_types`
-   - 覆盖 `int`、`float`、`bool`、`string`、`text`、`asset`。
-5. `keeps_description_fields`
-   - table、field、index 的 `desc` 都能保留。
-6. `rejects_duplicate_table_names`
-   - 两个 table 同名，产生 `DuplicateTableName`。
-7. `rejects_duplicate_field_names`
-   - 同一 table 下字段同名，产生 `DuplicateFieldName`。
-8. `rejects_index_referencing_missing_field`
-   - index fields 包含不存在字段，产生 `MissingFieldReference`。
-9. `rejects_primary_index_mismatch`
-   - table `primary_index = "by_id"`，另一个 index `primary = true`，产生 `PrimaryIndexMismatch`。
-10. `rejects_non_unique_primary_index`
-    - primary index 未设置 `unique = true`，产生 `InvalidPrimaryIndex`。
+   - project copyright、collection kind、desc、source、primary index、primitive link。
+2. `parses_basic_object_table_without_index`
+   - object table 不需要 index，兼容 `source`。
+3. `links_custom_enum_and_struct_types_after_loading_all_meta`
+   - enum / struct 自定义类型在全部加载后解析为引用。
+4. `supports_imported_meta_files_before_linking_field_types`
+   - root 文件通过 `imports` 引入类型文件，再成功 Link。
+5. `accepts_canonical_and_legacy_primitive_field_types`
+   - `int` / `float` 与 `i64` / `f64` 兼容。
+6. `rejects_unknown_field_type_after_linking`
+   - 未知类型产生 `UnknownFieldType`。
+7. duplicate 系列
+   - table / field 等重复命名产生对应 diagnostic。
+8. index 系列
+   - 缺失字段、primary mismatch、非 unique primary index。
 
-## 2.10 推荐实现顺序
+后续建议补充：
 
-### Step 1：扩展类型定义
+- duplicate enum / struct / enum value 的显式测试。
+- duplicate import / import cycle 的去重测试。
+- `LinkedIndexMeta.fields` 持有真实 `&FieldMeta` 的断言。
+- `LinkedTableMeta::primary_index()` 在 `primary_index = "..."` 和 `primary = true` 两种写法下都能返回选中的 linked index。
+- `LinkedStructMeta.field` 查询测试。
+- `MetaModel::from_paths` 多入口合并测试。
 
-- 增加 `MetaModel`。
-- 增加 `ProjectMeta`、`TableKind`、`ValueLayout`。
-- 将 `FieldType::I64/F64` 迁移或兼容到 `Int/Float`。
-- 为 `desc`、`default`、`primary_index`、`primary` 增加字段。
+## 2.13 与下游模块的接口约束
 
-### Step 2：增加 TOML 字符串加载入口
+- Loader 返回 `MetaModel`，因为它是 owned 数据，便于调用方控制生命周期。
+- 下游在需要类型解析或快速查询时，应在持有 `MetaModel` 的作用域内调用 `meta.link()` 得到 `LinkedMetaModel<'_>`。
+- `LinkedMetaModel<'_>` 不应跨越 `MetaModel` 生命周期；通常应在 export/validate 函数栈内临时创建并传递引用。
+- validation/exporter 不应再自行解析 `FieldMeta.field_type` 字符串；应读取 `LinkedFieldMeta.linked_field` 或 `primitive_type()`。
+- 对 index 逻辑，应优先使用 `LinkedIndexMeta.fields`，避免重复做 field name 查找。
 
-- 实现 `MetaModel::from_toml_str`。
-- `MetaModel::from_path` 内部读取文件后调用 `from_toml_str`。
-- 保留旧 `MetaSet::from_path` 时，可委托给新模型或作为兼容层。
+## 2.14 当前完成标准
 
-### Step 3：实现基础校验
+Meta 模块当前阶段完成的判断标准：
 
-- 创建 `MetaDiagnosticCode`。
-- 创建 `validate_meta_model`。
-- 先返回 `Vec<MetaDiagnostic>`，由调用方决定是否转成 `Result`。
-
-### Step 4：补齐单元测试
-
-- 先使用内联 TOML 字符串。
-- 每个错误测试只断言 diagnostic code 和关键 message。
-- 不断运行 `cargo test meta`。
-
-### Step 5：整理对外 API
-
-- `src/lib.rs` 保持 `pub mod meta;`。
-- 对外只暴露 canonical 类型和必要 loader。
-- raw syntax 结构尽量保持私有，避免后续兼容负担。
-
-## 2.11 与现有代码的迁移关系
-
-当前 `src/meta.rs` 已有：
-
-```rust
-pub struct MetaSet { pub tables: Vec<TableMeta> }
-pub struct TableMeta { pub name: String, pub source: String, ... }
-pub enum FieldType { String, I64, F64, Bool }
-pub struct IndexMeta { pub name: String, pub fields: Vec<String>, unique: bool }
-```
-
-建议迁移：
-
-| 当前类型/字段 | 目标设计 | 迁移方式 |
-| --- | --- | --- |
-| `MetaSet` | `MetaModel` | 可先 `pub type MetaSet = MetaModel`，或保留兼容 wrapper。 |
-| `TableMeta.source` | `TableMeta.sources` | 短期兼容 `source`；canonical 使用 `sources`。 |
-| 缺少 `TableKind` | `TableKind` | 新增必填或默认字段。 |
-| `FieldType::I64` | `FieldType::Int` | 解析兼容 `i64`，canonical 改为 `Int`。 |
-| `FieldType::F64` | `FieldType::Float` | 解析兼容 `f64`，canonical 改为 `Float`。 |
-| `FieldMeta.unique` | `IndexMeta.unique` | 新设计不再鼓励 field 级 unique。 |
-| `IndexMeta.fields: Vec<String>` | `Vec<FieldPath>` | 第一阶段可仍用 String，后续替换为 FieldPath。 |
-
-## 2.12 完成标准
-
-Meta 模块第一阶段实现完成的判断标准：
-
-- 新 canonical TOML 样例可以解析为 `MetaModel`。
-- 所有第一阶段测试内容要点都有单元测试覆盖。
-- 运行 `cargo test meta` 成功。
-- 旧的基础 Meta fixture 如仍存在，应继续通过或明确迁移。
-- 诊断 code 稳定，不依赖 HashMap 遍历顺序。
-- 代码结构仍允许后续拆分为 `src/meta/` 目录模块。
-
+- `MetaModel` 可从 TOML 字符串、路径、多路径加载。
+- `imports` 能递归加载，重复 canonical path 只加载一次。
+- 所有 Meta 文件加载完成后再执行 Link。
+- `MetaModel` 保持纯配置；运行期 HashMap 索引只存在于 `LinkedMetaModel<'meta>` 及子结构。
+- field type 从字符串 Link 为 primitive / enum / struct 引用。
+- index field 从字符串 Link 为 `&FieldMeta` 引用。
+- primary index 从 table/index 声明 Link 为 `LinkedTableMeta` 上可查询的 selected linked index。
+- Link 和 validate diagnostics 会在加载完成前合并返回，避免下游使用不完整模型。
+- 单元测试覆盖基础加载、primitive 兼容、自定义类型、imports、未知类型、重复命名和 primary index 校验。

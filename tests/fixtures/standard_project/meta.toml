@@ -1,12 +1,13 @@
 [[tables]]
 name = "items"
-source = "items.csv"
+kind = "collection"
+primary_index = "by_id"
+sources = [{ provider = "csv", path = "items.csv" }]
 
 [[tables.fields]]
 name = "id"
-type = "i64"
+type = "int"
 required = true
-unique = true
 
 [[tables.fields]]
 name = "name"
@@ -15,7 +16,7 @@ required = true
 
 [[tables.fields]]
 name = "price"
-type = "i64"
+type = "int"
 required = true
 
 [[tables.fields]]
@@ -27,3 +28,4 @@ required = true
 name = "by_id"
 fields = ["id"]
 unique = true
+primary = true

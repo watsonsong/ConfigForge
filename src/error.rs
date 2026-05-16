@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use crate::meta::MetaDiagnostic;
+
 pub type Result<T> = std::result::Result<T, ConfigForgeError>;
 
 #[derive(Debug, Error)]
@@ -27,6 +29,12 @@ pub enum ConfigForgeError {
         source: toml::de::Error,
     },
 
+    #[error("failed to parse meta: {0}")]
+    ParseMetaString(#[source] toml::de::Error),
+
+    #[error("meta validation failed: {}", format_meta_diagnostics(.0))]
+    MetaValidation(Vec<MetaDiagnostic>),
+
     #[error("failed to parse csv `{path}`: {source}")]
     ParseCsv {
         path: PathBuf,
@@ -39,4 +47,12 @@ pub enum ConfigForgeError {
 
     #[error("validation failed: {0}")]
     Validation(String),
+}
+
+fn format_meta_diagnostics(diagnostics: &[MetaDiagnostic]) -> String {
+    diagnostics
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
 }
