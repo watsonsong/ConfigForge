@@ -34,4 +34,7 @@ pub enum MetaDiagnosticCode {
     PrimaryIndexMismatch,
     EmptyIndexFields,
     UnknownFieldType,
+    InvalidDefaultValue,
+    InvalidSourceDeclaration,
+    UnsupportedFeature,
 }

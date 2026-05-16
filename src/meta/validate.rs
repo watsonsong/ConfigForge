@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use super::{MetaDiagnostic, MetaDiagnosticCode, MetaModel, TableMeta};
+use super::{MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType, TableMeta};
 
 pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
     let mut diagnostics = Vec::new();
@@ -14,7 +14,7 @@ pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
         );
     }
     for table in &model.tables {
-        validate_table_meta(table, &mut diagnostics);
+        validate_table_meta(model, table, &mut diagnostics);
     }
     diagnostics.sort();
     diagnostics
@@ -72,12 +72,22 @@ fn validate_enums(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic>) {
     }
 }
 
-fn validate_table_meta(table: &TableMeta, diagnostics: &mut Vec<MetaDiagnostic>) {
+fn validate_table_meta(
+    model: &MetaModel,
+    table: &TableMeta,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    validate_source_declaration(table, diagnostics);
+
     let field_names = validate_field_names(
         &format!("table `{}`", table.name),
         table.fields.iter().map(|field| field.name.as_str()),
         diagnostics,
     );
+
+    for field in &table.fields {
+        validate_default_value(model, table, field, diagnostics);
+    }
 
     let mut index_names = BTreeSet::new();
     let mut primary_indexes = Vec::new();
@@ -129,6 +139,105 @@ fn validate_table_meta(table: &TableMeta, diagnostics: &mut Vec<MetaDiagnostic>)
     }
 
     validate_primary_index(table, &primary_indexes, diagnostics);
+}
+
+fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiagnostic>) {
+    if table.source.is_some() && !table.sources.is_empty() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::InvalidSourceDeclaration,
+            format!(
+                "table `{}` declares both legacy `source` and `sources`; use exactly one source form",
+                table.name
+            ),
+        ));
+    }
+
+    if table.sources.len() > 1 {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "table `{}` declares multiple sources, but multi-source merge is not implemented yet",
+                table.name
+            ),
+        ));
+    }
+
+    if !table.override_sources.is_empty() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "table `{}` declares override_sources, but source override is not implemented yet",
+                table.name
+            ),
+        ));
+    }
+
+    for source in table.sources.iter().chain(table.override_sources.iter()) {
+        if source.provider != "csv" {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidSourceDeclaration,
+                format!(
+                    "table `{}` source `{}` uses unsupported provider `{}`; only `csv` is supported",
+                    table.name, source.path, source.provider
+                ),
+            ));
+        }
+
+        if !source.fragments.is_empty() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "table `{}` source `{}` declares fragments, but polymorphic fragments are not implemented yet",
+                    table.name, source.path
+                ),
+            ));
+        }
+    }
+}
+
+fn validate_default_value(
+    model: &MetaModel,
+    table: &TableMeta,
+    field: &super::FieldMeta,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    let default = if let Some(default) = &field.default {
+        default
+    } else {
+        return;
+    };
+
+    let valid = match PrimitiveFieldType::parse(&field.field_type) {
+        Some(PrimitiveFieldType::Int) => default.as_integer().is_some(),
+        Some(PrimitiveFieldType::Float) => {
+            default.as_float().is_some() || default.as_integer().is_some()
+        }
+        Some(PrimitiveFieldType::Bool) => default.as_bool().is_some(),
+        Some(PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset) => {
+            default.as_str().is_some()
+        }
+        None => model
+            .enum_meta(&field.field_type)
+            .and_then(|enum_meta| {
+                default.as_str().map(|default_value| {
+                    enum_meta
+                        .values
+                        .iter()
+                        .any(|enum_value| enum_value.name == default_value)
+                })
+            })
+            .unwrap_or(false),
+    };
+
+    if !valid {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::InvalidDefaultValue,
+            format!(
+                "table `{}` field `{}` default value does not match type `{}`",
+                table.name, field.name, field.field_type
+            ),
+        ));
+    }
 }
 
 fn validate_field_names<'a>(

@@ -586,12 +586,11 @@ fn exposes_raw_and_linked_query_helpers() {
 }
 
 #[test]
-fn source_path_prefers_sources_over_legacy_source() {
+fn source_path_reads_single_source_form_and_reports_missing_source() {
     let meta = parse(
         r#"
             [[tables]]
             name = "items"
-            source = "legacy.csv"
             sources = [{ provider = "csv", path = "primary.csv" }]
 
             [[tables.fields]]
@@ -612,6 +611,107 @@ fn source_path_prefers_sources_over_legacy_source() {
         Some("primary.csv")
     );
     assert_eq!(meta.table("generated").unwrap().source_path(), None);
+}
+
+#[test]
+fn rejects_unsupported_source_declarations() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "legacy.csv"
+            sources = [
+                { provider = "csv", path = "items.csv" },
+                { provider = "lark", path = "items-sheet", fragments = ["stats"] },
+            ]
+            override_sources = [{ provider = "csv", path = "override.csv" }]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::InvalidSourceDeclaration
+            && diagnostic
+                .message
+                .contains("both legacy `source` and `sources`")
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::InvalidSourceDeclaration
+            && diagnostic.message.contains("unsupported provider `lark`")
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+            && diagnostic.message.contains("multiple sources")
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+            && diagnostic.message.contains("override_sources")
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+            && diagnostic.message.contains("fragments")
+    }));
+}
+
+#[test]
+fn validates_primitive_and_enum_default_values() {
+    let meta = parse(
+        r#"
+            [[enums]]
+            name = "ItemRarity"
+            [[enums.values]]
+            name = "common"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "max_stack"
+            type = "int"
+            default = 1
+
+            [[tables.fields]]
+            name = "rarity"
+            type = "ItemRarity"
+            default = "common"
+        "#,
+    );
+    assert!(meta.validate().is_ok());
+
+    let diagnostics = diagnostics(
+        r#"
+            [[enums]]
+            name = "ItemRarity"
+            [[enums.values]]
+            name = "common"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "max_stack"
+            type = "int"
+            default = "one"
+
+            [[tables.fields]]
+            name = "rarity"
+            type = "ItemRarity"
+            default = "legendary"
+        "#,
+    );
+
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == MetaDiagnosticCode::InvalidDefaultValue)
+            .count(),
+        2
+    );
 }
 
 #[test]

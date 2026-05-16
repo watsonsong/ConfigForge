@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::{
     meta::{LinkedFieldMeta, LinkedTableMeta, MetaModel, PrimitiveFieldType, TableMeta},
     source::DataTable,
-    validation::validate_table,
+    validation::{apply_field_defaults, validate_table},
     ConfigForgeError, Result,
 };
 
@@ -43,6 +43,7 @@ pub fn export_project(options: ExportOptions<'_>) -> Result<()> {
     for table_meta in &linked_meta.tables {
         let table = load_table(options.data_dir, table_meta.meta)?;
         validate_table(table_meta, &table)?;
+        let table = apply_field_defaults(table_meta, &table)?;
         write_table_json(options.out_dir, table_meta.meta, &table)?;
         write_table_rust_stub(options.out_dir, table_meta)?;
     }
