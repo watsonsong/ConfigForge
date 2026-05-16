@@ -17,6 +17,7 @@ ConfigForge is a Rust CLI tool for game data export workflows. It lets game desi
 - `Documentation/code-style.md` — Rust code conventions and test expectations.
 - `Documentation/glossary.md` — project terminology, Chinese/English naming, and recommended code symbols.
 - `Documentation/Design/` — consolidated canonical design set for product behavior, execution stages, configuration, Meta model, validation/export semantics, CLI, user workflows, and QA input.
+- `Documentation/Implementation/` — program implementation design, module boundaries, detailed module plans, and test organization guidance.
 
 ## Current Source Layout
 
@@ -34,6 +35,7 @@ ConfigForge is a Rust CLI tool for game data export workflows. It lets game desi
 
 1. Keep `AGENTS.md` as the short project index; place detailed designs under `Documentation/`.
 2. Every meaningful product design conversation should update the consolidated documents under `Documentation/Design/`.
-3. Prefer small, typed Rust modules with unit tests near the logic and integration tests under `tests/`.
-4. Keep generated/exported outputs out of version control unless they are intentional fixtures.
-5. Run `cargo fmt` and `cargo test` before considering a code change complete.
+3. Put program implementation design and module-level detailed design under `Documentation/Implementation/`.
+4. Prefer small, typed Rust modules with unit tests near the logic and integration tests under `tests/`.
+5. Keep generated/exported outputs out of version control unless they are intentional fixtures.
+6. Run `cargo fmt` and `cargo test` before considering a code change complete.

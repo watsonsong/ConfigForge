@@ -7,6 +7,7 @@ This directory contains durable project knowledge for ConfigForge.
 - `code-style.md` records Rust style, module, and testing conventions.
 - `glossary.md` records project terminology, Chinese/English naming, and recommended code symbols.
 - `Design/` stores the consolidated canonical design set for product behavior, execution stages, configuration, Meta model, validation/export semantics, CLI, user workflows, and QA input.
+- `Implementation/` stores program implementation design, module boundaries, detailed module plans, and test organization guidance.
 
 ## Canonical Design Set
 
@@ -20,6 +21,13 @@ For future technical overview design, detailed design, user manual writing, and 
 - `Design/05-data-validation.md` — data views, filtering, validation semantics, special exporter inputs, and diagnostics.
 - `Design/06-export-cli.md` — export targets, runtime data formats, special exporters, artifact model, and CLI commands.
 - `Design/07-user-manual-and-qa.md` — user workflows, common operations, QA dimensions, and assertion guidance.
+
+## Implementation Design Set
+
+Use the implementation documents after product behavior has been confirmed in `Design/`:
+
+- `Implementation/01-module-outline.md` — Rust module boundaries, dependency direction, execution pipeline mapping, and first-stage completion criteria.
+- `Implementation/02-meta-module-detail-design.md` — Meta module data structures, Rust inheritance/composition strategy, main APIs, migration path, and unit test plan.
 
 ## Maintenance Rules
 
