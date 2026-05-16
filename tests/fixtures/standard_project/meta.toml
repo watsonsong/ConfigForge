@@ -1,0 +1,29 @@
+[[tables]]
+name = "items"
+source = "items.csv"
+
+[[tables.fields]]
+name = "id"
+type = "i64"
+required = true
+unique = true
+
+[[tables.fields]]
+name = "name"
+type = "string"
+required = true
+
+[[tables.fields]]
+name = "price"
+type = "i64"
+required = true
+
+[[tables.fields]]
+name = "enabled"
+type = "bool"
+required = true
+
+[[tables.indexes]]
+name = "by_id"
+fields = ["id"]
+unique = true
