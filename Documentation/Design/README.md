@@ -1,11 +1,11 @@
 # ConfigForge Consolidated Design
 
-本目录是 ConfigForge 的**收敛版设计说明**。它基于 `Documentation/` 旧有多轮设计文档和 `Documentation/answer.txt` 中的澄清结论重新组织，作为后续技术概要设计、详细设计、用户手册和 QA 测试用例设计的共同输入。
+本目录是 ConfigForge 的**收敛版设计说明**。它是当前唯一的产品设计入口，作为后续技术概要设计、详细设计、用户手册和 QA 测试用例设计的共同输入。
 
 ## 文档定位
 
 - 本目录描述 ConfigForge 作为工具应具备的产品能力、配置模型、执行阶段和用户可见行为。
-- 本目录优先表达**当前确认后的设计口径**；旧文档中未收敛、被取消或暂缓的内容，以本目录为准。
+- 本目录表达**当前确认后的设计口径**；已收敛到本目录的旧设计文档不再保留。
 - 本目录不是 Rust 模块设计，也不限定具体代码结构；技术概要设计和详细设计应在此基础上继续拆分实现方案。
 
 ## 阅读顺序
@@ -18,18 +18,9 @@
 6. `06-export-cli.md` — Runtime data format、special exporter、artifact、CLI 命令和参数设计。
 7. `07-user-manual-and-qa.md` — 用户工作流、错误处理期望和 QA 测试用例输入维度。
 
-## 与旧文档的关系
+## HTML 阅读版
 
-旧文档仍保留为设计历史、细节材料和未来扩展参考：
-
-- `Documentation/meta-design.md`
-- `Documentation/data-design.md`
-- `Documentation/export-design.md`
-- `Documentation/validator-design.md`
-- `Documentation/implementation-requirements.md`
-- `Documentation/features/*.md`
-
-若旧文档与本目录冲突，默认以本目录为准。
+- `html/index.html` — 面向人类阅读和评审的单页 HTML 设计说明，包含流程图、配置图、数据视图图例和 QA 摘要。
 
 ## 当前明确的设计决策
 
