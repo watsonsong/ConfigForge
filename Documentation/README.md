@@ -8,6 +8,7 @@ This directory contains durable project knowledge for ConfigForge.
 - `glossary.md` records project terminology, Chinese/English naming, and recommended code symbols.
 - `Design/` stores the consolidated canonical design set for product behavior, execution stages, configuration, Meta model, validation/export semantics, CLI, user workflows, and QA input.
 - `Implementation/` stores program implementation design, module boundaries, detailed module plans, and test organization guidance.
+- `Tech/` stores technical practice documents, including test coverage evaluation and engineering workflow notes.
 
 ## Canonical Design Set
 
@@ -28,6 +29,10 @@ Use the implementation documents after product behavior has been confirmed in `D
 
 - `Implementation/01-module-outline.md` — Rust module boundaries, dependency direction, execution pipeline mapping, and first-stage completion criteria.
 - `Implementation/02-meta-module-detail-design.md` — Meta module data structures, Rust inheritance/composition strategy, main APIs, migration path, and unit test plan.
+
+## Technical Practice Set
+
+- `Tech/unit-test-coverage.md` — Rust unit test coverage tooling, commands, evaluation criteria, and current coverage baseline.
 
 ## Maintenance Rules
 

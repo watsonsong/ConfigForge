@@ -1,3 +1,6 @@
 /target
+tarpaulin-report.html
+cobertura.xml
+lcov.info
 *.log
 .DS_Store

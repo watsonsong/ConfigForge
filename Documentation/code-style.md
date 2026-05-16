@@ -28,3 +28,4 @@
 - Add CLI-level tests under `tests/` for workflows that cross module boundaries.
 - Keep a canonical integration fixture under `tests/fixtures/standard_project/`.
 - Run `cargo fmt` and `cargo test` before handoff.
+- After adding or changing features and tests, run unit test coverage evaluation as part of judging whether tests are complete. Use `cargo coverage` for summary and `cargo coverage-html` to inspect uncovered lines in changed modules. Treat coverage as design evidence for normal and error branch completeness, not only as a percentage target.

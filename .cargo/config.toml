@@ -1,0 +1,9 @@
+[alias]
+# Text summary in terminal. Requires: cargo install cargo-llvm-cov --locked
+coverage = "llvm-cov --workspace --all-features --summary-only"
+
+# Generate HTML report under target/llvm-cov/html/index.html.
+coverage-html = "llvm-cov --workspace --all-features --html"
+
+# Generate LCOV file for CI integrations.
+coverage-lcov = "llvm-cov --workspace --all-features --lcov --output-path target/llvm-cov/lcov.info"
