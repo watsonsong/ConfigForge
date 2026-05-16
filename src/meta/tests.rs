@@ -289,6 +289,50 @@ fn accepts_canonical_and_legacy_primitive_field_types() {
 }
 
 #[test]
+fn primitive_field_type_names_are_canonical() {
+    assert_eq!(PrimitiveFieldType::Int.as_str(), "int");
+    assert_eq!(PrimitiveFieldType::Float.as_str(), "float");
+    assert_eq!(PrimitiveFieldType::Bool.as_str(), "bool");
+    assert_eq!(PrimitiveFieldType::String.as_str(), "string");
+    assert_eq!(PrimitiveFieldType::Text.as_str(), "text");
+    assert_eq!(PrimitiveFieldType::Asset.as_str(), "asset");
+    assert_eq!(PrimitiveFieldType::parse("unknown"), None);
+}
+
+#[test]
+fn validates_model_directly_with_ok_and_error_results() {
+    let valid = parse(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    );
+    assert!(valid.validate().is_ok());
+
+    let invalid: MetaModel = toml::from_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables]]
+            name = "items"
+            source = "other.csv"
+        "#,
+    )
+    .expect("raw invalid meta should deserialize");
+    let diagnostics = invalid.validate().expect_err("validation should fail");
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTableName));
+}
+
+#[test]
 fn rejects_unknown_field_type_after_linking() {
     let diagnostics = diagnostics(
         r#"
@@ -430,4 +474,383 @@ fn rejects_non_unique_primary_index() {
     assert!(diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::InvalidPrimaryIndex));
+}
+
+#[test]
+fn exposes_raw_and_linked_query_helpers() {
+    let meta = parse(
+        r#"
+            [[enums]]
+            name = "ItemRarity"
+            [[enums.values]]
+            name = "common"
+
+            [[structs]]
+            name = "Reward"
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            kind = "collection"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "rarity"
+            type = "ItemRarity"
+
+            [[tables.fields]]
+            name = "reward"
+            type = "Reward"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+
+            [[tables]]
+            name = "rules"
+            kind = "object"
+            source = "rules.csv"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+        "#,
+    );
+
+    assert_eq!(meta.collection_tables().count(), 1);
+    assert!(meta.table("missing").is_none());
+    assert!(meta.enum_meta("missing").is_none());
+    assert_eq!(meta.struct_meta("Reward").unwrap().name, "Reward");
+    assert!(meta.struct_meta("missing").is_none());
+
+    let table = meta.table("items").unwrap();
+    assert!(table.field("missing").is_none());
+    assert_eq!(table.index("by_id").unwrap().name, "by_id");
+    assert!(table.index("missing").is_none());
+    assert_eq!(table.primary_index().unwrap().name, "by_id");
+    assert!(meta.table("rules").unwrap().primary_index().is_none());
+    assert_eq!(
+        table.field("rarity").unwrap().primitive_type(),
+        None,
+        "custom enum fields are not primitive types"
+    );
+
+    let linked_meta = meta.link().expect("meta should link");
+    assert_eq!(linked_meta.model.tables.len(), 2);
+    assert_eq!(
+        linked_meta.enum_meta("ItemRarity").unwrap().name,
+        "ItemRarity"
+    );
+    assert!(linked_meta.enum_meta("missing").is_none());
+    assert_eq!(
+        linked_meta.raw_struct_meta("Reward").unwrap().name,
+        "Reward"
+    );
+    assert!(linked_meta.raw_struct_meta("missing").is_none());
+    assert!(linked_meta.table("missing").is_none());
+    assert_eq!(
+        linked_meta.struct_meta("Reward").unwrap().meta.name,
+        "Reward"
+    );
+    assert!(linked_meta.struct_meta("missing").is_none());
+
+    let linked_table = linked_meta.table("items").unwrap();
+    assert!(linked_table.field("missing").is_none());
+    assert_eq!(linked_table.index("by_id").unwrap().meta.name, "by_id");
+    assert!(linked_table.index("missing").is_none());
+    assert_eq!(
+        linked_table.field("id").unwrap().primitive_type(),
+        Some(PrimitiveFieldType::Int)
+    );
+    assert_eq!(linked_table.field("rarity").unwrap().primitive_type(), None);
+
+    let enum_field = &linked_table.field("rarity").unwrap().linked_field;
+    let struct_field = &linked_table.field("reward").unwrap().linked_field;
+    let primitive_field = &linked_table.field("id").unwrap().linked_field;
+    assert_eq!(meta.linked_enum(enum_field).unwrap().name, "ItemRarity");
+    assert!(meta.linked_enum(struct_field).is_none());
+    assert_eq!(meta.linked_struct(struct_field).unwrap().name, "Reward");
+    assert!(meta.linked_struct(primitive_field).is_none());
+
+    let linked_struct = linked_meta.struct_meta("Reward").unwrap();
+    assert_eq!(linked_struct.field("count").unwrap().meta.name, "count");
+    assert!(linked_struct.field("missing").is_none());
+}
+
+#[test]
+fn source_path_prefers_sources_over_legacy_source() {
+    let meta = parse(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "legacy.csv"
+            sources = [{ provider = "csv", path = "primary.csv" }]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables]]
+            name = "generated"
+
+            [[tables.fields]]
+            name = "value"
+            type = "string"
+        "#,
+    );
+
+    assert_eq!(
+        meta.table("items").unwrap().source_path(),
+        Some("primary.csv")
+    );
+    assert_eq!(meta.table("generated").unwrap().source_path(), None);
+}
+
+#[test]
+fn rejects_duplicate_enum_struct_enum_value_and_index_names() {
+    let diagnostics = diagnostics(
+        r#"
+            [[enums]]
+            name = "ItemRarity"
+            [[enums.values]]
+            name = "common"
+            [[enums.values]]
+            name = "common"
+
+            [[enums]]
+            name = "ItemRarity"
+
+            [[structs]]
+            name = "Reward"
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+
+            [[structs]]
+            name = "Reward"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+        "#,
+    );
+
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateEnumName));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateEnumValueName));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateStructName));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateIndexName));
+}
+
+#[test]
+fn rejects_duplicate_struct_field_names() {
+    let diagnostics = diagnostics(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+
+            [[structs.fields]]
+            name = "count"
+            type = "float"
+        "#,
+    );
+
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateFieldName));
+}
+
+#[test]
+fn rejects_empty_index_fields_missing_primary_index_and_multiple_primary_flags() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "missing"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "name"
+            type = "string"
+
+            [[tables.indexes]]
+            name = "empty"
+            fields = []
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables.indexes]]
+            name = "by_name"
+            fields = ["name"]
+            unique = true
+            primary = true
+        "#,
+    );
+
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::EmptyIndexFields));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::InvalidPrimaryIndex
+            && diagnostic.message.contains("does not exist")
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::PrimaryIndexMismatch
+            && diagnostic.message.contains("multiple primary indexes")
+    }));
+}
+
+#[test]
+fn rejects_primary_flag_when_index_is_not_unique() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            primary = true
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::InvalidPrimaryIndex
+            && diagnostic.message.contains("is primary but is not unique")
+    }));
+}
+
+#[test]
+fn reports_parse_errors_for_string_and_file_inputs() {
+    let string_error = MetaModel::from_toml_str("[[tables]\nname =").unwrap_err();
+    assert!(matches!(string_error, ConfigForgeError::ParseMetaString(_)));
+
+    let dir = tempdir().expect("temp dir should exist");
+    let invalid_path = dir.path().join("invalid.toml");
+    fs::write(&invalid_path, "[[tables]\nname =").expect("invalid meta should be written");
+
+    let file_error = MetaModel::from_path(&invalid_path).unwrap_err();
+    match file_error {
+        ConfigForgeError::ParseMeta { path, .. } => {
+            assert_eq!(path, invalid_path.canonicalize().unwrap())
+        }
+        other => panic!("expected ParseMeta error, got {other}"),
+    }
+}
+
+#[test]
+fn reports_read_errors_for_missing_meta_or_import_files() {
+    let dir = tempdir().expect("temp dir should exist");
+    let missing_path = dir.path().join("missing.toml");
+    let missing_error = MetaModel::from_path(&missing_path).unwrap_err();
+    assert!(matches!(missing_error, ConfigForgeError::ReadFile { .. }));
+
+    let root_path = dir.path().join("root.toml");
+    fs::write(
+        &root_path,
+        r#"
+            imports = ["missing-import.toml"]
+        "#,
+    )
+    .expect("root meta should be written");
+
+    let import_error = MetaModel::from_path(&root_path).unwrap_err();
+    match import_error {
+        ConfigForgeError::ReadFile { path, .. } => {
+            assert_eq!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("missing-import.toml")
+            );
+        }
+        other => panic!("expected ReadFile error, got {other}"),
+    }
+}
+
+#[test]
+fn loads_duplicate_imports_and_import_cycles_only_once() {
+    let dir = tempdir().expect("temp dir should exist");
+    let root_path = dir.path().join("root.toml");
+    let types_path = dir.path().join("types.toml");
+
+    fs::write(
+        &root_path,
+        r#"
+            imports = ["types.toml", "types.toml"]
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "rarity"
+            type = "ItemRarity"
+        "#,
+    )
+    .expect("root meta should be written");
+    fs::write(
+        &types_path,
+        r#"
+            imports = ["root.toml"]
+
+            [[enums]]
+            name = "ItemRarity"
+            [[enums.values]]
+            name = "common"
+        "#,
+    )
+    .expect("types meta should be written");
+
+    let meta = MetaModel::from_paths([&root_path, &types_path]).expect("meta graph should load");
+
+    assert_eq!(meta.enums.len(), 1);
+    assert_eq!(meta.tables.len(), 1);
+    assert_eq!(meta.imports.len(), 3);
+    assert_eq!(meta.enum_meta("ItemRarity").unwrap().name, "ItemRarity");
+    assert_eq!(meta.table("items").unwrap().name, "items");
 }
