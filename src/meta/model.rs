@@ -78,17 +78,12 @@ pub struct TableMeta {
     pub polymorphic: bool,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TableKind {
     Object,
+    #[default]
     Collection,
-}
-
-impl Default for TableKind {
-    fn default() -> Self {
-        Self::Collection
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

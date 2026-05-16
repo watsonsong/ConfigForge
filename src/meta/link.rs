@@ -105,9 +105,9 @@ fn link_field_type<'meta>(
     let linked_field = if let Some(primitive) = PrimitiveFieldType::parse(&field.field_type) {
         LinkedField::Primitive(primitive)
     } else if let Some(enum_meta) = enum_index.get(field.field_type.as_str()) {
-        LinkedField::Enum(*enum_meta)
+        LinkedField::Enum(enum_meta)
     } else if let Some(struct_meta) = struct_index.get(field.field_type.as_str()) {
-        LinkedField::Struct(*struct_meta)
+        LinkedField::Struct(struct_meta)
     } else {
         diagnostics.push(MetaDiagnostic::new(
             MetaDiagnosticCode::UnknownFieldType,
