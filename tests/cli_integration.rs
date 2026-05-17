@@ -418,12 +418,23 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
     .expect("generated TypeScript tsconfig should be written");
 
     if command_exists("tsc") {
-        let output = StdCommand::new("tsc")
-            .args(["--project"])
-            .arg(generated_dir.join("tsconfig.json"))
-            .output()
-            .expect("generated TypeScript type check should run");
-        assert_command_success(output, "generated TypeScript tsc");
+        assert_command_success(
+            StdCommand::new("tsc")
+                .args(["--project"])
+                .arg(generated_dir.join("tsconfig.json"))
+                .output()
+                .expect("generated TypeScript type check should run"),
+            "generated TypeScript tsc",
+        );
+    } else if command_exists("npx") {
+        assert_command_success(
+            StdCommand::new("npx")
+                .args(["--yes", "-p", "typescript", "tsc", "--project"])
+                .arg(generated_dir.join("tsconfig.json"))
+                .output()
+                .expect("generated TypeScript npx type check should run"),
+            "generated TypeScript npx tsc",
+        );
     }
 }
 

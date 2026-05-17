@@ -214,6 +214,105 @@ fn code_model_rejects_unsupported_index_key_types() {
 }
 
 #[test]
+fn generators_reject_duplicate_generated_field_names() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "foo_bar"
+            type = "int"
+
+            [[tables.fields]]
+            name = "foo-bar"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+
+    assert_duplicate_generated_identifier(
+        RustCodeGenerator.generate(&input_for(&meta, CodeExportLanguage::Rust)),
+        "rust codegen",
+        "duplicate generated identifier `foo_bar`",
+        "table `items` row fields",
+    );
+    assert_duplicate_generated_identifier(
+        CppCodeGenerator.generate(&input_for(&meta, CodeExportLanguage::Cpp)),
+        "cpp codegen",
+        "duplicate generated identifier `foo_bar`",
+        "table `items` row fields",
+    );
+    assert_duplicate_generated_identifier(
+        TypeScriptCodeGenerator.generate(&input_for(&meta, CodeExportLanguage::TypeScript)),
+        "typescript codegen",
+        "duplicate generated identifier `fooBar`",
+        "table `items` row fields",
+    );
+}
+
+#[test]
+fn generators_reject_duplicate_top_level_generated_types() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "items_row"
+
+            [[structs.fields]]
+            name = "value"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+
+    for language in [
+        CodeExportLanguage::Rust,
+        CodeExportLanguage::Cpp,
+        CodeExportLanguage::TypeScript,
+    ] {
+        let result = match language {
+            CodeExportLanguage::Rust => RustCodeGenerator.generate(&input_for(&meta, language)),
+            CodeExportLanguage::Cpp => CppCodeGenerator.generate(&input_for(&meta, language)),
+            CodeExportLanguage::TypeScript => {
+                TypeScriptCodeGenerator.generate(&input_for(&meta, language))
+            }
+        };
+        assert_duplicate_generated_identifier(
+            result,
+            language.as_str(),
+            "duplicate generated identifier `ItemsRow`",
+            if language == CodeExportLanguage::TypeScript {
+                "top-level exports"
+            } else {
+                "top-level types"
+            },
+        );
+    }
+}
+
+fn assert_duplicate_generated_identifier(
+    result: crate::Result<Vec<GeneratedFile>>,
+    language: &str,
+    identifier: &str,
+    scope: &str,
+) {
+    let error = result.expect_err("generator should reject duplicate generated symbols");
+    assert!(
+        matches!(&error, ConfigForgeError::Validation(message) if message.contains(language) && message.contains(identifier) && message.contains(scope)),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn typescript_generator_emits_async_loader_and_maps() {
     let meta = linked_fixture();
     let mut input = input_for(&meta, CodeExportLanguage::TypeScript);

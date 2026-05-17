@@ -12,7 +12,7 @@ pub use self::ir::{
 pub use self::rust::RustCodeGenerator;
 pub use self::typescript::TypeScriptCodeGenerator;
 
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use serde::Deserialize;
 
@@ -344,6 +344,49 @@ pub struct CodeExportInput<'meta> {
 pub trait CodeGenerator {
     fn language(&self) -> CodeExportLanguage;
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>>;
+}
+
+pub(crate) struct GeneratedSymbol {
+    pub kind: &'static str,
+    pub original: String,
+    pub generated: String,
+}
+
+impl GeneratedSymbol {
+    pub(crate) fn new(
+        kind: &'static str,
+        original: impl Into<String>,
+        generated: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            original: original.into(),
+            generated: generated.into(),
+        }
+    }
+}
+
+pub(crate) fn ensure_unique_generated_symbols(
+    language: &str,
+    scope: &str,
+    symbols: Vec<GeneratedSymbol>,
+) -> Result<()> {
+    let mut seen: HashMap<String, GeneratedSymbol> = HashMap::new();
+    for symbol in symbols {
+        let generated = symbol.generated.clone();
+        if let Some(previous) = seen.insert(generated.clone(), symbol) {
+            let duplicate = seen.get(&generated).expect("inserted symbol should exist");
+            return Err(ConfigForgeError::Validation(format!(
+                "{language} codegen: duplicate generated identifier `{}` in {scope}; {} `{}` and {} `{}` both map to it",
+                duplicate.generated,
+                previous.kind,
+                previous.original,
+                duplicate.kind,
+                duplicate.original
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub fn builtin_generators() -> Vec<Box<dyn CodeGenerator>> {
