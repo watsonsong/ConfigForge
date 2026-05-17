@@ -128,7 +128,6 @@ pub struct CodeExportTarget {
     pub module_name: String,
     pub namespace: Option<String>,
     pub out_dir: PathBuf,
-    pub runtime_data_format: RuntimeDataFormat,
     pub options: CodegenOptions,
 }
 ```
@@ -141,25 +140,17 @@ pub struct CodeExportTarget {
 | `module_name` | 生成模块名，例如 Rust module、TS namespace/package、C++ 文件前缀。 |
 | `namespace` | C++ namespace / Rust module path / TS namespace 的可选覆盖。 |
 | `out_dir` | 生成代码输出目录。 |
-| `runtime_data_format` | 当前 target 的运行时数据格式，第一阶段支持 `Json` 和 `MessagePack`。 |
 | `options` | 从 `targets.code` 解析出的通用和语言专属选项，包括文件头、命名策略、关键字冲突策略、语言扩展参数等。 |
 
-`CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.code]]`，其 `runtime_data_format` 由同一个 target 的 `[targets.data].format` 决定。code-only target 没有 `[targets.data]` 时可使用默认 `Json`，但正式项目推荐 data 与 code 在同一 target 中同时声明。
+`CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.code]]`。runtime data 的具体格式由 `[targets.data].format` 选择，并通过 `RuntimeDataFile.path` 的真实后缀传递给 CodeModel；code-only target 没有 data artifact 时当前默认推导 `<table>.json`。
 
-### 4.4.2.1 `RuntimeDataFormat`
-
-```rust
-pub enum RuntimeDataFormat {
-    Json,
-    MessagePack,
-}
-```
+### 4.4.2.1 Runtime data format
 
 解析规则：
 
-- Project Config 中 `[targets.data].format = "json"` 映射为 `RuntimeDataFormat::Json`。
-- Project Config 中 `[targets.data].format = "messagepack"` 映射为 `RuntimeDataFormat::MessagePack`。
-- 可兼容解析 `"msgpack"` 为 `MessagePack`，但错误信息、文档、生成代码和 manifest 中统一使用规范名 `messagepack`。
+- Project Config 中 `[targets.data].format = "json"` 选择 JSON exporter。
+- Project Config 中 `[targets.data].format = "messagepack"` 选择 MessagePack exporter。
+- 可兼容解析 `"msgpack"` 为 MessagePack，但错误信息、文档、生成代码和 manifest 中统一使用规范名 `messagepack`。
 
 文件规划规则：
 
@@ -168,7 +159,7 @@ pub enum RuntimeDataFormat {
 | `Json` | `.json` | `serde_json::to_vec_pretty` 或等价 typed JSON。 | loader 读取 bytes，decoder 按 JSON 解码。 |
 | `MessagePack` | `.msgpack` | `rmp-serde` 写出同一 payload 的 MessagePack bytes。 | loader 读取 bytes，decoder 按 MessagePack 解码。 |
 
-`RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json` 或 `items.msgpack`。CodeModel 不再自行假设 `.json`；当 target 没有 data export artifact 时，才允许按 `runtime_data_format` 推导默认文件名。
+`RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json` 或 `items.msgpack`。CodeModel 优先使用 runtime data export 阶段返回的真实路径；当 target 没有 data export artifact 时，才默认推导 `<table>.json`。
 
 ### 4.4.2.2 `CodegenOptions`
 
@@ -267,15 +258,15 @@ derive_serde = true
 ```rust
 pub struct CodeExportInput<'meta> {
     pub meta: &'meta LinkedMetaModel<'meta>,
+    pub target_tags: TargetTags,
     pub project: CodeExportProject,
     pub target: CodeExportTarget,
     pub runtime_data_files: Vec<RuntimeDataFile>,
-    pub runtime_data_format: RuntimeDataFormat,
     pub generated_at: String,
 }
 ```
 
-`project` 来自 Project Config，用于渲染文件头模板；`runtime_data_files` 来自数据导出阶段的 Artifact 规划，用于生成加载函数中的默认资源名。例如 JSON target 中 `items.json` 对应 `ItemsTable::DATA_FILE`，MessagePack target 中 `items.msgpack` 对应同一个常量。`runtime_data_format` 来自 target data config，用于生成格式常量和选择 decoder。`generated_at` 由 exporter 注入，用于渲染文件头中的 `{{datetime}}`。
+`project` 来自 Project Config，用于渲染文件头模板；`target_tags` 来自当前 target 的 `tags`，用于构造目标相关的 CodeModel；`runtime_data_files` 来自数据导出阶段的 Artifact 规划，用于生成加载函数中的默认资源名。例如 JSON target 中 `items.json` 对应 `ItemsTable::DATA_FILE`，MessagePack target 中 `items.msgpack` 对应同一个常量。`generated_at` 由 exporter 注入，用于渲染文件头中的 `{{datetime}}`。
 
 ### 4.4.4 `GeneratedFile`
 
@@ -325,7 +316,7 @@ pub struct CodeTable {
 IR 职责：
 
 1. 保留 Meta 中的语义名称和描述信息。
-2. 过滤不应导出的字段，例如 `export = false`、`tool_only = true` 的普通 runtime 字段。
+2. 根据 `target_tags` 过滤不应导出的表、字段和索引，例如 `export = false`、`export_when = { any = ["client"] }`。
 3. 保留 table、field、index、enum、struct 的语言无关关系。
 4. 保留 runtime data file 信息。
 5. 把 `LinkedField` 转换为目标语言无关的 `CodeTypeRef`。
@@ -848,7 +839,7 @@ pub enum TargetDataFormat {
 3. `Json` 使用 `serde_json::to_vec_pretty` 写出 `<table>.json`。
 4. `MessagePack` 使用 `rmp_serde::to_vec_named` 或等价 named-field 编码写出 `<table>.msgpack`。
 5. 返回给 codegen 的 `RuntimeDataFile { table_name, path }` 必须使用真实写出的文件名。
-6. `write_generated_code` 把 target format 传入 `CodeExportInput.runtime_data_format`，不可固定为 `Json`。
+6. `write_generated_code` 把 runtime data export 返回的 `RuntimeDataFile` 传入 `CodeExportInput`，让 CodeModel 使用真实文件名。
 
 依赖建议：
 
@@ -860,11 +851,11 @@ rmp-serde = "1"
 
 ## 4.11.2 Codegen 读取实现方案
 
-CodeModel 构建时需要使用 `RuntimeDataFile` 和 `RuntimeDataFormat`：
+CodeModel 构建时需要使用 `RuntimeDataFile`：
 
 - 若 `runtime_data_files` 中存在 table 对应 artifact，使用 artifact path。
-- 若不存在，则根据 `runtime_data_format` 推导默认 path：`<table>.json` 或 `<table>.msgpack`。
-- 每个 `CodeTable` 保留 `data_file` 和 `data_format`，语言生成器用它们生成常量。
+- 若不存在，则默认推导 `<table>.json`。
+- 每个 `CodeTable` 保留 `data_file`，语言生成器用它生成常量。
 
 生成代码的 load 流程统一为：
 
@@ -924,23 +915,20 @@ CodeExportInput
    - JSON target 生成 `<table>.json`，内容可用 `serde_json` 读取；
    - MessagePack target 生成 `<table>.msgpack`，内容可用 `rmp-serde` 读取为同一 payload；
    - `RuntimeDataFile.path` 与实际文件后缀一致。
-3. Codegen 输入传递：`CodeExportInput.runtime_data_format` 使用 target data format，不再固定为 `Json`。
-4. CodeModel 默认文件名：没有 runtime data artifact 时，按 `RuntimeDataFormat` 推导 `.json` 或 `.msgpack`。
+3. Codegen 输入传递：`CodeExportInput.runtime_data_files` 使用 data export 阶段返回的真实路径。
+4. CodeModel 默认文件名：没有 runtime data artifact 时，默认推导 `.json`。
 5. Rust 生成代码包含：
-   - `RuntimeDataFormat::{Json, MessagePack}`；
-   - `DataFileLoader::load_bytes`；
-   - `RuntimeDataDecoder`；
-   - 每张表的 `DATA_FILE` 和 `DATA_FORMAT`。
+   - `RuntimeDataLoader`；
+   - 每张表的 `DATA_FILE`；
+   - row struct、table repository 和 index helper。
 6. C++ 生成代码包含：
-   - `RuntimeDataFormat` enum class；
-   - `IDataFileLoader::LoadBytes`；
-   - `IRuntimeDataDecoder`；
-   - 每张表的 `DataFile` 和 `DataFormat`。
+   - `IRuntimeDataLoader`；
+   - 每张表的 `DataFile`；
+   - row struct、table repository 和 index helper。
 7. TypeScript 生成代码包含：
-   - `RuntimeDataFormat = "json" | "messagepack"`；
-   - `DataFileLoader.loadBytes`；
-   - `RuntimeDataDecoder`；
-   - 每张表的 `dataFile` 和 `dataFormat`。
+   - `RuntimeDataLoader`；
+   - 每张表的 `dataFile`；
+   - row interface、table repository 和 index helper。
 8. CLI integration：分别构建 JSON target 与 MessagePack target，验证 runtime data 文件和 generated code 文件同时生成，并检查代码中引用的默认文件名与格式一致。
 
 ## 4.13 文件组织策略
@@ -999,7 +987,7 @@ pub struct CodegenDiagnostic {
 
 1. enum / struct / table 都能进入 `CodeModel`。
 2. primitive / enum / struct 字段映射为正确 `CodeTypeRef`。
-3. field `export = false` / `tool_only = true` 默认不进入 runtime row。
+3. table / field / index 的 `export = false` 与 `export_when` 按 `target_tags` 过滤；primary index 引用当前 target 不导出的字段时报错，非 primary index 引用不导出字段时跳过。
 4. primary index、unique index、non-unique index 都能生成 `CodeIndex`。
 5. 命名 sanitize 后稳定且可预测。
 6. 命名冲突能报错。

@@ -161,6 +161,9 @@ pub struct TableMeta {
     pub name: String,
     pub kind: TableKind,
     pub desc: Option<String>,
+    pub export: bool,
+    pub export_when: ExportCondition,
+    pub row_export: Option<RowExportPolicy>,
     pub source: Option<String>,
     pub sources: Vec<SourceRef>,
     pub override_sources: Vec<SourceRef>,
@@ -178,6 +181,9 @@ pub struct TableMeta {
 - `source_path()` 优先返回 `sources.first().path`，否则回退到 `source`。
 - `kind` 默认 `collection`。
 - `primary_index` 当前仍是字符串，校验阶段确认引用 index 是否存在并且唯一。
+- `export = false` 是整表导出的硬关闭；默认 `true`。
+- `export_when` 根据 target tags 判断整表是否进入 runtime data 与 codegen。
+- `row_export` 只作用于 collection runtime data 行过滤，常用于 `shipping` / `debug` 等 target 差异。
 
 ### 2.5.5 `TableKind`
 
@@ -206,9 +212,10 @@ pub struct FieldMeta {
     pub default: Option<toml::Value>,
     pub layout: Option<ValueLayout>,
     pub export: bool,
-    pub tool_only: bool,
-    pub filter_field: bool,
-    pub validator_only: bool,
+    pub export_when: ExportCondition,
+    pub tool_only: Option<bool>,
+    pub filter_field: Option<bool>,
+    pub validator_only: Option<bool>,
     pub field_number: Option<u32>,
     pub unique: bool,
 }
@@ -218,9 +225,45 @@ pub struct FieldMeta {
 
 - `field_type` 必须保持 `String`，因为它可能是 primitive，也可能是后续文件中定义的 enum / struct 名称。
 - `default` 暂保留 `toml::Value`；后续可在 Link 或单独 default-link 阶段按字段类型解析为 typed default。
+- `export = false` 是字段导出的硬关闭；默认 `true`。
+- `export_when` 根据 target tags 判断字段是否进入 runtime row 与 codegen row type。
+- `tool_only`、`filter_field`、`validator_only` 已由 target tags 机制替代；当前仅保留为 `Option<bool>` 以便检测用户仍在使用并输出 `UnsupportedFeature` 诊断，不再参与导出判断。
 - `unique` 是兼容字段；正式唯一性建议优先通过 `IndexMeta { unique = true }` 表达。
 
-### 2.5.7 primitive 类型
+### 2.5.7 Target Tags 与导出条件
+
+```rust
+pub struct TargetTags {
+    tags: BTreeSet<String>,
+}
+
+pub struct ExportCondition {
+    pub any: Vec<String>,
+    pub all: Vec<String>,
+    pub none: Vec<String>,
+}
+
+pub struct RowExportPolicy {
+    pub required_tags_field: Option<String>,
+    pub excluded_tags_field: Option<String>,
+    #[serde(rename = "match")]
+    pub match_mode: TagMatchMode,
+}
+
+pub enum TagMatchMode {
+    Any,
+    All,
+}
+```
+
+判断规则：
+
+- `ExportCondition::matches(target)` 同时满足：`any` 为空或命中任意 tag；`all` 全部命中；`none` 全部未命中。
+- `TableMeta::is_exported_for`、`FieldMeta::is_exported_for`、`IndexMeta::is_exported_for` 均使用 `export && export_when.matches(target)`。
+- `RowExportPolicy` 从数据行中的 `required_tags_field` / `excluded_tags_field` 读取逗号分隔 tag 列表；命中 excluded tag 时该行不导出；required tags 为空时默认导出；非空时按 `match = "any" | "all"` 与 target tags 匹配。
+- Meta 校验阶段确认 `row_export` 引用的字段存在，但不把它们 link 成字段引用；当前 row 过滤只需要字段名查值。
+
+### 2.5.8 primitive 类型
 
 ```rust
 pub enum PrimitiveFieldType {
@@ -244,12 +287,14 @@ pub enum PrimitiveFieldType {
 | `text` | `Text` |
 | `asset` | `Asset` |
 
-### 2.5.8 `IndexMeta`
+### 2.5.9 `IndexMeta`
 
 ```rust
 pub struct IndexMeta {
     pub name: String,
     pub desc: Option<String>,
+    pub export: bool,
+    pub export_when: ExportCondition,
     pub fields: Vec<String>,
     pub unique: bool,
     pub primary: bool,
@@ -260,6 +305,7 @@ pub struct IndexMeta {
 
 - Raw `fields` 仍保存字段名字符串，方便 serde 加载和错误展示。
 - Link 后通过 `LinkedIndexMeta.fields: Vec<&FieldMeta>` 获得真实字段引用。
+- `export = false` / `export_when` 控制 index 是否生成到目标代码；primary index 如果引用了当前 target 不导出的字段，应报错；非 primary index 引用了不导出的字段时跳过该 index。
 - 当前只支持 table 顶层简单字段名；后续如支持 `a.b[0].c`，应引入 `FieldPath` 和 `LinkedFieldPath<'meta>`。
 
 ## 2.6 Linked 数据结构

@@ -80,6 +80,7 @@ pub struct GeneratedFile {
 
 pub fn build_code_model(
     meta: &LinkedMetaModel<'_>,
+    target_tags: &crate::meta::TargetTags,
     runtime_data_files: &[RuntimeDataFile],
 ) -> Result<CodeModel> {
     let data_file_index = runtime_data_files
@@ -120,7 +121,7 @@ pub fn build_code_model(
             let fields = struct_meta
                 .fields
                 .iter()
-                .filter(|field| is_runtime_codegen_field(field))
+                .filter(|field| is_runtime_codegen_field(field, target_tags))
                 .map(code_field_from_linked)
                 .collect::<Result<Vec<_>>>()?;
             ensure_model_unique_names(
@@ -139,11 +140,12 @@ pub fn build_code_model(
     let tables = meta
         .tables
         .iter()
+        .filter(|table_meta| table_meta.meta.is_exported_for(target_tags))
         .map(|table_meta| {
             let fields = table_meta
                 .fields
                 .iter()
-                .filter(|field| is_runtime_codegen_field(field))
+                .filter(|field| is_runtime_codegen_field(field, target_tags))
                 .map(code_field_from_linked)
                 .collect::<Result<Vec<_>>>()?;
             ensure_model_unique_names(
@@ -157,14 +159,15 @@ pub fn build_code_model(
                 .collect::<HashMap<_, _>>();
             let mut indexes = Vec::new();
             for index_meta in &table_meta.indexes {
+                if !index_meta.meta.is_exported_for(target_tags) {
+                    continue;
+                }
                 let mut index_fields = Vec::new();
+                let mut missing_exported_field = None;
                 for field in &index_meta.fields {
-                    let Some(code_field) = field_index.get(field.meta.name.as_str()).cloned()
-                    else {
-                        return Err(ConfigForgeError::Validation(format!(
-                            "table `{}` index `{}` references non-exported field `{}`",
-                            table_meta.meta.name, index_meta.meta.name, field.meta.name
-                        )));
+                    let Some(code_field) = field_index.get(field.meta.name.as_str()).cloned() else {
+                        missing_exported_field = Some(field.meta.name.as_str());
+                        break;
                     };
                     validate_index_key_type(
                         &table_meta.meta.name,
@@ -172,6 +175,15 @@ pub fn build_code_model(
                         &code_field,
                     )?;
                     index_fields.push(code_field);
+                }
+                if let Some(field_name) = missing_exported_field {
+                    if index_meta.meta.primary {
+                        return Err(ConfigForgeError::Validation(format!(
+                            "table `{}` primary index `{}` references non-exported field `{}` for current target",
+                            table_meta.meta.name, index_meta.meta.name, field_name
+                        )));
+                    }
+                    continue;
                 }
                 indexes.push(CodeIndex {
                     name: index_meta.meta.name.clone(),
@@ -231,8 +243,11 @@ pub fn build_code_model(
     })
 }
 
-fn is_runtime_codegen_field(field: &crate::meta::LinkedFieldMeta<'_>) -> bool {
-    field.meta.is_runtime_exported()
+fn is_runtime_codegen_field(
+    field: &crate::meta::LinkedFieldMeta<'_>,
+    target_tags: &crate::meta::TargetTags,
+) -> bool {
+    field.meta.is_exported_for(target_tags)
 }
 
 fn validate_index_key_type(table_name: &str, index_name: &str, field: &CodeField) -> Result<()> {

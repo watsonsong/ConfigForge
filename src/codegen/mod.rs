@@ -16,7 +16,10 @@ use std::{collections::HashMap, path::PathBuf};
 
 use serde::Deserialize;
 
-use crate::{meta::LinkedMetaModel, ConfigForgeError, Result};
+use crate::{
+    meta::{LinkedMetaModel, TargetTags},
+    ConfigForgeError, Result,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeExportLanguage {
@@ -335,6 +338,7 @@ pub enum ArtifactKind {
 
 pub struct CodeExportInput<'meta> {
     pub meta: &'meta LinkedMetaModel<'meta>,
+    pub target_tags: TargetTags,
     pub project: CodeExportProject,
     pub target: CodeExportTarget,
     pub runtime_data_files: Vec<RuntimeDataFile>,

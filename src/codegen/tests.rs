@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use crate::{meta::MetaModel, ConfigForgeError};
+use crate::{
+    meta::{MetaModel, TargetTags},
+    ConfigForgeError,
+};
 
 use super::*;
 
@@ -46,7 +49,7 @@ fn linked_fixture() -> MetaModel {
             [[tables.fields]]
             name = "internal_note"
             type = "string"
-            tool_only = true
+            export = false
 
             [[tables.indexes]]
             name = "by_id"
@@ -68,6 +71,7 @@ fn input_for<'a>(meta: &'a MetaModel, language: CodeExportLanguage) -> CodeExpor
     let linked = Box::leak(Box::new(linked));
     CodeExportInput {
         meta: linked,
+        target_tags: TargetTags::empty(),
         project: CodeExportProject {
             name: Some("demo".to_owned()),
             desc: Some("Demo config".to_owned()),
@@ -93,7 +97,8 @@ fn builds_code_model_with_types_tables_and_indexes() {
     let meta = linked_fixture();
     let input = input_for(&meta, CodeExportLanguage::Rust);
 
-    let model = build_code_model(input.meta, &input.runtime_data_files).expect("model");
+    let model =
+        build_code_model(input.meta, &input.target_tags, &input.runtime_data_files).expect("model");
 
     assert_eq!(model.enums[0].name, "ItemRarity");
     assert_eq!(model.structs[0].name, "RewardInfo");
@@ -122,7 +127,7 @@ fn code_model_defaults_data_file_to_json_when_no_runtime_file_is_available() {
     let meta = linked_fixture();
     let linked = meta.link().expect("fixture meta should link");
 
-    let model = build_code_model(&linked, &[]).expect("model");
+    let model = build_code_model(&linked, &TargetTags::empty(), &[]).expect("model");
 
     assert_eq!(model.tables[0].data_file, "items.json");
 }
@@ -169,21 +174,79 @@ fn code_model_rejects_indexes_referencing_non_exported_fields() {
             [[tables.fields]]
             name = "internal_region"
             type = "string"
-            tool_only = true
+            export_when = { any = ["server"] }
 
             [[tables.indexes]]
             name = "by_id_region"
             fields = ["id", "internal_region"]
             unique = true
+            primary = true
         "#,
     )
     .expect("meta should load");
     let linked = meta.link().expect("meta should link");
-    let error = build_code_model(&linked, &[]).unwrap_err();
+    let error = build_code_model(&linked, &TargetTags::new(["client"]), &[]).unwrap_err();
 
     assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("references non-exported field `internal_region`"))
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("primary index `by_id_region` references non-exported field `internal_region`"))
     );
+}
+
+#[test]
+fn code_model_filters_tables_fields_and_indexes_by_target_tags() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "icon"
+            type = "asset"
+            export_when = { any = ["client"] }
+
+            [[tables.fields]]
+            name = "drop_weight"
+            type = "int"
+            export_when = { any = ["server"] }
+
+            [[tables.indexes]]
+            name = "by_drop_weight"
+            fields = ["drop_weight"]
+            unique = false
+
+            [[tables]]
+            name = "server_only"
+            source = "server_only.csv"
+            export_when = { any = ["server"] }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+
+    let model = build_code_model(&linked, &TargetTags::new(["client"]), &[]).expect("model");
+
+    assert!(model.tables.iter().any(|table| table.name == "items"));
+    assert!(!model.tables.iter().any(|table| table.name == "server_only"));
+    let items = model
+        .tables
+        .iter()
+        .find(|table| table.name == "items")
+        .expect("items table should exist");
+    assert!(items.fields.iter().any(|field| field.name == "icon"));
+    assert!(!items.fields.iter().any(|field| field.name == "drop_weight"));
+    assert!(!items
+        .indexes
+        .iter()
+        .any(|index| index.name == "by_drop_weight"));
 }
 
 #[test]
@@ -206,7 +269,7 @@ fn code_model_rejects_unsupported_index_key_types() {
     )
     .expect("meta should load");
     let linked = meta.link().expect("meta should link");
-    let error = build_code_model(&linked, &[]).unwrap_err();
+    let error = build_code_model(&linked, &TargetTags::empty(), &[]).unwrap_err();
 
     assert!(
         matches!(error, ConfigForgeError::Validation(message) if message.contains("unsupported index key type"))

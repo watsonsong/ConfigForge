@@ -14,7 +14,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
     }
 
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>> {
-        let model = build_code_model(input.meta, &input.runtime_data_files)?;
+        let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
         require_non_empty_index_fields(&model)?;
         let typescript_options = input.target.options.typescript()?;
         let names = TypeScriptNames::new(&input.target.options);

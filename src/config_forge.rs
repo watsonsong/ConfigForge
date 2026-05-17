@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::{
     codegen::RuntimeDataFile,
     data::{DataRow, DataSet, DataTable},
-    meta::{LinkedMetaModel, LinkedTableMeta},
+    meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
     ConfigForgeError, Result,
 };
 
@@ -34,6 +34,7 @@ pub trait DataFormatExporter {
         out_dir: &Path,
         table_meta: &LinkedTableMeta<'_>,
         table: &DataTable,
+        target_tags: &TargetTags,
     ) -> Result<String>;
 
     fn matches(&self, format: &str) -> bool {
@@ -83,6 +84,7 @@ impl DataFormatRegistry {
 pub fn export_runtime_data(
     out_dir: &Path,
     linked_meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
     data_set: &DataSet,
     exporter: &dyn DataFormatExporter,
 ) -> Result<Vec<RuntimeDataFile>> {
@@ -93,13 +95,16 @@ pub fn export_runtime_data(
 
     let mut runtime_data_files = Vec::new();
     for table_meta in &linked_meta.tables {
+        if !table_meta.meta.is_exported_for(target_tags) {
+            continue;
+        }
         let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
             ConfigForgeError::Validation(format!(
                 "data set is missing table `{}`",
                 table_meta.meta.name
             ))
         })?;
-        let path = exporter.export_table(out_dir, table_meta, table)?;
+        let path = exporter.export_table(out_dir, table_meta, table, target_tags)?;
         runtime_data_files.push(RuntimeDataFile {
             table_name: table_meta.meta.name.clone(),
             path,
@@ -111,16 +116,22 @@ pub fn export_runtime_data(
 pub fn build_exported_table_payload(
     table_meta: &LinkedTableMeta<'_>,
     table: &DataTable,
+    target_tags: &TargetTags,
 ) -> ExportedTable {
     let exported_fields = table_meta
         .fields
         .iter()
-        .filter(|field| field.meta.is_runtime_exported())
+        .filter(|field| field.meta.is_exported_for(target_tags))
         .map(|field| field.meta.name.as_str())
         .collect::<std::collections::BTreeSet<_>>();
     let rows = table
         .rows
         .iter()
+        .filter(|row| {
+            table_meta
+                .meta
+                .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
+        })
         .map(|row| {
             row.iter()
                 .filter(|(field, _)| exported_fields.contains(field.as_str()))
@@ -153,8 +164,9 @@ impl DataFormatExporter for JsonDataExporter {
         out_dir: &Path,
         table_meta: &LinkedTableMeta<'_>,
         table: &DataTable,
+        target_tags: &TargetTags,
     ) -> Result<String> {
-        let payload = build_exported_table_payload(table_meta, table);
+        let payload = build_exported_table_payload(table_meta, table, target_tags);
         let content = serde_json::to_string_pretty(&payload)?;
         let file_name = format!("{}.{}", table_meta.meta.name, self.extension());
         let path = out_dir.join(&file_name);
@@ -183,8 +195,9 @@ impl DataFormatExporter for MessagePackDataExporter {
         out_dir: &Path,
         table_meta: &LinkedTableMeta<'_>,
         table: &DataTable,
+        target_tags: &TargetTags,
     ) -> Result<String> {
-        let payload = build_exported_table_payload(table_meta, table);
+        let payload = build_exported_table_payload(table_meta, table, target_tags);
         let content = rmp_serde::to_vec_named(&payload)
             .map_err(|source| ConfigForgeError::SerializeMessagePack { source })?;
         let file_name = format!("{}.{}", table_meta.meta.name, self.extension());
@@ -226,6 +239,7 @@ mod tests {
             out_dir: &Path,
             table_meta: &LinkedTableMeta<'_>,
             _table: &DataTable,
+            _target_tags: &TargetTags,
         ) -> Result<String> {
             self.seen_tables
                 .borrow_mut()
@@ -289,8 +303,14 @@ mod tests {
             seen_tables: RefCell::new(Vec::new()),
         };
 
-        let files = export_runtime_data(out_dir.path(), &linked, &data_set, &exporter)
-            .expect("runtime data should export");
+        let files = export_runtime_data(
+            out_dir.path(),
+            &linked,
+            &TargetTags::empty(),
+            &data_set,
+            &exporter,
+        )
+        .expect("runtime data should export");
 
         assert_eq!(files[0].path, "items.custom");
         assert_eq!(exporter.seen_tables.into_inner(), vec!["items"]);

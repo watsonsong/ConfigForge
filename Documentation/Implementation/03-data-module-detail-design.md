@@ -314,7 +314,7 @@ pub fn validate_project(meta_path: &Path, data_dir: &Path) -> Result<()> {
 }
 ```
 
-`export_project` 同理，应先得到 `DataSet`，再在导出阶段按 table name 查表，而不是在 exporter 中逐表读取 CSV。
+`export_project` 同理，应先得到 `DataSet`，再在导出阶段按 table name 查表，而不是在 exporter 中逐表读取 CSV。构建 `DataLoadPlan` 时应先用当前 target 的 `TargetTags` 过滤整表 `export_when`，避免加载不会导出的表；写出 runtime data 时继续按同一组 tags 过滤字段和 `row_export` 行。
 
 ## 3.9 与当前 `source.rs` 的关系
 

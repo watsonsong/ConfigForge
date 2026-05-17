@@ -16,7 +16,7 @@ use crate::{
     config_forge::{export_runtime_data, DataFormatRegistry},
     meta::{
         link_meta_model, validate_meta_model, EnumMeta, MetaDiagnostic, MetaModel, StructMeta,
-        TableMeta,
+        TableMeta, TargetTags,
     },
     validation::{normalize_data_set, validate_normalized_data_set},
     ConfigForgeError, Result,
@@ -58,6 +58,8 @@ pub struct ProjectConfigMeta {
 pub struct TargetConfig {
     pub name: String,
     #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
     pub data: Option<TargetDataConfig>,
     #[serde(default)]
     pub code: Vec<CodegenTaskConfig>,
@@ -88,13 +90,20 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
     let runtime_data_files = if let Some(data_config) = &target.data {
         let registry = DataFormatRegistry::with_builtin_exporters();
         let data_exporter = registry.require(&data_config.format)?;
-        let data_plan = DataLoadPlan::from_meta_model(&meta_set)?;
+        let data_plan = DataLoadPlan::from_tables(
+            linked_meta
+                .tables
+                .iter()
+                .filter(|table| table.meta.is_exported_for(&target.target_tags()))
+                .map(|table| table.meta),
+        )?;
         let data_set = DataLoader::new(project_root.join(&data_config.input)).load(&data_plan)?;
         let data_set = normalize_data_set(&linked_meta, &data_set)?;
         validate_normalized_data_set(&linked_meta, &data_set)?;
         export_runtime_data(
             &project_root.join(&data_config.output),
             &linked_meta,
+            &target.target_tags(),
             &data_set,
             data_exporter,
         )?
@@ -109,6 +118,12 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
         &linked_meta,
         runtime_data_files,
     )
+}
+
+impl TargetConfig {
+    pub fn target_tags(&self) -> TargetTags {
+        TargetTags::new(self.tags.clone())
+    }
 }
 
 impl ProjectConfig {
@@ -266,6 +281,7 @@ fn write_generated_code(
         code_target.out_dir = project_root.join(&code_target.out_dir);
         let input = CodeExportInput {
             meta: linked_meta,
+            target_tags: target.target_tags(),
             project: project.clone(),
             target: code_target,
             runtime_data_files: runtime_data_files.clone(),
@@ -412,12 +428,12 @@ mod tests {
                 [[tables.fields]]
                 name = "debug_note"
                 type = "string"
-                tool_only = true
+                export_when = { any = ["debug"] }
 
                 [[tables.fields]]
                 name = "validator_flag"
                 type = "bool"
-                validator_only = true
+                export_when = { any = ["validator"] }
 
                 [[tables.fields]]
                 name = "internal_value"
@@ -438,7 +454,7 @@ mod tests {
             ])],
         );
 
-        let payload = build_exported_table_payload(table_meta, &table);
+        let payload = build_exported_table_payload(table_meta, &table, &TargetTags::empty());
         let value = serde_json::to_value(payload).expect("payload should serialize");
 
         assert_eq!(value["meta"]["name"], "items");

@@ -31,6 +31,7 @@ fn validate_struct_meta(
     );
 
     for field in &struct_meta.fields {
+        validate_deprecated_field_export_flags(&owner, field, diagnostics);
         validate_default_value(model, &owner, field, diagnostics);
     }
 }
@@ -140,6 +141,11 @@ fn validate_table_meta(
     );
 
     for field in &table.fields {
+        validate_deprecated_field_export_flags(
+            &format!("table `{}`", table.name),
+            field,
+            diagnostics,
+        );
         validate_default_value(
             model,
             &format!("table `{}`", table.name),
@@ -197,7 +203,58 @@ fn validate_table_meta(
         }
     }
 
+    validate_row_export_policy(table, &field_names, diagnostics);
     validate_primary_index(table, &primary_indexes, diagnostics);
+}
+
+fn validate_deprecated_field_export_flags(
+    owner: &str,
+    field: &FieldMeta,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    for deprecated in [
+        ("tool_only", field.tool_only),
+        ("validator_only", field.validator_only),
+        ("filter_field", field.filter_field),
+    ] {
+        if deprecated.1.is_some() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "{owner} field `{}` uses deprecated `{}`; use `export = false`, `export_when`, or `row_export` instead",
+                    field.name, deprecated.0
+                ),
+            ));
+        }
+    }
+}
+
+fn validate_row_export_policy(
+    table: &TableMeta,
+    field_names: &BTreeSet<&str>,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    let Some(row_export) = &table.row_export else {
+        return;
+    };
+
+    for field_name in [
+        row_export.required_tags_field.as_deref(),
+        row_export.excluded_tags_field.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if !field_names.contains(field_name) {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::MissingFieldReference,
+                format!(
+                    "table `{}` row_export references unknown field `{}`",
+                    table.name, field_name
+                ),
+            ));
+        }
+    }
 }
 
 fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiagnostic>) {

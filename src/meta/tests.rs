@@ -356,6 +356,73 @@ fn primitive_field_type_names_are_canonical() {
 }
 
 #[test]
+fn export_condition_matches_target_tags() {
+    let condition = ExportCondition {
+        any: vec!["client".to_owned(), "tool".to_owned()],
+        all: vec!["shipping".to_owned()],
+        none: vec!["debug".to_owned()],
+    };
+
+    assert!(condition.matches(&TargetTags::new(["client", "shipping"])));
+    assert!(!condition.matches(&TargetTags::new(["server", "shipping"])));
+    assert!(!condition.matches(&TargetTags::new(["client"])));
+    assert!(!condition.matches(&TargetTags::new(["client", "shipping", "debug"])));
+}
+
+#[test]
+fn row_export_policy_matches_required_and_excluded_tags() {
+    let policy = RowExportPolicy {
+        required_tags_field: Some("required_tags".to_owned()),
+        excluded_tags_field: Some("excluded_tags".to_owned()),
+        match_mode: TagMatchMode::All,
+    };
+
+    assert!(policy.matches(
+        &TargetTags::new(["client", "shipping"]),
+        |field| match field {
+            "required_tags" => Some("client, shipping"),
+            "excluded_tags" => Some("server"),
+            _ => None,
+        }
+    ));
+    assert!(
+        !policy.matches(&TargetTags::new(["client"]), |field| match field {
+            "required_tags" => Some("client, shipping"),
+            "excluded_tags" => Some("server"),
+            _ => None,
+        })
+    );
+    assert!(
+        !policy.matches(&TargetTags::new(["client", "debug"]), |field| match field {
+            "required_tags" => Some("client"),
+            "excluded_tags" => Some("debug"),
+            _ => None,
+        })
+    );
+}
+
+#[test]
+fn rejects_deprecated_field_export_flags() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "debug_note"
+            type = "string"
+            tool_only = true
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+            && diagnostic.message.contains("deprecated `tool_only`")
+    }));
+}
+
+#[test]
 fn validates_model_directly_with_ok_and_error_results() {
     let valid = parse(
         r#"

@@ -25,7 +25,7 @@
 | Source | `src/source.rs` / `src/source/` | 将 CSV/XLSX/远程表格归一化为二维 `SourceSheet`。 | source declaration。 | `SourceSheet` / `DataTable`。 |
 | Data Model | `src/data/` | 将 source cell 解析为 typed value 和逻辑表数据。 | `LinkedMetaModel<'meta>`、`SourceSheet`。 | `DataSet`。 |
 | Validation | `src/validation.rs` / `src/validation/` | 业务规则、索引、外键、过滤视图校验。 | `LinkedMetaModel<'meta>`、`DataSet`、`ExportContext`。 | 结构化诊断。 |
-| Exporter | `src/exporter.rs` / `src/exporter/` | 生成 runtime data、代码、special artifacts。 | `LinkedMetaModel<'meta>`、`ExportView`、target config。 | `ArtifactPlan`。 |
+| Exporter | `src/exporter.rs` / `src/exporter/` | 生成 runtime data、代码、special artifacts。 | `LinkedMetaModel<'meta>`、`TargetTags`、target config。 | `RuntimeDataFile` / generated files。 |
 | Artifact Writer | `src/artifact/` | direct/temp_commit 写入策略、manifest 输出。 | `ArtifactPlan`。 | 文件系统产物。 |
 | Diagnostics | `src/diagnostics/` | 统一诊断模型、稳定排序、报告格式。 | 各模块诊断。 | `DiagnosticReport`。 |
 | Runtime/Executor | `src/executor/` | 异步 I/O、线程池、任务编排。 | 阶段任务。 | 阶段执行结果。 |
@@ -73,8 +73,8 @@ cli
 5. **Source Load**：按 provider 加载二维表，可并发 I/O。
 6. **Sheet Mapping / Data Parse**：根据已链接 Meta 映射 field path 并解析 typed value。
 7. **DataSet Compose**：base source split merge 与 override apply。
-8. **Validation**：required/default、类型、索引、外键、validator、export filter。
-9. **ExportView Build**：按 target/context 派生过滤视图。
+8. **Validation**：required/default、类型、索引、外键、validator、row export 引用。
+9. **Target Tags Filter**：按 target tags 过滤 table / field / index / runtime rows。
 10. **Artifact Generate**：生成 runtime data、代码、POT、asset manifest 等。
 11. **Artifact Write**：按 direct 或 temp_commit 写入，并输出 manifest。
 

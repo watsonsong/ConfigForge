@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +46,12 @@ pub struct TableMeta {
     pub kind: TableKind,
     #[serde(default)]
     pub desc: Option<String>,
+    #[serde(default = "default_export")]
+    pub export: bool,
+    #[serde(default)]
+    pub export_when: ExportCondition,
+    #[serde(default)]
+    pub row_export: Option<RowExportPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(default)]
@@ -96,11 +102,13 @@ pub struct FieldMeta {
     #[serde(default = "default_export")]
     pub export: bool,
     #[serde(default)]
-    pub tool_only: bool,
+    pub export_when: ExportCondition,
     #[serde(default)]
-    pub filter_field: bool,
+    pub tool_only: Option<bool>,
     #[serde(default)]
-    pub validator_only: bool,
+    pub filter_field: Option<bool>,
+    #[serde(default)]
+    pub validator_only: Option<bool>,
     #[serde(default)]
     pub field_number: Option<u32>,
     #[serde(default)]
@@ -109,6 +117,40 @@ pub struct FieldMeta {
 
 fn default_export() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ExportCondition {
+    #[serde(default)]
+    pub any: Vec<String>,
+    #[serde(default)]
+    pub all: Vec<String>,
+    #[serde(default)]
+    pub none: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct RowExportPolicy {
+    #[serde(default)]
+    pub required_tags_field: Option<String>,
+    #[serde(default)]
+    pub excluded_tags_field: Option<String>,
+    #[serde(default)]
+    #[serde(rename = "match")]
+    pub match_mode: TagMatchMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TagMatchMode {
+    #[default]
+    Any,
+    All,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TargetTags {
+    tags: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -172,6 +214,10 @@ pub struct IndexMeta {
     pub name: String,
     #[serde(default)]
     pub desc: Option<String>,
+    #[serde(default = "default_export")]
+    pub export: bool,
+    #[serde(default)]
+    pub export_when: ExportCondition,
     #[serde(default)]
     pub fields: Vec<String>,
     #[serde(default)]
@@ -257,6 +303,21 @@ impl TableMeta {
             .map(|source| source.path.as_str())
             .or(self.source.as_deref())
     }
+
+    pub fn is_exported_for(&self, target: &TargetTags) -> bool {
+        self.export && self.export_when.matches(target)
+    }
+
+    pub fn is_row_exported_for<'a>(
+        &self,
+        target: &TargetTags,
+        value_of: impl Fn(&str) -> Option<&'a str>,
+    ) -> bool {
+        self.row_export
+            .as_ref()
+            .map(|policy| policy.matches(target, value_of))
+            .unwrap_or(true)
+    }
 }
 
 impl FieldMeta {
@@ -264,9 +325,83 @@ impl FieldMeta {
         PrimitiveFieldType::parse(&self.field_type)
     }
 
-    pub fn is_runtime_exported(&self) -> bool {
-        self.export && !self.tool_only && !self.validator_only
+    pub fn is_exported_for(&self, target: &TargetTags) -> bool {
+        self.export && self.export_when.matches(target)
     }
+}
+
+impl IndexMeta {
+    pub fn is_exported_for(&self, target: &TargetTags) -> bool {
+        self.export && self.export_when.matches(target)
+    }
+}
+
+impl ExportCondition {
+    pub fn matches(&self, target: &TargetTags) -> bool {
+        (self.any.is_empty() || self.any.iter().any(|tag| target.contains(tag)))
+            && self.all.iter().all(|tag| target.contains(tag))
+            && self.none.iter().all(|tag| !target.contains(tag))
+    }
+}
+
+impl RowExportPolicy {
+    pub fn matches<'a>(
+        &self,
+        target: &TargetTags,
+        value_of: impl Fn(&str) -> Option<&'a str>,
+    ) -> bool {
+        if let Some(field) = &self.excluded_tags_field {
+            if parse_tag_list(value_of(field))
+                .iter()
+                .any(|tag| target.contains(tag))
+            {
+                return false;
+            }
+        }
+
+        let required_tags = self
+            .required_tags_field
+            .as_ref()
+            .map(|field| parse_tag_list(value_of(field)))
+            .unwrap_or_default();
+        if required_tags.is_empty() {
+            return true;
+        }
+
+        match self.match_mode {
+            TagMatchMode::Any => required_tags.iter().any(|tag| target.contains(tag)),
+            TagMatchMode::All => required_tags.iter().all(|tag| target.contains(tag)),
+        }
+    }
+}
+
+impl TargetTags {
+    pub fn new(tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            tags: tags.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    pub fn contains(&self, tag: &str) -> bool {
+        self.tags.contains(tag)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.tags.iter().map(String::as_str)
+    }
+}
+
+fn parse_tag_list(value: Option<&str>) -> Vec<&str> {
+    value
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .collect()
 }
 
 pub struct LinkedMetaModel<'meta> {

@@ -8,9 +8,10 @@ pub use diagnostic::{MetaDiagnostic, MetaDiagnosticCode};
 pub use link::link_meta_model;
 pub use loader::load_meta_path;
 pub use model::{
-    EnumMeta, EnumValueMeta, FieldMeta, IndexMeta, LinkedField, LinkedFieldMeta, LinkedIndexMeta,
-    LinkedMetaModel, LinkedStructMeta, LinkedStructType, LinkedTableMeta, MetaModel, MetaSet,
-    PrimitiveFieldType, SourceRef, StructMeta, TableKind, TableMeta, ValueLayout,
+    EnumMeta, EnumValueMeta, ExportCondition, FieldMeta, IndexMeta, LinkedField, LinkedFieldMeta,
+    LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType, LinkedTableMeta,
+    MetaModel, MetaSet, PrimitiveFieldType, RowExportPolicy, SourceRef, StructMeta, TableKind,
+    TableMeta, TagMatchMode, TargetTags, ValueLayout,
 };
 pub use validate::validate_meta_model;
 
