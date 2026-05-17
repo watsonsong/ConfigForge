@@ -345,7 +345,13 @@ pub struct CodeExportInput<'meta> {
     pub generated_at: String,
 }
 
-pub trait CodeGenerator {
+/// Target-language code generator.
+///
+/// Generators may be shared across worker threads and `generate` may be called
+/// concurrently for different codegen tasks. Implementations must therefore be
+/// thread-safe and reentrant; plugins with mutable caches must synchronize them
+/// internally or use a future factory-style registry to create per-task instances.
+pub trait CodeGenerator: Send + Sync {
     fn language(&self) -> CodeExportLanguage;
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>>;
 }

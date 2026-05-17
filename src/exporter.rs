@@ -1,16 +1,19 @@
 use std::{
     collections::BTreeSet,
     fs,
+    num::NonZeroUsize,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use rayon::prelude::*;
+use rayon::ThreadPool;
 use serde::Deserialize;
 
 use crate::{
     codegen::{
-        builtin_generators, CodeExportInput, CodeExportProject, CodeExportTarget,
-        CodegenTaskConfig, RuntimeDataFile,
+        builtin_generators, CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator,
+        CodegenTaskConfig, GeneratedFile, RuntimeDataFile,
     },
     data::{DataLoadPlan, DataLoader},
     config_forge::{export_runtime_data, DataFormatRegistry},
@@ -26,11 +29,90 @@ use crate::{
 pub struct BuildOptions<'a> {
     pub project_path: &'a Path,
     pub target_name: &'a str,
+    pub execution: ExecutionOptions,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutionOptions {
+    pub jobs: usize,
+    pub io_concurrency: usize,
+    pub network_concurrency: usize,
+    pub serial: bool,
+}
+
+const MAX_JOBS: usize = 128;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildOutput {
     pub warnings: Vec<String>,
+}
+
+impl ExecutionOptions {
+    pub fn from_cli(
+        jobs: Option<usize>,
+        io_concurrency: Option<usize>,
+        network_concurrency: Option<usize>,
+        serial: bool,
+    ) -> Result<Self> {
+        let mut options = Self::default();
+        if let Some(jobs) = jobs {
+            options.jobs = jobs;
+        }
+        if let Some(io_concurrency) = io_concurrency {
+            options.io_concurrency = io_concurrency;
+        }
+        if let Some(network_concurrency) = network_concurrency {
+            options.network_concurrency = network_concurrency;
+        }
+        options.serial = serial;
+        options.normalize()
+    }
+
+    fn normalize(mut self) -> Result<Self> {
+        if self.serial {
+            self.jobs = 1;
+            self.io_concurrency = 1;
+            self.network_concurrency = 1;
+        }
+        if self.jobs == 0 {
+            return Err(ConfigForgeError::Validation(
+                "--jobs must be greater than 0".to_owned(),
+            ));
+        }
+        if self.jobs > MAX_JOBS {
+            return Err(ConfigForgeError::Validation(format!(
+                "--jobs must be no greater than {MAX_JOBS}"
+            )));
+        }
+        if self.io_concurrency == 0 {
+            return Err(ConfigForgeError::Validation(
+                "--io-concurrency must be greater than 0".to_owned(),
+            ));
+        }
+        if self.network_concurrency == 0 {
+            return Err(ConfigForgeError::Validation(
+                "--network-concurrency must be greater than 0".to_owned(),
+            ));
+        }
+        Ok(self)
+    }
+}
+
+impl Default for ExecutionOptions {
+    fn default() -> Self {
+        let available = std::thread::available_parallelism()
+            .unwrap_or_else(|_| NonZeroUsize::new(1).expect("1 is non-zero"))
+            .get();
+        let jobs = available.clamp(1, 4);
+        let io_concurrency = (jobs * 2).clamp(4, 16);
+        let network_concurrency = io_concurrency.min(8);
+        Self {
+            jobs,
+            io_concurrency,
+            network_concurrency,
+            serial: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -83,6 +165,13 @@ fn default_data_format() -> String {
 }
 
 pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
+    let cpu_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(options.execution.jobs)
+        .thread_name(|index| format!("config-forge-cpu-{index}"))
+        .build()
+        .map_err(|source| {
+            ConfigForgeError::Validation(format!("failed to create CPU worker pool: {source}"))
+        })?;
     let project = ProjectConfig::from_path(options.project_path)?;
     let project_root = options
         .project_path
@@ -104,7 +193,8 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
                 .filter(|table| table.meta.is_exported_for(&target_tags))
                 .map(|table| table.meta),
         )?;
-        let data_set = DataLoader::new(project_root.join(&data_config.input)).load(&data_plan)?;
+        let data_set = DataLoader::new(project_root.join(&data_config.input))
+            .load_with_pool(&data_plan, &cpu_pool)?;
         let data_set = normalize_data_set(&linked_meta, &data_set)?;
         let validation_report = validate_normalized_data_set_for_target_with_report(
             &linked_meta,
@@ -118,6 +208,7 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
             &target_tags,
             &data_set,
             data_exporter,
+            &cpu_pool,
         )?
     } else {
         Vec::new()
@@ -130,6 +221,7 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
         &target_tags,
         &linked_meta,
         runtime_data_files,
+        &cpu_pool,
     )?;
 
     Ok(BuildOutput { warnings })
@@ -297,29 +389,31 @@ fn write_generated_code(
     target_tags: &TargetTags,
     linked_meta: &crate::meta::LinkedMetaModel<'_>,
     runtime_data_files: Vec<RuntimeDataFile>,
+    pool: &ThreadPool,
 ) -> Result<()> {
+    let generated_at = generated_at();
+    let generators = builtin_generators();
+    let context = CodegenTaskContext {
+        project_root,
+        project,
+        target_tags,
+        linked_meta,
+        runtime_data_files: &runtime_data_files,
+        generated_at: &generated_at,
+        generators: &generators,
+    };
+    let mut generated_by_task = pool.install(|| {
+        target
+            .code
+            .par_iter()
+            .enumerate()
+            .map(|(index, code_task)| (index, generate_code_task(&context, code_task)))
+            .collect::<Vec<_>>()
+    });
+    generated_by_task.sort_by_key(|(index, _)| *index);
     let mut generated_files = Vec::new();
-    for code_task in &target.code {
-        let generator = builtin_generators()
-            .into_iter()
-            .find(|generator| generator.language() == code_task.language)
-            .ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "no code generator registered for `{}`",
-                    code_task.language.as_str()
-                ))
-            })?;
-        let mut code_target = CodeExportTarget::from_task(code_task.clone());
-        code_target.out_dir = project_root.join(&code_target.out_dir);
-        let input = CodeExportInput {
-            meta: linked_meta,
-            target_tags: target_tags.clone(),
-            project: project.clone(),
-            target: code_target,
-            runtime_data_files: runtime_data_files.clone(),
-            generated_at: generated_at(),
-        };
-        generated_files.extend(generator.generate(&input)?);
+    for (_, result) in generated_by_task {
+        generated_files.extend(result?);
     }
 
     let mut planned_paths = BTreeSet::new();
@@ -346,6 +440,43 @@ fn write_generated_code(
     }
 
     Ok(())
+}
+
+struct CodegenTaskContext<'a, 'meta> {
+    project_root: &'a Path,
+    project: &'a CodeExportProject,
+    target_tags: &'a TargetTags,
+    linked_meta: &'meta crate::meta::LinkedMetaModel<'meta>,
+    runtime_data_files: &'a [RuntimeDataFile],
+    generated_at: &'a str,
+    generators: &'a [Box<dyn CodeGenerator>],
+}
+
+fn generate_code_task(
+    context: &CodegenTaskContext<'_, '_>,
+    code_task: &CodegenTaskConfig,
+) -> Result<Vec<GeneratedFile>> {
+    let generator = context
+        .generators
+        .iter()
+        .find(|generator| generator.language() == code_task.language)
+        .ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "no code generator registered for `{}`",
+                code_task.language.as_str()
+            ))
+        })?;
+    let mut code_target = CodeExportTarget::from_task(code_task.clone());
+    code_target.out_dir = context.project_root.join(&code_target.out_dir);
+    let input = CodeExportInput {
+        meta: context.linked_meta,
+        target_tags: context.target_tags.clone(),
+        project: context.project.clone(),
+        target: code_target,
+        runtime_data_files: context.runtime_data_files.to_vec(),
+        generated_at: context.generated_at.to_owned(),
+    };
+    generator.generate(&input)
 }
 
 fn generated_at() -> String {
@@ -443,6 +574,53 @@ mod tests {
         .expect("data config should parse");
 
         assert_eq!(config.format, "json");
+    }
+
+    #[test]
+    fn execution_options_apply_defaults_overrides_and_serial() {
+        let defaults = ExecutionOptions::default();
+        assert!(defaults.jobs >= 1);
+        assert!(defaults.jobs <= 4);
+        assert!(defaults.io_concurrency >= defaults.jobs);
+        assert!(defaults.network_concurrency <= defaults.io_concurrency);
+
+        let custom = ExecutionOptions::from_cli(Some(2), Some(5), Some(3), false)
+            .expect("custom execution options should be valid");
+        assert_eq!(custom.jobs, 2);
+        assert_eq!(custom.io_concurrency, 5);
+        assert_eq!(custom.network_concurrency, 3);
+        assert!(!custom.serial);
+
+        let serial = ExecutionOptions::from_cli(Some(8), Some(8), Some(8), true)
+            .expect("serial should override explicit concurrency");
+        assert_eq!(serial.jobs, 1);
+        assert_eq!(serial.io_concurrency, 1);
+        assert_eq!(serial.network_concurrency, 1);
+        assert!(serial.serial);
+    }
+
+    #[test]
+    fn execution_options_reject_zero_limits() {
+        let cases = [
+            ExecutionOptions::from_cli(Some(0), None, None, false),
+            ExecutionOptions::from_cli(None, Some(0), None, false),
+            ExecutionOptions::from_cli(None, None, Some(0), false),
+        ];
+
+        for error in cases.into_iter().map(Result::unwrap_err) {
+            assert!(
+                matches!(error, ConfigForgeError::Validation(message) if message.contains("greater than 0"))
+            );
+        }
+    }
+
+    #[test]
+    fn execution_options_reject_excessive_jobs() {
+        let error = ExecutionOptions::from_cli(Some(MAX_JOBS + 1), None, None, false).unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("--jobs must be no greater than"))
+        );
     }
 
     #[test]

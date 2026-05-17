@@ -273,6 +273,8 @@ fn data_loader_loads_multiple_tables_into_data_set() {
         .expect("data should load");
 
     assert_eq!(data_set.tables().len(), 2);
+    assert_eq!(data_set.tables()[0].name, "items");
+    assert_eq!(data_set.tables()[1].name, "levels");
     assert_eq!(
         data_set.table("items").unwrap().rows[0]
             .get("name")
@@ -280,6 +282,38 @@ fn data_loader_loads_multiple_tables_into_data_set() {
         Some("Sword")
     );
     assert!(data_set.table("missing").is_none());
+}
+
+#[test]
+fn data_loader_load_with_pool_preserves_plan_order() {
+    let dir = tempdir().expect("temp dir should exist");
+    fs::write(dir.path().join("items.csv"), "id,name\n1,Sword\n").expect("items csv");
+    fs::write(dir.path().join("levels.csv"), "id,name\n1,Forest\n").expect("levels csv");
+    let plan = DataLoadPlan {
+        sources: vec![
+            DataSourcePlan {
+                table_name: "items".to_owned(),
+                provider: DataProvider::Csv,
+                path: PathBuf::from("items.csv"),
+            },
+            DataSourcePlan {
+                table_name: "levels".to_owned(),
+                provider: DataProvider::Csv,
+                path: PathBuf::from("levels.csv"),
+            },
+        ],
+    };
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .expect("test thread pool should build");
+
+    let data_set = DataLoader::new(dir.path())
+        .load_with_pool(&plan, &pool)
+        .expect("data should load");
+
+    assert_eq!(data_set.tables()[0].name, "items");
+    assert_eq!(data_set.tables()[1].name, "levels");
 }
 
 #[test]

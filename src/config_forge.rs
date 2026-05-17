@@ -1,5 +1,10 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
+use rayon::prelude::*;
 use serde::Serialize;
 
 use crate::{
@@ -20,7 +25,13 @@ pub struct ExportedTableMeta {
     name: String,
 }
 
-pub trait DataFormatExporter {
+/// Runtime data format exporter.
+///
+/// Implementations may be shared across worker threads. `plan_table_artifact` and
+/// `serialize_table` must therefore be thread-safe and reentrant; plugins with
+/// internal mutable state must synchronize it themselves or use per-task factory
+/// instances in a future registry model.
+pub trait DataFormatExporter: Send + Sync {
     fn name(&self) -> &'static str;
 
     fn aliases(&self) -> &'static [&'static str] {
@@ -29,13 +40,19 @@ pub trait DataFormatExporter {
 
     fn extension(&self) -> &'static str;
 
-    fn export_table(
+    fn plan_table_artifact(&self, table_meta: &LinkedTableMeta<'_>) -> Result<RuntimeArtifactPlan> {
+        Ok(RuntimeArtifactPlan {
+            table_name: table_meta.meta.name.clone(),
+            path: PathBuf::from(format!("{}.{}", table_meta.meta.name, self.extension())),
+        })
+    }
+
+    fn serialize_table(
         &self,
-        out_dir: &Path,
         table_meta: &LinkedTableMeta<'_>,
         table: &DataTable,
         target_tags: &TargetTags,
-    ) -> Result<String>;
+    ) -> Result<Vec<u8>>;
 
     fn matches(&self, format: &str) -> bool {
         self.name() == format || self.aliases().contains(&format)
@@ -87,30 +104,104 @@ pub fn export_runtime_data(
     target_tags: &TargetTags,
     data_set: &DataSet,
     exporter: &dyn DataFormatExporter,
+    pool: &rayon::ThreadPool,
 ) -> Result<Vec<RuntimeDataFile>> {
     fs::create_dir_all(out_dir).map_err(|source| ConfigForgeError::WriteFile {
         path: out_dir.to_path_buf(),
         source,
     })?;
 
-    let mut runtime_data_files = Vec::new();
+    let mut plans = Vec::new();
     for table_meta in &linked_meta.tables {
-        if !table_meta.meta.is_exported_for(target_tags) {
-            continue;
+        if table_meta.meta.is_exported_for(target_tags) {
+            plans.push(exporter.plan_table_artifact(table_meta)?);
         }
-        let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "data set is missing table `{}`",
-                table_meta.meta.name
-            ))
-        })?;
-        let path = exporter.export_table(out_dir, table_meta, table, target_tags)?;
-        runtime_data_files.push(RuntimeDataFile {
-            table_name: table_meta.meta.name.clone(),
-            path,
+    }
+    ensure_unique_runtime_artifact_paths(&plans)?;
+
+    // Keep at most two fully serialized artifacts in memory at once. Each artifact
+    // can contain a large Vec<u8>, so this intentionally does not scale linearly
+    // with --jobs until streaming/temp-file export is introduced.
+    const MAX_IN_FLIGHT_RUNTIME_ARTIFACTS: usize = 2;
+    let max_in_flight_artifacts = pool
+        .current_num_threads()
+        .clamp(1, MAX_IN_FLIGHT_RUNTIME_ARTIFACTS);
+    let mut runtime_data_files = Vec::new();
+    for chunk in plans.chunks(max_in_flight_artifacts) {
+        let mut generated_results = pool.install(|| {
+            chunk
+                .par_iter()
+                .enumerate()
+                .map(|(index, plan)| {
+                    let result: Result<GeneratedRuntimeArtifact> = (|| {
+                        let table_meta = linked_meta.table(&plan.table_name).ok_or_else(|| {
+                            ConfigForgeError::Validation(format!(
+                                "linked meta is missing table `{}`",
+                                plan.table_name
+                            ))
+                        })?;
+                        let table = data_set.table(&plan.table_name).ok_or_else(|| {
+                            ConfigForgeError::Validation(format!(
+                                "data set is missing table `{}`",
+                                plan.table_name
+                            ))
+                        })?;
+                        let content = exporter.serialize_table(table_meta, table, target_tags)?;
+                        Ok(GeneratedRuntimeArtifact {
+                            plan: plan.clone(),
+                            content,
+                        })
+                    })();
+                    (index, result)
+                })
+                .collect::<Vec<_>>()
         });
+        generated_results.sort_by_key(|(index, _)| *index);
+
+        for (_, artifact) in generated_results {
+            let artifact = artifact?;
+            let path = out_dir.join(&artifact.plan.path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|source| ConfigForgeError::WriteFile {
+                    path: parent.to_path_buf(),
+                    source,
+                })?;
+            }
+            fs::write(&path, artifact.content).map_err(|source| ConfigForgeError::WriteFile {
+                path: path.clone(),
+                source,
+            })?;
+            runtime_data_files.push(RuntimeDataFile {
+                table_name: artifact.plan.table_name,
+                path: artifact.plan.path.to_string_lossy().into_owned(),
+            });
+        }
     }
     Ok(runtime_data_files)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeArtifactPlan {
+    pub table_name: String,
+    pub path: PathBuf,
+}
+
+struct GeneratedRuntimeArtifact {
+    plan: RuntimeArtifactPlan,
+    content: Vec<u8>,
+}
+
+fn ensure_unique_runtime_artifact_paths(plans: &[RuntimeArtifactPlan]) -> Result<()> {
+    let mut paths = std::collections::BTreeSet::new();
+    for plan in plans {
+        if !paths.insert(plan.path.clone()) {
+            return Err(ConfigForgeError::Validation(format!(
+                "multiple runtime data artifacts target `{}`",
+                plan.path.display()
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub fn build_exported_table_payload(
@@ -159,19 +250,14 @@ impl DataFormatExporter for JsonDataExporter {
         "json"
     }
 
-    fn export_table(
+    fn serialize_table(
         &self,
-        out_dir: &Path,
         table_meta: &LinkedTableMeta<'_>,
         table: &DataTable,
         target_tags: &TargetTags,
-    ) -> Result<String> {
+    ) -> Result<Vec<u8>> {
         let payload = build_exported_table_payload(table_meta, table, target_tags);
-        let content = serde_json::to_string_pretty(&payload)?;
-        let file_name = format!("{}.{}", table_meta.meta.name, self.extension());
-        let path = out_dir.join(&file_name);
-        fs::write(&path, content).map_err(|source| ConfigForgeError::WriteFile { path, source })?;
-        Ok(file_name)
+        Ok(serde_json::to_vec_pretty(&payload)?)
     }
 }
 
@@ -190,26 +276,21 @@ impl DataFormatExporter for MessagePackDataExporter {
         "msgpack"
     }
 
-    fn export_table(
+    fn serialize_table(
         &self,
-        out_dir: &Path,
         table_meta: &LinkedTableMeta<'_>,
         table: &DataTable,
         target_tags: &TargetTags,
-    ) -> Result<String> {
+    ) -> Result<Vec<u8>> {
         let payload = build_exported_table_payload(table_meta, table, target_tags);
-        let content = rmp_serde::to_vec_named(&payload)
-            .map_err(|source| ConfigForgeError::SerializeMessagePack { source })?;
-        let file_name = format!("{}.{}", table_meta.meta.name, self.extension());
-        let path = out_dir.join(&file_name);
-        fs::write(&path, content).map_err(|source| ConfigForgeError::WriteFile { path, source })?;
-        Ok(file_name)
+        rmp_serde::to_vec_named(&payload)
+            .map_err(|source| ConfigForgeError::SerializeMessagePack { source })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, collections::BTreeMap, fs, path::Path};
+    use std::{collections::BTreeMap, sync::Mutex};
 
     use tempfile::tempdir;
 
@@ -218,7 +299,7 @@ mod tests {
     use super::*;
 
     struct CustomDataExporter {
-        seen_tables: RefCell<Vec<String>>,
+        seen_tables: Mutex<Vec<String>>,
     }
 
     impl DataFormatExporter for CustomDataExporter {
@@ -234,21 +315,27 @@ mod tests {
             "custom"
         }
 
-        fn export_table(
+        fn plan_table_artifact(
             &self,
-            out_dir: &Path,
+            table_meta: &LinkedTableMeta<'_>,
+        ) -> Result<RuntimeArtifactPlan> {
+            Ok(RuntimeArtifactPlan {
+                table_name: table_meta.meta.name.clone(),
+                path: PathBuf::from("custom").join(format!("{}.custom", table_meta.meta.name)),
+            })
+        }
+
+        fn serialize_table(
+            &self,
             table_meta: &LinkedTableMeta<'_>,
             _table: &DataTable,
             _target_tags: &TargetTags,
-        ) -> Result<String> {
+        ) -> Result<Vec<u8>> {
             self.seen_tables
-                .borrow_mut()
+                .lock()
+                .expect("seen tables lock should not be poisoned")
                 .push(table_meta.meta.name.clone());
-            let file_name = format!("{}.{}", table_meta.meta.name, self.extension());
-            let path = out_dir.join(&file_name);
-            fs::write(&path, table_meta.meta.name.as_bytes())
-                .map_err(|source| ConfigForgeError::WriteFile { path, source })?;
-            Ok(file_name)
+            Ok(table_meta.meta.name.as_bytes().to_vec())
         }
     }
 
@@ -269,7 +356,7 @@ mod tests {
     fn registry_accepts_custom_exporter_plugins() {
         let mut registry = DataFormatRegistry::new();
         registry.register(CustomDataExporter {
-            seen_tables: RefCell::new(Vec::new()),
+            seen_tables: Mutex::new(Vec::new()),
         });
 
         assert_eq!(registry.require("custom").unwrap().extension(), "custom");
@@ -300,8 +387,12 @@ mod tests {
         )]);
         let out_dir = tempdir().expect("temp dir should exist");
         let exporter = CustomDataExporter {
-            seen_tables: RefCell::new(Vec::new()),
+            seen_tables: Mutex::new(Vec::new()),
         };
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .expect("test thread pool should build");
 
         let files = export_runtime_data(
             out_dir.path(),
@@ -309,12 +400,166 @@ mod tests {
             &TargetTags::empty(),
             &data_set,
             &exporter,
+            &pool,
         )
         .expect("runtime data should export");
 
-        assert_eq!(files[0].path, "items.custom");
-        assert_eq!(exporter.seen_tables.into_inner(), vec!["items"]);
-        assert!(out_dir.path().join("items.custom").exists());
+        assert_eq!(files[0].path, "custom/items.custom");
+        assert_eq!(
+            exporter
+                .seen_tables
+                .into_inner()
+                .expect("seen tables lock should not be poisoned"),
+            vec!["items"]
+        );
+        assert!(out_dir.path().join("custom/items.custom").exists());
+    }
+
+    struct ConflictDataExporter;
+
+    impl DataFormatExporter for ConflictDataExporter {
+        fn name(&self) -> &'static str {
+            "conflict"
+        }
+
+        fn extension(&self) -> &'static str {
+            "conflict"
+        }
+
+        fn plan_table_artifact(
+            &self,
+            table_meta: &LinkedTableMeta<'_>,
+        ) -> Result<RuntimeArtifactPlan> {
+            Ok(RuntimeArtifactPlan {
+                table_name: table_meta.meta.name.clone(),
+                path: PathBuf::from("same.conflict"),
+            })
+        }
+
+        fn serialize_table(
+            &self,
+            _table_meta: &LinkedTableMeta<'_>,
+            _table: &DataTable,
+            _target_tags: &TargetTags,
+        ) -> Result<Vec<u8>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn export_runtime_data_preserves_plan_order_for_multiple_artifacts() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables]]
+                name = "levels"
+                source = "levels.csv"
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables]]
+                name = "quests"
+                source = "quests.csv"
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let data_set = crate::data::DataSet::new(vec![
+            DataTable::new(
+                "items",
+                vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+            ),
+            DataTable::new(
+                "levels",
+                vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+            ),
+            DataTable::new(
+                "quests",
+                vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+            ),
+        ]);
+        let out_dir = tempdir().expect("temp dir should exist");
+        let exporter = CustomDataExporter {
+            seen_tables: Mutex::new(Vec::new()),
+        };
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .expect("test thread pool should build");
+
+        let files = export_runtime_data(
+            out_dir.path(),
+            &linked,
+            &TargetTags::empty(),
+            &data_set,
+            &exporter,
+            &pool,
+        )
+        .expect("runtime data should export");
+
+        assert_eq!(files[0].table_name, "items");
+        assert_eq!(files[1].table_name, "levels");
+        assert_eq!(files[2].table_name, "quests");
+        assert_eq!(files[0].path, "custom/items.custom");
+        assert_eq!(files[1].path, "custom/levels.custom");
+        assert_eq!(files[2].path, "custom/quests.custom");
+    }
+
+    #[test]
+    fn export_runtime_data_rejects_duplicate_artifact_paths_before_writing() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables]]
+                name = "levels"
+                source = "levels.csv"
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let data_set = crate::data::DataSet::new(vec![
+            DataTable::new("items", Vec::new()),
+            DataTable::new("levels", Vec::new()),
+        ]);
+        let out_dir = tempdir().expect("temp dir should exist");
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .expect("test thread pool should build");
+
+        let error = export_runtime_data(
+            out_dir.path(),
+            &linked,
+            &TargetTags::empty(),
+            &data_set,
+            &ConflictDataExporter,
+            &pool,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple runtime data artifacts target `same.conflict`"))
+        );
+        assert!(!out_dir.path().join("same.conflict").exists());
     }
 
     #[test]
