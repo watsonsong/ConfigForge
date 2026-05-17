@@ -1131,3 +1131,72 @@ fn loads_multiple_meta_files_as_one_model() {
     assert_eq!(meta.enum_meta("ItemRarity").unwrap().name, "ItemRarity");
     assert_eq!(meta.table("items").unwrap().name, "items");
 }
+
+#[test]
+fn parses_field_and_table_validators() {
+    let meta = parse(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.validators]]
+            kind = "unique"
+            fields = ["id"]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields.validators]]
+            kind = "range"
+            min = 1
+            max = 10
+            severity = "warning"
+        "#,
+    );
+
+    let table = meta.table("items").unwrap();
+    assert_eq!(table.validators[0].kind, "unique");
+    assert_eq!(
+        table.validators[0]
+            .params
+            .get("fields")
+            .and_then(|value| value.as_array())
+            .map(Vec::len),
+        Some(1)
+    );
+    let field_validator = &table.field("id").unwrap().validators[0];
+    assert_eq!(field_validator.kind, "range");
+    assert_eq!(field_validator.severity, ValidationSeverity::Warning);
+    assert_eq!(
+        field_validator
+            .params
+            .get("min")
+            .and_then(toml::Value::as_integer),
+        Some(1)
+    );
+}
+
+#[test]
+fn rejects_empty_validator_kind() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields.validators]]
+            kind = "  "
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::InvalidValidatorConfig
+            && diagnostic.message.contains("kind must be non-empty")
+    }));
+}

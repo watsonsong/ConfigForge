@@ -38,5 +38,6 @@ pub enum MetaDiagnosticCode {
     UnknownFieldType,
     InvalidDefaultValue,
     InvalidSourceDeclaration,
+    InvalidValidatorConfig,
     UnsupportedFeature,
 }

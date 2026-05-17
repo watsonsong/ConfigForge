@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +52,8 @@ pub struct TableMeta {
     pub export_when: ExportCondition,
     #[serde(default)]
     pub row_export: Option<RowExportPolicy>,
+    #[serde(default)]
+    pub validators: Vec<ValidatorMeta>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(default)]
@@ -104,6 +106,8 @@ pub struct FieldMeta {
     #[serde(default)]
     pub export_when: ExportCondition,
     #[serde(default)]
+    pub validators: Vec<ValidatorMeta>,
+    #[serde(default)]
     pub tool_only: Option<bool>,
     #[serde(default)]
     pub filter_field: Option<bool>,
@@ -117,6 +121,31 @@ pub struct FieldMeta {
 
 fn default_export() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct ValidatorMeta {
+    pub kind: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub desc: Option<String>,
+    #[serde(default)]
+    pub severity: ValidationSeverity,
+    #[serde(default)]
+    pub export_when: ExportCondition,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(flatten)]
+    pub params: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationSeverity {
+    #[default]
+    Error,
+    Warning,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]

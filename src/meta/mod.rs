@@ -11,7 +11,7 @@ pub use model::{
     EnumMeta, EnumValueMeta, ExportCondition, FieldMeta, IndexMeta, LinkedField, LinkedFieldMeta,
     LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType, LinkedTableMeta,
     MetaModel, MetaSet, PrimitiveFieldType, RowExportPolicy, SourceRef, StructMeta, TableKind,
-    TableMeta, TagMatchMode, TargetTags, ValueLayout,
+    TableMeta, TagMatchMode, TargetTags, ValidationSeverity, ValidatorMeta, ValueLayout,
 };
 pub use validate::validate_meta_model;
 

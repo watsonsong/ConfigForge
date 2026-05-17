@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use super::{
     model::normalize_tag, FieldMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
-    PrimitiveFieldType, TableMeta,
+    PrimitiveFieldType, TableMeta, ValidatorMeta,
 };
 
 pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
@@ -32,6 +32,16 @@ fn validate_struct_meta(
     );
 
     for field in &struct_meta.fields {
+        for validator in &field.validators {
+            validate_validator_meta(
+                &format!(
+                    "struct `{}` field `{}` validator",
+                    struct_meta.name, field.name
+                ),
+                validator,
+                diagnostics,
+            );
+        }
         validate_deprecated_field_export_flags(&owner, field, diagnostics);
         validate_default_value(model, &owner, field, diagnostics);
     }
@@ -140,6 +150,14 @@ fn validate_table_meta(
         diagnostics,
     );
 
+    for validator in &table.validators {
+        validate_validator_meta(
+            &format!("table `{}` validator", table.name),
+            validator,
+            diagnostics,
+        );
+    }
+
     let field_names = validate_field_names(
         &format!("table `{}`", table.name),
         table.fields.iter().map(|field| field.name.as_str()),
@@ -147,6 +165,13 @@ fn validate_table_meta(
     );
 
     for field in &table.fields {
+        for validator in &field.validators {
+            validate_validator_meta(
+                &format!("table `{}` field `{}` validator", table.name, field.name),
+                validator,
+                diagnostics,
+            );
+        }
         validate_export_condition_tags(
             &format!("table `{}` field `{}`", table.name, field.name),
             &field.export_when,
@@ -221,6 +246,21 @@ fn validate_table_meta(
 
     validate_row_export_policy(table, &field_names, diagnostics);
     validate_primary_index(table, &primary_indexes, diagnostics);
+}
+
+fn validate_validator_meta(
+    owner: &str,
+    validator: &ValidatorMeta,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    if validator.kind.trim().is_empty() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::InvalidValidatorConfig,
+            format!("{owner} kind must be non-empty"),
+        ));
+    }
+
+    validate_export_condition_tags(owner, &validator.export_when, diagnostics);
 }
 
 fn validate_export_condition_tags(
