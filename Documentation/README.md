@@ -36,6 +36,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 ## Technical Practice Set
 
 - `Tech/unit-test-coverage.md` — Rust unit test coverage tooling, commands, evaluation criteria, and current coverage baseline.
+- `Tech/task-system-design.md` — Task system, async I/O, CPU worker pool, resource limits, and phased migration design.
 
 ## Maintenance Rules
 
