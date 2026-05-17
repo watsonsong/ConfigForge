@@ -57,6 +57,45 @@ fn validate_unique_names(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic
         "struct",
         diagnostics,
     );
+    validate_type_namespace_names(model, diagnostics);
+}
+
+fn validate_type_namespace_names(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic>) {
+    let enum_names = model
+        .enums
+        .iter()
+        .map(|enum_meta| enum_meta.name.as_str())
+        .collect::<BTreeSet<_>>();
+    for struct_meta in &model.structs {
+        if enum_names.contains(struct_meta.name.as_str()) {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::DuplicateTypeName,
+                format!(
+                    "type `{}` is defined as both enum and struct",
+                    struct_meta.name
+                ),
+            ));
+        }
+    }
+
+    for type_name in model
+        .enums
+        .iter()
+        .map(|enum_meta| enum_meta.name.as_str())
+        .chain(
+            model
+                .structs
+                .iter()
+                .map(|struct_meta| struct_meta.name.as_str()),
+        )
+    {
+        if PrimitiveFieldType::parse(type_name).is_some() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::ReservedTypeName,
+                format!("custom type `{type_name}` conflicts with a primitive field type"),
+            ));
+        }
+    }
 }
 
 fn validate_names<'a>(

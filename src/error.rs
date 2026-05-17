@@ -52,6 +52,12 @@ pub enum ConfigForgeError {
     #[error("failed to serialize export output: {0}")]
     Serialize(#[from] serde_json::Error),
 
+    #[error("failed to serialize messagepack export output: {source}")]
+    SerializeMessagePack {
+        #[source]
+        source: rmp_serde::encode::Error,
+    },
+
     #[error("validation failed: {0}")]
     Validation(String),
 }

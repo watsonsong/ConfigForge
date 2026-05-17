@@ -153,9 +153,11 @@ Source declaration 描述 provider 和定位信息。
 | Provider | 用途 | 必填字段 |
 | --- | --- | --- |
 | `csv` | 本地 CSV 文件 | `path` |
-| `xlsx` | 本地 Excel 文件 | `path`，多 sheet 时需要 `sheet` |
-| `lark_sheet` | Lark/飞书表格 | `uri` 或 provider-specific id，通常需要 `auth_ref` |
-| `google_sheet` | Google Sheet | `uri` 或 sheet id，通常需要 `auth_ref` |
+| `xlsx` | Planned / Not implemented，本地 Excel 文件 | `path`，多 sheet 时需要 `sheet` |
+| `lark_sheet` | Planned / Not implemented，Lark/飞书表格 | `uri` 或 provider-specific id，通常需要 `auth_ref` |
+| `google_sheet` | Planned / Not implemented，Google Sheet | `uri` 或 sheet id，通常需要 `auth_ref` |
+
+当前实现只支持单个 CSV source。其他 provider、多 source 和 override sources 属于目标态设计。
 
 Source sheet 允许出现空行和空列。未映射到 field path 的行/列不会进入导出结果，可用于策划注释、公式中间结果或视觉分隔。
 
@@ -173,7 +175,7 @@ source = "Data/items.csv"
 
 语义：根据文件后缀推断为 `{ provider = "csv", path = "Data/items.csv" }`。
 
-多 source：
+多 source（Planned / Not implemented）：
 
 ```toml
 sources = [
@@ -182,7 +184,7 @@ sources = [
 ]
 ```
 
-Override sources：
+Override sources（Planned / Not implemented）：
 
 ```toml
 override_sources = [
@@ -195,29 +197,26 @@ override_sources = [
 
 ## 3.5 Target Config
 
-Target Config 定义一次导出的目标平台、语言、runtime data format、tag、输出目录和特殊导出器。
+Target Config 定义一次可构建的导出目标。当前实现支持 runtime data 导出任务 `[targets.data]` 和一个或多个代码生成任务 `[[targets.code]]`。
 
 ```toml
 [[targets]]
-name = "client_lua_shipping"
-language = "lua"
-engine = "unity"
-data_format = "lua_table"
-output = "Generated/ClientLua"
-tags = ["shipping", "global"]
+name = "client_runtime"
 
 [targets.data]
-split = "by_table"
-include_manifest = true
+input = "Data"
+output = "Generated/Data"
+format = "json"
 
-[[targets.special_exporters]]
-kind = "gettext_pot"
-output = "Generated/Localization/messages.pot"
+[[targets.code]]
+language = "rust"
+output = "Generated/Code/Rust"
+module_name = "game_config"
 
-[[targets.special_exporters]]
-kind = "asset_manifest_csv"
-output = "Generated/Build/assets.csv"
-deduplicate = true
+[[targets.code]]
+language = "typescript"
+output = "Generated/Code/TypeScript"
+module_name = "gameConfig"
 ```
 
 一个 target 可以声明 0 个、1 个或多个代码生成任务。代码生成任务放在 `[[targets.code]]` 中；每个任务有独立语言、输出目录和语言专属参数。这样同一个 target 可以同时输出 runtime data、Rust 服务端访问代码、C++ 客户端访问代码和 TypeScript 工具链访问代码。
@@ -225,9 +224,11 @@ deduplicate = true
 ```toml
 [[targets]]
 name = "client_runtime"
-data_format = "json"
+
+[targets.data]
+input = "Data"
 output = "Generated/Data"
-tags = ["shipping", "global"]
+format = "json"
 
 [[targets.code]]
 language = "rust"
@@ -260,6 +261,16 @@ function = "camel_case"
 [targets.code.typescript]
 readonly_fields = true
 ```
+
+`targets.data` 字段：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `input` | 必填 | Source data 根目录。只有声明 `[targets.data]` 时才读取。 |
+| `output` | 必填 | Runtime data 输出目录。 |
+| `format` | `json` | Runtime data 格式。当前实现支持 `json` 和 `messagepack`。 |
+
+Planned / Not implemented：`tags`、`engine`、`special_exporters`、POT、Asset Manifest、target-level `language` / `data_format` / `output` 属于旧设计或未来扩展，当前 Project Config 不应使用这些字段。
 
 `targets.code` 字段：
 
@@ -330,9 +341,9 @@ readonly_fields = true
 | Format | 状态 | 说明 |
 | --- | --- | --- |
 | `json` | 第一阶段默认 | 易调试，适合 Web/TS 和通用场景。 |
+| `messagepack` | 第一阶段支持 | 紧凑二进制格式，适合包体和加载性能更敏感的 runtime。 |
 | `lua_table` | 允许 | Lua 中代码和数据可能合一，作为特殊 runtime format。 |
 | `yaml` | 可扩展 | 可读性高，但运行时解析成本需谨慎。 |
-| `msgpack` | 可扩展 | 二进制 JSON-like 格式。 |
 | `sqlite` | 可扩展 | 适合查询型运行时。 |
 | `protobuf` | 未来设计 | 当前不要求实现；未来需要字段级 `field_number`。 |
 

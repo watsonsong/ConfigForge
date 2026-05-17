@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::meta::MetaModel;
+use crate::{meta::MetaModel, ConfigForgeError};
 
 use super::*;
 
@@ -94,7 +94,12 @@ fn builds_code_model_with_types_tables_and_indexes() {
     let meta = linked_fixture();
     let input = input_for(&meta, CodeExportLanguage::Rust);
 
-    let model = build_code_model(input.meta, &input.runtime_data_files).expect("model");
+    let model = build_code_model(
+        input.meta,
+        &input.runtime_data_files,
+        input.runtime_data_format,
+    )
+    .expect("model");
 
     assert_eq!(model.enums[0].name, "ItemRarity");
     assert_eq!(model.structs[0].name, "RewardInfo");
@@ -115,6 +120,19 @@ fn builds_code_model_with_types_tables_and_indexes() {
         .indexes
         .iter()
         .any(|index| index.name == "by_rarity" && !index.unique));
+    assert_eq!(model.tables[0].data_file, "items.json");
+    assert_eq!(model.tables[0].data_format, RuntimeDataFormat::Json);
+}
+
+#[test]
+fn code_model_defaults_data_file_extension_from_runtime_format() {
+    let meta = linked_fixture();
+    let linked = meta.link().expect("fixture meta should link");
+
+    let model = build_code_model(&linked, &[], RuntimeDataFormat::MessagePack).expect("model");
+
+    assert_eq!(model.tables[0].data_file, "items.msgpack");
+    assert_eq!(model.tables[0].data_format, RuntimeDataFormat::MessagePack);
 }
 
 #[test]
@@ -128,13 +146,78 @@ fn rust_generator_emits_loader_table_and_index_helpers() {
     let content = &files[0].content;
 
     assert!(content.contains("pub trait DataFileLoader"));
+    assert!(content.contains("fn load_bytes(&self, path: &str)"));
+    assert!(content.contains("pub trait RuntimeDataDecoder"));
+    assert!(content.contains("pub enum RuntimeDataFormat"));
+    assert!(content.contains("pub const DATA_FORMAT: RuntimeDataFormat = RuntimeDataFormat::Json;"));
     assert!(content.contains("serde::Serialize, serde::Deserialize"));
+    assert!(content.contains("#[serde(rename = \"common\")]"));
+    assert!(content.contains("#[serde(rename = \"display_name\")]"));
     assert!(content.contains("pub enum ItemRarity"));
     assert!(content.contains("pub struct RewardInfo"));
     assert!(content.contains("pub struct ItemsRow"));
     assert!(content.contains("pub fn get_by_id"));
     assert!(content.contains("pub fn find_by_rarity"));
     assert!(content.contains("pub struct GameData"));
+}
+
+#[test]
+fn code_model_rejects_indexes_referencing_non_exported_fields() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "internal_region"
+            type = "string"
+            tool_only = true
+
+            [[tables.indexes]]
+            name = "by_id_region"
+            fields = ["id", "internal_region"]
+            unique = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let error = build_code_model(&linked, &[], RuntimeDataFormat::Json).unwrap_err();
+
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("references non-exported field `internal_region`"))
+    );
+}
+
+#[test]
+fn code_model_rejects_unsupported_index_key_types() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "ratio"
+            type = "float"
+
+            [[tables.indexes]]
+            name = "by_ratio"
+            fields = ["ratio"]
+            unique = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let error = build_code_model(&linked, &[], RuntimeDataFormat::Json).unwrap_err();
+
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("unsupported index key type"))
+    );
 }
 
 #[test]
@@ -151,6 +234,10 @@ fn typescript_generator_emits_async_loader_and_maps() {
     let content = &files[0].content;
 
     assert!(content.contains("export interface DataFileLoader"));
+    assert!(content.contains("loadBytes(path: string)"));
+    assert!(content.contains("export interface RuntimeDataDecoder"));
+    assert!(content.contains("export type RuntimeDataFormat = \"json\" | \"messagepack\";"));
+    assert!(content.contains("static readonly dataFormat: RuntimeDataFormat = \"json\";"));
     assert!(content.contains("export type ItemRarity"));
     assert!(content.contains("export interface ItemsRow"));
     assert!(content.contains("readonly displayName: string;"));
@@ -171,6 +258,11 @@ fn cpp_generator_emits_loader_and_repository_declarations() {
     let content = &files[0].content;
 
     assert!(content.contains("class IDataFileLoader"));
+    assert!(content.contains("LoadBytes(const std::string& path)"));
+    assert!(content.contains("class IRuntimeDataDecoder"));
+    assert!(content.contains("enum class RuntimeDataFormat"));
+    assert!(content
+        .contains("static constexpr RuntimeDataFormat DataFormat = RuntimeDataFormat::Json;"));
     assert!(content.contains("namespace game::config"));
     assert!(content.contains("} // namespace game::config"));
     assert!(content.contains("enum class ItemRarity"));

@@ -14,8 +14,13 @@ impl CodeGenerator for CppCodeGenerator {
     }
 
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>> {
-        let model = build_code_model(input.meta, &input.runtime_data_files)?;
+        let model = build_code_model(
+            input.meta,
+            &input.runtime_data_files,
+            input.runtime_data_format,
+        )?;
         require_non_empty_index_fields(&model)?;
+        reject_compound_indexes(&model)?;
         let cpp_options = input.target.options.cpp()?;
         let names = CppNames::new(&input.target.options);
         let mut content = render_file_header(input);
@@ -28,7 +33,9 @@ impl CodeGenerator for CppCodeGenerator {
         if let Some(namespace) = namespace {
             content.push_str(&format!("namespace {namespace} {{\n\n"));
         }
-        content.push_str("class IDataFileLoader {\npublic:\n    virtual ~IDataFileLoader() = default;\n    virtual std::string LoadText(const std::string& path) = 0;\n};\n\n");
+        content.push_str("enum class RuntimeDataFormat {\n    Json,\n    MessagePack,\n};\n\n");
+        content.push_str("class IDataFileLoader {\npublic:\n    virtual ~IDataFileLoader() = default;\n    virtual std::vector<std::uint8_t> LoadBytes(const std::string& path) = 0;\n};\n\n");
+        content.push_str("class IRuntimeDataDecoder;\n\n");
 
         for code_enum in &model.enums {
             push_doc(&mut content, code_enum.desc.as_deref());
@@ -78,8 +85,22 @@ impl CodeGenerator for CppCodeGenerator {
             render_table(&mut content, table, &names)?;
         }
 
+        content.push_str(
+            "class IRuntimeDataDecoder {\npublic:\n    virtual ~IRuntimeDataDecoder() = default;\n",
+        );
+        for table in &model.tables {
+            content.push_str(&format!(
+                "    virtual std::vector<{}> Decode{}Rows(RuntimeDataFormat format, const std::string& path, const std::vector<std::uint8_t>& bytes) = 0;\n",
+                names.row_type_name(&table.name)?,
+                names.type_name(&table.name)?
+            ));
+        }
+        content.push_str("};\n\n");
+
         content.push_str("class GameData {\npublic:\n");
-        content.push_str("    static GameData Load(IDataFileLoader& loader);\n");
+        content.push_str(
+            "    static GameData Load(IDataFileLoader& loader, IRuntimeDataDecoder& decoder);\n",
+        );
         for table in &model.tables {
             content.push_str(&format!(
                 "    const {}& {}() const {{ return {}; }}\n",
@@ -109,6 +130,20 @@ impl CodeGenerator for CppCodeGenerator {
     }
 }
 
+fn reject_compound_indexes(model: &super::CodeModel) -> Result<()> {
+    for table in &model.tables {
+        for index in &table.indexes {
+            if index.fields.len() > 1 {
+                return Err(ConfigForgeError::Validation(format!(
+                    "cpp codegen: table `{}` index `{}` uses compound keys, which are not supported yet",
+                    table.name, index.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn render_table(content: &mut String, table: &CodeTable, names: &CppNames<'_>) -> Result<()> {
     content.push_str(&format!(
         "class {} {{\npublic:\n",
@@ -119,7 +154,11 @@ fn render_table(content: &mut String, table: &CodeTable, names: &CppNames<'_>) -
         table.data_file
     ));
     content.push_str(&format!(
-        "    static {} Load(IDataFileLoader& loader);\n",
+        "    static constexpr RuntimeDataFormat DataFormat = RuntimeDataFormat::{};\n",
+        table.data_format.rust_variant()
+    ));
+    content.push_str(&format!(
+        "    static {} Load(IDataFileLoader& loader, IRuntimeDataDecoder& decoder);\n",
         names.repository_type_name(&table.name)?
     ));
     content.push_str(&format!(

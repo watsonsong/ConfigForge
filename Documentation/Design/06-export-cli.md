@@ -9,12 +9,42 @@
 | 字段 | 说明 |
 | --- | --- |
 | `name` | 稳定 target 名称。 |
-| `data` | 可选 runtime data 导出任务。存在时才读取 source data。 |
+| `data` | 可选 runtime data 导出任务。存在时才读取 source data，并由 `format` 决定写出格式。 |
 | `code` | 当前 target 下的一个或多个代码生成任务。每个任务有独立语言、输出目录、文件头和命名策略。 |
 
 Project-level `name` / `desc` / `copyright` 可被 target 的代码生成器、schema exporter 或 manifest exporter 用于生成文件头。Target code task 可以通过 `file_header` 模板覆盖默认文件头。
 
-### 6.1.1 Code Generation Task
+### 6.1.1 Runtime Data Export Task
+
+`[targets.data]` 描述当前 target 是否导出 runtime data、从哪里读取 source data、写到哪里，以及使用哪种 runtime data format：
+
+```toml
+[[targets]]
+name = "client"
+
+[targets.data]
+input = "Data"
+output = "Generated/Data"
+format = "messagepack"
+```
+
+字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `input` | Source data 根目录。只有声明 `[targets.data]` 时才读取。 |
+| `output` | Runtime data 输出目录。 |
+| `format` | Runtime data 格式。当前第一阶段支持 `json` 和 `messagepack`，默认 `json`。 |
+
+导出规则：
+
+- 每张 table 输出一个 runtime data 文件。
+- `json` 使用 `.json` 后缀，`messagepack` 使用 `.msgpack` 后缀。
+- 两种格式承载同一套逻辑 payload：table meta 摘要和 normalized rows；字段名使用 Meta canonical name。
+- 同一个 target 的 code generation 必须感知该 target 的 runtime data format，生成的默认数据文件名、加载接口和格式常量必须与 `[targets.data].format` 一致。
+- code-only target 可以不声明 `[targets.data]`，但如果仍生成读取 runtime data 的代码，默认按 `json` 规划文件名；正式项目推荐 data 与 code 在同一个 target 中同时声明，避免格式不一致。
+
+### 6.1.2 Code Generation Task
 
 一个 export target 可以生成多个代码产物，例如同一次导出同时生成 Rust、C++ 和 TypeScript 访问代码：
 
@@ -46,6 +76,7 @@ namespace = "game::config"
 - `keyword_conflict` 控制 Meta 名称转换成目标语言标识符后碰到关键字时如何处理。
 - `naming` 控制 type、field、function、constant 等符号的大小写组织。
 - 语言生成器可以声明额外配置，但必须放在该 code task 内对应语言子表中，不能污染其他语言任务；实现层应按语言使用 tagged enum / 多态配置承载这些差异。
+- 生成代码必须暴露 runtime data 加载抽象接口，不直接绑定本地文件系统、引擎资源系统、网络或包内资源。
 
 当前内置语言特定配置：
 
@@ -82,14 +113,25 @@ namespace = "game::config"
 
 ## 6.2 Runtime Data Format
 
-当前推荐：
+当前第一阶段支持：
 
 | Format | 说明 |
 | --- | --- |
 | `json` | 默认格式，便于调试和通用接入。 |
+| `messagepack` | 紧凑二进制格式，用于包体和加载性能更敏感的 runtime。 |
+
+别名策略：
+
+- 配置中使用规范名 `messagepack`。
+- CLI 诊断和生成代码中的格式枚举也使用 `MessagePack` / `messagepack`。
+- 如需兼容 `msgpack` 简写，可作为解析别名，但文档和生成产物统一输出 `messagepack`。
+
+未来可扩展但当前不实现：
+
+| Format | 说明 |
+| --- | --- |
 | `lua_table` | Lua 特殊模式，代码和数据可合一。 |
 | `yaml` | 可选文本格式。 |
-| `msgpack` | 可选紧凑二进制格式。 |
 | `sqlite` | 可选数据库格式。 |
 | `protobuf` | 未来设计，不作为当前实现要求。 |
 
@@ -101,7 +143,35 @@ Protobuf 未来规则：
 - 如需要 Protobuf，Meta field 应支持显式 `field_number`。
 - 删除/重命名字段需要 schema evolution 策略和 reserved number 设计。
 
+### 6.2.1 生成代码的 Runtime Data 加载抽象
+
+生成代码必须把“如何取得配置文件”和“如何解析配置格式”接口化，避免把 runtime 绑定到 exporter 所在机器的文件系统或某个具体引擎 API。
+
+推荐抽象分两层：
+
+1. **DataFileLoader**：只负责按 path 读取文件内容，返回 bytes；具体 runtime 可以从本地文件、包内资源、AssetBundle、HTTP、Lark 缓存或其他资源系统加载。
+2. **RuntimeDataDecoder / Codec**：负责把 bytes 按 `json` 或 `messagepack` 解析成生成代码中的 typed row 列表。
+
+语言 API 形态可以按语言习惯调整，但语义应一致：
+
+| 语言 | 文件加载接口 | 解码接口 |
+| --- | --- | --- |
+| Rust | `DataFileLoader::load_bytes(path) -> Result<Vec<u8>, String>` | 泛型 `RuntimeDataDecoder`，按 `RuntimeDataFormat` 解码 table rows。 |
+| C++ | `IDataFileLoader::LoadBytes(path) -> std::vector<std::uint8_t>` | 生成 per-table decoder virtual methods，避免 C++ virtual generic。 |
+| TypeScript | `DataFileLoader.loadBytes(path) -> Promise<Uint8Array | ArrayBuffer | string>` | `RuntimeDataDecoder.decodeTable<T>(format, path, data)`。 |
+
+生成代码中的 repository / `GameData::load` 不直接打开文件，而是接收 loader 和 decoder。业务 runtime 可以选择：
+
+- 提供 JSON decoder；
+- 提供 MessagePack decoder；
+- 提供一个同时支持两种格式的 decoder；
+- 在引擎侧复用已有资源加载和反序列化系统。
+
+格式选择由 target 的 `[targets.data].format` 决定，并写入生成代码中的 table data file 后缀和格式常量。
+
 ## 6.3 Special Exporter
+
+Special Exporter 当前属于 Planned / Not implemented。当前 `TargetConfig` 尚不支持 `special_exporters` 字段，正式可运行配置不应声明该字段；以下 POT 和 Asset Manifest 是目标态设计，后续应纳入统一 ArtifactPlan 后再实现。
 
 ### gettext POT
 

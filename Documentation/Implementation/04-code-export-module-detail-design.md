@@ -17,14 +17,15 @@
    - table repository / collection type；
    - index key type 和辅助查找函数。
 4. 生成一个统一的 DataSet / Database facade，便于业务侧一次加载后按表访问。
-5. 支持抽象数据文件加载器，生成代码不绑定具体文件系统或引擎资源系统。
+5. 支持 JSON 与 MessagePack 两种 runtime data format，并让生成代码能够按 target format 读取对应文件。
+6. 支持抽象数据文件加载器和抽象 runtime data decoder，生成代码不绑定具体文件系统、引擎资源系统或反序列化库。
 6. 保持生成代码确定性：同一份 Meta 生成稳定文件名、声明顺序和 API 名称。
 7. 在生成前发现命名冲突、保留字、目标语言类型映射缺失、输出路径冲突等问题。
 
 第一阶段不实现：
 
 - 生成代码的插件化动态加载；
-- 复杂二进制数据格式；
+- JSON / MessagePack 之外的复杂二进制数据格式；
 - 跨语言运行时库发布；
 - 多 target 差异化字段过滤；
 - struct/json cell 的完整解析；
@@ -66,7 +67,7 @@ Data Load / Normalize / Validate
 - Code Export 只依赖已 linked 的 Meta，不直接读取 TOML。
 - Code Export 不重新读取 CSV，不直接依赖 `DataLoader`。
 - Runtime data 文件和 generated code 文件都应进入同一套 Artifact Plan，统一检查路径冲突。
-- Data 文件格式可以先继续使用 JSON；加载抽象只约束生成代码如何读取 bytes/text，不强制读取来源。
+- Data 文件格式第一阶段支持 JSON 与 MessagePack；加载抽象约束生成代码如何读取 bytes，decoder 抽象约束如何把 bytes 解析为 typed rows，不强制读取来源或第三方 runtime 库。
 
 ## 4.3 模块结构建议
 
@@ -140,12 +141,36 @@ pub struct CodeExportTarget {
 | `module_name` | 生成模块名，例如 Rust module、TS namespace/package、C++ 文件前缀。 |
 | `namespace` | C++ namespace / Rust module path / TS namespace 的可选覆盖。 |
 | `out_dir` | 生成代码输出目录。 |
-| `runtime_data_format` | 运行时数据格式，第一阶段为 `Json`。 |
+| `runtime_data_format` | 当前 target 的运行时数据格式，第一阶段支持 `Json` 和 `MessagePack`。 |
 | `options` | 从 `targets.code` 解析出的通用和语言专属选项，包括文件头、命名策略、关键字冲突策略、语言扩展参数等。 |
 
-`CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.code]]`。当前 CLI 的 `--meta/--data/--out` 简化模式可以构造一组默认 code task，以保持兼容。
+`CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.code]]`，其 `runtime_data_format` 由同一个 target 的 `[targets.data].format` 决定。code-only target 没有 `[targets.data]` 时可使用默认 `Json`，但正式项目推荐 data 与 code 在同一 target 中同时声明。
 
-### 4.4.2.1 `CodegenOptions`
+### 4.4.2.1 `RuntimeDataFormat`
+
+```rust
+pub enum RuntimeDataFormat {
+    Json,
+    MessagePack,
+}
+```
+
+解析规则：
+
+- Project Config 中 `[targets.data].format = "json"` 映射为 `RuntimeDataFormat::Json`。
+- Project Config 中 `[targets.data].format = "messagepack"` 映射为 `RuntimeDataFormat::MessagePack`。
+- 可兼容解析 `"msgpack"` 为 `MessagePack`，但错误信息、文档、生成代码和 manifest 中统一使用规范名 `messagepack`。
+
+文件规划规则：
+
+| Format | 文件后缀 | exporter 写出方式 | 生成代码读取方式 |
+| --- | --- | --- | --- |
+| `Json` | `.json` | `serde_json::to_vec_pretty` 或等价 typed JSON。 | loader 读取 bytes，decoder 按 JSON 解码。 |
+| `MessagePack` | `.msgpack` | `rmp-serde` 写出同一 payload 的 MessagePack bytes。 | loader 读取 bytes，decoder 按 MessagePack 解码。 |
+
+`RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json` 或 `items.msgpack`。CodeModel 不再自行假设 `.json`；当 target 没有 data export artifact 时，才允许按 `runtime_data_format` 推导默认文件名。
+
+### 4.4.2.2 `CodegenOptions`
 
 ```rust
 pub struct CodegenOptions {
@@ -224,7 +249,7 @@ derive_serde = true
 - 新增语言时应新增 generator 和语言扩展解析逻辑，不修改 IR。
 - 如果配置中出现当前语言不支持的 `CaseStyle` 或 `KeywordConflictPolicy`，应在 codegen validate 阶段报错。
 
-### 4.4.2.2 文件头模板
+### 4.4.2.3 文件头模板
 
 `file_header` 是可选模板。模板渲染上下文来自 Project Config 和执行上下文：
 
@@ -250,7 +275,7 @@ pub struct CodeExportInput<'meta> {
 }
 ```
 
-`project` 来自 Project Config，用于渲染文件头模板；`runtime_data_files` 来自数据导出阶段的 Artifact 规划，用于生成加载函数中的默认资源名。例如 `items.json` 对应 `ItemsTable::DATA_FILE`。`generated_at` 由 exporter 注入，用于渲染文件头中的 `{{datetime}}`。
+`project` 来自 Project Config，用于渲染文件头模板；`runtime_data_files` 来自数据导出阶段的 Artifact 规划，用于生成加载函数中的默认资源名。例如 JSON target 中 `items.json` 对应 `ItemsTable::DATA_FILE`，MessagePack target 中 `items.msgpack` 对应同一个常量。`runtime_data_format` 来自 target data config，用于生成格式常量和选择 decoder。`generated_at` 由 exporter 注入，用于渲染文件头中的 `{{datetime}}`。
 
 ### 4.4.4 `GeneratedFile`
 
@@ -458,7 +483,7 @@ export type ItemRarity = "common" | "rare";
 generated/rust/
   mod.rs
   types.rs          # enum / struct / row types
-  loader.rs         # DataFileLoader trait / Json helper
+  loader.rs         # DataFileLoader trait / RuntimeDataDecoder trait
   tables.rs         # table repository + index helpers
 ```
 
@@ -467,8 +492,22 @@ generated/rust/
 核心形态：
 
 ```rust
+pub enum RuntimeDataFormat {
+    Json,
+    MessagePack,
+}
+
 pub trait DataFileLoader {
-    fn load_text(&self, path: &str) -> Result<String, LoadError>;
+    fn load_bytes(&self, path: &str) -> Result<Vec<u8>, LoadError>;
+}
+
+pub trait RuntimeDataDecoder {
+    fn decode_items_rows(
+        &self,
+        format: RuntimeDataFormat,
+        path: &str,
+        bytes: &[u8],
+    ) -> Result<Vec<ItemRow>, LoadError>;
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -485,9 +524,13 @@ pub struct ItemsTable {
 }
 
 impl ItemsTable {
-    pub const DATA_FILE: &'static str = "items.json";
+    pub const DATA_FILE: &'static str = "items.msgpack";
+    pub const DATA_FORMAT: RuntimeDataFormat = RuntimeDataFormat::MessagePack;
 
-    pub fn load(loader: &impl DataFileLoader) -> Result<Self, LoadError>;
+    pub fn load(
+        loader: &impl DataFileLoader,
+        decoder: &impl RuntimeDataDecoder,
+    ) -> Result<Self, LoadError>;
     pub fn rows(&self) -> &[ItemRow];
     pub fn get_by_id(&self, id: i64) -> Option<&ItemRow>;
     pub fn find_by_rarity(&self, rarity: ItemRarity) -> Vec<&ItemRow>;
@@ -498,7 +541,10 @@ pub struct GameData {
 }
 
 impl GameData {
-    pub fn load(loader: &impl DataFileLoader) -> Result<Self, LoadError>;
+    pub fn load(
+        loader: &impl DataFileLoader,
+        decoder: &impl RuntimeDataDecoder,
+    ) -> Result<Self, LoadError>;
 }
 ```
 
@@ -508,6 +554,7 @@ Rust 约束：
 - 非 unique 索引生成 `find_by_* -> Vec<&Row>` 或迭代器。第一阶段用 `Vec<&Row>` 简单实现。
 - 复合索引生成 key struct 或 tuple。公开 API 推荐展开参数：`get_by_region_id(region: String, id: i64)`。
 - 若生成 serde 代码，需要生成 `serde` feature 说明或由项目配置决定是否带 derive。
+- 生成代码只定义 loader / decoder trait，不强制生成 JSON 或 MessagePack 的具体 decoder；业务 runtime 可以用 `serde_json`、`rmp-serde` 或项目自研库实现。
 
 ### 4.8.2 C++ 生成内容
 
@@ -527,7 +574,21 @@ generated/cpp/
 class IDataFileLoader {
 public:
     virtual ~IDataFileLoader() = default;
-    virtual std::string LoadText(const std::string& path) = 0;
+    virtual std::vector<std::uint8_t> LoadBytes(const std::string& path) = 0;
+};
+
+enum class RuntimeDataFormat {
+    Json,
+    MessagePack,
+};
+
+class IRuntimeDataDecoder {
+public:
+    virtual ~IRuntimeDataDecoder() = default;
+    virtual std::vector<ItemRow> DecodeItemsRows(
+        RuntimeDataFormat format,
+        const std::string& path,
+        const std::vector<std::uint8_t>& bytes) = 0;
 };
 
 struct ItemRow {
@@ -538,9 +599,10 @@ struct ItemRow {
 
 class ItemsTable {
 public:
-    static constexpr const char* DataFile = "items.json";
+    static constexpr const char* DataFile = "items.msgpack";
+    static constexpr RuntimeDataFormat DataFormat = RuntimeDataFormat::MessagePack;
 
-    static ItemsTable Load(IDataFileLoader& loader);
+    static ItemsTable Load(IDataFileLoader& loader, IRuntimeDataDecoder& decoder);
     const std::vector<ItemRow>& Rows() const;
     const ItemRow* GetById(std::int64_t id) const;
     std::vector<const ItemRow*> FindByRarity(ItemRarity rarity) const;
@@ -553,7 +615,7 @@ private:
 
 class GameData {
 public:
-    static GameData Load(IDataFileLoader& loader);
+    static GameData Load(IDataFileLoader& loader, IRuntimeDataDecoder& decoder);
     const ItemsTable& Items() const;
 private:
     ItemsTable items_;
@@ -563,10 +625,7 @@ private:
 C++ 约束：
 
 - 第一阶段目标 C++17。
-- 运行时 JSON 解析库不强绑定。生成代码可以：
-  1. 生成 parser adapter 接口，由业务实现；或
-  2. 可选生成基于 `nlohmann::json` 的实现。
-- 为降低依赖，第一阶段建议生成抽象 `JsonValue` / `JsonAdapter` 接口，或者文档声明需要 `nlohmann::json`。
+- 运行时 JSON / MessagePack 解析库不强绑定。生成代码只定义 `IRuntimeDataDecoder`，由业务实现；可在后续提供基于 `nlohmann::json`、`msgpack-c` 或引擎序列化系统的可选 adapter。
 - 复合 key 需要生成 `struct Key`、`operator==` 和 hash。
 - enum class 需要生成 hash 或转换为底层整数用于 unordered_map。
 
@@ -586,7 +645,13 @@ generated/ts/
 
 ```ts
 export interface DataFileLoader {
-  loadText(path: string): Promise<string> | string;
+  loadBytes(path: string): Promise<Uint8Array | ArrayBuffer | string> | Uint8Array | ArrayBuffer | string;
+}
+
+export type RuntimeDataFormat = "json" | "messagepack";
+
+export interface RuntimeDataDecoder {
+  decodeItemsRows(format: RuntimeDataFormat, path: string, data: Uint8Array | ArrayBuffer | string): ItemRow[];
 }
 
 export type ItemRarity = "common" | "rare";
@@ -598,13 +663,14 @@ export interface ItemRow {
 }
 
 export class ItemsTable {
-  static readonly dataFile = "items.json";
+  static readonly dataFile = "items.msgpack";
+  static readonly dataFormat: RuntimeDataFormat = "messagepack";
 
   private readonly rows_: ItemRow[];
   private readonly byId: Map<number, ItemRow>;
   private readonly byRarity: Map<ItemRarity, ItemRow[]>;
 
-  static async load(loader: DataFileLoader): Promise<ItemsTable>;
+  static async load(loader: DataFileLoader, decoder: RuntimeDataDecoder): Promise<ItemsTable>;
   rows(): readonly ItemRow[];
   getById(id: number): ItemRow | undefined;
   findByRarity(rarity: ItemRarity): readonly ItemRow[];
@@ -612,16 +678,16 @@ export class ItemsTable {
 
 export class GameData {
   readonly items: ItemsTable;
-  static async load(loader: DataFileLoader): Promise<GameData>;
+  static async load(loader: DataFileLoader, decoder: RuntimeDataDecoder): Promise<GameData>;
 }
 ```
 
 TypeScript 约束：
 
 - 第一阶段生成 ESM。
-- `DataFileLoader.loadText` 同时允许同步字符串和 `Promise<string>`，生成代码内部统一 `await`。
-- TS 运行时可直接 `JSON.parse`。
-- 对 JSON shape 做轻量检查：表文件必须能解析为数组或 `{ rows: [...] }`。是否对每个字段做严格 runtime type guard 可通过选项控制。
+- `DataFileLoader.loadBytes` 同时允许同步值和 `Promise`，生成代码内部统一 `await`。
+- JSON / MessagePack 解码通过 `RuntimeDataDecoder` 注入；可提供可选 `JsonRuntimeDataDecoder` 示例，但生成核心代码不绑定 MessagePack npm 包。
+- 对 runtime data shape 做轻量检查：表文件必须能解析为数组或 `{ rows: [...] }`。是否对每个字段做严格 runtime type guard 可通过选项控制。
 
 ## 4.9 索引辅助查找函数设计
 
@@ -678,26 +744,28 @@ TypeScript 约束：
 - C++ 游戏客户端：从包内资源、虚拟文件系统或引擎 AssetManager 读取；
 - TypeScript：从 HTTP、Node fs、浏览器 bundle 或 IndexedDB 读取。
 
-因此生成代码只依赖一个抽象 loader：给定逻辑 data file path，返回文本或 bytes。
+因此生成代码依赖两个抽象：loader 给定逻辑 data file path 返回 bytes；decoder 根据 target format 把 bytes 转成 typed rows。
 
 ### 4.10.2 语言无关接口
 
 ```text
 DataFileLoader
-  load_text(path) -> text
-  load_bytes(path) -> bytes   # optional, binary format 后续使用
+  load_bytes(path) -> bytes
+
+RuntimeDataDecoder
+  decode_<table>_rows(format, path, bytes) -> Vec<Row>
 ```
 
-第一阶段 JSON 只需要 `load_text`。
+第一阶段 JSON 和 MessagePack 都走 `load_bytes`，避免 JSON 使用 text、MessagePack 使用 bytes 导致生成 API 分裂。JSON decoder 可以自行把 bytes 按 UTF-8 解释为文本。
 
 ### 4.10.3 数据格式适配
 
-加载器只负责读取原始内容，不负责解析业务对象。解析由生成代码或 runtime adapter 完成：
+加载器只负责读取原始内容，不负责解析业务对象。解析由 runtime adapter / decoder 完成：
 
 ```text
-loader.load_text("items.json")
-  -> JSON text
-  -> generated parser / serde / JSON adapter
+loader.load_bytes("items.msgpack")
+  -> bytes
+  -> runtime decoder by RuntimeDataFormat::MessagePack
   -> Vec<ItemRow>
   -> ItemsTable::from_rows
   -> indexes
@@ -721,9 +789,16 @@ loader.load_text("items.json")
 - C++ 只生成接口，不绑定文件 API。
 - TypeScript 只生成接口和一个简单 `fetch` loader 示例，避免 Node/browser 环境分歧。
 
+默认 decoder 策略：
+
+- 核心生成代码只生成 decoder interface，不强制 runtime 依赖。
+- Rust 可选生成 `SerdeRuntimeDataDecoder`，需要调用方启用/提供 `serde_json` 与 `rmp-serde`。
+- C++ 可选生成 adapter 示例，不默认依赖 `nlohmann::json` 或 `msgpack-c`。
+- TypeScript 可选生成 JSON decoder；MessagePack decoder 由 runtime 注入，以避免绑定具体 npm 包。
+
 ## 4.11 Runtime data 文件约定
 
-当前 exporter 输出形态是包含 `meta` 和 `rows` 的 JSON object。生成代码读取时建议支持两种 shape：
+当前 exporter 输出形态是包含 `meta` 和 `rows` 的 payload。JSON 与 MessagePack 使用同一逻辑结构，只是编码方式不同。生成代码 / decoder 读取时建议支持两种 shape：
 
 ```json
 {
@@ -742,18 +817,65 @@ loader.load_text("items.json")
 ]
 ```
 
-第一阶段推荐导出 runtime data 时同步调整为 typed JSON：
+第一阶段推荐导出 runtime data 时同步调整为 typed payload：
 
-- int/float/bool 输出 JSON number/bool；
-- string/text/asset/enum 输出 JSON string；
-- struct 后续输出 JSON object。
+- int/float/bool 输出 number/bool；
+- string/text/asset/enum 输出 string；
+- struct 后续输出 object。
 
-如果短期仍输出字符串 cell，生成代码必须在加载时做类型转换。这会导致三种语言重复实现 parse 逻辑，不推荐长期保留。
+如果短期仍输出字符串 cell，decoder 必须在加载时做类型转换。这会导致三种语言重复实现 parse 逻辑，不推荐长期保留。
 
 建议分两步：
 
-1. Codegen 第一阶段先兼容当前 `{ meta, rows }`，并把字段从 JSON value parse 为目标类型。
-2. Data typed export 落地后，生成代码切换为直接读取 typed JSON。
+1. Codegen 第一阶段先兼容当前 `{ meta, rows }`，并由 decoder 把字段从 runtime value parse 为目标类型。
+2. Data typed export 落地后，decoder 可以直接读取 typed JSON / MessagePack。
+
+## 4.11.1 Exporter 写出实现方案
+
+`TargetDataFormat` 与 codegen 层 `RuntimeDataFormat` 保持一一对应：
+
+```rust
+pub enum TargetDataFormat {
+    Json,
+    MessagePack,
+}
+```
+
+写出流程：
+
+1. `build_target` 根据 `[targets.data].format` 选择 runtime data format，默认 `Json`。
+2. `write_runtime_data` 遍历 linked tables，为每张表构造统一 `ExportedTable { meta, rows }` payload。
+3. `Json` 使用 `serde_json::to_vec_pretty` 写出 `<table>.json`。
+4. `MessagePack` 使用 `rmp_serde::to_vec_named` 或等价 named-field 编码写出 `<table>.msgpack`。
+5. 返回给 codegen 的 `RuntimeDataFile { table_name, path }` 必须使用真实写出的文件名。
+6. `write_generated_code` 把 target format 传入 `CodeExportInput.runtime_data_format`，不可固定为 `Json`。
+
+依赖建议：
+
+```toml
+rmp-serde = "1"
+```
+
+如果后续引入 manifest，manifest 中也应记录每个 runtime data artifact 的 `format`、`path`、`table_name`。
+
+## 4.11.2 Codegen 读取实现方案
+
+CodeModel 构建时需要使用 `RuntimeDataFile` 和 `RuntimeDataFormat`：
+
+- 若 `runtime_data_files` 中存在 table 对应 artifact，使用 artifact path。
+- 若不存在，则根据 `runtime_data_format` 推导默认 path：`<table>.json` 或 `<table>.msgpack`。
+- 每个 `CodeTable` 保留 `data_file` 和 `data_format`，语言生成器用它们生成常量。
+
+生成代码的 load 流程统一为：
+
+```text
+Table::load(loader, decoder)
+  -> bytes = loader.load_bytes(DATA_FILE)
+  -> rows = decoder.decode_<table>_rows(DATA_FORMAT, DATA_FILE, bytes)
+  -> Table::from_rows(rows)
+```
+
+这样 JSON 与 MessagePack 的差异完全落在 decoder 实现里，repository、index、GameData facade 不需要关心具体解析库。
 
 ## 4.12 生成器接口
 
@@ -789,8 +911,37 @@ CodeExportInput
 - 命名冲突；
 - unsupported field type；
 - unsupported index key type；
+- unsupported runtime data format；
 - 输出路径冲突；
 - 目标语言需要的 runtime dependency 是否已声明。
+
+## 4.15 测试计划
+
+数据格式与生成代码加载接口相关测试应覆盖：
+
+1. `TargetDataFormat` 解析：`json`、`messagepack`、可选别名 `msgpack`，以及未知格式报错。
+2. Runtime data 写出：
+   - JSON target 生成 `<table>.json`，内容可用 `serde_json` 读取；
+   - MessagePack target 生成 `<table>.msgpack`，内容可用 `rmp-serde` 读取为同一 payload；
+   - `RuntimeDataFile.path` 与实际文件后缀一致。
+3. Codegen 输入传递：`CodeExportInput.runtime_data_format` 使用 target data format，不再固定为 `Json`。
+4. CodeModel 默认文件名：没有 runtime data artifact 时，按 `RuntimeDataFormat` 推导 `.json` 或 `.msgpack`。
+5. Rust 生成代码包含：
+   - `RuntimeDataFormat::{Json, MessagePack}`；
+   - `DataFileLoader::load_bytes`；
+   - `RuntimeDataDecoder`；
+   - 每张表的 `DATA_FILE` 和 `DATA_FORMAT`。
+6. C++ 生成代码包含：
+   - `RuntimeDataFormat` enum class；
+   - `IDataFileLoader::LoadBytes`；
+   - `IRuntimeDataDecoder`；
+   - 每张表的 `DataFile` 和 `DataFormat`。
+7. TypeScript 生成代码包含：
+   - `RuntimeDataFormat = "json" | "messagepack"`；
+   - `DataFileLoader.loadBytes`；
+   - `RuntimeDataDecoder`；
+   - 每张表的 `dataFile` 和 `dataFormat`。
+8. CLI integration：分别构建 JSON target 与 MessagePack target，验证 runtime data 文件和 generated code 文件同时生成，并检查代码中引用的默认文件名与格式一致。
 
 ## 4.13 文件组织策略
 

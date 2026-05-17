@@ -29,6 +29,8 @@ pub enum MetaDiagnosticCode {
     DuplicateEnumValueName,
     DuplicateFieldName,
     DuplicateIndexName,
+    DuplicateTypeName,
+    ReservedTypeName,
     MissingFieldReference,
     InvalidPrimaryIndex,
     PrimaryIndexMismatch,

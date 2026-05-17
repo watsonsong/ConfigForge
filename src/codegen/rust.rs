@@ -14,14 +14,32 @@ impl CodeGenerator for RustCodeGenerator {
     }
 
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>> {
-        let model = build_code_model(input.meta, &input.runtime_data_files)?;
+        let model = build_code_model(
+            input.meta,
+            &input.runtime_data_files,
+            input.runtime_data_format,
+        )?;
         require_non_empty_index_fields(&model)?;
         let rust_options = input.target.options.rust()?;
         let names = RustNames::new(&input.target.options);
         let mut content = render_file_header(input);
         content.push_str("use std::collections::HashMap;\n\n");
+        content.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n");
+        content.push_str("pub enum RuntimeDataFormat {\n");
+        content.push_str("    Json,\n");
+        content.push_str("    MessagePack,\n");
+        content.push_str("}\n\n");
         content.push_str("pub trait DataFileLoader {\n");
-        content.push_str("    fn load_text(&self, path: &str) -> Result<String, String>;\n");
+        content.push_str("    fn load_bytes(&self, path: &str) -> Result<Vec<u8>, String>;\n");
+        content.push_str("}\n\n");
+        content.push_str("pub trait RuntimeDataDecoder {\n");
+        for table in &model.tables {
+            content.push_str(&format!(
+                "    fn decode_{}_rows(&self, format: RuntimeDataFormat, path: &str, bytes: &[u8]) -> Result<Vec<{}>, String>;\n",
+                names.field_name(&table.name)?,
+                names.row_type_name(&table.name)?
+            ));
+        }
         content.push_str("}\n\n");
 
         for code_enum in &model.enums {
@@ -37,6 +55,9 @@ impl CodeGenerator for RustCodeGenerator {
             ));
             for value in &code_enum.values {
                 push_doc(&mut content, value.desc.as_deref(), "    /// ");
+                if rust_options.derive_serde {
+                    content.push_str(&format!("    #[serde(rename = {:?})]\n", value.name));
+                }
                 content.push_str(&format!("    {},\n", names.enum_variant_name(&value.name)?));
             }
             content.push_str("}\n\n");
@@ -55,6 +76,9 @@ impl CodeGenerator for RustCodeGenerator {
             ));
             for field in &code_struct.fields {
                 push_doc(&mut content, field.desc.as_deref(), "    /// ");
+                if rust_options.derive_serde {
+                    content.push_str(&format!("    #[serde(rename = {:?})]\n", field.name));
+                }
                 content.push_str(&format!(
                     "    pub {}: {},\n",
                     names.field_name(&field.name)?,
@@ -77,6 +101,9 @@ impl CodeGenerator for RustCodeGenerator {
             ));
             for field in &table.fields {
                 push_doc(&mut content, field.desc.as_deref(), "    /// ");
+                if rust_options.derive_serde {
+                    content.push_str(&format!("    #[serde(rename = {:?})]\n", field.name));
+                }
                 content.push_str(&format!(
                     "    pub {}: {},\n",
                     names.field_name(&field.name)?,
@@ -98,11 +125,11 @@ impl CodeGenerator for RustCodeGenerator {
         content.push_str("}\n\n");
         content.push_str("impl GameData {\n");
         content
-            .push_str("    pub fn load(loader: &impl DataFileLoader) -> Result<Self, String> {\n");
+            .push_str("    pub fn load(loader: &impl DataFileLoader, decoder: &impl RuntimeDataDecoder) -> Result<Self, String> {\n");
         content.push_str("        Ok(Self {\n");
         for table in &model.tables {
             content.push_str(&format!(
-                "            {}: {}::load(loader)?,\n",
+                "            {}: {}::load(loader, decoder)?,\n",
                 names.field_name(&table.name)?,
                 names.repository_type_name(&table.name)?
             ));
@@ -145,9 +172,17 @@ fn render_table(content: &mut String, table: &CodeTable, names: &RustNames<'_>) 
         "    pub const DATA_FILE: &'static str = {:?};\n\n",
         table.data_file
     ));
-    content.push_str("    pub fn load(loader: &impl DataFileLoader) -> Result<Self, String> {\n");
-    content.push_str("        let _content = loader.load_text(Self::DATA_FILE)?;\n");
-    content.push_str("        Self::from_rows(Vec::new())\n");
+    content.push_str(&format!(
+        "    pub const DATA_FORMAT: RuntimeDataFormat = RuntimeDataFormat::{};\n\n",
+        table.data_format.rust_variant()
+    ));
+    content.push_str("    pub fn load(loader: &impl DataFileLoader, decoder: &impl RuntimeDataDecoder) -> Result<Self, String> {\n");
+    content.push_str("        let bytes = loader.load_bytes(Self::DATA_FILE)?;\n");
+    content.push_str(&format!(
+        "        let rows = decoder.decode_{}_rows(Self::DATA_FORMAT, Self::DATA_FILE, &bytes)?;\n",
+        names.field_name(&table.name)?
+    ));
+    content.push_str("        Self::from_rows(rows)\n");
     content.push_str("    }\n\n");
     content.push_str(&format!(
         "    pub fn from_rows(rows: Vec<{}>) -> Result<Self, String> {{\n",

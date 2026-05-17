@@ -112,11 +112,84 @@ fn builds_target_from_project_config() {
     let cpp_code = fs::read_to_string(cpp_out_dir.join("generated.hpp")).expect("cpp code");
     let ts_code = fs::read_to_string(ts_out_dir.join("generated.ts")).expect("ts code");
     assert!(rust_code.contains("pub struct ItemsRow"));
+    assert!(rust_code.contains("pub trait RuntimeDataDecoder"));
+    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.json\""));
+    assert!(rust_code.contains("RuntimeDataFormat::Json"));
     assert!(rust_code.contains("pub fn get_by_id"));
     assert!(cpp_code.contains("class IDataFileLoader"));
+    assert!(cpp_code.contains("class IRuntimeDataDecoder"));
+    assert!(cpp_code.contains("static constexpr const char* DataFile = \"items.json\""));
     assert!(cpp_code.contains("const ItemsRow* GetById"));
     assert!(ts_code.contains("export interface DataFileLoader"));
+    assert!(ts_code.contains("export interface RuntimeDataDecoder"));
+    assert!(ts_code.contains("static readonly dataFile = \"items.json\""));
     assert!(ts_code.contains("getById(id: number): ItemsRow | undefined"));
+}
+
+#[test]
+fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_out_dir = temp_dir.path().join("out/data");
+    let rust_out_dir = temp_dir.path().join("out/code/rust");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = ["{}"]
+
+                [project]
+                name = "standard_project"
+
+                [[targets]]
+                name = "client_messagepack"
+
+                [targets.data]
+                input = "{}"
+                output = "{}"
+                format = "messagepack"
+
+                [[targets.code]]
+                language = "rust"
+                output = "{}"
+            "#,
+            absolute_fixture_path("meta.toml"),
+            absolute_fixture_path("data"),
+            data_out_dir.display(),
+            rust_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client_messagepack",
+    ]);
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "target `client_messagepack` built",
+    ));
+
+    let messagepack_path = data_out_dir.join("items.msgpack");
+    assert!(messagepack_path.exists());
+    let messagepack_bytes = fs::read(messagepack_path).expect("messagepack data");
+    assert!(!messagepack_bytes.is_empty());
+    let payload: serde_json::Value =
+        rmp_serde::from_slice(&messagepack_bytes).expect("messagepack should decode");
+    assert_eq!(payload["meta"]["name"], "items");
+    assert!(payload["meta"].get("fields").is_none());
+    assert!(!payload["rows"]
+        .as_array()
+        .expect("rows should be array")
+        .is_empty());
+
+    let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
+    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.msgpack\""));
+    assert!(rust_code
+        .contains("pub const DATA_FORMAT: RuntimeDataFormat = RuntimeDataFormat::MessagePack;"));
 }
 
 #[test]

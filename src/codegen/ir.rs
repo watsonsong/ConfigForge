@@ -5,7 +5,7 @@ use crate::{
     ConfigForgeError, Result,
 };
 
-use super::{ArtifactKind, RuntimeDataFile};
+use super::{ArtifactKind, RuntimeDataFile, RuntimeDataFormat};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeModel {
@@ -42,6 +42,7 @@ pub struct CodeTable {
     pub indexes: Vec<CodeIndex>,
     pub primary_index: Option<String>,
     pub data_file: String,
+    pub data_format: RuntimeDataFormat,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +82,7 @@ pub struct GeneratedFile {
 pub fn build_code_model(
     meta: &LinkedMetaModel<'_>,
     runtime_data_files: &[RuntimeDataFile],
+    runtime_data_format: RuntimeDataFormat,
 ) -> Result<CodeModel> {
     let data_file_index = runtime_data_files
         .iter()
@@ -120,7 +122,7 @@ pub fn build_code_model(
             let fields = struct_meta
                 .fields
                 .iter()
-                .filter(|field| field.meta.export && !field.meta.tool_only)
+                .filter(|field| is_runtime_codegen_field(field))
                 .map(code_field_from_linked)
                 .collect::<Result<Vec<_>>>()?;
             ensure_model_unique_names(
@@ -143,7 +145,7 @@ pub fn build_code_model(
             let fields = table_meta
                 .fields
                 .iter()
-                .filter(|field| field.meta.export && !field.meta.tool_only)
+                .filter(|field| is_runtime_codegen_field(field))
                 .map(code_field_from_linked)
                 .collect::<Result<Vec<_>>>()?;
             ensure_model_unique_names(
@@ -157,11 +159,21 @@ pub fn build_code_model(
                 .collect::<HashMap<_, _>>();
             let mut indexes = Vec::new();
             for index_meta in &table_meta.indexes {
-                let index_fields = index_meta
-                    .fields
-                    .iter()
-                    .filter_map(|field| field_index.get(field.name.as_str()).cloned())
-                    .collect::<Vec<_>>();
+                let mut index_fields = Vec::new();
+                for field in &index_meta.fields {
+                    let Some(code_field) = field_index.get(field.name.as_str()).cloned() else {
+                        return Err(ConfigForgeError::Validation(format!(
+                            "table `{}` index `{}` references non-exported field `{}`",
+                            table_meta.meta.name, index_meta.meta.name, field.name
+                        )));
+                    };
+                    validate_index_key_type(
+                        &table_meta.meta.name,
+                        &index_meta.meta.name,
+                        &code_field,
+                    )?;
+                    index_fields.push(code_field);
+                }
                 indexes.push(CodeIndex {
                     name: index_meta.meta.name.clone(),
                     unique: index_meta.meta.unique,
@@ -177,6 +189,7 @@ pub fn build_code_model(
                     .iter()
                     .any(|index| index.name == synthetic_index_name)
                 {
+                    validate_index_key_type(&table_meta.meta.name, &synthetic_index_name, field)?;
                     indexes.push(CodeIndex {
                         name: synthetic_index_name,
                         unique: true,
@@ -195,7 +208,13 @@ pub fn build_code_model(
                 .get(table_meta.meta.name.as_str())
                 .copied()
                 .map(str::to_owned)
-                .unwrap_or_else(|| format!("{}.json", table_meta.meta.name));
+                .unwrap_or_else(|| {
+                    format!(
+                        "{}.{}",
+                        table_meta.meta.name,
+                        runtime_data_format.extension()
+                    )
+                });
             Ok(CodeTable {
                 name: table_meta.meta.name.clone(),
                 desc: table_meta.meta.desc.clone(),
@@ -205,6 +224,7 @@ pub fn build_code_model(
                     .primary_index()
                     .map(|index| index.meta.name.clone()),
                 data_file,
+                data_format: runtime_data_format,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -217,6 +237,27 @@ pub fn build_code_model(
         structs,
         tables,
     })
+}
+
+fn is_runtime_codegen_field(field: &crate::meta::LinkedFieldMeta<'_>) -> bool {
+    field.meta.export && !field.meta.tool_only && !field.meta.validator_only
+}
+
+fn validate_index_key_type(table_name: &str, index_name: &str, field: &CodeField) -> Result<()> {
+    match field.code_type {
+        CodeTypeRef::Float | CodeTypeRef::Struct { .. } => Err(ConfigForgeError::Validation(
+            format!(
+                "table `{table_name}` index `{index_name}` field `{}` uses unsupported index key type `{:?}`",
+                field.name, field.code_type
+            ),
+        )),
+        CodeTypeRef::Int
+        | CodeTypeRef::Bool
+        | CodeTypeRef::String
+        | CodeTypeRef::Text
+        | CodeTypeRef::Asset
+        | CodeTypeRef::Enum { .. } => Ok(()),
+    }
 }
 
 fn code_field_from_linked(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<CodeField> {

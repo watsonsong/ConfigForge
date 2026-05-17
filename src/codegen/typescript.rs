@@ -14,14 +14,28 @@ impl CodeGenerator for TypeScriptCodeGenerator {
     }
 
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>> {
-        let model = build_code_model(input.meta, &input.runtime_data_files)?;
+        let model = build_code_model(
+            input.meta,
+            &input.runtime_data_files,
+            input.runtime_data_format,
+        )?;
         require_non_empty_index_fields(&model)?;
         let typescript_options = input.target.options.typescript()?;
         let names = TypeScriptNames::new(&input.target.options);
         let mut content = render_file_header(input);
         content.push('\n');
         content.push_str("export interface DataFileLoader {\n");
-        content.push_str("  loadText(path: string): Promise<string> | string;\n");
+        content.push_str("  loadBytes(path: string): Promise<Uint8Array | ArrayBuffer | string> | Uint8Array | ArrayBuffer | string;\n");
+        content.push_str("}\n\n");
+        content.push_str("export type RuntimeDataFormat = \"json\" | \"messagepack\";\n\n");
+        content.push_str("export interface RuntimeDataDecoder {\n");
+        for table in &model.tables {
+            content.push_str(&format!(
+                "  decode{}Rows(format: RuntimeDataFormat, path: string, data: Uint8Array | ArrayBuffer | string): {}[];\n",
+                names.type_name(&table.name)?,
+                names.row_type_name(&table.name)?
+            ));
+        }
         content.push_str("}\n\n");
 
         for code_enum in &model.enums {
@@ -100,11 +114,11 @@ impl CodeGenerator for TypeScriptCodeGenerator {
             ));
         }
         content.push_str("  }\n\n");
-        content.push_str("  static async load(loader: DataFileLoader): Promise<GameData> {\n");
+        content.push_str("  static async load(loader: DataFileLoader, decoder: RuntimeDataDecoder): Promise<GameData> {\n");
         content.push_str("    return new GameData({\n");
         for table in &model.tables {
             content.push_str(&format!(
-                "      {}: await {}.load(loader),\n",
+                "      {}: await {}.load(loader, decoder),\n",
                 names.field_name(&table.name)?,
                 names.repository_type_name(&table.name)?
             ));
@@ -133,6 +147,10 @@ fn render_table(
     content.push_str(&format!(
         "  static readonly dataFile = {:?};\n",
         table.data_file
+    ));
+    content.push_str(&format!(
+        "  static readonly dataFormat: RuntimeDataFormat = {:?};\n",
+        table.data_format.as_config_str()
     ));
     content.push_str(&format!(
         "  private readonly rows_: {}[];\n",
@@ -188,12 +206,14 @@ fn render_table(
     content.push_str("    }\n");
     content.push_str("  }\n\n");
     content.push_str(&format!(
-        "  static async load(loader: DataFileLoader): Promise<{}> {{\n",
+        "  static async load(loader: DataFileLoader, decoder: RuntimeDataDecoder): Promise<{}> {{\n",
         names.repository_type_name(&table.name)?
     ));
-    content.push_str("    const text = await loader.loadText(this.dataFile);\n");
-    content.push_str("    const payload = JSON.parse(text);\n");
-    content.push_str("    const rows = Array.isArray(payload) ? payload : payload.rows;\n");
+    content.push_str("    const data = await loader.loadBytes(this.dataFile);\n");
+    content.push_str(&format!(
+        "    const rows = decoder.decode{}Rows(this.dataFormat, this.dataFile, data);\n",
+        names.type_name(&table.name)?
+    ));
     content.push_str(&format!(
         "    return new {}(rows ?? []);\n",
         names.repository_type_name(&table.name)?

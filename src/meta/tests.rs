@@ -875,6 +875,29 @@ fn rejects_primary_flag_when_index_is_not_unique() {
 }
 
 #[test]
+fn rejects_ambiguous_or_reserved_custom_type_names() {
+    let diagnostics = diagnostics(
+        r#"
+            [[enums]]
+            name = "Reward"
+
+            [[structs]]
+            name = "Reward"
+
+            [[structs]]
+            name = "int"
+        "#,
+    );
+
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTypeName));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::ReservedTypeName));
+}
+
+#[test]
 fn reports_parse_errors_for_string_and_file_inputs() {
     let string_error = MetaModel::from_toml_str("[[tables]\nname =").unwrap_err();
     assert!(matches!(string_error, ConfigForgeError::ParseMetaString(_)));

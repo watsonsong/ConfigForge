@@ -144,6 +144,10 @@ fn validate_field_presence(
     table: &DataTable,
     field: &LinkedFieldMeta<'_>,
 ) -> Result<()> {
+    if !field.meta.required {
+        return Ok(());
+    }
+
     let present = table
         .rows
         .iter()
@@ -374,6 +378,35 @@ mod tests {
             table.rows[0].get("max_stack").map(String::as_str),
             Some("1")
         );
+    }
+
+    #[test]
+    fn allows_missing_optional_field_without_default() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "note"
+                type = "string"
+                required = false
+            "#,
+        )
+        .expect("meta should load");
+        let linked_meta = meta.link().expect("meta should link");
+        let data_set = DataSet::new(vec![DataTable::new(
+            "items",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        )]);
+
+        assert!(validate_data_set(&linked_meta, &data_set).is_ok());
     }
 
     #[test]

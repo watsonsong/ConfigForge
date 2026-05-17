@@ -1,12 +1,12 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use serde::Deserialize;
 use serde::Serialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::{
     codegen::{
@@ -71,10 +71,35 @@ pub struct TargetDataConfig {
     pub format: TargetDataFormat,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetDataFormat {
     Json,
+    MessagePack,
+}
+
+impl<'de> Deserialize<'de> for TargetDataFormat {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "json" => Ok(Self::Json),
+            "messagepack" | "msgpack" => Ok(Self::MessagePack),
+            _ => Err(serde::de::Error::custom(format!(
+                "unsupported target data format `{value}`"
+            ))),
+        }
+    }
+}
+
+impl From<TargetDataFormat> for RuntimeDataFormat {
+    fn from(format: TargetDataFormat) -> Self {
+        match format {
+            TargetDataFormat::Json => RuntimeDataFormat::Json,
+            TargetDataFormat::MessagePack => RuntimeDataFormat::MessagePack,
+        }
+    }
 }
 
 fn default_data_format() -> TargetDataFormat {
@@ -82,9 +107,14 @@ fn default_data_format() -> TargetDataFormat {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct ExportedTable<'a> {
-    meta: &'a TableMeta,
-    rows: &'a [DataRow],
+struct ExportedTable {
+    meta: ExportedTableMeta,
+    rows: Vec<DataRow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportedTableMeta {
+    name: String,
 }
 
 pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
@@ -96,6 +126,12 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
     let target = project.target(options.target_name)?;
     let meta_set = project.meta_model()?;
     let linked_meta = meta_set.link().map_err(ConfigForgeError::MetaValidation)?;
+
+    let runtime_data_format = target
+        .data
+        .as_ref()
+        .map(|data_config| RuntimeDataFormat::from(data_config.format))
+        .unwrap_or(RuntimeDataFormat::Json);
 
     let runtime_data_files = if let Some(data_config) = &target.data {
         let data_plan = DataLoadPlan::from_meta_model(&meta_set)?;
@@ -118,6 +154,7 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
         target,
         &linked_meta,
         runtime_data_files,
+        runtime_data_format,
     )
 }
 
@@ -274,7 +311,8 @@ fn write_runtime_data(
             ))
         })?;
         let path = match format {
-            TargetDataFormat::Json => write_table_json(out_dir, table_meta.meta, table)?,
+            TargetDataFormat::Json => write_table_json(out_dir, table_meta, table)?,
+            TargetDataFormat::MessagePack => write_table_messagepack(out_dir, table_meta, table)?,
         };
         runtime_data_files.push(RuntimeDataFile {
             table_name: table_meta.meta.name.clone(),
@@ -284,16 +322,60 @@ fn write_runtime_data(
     Ok(runtime_data_files)
 }
 
-fn write_table_json(out_dir: &Path, table_meta: &TableMeta, table: &DataTable) -> Result<String> {
-    let payload = ExportedTable {
-        meta: table_meta,
-        rows: &table.rows,
-    };
-    let content = serde_json::to_string_pretty(&payload)?;
-    let file_name = format!("{}.json", table_meta.name);
+fn write_table_messagepack(
+    out_dir: &Path,
+    table_meta: &crate::meta::LinkedTableMeta<'_>,
+    table: &DataTable,
+) -> Result<String> {
+    let payload = build_exported_table_payload(table_meta, table);
+    let content = rmp_serde::to_vec_named(&payload)
+        .map_err(|source| ConfigForgeError::SerializeMessagePack { source })?;
+    let file_name = format!("{}.msgpack", table_meta.meta.name);
     let path = out_dir.join(&file_name);
     fs::write(&path, content).map_err(|source| ConfigForgeError::WriteFile { path, source })?;
     Ok(file_name)
+}
+
+fn write_table_json(
+    out_dir: &Path,
+    table_meta: &crate::meta::LinkedTableMeta<'_>,
+    table: &DataTable,
+) -> Result<String> {
+    let payload = build_exported_table_payload(table_meta, table);
+    let content = serde_json::to_string_pretty(&payload)?;
+    let file_name = format!("{}.json", table_meta.meta.name);
+    let path = out_dir.join(&file_name);
+    fs::write(&path, content).map_err(|source| ConfigForgeError::WriteFile { path, source })?;
+    Ok(file_name)
+}
+
+fn build_exported_table_payload(
+    table_meta: &crate::meta::LinkedTableMeta<'_>,
+    table: &DataTable,
+) -> ExportedTable {
+    let exported_fields = table_meta
+        .fields
+        .iter()
+        .filter(|field| field.meta.export && !field.meta.tool_only && !field.meta.validator_only)
+        .map(|field| field.meta.name.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let rows = table
+        .rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .filter(|(field, _)| exported_fields.contains(field.as_str()))
+                .map(|(field, value)| (field.clone(), value.clone()))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .collect();
+
+    ExportedTable {
+        meta: ExportedTableMeta {
+            name: table_meta.meta.name.clone(),
+        },
+        rows,
+    }
 }
 
 fn write_generated_code(
@@ -302,7 +384,9 @@ fn write_generated_code(
     target: &TargetConfig,
     linked_meta: &crate::meta::LinkedMetaModel<'_>,
     runtime_data_files: Vec<RuntimeDataFile>,
+    runtime_data_format: RuntimeDataFormat,
 ) -> Result<()> {
+    let mut generated_files = Vec::new();
     for code_task in &target.code {
         let generator = builtin_generators()
             .into_iter()
@@ -320,21 +404,33 @@ fn write_generated_code(
             project: project.clone(),
             target: code_target,
             runtime_data_files: runtime_data_files.clone(),
-            runtime_data_format: RuntimeDataFormat::Json,
+            runtime_data_format,
             generated_at: generated_at(),
         };
-        for file in generator.generate(&input)? {
-            if let Some(parent) = file.path.parent() {
-                fs::create_dir_all(parent).map_err(|source| ConfigForgeError::WriteFile {
-                    path: parent.to_path_buf(),
-                    source,
-                })?;
-            }
-            fs::write(&file.path, file.content).map_err(|source| ConfigForgeError::WriteFile {
-                path: file.path,
+        generated_files.extend(generator.generate(&input)?);
+    }
+
+    let mut planned_paths = BTreeSet::new();
+    for file in &generated_files {
+        if !planned_paths.insert(file.path.clone()) {
+            return Err(ConfigForgeError::Validation(format!(
+                "multiple generated code artifacts target `{}`",
+                file.path.display()
+            )));
+        }
+    }
+
+    for file in generated_files {
+        if let Some(parent) = file.path.parent() {
+            fs::create_dir_all(parent).map_err(|source| ConfigForgeError::WriteFile {
+                path: parent.to_path_buf(),
                 source,
             })?;
         }
+        fs::write(&file.path, file.content).map_err(|source| ConfigForgeError::WriteFile {
+            path: file.path,
+            source,
+        })?;
     }
 
     Ok(())
@@ -371,6 +467,8 @@ fn civil_from_unix_days(days: i64) -> (i32, u32, u32) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use crate::codegen::{default_module_name, CodeExportLanguage};
 
     use super::*;
@@ -395,5 +493,105 @@ mod tests {
     fn converts_unix_days_to_civil_date() {
         assert_eq!(civil_from_unix_days(0), (1970, 1, 1));
         assert_eq!(civil_from_unix_days(20_590), (2026, 5, 17));
+    }
+
+    #[test]
+    fn parses_messagepack_data_format_and_alias() {
+        let config: TargetDataConfig = toml::from_str(
+            r#"
+                input = "Data"
+                output = "Generated/Data"
+                format = "messagepack"
+            "#,
+        )
+        .expect("messagepack format should parse");
+        assert_eq!(config.format, TargetDataFormat::MessagePack);
+
+        let alias_config: TargetDataConfig = toml::from_str(
+            r#"
+                input = "Data"
+                output = "Generated/Data"
+                format = "msgpack"
+            "#,
+        )
+        .expect("msgpack alias should parse");
+        assert_eq!(alias_config.format, TargetDataFormat::MessagePack);
+    }
+
+    #[test]
+    fn defaults_data_format_to_json() {
+        let config: TargetDataConfig = toml::from_str(
+            r#"
+                input = "Data"
+                output = "Generated/Data"
+            "#,
+        )
+        .expect("data config should parse");
+
+        assert_eq!(config.format, TargetDataFormat::Json);
+    }
+
+    #[test]
+    fn converts_target_data_format_to_runtime_data_format() {
+        assert_eq!(
+            RuntimeDataFormat::from(TargetDataFormat::Json),
+            RuntimeDataFormat::Json
+        );
+        assert_eq!(
+            RuntimeDataFormat::from(TargetDataFormat::MessagePack),
+            RuntimeDataFormat::MessagePack
+        );
+    }
+
+    #[test]
+    fn exported_table_payload_omits_non_runtime_fields_and_full_meta() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.fields]]
+                name = "debug_note"
+                type = "string"
+                tool_only = true
+
+                [[tables.fields]]
+                name = "validator_flag"
+                type = "bool"
+                validator_only = true
+
+                [[tables.fields]]
+                name = "internal_value"
+                type = "string"
+                export = false
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("items").expect("linked table");
+        let table = DataTable::new(
+            "items",
+            vec![BTreeMap::from([
+                ("id".to_owned(), "1".to_owned()),
+                ("debug_note".to_owned(), "debug".to_owned()),
+                ("validator_flag".to_owned(), "true".to_owned()),
+                ("internal_value".to_owned(), "secret".to_owned()),
+            ])],
+        );
+
+        let payload = build_exported_table_payload(table_meta, &table);
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+
+        assert_eq!(value["meta"]["name"], "items");
+        assert!(value["meta"].get("fields").is_none());
+        assert_eq!(value["rows"][0]["id"], "1");
+        assert!(value["rows"][0].get("debug_note").is_none());
+        assert!(value["rows"][0].get("validator_flag").is_none());
+        assert!(value["rows"][0].get("internal_value").is_none());
     }
 }
