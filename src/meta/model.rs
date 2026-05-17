@@ -378,7 +378,10 @@ impl RowExportPolicy {
 impl TargetTags {
     pub fn new(tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {
-            tags: tags.into_iter().map(Into::into).collect(),
+            tags: tags
+                .into_iter()
+                .filter_map(|tag| normalize_tag(tag.into()))
+                .collect(),
         }
     }
 
@@ -402,6 +405,15 @@ fn parse_tag_list(value: Option<&str>) -> Vec<&str> {
         .map(str::trim)
         .filter(|tag| !tag.is_empty())
         .collect()
+}
+
+pub(crate) fn normalize_tag(tag: String) -> Option<String> {
+    let tag = tag.trim();
+    if tag.is_empty() {
+        None
+    } else {
+        Some(tag.to_owned())
+    }
 }
 
 pub struct LinkedMetaModel<'meta> {

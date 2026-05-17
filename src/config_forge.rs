@@ -316,4 +316,50 @@ mod tests {
         assert_eq!(exporter.seen_tables.into_inner(), vec!["items"]);
         assert!(out_dir.path().join("items.custom").exists());
     }
+
+    #[test]
+    fn row_export_filter_fields_control_rows_without_runtime_output() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+                row_export = { excluded_tags_field = "exclude_tags" }
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.fields]]
+                name = "exclude_tags"
+                type = "string"
+                export = false
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("items").expect("linked table");
+        let table = DataTable::new(
+            "items",
+            vec![
+                BTreeMap::from([
+                    ("id".to_owned(), "1".to_owned()),
+                    ("exclude_tags".to_owned(), String::new()),
+                ]),
+                BTreeMap::from([
+                    ("id".to_owned(), "2".to_owned()),
+                    ("exclude_tags".to_owned(), "client".to_owned()),
+                ]),
+            ],
+        );
+
+        let payload =
+            build_exported_table_payload(table_meta, &table, &TargetTags::new(["client"]));
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+
+        let rows = value["rows"].as_array().expect("rows should be array");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], "1");
+        assert!(rows[0].get("exclude_tags").is_none());
+    }
 }

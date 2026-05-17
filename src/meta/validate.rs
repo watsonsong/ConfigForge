@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 
 use super::{
-    FieldMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType, TableMeta,
+    model::normalize_tag, FieldMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
+    PrimitiveFieldType, TableMeta,
 };
 
 pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
@@ -133,6 +134,11 @@ fn validate_table_meta(
     diagnostics: &mut Vec<MetaDiagnostic>,
 ) {
     validate_source_declaration(table, diagnostics);
+    validate_export_condition_tags(
+        &format!("table `{}`", table.name),
+        &table.export_when,
+        diagnostics,
+    );
 
     let field_names = validate_field_names(
         &format!("table `{}`", table.name),
@@ -141,6 +147,11 @@ fn validate_table_meta(
     );
 
     for field in &table.fields {
+        validate_export_condition_tags(
+            &format!("table `{}` field `{}`", table.name, field.name),
+            &field.export_when,
+            diagnostics,
+        );
         validate_deprecated_field_export_flags(
             &format!("table `{}`", table.name),
             field,
@@ -157,6 +168,11 @@ fn validate_table_meta(
     let mut index_names = BTreeSet::new();
     let mut primary_indexes = Vec::new();
     for index in &table.indexes {
+        validate_export_condition_tags(
+            &format!("table `{}` index `{}`", table.name, index.name),
+            &index.export_when,
+            diagnostics,
+        );
         if !index_names.insert(index.name.as_str()) {
             diagnostics.push(MetaDiagnostic::new(
                 MetaDiagnosticCode::DuplicateIndexName,
@@ -205,6 +221,28 @@ fn validate_table_meta(
 
     validate_row_export_policy(table, &field_names, diagnostics);
     validate_primary_index(table, &primary_indexes, diagnostics);
+}
+
+fn validate_export_condition_tags(
+    owner: &str,
+    condition: &super::ExportCondition,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    for tag in condition
+        .any
+        .iter()
+        .chain(condition.all.iter())
+        .chain(condition.none.iter())
+    {
+        if normalize_tag(tag.clone()).as_deref() != Some(tag.as_str()) {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "{owner} export_when tag `{tag}` is invalid; tags must be non-empty and trimmed"
+                ),
+            ));
+        }
+    }
 }
 
 fn validate_deprecated_field_export_flags(

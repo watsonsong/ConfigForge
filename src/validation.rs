@@ -2,13 +2,25 @@ use std::collections::HashSet;
 
 use crate::{
     data::{DataSet, DataTable},
-    meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedTableMeta, PrimitiveFieldType},
+    meta::{
+        LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedTableMeta, PrimitiveFieldType,
+        TargetTags,
+    },
     ConfigForgeError, Result,
 };
 
 pub fn validate_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataSet) -> Result<()> {
     let data_set = normalize_data_set(meta, data_set)?;
     validate_normalized_data_set(meta, &data_set)
+}
+
+pub fn validate_data_set_for_target(
+    meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    data_set: &DataSet,
+) -> Result<()> {
+    let data_set = normalize_data_set(meta, data_set)?;
+    validate_normalized_data_set_for_target(meta, target_tags, &data_set)
 }
 
 pub fn normalize_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataSet) -> Result<DataSet> {
@@ -37,9 +49,40 @@ pub fn validate_normalized_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataS
     Ok(())
 }
 
+pub fn validate_normalized_data_set_for_target(
+    meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    data_set: &DataSet,
+) -> Result<()> {
+    for table_meta in &meta.tables {
+        if !table_meta.meta.is_exported_for(target_tags) {
+            continue;
+        }
+
+        let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "data set is missing table `{}`",
+                table_meta.meta.name
+            ))
+        })?;
+        validate_normalized_table_for_target(table_meta, target_tags, table)?;
+    }
+
+    Ok(())
+}
+
 pub fn validate_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
     let table = normalize_table(meta, table)?;
     validate_normalized_table(meta, &table)
+}
+
+pub fn validate_table_for_target(
+    meta: &LinkedTableMeta<'_>,
+    target_tags: &TargetTags,
+    table: &DataTable,
+) -> Result<()> {
+    let table = normalize_table(meta, table)?;
+    validate_normalized_table_for_target(meta, target_tags, &table)
 }
 
 pub fn validate_normalized_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
@@ -55,6 +98,69 @@ pub fn validate_normalized_table(meta: &LinkedTableMeta<'_>, table: &DataTable) 
     }
 
     Ok(())
+}
+
+pub fn validate_normalized_table_for_target(
+    meta: &LinkedTableMeta<'_>,
+    target_tags: &TargetTags,
+    table: &DataTable,
+) -> Result<()> {
+    let table = filter_table_rows_for_target(meta, target_tags, table);
+    for field in meta
+        .fields
+        .iter()
+        .filter(|field| field.meta.is_exported_for(target_tags))
+    {
+        validate_supported_field_type(meta, field)?;
+        validate_field_presence(meta, &table, field)?;
+        validate_field_values(meta, &table, field)?;
+        validate_field_uniqueness(meta, &table, field)?;
+    }
+
+    let primary_index_name = meta.primary_index().map(|index| index.meta.name.as_str());
+    for index in &meta.indexes {
+        if !index.meta.is_exported_for(target_tags) {
+            continue;
+        }
+        let is_primary_index =
+            index.meta.primary || primary_index_name == Some(index.meta.name.as_str());
+        if let Some(field_name) = index
+            .fields
+            .iter()
+            .find(|field| !field.meta.is_exported_for(target_tags))
+            .map(|field| field.meta.name.as_str())
+        {
+            if is_primary_index {
+                return Err(ConfigForgeError::Validation(format!(
+                    "table `{}` primary index `{}` references non-exported field `{}` for current target",
+                    meta.meta.name, index.meta.name, field_name
+                )));
+            }
+            continue;
+        }
+        validate_index_uniqueness(meta, &table, index)?;
+    }
+
+    Ok(())
+}
+
+fn filter_table_rows_for_target(
+    meta: &LinkedTableMeta<'_>,
+    target_tags: &TargetTags,
+    table: &DataTable,
+) -> DataTable {
+    DataTable::new(
+        table.name.clone(),
+        table
+            .rows
+            .iter()
+            .filter(|row| {
+                meta.meta
+                    .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
+            })
+            .cloned()
+            .collect(),
+    )
 }
 
 pub fn normalize_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<DataTable> {
@@ -282,7 +388,7 @@ mod tests {
 
     use crate::meta::{
         EnumMeta, EnumValueMeta, ExportCondition, FieldMeta, LinkedField, LinkedFieldMeta,
-        LinkedStructType, LinkedTableMeta, MetaModel, PrimitiveFieldType, TableMeta,
+        LinkedStructType, LinkedTableMeta, MetaModel, PrimitiveFieldType, TableMeta, TargetTags,
     };
 
     use super::*;
@@ -616,5 +722,74 @@ mod tests {
                 .map(String::as_str),
             Some("1")
         );
+    }
+
+    #[test]
+    fn target_validation_skips_non_exported_tables_fields_and_rows() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+                primary_index = "by_id"
+                row_export = { excluded_tags_field = "exclude_tags" }
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "server_value"
+                type = "int"
+                required = true
+                export_when = { any = ["server"] }
+
+                [[tables.fields]]
+                name = "exclude_tags"
+                type = "string"
+                export = false
+
+                [[tables.indexes]]
+                name = "by_id"
+                fields = ["id"]
+                unique = true
+                primary = true
+
+                [[tables]]
+                name = "server_only"
+                source = "server_only.csv"
+                export_when = { any = ["server"] }
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+            "#,
+        )
+        .expect("meta should load");
+        let linked_meta = meta.link().expect("meta should link");
+        let data_set = DataSet::new(vec![DataTable::new(
+            "items",
+            vec![
+                BTreeMap::from([
+                    ("id".to_owned(), "1".to_owned()),
+                    ("exclude_tags".to_owned(), String::new()),
+                ]),
+                BTreeMap::from([
+                    ("id".to_owned(), "1".to_owned()),
+                    ("exclude_tags".to_owned(), "client".to_owned()),
+                ]),
+            ],
+        )]);
+        let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
+
+        assert!(validate_normalized_data_set_for_target(
+            &linked_meta,
+            &TargetTags::new(["client"]),
+            &normalized
+        )
+        .is_ok());
+        assert!(validate_normalized_data_set(&linked_meta, &normalized).is_err());
     }
 }

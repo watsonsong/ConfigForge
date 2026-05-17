@@ -256,6 +256,123 @@ fn builds_target_from_imported_project_config_fragments() {
     assert!(rust_code.contains("pub struct ItemsRow"));
 }
 
+#[test]
+fn target_tags_filter_validation_export_and_codegen() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_dir = temp_dir.path().join("data");
+    let data_out_dir = temp_dir.path().join("out/data");
+    let rust_out_dir = temp_dir.path().join("out/code/rust");
+    fs::create_dir_all(&data_dir).expect("data dir should be created");
+    fs::write(
+        data_dir.join("items.csv"),
+        "id,name,server_value,exclude_tags\n1,Potion,,\n1,Debug Potion,,client\n",
+    )
+    .expect("items data should be written");
+
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                [project]
+                name = "target_tags_project"
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+                primary_index = "by_id"
+                row_export = {{ excluded_tags_field = "exclude_tags" }}
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "name"
+                type = "string"
+                required = true
+
+                [[tables.fields]]
+                name = "server_value"
+                type = "int"
+                required = true
+                export_when = {{ any = ["server"] }}
+
+                [[tables.fields]]
+                name = "exclude_tags"
+                type = "string"
+                export = false
+
+                [[tables.indexes]]
+                name = "by_id"
+                fields = ["id"]
+                unique = true
+                primary = true
+
+                [[tables]]
+                name = "server_only"
+                source = "server_only.csv"
+                export_when = {{ any = ["server"] }}
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [targets.data]
+                input = "{}"
+                output = "{}"
+                format = "json"
+
+                [[targets.code]]
+                language = "rust"
+                output = "{}"
+            "#,
+            data_dir.display(),
+            data_out_dir.display(),
+            rust_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `client` built"));
+
+    assert!(data_out_dir.join("items.json").exists());
+    assert!(!data_out_dir.join("server_only.json").exists());
+    let payload: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(data_out_dir.join("items.json")).expect("items json should exist"),
+    )
+    .expect("items json should parse");
+    let rows = payload["rows"].as_array().expect("rows should be array");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], "1");
+    assert!(rows[0].get("server_value").is_none());
+    assert!(rows[0].get("exclude_tags").is_none());
+
+    let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
+    assert!(rust_code.contains("pub struct ItemsRow"));
+    assert!(rust_code.contains("pub id: i64"));
+    assert!(rust_code.contains("pub name: String"));
+    assert!(!rust_code.contains("server_value"));
+    assert!(!rust_code.contains("exclude_tags"));
+    assert!(!rust_code.contains("ServerOnly"));
+}
+
 fn absolute_fixture_path(relative_path: &str) -> String {
     std::env::current_dir()
         .expect("current dir")

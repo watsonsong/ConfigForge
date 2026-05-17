@@ -18,7 +18,7 @@ use crate::{
         link_meta_model, validate_meta_model, EnumMeta, MetaDiagnostic, MetaModel, StructMeta,
         TableMeta, TargetTags,
     },
-    validation::{normalize_data_set, validate_normalized_data_set},
+    validation::{normalize_data_set, validate_normalized_data_set_for_target},
     ConfigForgeError, Result,
 };
 
@@ -86,6 +86,7 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
     let target = project.target(options.target_name)?;
     let meta_set = project.meta_model()?;
     let linked_meta = meta_set.link().map_err(ConfigForgeError::MetaValidation)?;
+    let target_tags = target.target_tags();
 
     let runtime_data_files = if let Some(data_config) = &target.data {
         let registry = DataFormatRegistry::with_builtin_exporters();
@@ -94,16 +95,16 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
             linked_meta
                 .tables
                 .iter()
-                .filter(|table| table.meta.is_exported_for(&target.target_tags()))
+                .filter(|table| table.meta.is_exported_for(&target_tags))
                 .map(|table| table.meta),
         )?;
         let data_set = DataLoader::new(project_root.join(&data_config.input)).load(&data_plan)?;
         let data_set = normalize_data_set(&linked_meta, &data_set)?;
-        validate_normalized_data_set(&linked_meta, &data_set)?;
+        validate_normalized_data_set_for_target(&linked_meta, &target_tags, &data_set)?;
         export_runtime_data(
             &project_root.join(&data_config.output),
             &linked_meta,
-            &target.target_tags(),
+            &target_tags,
             &data_set,
             data_exporter,
         )?
@@ -115,6 +116,7 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
         project_root,
         &CodeExportProject::from(&project.project),
         target,
+        &target_tags,
         &linked_meta,
         runtime_data_files,
     )
@@ -263,6 +265,7 @@ fn write_generated_code(
     project_root: &Path,
     project: &CodeExportProject,
     target: &TargetConfig,
+    target_tags: &TargetTags,
     linked_meta: &crate::meta::LinkedMetaModel<'_>,
     runtime_data_files: Vec<RuntimeDataFile>,
 ) -> Result<()> {
@@ -281,7 +284,7 @@ fn write_generated_code(
         code_target.out_dir = project_root.join(&code_target.out_dir);
         let input = CodeExportInput {
             meta: linked_meta,
-            target_tags: target.target_tags(),
+            target_tags: target_tags.clone(),
             project: project.clone(),
             target: code_target,
             runtime_data_files: runtime_data_files.clone(),

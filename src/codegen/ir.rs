@@ -158,10 +158,13 @@ pub fn build_code_model(
                 .map(|field| (field.name.as_str(), field.clone()))
                 .collect::<HashMap<_, _>>();
             let mut indexes = Vec::new();
+            let primary_index_name = table_meta.primary_index().map(|index| index.meta.name.as_str());
             for index_meta in &table_meta.indexes {
                 if !index_meta.meta.is_exported_for(target_tags) {
                     continue;
                 }
+                let is_primary_index =
+                    index_meta.meta.primary || primary_index_name == Some(index_meta.meta.name.as_str());
                 let mut index_fields = Vec::new();
                 let mut missing_exported_field = None;
                 for field in &index_meta.fields {
@@ -177,7 +180,7 @@ pub fn build_code_model(
                     index_fields.push(code_field);
                 }
                 if let Some(field_name) = missing_exported_field {
-                    if index_meta.meta.primary {
+                    if is_primary_index {
                         return Err(ConfigForgeError::Validation(format!(
                             "table `{}` primary index `{}` references non-exported field `{}` for current target",
                             table_meta.meta.name, index_meta.meta.name, field_name
@@ -188,7 +191,7 @@ pub fn build_code_model(
                 indexes.push(CodeIndex {
                     name: index_meta.meta.name.clone(),
                     unique: index_meta.meta.unique,
-                    primary: index_meta.meta.primary,
+                    primary: is_primary_index,
                     fields: index_fields,
                 });
             }
@@ -220,14 +223,16 @@ pub fn build_code_model(
                 .copied()
                 .map(str::to_owned)
                 .unwrap_or_else(|| format!("{}.json", table_meta.meta.name));
+            let primary_index = indexes
+                .iter()
+                .find(|index| index.primary)
+                .map(|index| index.name.clone());
             Ok(CodeTable {
                 name: table_meta.meta.name.clone(),
                 desc: table_meta.meta.desc.clone(),
                 fields,
                 indexes,
-                primary_index: table_meta
-                    .primary_index()
-                    .map(|index| index.meta.name.clone()),
+                primary_index,
                 data_file,
             })
         })

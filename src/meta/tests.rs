@@ -370,6 +370,39 @@ fn export_condition_matches_target_tags() {
 }
 
 #[test]
+fn target_tags_are_trimmed_and_empty_tags_are_ignored() {
+    let tags = TargetTags::new([" client ", "", " shipping"]);
+
+    assert!(tags.contains("client"));
+    assert!(tags.contains("shipping"));
+    assert!(!tags.contains(" client "));
+    assert!(!tags.contains(""));
+}
+
+#[test]
+fn rejects_invalid_export_condition_tags() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            export_when = { any = [" client "] }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+            && diagnostic
+                .message
+                .contains("export_when tag ` client ` is invalid")
+    }));
+}
+
+#[test]
 fn row_export_policy_matches_required_and_excluded_tags() {
     let policy = RowExportPolicy {
         required_tags_field: Some("required_tags".to_owned()),
