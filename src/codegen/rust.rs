@@ -24,18 +24,10 @@ impl CodeGenerator for RustCodeGenerator {
         let names = RustNames::new(&input.target.options);
         let mut content = render_file_header(input);
         content.push_str("use std::collections::HashMap;\n\n");
-        content.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n");
-        content.push_str("pub enum RuntimeDataFormat {\n");
-        content.push_str("    Json,\n");
-        content.push_str("    MessagePack,\n");
-        content.push_str("}\n\n");
-        content.push_str("pub trait DataFileLoader {\n");
-        content.push_str("    fn load_bytes(&self, path: &str) -> Result<Vec<u8>, String>;\n");
-        content.push_str("}\n\n");
-        content.push_str("pub trait RuntimeDataDecoder {\n");
+        content.push_str("pub trait RuntimeDataLoader {\n");
         for table in &model.tables {
             content.push_str(&format!(
-                "    fn decode_{}_rows(&self, format: RuntimeDataFormat, path: &str, bytes: &[u8]) -> Result<Vec<{}>, String>;\n",
+                "    fn load_{}_rows(&self, path: &str) -> Result<Vec<{}>, String>;\n",
                 names.field_name(&table.name)?,
                 names.row_type_name(&table.name)?
             ));
@@ -124,12 +116,13 @@ impl CodeGenerator for RustCodeGenerator {
         }
         content.push_str("}\n\n");
         content.push_str("impl GameData {\n");
-        content
-            .push_str("    pub fn load(loader: &impl DataFileLoader, decoder: &impl RuntimeDataDecoder) -> Result<Self, String> {\n");
+        content.push_str(
+            "    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n",
+        );
         content.push_str("        Ok(Self {\n");
         for table in &model.tables {
             content.push_str(&format!(
-                "            {}: {}::load(loader, decoder)?,\n",
+                "            {}: {}::load(loader)?,\n",
                 names.field_name(&table.name)?,
                 names.repository_type_name(&table.name)?
             ));
@@ -172,14 +165,10 @@ fn render_table(content: &mut String, table: &CodeTable, names: &RustNames<'_>) 
         "    pub const DATA_FILE: &'static str = {:?};\n\n",
         table.data_file
     ));
+    content
+        .push_str("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
     content.push_str(&format!(
-        "    pub const DATA_FORMAT: RuntimeDataFormat = RuntimeDataFormat::{};\n\n",
-        table.data_format.rust_variant()
-    ));
-    content.push_str("    pub fn load(loader: &impl DataFileLoader, decoder: &impl RuntimeDataDecoder) -> Result<Self, String> {\n");
-    content.push_str("        let bytes = loader.load_bytes(Self::DATA_FILE)?;\n");
-    content.push_str(&format!(
-        "        let rows = decoder.decode_{}_rows(Self::DATA_FORMAT, Self::DATA_FILE, &bytes)?;\n",
+        "        let rows = loader.load_{}_rows(Self::DATA_FILE)?;\n",
         names.field_name(&table.name)?
     ));
     content.push_str("        Self::from_rows(rows)\n");

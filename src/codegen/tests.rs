@@ -145,11 +145,12 @@ fn rust_generator_emits_loader_table_and_index_helpers() {
     let files = RustCodeGenerator.generate(&input).expect("rust code");
     let content = &files[0].content;
 
-    assert!(content.contains("pub trait DataFileLoader"));
-    assert!(content.contains("fn load_bytes(&self, path: &str)"));
-    assert!(content.contains("pub trait RuntimeDataDecoder"));
-    assert!(content.contains("pub enum RuntimeDataFormat"));
-    assert!(content.contains("pub const DATA_FORMAT: RuntimeDataFormat = RuntimeDataFormat::Json;"));
+    assert!(content.contains("pub trait RuntimeDataLoader"));
+    assert!(content.contains("fn load_items_rows(&self, path: &str)"));
+    assert!(content.contains("pub const DATA_FILE: &'static str = \"items.json\";"));
+    assert!(!content.contains("RuntimeDataFormat"));
+    assert!(!content.contains("RuntimeDataDecoder"));
+    assert!(!content.contains("load_bytes"));
     assert!(content.contains("serde::Serialize, serde::Deserialize"));
     assert!(content.contains("#[serde(rename = \"common\")]"));
     assert!(content.contains("#[serde(rename = \"display_name\")]"));
@@ -233,11 +234,12 @@ fn typescript_generator_emits_async_loader_and_maps() {
         .expect("typescript code");
     let content = &files[0].content;
 
-    assert!(content.contains("export interface DataFileLoader"));
-    assert!(content.contains("loadBytes(path: string)"));
-    assert!(content.contains("export interface RuntimeDataDecoder"));
-    assert!(content.contains("export type RuntimeDataFormat = \"json\" | \"messagepack\";"));
-    assert!(content.contains("static readonly dataFormat: RuntimeDataFormat = \"json\";"));
+    assert!(content.contains("export interface RuntimeDataLoader"));
+    assert!(content.contains("loadItemsRows(path: string): Promise<ItemsRow[]> | ItemsRow[];"));
+    assert!(content.contains("static readonly dataFile = \"items.json\";"));
+    assert!(!content.contains("RuntimeDataFormat"));
+    assert!(!content.contains("RuntimeDataDecoder"));
+    assert!(!content.contains("loadBytes"));
     assert!(content.contains("export type ItemRarity"));
     assert!(content.contains("export interface ItemsRow"));
     assert!(content.contains("readonly displayName: string;"));
@@ -257,12 +259,12 @@ fn cpp_generator_emits_loader_and_repository_declarations() {
     let files = CppCodeGenerator.generate(&input).expect("cpp code");
     let content = &files[0].content;
 
-    assert!(content.contains("class IDataFileLoader"));
-    assert!(content.contains("LoadBytes(const std::string& path)"));
-    assert!(content.contains("class IRuntimeDataDecoder"));
-    assert!(content.contains("enum class RuntimeDataFormat"));
-    assert!(content
-        .contains("static constexpr RuntimeDataFormat DataFormat = RuntimeDataFormat::Json;"));
+    assert!(content.contains("class IRuntimeDataLoader"));
+    assert!(content.contains("LoadItemsRows(const std::string& path)"));
+    assert!(content.contains("static constexpr const char* DataFile = \"items.json\";"));
+    assert!(!content.contains("RuntimeDataFormat"));
+    assert!(!content.contains("IRuntimeDataDecoder"));
+    assert!(!content.contains("IDataFileLoader"));
     assert!(content.contains("namespace game::config"));
     assert!(content.contains("} // namespace game::config"));
     assert!(content.contains("enum class ItemRarity"));

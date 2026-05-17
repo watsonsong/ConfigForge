@@ -24,15 +24,12 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         let names = TypeScriptNames::new(&input.target.options);
         let mut content = render_file_header(input);
         content.push('\n');
-        content.push_str("export interface DataFileLoader {\n");
-        content.push_str("  loadBytes(path: string): Promise<Uint8Array | ArrayBuffer | string> | Uint8Array | ArrayBuffer | string;\n");
-        content.push_str("}\n\n");
-        content.push_str("export type RuntimeDataFormat = \"json\" | \"messagepack\";\n\n");
-        content.push_str("export interface RuntimeDataDecoder {\n");
+        content.push_str("export interface RuntimeDataLoader {\n");
         for table in &model.tables {
             content.push_str(&format!(
-                "  decode{}Rows(format: RuntimeDataFormat, path: string, data: Uint8Array | ArrayBuffer | string): {}[];\n",
+                "  load{}Rows(path: string): Promise<{}[]> | {}[];\n",
                 names.type_name(&table.name)?,
+                names.row_type_name(&table.name)?,
                 names.row_type_name(&table.name)?
             ));
         }
@@ -114,11 +111,11 @@ impl CodeGenerator for TypeScriptCodeGenerator {
             ));
         }
         content.push_str("  }\n\n");
-        content.push_str("  static async load(loader: DataFileLoader, decoder: RuntimeDataDecoder): Promise<GameData> {\n");
+        content.push_str("  static async load(loader: RuntimeDataLoader): Promise<GameData> {\n");
         content.push_str("    return new GameData({\n");
         for table in &model.tables {
             content.push_str(&format!(
-                "      {}: await {}.load(loader, decoder),\n",
+                "      {}: await {}.load(loader),\n",
                 names.field_name(&table.name)?,
                 names.repository_type_name(&table.name)?
             ));
@@ -147,10 +144,6 @@ fn render_table(
     content.push_str(&format!(
         "  static readonly dataFile = {:?};\n",
         table.data_file
-    ));
-    content.push_str(&format!(
-        "  static readonly dataFormat: RuntimeDataFormat = {:?};\n",
-        table.data_format.as_config_str()
     ));
     content.push_str(&format!(
         "  private readonly rows_: {}[];\n",
@@ -206,12 +199,11 @@ fn render_table(
     content.push_str("    }\n");
     content.push_str("  }\n\n");
     content.push_str(&format!(
-        "  static async load(loader: DataFileLoader, decoder: RuntimeDataDecoder): Promise<{}> {{\n",
+        "  static async load(loader: RuntimeDataLoader): Promise<{}> {{\n",
         names.repository_type_name(&table.name)?
     ));
-    content.push_str("    const data = await loader.loadBytes(this.dataFile);\n");
     content.push_str(&format!(
-        "    const rows = decoder.decode{}Rows(this.dataFormat, this.dataFile, data);\n",
+        "    const rows = await loader.load{}Rows(this.dataFile);\n",
         names.type_name(&table.name)?
     ));
     content.push_str(&format!(

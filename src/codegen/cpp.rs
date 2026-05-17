@@ -25,7 +25,7 @@ impl CodeGenerator for CppCodeGenerator {
         let names = CppNames::new(&input.target.options);
         let mut content = render_file_header(input);
         content.push_str("#pragma once\n\n");
-        content.push_str("#include <cstdint>\n#include <cstddef>\n#include <string>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
+        content.push_str("#include <cstddef>\n#include <string>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
         let namespace = cpp_options
             .namespace
             .as_ref()
@@ -33,9 +33,7 @@ impl CodeGenerator for CppCodeGenerator {
         if let Some(namespace) = namespace {
             content.push_str(&format!("namespace {namespace} {{\n\n"));
         }
-        content.push_str("enum class RuntimeDataFormat {\n    Json,\n    MessagePack,\n};\n\n");
-        content.push_str("class IDataFileLoader {\npublic:\n    virtual ~IDataFileLoader() = default;\n    virtual std::vector<std::uint8_t> LoadBytes(const std::string& path) = 0;\n};\n\n");
-        content.push_str("class IRuntimeDataDecoder;\n\n");
+        content.push_str("class IRuntimeDataLoader;\n\n");
 
         for code_enum in &model.enums {
             push_doc(&mut content, code_enum.desc.as_deref());
@@ -86,11 +84,11 @@ impl CodeGenerator for CppCodeGenerator {
         }
 
         content.push_str(
-            "class IRuntimeDataDecoder {\npublic:\n    virtual ~IRuntimeDataDecoder() = default;\n",
+            "class IRuntimeDataLoader {\npublic:\n    virtual ~IRuntimeDataLoader() = default;\n",
         );
         for table in &model.tables {
             content.push_str(&format!(
-                "    virtual std::vector<{}> Decode{}Rows(RuntimeDataFormat format, const std::string& path, const std::vector<std::uint8_t>& bytes) = 0;\n",
+                "    virtual std::vector<{}> Load{}Rows(const std::string& path) = 0;\n",
                 names.row_type_name(&table.name)?,
                 names.type_name(&table.name)?
             ));
@@ -98,9 +96,7 @@ impl CodeGenerator for CppCodeGenerator {
         content.push_str("};\n\n");
 
         content.push_str("class GameData {\npublic:\n");
-        content.push_str(
-            "    static GameData Load(IDataFileLoader& loader, IRuntimeDataDecoder& decoder);\n",
-        );
+        content.push_str("    static GameData Load(IRuntimeDataLoader& loader);\n");
         for table in &model.tables {
             content.push_str(&format!(
                 "    const {}& {}() const {{ return {}; }}\n",
@@ -154,11 +150,7 @@ fn render_table(content: &mut String, table: &CodeTable, names: &CppNames<'_>) -
         table.data_file
     ));
     content.push_str(&format!(
-        "    static constexpr RuntimeDataFormat DataFormat = RuntimeDataFormat::{};\n",
-        table.data_format.rust_variant()
-    ));
-    content.push_str(&format!(
-        "    static {} Load(IDataFileLoader& loader, IRuntimeDataDecoder& decoder);\n",
+        "    static {} Load(IRuntimeDataLoader& loader);\n",
         names.repository_type_name(&table.name)?
     ));
     content.push_str(&format!(

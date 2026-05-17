@@ -112,17 +112,17 @@ fn builds_target_from_project_config() {
     let cpp_code = fs::read_to_string(cpp_out_dir.join("generated.hpp")).expect("cpp code");
     let ts_code = fs::read_to_string(ts_out_dir.join("generated.ts")).expect("ts code");
     assert!(rust_code.contains("pub struct ItemsRow"));
-    assert!(rust_code.contains("pub trait RuntimeDataDecoder"));
+    assert!(rust_code.contains("pub trait RuntimeDataLoader"));
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.json\""));
-    assert!(rust_code.contains("RuntimeDataFormat::Json"));
+    assert!(!rust_code.contains("RuntimeDataFormat"));
     assert!(rust_code.contains("pub fn get_by_id"));
-    assert!(cpp_code.contains("class IDataFileLoader"));
-    assert!(cpp_code.contains("class IRuntimeDataDecoder"));
+    assert!(cpp_code.contains("class IRuntimeDataLoader"));
     assert!(cpp_code.contains("static constexpr const char* DataFile = \"items.json\""));
+    assert!(!cpp_code.contains("RuntimeDataFormat"));
     assert!(cpp_code.contains("const ItemsRow* GetById"));
-    assert!(ts_code.contains("export interface DataFileLoader"));
-    assert!(ts_code.contains("export interface RuntimeDataDecoder"));
+    assert!(ts_code.contains("export interface RuntimeDataLoader"));
     assert!(ts_code.contains("static readonly dataFile = \"items.json\""));
+    assert!(!ts_code.contains("RuntimeDataFormat"));
     assert!(ts_code.contains("getById(id: number): ItemsRow | undefined"));
 }
 
@@ -188,8 +188,8 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
 
     let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.msgpack\""));
-    assert!(rust_code
-        .contains("pub const DATA_FORMAT: RuntimeDataFormat = RuntimeDataFormat::MessagePack;"));
+    assert!(rust_code.contains("pub trait RuntimeDataLoader"));
+    assert!(!rust_code.contains("RuntimeDataFormat"));
 }
 
 #[test]
