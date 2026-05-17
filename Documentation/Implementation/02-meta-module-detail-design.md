@@ -16,10 +16,12 @@ Meta 模块负责把一个或多个 Meta 文件转换为可被后续模块使用
 - project / enum / struct / table / field / index 建模。
 - `FieldMeta.field_type` 以字符串保存，Link 后解析为 primitive / enum / struct。
 - `IndexMeta.fields` 以字符串保存，Link 后解析为 `Vec<&FieldMeta>`。
+- target tags / `export_when` / `row_export` 建模与公共结构校验。
+- validator raw meta 建模：`ValidatorMeta`、`ValidationSeverity`、table / field validators。
 - 基础结构校验与稳定诊断。
 - 模块内单元测试覆盖加载、Link、imports、诊断。
 
-计划字段说明：本文后续结构示例中出现的 `validators: Vec<ValidatorMeta>` 与 `foreign_keys: Vec<ForeignKeyMeta>` 属于 validator 框架 / 外键关系数据的后续实现目标，当前 `src/meta/model.rs` 尚未落地这些字段，当前 TOML 也尚不接受 validator / foreign key 配置。具体落地阶段见 `05-validator-framework-detail-design.md`。
+计划字段说明：`validators: Vec<ValidatorMeta>` 已在 `src/meta/model.rs` 落地，当前 TOML 接受 `[[tables.validators]]` 与 `[[tables.fields.validators]]`，并由 validation registry 在 compile 阶段解释具体 `kind` 与参数；当前内置已实现 `range` field validator。`foreign_keys: Vec<ForeignKeyMeta>` 仍属于后续实现目标，当前 TOML 尚不接受 foreign key 配置。validator 详细实现见 `05-validator-framework-detail-design.md`。
 
 ## 2.2 Rust 中的“类”和继承策略
 
@@ -167,7 +169,6 @@ pub struct TableMeta {
     pub export_when: ExportCondition,
     pub row_export: Option<RowExportPolicy>,
     pub validators: Vec<ValidatorMeta>,
-    pub foreign_keys: Vec<ForeignKeyMeta>,
     pub source: Option<String>,
     pub sources: Vec<SourceRef>,
     pub override_sources: Vec<SourceRef>,
@@ -188,8 +189,8 @@ pub struct TableMeta {
 - `export = false` 是整表导出的硬关闭；默认 `true`。
 - `export_when` 根据 target tags 判断整表是否进入 runtime data 与 codegen。
 - `row_export` 只作用于 collection runtime data 行过滤，常用于 `shipping` / `debug` 等 target 差异。
-- `validators` 保存 table-level / record-level validator 的 raw 配置，例如 explicit unique、权重总和、跨字段关系等；具体参数由 validation registry 编译。该字段是 Phase 1 计划新增字段，当前实现尚不接受 TOML 配置。
-- `foreign_keys` 保存外键关系数据。外键不是普通 validator，它既会隐式生成引用完整性校验，也会进入 CodeModel 影响生成代码的关联查询 API。该字段是 Phase 3 计划新增字段，当前实现尚不接受 TOML 配置。
+- `validators` 保存 table-level / record-level validator 的 raw 配置；公共字段由 Meta validate 做轻量检查，scope、unknown kind 与专属参数由 validation registry compile 阶段诊断。当前实现已解析 TOML，但内置 validator 仅提供 field-scope `range`，因此 table-level `range` 会被 scope 校验拒绝。
+- `foreign_keys` 尚未在当前 `TableMeta` 中落地。外键不是普通 validator，未来会作为一等关系数据保存：它既会隐式生成引用完整性校验，也会进入 CodeModel 影响生成代码的关联查询 API。该能力仍是 Phase 3 计划。
 
 ### 2.5.5 `TableKind`
 
@@ -234,15 +235,15 @@ pub struct FieldMeta {
 - `default` 暂保留 `toml::Value`；后续可在 Link 或单独 default-link 阶段按字段类型解析为 typed default。
 - `export = false` 是字段导出的硬关闭；默认 `true`。
 - `export_when` 根据 target tags 判断字段是否进入 runtime row 与 codegen row type。
-- `validators` 保存 field-level validator 的 raw 配置，例如 range、regex、length、asset ref syntax 等；Meta 模块只做公共字段和轻量结构校验。该字段是 Phase 1 计划新增字段，当前实现尚不接受 TOML 配置。
+- `validators` 保存 field-level validator 的 raw 配置，例如 range、regex、length、asset ref syntax 等；Meta 模块只做公共字段和轻量结构校验。当前实现已接受 TOML 配置，并通过 validation registry 编译执行；已内置 `range` validator，支持 `min`、`max`、`exclusive_min`、`exclusive_max`、`allow_empty`、`severity`、`message`、`export_when`。
 - `tool_only`、`filter_field`、`validator_only` 已由 target tags 机制替代；当前仅保留为 `Option<bool>` 以便检测用户仍在使用并输出 `UnsupportedFeature` 诊断，不再参与导出判断。
-- `unique` 是内置便捷字段，后台会隐式转换为 single-field unique validator；复合唯一性建议优先通过 `IndexMeta { unique = true }` 或 explicit table validator 表达。
+- `unique` 是内置便捷字段；当前基础 validation 会直接校验 single-field unique，codegen 也会生成对应 single-field unique index。复合唯一性建议优先通过 `IndexMeta { unique = true }` 表达；未来也可迁移为 implicit validator。
 
 ### 2.5.7 `ValidatorMeta`
 
 Validator 采用注册式框架。Meta 层只保存 raw 配置，不依赖具体 validator 实现：
 
-状态：Phase 1 计划新增。当前实现尚未定义 `ValidatorMeta`，也不会解析 `[[tables.fields.validators]]` / `[[tables.validators]]` TOML。
+状态：已实现 raw meta 承载与公共结构校验。当前已定义 `ValidatorMeta` / `ValidationSeverity`，并会解析 `[[tables.fields.validators]]` / `[[tables.validators]]` TOML；具体 validator 的 `kind`、scope 与专属参数由 `src/validation/registry.rs` 和内置 validator factory 在 compile 阶段校验。当前内置执行器已实现 `range` field validator，其余 validator kind 会报告 unknown validator。
 
 ```rust
 pub struct ValidatorMeta {
@@ -261,6 +262,7 @@ pub struct ValidatorMeta {
 - `kind` 是 validator registry 的查找 key，例如 `range`、`unique`、`weight_sum`。
 - `params` 通过 serde flatten 保存 validator 专属配置，避免每新增一个 validator 就修改 `FieldMeta` / `TableMeta` 顶层字段。
 - `export_when` 控制 validator 是否在当前 target tags 下执行。
+- `severity` 支持 `error` / `warning`；error 会阻断导出，warning 会保留在 `ValidationReport` 中并由 CLI 以 warning 输出但不阻断。
 - Meta validate 阶段只检查公共字段、tag 合法性和明显结构错误；unknown kind、参数类型、字段引用等由 validation compile 阶段根据 registry 诊断。
 
 详细框架见 `05-validator-framework-detail-design.md`。

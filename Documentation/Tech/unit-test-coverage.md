@@ -173,9 +173,9 @@ cargo coverage-html
 
 ```text
 TOTAL:
-Regions   58.43%
-Functions 60.32%
-Lines     80.23%
+Regions   91.17%
+Functions 90.60%
+Lines     92.92%
 Branches  -
 ```
 
@@ -183,11 +183,15 @@ Branches  -
 
 | 文件 | 行覆盖率 | 说明 |
 | --- | ---: | --- |
-| `meta/link.rs` | 99.14% | Link 主流程覆盖较充分。 |
-| `meta/validate.rs` | 80.21% | 主要校验路径已覆盖，但仍需补更多异常分支。 |
-| `meta/loader.rs` | 71.59% | 正常加载和 imports 已覆盖，I/O/parse 异常不足。 |
-| `meta/model.rs` | 60.64% | 查询 helper 与部分分支覆盖不足。 |
-| `validation.rs` | 73.78% | 类型错误已覆盖，required/unique/index 异常不足。 |
+| `meta/link.rs` | 93.96% | Link 主流程覆盖较充分，仍有少量异常分支可补。 |
+| `meta/validate.rs` | 95.63% | duplicate、primary index、export condition、validator meta 等主要校验路径已覆盖。 |
+| `meta/loader.rs` | 93.55% | 正常加载、imports、I/O/parse 异常路径已有覆盖。 |
+| `meta/model.rs` | 98.36% | 查询 helper、target tags、row export policy 等模型行为覆盖较充分。 |
+| `validation/mod.rs` | 64.63% | 基础 required/type/enum/unique 与 target-aware validation 已覆盖；仍有 helper/边界分支未完全覆盖。 |
+| `validation/builtins/range.rs` | 81.31% | range validator 的参数解析、target 过滤、warning/error、空值和边界比较已有覆盖。 |
+| `validation/context.rs` | 93.58% | ExportValidationView / ExportTableView 主要路径已覆盖。 |
+| `validation/diagnostic.rs` | 71.76% | Error/Warning 报告路径已覆盖，格式化分支仍可补充。 |
+| `validation/registry.rs` | 88.46% | registry require、scope 校验、compile/run 主要路径已覆盖。 |
 
 该基线不作为长期目标，只用于后续迭代比较。后续新增 Meta、Validation、Exporter 功能时，应逐步提高核心模块覆盖率。
 
@@ -196,8 +200,8 @@ Branches  -
 优先补充：
 
 1. Meta validate 异常分支：duplicate enum / struct / enum value / index、empty index fields、missing primary index、多 primary index。
-2. Loader 异常分支：invalid TOML string、missing import、invalid import TOML、duplicate import、import cycle。
-3. Data validation 异常分支：required empty、missing field、bool/float invalid、field unique duplicate、index unique duplicate。
-4. Source / Exporter 错误路径：missing CSV、missing source declaration、write output failure。
+2. Loader 异常分支：invalid import TOML、更多 import cycle / canonicalize 边界。
+3. Data validation 异常分支：更多 target-aware unique/index 边界、ValidationReport warning 格式化分支。
+4. Source / Exporter 错误路径：write output failure、重复 output path、重复 target 与 warning 输出组合场景。
 
 这些补测项应结合后续功能迭代逐步完成。

@@ -17,17 +17,16 @@
    - table repository / collection type；
    - index key type 和辅助查找函数。
 4. 生成一个统一的 DataSet / Database facade，便于业务侧一次加载后按表访问。
-5. 支持 JSON 与 MessagePack 两种 runtime data format，并让生成代码能够按 target format 读取对应文件。
-6. 支持抽象数据文件加载器和抽象 runtime data decoder，生成代码不绑定具体文件系统、引擎资源系统或反序列化库。
-6. 保持生成代码确定性：同一份 Meta 生成稳定文件名、声明顺序和 API 名称。
-7. 在生成前发现命名冲突、保留字、目标语言类型映射缺失、输出路径冲突等问题。
+5. 支持 JSON 与 MessagePack 两种 runtime data format；生成代码通过 runtime data export 阶段返回的真实文件名暴露每张表的默认数据文件路径。
+6. 生成抽象 `RuntimeDataLoader`，由接入方负责读取并解码导出的 payload envelope `{ meta, rows }`，返回 typed rows；当前生成代码不再生成独立 `RuntimeDataFormat` / `RuntimeDataDecoder` 抽象。
+7. 保持生成代码确定性：同一份 Meta 生成稳定文件名、声明顺序和 API 名称。
+8. 在生成前发现命名冲突、保留字、目标语言类型映射缺失、输出路径冲突等问题。
 
 第一阶段不实现：
 
 - 生成代码的插件化动态加载；
 - JSON / MessagePack 之外的复杂二进制数据格式；
 - 跨语言运行时库发布；
-- 多 target 差异化字段过滤；
 - struct/json cell 的完整解析；
 - foreign key 自动跳转接口；
 - 增量代码生成。
@@ -36,21 +35,23 @@
 
 ## 4.2 与现有流程的关系
 
-当前 exporter 已经完成基础流程：
+当前 exporter 已经完成的基础流程：
 
 ```text
-MetaModel::from_path
-  -> DataLoadPlan::from_meta_model
+ProjectConfig::from_path
   -> MetaModel::link
+  -> DataLoadPlan::from_tables(target-visible tables)
   -> DataLoader::load
   -> normalize_data_set
-  -> validate_normalized_data_set
-  -> write runtime data / simple Rust stub
+  -> validate_normalized_data_set_for_target
+  -> export runtime data (JSON / MessagePack)
+  -> CodeGeneratorRegistry dispatch (Rust / C++ / TypeScript)
+  -> write generated files
 ```
 
-Code Export 应替换当前 `exporter.rs` 中临时的 `write_table_rust_stub`，并把生成代码的职责从 `exporter` 编排层下沉到独立模块。
+Code Export 已从 `exporter` 编排层下沉到独立 `src/codegen/` 模块；`exporter.rs` 负责构造输入、分发生成器、检查输出路径冲突并写出 artifact。
 
-建议新流程：
+目标态流程仍可继续演进为：
 
 ```text
 Meta Load / Link
@@ -67,26 +68,24 @@ Data Load / Normalize / Validate
 - Code Export 只依赖已 linked 的 Meta，不直接读取 TOML。
 - Code Export 不重新读取 CSV，不直接依赖 `DataLoader`。
 - Runtime data 文件和 generated code 文件都应进入同一套 Artifact Plan，统一检查路径冲突。
-- Data 文件格式第一阶段支持 JSON 与 MessagePack；加载抽象约束生成代码如何读取 bytes，decoder 抽象约束如何把 bytes 解析为 typed rows，不强制读取来源或第三方 runtime 库。
+- Data 文件格式第一阶段支持 JSON 与 MessagePack；当前生成代码只约束 `RuntimeDataLoader` 的 typed rows 加载方法。loader 实现负责读取具体文件并解码 `{ meta, rows }` payload，生成代码本身不绑定文件系统、引擎资源系统、JSON 库或 MessagePack 库。
 
 ## 4.3 模块结构建议
 
-建议新增 `src/codegen/` 目录模块：
+当前 `src/codegen/` 目录模块：
 
 ```text
 src/codegen/
-  mod.rs              # 对外 API 与 re-export
-  model.rs            # CodeExportTarget / CodeExportInput / Artifact 等核心模型
+  mod.rs              # 对外 API、re-export、CodeExportTarget / CodeExportInput / Artifact 等核心模型
   ir.rs               # Language-neutral CodeModel IR
   naming.rs           # 目标语言命名规范、保留字处理、冲突检测
-  type_mapping.rs     # Meta type -> target language type 映射
-  index.rs            # 索引 API 规划、Key 类型规划
-  runtime.rs          # 抽象 loader / repository API 的语言无关描述
   rust.rs             # RustCodeGenerator
   cpp.rs              # CppCodeGenerator
   typescript.rs       # TypeScriptCodeGenerator
   tests.rs            # codegen 单元测试
 ```
+
+`type_mapping.rs`、`index.rs`、`runtime.rs` 当前未拆分为独立文件；对应逻辑仍分别位于 IR 与各语言生成器内部，后续可在模块继续膨胀时再拆出。
 
 `src/exporter.rs` 保留为执行编排层，负责：
 
@@ -156,8 +155,8 @@ pub struct CodeExportTarget {
 
 | Format | 文件后缀 | exporter 写出方式 | 生成代码读取方式 |
 | --- | --- | --- | --- |
-| `Json` | `.json` | `serde_json::to_vec_pretty` 或等价 typed JSON。 | loader 读取 bytes，decoder 按 JSON 解码。 |
-| `MessagePack` | `.msgpack` | `rmp-serde` 写出同一 payload 的 MessagePack bytes。 | loader 读取 bytes，decoder 按 MessagePack 解码。 |
+| `Json` | `.json` | `serde_json::to_vec_pretty` 写出 payload envelope。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 读取并解码，返回 typed rows。 |
+| `MessagePack` | `.msgpack` | `rmp-serde` 写出同一 payload envelope 的 MessagePack bytes。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 读取并解码，返回 typed rows。 |
 
 `RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json` 或 `items.msgpack`。CodeModel 优先使用 runtime data export 阶段返回的真实路径；当 target 没有 data export artifact 时，才默认推导 `<table>.json`。
 
@@ -486,37 +485,25 @@ export type ItemRarity = "common" | "rare";
 
 ### 4.8.1 Rust 生成内容
 
-建议文件：
+当前实现采用单文件输出：`generated.rs`。以下多文件布局仍是后续拆分方向：
 
 ```text
 generated/rust/
   mod.rs
   types.rs          # enum / struct / row types
-  loader.rs         # DataFileLoader trait / RuntimeDataDecoder trait
+  loader.rs         # RuntimeDataLoader trait
   tables.rs         # table repository + index helpers
 ```
 
-可选单文件模式：`generated.rs`。
+当前单文件模式：`generated.rs`。
 
 核心形态：
 
 ```rust
-pub enum RuntimeDataFormat {
-    Json,
-    MessagePack,
-}
-
-pub trait DataFileLoader {
-    fn load_bytes(&self, path: &str) -> Result<Vec<u8>, LoadError>;
-}
-
-pub trait RuntimeDataDecoder {
-    fn decode_items_rows(
-        &self,
-        format: RuntimeDataFormat,
-        path: &str,
-        bytes: &[u8],
-    ) -> Result<Vec<ItemRow>, LoadError>;
+pub trait RuntimeDataLoader {
+    // Implementations should read exported table files such as DATA_FILE,
+    // decode the payload envelope `{ meta, rows }`, and return typed rows.
+    fn load_items_rows(&self, path: &str) -> Result<Vec<ItemRow>, String>;
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -534,12 +521,8 @@ pub struct ItemsTable {
 
 impl ItemsTable {
     pub const DATA_FILE: &'static str = "items.msgpack";
-    pub const DATA_FORMAT: RuntimeDataFormat = RuntimeDataFormat::MessagePack;
 
-    pub fn load(
-        loader: &impl DataFileLoader,
-        decoder: &impl RuntimeDataDecoder,
-    ) -> Result<Self, LoadError>;
+    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String>;
     pub fn rows(&self) -> &[ItemRow];
     pub fn get_by_id(&self, id: i64) -> Option<&ItemRow>;
     pub fn find_by_rarity(&self, rarity: ItemRarity) -> Vec<&ItemRow>;
@@ -550,10 +533,7 @@ pub struct GameData {
 }
 
 impl GameData {
-    pub fn load(
-        loader: &impl DataFileLoader,
-        decoder: &impl RuntimeDataDecoder,
-    ) -> Result<Self, LoadError>;
+    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String>;
 }
 ```
 
@@ -563,11 +543,11 @@ Rust 约束：
 - 非 unique 索引生成 `find_by_* -> Vec<&Row>` 或迭代器。第一阶段用 `Vec<&Row>` 简单实现。
 - 复合索引生成 key struct 或 tuple。公开 API 推荐展开参数：`get_by_region_id(region: String, id: i64)`。
 - 若生成 serde 代码，需要生成 `serde` feature 说明或由项目配置决定是否带 derive。
-- 生成代码只定义 loader / decoder trait，不强制生成 JSON 或 MessagePack 的具体 decoder；业务 runtime 可以用 `serde_json`、`rmp-serde` 或项目自研库实现。
+- 生成代码只定义 typed `RuntimeDataLoader` trait，不强制生成 JSON 或 MessagePack 的具体 decoder；业务 runtime 可以在 loader 实现中用 `serde_json`、`rmp-serde` 或项目自研库读取 payload envelope 并返回 typed rows。
 
 ### 4.8.2 C++ 生成内容
 
-建议文件：
+当前实现采用单文件头输出：`generated.hpp`。以下多文件布局仍是后续拆分方向：
 
 ```text
 generated/cpp/
@@ -580,24 +560,12 @@ generated/cpp/
 核心形态：
 
 ```cpp
-class IDataFileLoader {
+class IRuntimeDataLoader {
 public:
-    virtual ~IDataFileLoader() = default;
-    virtual std::vector<std::uint8_t> LoadBytes(const std::string& path) = 0;
-};
-
-enum class RuntimeDataFormat {
-    Json,
-    MessagePack,
-};
-
-class IRuntimeDataDecoder {
-public:
-    virtual ~IRuntimeDataDecoder() = default;
-    virtual std::vector<ItemRow> DecodeItemsRows(
-        RuntimeDataFormat format,
-        const std::string& path,
-        const std::vector<std::uint8_t>& bytes) = 0;
+    virtual ~IRuntimeDataLoader() = default;
+    // Implementations should read exported table files such as DataFile,
+    // decode the payload envelope `{ meta, rows }`, and return typed rows.
+    virtual std::vector<ItemRow> LoadItemsRows(const std::string& path) = 0;
 };
 
 struct ItemRow {
@@ -609,9 +577,8 @@ struct ItemRow {
 class ItemsTable {
 public:
     static constexpr const char* DataFile = "items.msgpack";
-    static constexpr RuntimeDataFormat DataFormat = RuntimeDataFormat::MessagePack;
 
-    static ItemsTable Load(IDataFileLoader& loader, IRuntimeDataDecoder& decoder);
+    static ItemsTable Load(IRuntimeDataLoader& loader);
     const std::vector<ItemRow>& Rows() const;
     const ItemRow* GetById(std::int64_t id) const;
     std::vector<const ItemRow*> FindByRarity(ItemRarity rarity) const;
@@ -624,7 +591,7 @@ private:
 
 class GameData {
 public:
-    static GameData Load(IDataFileLoader& loader, IRuntimeDataDecoder& decoder);
+    static GameData Load(IRuntimeDataLoader& loader);
     const ItemsTable& Items() const;
 private:
     ItemsTable items_;
@@ -634,13 +601,13 @@ private:
 C++ 约束：
 
 - 第一阶段目标 C++17。
-- 运行时 JSON / MessagePack 解析库不强绑定。生成代码只定义 `IRuntimeDataDecoder`，由业务实现；可在后续提供基于 `nlohmann::json`、`msgpack-c` 或引擎序列化系统的可选 adapter。
+- 运行时 JSON / MessagePack 解析库不强绑定。生成代码只定义 typed `IRuntimeDataLoader`，由业务实现；可在后续提供基于 `nlohmann::json`、`msgpack-c` 或引擎序列化系统的可选 adapter。
 - 复合 key 需要生成 `struct Key`、`operator==` 和 hash。
 - enum class 需要生成 hash 或转换为底层整数用于 unordered_map。
 
 ### 4.8.3 TypeScript 生成内容
 
-建议文件：
+当前实现采用单文件输出：`generated.ts`。以下多文件布局仍是后续拆分方向：
 
 ```text
 generated/ts/
@@ -653,14 +620,10 @@ generated/ts/
 核心形态：
 
 ```ts
-export interface DataFileLoader {
-  loadBytes(path: string): Promise<Uint8Array | ArrayBuffer | string> | Uint8Array | ArrayBuffer | string;
-}
-
-export type RuntimeDataFormat = "json" | "messagepack";
-
-export interface RuntimeDataDecoder {
-  decodeItemsRows(format: RuntimeDataFormat, path: string, data: Uint8Array | ArrayBuffer | string): ItemRow[];
+export interface RuntimeDataLoader {
+  // Implementations should read exported table files such as dataFile,
+  // decode the payload envelope `{ meta, rows }`, and return typed rows.
+  loadItemsRows(path: string): Promise<ItemRow[]> | ItemRow[];
 }
 
 export type ItemRarity = "common" | "rare";
@@ -673,13 +636,12 @@ export interface ItemRow {
 
 export class ItemsTable {
   static readonly dataFile = "items.msgpack";
-  static readonly dataFormat: RuntimeDataFormat = "messagepack";
 
   private readonly rows_: ItemRow[];
   private readonly byId: Map<number, ItemRow>;
   private readonly byRarity: Map<ItemRarity, ItemRow[]>;
 
-  static async load(loader: DataFileLoader, decoder: RuntimeDataDecoder): Promise<ItemsTable>;
+  static async load(loader: RuntimeDataLoader): Promise<ItemsTable>;
   rows(): readonly ItemRow[];
   getById(id: number): ItemRow | undefined;
   findByRarity(rarity: ItemRarity): readonly ItemRow[];
@@ -687,16 +649,16 @@ export class ItemsTable {
 
 export class GameData {
   readonly items: ItemsTable;
-  static async load(loader: DataFileLoader, decoder: RuntimeDataDecoder): Promise<GameData>;
+  static async load(loader: RuntimeDataLoader): Promise<GameData>;
 }
 ```
 
 TypeScript 约束：
 
 - 第一阶段生成 ESM。
-- `DataFileLoader.loadBytes` 同时允许同步值和 `Promise`，生成代码内部统一 `await`。
-- JSON / MessagePack 解码通过 `RuntimeDataDecoder` 注入；可提供可选 `JsonRuntimeDataDecoder` 示例，但生成核心代码不绑定 MessagePack npm 包。
-- 对 runtime data shape 做轻量检查：表文件必须能解析为数组或 `{ rows: [...] }`。是否对每个字段做严格 runtime type guard 可通过选项控制。
+- `RuntimeDataLoader.load*Rows` 同时允许同步值和 `Promise`，生成代码内部统一 `await`。
+- JSON / MessagePack 解码由 `RuntimeDataLoader` 实现负责；生成核心代码不绑定 MessagePack npm 包。
+- runtime data shape `{ meta, rows }` 的读取与字段 runtime type guard 由 loader 实现负责；生成 repository 只接收 typed rows 并建立索引。
 
 ## 4.9 索引辅助查找函数设计
 
@@ -753,61 +715,57 @@ TypeScript 约束：
 - C++ 游戏客户端：从包内资源、虚拟文件系统或引擎 AssetManager 读取；
 - TypeScript：从 HTTP、Node fs、浏览器 bundle 或 IndexedDB 读取。
 
-因此生成代码依赖两个抽象：loader 给定逻辑 data file path 返回 bytes；decoder 根据 target format 把 bytes 转成 typed rows。
+因此当前生成代码依赖一个 typed loader 抽象：loader 给定逻辑 data file path，负责读取对应 JSON / MessagePack 文件、解码 payload envelope `{ meta, rows }`，并返回 typed rows。早期设计中的 `DataFileLoader + RuntimeDataDecoder` 双抽象暂未落地，后续如果需要复用统一 decoder，可在不改变 CodeModel 的前提下再拆分。
 
 ### 4.10.2 语言无关接口
 
 ```text
-DataFileLoader
-  load_bytes(path) -> bytes
-
-RuntimeDataDecoder
-  decode_<table>_rows(format, path, bytes) -> Vec<Row>
+RuntimeDataLoader
+  load_<table>_rows(path) -> Vec<Row>
 ```
 
-第一阶段 JSON 和 MessagePack 都走 `load_bytes`，避免 JSON 使用 text、MessagePack 使用 bytes 导致生成 API 分裂。JSON decoder 可以自行把 bytes 按 UTF-8 解释为文本。
+Rust / C++ / TypeScript 生成代码分别暴露同名语义的 `RuntimeDataLoader` / `IRuntimeDataLoader` / `RuntimeDataLoader`。方法名按表生成，例如 Rust `load_items_rows`、C++ `LoadItemsRows`、TypeScript `loadItemsRows`。
 
 ### 4.10.3 数据格式适配
 
-加载器只负责读取原始内容，不负责解析业务对象。解析由 runtime adapter / decoder 完成：
+加载器实现负责读取与解析业务对象：
 
 ```text
-loader.load_bytes("items.msgpack")
-  -> bytes
-  -> runtime decoder by RuntimeDataFormat::MessagePack
+loader.load_items_rows("items.msgpack")
+  -> read bytes/text
+  -> decode payload envelope `{ meta, rows }`
   -> Vec<ItemRow>
-  -> ItemsTable::from_rows
+  -> ItemsTable::new / constructor
   -> indexes
 ```
 
-这样可以把“从哪里加载”和“如何解释数据”分开。
+这样让生成代码保持轻量，不绑定 runtime decoder crate/package；代价是 loader 实现需要按表提供 typed rows 方法。后续如果多表 decoder 复用成本变高，可再引入统一 decoder adapter。
 
 ### 4.10.4 默认 loader
 
-可以为每种语言生成一个可选的默认本地文件 loader：
+可以为每种语言生成一个可选的默认 loader / adapter 示例，但当前实现只生成接口，不生成默认文件 loader：
 
 | Language | 默认实现 |
 | --- | --- |
-| Rust | `FsDataFileLoader { root: PathBuf }` |
+| Rust | `FsRuntimeDataLoader { root: PathBuf }`，可选生成 |
 | C++ | `FileSystemDataFileLoader { root }`，可选生成 |
 | TypeScript | `FetchDataFileLoader` / `NodeFsDataFileLoader`，二选一或都不默认生成 |
 
-第一阶段建议：
+当前实现：
 
-- Rust 生成 `FsDataFileLoader`，便于测试。
-- C++ 只生成接口，不绑定文件 API。
-- TypeScript 只生成接口和一个简单 `fetch` loader 示例，避免 Node/browser 环境分歧。
+- Rust / C++ / TypeScript 均只生成 typed loader interface，不绑定文件 API。
+- 集成测试中通过 mock loader 验证生成代码可编译。
+- 后续可按语言新增可选 adapter，而不是强制把文件系统或第三方解析库纳入生成代码。
 
 默认 decoder 策略：
 
-- 核心生成代码只生成 decoder interface，不强制 runtime 依赖。
-- Rust 可选生成 `SerdeRuntimeDataDecoder`，需要调用方启用/提供 `serde_json` 与 `rmp-serde`。
-- C++ 可选生成 adapter 示例，不默认依赖 `nlohmann::json` 或 `msgpack-c`。
-- TypeScript 可选生成 JSON decoder；MessagePack decoder 由 runtime 注入，以避免绑定具体 npm 包。
+- 核心生成代码不生成 decoder interface，不强制 runtime 依赖。
+- JSON / MessagePack 解析应放在业务侧 `RuntimeDataLoader` 实现或后续可选 adapter 中。
+- MessagePack decoder 不绑定具体 npm / C++ / Rust 包。
 
 ## 4.11 Runtime data 文件约定
 
-当前 exporter 输出形态是包含 `meta` 和 `rows` 的 payload。JSON 与 MessagePack 使用同一逻辑结构，只是编码方式不同。生成代码 / decoder 读取时建议支持两种 shape：
+当前 exporter 输出形态是包含 `meta` 和 `rows` 的 payload。JSON 与 MessagePack 使用同一逻辑结构，只是编码方式不同。业务侧 `RuntimeDataLoader` 读取时至少应支持当前 shape：
 
 ```json
 {
@@ -818,7 +776,7 @@ loader.load_bytes("items.msgpack")
 }
 ```
 
-以及未来更轻量的：
+未来也可以支持更轻量的：
 
 ```json
 [
@@ -832,16 +790,16 @@ loader.load_bytes("items.msgpack")
 - string/text/asset/enum 输出 string；
 - struct 后续输出 object。
 
-如果短期仍输出字符串 cell，decoder 必须在加载时做类型转换。这会导致三种语言重复实现 parse 逻辑，不推荐长期保留。
+如果短期仍输出字符串 cell，typed loader 必须在加载时做类型转换。这会导致三种语言重复实现 parse 逻辑，不推荐长期保留。
 
 建议分两步：
 
-1. Codegen 第一阶段先兼容当前 `{ meta, rows }`，并由 decoder 把字段从 runtime value parse 为目标类型。
-2. Data typed export 落地后，decoder 可以直接读取 typed JSON / MessagePack。
+1. Codegen 第一阶段先兼容当前 `{ meta, rows }`，并由业务侧 `RuntimeDataLoader` 把字段从 runtime value parse 为目标类型。
+2. Data typed export 落地后，loader 可以直接读取 typed JSON / MessagePack。
 
 ## 4.11.1 Exporter 写出实现方案
 
-`TargetDataFormat` 与 codegen 层 `RuntimeDataFormat` 保持一一对应：
+runtime data format 由 data export registry 选择，并通过 `RuntimeDataFile.path` 的文件名后缀传给 codegen；当前 codegen 层不再生成 `RuntimeDataFormat` 类型。目标态可用枚举描述如下：
 
 ```rust
 pub enum TargetDataFormat {
@@ -878,13 +836,13 @@ CodeModel 构建时需要使用 `RuntimeDataFile`：
 生成代码的 load 流程统一为：
 
 ```text
-Table::load(loader, decoder)
-  -> bytes = loader.load_bytes(DATA_FILE)
-  -> rows = decoder.decode_<table>_rows(DATA_FORMAT, DATA_FILE, bytes)
-  -> Table::from_rows(rows)
+Table::load(loader)
+  -> rows = loader.load_<table>_rows(DATA_FILE)
+  -> Table::new / constructor(rows)
+  -> build indexes
 ```
 
-这样 JSON 与 MessagePack 的差异完全落在 decoder 实现里，repository、index、GameData facade 不需要关心具体解析库。
+这样 JSON 与 MessagePack 的差异完全落在 loader 实现里，repository、index、GameData facade 不需要关心具体解析库。
 
 ## 4.12 生成器接口
 
@@ -1047,50 +1005,58 @@ C++ / TypeScript 可后续增加：
 4. 检查关键 API 名称存在。
 5. Rust 生成代码可选执行 compile check。
 
-## 4.16 第一阶段落地顺序
+## 4.16 第一阶段落地状态
 
-推荐分阶段实现：
+当前第一阶段主体已落地，历史分阶段计划更新为实现状态：
 
 ### Phase 1：CodeModel 与 Rust 生成器
 
-1. 新增 `src/codegen/`。
-2. 实现 CodeModel IR。
-3. 实现 naming / type mapping。
-4. 替换现有 `write_table_rust_stub`。
-5. 生成 Rust enum / struct / row / table / index helper / loader trait。
-6. 增加单元测试和标准 fixture 回归。
+状态：已完成。
+
+1. 已新增 `src/codegen/`。
+2. 已实现 CodeModel IR。
+3. 已实现 naming / type mapping 和生成符号冲突检测。
+4. 已移除临时 Rust stub 路径，改由 `CodeGeneratorRegistry` 分发。
+5. 已生成 Rust enum / struct / row / table / index helper / typed loader trait。
+6. 已增加单元测试和标准 fixture 回归。
 
 ### Phase 2：TypeScript 生成器
 
-1. 生成 `types.ts` / `tables.ts` / `loader.ts`。
-2. 支持 async loader。
-3. 支持 Map-based indexes。
-4. 增加 snapshot/contains 测试。
+状态：已完成核心单文件生成。
+
+1. 当前输出 `generated.ts`，包含 type / table / loader / GameData facade。
+2. 已支持 async typed loader。
+3. 已支持 Map-based indexes，并为 unique index 增加重复 key 防御。
+4. 当前测试以语义 contains 断言为主，snapshot/golden file 可后续补充。
 
 ### Phase 3：C++ 生成器
 
-1. 生成 header-only 版本，降低 `.cpp` 链接复杂度。
-2. 生成 loader interface。
-3. 生成 enum conversion 和 index hash。
-4. 后续再拆 `.hpp` / `.cpp`。
+状态：已完成核心 header-only 生成。
+
+1. 当前输出 `generated.hpp`。
+2. 已生成 typed loader interface。
+3. 已生成 enum、row、repository 和 index helper。
+4. 后续可再拆 `.hpp` / `.cpp` 或补充更完整 enum conversion。
 
 ### Phase 4：Artifact Writer 和 manifest
 
-1. 把 runtime data 和 generated code 统一为 Artifact。
-2. 做路径冲突检查。
-3. 支持 direct / temp_commit。
-4. 输出 manifest。
+状态：部分完成。
+
+1. runtime data 与 generated code 都以 `GeneratedFile`/artifact 形态参与写出。
+2. 已做输出路径冲突检查。
+3. 当前写入策略为 direct write；`temp_commit` 未实现。
+4. manifest 未实现。
 
 ## 4.17 第一阶段完成标准
 
 完成时应满足：
 
-- Rust、C++、TypeScript 三种语言至少能生成类型和表访问代码。
-- 所有 enum、struct、table row type 都有生成结果。
-- 所有 table index 都有对应辅助查找函数。
-- 每种语言都有抽象 loader 接口。
+- Rust、C++、TypeScript 三种语言至少能生成类型和表访问代码。（已满足）
+- 所有 enum、struct、table row type 都有生成结果。（已满足；struct 数据值 validation 仍 reserved）
+- 当前 target 可见的 table index 都有对应辅助查找函数。（已满足）
+- 每种语言都有抽象 typed loader 接口。（已满足）
 - 生成代码不直接依赖 ConfigForge CLI 内部类型。
 - 命名冲突和非法标识符不会静默生成错误代码。
-- `export_project` 不再使用临时 `write_table_rust_stub`。
+- exporter 不再使用临时 Rust stub。
 - `cargo fmt`、`cargo clippy --all-targets --all-features`、`cargo test` 通过。
 - 标准工程 fixture 覆盖 runtime data + code export 输出。

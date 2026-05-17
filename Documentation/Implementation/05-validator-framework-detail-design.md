@@ -1,6 +1,6 @@
 # 05. 注册式 Validator 框架详细设计
 
-本文档描述 ConfigForge 后续 validator 框架的实现设计。目标是在保留现有 required / type / enum / unique / target-aware validation 行为的基础上，引入可注册、可扩展、可配置的 validator 机制，使内置校验和未来插件校验都能通过统一管线执行，而不是继续把规则硬编码在 `src/validation.rs` 中。
+本文档描述 ConfigForge validator 框架的实现设计。当前已在保留 required / type / enum / unique / target-aware validation 行为的基础上，引入可注册、可扩展、可配置的 validator 机制；已落地 registry、结构化 `ValidationReport` 和内置 `range` validator。required / type / enum / unique 仍作为基础规则保留在 validation 主流程中，后续可继续迁移为 implicit validators。
 
 需要特别区分：**validator 是检查规则，foreign key 是数据关系模型**。外键关系不仅用于导出前校验，还会影响 runtime data/codegen，例如生成自动查找关联记录的 helper。因此外键不应只作为 `kind = "foreign_key"` 的普通 validator 配置存在；它应成为 Meta 中的一等关系数据，再由 validation 阶段从外键关系隐式生成 referential-integrity validator。
 
@@ -11,7 +11,7 @@
 ### 5.1.1 必须解决的问题
 
 1. **避免校验逻辑继续硬编码扩散**
-   - 当前 `src/validation.rs` 直接写死 required、type、enum、unique index 等规则。
+   - 早期 `src/validation.rs` 直接写死 required、type、enum、unique index 等规则；当前已拆成 `src/validation/` 模块并引入 registry，基础规则仍保留 hardcoded，新增 range 走 registry。
    - 新增 range、regex、长度、概率和跨字段规则时，如果继续堆函数，会导致模块难以维护。
 
 2. **支持 validator 专属配置字段**
@@ -295,7 +295,7 @@ codegen 规则：
 
 ## 5.3 代码模块结构
 
-建议把当前扁平 `src/validation.rs` 逐步拆成目录模块：
+当前已拆成目录模块：
 
 ```text
 src/validation/
@@ -303,29 +303,13 @@ src/validation/
   context.rs          # ValidationContext、ExportValidationView
   diagnostic.rs       # ValidationDiagnostic / ValidationIssue，桥接 ConfigForgeError
   registry.rs         # ValidatorRegistry、ValidatorFactory 注册与 lookup
-  meta.rs             # ValidatorMeta、ValidationSeverity、ValidatorInputScope（也可放 meta/model.rs）
-  compile.rs          # Raw ValidatorMeta -> CompiledValidator
   builtins/
     mod.rs
-    required.rs       # 可第二阶段迁移
-    type_check.rs     # 可第二阶段迁移
-    enum_value.rs     # 可第二阶段迁移
     range.rs
-    unique.rs
-    referential_integrity.rs # 由 ForeignKeyMeta 隐式生成的关系完整性校验
+  tests.rs
 ```
 
-短期也可以先保持 `src/validation.rs`，新增内部子模块文件，避免一次性大迁移：
-
-```text
-src/validation.rs
-src/validation/registry.rs
-src/validation/builtins/range.rs
-src/validation/builtins/unique.rs
-src/validation/builtins/referential_integrity.rs
-```
-
-Rust 支持 `src/validation.rs` 与 `src/validation/` 子目录共存；后续再把 `validation.rs` 改为 `validation/mod.rs`。
+`ValidatorMeta`、`ValidationSeverity` 当前放在 `src/meta/model.rs`；raw `ValidatorMeta -> CompiledValidator` 的 compile 流程由 `src/validation/registry.rs` 中的 `CompiledValidationPlan::compile` 负责。required / type / enum / unique 仍在 `src/validation/mod.rs` 中作为基础校验执行；后续可按需新增 `builtins/unique.rs`、`builtins/referential_integrity.rs` 等模块继续迁移。
 
 ## 5.4 核心 trait 与类型
 
@@ -732,7 +716,7 @@ impl ValidationReport {
    - 新增 `ValidatorMeta`、`ValidationSeverity`。
    - `FieldMeta` 增加 `validators: Vec<ValidatorMeta>`。
    - `TableMeta` 增加 `validators: Vec<ValidatorMeta>`。
-   - 当前代码尚不接受 validator TOML；这些字段属于 Phase 1 新增能力，文档示例在实现前仅表示目标结构。
+   - 当前代码已接受 validator TOML；这些字段已属于 Phase 1 落地能力。
 
 2. `src/meta/validate.rs`
    - 校验 validator `kind` 非空、tag 合法、公共字段合法。
@@ -745,7 +729,7 @@ impl ValidationReport {
 4. `src/validation/builtins/range.rs`
    - 实现 range factory 和 compiled validator。
 
-5. `src/validation.rs`
+5. `src/validation/mod.rs`
    - 在现有 target-aware validation 中插入 `CompiledValidationPlan::run`。
    - 第一阶段 required/type/enum/unique 可继续保留 hardcoded；range 走 registry。
 
@@ -789,7 +773,7 @@ impl ValidationReport {
 
 ### Phase 4：迁移 required/type/enum 并引入结构化诊断
 
-目标：`src/validation.rs` 不再硬编码具体规则，只负责上下文、视图和执行顺序。
+目标：`src/validation/mod.rs` 不再硬编码具体规则，只负责上下文、视图和执行顺序。
 
 修改点：
 
@@ -824,7 +808,7 @@ impl ValidationReport {
 | `src/validation/builtins/range.rs` | range 参数解析、边界比较、错误信息。 |
 | `src/validation/builtins/unique.rs` | explicit / implicit unique、复合 key、row_export 后过滤。 |
 | `src/validation/builtins/referential_integrity.rs` | 外键关系生成的完整性校验、target 查找、optional、复合 key、target ExportView 语义。 |
-| `src/validation/tests.rs` 或 `src/validation.rs` | registry compile/run 流程。 |
+| `src/validation/tests.rs` | registry compile/run 流程。 |
 
 ### 集成测试
 

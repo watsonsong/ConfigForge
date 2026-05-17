@@ -14,7 +14,7 @@
 | default | Partial | 当前支持 primitive / enum scalar default。 |
 | multi-source / override / fragments | Reserved | 当前会显式报 unsupported，避免静默忽略配置。 |
 | builtin value types / foreign key / ObjectTable 特化语义 | Planned | 当前尚未实现。 |
-| target tags / export_when / row_export | Planned | 目标态设计已确认；当前实现仍待替换旧字段过滤逻辑。 |
+| target tags / export_when / row_export | Implemented | 当前 Project target 支持 `tags`；Meta 中 table / field / index 支持 `export` 与 `export_when`；collection table 支持 `row_export`，并已接入 validation、runtime data export 与 codegen 的 target-aware 视图。旧字段 `tool_only` / `filter_field` / `validator_only` 仅用于报 deprecated/unsupported 诊断，不再参与导出判断。 |
 
 ## 4.1 MetaModel
 
