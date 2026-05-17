@@ -29,6 +29,9 @@ Use the implementation documents after product behavior has been confirmed in `D
 
 - `Implementation/01-module-outline.md` — Rust module boundaries, dependency direction, execution pipeline mapping, and first-stage completion criteria.
 - `Implementation/02-meta-module-detail-design.md` — Meta module data structures, Rust inheritance/composition strategy, main APIs, migration path, and unit test plan.
+- `Implementation/03-data-module-detail-design.md` — Data load/model/validation/exporter flow design.
+- `Implementation/04-code-export-module-detail-design.md` — Code export IR, generator contracts, and multi-language output design.
+- `Implementation/05-validator-framework-detail-design.md` — Registered validator framework, Meta validator configuration, built-in validator migration, and test plan.
 
 ## Technical Practice Set
 

@@ -19,6 +19,8 @@ Meta 模块负责把一个或多个 Meta 文件转换为可被后续模块使用
 - 基础结构校验与稳定诊断。
 - 模块内单元测试覆盖加载、Link、imports、诊断。
 
+计划字段说明：本文后续结构示例中出现的 `validators: Vec<ValidatorMeta>` 与 `foreign_keys: Vec<ForeignKeyMeta>` 属于 validator 框架 / 外键关系数据的后续实现目标，当前 `src/meta/model.rs` 尚未落地这些字段，当前 TOML 也尚不接受 validator / foreign key 配置。具体落地阶段见 `05-validator-framework-detail-design.md`。
+
 ## 2.2 Rust 中的“类”和继承策略
 
 Rust 不使用面向对象继承。本文档中的“类”对应 Rust 的 `struct`、`enum`、`trait`：
@@ -164,6 +166,8 @@ pub struct TableMeta {
     pub export: bool,
     pub export_when: ExportCondition,
     pub row_export: Option<RowExportPolicy>,
+    pub validators: Vec<ValidatorMeta>,
+    pub foreign_keys: Vec<ForeignKeyMeta>,
     pub source: Option<String>,
     pub sources: Vec<SourceRef>,
     pub override_sources: Vec<SourceRef>,
@@ -184,6 +188,8 @@ pub struct TableMeta {
 - `export = false` 是整表导出的硬关闭；默认 `true`。
 - `export_when` 根据 target tags 判断整表是否进入 runtime data 与 codegen。
 - `row_export` 只作用于 collection runtime data 行过滤，常用于 `shipping` / `debug` 等 target 差异。
+- `validators` 保存 table-level / record-level validator 的 raw 配置，例如 explicit unique、权重总和、跨字段关系等；具体参数由 validation registry 编译。该字段是 Phase 1 计划新增字段，当前实现尚不接受 TOML 配置。
+- `foreign_keys` 保存外键关系数据。外键不是普通 validator，它既会隐式生成引用完整性校验，也会进入 CodeModel 影响生成代码的关联查询 API。该字段是 Phase 3 计划新增字段，当前实现尚不接受 TOML 配置。
 
 ### 2.5.5 `TableKind`
 
@@ -213,6 +219,7 @@ pub struct FieldMeta {
     pub layout: Option<ValueLayout>,
     pub export: bool,
     pub export_when: ExportCondition,
+    pub validators: Vec<ValidatorMeta>,
     pub tool_only: Option<bool>,
     pub filter_field: Option<bool>,
     pub validator_only: Option<bool>,
@@ -227,10 +234,65 @@ pub struct FieldMeta {
 - `default` 暂保留 `toml::Value`；后续可在 Link 或单独 default-link 阶段按字段类型解析为 typed default。
 - `export = false` 是字段导出的硬关闭；默认 `true`。
 - `export_when` 根据 target tags 判断字段是否进入 runtime row 与 codegen row type。
+- `validators` 保存 field-level validator 的 raw 配置，例如 range、regex、length、asset ref syntax 等；Meta 模块只做公共字段和轻量结构校验。该字段是 Phase 1 计划新增字段，当前实现尚不接受 TOML 配置。
 - `tool_only`、`filter_field`、`validator_only` 已由 target tags 机制替代；当前仅保留为 `Option<bool>` 以便检测用户仍在使用并输出 `UnsupportedFeature` 诊断，不再参与导出判断。
-- `unique` 是兼容字段；正式唯一性建议优先通过 `IndexMeta { unique = true }` 表达。
+- `unique` 是内置便捷字段，后台会隐式转换为 single-field unique validator；复合唯一性建议优先通过 `IndexMeta { unique = true }` 或 explicit table validator 表达。
 
-### 2.5.7 Target Tags 与导出条件
+### 2.5.7 `ValidatorMeta`
+
+Validator 采用注册式框架。Meta 层只保存 raw 配置，不依赖具体 validator 实现：
+
+状态：Phase 1 计划新增。当前实现尚未定义 `ValidatorMeta`，也不会解析 `[[tables.fields.validators]]` / `[[tables.validators]]` TOML。
+
+```rust
+pub struct ValidatorMeta {
+    pub kind: String,
+    pub name: Option<String>,
+    pub desc: Option<String>,
+    pub severity: ValidationSeverity,
+    pub export_when: ExportCondition,
+    pub message: Option<String>,
+    pub params: BTreeMap<String, toml::Value>,
+}
+```
+
+设计要点：
+
+- `kind` 是 validator registry 的查找 key，例如 `range`、`unique`、`weight_sum`。
+- `params` 通过 serde flatten 保存 validator 专属配置，避免每新增一个 validator 就修改 `FieldMeta` / `TableMeta` 顶层字段。
+- `export_when` 控制 validator 是否在当前 target tags 下执行。
+- Meta validate 阶段只检查公共字段、tag 合法性和明显结构错误；unknown kind、参数类型、字段引用等由 validation compile 阶段根据 registry 诊断。
+
+详细框架见 `05-validator-framework-detail-design.md`。
+
+### 2.5.8 `ForeignKeyMeta`
+
+外键关系是一等 Meta 数据，不放在 `validators` 中：
+
+状态：Phase 3 计划新增。当前实现尚未定义 `ForeignKeyMeta`，也不会解析 `[[tables.foreign_keys]]` TOML。
+
+```rust
+pub struct ForeignKeyMeta {
+    pub name: String,
+    pub desc: Option<String>,
+    pub export: bool,
+    pub export_when: ExportCondition,
+    pub fields: Vec<String>,
+    pub target_table: String,
+    pub target_index: Option<String>,
+    pub allow_empty: bool,
+}
+```
+
+设计要点：
+
+- `fields` 是 source table 中参与引用的字段列表。
+- `target_table` / `target_index` 描述被引用的目标表和唯一索引；`target_index` 为空时使用目标表 primary index。
+- `allow_empty` 允许 optional FK 全空时跳过引用完整性检查。
+- `export` / `export_when` 控制该关系是否进入当前 target 的 CodeModel；validation 也默认只检查当前 target 可见关系。
+- Link 阶段应解析为 `LinkedForeignKeyMeta<'meta>`，供 validation 隐式生成 referential-integrity validator，并供 codegen 生成关联查询 helper。
+
+### 2.5.9 Target Tags 与导出条件
 
 ```rust
 pub struct TargetTags {
@@ -263,7 +325,7 @@ pub enum TagMatchMode {
 - `RowExportPolicy` 从数据行中的 `required_tags_field` / `excluded_tags_field` 读取逗号分隔 tag 列表；命中 excluded tag 时该行不导出；required tags 为空时默认导出；非空时按 `match = "any" | "all"` 与 target tags 匹配。
 - Meta 校验阶段确认 `row_export` 引用的字段存在，但不把它们 link 成字段引用；当前 row 过滤只需要字段名查值。
 
-### 2.5.8 primitive 类型
+### 2.5.10 primitive 类型
 
 ```rust
 pub enum PrimitiveFieldType {
@@ -287,7 +349,7 @@ pub enum PrimitiveFieldType {
 | `text` | `Text` |
 | `asset` | `Asset` |
 
-### 2.5.9 `IndexMeta`
+### 2.5.11 `IndexMeta`
 
 ```rust
 pub struct IndexMeta {
@@ -547,7 +609,7 @@ pub enum MetaDiagnosticCode {
 | 候选位置 | Raw 表达 | 建议 Linked 表达 | 触发条件 |
 | --- | --- | --- | --- |
 | field path | `String` | `LinkedFieldPath<'meta>` | 支持 expanded value、嵌套 struct、数组 slot 后补充。 |
-| foreign key | table/index/field 名字符串 | `LinkedForeignKey<'meta>` | 外键 Meta 字段落地后补充。 |
+| foreign key | `ForeignKeyMeta { fields, target_table, target_index }` | `LinkedForeignKeyMeta<'meta>` | 外键是一等关系数据，validation 用于引用完整性检查，codegen 用于关联查询 helper。 |
 | source fragments | `SourceRef.fragments: Vec<String>` | `Vec<&FragmentMeta>` | FragmentMeta 落地后补充。 |
 | validator 引用 | validator 名字符串 | `LinkedValidator<'meta>` 或 compiled handle | validator registry 落地后补充。 |
 | default value | `toml::Value` | `LinkedDefaultValue` / typed value | 需要按 `LinkedField` 判断 TOML 值是否合法。 |

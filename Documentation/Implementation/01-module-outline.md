@@ -24,7 +24,7 @@
 | Meta | `src/meta/` | 加载、合并、链接、校验 Meta。 | TOML/XML Meta 文件。 | `MetaModel`、`LinkedMetaModel<'meta>`、`MetaDiagnostic`。 |
 | Source | `src/source.rs` / `src/source/` | 将 CSV/XLSX/远程表格归一化为二维 `SourceSheet`。 | source declaration。 | `SourceSheet` / `DataTable`。 |
 | Data Model | `src/data/` | 将 source cell 解析为 typed value 和逻辑表数据。 | `LinkedMetaModel<'meta>`、`SourceSheet`。 | `DataSet`。 |
-| Validation | `src/validation.rs` / `src/validation/` | 业务规则、索引、外键、过滤视图校验。 | `LinkedMetaModel<'meta>`、`DataSet`、`ExportContext`。 | 结构化诊断。 |
+| Validation | `src/validation.rs` / `src/validation/` | 业务规则、索引、外键、注册式 validator、过滤视图校验。 | `LinkedMetaModel<'meta>`、`DataSet`、`ExportContext`、`ValidatorRegistry`。 | 结构化诊断。 |
 | Exporter | `src/exporter.rs` / `src/exporter/` | 生成 runtime data、代码、special artifacts。 | `LinkedMetaModel<'meta>`、`TargetTags`、target config。 | `RuntimeDataFile` / generated files。 |
 | Artifact Writer | `src/artifact/` | direct/temp_commit 写入策略、manifest 输出。 | `ArtifactPlan`。 | 文件系统产物。 |
 | Diagnostics | `src/diagnostics/` | 统一诊断模型、稳定排序、报告格式。 | 各模块诊断。 | `DiagnosticReport`。 |
@@ -73,9 +73,9 @@ cli
 5. **Source Load**：按 provider 加载二维表，可并发 I/O。
 6. **Sheet Mapping / Data Parse**：根据已链接 Meta 映射 field path 并解析 typed value。
 7. **DataSet Compose**：base source split merge 与 override apply。
-8. **Validation**：required/default、类型、索引、外键、validator、row export 引用。
-9. **Target Tags Filter**：按 target tags 过滤 table / field / index / runtime rows。
-10. **Artifact Generate**：生成 runtime data、代码、POT、asset manifest 等。
+8. **ExportView Derive / Target Tags Filter**：按当前 `ValidationMode` 和 target tags 派生 validation/export 输入视图，过滤 table / field / index / runtime rows；`validate --all-targets` 会为每个 target 分别派生视图。
+9. **Validation on ExportView**：required/default、类型、索引、外键、validator、row export 引用等规则在当前 ExportView 上执行；需要完整数据集语义的规则必须显式声明 `input = "full_dataset"`。
+10. **Artifact Generate**：复用同一个 target ExportView 生成 runtime data、代码、POT、asset manifest 等，避免 validation 与实际导出语义不一致。
 11. **Artifact Write**：按 direct 或 temp_commit 写入，并输出 manifest。
 
 当前已重点落地第 2～5 步中与 TOML Meta 相关的部分。
@@ -105,6 +105,8 @@ src/meta/
   default_value.rs    # default 按 LinkedField 类型解析后的结构
   validator_ref.rs    # validator 声明与引用解析
 ```
+
+Validator 的注册、编译和执行框架详见 `05-validator-framework-detail-design.md`。Meta 模块只承载 raw validator 配置和轻量结构校验，不依赖具体 validator 实现。
 
 ## 1.6 Load-then-Link 策略
 
@@ -141,7 +143,7 @@ TOML files/imports
 
 | 候选位置 | 当前/未来 Raw 表达 | 建议 Linked 表达 | 说明 |
 | --- | --- | --- | --- |
-| foreign key | table/index/field 名字符串 | `&LinkedTableMeta` + `&LinkedIndexMeta` / `&LinkedFieldMeta` | 需要目标表和目标索引全部加载后解析。 |
+| foreign key | `ForeignKeyMeta { fields, target_table, target_index }` | `LinkedForeignKeyMeta<'meta>` | 外键是一等关系数据，供 validation 隐式生成 referential-integrity validator，并供 codegen 生成关联查询 helper。 |
 | `SourceRef.fragments` | `Vec<String>` | `Vec<&FragmentMeta>` | fragment 元数据落地后再解析。 |
 | validator 引用 | validator 名字符串 | `&ValidatorMeta` 或 compiled validator handle | 需要 validator registry。 |
 | export/filter 字段引用 | 字符串 field path | `LinkedFieldPath<'meta>` | 需要 field path parser 和 struct/array 展开规则。 |

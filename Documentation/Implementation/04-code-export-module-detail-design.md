@@ -308,8 +308,18 @@ pub struct CodeTable {
     pub desc: Option<String>,
     pub fields: Vec<CodeField>,
     pub indexes: Vec<CodeIndex>,
+    pub foreign_keys: Vec<CodeForeignKey>,
     pub primary_index: Option<String>,
     pub data_file: String,
+}
+
+pub struct CodeForeignKey {
+    pub name: String,
+    pub desc: Option<String>,
+    pub fields: Vec<CodeField>,
+    pub target_table: String,
+    pub target_index: String,
+    pub allow_empty: bool,
 }
 ```
 
@@ -317,7 +327,7 @@ IR 职责：
 
 1. 保留 Meta 中的语义名称和描述信息。
 2. 根据 `target_tags` 过滤不应导出的表、字段和索引，例如 `export = false`、`export_when = { any = ["client"] }`。
-3. 保留 table、field、index、enum、struct 的语言无关关系。
+3. 保留 table、field、index、foreign key、enum、struct 的语言无关关系。
 4. 保留 runtime data file 信息。
 5. 把 `LinkedField` 转换为目标语言无关的 `CodeTypeRef`。
 
@@ -352,7 +362,15 @@ pub enum CodeTypeRef {
 - 把 `CodeTypeRef` 映射为语言类型；
 - 渲染语法；
 - 渲染 loader / repository / index API；
+- 渲染 foreign key 关联 helper，例如 Rust `fn item<'a>(&self, data: &'a GameData, row: &QuestRow) -> Option<&'a ItemsRow>`、C++ `GetItem`、TypeScript `getItem`；
 - 处理 import/include/use。
+
+Foreign key 对 CodeModel 的要求：
+
+- 外键不是普通 validator，而是 Meta 关系数据。validation 只负责保证关系完整性；codegen 需要读取同一份 `LinkedForeignKeyMeta` 生成关联查询 API。
+- 只有当前 target 可导出的 foreign key 进入 `CodeForeignKey`。
+- source table、target table、source fields、target index fields 都必须在当前 target CodeModel 可见。
+- target index 必须 unique，第一阶段只生成 many-to-one helper；一对多反向索引可在后续 relation 设计中扩展。
 
 ## 4.6 命名策略与冲突检测
 
