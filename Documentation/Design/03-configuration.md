@@ -233,6 +233,111 @@ output = "Generated/Build/assets.csv"
 deduplicate = true
 ```
 
+一个 target 可以声明 0 个、1 个或多个代码生成任务。代码生成任务放在 `[[targets.code]]` 中；每个任务有独立语言、输出目录和语言专属参数。这样同一个 target 可以同时输出 runtime data、Rust 服务端访问代码、C++ 客户端访问代码和 TypeScript 工具链访问代码。
+
+```toml
+[[targets]]
+name = "client_runtime"
+data_format = "json"
+output = "Generated/Data"
+tags = ["shipping", "global"]
+
+[[targets.code]]
+language = "rust"
+output = "Generated/Code/Rust"
+module_name = "game_config"
+file_header = "// Generated for {{project.name}} at {{datetime}}\n// {{project.copyright}}"
+keyword_conflict = "suffix_underscore"
+
+[targets.code.naming]
+type = "pascal_case"
+enum_value = "pascal_case"
+field = "snake_case"
+function = "snake_case"
+
+[targets.code.rust]
+derive_serde = true
+
+[[targets.code]]
+language = "typescript"
+output = "Generated/Code/TypeScript"
+module_name = "gameConfig"
+file_header = "// {{project.name}} - {{project.desc}}\n// Generated at {{datetime}}"
+keyword_conflict = "suffix_underscore"
+
+[targets.code.naming]
+type = "pascal_case"
+field = "camel_case"
+function = "camel_case"
+
+[targets.code.typescript]
+readonly_fields = true
+```
+
+`targets.code` 字段：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `language` | 必填 | 代码生成语言，例如 `rust`、`cpp`、`typescript`。 |
+| `output` | 必填 | 当前代码生成任务的输出目录。相对路径以 project root 为基准。 |
+| `module_name` | language 默认值 | 模块名、包名、namespace 或生成文件前缀。具体语义由语言生成器决定。 |
+| `namespace` | 未设置 | 可选命名空间；C++ 可映射为 namespace，Rust/TS 可作为模块组织提示。 |
+| `file_header` | 生成器默认文件头 | 可选文件头模板。为空字符串表示不生成文件头。 |
+| `keyword_conflict` | `suffix_underscore` | 生成标识符与目标语言关键字冲突时的处理策略。 |
+| `naming` | 语言默认命名策略 | 当前语言各类符号的大小写组织方式。 |
+
+语言特定配置必须放在当前 `[[targets.code]]` 任务下的语言子表中，采用 tagged enum 的语义解析，避免不同语言的配置字段互相污染：
+
+| 子表 | 字段 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `[targets.code.rust]` | `derive_serde` | `false` | 为生成的 Rust enum/struct 派生 `serde::Serialize` / `serde::Deserialize`。 |
+| `[targets.code.cpp]` | `namespace` | 继承 `targets.code.namespace` | C++ namespace 覆盖项。 |
+| `[targets.code.typescript]` | `readonly_fields` | `false` | TypeScript interface 字段是否生成 `readonly`。 |
+
+`file_header` 支持以下模板变量：
+
+| 变量 | 含义 |
+| --- | --- |
+| `{{project.name}}` | Project Config 中的 `project.name`。 |
+| `{{project.desc}}` | Project Config 中的 `project.desc`，未配置时为空。 |
+| `{{project.copyright}}` | Project Config 中的 `project.copyright`，未配置时为空。 |
+| `{{datetime}}` | 代码生成执行时刻，推荐 ISO-8601 或工具定义的稳定 datetime 字符串。 |
+
+`keyword_conflict` 可选值：
+
+| 值 | 说明 |
+| --- | --- |
+| `suffix_underscore` | 自动追加 `_`，例如 `type` -> `type_`。推荐默认值。 |
+| `raw_identifier` | 使用目标语言原生转义方式，例如 Rust `r#type`；不支持该能力的语言应报错。 |
+| `error` | 直接报错，要求修改 Meta 名称或显式配置命名覆盖。 |
+
+`targets.code.naming` 是语言生成器的可扩展配置。第一阶段统一支持以下 key：
+
+| Key | 适用符号 | 常用值 |
+| --- | --- | --- |
+| `type` | enum type、struct type、table row type、repository type | `pascal_case` |
+| `enum_value` | enum 成员 | `pascal_case`、`screaming_snake_case` |
+| `field` | struct/table 字段、facade 成员 | `snake_case`、`camel_case` |
+| `function` | lookup function、loader function | `snake_case`、`camel_case`、`pascal_case` |
+| `constant` | data file 常量等 | `screaming_snake_case`、`pascal_case` |
+
+大小写策略可选值：
+
+| 值 | 示例 |
+| --- | --- |
+| `preserve` | `item_id` -> `item_id` |
+| `pascal_case` | `item_id` -> `ItemId` |
+| `camel_case` | `item_id` -> `itemId` |
+| `snake_case` | `item-id` -> `item_id` |
+| `screaming_snake_case` | `item-id` -> `ITEM_ID` |
+
+原则：
+
+- Project Config 只声明“想要的命名策略”，不应写死生成器内部类型名。
+- 新语言生成器可以扩展自己的 `targets.code.<language_specific>` 配置，但不应要求修改通用 target schema。
+- 若配置中的命名策略导致同一作用域生成名冲突，必须在写文件前报错。
+- 同一 target 下多个 code task 的输出路径不能互相覆盖，也不能与 runtime data/special exporter 输出冲突。
+
 推荐 runtime data format：
 
 | Format | 状态 | 说明 |

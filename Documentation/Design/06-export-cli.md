@@ -16,8 +16,75 @@
 | `output` | 输出目录或 artifact 路径。 |
 | `type_mappings` | logical type 到 target type 的映射。 |
 | `special_exporters` | POT、asset manifest 等辅助产物。 |
+| `code` | 当前 target 下的一个或多个代码生成任务。每个任务有独立语言、输出目录、文件头和命名策略。 |
 
-Project-level `copyright` 可被 target 的代码生成器、schema exporter 或 manifest exporter 用于生成文件头。Target 可在未来扩展覆盖文件头策略，但第一阶段推荐继承 Project Config。
+Project-level `name` / `desc` / `copyright` 可被 target 的代码生成器、schema exporter 或 manifest exporter 用于生成文件头。Target code task 可以通过 `file_header` 模板覆盖默认文件头。
+
+### 6.1.1 Code Generation Task
+
+一个 export target 可以生成多个代码产物，例如同一次导出同时生成 Rust、C++ 和 TypeScript 访问代码：
+
+```toml
+[[targets.code]]
+language = "cpp"
+output = "Generated/Cpp"
+module_name = "GameConfig"
+namespace = "game::config"
+file_header = "// {{project.name}}\n// {{project.copyright}}\n// Generated at {{datetime}}"
+keyword_conflict = "suffix_underscore"
+
+[targets.code.naming]
+type = "pascal_case"
+enum_value = "pascal_case"
+field = "snake_case"
+function = "pascal_case"
+constant = "pascal_case"
+
+[targets.code.cpp]
+namespace = "game::config"
+```
+
+通用要求：
+
+- `language` 决定使用哪个代码生成器。
+- `output` 是该代码生成任务的根目录，不与 target runtime data output 混淆。
+- `file_header` 是文本模板，支持 `{{project.name}}`、`{{project.desc}}`、`{{project.copyright}}`、`{{datetime}}`。
+- `keyword_conflict` 控制 Meta 名称转换成目标语言标识符后碰到关键字时如何处理。
+- `naming` 控制 type、field、function、constant 等符号的大小写组织。
+- 语言生成器可以声明额外配置，但必须放在该 code task 内对应语言子表中，不能污染其他语言任务；实现层应按语言使用 tagged enum / 多态配置承载这些差异。
+
+当前内置语言特定配置：
+
+| 子表 | 字段 | 说明 |
+| --- | --- | --- |
+| `[targets.code.rust]` | `derive_serde` | 为生成类型派生 serde 序列化/反序列化 trait。 |
+| `[targets.code.cpp]` | `namespace` | C++ namespace 覆盖；未设置时可使用通用 `namespace`。 |
+| `[targets.code.typescript]` | `readonly_fields` | interface 字段是否生成 `readonly`。 |
+
+`keyword_conflict` 策略：
+
+| 策略 | 说明 |
+| --- | --- |
+| `suffix_underscore` | 自动追加 `_`，作为默认策略。 |
+| `raw_identifier` | 使用目标语言原生关键字转义方式；语言不支持时应报错。 |
+| `error` | 直接报错，要求用户修改 Meta 或命名配置。 |
+
+`naming` 策略：
+
+| 策略 | 说明 |
+| --- | --- |
+| `preserve` | 尽量保留原始名称，仅做非法字符处理。 |
+| `pascal_case` | 类型名常用。 |
+| `camel_case` | TypeScript 字段和函数常用。 |
+| `snake_case` | Rust 字段和函数常用。 |
+| `screaming_snake_case` | 常量或部分 enum value 常用。 |
+
+代码生成器必须在写文件前完成：
+
+1. 标识符合法性检查；
+2. 关键字冲突处理；
+3. 同作用域生成名冲突检查；
+4. 输出路径冲突检查。
 
 ## 6.2 Runtime Data Format
 

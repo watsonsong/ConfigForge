@@ -1,3 +1,5 @@
+use std::fs;
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 
@@ -38,5 +40,13 @@ fn exports_standard_project_fixture() {
         .stdout(predicate::str::contains("export succeeded"));
 
     assert!(out_dir.join("items.json").exists());
-    assert!(out_dir.join("items.rs").exists());
+    let rust_code = fs::read_to_string(out_dir.join("rust/generated.rs")).expect("rust code");
+    let cpp_code = fs::read_to_string(out_dir.join("cpp/generated.hpp")).expect("cpp code");
+    let ts_code = fs::read_to_string(out_dir.join("typescript/generated.ts")).expect("ts code");
+    assert!(rust_code.contains("pub struct ItemsRow"));
+    assert!(rust_code.contains("pub fn get_by_id"));
+    assert!(cpp_code.contains("class IDataFileLoader"));
+    assert!(cpp_code.contains("const ItemsRow* GetById"));
+    assert!(ts_code.contains("export interface DataFileLoader"));
+    assert!(ts_code.contains("getById(id: number): ItemsRow | undefined"));
 }

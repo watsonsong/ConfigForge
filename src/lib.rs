@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod codegen;
 pub mod data;
 pub mod error;
 pub mod exporter;
