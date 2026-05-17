@@ -25,6 +25,14 @@ pub fn validate_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataSet) -> Resu
     validate_normalized_data_set(meta, &data_set)
 }
 
+pub fn validate_data_set_with_report(
+    meta: &LinkedMetaModel<'_>,
+    data_set: &DataSet,
+) -> Result<ValidationReport> {
+    let data_set = normalize_data_set(meta, data_set)?;
+    validate_normalized_data_set_with_report(meta, &data_set)
+}
+
 pub fn validate_data_set_for_target(
     meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
@@ -32,6 +40,15 @@ pub fn validate_data_set_for_target(
 ) -> Result<()> {
     let data_set = normalize_data_set(meta, data_set)?;
     validate_normalized_data_set_for_target(meta, target_tags, &data_set)
+}
+
+pub fn validate_data_set_for_target_with_report(
+    meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    data_set: &DataSet,
+) -> Result<ValidationReport> {
+    let data_set = normalize_data_set(meta, data_set)?;
+    validate_normalized_data_set_for_target_with_report(meta, target_tags, &data_set)
 }
 
 pub fn normalize_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataSet) -> Result<DataSet> {
@@ -47,6 +64,13 @@ pub fn normalize_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataSet) -> Res
 }
 
 pub fn validate_normalized_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataSet) -> Result<()> {
+    validate_normalized_data_set_with_report(meta, data_set).map(|_| ())
+}
+
+pub fn validate_normalized_data_set_with_report(
+    meta: &LinkedMetaModel<'_>,
+    data_set: &DataSet,
+) -> Result<ValidationReport> {
     for table_meta in &meta.tables {
         let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
             ConfigForgeError::Validation(format!(
@@ -65,7 +89,7 @@ pub fn validate_normalized_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataS
         data_set,
         ExportValidationView::full(meta, data_set),
     );
-    plan.run(&context).into_result()
+    report_into_result(plan.run(&context))
 }
 
 pub fn validate_normalized_data_set_for_target(
@@ -73,6 +97,14 @@ pub fn validate_normalized_data_set_for_target(
     target_tags: &TargetTags,
     data_set: &DataSet,
 ) -> Result<()> {
+    validate_normalized_data_set_for_target_with_report(meta, target_tags, data_set).map(|_| ())
+}
+
+pub fn validate_normalized_data_set_for_target_with_report(
+    meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    data_set: &DataSet,
+) -> Result<ValidationReport> {
     let export_view = ExportValidationView::for_target(meta, data_set, target_tags)?;
     for table_view in &export_view.tables {
         validate_normalized_table_view(table_view, Some(target_tags))?;
@@ -81,7 +113,16 @@ pub fn validate_normalized_data_set_for_target(
     let registry = ValidatorRegistry::with_builtin_validators();
     let plan = CompiledValidationPlan::compile(meta, &registry)?;
     let context = ValidationContext::new(meta, Some(target_tags.clone()), data_set, export_view);
-    plan.run(&context).into_result()
+    report_into_result(plan.run(&context))
+}
+
+fn report_into_result(report: ValidationReport) -> Result<ValidationReport> {
+    if report.has_error() {
+        return Err(ConfigForgeError::Validation(
+            report.error_messages().join("; "),
+        ));
+    }
+    Ok(report)
 }
 
 pub fn validate_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {

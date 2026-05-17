@@ -295,9 +295,21 @@ fn render_table(
         let key = names.ts_key_expr(index)?;
         if index.unique {
             content.push_str(&format!(
-                "      this.{}.set({}, row);\n",
+                "      const key_{} = {};\n",
                 names.index_storage_name(index)?,
                 key
+            ));
+            content.push_str(&format!(
+                "      if (this.{}.has(key_{})) {{ throw new Error(\"Duplicate unique index key for {}.{}\"); }}\n",
+                names.index_storage_name(index)?,
+                names.index_storage_name(index)?,
+                names.repository_type_name(&table.name)?,
+                index.name
+            ));
+            content.push_str(&format!(
+                "      this.{}.set(key_{}, row);\n",
+                names.index_storage_name(index)?,
+                names.index_storage_name(index)?
             ));
         } else {
             content.push_str(&format!(

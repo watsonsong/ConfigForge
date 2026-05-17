@@ -39,19 +39,56 @@ impl ValidationReport {
             .any(|issue| issue.severity == ValidationSeverity::Error)
     }
 
+    pub fn warning_messages(&self) -> Vec<String> {
+        self.issues
+            .iter()
+            .filter(|issue| issue.severity == ValidationSeverity::Warning)
+            .map(format_issue)
+            .collect()
+    }
+
+    pub fn error_messages(&self) -> Vec<String> {
+        self.issues
+            .iter()
+            .filter(|issue| issue.severity == ValidationSeverity::Error)
+            .map(|issue| issue.message.clone())
+            .collect()
+    }
+
     pub fn into_result(self) -> Result<()> {
         if !self.has_error() {
             return Ok(());
         }
 
-        let messages = self
-            .issues
-            .into_iter()
-            .filter(|issue| issue.severity == ValidationSeverity::Error)
-            .map(|issue| issue.message)
-            .collect::<Vec<_>>()
-            .join("; ");
+        let messages = self.error_messages().join("; ");
         Err(ConfigForgeError::Validation(messages))
+    }
+}
+
+fn format_issue(issue: &ValidationIssue) -> String {
+    let mut parts = Vec::new();
+    if let Some(table) = &issue.location.table {
+        parts.push(format!("table `{table}`"));
+    }
+    if let Some(row_number) = issue.location.source_row_number {
+        parts.push(format!("row {row_number}"));
+    }
+    if let Some(field) = &issue.location.field {
+        parts.push(format!("field `{field}`"));
+    }
+    if let Some(target) = &issue.target {
+        parts.push(format!("target `{target}`"));
+    }
+
+    if parts.is_empty() {
+        format!("{}: {}", issue.validator, issue.message)
+    } else {
+        format!(
+            "{}: {} ({})",
+            issue.validator,
+            issue.message,
+            parts.join(", ")
+        )
     }
 }
 

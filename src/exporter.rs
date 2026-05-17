@@ -18,7 +18,7 @@ use crate::{
         link_meta_model, validate_meta_model, EnumMeta, MetaDiagnostic, MetaModel, StructMeta,
         TableMeta, TargetTags,
     },
-    validation::{normalize_data_set, validate_normalized_data_set_for_target},
+    validation::{normalize_data_set, validate_normalized_data_set_for_target_with_report},
     ConfigForgeError, Result,
 };
 
@@ -26,6 +26,11 @@ use crate::{
 pub struct BuildOptions<'a> {
     pub project_path: &'a Path,
     pub target_name: &'a str,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BuildOutput {
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -77,7 +82,7 @@ fn default_data_format() -> String {
     "json".to_owned()
 }
 
-pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
+pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
     let project = ProjectConfig::from_path(options.project_path)?;
     let project_root = options
         .project_path
@@ -88,6 +93,7 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
     let linked_meta = meta_set.link().map_err(ConfigForgeError::MetaValidation)?;
     let target_tags = target.target_tags();
 
+    let mut warnings = Vec::new();
     let runtime_data_files = if let Some(data_config) = &target.data {
         let registry = DataFormatRegistry::with_builtin_exporters();
         let data_exporter = registry.require(&data_config.format)?;
@@ -100,7 +106,12 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
         )?;
         let data_set = DataLoader::new(project_root.join(&data_config.input)).load(&data_plan)?;
         let data_set = normalize_data_set(&linked_meta, &data_set)?;
-        validate_normalized_data_set_for_target(&linked_meta, &target_tags, &data_set)?;
+        let validation_report = validate_normalized_data_set_for_target_with_report(
+            &linked_meta,
+            &target_tags,
+            &data_set,
+        )?;
+        warnings.extend(validation_report.warning_messages());
         export_runtime_data(
             &project_root.join(&data_config.output),
             &linked_meta,
@@ -119,7 +130,9 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
         &target_tags,
         &linked_meta,
         runtime_data_files,
-    )
+    )?;
+
+    Ok(BuildOutput { warnings })
 }
 
 impl TargetConfig {
@@ -133,7 +146,9 @@ impl ProjectConfig {
         let mut visited = BTreeSet::new();
         let mut fragments = Vec::new();
         load_project_config_recursive(path.as_ref(), &mut visited, &mut fragments)?;
-        Ok(merge_project_configs(fragments))
+        let merged = merge_project_configs(fragments);
+        validate_unique_target_names(&merged.targets)?;
+        Ok(merged)
     }
 
     fn target(&self, target_name: &str) -> Result<&TargetConfig> {
@@ -233,6 +248,20 @@ fn merge_project_configs(fragments: Vec<ProjectConfig>) -> ProjectConfig {
     }
 
     merged
+}
+
+fn validate_unique_target_names(targets: &[TargetConfig]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for target in targets {
+        if !seen.insert(target.name.as_str()) {
+            return Err(ConfigForgeError::Validation(format!(
+                "duplicate target `{}`",
+                target.name
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 fn finish_loading_project_meta(model: &MetaModel) -> Result<()> {
@@ -414,6 +443,29 @@ mod tests {
         .expect("data config should parse");
 
         assert_eq!(config.format, "json");
+    }
+
+    #[test]
+    fn project_config_rejects_duplicate_target_names() {
+        let error = validate_unique_target_names(&[
+            TargetConfig {
+                name: "client".to_owned(),
+                tags: Vec::new(),
+                data: None,
+                code: Vec::new(),
+            },
+            TargetConfig {
+                name: "client".to_owned(),
+                tags: Vec::new(),
+                data: None,
+                code: Vec::new(),
+            },
+        ])
+        .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate target `client`"))
+        );
     }
 
     #[test]

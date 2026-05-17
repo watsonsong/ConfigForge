@@ -21,10 +21,13 @@ pub fn run() -> anyhow::Result<()> {
 }
 
 pub fn run_with_args(cli: Cli) -> anyhow::Result<()> {
-    build_target(BuildOptions {
+    let output = build_target(BuildOptions {
         project_path: &cli.project,
         target_name: &cli.target,
     })?;
+    for warning in output.warnings {
+        eprintln!("warning: {warning}");
+    }
     println!("target `{}` built", cli.target);
     Ok(())
 }

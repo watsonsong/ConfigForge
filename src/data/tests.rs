@@ -39,6 +39,82 @@ fn csv_reader_reports_parse_errors() {
 }
 
 #[test]
+fn csv_reader_rejects_duplicate_headers_but_allows_empty_header() {
+    let dir = tempdir().expect("temp dir should exist");
+    let duplicate_path = dir.path().join("duplicate.csv");
+    fs::write(&duplicate_path, "id,id\n1,2\n").expect("csv should be written");
+
+    let error = CsvDataReader::read_table("items", &duplicate_path).unwrap_err();
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate header `id`"))
+    );
+
+    let empty_header_path = dir.path().join("empty_header.csv");
+    fs::write(&empty_header_path, ",name\nraw,Sword\n").expect("csv should be written");
+    let table = CsvDataReader::read_table("items", &empty_header_path).expect("csv should load");
+
+    assert_eq!(table.rows[0].get("").map(String::as_str), Some("raw"));
+    assert_eq!(table.rows[0].get("name").map(String::as_str), Some("Sword"));
+}
+
+#[test]
+fn csv_reader_handles_common_csv_boundaries() {
+    let dir = tempdir().expect("temp dir should exist");
+
+    let only_header_path = dir.path().join("only_header.csv");
+    fs::write(&only_header_path, "id,name\n").expect("csv should be written");
+    let table = CsvDataReader::read_table("items", &only_header_path).expect("csv should load");
+    assert!(table.is_empty());
+
+    let quoted_path = dir.path().join("quoted.csv");
+    fs::write(
+        &quoted_path,
+        "id,desc\n1,\"hello, world\"\n2,\"line1\nline2\"\n",
+    )
+    .expect("csv should be written");
+    let table = CsvDataReader::read_table("items", &quoted_path).expect("csv should load");
+    assert_eq!(
+        table.rows[0].get("desc").map(String::as_str),
+        Some("hello, world")
+    );
+    assert_eq!(
+        table.rows[1].get("desc").map(String::as_str),
+        Some("line1\nline2")
+    );
+
+    let windows_bom_path = dir.path().join("windows_bom.csv");
+    fs::write(&windows_bom_path, "\u{feff}id,name\r\n1,Sword\r\n").expect("csv should be written");
+    let table = CsvDataReader::read_table("items", &windows_bom_path).expect("csv should load");
+    assert_eq!(table.rows[0].get("id").map(String::as_str), Some("1"));
+    assert_eq!(table.rows[0].get("name").map(String::as_str), Some("Sword"));
+}
+
+#[test]
+fn csv_reader_reports_empty_file_and_ragged_rows() {
+    let dir = tempdir().expect("temp dir should exist");
+
+    let empty_path = dir.path().join("empty.csv");
+    fs::write(&empty_path, "").expect("csv should be written");
+    assert!(
+        matches!(CsvDataReader::read_table("items", &empty_path).unwrap_err(), ConfigForgeError::Validation(message) if message.contains("no header row"))
+    );
+
+    let missing_path = dir.path().join("missing.csv");
+    fs::write(&missing_path, "id,name\n1\n").expect("csv should be written");
+    assert!(matches!(
+        CsvDataReader::read_table("items", &missing_path).unwrap_err(),
+        ConfigForgeError::ParseCsv { .. }
+    ));
+
+    let extra_path = dir.path().join("extra.csv");
+    fs::write(&extra_path, "id,name\n1,Sword,extra\n").expect("csv should be written");
+    assert!(matches!(
+        CsvDataReader::read_table("items", &extra_path).unwrap_err(),
+        ConfigForgeError::ParseCsv { .. }
+    ));
+}
+
+#[test]
 fn data_load_plan_reads_legacy_and_canonical_sources() {
     let meta = MetaModel::from_toml_str(
         r#"

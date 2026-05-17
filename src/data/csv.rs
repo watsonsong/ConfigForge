@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::BTreeSet, path::Path};
 
 use crate::{ConfigForgeError, Result};
 
@@ -23,6 +23,13 @@ impl CsvDataReader {
             .iter()
             .map(str::to_owned)
             .collect::<Vec<_>>();
+        if headers.is_empty() {
+            return Err(ConfigForgeError::Validation(format!(
+                "csv `{}` has no header row",
+                path.display()
+            )));
+        }
+        validate_unique_headers(path, &headers)?;
 
         let mut rows = Vec::new();
         for record in reader.records() {
@@ -39,4 +46,19 @@ impl CsvDataReader {
 
         Ok(DataTable::new(name, rows))
     }
+}
+
+fn validate_unique_headers(path: &Path, headers: &[String]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for header in headers {
+        if !seen.insert(header.as_str()) {
+            return Err(ConfigForgeError::Validation(format!(
+                "csv `{}` has duplicate header `{}`",
+                path.display(),
+                header
+            )));
+        }
+    }
+
+    Ok(())
 }

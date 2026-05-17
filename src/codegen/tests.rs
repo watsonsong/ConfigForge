@@ -400,6 +400,7 @@ fn typescript_generator_emits_async_loader_and_maps() {
     assert!(content.contains("static async load"));
     assert!(content.contains("getById(id: number): ItemsRow | undefined"));
     assert!(content.contains("findByRarity(rarity: ItemRarity): readonly ItemsRow[]"));
+    assert!(content.contains("Duplicate unique index key for ItemsTable.by_id"));
 }
 
 #[test]
