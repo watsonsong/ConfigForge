@@ -159,20 +159,26 @@ pub fn validate_normalized_table_for_target(
     target_tags: &TargetTags,
     table: &DataTable,
 ) -> Result<()> {
-    let table = filter_table_rows_for_target(meta, target_tags, table);
     let visible_fields = meta
         .fields
         .iter()
         .filter(|field| field.meta.is_exported_for(target_tags))
         .map(|field| field.meta.name.as_str())
         .collect::<BTreeSet<_>>();
-    let visible_rows = (0..table.rows.len())
-        .map(|row_index| VisibleRow {
+    let visible_rows = table
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| {
+            meta.meta
+                .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
+        })
+        .map(|(row_index, _)| VisibleRow {
             row_index,
             source_row_number: Some(row_index + 1),
         })
         .collect();
-    let table_view = ExportTableView::new(meta, &table, visible_fields, visible_rows);
+    let table_view = ExportTableView::new(meta, table, visible_fields, visible_rows);
     validate_normalized_table_view(&table_view, Some(target_tags))
 }
 
@@ -181,23 +187,15 @@ fn validate_normalized_table_view(
     target_tags: Option<&TargetTags>,
 ) -> Result<()> {
     let meta = table_view.meta;
-    let visible_table = DataTable::new(
-        table_view.table.name.clone(),
-        table_view
-            .visible_rows
-            .iter()
-            .filter_map(|visible_row| table_view.table.rows.get(visible_row.row_index).cloned())
-            .collect(),
-    );
     for field in meta
         .fields
         .iter()
         .filter(|field| table_view.is_field_visible(field.meta.name.as_str()))
     {
         validate_supported_field_type(meta, field)?;
-        validate_field_presence(meta, &visible_table, field)?;
-        validate_field_values(meta, &visible_table, field)?;
-        validate_field_uniqueness(meta, &visible_table, field)?;
+        validate_field_presence_view(meta, table_view, field)?;
+        validate_field_values_view(meta, table_view, field)?;
+        validate_field_uniqueness_view(meta, table_view, field)?;
     }
 
     let primary_index_name = meta.primary_index().map(|index| index.meta.name.as_str());
@@ -223,29 +221,10 @@ fn validate_normalized_table_view(
             }
             continue;
         }
-        validate_index_uniqueness(meta, &visible_table, index)?;
+        validate_index_uniqueness_view(meta, table_view, index)?;
     }
 
     Ok(())
-}
-
-fn filter_table_rows_for_target(
-    meta: &LinkedTableMeta<'_>,
-    target_tags: &TargetTags,
-    table: &DataTable,
-) -> DataTable {
-    DataTable::new(
-        table.name.clone(),
-        table
-            .rows
-            .iter()
-            .filter(|row| {
-                meta.meta
-                    .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
-            })
-            .cloned()
-            .collect(),
-    )
 }
 
 pub fn normalize_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<DataTable> {
@@ -314,13 +293,56 @@ fn validate_index_uniqueness(
         let key = index
             .fields
             .iter()
-            .map(|field| row.get(&field.meta.name).cloned().unwrap_or_default())
+            .map(|field| {
+                row.get(&field.meta.name)
+                    .map(String::as_str)
+                    .unwrap_or_default()
+            })
             .collect::<Vec<_>>();
         if !seen.insert(key.clone()) {
             return Err(ConfigForgeError::Validation(format!(
                 "table `{}` row {} index `{}` duplicates unique key `{:?}`",
                 meta.meta.name,
                 row_index + 1,
+                index.meta.name,
+                key
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_index_uniqueness_view(
+    meta: &LinkedTableMeta<'_>,
+    table_view: &ExportTableView<'_, '_>,
+    index: &LinkedIndexMeta<'_>,
+) -> Result<()> {
+    if !index.meta.unique {
+        return Ok(());
+    }
+
+    let mut seen = HashSet::new();
+    for visible_row in &table_view.visible_rows {
+        let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
+            continue;
+        };
+        let key = index
+            .fields
+            .iter()
+            .map(|field| {
+                row.get(&field.meta.name)
+                    .map(String::as_str)
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
+        if !seen.insert(key.clone()) {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} index `{}` duplicates unique key `{:?}`",
+                meta.meta.name,
+                visible_row
+                    .source_row_number
+                    .unwrap_or(visible_row.row_index + 1),
                 index.meta.name,
                 key
             )));
@@ -343,6 +365,32 @@ fn validate_field_presence(
         .rows
         .iter()
         .all(|row| row.contains_key(&field.meta.name));
+    if !present {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` is missing field `{}`",
+            meta.meta.name, field.meta.name
+        )));
+    }
+    Ok(())
+}
+
+fn validate_field_presence_view(
+    meta: &LinkedTableMeta<'_>,
+    table_view: &ExportTableView<'_, '_>,
+    field: &LinkedFieldMeta<'_>,
+) -> Result<()> {
+    if !field.meta.required {
+        return Ok(());
+    }
+
+    let present = table_view.visible_rows.iter().all(|visible_row| {
+        table_view
+            .table
+            .rows
+            .get(visible_row.row_index)
+            .map(|row| row.contains_key(&field.meta.name))
+            .unwrap_or(false)
+    });
     if !present {
         return Err(ConfigForgeError::Validation(format!(
             "table `{}` is missing field `{}`",
@@ -380,6 +428,38 @@ fn validate_field_values(
     Ok(())
 }
 
+fn validate_field_values_view(
+    meta: &LinkedTableMeta<'_>,
+    table_view: &ExportTableView<'_, '_>,
+    field: &LinkedFieldMeta<'_>,
+) -> Result<()> {
+    for visible_row in &table_view.visible_rows {
+        let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
+            continue;
+        };
+        let row_number = visible_row
+            .source_row_number
+            .unwrap_or(visible_row.row_index + 1);
+        let value = row
+            .get(&field.meta.name)
+            .map(String::as_str)
+            .unwrap_or_default();
+        if field.meta.required && value.trim().is_empty() {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` is required",
+                meta.meta.name, row_number, field.meta.name
+            )));
+        }
+
+        if value.trim().is_empty() {
+            continue;
+        }
+
+        validate_value_type_at_row_number(meta, field, value, row_number)?;
+    }
+    Ok(())
+}
+
 fn validate_supported_field_type(
     meta: &LinkedTableMeta<'_>,
     field: &LinkedFieldMeta<'_>,
@@ -400,6 +480,15 @@ fn validate_value_type(
     value: &str,
     row_index: usize,
 ) -> Result<()> {
+    validate_value_type_at_row_number(meta, field, value, row_index + 1)
+}
+
+fn validate_value_type_at_row_number(
+    meta: &LinkedTableMeta<'_>,
+    field: &LinkedFieldMeta<'_>,
+    value: &str,
+    row_number: usize,
+) -> Result<()> {
     let valid = match &field.linked_field {
         LinkedField::Primitive(PrimitiveFieldType::Int) => value.parse::<i64>().is_ok(),
         LinkedField::Primitive(PrimitiveFieldType::Float) => value.parse::<f64>().is_ok(),
@@ -417,7 +506,7 @@ fn validate_value_type(
             return Err(ConfigForgeError::Validation(format!(
                 "table `{}` row {} field `{}` uses struct type `{}`, but struct value validation is not implemented yet",
                 meta.meta.name,
-                row_index + 1,
+                row_number,
                 field.meta.name,
                 field.meta.field_type
             )));
@@ -427,11 +516,7 @@ fn validate_value_type(
     if !valid {
         return Err(ConfigForgeError::Validation(format!(
             "table `{}` row {} field `{}` value `{}` does not match type `{:?}`",
-            meta.meta.name,
-            row_index + 1,
-            field.meta.name,
-            value,
-            field.meta.field_type
+            meta.meta.name, row_number, field.meta.name, value, field.meta.field_type
         )));
     }
 
@@ -453,11 +538,45 @@ fn validate_field_uniqueness(
             .get(&field.meta.name)
             .map(String::as_str)
             .unwrap_or_default();
-        if !seen.insert(value.to_owned()) {
+        if !seen.insert(value) {
             return Err(ConfigForgeError::Validation(format!(
                 "table `{}` row {} field `{}` duplicates unique value `{}`",
                 meta.meta.name,
                 row_index + 1,
+                field.meta.name,
+                value
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_field_uniqueness_view(
+    meta: &LinkedTableMeta<'_>,
+    table_view: &ExportTableView<'_, '_>,
+    field: &LinkedFieldMeta<'_>,
+) -> Result<()> {
+    if !field.meta.unique {
+        return Ok(());
+    }
+
+    let mut seen = HashSet::new();
+    for visible_row in &table_view.visible_rows {
+        let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
+            continue;
+        };
+        let value = row
+            .get(&field.meta.name)
+            .map(String::as_str)
+            .unwrap_or_default();
+        if !seen.insert(value) {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` duplicates unique value `{}`",
+                meta.meta.name,
+                visible_row
+                    .source_row_number
+                    .unwrap_or(visible_row.row_index + 1),
                 field.meta.name,
                 value
             )));
