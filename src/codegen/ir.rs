@@ -5,7 +5,7 @@ use crate::{
     ConfigForgeError, Result,
 };
 
-use super::{ArtifactKind, RuntimeDataFile, RuntimeDataFormat};
+use super::{ArtifactKind, RuntimeDataFile};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeModel {
@@ -42,7 +42,6 @@ pub struct CodeTable {
     pub indexes: Vec<CodeIndex>,
     pub primary_index: Option<String>,
     pub data_file: String,
-    pub data_format: RuntimeDataFormat,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,7 +81,6 @@ pub struct GeneratedFile {
 pub fn build_code_model(
     meta: &LinkedMetaModel<'_>,
     runtime_data_files: &[RuntimeDataFile],
-    runtime_data_format: RuntimeDataFormat,
 ) -> Result<CodeModel> {
     let data_file_index = runtime_data_files
         .iter()
@@ -209,13 +207,7 @@ pub fn build_code_model(
                 .get(table_meta.meta.name.as_str())
                 .copied()
                 .map(str::to_owned)
-                .unwrap_or_else(|| {
-                    format!(
-                        "{}.{}",
-                        table_meta.meta.name,
-                        runtime_data_format.extension()
-                    )
-                });
+                .unwrap_or_else(|| format!("{}.json", table_meta.meta.name));
             Ok(CodeTable {
                 name: table_meta.meta.name.clone(),
                 desc: table_meta.meta.desc.clone(),
@@ -225,7 +217,6 @@ pub fn build_code_model(
                     .primary_index()
                     .map(|index| index.meta.name.clone()),
                 data_file,
-                data_format: runtime_data_format,
             })
         })
         .collect::<Result<Vec<_>>>()?;

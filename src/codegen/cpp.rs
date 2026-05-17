@@ -14,11 +14,7 @@ impl CodeGenerator for CppCodeGenerator {
     }
 
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>> {
-        let model = build_code_model(
-            input.meta,
-            &input.runtime_data_files,
-            input.runtime_data_format,
-        )?;
+        let model = build_code_model(input.meta, &input.runtime_data_files)?;
         require_non_empty_index_fields(&model)?;
         reject_compound_indexes(&model)?;
         let cpp_options = input.target.options.cpp()?;

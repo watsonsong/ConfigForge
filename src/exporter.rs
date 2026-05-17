@@ -1,19 +1,19 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use serde::Serialize;
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 
 use crate::{
     codegen::{
         builtin_generators, CodeExportInput, CodeExportProject, CodeExportTarget,
-        CodegenTaskConfig, RuntimeDataFile, RuntimeDataFormat,
+        CodegenTaskConfig, RuntimeDataFile,
     },
-    data::{DataLoadPlan, DataLoader, DataRow, DataTable},
+    data::{DataLoadPlan, DataLoader},
+    config_forge::{export_runtime_data, DataFormatRegistry},
     meta::{
         link_meta_model, validate_meta_model, EnumMeta, MetaDiagnostic, MetaModel, StructMeta,
         TableMeta,
@@ -68,53 +68,11 @@ pub struct TargetDataConfig {
     pub input: PathBuf,
     pub output: PathBuf,
     #[serde(default = "default_data_format")]
-    pub format: TargetDataFormat,
+    pub format: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TargetDataFormat {
-    Json,
-    MessagePack,
-}
-
-impl<'de> Deserialize<'de> for TargetDataFormat {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        match value.as_str() {
-            "json" => Ok(Self::Json),
-            "messagepack" | "msgpack" => Ok(Self::MessagePack),
-            _ => Err(serde::de::Error::custom(format!(
-                "unsupported target data format `{value}`"
-            ))),
-        }
-    }
-}
-
-impl From<TargetDataFormat> for RuntimeDataFormat {
-    fn from(format: TargetDataFormat) -> Self {
-        match format {
-            TargetDataFormat::Json => RuntimeDataFormat::Json,
-            TargetDataFormat::MessagePack => RuntimeDataFormat::MessagePack,
-        }
-    }
-}
-
-fn default_data_format() -> TargetDataFormat {
-    TargetDataFormat::Json
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ExportedTable {
-    meta: ExportedTableMeta,
-    rows: Vec<DataRow>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ExportedTableMeta {
-    name: String,
+fn default_data_format() -> String {
+    "json".to_owned()
 }
 
 pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
@@ -127,22 +85,18 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
     let meta_set = project.meta_model()?;
     let linked_meta = meta_set.link().map_err(ConfigForgeError::MetaValidation)?;
 
-    let runtime_data_format = target
-        .data
-        .as_ref()
-        .map(|data_config| RuntimeDataFormat::from(data_config.format))
-        .unwrap_or(RuntimeDataFormat::Json);
-
     let runtime_data_files = if let Some(data_config) = &target.data {
+        let registry = DataFormatRegistry::with_builtin_exporters();
+        let data_exporter = registry.require(&data_config.format)?;
         let data_plan = DataLoadPlan::from_meta_model(&meta_set)?;
         let data_set = DataLoader::new(project_root.join(&data_config.input)).load(&data_plan)?;
         let data_set = normalize_data_set(&linked_meta, &data_set)?;
         validate_normalized_data_set(&linked_meta, &data_set)?;
-        write_runtime_data(
+        export_runtime_data(
             &project_root.join(&data_config.output),
             &linked_meta,
             &data_set,
-            data_config.format,
+            data_exporter,
         )?
     } else {
         Vec::new()
@@ -154,7 +108,6 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<()> {
         target,
         &linked_meta,
         runtime_data_files,
-        runtime_data_format,
     )
 }
 
@@ -291,100 +244,12 @@ impl From<&ProjectConfigMeta> for CodeExportProject {
     }
 }
 
-fn write_runtime_data(
-    out_dir: &Path,
-    linked_meta: &crate::meta::LinkedMetaModel<'_>,
-    data_set: &crate::data::DataSet,
-    format: TargetDataFormat,
-) -> Result<Vec<RuntimeDataFile>> {
-    fs::create_dir_all(out_dir).map_err(|source| ConfigForgeError::WriteFile {
-        path: out_dir.to_path_buf(),
-        source,
-    })?;
-
-    let mut runtime_data_files = Vec::new();
-    for table_meta in &linked_meta.tables {
-        let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "data set is missing table `{}`",
-                table_meta.meta.name
-            ))
-        })?;
-        let path = match format {
-            TargetDataFormat::Json => write_table_json(out_dir, table_meta, table)?,
-            TargetDataFormat::MessagePack => write_table_messagepack(out_dir, table_meta, table)?,
-        };
-        runtime_data_files.push(RuntimeDataFile {
-            table_name: table_meta.meta.name.clone(),
-            path,
-        });
-    }
-    Ok(runtime_data_files)
-}
-
-fn write_table_messagepack(
-    out_dir: &Path,
-    table_meta: &crate::meta::LinkedTableMeta<'_>,
-    table: &DataTable,
-) -> Result<String> {
-    let payload = build_exported_table_payload(table_meta, table);
-    let content = rmp_serde::to_vec_named(&payload)
-        .map_err(|source| ConfigForgeError::SerializeMessagePack { source })?;
-    let file_name = format!("{}.msgpack", table_meta.meta.name);
-    let path = out_dir.join(&file_name);
-    fs::write(&path, content).map_err(|source| ConfigForgeError::WriteFile { path, source })?;
-    Ok(file_name)
-}
-
-fn write_table_json(
-    out_dir: &Path,
-    table_meta: &crate::meta::LinkedTableMeta<'_>,
-    table: &DataTable,
-) -> Result<String> {
-    let payload = build_exported_table_payload(table_meta, table);
-    let content = serde_json::to_string_pretty(&payload)?;
-    let file_name = format!("{}.json", table_meta.meta.name);
-    let path = out_dir.join(&file_name);
-    fs::write(&path, content).map_err(|source| ConfigForgeError::WriteFile { path, source })?;
-    Ok(file_name)
-}
-
-fn build_exported_table_payload(
-    table_meta: &crate::meta::LinkedTableMeta<'_>,
-    table: &DataTable,
-) -> ExportedTable {
-    let exported_fields = table_meta
-        .fields
-        .iter()
-        .filter(|field| field.meta.export && !field.meta.tool_only && !field.meta.validator_only)
-        .map(|field| field.meta.name.as_str())
-        .collect::<std::collections::BTreeSet<_>>();
-    let rows = table
-        .rows
-        .iter()
-        .map(|row| {
-            row.iter()
-                .filter(|(field, _)| exported_fields.contains(field.as_str()))
-                .map(|(field, value)| (field.clone(), value.clone()))
-                .collect::<BTreeMap<_, _>>()
-        })
-        .collect();
-
-    ExportedTable {
-        meta: ExportedTableMeta {
-            name: table_meta.meta.name.clone(),
-        },
-        rows,
-    }
-}
-
 fn write_generated_code(
     project_root: &Path,
     project: &CodeExportProject,
     target: &TargetConfig,
     linked_meta: &crate::meta::LinkedMetaModel<'_>,
     runtime_data_files: Vec<RuntimeDataFile>,
-    runtime_data_format: RuntimeDataFormat,
 ) -> Result<()> {
     let mut generated_files = Vec::new();
     for code_task in &target.code {
@@ -404,7 +269,6 @@ fn write_generated_code(
             project: project.clone(),
             target: code_target,
             runtime_data_files: runtime_data_files.clone(),
-            runtime_data_format,
             generated_at: generated_at(),
         };
         generated_files.extend(generator.generate(&input)?);
@@ -470,6 +334,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::codegen::{default_module_name, CodeExportLanguage};
+    use crate::data::DataTable;
+    use crate::config_forge::build_exported_table_payload;
 
     use super::*;
 
@@ -505,7 +371,7 @@ mod tests {
             "#,
         )
         .expect("messagepack format should parse");
-        assert_eq!(config.format, TargetDataFormat::MessagePack);
+        assert_eq!(config.format, "messagepack");
 
         let alias_config: TargetDataConfig = toml::from_str(
             r#"
@@ -515,7 +381,7 @@ mod tests {
             "#,
         )
         .expect("msgpack alias should parse");
-        assert_eq!(alias_config.format, TargetDataFormat::MessagePack);
+        assert_eq!(alias_config.format, "msgpack");
     }
 
     #[test]
@@ -528,19 +394,7 @@ mod tests {
         )
         .expect("data config should parse");
 
-        assert_eq!(config.format, TargetDataFormat::Json);
-    }
-
-    #[test]
-    fn converts_target_data_format_to_runtime_data_format() {
-        assert_eq!(
-            RuntimeDataFormat::from(TargetDataFormat::Json),
-            RuntimeDataFormat::Json
-        );
-        assert_eq!(
-            RuntimeDataFormat::from(TargetDataFormat::MessagePack),
-            RuntimeDataFormat::MessagePack
-        );
+        assert_eq!(config.format, "json");
     }
 
     #[test]

@@ -120,10 +120,12 @@ namespace = "game::config"
 | `json` | 默认格式，便于调试和通用接入。 |
 | `messagepack` | 紧凑二进制格式，用于包体和加载性能更敏感的 runtime。 |
 
+格式实现采用注册工厂模式：核心导出流程只根据 `format` 字符串从 `DataFormatRegistry` 中查找 `DataFormatExporter`，不在流程中通过枚举 `match` 分发。新增导出格式应通过注册新的 exporter 实现扩展，避免修改核心导出编排逻辑。内置注册器提供 `json` 与 `messagepack`。
+
 别名策略：
 
 - 配置中使用规范名 `messagepack`。
-- CLI 诊断和生成代码中的格式枚举也使用 `MessagePack` / `messagepack`。
+- CLI 诊断使用格式 ID；生成代码不再包含格式枚举。
 - 如需兼容 `msgpack` 简写，可作为解析别名，但文档和生成产物统一输出 `messagepack`。
 
 未来可扩展但当前不实现：
@@ -147,27 +149,24 @@ Protobuf 未来规则：
 
 生成代码必须把“如何取得配置文件”和“如何解析配置格式”接口化，避免把 runtime 绑定到 exporter 所在机器的文件系统或某个具体引擎 API。
 
-推荐抽象分两层：
-
-1. **DataFileLoader**：只负责按 path 读取文件内容，返回 bytes；具体 runtime 可以从本地文件、包内资源、AssetBundle、HTTP、Lark 缓存或其他资源系统加载。
-2. **RuntimeDataDecoder / Codec**：负责把 bytes 按 `json` 或 `messagepack` 解析成生成代码中的 typed row 列表。
+推荐抽象为一层：**RuntimeDataLoader**。生成代码只声明每张表所需的 typed row 加载方法，具体 runtime 自行决定如何读取文件、如何识别格式、如何解码成 row 列表。
 
 语言 API 形态可以按语言习惯调整，但语义应一致：
 
-| 语言 | 文件加载接口 | 解码接口 |
-| --- | --- | --- |
-| Rust | `DataFileLoader::load_bytes(path) -> Result<Vec<u8>, String>` | 泛型 `RuntimeDataDecoder`，按 `RuntimeDataFormat` 解码 table rows。 |
-| C++ | `IDataFileLoader::LoadBytes(path) -> std::vector<std::uint8_t>` | 生成 per-table decoder virtual methods，避免 C++ virtual generic。 |
-| TypeScript | `DataFileLoader.loadBytes(path) -> Promise<Uint8Array | ArrayBuffer | string>` | `RuntimeDataDecoder.decodeTable<T>(format, path, data)`。 |
+| 语言 | Runtime 加载接口 |
+| --- | --- |
+| Rust | `RuntimeDataLoader::load_<table>_rows(path) -> Result<Vec<TableRow>, String>` |
+| C++ | `IRuntimeDataLoader::Load<Table>Rows(path) -> std::vector<TableRow>` |
+| TypeScript | `RuntimeDataLoader.load<Table>Rows(path) -> Promise<TableRow[]> | TableRow[]` |
 
-生成代码中的 repository / `GameData::load` 不直接打开文件，而是接收 loader 和 decoder。业务 runtime 可以选择：
+生成代码中的 repository / `GameData::load` 不直接打开文件，也不感知数据格式，而是接收 runtime loader。业务 runtime 可以选择：
 
 - 提供 JSON decoder；
 - 提供 MessagePack decoder；
-- 提供一个同时支持两种格式的 decoder；
+- 提供一个同时支持多种格式的 loader；
 - 在引擎侧复用已有资源加载和反序列化系统。
 
-格式选择由 target 的 `[targets.data].format` 决定，并写入生成代码中的 table data file 后缀和格式常量。
+格式选择由 target 的 `[targets.data].format` 决定，并影响导出的 table data file 后缀；生成代码只保留 data file path，不包含格式常量。
 
 ## 6.3 Special Exporter
 

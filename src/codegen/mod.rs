@@ -149,35 +149,6 @@ pub struct PartialNamingConfig {
     pub constant: Option<CaseStyle>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeDataFormat {
-    Json,
-    MessagePack,
-}
-
-impl RuntimeDataFormat {
-    pub fn extension(self) -> &'static str {
-        match self {
-            Self::Json => "json",
-            Self::MessagePack => "msgpack",
-        }
-    }
-
-    pub fn as_config_str(self) -> &'static str {
-        match self {
-            Self::Json => "json",
-            Self::MessagePack => "messagepack",
-        }
-    }
-
-    pub fn rust_variant(self) -> &'static str {
-        match self {
-            Self::Json => "Json",
-            Self::MessagePack => "MessagePack",
-        }
-    }
-}
-
 impl<'de> Deserialize<'de> for CodeExportLanguage {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
@@ -367,7 +338,6 @@ pub struct CodeExportInput<'meta> {
     pub project: CodeExportProject,
     pub target: CodeExportTarget,
     pub runtime_data_files: Vec<RuntimeDataFile>,
-    pub runtime_data_format: RuntimeDataFormat,
     pub generated_at: String,
 }
 

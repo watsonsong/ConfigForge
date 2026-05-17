@@ -84,7 +84,6 @@ fn input_for<'a>(meta: &'a MetaModel, language: CodeExportLanguage) -> CodeExpor
             table_name: "items".to_owned(),
             path: "items.json".to_owned(),
         }],
-        runtime_data_format: RuntimeDataFormat::Json,
         generated_at: "2026-05-17T00:00:00Z".to_owned(),
     }
 }
@@ -94,12 +93,7 @@ fn builds_code_model_with_types_tables_and_indexes() {
     let meta = linked_fixture();
     let input = input_for(&meta, CodeExportLanguage::Rust);
 
-    let model = build_code_model(
-        input.meta,
-        &input.runtime_data_files,
-        input.runtime_data_format,
-    )
-    .expect("model");
+    let model = build_code_model(input.meta, &input.runtime_data_files).expect("model");
 
     assert_eq!(model.enums[0].name, "ItemRarity");
     assert_eq!(model.structs[0].name, "RewardInfo");
@@ -121,18 +115,16 @@ fn builds_code_model_with_types_tables_and_indexes() {
         .iter()
         .any(|index| index.name == "by_rarity" && !index.unique));
     assert_eq!(model.tables[0].data_file, "items.json");
-    assert_eq!(model.tables[0].data_format, RuntimeDataFormat::Json);
 }
 
 #[test]
-fn code_model_defaults_data_file_extension_from_runtime_format() {
+fn code_model_defaults_data_file_to_json_when_no_runtime_file_is_available() {
     let meta = linked_fixture();
     let linked = meta.link().expect("fixture meta should link");
 
-    let model = build_code_model(&linked, &[], RuntimeDataFormat::MessagePack).expect("model");
+    let model = build_code_model(&linked, &[]).expect("model");
 
-    assert_eq!(model.tables[0].data_file, "items.msgpack");
-    assert_eq!(model.tables[0].data_format, RuntimeDataFormat::MessagePack);
+    assert_eq!(model.tables[0].data_file, "items.json");
 }
 
 #[test]
@@ -187,7 +179,7 @@ fn code_model_rejects_indexes_referencing_non_exported_fields() {
     )
     .expect("meta should load");
     let linked = meta.link().expect("meta should link");
-    let error = build_code_model(&linked, &[], RuntimeDataFormat::Json).unwrap_err();
+    let error = build_code_model(&linked, &[]).unwrap_err();
 
     assert!(
         matches!(error, ConfigForgeError::Validation(message) if message.contains("references non-exported field `internal_region`"))
@@ -214,7 +206,7 @@ fn code_model_rejects_unsupported_index_key_types() {
     )
     .expect("meta should load");
     let linked = meta.link().expect("meta should link");
-    let error = build_code_model(&linked, &[], RuntimeDataFormat::Json).unwrap_err();
+    let error = build_code_model(&linked, &[]).unwrap_err();
 
     assert!(
         matches!(error, ConfigForgeError::Validation(message) if message.contains("unsupported index key type"))
