@@ -68,7 +68,11 @@ fn parses_basic_collection_table() {
         .primary_index()
         .expect("linked primary index should exist");
     assert_eq!(linked_primary_index.meta.name, "by_id");
-    assert_eq!(linked_primary_index.fields[0].name, "id");
+    assert_eq!(linked_primary_index.fields[0].meta.name, "id");
+    assert_eq!(
+        linked_primary_index.fields[0].linked_field,
+        LinkedField::Primitive(PrimitiveFieldType::Int)
+    );
 }
 
 #[test]
@@ -97,7 +101,7 @@ fn links_primary_index_marked_on_index_when_table_field_is_empty() {
         .primary_index()
         .expect("primary index should be linked from primary flag");
     assert_eq!(primary_index.meta.name, "by_id");
-    assert_eq!(primary_index.fields[0].name, "id");
+    assert_eq!(primary_index.fields[0].meta.name, "id");
 }
 
 #[test]
@@ -151,13 +155,77 @@ fn links_custom_enum_and_struct_types_after_loading_all_meta() {
 
     let linked_meta = meta.link().expect("meta should link");
     let table = linked_meta.table("items").unwrap();
-    match table.field("rarity").unwrap().linked_field {
+    match &table.field("rarity").unwrap().linked_field {
         LinkedField::Enum(enum_meta) => assert_eq!(enum_meta.name, "ItemRarity"),
         other => panic!("expected linked enum, got {other:?}"),
     }
-    match table.field("reward").unwrap().linked_field {
-        LinkedField::Struct(struct_meta) => assert_eq!(struct_meta.name, "Reward"),
+    match &table.field("reward").unwrap().linked_field {
+        LinkedField::Struct(struct_type) => {
+            assert_eq!(struct_type.meta.name, "Reward");
+            assert_eq!(struct_type.fields[0].meta.name, "count");
+            assert_eq!(
+                struct_type.fields[0].linked_field,
+                LinkedField::Primitive(PrimitiveFieldType::Int)
+            );
+        }
         other => panic!("expected linked struct, got {other:?}"),
+    }
+}
+
+#[test]
+fn linked_struct_fields_recursively_include_nested_type_info() {
+    let meta = parse(
+        r#"
+            [[enums]]
+            name = "RewardKind"
+            [[enums.values]]
+            name = "coin"
+
+            [[structs]]
+            name = "RewardDetail"
+            [[structs.fields]]
+            name = "kind"
+            type = "RewardKind"
+
+            [[structs]]
+            name = "Reward"
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+            [[structs.fields]]
+            name = "detail"
+            type = "RewardDetail"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            [[tables.fields]]
+            name = "reward"
+            type = "Reward"
+        "#,
+    );
+
+    let linked_meta = meta.link().expect("meta should link");
+    let reward_field = linked_meta.table("items").unwrap().field("reward").unwrap();
+    let LinkedField::Struct(reward_type) = &reward_field.linked_field else {
+        panic!("reward should be linked as struct");
+    };
+    let detail_field = reward_type
+        .fields
+        .iter()
+        .find(|field| field.meta.name == "detail")
+        .expect("nested struct field should exist");
+    let LinkedField::Struct(detail_type) = &detail_field.linked_field else {
+        panic!("detail should be linked as struct");
+    };
+    let kind_field = detail_type
+        .fields
+        .iter()
+        .find(|field| field.meta.name == "kind")
+        .expect("nested enum field should exist");
+    match &kind_field.linked_field {
+        LinkedField::Enum(enum_meta) => assert_eq!(enum_meta.name, "RewardKind"),
+        other => panic!("expected nested enum, got {other:?}"),
     }
 }
 
@@ -193,7 +261,7 @@ fn supports_imported_meta_files_before_linking_field_types() {
     assert!(meta.enum_meta("ItemRarity").is_some());
     let linked_meta = meta.link().expect("imported meta should link");
     let field = linked_meta.table("items").unwrap().field("rarity").unwrap();
-    match field.linked_field {
+    match &field.linked_field {
         LinkedField::Enum(enum_meta) => assert_eq!(enum_meta.name, "ItemRarity"),
         other => panic!("expected linked enum, got {other:?}"),
     }
@@ -565,7 +633,10 @@ fn exposes_raw_and_linked_query_helpers() {
     let primitive_field = &linked_table.field("id").unwrap().linked_field;
     assert_eq!(meta.linked_enum(enum_field).unwrap().name, "ItemRarity");
     assert!(meta.linked_enum(struct_field).is_none());
-    assert_eq!(meta.linked_struct(struct_field).unwrap().name, "Reward");
+    assert_eq!(
+        meta.linked_struct(struct_field).unwrap().meta.name,
+        "Reward"
+    );
     assert!(meta.linked_struct(primitive_field).is_none());
 
     let linked_struct = linked_meta.struct_meta("Reward").unwrap();

@@ -123,7 +123,7 @@ fn validate_index_uniqueness(
         let key = index
             .fields
             .iter()
-            .map(|field| row.get(&field.name).cloned().unwrap_or_default())
+            .map(|field| row.get(&field.meta.name).cloned().unwrap_or_default())
             .collect::<Vec<_>>();
         if !seen.insert(key.clone()) {
             return Err(ConfigForgeError::Validation(format!(
@@ -193,7 +193,7 @@ fn validate_supported_field_type(
     meta: &LinkedTableMeta<'_>,
     field: &LinkedFieldMeta<'_>,
 ) -> Result<()> {
-    if let LinkedField::Struct(_) = field.linked_field {
+    if let LinkedField::Struct(_) = &field.linked_field {
         return Err(ConfigForgeError::Validation(format!(
             "table `{}` field `{}` uses struct type `{}`, but struct value validation is not implemented yet",
             meta.meta.name, field.meta.name, field.meta.field_type
@@ -209,7 +209,7 @@ fn validate_value_type(
     value: &str,
     row_index: usize,
 ) -> Result<()> {
-    let valid = match field.linked_field {
+    let valid = match &field.linked_field {
         LinkedField::Primitive(PrimitiveFieldType::Int) => value.parse::<i64>().is_ok(),
         LinkedField::Primitive(PrimitiveFieldType::Float) => value.parse::<f64>().is_ok(),
         LinkedField::Primitive(PrimitiveFieldType::Bool) => {
@@ -281,8 +281,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::meta::{
-        EnumMeta, EnumValueMeta, FieldMeta, LinkedField, LinkedFieldMeta, LinkedTableMeta,
-        MetaModel, PrimitiveFieldType, TableMeta,
+        EnumMeta, EnumValueMeta, FieldMeta, LinkedField, LinkedFieldMeta, LinkedStructType,
+        LinkedTableMeta, MetaModel, PrimitiveFieldType, TableMeta,
     };
 
     use super::*;
@@ -506,7 +506,10 @@ mod tests {
             &meta,
             vec![LinkedFieldMeta {
                 meta: &meta.fields[0],
-                linked_field: LinkedField::Struct(&struct_meta),
+                linked_field: LinkedField::Struct(LinkedStructType {
+                    meta: &struct_meta,
+                    fields: vec![],
+                }),
             }],
             vec![],
         );

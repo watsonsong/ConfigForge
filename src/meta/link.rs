@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use super::{
     FieldMeta, LinkedField, LinkedFieldMeta, LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta,
-    LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
+    LinkedStructType, LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
+    PrimitiveFieldType,
 };
 
 pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<MetaDiagnostic>) {
@@ -20,14 +21,14 @@ pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<M
 
     let mut linked_tables = Vec::new();
     for table in &model.tables {
-        let field_index = table
-            .fields
-            .iter()
-            .map(|field| (field.name.as_str(), field))
-            .collect::<HashMap<_, _>>();
-        let linked_fields =
-            link_fields(&enum_index, &struct_index, &table.fields, &mut diagnostics);
-        let linked_indexes = link_indexes(table, &field_index);
+        let linked_fields = link_fields(
+            &enum_index,
+            &struct_index,
+            &table.fields,
+            &mut Vec::new(),
+            &mut diagnostics,
+        );
+        let linked_indexes = link_indexes(table, &linked_fields);
         linked_tables.push(LinkedTableMeta::new(table, linked_fields, linked_indexes));
     }
 
@@ -39,6 +40,7 @@ pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<M
                 &enum_index,
                 &struct_index,
                 &struct_meta.fields,
+                &mut vec![struct_meta.name.as_str()],
                 &mut diagnostics,
             );
             LinkedStructMeta::new(struct_meta, linked_fields)
@@ -70,18 +72,25 @@ fn link_fields<'meta>(
     enum_index: &HashMap<&'meta str, &'meta super::EnumMeta>,
     struct_index: &HashMap<&'meta str, &'meta super::StructMeta>,
     fields: &'meta [FieldMeta],
+    struct_stack: &mut Vec<&'meta str>,
     diagnostics: &mut Vec<MetaDiagnostic>,
 ) -> Vec<LinkedFieldMeta<'meta>> {
     fields
         .iter()
-        .filter_map(|field| link_field_type(enum_index, struct_index, field, diagnostics))
+        .filter_map(|field| {
+            link_field_type(enum_index, struct_index, field, struct_stack, diagnostics)
+        })
         .collect()
 }
 
 fn link_indexes<'meta>(
     table: &'meta super::TableMeta,
-    field_index: &HashMap<&'meta str, &'meta FieldMeta>,
+    linked_fields: &[LinkedFieldMeta<'meta>],
 ) -> Vec<LinkedIndexMeta<'meta>> {
+    let field_index = linked_fields
+        .iter()
+        .map(|field| (field.meta.name.as_str(), field))
+        .collect::<HashMap<_, _>>();
     table
         .indexes
         .iter()
@@ -90,7 +99,7 @@ fn link_indexes<'meta>(
             fields: index
                 .fields
                 .iter()
-                .filter_map(|field_name| field_index.get(field_name.as_str()).copied())
+                .filter_map(|field_name| field_index.get(field_name.as_str()).cloned().cloned())
                 .collect(),
         })
         .collect()
@@ -100,6 +109,7 @@ fn link_field_type<'meta>(
     enum_index: &HashMap<&'meta str, &'meta super::EnumMeta>,
     struct_index: &HashMap<&'meta str, &'meta super::StructMeta>,
     field: &'meta FieldMeta,
+    struct_stack: &mut Vec<&'meta str>,
     diagnostics: &mut Vec<MetaDiagnostic>,
 ) -> Option<LinkedFieldMeta<'meta>> {
     let linked_field = if let Some(primitive) = PrimitiveFieldType::parse(&field.field_type) {
@@ -107,7 +117,14 @@ fn link_field_type<'meta>(
     } else if let Some(enum_meta) = enum_index.get(field.field_type.as_str()) {
         LinkedField::Enum(enum_meta)
     } else if let Some(struct_meta) = struct_index.get(field.field_type.as_str()) {
-        LinkedField::Struct(struct_meta)
+        let linked_struct = link_struct_type(
+            enum_index,
+            struct_index,
+            struct_meta,
+            struct_stack,
+            diagnostics,
+        )?;
+        LinkedField::Struct(linked_struct)
     } else {
         diagnostics.push(MetaDiagnostic::new(
             MetaDiagnosticCode::UnknownFieldType,
@@ -122,5 +139,41 @@ fn link_field_type<'meta>(
     Some(LinkedFieldMeta {
         meta: field,
         linked_field,
+    })
+}
+
+fn link_struct_type<'meta>(
+    enum_index: &HashMap<&'meta str, &'meta super::EnumMeta>,
+    struct_index: &HashMap<&'meta str, &'meta super::StructMeta>,
+    struct_meta: &'meta super::StructMeta,
+    struct_stack: &mut Vec<&'meta str>,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) -> Option<LinkedStructType<'meta>> {
+    if struct_stack.contains(&struct_meta.name.as_str()) {
+        let mut cycle_path = struct_stack.clone();
+        cycle_path.push(struct_meta.name.as_str());
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "struct type cycle `{}` is not supported by linked meta",
+                cycle_path.join(" -> ")
+            ),
+        ));
+        return None;
+    }
+
+    struct_stack.push(struct_meta.name.as_str());
+    let fields = link_fields(
+        enum_index,
+        struct_index,
+        &struct_meta.fields,
+        struct_stack,
+        diagnostics,
+    );
+    struct_stack.pop();
+
+    Some(LinkedStructType {
+        meta: struct_meta,
+        fields,
     })
 }

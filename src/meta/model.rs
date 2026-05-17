@@ -111,11 +111,17 @@ fn default_export() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LinkedField<'meta> {
     Primitive(PrimitiveFieldType),
     Enum(&'meta EnumMeta),
-    Struct(&'meta StructMeta),
+    Struct(LinkedStructType<'meta>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinkedStructType<'meta> {
+    pub meta: &'meta StructMeta,
+    pub fields: Vec<LinkedFieldMeta<'meta>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,10 +207,10 @@ impl MetaModel {
 
     pub fn linked_struct<'meta>(
         &'meta self,
-        linked_field: &LinkedField<'meta>,
-    ) -> Option<&'meta StructMeta> {
+        linked_field: &'meta LinkedField<'meta>,
+    ) -> Option<&'meta LinkedStructType<'meta>> {
         match linked_field {
-            LinkedField::Struct(struct_meta) => Some(struct_meta),
+            LinkedField::Struct(struct_type) => Some(struct_type),
             _ => None,
         }
     }
@@ -284,11 +290,13 @@ pub struct LinkedStructMeta<'meta> {
     field_index: HashMap<&'meta str, usize>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct LinkedIndexMeta<'meta> {
     pub meta: &'meta IndexMeta,
-    pub fields: Vec<&'meta FieldMeta>,
+    pub fields: Vec<LinkedFieldMeta<'meta>>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct LinkedFieldMeta<'meta> {
     pub meta: &'meta FieldMeta,
     pub linked_field: LinkedField<'meta>,
@@ -421,8 +429,8 @@ impl<'meta> LinkedStructMeta<'meta> {
 
 impl<'meta> LinkedFieldMeta<'meta> {
     pub fn primitive_type(&self) -> Option<PrimitiveFieldType> {
-        match self.linked_field {
-            LinkedField::Primitive(primitive) => Some(primitive),
+        match &self.linked_field {
+            LinkedField::Primitive(primitive) => Some(*primitive),
             _ => None,
         }
     }

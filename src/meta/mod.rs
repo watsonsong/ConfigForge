@@ -9,8 +9,8 @@ pub use link::link_meta_model;
 pub use loader::load_meta_path;
 pub use model::{
     EnumMeta, EnumValueMeta, FieldMeta, IndexMeta, LinkedField, LinkedFieldMeta, LinkedIndexMeta,
-    LinkedMetaModel, LinkedStructMeta, LinkedTableMeta, MetaModel, MetaSet, PrimitiveFieldType,
-    SourceRef, StructMeta, TableKind, TableMeta, ValueLayout,
+    LinkedMetaModel, LinkedStructMeta, LinkedStructType, LinkedTableMeta, MetaModel, MetaSet,
+    PrimitiveFieldType, SourceRef, StructMeta, TableKind, TableMeta, ValueLayout,
 };
 pub use validate::validate_meta_model;
 

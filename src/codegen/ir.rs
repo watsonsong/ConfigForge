@@ -161,10 +161,11 @@ pub fn build_code_model(
             for index_meta in &table_meta.indexes {
                 let mut index_fields = Vec::new();
                 for field in &index_meta.fields {
-                    let Some(code_field) = field_index.get(field.name.as_str()).cloned() else {
+                    let Some(code_field) = field_index.get(field.meta.name.as_str()).cloned()
+                    else {
                         return Err(ConfigForgeError::Validation(format!(
                             "table `{}` index `{}` references non-exported field `{}`",
-                            table_meta.meta.name, index_meta.meta.name, field.name
+                            table_meta.meta.name, index_meta.meta.name, field.meta.name
                         )));
                     };
                     validate_index_key_type(
@@ -269,7 +270,7 @@ fn code_field_from_linked(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<Co
 }
 
 fn code_type_from_linked(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<CodeTypeRef> {
-    Ok(match field.linked_field {
+    Ok(match &field.linked_field {
         LinkedField::Primitive(PrimitiveFieldType::Int) => CodeTypeRef::Int,
         LinkedField::Primitive(PrimitiveFieldType::Float) => CodeTypeRef::Float,
         LinkedField::Primitive(PrimitiveFieldType::Bool) => CodeTypeRef::Bool,
@@ -279,8 +280,8 @@ fn code_type_from_linked(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<Cod
         LinkedField::Enum(enum_meta) => CodeTypeRef::Enum {
             name: enum_meta.name.clone(),
         },
-        LinkedField::Struct(struct_meta) => CodeTypeRef::Struct {
-            name: struct_meta.name.clone(),
+        LinkedField::Struct(struct_type) => CodeTypeRef::Struct {
+            name: struct_type.meta.name.clone(),
         },
     })
 }
