@@ -115,7 +115,7 @@ pub fn build_exported_table_payload(
     let exported_fields = table_meta
         .fields
         .iter()
-        .filter(|field| field.meta.export && !field.meta.tool_only && !field.meta.validator_only)
+        .filter(|field| field.meta.is_runtime_exported())
         .map(|field| field.meta.name.as_str())
         .collect::<std::collections::BTreeSet<_>>();
     let rows = table

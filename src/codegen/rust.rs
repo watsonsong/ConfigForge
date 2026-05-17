@@ -21,6 +21,7 @@ impl CodeGenerator for RustCodeGenerator {
         let mut content = render_file_header(input);
         content.push_str("use std::collections::HashMap;\n\n");
         content.push_str("pub trait RuntimeDataLoader {\n");
+        content.push_str("    // Implementations should read exported table files such as DATA_FILE, decode the payload envelope `{ meta, rows }`, and return the typed `rows`.\n");
         for table in &model.tables {
             content.push_str(&format!(
                 "    fn load_{}_rows(&self, path: &str) -> Result<Vec<{}>, String>;\n",

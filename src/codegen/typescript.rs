@@ -21,6 +21,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         let mut content = render_file_header(input);
         content.push('\n');
         content.push_str("export interface RuntimeDataLoader {\n");
+        content.push_str("  // Implementations should read exported table files such as dataFile, decode the payload envelope `{ meta, rows }`, and return the typed `rows`.\n");
         for table in &model.tables {
             content.push_str(&format!(
                 "  load{}Rows(path: string): Promise<{}[]> | {}[];\n",

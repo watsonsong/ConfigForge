@@ -232,7 +232,7 @@ pub fn build_code_model(
 }
 
 fn is_runtime_codegen_field(field: &crate::meta::LinkedFieldMeta<'_>) -> bool {
-    field.meta.export && !field.meta.tool_only && !field.meta.validator_only
+    field.meta.is_runtime_exported()
 }
 
 fn validate_index_key_type(table_name: &str, index_name: &str, field: &CodeField) -> Result<()> {

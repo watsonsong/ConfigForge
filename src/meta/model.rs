@@ -263,6 +263,10 @@ impl FieldMeta {
     pub fn primitive_type(&self) -> Option<PrimitiveFieldType> {
         PrimitiveFieldType::parse(&self.field_type)
     }
+
+    pub fn is_runtime_exported(&self) -> bool {
+        self.export && !self.tool_only && !self.validator_only
+    }
 }
 
 pub struct LinkedMetaModel<'meta> {

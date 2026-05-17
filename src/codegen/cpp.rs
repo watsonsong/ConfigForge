@@ -21,7 +21,7 @@ impl CodeGenerator for CppCodeGenerator {
         let names = CppNames::new(&input.target.options);
         let mut content = render_file_header(input);
         content.push_str("#pragma once\n\n");
-        content.push_str("#include <cstddef>\n#include <string>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
+        content.push_str("#include <cstdint>\n#include <cstddef>\n#include <string>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
         let namespace = cpp_options
             .namespace
             .as_ref()
@@ -82,6 +82,7 @@ impl CodeGenerator for CppCodeGenerator {
         content.push_str(
             "class IRuntimeDataLoader {\npublic:\n    virtual ~IRuntimeDataLoader() = default;\n",
         );
+        content.push_str("    // Implementations should read exported table files such as DataFile, decode the payload envelope `{ meta, rows }`, and return the typed rows.\n");
         for table in &model.tables {
             content.push_str(&format!(
                 "    virtual std::vector<{}> Load{}Rows(const std::string& path) = 0;\n",
