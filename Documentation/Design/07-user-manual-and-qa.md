@@ -72,16 +72,23 @@ action = "exclude"
 `ConfigForge.toml`：
 
 ```toml
+imports = ["Meta/items.toml"]
+
 [project]
 name = "sample"
-meta = ["Meta/items.toml"]
 
 [[targets]]
 name = "client_json_shipping"
-language = "typescript"
-data_format = "json"
-output = "Generated/Client"
 tags = ["shipping"]
+
+[targets.data]
+input = "Data"
+output = "Generated/Data"
+format = "json"
+
+[[targets.code]]
+language = "typescript"
+output = "Generated/Client"
 
 [[targets.special_exporters]]
 kind = "asset_manifest_csv"
@@ -91,13 +98,13 @@ output = "Generated/assets.csv"
 ### 4. 校验
 
 ```bash
-config-forge validate --project ConfigForge.toml --target client_json_shipping
+config-forge --project ConfigForge.toml --target client_json_shipping
 ```
 
 ### 5. 导出
 
 ```bash
-config-forge export --project ConfigForge.toml --target client_json_shipping
+config-forge --project ConfigForge.toml --target client_json_shipping
 ```
 
 预期：

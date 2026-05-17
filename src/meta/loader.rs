@@ -1,8 +1,4 @@
-use std::{
-    collections::BTreeSet,
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
 
 use crate::{ConfigForgeError, Result};
 
@@ -23,34 +19,23 @@ impl MetaModel {
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
     {
-        let mut visited = BTreeSet::new();
         let mut loaded = Vec::new();
         for path in paths {
-            load_recursive(path.as_ref(), &mut visited, &mut loaded)?;
+            loaded.push(read_meta_file(path.as_ref())?);
         }
         finish_loading(merge_models(loaded))
     }
 }
 
 pub fn load_meta_path(path: &Path) -> Result<MetaModel> {
-    let mut visited = BTreeSet::new();
-    let mut loaded = Vec::new();
-    load_recursive(path, &mut visited, &mut loaded)?;
-    finish_loading(merge_models(loaded))
+    finish_loading(read_meta_file(path)?)
 }
 
-fn load_recursive(
-    path: &Path,
-    visited: &mut BTreeSet<PathBuf>,
-    loaded: &mut Vec<MetaModel>,
-) -> Result<()> {
+fn read_meta_file(path: &Path) -> Result<MetaModel> {
     let canonical_path = fs::canonicalize(path).map_err(|source| ConfigForgeError::ReadFile {
         path: path.to_path_buf(),
         source,
     })?;
-    if !visited.insert(canonical_path.clone()) {
-        return Ok(());
-    }
 
     let content =
         fs::read_to_string(&canonical_path).map_err(|source| ConfigForgeError::ReadFile {
@@ -62,29 +47,17 @@ fn load_recursive(
             path: canonical_path.clone(),
             source,
         })?;
-
-    let base_dir = canonical_path.parent().unwrap_or_else(|| Path::new("."));
-    for import in &model.imports {
-        load_recursive(&base_dir.join(import), visited, loaded)?;
-    }
-    loaded.push(model);
-    Ok(())
+    Ok(model)
 }
 
 fn merge_models(models: Vec<MetaModel>) -> MetaModel {
     let mut merged = MetaModel {
-        imports: Vec::new(),
-        project: None,
         enums: Vec::new(),
         structs: Vec::new(),
         tables: Vec::new(),
     };
 
     for mut model in models {
-        if merged.project.is_none() {
-            merged.project = model.project.take();
-        }
-        merged.imports.append(&mut model.imports);
         merged.enums.append(&mut model.enums);
         merged.structs.append(&mut model.structs);
         merged.tables.append(&mut model.tables);

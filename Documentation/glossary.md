@@ -35,8 +35,8 @@
 | Meta / 元定义 | Meta | `Meta` | 数据结构定义，包含 table、field、type、index、foreign key、validator 等。 |
 | Meta 文件 | Meta File | `MetaFile` | 物理 Meta 文件，格式可以是 TOML 或 XML。 |
 | Meta 文档 | Meta Document | `MetaDocument` | 一个解析前的 Meta 文档单元。 |
-| Meta 模型 | Meta Model | `MetaModel` | 多文件 import、parse、merge、link 后的 canonical 内存模型。 |
-| Meta 导入 | Meta Import | `imports`, `MetaImport` | 一个 Meta 文件引用其他 TOML/XML Meta 文件。 |
+| Meta 模型 | Meta Model | `MetaModel` | 多个 Meta 片段 parse、merge、link 后的 canonical 内存模型。 |
+| 配置导入 | Config Import | `ProjectConfig.imports` | 一个 Project Config 片段引用其他工程配置片段；用于统一组合 Meta 定义和 target 定义。 |
 | 描述 | Description | `desc` | Meta 各层级定义上的结构化描述，用于 inspect、代码注释和辅助文档。 |
 | 表 | Table | `Table`, `TableMeta` | 被 Meta 描述并导出的逻辑配置表。 |
 | 表类型 | Table Kind | `TableKind` | 表类型区分字段，例如 object 或 collection。 |

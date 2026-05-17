@@ -9,13 +9,7 @@
 | 字段 | 说明 |
 | --- | --- |
 | `name` | 稳定 target 名称。 |
-| `language` | 代码生成语言，例如 `typescript`、`lua`、`csharp`、`cpp`。 |
-| `engine` | 可选引擎，例如 `unity`、`unreal`。 |
-| `data_format` | runtime data format，例如 `json`、`lua_table`。 |
-| `tags` | target 默认导出上下文 tag。 |
-| `output` | 输出目录或 artifact 路径。 |
-| `type_mappings` | logical type 到 target type 的映射。 |
-| `special_exporters` | POT、asset manifest 等辅助产物。 |
+| `data` | 可选 runtime data 导出任务。存在时才读取 source data。 |
 | `code` | 当前 target 下的一个或多个代码生成任务。每个任务有独立语言、输出目录、文件头和命名策略。 |
 
 Project-level `name` / `desc` / `copyright` 可被 target 的代码生成器、schema exporter 或 manifest exporter 用于生成文件头。Target code task 可以通过 `file_header` 模板覆盖默认文件头。
@@ -201,108 +195,36 @@ Artifact 类型：
 
 ## 6.6 CLI 总体形式
 
-命令：
+当前 CLI 只保留构建一个 target 所需的最小参数：Project Config 路径和 target 名称。Meta、Data、输出目录和代码生成语言都从 target 配置中读取，不在命令行重复声明。
 
 ```bash
-config-forge <command> [options]
+config-forge --project ConfigForge.toml --target client
 ```
 
-全局参数：
+参数：
 
 | 参数 | 说明 |
 | --- | --- |
-| `--project <FILE>` | Project Config 路径，默认查找 `ConfigForge.toml`。 |
-| `--root <DIR>` | 覆盖 project root。 |
-| `--meta <FILE>` | 追加或覆盖 Meta root 文件。可重复。 |
-| `--target <NAME>` | 选择 target。可重复。 |
-| `--tag <TAG>` | 追加导出上下文 tag。可重复。 |
-| `--context <A,B>` | 一次指定多个 tag。 |
-| `--out <DIR>` | 覆盖输出目录。 |
-| `--diagnostic-format <human|json|jsonl|summary>` | 诊断格式。 |
-| `--fail-on-warning` | warning 也导致失败。 |
-| `--plugin-path <DIR>` | 追加插件搜索路径。可重复。 |
-| `--no-color` | 禁用终端颜色。 |
-| `--verbose` | 输出更多调试信息。 |
+| `--project <FILE>` | Project Config 路径。 |
+| `--target <NAME>` | 要构建的 target 名称。 |
 
-## 6.7 `validate` 命令
+执行行为：
 
-用途：只读取、组合、过滤和校验，不写正式导出产物。
+1. 解析 Project Config，并递归加载其顶层 `imports` 指向的工程配置片段。
+2. 按 `--target` 找到目标 target。
+3. 合并所有配置片段中的 `enums`、`structs`、`tables` 并完成 link/validate。
+4. 如果 target 声明 `[targets.data]`，再读取 Data source、归一化、校验并写出 runtime data。
+5. 如果 target 声明 `[[targets.code]]`，按每个 code task 的语言和输出目录生成代码。
+6. 未声明的任务不读取对应输入、不产生对应输出。例如 code-only target 不读取 Data。
 
-```bash
-config-forge validate --project ConfigForge.toml
-config-forge validate --project ConfigForge.toml --target client_lua_shipping
-config-forge validate --meta Meta/items.toml --tag shipping --tag global
-```
-
-行为：
-
-- 未指定 target/context 时，默认校验 Full DataSet。
-- 指定 target/context 时，校验对应 ExportView。
-- 可输出 human/json/jsonl 诊断。
-- 不生成 runtime data，但可选择 `--dry-run-export-plan` 输出导出计划。
-
-## 6.8 `export` 命令
-
-用途：校验通过后生成运行时数据、代码和特殊产物。
-
-```bash
-config-forge export --project ConfigForge.toml --target client_lua_shipping
-config-forge export --project ConfigForge.toml --target client_lua_shipping --out Build/Generated
-```
-
-行为：
-
-1. 解析配置。
-2. 加载插件。
-3. 解析 Meta 和 source。
-4. 生成 target ExportView。
-5. 校验 ExportView。
-6. 规划 artifact。
-7. 写入产物和 manifest。
-
-如果校验失败，不应写入最终产物。
-
-## 6.9 `inspect` 命令
-
-用途：帮助用户理解项目和 Meta。
-
-子命令建议：
-
-```bash
-config-forge inspect meta --project ConfigForge.toml
-config-forge inspect table items --project ConfigForge.toml
-config-forge inspect target client_lua_shipping --project ConfigForge.toml
-config-forge inspect sources --project ConfigForge.toml
-```
-
-输出：
-
-- 合并后的 MetaModel 摘要；
-- 表字段、索引、外键；
-- table、field、enum、struct 等定义的 `desc`；
-- source resolution；
-- target tags 和 exporter；
-- filter 后 record 数量统计。
-
-## 6.10 `debug` 命令
-
-用途：为工具开发和 CI 排障提供信息。
-
-```bash
-config-forge debug plugins --project ConfigForge.toml
-config-forge debug export-plan --project ConfigForge.toml --target client_lua_shipping
-config-forge debug diagnostics-schema
-```
-
-## 6.11 退出码
+## 6.7 退出码
 
 | Exit Code | 含义 |
 | --- | --- |
 | `0` | 成功，无 error。 |
-| `1` | 校验或导出失败。 |
+| `1` | 构建、校验或导出失败。 |
 | `2` | CLI 参数错误。 |
 | `3` | Project/Meta 配置解析失败。 |
 | `4` | Source 加载失败。 |
-| `5` | 插件加载失败。 |
 
 如果存在多个错误，退出码取最主要失败类别，但诊断中应保留全部错误。

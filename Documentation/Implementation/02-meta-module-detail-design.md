@@ -49,7 +49,7 @@ src/meta/
 | --- | --- |
 | `mod.rs` | 只负责声明子模块和 re-export 对外 API。 |
 | `model.rs` | 定义 serde 数据结构、linked 数据结构、查询方法和 primitive 类型解析。 |
-| `loader.rs` | 文件读取、TOML 反序列化、imports 递归、模型合并、加载后 link/validate。 |
+| `loader.rs` | Meta 文件读取、TOML 反序列化、显式路径列表合并、加载后 link/validate。 |
 | `link.rs` | 构建 `LinkedMetaModel<'meta>`，解析字段类型和索引字段引用。 |
 | `validate.rs` | 独立结构校验；不构造运行时数据。 |
 | `diagnostic.rs` | 诊断 code、message、排序和展示。 |
@@ -62,8 +62,7 @@ src/meta/
 ```text
 TOML input
   --serde load--> MetaModel
-  --imports-----> Vec<MetaModel>
-  --merge-------> MetaModel
+  --merge paths-> MetaModel
   --link--------> LinkedMetaModel<'meta>
   --validate----> diagnostics
 ```
@@ -94,8 +93,6 @@ LinkedMetaModel<'meta> borrows from &'meta MetaModel
 
 ```rust
 pub struct MetaModel {
-    pub imports: Vec<String>,
-    pub project: Option<ProjectMeta>,
     pub enums: Vec<EnumMeta>,
     pub structs: Vec<StructMeta>,
     pub tables: Vec<TableMeta>,
@@ -107,7 +104,7 @@ pub struct MetaModel {
 - `MetaModel` 是 serde 直接加载的 owned model。
 - 不包含 `HashMap` 索引，不包含内部引用。
 - `MetaSet` 当前是 `MetaModel` 的兼容别名。
-- `imports` 只参与加载；合并后仍保留导入声明，便于调试或后续展示。
+- Project 信息和配置片段导入关系属于 Project Config，不属于 MetaModel。
 
 主要方法：
 
@@ -126,17 +123,9 @@ impl MetaModel {
 }
 ```
 
-### 2.5.2 `ProjectMeta`
+### 2.5.2 Project 信息边界
 
-```rust
-pub struct ProjectMeta {
-    pub name: Option<String>,
-    pub copyright: Option<String>,
-    pub desc: Option<String>,
-}
-```
-
-`copyright` 可被 exporter 用于生成文件头。Project Config 与 Meta 顶层 project 的合并优先级后续再单独设计；当前 Meta 模块只负责保留字段。
+Project 信息由 `ProjectConfig` 管理，不再在 Meta 模块中重复定义 `ProjectMeta`。Meta 片段只描述 enum、struct、table、field、index 等数据结构语义；Project Config 顶层 `imports` 负责组合多个配置片段，Project Config 的 `[project]` 负责提供生成文件头所需的 `name`、`desc`、`copyright`。
 
 ### 2.5.3 enum 与 struct
 
@@ -417,7 +406,7 @@ PrimitiveFieldType::parse(field.field_type)
   -> UnknownFieldType
 ```
 
-## 2.8 Loader 与 imports
+## 2.8 Loader 与配置片段边界
 
 入口：
 
@@ -435,14 +424,9 @@ pub fn load_meta_path(path: &Path) -> Result<MetaModel>;
 
 - `from_toml_str`：直接 TOML 反序列化为 `MetaModel`，随后执行 `finish_loading`。
 - `from_path`：调用 `load_meta_path`。
-- `from_paths`：多个入口文件共用一个 visited set，合并所有加载结果。
-- `load_recursive`：
-  - 先 `fs::canonicalize(path)`。
-  - canonical path 已访问则跳过，避免重复导入和简单循环。
-  - 读取文件并 TOML 反序列化。
-  - 以当前文件所在目录为 base，递归加载 `imports`。
-  - imports 先入 `loaded`，当前文件后入 `loaded`。
-- `merge_models`：按 loaded 顺序合并 project、imports、enums、structs、tables；第一个非空 project 生效。
+- `from_paths`：合并多个显式传入的 Meta TOML 文件；不处理 imports。
+- Project Config 的 `imports` 递归、去重、片段合并由 exporter/config resolve 层负责；Meta loader 只负责把已给定的 Meta 内容加载成 `MetaModel` 并完成 link/validate。
+- `merge_models`：按传入顺序合并 enums、structs、tables。
 - `finish_loading`：先 `link_meta_model` 收集未知类型等 Link diagnostics，再 `validate_meta_model` 收集结构 diagnostics，排序并去重后返回。
 
 ## 2.9 校验与诊断

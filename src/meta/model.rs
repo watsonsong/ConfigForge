@@ -2,12 +2,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct MetaModel {
-    #[serde(default)]
-    pub imports: Vec<String>,
-    #[serde(default)]
-    pub project: Option<ProjectMeta>,
     #[serde(default)]
     pub enums: Vec<EnumMeta>,
     #[serde(default)]
@@ -17,16 +13,6 @@ pub struct MetaModel {
 }
 
 pub type MetaSet = MetaModel;
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct ProjectMeta {
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub copyright: Option<String>,
-    #[serde(default)]
-    pub desc: Option<String>,
-}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct EnumMeta {

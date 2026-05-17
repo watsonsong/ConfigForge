@@ -102,7 +102,7 @@ impl CodeGenerator for CppCodeGenerator {
         }
 
         Ok(vec![GeneratedFile {
-            path: input.target.out_dir.join("cpp").join("generated.hpp"),
+            path: input.target.out_dir.join("generated.hpp"),
             kind: ArtifactKind::GeneratedCode,
             content,
         }])

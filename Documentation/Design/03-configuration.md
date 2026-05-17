@@ -6,9 +6,9 @@ ConfigForge 推荐使用以下配置层次：
 
 ```text
 Project Config
+  -> Imports
   -> Meta Files
       -> Tables / Fields / Indexes / Validators
-      -> Imports
   -> Target Config
       -> Runtime Data Export
       -> Code Generation
@@ -30,75 +30,66 @@ Targets/
   server.toml
 ```
 
+拆分时使用 Project Config 顶层 `imports` 统一导入其他工程配置片段。被导入的文件与根配置使用同一套格式：可以直接声明 `[[enums]]`、`[[structs]]`、`[[tables]]`、`[[targets]]`，也可以继续声明 `imports`。不再需要单独的 `meta = [...]` 列表；所有导入片段中的 Meta 定义和 target 定义最终合并为一次构建使用的工程配置。
+
 ## 3.2 Project Config
 
-Project Config 定义工程根、Meta 根文件、默认输出目录、插件、默认诊断格式等。
+Project Config 定义工程元信息、Meta 定义和可构建的 targets。CLI 只接收 Project Config 路径和 target 名称；Data 输入、runtime data 输出、代码生成语言和代码输出目录都由 target 配置决定。
 
 示例：
 
 ```toml
-[project]
-name = "game_config"
-root = "."
-copyright = "Copyright 2026 Example Studio. All rights reserved."
-
-meta = [
+imports = [
   "Meta/common.toml",
   "Meta/items.toml",
   "Meta/quests.toml",
-]
-
-targets = [
   "Targets/client.toml",
-  "Targets/server.toml",
 ]
 
-default_output = "Generated"
+[project]
+name = "game_config"
+desc = "Game config export project."
+copyright = "Copyright 2026 Example Studio. All rights reserved."
 
-[diagnostics]
-format = "human"
-fail_on_warning = false
+[[targets]]
+name = "client"
 
-[artifact_writer]
-write_mode = "temp_commit"
+[targets.data]
+input = "Data"
+output = "Generated/Data"
+format = "json"
 
-[[plugins]]
-id = "com.game.lark_sheet"
-version = "1.2.0"
-path = "Plugins/lark_sheet.dylib"
-override = false
+[[targets.code]]
+language = "cpp"
+output = "Generated/Cpp"
+namespace = "game::config"
+
+[[targets.code]]
+language = "typescript"
+output = "Generated/TypeScript"
 ```
 
 要求：
 
 - `project.name` 必须稳定。
 - `project.copyright` 可选；用于生成代码、schema、manifest 或其他文本产物的文件头。
-- `meta` 可指向 TOML 或 XML。
-- `targets` 可指向独立 target 文件，也可直接内联在 Project Config。
-- 插件 path 不应写入 target config；target 只引用稳定 exporter/provider/generator ID。
-
-Artifact Writer 配置：
-
-| 字段 | 默认值 | 说明 |
-| --- | --- | --- |
-| `artifact_writer.write_mode` | `temp_commit` | 产物写入策略。`temp_commit` 表示先写临时文件再确定性提交；`direct` 表示直接写目标路径。 |
+- `imports` 属于 Project Config 顶层，用于导入其他 Project Config 片段，可递归导入；重复导入同一文件只加载一次。
+- Meta 定义直接使用 `[[enums]]`、`[[structs]]`、`[[tables]]` 写在任意 Project Config 片段中；构建前会合并所有导入片段中的 Meta 定义。
+- `targets` 可以直接内联在根 Project Config 中，也可以放在被 `imports` 引入的配置片段中；每个 target 描述一次完整构建。
+- 每个配置片段中的相对路径都相对该片段自身所在目录解析。
 
 要求：
 
-- `temp_commit` 是推荐默认值，适合 CI 和正式导出，失败时不应留下部分最终产物。
-- `direct` 可用于本地调试或项目明确接受部分写入风险的场景。
-- 无论使用哪种写入策略，输出路径冲突都必须在写入前发现。
+- CLI 不提供 `--meta`、`--data`、`--out`、`validate/export` 子命令等重复入口。
+- 构建时根据 target 自动判断是否需要 Data：code-only target 只加载 Meta；声明 `[targets.data]` 的 target 才加载 Data。
 
-## 3.3 Meta 文件与 Import
+## 3.3 Meta 文件
 
-Meta 文件定义数据逻辑结构。TOML 示例：
+Meta 片段只定义数据逻辑结构，可以被 Project Config 顶层 `imports` 直接导入。多个 Meta 片段中的 `enums`、`structs`、`tables` 会与 target 片段一起按统一 Project Config 格式合并。
+
+TOML 示例：
 
 ```toml
-imports = [
-  "common/enums.toml",
-  "common/structs.toml",
-]
-
 [[tables]]
 name = "items"
 kind = "collection"
@@ -129,10 +120,6 @@ XML 示例：
 
 ```xml
 <meta>
-  <imports>
-    <import path="common/enums.xml" />
-  </imports>
-
   <table name="items" kind="collection" primaryIndex="by_id" desc="所有可获得物品的基础配置。">
     <source provider="csv" path="Data/items.csv" />
     <field name="id" type="int" required="true" desc="物品唯一 ID。" />

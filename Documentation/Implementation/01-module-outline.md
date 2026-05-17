@@ -66,18 +66,17 @@ cli
 
 实现应对应产品设计中的执行阶段：
 
-1. **CLI / Config Resolve**：解析命令、读取工程配置。
-2. **Meta Load**：读取 TOML Meta 文件，serde 反序列化为纯配置 `MetaModel`。
-3. **Meta Import Merge**：递归展开 `imports`，按 canonical path 去重，并合并为单个 `MetaModel`。
-4. **Meta Link**：在所有 enum、struct、table 都加载完成后，构造 `LinkedMetaModel<'meta>`，解析类型和索引引用。
-5. **Meta Validate**：对纯配置和可解析引用执行结构校验，输出稳定排序的 `MetaDiagnostic`。
-6. **Source Load**：按 provider 加载二维表，可并发 I/O。
-7. **Sheet Mapping / Data Parse**：根据已链接 Meta 映射 field path 并解析 typed value。
-8. **DataSet Compose**：base source split merge 与 override apply。
-9. **Validation**：required/default、类型、索引、外键、validator、export filter。
-10. **ExportView Build**：按 target/context 派生过滤视图。
-11. **Artifact Generate**：生成 runtime data、代码、POT、asset manifest 等。
-12. **Artifact Write**：按 direct 或 temp_commit 写入，并输出 manifest。
+1. **CLI / Config Resolve**：解析命令，读取工程配置，并递归展开 Project Config 顶层 `imports` 指向的配置片段。
+2. **Meta Extract / Merge**：从合并后的 Project Config 中提取 `enums`、`structs`、`tables`，组成纯配置 `MetaModel`。
+3. **Meta Link**：在所有 enum、struct、table 都加载完成后，构造 `LinkedMetaModel<'meta>`，解析类型和索引引用。
+4. **Meta Validate**：对纯配置和可解析引用执行结构校验，输出稳定排序的 `MetaDiagnostic`。
+5. **Source Load**：按 provider 加载二维表，可并发 I/O。
+6. **Sheet Mapping / Data Parse**：根据已链接 Meta 映射 field path 并解析 typed value。
+7. **DataSet Compose**：base source split merge 与 override apply。
+8. **Validation**：required/default、类型、索引、外键、validator、export filter。
+9. **ExportView Build**：按 target/context 派生过滤视图。
+10. **Artifact Generate**：生成 runtime data、代码、POT、asset manifest 等。
+11. **Artifact Write**：按 direct 或 temp_commit 写入，并输出 manifest。
 
 当前已重点落地第 2～5 步中与 TOML Meta 相关的部分。
 

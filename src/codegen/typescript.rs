@@ -114,7 +114,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         content.push_str("}\n");
 
         Ok(vec![GeneratedFile {
-            path: input.target.out_dir.join("typescript").join("generated.ts"),
+            path: input.target.out_dir.join("generated.ts"),
             kind: ArtifactKind::GeneratedCode,
             content,
         }])

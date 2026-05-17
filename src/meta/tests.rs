@@ -20,10 +20,6 @@ fn diagnostics(input: &str) -> Vec<MetaDiagnostic> {
 fn parses_basic_collection_table() {
     let meta = parse(
         r#"
-            [project]
-            name = "demo"
-            copyright = "Copyright 2026 Demo Studio."
-
             [[tables]]
             name = "items"
             kind = "collection"
@@ -51,12 +47,6 @@ fn parses_basic_collection_table() {
         "#,
     );
 
-    assert_eq!(
-        meta.project
-            .as_ref()
-            .and_then(|project| project.copyright.as_deref()),
-        Some("Copyright 2026 Demo Studio.")
-    );
     let table = meta.table("items").expect("table should exist");
     assert_eq!(table.kind, TableKind::Collection);
     assert_eq!(table.desc.as_deref(), Some("所有物品配置。"));
@@ -189,8 +179,6 @@ fn supports_imported_meta_files_before_linking_field_types() {
     fs::write(
         &root_path,
         r#"
-            imports = ["types.toml"]
-
             [[tables]]
             name = "items"
             source = "items.csv"
@@ -201,7 +189,7 @@ fn supports_imported_meta_files_before_linking_field_types() {
     )
     .expect("root meta should be written");
 
-    let meta = MetaModel::from_path(&root_path).expect("imported meta should load");
+    let meta = MetaModel::from_paths([&root_path, &types_path]).expect("meta files should load");
     assert!(meta.enum_meta("ItemRarity").is_some());
     let linked_meta = meta.link().expect("imported meta should link");
     let field = linked_meta.table("items").unwrap().field("rarity").unwrap();
@@ -910,30 +898,10 @@ fn reports_read_errors_for_missing_meta_or_import_files() {
     let missing_path = dir.path().join("missing.toml");
     let missing_error = MetaModel::from_path(&missing_path).unwrap_err();
     assert!(matches!(missing_error, ConfigForgeError::ReadFile { .. }));
-
-    let root_path = dir.path().join("root.toml");
-    fs::write(
-        &root_path,
-        r#"
-            imports = ["missing-import.toml"]
-        "#,
-    )
-    .expect("root meta should be written");
-
-    let import_error = MetaModel::from_path(&root_path).unwrap_err();
-    match import_error {
-        ConfigForgeError::ReadFile { path, .. } => {
-            assert_eq!(
-                path.file_name().and_then(std::ffi::OsStr::to_str),
-                Some("missing-import.toml")
-            );
-        }
-        other => panic!("expected ReadFile error, got {other}"),
-    }
 }
 
 #[test]
-fn loads_duplicate_imports_and_import_cycles_only_once() {
+fn loads_multiple_meta_files_as_one_model() {
     let dir = tempdir().expect("temp dir should exist");
     let root_path = dir.path().join("root.toml");
     let types_path = dir.path().join("types.toml");
@@ -941,8 +909,6 @@ fn loads_duplicate_imports_and_import_cycles_only_once() {
     fs::write(
         &root_path,
         r#"
-            imports = ["types.toml", "types.toml"]
-
             [[tables]]
             name = "items"
             source = "items.csv"
@@ -956,8 +922,6 @@ fn loads_duplicate_imports_and_import_cycles_only_once() {
     fs::write(
         &types_path,
         r#"
-            imports = ["root.toml"]
-
             [[enums]]
             name = "ItemRarity"
             [[enums.values]]
@@ -970,7 +934,6 @@ fn loads_duplicate_imports_and_import_cycles_only_once() {
 
     assert_eq!(meta.enums.len(), 1);
     assert_eq!(meta.tables.len(), 1);
-    assert_eq!(meta.imports.len(), 3);
     assert_eq!(meta.enum_meta("ItemRarity").unwrap().name, "ItemRarity");
     assert_eq!(meta.table("items").unwrap().name, "items");
 }

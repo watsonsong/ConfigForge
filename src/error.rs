@@ -32,6 +32,13 @@ pub enum ConfigForgeError {
     #[error("failed to parse meta: {0}")]
     ParseMetaString(#[source] toml::de::Error),
 
+    #[error("failed to parse project `{path}`: {source}")]
+    ParseProject {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+
     #[error("meta validation failed: {}", format_meta_diagnostics(.0))]
     MetaValidation(Vec<MetaDiagnostic>),
 

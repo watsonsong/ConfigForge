@@ -10,7 +10,7 @@ pub use loader::load_meta_path;
 pub use model::{
     EnumMeta, EnumValueMeta, FieldMeta, IndexMeta, LinkedField, LinkedFieldMeta, LinkedIndexMeta,
     LinkedMetaModel, LinkedStructMeta, LinkedTableMeta, MetaModel, MetaSet, PrimitiveFieldType,
-    ProjectMeta, SourceRef, StructMeta, TableKind, TableMeta, ValueLayout,
+    SourceRef, StructMeta, TableKind, TableMeta, ValueLayout,
 };
 pub use validate::validate_meta_model;
 

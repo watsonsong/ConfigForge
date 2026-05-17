@@ -112,7 +112,7 @@ impl CodeGenerator for RustCodeGenerator {
         content.push_str("}\n");
 
         Ok(vec![GeneratedFile {
-            path: input.target.out_dir.join("rust").join("generated.rs"),
+            path: input.target.out_dir.join("generated.rs"),
             kind: ArtifactKind::GeneratedCode,
             content,
         }])

@@ -68,6 +68,11 @@ fn input_for<'a>(meta: &'a MetaModel, language: CodeExportLanguage) -> CodeExpor
     let linked = Box::leak(Box::new(linked));
     CodeExportInput {
         meta: linked,
+        project: CodeExportProject {
+            name: Some("demo".to_owned()),
+            desc: Some("Demo config".to_owned()),
+            copyright: Some("Copyright Demo".to_owned()),
+        },
         target: CodeExportTarget {
             language,
             out_dir: PathBuf::from("out"),
@@ -239,15 +244,7 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
 
 #[test]
 fn render_file_header_replaces_project_variables_and_datetime() {
-    let meta = MetaModel::from_toml_str(
-        r#"
-            [project]
-            name = "demo"
-            desc = "Demo config"
-            copyright = "Copyright Demo"
-        "#,
-    )
-    .expect("meta should parse");
+    let meta = MetaModel::from_toml_str("").expect("meta should parse");
     let mut input = input_for(&meta, CodeExportLanguage::Rust);
     input.target.options.file_header = Some(
         "// {{project.name}} | {{project.desc}} | {{project.copyright}} | {{datetime}}".to_owned(),

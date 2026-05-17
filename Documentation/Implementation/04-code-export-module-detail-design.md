@@ -230,9 +230,9 @@ derive_serde = true
 
 | 变量 | 来源 |
 | --- | --- |
-| `{{project.name}}` | `ProjectMeta.name`。 |
-| `{{project.desc}}` | `ProjectMeta.desc`，未配置为空。 |
-| `{{project.copyright}}` | `ProjectMeta.copyright`，未配置为空。 |
+| `{{project.name}}` | `ProjectConfig.project.name`。 |
+| `{{project.desc}}` | `ProjectConfig.project.desc`，未配置为空。 |
+| `{{project.copyright}}` | `ProjectConfig.project.copyright`，未配置为空。 |
 | `{{datetime}}` | 当前生成时间，由 exporter 注入。 |
 
 文件头渲染应发生在语言生成器写入每个 `GeneratedFile` 内容前。语言生成器可以决定是否为每行追加注释前缀，但模板本身应允许用户完整控制文本。
@@ -242,6 +242,7 @@ derive_serde = true
 ```rust
 pub struct CodeExportInput<'meta> {
     pub meta: &'meta LinkedMetaModel<'meta>,
+    pub project: CodeExportProject,
     pub target: CodeExportTarget,
     pub runtime_data_files: Vec<RuntimeDataFile>,
     pub runtime_data_format: RuntimeDataFormat,
@@ -249,7 +250,7 @@ pub struct CodeExportInput<'meta> {
 }
 ```
 
-`runtime_data_files` 来自数据导出阶段的 Artifact 规划，用于生成加载函数中的默认资源名。例如 `items.json` 对应 `ItemsTable::DATA_FILE`。`generated_at` 由 exporter 注入，用于渲染文件头中的 `{{datetime}}`。
+`project` 来自 Project Config，用于渲染文件头模板；`runtime_data_files` 来自数据导出阶段的 Artifact 规划，用于生成加载函数中的默认资源名。例如 `items.json` 对应 `ItemsTable::DATA_FILE`。`generated_at` 由 exporter 注入，用于渲染文件头中的 `{{datetime}}`。
 
 ### 4.4.4 `GeneratedFile`
 
