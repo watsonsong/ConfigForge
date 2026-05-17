@@ -36,6 +36,8 @@
 - 暂不设计“独立子表式明细布局”作为当前必备布局能力；复合值布局统一描述为聚合书写或展开书写，具体物理方向由表类型决定。
 - Protobuf 暂作为未来扩展考量；如未来支持，应通过字段级 `field_number` 明确 Protobuf 编号。
 - Special exporter 使用与目标导出一致的过滤后数据视图。被 shipping 等上下文排除的数据，其资源和国际化文本默认不进入最终特殊产物。
+- Target 使用 `tags` 描述导出上下文；表、字段、索引用 `export_when` 匹配 target tags，collection 行用 `row_export` 控制行级导出。
+- 不再保留 `tool_only`、`validator_only`、`filter_field` 作为导出机制；用 `export = false`、`export_when`、`row_export` 替代。
 - 表格允许空行和空列；未映射到 field path 的行/列默认不进入导出，可作为表格注释或中间数据使用。
 - 并发执行应优先区分 I/O 与计算任务：I/O 使用异步接口或系统机制避免大量阻塞线程，计算任务使用线程池，并保持诊断和产物顺序确定。
 - Project Config 支持 `copyright` 元信息，供代码生成器和导出器生成文件头。

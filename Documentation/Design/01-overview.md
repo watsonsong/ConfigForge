@@ -35,7 +35,7 @@ ConfigForge 是面向游戏配置生产流程的命令行工具。它把策划�
 
 ### 发布包按上下文裁剪数据
 
-例如 shipping 包不应包含测试数据，某地区包不应包含其他地区配置。ConfigForge 支持 target/context tags，根据过滤规则生成目标专属数据视图。过滤后的数据视图同时影响常规运行时数据和 special exporter 产物。
+例如 shipping 包不应包含测试数据，某地区包不应包含其他地区配置。ConfigForge 支持 target tags，并通过 `export_when` 和 `row_export` 生成目标专属数据视图。过滤后的数据视图同时影响常规运行时数据和 special exporter 产物。
 
 ### 表内、表间一致性缺少自动检查
 
@@ -59,8 +59,8 @@ ConfigForge 支持 required/default、类型解析、枚举、索引唯一性、
 | Index | 集合表查询入口，可 unique 或 non-unique，可声明为 primary index。 |
 | Primary Index | 表的主索引。用于默认外键目标和 override identity，不是 primary key。 |
 | DataSet | Source 读取、组合后的完整逻辑数据集合。 |
-| ExportView | 针对某个 target/context 过滤后的导出数据视图。 |
-| Target | 一个导出目标，定义语言、运行时格式、tag、输出目录、特殊导出器等。 |
+| ExportView | 针对某个 target tags 过滤后的导出数据视图。 |
+| Target | 一个导出目标，定义 tags、runtime data 输出、代码生成任务、输出目录等。 |
 | Special Exporter | 输出辅助产物的导出器，例如 POT、asset manifest。 |
 
 ## 1.5 当前范围

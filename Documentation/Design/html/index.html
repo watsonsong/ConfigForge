@@ -280,7 +280,7 @@
         <h2>1. 总览</h2>
         <p class="lead">ConfigForge 的核心是让 <strong>Meta 成为配置数据的结构真相</strong>，再从同一份 Meta 和源数据生成多个目标产物。</p>
         <div class="grid grid-4">
-          <div class="card"><span class="tag blue">Meta</span><h3>结构真相</h3><p>定义表、字段、类型、默认值、索引、外键、过滤和描述信息。</p></div>
+          <div class="card"><span class="tag blue">Meta</span><h3>结构真相</h3><p>定义表、字段、类型、默认值、索引、外键、target tags 过滤和描述信息。</p></div>
           <div class="card"><span class="tag green">Source</span><h3>表格输入</h3><p>CSV、XLSX、Lark Sheet、Google Sheet 等统一读取成二维 Sheet。</p></div>
           <div class="card"><span class="tag orange">Validation</span><h3>导出前发现错误</h3><p>检查 required、type、index、foreign key、asset、text、target mapping 等。</p></div>
           <div class="card"><span class="tag purple">Export</span><h3>运行时产物</h3><p>导出 JSON、Lua table、代码、POT、asset manifest 和 manifest。</p></div>
@@ -304,7 +304,7 @@
         <div class="grid grid-2">
           <div class="card"><h3>表结构与运行时代码脱节</h3><p>Meta 描述逻辑结构，工具生成 runtime data 和类型感知代码，避免多处重复维护 schema。</p></div>
           <div class="card"><h3>多人协作和版本覆盖</h3><p>一个逻辑表可以读取多个 <code>sources</code>，并通过 <code>override_sources</code> 做版本、分支或热修覆盖。</p></div>
-          <div class="card"><h3>发布包数据裁剪</h3><p>Target/context tag 派生 ExportView，使 shipping、地区、渠道等目标只导出需要的数据。</p></div>
+          <div class="card"><h3>发布包数据裁剪</h3><p>Target tags 通过 <code>export_when</code> 和 <code>row_export</code> 派生 ExportView，使 client/server、shipping/debug、地区、渠道等目标只导出需要的数据。</p></div>
           <div class="card"><h3>表内表间一致性</h3><p>统一检查字段类型、默认值、唯一索引、外键、资源引用和集合级业务规则。</p></div>
         </div>
       </section>
@@ -318,7 +318,7 @@
               <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
               <style>.box{fill:#fff;stroke:#cbd5e1;stroke-width:2}.b1{fill:#e8f0ff}.b2{fill:#e7f8f1}.b3{fill:#fff3dd}.b4{fill:#f2eaff}.b5{fill:#fff0f0}.t{font:600 15px -apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;fill:#1f2937}.s{font:12px sans-serif;fill:#64748b}.line{stroke:#64748b;stroke-width:2;marker-end:url(#arrow)}</style>
             </defs>
-            <rect class="box b1" x="20" y="35" width="160" height="70" rx="14"/><text class="t" x="100" y="65" text-anchor="middle">CLI 参数</text><text class="s" x="100" y="86" text-anchor="middle">project / target / tag</text>
+            <rect class="box b1" x="20" y="35" width="160" height="70" rx="14"/><text class="t" x="100" y="65" text-anchor="middle">CLI 参数</text><text class="s" x="100" y="86" text-anchor="middle">project / target</text>
             <line class="line" x1="180" y1="70" x2="220" y2="70"/>
             <rect class="box b1" x="220" y="35" width="160" height="70" rx="14"/><text class="t" x="300" y="65" text-anchor="middle">配置解析</text><text class="s" x="300" y="86" text-anchor="middle">Project / Plugin</text>
             <line class="line" x1="380" y1="70" x2="420" y2="70"/>
@@ -331,7 +331,7 @@
             <line class="line" x1="935" y1="105" x2="935" y2="145"/>
             <rect class="box b3" x="840" y="145" width="190" height="70" rx="14"/><text class="t" x="935" y="175" text-anchor="middle">Full DataSet</text><text class="s" x="935" y="196" text-anchor="middle">merge + override</text>
             <line class="line" x1="840" y1="180" x2="800" y2="180"/>
-            <rect class="box b3" x="610" y="145" width="190" height="70" rx="14"/><text class="t" x="705" y="175" text-anchor="middle">ExportView</text><text class="s" x="705" y="196" text-anchor="middle">target tags + filters</text>
+            <rect class="box b3" x="610" y="145" width="190" height="70" rx="14"/><text class="t" x="705" y="175" text-anchor="middle">ExportView</text><text class="s" x="705" y="196" text-anchor="middle">export_when + row_export</text>
             <line class="line" x1="610" y1="180" x2="570" y2="180"/>
             <rect class="box b4" x="380" y="145" width="190" height="70" rx="14"/><text class="t" x="475" y="175" text-anchor="middle">Validation</text><text class="s" x="475" y="196" text-anchor="middle">current view</text>
             <line class="line" x1="380" y1="180" x2="340" y2="180"/>
@@ -345,10 +345,10 @@
         </div>
 
         <div class="timeline">
-          <div class="step"><div><h3>配置解析</h3><p>CLI 覆盖 Project 默认配置，解析 target、tag、输出目录和诊断格式。</p></div></div>
+          <div class="step"><div><h3>配置解析</h3><p>解析 Project Config、target、target tags、输出目录和诊断格式。</p></div></div>
           <div class="step"><div><h3>插件注册</h3><p>内置能力先注册，插件按配置顺序注册，ID 冲突默认报错。</p></div></div>
           <div class="step"><div><h3>Meta 与 Source</h3><p>Meta 支持多文件 import；Source Provider 输出统一二维 Sheet。</p></div></div>
-          <div class="step"><div><h3>DataSet 与 ExportView</h3><p>先形成完整 DataSet，再按 target/context 派生过滤后的 ExportView。</p></div></div>
+          <div class="step"><div><h3>DataSet 与 ExportView</h3><p>先形成完整 DataSet，再按 target tags、表/字段 <code>export_when</code> 和行级 <code>row_export</code> 派生过滤后的 ExportView。</p></div></div>
           <div class="step"><div><h3>校验与导出</h3><p>校验当前视图，通过后规划和生成 artifact，manifest 按路径稳定排序。</p></div></div>
         </div>
         <div class="callout"><strong>并发策略：</strong>I/O 任务优先使用异步接口或操作系统 I/O 机制，计算任务使用线程池；可按 source、table、target、artifact 等数据粒度拆分，但所有 diagnostics 和 manifest 必须稳定排序。</div>
@@ -363,11 +363,11 @@
             <rect class="box root" x="390" y="25" width="200" height="72" rx="14"/><text class="txt" x="490" y="55" text-anchor="middle">Project Config</text><text class="small" x="490" y="77" text-anchor="middle">ConfigForge.toml</text>
             <line class="arr" x1="490" y1="97" x2="205" y2="145"/><line class="arr" x1="490" y1="97" x2="490" y2="145"/><line class="arr" x1="490" y1="97" x2="775" y2="145"/>
             <rect class="box meta" x="70" y="145" width="270" height="95" rx="14"/><text class="txt" x="205" y="176" text-anchor="middle">Meta Files</text><text class="small" x="205" y="199" text-anchor="middle">tables / fields / indexes</text><text class="small" x="205" y="219" text-anchor="middle">imports / desc / validators</text>
-            <rect class="box target" x="355" y="145" width="270" height="95" rx="14"/><text class="txt" x="490" y="176" text-anchor="middle">Target Config</text><text class="small" x="490" y="199" text-anchor="middle">language / data_format / tags</text><text class="small" x="490" y="219" text-anchor="middle">special_exporters / output</text>
+            <rect class="box target" x="355" y="145" width="270" height="95" rx="14"/><text class="txt" x="490" y="176" text-anchor="middle">Target Config</text><text class="small" x="490" y="199" text-anchor="middle">tags / data / code tasks</text><text class="small" x="490" y="219" text-anchor="middle">output / format / naming</text>
             <rect class="box plugin" x="640" y="145" width="270" height="95" rx="14"/><text class="txt" x="775" y="176" text-anchor="middle">Plugin Config</text><text class="small" x="775" y="199" text-anchor="middle">provider / exporter / generator</text><text class="small" x="775" y="219" text-anchor="middle">validator / builtin type</text>
             <line class="arr" x1="205" y1="240" x2="205" y2="295"/><line class="arr" x1="490" y1="240" x2="490" y2="295"/><line class="arr" x1="775" y1="240" x2="775" y2="295"/>
             <rect class="box" x="70" y="295" width="270" height="78" rx="14"/><text class="txt" x="205" y="326" text-anchor="middle">MetaModel</text><text class="small" x="205" y="349" text-anchor="middle">canonical, linked, merged</text>
-            <rect class="box" x="355" y="295" width="270" height="78" rx="14"/><text class="txt" x="490" y="326" text-anchor="middle">ExportContext</text><text class="small" x="490" y="349" text-anchor="middle">target + tags + variables</text>
+            <rect class="box" x="355" y="295" width="270" height="78" rx="14"/><text class="txt" x="490" y="326" text-anchor="middle">Target Tags</text><text class="small" x="490" y="349" text-anchor="middle">client / server / debug / shipping</text>
             <rect class="box" x="640" y="295" width="270" height="78" rx="14"/><text class="txt" x="775" y="326" text-anchor="middle">Registries</text><text class="small" x="775" y="349" text-anchor="middle">resolved capabilities</text>
           </svg>
         </div>
@@ -388,11 +388,17 @@ source = { provider = "csv", path = "Data/items.csv" }
 primary_index = "by_id"
 
 [[targets]]
-name = "client_json_shipping"
+name = "client_shipping"
+tags = ["client", "shipping"]
+
+[targets.data]
+input = "Data"
+output = "Generated/Data/ClientShipping"
+format = "json"
+
+[[targets.code]]
 language = "typescript"
-data_format = "json"
-tags = ["shipping"]
-output = "Generated/Client"</code></pre>
+output = "Generated/Code/TypeScript"</code></pre>
         <div class="callout ok"><strong>Project 元信息：</strong><code>copyright</code> 可用于生成代码、schema、manifest 等文件头；Artifact Writer 支持 <code>temp_commit</code> 与 <code>direct</code>，推荐正式导出使用 <code>temp_commit</code>。</div>
       </section>
 
@@ -400,7 +406,7 @@ output = "Generated/Client"</code></pre>
         <h2>5. Meta 模型</h2>
         <div class="grid grid-3">
           <div class="card"><h3>ObjectTable</h3><p>导出一个常量对象，常用于全局配置。Override 以 field path 为单位覆盖。</p></div>
-          <div class="card"><h3>CollectionTable</h3><p>导出多条记录。可定义 index、primary index，并支持 source order 数组访问。</p></div>
+          <div class="card"><h3>CollectionTable</h3><p>导出多条记录。可定义 index、primary index、<code>row_export</code>，并支持 source order 数组访问。</p></div>
           <div class="card"><h3>Polymorphic Fragment</h3><p>使用 composition 表达多态记录；当前只支持 variant source mode，不支持按 ID 拼接 fragment。</p></div>
         </div>
         <h3>字段关键属性</h3>
@@ -411,24 +417,48 @@ output = "Generated/Client"</code></pre>
             <tr><td><code>required</code></td><td>必填规则</td><td>当前验证视图中无值且无 default 时报错。</td></tr>
             <tr><td><code>default</code></td><td>默认值</td><td>源数据未提供时补齐，且必须能按字段类型解析。</td></tr>
             <tr><td><code>layout</code></td><td>复合值书写方式</td><td><code>scalar_cell</code>、<code>json_cell</code>、<code>expanded_value</code>。</td></tr>
-            <tr><td><code>export</code> / <code>tool_only</code></td><td>导出策略</td><td>控制字段是否进入常规 runtime data。</td></tr>
-            <tr><td><code>filter_field</code></td><td>过滤引用</td><td>tool-only 字段被 filter 使用时必须显式开启。</td></tr>
+            <tr><td><code>export</code></td><td>强制导出开关</td><td><code>false</code> 表示永不进入 runtime ExportView。</td></tr>
+            <tr><td><code>export_when</code></td><td>Target tags 条件</td><td>使用 <code>any</code> / <code>all</code> / <code>none</code> 匹配 target tags。</td></tr>
           </tbody>
         </table>
 
         <div class="callout ok"><strong>Primary Index：</strong>设计取消 <code>primary_key</code> 概念，只保留 <code>primary_index</code> 或 index 上的 <code>primary = true</code>。Primary index 必须是 unique index。</div>
+        <h3>Target Tags 过滤</h3>
+        <pre><code>[[tables]]
+name = "skill"
+export_when = { any = ["client", "server"] }
+
+[[tables.fields]]
+name = "icon"
+type = "asset"
+export_when = { any = ["client"] }
+
+[[tables.fields]]
+name = "damage_formula"
+type = "string"
+export_when = { any = ["server"] }</code></pre>
+        <h3>Collection 行级过滤</h3>
+        <pre><code>[tables.row_export]
+required_tags_field = "export_tags"
+excluded_tags_field = "exclude_tags"
+match = "any"
+
+# CSV: export_tags 为空表示所有 target；exclude_tags 命中则排除
+# id,name,export_tags,exclude_tags
+# 1,Potion,,
+# 2,Debug Sword,debug,shipping</code></pre>
         <div class="callout"><strong>数组下标：</strong><code>expanded_value</code> 中的数组 slot 使用 0-based，例如 <code>rewards[0].item_id</code>；Lua 等 1-based 目标语言差异由 code generator 或 runtime adapter 处理。</div>
       </section>
 
       <section id="views">
         <h2>6. DataSet 与 ExportView</h2>
-        <p class="lead">Full DataSet 保留完整逻辑数据；ExportView 是某个 target/context 实际校验和导出的数据视图。</p>
+        <p class="lead">Full DataSet 保留完整逻辑数据；ExportView 是某个 target tags 实际校验和导出的数据视图。</p>
         <div class="diagram" role="img" aria-label="DataSet 与 ExportView 图">
           <svg width="980" height="330" viewBox="0 0 980 330" xmlns="http://www.w3.org/2000/svg">
             <defs><marker id="arrow3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker><style>.box{fill:#fff;stroke:#cbd5e1;stroke-width:2}.full{fill:#fff3dd}.view{fill:#e8f0ff}.out{fill:#e7f8f1}.txt{font:600 16px sans-serif;fill:#1f2937}.small{font:12px sans-serif;fill:#64748b}.arr{stroke:#64748b;stroke-width:2;marker-end:url(#arrow3)}.cut{stroke:#dc2626;stroke-width:2;stroke-dasharray:5 5}</style></defs>
-            <rect class="box full" x="40" y="85" width="230" height="130" rx="16"/><text class="txt" x="155" y="122" text-anchor="middle">Full DataSet</text><text class="small" x="155" y="148" text-anchor="middle">all records / all fields</text><text class="small" x="155" y="170" text-anchor="middle">tool-only / source location</text><text class="small" x="155" y="192" text-anchor="middle">override metadata</text>
+            <rect class="box full" x="40" y="85" width="230" height="130" rx="16"/><text class="txt" x="155" y="122" text-anchor="middle">Full DataSet</text><text class="small" x="155" y="148" text-anchor="middle">all records / all fields</text><text class="small" x="155" y="170" text-anchor="middle">export=false / source location</text><text class="small" x="155" y="192" text-anchor="middle">override metadata</text>
             <line class="arr" x1="270" y1="150" x2="370" y2="150"/>
-            <rect class="box view" x="370" y="65" width="250" height="170" rx="16"/><text class="txt" x="495" y="102" text-anchor="middle">ExportView</text><text class="small" x="495" y="130" text-anchor="middle">record filters</text><text class="small" x="495" y="152" text-anchor="middle">field / fragment filters</text><text class="small" x="495" y="174" text-anchor="middle">target tags</text><text class="small" x="495" y="196" text-anchor="middle">target type mapping</text>
+            <rect class="box view" x="370" y="65" width="250" height="170" rx="16"/><text class="txt" x="495" y="102" text-anchor="middle">ExportView</text><text class="small" x="495" y="130" text-anchor="middle">table / field export_when</text><text class="small" x="495" y="152" text-anchor="middle">row_export filters</text><text class="small" x="495" y="174" text-anchor="middle">target tags</text><text class="small" x="495" y="196" text-anchor="middle">target type mapping</text>
             <line class="arr" x1="620" y1="150" x2="720" y2="150"/>
             <rect class="box out" x="720" y="55" width="220" height="80" rx="16"/><text class="txt" x="830" y="88" text-anchor="middle">Runtime Data</text><text class="small" x="830" y="112" text-anchor="middle">JSON / Lua table / ...</text>
             <rect class="box out" x="720" y="165" width="220" height="80" rx="16"/><text class="txt" x="830" y="198" text-anchor="middle">Special Artifacts</text><text class="small" x="830" y="222" text-anchor="middle">POT / asset manifest</text>
@@ -436,7 +466,7 @@ output = "Generated/Client"</code></pre>
             <line class="cut" x1="437" y1="248" x2="553" y2="286"/><text class="small" x="495" y="305" text-anchor="middle">被过滤记录不进入 runtime / special exporter / 集合级检查</text>
           </svg>
         </div>
-        <div class="callout"><strong>校验口径：</strong>target 相关命令默认校验 ExportView；未指定 target/context 的 validate 默认校验 Full DataSet。</div>
+        <div class="callout"><strong>校验口径：</strong>target 相关命令默认校验 ExportView；未指定 target 的 validate 默认校验 Full DataSet。</div>
       </section>
 
       <section id="source">
@@ -488,7 +518,7 @@ override_sources = [
           <div class="card"><h3>Source Provider</h3><p>CSV/XLSX 正常读取、header 缺失/重复、空行空列不进入 DataSet、远程 provider auth_ref。</p></div>
           <div class="card"><h3>Field Type</h3><p>required、default、color channel、vector3、datetime timezone。</p></div>
           <div class="card"><h3>Multi-source</h3><p>base merge、unique 冲突、override 整行替换、后者覆盖前者。</p></div>
-          <div class="card"><h3>Export Filtering</h3><p>shipping 过滤、tool-only 字段、过滤后集合级校验。</p></div>
+          <div class="card"><h3>Export Filtering</h3><p>target tags、<code>export_when</code>、<code>row_export</code>、<code>export = false</code> 和过滤后集合级校验。</p></div>
           <div class="card"><h3>Desc / 注释</h3><p>desc 进入 inspect、生成代码注释和 translator comments，多行与特殊字符正确转义。</p></div>
           <div class="card"><h3>Artifact Writer</h3><p><code>temp_commit</code> 失败不提交最终产物，<code>direct</code> 按配置直接写入，manifest 稳定排序。</p></div>
         </div>
@@ -504,6 +534,8 @@ override_sources = [
           <div class="card"><h3>Override 顺序</h3><p><code>override_sources</code> 不定义 priority，按列表顺序应用，后者覆盖前者。</p></div>
           <div class="card"><h3>Primary Index</h3><p>取消 primary_key，仅保留 primary_index 或 <code>primary = true</code>。</p></div>
           <div class="card"><h3>Default / Required</h3><p>缺值时先用 default；required 且无值、无 default 才报错。</p></div>
+          <div class="card"><h3>Target Tags</h3><p>Target 使用 <code>tags</code> 描述导出上下文；表、字段、索引用 <code>export_when</code> 匹配，collection 行用 <code>row_export</code> 控制。</p></div>
+          <div class="card"><h3>废弃旧导出字段</h3><p>不再保留 <code>tool_only</code>、<code>validator_only</code>、<code>filter_field</code> 作为导出机制；使用 <code>export = false</code>、<code>export_when</code>、<code>row_export</code> 替代。</p></div>
           <div class="card"><h3>Special Exporter</h3><p>默认读取 ExportView，被 shipping 过滤的数据不进入 POT 和 asset manifest。</p></div>
           <div class="card"><h3>Source 注释区</h3><p>空行、空列和未映射行/列可用于表格注释或中间数据，不进入 DataSet。</p></div>
           <div class="card"><h3>并发与写入</h3><p>I/O 与计算任务分开调度；Artifact Writer 可配置 <code>temp_commit</code> 或 <code>direct</code>。</p></div>

@@ -12,46 +12,49 @@ Full DataSet 是所有 source 读取、解析、默认值应用、base merge、o
 
 - 所有记录；
 - 所有字段；
-- tool-only 字段；
-- validator-only 字段；
+- `export = false` 字段；
+- 不匹配当前 target 的字段；
 - source location；
 - override 来源信息。
 
 ### ExportView
 
-ExportView 是针对某个 target/context 派生的视图。
+ExportView 是针对某个 target tags 派生的视图。
 
 它会应用：
 
-- record filters；
-- field export rules；
+- table `export_when`；
+- field `export_when`；
+- collection `row_export`；
 - fragment filters；
-- `tool_only` / `export = false` 常规运行时裁剪；
+- `export = false` 常规运行时裁剪；
 - target-specific type mapping。
 
 常规 runtime exporter、special exporter 和 target-specific validation 默认读取 ExportView。
 
-## 5.2 Export Filter
+## 5.2 ExportView 过滤规则
 
-示例：shipping 包排除测试数据。
+表和字段使用 `export_when` 匹配 target tags；collection 行使用 `row_export` 匹配数据行中的 tags。
 
 ```toml
-[[tables.export_filters]]
-scope = "record"
-when_tag = "shipping"
-field = "test"
-op = "=="
-value = true
-action = "exclude"
+[[tables]]
+name = "item"
+export_when = { any = ["client", "server"] }
+
+[tables.row_export]
+required_tags_field = "export_tags"
+excluded_tags_field = "exclude_tags"
+match = "any"
 ```
 
 规则：
 
-- filter 必须引用已声明 field path。
-- tool-only 字段若要参与 filter，必须显式 `filter_field = true`。
-- filter operator 必须和字段类型兼容。
-- record filter 在 ExportView 派生阶段执行。
-- 被 filter 排除的数据默认不参与该 target 的 runtime data、special exporter 和集合级校验。
+- `export_when.any` 非空时至少命中一个 tag。
+- `export_when.all` 非空时必须命中全部 tag。
+- `export_when.none` 非空时不能命中任一 tag。
+- `export = false` 优先级最高，永不进入 runtime ExportView。
+- `row_export` 引用的字段必须存在；这些字段可以 `export = false`，仍可参与行级过滤。
+- 被 `row_export` 排除的数据默认不参与该 target 的 runtime data、special exporter 和集合级校验。
 
 ## 5.3 Validation Scope
 
@@ -75,7 +78,7 @@ action = "exclude"
 - ObjectTable override 可只覆盖指定 field path。
 - CollectionTable override 是整行替换。
 - 集合级检查默认对过滤后的 ExportView 执行。
-- validate 命令若未指定 target/context，可默认检查 Full DataSet；如果指定 target/context，则检查对应 ExportView。
+- validate 命令若未指定 target，可默认检查 Full DataSet；如果指定 target，则检查对应 ExportView。
 
 ## 5.5 Required 与 Default
 

@@ -202,6 +202,7 @@ Target Config 定义一次可构建的导出目标。当前实现支持 runtime 
 ```toml
 [[targets]]
 name = "client_runtime"
+tags = ["client", "shipping"]
 
 [targets.data]
 input = "Data"
@@ -221,13 +222,43 @@ module_name = "gameConfig"
 
 一个 target 可以声明 0 个、1 个或多个代码生成任务。代码生成任务放在 `[[targets.code]]` 中；每个任务有独立语言、输出目录和语言专属参数。这样同一个 target 可以同时输出 runtime data、Rust 服务端访问代码、C++ 客户端访问代码和 TypeScript 工具链访问代码。
 
+`tags` 是 target 的核心上下文。每个 tag 代表一个导出特性，例如：
+
+| Tag | 推荐语义 |
+| --- | --- |
+| `client` | 客户端目标。 |
+| `server` | 服务端目标。 |
+| `debug` | 开发、调试或内部验证目标。 |
+| `shipping` | 正式发布目标。 |
+
+这些名称只是推荐约定，机制本身允许项目继续扩展平台、地区、渠道或业务线 tag，例如 `ios`、`android`、`cn`、`global`、`playtest`。表、字段和 collection 行根据这些 tags 生成 target 专属 ExportView。
+
 ```toml
 [[targets]]
-name = "client_runtime"
+name = "client_debug"
+tags = ["client", "debug"]
 
 [targets.data]
 input = "Data"
-output = "Generated/Data"
+output = "Generated/Data/ClientDebug"
+format = "json"
+
+[[targets]]
+name = "client_shipping"
+tags = ["client", "shipping"]
+
+[targets.data]
+input = "Data"
+output = "Generated/Data/ClientShipping"
+format = "messagepack"
+
+[[targets]]
+name = "server_shipping"
+tags = ["server", "shipping"]
+
+[targets.data]
+input = "Data"
+output = "Generated/Data/ServerShipping"
 format = "json"
 
 [[targets.code]]
@@ -266,11 +297,12 @@ readonly_fields = true
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
+| `tags` | `[]` | Target 的导出特性集合。用于匹配表、字段、行级 `export_when` / `row_export`。 |
 | `input` | 必填 | Source data 根目录。只有声明 `[targets.data]` 时才读取。 |
 | `output` | 必填 | Runtime data 输出目录。 |
 | `format` | `json` | Runtime data 格式。当前实现支持 `json` 和 `messagepack`。 |
 
-Planned / Not implemented：`tags`、`engine`、`special_exporters`、POT、Asset Manifest、target-level `language` / `data_format` / `output` 属于旧设计或未来扩展，当前 Project Config 不应使用这些字段。
+Planned / Not implemented：`engine`、`special_exporters`、POT、Asset Manifest、target-level `language` / `data_format` / `output` 属于旧设计或未来扩展，当前 Project Config 不应使用这些字段。
 
 `targets.code` 字段：
 
@@ -351,17 +383,133 @@ Planned / Not implemented：`tags`、`engine`、`special_exporters`、POT、Asse
 
 当前不引入通用配置 schema version 或自动兼容机制。表、字段、enum、struct 等定义依赖稳定字符串 `name` 作为长期身份；如果未来启用 Protobuf，则通过显式 `field_number` 和对应 schema evolution 策略处理二进制格式兼容。
 
-## 3.6 Field Export Policy 配置
+## 3.6 Target Tags 与导出条件配置
 
-字段可控制是否进入运行时数据、是否参与过滤、是否参与特殊导出。
+表、字段和索引都可以声明 `export_when`，用于按 target tags 生成导出视图。`export_when` 是结构化条件，不使用字符串表达式。
+
+```toml
+export_when = { any = ["client"], all = ["shipping"], none = ["debug"] }
+```
+
+匹配语义：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `any` | `[]` | 若非空，target tags 至少命中其中一个。 |
+| `all` | `[]` | 若非空，target tags 必须包含全部 tag。 |
+| `none` | `[]` | 若非空，target tags 不能包含其中任何 tag。 |
+
+空条件表示不限制 target。`export = false` 是强制不导出，优先级高于 `export_when`。不再设计 `tool_only`、`validator_only`、`filter_field` 作为导出控制字段；可以被 `export = false`、`export_when` 和 `row_export` 完整替代。
+
+表级示例：
+
+```toml
+[[tables]]
+name = "client_ui"
+source = "client_ui.csv"
+export_when = { any = ["client"] }
+
+[[tables]]
+name = "server_drop"
+source = "server_drop.csv"
+export_when = { any = ["server"] }
+```
+
+字段级示例：
+
+```toml
+[[tables]]
+name = "skill"
+source = "skill.csv"
+
+[[tables.fields]]
+name = "id"
+type = "int"
+unique = true
+
+[[tables.fields]]
+name = "icon"
+type = "asset"
+export_when = { any = ["client"] }
+
+[[tables.fields]]
+name = "damage_formula"
+type = "string"
+export_when = { any = ["server"] }
+
+[[tables.fields]]
+name = "debug_comment"
+type = "string"
+export_when = { any = ["debug"] }
+```
+
+索引规则：普通 index 只有在 index 自身满足 `export_when` 且所有 index fields 都可导出时才进入 ExportView；primary index 若在当前 target 下不可用必须报错，不能静默删除。
+
+## 3.7 Row Export Policy 配置
+
+collection 表可以通过 `row_export` 声明由哪些数据列控制行级导出。推荐用于 `debug` / `shipping` 行裁剪，也可用于平台、地区或渠道行裁剪。
+
+```toml
+[[tables]]
+name = "item"
+source = "item.csv"
+
+[tables.row_export]
+required_tags_field = "export_tags"
+excluded_tags_field = "exclude_tags"
+match = "any"
+
+[[tables.fields]]
+name = "id"
+type = "int"
+unique = true
+
+[[tables.fields]]
+name = "name"
+type = "string"
+
+[[tables.fields]]
+name = "export_tags"
+type = "string"
+export = false
+
+[[tables.fields]]
+name = "exclude_tags"
+type = "string"
+export = false
+```
+
+`row_export` 字段：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `required_tags_field` | 未设置 | 行上声明“需要哪些 target tag 才导出”的字段；空值表示不限制。 |
+| `excluded_tags_field` | 未设置 | 行上声明“target 包含哪些 tag 时不导出”的字段；空值表示不排除。 |
+| `match` | `any` | `required_tags_field` 中多个 tag 的匹配方式，`any` 表示命中任意一个，`all` 表示必须全部命中。 |
+
+数据列中的 tag 推荐用逗号分隔：
+
+```csv
+id,name,export_tags,exclude_tags
+1,Potion,,
+2,Debug Sword,debug,
+3,Shipping Gift,shipping,
+4,Internal Test Item,,shipping
+5,Server Reward,server,
+6,Client Preview Item,client,
+```
+
+在 `tags = ["client", "debug"]` 的 target 中导出默认行、debug 行和 client 行；在 `tags = ["client", "shipping"]` 的 target 中导出默认行、shipping 行和 client 行，并排除 `exclude_tags = "shipping"` 的行。
+
+## 3.8 Field 基础配置
+
+字段可控制类型、缺省值、是否强制不导出以及特殊导出器读取策略。
 
 ```toml
 [[tables.fields]]
 name = "test"
 type = "bool"
 default = false
-tool_only = true
-filter_field = true
 export = false
 ```
 
@@ -371,8 +519,6 @@ export = false
 | --- | --- | --- |
 | `required` | `false` | 是否必须有值；若有 `default` 可由 default 补齐。 |
 | `default` | 未设置 | 源数据缺失时使用的默认值。 |
-| `export` | `true` | 是否进入常规 runtime data。 |
-| `tool_only` | `false` | 仅工具使用；等价于默认不进入 runtime data。 |
-| `filter_field` | 普通字段默认可用，tool-only 字段需显式声明 | 是否允许被 export filter 引用。 |
-| `validator_only` | `false` | 仅参与校验，默认不参与 runtime data。 |
+| `export` | `true` | 是否允许进入 runtime ExportView。`false` 表示强制不导出。 |
+| `export_when` | 未设置 | 按 target tags 判断字段是否进入当前 ExportView。 |
 | `special_exports` | 未设置 | 控制是否可被特殊导出器使用。 |

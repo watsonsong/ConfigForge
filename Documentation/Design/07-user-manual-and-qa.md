@@ -7,9 +7,9 @@
 `Data/items.csv`：
 
 ```csv
-id,name,icon,test
-1001,Iron Sword,assets/icons/iron_sword.png,false
-9001,Debug Sword,assets/icons/debug_sword.png,true
+id,name,icon,export_tags,exclude_tags
+1001,Iron Sword,assets/icons/iron_sword.png,,
+9001,Debug Sword,assets/icons/debug_sword.png,debug,shipping
 ```
 
 ### 2. 编写 Meta
@@ -44,13 +44,21 @@ required = true
 desc = "物品图标资源路径。"
 
 [[tables.fields]]
-name = "test"
-type = "bool"
-default = false
-tool_only = true
-filter_field = true
+name = "export_tags"
+type = "string"
 export = false
-desc = "是否为测试配置，shipping 导出时会被排除。"
+desc = "行级导出要求的 target tags，逗号分隔；空值表示所有 target。"
+
+[[tables.fields]]
+name = "exclude_tags"
+type = "string"
+export = false
+desc = "命中这些 target tags 时排除该行，逗号分隔。"
+
+[tables.row_export]
+required_tags_field = "export_tags"
+excluded_tags_field = "exclude_tags"
+match = "any"
 
 [[tables.indexes]]
 name = "by_id"
@@ -58,13 +66,6 @@ fields = ["id"]
 unique = true
 primary = true
 
-[[tables.export_filters]]
-scope = "record"
-when_tag = "shipping"
-field = "test"
-op = "=="
-value = true
-action = "exclude"
 ```
 
 ### 3. 编写 Project Config
@@ -79,7 +80,7 @@ name = "sample"
 
 [[targets]]
 name = "client_json_shipping"
-tags = ["shipping"]
+tags = ["client", "shipping"]
 
 [targets.data]
 input = "Data"
@@ -90,9 +91,6 @@ format = "json"
 language = "typescript"
 output = "Generated/Client"
 
-[[targets.special_exporters]]
-kind = "asset_manifest_csv"
-output = "Generated/assets.csv"
 ```
 
 ### 4. 校验
@@ -109,8 +107,8 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 
 预期：
 
-- `Debug Sword` 因 `test = true` 被 shipping target 排除。
-- `test` 字段不进入 runtime data。
+- `Debug Sword` 因 `exclude_tags = "shipping"` 被 shipping target 排除。
+- `export_tags` / `exclude_tags` 字段不进入 runtime data。
 - debug sword 的 icon 不进入 asset manifest。
 
 ## 7.2 用户常见任务
@@ -144,10 +142,10 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 
 ### 添加 shipping 过滤
 
-1. 添加 tool-only filter 字段，例如 `test`。
-2. 配置 `filter_field = true`。
-3. 添加 `tables.export_filters`。
-4. 用 target tags 验证过滤效果。
+1. 在 collection 表中添加 `export_tags` / `exclude_tags` 等行级 tag 字段，并设置 `export = false`。
+2. 添加 `[tables.row_export]`，通过 `required_tags_field` 和 `excluded_tags_field` 引用这些字段。
+3. 在 target 中配置 `tags = ["client", "shipping"]` 等上下文。
+4. 通过不同 target tags 验证行级过滤效果。
 
 ## 7.3 QA 测试维度
 
@@ -203,10 +201,11 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 
 ### Export Filtering
 
-- shipping tag 排除 test 行。
-- dev target 不排除 test 行。
-- tool-only 字段不进入 runtime data。
-- tool-only 字段未声明 `filter_field = true` 却被 filter 引用时报错。
+- shipping tag 排除 `exclude_tags` 包含 `shipping` 的行。
+- debug target 导出 `export_tags` 包含 `debug` 的行。
+- client/server target 分别只导出匹配对应 tag 的表、字段和行。
+- `export = false` 字段不进入 runtime data，但可以被 `row_export` 显式引用。
+- `row_export` 引用不存在字段时报错。
 - 过滤后 collection validator 只检查剩余记录。
 
 ### Special Exporter

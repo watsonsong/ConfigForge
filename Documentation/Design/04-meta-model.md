@@ -14,6 +14,7 @@
 | default | Partial | 当前支持 primitive / enum scalar default。 |
 | multi-source / override / fragments | Reserved | 当前会显式报 unsupported，避免静默忽略配置。 |
 | builtin value types / foreign key / ObjectTable 特化语义 | Planned | 当前尚未实现。 |
+| target tags / export_when / row_export | Planned | 目标态设计已确认；当前实现仍待替换旧字段过滤逻辑。 |
 
 ## 4.1 MetaModel
 
@@ -131,6 +132,7 @@ CollectionTable 表示多条记录，例如 items、quests、levels。
 - 每行 source data 通常对应一条 record。
 - 可定义一个或多个 index。
 - 可定义 `primary_index`。
+- 可定义 `row_export`，按 target tags 裁剪集合记录。
 - override source 以整条 record 为单位覆盖，必须通过 primary index 匹配。
 - 可选择 `preserve_source_order = true` 暴露源顺序数组访问。
 
@@ -159,13 +161,136 @@ desc = "商店购买价格。"
 | `required` | 当前验证视图中是否必须有值。 |
 | `default` | 数据未提供值时使用的默认值。 |
 | `layout` | 复合值在 source 中的书写方式，例如 scalar cell、JSON cell、expanded value。 |
-| `export` | 是否进入常规 runtime data。 |
-| `tool_only` | 是否仅用于工具流程。 |
-| `filter_field` | 是否可被 export filter 引用。 |
-| `validator_only` | 是否仅用于 Validator。 |
+| `export` | 是否允许进入 runtime ExportView；`false` 表示强制不导出。 |
+| `export_when` | 按 target tags 判断是否进入当前 ExportView。 |
 | `special_exports` | 是否允许特殊导出器读取。 |
 
-## 4.5 Missing、Default、Required
+## 4.5 Target Tags 与 ExportView 过滤
+
+Target 使用 `tags` 描述导出上下文，例如 `client`、`server`、`debug`、`shipping`。这些 tag 不内建业务语义，只作为匹配条件。Meta 中表、字段和索引通过 `export_when` 匹配 target tags。
+
+`export_when` 结构：
+
+```toml
+export_when = { any = ["client"], all = ["shipping"], none = ["debug"] }
+```
+
+匹配规则：
+
+1. `any` 非空时，target tags 至少命中其中一个。
+2. `all` 非空时，target tags 必须包含全部 tag。
+3. `none` 非空时，target tags 不能包含其中任何 tag。
+4. 三类条件都为空时表示不限制 target。
+5. `export = false` 优先级最高，表示永不进入 runtime ExportView。
+
+表级示例：
+
+```toml
+[[tables]]
+name = "client_ui"
+source = "client_ui.csv"
+export_when = { any = ["client"] }
+
+[[tables]]
+name = "server_drop"
+source = "server_drop.csv"
+export_when = { any = ["server"] }
+```
+
+字段级示例：
+
+```toml
+[[tables]]
+name = "skill"
+source = "skill.csv"
+
+[[tables.fields]]
+name = "id"
+type = "int"
+unique = true
+
+[[tables.fields]]
+name = "icon"
+type = "asset"
+export_when = { any = ["client"] }
+
+[[tables.fields]]
+name = "damage_formula"
+type = "string"
+export_when = { any = ["server"] }
+```
+
+普通 index 在当前 target 中只有满足以下条件才进入 ExportView：
+
+```text
+index.exported_for(target)
+  = index.export_when matches target.tags
+  AND every index field is exported_for(target)
+```
+
+如果 primary index 在当前 target 下不可用，必须报错，不能静默删除。
+
+## 4.6 Row Export Policy
+
+CollectionTable 可以声明 `row_export`，由数据列控制某一行是否进入当前 target 的 ExportView。该机制用于替代旧的硬编码过滤字段，常见场景是 debug-only、shipping-only、平台、地区、渠道数据裁剪。
+
+```toml
+[[tables]]
+name = "item"
+source = "item.csv"
+
+[tables.row_export]
+required_tags_field = "export_tags"
+excluded_tags_field = "exclude_tags"
+match = "any"
+
+[[tables.fields]]
+name = "export_tags"
+type = "string"
+export = false
+
+[[tables.fields]]
+name = "exclude_tags"
+type = "string"
+export = false
+```
+
+语义：
+
+| 字段 | 含义 |
+| --- | --- |
+| `required_tags_field` | 行要求 target 具备的 tags。空值表示不限制。 |
+| `excluded_tags_field` | target 命中任一排除 tag 时该行不导出。空值表示不排除。 |
+| `match = "any"` | `required_tags_field` 多个 tag 命中任一即可。 |
+| `match = "all"` | `required_tags_field` 多个 tag 必须全部命中。 |
+
+行数据示例：
+
+```csv
+id,name,export_tags,exclude_tags
+1,Potion,,
+2,Debug Sword,debug,
+3,Shipping Gift,shipping,
+4,Internal Test Item,,shipping
+5,Server Reward,server,
+6,Client Preview Item,client,
+```
+
+`export_tags` / `exclude_tags` 字段通常设置 `export = false`，因为它们只用于形成 ExportView，不进入 runtime data。字段是否可被行过滤引用不再需要额外 `filter_field` 开关。
+
+## 4.7 废弃的旧导出字段
+
+目标态不再保留 `tool_only`、`validator_only`、`filter_field` 作为 Meta 导出机制：
+
+| 旧字段 | 替代方式 |
+| --- | --- |
+| `tool_only = true` | `export = false`，或通过工具专用 target tags 单独导出。 |
+| `validator_only = true` | `export = false`；校验仍基于 Full DataSet 或目标 ExportView 执行。 |
+| `filter_field = true` | `row_export.required_tags_field` / `row_export.excluded_tags_field` 显式引用字段。 |
+
+后续实现应直接迁移到新机制，不提供旧字段兼容语义。
+
+## 4.8 Missing、Default、Required
 
 > 实现状态：Partial。当前实现已支持 primitive / enum 字段的 scalar `default` 校验，并会在数据验证/导出前把 Missing 或 Empty 值替换为 default；struct、array、table 等复合 default 暂未实现。
 
@@ -189,7 +314,7 @@ desc = "商店购买价格。"
 4. Null 默认不满足 required。
 5. default 必须能按字段类型解析和校验。
 
-## 4.6 字段类型
+## 4.9 字段类型
 
 ### Primitive Types
 
@@ -270,7 +395,7 @@ desc = "奖励数量。"
 
 Named struct 不能形成直接或间接循环引用，除非未来引入显式 indirection 类型。
 
-## 4.7 复合值书写方式
+## 4.10 复合值书写方式
 
 这里描述的是 **struct / array 等复合值如何在二维数据表中书写**，而不是固定使用“列展开”或“行展开”这样的物理名词。
 
@@ -313,7 +438,7 @@ rewards[1].count
 - 如果能通过连续相邻列推断元素分组，未来可考虑省略显式 `[0]`，但当前 canonical 写法仍保留 index。
 - expanded value 中的 array index 默认必须连续；不支持 sparse，除非未来显式设计。
 
-## 4.8 Index 与 Primary Index
+## 4.11 Index 与 Primary Index
 
 CollectionTable 可定义多个 index。
 
@@ -339,7 +464,7 @@ Index cardinality：
 - `unique = true`：一个 key 至多对应一条 record。
 - `unique = false`：一个 key 可对应多条 record。
 
-## 4.9 Foreign Key
+## 4.12 Foreign Key
 
 外键声明字段值引用另一张表的 unique index。
 
@@ -362,7 +487,7 @@ desc = "引用奖励物品。"
 - composite foreign key 全空可跳过，部分为空应报 partial key error。
 - foreign key target 必须是 unique index 或 primary index。
 
-## 4.10 Multi-source 与 Override
+## 4.13 Multi-source 与 Override
 
 > 实现状态：Reserved。当前版本只支持单个 CSV source；multiple `sources`、`override_sources`、非 `csv` provider 与 `fragments` 会在 Meta 校验阶段显式报错，避免静默忽略。
 
@@ -378,7 +503,7 @@ Base `sources` 用于 split merge：
 - CollectionTable：按 primary index 匹配整条 record 并替换。
 - 按列表顺序应用，不使用 priority。
 
-## 4.11 Polymorphic Fragment
+## 4.14 Polymorphic Fragment
 
 > 实现状态：Reserved。当前版本尚未实现 polymorphic fragments；配置 `fragments` 会报 unsupported diagnostic。
 

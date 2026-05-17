@@ -15,7 +15,7 @@ CLI Arguments
   -> Source Loading
   -> Sheet Normalization and Field Mapping
   -> Full DataSet Materialization
-  -> Target Context Resolution
+  -> Target Tags Resolution
   -> ExportView Filtering
   -> Validation on Target View
   -> Export Planning
@@ -38,7 +38,7 @@ CLI Arguments
 - resolved project root；
 - selected meta roots；
 - selected target list；
-- selected context tags；
+- selected target tags；
 - output policy；
 - diagnostic output policy。
 
@@ -148,16 +148,17 @@ Source Provider 负责把 CSV、XLSX、Lark Sheet、Google Sheet 等外部数据
 - 多 artifact 可以并行生成；Artifact Writer 负责统一冲突检查、写入策略和最终提交。
 - 所有阶段的 diagnostics 必须进入统一 collector，并按稳定 key 输出。
 
-## 2.7 Target Context 与 ExportView 阶段
+## 2.7 Target Tags 与 ExportView 阶段
 
-Target 定义默认 tags，CLI 也可以额外指定 tags。ConfigForge 根据 target/context 生成导出视图。
+Target 定义一组 `tags`，例如 `client`、`server`、`debug`、`shipping`、平台、地区或渠道。ConfigForge 根据 target tags 生成导出视图；tags 本身只是能力标签，工具不硬编码具体业务含义。
 
 流程：
 
 ```text
 Full DataSet
-  -> apply record filters
-  -> apply field filters / export policy
+  -> apply table export_when
+  -> apply field export_when
+  -> apply row_export filters
   -> apply fragment filters
   -> ExportView
 ```
@@ -165,10 +166,11 @@ Full DataSet
 明确规则：
 
 - ExportView 是目标实际导出的数据视图。
-- shipping 等上下文排除的记录，不进入常规 runtime data。
+- 表、字段通过统一的 `export_when = { any = [...], all = [...], none = [...] }` 匹配 target tags。
+- `export = false` 是强制不导出；不再设计 `tool_only`、`validator_only`、`filter_field` 作为导出机制。
+- collection 表可通过 `row_export` 指定数据列控制行级导出，常用于 `debug` / `shipping` 行裁剪。
 - 被排除记录对应的 text、asset 等也默认不进入 special exporter 产物。
-- `tool_only`、`export = false` 字段默认不进入常规 runtime data。
-- 若 special exporter 需要使用非常规字段，必须通过 `special_exports` 或 exporter policy 显式允许，但仍受 target/context 过滤影响。
+- 若 special exporter 需要额外读取非 runtime 字段，必须由 exporter policy 显式声明，但仍受 target tags 过滤影响。
 
 ## 2.8 Validation 阶段
 
