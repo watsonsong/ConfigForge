@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::meta::{
     EnumMeta, EnumValueMeta, ExportCondition, FieldMeta, LinkedField, LinkedFieldMeta,
-    LinkedStructType, LinkedTableMeta, MetaModel, PrimitiveFieldType, TableMeta, TargetTags,
-    ValidationSeverity,
+    LinkedTableMeta, MetaModel, PrimitiveFieldType, TableMeta, TargetTags, ValidationSeverity,
 };
 use crate::{ConfigForgeError, Result};
 
@@ -217,63 +216,146 @@ fn validates_enum_values() {
 }
 
 #[test]
-fn rejects_struct_field_even_when_empty() {
-    let struct_meta = crate::meta::StructMeta {
-        name: "Reward".to_owned(),
-        desc: None,
-        fields: Vec::new(),
-    };
-    let meta = TableMeta {
-        name: "items".to_owned(),
-        kind: crate::meta::TableKind::Collection,
-        desc: None,
-        export: true,
-        export_when: ExportCondition::default(),
-        row_export: None,
-        validators: vec![],
-        source: Some("items.csv".to_owned()),
-        sources: vec![],
-        override_sources: vec![],
-        fields: vec![FieldMeta {
-            name: "reward".to_owned(),
-            desc: None,
-            field_type: "Reward".to_owned(),
-            required: false,
-            default: None,
-            layout: None,
-            export: true,
-            export_when: ExportCondition::default(),
-            validators: vec![],
-            tool_only: None,
-            filter_field: None,
-            validator_only: None,
-            field_number: None,
-            unique: false,
-        }],
-        indexes: vec![],
-        primary_index: None,
-        preserve_source_order: false,
-        polymorphic: false,
-    };
-    let linked_meta = LinkedTableMeta::new(
-        &meta,
-        vec![LinkedFieldMeta {
-            meta: &meta.fields[0],
-            linked_field: LinkedField::Struct(LinkedStructType {
-                meta: &struct_meta,
-                fields: vec![],
-            }),
-        }],
-        vec![],
-    );
-    let table = DataTable {
-        name: "items".to_owned(),
-        rows: vec![BTreeMap::from([("reward".to_owned(), String::new())])],
-    };
-    let error = validate_table(&linked_meta, &table).unwrap_err();
+fn validates_struct_json_cell_values() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "item_id"
+            type = "string"
+            required = true
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+            required = true
+            default = 1
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "reward"
+            type = "Reward"
+            required = true
+            layout = "json_cell"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([(
+            "reward".to_owned(),
+            r#"{"item_id":"coin"}"#.to_owned(),
+        )])],
+    )]);
+
+    assert!(validate_data_set(&linked_meta, &data_set).is_ok());
+}
+
+#[test]
+fn rejects_invalid_struct_json_cell_values() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "item_id"
+            type = "string"
+            required = true
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+            required = true
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "reward"
+            type = "Reward"
+            required = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let cases = [
+        (r#"{"item_id":"coin"}"#, "reward.count` is required"),
+        (
+            r#"{"item_id":"coin","count":"many"}"#,
+            "reward.count` value `many` does not match type",
+        ),
+        (
+            r#"{"item_id":"coin","count":1,"extra":true}"#,
+            "unknown struct key `extra`",
+        ),
+        ("not json", "invalid struct JSON"),
+    ];
+
+    for (raw, expected) in cases {
+        let data_set = DataSet::new(vec![DataTable::new(
+            "items",
+            vec![BTreeMap::from([("reward".to_owned(), raw.to_owned())])],
+        )]);
+        let error = validate_data_set(&linked_meta, &data_set).unwrap_err();
+        assert!(
+            matches!(&error, ConfigForgeError::Validation(message) if message.contains(expected)),
+            "expected `{expected}` from `{raw}`, got {error}"
+        );
+    }
+}
+
+#[test]
+fn target_validation_skips_non_exported_struct_children() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "item_id"
+            type = "string"
+            required = true
+
+            [[structs.fields]]
+            name = "server_count"
+            type = "int"
+            required = true
+            export_when = { any = ["server"] }
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "reward"
+            type = "Reward"
+            required = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([(
+            "reward".to_owned(),
+            r#"{"item_id":"coin"}"#.to_owned(),
+        )])],
+    )]);
 
     assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("struct value validation is not implemented yet"))
+        validate_data_set_for_target(&linked_meta, &TargetTags::new(["client"]), &data_set).is_ok()
+    );
+    assert!(
+        validate_data_set_for_target(&linked_meta, &TargetTags::new(["server"]), &data_set)
+            .is_err()
     );
 }
 

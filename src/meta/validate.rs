@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use super::{
     model::normalize_tag, FieldMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
-    PrimitiveFieldType, TableMeta, ValidatorMeta,
+    PrimitiveFieldType, TableMeta, ValidatorMeta, ValueLayout,
 };
 
 pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
@@ -42,7 +42,17 @@ fn validate_struct_meta(
                 diagnostics,
             );
         }
+        if !field.validators.is_empty() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "struct `{}` field `{}` declares validators, but struct child validators are not implemented yet",
+                    struct_meta.name, field.name
+                ),
+            ));
+        }
         validate_deprecated_field_export_flags(&owner, field, diagnostics);
+        validate_field_layout(model, &owner, field, diagnostics);
         validate_default_value(model, &owner, field, diagnostics);
     }
 }
@@ -182,6 +192,12 @@ fn validate_table_meta(
             field,
             diagnostics,
         );
+        validate_field_layout(
+            model,
+            &format!("table `{}`", table.name),
+            field,
+            diagnostics,
+        );
         validate_default_value(
             model,
             &format!("table `{}`", table.name),
@@ -246,6 +262,54 @@ fn validate_table_meta(
 
     validate_row_export_policy(table, &field_names, diagnostics);
     validate_primary_index(table, &primary_indexes, diagnostics);
+}
+
+fn validate_field_layout(
+    model: &MetaModel,
+    owner: &str,
+    field: &FieldMeta,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    let is_struct = model.struct_meta(&field.field_type).is_some();
+    match (is_struct, field.layout) {
+        (true, None | Some(ValueLayout::JsonCell)) => {}
+        (true, Some(ValueLayout::ScalarCell)) => diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "{} field `{}` uses struct type `{}` with scalar_cell layout; struct fields only support json_cell in this phase",
+                owner, field.name, field.field_type
+            ),
+        )),
+        (true, Some(ValueLayout::ExpandedValue)) => diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "{} field `{}` uses struct type `{}` with expanded_value layout, but expanded struct values are not implemented yet",
+                owner, field.name, field.field_type
+            ),
+        )),
+        (false, Some(ValueLayout::JsonCell | ValueLayout::ExpandedValue)) => {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "{} field `{}` uses layout `{:?}`, but non-struct fields only support scalar_cell in this phase",
+                    owner,
+                    field.name,
+                    field.layout.expect("layout exists")
+                ),
+            ));
+        }
+        (false, None | Some(ValueLayout::ScalarCell)) => {}
+    }
+
+    if is_struct && field.default.is_some() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "{} field `{}` uses struct type `{}` with a default value, but whole-struct defaults are not implemented yet",
+                owner, field.name, field.field_type
+            ),
+        ));
+    }
 }
 
 fn validate_validator_meta(
@@ -410,17 +474,22 @@ fn validate_default_value(
         Some(PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset) => {
             default.as_str().is_some()
         }
-        None => model
-            .enum_meta(&field.field_type)
-            .and_then(|enum_meta| {
-                default.as_str().map(|default_value| {
-                    enum_meta
-                        .values
-                        .iter()
-                        .any(|enum_value| enum_value.name == default_value)
+        None => {
+            if model.struct_meta(&field.field_type).is_some() {
+                return;
+            }
+            model
+                .enum_meta(&field.field_type)
+                .and_then(|enum_meta| {
+                    default.as_str().map(|default_value| {
+                        enum_meta
+                            .values
+                            .iter()
+                            .any(|enum_value| enum_value.name == default_value)
+                    })
                 })
-            })
-            .unwrap_or(false),
+                .unwrap_or(false)
+        }
     };
 
     if !valid {

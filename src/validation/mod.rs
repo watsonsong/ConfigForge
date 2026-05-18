@@ -3,8 +3,8 @@ use std::collections::{BTreeSet, HashSet};
 use crate::{
     data::{DataSet, DataTable},
     meta::{
-        LinkedField, LinkedFieldMeta, LinkedIndexMeta, LinkedMetaModel, LinkedTableMeta,
-        PrimitiveFieldType, TargetTags,
+        LinkedField, LinkedFieldMeta, LinkedIndexMeta, LinkedMetaModel, LinkedStructType,
+        LinkedTableMeta, PrimitiveFieldType, TargetTags, ValueLayout,
     },
     ConfigForgeError, Result,
 };
@@ -194,7 +194,7 @@ fn validate_normalized_table_view(
     {
         validate_supported_field_type(meta, field)?;
         validate_field_presence_view(meta, table_view, field)?;
-        validate_field_values_view(meta, table_view, field)?;
+        validate_field_values_view(meta, table_view, field, target_tags)?;
         validate_field_uniqueness_view(meta, table_view, field)?;
     }
 
@@ -432,6 +432,7 @@ fn validate_field_values_view(
     meta: &LinkedTableMeta<'_>,
     table_view: &ExportTableView<'_, '_>,
     field: &LinkedFieldMeta<'_>,
+    target_tags: Option<&TargetTags>,
 ) -> Result<()> {
     for visible_row in &table_view.visible_rows {
         let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
@@ -455,7 +456,7 @@ fn validate_field_values_view(
             continue;
         }
 
-        validate_value_type_at_row_number(meta, field, value, row_number)?;
+        validate_value_type_at_row_number(meta, field, value, row_number, target_tags)?;
     }
     Ok(())
 }
@@ -464,14 +465,22 @@ fn validate_supported_field_type(
     meta: &LinkedTableMeta<'_>,
     field: &LinkedFieldMeta<'_>,
 ) -> Result<()> {
-    if let LinkedField::Struct(_) = &field.linked_field {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` field `{}` uses struct type `{}`, but struct value validation is not implemented yet",
-            meta.meta.name, field.meta.name, field.meta.field_type
-        )));
+    match (&field.linked_field, field.meta.layout) {
+        (LinkedField::Struct(_), None | Some(ValueLayout::JsonCell)) => Ok(()),
+        (LinkedField::Struct(_), Some(ValueLayout::ScalarCell | ValueLayout::ExpandedValue)) => {
+            Err(ConfigForgeError::Validation(format!(
+                "table `{}` field `{}` uses struct type `{}` with unsupported layout; only json_cell is supported in this phase",
+                meta.meta.name, field.meta.name, field.meta.field_type
+            )))
+        }
+        (_, None | Some(ValueLayout::ScalarCell)) => Ok(()),
+        (_, Some(ValueLayout::JsonCell | ValueLayout::ExpandedValue)) => Err(
+            ConfigForgeError::Validation(format!(
+                "table `{}` field `{}` uses unsupported layout; non-struct fields only support scalar_cell in this phase",
+                meta.meta.name, field.meta.name
+            )),
+        ),
     }
-
-    Ok(())
 }
 
 fn validate_value_type(
@@ -480,7 +489,7 @@ fn validate_value_type(
     value: &str,
     row_index: usize,
 ) -> Result<()> {
-    validate_value_type_at_row_number(meta, field, value, row_index + 1)
+    validate_value_type_at_row_number(meta, field, value, row_index + 1, None)
 }
 
 fn validate_value_type_at_row_number(
@@ -488,8 +497,31 @@ fn validate_value_type_at_row_number(
     field: &LinkedFieldMeta<'_>,
     value: &str,
     row_number: usize,
+    target_tags: Option<&TargetTags>,
 ) -> Result<()> {
-    let valid = match &field.linked_field {
+    if let LinkedField::Struct(struct_type) = &field.linked_field {
+        return validate_struct_json_cell(
+            meta.meta.name.as_str(),
+            row_number,
+            field.meta.name.as_str(),
+            struct_type,
+            value,
+            target_tags,
+        );
+    }
+
+    if !validate_scalar_value(field, value) {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` value `{}` does not match type `{:?}`",
+            meta.meta.name, row_number, field.meta.name, value, field.meta.field_type
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_scalar_value(field: &LinkedFieldMeta<'_>, value: &str) -> bool {
+    match &field.linked_field {
         LinkedField::Primitive(PrimitiveFieldType::Int) => value.parse::<i64>().is_ok(),
         LinkedField::Primitive(PrimitiveFieldType::Float) => value.parse::<f64>().is_ok(),
         LinkedField::Primitive(PrimitiveFieldType::Bool) => {
@@ -502,25 +534,130 @@ fn validate_value_type_at_row_number(
             .values
             .iter()
             .any(|enum_value| enum_value.name == value),
-        LinkedField::Struct(_) => {
+        LinkedField::Struct(_) => false,
+    }
+}
+
+fn validate_struct_json_cell(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    struct_type: &LinkedStructType<'_>,
+    raw: &str,
+    target_tags: Option<&TargetTags>,
+) -> Result<()> {
+    let value: serde_json::Value = serde_json::from_str(raw).map_err(|source| {
+        ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` has invalid struct JSON: {}",
+            table_name, row_number, field_path, source
+        ))
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` must be a JSON object for struct `{}`",
+            table_name, row_number, field_path, struct_type.meta.name
+        ))
+    })?;
+
+    for key in object.keys() {
+        if !struct_type
+            .fields
+            .iter()
+            .any(|field| field.meta.name == key.as_str())
+        {
             return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` uses struct type `{}`, but struct value validation is not implemented yet",
-                meta.meta.name,
-                row_number,
-                field.meta.name,
-                field.meta.field_type
+                "table `{}` row {} field `{}` contains unknown struct key `{}`",
+                table_name, row_number, field_path, key
             )));
         }
-    };
+    }
 
-    if !valid {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` value `{}` does not match type `{:?}`",
-            meta.meta.name, row_number, field.meta.name, value, field.meta.field_type
-        )));
+    for child in &struct_type.fields {
+        if let Some(target_tags) = target_tags {
+            if !child.meta.is_exported_for(target_tags) {
+                continue;
+            }
+        }
+        let child_path = format!("{field_path}.{}", child.meta.name);
+        let child_value = object.get(&child.meta.name);
+        let default_value = child.meta.default.as_ref().map(toml_default_to_json_value);
+        let effective_value = child_value.or(default_value.as_ref());
+        let is_empty = effective_value.map(json_value_is_empty).unwrap_or(true);
+
+        if child.meta.required && is_empty {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` is required",
+                table_name, row_number, child_path
+            )));
+        }
+        if is_empty {
+            continue;
+        }
+
+        match &child.linked_field {
+            LinkedField::Struct(nested_struct) => {
+                let raw = effective_value.expect("checked non-empty").to_string();
+                validate_struct_json_cell(
+                    table_name,
+                    row_number,
+                    &child_path,
+                    nested_struct,
+                    &raw,
+                    target_tags,
+                )?;
+            }
+            _ => {
+                let scalar = json_value_to_scalar_cell(
+                    effective_value.expect("checked non-empty"),
+                    table_name,
+                    row_number,
+                    &child_path,
+                )?;
+                if !validate_scalar_value(child, &scalar) {
+                    return Err(ConfigForgeError::Validation(format!(
+                        "table `{}` row {} field `{}` value `{}` does not match type `{:?}`",
+                        table_name, row_number, child_path, scalar, child.meta.field_type
+                    )));
+                }
+            }
+        }
     }
 
     Ok(())
+}
+
+fn toml_default_to_json_value(value: &toml::Value) -> serde_json::Value {
+    match value {
+        toml::Value::String(value) => serde_json::Value::String(value.clone()),
+        toml::Value::Integer(value) => serde_json::Value::Number((*value).into()),
+        toml::Value::Float(value) => serde_json::Number::from_f64(*value)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        toml::Value::Boolean(value) => serde_json::Value::Bool(*value),
+        _ => serde_json::Value::Null,
+    }
+}
+
+fn json_value_is_empty(value: &serde_json::Value) -> bool {
+    matches!(value, serde_json::Value::Null)
+        || value.as_str().map(str::trim).is_some_and(str::is_empty)
+}
+
+fn json_value_to_scalar_cell(
+    value: &serde_json::Value,
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+) -> Result<String> {
+    match value {
+        serde_json::Value::String(value) => Ok(value.clone()),
+        serde_json::Value::Number(value) => Ok(value.to_string()),
+        serde_json::Value::Bool(value) => Ok(value.to_string()),
+        _ => Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` must be a scalar value",
+            table_name, row_number, field_path
+        ))),
+    }
 }
 
 fn validate_field_uniqueness(

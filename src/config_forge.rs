@@ -9,20 +9,30 @@ use serde::Serialize;
 
 use crate::{
     codegen::RuntimeDataFile,
-    data::{DataRow, DataSet, DataTable},
-    meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
+    data::{DataSet, DataTable},
+    meta::{
+        LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, LinkedTableMeta,
+        TargetTags,
+    },
     ConfigForgeError, Result,
 };
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportedTable {
     meta: ExportedTableMeta,
-    rows: Vec<DataRow>,
+    rows: Vec<BTreeMap<String, ExportedValue>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportedTableMeta {
     name: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(untagged)]
+pub enum ExportedValue {
+    Scalar(String),
+    Struct(BTreeMap<String, ExportedValue>),
 }
 
 /// Runtime data format exporter.
@@ -208,34 +218,165 @@ pub fn build_exported_table_payload(
     table_meta: &LinkedTableMeta<'_>,
     table: &DataTable,
     target_tags: &TargetTags,
-) -> ExportedTable {
+) -> Result<ExportedTable> {
     let exported_fields = table_meta
         .fields
         .iter()
         .filter(|field| field.meta.is_exported_for(target_tags))
-        .map(|field| field.meta.name.as_str())
-        .collect::<std::collections::BTreeSet<_>>();
+        .collect::<Vec<_>>();
     let rows = table
         .rows
         .iter()
+        .enumerate()
         .filter(|row| {
+            let row = row.1;
             table_meta
                 .meta
                 .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
         })
-        .map(|row| {
-            row.iter()
-                .filter(|(field, _)| exported_fields.contains(field.as_str()))
-                .map(|(field, value)| (field.clone(), value.clone()))
-                .collect::<BTreeMap<_, _>>()
+        .map(|(row_index, row)| {
+            let mut exported_row = BTreeMap::new();
+            for field in &exported_fields {
+                let Some(raw) = row.get(&field.meta.name) else {
+                    continue;
+                };
+                if let Some(value) = export_field_value(
+                    table_meta.meta.name.as_str(),
+                    row_index + 1,
+                    field.meta.name.as_str(),
+                    field,
+                    raw,
+                    target_tags,
+                )? {
+                    exported_row.insert(field.meta.name.clone(), value);
+                }
+            }
+            Ok(exported_row)
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
-    ExportedTable {
+    Ok(ExportedTable {
         meta: ExportedTableMeta {
             name: table_meta.meta.name.clone(),
         },
         rows,
+    })
+}
+
+fn export_field_value(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    field: &LinkedFieldMeta<'_>,
+    raw: &str,
+    target_tags: &TargetTags,
+) -> Result<Option<ExportedValue>> {
+    match &field.linked_field {
+        LinkedField::Struct(struct_type) => {
+            if raw.trim().is_empty() {
+                return Ok(None);
+            }
+            let value: serde_json::Value = serde_json::from_str(raw).map_err(|source| {
+                ConfigForgeError::Validation(format!(
+                    "table `{}` row {} field `{}` has invalid struct JSON: {}",
+                    table_name, row_number, field_path, source
+                ))
+            })?;
+            export_struct_value(
+                table_name,
+                row_number,
+                field_path,
+                struct_type,
+                &value,
+                target_tags,
+            )
+            .map(Some)
+        }
+        _ => Ok(Some(ExportedValue::Scalar(raw.to_owned()))),
+    }
+}
+
+fn export_struct_value(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    struct_type: &LinkedStructType<'_>,
+    value: &serde_json::Value,
+    target_tags: &TargetTags,
+) -> Result<ExportedValue> {
+    let object = value.as_object().ok_or_else(|| {
+        ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` must be a JSON object for struct `{}`",
+            table_name, row_number, field_path, struct_type.meta.name
+        ))
+    })?;
+    for key in object.keys() {
+        if !struct_type
+            .fields
+            .iter()
+            .any(|field| field.meta.name == key.as_str())
+        {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` contains unknown struct key `{}`",
+                table_name, row_number, field_path, key
+            )));
+        }
+    }
+    let mut exported = BTreeMap::new();
+    for field in struct_type
+        .fields
+        .iter()
+        .filter(|field| field.meta.is_exported_for(target_tags))
+    {
+        let default_value = field.meta.default.as_ref().map(toml_default_to_json_value);
+        let Some(value) = object.get(&field.meta.name).or(default_value.as_ref()) else {
+            continue;
+        };
+        if json_value_is_empty(value) {
+            continue;
+        }
+        let child_path = format!("{field_path}.{}", field.meta.name);
+        let exported_value = match &field.linked_field {
+            LinkedField::Struct(nested_struct) => export_struct_value(
+                table_name,
+                row_number,
+                &child_path,
+                nested_struct,
+                value,
+                target_tags,
+            )?,
+            _ => ExportedValue::Scalar(json_value_to_scalar_cell(value)?),
+        };
+        exported.insert(field.meta.name.clone(), exported_value);
+    }
+    Ok(ExportedValue::Struct(exported))
+}
+
+fn toml_default_to_json_value(value: &toml::Value) -> serde_json::Value {
+    match value {
+        toml::Value::String(value) => serde_json::Value::String(value.clone()),
+        toml::Value::Integer(value) => serde_json::Value::Number((*value).into()),
+        toml::Value::Float(value) => serde_json::Number::from_f64(*value)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        toml::Value::Boolean(value) => serde_json::Value::Bool(*value),
+        _ => serde_json::Value::Null,
+    }
+}
+
+fn json_value_is_empty(value: &serde_json::Value) -> bool {
+    matches!(value, serde_json::Value::Null)
+        || value.as_str().map(str::trim).is_some_and(str::is_empty)
+}
+
+fn json_value_to_scalar_cell(value: &serde_json::Value) -> Result<String> {
+    match value {
+        serde_json::Value::String(value) => Ok(value.clone()),
+        serde_json::Value::Number(value) => Ok(value.to_string()),
+        serde_json::Value::Bool(value) => Ok(value.to_string()),
+        _ => Err(ConfigForgeError::Validation(
+            "struct scalar field value must be string, number, or bool".to_owned(),
+        )),
     }
 }
 
@@ -256,7 +397,7 @@ impl DataFormatExporter for JsonDataExporter {
         table: &DataTable,
         target_tags: &TargetTags,
     ) -> Result<Vec<u8>> {
-        let payload = build_exported_table_payload(table_meta, table, target_tags);
+        let payload = build_exported_table_payload(table_meta, table, target_tags)?;
         Ok(serde_json::to_vec_pretty(&payload)?)
     }
 }
@@ -282,7 +423,7 @@ impl DataFormatExporter for MessagePackDataExporter {
         table: &DataTable,
         target_tags: &TargetTags,
     ) -> Result<Vec<u8>> {
-        let payload = build_exported_table_payload(table_meta, table, target_tags);
+        let payload = build_exported_table_payload(table_meta, table, target_tags)?;
         rmp_serde::to_vec_named(&payload)
             .map_err(|source| ConfigForgeError::SerializeMessagePack { source })
     }
@@ -599,12 +740,168 @@ mod tests {
         );
 
         let payload =
-            build_exported_table_payload(table_meta, &table, &TargetTags::new(["client"]));
+            build_exported_table_payload(table_meta, &table, &TargetTags::new(["client"]))
+                .expect("payload should build");
         let value = serde_json::to_value(payload).expect("payload should serialize");
 
         let rows = value["rows"].as_array().expect("rows should be array");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["id"], "1");
         assert!(rows[0].get("exclude_tags").is_none());
+    }
+
+    #[test]
+    fn struct_json_cell_exports_as_nested_object_and_filters_children() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[structs]]
+                name = "Reward"
+
+                [[structs.fields]]
+                name = "item_id"
+                type = "string"
+
+                [[structs.fields]]
+                name = "count"
+                type = "int"
+
+                [[structs.fields]]
+                name = "internal_note"
+                type = "string"
+                export = false
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.fields]]
+                name = "reward"
+                type = "Reward"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("items").expect("linked table");
+        let table = DataTable::new(
+            "items",
+            vec![BTreeMap::from([
+                ("id".to_owned(), "1".to_owned()),
+                (
+                    "reward".to_owned(),
+                    r#"{"item_id":"coin","count":100,"internal_note":"hidden"}"#.to_owned(),
+                ),
+            ])],
+        );
+
+        let payload = build_exported_table_payload(table_meta, &table, &TargetTags::empty())
+            .expect("payload should build");
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+
+        assert_eq!(value["rows"][0]["id"], "1");
+        assert_eq!(value["rows"][0]["reward"]["item_id"], "coin");
+        assert_eq!(value["rows"][0]["reward"]["count"], "100");
+        assert!(value["rows"][0]["reward"].get("internal_note").is_none());
+    }
+
+    #[test]
+    fn struct_json_cell_export_errors_include_row_and_field_context() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[structs]]
+                name = "Reward"
+
+                [[structs.fields]]
+                name = "count"
+                type = "int"
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "reward"
+                type = "Reward"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("items").expect("linked table");
+        let invalid_json_table = DataTable::new(
+            "items",
+            vec![BTreeMap::from([(
+                "reward".to_owned(),
+                "not json".to_owned(),
+            )])],
+        );
+
+        let error =
+            build_exported_table_payload(table_meta, &invalid_json_table, &TargetTags::empty())
+                .unwrap_err();
+        assert!(
+            matches!(&error, ConfigForgeError::Validation(message) if message.contains("table `items` row 1 field `reward` has invalid struct JSON"))
+        );
+
+        let unknown_key_table = DataTable::new(
+            "items",
+            vec![BTreeMap::from([(
+                "reward".to_owned(),
+                r#"{"count":1,"extra":true}"#.to_owned(),
+            )])],
+        );
+        let error =
+            build_exported_table_payload(table_meta, &unknown_key_table, &TargetTags::empty())
+                .unwrap_err();
+        assert!(
+            matches!(&error, ConfigForgeError::Validation(message) if message.contains("field `reward` contains unknown struct key `extra`"))
+        );
+    }
+
+    #[test]
+    fn messagepack_export_preserves_struct_nested_map() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[structs]]
+                name = "Reward"
+
+                [[structs.fields]]
+                name = "item_id"
+                type = "string"
+
+                [[structs.fields]]
+                name = "count"
+                type = "int"
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "reward"
+                type = "Reward"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("items").expect("linked table");
+        let table = DataTable::new(
+            "items",
+            vec![BTreeMap::from([(
+                "reward".to_owned(),
+                r#"{"item_id":"coin","count":100}"#.to_owned(),
+            )])],
+        );
+
+        let bytes = MessagePackDataExporter
+            .serialize_table(table_meta, &table, &TargetTags::empty())
+            .expect("messagepack should serialize");
+        let value: serde_json::Value =
+            rmp_serde::from_slice(&bytes).expect("messagepack should decode");
+
+        assert_eq!(value["rows"][0]["reward"]["item_id"], "coin");
+        assert_eq!(value["rows"][0]["reward"]["count"], "100");
     }
 }

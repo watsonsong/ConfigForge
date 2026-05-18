@@ -687,7 +687,8 @@ mod tests {
             ])],
         );
 
-        let payload = build_exported_table_payload(table_meta, &table, &TargetTags::empty());
+        let payload = build_exported_table_payload(table_meta, &table, &TargetTags::empty())
+            .expect("payload should build");
         let value = serde_json::to_value(payload).expect("payload should serialize");
 
         assert_eq!(value["meta"]["name"], "items");

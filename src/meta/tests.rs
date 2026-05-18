@@ -894,6 +894,125 @@ fn validates_struct_field_default_values() {
 }
 
 #[test]
+fn validates_phase_one_struct_layout_rules() {
+    let allowed = parse(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "reward"
+            type = "Reward"
+            layout = "json_cell"
+        "#,
+    );
+    assert_eq!(
+        allowed.tables[0].fields[0].layout,
+        Some(ValueLayout::JsonCell)
+    );
+
+    let diagnostics = diagnostics(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "reward"
+            type = "Reward"
+            layout = "expanded_value"
+
+            [[tables.fields]]
+            name = "name"
+            type = "string"
+            layout = "json_cell"
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+            && diagnostic.message.contains("expanded_value")
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+            && diagnostic
+                .message
+                .contains("non-struct fields only support scalar_cell")
+    }));
+}
+
+#[test]
+fn rejects_whole_struct_default_in_phase_one() {
+    let diagnostics = diagnostics(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "reward"
+            type = "Reward"
+            default = { count = 1 }
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+            && diagnostic
+                .message
+                .contains("whole-struct defaults are not implemented yet")
+    }));
+}
+
+#[test]
+fn rejects_struct_child_validators_until_nested_validation_is_supported() {
+    let diagnostics = diagnostics(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+
+            [[structs.fields.validators]]
+            kind = "range"
+            min = 1
+            max = 99
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+            && diagnostic
+                .message
+                .contains("struct child validators are not implemented yet")
+    }));
+}
+
+#[test]
 fn rejects_duplicate_enum_struct_enum_value_and_index_names() {
     let diagnostics = diagnostics(
         r#"
