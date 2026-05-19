@@ -47,13 +47,7 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
                             .map(|field| field.meta.name.as_str())
                             .collect();
                         let visible_rows = (0..table.rows.len())
-                            .map(|row_index| VisibleRow {
-                                row_index,
-                                source_row_number: table
-                                    .row_source(row_index)
-                                    .map(|source| source.source_row_number)
-                                    .or(Some(row_index + 1)),
-                            })
+                            .map(|row_index| visible_row_for(table, row_index))
                             .collect();
                         ExportTableView::new(table_meta, table, visible_fields, visible_rows)
                     })
@@ -94,13 +88,7 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
                         row.get(field).map(String::as_str)
                     })
                 })
-                .map(|(row_index, _)| VisibleRow {
-                    row_index,
-                    source_row_number: table
-                        .row_source(row_index)
-                        .map(|source| source.source_row_number)
-                        .or(Some(row_index + 1)),
-                })
+                .map(|(row_index, _)| visible_row_for(table, row_index))
                 .collect();
             tables.push(ExportTableView::new(
                 table_meta,
@@ -144,6 +132,18 @@ impl<'meta, 'data> ExportTableView<'meta, 'data> {
 
     pub fn is_field_visible(&self, field_name: &str) -> bool {
         self.visible_fields.contains(field_name)
+    }
+}
+
+pub fn visible_row_for(table: &DataTable, row_index: usize) -> VisibleRow {
+    VisibleRow {
+        row_index,
+        source_row_number: Some(
+            table
+                .row_source(row_index)
+                .map(|source| source.source_row_number)
+                .unwrap_or(row_index + 1),
+        ),
     }
 }
 

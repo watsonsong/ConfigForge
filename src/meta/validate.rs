@@ -523,7 +523,7 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
         ));
     }
 
-    if table.sources.len() > 1 && !is_variant_source_mode(table) {
+    if table.sources.len() > 1 && !table.is_variant_source_mode() {
         diagnostics.push(MetaDiagnostic::new(
             MetaDiagnosticCode::UnsupportedFeature,
             format!(
@@ -554,16 +554,6 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
             ));
         }
     }
-}
-
-fn is_variant_source_mode(table: &TableMeta) -> bool {
-    table.kind == TableKind::Collection
-        && table.polymorphic
-        && (!table.fragments.is_empty()
-            || table
-                .sources
-                .iter()
-                .any(|source| !source.fragments.is_empty()))
 }
 
 fn validate_default_value(

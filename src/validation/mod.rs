@@ -14,7 +14,9 @@ mod context;
 mod diagnostic;
 mod registry;
 
-pub use context::{ExportTableView, ExportValidationView, ValidationContext, VisibleRow};
+pub use context::{
+    visible_row_for, ExportTableView, ExportValidationView, ValidationContext, VisibleRow,
+};
 pub use diagnostic::{ValidationIssue, ValidationIssueLocation, ValidationReport};
 pub use registry::{
     CompiledValidationPlan, CompiledValidator, ValidatorFactory, ValidatorRegistry,
@@ -175,13 +177,7 @@ pub fn validate_normalized_table_for_target(
             meta.meta
                 .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
         })
-        .map(|(row_index, _)| VisibleRow {
-            row_index,
-            source_row_number: table
-                .row_source(row_index)
-                .map(|source| source.source_row_number)
-                .or(Some(row_index + 1)),
-        })
+        .map(|(row_index, _)| visible_row_for(table, row_index))
         .collect();
     let table_view = ExportTableView::new(meta, table, visible_fields, visible_rows);
     validate_normalized_table_view(&table_view, Some(target_tags))

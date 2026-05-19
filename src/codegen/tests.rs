@@ -220,12 +220,34 @@ fn codegen_includes_fragment_structs_and_optional_row_members() {
     assert!(ts_content.contains("export interface ItemsWeaponFragment"));
     assert!(ts_content.contains("weapon?: ItemsWeaponFragment;"));
 
+    let client_typescript = TypeScriptCodeGenerator
+        .generate(&CodeExportInput {
+            target_tags: TargetTags::new(["client"]),
+            ..input_for(&meta, CodeExportLanguage::TypeScript)
+        })
+        .expect("client typescript code");
+    let client_ts_content = &client_typescript[0].content;
+    assert!(client_ts_content.contains("export interface ItemsClientMarkerFragment"));
+    assert!(client_ts_content.contains("clientMarker?: ItemsClientMarkerFragment;"));
+    assert!(!client_ts_content.contains("serverMarker"));
+
     let cpp = CppCodeGenerator
         .generate(&input_for(&meta, CodeExportLanguage::Cpp))
         .expect("cpp code");
     let cpp_content = &cpp[0].content;
     assert!(cpp_content.contains("struct ItemsWeaponFragment"));
     assert!(cpp_content.contains("std::optional<ItemsWeaponFragment> weapon"));
+
+    let client_cpp = CppCodeGenerator
+        .generate(&CodeExportInput {
+            target_tags: TargetTags::new(["client"]),
+            ..input_for(&meta, CodeExportLanguage::Cpp)
+        })
+        .expect("client cpp code");
+    let client_cpp_content = &client_cpp[0].content;
+    assert!(client_cpp_content.contains("struct ItemsClientMarkerFragment"));
+    assert!(client_cpp_content.contains("std::optional<ItemsClientMarkerFragment> client_marker"));
+    assert!(!client_cpp_content.contains("server_marker"));
 }
 
 #[test]

@@ -12,7 +12,7 @@
 | enum | Partial | 当前支持 enum 类型链接、default 校验与数据值校验。 |
 | struct | Partial | 当前支持 named struct 链接、`json_cell` 数据校验与 nested object 导出；`expanded_value`、array/map 与 struct child validators 暂未实现。 |
 | default | Partial | 当前支持 primitive / enum scalar default。 |
-| multi-source / override / fragments | Reserved / Next | 当前 multiple `sources`、`override_sources` 与 `fragments` 会显式报 unsupported；下一阶段优先按 variant source mode 支持 polymorphic fragments，不做 fragment join mode。 |
+| multi-source / override / fragments | Partial | 当前已支持 polymorphic CollectionTable 的 fragment variant source mode：多个 CSV source 可追加完整 records，并由 source `fragments` 声明激活 fragment set；通用 multi-source split merge、ObjectTable 多源合并、`override_sources` 与 fragment join mode 仍未实现。 |
 | builtin value types / foreign key / ObjectTable 特化语义 | Planned | 当前尚未实现。 |
 | target tags / export_when / row_export | Implemented | 当前 Project target 支持 `tags`；Meta 中 table / field / index 支持 `export` 与 `export_when`；collection table 支持 `row_export`，并已接入 validation、runtime data export 与 codegen 的 target-aware 视图。旧字段 `tool_only` / `filter_field` / `validator_only` 仅用于报 deprecated/unsupported 诊断，不再参与导出判断。 |
 
@@ -489,7 +489,7 @@ desc = "引用奖励物品。"
 
 ## 4.13 Multi-source 与 Override
 
-> 实现状态：Reserved。当前版本只支持单个 CSV source；multiple `sources`、`override_sources`、非 `csv` provider 与 `fragments` 会在 Meta 校验阶段显式报错，避免静默忽略。
+> 实现状态：Partial。当前版本已支持 fragment variant source mode 这一受限多源能力：polymorphic CollectionTable 可声明多个 CSV `sources`，但至少一个 source 必须声明 `fragments`。通用 split merge、ObjectTable 多源合并、`override_sources` 与非 `csv` provider 仍会在 Meta 校验或 DataLoadPlan 构造阶段报错，避免静默忽略。
 
 本节的 multi-source split merge / override 是通用多源能力，仍为 Reserved。下一节的 polymorphic variant source mode 是多源能力的受限子集：仅允许 `polymorphic = true` 的 CollectionTable 声明多个 variant sources，且每个 source 追加完整 records，不提供通用 split merge、ObjectTable 多源合并或 override 语义。
 
@@ -507,7 +507,7 @@ Base `sources` 用于 split merge：
 
 ## 4.14 Polymorphic Fragment
 
-> 实现状态：Next。当前版本尚未实现 polymorphic fragments；配置 `fragments` 会报 unsupported diagnostic。下一阶段按 **variant source mode** 落地，先不实现 fragment join mode。
+> 实现状态：Implemented MVP。当前版本已按 **variant source mode** 支持 polymorphic fragments，包括 `FragmentMeta`、source `fragments` 声明、按行 source/fragments 元数据、fragment scoped required/default/type 校验、target-aware validation、runtime nested object export，以及 Rust / TypeScript / C++ fragment 类型生成。fragment join mode 仍不实现。
 
 多态表用于表达“同一逻辑集合中，不同 record 拥有不同附加字段集合”的场景，例如物品表中的 weapon、equipment、usable。ConfigForge 的多态模型使用 composition，不使用继承：record 始终由 table common fields 加零个或多个 fragment fields 组成。
 
@@ -554,7 +554,7 @@ type = "float"
 required = true
 ```
 
-> 说明：当前代码中尚未有 `FragmentMeta` 数据结构；这是下一阶段实现目标。落地时需要在 `TableMeta` 中新增 `fragments: Vec<FragmentMeta>`，并在 link 阶段把 `SourceRef.fragments` 解析到 table-local fragments。
+> 说明：当前代码已落地 `FragmentMeta` / `LinkedFragmentMeta`，`TableMeta` 包含 `fragments: Vec<FragmentMeta>`，link 阶段会把 table-local fragments 链接为可查询结构。`SourceRef.fragments` 保留为每个 source 的 active fragment 名称集合，由 DataLoader 写入每行 `RowSourceInfo`，再由 Validation 阶段按行解释。
 
 目标 Rust schema：
 
@@ -585,6 +585,7 @@ Phase 1 中 fragment 只表达一组可 target-filter 的字段，不引入完�
 
 规则：
 
+- variant source mode 只允许 `polymorphic = true` 的 CollectionTable 使用多个 sources，且至少一个 source 必须声明非空 `fragments`，避免把无 fragment 的多 CSV append 与未来通用 multi-source merge 语义混淆。
 - 每个 source 贡献完整 record 加声明的 fragments。
 - base sources 中同 ID 冲突，即使 fragments 不同也冲突。
 - 不支持多个 source 按 ID 拼接 fragment。
@@ -593,6 +594,7 @@ Phase 1 中 fragment 只表达一组可 target-filter 的字段，不引入完�
 - common fields 对所有 source 生效；fragment fields 只对声明了对应 fragment 的 source 生效。
 - `required` / `default` 在 fragment schema 内按普通字段规则处理：声明了 fragment 的 source 中，缺失 fragment required field 且无 default 时失败；缺失但有 default 时补齐。
 - fragment 字段可以使用 `export` / `export_when`，运行时 ExportView 按 target tags 过滤 fragment 字段；如果某个 fragment 在当前 target 下没有任何可导出字段，仍可保留 fragment presence 信息供代码访问。
+- target validation 只对当前 target 的 visible rows 生效；但 visible row 中出现的 `fragment.field` 仍必须引用已存在、且被该行 source 激活的 fragment field。`export_when` 只影响 required/type/export/codegen 是否参与当前 target，不表示 CSV 中可以出现任意 hidden dotted key。
 - CollectionTable 的 primary/unique index 第一阶段只允许引用 common fields，不允许引用 fragment fields。这样可以保证不同 variant source 之间使用同一套主键冲突规则。
 - `polymorphic = true` 的 table 才允许 source 声明 `fragments`；非 polymorphic table 配置 fragments 应报 Meta validation 错误。
 

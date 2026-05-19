@@ -845,6 +845,26 @@ fn rejects_multi_source_outside_variant_source_mode() {
             name = "id"
             type = "int"
         "#,
+        r#"
+            [[tables]]
+            name = "items"
+            polymorphic = true
+            sources = [
+                { provider = "csv", path = "items.csv" },
+                { provider = "csv", path = "items-extra.csv" },
+            ]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "weapon"
+
+            [[tables.fragments.fields]]
+            name = "power"
+            type = "int"
+        "#,
     ];
 
     for input in cases {

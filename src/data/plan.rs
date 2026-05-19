@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    meta::{MetaModel, SourceRef, TableKind, TableMeta},
+    meta::{MetaModel, SourceRef, TableMeta},
     ConfigForgeError, Result,
 };
 
@@ -65,7 +65,7 @@ impl DataSourcePlan {
             )));
         }
 
-        if table.sources.len() > 1 && !is_variant_source_mode(table) {
+        if table.sources.len() > 1 && !table.is_variant_source_mode() {
             return Err(ConfigForgeError::Validation(format!(
                 "table `{}` declares multiple sources, but only polymorphic collection tables with fragments support variant source mode",
                 table.name
@@ -119,14 +119,4 @@ impl DataSourcePlan {
             fragments: source.fragments.clone(),
         })
     }
-}
-
-fn is_variant_source_mode(table: &TableMeta) -> bool {
-    table.kind == TableKind::Collection
-        && table.polymorphic
-        && (!table.fragments.is_empty()
-            || table
-                .sources
-                .iter()
-                .any(|source| !source.fragments.is_empty()))
 }

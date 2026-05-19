@@ -12,7 +12,7 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 4. 在 Meta Link 完成后，由 Validation 阶段使用 `LinkedMetaModel<'meta>` + `DataSet` 做字段存在性、required/default、类型、enum、unique index 等合法性检测。
 5. 暂不实现任务并行驱动，但类型设计保持 Data 与 Meta 的数据相互独立，后续可接入 executor 并行加载。
 
-当前阶段已实现单 CSV source、DataSet、target-aware validation/export 的基础流程。下一阶段准备按 **variant source mode** 支持 polymorphic fragments。
+当前阶段已实现 CSV source、DataSet、target-aware validation/export 的基础流程，并已按 **variant source mode** 支持 polymorphic fragments：polymorphic CollectionTable 可声明多个 CSV sources，每个 source 追加完整 records 并声明 active fragments。
 
 仍不实现：
 
@@ -24,7 +24,7 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 
 这些能力在 Meta validate 阶段应显式报 unsupported，避免 Data 阶段静默忽略。
 
-variant source mode 支持后，`sources` 可以为同一 polymorphic collection table 声明多个 CSV source，但每个 source 必须贡献完整 record，不做按 ID 拼接。
+variant source mode 下，`sources` 可以为同一 polymorphic collection table 声明多个 CSV source，但至少一个 source 必须声明非空 `fragments`，每个 source 必须贡献完整 record，不做按 ID 拼接。
 
 ## 3.2 Rust 中的“类”和职责表达
 
@@ -204,7 +204,7 @@ pub struct DataSourcePlan {
 - `table_name` 是目标逻辑表名。
 - `path` 是相对 data root 的路径，来自 `SourceRef.path` 或 legacy `TableMeta.source`。
 - `fragments` 是该 source 声明的 polymorphic fragment 名称；普通表和 legacy `source` 为空。
-- variant source mode 落地后，polymorphic collection table 可以拥有多个 `DataSourcePlan`；非 polymorphic table 仍只允许一个 source。
+- variant source mode 下，polymorphic collection table 可以拥有多个 `DataSourcePlan`；非 polymorphic table 仍只允许一个 source。为了避免把普通 append mode 与未来通用 multi-source merge 混淆，多 source 必须由至少一个 source 的非空 `fragments` 声明驱动。
 
 ### 3.5.3 `DataLoadPlan`
 
@@ -229,7 +229,7 @@ impl DataLoadPlan {
 - `DataLoadPlan` 从 raw `MetaModel` / `TableMeta` 中提取 source 信息，不需要 `LinkedMetaModel<'meta>`。
 - 一旦 `DataLoadPlan` 构造完成，就拥有 table name、provider、path，后续 Data Load 不再借用 Meta。
 - variant source mode 下，`DataLoadPlan` 需要展开 table 的每个 `SourceRef`，为同一 `table_name` 生成多个 `DataSourcePlan`，并保留 source 声明顺序。
-- `DataLoadPlan::from_tables` 不负责验证 fragment 是否存在、是否允许用于当前 table、字段是否属于 fragment；它只搬运 source declaration。fragment 引用合法性由 Meta validation/link 负责。
+- `DataLoadPlan::from_tables` 只做 source declaration 的轻量契约检查和搬运：provider 必须支持；多个 sources 只允许 `TableMeta::is_variant_source_mode()` 为 true 的表。fragment 是否存在、字段是否属于 fragment 等 schema 合法性由 Meta validation/link 负责。
 - provider 是否支持属于 source declaration 的基础结构检查，可以由 Meta validation fail-fast，也可以由 DataLoadPlan parse 时返回错误；除 provider parse 以外，DataLoadPlan 不应理解 fragment schema 语义。
 - 因此流程上可以在 raw Meta load/merge 完成后：
   - 一边做 `MetaModel::link()` / Meta validate；

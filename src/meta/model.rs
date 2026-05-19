@@ -348,6 +348,15 @@ impl TableMeta {
             .or(self.source.as_deref())
     }
 
+    pub fn is_variant_source_mode(&self) -> bool {
+        self.kind == TableKind::Collection
+            && self.polymorphic
+            && self
+                .sources
+                .iter()
+                .any(|source| !source.fragments.is_empty())
+    }
+
     pub fn is_exported_for(&self, target: &TargetTags) -> bool {
         self.export && self.export_when.matches(target)
     }

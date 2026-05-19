@@ -137,7 +137,7 @@ variant source mode 中，required/default 的输入范围由 source 声明的 f
 table `items` source `items/weapons.csv` row 3 fragment `stats` field `attack` is required
 ```
 
-这意味着 validation 不能只看合并后的 `DataTable.rows`，还需要知道每行来自哪个 `DataSourcePlan` 以及该 source 声明的 fragment set。下一阶段应在 Data 模块为每行保留 source ordinal/path/fragments 元数据。
+这意味着 validation 不能只看合并后的 `DataTable.rows`，还需要知道每行来自哪个 `DataSourcePlan` 以及该 source 声明的 fragment set。当前实现已在 Data 模块为每行保留 `RowSourceInfo { source_index, source_path, source_row_number, fragments }`，Validation 阶段据此决定每行 active fragments。
 
 ## 5.6 Polymorphic Fragment Validation
 
@@ -149,6 +149,7 @@ variant source mode 的校验分为 Meta、Data load/merge、Data validation 三
 
 - `SourceRef.fragments` 只能用于 `polymorphic = true` 的 collection table。
 - source 引用的 fragment 必须在当前 table 的 `[[tables.fragments]]` 中存在。
+- 多 source variant source mode 只允许 `polymorphic = true` 的 CollectionTable，且至少一个 source 必须声明非空 `fragments`；table 仅声明 fragments 但所有 sources 都未激活 fragments 时，不视为合法 variant source mode。
 - fragment names 在 table scope 内唯一。
 - fragment name 不能与 table common field name 冲突，因为 runtime payload 使用 fragment name 作为顶层 nested object key。
 - fragment field names 在所属 fragment 内唯一；不同 fragments 可以复用相同 field name，fragment field 也可以与 common field 同名。
@@ -156,6 +157,12 @@ variant source mode 的校验分为 Meta、Data load/merge、Data validation 三
 - CSV header 中出现未知 `fragment.field`、未声明 fragment 的 `fragment.field`、或 source 未激活 fragment 的 `fragment.field`，都应报 validation error。
 - fragment field validator 若未支持 nested/fragment scope，应像 struct child validators 一样先拒绝或明确只支持基础 type/default/required。
 - primary/unique index 第一阶段只允许引用 common fields。
+
+target validation 下，fragment 校验基于当前 target 的 ExportView：
+
+- `row_export` 排除的 rows 不参与当前 target 的 fragment required/type/schema 校验。
+- visible rows 中的 `fragment.field` dotted key 仍保持严格检查：fragment 必须存在、必须被该行 source 激活，field 必须属于该 fragment。
+- fragment / field 的 `export_when` 只影响当前 target 是否执行 required/type/export/codegen，不表示 visible row 的 CSV 可以出现任意 hidden dotted key。
 
 ### 5.6.2 Data load / merge validation
 

@@ -192,7 +192,7 @@ pub struct TableMeta {
 - `row_export` 只作用于 collection runtime data 行过滤，常用于 `shipping` / `debug` 等 target 差异。
 - `validators` 保存 table-level / record-level validator 的 raw 配置；公共字段由 Meta validate 做轻量检查，scope、unknown kind 与专属参数由 validation registry compile 阶段诊断。当前实现已解析 TOML，但内置 validator 仅提供 field-scope `range`，因此 table-level `range` 会被 scope 校验拒绝。
 - `foreign_keys` 尚未在当前 `TableMeta` 中落地。外键不是普通 validator，未来会作为一等关系数据保存：它既会隐式生成引用完整性校验，也会进入 CodeModel 影响生成代码的关联查询 API。该能力仍是 Phase 3 计划。
-- `fragments` 是下一阶段 polymorphic variant source mode 的 table-local fragment schema。当前代码尚未落地该字段；实现前继续对 `SourceRef.fragments` 报 unsupported。
+- `fragments` 是 polymorphic variant source mode 的 table-local fragment schema。当前代码已落地该字段，并要求多 source variant source mode 至少由一个 source 声明非空 `fragments` 驱动；`SourceRef.fragments` 的合法性由 Meta validation 检查。
 
 ### 2.5.5 `FragmentMeta`
 

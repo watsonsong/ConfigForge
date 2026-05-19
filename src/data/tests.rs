@@ -272,6 +272,29 @@ fn data_load_plan_rejects_unsupported_source_features() {
                 [[tables.fields]]
                 name = "id"
                 type = "int"
+
+                [[tables.fragments]]
+                name = "weapon"
+
+                [[tables.fragments.fields]]
+                name = "power"
+                type = "int"
+            "#,
+            "variant source mode",
+        ),
+        (
+            r#"
+                [[tables]]
+                name = "items"
+                polymorphic = true
+                sources = [
+                    { provider = "csv", path = "items.csv" },
+                    { provider = "csv", path = "items-extra.csv" },
+                ]
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
             "#,
             "variant source mode",
         ),
