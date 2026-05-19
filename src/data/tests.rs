@@ -148,6 +148,49 @@ fn data_load_plan_reads_legacy_and_canonical_sources() {
 }
 
 #[test]
+fn data_load_plan_reads_polymorphic_source_fragments() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            polymorphic = true
+            sources = [
+                { provider = "csv", path = "weapons.csv", fragments = ["weapon"] },
+                { provider = "csv", path = "armors.csv", fragments = ["armor"] },
+            ]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "weapon"
+
+            [[tables.fragments.fields]]
+            name = "power"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "armor"
+
+            [[tables.fragments.fields]]
+            name = "power"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+
+    let plan = DataLoadPlan::from_meta_model(&meta).expect("plan should build");
+
+    assert_eq!(plan.sources().len(), 2);
+    assert_eq!(plan.sources()[0].table_name, "items");
+    assert_eq!(plan.sources()[0].path, PathBuf::from("weapons.csv"));
+    assert_eq!(plan.sources()[0].fragments, vec!["weapon".to_owned()]);
+    assert_eq!(plan.sources()[1].path, PathBuf::from("armors.csv"));
+    assert_eq!(plan.sources()[1].fragments, vec!["armor".to_owned()]);
+}
+
+#[test]
 fn data_load_plan_rejects_missing_source() {
     let meta: MetaModel = toml::from_str(
         r#"
@@ -203,6 +246,39 @@ fn data_load_plan_rejects_unsupported_source_features() {
             r#"
                 [[tables]]
                 name = "items"
+                kind = "object"
+                polymorphic = true
+                sources = [
+                    { provider = "csv", path = "items.csv" },
+                    { provider = "csv", path = "items-extra.csv" },
+                ]
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+            "#,
+            "variant source mode",
+        ),
+        (
+            r#"
+                [[tables]]
+                name = "items"
+                polymorphic = true
+                sources = [
+                    { provider = "csv", path = "items.csv" },
+                    { provider = "csv", path = "items-extra.csv" },
+                ]
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+            "#,
+            "variant source mode",
+        ),
+        (
+            r#"
+                [[tables]]
+                name = "items"
                 source = "items.csv"
                 override_sources = [{ provider = "csv", path = "override.csv" }]
 
@@ -223,18 +299,6 @@ fn data_load_plan_rejects_unsupported_source_features() {
                 type = "int"
             "#,
             "unsupported provider",
-        ),
-        (
-            r#"
-                [[tables]]
-                name = "items"
-                sources = [{ provider = "csv", path = "items.csv", fragments = ["stats"] }]
-
-                [[tables.fields]]
-                name = "id"
-                type = "int"
-            "#,
-            "fragments",
         ),
     ];
 
@@ -259,11 +323,13 @@ fn data_loader_loads_multiple_tables_into_data_set() {
                 table_name: "items".to_owned(),
                 provider: DataProvider::Csv,
                 path: PathBuf::from("items.csv"),
+                fragments: vec![],
             },
             DataSourcePlan {
                 table_name: "levels".to_owned(),
                 provider: DataProvider::Csv,
                 path: PathBuf::from("levels.csv"),
+                fragments: vec![],
             },
         ],
     };
@@ -295,11 +361,13 @@ fn data_loader_load_with_pool_preserves_plan_order() {
                 table_name: "items".to_owned(),
                 provider: DataProvider::Csv,
                 path: PathBuf::from("items.csv"),
+                fragments: vec![],
             },
             DataSourcePlan {
                 table_name: "levels".to_owned(),
                 provider: DataProvider::Csv,
                 path: PathBuf::from("levels.csv"),
+                fragments: vec![],
             },
         ],
     };
@@ -332,27 +400,47 @@ fn data_set_try_new_rejects_duplicate_table_names() {
 }
 
 #[test]
-fn data_loader_rejects_duplicate_table_names() {
+fn data_loader_merges_multiple_sources_for_one_table() {
     let dir = tempdir().expect("temp dir should exist");
-    fs::write(dir.path().join("items.csv"), "id,name\n1,Sword\n").expect("items csv");
+    fs::write(dir.path().join("weapons.csv"), "id,name\n1,Sword\n").expect("weapons csv");
+    fs::write(dir.path().join("armors.csv"), "id,name\n2,Shield\n").expect("armors csv");
     let plan = DataLoadPlan {
         sources: vec![
             DataSourcePlan {
                 table_name: "items".to_owned(),
                 provider: DataProvider::Csv,
-                path: PathBuf::from("items.csv"),
+                path: PathBuf::from("weapons.csv"),
+                fragments: vec!["weapon".to_owned()],
             },
             DataSourcePlan {
                 table_name: "items".to_owned(),
                 provider: DataProvider::Csv,
-                path: PathBuf::from("items.csv"),
+                path: PathBuf::from("armors.csv"),
+                fragments: vec!["armor".to_owned()],
             },
         ],
     };
 
-    let error = DataLoader::new(dir.path()).load(&plan).unwrap_err();
+    let data_set = DataLoader::new(dir.path()).load(&plan).unwrap();
+    let table = data_set.table("items").unwrap();
 
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate table `items`"))
+    assert_eq!(data_set.tables().len(), 1);
+    assert_eq!(table.rows.len(), 2);
+    assert_eq!(table.rows[0].get("name").map(String::as_str), Some("Sword"));
+    assert_eq!(
+        table.rows[1].get("name").map(String::as_str),
+        Some("Shield")
     );
+    assert_eq!(table.row_sources[0].source_index, 0);
+    assert_eq!(
+        table.row_sources[0].source_path,
+        PathBuf::from("weapons.csv")
+    );
+    assert_eq!(table.row_sources[0].fragments, vec!["weapon".to_owned()]);
+    assert_eq!(table.row_sources[1].source_index, 1);
+    assert_eq!(
+        table.row_sources[1].source_path,
+        PathBuf::from("armors.csv")
+    );
+    assert_eq!(table.row_sources[1].fragments, vec!["armor".to_owned()]);
 }

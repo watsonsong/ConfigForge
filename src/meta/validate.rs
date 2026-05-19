@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use super::{
-    model::normalize_tag, FieldMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
-    PrimitiveFieldType, TableMeta, ValidatorMeta, ValueLayout,
+    model::normalize_tag, FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
+    PrimitiveFieldType, TableKind, TableMeta, ValidatorMeta, ValueLayout,
 };
 
 pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
@@ -173,6 +173,7 @@ fn validate_table_meta(
         table.fields.iter().map(|field| field.name.as_str()),
         diagnostics,
     );
+    validate_fragments(model, table, &field_names, diagnostics);
 
     for field in &table.fields {
         for validator in &field.validators {
@@ -312,6 +313,118 @@ fn validate_field_layout(
     }
 }
 
+fn validate_fragments(
+    model: &MetaModel,
+    table: &TableMeta,
+    field_names: &BTreeSet<&str>,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    let owner = format!("table `{}`", table.name);
+    let fragment_names = validate_field_names(
+        &format!("{owner} fragment"),
+        table
+            .fragments
+            .iter()
+            .map(|fragment| fragment.name.as_str()),
+        diagnostics,
+    );
+
+    if !table.fragments.is_empty() {
+        if table.kind != TableKind::Collection {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!("{owner} declares fragments, but fragments are only supported on collection tables"),
+            ));
+        }
+        if !table.polymorphic {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!("{owner} declares fragments, but `polymorphic = true` is required"),
+            ));
+        }
+    }
+
+    for fragment in &table.fragments {
+        validate_fragment_meta(model, table, fragment, field_names, diagnostics);
+    }
+
+    for source in table.sources.iter().chain(table.override_sources.iter()) {
+        if !source.fragments.is_empty() {
+            if table.kind != TableKind::Collection || !table.polymorphic {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::UnsupportedFeature,
+                    format!(
+                        "table `{}` source `{}` declares fragments, but fragments require a polymorphic collection table",
+                        table.name, source.path
+                    ),
+                ));
+            }
+            for fragment_name in &source.fragments {
+                if !fragment_names.contains(fragment_name.as_str()) {
+                    diagnostics.push(MetaDiagnostic::new(
+                        MetaDiagnosticCode::MissingFieldReference,
+                        format!(
+                            "table `{}` source `{}` references unknown fragment `{}`",
+                            table.name, source.path, fragment_name
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+fn validate_fragment_meta(
+    model: &MetaModel,
+    table: &TableMeta,
+    fragment: &FragmentMeta,
+    field_names: &BTreeSet<&str>,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    let owner = format!("table `{}` fragment `{}`", table.name, fragment.name);
+    if field_names.contains(fragment.name.as_str()) {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::DuplicateFieldName,
+            format!(
+                "table `{}` fragment `{}` conflicts with a common field of the same name",
+                table.name, fragment.name
+            ),
+        ));
+    }
+    validate_export_condition_tags(&owner, &fragment.export_when, diagnostics);
+    validate_field_names(
+        &owner,
+        fragment.fields.iter().map(|field| field.name.as_str()),
+        diagnostics,
+    );
+    for field in &fragment.fields {
+        if !field.validators.is_empty() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "{} field `{}` declares validators, but fragment field validators are not implemented yet",
+                    owner, field.name
+                ),
+            ));
+        }
+        for validator in &field.validators {
+            validate_validator_meta(
+                &format!("{} field `{}` validator", owner, field.name),
+                validator,
+                diagnostics,
+            );
+        }
+        validate_export_condition_tags(
+            &format!("{} field `{}`", owner, field.name),
+            &field.export_when,
+            diagnostics,
+        );
+        validate_deprecated_field_export_flags(&owner, field, diagnostics);
+        validate_field_layout(model, &owner, field, diagnostics);
+        validate_default_value(model, &owner, field, diagnostics);
+    }
+}
+
 fn validate_validator_meta(
     owner: &str,
     validator: &ValidatorMeta,
@@ -410,11 +523,11 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
         ));
     }
 
-    if table.sources.len() > 1 {
+    if table.sources.len() > 1 && !is_variant_source_mode(table) {
         diagnostics.push(MetaDiagnostic::new(
             MetaDiagnosticCode::UnsupportedFeature,
             format!(
-                "table `{}` declares multiple sources, but multi-source merge is not implemented yet",
+                "table `{}` declares multiple sources, but only polymorphic collection tables with fragments support variant source mode",
                 table.name
             ),
         ));
@@ -440,17 +553,17 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
                 ),
             ));
         }
-
-        if !source.fragments.is_empty() {
-            diagnostics.push(MetaDiagnostic::new(
-                MetaDiagnosticCode::UnsupportedFeature,
-                format!(
-                    "table `{}` source `{}` declares fragments, but polymorphic fragments are not implemented yet",
-                    table.name, source.path
-                ),
-            ));
-        }
     }
+}
+
+fn is_variant_source_mode(table: &TableMeta) -> bool {
+    table.kind == TableKind::Collection
+        && table.polymorphic
+        && (!table.fragments.is_empty()
+            || table
+                .sources
+                .iter()
+                .any(|source| !source.fragments.is_empty()))
 }
 
 fn validate_default_value(

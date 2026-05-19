@@ -816,6 +816,82 @@ fn rejects_unsupported_source_declarations() {
 }
 
 #[test]
+fn rejects_multi_source_outside_variant_source_mode() {
+    let cases = [
+        r#"
+            [[tables]]
+            name = "items"
+            kind = "object"
+            polymorphic = true
+            sources = [
+                { provider = "csv", path = "items.csv" },
+                { provider = "csv", path = "items-extra.csv" },
+            ]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+        r#"
+            [[tables]]
+            name = "items"
+            polymorphic = true
+            sources = [
+                { provider = "csv", path = "items.csv" },
+                { provider = "csv", path = "items-extra.csv" },
+            ]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    ];
+
+    for input in cases {
+        let diagnostics = diagnostics(input);
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+                && diagnostic.message.contains("variant source mode")
+        }));
+    }
+}
+
+#[test]
+fn accepts_multi_source_variant_source_mode() {
+    let meta = parse(
+        r#"
+            [[tables]]
+            name = "items"
+            polymorphic = true
+            sources = [
+                { provider = "csv", path = "weapons.csv", fragments = ["weapon"] },
+                { provider = "csv", path = "armors.csv", fragments = ["armor"] },
+            ]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "weapon"
+
+            [[tables.fragments.fields]]
+            name = "power"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "armor"
+
+            [[tables.fragments.fields]]
+            name = "power"
+            type = "int"
+        "#,
+    );
+
+    assert!(validate_meta_model(&meta).is_empty());
+}
+
+#[test]
 fn validates_primitive_and_enum_default_values() {
     let meta = parse(
         r#"

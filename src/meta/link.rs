@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use super::{
-    FieldMeta, LinkedField, LinkedFieldMeta, LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta,
-    LinkedStructType, LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
-    PrimitiveFieldType,
+    FieldMeta, LinkedField, LinkedFieldMeta, LinkedFragmentMeta, LinkedIndexMeta, LinkedMetaModel,
+    LinkedStructMeta, LinkedStructType, LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode,
+    MetaModel, PrimitiveFieldType,
 };
 
 pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<MetaDiagnostic>) {
@@ -28,8 +28,27 @@ pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<M
             &mut Vec::new(),
             &mut diagnostics,
         );
+        let linked_fragments = table
+            .fragments
+            .iter()
+            .map(|fragment| {
+                let linked_fields = link_fields(
+                    &enum_index,
+                    &struct_index,
+                    &fragment.fields,
+                    &mut Vec::new(),
+                    &mut diagnostics,
+                );
+                LinkedFragmentMeta::new(fragment, linked_fields)
+            })
+            .collect::<Vec<_>>();
         let linked_indexes = link_indexes(table, &linked_fields);
-        linked_tables.push(LinkedTableMeta::new(table, linked_fields, linked_indexes));
+        linked_tables.push(LinkedTableMeta::new(
+            table,
+            linked_fields,
+            linked_fragments,
+            linked_indexes,
+        ));
     }
 
     let linked_structs = model

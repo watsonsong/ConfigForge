@@ -123,6 +123,112 @@ fn builds_code_model_with_types_tables_and_indexes() {
 }
 
 #[test]
+fn codegen_includes_fragment_structs_and_optional_row_members() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            polymorphic = true
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "weapon"
+
+            [[tables.fragments.fields]]
+            name = "power"
+            type = "int"
+
+            [[tables.fragments.fields]]
+            name = "internal_note"
+            type = "string"
+            export = false
+
+            [[tables.fragments]]
+            name = "client_marker"
+            export_when = { any = ["client"] }
+
+            [[tables.fragments.fields]]
+            name = "server_note"
+            type = "string"
+            export_when = { any = ["server"] }
+
+            [[tables.fragments]]
+            name = "server_marker"
+            export_when = { any = ["server"] }
+
+            [[tables.fragments.fields]]
+            name = "value"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let input = input_for(&meta, CodeExportLanguage::Rust);
+
+    let model = build_code_model(input.meta, &TargetTags::empty(), &input.runtime_data_files)
+        .expect("model should build");
+    assert_eq!(model.tables[0].fragments[0].name, "weapon");
+    assert!(model.tables[0].fragments[0]
+        .fields
+        .iter()
+        .any(|field| field.name == "power"));
+    assert!(!model.tables[0].fragments[0]
+        .fields
+        .iter()
+        .any(|field| field.name == "internal_note"));
+
+    let client_model = build_code_model(input.meta, &TargetTags::new(["client"]), &[])
+        .expect("client model should build");
+    let client_marker = client_model.tables[0]
+        .fragments
+        .iter()
+        .find(|fragment| fragment.name == "client_marker")
+        .expect("client marker should be generated");
+    assert!(client_marker.fields.is_empty());
+    assert!(!client_model.tables[0]
+        .fragments
+        .iter()
+        .any(|fragment| fragment.name == "server_marker"));
+
+    let rust = RustCodeGenerator
+        .generate(&input_for(&meta, CodeExportLanguage::Rust))
+        .expect("rust code");
+    let rust_content = &rust[0].content;
+    assert!(rust_content.contains("pub struct ItemsWeaponFragment"));
+    assert!(rust_content.contains("pub weapon: Option<ItemsWeaponFragment>"));
+    assert!(rust_content.contains("pub fn has_weapon(&self) -> bool"));
+
+    let client_rust = RustCodeGenerator
+        .generate(&CodeExportInput {
+            target_tags: TargetTags::new(["client"]),
+            ..input_for(&meta, CodeExportLanguage::Rust)
+        })
+        .expect("client rust code");
+    let client_rust_content = &client_rust[0].content;
+    assert!(client_rust_content.contains("pub struct ItemsClientMarkerFragment"));
+    assert!(client_rust_content.contains("pub client_marker: Option<ItemsClientMarkerFragment>"));
+    assert!(client_rust_content.contains("pub fn has_client_marker(&self) -> bool"));
+    assert!(!client_rust_content.contains("server_marker"));
+
+    let typescript = TypeScriptCodeGenerator
+        .generate(&input_for(&meta, CodeExportLanguage::TypeScript))
+        .expect("typescript code");
+    let ts_content = &typescript[0].content;
+    assert!(ts_content.contains("export interface ItemsWeaponFragment"));
+    assert!(ts_content.contains("weapon?: ItemsWeaponFragment;"));
+
+    let cpp = CppCodeGenerator
+        .generate(&input_for(&meta, CodeExportLanguage::Cpp))
+        .expect("cpp code");
+    let cpp_content = &cpp[0].content;
+    assert!(cpp_content.contains("struct ItemsWeaponFragment"));
+    assert!(cpp_content.contains("std::optional<ItemsWeaponFragment> weapon"));
+}
+
+#[test]
 fn code_model_defaults_data_file_to_json_when_no_runtime_file_is_available() {
     let meta = linked_fixture();
     let linked = meta.link().expect("fixture meta should link");

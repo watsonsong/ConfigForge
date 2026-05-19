@@ -1,4 +1,6 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf};
+
+use crate::data::RowSourceInfo;
 
 use crate::meta::{
     EnumMeta, EnumValueMeta, ExportCondition, FieldMeta, LinkedField, LinkedFieldMeta,
@@ -12,6 +14,18 @@ fn validate_error(result: Result<()>) -> String {
     match result.unwrap_err() {
         ConfigForgeError::Validation(message) => message,
         error => panic!("expected validation error, got {error}"),
+    }
+}
+
+fn fragment_row_source(source_row_number: usize, fragments: &[&str]) -> RowSourceInfo {
+    RowSourceInfo {
+        source_index: 0,
+        source_path: PathBuf::from("items.csv"),
+        source_row_number,
+        fragments: fragments
+            .iter()
+            .map(|fragment| (*fragment).to_owned())
+            .collect(),
     }
 }
 
@@ -44,6 +58,7 @@ fn rejects_invalid_type() {
             field_number: None,
             unique: true,
         }],
+        fragments: vec![],
         indexes: vec![],
         primary_index: None,
         preserve_source_order: false,
@@ -56,11 +71,12 @@ fn rejects_invalid_type() {
             linked_field: LinkedField::Primitive(PrimitiveFieldType::Int),
         }],
         vec![],
+        vec![],
     );
-    let table = DataTable {
-        name: "items".to_owned(),
-        rows: vec![BTreeMap::from([("id".to_owned(), "abc".to_owned())])],
-    };
+    let table = DataTable::new(
+        "items",
+        vec![BTreeMap::from([("id".to_owned(), "abc".to_owned())])],
+    );
 
     assert!(validate_table(&linked_meta, &table).is_err());
 }
@@ -94,6 +110,7 @@ fn applies_defaults_before_required_and_type_validation() {
             field_number: None,
             unique: false,
         }],
+        fragments: vec![],
         indexes: vec![],
         primary_index: None,
         preserve_source_order: false,
@@ -106,11 +123,9 @@ fn applies_defaults_before_required_and_type_validation() {
             linked_field: LinkedField::Primitive(PrimitiveFieldType::Int),
         }],
         vec![],
+        vec![],
     );
-    let table = DataTable {
-        name: "items".to_owned(),
-        rows: vec![BTreeMap::new()],
-    };
+    let table = DataTable::new("items", vec![BTreeMap::new()]);
 
     assert!(validate_table(&linked_meta, &table).is_ok());
     let table = apply_field_defaults(&linked_meta, &table).unwrap();
@@ -186,6 +201,7 @@ fn validates_enum_values() {
             field_number: None,
             unique: false,
         }],
+        fragments: vec![],
         indexes: vec![],
         primary_index: None,
         preserve_source_order: false,
@@ -198,21 +214,193 @@ fn validates_enum_values() {
             linked_field: LinkedField::Enum(&enum_meta),
         }],
         vec![],
+        vec![],
     );
-    let valid_table = DataTable {
-        name: "items".to_owned(),
-        rows: vec![BTreeMap::from([("rarity".to_owned(), "common".to_owned())])],
-    };
-    let invalid_table = DataTable {
-        name: "items".to_owned(),
-        rows: vec![BTreeMap::from([(
+    let valid_table = DataTable::new(
+        "items",
+        vec![BTreeMap::from([("rarity".to_owned(), "common".to_owned())])],
+    );
+    let invalid_table = DataTable::new(
+        "items",
+        vec![BTreeMap::from([(
             "rarity".to_owned(),
             "legendary".to_owned(),
         )])],
-    };
+    );
 
     assert!(validate_table(&linked_meta, &valid_table).is_ok());
     assert!(validate_table(&linked_meta, &invalid_table).is_err());
+}
+
+#[test]
+fn validates_fragment_scoped_fields_and_defaults() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            polymorphic = true
+            sources = [
+                { provider = "csv", path = "weapons.csv", fragments = ["weapon"] },
+                { provider = "csv", path = "armors.csv", fragments = ["armor"] },
+            ]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fragments]]
+            name = "weapon"
+
+            [[tables.fragments.fields]]
+            name = "power"
+            type = "int"
+            required = true
+            default = 1
+
+            [[tables.fragments]]
+            name = "armor"
+
+            [[tables.fragments.fields]]
+            name = "power"
+            type = "int"
+            required = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let table_meta = linked_meta.table("items").expect("linked table");
+    let table = DataTable::new_with_sources(
+        "items",
+        vec![
+            BTreeMap::from([("id".to_owned(), "1".to_owned())]),
+            BTreeMap::from([
+                ("id".to_owned(), "2".to_owned()),
+                ("armor.power".to_owned(), "10".to_owned()),
+            ]),
+        ],
+        vec![
+            RowSourceInfo {
+                source_index: 0,
+                source_path: PathBuf::from("weapons.csv"),
+                source_row_number: 1,
+                fragments: vec!["weapon".to_owned()],
+            },
+            RowSourceInfo {
+                source_index: 1,
+                source_path: PathBuf::from("armors.csv"),
+                source_row_number: 1,
+                fragments: vec!["armor".to_owned()],
+            },
+        ],
+    )
+    .expect("table should build");
+
+    assert!(validate_table(table_meta, &table).is_ok());
+    let normalized = apply_field_defaults(table_meta, &table).expect("defaults should apply");
+    assert_eq!(
+        normalized.rows[0].get("weapon.power").map(String::as_str),
+        Some("1")
+    );
+
+    let inactive_fragment_table = DataTable::new_with_sources(
+        "items",
+        vec![BTreeMap::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("armor.power".to_owned(), "10".to_owned()),
+        ])],
+        vec![RowSourceInfo {
+            source_index: 0,
+            source_path: PathBuf::from("weapons.csv"),
+            source_row_number: 1,
+            fragments: vec!["weapon".to_owned()],
+        }],
+    )
+    .expect("table should build");
+    let error = validate_table(table_meta, &inactive_fragment_table).unwrap_err();
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("inactive fragment `armor`"))
+    );
+}
+
+#[test]
+fn target_fragment_validation_uses_visible_rows() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            polymorphic = true
+            row_export = { excluded_tags_field = "exclude_tags" }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "exclude_tags"
+            type = "string"
+            export = false
+
+            [[tables.fragments]]
+            name = "weapon"
+
+            [[tables.fragments.fields]]
+            name = "power"
+            type = "int"
+            required = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+
+    let data_set = DataSet::new(vec![DataTable::new_with_sources(
+        "items",
+        vec![
+            BTreeMap::from([
+                ("id".to_owned(), "1".to_owned()),
+                ("exclude_tags".to_owned(), String::new()),
+                ("weapon.power".to_owned(), "10".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("id".to_owned(), "2".to_owned()),
+                ("exclude_tags".to_owned(), "client".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("id".to_owned(), "3".to_owned()),
+                ("exclude_tags".to_owned(), "client".to_owned()),
+                ("weapon.power".to_owned(), "bad".to_owned()),
+            ]),
+        ],
+        vec![
+            fragment_row_source(1, &["weapon"]),
+            fragment_row_source(2, &["weapon"]),
+            fragment_row_source(3, &["weapon"]),
+        ],
+    )
+    .expect("table should build")]);
+
+    assert!(
+        validate_data_set_for_target(&linked_meta, &TargetTags::new(["client"]), &data_set).is_ok()
+    );
+    assert!(validate_data_set(&linked_meta, &data_set).is_err());
+
+    let visible_invalid = DataSet::new(vec![DataTable::new_with_sources(
+        "items",
+        vec![BTreeMap::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("exclude_tags".to_owned(), String::new()),
+        ])],
+        vec![fragment_row_source(1, &["weapon"])],
+    )
+    .expect("table should build")]);
+    let error =
+        validate_data_set_for_target(&linked_meta, &TargetTags::new(["client"]), &visible_invalid)
+            .unwrap_err();
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("weapon.power` is required"))
+    );
 }
 
 #[test]

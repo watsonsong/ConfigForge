@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    meta::{MetaModel, SourceRef, TableMeta},
+    meta::{MetaModel, SourceRef, TableKind, TableMeta},
     ConfigForgeError, Result,
 };
 
@@ -15,6 +15,7 @@ pub struct DataSourcePlan {
     pub table_name: String,
     pub provider: DataProvider,
     pub path: PathBuf,
+    pub fragments: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +46,7 @@ impl DataLoadPlan {
     pub fn from_tables<'a>(tables: impl IntoIterator<Item = &'a TableMeta>) -> Result<Self> {
         let mut sources = Vec::new();
         for table in tables {
-            sources.push(DataSourcePlan::from_table(table)?);
+            sources.extend(DataSourcePlan::from_table(table)?);
         }
         Ok(Self { sources })
     }
@@ -56,7 +57,7 @@ impl DataLoadPlan {
 }
 
 impl DataSourcePlan {
-    pub fn from_table(table: &TableMeta) -> Result<Self> {
+    pub fn from_table(table: &TableMeta) -> Result<Vec<Self>> {
         if table.source.is_some() && !table.sources.is_empty() {
             return Err(ConfigForgeError::Validation(format!(
                 "table `{}` declares both legacy `source` and `sources`",
@@ -64,9 +65,9 @@ impl DataSourcePlan {
             )));
         }
 
-        if table.sources.len() > 1 {
+        if table.sources.len() > 1 && !is_variant_source_mode(table) {
             return Err(ConfigForgeError::Validation(format!(
-                "table `{}` declares multiple sources, but multi-source merge is not implemented yet",
+                "table `{}` declares multiple sources, but only polymorphic collection tables with fragments support variant source mode",
                 table.name
             )));
         }
@@ -78,8 +79,12 @@ impl DataSourcePlan {
             )));
         }
 
-        if let Some(source) = table.sources.first() {
-            return Self::from_source_ref(&table.name, source);
+        if !table.sources.is_empty() {
+            return table
+                .sources
+                .iter()
+                .map(|source| Self::from_source_ref(&table.name, source))
+                .collect();
         }
 
         let path = if let Some(path) = &table.source {
@@ -91,21 +96,15 @@ impl DataSourcePlan {
             )));
         };
 
-        Ok(Self {
+        Ok(vec![Self {
             table_name: table.name.clone(),
             provider: DataProvider::Csv,
             path: PathBuf::from(path),
-        })
+            fragments: Vec::new(),
+        }])
     }
 
     fn from_source_ref(table_name: &str, source: &SourceRef) -> Result<Self> {
-        if !source.fragments.is_empty() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{table_name}` source `{}` declares fragments, but polymorphic fragments are not implemented yet",
-                source.path
-            )));
-        }
-
         let provider = DataProvider::parse(&source.provider).ok_or_else(|| {
             ConfigForgeError::Validation(format!(
                 "table `{table_name}` source `{}` uses unsupported provider `{}`; only `csv` is supported",
@@ -117,6 +116,17 @@ impl DataSourcePlan {
             table_name: table_name.to_owned(),
             provider,
             path: PathBuf::from(&source.path),
+            fragments: source.fragments.clone(),
         })
     }
+}
+
+fn is_variant_source_mode(table: &TableMeta) -> bool {
+    table.kind == TableKind::Collection
+        && table.polymorphic
+        && (!table.fragments.is_empty()
+            || table
+                .sources
+                .iter()
+                .any(|source| !source.fragments.is_empty()))
 }

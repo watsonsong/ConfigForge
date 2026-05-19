@@ -49,7 +49,10 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
                         let visible_rows = (0..table.rows.len())
                             .map(|row_index| VisibleRow {
                                 row_index,
-                                source_row_number: Some(row_index + 1),
+                                source_row_number: table
+                                    .row_source(row_index)
+                                    .map(|source| source.source_row_number)
+                                    .or(Some(row_index + 1)),
                             })
                             .collect();
                         ExportTableView::new(table_meta, table, visible_fields, visible_rows)
@@ -93,7 +96,10 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
                 })
                 .map(|(row_index, _)| VisibleRow {
                     row_index,
-                    source_row_number: Some(row_index + 1),
+                    source_row_number: table
+                        .row_source(row_index)
+                        .map(|source| source.source_row_number)
+                        .or(Some(row_index + 1)),
                 })
                 .collect();
             tables.push(ExportTableView::new(

@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{
-    data::{DataSet, DataTable},
+    data::{DataRow, DataSet, DataTable},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedIndexMeta, LinkedMetaModel, LinkedStructType,
         LinkedTableMeta, PrimitiveFieldType, TargetTags, ValueLayout,
@@ -147,6 +147,8 @@ pub fn validate_normalized_table(meta: &LinkedTableMeta<'_>, table: &DataTable) 
         validate_field_uniqueness(meta, table, field)?;
     }
 
+    validate_fragment_values(meta, table, None)?;
+
     for index in &meta.indexes {
         validate_index_uniqueness(meta, table, index)?;
     }
@@ -175,7 +177,10 @@ pub fn validate_normalized_table_for_target(
         })
         .map(|(row_index, _)| VisibleRow {
             row_index,
-            source_row_number: Some(row_index + 1),
+            source_row_number: table
+                .row_source(row_index)
+                .map(|source| source.source_row_number)
+                .or(Some(row_index + 1)),
         })
         .collect();
     let table_view = ExportTableView::new(meta, table, visible_fields, visible_rows);
@@ -197,6 +202,8 @@ fn validate_normalized_table_view(
         validate_field_values_view(meta, table_view, field, target_tags)?;
         validate_field_uniqueness_view(meta, table_view, field)?;
     }
+
+    validate_fragment_values_view(meta, table_view, target_tags)?;
 
     let primary_index_name = meta.primary_index().map(|index| index.meta.name.as_str());
     for index in &meta.indexes {
@@ -233,7 +240,12 @@ pub fn normalize_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<
 
 pub fn apply_field_defaults(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<DataTable> {
     let mut table = table.clone();
-    for row in &mut table.rows {
+    for row_index in 0..table.rows.len() {
+        let active_fragments = table
+            .row_source(row_index)
+            .map(|source| source.fragments.clone())
+            .unwrap_or_default();
+        let row = &mut table.rows[row_index];
         for field in &meta.fields {
             let needs_default = row
                 .get(&field.meta.name)
@@ -248,6 +260,26 @@ pub fn apply_field_defaults(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Re
                     field.meta.name.clone(),
                     default_value_to_cell(meta, field, default)?,
                 );
+            }
+        }
+
+        for fragment_name in active_fragments {
+            let Some(fragment) = meta.fragment(&fragment_name) else {
+                continue;
+            };
+            for field in &fragment.fields {
+                let key = fragment_field_key(fragment.meta.name.as_str(), field.meta.name.as_str());
+                let needs_default = row
+                    .get(&key)
+                    .map(|value| value.trim().is_empty())
+                    .unwrap_or(true);
+                if !needs_default {
+                    continue;
+                }
+
+                if let Some(default) = &field.meta.default {
+                    row.insert(key, default_value_to_cell(meta, field, default)?);
+                }
             }
         }
     }
@@ -461,6 +493,117 @@ fn validate_field_values_view(
     Ok(())
 }
 
+fn validate_fragment_values(
+    meta: &LinkedTableMeta<'_>,
+    table: &DataTable,
+    target_tags: Option<&TargetTags>,
+) -> Result<()> {
+    for (row_index, row) in table.rows.iter().enumerate() {
+        let row_number = table
+            .row_source(row_index)
+            .map(|source| source.source_row_number)
+            .unwrap_or(row_index + 1);
+        let active_fragments = table
+            .row_source(row_index)
+            .map(|source| source.fragments.as_slice())
+            .unwrap_or(&[]);
+
+        validate_fragment_values_for_row(meta, row, row_number, active_fragments, target_tags)?;
+    }
+    Ok(())
+}
+
+fn validate_fragment_values_view(
+    meta: &LinkedTableMeta<'_>,
+    table_view: &ExportTableView<'_, '_>,
+    target_tags: Option<&TargetTags>,
+) -> Result<()> {
+    for visible_row in &table_view.visible_rows {
+        let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
+            continue;
+        };
+        let row_number = visible_row
+            .source_row_number
+            .unwrap_or(visible_row.row_index + 1);
+        let active_fragments = table_view
+            .table
+            .row_source(visible_row.row_index)
+            .map(|source| source.fragments.as_slice())
+            .unwrap_or(&[]);
+
+        validate_fragment_values_for_row(meta, row, row_number, active_fragments, target_tags)?;
+    }
+    Ok(())
+}
+
+fn validate_fragment_values_for_row(
+    meta: &LinkedTableMeta<'_>,
+    row: &DataRow,
+    row_number: usize,
+    active_fragments: &[String],
+    target_tags: Option<&TargetTags>,
+) -> Result<()> {
+    for key in row.keys().filter(|key| key.contains('.')) {
+        let Some((fragment_name, field_name)) = key.split_once('.') else {
+            continue;
+        };
+        let Some(fragment) = meta.fragment(fragment_name) else {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` references unknown fragment `{}`",
+                meta.meta.name, row_number, key, fragment_name
+            )));
+        };
+        if !active_fragments
+            .iter()
+            .any(|active| active == fragment_name)
+        {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` belongs to inactive fragment `{}`",
+                meta.meta.name, row_number, key, fragment_name
+            )));
+        }
+        if fragment.field(field_name).is_none() {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` references unknown fragment field `{}`",
+                meta.meta.name, row_number, key, field_name
+            )));
+        }
+    }
+
+    for fragment_name in active_fragments {
+        let Some(fragment) = meta.fragment(fragment_name) else {
+            continue;
+        };
+        if let Some(target_tags) = target_tags {
+            if !fragment.meta.is_exported_for(target_tags) {
+                continue;
+            }
+        }
+        for field in &fragment.fields {
+            if let Some(target_tags) = target_tags {
+                if !field.meta.is_exported_for(target_tags) {
+                    continue;
+                }
+            }
+            validate_supported_field_type(meta, field)?;
+            let field_path =
+                fragment_field_key(fragment.meta.name.as_str(), field.meta.name.as_str());
+            let value = row.get(&field_path).map(String::as_str).unwrap_or_default();
+            if field.meta.required && value.trim().is_empty() {
+                return Err(ConfigForgeError::Validation(format!(
+                    "table `{}` row {} field `{}` is required",
+                    meta.meta.name, row_number, field_path
+                )));
+            }
+            if value.trim().is_empty() {
+                continue;
+            }
+            validate_value_type_at_row_number(meta, field, value, row_number, target_tags)?;
+        }
+    }
+    Ok(())
+}
+
 fn validate_supported_field_type(
     meta: &LinkedTableMeta<'_>,
     field: &LinkedFieldMeta<'_>,
@@ -658,6 +801,10 @@ fn json_value_to_scalar_cell(
             table_name, row_number, field_path
         ))),
     }
+}
+
+fn fragment_field_key(fragment_name: &str, field_name: &str) -> String {
+    format!("{fragment_name}.{field_name}")
 }
 
 fn validate_field_uniqueness(

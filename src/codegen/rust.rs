@@ -79,6 +79,33 @@ impl CodeGenerator for RustCodeGenerator {
         }
 
         for table in &model.tables {
+            for fragment in &table.fragments {
+                push_doc(&mut content, fragment.desc.as_deref(), "/// ");
+                push_derive(
+                    &mut content,
+                    "Debug, Clone, PartialEq",
+                    rust_options.derive_serde,
+                );
+                content.push_str(&format!(
+                    "pub struct {} {{\n",
+                    names.fragment_type_name(&table.name, &fragment.name)?
+                ));
+                for field in &fragment.fields {
+                    push_doc(&mut content, field.desc.as_deref(), "    /// ");
+                    if rust_options.derive_serde {
+                        content.push_str(&format!("    #[serde(rename = {:?})]\n", field.name));
+                    }
+                    content.push_str(&format!(
+                        "    pub {}: {},\n",
+                        names.field_name(&field.name)?,
+                        names.rust_type(&field.code_type)?
+                    ));
+                }
+                content.push_str("}\n\n");
+            }
+        }
+
+        for table in &model.tables {
             push_doc(&mut content, table.desc.as_deref(), "/// ");
             push_derive(
                 &mut content,
@@ -98,6 +125,31 @@ impl CodeGenerator for RustCodeGenerator {
                     "    pub {}: {},\n",
                     names.field_name(&field.name)?,
                     names.rust_type(&field.code_type)?
+                ));
+            }
+            for fragment in &table.fragments {
+                if rust_options.derive_serde {
+                    content.push_str(&format!("    #[serde(rename = {:?})]\n", fragment.name));
+                }
+                content.push_str(&format!(
+                    "    pub {}: Option<{}>,\n",
+                    names.field_name(&fragment.name)?,
+                    names.fragment_type_name(&table.name, &fragment.name)?
+                ));
+            }
+            content.push_str("}\n\n");
+            content.push_str(&format!("impl {} {{\n", names.row_type_name(&table.name)?));
+            for fragment in &table.fragments {
+                content.push_str(&format!(
+                    "    pub fn has_{}(&self) -> bool {{ self.{}.is_some() }}\n",
+                    names.field_name(&fragment.name)?,
+                    names.field_name(&fragment.name)?
+                ));
+                content.push_str(&format!(
+                    "    pub fn {}(&self) -> Option<&{}> {{ self.{}.as_ref() }}\n",
+                    names.field_name(&fragment.name)?,
+                    names.fragment_type_name(&table.name, &fragment.name)?,
+                    names.field_name(&fragment.name)?
                 ));
             }
             content.push_str("}\n\n");
@@ -179,14 +231,43 @@ fn validate_generated_symbols(model: &CodeModel, names: &RustNames<'_>) -> Resul
         validate_named_symbols(
             "rust",
             &format!("table `{}` row fields", table.name),
-            table.fields.iter().map(|field| {
-                Ok(GeneratedSymbol::new(
-                    "field",
-                    &field.name,
-                    names.field_name(&field.name)?,
-                ))
-            }),
+            table
+                .fields
+                .iter()
+                .map(|field| {
+                    Ok(GeneratedSymbol::new(
+                        "field",
+                        &field.name,
+                        names.field_name(&field.name)?,
+                    ))
+                })
+                .chain(table.fragments.iter().map(|fragment| {
+                    Ok(GeneratedSymbol::new(
+                        "fragment field",
+                        &fragment.name,
+                        names.field_name(&fragment.name)?,
+                    ))
+                })),
         )?;
+
+        for fragment in &table.fragments {
+            type_symbols.push(GeneratedSymbol::new(
+                "fragment",
+                format!("{}_{}", table.name, fragment.name),
+                names.fragment_type_name(&table.name, &fragment.name)?,
+            ));
+            validate_named_symbols(
+                "rust",
+                &format!("table `{}` fragment `{}` fields", table.name, fragment.name),
+                fragment.fields.iter().map(|field| {
+                    Ok(GeneratedSymbol::new(
+                        "field",
+                        &field.name,
+                        names.field_name(&field.name)?,
+                    ))
+                }),
+            )?;
+        }
 
         let mut storage_symbols = vec![GeneratedSymbol::new("field", "rows", "rows")];
         for index in &table.indexes {
@@ -406,6 +487,10 @@ impl<'a> RustNames<'a> {
 
     fn repository_type_name(&self, table_name: &str) -> Result<String> {
         self.type_name(&format!("{table_name}_table"))
+    }
+
+    fn fragment_type_name(&self, table_name: &str, fragment_name: &str) -> Result<String> {
+        self.type_name(&format!("{table_name}_{fragment_name}_fragment"))
     }
 
     fn enum_variant_name(&self, name: &str) -> Result<String> {

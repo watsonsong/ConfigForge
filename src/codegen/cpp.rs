@@ -22,7 +22,7 @@ impl CodeGenerator for CppCodeGenerator {
         validate_generated_symbols(&model, &names)?;
         let mut content = render_file_header(input);
         content.push_str("#pragma once\n\n");
-        content.push_str("#include <cstdint>\n#include <cstddef>\n#include <string>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
+        content.push_str("#include <cstdint>\n#include <cstddef>\n#include <optional>\n#include <string>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
         let namespace = cpp_options
             .namespace
             .as_ref()
@@ -63,6 +63,25 @@ impl CodeGenerator for CppCodeGenerator {
         }
 
         for table in &model.tables {
+            for fragment in &table.fragments {
+                push_doc(&mut content, fragment.desc.as_deref());
+                content.push_str(&format!(
+                    "struct {} {{\n",
+                    names.fragment_type_name(&table.name, &fragment.name)?
+                ));
+                for field in &fragment.fields {
+                    push_doc_indented(&mut content, field.desc.as_deref(), "    ");
+                    content.push_str(&format!(
+                        "    {} {};\n",
+                        names.cpp_type(&field.code_type)?,
+                        names.field_name(&field.name)?
+                    ));
+                }
+                content.push_str("};\n\n");
+            }
+        }
+
+        for table in &model.tables {
             push_doc(&mut content, table.desc.as_deref());
             content.push_str(&format!(
                 "struct {} {{\n",
@@ -74,6 +93,13 @@ impl CodeGenerator for CppCodeGenerator {
                     "    {} {};\n",
                     names.cpp_type(&field.code_type)?,
                     names.field_name(&field.name)?
+                ));
+            }
+            for fragment in &table.fragments {
+                content.push_str(&format!(
+                    "    std::optional<{}> {};\n",
+                    names.fragment_type_name(&table.name, &fragment.name)?,
+                    names.field_name(&fragment.name)?
                 ));
             }
             content.push_str("};\n\n");
@@ -166,17 +192,45 @@ fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>) -> Result
             format!("{}_table", table.name),
             names.repository_type_name(&table.name)?,
         ));
+        for fragment in &table.fragments {
+            type_symbols.push(GeneratedSymbol::new(
+                "fragment",
+                format!("{}_{}", table.name, fragment.name),
+                names.fragment_type_name(&table.name, &fragment.name)?,
+            ));
+            validate_named_symbols(
+                "cpp",
+                &format!("table `{}` fragment `{}` fields", table.name, fragment.name),
+                fragment.fields.iter().map(|field| {
+                    Ok(GeneratedSymbol::new(
+                        "field",
+                        &field.name,
+                        names.field_name(&field.name)?,
+                    ))
+                }),
+            )?;
+        }
 
         validate_named_symbols(
             "cpp",
             &format!("table `{}` row fields", table.name),
-            table.fields.iter().map(|field| {
-                Ok(GeneratedSymbol::new(
-                    "field",
-                    &field.name,
-                    names.field_name(&field.name)?,
-                ))
-            }),
+            table
+                .fields
+                .iter()
+                .map(|field| {
+                    Ok(GeneratedSymbol::new(
+                        "field",
+                        &field.name,
+                        names.field_name(&field.name)?,
+                    ))
+                })
+                .chain(table.fragments.iter().map(|fragment| {
+                    Ok(GeneratedSymbol::new(
+                        "fragment field",
+                        &fragment.name,
+                        names.field_name(&fragment.name)?,
+                    ))
+                })),
         )?;
 
         let mut member_symbols = vec![GeneratedSymbol::new("field", "rows_", "rows_")];
@@ -359,6 +413,10 @@ impl<'a> CppNames<'a> {
 
     fn repository_type_name(&self, table_name: &str) -> Result<String> {
         self.type_name(&format!("{table_name}_table"))
+    }
+
+    fn fragment_type_name(&self, table_name: &str, fragment_name: &str) -> Result<String> {
+        self.type_name(&format!("{table_name}_{fragment_name}_fragment"))
     }
 
     fn enum_variant_name(&self, name: &str) -> Result<String> {

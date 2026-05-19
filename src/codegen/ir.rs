@@ -39,9 +39,17 @@ pub struct CodeTable {
     pub name: String,
     pub desc: Option<String>,
     pub fields: Vec<CodeField>,
+    pub fragments: Vec<CodeFragment>,
     pub indexes: Vec<CodeIndex>,
     pub primary_index: Option<String>,
     pub data_file: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeFragment {
+    pub name: String,
+    pub desc: Option<String>,
+    pub fields: Vec<CodeField>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,10 +156,41 @@ pub fn build_code_model(
                 .filter(|field| is_runtime_codegen_field(field, target_tags))
                 .map(code_field_from_linked)
                 .collect::<Result<Vec<_>>>()?;
+            let fragments = table_meta
+                .fragments
+                .iter()
+                .filter(|fragment| fragment.meta.is_exported_for(target_tags))
+                .map(|fragment| {
+                    let fields = fragment
+                        .fields
+                        .iter()
+                        .filter(|field| is_runtime_codegen_field(field, target_tags))
+                        .map(code_field_from_linked)
+                        .collect::<Result<Vec<_>>>()?;
+                    ensure_model_unique_names(
+                        &fields,
+                        |field| field.name.as_str(),
+                        &format!(
+                            "table `{}` fragment `{}` fields",
+                            table_meta.meta.name, fragment.meta.name
+                        ),
+                    )?;
+                    Ok(CodeFragment {
+                        name: fragment.meta.name.clone(),
+                        desc: fragment.meta.desc.clone(),
+                        fields,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
             ensure_model_unique_names(
                 &fields,
                 |field| field.name.as_str(),
                 &format!("table `{}` fields", table_meta.meta.name),
+            )?;
+            ensure_model_unique_names(
+                &fragments,
+                |fragment| fragment.name.as_str(),
+                &format!("table `{}` fragments", table_meta.meta.name),
             )?;
             let field_index = fields
                 .iter()
@@ -231,6 +270,7 @@ pub fn build_code_model(
                 name: table_meta.meta.name.clone(),
                 desc: table_meta.meta.desc.clone(),
                 fields,
+                fragments,
                 indexes,
                 primary_index,
                 data_file,

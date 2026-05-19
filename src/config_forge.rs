@@ -251,6 +251,44 @@ pub fn build_exported_table_payload(
                     exported_row.insert(field.meta.name.clone(), value);
                 }
             }
+            if let Some(row_source) = table.row_source(row_index) {
+                for fragment_name in &row_source.fragments {
+                    let Some(fragment) = table_meta.fragment(fragment_name) else {
+                        continue;
+                    };
+                    if !fragment.meta.is_exported_for(target_tags) {
+                        continue;
+                    }
+                    let mut fragment_object = BTreeMap::new();
+                    for field in fragment
+                        .fields
+                        .iter()
+                        .filter(|field| field.meta.is_exported_for(target_tags))
+                    {
+                        let key = fragment_field_key(
+                            fragment.meta.name.as_str(),
+                            field.meta.name.as_str(),
+                        );
+                        let Some(raw) = row.get(&key) else {
+                            continue;
+                        };
+                        if let Some(value) = export_field_value(
+                            table_meta.meta.name.as_str(),
+                            row_index + 1,
+                            &key,
+                            field,
+                            raw,
+                            target_tags,
+                        )? {
+                            fragment_object.insert(field.meta.name.clone(), value);
+                        }
+                    }
+                    exported_row.insert(
+                        fragment.meta.name.clone(),
+                        ExportedValue::Struct(fragment_object),
+                    );
+                }
+            }
             Ok(exported_row)
         })
         .collect::<Result<Vec<_>>>()?;
@@ -378,6 +416,10 @@ fn json_value_to_scalar_cell(value: &serde_json::Value) -> Result<String> {
             "struct scalar field value must be string, number, or bool".to_owned(),
         )),
     }
+}
+
+fn fragment_field_key(fragment_name: &str, field_name: &str) -> String {
+    format!("{fragment_name}.{field_name}")
 }
 
 pub struct JsonDataExporter;
@@ -805,6 +847,150 @@ mod tests {
         assert_eq!(value["rows"][0]["reward"]["item_id"], "coin");
         assert_eq!(value["rows"][0]["reward"]["count"], "100");
         assert!(value["rows"][0]["reward"].get("internal_note").is_none());
+    }
+
+    #[test]
+    fn fragment_export_uses_nested_objects_and_presence() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                polymorphic = true
+                sources = [
+                    { provider = "csv", path = "weapons.csv", fragments = ["weapon"] },
+                    { provider = "csv", path = "armors.csv", fragments = ["armor"] },
+                ]
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.fragments]]
+                name = "weapon"
+
+                [[tables.fragments.fields]]
+                name = "power"
+                type = "int"
+
+                [[tables.fragments.fields]]
+                name = "server_note"
+                type = "string"
+                export_when = { any = ["server"] }
+
+                [[tables.fragments]]
+                name = "armor"
+
+                [[tables.fragments.fields]]
+                name = "power"
+                type = "int"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("items").expect("linked table");
+        let table = DataTable::new_with_sources(
+            "items",
+            vec![
+                BTreeMap::from([
+                    ("id".to_owned(), "1".to_owned()),
+                    ("weapon.power".to_owned(), "10".to_owned()),
+                    ("weapon.server_note".to_owned(), "hidden".to_owned()),
+                ]),
+                BTreeMap::from([
+                    ("id".to_owned(), "2".to_owned()),
+                    ("armor.power".to_owned(), "20".to_owned()),
+                ]),
+            ],
+            vec![
+                crate::data::RowSourceInfo {
+                    source_index: 0,
+                    source_path: PathBuf::from("weapons.csv"),
+                    source_row_number: 1,
+                    fragments: vec!["weapon".to_owned()],
+                },
+                crate::data::RowSourceInfo {
+                    source_index: 1,
+                    source_path: PathBuf::from("armors.csv"),
+                    source_row_number: 1,
+                    fragments: vec!["armor".to_owned()],
+                },
+            ],
+        )
+        .expect("table should build");
+
+        let payload =
+            build_exported_table_payload(table_meta, &table, &TargetTags::new(["client"]))
+                .expect("payload should build");
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+
+        assert_eq!(value["rows"][0]["id"], "1");
+        assert_eq!(value["rows"][0]["weapon"]["power"], "10");
+        assert!(value["rows"][0]["weapon"].get("server_note").is_none());
+        assert!(value["rows"][0].get("armor").is_none());
+        assert_eq!(value["rows"][1]["armor"]["power"], "20");
+        assert!(value["rows"][1].get("weapon").is_none());
+    }
+
+    #[test]
+    fn fragment_export_locks_empty_and_hidden_fragment_presence() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+                polymorphic = true
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.fragments]]
+                name = "client_marker"
+                export_when = { any = ["client"] }
+
+                [[tables.fragments.fields]]
+                name = "server_note"
+                type = "string"
+                export_when = { any = ["server"] }
+
+                [[tables.fragments]]
+                name = "server_marker"
+                export_when = { any = ["server"] }
+
+                [[tables.fragments.fields]]
+                name = "value"
+                type = "int"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("items").expect("linked table");
+        let table = DataTable::new_with_sources(
+            "items",
+            vec![BTreeMap::from([
+                ("id".to_owned(), "1".to_owned()),
+                ("client_marker.server_note".to_owned(), "hidden".to_owned()),
+                ("server_marker.value".to_owned(), "10".to_owned()),
+            ])],
+            vec![crate::data::RowSourceInfo {
+                source_index: 0,
+                source_path: PathBuf::from("items.csv"),
+                source_row_number: 1,
+                fragments: vec!["client_marker".to_owned(), "server_marker".to_owned()],
+            }],
+        )
+        .expect("table should build");
+
+        let payload =
+            build_exported_table_payload(table_meta, &table, &TargetTags::new(["client"]))
+                .expect("payload should build");
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+
+        assert!(value["rows"][0]["client_marker"]
+            .as_object()
+            .expect("client marker should be object")
+            .is_empty());
+        assert!(value["rows"][0].get("server_marker").is_none());
     }
 
     #[test]

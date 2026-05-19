@@ -63,6 +63,8 @@ pub struct TableMeta {
     #[serde(default)]
     pub fields: Vec<FieldMeta>,
     #[serde(default)]
+    pub fragments: Vec<FragmentMeta>,
+    #[serde(default)]
     pub indexes: Vec<IndexMeta>,
     #[serde(default)]
     pub primary_index: Option<String>,
@@ -70,6 +72,19 @@ pub struct TableMeta {
     pub preserve_source_order: bool,
     #[serde(default)]
     pub polymorphic: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct FragmentMeta {
+    pub name: String,
+    #[serde(default)]
+    pub desc: Option<String>,
+    #[serde(default = "default_export")]
+    pub export: bool,
+    #[serde(default)]
+    pub export_when: ExportCondition,
+    #[serde(default)]
+    pub fields: Vec<FieldMeta>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -359,6 +374,12 @@ impl FieldMeta {
     }
 }
 
+impl FragmentMeta {
+    pub fn is_exported_for(&self, target: &TargetTags) -> bool {
+        self.export && self.export_when.matches(target)
+    }
+}
+
 impl IndexMeta {
     pub fn is_exported_for(&self, target: &TargetTags) -> bool {
         self.export && self.export_when.matches(target)
@@ -458,10 +479,18 @@ pub struct LinkedMetaModel<'meta> {
 pub struct LinkedTableMeta<'meta> {
     pub meta: &'meta TableMeta,
     pub fields: Vec<LinkedFieldMeta<'meta>>,
+    pub fragments: Vec<LinkedFragmentMeta<'meta>>,
     pub indexes: Vec<LinkedIndexMeta<'meta>>,
     primary_index: Option<usize>,
     field_index: HashMap<&'meta str, usize>,
     index_index: HashMap<&'meta str, usize>,
+    fragment_index: HashMap<&'meta str, usize>,
+}
+
+pub struct LinkedFragmentMeta<'meta> {
+    pub meta: &'meta FragmentMeta,
+    pub fields: Vec<LinkedFieldMeta<'meta>>,
+    field_index: HashMap<&'meta str, usize>,
 }
 
 pub struct LinkedStructMeta<'meta> {
@@ -544,6 +573,7 @@ impl<'meta> LinkedTableMeta<'meta> {
     pub fn new(
         meta: &'meta TableMeta,
         fields: Vec<LinkedFieldMeta<'meta>>,
+        fragments: Vec<LinkedFragmentMeta<'meta>>,
         indexes: Vec<LinkedIndexMeta<'meta>>,
     ) -> Self {
         let field_index = fields
@@ -559,13 +589,20 @@ impl<'meta> LinkedTableMeta<'meta> {
         let primary_index = meta
             .primary_index()
             .and_then(|index| index_index.get(index.name.as_str()).copied());
+        let fragment_index = fragments
+            .iter()
+            .enumerate()
+            .map(|(index, fragment)| (fragment.meta.name.as_str(), index))
+            .collect();
         Self {
             meta,
             fields,
+            fragments,
             indexes,
             primary_index,
             field_index,
             index_index,
+            fragment_index,
         }
     }
 
@@ -583,6 +620,33 @@ impl<'meta> LinkedTableMeta<'meta> {
 
     pub fn primary_index(&self) -> Option<&LinkedIndexMeta<'meta>> {
         self.primary_index.and_then(|index| self.indexes.get(index))
+    }
+
+    pub fn fragment(&self, name: &str) -> Option<&LinkedFragmentMeta<'meta>> {
+        self.fragment_index
+            .get(name)
+            .and_then(|index| self.fragments.get(*index))
+    }
+}
+
+impl<'meta> LinkedFragmentMeta<'meta> {
+    pub fn new(meta: &'meta FragmentMeta, fields: Vec<LinkedFieldMeta<'meta>>) -> Self {
+        let field_index = fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| (field.meta.name.as_str(), index))
+            .collect();
+        Self {
+            meta,
+            fields,
+            field_index,
+        }
+    }
+
+    pub fn field(&self, name: &str) -> Option<&LinkedFieldMeta<'meta>> {
+        self.field_index
+            .get(name)
+            .and_then(|index| self.fields.get(*index))
     }
 }
 
