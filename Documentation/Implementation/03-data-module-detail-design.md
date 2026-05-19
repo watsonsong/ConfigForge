@@ -12,16 +12,19 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 4. 在 Meta Link 完成后，由 Validation 阶段使用 `LinkedMetaModel<'meta>` + `DataSet` 做字段存在性、required/default、类型、enum、unique index 等合法性检测。
 5. 暂不实现任务并行驱动，但类型设计保持 Data 与 Meta 的数据相互独立，后续可接入 executor 并行加载。
 
-当前阶段不实现：
+当前阶段已实现单 CSV source、DataSet、target-aware validation/export 的基础流程。下一阶段准备按 **variant source mode** 支持 polymorphic fragments。
 
-- multi-source merge；
+仍不实现：
+
+- fragment join mode；
 - `override_sources`；
-- polymorphic `fragments`；
 - 非 CSV provider；
-- struct / array / expanded value 的 typed parse；
+- array / map / expanded value 的 typed parse；
 - source location 精确到单元格的诊断。
 
 这些能力在 Meta validate 阶段应显式报 unsupported，避免 Data 阶段静默忽略。
+
+variant source mode 支持后，`sources` 可以为同一 polymorphic collection table 声明多个 CSV source，但每个 source 必须贡献完整 record，不做按 ID 拼接。
 
 ## 3.2 Rust 中的“类”和职责表达
 
@@ -34,6 +37,8 @@ Rust 不使用传统 OO class。本文档中的“类”对应 Rust 的 `struct`
 | DataRow | `type DataRow = BTreeMap<String, String>` | 单行原始 cell 文本，key 为字段/列名。 |
 | DataSourcePlan | `struct DataSourcePlan` | 单张表的数据加载计划，已解析 provider 和相对路径。 |
 | DataLoadPlan | `struct DataLoadPlan` | 多张表的数据加载计划集合。 |
+| SourceFragmentSet | `struct SourceFragmentSet` / `Vec<String>` | 某个 source 声明的 fragment 名称集合。 |
+| RowSourceInfo | `struct RowSourceInfo` | 行来源元数据，记录 source ordinal/path/fragments/source row number。 |
 | DataProvider | `enum DataProvider` | 当前支持的 provider，第一阶段只有 `Csv`。 |
 | DataLoader | `struct DataLoader` | 根据 `DataLoadPlan` 加载 `DataSet`。 |
 | CsvDataReader | `struct CsvDataReader` | CSV provider 的具体读取器。 |
@@ -91,6 +96,7 @@ impl DataSet {
 pub struct DataTable {
     pub name: String,
     pub rows: Vec<DataRow>,
+    pub row_sources: Vec<RowSourceInfo>,
 }
 ```
 
@@ -98,7 +104,8 @@ pub struct DataTable {
 
 - `name` 对应 `TableMeta.name`。
 - `rows` 是 CSV 读取后的行集合。
-- 每个 row 的 key 来自 CSV header。
+- `row_sources` 与 `rows` 等长，记录每行来自哪个 physical source。非 polymorphic 单 source 表也应填充，便于统一诊断。
+- 每个 row 的 key 来自 CSV header；fragment field 在 DataRow 中保留 `fragment.field` 形式，例如 `stats.attack`，不在读取阶段展开为嵌套结构。
 - 第一阶段不在 Data Load 阶段判断 header 是否匹配 Meta 字段；该判断放到 Validation 阶段。
 
 主要方法：
@@ -106,10 +113,48 @@ pub struct DataTable {
 ```rust
 impl DataTable {
     pub fn new(name: impl Into<String>, rows: Vec<DataRow>) -> Self;
+    pub fn new_with_sources(
+        name: impl Into<String>,
+        rows: Vec<DataRow>,
+        row_sources: Vec<RowSourceInfo>,
+    ) -> Result<Self>;
     pub fn row_count(&self) -> usize;
     pub fn is_empty(&self) -> bool;
 }
 ```
+
+`new()` 用于测试、内存构造和非 source 数据构造，会自动为每行填充默认 `RowSourceInfo`：`source_index = 0`、`source_path = "<memory>"`、`source_row_number = row_index + 1`、`fragments = []`。`new_with_sources()` 用于真实 DataLoader，必须校验 `rows.len() == row_sources.len()`，不一致时返回 validation error。
+
+### 3.4.4 `RowSourceInfo`
+
+variant source mode 需要保留每行的 source fragment set，否则 validation 无法判断该行应该应用哪些 fragment fields。
+
+```rust
+pub struct RowSourceInfo {
+    pub source_index: usize,
+    pub source_path: PathBuf,
+    pub source_row_number: usize,
+    pub fragments: Vec<String>,
+}
+```
+
+说明：
+
+- `source_index` 对应 `DataSourcePlan.sources` 中该 table 的 source 顺序，用于稳定诊断和后续 merge 规则。
+- `source_path` 用于错误信息，例如 `items/weapons.csv`。
+- `source_row_number` 固定为 record number，从 1 开始，不包含 CSV header；这与当前 validation 中 `row_index + 1` 的错误信息语义保持一致。未来如果需要显示真实文件行号，应新增 `source_line_number: Option<usize>`，不要复用 `source_row_number`。
+- `fragments` 来自 `SourceRef.fragments`。Data 模块只保留名称；是否存在、字段 schema、target 过滤由 Meta Link / Validation 处理。
+
+如果短期不想修改 `DataTable` public shape，也可以先引入：
+
+```rust
+pub struct DataRecord {
+    pub row: DataRow,
+    pub source: RowSourceInfo,
+}
+```
+
+然后将 `DataTable.rows` 从 `Vec<DataRow>` 演进为 `Vec<DataRecord>`。考虑当前代码大量使用 `table.rows`，更小改动是保留 `rows` 并新增并行 `row_sources`，但需要测试保证长度一致。
 
 ### 3.4.3 `DataRow`
 
@@ -150,6 +195,7 @@ pub struct DataSourcePlan {
     pub table_name: String,
     pub provider: DataProvider,
     pub path: PathBuf,
+    pub fragments: Vec<String>,
 }
 ```
 
@@ -157,7 +203,8 @@ pub struct DataSourcePlan {
 
 - `table_name` 是目标逻辑表名。
 - `path` 是相对 data root 的路径，来自 `SourceRef.path` 或 legacy `TableMeta.source`。
-- 第一阶段每张表最多一个 `DataSourcePlan`。
+- `fragments` 是该 source 声明的 polymorphic fragment 名称；普通表和 legacy `source` 为空。
+- variant source mode 落地后，polymorphic collection table 可以拥有多个 `DataSourcePlan`；非 polymorphic table 仍只允许一个 source。
 
 ### 3.5.3 `DataLoadPlan`
 
@@ -181,6 +228,9 @@ impl DataLoadPlan {
 
 - `DataLoadPlan` 从 raw `MetaModel` / `TableMeta` 中提取 source 信息，不需要 `LinkedMetaModel<'meta>`。
 - 一旦 `DataLoadPlan` 构造完成，就拥有 table name、provider、path，后续 Data Load 不再借用 Meta。
+- variant source mode 下，`DataLoadPlan` 需要展开 table 的每个 `SourceRef`，为同一 `table_name` 生成多个 `DataSourcePlan`，并保留 source 声明顺序。
+- `DataLoadPlan::from_tables` 不负责验证 fragment 是否存在、是否允许用于当前 table、字段是否属于 fragment；它只搬运 source declaration。fragment 引用合法性由 Meta validation/link 负责。
+- provider 是否支持属于 source declaration 的基础结构检查，可以由 Meta validation fail-fast，也可以由 DataLoadPlan parse 时返回错误；除 provider parse 以外，DataLoadPlan 不应理解 fragment schema 语义。
 - 因此流程上可以在 raw Meta load/merge 完成后：
   - 一边做 `MetaModel::link()` / Meta validate；
   - 一边执行 `DataLoader::load(&plan)`。
@@ -205,9 +255,10 @@ impl CsvDataReader {
 
 1. 使用 `csv::Reader::from_path` 打开文件。
 2. 第一行作为 header。
-3. 每条 record 与 header zip 成 `DataRow`。
+3. 每条 record 与 header zip 成 `DataRow`；header 原样保留，包含 `stats.attack` 这类 fragment field path。
 4. 缺失 cell 当前不在读取阶段补齐；Validation 阶段按 required/default 处理。
 5. 多余 cell 当前由 csv crate 的 record 行为处理；后续如果需要严格列数，可在 Data 模块增加 header/record 长度校验。
+6. CsvDataReader 不理解 fragment schema；它只返回原始 row。DataLoader 在组装 DataTable 时为每行附加 `RowSourceInfo`。
 
 错误映射：
 
@@ -235,9 +286,30 @@ impl DataLoader {
 设计要点：
 
 - `DataLoader` 不持有 Meta 引用。
-- `load()` 第一阶段顺序加载所有 source；未来可以替换为并行实现，但 public API 不需要变化。
+- `load()` 可并行加载多个 source，但组装 DataSet 时必须保持 `DataLoadPlan.sources()` 声明顺序。
 - `load_source()` 根据 `DataProvider` 分发到 `CsvDataReader`。
-- `DataSet::new()` 负责建立 table index；若出现重复 table name，应报错或以后由 Data diagnostic 表达。第一阶段由于 Meta 已校验重复 table name，DataLoader 可以假设输入计划无重复。
+- 对同一 `table_name` 的多个 `DataSourcePlan`，DataLoader 需要把 rows append 到同一个 `DataTable`，并同步 append 对应 `RowSourceInfo`。
+- `DataSet::try_new()` 仍应拒绝重复 table name；多 source 合并必须发生在 DataLoader 内部，而不是先生成多个同名 DataTable 再交给 DataSet。
+
+### 3.7.1 Variant source merge 流程
+
+variant source mode 的 DataLoader 组装流程：
+
+```text
+for source in DataLoadPlan.sources() in declaration order:
+  table = read source.path as DataTable(source.table_name)
+  for each row in table.rows:
+    append row to pending_tables[source.table_name].rows
+    append RowSourceInfo { source_index, source_path, source_row_number, fragments } to row_sources
+
+DataSet::try_new(pending_tables in first-seen table order)
+```
+
+注意：
+
+- DataLoader 不做 primary key 去重；unique/primary index 冲突仍在 Validation 阶段基于 normalized DataTable 检查。
+- DataLoader 不做 fragment field required/default；Validation 阶段根据 `row_sources[row_index].fragments` 决定应用哪些 fragment schemas。
+- 如果某个 source 读取失败，错误需要包含 source path；如果后续引入 source ordinal，可在 Data diagnostic 中补充。
 
 ## 3.8 与 Meta / Validation / Exporter 的流程关系
 
@@ -379,6 +451,9 @@ pub struct DataDiagnostic {
 4. `DataLoadPlan::from_meta_model` 能从单个 `sources = [{ provider = "csv", path = "..." }]` 生成 csv plan。
 5. `DataLoader::load` 能读取多张表并生成 `DataSet`。
 6. `DataSet::table` 能按名称查询表。
+7. polymorphic table 的多个 variant sources 会合并成一个 `DataTable`，行顺序保持 source 声明顺序。
+8. `RowSourceInfo` 与 `rows` 等长，并正确记录 source path、source row number 和 fragments。
+9. 非 polymorphic table 声明 fragments 时，Meta validation/link 应失败，不能静默忽略；DataLoadPlan 只搬运 fragments 名称，不负责判断 table 是否 polymorphic。
 
 ### Validation 层测试
 
@@ -389,6 +464,11 @@ pub struct DataDiagnostic {
 3. CSV 中缺少 required field 且无 default 时失败。
 4. CSV 中缺少 required field 但有 default 时通过。
 5. enum 字段非法值失败。
+6. variant source 中声明的 fragment required field 缺失且无 default 时失败，错误包含 table/source/row/fragment/field。
+7. variant source 中声明的 fragment field 缺失但有 default 时 normalize 后通过并参与 export。
+8. source 未声明 fragment 的 `fragment.field` 列出现在 CSV header 时失败；不同 fragments 复用同名字段时，`stats.value` 与 `cost.value` 应分别按对应 fragment 校验。
+9. 两个 variant sources 中 primary key 冲突时失败，即使它们声明不同 fragments。
+10. target tags 能过滤 fragment fields，并且不影响 common primary key validation。
 
 ### 集成测试
 
@@ -397,6 +477,9 @@ pub struct DataDiagnostic {
 1. CLI validate 通过标准工程。
 2. CLI export 输出 JSON 和 Rust stub。
 3. 后续可增加一个错误 fixture，覆盖非法 CSV 值和缺表场景。
+4. 增加 polymorphic items fixture：weapons/equipment/usable 三个 CSV source 合并为 `items` runtime data。
+5. 检查 runtime JSON/MessagePack 中包含 nested fragment objects，并以 object 是否存在表达 fragment presence；不额外要求 `fragments` metadata 数组。
+6. 检查生成代码包含 fragment 类型与 `has/get fragment` API。
 
 ## 3.12 第一阶段完成标准
 

@@ -173,6 +173,7 @@ pub struct TableMeta {
     pub sources: Vec<SourceRef>,
     pub override_sources: Vec<SourceRef>,
     pub fields: Vec<FieldMeta>,
+    pub fragments: Vec<FragmentMeta>,
     pub indexes: Vec<IndexMeta>,
     pub primary_index: Option<String>,
     pub preserve_source_order: bool,
@@ -191,8 +192,32 @@ pub struct TableMeta {
 - `row_export` 只作用于 collection runtime data 行过滤，常用于 `shipping` / `debug` 等 target 差异。
 - `validators` 保存 table-level / record-level validator 的 raw 配置；公共字段由 Meta validate 做轻量检查，scope、unknown kind 与专属参数由 validation registry compile 阶段诊断。当前实现已解析 TOML，但内置 validator 仅提供 field-scope `range`，因此 table-level `range` 会被 scope 校验拒绝。
 - `foreign_keys` 尚未在当前 `TableMeta` 中落地。外键不是普通 validator，未来会作为一等关系数据保存：它既会隐式生成引用完整性校验，也会进入 CodeModel 影响生成代码的关联查询 API。该能力仍是 Phase 3 计划。
+- `fragments` 是下一阶段 polymorphic variant source mode 的 table-local fragment schema。当前代码尚未落地该字段；实现前继续对 `SourceRef.fragments` 报 unsupported。
 
-### 2.5.5 `TableKind`
+### 2.5.5 `FragmentMeta`
+
+```rust
+pub struct FragmentMeta {
+    pub name: String,
+    pub desc: Option<String>,
+    pub export: bool,
+    pub export_when: ExportCondition,
+    pub fields: Vec<FieldMeta>,
+}
+```
+
+说明：
+
+- fragment 是 table-local 的字段组，只用于 `polymorphic = true` 的 CollectionTable。
+- `export = false` 是 fragment 级运行时导出硬关闭；默认 `true`。
+- `export_when` 根据 target tags 判断整个 fragment 是否进入当前 ExportView。
+- `fields` 复用 `FieldMeta`，但 Phase 1 只支持基础字段语义：required、default、type、export、export_when。
+- Phase 1 不支持 fragment-level validators、fragment field validators、fragment indexes、fragment row_export，也不支持 fragment fields 作为 table index key。
+- fragment names 在 table scope 内唯一，且不能与 table common field names 冲突。
+- fragment field names 只要求在所属 fragment 内唯一；不同 fragments 可以复用相同 field name，fragment field 也可以与 common field 同名。
+- CSV header 使用 `fragment.field` 表达 fragment field，例如 `stats.attack`；common field 使用裸字段名，例如 `attack`。
+
+### 2.5.6 `TableKind`
 
 ```rust
 #[serde(rename_all = "snake_case")]
@@ -207,7 +232,7 @@ pub enum TableKind {
 - `Object`：可以没有 index。
 - `Collection`：可以定义 index；override 等后续逻辑会依赖 primary index。
 
-### 2.5.6 `FieldMeta`
+### 2.5.7 `FieldMeta`
 
 ```rust
 pub struct FieldMeta {
@@ -239,7 +264,7 @@ pub struct FieldMeta {
 - `tool_only`、`filter_field`、`validator_only` 已由 target tags 机制替代；当前仅保留为 `Option<bool>` 以便检测用户仍在使用并输出 `UnsupportedFeature` 诊断，不再参与导出判断。
 - `unique` 是内置便捷字段；当前基础 validation 会直接校验 single-field unique，codegen 也会生成对应 single-field unique index。复合唯一性建议优先通过 `IndexMeta { unique = true }` 表达；未来也可迁移为 implicit validator。
 
-### 2.5.7 `ValidatorMeta`
+### 2.5.8 `ValidatorMeta`
 
 Validator 采用注册式框架。Meta 层只保存 raw 配置，不依赖具体 validator 实现：
 

@@ -306,10 +306,17 @@ pub struct CodeTable {
     pub name: String,
     pub desc: Option<String>,
     pub fields: Vec<CodeField>,
+    pub fragments: Vec<CodeFragment>,
     pub indexes: Vec<CodeIndex>,
     pub foreign_keys: Vec<CodeForeignKey>,
     pub primary_index: Option<String>,
     pub data_file: String,
+}
+
+pub struct CodeFragment {
+    pub name: String,
+    pub desc: Option<String>,
+    pub fields: Vec<CodeField>,
 }
 
 pub struct CodeForeignKey {
@@ -329,11 +336,13 @@ IR 职责：
 3. 保留 table、field、index、foreign key、enum、struct 的语言无关关系。
 4. 保留 runtime data file 信息。
 5. 把 `LinkedField` 转换为目标语言无关的 `CodeTypeRef`。
+6. 对 polymorphic table 保留 fragment 类型、table-fragment 关联和当前 target 可见的 fragment fields。
 
 IR 不负责：
 
 - 目标语言标识符生成；
 - table row type 名称；
+- fragment type 名称；
 - repository type 名称；
 - index key type 名称；
 - lookup function 名称；
@@ -370,6 +379,38 @@ Foreign key 对 CodeModel 的要求：
 - 只有当前 target 可导出的 foreign key 进入 `CodeForeignKey`。
 - source table、target table、source fields、target index fields 都必须在当前 target CodeModel 可见。
 - target index 必须 unique，第一阶段只生成 many-to-one helper；一对多反向索引可在后续 relation 设计中扩展。
+
+### 4.5.1 Polymorphic Fragment CodeModel
+
+variant source mode 落地后，CodeModel 需要表达三件事：
+
+1. 每个 fragment 的字段类型，用于生成 fragment struct/interface。
+2. 每个 polymorphic table 可能拥有的 fragments，用于 row type 和访问器生成。
+3. 当前 target tags 下可见的 fragment/field 集合，用于避免生成无法出现在 runtime payload 中的 API。
+
+构建规则：
+
+- `CodeFragment` 来自 `LinkedFragmentMeta` 或等价 linked 结构；名称在 table scope 内唯一。
+- 如果不同 table 下有同名 fragment，生成器必须通过 table name 参与命名，例如 Rust `ItemsStatsFragment` / TS `ItemsStatsFragment`，避免全局类型冲突。
+- `CodeTable.fields` 只包含 common fields。
+- `CodeTable.fragments` 只包含当前 target 可见 fragments；fragment 内字段再按 field `export_when` 过滤。
+- `CodeFragment` 是 table-local IR，不再在 `CodeModel` 顶层保存一份全局 fragments；如果生成器需要全局遍历 fragment，可以从 `CodeModel.tables[*].fragments` flatten，避免 `CodeFragment` / `CodeTableFragment` 双结构重复导致不一致。
+- primary/unique index 第一阶段只允许使用 common fields，因此 `CodeIndex.fields` 不需要支持 fragment path。
+- runtime data 中不额外输出 `fragments` 数组；fragment nested object 是否存在就是 row 的 fragment presence。生成器不需要为 `fragments` metadata 生成字段。
+
+推荐生成 API：
+
+| 语言 | Row 表达 | Fragment 访问 |
+| --- | --- | --- |
+| Rust | row struct 包含 common fields、每个 fragment `Option<FragmentType>` | `fn has_stats(&self) -> bool`、`fn stats(&self) -> Option<&ItemsStatsFragment>` |
+| C++ | row struct 包含 common fields、每个 fragment `std::optional<FragmentType>` | `HasStats()`、`Stats()` 返回 pointer/optional reference |
+| TypeScript | row interface 包含 common fields、每个 fragment 可选属性 | `hasStats(row)` 或 row helper class 的 `hasStats()` |
+
+`has_*` 的语义直接来自对应 optional fragment 字段是否存在，而不是额外的 fragment name list。若 runtime payload 中出现空 object，例如 `"stats": {}`，loader 仍应构造 `Some(ItemsStatsFragment { ... })` / `std::optional` / 非 `undefined` 对象，以保留 presence。
+
+第一阶段不要求生成 discriminated union。原因是一个 source 可以声明多个 fragments，例如 weapon 同时拥有 `stats` 和 `skills`，更接近 composition 而不是单一 enum variant。后续如果产品约束“一条 record 必须且只能属于一个 kind”，可以在此基础上额外生成 union facade。
+
+runtime loader 仍负责把 payload envelope 解码为 typed rows。由于当前 runtime scalar payload 仍是字符串，loader 需要继续承担 string -> typed primitive 的转换；fragment fields 也遵循同一规则。
 
 ## 4.6 命名策略与冲突检测
 
@@ -967,6 +1008,9 @@ pub struct CodegenDiagnostic {
 4. primary index、unique index、non-unique index 都能生成 `CodeIndex`。
 5. 命名 sanitize 后稳定且可预测。
 6. 命名冲突能报错。
+7. polymorphic table 的 common fields 与 fragments 能进入 `CodeModel`，fragment fields 按 target tags 过滤。
+8. 同名 fragment 出现在不同 table 时，生成类型名应包含 table scope，避免冲突。
+9. fragment field 不能作为 index key；Meta/CodeModel 层应给出明确错误或在 Meta validation 阶段提前拒绝。
 
 ### 4.15.2 语言生成器 snapshot 测试
 
@@ -974,7 +1018,10 @@ pub struct CodegenDiagnostic {
 
 - enum 声明；
 - struct/interface 声明；
+- fragment struct/interface 声明；
 - row type；
+- row 中的 optional fragment 字段；
+- `has_fragment` / `get_fragment` 风格访问器；
 - loader interface；
 - repository type；
 - unique / non-unique lookup function；

@@ -56,6 +56,27 @@ match = "any"
 - `row_export` 引用的字段必须存在；这些字段可以 `export = false`，仍可参与行级过滤。
 - 被 `row_export` 排除的数据默认不参与该 target 的 runtime data、special exporter 和集合级校验。
 
+### 5.2.1 Polymorphic Fragment ExportView
+
+variant source mode 落地后，ExportView 需要同时保留 record 的 fragment presence 和 target-visible fragment fields：
+
+- table common fields 先按 table/field `export_when` 过滤。
+- 每条 record 携带由其 source 声明得到的 fragment set，例如 `{ stats, skills }`。
+- fragment 本身可选支持 `export` / `export_when`；不匹配当前 target 的 fragment 不进入 runtime payload，也不参与当前 target 的 fragment field validation。
+- fragment 内字段继续按 field `export` / `export_when` 过滤。
+- 如果 fragment 在当前 target 可见，但其所有字段都被过滤，ExportView 仍应能表达该 record 拥有该 fragment；runtime payload 可输出空 object，例如 `"stats": {}`，代码生成据此提供 `has_stats()` / `hasStats()` 之类查询。
+- `row_export` 仍以整条 record 为单位过滤。被过滤掉的 record，其 common fields、fragment presence 和 fragment fields 都不进入当前 target。
+
+fragment presence 的 target 判断顺序固定为：
+
+1. row 是否被 `row_export` 保留。
+2. 当前 row 的 source 是否声明该 fragment。
+3. fragment meta 是否对当前 target 可见，即 `export = true` 且 `export_when` 匹配。
+4. fragment fields 再按 field-level `export` / `export_when` 过滤。
+5. 如果 fragment 可见但过滤后没有任何可见字段，runtime payload 仍输出 empty object。
+
+因此：source 未声明的 fragment 不输出 empty object；fragment 对当前 target 不可见时不输出 empty object；fragment 可见但字段都 `export = false` 或都被 target tags 过滤时输出 empty object。
+
 ## 5.3 Validation Scope
 
 | Scope | 例子 | 默认输入 |
@@ -101,6 +122,72 @@ default = 1
 ```
 
 该字段在 source 缺失时使用 `1`，不会报 required error。
+
+### 5.5.1 Fragment 字段 Required / Default
+
+variant source mode 中，required/default 的输入范围由 source 声明的 fragments 决定：
+
+1. common fields：所有 source 的每行都要应用 common field 的 required/default/type 规则。
+2. fragment fields：只有当 source 声明了该 fragment 时，该 source 的每行才应用对应 fragment fields 的 required/default/type 规则。
+3. source 未声明的 fragment，其字段在该 source 中不要求存在；如果 CSV header 提供了该 fragment 的 `fragment.field` 列，应报 unknown/inactive fragment field，避免误填被静默忽略。
+4. fragment required field 缺失但有 default 时，normalize 阶段补 default 后通过。
+5. fragment required field 缺失且无 default 时，错误信息应包含 table、source、row、fragment、field，例如：
+
+```text
+table `items` source `items/weapons.csv` row 3 fragment `stats` field `attack` is required
+```
+
+这意味着 validation 不能只看合并后的 `DataTable.rows`，还需要知道每行来自哪个 `DataSourcePlan` 以及该 source 声明的 fragment set。下一阶段应在 Data 模块为每行保留 source ordinal/path/fragments 元数据。
+
+## 5.6 Polymorphic Fragment Validation
+
+variant source mode 的校验分为 Meta、Data load/merge、Data validation 三层。
+
+### 5.6.1 Meta validation
+
+需要检查：
+
+- `SourceRef.fragments` 只能用于 `polymorphic = true` 的 collection table。
+- source 引用的 fragment 必须在当前 table 的 `[[tables.fragments]]` 中存在。
+- fragment names 在 table scope 内唯一。
+- fragment name 不能与 table common field name 冲突，因为 runtime payload 使用 fragment name 作为顶层 nested object key。
+- fragment field names 在所属 fragment 内唯一；不同 fragments 可以复用相同 field name，fragment field 也可以与 common field 同名。
+- CSV header 中 fragment field 使用 `fragment.field` 形式，例如 `stats.attack`，common field 使用裸 field name，例如 `attack`。如果存在 common field `attack` 和 fragment field `stats.attack`，两者分别由 `attack` 与 `stats.attack` 两列提供。
+- CSV header 中出现未知 `fragment.field`、未声明 fragment 的 `fragment.field`、或 source 未激活 fragment 的 `fragment.field`，都应报 validation error。
+- fragment field validator 若未支持 nested/fragment scope，应像 struct child validators 一样先拒绝或明确只支持基础 type/default/required。
+- primary/unique index 第一阶段只允许引用 common fields。
+
+### 5.6.2 Data load / merge validation
+
+需要检查：
+
+- 每个 source 读出的每行都必须是完整 variant record：包含 common required/default 处理所需字段，以及该 source 声明 fragments 的 `fragment.field` 字段。
+- 多个 variant sources 追加到同一逻辑 table；按 primary index 或 unique index 检查冲突。即使两个 source 声明不同 fragments，同一 primary key 也冲突。
+- 不做按 ID 拼接；如果某 source 行只包含 fragment 字段但缺 common required 字段，应按普通 required 错误处理，而不是尝试从其他 source 补齐。
+
+### 5.6.3 Runtime export validation
+
+runtime payload 应固定 fragment 表达方式。第一阶段推荐直接用 fragment 对应的 nested object 表达 presence，不额外输出 `fragments` 数组：
+
+```json
+{
+  "id": "1001",
+  "name": "Iron Sword",
+  "stats": { "attack": "10", "defense": "0" },
+  "skills": { "skill_id": "slash" }
+}
+```
+
+其中：
+
+- common fields 保持当前顶层字段输出。
+- 每个 fragment 输出为一个与 fragment 同名的 nested object，内部只包含当前 target 可见字段；fragment 内字段保持自己的局部名称。
+- fragment object 出现即表示该 row 拥有该 fragment；缺失则表示该 row 没有该 fragment，或该 fragment 对当前 target 不可见。
+- 如果 row 拥有某个当前 target 可见的 fragment，但该 fragment 没有任何 target-visible 字段，仍输出空 object，例如 `"stats": {}`，避免丢失 presence。
+- 因为不再输出 `fragments` 数组，`fragments` 不需要作为 runtime payload 保留字段；但 fragment 名称不能与 common field 名称冲突，否则 nested object 与普通字段会歧义。fragment 内字段名可以与其他 fragment 或 common field 重复，因为它们位于不同 object scope。
+- scalar 仍沿用当前 runtime payload 策略：先保持字符串输出；typed payload 可作为后续统一升级。
+
+> 编号说明：原 `Index Validation` 章节后续编号可在文档整理时统一顺延；本节先插入 polymorphic fragment validation 语义，避免实现阶段缺少依据。
 
 ## 5.6 Index Validation
 
