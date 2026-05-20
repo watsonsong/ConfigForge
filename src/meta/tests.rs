@@ -426,6 +426,65 @@ fn rejects_invalid_foreign_key_declarations() {
 }
 
 #[test]
+fn link_rejects_semantically_invalid_foreign_keys() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "region"
+            type = "string"
+
+            [[tables.indexes]]
+            name = "by_id_region"
+            fields = ["id", "region"]
+            unique = true
+
+            [[tables.indexes]]
+            name = "by_region"
+            fields = ["region"]
+            unique = false
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "item_id"
+            type = "int"
+            foreign_key = { name = "composite_from_field", target_table = "items", target_index = "by_id_region" }
+
+            [[tables.fields]]
+            name = "region"
+            type = "string"
+
+            [[tables.foreign_keys]]
+            name = "non_unique"
+            fields = ["region"]
+            target_table = "items"
+            target_index = "by_region"
+        "#,
+    )
+    .expect_err("invalid FK meta should fail loading");
+    let ConfigForgeError::MetaValidation(diagnostics) = meta else {
+        panic!("expected meta validation diagnostics");
+    };
+    let messages = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(messages.contains("field-level foreign key only supports single-field index"));
+    assert!(messages.contains("which is not unique"));
+}
+
+#[test]
 fn accepts_canonical_and_legacy_primitive_field_types() {
     let meta = parse(
         r#"

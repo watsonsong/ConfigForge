@@ -48,8 +48,13 @@ pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<M
             })
             .collect::<Vec<_>>();
         let linked_indexes = link_indexes(table, &linked_fields);
-        let linked_foreign_keys =
-            link_foreign_keys(table, &raw_table_index, &linked_fields, &mut diagnostics);
+        let linked_foreign_keys = link_foreign_keys(
+            table,
+            &raw_table_index,
+            &enum_index,
+            &linked_fields,
+            &mut diagnostics,
+        );
         linked_tables.push(LinkedTableMeta::new(
             table,
             linked_fields,
@@ -135,6 +140,7 @@ fn link_indexes<'meta>(
 fn link_foreign_keys<'meta>(
     table: &'meta super::TableMeta,
     table_index: &HashMap<&'meta str, &'meta super::TableMeta>,
+    enum_index: &HashMap<&'meta str, &'meta super::EnumMeta>,
     linked_fields: &[LinkedFieldMeta<'meta>],
     diagnostics: &mut Vec<MetaDiagnostic>,
 ) -> Vec<LinkedForeignKeyMeta<'meta>> {
@@ -203,6 +209,52 @@ fn link_foreign_keys<'meta>(
             continue;
         }
         if let Some(target_index) = target_index {
+            if !target_index.unique && !target_index.primary {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!(
+                        "table `{}` foreign key `{}` references target index `{}.{}` which is not unique",
+                        table.name, foreign_key.name, target_table.name, target_index.name
+                    ),
+                ));
+                continue;
+            }
+            if foreign_key.is_field_level() && target_index.fields.len() != 1 {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!(
+                        "table `{}` foreign key `{}` references composite index `{}.{}`; field-level foreign key only supports single-field index",
+                        table.name, foreign_key.name, target_table.name, target_index.name
+                    ),
+                ));
+                continue;
+            }
+            if fields.len() != target_index.fields.len() {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!(
+                        "table `{}` foreign key `{}` has {} source fields but target index `{}.{}` has {} fields",
+                        table.name,
+                        foreign_key.name,
+                        fields.len(),
+                        target_table.name,
+                        target_index.name,
+                        target_index.fields.len()
+                    ),
+                ));
+                continue;
+            }
+            if !linked_foreign_key_types_compatible(&fields, target_table, target_index, enum_index)
+            {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!(
+                        "table `{}` foreign key `{}` has incompatible source and target key field types",
+                        table.name, foreign_key.name
+                    ),
+                ));
+                continue;
+            }
             linked_foreign_keys.push(LinkedForeignKeyMeta {
                 name: foreign_key.name,
                 desc: foreign_key.desc,
@@ -217,6 +269,33 @@ fn link_foreign_keys<'meta>(
         }
     }
     linked_foreign_keys
+}
+
+fn linked_foreign_key_types_compatible(
+    source_fields: &[LinkedFieldMeta<'_>],
+    target_table: &super::TableMeta,
+    target_index: &super::IndexMeta,
+    enum_index: &HashMap<&str, &super::EnumMeta>,
+) -> bool {
+    source_fields
+        .iter()
+        .zip(target_index.fields.iter())
+        .all(|(source_field, target_field_name)| {
+            let Some(target_field) = target_table.field(target_field_name) else {
+                return false;
+            };
+            let source_type = source_field.meta.primitive_type();
+            let target_type = target_field.primitive_type();
+            match (source_type, target_type) {
+                (Some(source), Some(target)) => source == target,
+                (Some(_), None) | (None, Some(_)) => false,
+                (None, None) => {
+                    source_field.meta.field_type == target_field.field_type
+                        && enum_index.contains_key(source_field.meta.field_type.as_str())
+                        && enum_index.contains_key(target_field.field_type.as_str())
+                }
+            }
+        })
 }
 
 fn link_field_type<'meta>(

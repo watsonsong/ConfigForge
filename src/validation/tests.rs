@@ -532,6 +532,243 @@ fn target_validation_rejects_non_visible_foreign_key_target_table() {
 }
 
 #[test]
+fn target_validation_rejects_foreign_key_to_filtered_target_row() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+            row_export = { excluded_tags_field = "exclude_tags" }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "exclude_tags"
+            type = "string"
+            export = false
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "drop_item_id"
+            type = "int"
+            foreign_key = { name = "drop_item", target_table = "items" }
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![
+        DataTable::new(
+            "items",
+            vec![
+                BTreeMap::from([
+                    ("id".to_owned(), "1".to_owned()),
+                    ("exclude_tags".to_owned(), String::new()),
+                ]),
+                BTreeMap::from([
+                    ("id".to_owned(), "2".to_owned()),
+                    ("exclude_tags".to_owned(), "client".to_owned()),
+                ]),
+            ],
+        ),
+        DataTable::new(
+            "monsters",
+            vec![BTreeMap::from([(
+                "drop_item_id".to_owned(),
+                "2".to_owned(),
+            )])],
+        ),
+    ]);
+
+    assert!(validate_data_set(&linked_meta, &data_set).is_ok());
+    let message = validate_error(validate_data_set_for_target(
+        &linked_meta,
+        &TargetTags::new(["client"]),
+        &data_set,
+    ));
+    assert!(message.contains("references missing `items.by_id` key `[\"2\"]`"));
+}
+
+#[test]
+fn target_validation_skips_foreign_key_when_export_when_does_not_match() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+            export_when = { any = ["server"] }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "drop_item_id"
+            type = "int"
+            export_when = { any = ["server"] }
+            foreign_key = { name = "drop_item", target_table = "items", export_when = { any = ["server"] } }
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![
+        DataTable::new(
+            "items",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+        DataTable::new(
+            "monsters",
+            vec![BTreeMap::from([(
+                "drop_item_id".to_owned(),
+                "1".to_owned(),
+            )])],
+        ),
+    ]);
+
+    assert!(
+        validate_data_set_for_target(&linked_meta, &TargetTags::new(["client"]), &data_set,)
+            .is_ok()
+    );
+}
+
+#[test]
+fn target_validation_reports_hidden_foreign_key_source_and_target_fields() {
+    let source_hidden = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "drop_item_id"
+            type = "int"
+            export_when = { any = ["server"] }
+            foreign_key = { name = "drop_item", target_table = "items" }
+        "#,
+    )
+    .expect("meta should load");
+    let linked_source_hidden = source_hidden.link().expect("meta should link");
+    let data_set = DataSet::new(vec![
+        DataTable::new(
+            "items",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+        DataTable::new(
+            "monsters",
+            vec![BTreeMap::from([(
+                "drop_item_id".to_owned(),
+                "1".to_owned(),
+            )])],
+        ),
+    ]);
+    let source_message = validate_error(validate_data_set_for_target(
+        &linked_source_hidden,
+        &TargetTags::new(["client"]),
+        &data_set,
+    ));
+    assert!(source_message.contains("non-exported source field `drop_item_id`"));
+
+    let target_hidden = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_pk"
+
+            [[tables.fields]]
+            name = "pk"
+            type = "int"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            export_when = { any = ["server"] }
+
+            [[tables.indexes]]
+            name = "by_pk"
+            fields = ["pk"]
+            unique = true
+            primary = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "drop_item_id"
+            type = "int"
+            foreign_key = { name = "drop_item", target_table = "items", target_index = "by_id" }
+        "#,
+    )
+    .expect("meta should load");
+    let linked_target_hidden = target_hidden.link().expect("meta should link");
+    let target_data_set = DataSet::new(vec![
+        DataTable::new(
+            "items",
+            vec![BTreeMap::from([
+                ("pk".to_owned(), "1".to_owned()),
+                ("id".to_owned(), "1".to_owned()),
+            ])],
+        ),
+        DataTable::new(
+            "monsters",
+            vec![BTreeMap::from([(
+                "drop_item_id".to_owned(),
+                "1".to_owned(),
+            )])],
+        ),
+    ]);
+    let target_message = validate_error(validate_data_set_for_target(
+        &linked_target_hidden,
+        &TargetTags::new(["client"]),
+        &target_data_set,
+    ));
+    assert!(target_message.contains("non-exported target index field `items.id`"));
+}
+
+#[test]
 fn target_fragment_validation_uses_visible_rows() {
     let meta = MetaModel::from_toml_str(
         r#"

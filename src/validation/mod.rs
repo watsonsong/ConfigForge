@@ -415,7 +415,7 @@ fn validate_foreign_keys_full(meta: &LinkedMetaModel<'_>, data_set: &DataSet) ->
                         target_table_meta.meta.name
                     ))
                 })?;
-            let target_keys = build_foreign_key_target_keys(target_table, target_index, None)?;
+            let target_keys = build_foreign_key_target_keys(target_table, target_index, None);
             validate_foreign_key_source_rows(
                 source_table_meta,
                 source_table,
@@ -485,7 +485,7 @@ fn validate_foreign_keys_for_target(
                 target_table_view.table,
                 target_index,
                 Some(target_table_view),
-            )?;
+            );
             validate_foreign_key_source_rows(
                 source_table_view.meta,
                 source_table_view.table,
@@ -539,7 +539,7 @@ fn build_foreign_key_target_keys(
     target_table: &DataTable,
     target_index: &LinkedIndexMeta<'_>,
     target_table_view: Option<&ExportTableView<'_, '_>>,
-) -> Result<HashSet<Vec<String>>> {
+) -> HashSet<Vec<String>> {
     let mut keys = HashSet::new();
     match target_table_view {
         Some(view) => {
@@ -556,7 +556,7 @@ fn build_foreign_key_target_keys(
             }
         }
     }
-    Ok(keys)
+    keys
 }
 
 fn validate_foreign_key_source_rows(
