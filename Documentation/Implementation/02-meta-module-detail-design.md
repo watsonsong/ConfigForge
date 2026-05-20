@@ -307,7 +307,7 @@ pub struct ForeignKeyMeta {
     pub fields: Vec<String>,
     pub target_table: String,
     pub target_index: Option<String>,
-    pub allow_empty: bool,
+    pub allow_empty: Option<bool>,
 }
 ```
 
@@ -315,9 +315,10 @@ pub struct ForeignKeyMeta {
 
 - `fields` 是 source table 中参与引用的字段列表。
 - `target_table` / `target_index` 描述被引用的目标表和唯一索引；`target_index` 为空时使用目标表 primary index。
-- `allow_empty` 允许 optional FK 全空时跳过引用完整性检查。
+- `allow_empty` 允许 optional FK 全空时跳过引用完整性检查；省略时按 source fields 的 `required` 派生，所有 source fields 都是 optional 时允许全空，否则不允许全空。
 - `export` / `export_when` 控制该关系是否进入当前 target 的 CodeModel；validation 也默认只检查当前 target 可见关系。
 - Link 阶段应解析为 `LinkedForeignKeyMeta<'meta>`，供 validation 隐式生成 referential-integrity validator，并供 codegen 生成关联查询 helper。
+- Phase 1 仅支持 CollectionTable 到 CollectionTable 的 FK；ObjectTable 作为 source/target 暂不支持。
 
 ### 2.5.9 Target Tags 与导出条件
 

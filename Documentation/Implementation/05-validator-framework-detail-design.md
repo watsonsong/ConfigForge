@@ -243,11 +243,11 @@ pub struct ForeignKeyMeta {
     #[serde(default)]
     pub target_index: Option<String>,
     #[serde(default)]
-    pub allow_empty: bool,
+    pub allow_empty: Option<bool>,
 }
 ```
 
-如果 `target_index` 为空，则默认使用 target table 的 primary index。单字段便捷写法可以作为后续语法糖：
+如果 `target_index` 为空，则默认使用 target table 的 primary index。单字段 FK 推荐使用字段级语法糖：
 
 ```toml
 [[tables.fields]]
@@ -256,7 +256,7 @@ type = "int"
 foreign_key = { name = "item", target_table = "items", target_index = "by_id" }
 ```
 
-该便捷写法在 load/compile 阶段展开成 `TableMeta.foreign_keys` 中的一条关系。
+该便捷写法在 link/validate 阶段规范化为与 table-level FK 相同的关系视图。字段级 FK 省略 `allow_empty` 时按当前字段 `required` 派生；table-level FK 省略 `allow_empty` 时按 source fields 的 `required` 派生：所有 source fields 都是 optional 则允许全空，否则不允许全空。
 
 外键关系的消费者：
 
@@ -276,6 +276,7 @@ foreign_key = { name = "item", target_table = "items", target_index = "by_id" }
 - target index 是 unique；
 - source fields 数量与 target index fields 数量一致；
 - source/target key 类型兼容。
+- source/target table 都是 CollectionTable；ObjectTable 参与 FK 时 Phase 1 报 unsupported。
 
 validation 执行期检查：
 
@@ -283,13 +284,13 @@ validation 执行期检查：
 - composite FK 部分为空时报错；
 - 非空 FK 必须能在 target ExportView index 中找到。
 
-外键关系默认按 `input = "export_view"` 语义执行：source table、target table、source fields、target index fields 都必须在当前 target 的 ExportView 中可见，target 中被 `row_export` 排除的行默认不可引用。若业务确实需要校验完整数据集中的关系，后续可显式支持 `input = "full_dataset"`；此时诊断必须标明当前 target 与 input scope，避免用户误解被过滤行是否可引用。若 foreign key 自身的 `export_when` 不匹配当前 target，则该关系不参与当前 target 的 referential-integrity validation，也不进入当前 target 的 CodeModel。
+外键关系默认按 `input = "export_view"` 语义执行：若 foreign key 自身的 `export_when` 不匹配当前 target，则该关系不参与当前 target 的 referential-integrity validation，也不进入当前 target 的 CodeModel；若 foreign key 自身可见，则 source table、target table、target index、source fields、target index fields 都必须在当前 target 的 ExportView 中可见，否则报 validation/codegen error。target key set 仅从当前 target visible rows 中构建，target 中被 `row_export` 排除的行默认不可引用。若业务确实需要校验完整数据集中的关系，后续可显式支持 `input = "full_dataset"`；此时诊断必须标明当前 target 与 input scope，避免用户误解被过滤行是否可引用。
 
 codegen 规则：
 
 - 只有 `foreign_key.export && foreign_key.export_when.matches(target_tags)` 的关系进入 CodeModel。
-- source table、target table、source fields、target index fields 都必须在当前 target CodeModel 中可见，否则：
-  - 若外键是当前 target 可导出的关系但字段/表不可见，应报 codegen validation error；
+- source table、target table、target index、source fields、target index fields 都必须在当前 target CodeModel 中可见，否则：
+  - 若外键是当前 target 可导出的关系但字段/索引/表不可见，应报 codegen validation error；
   - 若外键被 `export_when` 排除，则跳过。
 - target index 必须唯一，生成代码才能返回单条关联记录；非唯一关系应建模为另一类 relation，例如 `many_to_one = false` / `relation = "many"`，第一阶段不支持。
 
@@ -602,8 +603,10 @@ pub struct ReferentialIntegrityValidatorConfig<'meta> {
 - 先从 target ExportView rows 构建 target key set。
 - 遍历 source ExportView rows。
 - source fields 全空且 `allow_empty = true` 时跳过。
-- source fields 部分为空时报错。
+- source fields 全空且 `allow_empty = false` 时报错。
+- source fields 部分为空始终报错。
 - 非空 key 不存在时报错。
+- key 使用 normalize 后的 raw string cell，与 unique index 语义保持一致；Phase 1 不做 primitive typed canonicalization，例如 `"01"` 与 `"1"` 是不同 key。
 
 ### 5.6.4 Required / Type / Enum 的迁移
 

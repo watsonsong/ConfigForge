@@ -377,7 +377,7 @@ Foreign key 对 CodeModel 的要求：
 
 - 外键不是普通 validator，而是 Meta 关系数据。validation 只负责保证关系完整性；codegen 需要读取同一份 `LinkedForeignKeyMeta` 生成关联查询 API。
 - 只有当前 target 可导出的 foreign key 进入 `CodeForeignKey`。
-- source table、target table、source fields、target index fields 都必须在当前 target CodeModel 可见。
+- source table、target table、target index、source fields、target index fields 都必须在当前 target CodeModel 可见。
 - target index 必须 unique，第一阶段只生成 many-to-one helper；一对多反向索引可在后续 relation 设计中扩展。
 
 ### 4.5.1 Polymorphic Fragment CodeModel

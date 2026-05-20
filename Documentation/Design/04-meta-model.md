@@ -468,24 +468,46 @@ Index cardinality：
 
 外键声明字段值引用另一张表的 unique index。
 
+单字段外键推荐直接写在字段上，作为便捷语法：
+
 ```toml
 [[tables.fields]]
 name = "item_id"
 type = "int"
 required = true
+foreign_key = { target_table = "items", target_index = "by_id" }
+```
 
-[tables.fields.foreign_key]
-table = "items"
-desc = "引用奖励物品。"
+如果省略 `target_index`，默认引用目标表 primary index：
+
+```toml
+[[tables.fields]]
+name = "item_id"
+type = "int"
+foreign_key = { target_table = "items" }
+```
+
+多字段外键或需要引用复合 unique index 时，使用 table-level 配置：
+
+```toml
+[[tables.foreign_keys]]
+name = "item_in_region"
+fields = ["item_id", "region"]
+target_table = "items"
+target_index = "by_id_region"
 ```
 
 规则：
 
-- 外键是否可为空由字段 `required` 决定。
+- 单字段外键优先使用字段级 `foreign_key` 语法糖；table-level `[[tables.foreign_keys]]` 主要用于复合外键。
+- 字段级外键只允许引用目标表的一字段 unique / primary index；如果要引用复合 unique index，必须使用 table-level 配置。
+- 字段级外键是否可为空默认由字段 `required` 决定：`required = true` 时不允许空，`required = false` 时允许空；也可以通过 `allow_empty` 显式覆盖。
+- table-level 外键省略 `allow_empty` 时，默认按 source fields 的 `required` 派生：所有 source fields 都是 optional 时允许全空，否则不允许全空；也可以通过 `allow_empty` 显式覆盖。
 - required foreign key 缺值时报 required error。
 - optional foreign key 全空时跳过 FK resolution。
-- composite foreign key 全空可跳过，部分为空应报 partial key error。
+- composite foreign key 仅在 `allow_empty = true` 或默认派生为允许空时，全空可跳过；部分为空始终报 partial key error。
 - foreign key target 必须是 unique index 或 primary index。
+- Phase 1 仅支持 CollectionTable 到 CollectionTable 的 FK；ObjectTable 作为 source/target 暂不支持。
 
 ## 4.13 Multi-source 与 Override
 
