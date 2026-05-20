@@ -41,6 +41,7 @@ pub struct CodeTable {
     pub fields: Vec<CodeField>,
     pub fragments: Vec<CodeFragment>,
     pub indexes: Vec<CodeIndex>,
+    pub foreign_keys: Vec<CodeForeignKey>,
     pub primary_index: Option<String>,
     pub data_file: String,
 }
@@ -65,6 +66,16 @@ pub struct CodeIndex {
     pub unique: bool,
     pub primary: bool,
     pub fields: Vec<CodeField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeForeignKey {
+    pub name: String,
+    pub desc: Option<String>,
+    pub fields: Vec<CodeField>,
+    pub target_table: String,
+    pub target_index: String,
+    pub allow_empty: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -257,6 +268,8 @@ pub fn build_code_model(
                 &format!("table `{}` indexes", table_meta.meta.name),
             )?;
 
+            let foreign_keys = build_code_foreign_keys(meta, table_meta, &field_index, target_tags)?;
+
             let data_file = data_file_index
                 .get(table_meta.meta.name.as_str())
                 .copied()
@@ -272,6 +285,7 @@ pub fn build_code_model(
                 fields,
                 fragments,
                 indexes,
+                foreign_keys,
                 primary_index,
                 data_file,
             })
@@ -286,6 +300,87 @@ pub fn build_code_model(
         structs,
         tables,
     })
+}
+
+fn build_code_foreign_keys(
+    meta: &LinkedMetaModel<'_>,
+    table_meta: &crate::meta::LinkedTableMeta<'_>,
+    field_index: &HashMap<&str, CodeField>,
+    target_tags: &crate::meta::TargetTags,
+) -> Result<Vec<CodeForeignKey>> {
+    let mut foreign_keys = Vec::new();
+    for foreign_key in &table_meta.foreign_keys {
+        if !foreign_key.is_exported_for(target_tags) {
+            continue;
+        }
+        let target_table = meta.table(foreign_key.target_table_name).ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "table `{}` foreign key `{}` references unknown target table `{}`",
+                table_meta.meta.name, foreign_key.name, foreign_key.target_table_name
+            ))
+        })?;
+        if !target_table.meta.is_exported_for(target_tags) {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` foreign key `{}` references target table `{}` which is not exported for current target",
+                table_meta.meta.name, foreign_key.name, foreign_key.target_table_name
+            )));
+        }
+        let target_index = target_table
+            .index(foreign_key.target_index_name)
+            .ok_or_else(|| {
+                ConfigForgeError::Validation(format!(
+                    "table `{}` foreign key `{}` references unknown target index `{}.{}`",
+                    table_meta.meta.name,
+                    foreign_key.name,
+                    target_table.meta.name,
+                    foreign_key.target_index_name
+                ))
+            })?;
+        if !target_index.meta.is_exported_for(target_tags) {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` foreign key `{}` references target index `{}.{}` which is not exported for current target",
+                table_meta.meta.name,
+                foreign_key.name,
+                target_table.meta.name,
+                target_index.meta.name
+            )));
+        }
+        for target_field in &target_index.fields {
+            if !target_field.meta.is_exported_for(target_tags) {
+                return Err(ConfigForgeError::Validation(format!(
+                    "table `{}` foreign key `{}` references non-exported target index field `{}.{}` for current target",
+                    table_meta.meta.name,
+                    foreign_key.name,
+                    target_table.meta.name,
+                    target_field.meta.name
+                )));
+            }
+        }
+        let mut fields = Vec::new();
+        for field in &foreign_key.fields {
+            let Some(code_field) = field_index.get(field.meta.name.as_str()).cloned() else {
+                return Err(ConfigForgeError::Validation(format!(
+                    "table `{}` foreign key `{}` references non-exported source field `{}` for current target",
+                    table_meta.meta.name, foreign_key.name, field.meta.name
+                )));
+            };
+            fields.push(code_field);
+        }
+        foreign_keys.push(CodeForeignKey {
+            name: foreign_key.name.to_owned(),
+            desc: foreign_key.desc.map(str::to_owned),
+            fields,
+            target_table: foreign_key.target_table_name.to_owned(),
+            target_index: foreign_key.target_index_name.to_owned(),
+            allow_empty: foreign_key.allow_empty,
+        });
+    }
+    ensure_model_unique_names(
+        &foreign_keys,
+        |foreign_key| foreign_key.name.as_str(),
+        &format!("table `{}` foreign keys", table_meta.meta.name),
+    )?;
+    Ok(foreign_keys)
 }
 
 fn is_runtime_codegen_field(

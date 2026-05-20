@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use super::{
-    FieldMeta, LinkedField, LinkedFieldMeta, LinkedFragmentMeta, LinkedIndexMeta, LinkedMetaModel,
-    LinkedStructMeta, LinkedStructType, LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode,
-    MetaModel, PrimitiveFieldType,
+    FieldMeta, LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedFragmentMeta,
+    LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType, LinkedTableMeta,
+    MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
 };
 
 pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<MetaDiagnostic>) {
@@ -20,6 +20,11 @@ pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<M
         .collect::<HashMap<_, _>>();
 
     let mut linked_tables = Vec::new();
+    let raw_table_index = model
+        .tables
+        .iter()
+        .map(|table| (table.name.as_str(), table))
+        .collect::<HashMap<_, _>>();
     for table in &model.tables {
         let linked_fields = link_fields(
             &enum_index,
@@ -43,11 +48,14 @@ pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<M
             })
             .collect::<Vec<_>>();
         let linked_indexes = link_indexes(table, &linked_fields);
+        let linked_foreign_keys =
+            link_foreign_keys(table, &raw_table_index, &linked_fields, &mut diagnostics);
         linked_tables.push(LinkedTableMeta::new(
             table,
             linked_fields,
             linked_fragments,
             linked_indexes,
+            linked_foreign_keys,
         ));
     }
 
@@ -122,6 +130,93 @@ fn link_indexes<'meta>(
                 .collect(),
         })
         .collect()
+}
+
+fn link_foreign_keys<'meta>(
+    table: &'meta super::TableMeta,
+    table_index: &HashMap<&'meta str, &'meta super::TableMeta>,
+    linked_fields: &[LinkedFieldMeta<'meta>],
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) -> Vec<LinkedForeignKeyMeta<'meta>> {
+    let field_index = linked_fields
+        .iter()
+        .map(|field| (field.meta.name.as_str(), field))
+        .collect::<HashMap<_, _>>();
+    let mut linked_foreign_keys = Vec::new();
+    for foreign_key in table.resolved_foreign_keys() {
+        let mut failed = false;
+        let fields = foreign_key
+            .fields
+            .iter()
+            .filter_map(|field_name| {
+                field_index.get(field_name).cloned().cloned().or_else(|| {
+                    failed = true;
+                    diagnostics.push(MetaDiagnostic::new(
+                        MetaDiagnosticCode::MissingFieldReference,
+                        format!(
+                            "table `{}` foreign key `{}` references unknown source field `{}`",
+                            table.name, foreign_key.name, field_name
+                        ),
+                    ));
+                    None
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let Some(target_table) = table_index.get(foreign_key.target_table).copied() else {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                format!(
+                    "table `{}` foreign key `{}` references unknown target table `{}`",
+                    table.name, foreign_key.name, foreign_key.target_table
+                ),
+            ));
+            continue;
+        };
+        let target_index = if let Some(target_index_name) = foreign_key.target_index {
+            target_table.index(target_index_name).or_else(|| {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!(
+                        "table `{}` foreign key `{}` references unknown target index `{}.{}`",
+                        table.name, foreign_key.name, target_table.name, target_index_name
+                    ),
+                ));
+                failed = true;
+                None
+            })
+        } else {
+            target_table.primary_index().or_else(|| {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!(
+                        "table `{}` foreign key `{}` omits `target_index`, but target table `{}` has no primary index",
+                        table.name, foreign_key.name, target_table.name
+                    ),
+                ));
+                failed = true;
+                None
+            })
+        };
+
+        if failed {
+            continue;
+        }
+        if let Some(target_index) = target_index {
+            linked_foreign_keys.push(LinkedForeignKeyMeta {
+                name: foreign_key.name,
+                desc: foreign_key.desc,
+                export: foreign_key.export,
+                export_when: foreign_key.export_when,
+                allow_empty: foreign_key.allow_empty,
+                declared_at: foreign_key.declared_at,
+                fields,
+                target_table_name: target_table.name.as_str(),
+                target_index_name: target_index.name.as_str(),
+            });
+        }
+    }
+    linked_foreign_keys
 }
 
 fn link_field_type<'meta>(

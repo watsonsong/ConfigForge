@@ -39,5 +39,6 @@ pub enum MetaDiagnosticCode {
     InvalidDefaultValue,
     InvalidSourceDeclaration,
     InvalidValidatorConfig,
+    InvalidForeignKeyDeclaration,
     UnsupportedFeature,
 }

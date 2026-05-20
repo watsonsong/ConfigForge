@@ -57,9 +57,11 @@ fn rejects_invalid_type() {
             validator_only: None,
             field_number: None,
             unique: true,
+            foreign_key: None,
         }],
         fragments: vec![],
         indexes: vec![],
+        foreign_keys: vec![],
         primary_index: None,
         preserve_source_order: false,
         polymorphic: false,
@@ -70,6 +72,7 @@ fn rejects_invalid_type() {
             meta: &meta.fields[0],
             linked_field: LinkedField::Primitive(PrimitiveFieldType::Int),
         }],
+        vec![],
         vec![],
         vec![],
     );
@@ -109,9 +112,11 @@ fn applies_defaults_before_required_and_type_validation() {
             validator_only: None,
             field_number: None,
             unique: false,
+            foreign_key: None,
         }],
         fragments: vec![],
         indexes: vec![],
+        foreign_keys: vec![],
         primary_index: None,
         preserve_source_order: false,
         polymorphic: false,
@@ -122,6 +127,7 @@ fn applies_defaults_before_required_and_type_validation() {
             meta: &meta.fields[0],
             linked_field: LinkedField::Primitive(PrimitiveFieldType::Int),
         }],
+        vec![],
         vec![],
         vec![],
     );
@@ -200,9 +206,11 @@ fn validates_enum_values() {
             validator_only: None,
             field_number: None,
             unique: false,
+            foreign_key: None,
         }],
         fragments: vec![],
         indexes: vec![],
+        foreign_keys: vec![],
         primary_index: None,
         preserve_source_order: false,
         polymorphic: false,
@@ -213,6 +221,7 @@ fn validates_enum_values() {
             meta: &meta.fields[0],
             linked_field: LinkedField::Enum(&enum_meta),
         }],
+        vec![],
         vec![],
         vec![],
     );
@@ -321,6 +330,205 @@ fn validates_fragment_scoped_fields_and_defaults() {
     assert!(
         matches!(error, ConfigForgeError::Validation(message) if message.contains("inactive fragment `armor`"))
     );
+}
+
+fn foreign_key_meta() -> MetaModel {
+    MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "drop_item_id"
+            type = "int"
+            required = true
+            foreign_key = { name = "drop_item", target_table = "items" }
+        "#,
+    )
+    .expect("meta should load")
+}
+
+fn foreign_key_data(drop_item_id: &str) -> DataSet {
+    DataSet::new(vec![
+        DataTable::new(
+            "items",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+        DataTable::new(
+            "monsters",
+            vec![BTreeMap::from([
+                ("id".to_owned(), "100".to_owned()),
+                ("drop_item_id".to_owned(), drop_item_id.to_owned()),
+            ])],
+        ),
+    ])
+}
+
+#[test]
+fn validates_foreign_key_reference_integrity() {
+    let meta = foreign_key_meta();
+    let linked_meta = meta.link().expect("meta should link");
+
+    assert!(validate_data_set(&linked_meta, &foreign_key_data("1")).is_ok());
+
+    let message = validate_error(validate_data_set(&linked_meta, &foreign_key_data("2")));
+    assert!(message.contains("foreign key `drop_item` references missing `items.by_id` key"));
+}
+
+#[test]
+fn uses_raw_string_foreign_key_semantics() {
+    let meta = foreign_key_meta();
+    let linked_meta = meta.link().expect("meta should link");
+
+    let message = validate_error(validate_data_set(&linked_meta, &foreign_key_data("01")));
+    assert!(message.contains("references missing `items.by_id` key `[\"01\"]`"));
+}
+
+#[test]
+fn handles_foreign_key_empty_and_partial_keys() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "region"
+            type = "string"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id_region"
+            fields = ["id", "region"]
+            unique = true
+
+            [[tables]]
+            name = "shops"
+            source = "shops.csv"
+
+            [[tables.fields]]
+            name = "item_id"
+            type = "int"
+            required = false
+
+            [[tables.fields]]
+            name = "region"
+            type = "string"
+            required = false
+
+            [[tables.foreign_keys]]
+            name = "item_region"
+            fields = ["item_id", "region"]
+            target_table = "items"
+            target_index = "by_id_region"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let items = DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("region".to_owned(), "cn".to_owned()),
+        ])],
+    );
+
+    let empty = DataSet::new(vec![
+        items.clone(),
+        DataTable::new("shops", vec![BTreeMap::new()]),
+    ]);
+    assert!(validate_data_set(&linked_meta, &empty).is_ok());
+
+    let partial = DataSet::new(vec![
+        items,
+        DataTable::new(
+            "shops",
+            vec![BTreeMap::from([("item_id".to_owned(), "1".to_owned())])],
+        ),
+    ]);
+    let message = validate_error(validate_data_set(&linked_meta, &partial));
+    assert!(message.contains("partial empty key"));
+}
+
+#[test]
+fn target_validation_rejects_non_visible_foreign_key_target_table() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+            export_when = { any = ["server"] }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "drop_item_id"
+            type = "int"
+            foreign_key = { target_table = "items" }
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![
+        DataTable::new(
+            "items",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+        DataTable::new(
+            "monsters",
+            vec![BTreeMap::from([(
+                "drop_item_id".to_owned(),
+                "1".to_owned(),
+            )])],
+        ),
+    ]);
+
+    let message = validate_error(validate_data_set_for_target(
+        &linked_meta,
+        &TargetTags::new(["client"]),
+        &data_set,
+    ));
+    assert!(message.contains("target table `items` which is not exported"));
 }
 
 #[test]

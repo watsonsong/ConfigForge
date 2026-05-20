@@ -263,6 +263,211 @@ fn validate_table_meta(
 
     validate_row_export_policy(table, &field_names, diagnostics);
     validate_primary_index(table, &primary_indexes, diagnostics);
+    validate_foreign_keys(model, table, &field_names, diagnostics);
+}
+
+fn validate_foreign_keys(
+    model: &MetaModel,
+    table: &TableMeta,
+    field_names: &BTreeSet<&str>,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    let mut foreign_key_names = BTreeSet::new();
+    for foreign_key in table.resolved_foreign_keys() {
+        let owner = format!("table `{}` foreign key `{}`", table.name, foreign_key.name);
+        if foreign_key.name.trim().is_empty() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                format!("{owner} name must be non-empty"),
+            ));
+        }
+        if !foreign_key_names.insert(foreign_key.name) {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                format!(
+                    "table `{}` foreign key `{}` is defined more than once",
+                    table.name, foreign_key.name
+                ),
+            ));
+        }
+        validate_export_condition_tags(&owner, foreign_key.export_when, diagnostics);
+
+        if table.kind != TableKind::Collection {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!("{owner} uses ObjectTable as source, but foreign keys only support CollectionTable in Phase 1"),
+            ));
+        }
+
+        if foreign_key.fields.is_empty() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                format!("{owner} must reference at least one source field"),
+            ));
+        }
+
+        let mut source_field_names = BTreeSet::new();
+        for field_name in &foreign_key.fields {
+            if field_name.contains('.') {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::UnsupportedFeature,
+                    format!("{owner} references `{field_name}`, but fragment/nested field foreign keys are not supported"),
+                ));
+                continue;
+            }
+            if !source_field_names.insert(*field_name) {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!("{owner} references source field `{field_name}` more than once"),
+                ));
+            }
+            if !field_names.contains(field_name) {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::MissingFieldReference,
+                    format!("{owner} references unknown source field `{field_name}`"),
+                ));
+            }
+        }
+
+        if foreign_key.target_table.trim().is_empty() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                format!("{owner} target_table must be non-empty"),
+            ));
+            continue;
+        }
+
+        let Some(target_table) = model.table(foreign_key.target_table) else {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                format!(
+                    "{owner} references unknown target table `{}`",
+                    foreign_key.target_table
+                ),
+            ));
+            continue;
+        };
+        if target_table.kind != TableKind::Collection {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!("{owner} uses ObjectTable `{}` as target, but foreign keys only support CollectionTable in Phase 1", target_table.name),
+            ));
+        }
+
+        let target_index = if let Some(target_index_name) = foreign_key.target_index {
+            match target_table.index(target_index_name) {
+                Some(index) => Some(index),
+                None => {
+                    diagnostics.push(MetaDiagnostic::new(
+                        MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                        format!(
+                            "{owner} references unknown target index `{}.{}`",
+                            target_table.name, target_index_name
+                        ),
+                    ));
+                    None
+                }
+            }
+        } else {
+            match target_table.primary_index() {
+                Some(index) => Some(index),
+                None => {
+                    diagnostics.push(MetaDiagnostic::new(
+                        MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                        format!(
+                            "{owner} omits `target_index`, but target table `{}` has no primary index; configure a primary index or specify `target_index`",
+                            target_table.name
+                        ),
+                    ));
+                    None
+                }
+            }
+        };
+
+        let Some(target_index) = target_index else {
+            continue;
+        };
+        if !(target_index.unique || target_index.primary) {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                format!(
+                    "{owner} references target index `{}.{}` which is not unique",
+                    target_table.name, target_index.name
+                ),
+            ));
+        }
+        if foreign_key.is_field_level() && target_index.fields.len() != 1 {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                format!(
+                    "{owner} references composite index `{}.{}`; field-level foreign key only supports single-field index, use [[tables.foreign_keys]] for composite keys",
+                    target_table.name, target_index.name
+                ),
+            ));
+        }
+        if foreign_key.fields.len() != target_index.fields.len() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                format!(
+                    "{owner} has {} source fields but target index `{}.{}` has {} fields",
+                    foreign_key.fields.len(),
+                    target_table.name,
+                    target_index.name,
+                    target_index.fields.len()
+                ),
+            ));
+            continue;
+        }
+
+        for (source_field_name, target_field_name) in foreign_key
+            .fields
+            .iter()
+            .zip(target_index.fields.iter().map(String::as_str))
+        {
+            let Some(source_field) = table.field(source_field_name) else {
+                continue;
+            };
+            let Some(target_field) = target_table.field(target_field_name) else {
+                continue;
+            };
+            if !foreign_key_field_types_compatible(model, source_field, target_field) {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!(
+                        "{owner} source field `{}` type `{}` is incompatible with target field `{}.{}` type `{}`",
+                        source_field.name,
+                        source_field.field_type,
+                        target_table.name,
+                        target_field.name,
+                        target_field.field_type
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+fn foreign_key_field_types_compatible(
+    model: &MetaModel,
+    source: &FieldMeta,
+    target: &FieldMeta,
+) -> bool {
+    match (
+        PrimitiveFieldType::parse(&source.field_type),
+        PrimitiveFieldType::parse(&target.field_type),
+    ) {
+        (Some(source), Some(target)) => return source == target,
+        (Some(_), None) | (None, Some(_)) => return false,
+        (None, None) => {}
+    }
+    if model.enum_meta(&source.field_type).is_some()
+        || model.enum_meta(&target.field_type).is_some()
+    {
+        return source.field_type == target.field_type
+            && model.enum_meta(&source.field_type).is_some()
+            && model.enum_meta(&target.field_type).is_some();
+    }
+    false
 }
 
 fn validate_field_layout(

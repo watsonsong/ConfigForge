@@ -67,6 +67,8 @@ pub struct TableMeta {
     #[serde(default)]
     pub indexes: Vec<IndexMeta>,
     #[serde(default)]
+    pub foreign_keys: Vec<ForeignKeyMeta>,
+    #[serde(default)]
     pub primary_index: Option<String>,
     #[serde(default)]
     pub preserve_source_order: bool,
@@ -132,6 +134,62 @@ pub struct FieldMeta {
     pub field_number: Option<u32>,
     #[serde(default)]
     pub unique: bool,
+    #[serde(default)]
+    pub foreign_key: Option<FieldForeignKeyMeta>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct FieldForeignKeyMeta {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub desc: Option<String>,
+    #[serde(default = "default_export")]
+    pub export: bool,
+    #[serde(default)]
+    pub export_when: ExportCondition,
+    pub target_table: String,
+    #[serde(default)]
+    pub target_index: Option<String>,
+    #[serde(default)]
+    pub allow_empty: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct ForeignKeyMeta {
+    pub name: String,
+    #[serde(default)]
+    pub desc: Option<String>,
+    #[serde(default = "default_export")]
+    pub export: bool,
+    #[serde(default)]
+    pub export_when: ExportCondition,
+    #[serde(default)]
+    pub fields: Vec<String>,
+    pub target_table: String,
+    #[serde(default)]
+    pub target_index: Option<String>,
+    #[serde(default)]
+    pub allow_empty: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ForeignKeyDeclarationSite<'meta> {
+    Table(&'meta ForeignKeyMeta),
+    Field(&'meta FieldMeta, &'meta FieldForeignKeyMeta),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedForeignKeyMeta<'meta> {
+    pub name: &'meta str,
+    pub desc: Option<&'meta str>,
+    pub export: bool,
+    pub export_when: &'meta ExportCondition,
+    pub fields: Vec<&'meta str>,
+    pub target_table: &'meta str,
+    pub target_index: Option<&'meta str>,
+    pub allow_empty: bool,
+    pub declared_at: ForeignKeyDeclarationSite<'meta>,
 }
 
 fn default_export() -> bool {
@@ -341,6 +399,53 @@ impl TableMeta {
         self.primary_index()
     }
 
+    pub fn resolved_foreign_keys(&self) -> Vec<ResolvedForeignKeyMeta<'_>> {
+        let mut resolved = Vec::new();
+        for foreign_key in &self.foreign_keys {
+            let fields = foreign_key
+                .fields
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            let allow_empty = foreign_key.allow_empty.unwrap_or_else(|| {
+                fields.iter().all(|field_name| {
+                    self.field(field_name)
+                        .map(|field| !field.required)
+                        .unwrap_or(false)
+                })
+            });
+            resolved.push(ResolvedForeignKeyMeta {
+                name: foreign_key.name.as_str(),
+                desc: foreign_key.desc.as_deref(),
+                export: foreign_key.export,
+                export_when: &foreign_key.export_when,
+                fields,
+                target_table: foreign_key.target_table.as_str(),
+                target_index: foreign_key.target_index.as_deref(),
+                allow_empty,
+                declared_at: ForeignKeyDeclarationSite::Table(foreign_key),
+            });
+        }
+
+        for field in &self.fields {
+            let Some(foreign_key) = &field.foreign_key else {
+                continue;
+            };
+            resolved.push(ResolvedForeignKeyMeta {
+                name: foreign_key.name.as_deref().unwrap_or(field.name.as_str()),
+                desc: foreign_key.desc.as_deref(),
+                export: foreign_key.export,
+                export_when: &foreign_key.export_when,
+                fields: vec![field.name.as_str()],
+                target_table: foreign_key.target_table.as_str(),
+                target_index: foreign_key.target_index.as_deref(),
+                allow_empty: foreign_key.allow_empty.unwrap_or(!field.required),
+                declared_at: ForeignKeyDeclarationSite::Field(field, foreign_key),
+            });
+        }
+        resolved
+    }
+
     pub fn source_path(&self) -> Option<&str> {
         self.sources
             .first()
@@ -392,6 +497,28 @@ impl FragmentMeta {
 impl IndexMeta {
     pub fn is_exported_for(&self, target: &TargetTags) -> bool {
         self.export && self.export_when.matches(target)
+    }
+}
+
+impl ForeignKeyMeta {
+    pub fn is_exported_for(&self, target: &TargetTags) -> bool {
+        self.export && self.export_when.matches(target)
+    }
+}
+
+impl FieldForeignKeyMeta {
+    pub fn is_exported_for(&self, target: &TargetTags) -> bool {
+        self.export && self.export_when.matches(target)
+    }
+}
+
+impl ResolvedForeignKeyMeta<'_> {
+    pub fn is_exported_for(&self, target: &TargetTags) -> bool {
+        self.export && self.export_when.matches(target)
+    }
+
+    pub fn is_field_level(&self) -> bool {
+        matches!(self.declared_at, ForeignKeyDeclarationSite::Field(_, _))
     }
 }
 
@@ -490,10 +617,12 @@ pub struct LinkedTableMeta<'meta> {
     pub fields: Vec<LinkedFieldMeta<'meta>>,
     pub fragments: Vec<LinkedFragmentMeta<'meta>>,
     pub indexes: Vec<LinkedIndexMeta<'meta>>,
+    pub foreign_keys: Vec<LinkedForeignKeyMeta<'meta>>,
     primary_index: Option<usize>,
     field_index: HashMap<&'meta str, usize>,
     index_index: HashMap<&'meta str, usize>,
     fragment_index: HashMap<&'meta str, usize>,
+    foreign_key_index: HashMap<&'meta str, usize>,
 }
 
 pub struct LinkedFragmentMeta<'meta> {
@@ -512,6 +641,19 @@ pub struct LinkedStructMeta<'meta> {
 pub struct LinkedIndexMeta<'meta> {
     pub meta: &'meta IndexMeta,
     pub fields: Vec<LinkedFieldMeta<'meta>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinkedForeignKeyMeta<'meta> {
+    pub name: &'meta str,
+    pub desc: Option<&'meta str>,
+    pub export: bool,
+    pub export_when: &'meta ExportCondition,
+    pub allow_empty: bool,
+    pub declared_at: ForeignKeyDeclarationSite<'meta>,
+    pub fields: Vec<LinkedFieldMeta<'meta>>,
+    pub target_table_name: &'meta str,
+    pub target_index_name: &'meta str,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -584,6 +726,7 @@ impl<'meta> LinkedTableMeta<'meta> {
         fields: Vec<LinkedFieldMeta<'meta>>,
         fragments: Vec<LinkedFragmentMeta<'meta>>,
         indexes: Vec<LinkedIndexMeta<'meta>>,
+        foreign_keys: Vec<LinkedForeignKeyMeta<'meta>>,
     ) -> Self {
         let field_index = fields
             .iter()
@@ -603,15 +746,22 @@ impl<'meta> LinkedTableMeta<'meta> {
             .enumerate()
             .map(|(index, fragment)| (fragment.meta.name.as_str(), index))
             .collect();
+        let foreign_key_index = foreign_keys
+            .iter()
+            .enumerate()
+            .map(|(index, foreign_key)| (foreign_key.name, index))
+            .collect();
         Self {
             meta,
             fields,
             fragments,
             indexes,
+            foreign_keys,
             primary_index,
             field_index,
             index_index,
             fragment_index,
+            foreign_key_index,
         }
     }
 
@@ -635,6 +785,22 @@ impl<'meta> LinkedTableMeta<'meta> {
         self.fragment_index
             .get(name)
             .and_then(|index| self.fragments.get(*index))
+    }
+
+    pub fn foreign_key(&self, name: &str) -> Option<&LinkedForeignKeyMeta<'meta>> {
+        self.foreign_key_index
+            .get(name)
+            .and_then(|index| self.foreign_keys.get(*index))
+    }
+}
+
+impl LinkedForeignKeyMeta<'_> {
+    pub fn is_exported_for(&self, target: &TargetTags) -> bool {
+        self.export && self.export_when.matches(target)
+    }
+
+    pub fn is_field_level(&self) -> bool {
+        matches!(self.declared_at, ForeignKeyDeclarationSite::Field(_, _))
     }
 }
 

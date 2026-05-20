@@ -268,6 +268,164 @@ fn supports_imported_meta_files_before_linking_field_types() {
 }
 
 #[test]
+fn parses_and_links_field_level_foreign_key() {
+    let meta = parse(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "drop_item_id"
+            type = "int"
+            required = false
+            foreign_key = { target_table = "items", target_index = "by_id" }
+        "#,
+    );
+
+    let monsters = meta.table("monsters").expect("table should exist");
+    let resolved = monsters.resolved_foreign_keys();
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].name, "drop_item_id");
+    assert_eq!(resolved[0].fields, vec!["drop_item_id"]);
+    assert!(resolved[0].allow_empty);
+
+    let linked = meta.link().expect("meta should link");
+    let linked_monsters = linked.table("monsters").expect("linked table should exist");
+    let foreign_key = linked_monsters
+        .foreign_key("drop_item_id")
+        .expect("foreign key should link");
+    assert_eq!(foreign_key.target_table_name, "items");
+    assert_eq!(foreign_key.target_index_name, "by_id");
+    assert_eq!(foreign_key.fields[0].meta.name, "drop_item_id");
+}
+
+#[test]
+fn derives_table_level_foreign_key_allow_empty_from_source_fields() {
+    let meta = parse(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "region"
+            type = "string"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id_region"
+            fields = ["id", "region"]
+            unique = true
+
+            [[tables]]
+            name = "shops"
+            source = "shops.csv"
+
+            [[tables.fields]]
+            name = "item_id"
+            type = "int"
+            required = false
+
+            [[tables.fields]]
+            name = "region"
+            type = "string"
+            required = false
+
+            [[tables.foreign_keys]]
+            name = "item_in_region"
+            fields = ["item_id", "region"]
+            target_table = "items"
+            target_index = "by_id_region"
+        "#,
+    );
+
+    let shops = meta.table("shops").expect("table should exist");
+    let resolved = shops.resolved_foreign_keys();
+    assert_eq!(resolved.len(), 1);
+    assert!(resolved[0].allow_empty);
+}
+
+#[test]
+fn rejects_invalid_foreign_key_declarations() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "rules"
+            kind = "object"
+            source = "rules.csv"
+
+            [[tables.fields]]
+            name = "item_id"
+            type = "int"
+            foreign_key = { target_table = "items" }
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "region"
+            type = "string"
+
+            [[tables.indexes]]
+            name = "by_id_region"
+            fields = ["id", "region"]
+            unique = true
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "item_id"
+            type = "string"
+            foreign_key = { name = "bad", target_table = "items", target_index = "by_id_region" }
+
+            [[tables.foreign_keys]]
+            name = "bad"
+            fields = ["missing"]
+            target_table = "items"
+            target_index = "by_id_region"
+        "#,
+    );
+    let messages = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(messages.contains("ObjectTable as source"));
+    assert!(messages.contains("field-level foreign key only supports single-field index"));
+    assert!(messages.contains("defined more than once"));
+    assert!(messages.contains("unknown source field `missing`"));
+}
+
+#[test]
 fn accepts_canonical_and_legacy_primitive_field_types() {
     let meta = parse(
         r#"

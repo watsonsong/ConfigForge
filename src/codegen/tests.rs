@@ -261,6 +261,91 @@ fn code_model_defaults_data_file_to_json_when_no_runtime_file_is_available() {
 }
 
 #[test]
+fn code_model_includes_visible_foreign_keys() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "drop_item_id"
+            type = "int"
+            required = false
+            foreign_key = { name = "drop_item", target_table = "items" }
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+
+    let model = build_code_model(&linked, &TargetTags::empty(), &[]).expect("model");
+    let monsters = model
+        .tables
+        .iter()
+        .find(|table| table.name == "monsters")
+        .expect("monsters table should exist");
+    assert_eq!(monsters.foreign_keys.len(), 1);
+    assert_eq!(monsters.foreign_keys[0].name, "drop_item");
+    assert_eq!(monsters.foreign_keys[0].target_table, "items");
+    assert_eq!(monsters.foreign_keys[0].target_index, "by_id");
+    assert!(monsters.foreign_keys[0].allow_empty);
+}
+
+#[test]
+fn code_model_rejects_visible_foreign_key_to_hidden_target_index() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+            export_when = { any = ["server"] }
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "drop_item_id"
+            type = "int"
+            foreign_key = { name = "drop_item", target_table = "items" }
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+
+    let error = build_code_model(&linked, &TargetTags::new(["client"]), &[]).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("target index `items.by_id` which is not exported"));
+}
+
+#[test]
 fn rust_generator_emits_loader_table_and_index_helpers() {
     let meta = linked_fixture();
     let mut input = input_for(&meta, CodeExportLanguage::Rust);
