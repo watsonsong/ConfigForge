@@ -30,3 +30,46 @@
 - Run `cargo fmt`, `cargo lint`, and `cargo test` before handoff. `cargo lint` uses Clippy with all targets and all features; the project forbids `unsafe_code` and treats the default Clippy lint set as warnings.
 - Use `cargo lint-strict` when evaluating broader API/design cleanup candidates. Treat strict/pedantic findings as review input rather than automatic rewrite requirements, especially for domain naming such as `MetaModel` and TOML schema structs with multiple boolean flags.
 - After adding or changing features and tests, run unit test coverage evaluation as part of judging whether tests are complete. Use `cargo coverage` for summary and `cargo coverage-html` to inspect uncovered lines in changed modules. Treat coverage as design evidence for normal and error branch completeness, not only as a percentage target.
+
+## Git Commit Message Rules
+
+- Write commit messages in English.
+- Use a concise Conventional Commits style subject:
+  - `feat(scope): add new user-visible capability`
+  - `fix(scope): correct broken behavior`
+  - `docs(scope): update design or user-facing documentation`
+  - `test(scope): add or improve tests`
+  - `refactor(scope): restructure code without changing behavior`
+  - `perf(scope): improve performance without changing behavior`
+  - `chore(scope): update tooling, build configuration, or maintenance files`
+- Use an optional scope when it clarifies the affected area, such as `meta`, `data`, `validation`, `export`, `codegen`, `fragment`, `foreign-key`, `tasks`, or `targets`.
+- Keep the subject specific and action-oriented. Prefer `feat(fragment): implement variant source fragments end-to-end` over vague messages such as `fix`, `update`, or `modify code`.
+- Keep the subject within roughly 72 characters when practical.
+- Add a body for non-trivial commits. The body should explain what changed and why, not just repeat the subject.
+- Use one blank line between the subject and body.
+- Wrap body lines at roughly 72 characters.
+- Mention important validation or compatibility notes in the body when relevant, for example target semantics, migration behavior, or generated output changes.
+- Do not mix unrelated work in one commit. Split documentation, feature implementation, tests, and follow-up fixes when they are independently understandable.
+
+Recommended examples:
+
+```text
+feat(foreign-key): implement FK meta, validation, and codegen IR
+
+Add field-level and table-level FK meta, linked FK resolution, meta checks,
+referential integrity validation, CodeModel FK entries, and tests.
+```
+
+```text
+fix(fragment): tighten variant source mode and target validation
+
+Centralize variant source mode checks, restrict unsupported multi-source
+cases, improve visible row handling, and expand fragment codegen tests.
+```
+
+```text
+docs(validation): add validator framework design
+
+Document the registered validator framework, built-in validator migration,
+meta validator configuration, and test plan.
+```
