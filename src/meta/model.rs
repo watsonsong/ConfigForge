@@ -407,6 +407,7 @@ impl TableMeta {
                 .iter()
                 .map(String::as_str)
                 .collect::<Vec<_>>();
+            // Missing allow_empty inherits requiredness so optional references do not need duplicate FK config.
             let allow_empty = foreign_key.allow_empty.unwrap_or_else(|| {
                 fields.iter().all(|field_name| {
                     self.field(field_name)
@@ -454,6 +455,7 @@ impl TableMeta {
     }
 
     pub fn is_variant_source_mode(&self) -> bool {
+        // Fragment activation depends on per-row source metadata, so only collection tables opt in.
         self.kind == TableKind::Collection
             && self.polymorphic
             && self

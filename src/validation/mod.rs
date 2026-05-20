@@ -543,6 +543,7 @@ fn build_foreign_key_target_keys(
     let mut keys = HashSet::new();
     match target_table_view {
         Some(view) => {
+            // Target-specific validation must reject references to rows filtered out for that target.
             for visible_row in &view.visible_rows {
                 let Some(row) = target_table.rows.get(visible_row.row_index) else {
                     continue;
@@ -612,6 +613,7 @@ fn validate_foreign_key_row(
 ) -> Result<()> {
     let key = foreign_key_row_key(row, &foreign_key.fields);
     let empty_count = key.iter().filter(|value| value.trim().is_empty()).count();
+    // All-empty keys can mean "no relationship"; partial composite keys are always ambiguous.
     if empty_count == key.len() {
         if foreign_key.allow_empty {
             return Ok(());
@@ -642,6 +644,7 @@ fn validate_foreign_key_row(
 }
 
 fn foreign_key_row_key(row: &DataRow, fields: &[LinkedFieldMeta<'_>]) -> Vec<String> {
+    // FK keys preserve raw cell strings to avoid target-dependent typed canonicalization surprises.
     fields
         .iter()
         .map(|field| {

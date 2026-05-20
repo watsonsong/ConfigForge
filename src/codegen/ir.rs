@@ -231,11 +231,13 @@ pub fn build_code_model(
                 }
                 if let Some(field_name) = missing_exported_field {
                     if is_primary_index {
+                        // Primary indexes are a generated loader contract, so hiding one is an error.
                         return Err(ConfigForgeError::Validation(format!(
                             "table `{}` primary index `{}` references non-exported field `{}` for current target",
                             table_meta.meta.name, index_meta.meta.name, field_name
                         )));
                     }
+                    // Secondary indexes can disappear with target-hidden fields without breaking table access.
                     continue;
                 }
                 indexes.push(CodeIndex {
@@ -274,6 +276,7 @@ pub fn build_code_model(
                 .get(table_meta.meta.name.as_str())
                 .copied()
                 .map(str::to_owned)
+                // Code-only targets still need a stable conventional data path in generated APIs.
                 .unwrap_or_else(|| format!("{}.json", table_meta.meta.name));
             let primary_index = indexes
                 .iter()
@@ -313,6 +316,7 @@ fn build_code_foreign_keys(
         if !foreign_key.is_exported_for(target_tags) {
             continue;
         }
+        // Linking proves the full-model FK shape; IR must still prove the target-visible shape.
         let target_table = meta.table(foreign_key.target_table_name).ok_or_else(|| {
             ConfigForgeError::Validation(format!(
                 "table `{}` foreign key `{}` references unknown target table `{}`",

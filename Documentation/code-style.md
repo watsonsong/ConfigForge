@@ -22,6 +22,20 @@
 - `runtime` or `executor` owns shared async/parallel task execution primitives if those primitives outgrow individual modules.
 - `cli` owns command-line parsing and user-facing messages.
 
+## Comment Rules
+
+- Always write code comments in English.
+- Prefer comments that explain why a decision exists, not how the code executes. The implementation should make the how clear through names, types, and structure.
+- Do not add comments that merely repeat expressive symbol names. If a class, function, variable, or type already states the intent, leave it uncommented.
+- Keep comments concise and rare. Add them only around complex domain rules, non-obvious invariants, external constraints, or trade-offs that are difficult to infer from code alone.
+- When several reasonable approaches exist, briefly document why the current approach was chosen, especially if the choice protects compatibility, determinism, performance, or future extensibility.
+- Use comments to record important invariants, preconditions, and cross-module assumptions that callers or future maintainers must preserve.
+- Prefer refactoring over commenting when clearer names, smaller functions, or stronger types can remove the need for explanation.
+- Keep comments close to the code they explain, and update or remove them in the same change when the behavior changes. Stale comments are worse than missing comments.
+- Avoid speculative roadmap comments. Use `TODO` only for actionable follow-up work with enough context to understand the trigger and intended direction.
+- For public APIs, write doc comments when they define contracts, target-specific behavior, error semantics, or compatibility expectations. Avoid doc comments that only restate the item name.
+- Comment surprising workarounds with the constraint that requires them, such as third-party behavior, generated format compatibility, or a documented product decision.
+
 ## Testing Rules
 
 - Add unit tests beside module logic for parsing, validation, and generation helpers.

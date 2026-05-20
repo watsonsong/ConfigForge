@@ -183,6 +183,7 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
     let target_tags = target.target_tags();
 
     let mut warnings = Vec::new();
+    // Runtime data is exported before codegen so generated APIs can reference actual artifact paths.
     let runtime_data_files = if let Some(data_config) = &target.data {
         let registry = DataFormatRegistry::with_builtin_exporters();
         let data_exporter = registry.require(&data_config.format)?;

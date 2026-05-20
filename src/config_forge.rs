@@ -252,6 +252,7 @@ pub fn build_exported_table_payload(
                 }
             }
             if let Some(row_source) = table.row_source(row_index) {
+                // Variant-source rows export only fragments activated by their originating source.
                 for fragment_name in &row_source.fragments {
                     let Some(fragment) = table_meta.fragment(fragment_name) else {
                         continue;

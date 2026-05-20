@@ -209,6 +209,7 @@ fn link_foreign_keys<'meta>(
             continue;
         }
         if let Some(target_index) = target_index {
+            // Keep linked FKs structurally trustworthy so validation and codegen do not repeat shape checks.
             if !target_index.unique && !target_index.primary {
                 diagnostics.push(MetaDiagnostic::new(
                     MetaDiagnosticCode::InvalidForeignKeyDeclaration,
@@ -289,6 +290,7 @@ fn linked_foreign_key_types_compatible(
             match (source_type, target_type) {
                 (Some(source), Some(target)) => source == target,
                 (Some(_), None) | (None, Some(_)) => false,
+                // Enums intentionally match by declared type, not by their underlying value representation.
                 (None, None) => {
                     source_field.meta.field_type == target_field.field_type
                         && enum_index.contains_key(source_field.meta.field_type.as_str())
