@@ -743,6 +743,9 @@ Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和�
 
 - Loader 返回 `MetaModel`，因为它是 owned 数据，便于调用方控制生命周期。
 - 下游在需要类型解析或快速查询时，应在持有 `MetaModel` 的作用域内调用 `meta.link()` 得到 `LinkedMetaModel<'_>`。
+- `MetaModel::from_toml_str` / `from_path` / `from_paths` 返回的是已完成 link + validate 检查的 raw model；raw model 本身不保存 borrowed links。
+- `link_meta_model()` / `MetaModel::link()` 每次调用都会基于 raw model 构造 runtime borrowed view。调用方只能在 diagnostics 为空时消费 linked model；如果 diagnostics 非空，linked model 视为不可用。
+- `ProjectConfig::meta_model()` 同样返回已完成 link + validate 检查的 raw model；`build_target()` 随后再次调用 `link()` 是为了获得当前执行阶段使用的 borrowed view，而不是重复修改 raw model。
 - `LinkedMetaModel<'_>` 不应跨越 `MetaModel` 生命周期；通常应在 export/validate 函数栈内临时创建并传递引用。
 - validation/exporter 不应再自行解析 `FieldMeta.field_type` 字符串；应读取 `LinkedFieldMeta.linked_field` 或 `primitive_type()`。
 - 对 index 逻辑，应优先使用 `LinkedIndexMeta.fields`，避免重复做 field name 查找。

@@ -6,6 +6,11 @@ use super::{
     MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
 };
 
+/// Builds a borrowed linked view of a validated raw model.
+///
+/// Callers must only consume the returned linked model when diagnostics are empty.
+/// Link diagnostics intentionally reject incomplete intermediate shapes so later
+/// validation, export, and codegen stages can rely on linked references.
 pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<MetaDiagnostic>) {
     let mut diagnostics = Vec::new();
     let enum_index = model
@@ -47,7 +52,7 @@ pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<M
                 LinkedFragmentMeta::new(fragment, linked_fields)
             })
             .collect::<Vec<_>>();
-        let linked_indexes = link_indexes(table, &linked_fields);
+        let linked_indexes = link_indexes(table, &linked_fields, &mut diagnostics);
         let linked_foreign_keys = link_foreign_keys(
             table,
             &raw_table_index,
@@ -118,6 +123,7 @@ fn link_fields<'meta>(
 fn link_indexes<'meta>(
     table: &'meta super::TableMeta,
     linked_fields: &[LinkedFieldMeta<'meta>],
+    diagnostics: &mut Vec<MetaDiagnostic>,
 ) -> Vec<LinkedIndexMeta<'meta>> {
     let field_index = linked_fields
         .iter()
@@ -126,13 +132,37 @@ fn link_indexes<'meta>(
     table
         .indexes
         .iter()
-        .map(|index| LinkedIndexMeta {
-            meta: index,
-            fields: index
+        .filter_map(|index| {
+            let mut missing_field = false;
+            let fields = index
                 .fields
                 .iter()
-                .filter_map(|field_name| field_index.get(field_name.as_str()).cloned().cloned())
-                .collect(),
+                .filter_map(|field_name| {
+                    field_index
+                        .get(field_name.as_str())
+                        .cloned()
+                        .cloned()
+                        .or_else(|| {
+                            missing_field = true;
+                            diagnostics.push(MetaDiagnostic::new(
+                                MetaDiagnosticCode::MissingFieldReference,
+                                format!(
+                                    "table `{}` index `{}` references unknown field `{}`",
+                                    table.name, index.name, field_name
+                                ),
+                            ));
+                            None
+                        })
+                })
+                .collect();
+            if missing_field {
+                None
+            } else {
+                Some(LinkedIndexMeta {
+                    meta: index,
+                    fields,
+                })
+            }
         })
         .collect()
 }

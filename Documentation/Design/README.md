@@ -43,3 +43,30 @@
 - Project Config 支持 `copyright` 元信息，供代码生成器和导出器生成文件头。
 - Artifact Writer 的写入策略可配置为直接写入或临时文件提交；项目可按构建流程选择。
 - 当前不引入通用配置版本兼容机制；表和字段依赖稳定字符串 `name`，Protobuf 等格式未来通过显式 `field_number` 处理格式兼容。
+
+## 当前实现状态矩阵
+
+本目录描述目标态设计与当前确认行为。为避免把目标态误解为已完成能力，当前实现状态按以下口径阅读：
+
+- **Stable**：已实现并有常规测试覆盖，可作为当前用户契约。
+- **Implemented MVP**：已形成最小闭环，但后续 API、诊断或生成器能力仍可能扩展。
+- **Partial**：只实现了目标能力中的明确子集，未实现部分必须显式报错或在文档中标注。
+- **Planned / Not implemented**：目标态保留，当前代码不应静默接受。
+
+| 能力 | 当前状态 | 当前实现边界 |
+| --- | --- | --- |
+| TOML Project / Meta loading | Stable | 支持 Project imports、多个 Meta 文件 merge、link + validate。XML 仅为历史/目标态示例，当前未实现。 |
+| CSV source provider | Stable | 当前唯一可执行 provider。`xlsx`、`lark_sheet`、`google_sheet` 为 planned / not implemented。 |
+| `sources` 多源 | Implemented MVP | 当前支持同一逻辑表多个 CSV source 追加 records，主要服务 polymorphic variant source mode。 |
+| `override_sources` | Planned / Not implemented | Meta 可建模，但 DataLoadPlan 会拒绝，避免误以为已执行覆盖合并。 |
+| ObjectTable | Partial | 当前可解析并复用 row pipeline；单对象布局、singleton row constraint、ObjectTable 多源/override 和 ObjectTable FK 均未实现。 |
+| primitive / enum fields | Stable | 支持 primitive、enum link、default 校验和数据值校验。 |
+| struct fields | Partial | 支持 named struct、`json_cell` 校验和 nested object 导出；`expanded_value`、array/map、struct child validators 暂未实现。 |
+| scalar default | Stable | 支持 primitive / enum scalar default。复杂 struct/list/table default 当前不支持。 |
+| target tags / export_when / row_export | Stable | 已接入 validation、runtime export 和 codegen target-aware 视图。 |
+| validators | Implemented MVP | 已有 validator registry 和 `range` field validator；后续可扩展更多 built-in/plugin validators。 |
+| fragments | Implemented MVP | 已支持 polymorphic variant source mode；fragment join mode 不实现。 |
+| foreign keys | Implemented MVP | 支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；Phase 1 仅支持 CollectionTable 到 CollectionTable。 |
+| runtime data export | Implemented MVP | 支持 JSON 与 MessagePack registry；大表 streaming writer 仍为中期优化。 |
+| codegen backends | Implemented MVP | 已有 Rust / TypeScript / C++ 基础生成、loader/repository helper 和 target-aware IR；更丰富 FK helper/API 契约待后续确认。 |
+| diagnostics | Partial | 当前 Meta diagnostics 和部分 validation issues 已有 code/message 或局部结构；统一 path/table/field/source/span/hint/severity 仍待设计实现。 |

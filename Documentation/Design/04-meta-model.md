@@ -13,7 +13,9 @@
 | struct | Partial | 当前支持 named struct 链接、`json_cell` 数据校验与 nested object 导出；`expanded_value`、array/map 与 struct child validators 暂未实现。 |
 | default | Partial | 当前支持 primitive / enum scalar default。 |
 | multi-source / override / fragments | Partial | 当前已支持 polymorphic CollectionTable 的 fragment variant source mode：多个 CSV source 可追加完整 records，并由 source `fragments` 声明激活 fragment set；通用 multi-source split merge、ObjectTable 多源合并、`override_sources` 与 fragment join mode 仍未实现。 |
-| builtin value types / foreign key / ObjectTable 特化语义 | Planned | 当前尚未实现。 |
+| builtin value types | Planned | `vector3` 等 builtin value types 仍为目标态，当前尚未实现。 |
+| foreign key | Implemented MVP | 当前支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；Phase 1 仅支持 CollectionTable 到 CollectionTable。 |
+| ObjectTable 特化语义 | Partial | 当前可解析 ObjectTable 并复用 row pipeline；单对象布局、singleton row constraint、ObjectTable 多源/override 和 ObjectTable FK 暂未实现。 |
 | target tags / export_when / row_export | Implemented | 当前 Project target 支持 `tags`；Meta 中 table / field / index 支持 `export` 与 `export_when`；collection table 支持 `row_export`，并已接入 validation、runtime data export 与 codegen 的 target-aware 视图。旧字段 `tool_only` / `filter_field` / `validator_only` 仅用于报 deprecated/unsupported 诊断，不再参与导出判断。 |
 
 ## 4.1 MetaModel

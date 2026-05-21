@@ -791,6 +791,37 @@ fn rejects_index_referencing_missing_field() {
 }
 
 #[test]
+fn link_rejects_indexes_with_missing_fields() {
+    let meta: MetaModel = toml::from_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_missing"
+            fields = ["missing"]
+            unique = true
+        "#,
+    )
+    .expect("raw meta should deserialize");
+
+    let (linked, diagnostics) = link_meta_model(&meta);
+
+    assert!(linked.is_none());
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::MissingFieldReference
+            && diagnostic
+                .message
+                .contains("index `by_missing` references unknown field `missing`")
+    }));
+}
+
+#[test]
 fn rejects_primary_index_mismatch() {
     let diagnostics = diagnostics(
         r#"
