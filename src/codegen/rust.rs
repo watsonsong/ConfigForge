@@ -3,7 +3,8 @@ use crate::{ConfigForgeError, Result};
 use super::{
     build_code_model, ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
     render_file_header, ArtifactKind, CodeExportInput, CodeExportLanguage, CodeGenerator,
-    CodeIndex, CodeModel, CodeTable, CodeTypeRef, CodegenOptions, GeneratedFile, GeneratedSymbol,
+    CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, GeneratedFile,
+    GeneratedSymbol,
 };
 
 pub struct RustCodeGenerator;
@@ -22,13 +23,20 @@ impl CodeGenerator for RustCodeGenerator {
         let mut content = render_file_header(input);
         content.push_str("use std::collections::HashMap;\n\n");
         content.push_str("pub trait RuntimeDataLoader {\n");
-        content.push_str("    // Implementations should read exported table files such as DATA_FILE, decode the payload envelope `{ meta, rows }`, and return the typed `rows`.\n");
+        content.push_str("    // Implementations should read exported table files such as DATA_FILE and return typed rows for CollectionTable or a typed object for ObjectTable.\n");
         for table in &model.tables {
-            content.push_str(&format!(
-                "    fn load_{}_rows(&self, path: &str) -> Result<Vec<{}>, String>;\n",
-                names.field_name(&table.name)?,
-                names.row_type_name(&table.name)?
-            ));
+            match table.kind {
+                CodeTableKind::Collection => content.push_str(&format!(
+                    "    fn load_{}_rows(&self, path: &str) -> Result<Vec<{}>, String>;\n",
+                    names.field_name(&table.name)?,
+                    names.row_type_name(&table.name)?
+                )),
+                CodeTableKind::Object => content.push_str(&format!(
+                    "    fn load_{}(&self, path: &str) -> Result<{}, String>;\n",
+                    names.field_name(&table.name)?,
+                    names.row_type_name(&table.name)?
+                )),
+            }
         }
         content.push_str("}\n\n");
 
@@ -161,7 +169,7 @@ impl CodeGenerator for RustCodeGenerator {
             content.push_str(&format!(
                 "    pub {}: {},\n",
                 names.field_name(&table.name)?,
-                names.repository_type_name(&table.name)?
+                names.table_data_type_name(table)?
             ));
         }
         content.push_str("}\n\n");
@@ -174,7 +182,7 @@ impl CodeGenerator for RustCodeGenerator {
             content.push_str(&format!(
                 "            {}: {}::load(loader)?,\n",
                 names.field_name(&table.name)?,
-                names.repository_type_name(&table.name)?
+                names.table_data_type_name(table)?
             ));
         }
         content.push_str("        })\n");
@@ -222,11 +230,13 @@ fn validate_generated_symbols(model: &CodeModel, names: &RustNames<'_>) -> Resul
             format!("{}_row", table.name),
             names.row_type_name(&table.name)?,
         ));
-        type_symbols.push(GeneratedSymbol::new(
-            "table repository",
-            format!("{}_table", table.name),
-            names.repository_type_name(&table.name)?,
-        ));
+        if table.kind == CodeTableKind::Collection {
+            type_symbols.push(GeneratedSymbol::new(
+                "table repository",
+                format!("{}_table", table.name),
+                names.repository_type_name(&table.name)?,
+            ));
+        }
 
         validate_named_symbols(
             "rust",
@@ -267,6 +277,10 @@ fn validate_generated_symbols(model: &CodeModel, names: &RustNames<'_>) -> Resul
                     ))
                 }),
             )?;
+        }
+
+        if table.kind == CodeTableKind::Object {
+            continue;
         }
 
         let mut storage_symbols = vec![GeneratedSymbol::new("field", "rows", "rows")];
@@ -319,11 +333,18 @@ fn validate_generated_symbols(model: &CodeModel, names: &RustNames<'_>) -> Resul
         "rust",
         "RuntimeDataLoader methods",
         model.tables.iter().map(|table| {
-            Ok(GeneratedSymbol::new(
-                "loader method",
-                &table.name,
-                format!("load_{}_rows", names.field_name(&table.name)?),
-            ))
+            Ok(match table.kind {
+                CodeTableKind::Collection => GeneratedSymbol::new(
+                    "loader method",
+                    &table.name,
+                    format!("load_{}_rows", names.field_name(&table.name)?),
+                ),
+                CodeTableKind::Object => GeneratedSymbol::new(
+                    "loader method",
+                    &table.name,
+                    format!("load_{}", names.field_name(&table.name)?),
+                ),
+            })
         }),
     )
 }
@@ -337,6 +358,10 @@ fn validate_named_symbols(
 }
 
 fn render_table(content: &mut String, table: &CodeTable, names: &RustNames<'_>) -> Result<()> {
+    if table.kind == CodeTableKind::Object {
+        return render_object_table(content, table, names);
+    }
+
     content.push_str(&format!(
         "pub struct {} {{\n",
         names.repository_type_name(&table.name)?
@@ -420,6 +445,27 @@ fn render_table(content: &mut String, table: &CodeTable, names: &RustNames<'_>) 
     Ok(())
 }
 
+fn render_object_table(
+    content: &mut String,
+    table: &CodeTable,
+    names: &RustNames<'_>,
+) -> Result<()> {
+    content.push_str(&format!("impl {} {{\n", names.row_type_name(&table.name)?));
+    content.push_str(&format!(
+        "    pub const DATA_FILE: &'static str = {:?};\n\n",
+        table.data_file
+    ));
+    content
+        .push_str("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
+    content.push_str(&format!(
+        "        loader.load_{}(Self::DATA_FILE)\n",
+        names.field_name(&table.name)?
+    ));
+    content.push_str("    }\n");
+    content.push_str("}\n\n");
+    Ok(())
+}
+
 fn render_index_function(
     content: &mut String,
     table: &CodeTable,
@@ -487,6 +533,13 @@ impl<'a> RustNames<'a> {
 
     fn repository_type_name(&self, table_name: &str) -> Result<String> {
         self.type_name(&format!("{table_name}_table"))
+    }
+
+    fn table_data_type_name(&self, table: &CodeTable) -> Result<String> {
+        match table.kind {
+            CodeTableKind::Object => self.row_type_name(&table.name),
+            CodeTableKind::Collection => self.repository_type_name(&table.name),
+        }
     }
 
     fn fragment_type_name(&self, table_name: &str, fragment_name: &str) -> Result<String> {

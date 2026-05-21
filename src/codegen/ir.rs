@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
-    meta::{LinkedField, LinkedMetaModel, PrimitiveFieldType},
+    meta::{LinkedField, LinkedMetaModel, PrimitiveFieldType, TableKind},
     ConfigForgeError, Result,
 };
 
@@ -37,6 +37,7 @@ pub struct CodeStruct {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeTable {
     pub name: String,
+    pub kind: CodeTableKind,
     pub desc: Option<String>,
     pub fields: Vec<CodeField>,
     pub fragments: Vec<CodeFragment>,
@@ -44,6 +45,12 @@ pub struct CodeTable {
     pub foreign_keys: Vec<CodeForeignKey>,
     pub primary_index: Option<String>,
     pub data_file: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeTableKind {
+    Object,
+    Collection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,6 +174,7 @@ pub fn build_code_model(
                 .filter(|field| is_runtime_codegen_field(field, target_tags))
                 .map(code_field_from_linked)
                 .collect::<Result<Vec<_>>>()?;
+            let kind = CodeTableKind::from_table_kind(table_meta.meta.kind);
             let fragments = table_meta
                 .fragments
                 .iter()
@@ -208,60 +216,62 @@ pub fn build_code_model(
                 .map(|field| (field.name.as_str(), field.clone()))
                 .collect::<HashMap<_, _>>();
             let mut indexes = Vec::new();
-            let primary_index_name = table_meta.primary_index().map(|index| index.meta.name.as_str());
-            for index_meta in &table_meta.indexes {
-                if !index_meta.meta.is_exported_for(target_tags) {
-                    continue;
-                }
-                let is_primary_index =
-                    index_meta.meta.primary || primary_index_name == Some(index_meta.meta.name.as_str());
-                let mut index_fields = Vec::new();
-                let mut missing_exported_field = None;
-                for field in &index_meta.fields {
-                    let Some(code_field) = field_index.get(field.meta.name.as_str()).cloned() else {
-                        missing_exported_field = Some(field.meta.name.as_str());
-                        break;
-                    };
-                    validate_index_key_type(
-                        &table_meta.meta.name,
-                        &index_meta.meta.name,
-                        &code_field,
-                    )?;
-                    index_fields.push(code_field);
-                }
-                if let Some(field_name) = missing_exported_field {
-                    if is_primary_index {
-                        // Primary indexes are a generated loader contract, so hiding one is an error.
-                        return Err(ConfigForgeError::Validation(format!(
-                            "table `{}` primary index `{}` references non-exported field `{}` for current target",
-                            table_meta.meta.name, index_meta.meta.name, field_name
-                        )));
+            if kind == CodeTableKind::Collection {
+                let primary_index_name = table_meta.primary_index().map(|index| index.meta.name.as_str());
+                for index_meta in &table_meta.indexes {
+                    if !index_meta.meta.is_exported_for(target_tags) {
+                        continue;
                     }
-                    // Secondary indexes can disappear with target-hidden fields without breaking table access.
-                    continue;
-                }
-                indexes.push(CodeIndex {
-                    name: index_meta.meta.name.clone(),
-                    unique: index_meta.meta.unique,
-                    primary: is_primary_index,
-                    fields: index_fields,
-                });
-            }
-            for field in &fields {
-                let synthetic_index_name = format!("by_{}", field.name);
-                if table_meta.fields.iter().any(|linked_field| {
-                    linked_field.meta.name == field.name && linked_field.meta.unique
-                }) && !indexes
-                    .iter()
-                    .any(|index| index.name == synthetic_index_name)
-                {
-                    validate_index_key_type(&table_meta.meta.name, &synthetic_index_name, field)?;
+                    let is_primary_index =
+                        index_meta.meta.primary || primary_index_name == Some(index_meta.meta.name.as_str());
+                    let mut index_fields = Vec::new();
+                    let mut missing_exported_field = None;
+                    for field in &index_meta.fields {
+                        let Some(code_field) = field_index.get(field.meta.name.as_str()).cloned() else {
+                            missing_exported_field = Some(field.meta.name.as_str());
+                            break;
+                        };
+                        validate_index_key_type(
+                            &table_meta.meta.name,
+                            &index_meta.meta.name,
+                            &code_field,
+                        )?;
+                        index_fields.push(code_field);
+                    }
+                    if let Some(field_name) = missing_exported_field {
+                        if is_primary_index {
+                            // Primary indexes are a generated loader contract, so hiding one is an error.
+                            return Err(ConfigForgeError::Validation(format!(
+                                "table `{}` primary index `{}` references non-exported field `{}` for current target",
+                                table_meta.meta.name, index_meta.meta.name, field_name
+                            )));
+                        }
+                        // Secondary indexes can disappear with target-hidden fields without breaking table access.
+                        continue;
+                    }
                     indexes.push(CodeIndex {
-                        name: synthetic_index_name,
-                        unique: true,
-                        primary: false,
-                        fields: vec![field.clone()],
+                        name: index_meta.meta.name.clone(),
+                        unique: index_meta.meta.unique,
+                        primary: is_primary_index,
+                        fields: index_fields,
                     });
+                }
+                for field in &fields {
+                    let synthetic_index_name = format!("by_{}", field.name);
+                    if table_meta.fields.iter().any(|linked_field| {
+                        linked_field.meta.name == field.name && linked_field.meta.unique
+                    }) && !indexes
+                        .iter()
+                        .any(|index| index.name == synthetic_index_name)
+                    {
+                        validate_index_key_type(&table_meta.meta.name, &synthetic_index_name, field)?;
+                        indexes.push(CodeIndex {
+                            name: synthetic_index_name,
+                            unique: true,
+                            primary: false,
+                            fields: vec![field.clone()],
+                        });
+                    }
                 }
             }
             ensure_model_unique_names(
@@ -270,7 +280,11 @@ pub fn build_code_model(
                 &format!("table `{}` indexes", table_meta.meta.name),
             )?;
 
-            let foreign_keys = build_code_foreign_keys(meta, table_meta, &field_index, target_tags)?;
+            let foreign_keys = if kind == CodeTableKind::Collection {
+                build_code_foreign_keys(meta, table_meta, &field_index, target_tags)?
+            } else {
+                Vec::new()
+            };
 
             let data_file = data_file_index
                 .get(table_meta.meta.name.as_str())
@@ -284,6 +298,7 @@ pub fn build_code_model(
                 .map(|index| index.name.clone());
             Ok(CodeTable {
                 name: table_meta.meta.name.clone(),
+                kind,
                 desc: table_meta.meta.desc.clone(),
                 fields,
                 fragments,
@@ -303,6 +318,15 @@ pub fn build_code_model(
         structs,
         tables,
     })
+}
+
+impl CodeTableKind {
+    fn from_table_kind(kind: TableKind) -> Self {
+        match kind {
+            TableKind::Object => Self::Object,
+            TableKind::Collection => Self::Collection,
+        }
+    }
 }
 
 fn build_code_foreign_keys(

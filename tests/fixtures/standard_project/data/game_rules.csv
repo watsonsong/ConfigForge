@@ -1,0 +1,6 @@
+key,value
+max_player_level,60
+starter_gold,500
+stamina_cap,120
+daily_reset_hour,5
+pvp_enabled,true

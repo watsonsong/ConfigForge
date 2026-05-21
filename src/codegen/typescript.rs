@@ -3,7 +3,8 @@ use crate::{ConfigForgeError, Result};
 use super::{
     build_code_model, ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
     render_file_header, ArtifactKind, CodeExportInput, CodeExportLanguage, CodeGenerator,
-    CodeIndex, CodeModel, CodeTable, CodeTypeRef, CodegenOptions, GeneratedFile, GeneratedSymbol,
+    CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, GeneratedFile,
+    GeneratedSymbol,
 };
 
 pub struct TypeScriptCodeGenerator;
@@ -22,14 +23,22 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         let mut content = render_file_header(input);
         content.push('\n');
         content.push_str("export interface RuntimeDataLoader {\n");
-        content.push_str("  // Implementations should read exported table files such as dataFile, decode the payload envelope `{ meta, rows }`, and return the typed `rows`.\n");
+        content.push_str("  // Implementations should read exported table files and return typed rows for CollectionTable or a typed object for ObjectTable.\n");
         for table in &model.tables {
-            content.push_str(&format!(
-                "  load{}Rows(path: string): Promise<{}[]> | {}[];\n",
-                names.type_name(&table.name)?,
-                names.row_type_name(&table.name)?,
-                names.row_type_name(&table.name)?
-            ));
+            match table.kind {
+                CodeTableKind::Collection => content.push_str(&format!(
+                    "  load{}Rows(path: string): Promise<{}[]> | {}[];\n",
+                    names.type_name(&table.name)?,
+                    names.row_type_name(&table.name)?,
+                    names.row_type_name(&table.name)?
+                )),
+                CodeTableKind::Object => content.push_str(&format!(
+                    "  load{}(path: string): Promise<{}> | {};\n",
+                    names.type_name(&table.name)?,
+                    names.row_type_name(&table.name)?,
+                    names.row_type_name(&table.name)?
+                )),
+            }
         }
         content.push_str("}\n\n");
 
@@ -109,7 +118,9 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 ));
             }
             content.push_str("}\n\n");
-            render_table(&mut content, table, &names)?;
+            if table.kind == CodeTableKind::Collection {
+                render_table(&mut content, table, &names)?;
+            }
         }
 
         content.push_str("export class GameData {\n");
@@ -117,7 +128,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
             content.push_str(&format!(
                 "  readonly {}: {};\n",
                 names.field_name(&table.name)?,
-                names.repository_type_name(&table.name)?
+                names.table_data_type_name(table)?
             ));
         }
         content.push_str("\n  private constructor(args: {\n");
@@ -125,7 +136,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
             content.push_str(&format!(
                 "    {}: {};\n",
                 names.field_name(&table.name)?,
-                names.repository_type_name(&table.name)?
+                names.table_data_type_name(table)?
             ));
         }
         content.push_str("  }) {\n");
@@ -140,11 +151,19 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         content.push_str("  static async load(loader: RuntimeDataLoader): Promise<GameData> {\n");
         content.push_str("    return new GameData({\n");
         for table in &model.tables {
-            content.push_str(&format!(
-                "      {}: await {}.load(loader),\n",
-                names.field_name(&table.name)?,
-                names.repository_type_name(&table.name)?
-            ));
+            match table.kind {
+                CodeTableKind::Collection => content.push_str(&format!(
+                    "      {}: await {}.load(loader),\n",
+                    names.field_name(&table.name)?,
+                    names.repository_type_name(&table.name)?
+                )),
+                CodeTableKind::Object => content.push_str(&format!(
+                    "      {}: await loader.load{}({:?}),\n",
+                    names.field_name(&table.name)?,
+                    names.type_name(&table.name)?,
+                    table.data_file
+                )),
+            }
         }
         content.push_str("    });\n");
         content.push_str("  }\n");
@@ -194,11 +213,13 @@ fn validate_generated_symbols(model: &CodeModel, names: &TypeScriptNames<'_>) ->
             format!("{}_row", table.name),
             names.row_type_name(&table.name)?,
         ));
-        type_symbols.push(GeneratedSymbol::new(
-            "table class",
-            format!("{}_table", table.name),
-            names.repository_type_name(&table.name)?,
-        ));
+        if table.kind == CodeTableKind::Collection {
+            type_symbols.push(GeneratedSymbol::new(
+                "table class",
+                format!("{}_table", table.name),
+                names.repository_type_name(&table.name)?,
+            ));
+        }
         for fragment in &table.fragments {
             type_symbols.push(GeneratedSymbol::new(
                 "fragment interface",
@@ -239,6 +260,10 @@ fn validate_generated_symbols(model: &CodeModel, names: &TypeScriptNames<'_>) ->
                     ))
                 })),
         )?;
+
+        if table.kind == CodeTableKind::Object {
+            continue;
+        }
 
         let mut member_symbols = vec![
             GeneratedSymbol::new("static field", "dataFile", "dataFile"),
@@ -293,11 +318,18 @@ fn validate_generated_symbols(model: &CodeModel, names: &TypeScriptNames<'_>) ->
         "typescript",
         "RuntimeDataLoader methods",
         model.tables.iter().map(|table| {
-            Ok(GeneratedSymbol::new(
-                "loader method",
-                &table.name,
-                format!("load{}Rows", names.type_name(&table.name)?),
-            ))
+            Ok(match table.kind {
+                CodeTableKind::Collection => GeneratedSymbol::new(
+                    "loader method",
+                    &table.name,
+                    format!("load{}Rows", names.type_name(&table.name)?),
+                ),
+                CodeTableKind::Object => GeneratedSymbol::new(
+                    "loader method",
+                    &table.name,
+                    format!("load{}", names.type_name(&table.name)?),
+                ),
+            })
         }),
     )
 }
@@ -472,6 +504,13 @@ impl<'a> TypeScriptNames<'a> {
 
     fn repository_type_name(&self, table_name: &str) -> Result<String> {
         self.type_name(&format!("{table_name}_table"))
+    }
+
+    fn table_data_type_name(&self, table: &CodeTable) -> Result<String> {
+        match table.kind {
+            CodeTableKind::Object => self.row_type_name(&table.name),
+            CodeTableKind::Collection => self.repository_type_name(&table.name),
+        }
     }
 
     fn fragment_type_name(&self, table_name: &str, fragment_name: &str) -> Result<String> {

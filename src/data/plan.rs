@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    meta::{MetaModel, SourceRef, TableMeta},
+    meta::{MetaModel, SourceRef, TableKind, TableMeta},
     ConfigForgeError, Result,
 };
 
@@ -16,6 +16,14 @@ pub struct DataSourcePlan {
     pub provider: DataProvider,
     pub path: PathBuf,
     pub fragments: Vec<String>,
+    pub layout: DataSourceLayout,
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataSourceLayout {
+    CollectionRecords,
+    ObjectKeyValueRows,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +87,16 @@ impl DataSourcePlan {
             )));
         }
 
+        // Meta validation is the primary source-shape check; keep this defensive
+        // guard so callers that build a DataLoadPlan from an unvalidated model do
+        // not silently load an unsupported ObjectTable source form.
+        if table.kind == TableKind::Object && !table.sources.is_empty() {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` is an ObjectTable, but ObjectTable Step 1 only supports legacy `source`",
+                table.name
+            )));
+        }
+
         if !table.sources.is_empty() {
             return table
                 .sources
@@ -101,6 +119,12 @@ impl DataSourcePlan {
             provider: DataProvider::Csv,
             path: PathBuf::from(path),
             fragments: Vec::new(),
+            layout: layout_for_table(table),
+            fields: table
+                .fields
+                .iter()
+                .map(|field| field.name.clone())
+                .collect(),
         }])
     }
 
@@ -117,6 +141,15 @@ impl DataSourcePlan {
             provider,
             path: PathBuf::from(&source.path),
             fragments: source.fragments.clone(),
+            layout: DataSourceLayout::CollectionRecords,
+            fields: Vec::new(),
         })
+    }
+}
+
+fn layout_for_table(table: &TableMeta) -> DataSourceLayout {
+    match table.kind {
+        TableKind::Object => DataSourceLayout::ObjectKeyValueRows,
+        TableKind::Collection => DataSourceLayout::CollectionRecords,
     }
 }

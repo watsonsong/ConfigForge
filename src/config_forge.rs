@@ -12,7 +12,7 @@ use crate::{
     data::{DataSet, DataTable},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, LinkedTableMeta,
-        TargetTags,
+        TableKind, TargetTags,
     },
     ConfigForgeError, Result,
 };
@@ -21,6 +21,13 @@ use crate::{
 pub struct ExportedTable {
     meta: ExportedTableMeta,
     rows: Vec<BTreeMap<String, ExportedValue>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum ExportedTablePayload {
+    Collection(ExportedTable),
+    Object(BTreeMap<String, ExportedValue>),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -218,6 +225,19 @@ pub fn build_exported_table_payload(
     table_meta: &LinkedTableMeta<'_>,
     table: &DataTable,
     target_tags: &TargetTags,
+) -> Result<ExportedTablePayload> {
+    match table_meta.meta.kind {
+        TableKind::Collection => build_exported_collection_payload(table_meta, table, target_tags)
+            .map(ExportedTablePayload::Collection),
+        TableKind::Object => build_exported_object_payload(table_meta, table, target_tags)
+            .map(ExportedTablePayload::Object),
+    }
+}
+
+pub fn build_exported_collection_payload(
+    table_meta: &LinkedTableMeta<'_>,
+    table: &DataTable,
+    target_tags: &TargetTags,
 ) -> Result<ExportedTable> {
     let exported_fields = table_meta
         .fields
@@ -300,6 +320,53 @@ pub fn build_exported_table_payload(
         },
         rows,
     })
+}
+
+pub fn build_exported_object_payload(
+    table_meta: &LinkedTableMeta<'_>,
+    table: &DataTable,
+    target_tags: &TargetTags,
+) -> Result<BTreeMap<String, ExportedValue>> {
+    if table.rows.len() != 1 {
+        return Err(ConfigForgeError::Validation(format!(
+            "object table `{}` must normalize to exactly one logical row, got {}",
+            table_meta.meta.name,
+            table.rows.len()
+        )));
+    }
+
+    let Some(row) = table.rows.first() else {
+        return Ok(BTreeMap::new());
+    };
+    if !table_meta
+        .meta
+        .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
+    {
+        return Ok(BTreeMap::new());
+    }
+
+    let mut exported_object = BTreeMap::new();
+    for field in table_meta
+        .fields
+        .iter()
+        .filter(|field| field.meta.is_exported_for(target_tags))
+    {
+        let Some(raw) = row.get(&field.meta.name) else {
+            continue;
+        };
+        if let Some(value) = export_field_value(
+            table_meta.meta.name.as_str(),
+            1,
+            field.meta.name.as_str(),
+            field,
+            raw,
+            target_tags,
+        )? {
+            exported_object.insert(field.meta.name.clone(), value);
+        }
+    }
+
+    Ok(exported_object)
 }
 
 fn export_field_value(
@@ -851,6 +918,164 @@ mod tests {
     }
 
     #[test]
+    fn object_table_exports_single_object_and_filters_fields() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[structs]]
+                name = "Reward"
+
+                [[structs.fields]]
+                name = "item_id"
+                type = "string"
+
+                [[structs.fields]]
+                name = "count"
+                type = "int"
+                export_when = { any = ["server"] }
+
+                [[tables]]
+                name = "game_config"
+                kind = "object"
+                source = "game_config.csv"
+
+                [[tables.fields]]
+                name = "max_level"
+                type = "int"
+
+                [[tables.fields]]
+                name = "start_gold"
+                type = "int"
+                export_when = { any = ["server"] }
+
+                [[tables.fields]]
+                name = "reward"
+                type = "Reward"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("game_config").expect("linked table");
+        let table = DataTable::new(
+            "game_config",
+            vec![BTreeMap::from([
+                ("max_level".to_owned(), "100".to_owned()),
+                ("start_gold".to_owned(), "500".to_owned()),
+                (
+                    "reward".to_owned(),
+                    r#"{"item_id":"coin","count":10}"#.to_owned(),
+                ),
+            ])],
+        );
+
+        let payload =
+            build_exported_table_payload(table_meta, &table, &TargetTags::new(["client"]))
+                .expect("payload should build");
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+
+        assert_eq!(value["max_level"], "100");
+        assert!(value.get("start_gold").is_none());
+        assert_eq!(value["reward"]["item_id"], "coin");
+        assert!(value["reward"].get("count").is_none());
+        assert!(value.get("rows").is_none());
+        assert!(value.get("meta").is_none());
+    }
+
+    #[test]
+    fn object_table_only_header_exports_empty_or_default_object() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "game_config"
+                kind = "object"
+                source = "game_config.csv"
+
+                [[tables.fields]]
+                name = "max_level"
+                type = "int"
+                default = 100
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("game_config").expect("linked table");
+        let table = crate::validation::normalize_table(
+            table_meta,
+            &DataTable::new("game_config", vec![BTreeMap::new()]),
+        )
+        .expect("defaults should apply");
+
+        let payload = build_exported_table_payload(table_meta, &table, &TargetTags::empty())
+            .expect("payload should build");
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+
+        assert_eq!(value["max_level"], "100");
+
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "empty_config"
+                kind = "object"
+                source = "empty_config.csv"
+
+                [[tables.fields]]
+                name = "optional_note"
+                type = "string"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("empty_config").expect("linked table");
+        let payload = build_exported_table_payload(
+            table_meta,
+            &DataTable::new("empty_config", vec![BTreeMap::new()]),
+            &TargetTags::empty(),
+        )
+        .expect("payload should build");
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+        assert!(value
+            .as_object()
+            .expect("payload should be object")
+            .is_empty());
+    }
+
+    #[test]
+    fn object_table_exports_empty_object_when_all_fields_hidden_for_target() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "game_config"
+                kind = "object"
+                source = "game_config.csv"
+
+                [[tables.fields]]
+                name = "server_only"
+                type = "string"
+                export_when = { any = ["server"] }
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("game_config").expect("linked table");
+        let table = DataTable::new(
+            "game_config",
+            vec![BTreeMap::from([(
+                "server_only".to_owned(),
+                "hidden".to_owned(),
+            )])],
+        );
+
+        let payload =
+            build_exported_table_payload(table_meta, &table, &TargetTags::new(["client"]))
+                .expect("payload should build");
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+
+        assert!(value
+            .as_object()
+            .expect("payload should be object")
+            .is_empty());
+    }
+
+    #[test]
     fn fragment_export_uses_nested_objects_and_presence() {
         let meta = MetaModel::from_toml_str(
             r#"
@@ -1090,5 +1315,46 @@ mod tests {
 
         assert_eq!(value["rows"][0]["reward"]["item_id"], "coin");
         assert_eq!(value["rows"][0]["reward"]["count"], "100");
+    }
+
+    #[test]
+    fn messagepack_object_table_preserves_object_shape_without_collection_envelope() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "game_config"
+                kind = "object"
+                source = "game_config.csv"
+
+                [[tables.fields]]
+                name = "max_level"
+                type = "int"
+
+                [[tables.fields]]
+                name = "pvp_enabled"
+                type = "bool"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("game_config").expect("linked table");
+        let table = DataTable::new(
+            "game_config",
+            vec![BTreeMap::from([
+                ("max_level".to_owned(), "60".to_owned()),
+                ("pvp_enabled".to_owned(), "true".to_owned()),
+            ])],
+        );
+
+        let bytes = MessagePackDataExporter
+            .serialize_table(table_meta, &table, &TargetTags::empty())
+            .expect("messagepack should serialize");
+        let value: serde_json::Value =
+            rmp_serde::from_slice(&bytes).expect("messagepack should decode");
+
+        assert_eq!(value["max_level"], "60");
+        assert_eq!(value["pvp_enabled"], "true");
+        assert!(value.get("rows").is_none());
+        assert!(value.get("meta").is_none());
     }
 }

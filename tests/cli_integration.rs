@@ -108,20 +108,40 @@ fn builds_target_from_project_config() {
         .stdout(predicate::str::contains("target `client` built"));
 
     assert!(data_out_dir.join("items.json").exists());
+    assert!(data_out_dir.join("game_rules.json").exists());
+    let game_rules_json = fs::read_to_string(data_out_dir.join("game_rules.json"))
+        .expect("game rules json should exist");
+    let game_rules: serde_json::Value =
+        serde_json::from_str(&game_rules_json).expect("game rules json should parse");
+    assert_eq!(game_rules["max_player_level"], "60");
+    assert_eq!(game_rules["starter_gold"], "500");
+    assert_eq!(game_rules["stamina_cap"], "120");
+    assert_eq!(game_rules["daily_reset_hour"], "5");
+    assert_eq!(game_rules["pvp_enabled"], "true");
+    assert!(game_rules.get("rows").is_none());
     let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
     let cpp_code = fs::read_to_string(cpp_out_dir.join("generated.hpp")).expect("cpp code");
     let ts_code = fs::read_to_string(ts_out_dir.join("generated.ts")).expect("ts code");
     assert!(rust_code.contains("pub struct ItemsRow"));
+    assert!(rust_code.contains("pub struct GameRulesRow"));
+    assert!(rust_code.contains("fn load_game_rules(&self, path: &str)"));
+    assert!(!rust_code.contains("pub struct GameRulesTable"));
     assert!(rust_code.contains("pub trait RuntimeDataLoader"));
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.json\""));
+    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"game_rules.json\""));
     assert!(!rust_code.contains("RuntimeDataFormat"));
     assert!(rust_code.contains("pub fn get_by_id"));
     assert!(cpp_code.contains("class IRuntimeDataLoader"));
     assert!(cpp_code.contains("static constexpr const char* DataFile = \"items.json\""));
+    assert!(cpp_code.contains("virtual GameRulesRow LoadGameRules(const std::string& path)"));
+    assert!(cpp_code.contains("static constexpr const char* DataFile = \"game_rules.json\""));
+    assert!(!cpp_code.contains("class GameRulesTable"));
     assert!(!cpp_code.contains("RuntimeDataFormat"));
     assert!(cpp_code.contains("const ItemsRow* GetById"));
     assert!(ts_code.contains("export interface RuntimeDataLoader"));
     assert!(ts_code.contains("static readonly dataFile = \"items.json\""));
+    assert!(ts_code.contains("loadGameRules(path: string): Promise<GameRulesRow> | GameRulesRow"));
+    assert!(!ts_code.contains("export class GameRulesTable"));
     assert!(!ts_code.contains("RuntimeDataFormat"));
     assert!(ts_code.contains("getById(id: number): ItemsRow | undefined"));
 
@@ -702,6 +722,19 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             enabled: true,
                         }}])
                     }}
+
+                    fn load_game_rules(&self, path: &str) -> Result<GameRulesRow, String> {{
+                        if path != GameRulesRow::DATA_FILE {{
+                            return Err(format!("unexpected path: {{path}}"));
+                        }}
+                        Ok(GameRulesRow {{
+                            max_player_level: 60,
+                            starter_gold: 500,
+                            stamina_cap: 120,
+                            daily_reset_hour: 5,
+                            pvp_enabled: true,
+                        }})
+                    }}
                 }}
 
                 #[test]
@@ -710,12 +743,14 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                     let item = data.items.get_by_id(1).expect("item should be indexed");
                     assert_eq!(item.name, "Potion");
                     assert_eq!(data.items.rows().len(), 1);
+                    assert_eq!(data.game_rules.max_player_level, 60);
+                    assert!(data.game_rules.pvp_enabled);
                 }}
 
                 {serde_assertion}
             "#,
             serde_assertion = if derive_serde {
-                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, enabled: true }).unwrap();\n}"
+                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, enabled: true }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true }).unwrap();\n}"
             } else {
                 ""
             }
@@ -744,6 +779,16 @@ fn verify_generated_cpp_header(generated_dir: &std::path::Path) {
                 row.price = 10;
                 row.enabled = true;
                 (void)row;
+                GameRulesRow rules{};
+                rules.max_player_level = 60;
+                rules.starter_gold = 500;
+                rules.stamina_cap = 120;
+                rules.daily_reset_hour = 5;
+                rules.pvp_enabled = true;
+                if (std::string(GameRulesRow::DataFile) != "game_rules.json") {
+                    return 1;
+                }
+                (void)rules;
                 return 0;
             }
         "#,
@@ -770,7 +815,7 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
     fs::write(
         generated_dir.join("compile_check.ts"),
         r#"
-            import { GameData, ItemsRow, RuntimeDataLoader } from "./generated";
+            import { GameData, GameRulesRow, ItemsRow, RuntimeDataLoader } from "./generated";
 
             const loader: RuntimeDataLoader = {
                 loadItemsRows(path: string): ItemsRow[] {
@@ -779,6 +824,18 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     }
                     return [{ id: 1, name: "Potion", price: 10, enabled: true }];
                 },
+                loadGameRules(path: string): GameRulesRow {
+                    if (path !== "game_rules.json") {
+                        throw new Error(`unexpected path: ${path}`);
+                    }
+                    return {
+                        maxPlayerLevel: 60,
+                        starterGold: 500,
+                        staminaCap: 120,
+                        dailyResetHour: 5,
+                        pvpEnabled: true,
+                    };
+                },
             };
 
             async function main(): Promise<void> {
@@ -786,6 +843,9 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 const item = data.items.getById(1);
                 if (!item || item.name !== "Potion") {
                     throw new Error("generated TypeScript query failed");
+                }
+                if (data.gameRules.maxPlayerLevel !== 60 || !data.gameRules.pvpEnabled) {
+                    throw new Error("generated TypeScript object table failed");
                 }
             }
 

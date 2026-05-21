@@ -1071,6 +1071,208 @@ fn normalizes_data_set_before_validation() {
 }
 
 #[test]
+fn object_table_validation_uses_single_logical_row_and_field_rules() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+            required = true
+            default = 100
+
+            [[tables.fields]]
+            name = "server_note"
+            type = "string"
+            required = true
+            export_when = { any = ["server"] }
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new("game_config", vec![BTreeMap::new()])]);
+    let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
+
+    assert!(validate_normalized_data_set_for_target(
+        &linked_meta,
+        &TargetTags::new(["client"]),
+        &normalized
+    )
+    .is_ok());
+    assert!(validate_normalized_data_set(&linked_meta, &normalized).is_err());
+    assert_eq!(
+        normalized.table("game_config").unwrap().rows[0]
+            .get("max_level")
+            .map(String::as_str),
+        Some("100")
+    );
+}
+
+#[test]
+fn object_table_validation_rejects_non_singleton_rows() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let table_meta = linked_meta.table("game_config").expect("linked table");
+    let table = DataTable::new(
+        "game_config",
+        vec![
+            BTreeMap::from([("max_level".to_owned(), "100".to_owned())]),
+            BTreeMap::from([("max_level".to_owned(), "101".to_owned())]),
+        ],
+    );
+
+    let message = validate_error(validate_table(table_meta, &table));
+
+    assert!(message.contains("must normalize to exactly one logical row"));
+}
+
+#[test]
+fn object_table_only_header_required_without_default_fails() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+            required = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new("game_config", vec![BTreeMap::new()])]);
+
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+
+    assert!(message.contains("missing field `max_level`"));
+}
+
+#[test]
+fn object_table_field_type_enum_and_struct_errors_still_apply() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[enums]]
+            name = "Difficulty"
+
+            [[enums.values]]
+            name = "normal"
+
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+
+            [[tables.fields]]
+            name = "difficulty"
+            type = "Difficulty"
+
+            [[tables.fields]]
+            name = "daily_reward"
+            type = "Reward"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+
+    let cases = [
+        (
+            BTreeMap::from([
+                ("max_level".to_owned(), "bad".to_owned()),
+                ("difficulty".to_owned(), "normal".to_owned()),
+                ("daily_reward".to_owned(), r#"{"count":1}"#.to_owned()),
+            ]),
+            "field `max_level` value `bad` does not match type",
+        ),
+        (
+            BTreeMap::from([
+                ("max_level".to_owned(), "60".to_owned()),
+                ("difficulty".to_owned(), "nightmare".to_owned()),
+                ("daily_reward".to_owned(), r#"{"count":1}"#.to_owned()),
+            ]),
+            "field `difficulty` value `nightmare` does not match type",
+        ),
+        (
+            BTreeMap::from([
+                ("max_level".to_owned(), "60".to_owned()),
+                ("difficulty".to_owned(), "normal".to_owned()),
+                ("daily_reward".to_owned(), "not json".to_owned()),
+            ]),
+            "field `daily_reward` has invalid struct JSON",
+        ),
+    ];
+
+    for (row, expected_message) in cases {
+        let data_set = DataSet::new(vec![DataTable::new("game_config", vec![row])]);
+        let message = validate_error(validate_data_set(&linked_meta, &data_set));
+        assert!(
+            message.contains(expected_message),
+            "expected `{expected_message}` in `{message}`"
+        );
+    }
+}
+
+#[test]
+fn object_table_field_validator_still_applies() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+
+            [[tables.fields.validators]]
+            kind = "range"
+            min = 1
+            max = 100
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "game_config",
+        vec![BTreeMap::from([("max_level".to_owned(), "101".to_owned())])],
+    )]);
+
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+
+    assert!(message.contains("exceeds max `100`"));
+}
+
+#[test]
 fn target_validation_skips_non_exported_tables_fields_and_rows() {
     let meta = MetaModel::from_toml_str(
         r#"

@@ -3,7 +3,8 @@ use crate::{ConfigForgeError, Result};
 use super::{
     build_code_model, ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
     render_file_header, ArtifactKind, CodeExportInput, CodeExportLanguage, CodeGenerator,
-    CodeIndex, CodeModel, CodeTable, CodeTypeRef, CodegenOptions, GeneratedFile, GeneratedSymbol,
+    CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, GeneratedFile,
+    GeneratedSymbol,
 };
 
 pub struct CppCodeGenerator;
@@ -87,6 +88,12 @@ impl CodeGenerator for CppCodeGenerator {
                 "struct {} {{\n",
                 names.row_type_name(&table.name)?
             ));
+            if table.kind == CodeTableKind::Object {
+                content.push_str(&format!(
+                    "    static constexpr const char* DataFile = {:?};\n",
+                    table.data_file
+                ));
+            }
             for field in &table.fields {
                 push_doc_indented(&mut content, field.desc.as_deref(), "    ");
                 content.push_str(&format!(
@@ -103,19 +110,28 @@ impl CodeGenerator for CppCodeGenerator {
                 ));
             }
             content.push_str("};\n\n");
-            render_table(&mut content, table, &names)?;
+            if table.kind == CodeTableKind::Collection {
+                render_table(&mut content, table, &names)?;
+            }
         }
 
         content.push_str(
             "class IRuntimeDataLoader {\npublic:\n    virtual ~IRuntimeDataLoader() = default;\n",
         );
-        content.push_str("    // Implementations should read exported table files such as DataFile, decode the payload envelope `{ meta, rows }`, and return the typed rows.\n");
+        content.push_str("    // Implementations should read exported table files and return typed rows for CollectionTable or a typed object for ObjectTable.\n");
         for table in &model.tables {
-            content.push_str(&format!(
-                "    virtual std::vector<{}> Load{}Rows(const std::string& path) = 0;\n",
-                names.row_type_name(&table.name)?,
-                names.type_name(&table.name)?
-            ));
+            match table.kind {
+                CodeTableKind::Collection => content.push_str(&format!(
+                    "    virtual std::vector<{}> Load{}Rows(const std::string& path) = 0;\n",
+                    names.row_type_name(&table.name)?,
+                    names.type_name(&table.name)?
+                )),
+                CodeTableKind::Object => content.push_str(&format!(
+                    "    virtual {} Load{}(const std::string& path) = 0;\n",
+                    names.row_type_name(&table.name)?,
+                    names.type_name(&table.name)?
+                )),
+            }
         }
         content.push_str("};\n\n");
 
@@ -124,7 +140,7 @@ impl CodeGenerator for CppCodeGenerator {
         for table in &model.tables {
             content.push_str(&format!(
                 "    const {}& {}() const {{ return {}; }}\n",
-                names.repository_type_name(&table.name)?,
+                names.table_data_type_name(table)?,
                 names.type_name(&table.name)?,
                 names.member_name(&table.name)?
             ));
@@ -133,7 +149,7 @@ impl CodeGenerator for CppCodeGenerator {
         for table in &model.tables {
             content.push_str(&format!(
                 "    {} {};\n",
-                names.repository_type_name(&table.name)?,
+                names.table_data_type_name(table)?,
                 names.member_name(&table.name)?
             ));
         }
@@ -187,11 +203,13 @@ fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>) -> Result
             format!("{}_row", table.name),
             names.row_type_name(&table.name)?,
         ));
-        type_symbols.push(GeneratedSymbol::new(
-            "table repository",
-            format!("{}_table", table.name),
-            names.repository_type_name(&table.name)?,
-        ));
+        if table.kind == CodeTableKind::Collection {
+            type_symbols.push(GeneratedSymbol::new(
+                "table repository",
+                format!("{}_table", table.name),
+                names.repository_type_name(&table.name)?,
+            ));
+        }
         for fragment in &table.fragments {
             type_symbols.push(GeneratedSymbol::new(
                 "fragment",
@@ -232,6 +250,10 @@ fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>) -> Result
                     ))
                 })),
         )?;
+
+        if table.kind == CodeTableKind::Object {
+            continue;
+        }
 
         let mut member_symbols = vec![GeneratedSymbol::new("field", "rows_", "rows_")];
         for index in &table.indexes {
@@ -289,7 +311,10 @@ fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>) -> Result
         loader_symbols.push(GeneratedSymbol::new(
             "loader method",
             &table.name,
-            format!("Load{}Rows", names.type_name(&table.name)?),
+            match table.kind {
+                CodeTableKind::Collection => format!("Load{}Rows", names.type_name(&table.name)?),
+                CodeTableKind::Object => format!("Load{}", names.type_name(&table.name)?),
+            },
         ));
     }
     ensure_unique_generated_symbols("cpp", "IRuntimeDataLoader methods", loader_symbols)
@@ -413,6 +438,13 @@ impl<'a> CppNames<'a> {
 
     fn repository_type_name(&self, table_name: &str) -> Result<String> {
         self.type_name(&format!("{table_name}_table"))
+    }
+
+    fn table_data_type_name(&self, table: &CodeTable) -> Result<String> {
+        match table.kind {
+            CodeTableKind::Object => self.row_type_name(&table.name),
+            CodeTableKind::Collection => self.repository_type_name(&table.name),
+        }
     }
 
     fn fragment_type_name(&self, table_name: &str, fragment_name: &str) -> Result<String> {

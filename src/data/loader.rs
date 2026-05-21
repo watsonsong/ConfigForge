@@ -5,8 +5,8 @@ use rayon::prelude::*;
 use crate::Result;
 
 use super::{
-    CsvDataReader, DataLoadPlan, DataProvider, DataRow, DataSet, DataSourcePlan, DataTable,
-    RowSourceInfo,
+    CsvDataReader, DataLoadPlan, DataProvider, DataRow, DataSet, DataSourceLayout, DataSourcePlan,
+    DataTable, RowSourceInfo,
 };
 
 #[derive(Debug, Clone)]
@@ -48,9 +48,17 @@ impl DataLoader {
 
     pub fn load_source(&self, source: &DataSourcePlan) -> Result<DataTable> {
         match source.provider {
-            DataProvider::Csv => {
-                CsvDataReader::read_table(&source.table_name, &self.data_root.join(&source.path))
-            }
+            DataProvider::Csv => match source.layout {
+                DataSourceLayout::CollectionRecords => CsvDataReader::read_table(
+                    &source.table_name,
+                    &self.data_root.join(&source.path),
+                ),
+                DataSourceLayout::ObjectKeyValueRows => CsvDataReader::read_object_table(
+                    &source.table_name,
+                    &self.data_root.join(&source.path),
+                    &source.fields,
+                ),
+            },
         }
     }
 

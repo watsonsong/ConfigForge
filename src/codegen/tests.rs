@@ -103,6 +103,7 @@ fn builds_code_model_with_types_tables_and_indexes() {
     assert_eq!(model.enums[0].name, "ItemRarity");
     assert_eq!(model.structs[0].name, "RewardInfo");
     assert_eq!(model.tables[0].name, "items");
+    assert_eq!(model.tables[0].kind, CodeTableKind::Collection);
     assert!(model.tables[0]
         .fields
         .iter()
@@ -120,6 +121,37 @@ fn builds_code_model_with_types_tables_and_indexes() {
         .iter()
         .any(|index| index.name == "by_rarity" && !index.unique));
     assert_eq!(model.tables[0].data_file, "items.json");
+}
+
+#[test]
+fn code_model_marks_object_tables_and_skips_indexes() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+
+            [[tables.fields]]
+            name = "client_note"
+            type = "string"
+            export_when = { any = ["client"] }
+        "#,
+    )
+    .expect("meta should load");
+    let input = input_for(&meta, CodeExportLanguage::Rust);
+
+    let model = build_code_model(input.meta, &TargetTags::new(["client"]), &[]).expect("model");
+
+    assert_eq!(model.tables[0].name, "game_config");
+    assert_eq!(model.tables[0].kind, CodeTableKind::Object);
+    assert!(model.tables[0].indexes.is_empty());
+    assert!(model.tables[0].foreign_keys.is_empty());
+    assert_eq!(model.tables[0].data_file, "game_config.json");
 }
 
 #[test]
@@ -455,6 +487,36 @@ fn rust_generator_emits_loader_table_and_index_helpers() {
 }
 
 #[test]
+fn rust_generator_emits_object_table_as_typed_object_not_repository() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let input = input_for(&meta, CodeExportLanguage::Rust);
+
+    let files = RustCodeGenerator.generate(&input).expect("rust code");
+    let content = &files[0].content;
+
+    assert!(content
+        .contains("fn load_game_config(&self, path: &str) -> Result<GameConfigRow, String>;"));
+    assert!(content.contains("pub game_config: GameConfigRow,"));
+    assert!(content.contains("impl GameConfigRow"));
+    assert!(content.contains("loader.load_game_config(Self::DATA_FILE)"));
+    assert!(!content.contains("pub struct GameConfigTable"));
+    assert!(!content.contains("from_rows"));
+    assert!(!content.contains("pub fn rows(&self)"));
+}
+
+#[test]
 fn code_model_rejects_indexes_referencing_non_exported_fields() {
     let meta = MetaModel::from_toml_str(
         r#"
@@ -699,6 +761,37 @@ fn typescript_generator_emits_async_loader_and_maps() {
 }
 
 #[test]
+fn typescript_generator_emits_object_table_as_typed_object_not_repository() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let input = input_for(&meta, CodeExportLanguage::TypeScript);
+
+    let files = TypeScriptCodeGenerator
+        .generate(&input)
+        .expect("typescript code");
+    let content = &files[0].content;
+
+    assert!(
+        content.contains("loadGameConfig(path: string): Promise<GameConfigRow> | GameConfigRow;")
+    );
+    assert!(content.contains("readonly gameConfig: GameConfigRow;"));
+    assert!(content.contains("gameConfig: await loader.loadGameConfig(\"game_config.json\")"));
+    assert!(!content.contains("export class GameConfigTable"));
+    assert!(!content.contains("rows(): readonly GameConfigRow[]"));
+}
+
+#[test]
 fn cpp_generator_emits_loader_and_repository_declarations() {
     let meta = linked_fixture();
     let mut input = input_for(&meta, CodeExportLanguage::Cpp);
@@ -722,6 +815,34 @@ fn cpp_generator_emits_loader_and_repository_declarations() {
     assert!(content.contains("class ItemsTable"));
     assert!(content.contains("const ItemsRow* GetById"));
     assert!(content.contains("std::vector<const ItemsRow*> FindByRarity"));
+}
+
+#[test]
+fn cpp_generator_emits_object_table_as_typed_object_not_repository() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let input = input_for(&meta, CodeExportLanguage::Cpp);
+
+    let files = CppCodeGenerator.generate(&input).expect("cpp code");
+    let content = &files[0].content;
+
+    assert!(content.contains("virtual GameConfigRow LoadGameConfig(const std::string& path) = 0;"));
+    assert!(content.contains("static constexpr const char* DataFile = \"game_config.json\";"));
+    assert!(content.contains("const GameConfigRow& GameConfig() const"));
+    assert!(content.contains("GameConfigRow game_config_;"));
+    assert!(!content.contains("class GameConfigTable"));
+    assert!(!content.contains("Rows() const"));
 }
 
 #[test]

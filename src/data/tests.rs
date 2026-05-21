@@ -143,8 +143,162 @@ fn data_load_plan_reads_legacy_and_canonical_sources() {
     assert_eq!(plan.sources()[0].table_name, "legacy_items");
     assert_eq!(plan.sources()[0].provider, DataProvider::Csv);
     assert_eq!(plan.sources()[0].path, PathBuf::from("legacy_items.csv"));
+    assert_eq!(
+        plan.sources()[0].layout,
+        DataSourceLayout::CollectionRecords
+    );
     assert_eq!(plan.sources()[1].table_name, "items");
     assert_eq!(plan.sources()[1].path, PathBuf::from("items.csv"));
+    assert_eq!(
+        plan.sources()[1].layout,
+        DataSourceLayout::CollectionRecords
+    );
+}
+
+#[test]
+fn data_load_plan_marks_object_tables_as_key_value_rows() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+
+            [[tables.fields]]
+            name = "start_gold"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+
+    let plan = DataLoadPlan::from_meta_model(&meta).expect("plan should build");
+
+    assert_eq!(plan.sources().len(), 1);
+    assert_eq!(plan.sources()[0].table_name, "game_config");
+    assert_eq!(
+        plan.sources()[0].layout,
+        DataSourceLayout::ObjectKeyValueRows
+    );
+    assert_eq!(
+        plan.sources()[0].fields,
+        vec!["max_level".to_owned(), "start_gold".to_owned()]
+    );
+}
+
+#[test]
+fn csv_reader_reads_object_key_value_rows_as_one_logical_row() {
+    let dir = tempdir().expect("temp dir should exist");
+    let csv_path = dir.path().join("game_config.csv");
+    fs::write(&csv_path, "key,value\nmax_level,100\nstart_gold,500\n")
+        .expect("csv should be written");
+
+    let table = CsvDataReader::read_object_table(
+        "game_config",
+        &csv_path,
+        &["max_level".to_owned(), "start_gold".to_owned()],
+    )
+    .expect("object csv should load");
+
+    assert_eq!(table.name, "game_config");
+    assert_eq!(table.rows.len(), 1);
+    assert_eq!(
+        table.rows[0].get("max_level").map(String::as_str),
+        Some("100")
+    );
+    assert_eq!(
+        table.rows[0].get("start_gold").map(String::as_str),
+        Some("500")
+    );
+
+    let only_header_path = dir.path().join("empty_config.csv");
+    fs::write(&only_header_path, "key,value\n").expect("csv should be written");
+    let table = CsvDataReader::read_object_table("game_config", &only_header_path, &[])
+        .expect("only-header object csv should load");
+    assert_eq!(table.rows.len(), 1);
+    assert!(table.rows[0].is_empty());
+
+    let whitespace_header_path = dir.path().join("whitespace_header.csv");
+    fs::write(&whitespace_header_path, " key , value \nmax_level,100\n")
+        .expect("csv should be written");
+    let table = CsvDataReader::read_object_table(
+        "game_config",
+        &whitespace_header_path,
+        &["max_level".to_owned()],
+    )
+    .expect("whitespace around object csv header names should be accepted");
+    assert_eq!(
+        table.rows[0].get("max_level").map(String::as_str),
+        Some("100")
+    );
+}
+
+#[test]
+fn csv_reader_rejects_invalid_object_key_value_rows() {
+    let dir = tempdir().expect("temp dir should exist");
+    let cases = [
+        (
+            "bad_header.csv",
+            "field,value\nmax_level,100\n",
+            "header must contain exactly two columns named `key` and `value`",
+        ),
+        (
+            "missing_value_header.csv",
+            "key\nmax_level\n",
+            "header must contain exactly two columns named `key` and `value`",
+        ),
+        (
+            "extra_header.csv",
+            "key,value,extra\nmax_level,100,ignored\n",
+            "header must contain exactly two columns named `key` and `value`",
+        ),
+        ("empty_key.csv", "key,value\n,100\n", "empty key"),
+        (
+            "unknown_key.csv",
+            "key,value\nunknown,100\n",
+            "unknown field key",
+        ),
+        (
+            "duplicate_key.csv",
+            "key,value\nmax_level,100\nmax_level,101\n",
+            "duplicates key",
+        ),
+    ];
+
+    for (file_name, content, expected_message) in cases {
+        let path = dir.path().join(file_name);
+        fs::write(&path, content).expect("csv should be written");
+        let error =
+            CsvDataReader::read_object_table("game_config", &path, &["max_level".to_owned()])
+                .unwrap_err();
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains(expected_message)),
+            "expected message containing `{expected_message}`"
+        );
+    }
+}
+
+#[test]
+fn csv_reader_reports_object_table_ragged_rows() {
+    let dir = tempdir().expect("temp dir should exist");
+    let missing_path = dir.path().join("missing_value.csv");
+    fs::write(&missing_path, "key,value\nmax_level\n").expect("csv should be written");
+    assert!(matches!(
+        CsvDataReader::read_object_table("game_config", &missing_path, &["max_level".to_owned()])
+            .unwrap_err(),
+        ConfigForgeError::ParseCsv { .. }
+    ));
+
+    let extra_path = dir.path().join("extra_value.csv");
+    fs::write(&extra_path, "key,value\nmax_level,100,extra\n").expect("csv should be written");
+    assert!(matches!(
+        CsvDataReader::read_object_table("game_config", &extra_path, &["max_level".to_owned()])
+            .unwrap_err(),
+        ConfigForgeError::ParseCsv { .. }
+    ));
 }
 
 #[test]
@@ -347,12 +501,16 @@ fn data_loader_loads_multiple_tables_into_data_set() {
                 provider: DataProvider::Csv,
                 path: PathBuf::from("items.csv"),
                 fragments: vec![],
+                layout: DataSourceLayout::CollectionRecords,
+                fields: vec![],
             },
             DataSourcePlan {
                 table_name: "levels".to_owned(),
                 provider: DataProvider::Csv,
                 path: PathBuf::from("levels.csv"),
                 fragments: vec![],
+                layout: DataSourceLayout::CollectionRecords,
+                fields: vec![],
             },
         ],
     };
@@ -385,12 +543,16 @@ fn data_loader_load_with_pool_preserves_plan_order() {
                 provider: DataProvider::Csv,
                 path: PathBuf::from("items.csv"),
                 fragments: vec![],
+                layout: DataSourceLayout::CollectionRecords,
+                fields: vec![],
             },
             DataSourcePlan {
                 table_name: "levels".to_owned(),
                 provider: DataProvider::Csv,
                 path: PathBuf::from("levels.csv"),
                 fragments: vec![],
+                layout: DataSourceLayout::CollectionRecords,
+                fields: vec![],
             },
         ],
     };
@@ -434,12 +596,16 @@ fn data_loader_merges_multiple_sources_for_one_table() {
                 provider: DataProvider::Csv,
                 path: PathBuf::from("weapons.csv"),
                 fragments: vec!["weapon".to_owned()],
+                layout: DataSourceLayout::CollectionRecords,
+                fields: vec![],
             },
             DataSourcePlan {
                 table_name: "items".to_owned(),
                 provider: DataProvider::Csv,
                 path: PathBuf::from("armors.csv"),
                 fragments: vec!["armor".to_owned()],
+                layout: DataSourceLayout::CollectionRecords,
+                fields: vec![],
             },
         ],
     };

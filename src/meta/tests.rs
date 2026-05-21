@@ -127,6 +127,113 @@ fn parses_basic_object_table_without_index() {
 }
 
 #[test]
+fn rejects_object_table_step1_unsupported_features() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+            sources = [{ provider = "csv", path = "extra.csv" }]
+            override_sources = [{ provider = "csv", path = "override.csv" }]
+            row_export = { required_tags_field = "tags" }
+            primary_index = "by_id"
+            preserve_source_order = true
+            polymorphic = true
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            unique = true
+            foreign_key = { target_table = "items" }
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+
+            [[tables.fragments]]
+            name = "debug"
+
+            [[tables.foreign_keys]]
+            name = "bad_fk"
+            fields = ["id"]
+            target_table = "items"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+        "#,
+    );
+    let messages = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    for expected in [
+        "only supports legacy `source`",
+        "does not support `override_sources`",
+        "does not support `row_export`",
+        "does not support fragments",
+        "does not support indexes",
+        "does not support `primary_index`",
+        "does not support table-level foreign keys",
+        "does not support `preserve_source_order`",
+        "does not support `polymorphic`",
+        "does not support field-level foreign keys",
+        "does not support unique field indexes",
+    ] {
+        assert!(
+            messages.contains(expected),
+            "missing diagnostic `{expected}` in\n{messages}"
+        );
+    }
+}
+
+#[test]
+fn rejects_foreign_key_targeting_object_table() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "config_id"
+            type = "int"
+            foreign_key = { target_table = "game_config" }
+        "#,
+    );
+    let messages = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(messages.contains("uses ObjectTable `game_config` as target"));
+}
+
+#[test]
 fn links_custom_enum_and_struct_types_after_loading_all_meta() {
     let meta = parse(
         r#"

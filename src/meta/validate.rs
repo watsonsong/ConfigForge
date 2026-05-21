@@ -154,6 +154,7 @@ fn validate_table_meta(
     diagnostics: &mut Vec<MetaDiagnostic>,
 ) {
     validate_source_declaration(table, diagnostics);
+    validate_object_table_restrictions(table, diagnostics);
     validate_export_condition_tags(
         &format!("table `{}`", table.name),
         &table.export_when,
@@ -443,6 +444,95 @@ fn validate_foreign_keys(
                     ),
                 ));
             }
+        }
+    }
+}
+
+fn validate_object_table_restrictions(table: &TableMeta, diagnostics: &mut Vec<MetaDiagnostic>) {
+    if table.kind != TableKind::Object {
+        return;
+    }
+
+    let owner = format!("table `{}`", table.name);
+    if !table.sources.is_empty() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "{owner} is an ObjectTable, but ObjectTable Step 1 only supports legacy `source`"
+            ),
+        ));
+    }
+    if !table.override_sources.is_empty() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!("{owner} is an ObjectTable, but ObjectTable Step 1 does not support `override_sources`"),
+        ));
+    }
+    if table.row_export.is_some() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "{owner} is an ObjectTable, but ObjectTable Step 1 does not support `row_export`"
+            ),
+        ));
+    }
+    if !table.fragments.is_empty() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!("{owner} is an ObjectTable, but ObjectTable Step 1 does not support fragments"),
+        ));
+    }
+    if !table.indexes.is_empty() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!("{owner} is an ObjectTable, but ObjectTable Step 1 does not support indexes"),
+        ));
+    }
+    if table.primary_index.is_some() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!("{owner} is an ObjectTable, but ObjectTable Step 1 does not support `primary_index`"),
+        ));
+    }
+    if !table.foreign_keys.is_empty() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!("{owner} is an ObjectTable, but ObjectTable Step 1 does not support table-level foreign keys"),
+        ));
+    }
+    if table.preserve_source_order {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!("{owner} is an ObjectTable, but ObjectTable Step 1 does not support `preserve_source_order`"),
+        ));
+    }
+    if table.polymorphic {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "{owner} is an ObjectTable, but ObjectTable Step 1 does not support `polymorphic`"
+            ),
+        ));
+    }
+
+    for field in &table.fields {
+        if field.foreign_key.is_some() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "{owner} field `{}` is in an ObjectTable, but ObjectTable Step 1 does not support field-level foreign keys",
+                    field.name
+                ),
+            ));
+        }
+        if field.unique {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "{owner} field `{}` is in an ObjectTable, but ObjectTable Step 1 does not support unique field indexes",
+                    field.name
+                ),
+            ));
         }
     }
 }

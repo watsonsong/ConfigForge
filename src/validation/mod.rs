@@ -4,7 +4,7 @@ use crate::{
     data::{DataRow, DataSet, DataTable},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedIndexMeta, LinkedMetaModel,
-        LinkedStructType, LinkedTableMeta, PrimitiveFieldType, TargetTags, ValueLayout,
+        LinkedStructType, LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags, ValueLayout,
     },
     ConfigForgeError, Result,
 };
@@ -153,6 +153,11 @@ pub fn validate_normalized_table(meta: &LinkedTableMeta<'_>, table: &DataTable) 
         validate_field_uniqueness(meta, table, field)?;
     }
 
+    if meta.meta.kind == TableKind::Object {
+        validate_object_table_row_count(meta, table)?;
+        return Ok(());
+    }
+
     validate_fragment_values(meta, table, None)?;
 
     for index in &meta.indexes {
@@ -203,6 +208,11 @@ fn validate_normalized_table_view(
         validate_field_uniqueness_view(meta, table_view, field)?;
     }
 
+    if meta.meta.kind == TableKind::Object {
+        validate_object_table_view_row_count(meta, table_view)?;
+        return Ok(());
+    }
+
     validate_fragment_values_view(meta, table_view, target_tags)?;
 
     let primary_index_name = meta.primary_index().map(|index| index.meta.name.as_str());
@@ -231,6 +241,38 @@ fn validate_normalized_table_view(
         validate_index_uniqueness_view(meta, table_view, index)?;
     }
 
+    Ok(())
+}
+
+fn validate_object_table_row_count(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
+    if table.rows.len() != 1 {
+        return Err(ConfigForgeError::Validation(format!(
+            "object table `{}` must normalize to exactly one logical row, got {}",
+            meta.meta.name,
+            table.rows.len()
+        )));
+    }
+    Ok(())
+}
+
+fn validate_object_table_view_row_count(
+    meta: &LinkedTableMeta<'_>,
+    table_view: &ExportTableView<'_, '_>,
+) -> Result<()> {
+    if table_view.table.rows.len() != 1 {
+        return Err(ConfigForgeError::Validation(format!(
+            "object table `{}` must normalize to exactly one logical row, got {}",
+            meta.meta.name,
+            table_view.table.rows.len()
+        )));
+    }
+    if table_view.visible_rows.len() > 1 {
+        return Err(ConfigForgeError::Validation(format!(
+            "object table `{}` export view must contain at most one logical row, got {}",
+            meta.meta.name,
+            table_view.visible_rows.len()
+        )));
+    }
     Ok(())
 }
 

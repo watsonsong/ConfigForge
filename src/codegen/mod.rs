@@ -7,7 +7,7 @@ mod typescript;
 pub use self::cpp::CppCodeGenerator;
 pub use self::ir::{
     build_code_model, CodeEnum, CodeEnumValue, CodeField, CodeIndex, CodeModel, CodeStruct,
-    CodeTable, CodeTypeRef, GeneratedFile,
+    CodeTable, CodeTableKind, CodeTypeRef, GeneratedFile,
 };
 pub use self::rust::RustCodeGenerator;
 pub use self::typescript::TypeScriptCodeGenerator;
