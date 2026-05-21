@@ -34,6 +34,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 - `Implementation/04-code-export-module-detail-design.md` — Code export IR, generator contracts, and multi-language output design.
 - `Implementation/05-validator-framework-detail-design.md` — Registered validator framework, Meta validator configuration, built-in validator migration, and test plan.
 - `Implementation/06-foreign-key-detail-design.md` — Foreign key raw/link model, referential-integrity validation, target semantics, codegen staging, and test plan.
+- `Implementation/07-object-table-step1-detail-design.md` — ObjectTable CSV `key,value` row layout, validation/export/codegen plan, and Step 1 test plan.
 
 ## Technical Practice Set
 

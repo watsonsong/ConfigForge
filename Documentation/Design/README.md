@@ -59,7 +59,7 @@
 | CSV source provider | Stable | 当前唯一可执行 provider。`xlsx`、`lark_sheet`、`google_sheet` 为 planned / not implemented。 |
 | `sources` 多源 | Implemented MVP | 当前支持同一逻辑表多个 CSV source 追加 records，主要服务 polymorphic variant source mode。 |
 | `override_sources` | Planned / Not implemented | Meta 可建模，但 DataLoadPlan 会拒绝，避免误以为已执行覆盖合并。 |
-| ObjectTable | Partial | 当前可解析并复用 row pipeline；单对象布局、singleton row constraint、ObjectTable 多源/override 和 ObjectTable FK 均未实现。 |
+| ObjectTable | Planned Step 1 | 当前可解析但仍复用 row pipeline。下一步明确为 CSV `key,value` 行式常量表：每行一个 top-level field key，导出单个 object；多源/override、FK、field path 展开、后续格子 expand 暂不实现。 |
 | primitive / enum fields | Stable | 支持 primitive、enum link、default 校验和数据值校验。 |
 | struct fields | Partial | 支持 named struct、`json_cell` 校验和 nested object 导出；`expanded_value`、array/map、struct child validators 暂未实现。 |
 | scalar default | Stable | 支持 primitive / enum scalar default。复杂 struct/list/table default 当前不支持。 |

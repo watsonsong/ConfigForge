@@ -15,7 +15,7 @@
 | multi-source / override / fragments | Partial | 当前已支持 polymorphic CollectionTable 的 fragment variant source mode：多个 CSV source 可追加完整 records，并由 source `fragments` 声明激活 fragment set；通用 multi-source split merge、ObjectTable 多源合并、`override_sources` 与 fragment join mode 仍未实现。 |
 | builtin value types | Planned | `vector3` 等 builtin value types 仍为目标态，当前尚未实现。 |
 | foreign key | Implemented MVP | 当前支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；Phase 1 仅支持 CollectionTable 到 CollectionTable。 |
-| ObjectTable 特化语义 | Partial | 当前可解析 ObjectTable 并复用 row pipeline；单对象布局、singleton row constraint、ObjectTable 多源/override 和 ObjectTable FK 暂未实现。 |
+| ObjectTable 特化语义 | Planned Step 1 | 当前可解析 ObjectTable 但仍复用 row pipeline。下一步实现 CSV `key,value` 行式常量表：每行一个 top-level field key，导出单个 object；多源/override、FK、field path 展开、后续格子 expand 暂不实现。 |
 | target tags / export_when / row_export | Implemented | 当前 Project target 支持 `tags`；Meta 中 table / field / index 支持 `export` 与 `export_when`；collection table 支持 `row_export`，并已接入 validation、runtime data export 与 codegen 的 target-aware 视图。旧字段 `tool_only` / `filter_field` / `validator_only` 仅用于报 deprecated/unsupported 诊断，不再参与导出判断。 |
 
 ## 4.1 MetaModel
@@ -124,6 +124,52 @@ ObjectTable 表示一个整体配置对象，例如全局游戏规则、经济�
 - 不需要 index。
 - 多 source 时，不同 source 可提供不同 field path。
 - override source 以 field path 为单位覆盖。
+
+Step 1 目标：ObjectTable 先支持 CSV `key,value` 行式常量表。CSV 第一行仍是 header，但每个数据行表示一个 top-level field key，而不是一条 record。默认约定如下：
+
+```csv
+key,value
+max_level,100
+start_gold,500
+economy,"{""gold_rate"":""1.2"",""drop_rate"":""0.8""}"
+start_item,"{""id"":""1"",""count"":""10""}"
+```
+
+Step 1 语义：
+
+- `key` 列保存 Meta top-level field name；field path rows 留到后续 `expanded_value` 设计。
+- `value` 列保存该 field 的 raw cell value；scalar runtime export Step 1 保持与 CollectionTable 一致，仍输出 string。
+- 字段使用 `json_cell` layout 时可写当前已支持的 named struct JSON object；array/map schema 留到后续类型系统扩展。
+- 同一个 ObjectTable source 归一化为一个逻辑 object row，runtime data 导出为单个 object，而不是 records array。
+- 即使 source 只有 header、没有数据行，也必须归一化为一个 empty logical row `{}`，确保 required/default 在单对象上执行。
+- table-level `export/export_when` 和 field-level `export/export_when` 对 ObjectTable 生效；table 可见但所有字段被过滤时导出 `{}`。
+- ObjectTable Step 1 不支持 index、primary index、row_export、foreign key source/target、variant source fragments。
+- ObjectTable Step 1 只支持 `source = "...csv"`，不支持 `sources` / `override_sources`；后续应以 field path 为覆盖粒度扩展。
+- ObjectTable Step 1 不支持 field path 展开或“后续格子自动 expand 为数组元素”；复杂对象先使用 named struct JSON cell，数组和 `expanded_value` field path rows 留到后续设计补充。
+
+Step 1 推荐 Meta：
+
+```toml
+[[tables]]
+name = "game_config"
+kind = "object"
+source = "game_config.csv"
+
+[[tables.fields]]
+name = "max_level"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "economy"
+type = "EconomyConfig"
+layout = "json_cell"
+
+[[tables.fields]]
+name = "start_item"
+type = "RewardItem"
+layout = "json_cell"
+```
 
 ### CollectionTable
 

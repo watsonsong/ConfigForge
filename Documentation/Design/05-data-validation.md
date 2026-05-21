@@ -89,6 +89,8 @@ fragment presence 的 target 判断顺序固定为：
 | Multi-Collection | foreign key、跨表一致性 | 当前验证视图中的多个 collection |
 | Export | target mapping、输出路径、artifact 能力 | Export plan |
 
+ObjectTable Step 1 的输入视图不是多行 records，而是由 CSV `key,value` rows 归一化出的单个 object row。即使 source 只有 header、没有数据行，也必须归一化为一个 empty logical row `{}`，使 required/default/type/enum/struct JSON cell 等字段级规则复用现有 field validation；但 index、row_export、foreign key、fragment-scoped validation 不适用于 ObjectTable Step 1。ObjectTable 的 table-level `export/export_when` 与 field-level `export/export_when` 仍生效；table 可见但字段都被过滤时，导出 empty object。
+
 ## 5.4 当前确认后的校验时机
 
 功能性校验面向所有 source 读取完成后的最终视图，而不是每个单独 source 或 override source。
