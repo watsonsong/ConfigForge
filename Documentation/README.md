@@ -9,6 +9,7 @@ This directory contains durable project knowledge for ConfigForge.
 - `Design/` stores the consolidated canonical design set for product behavior, execution stages, configuration, Meta model, validation/export semantics, CLI, user workflows, and QA input.
 - `Implementation/` stores program implementation design, module boundaries, detailed module plans, and test organization guidance.
 - `Tech/` stores technical practice documents, including test coverage evaluation and engineering workflow notes.
+- `DevLogs/` stores raw phase-by-phase development logs for historical decision context, temporary decisions, and source material references.
 
 ## Canonical Design Set
 
@@ -39,9 +40,15 @@ Use the implementation documents after product behavior has been confirmed in `D
 - `Tech/unit-test-coverage.md` — Rust unit test coverage tooling, commands, evaluation criteria, and current coverage baseline.
 - `Tech/task-system-design.md` — Task system, async I/O, CPU worker pool, resource limits, and phased migration design.
 
+## Developer Logs
+
+- `DevLogs/Readme.md` — developer log purpose, relationship to canonical documents, file naming, and writing rules.
+- `DevLogs/phase-0001.md` — first raw phase log covering foundation, targets, fragments, foreign keys, and workflow decisions through 2026-05-21.
+
 ## Maintenance Rules
 
 - Keep this directory focused on decisions that future contributors need.
 - Put concise navigation and project summaries in `../AGENTS.md`.
 - Update the consolidated `Design/` documents whenever product behavior is introduced, redesigned, or meaningfully expanded.
 - When introducing new domain concepts, update `glossary.md` before or together with feature specs.
+- Use `DevLogs/` for phase snapshots and raw decision evidence; do not rewrite old logs as if they were canonical current design.
