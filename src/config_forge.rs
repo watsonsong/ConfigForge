@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::{
     codegen::RuntimeDataFile,
-    data::{DataSet, DataTable},
+    data::{DataRow, DataSet, DataTable},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, LinkedTableMeta,
         TableKind, TargetTags,
@@ -257,15 +257,12 @@ pub fn build_exported_collection_payload(
         .map(|(row_index, row)| {
             let mut exported_row = BTreeMap::new();
             for field in &exported_fields {
-                let Some(raw) = row.get(&field.meta.name) else {
-                    continue;
-                };
-                if let Some(value) = export_field_value(
+                if let Some(value) = export_field_value_from_row(
                     table_meta.meta.name.as_str(),
                     row_index + 1,
                     field.meta.name.as_str(),
                     field,
-                    raw,
+                    row,
                     target_tags,
                 )? {
                     exported_row.insert(field.meta.name.clone(), value);
@@ -290,15 +287,12 @@ pub fn build_exported_collection_payload(
                             fragment.meta.name.as_str(),
                             field.meta.name.as_str(),
                         );
-                        let Some(raw) = row.get(&key) else {
-                            continue;
-                        };
-                        if let Some(value) = export_field_value(
+                        if let Some(value) = export_field_value_from_row(
                             table_meta.meta.name.as_str(),
                             row_index + 1,
                             &key,
                             field,
-                            raw,
+                            row,
                             target_tags,
                         )? {
                             fragment_object.insert(field.meta.name.clone(), value);
@@ -351,15 +345,12 @@ pub fn build_exported_object_payload(
         .iter()
         .filter(|field| field.meta.is_exported_for(target_tags))
     {
-        let Some(raw) = row.get(&field.meta.name) else {
-            continue;
-        };
-        if let Some(value) = export_field_value(
+        if let Some(value) = export_field_value_from_row(
             table_meta.meta.name.as_str(),
             1,
             field.meta.name.as_str(),
             field,
-            raw,
+            row,
             target_tags,
         )? {
             exported_object.insert(field.meta.name.clone(), value);
@@ -400,6 +391,177 @@ fn export_field_value(
         }
         _ => Ok(Some(ExportedValue::Scalar(raw.to_owned()))),
     }
+}
+
+fn export_field_value_from_row(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    field: &LinkedFieldMeta<'_>,
+    row: &DataRow,
+    target_tags: &TargetTags,
+) -> Result<Option<ExportedValue>> {
+    match &field.linked_field {
+        LinkedField::Struct(struct_type) => export_struct_occurrence_value(
+            table_name,
+            row_number,
+            field_path,
+            struct_type,
+            row,
+            target_tags,
+        ),
+        _ => row
+            .get(field_path)
+            .map(|raw| {
+                export_field_value(table_name, row_number, field_path, field, raw, target_tags)
+            })
+            .transpose()
+            .map(Option::flatten),
+    }
+}
+
+fn export_struct_occurrence_value(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    struct_type: &LinkedStructType<'_>,
+    row: &DataRow,
+    target_tags: &TargetTags,
+) -> Result<Option<ExportedValue>> {
+    if let Some(raw) = row
+        .get(field_path)
+        .map(String::as_str)
+        .filter(|raw| !raw.trim().is_empty())
+    {
+        let value: serde_json::Value = serde_json::from_str(raw).map_err(|source| {
+            ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` has invalid struct JSON: {}",
+                table_name, row_number, field_path, source
+            ))
+        })?;
+        return export_struct_value(
+            table_name,
+            row_number,
+            field_path,
+            struct_type,
+            &value,
+            target_tags,
+        )
+        .map(Some);
+    }
+
+    if !struct_occurrence_has_exportable_value(field_path, struct_type, row, target_tags) {
+        return Ok(None);
+    }
+
+    let mut exported = BTreeMap::new();
+    for field in struct_type
+        .fields
+        .iter()
+        .filter(|field| field.meta.is_exported_for(target_tags))
+    {
+        let child_path = format!("{field_path}.{}", field.meta.name);
+        let exported_value = match &field.linked_field {
+            LinkedField::Struct(nested_struct) => export_struct_occurrence_value(
+                table_name,
+                row_number,
+                &child_path,
+                nested_struct,
+                row,
+                target_tags,
+            )?,
+            _ => export_scalar_child_occurrence(table_name, row_number, &child_path, field, row)?,
+        };
+        if let Some(exported_value) = exported_value {
+            exported.insert(field.meta.name.clone(), exported_value);
+        }
+    }
+
+    Ok(Some(ExportedValue::Struct(exported)))
+}
+
+fn export_scalar_child_occurrence(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    field: &LinkedFieldMeta<'_>,
+    row: &DataRow,
+) -> Result<Option<ExportedValue>> {
+    if let Some(raw) = row
+        .get(field_path)
+        .map(String::as_str)
+        .filter(|raw| !raw.trim().is_empty())
+    {
+        return Ok(Some(ExportedValue::Scalar(raw.to_owned())));
+    }
+    let Some(default_value) = field.meta.default.as_ref().map(toml_default_to_json_value) else {
+        return Ok(None);
+    };
+    if json_value_is_empty(&default_value) {
+        return Ok(None);
+    }
+    let scalar = json_value_to_scalar_cell(&default_value).map_err(|_| {
+        ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` must be a scalar value",
+            table_name, row_number, field_path
+        ))
+    })?;
+    Ok(Some(ExportedValue::Scalar(scalar)))
+}
+
+fn struct_occurrence_has_exportable_value(
+    field_path: &str,
+    struct_type: &LinkedStructType<'_>,
+    row: &DataRow,
+    target_tags: &TargetTags,
+) -> bool {
+    if row
+        .get(field_path)
+        .map(String::as_str)
+        .is_some_and(|raw| !raw.trim().is_empty())
+    {
+        return true;
+    }
+
+    for field in struct_type
+        .fields
+        .iter()
+        .filter(|field| field.meta.is_exported_for(target_tags))
+    {
+        let child_path = format!("{field_path}.{}", field.meta.name);
+        match &field.linked_field {
+            LinkedField::Struct(nested_struct) => {
+                if struct_occurrence_has_exportable_value(
+                    &child_path,
+                    nested_struct,
+                    row,
+                    target_tags,
+                ) {
+                    return true;
+                }
+            }
+            _ => {
+                if row
+                    .get(&child_path)
+                    .map(String::as_str)
+                    .is_some_and(|raw| !raw.trim().is_empty())
+                {
+                    return true;
+                }
+                if field
+                    .meta
+                    .default
+                    .as_ref()
+                    .map(toml_default_to_json_value)
+                    .is_some_and(|value| !json_value_is_empty(&value))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 fn export_struct_value(
@@ -915,6 +1077,187 @@ mod tests {
         assert_eq!(value["rows"][0]["reward"]["item_id"], "coin");
         assert_eq!(value["rows"][0]["reward"]["count"], "100");
         assert!(value["rows"][0]["reward"].get("internal_note").is_none());
+    }
+
+    #[test]
+    fn struct_expanded_value_exports_as_nested_object_for_collection_and_object() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[structs]]
+                name = "Attributes"
+
+                [[structs.fields]]
+                name = "attack"
+                type = "int"
+
+                [[structs.fields]]
+                name = "max_health"
+                type = "int"
+                default = 100
+
+                [[tables]]
+                name = "characters"
+                source = "characters.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "string"
+
+                [[tables.fields]]
+                name = "attributes"
+                type = "Attributes"
+
+                [[tables]]
+                name = "game_rules"
+                kind = "object"
+                source = "game_rules.csv"
+
+                [[tables.fields]]
+                name = "default_attributes"
+                type = "Attributes"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+
+        let characters = DataTable::new(
+            "characters",
+            vec![BTreeMap::from([
+                ("id".to_owned(), "hero".to_owned()),
+                ("attributes.attack".to_owned(), "10".to_owned()),
+            ])],
+        );
+        let payload = build_exported_table_payload(
+            linked.table("characters").expect("linked table"),
+            &characters,
+            &TargetTags::empty(),
+        )
+        .expect("payload should build");
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+        assert_eq!(value["rows"][0]["attributes"]["attack"], "10");
+        assert_eq!(value["rows"][0]["attributes"]["max_health"], "100");
+
+        let rules = DataTable::new(
+            "game_rules",
+            vec![BTreeMap::from([
+                ("default_attributes.attack".to_owned(), "5".to_owned()),
+                ("default_attributes.max_health".to_owned(), "80".to_owned()),
+            ])],
+        );
+        let payload = build_exported_table_payload(
+            linked.table("game_rules").expect("linked table"),
+            &rules,
+            &TargetTags::empty(),
+        )
+        .expect("payload should build");
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+        assert_eq!(value["default_attributes"]["attack"], "5");
+        assert_eq!(value["default_attributes"]["max_health"], "80");
+    }
+
+    #[test]
+    fn struct_expanded_value_exports_defaults_and_omits_empty_optional_occurrence() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[structs]]
+                name = "Attributes"
+
+                [[structs.fields]]
+                name = "attack"
+                type = "int"
+
+                [[structs.fields]]
+                name = "max_health"
+                type = "int"
+                default = 100
+
+                [[structs]]
+                name = "PlainReward"
+
+                [[structs.fields]]
+                name = "item_id"
+                type = "string"
+
+                [[tables]]
+                name = "characters"
+                source = "characters.csv"
+
+                [[tables.fields]]
+                name = "required_attributes"
+                type = "Attributes"
+                required = true
+
+                [[tables.fields]]
+                name = "optional_attributes"
+                type = "Attributes"
+
+                [[tables.fields]]
+                name = "optional_reward"
+                type = "PlainReward"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("characters").expect("linked table");
+        let table = DataTable::new(
+            "characters",
+            vec![BTreeMap::from([
+                ("optional_attributes.attack".to_owned(), String::new()),
+                ("optional_attributes.max_health".to_owned(), String::new()),
+                ("optional_reward.item_id".to_owned(), String::new()),
+            ])],
+        );
+
+        let payload = build_exported_table_payload(table_meta, &table, &TargetTags::empty())
+            .expect("payload should build");
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+
+        assert_eq!(value["rows"][0]["required_attributes"]["max_health"], "100");
+        assert_eq!(value["rows"][0]["optional_attributes"]["max_health"], "100");
+        assert!(value["rows"][0]["optional_attributes"]
+            .get("attack")
+            .is_none());
+        assert!(value["rows"][0].get("optional_reward").is_none());
+    }
+
+    #[test]
+    fn messagepack_export_preserves_expanded_struct_nested_map() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[structs]]
+                name = "Attributes"
+
+                [[structs.fields]]
+                name = "attack"
+                type = "int"
+
+                [[tables]]
+                name = "characters"
+                source = "characters.csv"
+
+                [[tables.fields]]
+                name = "attributes"
+                type = "Attributes"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let table_meta = linked.table("characters").expect("linked table");
+        let table = DataTable::new(
+            "characters",
+            vec![BTreeMap::from([(
+                "attributes.attack".to_owned(),
+                "10".to_owned(),
+            )])],
+        );
+
+        let bytes = MessagePackDataExporter
+            .serialize_table(table_meta, &table, &TargetTags::empty())
+            .expect("messagepack should serialize");
+        let value: serde_json::Value =
+            rmp_serde::from_slice(&bytes).expect("messagepack should decode");
+
+        assert_eq!(value["rows"][0]["attributes"]["attack"], "10");
     }
 
     #[test]

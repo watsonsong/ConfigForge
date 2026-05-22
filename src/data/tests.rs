@@ -257,11 +257,6 @@ fn csv_reader_rejects_invalid_object_key_value_rows() {
         ),
         ("empty_key.csv", "key,value\n,100\n", "empty key"),
         (
-            "unknown_key.csv",
-            "key,value\nunknown,100\n",
-            "unknown field key",
-        ),
-        (
             "duplicate_key.csv",
             "key,value\nmax_level,100\nmax_level,101\n",
             "duplicates key",

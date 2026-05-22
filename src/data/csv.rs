@@ -50,7 +50,7 @@ impl CsvDataReader {
     pub fn read_object_table(
         name: impl Into<String>,
         path: &Path,
-        fields: &[String],
+        _fields: &[String],
     ) -> Result<DataTable> {
         let table_name = name.into();
         let mut reader =
@@ -69,7 +69,6 @@ impl CsvDataReader {
             .map(str::to_owned)
             .collect::<Vec<_>>();
         validate_object_headers(path, &headers)?;
-        let field_names = fields.iter().map(String::as_str).collect::<BTreeSet<_>>();
         let mut seen_keys = BTreeSet::new();
         let mut row = DataRow::new();
         for (record_index, record) in reader.records().enumerate() {
@@ -85,15 +84,6 @@ impl CsvDataReader {
                     path.display(),
                     table_name,
                     row_number
-                )));
-            }
-            if !field_names.contains(key) {
-                return Err(ConfigForgeError::Validation(format!(
-                    "csv `{}` object table `{}` row {} references unknown field key `{}`",
-                    path.display(),
-                    table_name,
-                    row_number,
-                    key
                 )));
             }
             if !seen_keys.insert(key.to_owned()) {

@@ -10,7 +10,7 @@
 | XML Meta | Planned | 文档中的 XML 仅为目标态示例，当前 loader 不支持 XML。 |
 | primitive types | Implemented | 当前支持 `int`、`float`、`bool`、`string`、`text`、`asset`。 |
 | enum | Partial | 当前支持 enum 类型链接、default 校验与数据值校验。 |
-| struct | Partial | 当前支持 named struct 链接、struct JSON cell 数据校验与 nested object 导出；目标设计支持由 CSV/source 形态自动决定同一个 struct field occurrence 使用 JSON cell 或 field path 展开，代码仍需实现；array/map 与 struct child validators 暂未实现。 |
+| struct | Implemented MVP | 当前支持 named struct 链接、struct JSON cell 数据校验与 nested object 导出；支持由 CSV/source 形态自动决定同一个 struct field occurrence 使用 JSON cell 或 field path 展开，并支持 recursive nested struct、JSON/expanded 混用错误、target-aware child filtering 与 child default；array/map、struct child validators 与 ObjectTable key-level source location 暂未实现。 |
 | default | Partial | 当前支持 primitive / enum scalar default。 |
 | multi-source / override / fragments | Partial | 当前已支持 polymorphic CollectionTable 的 fragment variant source mode：多个 CSV source 可追加完整 records，并由 source `fragments` 声明激活 fragment set；通用 multi-source split merge、ObjectTable 多源合并、`override_sources` 与 fragment join mode 仍未实现。 |
 | builtin value types | Planned | `vector3` 等 builtin value types 仍为目标态，当前尚未实现。 |

@@ -568,18 +568,11 @@ fn validate_field_layout(
 ) {
     let is_struct = model.struct_meta(&field.field_type).is_some();
     match (is_struct, field.layout) {
-        (true, None | Some(ValueLayout::JsonCell)) => {}
-        (true, Some(ValueLayout::ScalarCell)) => diagnostics.push(MetaDiagnostic::new(
+        (true, None) => {}
+        (true, Some(_)) => diagnostics.push(MetaDiagnostic::new(
             MetaDiagnosticCode::UnsupportedFeature,
             format!(
-                "{} field `{}` uses struct type `{}` with scalar_cell layout; struct fields only support json_cell in this phase",
-                owner, field.name, field.field_type
-            ),
-        )),
-        (true, Some(ValueLayout::ExpandedValue)) => diagnostics.push(MetaDiagnostic::new(
-            MetaDiagnosticCode::UnsupportedFeature,
-            format!(
-                "{} field `{}` uses struct type `{}` with expanded_value layout, but expanded struct values are not implemented yet",
+                "{} field `{}` uses struct type `{}` with explicit layout; struct source layout is decided by CSV headers or object keys, so remove `layout`",
                 owner, field.name, field.field_type
             ),
         )),
@@ -912,6 +905,15 @@ fn validate_field_names<'a>(
             diagnostics.push(MetaDiagnostic::new(
                 MetaDiagnosticCode::DuplicateFieldName,
                 format!("{} field `{}` is defined more than once", owner, name),
+            ));
+        }
+        if name.contains(['.', '[', ']']) {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "{} field `{}` contains reserved field path characters `.`, `[` or `]`",
+                    owner, name
+                ),
             ));
         }
     }

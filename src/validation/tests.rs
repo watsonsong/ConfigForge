@@ -874,7 +874,6 @@ fn validates_struct_json_cell_values() {
             name = "reward"
             type = "Reward"
             required = true
-            layout = "json_cell"
         "#,
     )
     .expect("meta should load");
@@ -946,6 +945,231 @@ fn rejects_invalid_struct_json_cell_values() {
 }
 
 #[test]
+fn validates_struct_expanded_value_columns() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Attributes"
+
+            [[structs.fields]]
+            name = "attack"
+            type = "int"
+
+            [[structs.fields]]
+            name = "max_health"
+            type = "int"
+            required = true
+            default = 100
+
+            [[tables]]
+            name = "characters"
+            source = "characters.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "string"
+
+            [[tables.fields]]
+            name = "attributes"
+            type = "Attributes"
+            required = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "characters",
+        vec![BTreeMap::from([
+            ("id".to_owned(), "hero".to_owned()),
+            ("attributes.attack".to_owned(), "10".to_owned()),
+        ])],
+    )]);
+
+    assert!(validate_data_set(&linked_meta, &data_set).is_ok());
+}
+
+#[test]
+fn struct_expanded_value_uses_child_defaults_for_effective_existence() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Attributes"
+
+            [[structs.fields]]
+            name = "max_health"
+            type = "int"
+            default = 100
+
+            [[tables]]
+            name = "characters"
+            source = "characters.csv"
+
+            [[tables.fields]]
+            name = "attributes"
+            type = "Attributes"
+            required = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new("characters", vec![BTreeMap::new()])]);
+
+    assert!(validate_data_set(&linked_meta, &data_set).is_ok());
+}
+
+#[test]
+fn optional_struct_expanded_empty_cells_do_not_create_occurrence() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "item_id"
+            type = "string"
+            required = true
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "reward"
+            type = "Reward"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let empty_optional = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([(
+            "reward.item_id".to_owned(),
+            String::new(),
+        )])],
+    )]);
+    assert!(validate_data_set(&linked_meta, &empty_optional).is_ok());
+
+    let present_but_incomplete = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("reward.item_id".to_owned(), String::new()),
+            ("reward.count".to_owned(), "1".to_owned()),
+        ])],
+    )]);
+    let error = validate_error(validate_data_set(&linked_meta, &present_but_incomplete));
+    assert!(error.contains("reward.item_id` is required"));
+}
+
+#[test]
+fn rejects_struct_expanded_value_schema_and_mixing_errors() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Attributes"
+
+            [[structs.fields]]
+            name = "attack"
+            type = "int"
+
+            [[tables]]
+            name = "characters"
+            source = "characters.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "string"
+
+            [[tables.fields]]
+            name = "attributes"
+            type = "Attributes"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+
+    let mixed = DataSet::new(vec![DataTable::new(
+        "characters",
+        vec![BTreeMap::from([
+            ("id".to_owned(), "hero".to_owned()),
+            ("attributes".to_owned(), r#"{"attack":10}"#.to_owned()),
+            ("attributes.attack".to_owned(), "10".to_owned()),
+        ])],
+    )]);
+    let error = validate_error(validate_data_set(&linked_meta, &mixed));
+    assert!(error.contains("mixes struct JSON cell with expanded child path"));
+
+    let unknown_child = DataSet::new(vec![DataTable::new(
+        "characters",
+        vec![BTreeMap::from([
+            ("id".to_owned(), "hero".to_owned()),
+            ("attributes.power".to_owned(), "10".to_owned()),
+        ])],
+    )]);
+    let error = validate_error(validate_data_set(&linked_meta, &unknown_child));
+    assert!(error.contains("unknown struct child `power`"));
+}
+
+#[test]
+fn validates_recursive_struct_expanded_value_and_json_boundary() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Offense"
+
+            [[structs.fields]]
+            name = "attack"
+            type = "int"
+            required = true
+
+            [[structs]]
+            name = "Attributes"
+
+            [[structs.fields]]
+            name = "offense"
+            type = "Offense"
+            required = true
+
+            [[tables]]
+            name = "characters"
+            source = "characters.csv"
+
+            [[tables.fields]]
+            name = "attributes"
+            type = "Attributes"
+            required = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+
+    let expanded = DataSet::new(vec![DataTable::new(
+        "characters",
+        vec![BTreeMap::from([(
+            "attributes.offense.attack".to_owned(),
+            "10".to_owned(),
+        )])],
+    )]);
+    assert!(validate_data_set(&linked_meta, &expanded).is_ok());
+
+    let mixed_nested = DataSet::new(vec![DataTable::new(
+        "characters",
+        vec![BTreeMap::from([
+            (
+                "attributes.offense".to_owned(),
+                r#"{"attack":10}"#.to_owned(),
+            ),
+            ("attributes.offense.attack".to_owned(), "10".to_owned()),
+        ])],
+    )]);
+    let error = validate_error(validate_data_set(&linked_meta, &mixed_nested));
+    assert!(error.contains("attributes.offense` mixes struct JSON cell"));
+}
+
+#[test]
 fn target_validation_skips_non_exported_struct_children() {
     let meta = MetaModel::from_toml_str(
         r#"
@@ -989,6 +1213,51 @@ fn target_validation_skips_non_exported_struct_children() {
     assert!(
         validate_data_set_for_target(&linked_meta, &TargetTags::new(["server"]), &data_set)
             .is_err()
+    );
+}
+
+#[test]
+fn target_validation_ignores_hidden_expanded_descendants_for_occurrence_existence() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "client_item"
+            type = "string"
+            required = true
+            export_when = { any = ["client"] }
+
+            [[structs.fields]]
+            name = "server_count"
+            type = "int"
+            export_when = { any = ["server"] }
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "reward"
+            type = "Reward"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([(
+            "reward.server_count".to_owned(),
+            "10".to_owned(),
+        )])],
+    )]);
+
+    assert!(
+        validate_data_set_for_target(&linked_meta, &TargetTags::new(["client"]), &data_set).is_ok()
+    );
+    assert!(
+        validate_data_set_for_target(&linked_meta, &TargetTags::new(["server"]), &data_set).is_ok()
     );
 }
 

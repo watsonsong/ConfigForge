@@ -146,6 +146,8 @@ pub fn validate_table_for_target(
 }
 
 pub fn validate_normalized_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
+    validate_source_schema(meta, table)?;
+
     for field in &meta.fields {
         validate_supported_field_type(meta, field)?;
         validate_field_presence(meta, table, field)?;
@@ -172,6 +174,8 @@ pub fn validate_normalized_table_for_target(
     target_tags: &TargetTags,
     table: &DataTable,
 ) -> Result<()> {
+    validate_source_schema(meta, table)?;
+
     let visible_fields = meta
         .fields
         .iter()
@@ -698,11 +702,393 @@ fn foreign_key_row_key(row: &DataRow, fields: &[LinkedFieldMeta<'_>]) -> Vec<Str
         .collect()
 }
 
+fn validate_source_schema(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
+    for (row_index, row) in table.rows.iter().enumerate() {
+        let row_number = table
+            .row_source(row_index)
+            .map(|source| source.source_row_number)
+            .unwrap_or(row_index + 1);
+        let active_fragments = table
+            .row_source(row_index)
+            .map(|source| source.fragments.as_slice())
+            .unwrap_or(&[]);
+
+        for key in row.keys().filter(|key| key.contains('.')) {
+            validate_dotted_source_key(meta, key, row_number, active_fragments)?;
+        }
+        if meta.meta.kind == TableKind::Object {
+            for key in row.keys().filter(|key| !key.contains('.')) {
+                if meta.field(key).is_none() {
+                    return Err(ConfigForgeError::Validation(format!(
+                        "object table `{}` row {} references unknown field key `{}`",
+                        meta.meta.name, row_number, key
+                    )));
+                }
+            }
+        }
+
+        for field in &meta.fields {
+            if let LinkedField::Struct(struct_type) = &field.linked_field {
+                validate_struct_layout_mixing_for_row(
+                    meta.meta.name.as_str(),
+                    row,
+                    row_number,
+                    field.meta.name.as_str(),
+                    struct_type,
+                )?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_dotted_source_key(
+    meta: &LinkedTableMeta<'_>,
+    key: &str,
+    row_number: usize,
+    active_fragments: &[String],
+) -> Result<()> {
+    let Some((first_segment, rest)) = key.split_once('.') else {
+        return Ok(());
+    };
+
+    if let Some(field) = meta.field(first_segment) {
+        let LinkedField::Struct(struct_type) = &field.linked_field else {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` uses child path but `{}` is not a struct field",
+                meta.meta.name, row_number, key, first_segment
+            )));
+        };
+        validate_struct_child_path(meta.meta.name.as_str(), row_number, key, struct_type, rest)?;
+        return Ok(());
+    }
+
+    if let Some(fragment) = meta.fragment(first_segment) {
+        if !active_fragments
+            .iter()
+            .any(|active| active == first_segment)
+        {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` belongs to inactive fragment `{}`",
+                meta.meta.name, row_number, key, first_segment
+            )));
+        }
+        if fragment.field(rest).is_none() {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` references unknown fragment field `{}`",
+                meta.meta.name, row_number, key, rest
+            )));
+        }
+        return Ok(());
+    }
+
+    Err(ConfigForgeError::Validation(format!(
+        "table `{}` row {} field `{}` references unknown dotted field path",
+        meta.meta.name, row_number, key
+    )))
+}
+
+fn validate_struct_child_path(
+    table_name: &str,
+    row_number: usize,
+    full_path: &str,
+    struct_type: &LinkedStructType<'_>,
+    path: &str,
+) -> Result<()> {
+    let Some((segment, rest)) = path.split_once('.') else {
+        if struct_child(struct_type, path).is_some() {
+            return Ok(());
+        }
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` references unknown struct child `{}`",
+            table_name, row_number, full_path, path
+        )));
+    };
+
+    let Some(child) = struct_child(struct_type, segment) else {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` references unknown struct child `{}`",
+            table_name, row_number, full_path, segment
+        )));
+    };
+    let LinkedField::Struct(nested_struct) = &child.linked_field else {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` uses child path but `{}` is not a struct field",
+            table_name, row_number, full_path, segment
+        )));
+    };
+    validate_struct_child_path(table_name, row_number, full_path, nested_struct, rest)
+}
+
+fn validate_struct_layout_mixing_for_row(
+    table_name: &str,
+    row: &DataRow,
+    row_number: usize,
+    field_path: &str,
+    struct_type: &LinkedStructType<'_>,
+) -> Result<()> {
+    let parent_present = row.contains_key(field_path);
+    let descendant_path = first_descendant_path(row, field_path);
+    if parent_present {
+        if let Some(descendant_path) = descendant_path {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` mixes struct JSON cell with expanded child path `{}`",
+                table_name, row_number, field_path, descendant_path
+            )));
+        }
+        return Ok(());
+    }
+
+    if descendant_path.is_none() {
+        return Ok(());
+    }
+
+    for child in &struct_type.fields {
+        if let LinkedField::Struct(nested_struct) = &child.linked_field {
+            let child_path = format!("{field_path}.{}", child.meta.name);
+            validate_struct_layout_mixing_for_row(
+                table_name,
+                row,
+                row_number,
+                &child_path,
+                nested_struct,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_struct_field_value_for_row(
+    meta: &LinkedTableMeta<'_>,
+    row: &DataRow,
+    row_number: usize,
+    field: &LinkedFieldMeta<'_>,
+    target_tags: Option<&TargetTags>,
+) -> Result<()> {
+    let LinkedField::Struct(struct_type) = &field.linked_field else {
+        return Ok(());
+    };
+    let has_effective_value = validate_struct_occurrence_value(
+        meta.meta.name.as_str(),
+        row,
+        row_number,
+        field.meta.name.as_str(),
+        struct_type,
+        target_tags,
+    )?;
+    if field.meta.required
+        && !has_effective_value
+        && visible_struct_child_count(struct_type, target_tags) > 0
+    {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` is required",
+            meta.meta.name, row_number, field.meta.name
+        )));
+    }
+    Ok(())
+}
+
+fn validate_struct_occurrence_value(
+    table_name: &str,
+    row: &DataRow,
+    row_number: usize,
+    field_path: &str,
+    struct_type: &LinkedStructType<'_>,
+    target_tags: Option<&TargetTags>,
+) -> Result<bool> {
+    if let Some(raw) = non_empty_row_value(row, field_path) {
+        validate_struct_json_cell(
+            table_name,
+            row_number,
+            field_path,
+            struct_type,
+            raw,
+            target_tags,
+        )?;
+        return Ok(true);
+    }
+
+    let visible_children = visible_struct_child_count(struct_type, target_tags);
+    if visible_children == 0 {
+        return Ok(false);
+    }
+
+    let occurrence_effective = struct_occurrence_has_effective_value(
+        row,
+        field_path,
+        struct_type,
+        target_tags,
+        table_name,
+        row_number,
+    )?;
+    if !occurrence_effective {
+        return Ok(false);
+    }
+
+    let mut has_effective_value = false;
+    for child in struct_type
+        .fields
+        .iter()
+        .filter(|child| child_is_visible(child, target_tags))
+    {
+        let child_path = format!("{field_path}.{}", child.meta.name);
+        match &child.linked_field {
+            LinkedField::Struct(nested_struct) => {
+                let child_effective = validate_struct_occurrence_value(
+                    table_name,
+                    row,
+                    row_number,
+                    &child_path,
+                    nested_struct,
+                    target_tags,
+                )?;
+                if child.meta.required
+                    && !child_effective
+                    && visible_struct_child_count(nested_struct, target_tags) > 0
+                {
+                    return Err(ConfigForgeError::Validation(format!(
+                        "table `{}` row {} field `{}` is required",
+                        table_name, row_number, child_path
+                    )));
+                }
+                has_effective_value |= child_effective;
+            }
+            _ => {
+                let raw = non_empty_row_value(row, &child_path);
+                let default_value = child.meta.default.as_ref().map(toml_default_to_json_value);
+                let default_scalar = default_value
+                    .as_ref()
+                    .filter(|value| !json_value_is_empty(value))
+                    .map(|value| {
+                        json_value_to_scalar_cell(value, table_name, row_number, &child_path)
+                    })
+                    .transpose()?;
+                let effective_value = raw.or(default_scalar.as_deref());
+                if child.meta.required && effective_value.is_none() {
+                    return Err(ConfigForgeError::Validation(format!(
+                        "table `{}` row {} field `{}` is required",
+                        table_name, row_number, child_path
+                    )));
+                }
+                if let Some(value) = effective_value {
+                    if !validate_scalar_value(child, value) {
+                        return Err(ConfigForgeError::Validation(format!(
+                            "table `{}` row {} field `{}` value `{}` does not match type `{:?}`",
+                            table_name, row_number, child_path, value, child.meta.field_type
+                        )));
+                    }
+                    has_effective_value = true;
+                }
+            }
+        }
+    }
+
+    Ok(has_effective_value)
+}
+
+fn struct_occurrence_has_effective_value(
+    row: &DataRow,
+    field_path: &str,
+    struct_type: &LinkedStructType<'_>,
+    target_tags: Option<&TargetTags>,
+    table_name: &str,
+    row_number: usize,
+) -> Result<bool> {
+    if non_empty_row_value(row, field_path).is_some() {
+        return Ok(true);
+    }
+
+    for child in struct_type
+        .fields
+        .iter()
+        .filter(|child| child_is_visible(child, target_tags))
+    {
+        let child_path = format!("{field_path}.{}", child.meta.name);
+        match &child.linked_field {
+            LinkedField::Struct(nested_struct) => {
+                if struct_occurrence_has_effective_value(
+                    row,
+                    &child_path,
+                    nested_struct,
+                    target_tags,
+                    table_name,
+                    row_number,
+                )? {
+                    return Ok(true);
+                }
+            }
+            _ => {
+                if non_empty_row_value(row, &child_path).is_some() {
+                    return Ok(true);
+                }
+                let default_value = child.meta.default.as_ref().map(toml_default_to_json_value);
+                let default_scalar = default_value
+                    .as_ref()
+                    .filter(|value| !json_value_is_empty(value))
+                    .map(|value| {
+                        json_value_to_scalar_cell(value, table_name, row_number, &child_path)
+                    })
+                    .transpose()?;
+                if default_scalar.is_some() {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+fn visible_struct_child_count(
+    struct_type: &LinkedStructType<'_>,
+    target_tags: Option<&TargetTags>,
+) -> usize {
+    struct_type
+        .fields
+        .iter()
+        .filter(|field| child_is_visible(field, target_tags))
+        .count()
+}
+
+fn child_is_visible(field: &LinkedFieldMeta<'_>, target_tags: Option<&TargetTags>) -> bool {
+    target_tags
+        .map(|target_tags| field.meta.is_exported_for(target_tags))
+        .unwrap_or(true)
+}
+
+fn struct_child<'meta>(
+    struct_type: &'meta LinkedStructType<'meta>,
+    name: &str,
+) -> Option<&'meta LinkedFieldMeta<'meta>> {
+    struct_type
+        .fields
+        .iter()
+        .find(|field| field.meta.name == name)
+}
+
+fn first_descendant_path<'a>(row: &'a DataRow, field_path: &str) -> Option<&'a str> {
+    let prefix = format!("{field_path}.");
+    row.keys()
+        .find(|key| key.starts_with(&prefix))
+        .map(String::as_str)
+}
+
+fn non_empty_row_value<'a>(row: &'a DataRow, field_path: &str) -> Option<&'a str> {
+    row.get(field_path)
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty())
+}
+
 fn validate_field_presence(
     meta: &LinkedTableMeta<'_>,
     table: &DataTable,
     field: &LinkedFieldMeta<'_>,
 ) -> Result<()> {
+    if matches!(&field.linked_field, LinkedField::Struct(_)) {
+        return Ok(());
+    }
     if !field.meta.required {
         return Ok(());
     }
@@ -725,6 +1111,9 @@ fn validate_field_presence_view(
     table_view: &ExportTableView<'_, '_>,
     field: &LinkedFieldMeta<'_>,
 ) -> Result<()> {
+    if matches!(&field.linked_field, LinkedField::Struct(_)) {
+        return Ok(());
+    }
     if !field.meta.required {
         return Ok(());
     }
@@ -752,6 +1141,10 @@ fn validate_field_values(
     field: &LinkedFieldMeta<'_>,
 ) -> Result<()> {
     for (row_index, row) in table.rows.iter().enumerate() {
+        if matches!(&field.linked_field, LinkedField::Struct(_)) {
+            validate_struct_field_value_for_row(meta, row, row_index + 1, field, None)?;
+            continue;
+        }
         let value = row
             .get(&field.meta.name)
             .map(String::as_str)
@@ -787,6 +1180,10 @@ fn validate_field_values_view(
         let row_number = visible_row
             .source_row_number
             .unwrap_or(visible_row.row_index + 1);
+        if matches!(&field.linked_field, LinkedField::Struct(_)) {
+            validate_struct_field_value_for_row(meta, row, row_number, field, target_tags)?;
+            continue;
+        }
         let value = row
             .get(&field.meta.name)
             .map(String::as_str)
@@ -861,6 +1258,12 @@ fn validate_fragment_values_for_row(
         let Some((fragment_name, field_name)) = key.split_once('.') else {
             continue;
         };
+        if matches!(
+            meta.field(fragment_name).map(|field| &field.linked_field),
+            Some(LinkedField::Struct(_))
+        ) {
+            continue;
+        }
         let Some(fragment) = meta.fragment(fragment_name) else {
             return Err(ConfigForgeError::Validation(format!(
                 "table `{}` row {} field `{}` references unknown fragment `{}`",
@@ -923,10 +1326,10 @@ fn validate_supported_field_type(
     field: &LinkedFieldMeta<'_>,
 ) -> Result<()> {
     match (&field.linked_field, field.meta.layout) {
-        (LinkedField::Struct(_), None | Some(ValueLayout::JsonCell)) => Ok(()),
-        (LinkedField::Struct(_), Some(ValueLayout::ScalarCell | ValueLayout::ExpandedValue)) => {
+        (LinkedField::Struct(_), None) => Ok(()),
+        (LinkedField::Struct(_), Some(_)) => {
             Err(ConfigForgeError::Validation(format!(
-                "table `{}` field `{}` uses struct type `{}` with unsupported layout; only json_cell is supported in this phase",
+                "table `{}` field `{}` uses struct type `{}` with unsupported layout; struct source layout is decided by source headers or keys",
                 meta.meta.name, field.meta.name, field.meta.field_type
             )))
         }

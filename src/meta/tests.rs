@@ -1346,7 +1346,7 @@ fn validates_struct_field_default_values() {
 
 #[test]
 fn validates_phase_one_struct_layout_rules() {
-    let allowed = parse(
+    let explicit_json_cell_diagnostics = diagnostics(
         r#"
             [[structs]]
             name = "Reward"
@@ -1365,12 +1365,13 @@ fn validates_phase_one_struct_layout_rules() {
             layout = "json_cell"
         "#,
     );
-    assert_eq!(
-        allowed.tables[0].fields[0].layout,
-        Some(ValueLayout::JsonCell)
-    );
 
-    let diagnostics = diagnostics(
+    assert!(explicit_json_cell_diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+            && diagnostic.message.contains("remove `layout`")
+    }));
+
+    let explicit_expanded_value_diagnostics = diagnostics(
         r#"
             [[structs]]
             name = "Reward"
@@ -1395,16 +1396,20 @@ fn validates_phase_one_struct_layout_rules() {
         "#,
     );
 
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
-            && diagnostic.message.contains("expanded_value")
-    }));
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
-            && diagnostic
-                .message
-                .contains("non-struct fields only support scalar_cell")
-    }));
+    assert!(explicit_expanded_value_diagnostics
+        .iter()
+        .any(|diagnostic| {
+            diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+                && diagnostic.message.contains("remove `layout`")
+        }));
+    assert!(explicit_expanded_value_diagnostics
+        .iter()
+        .any(|diagnostic| {
+            diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+                && diagnostic
+                    .message
+                    .contains("non-struct fields only support scalar_cell")
+        }));
 }
 
 #[test]
@@ -1613,6 +1618,42 @@ fn rejects_primary_flag_when_index_is_not_unique() {
         diagnostic.code == MetaDiagnosticCode::InvalidPrimaryIndex
             && diagnostic.message.contains("is primary but is not unique")
     }));
+}
+
+#[test]
+fn rejects_field_path_reserved_name_characters() {
+    let diagnostics = diagnostics(
+        r#"
+            [[structs]]
+            name = "Stats"
+
+            [[structs.fields]]
+            name = "attack.power"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "reward[0]"
+            type = "string"
+
+            [[tables.fragments]]
+            name = "debug.note"
+        "#,
+    );
+
+    let reserved_diagnostics = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+                && diagnostic
+                    .message
+                    .contains("reserved field path characters")
+        })
+        .count();
+    assert_eq!(reserved_diagnostics, 3);
 }
 
 #[test]
