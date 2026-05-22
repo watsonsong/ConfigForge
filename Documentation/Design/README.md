@@ -33,7 +33,8 @@
 - 禁止 `color_channel = "auto"`。颜色通道必须显式声明为 `byte` 或 `normalized`。
 - `vector3` 等常见数学类型优先作为 builtin value type，而不是 named struct。
 - 第一阶段不支持 fragment join mode；多态表只支持 variant source mode。
-- 暂不设计“独立子表式明细布局”作为当前必备布局能力；复合值布局统一描述为聚合书写或展开书写，具体物理方向由表类型决定。
+- 暂不设计“独立子表式明细布局”作为当前必备布局能力；复合值布局统一描述为聚合书写或展开书写，具体物理方向由表类型决定。Struct source layout 的目标语义是由 CSV/source 中出现 parent path 还是 child paths 自动决定 JSON cell 或 expanded value；CollectionTable 展开表现为多列 `field.child`，ObjectTable 展开表现为多行 `field.child` key，当前仍需实现。
+- Field path 保留字符为 `.`, `[`, `]`；table field、struct field、fragment name 第一阶段均不允许包含这些字符，特殊展示名应通过 header alias / source mapping 解决。
 - Protobuf 暂作为未来扩展考量；如未来支持，应通过字段级 `field_number` 明确 Protobuf 编号。
 - Special exporter 使用与目标导出一致的过滤后数据视图。被 shipping 等上下文排除的数据，其资源和国际化文本默认不进入最终特殊产物。
 - Target 使用 `tags` 描述导出上下文；表、字段、索引用 `export_when` 匹配 target tags，collection 行用 `row_export` 控制行级导出。
@@ -59,9 +60,9 @@
 | CSV source provider | Stable | 当前唯一可执行 provider。`xlsx`、`lark_sheet`、`google_sheet` 为 planned / not implemented。 |
 | `sources` 多源 | Implemented MVP | 当前支持同一逻辑表多个 CSV source 追加 records，主要服务 polymorphic variant source mode。 |
 | `override_sources` | Planned / Not implemented | Meta 可建模，但 DataLoadPlan 会拒绝，避免误以为已执行覆盖合并。 |
-| ObjectTable | Planned Step 1 | 当前可解析但仍复用 row pipeline。下一步明确为 CSV `key,value` 行式常量表：每行一个 top-level field key，导出单个 object；多源/override、FK、field path 展开、后续格子 expand 暂不实现。 |
+| ObjectTable | Implemented MVP | 当前支持 CSV `key,value` 行式常量表：每行一个 top-level field key，导出单个 object；多源/override、FK、field path 展开、后续格子 expand 暂不实现。 |
 | primitive / enum fields | Stable | 支持 primitive、enum link、default 校验和数据值校验。 |
-| struct fields | Partial | 支持 named struct、`json_cell` 校验和 nested object 导出；`expanded_value`、array/map、struct child validators 暂未实现。 |
+| struct fields | Partial | 支持 named struct、JSON cell 校验和 nested object 导出；struct source layout 自动判定与 expanded value 目标语义已设计但代码暂未实现，array/map、struct child validators 暂未实现。 |
 | scalar default | Stable | 支持 primitive / enum scalar default。复杂 struct/list/table default 当前不支持。 |
 | target tags / export_when / row_export | Stable | 已接入 validation、runtime export 和 codegen target-aware 视图。 |
 | validators | Implemented MVP | 已有 validator registry 和 `range` field validator；后续可扩展更多 built-in/plugin validators。 |

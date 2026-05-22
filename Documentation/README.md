@@ -35,6 +35,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 - `Implementation/05-validator-framework-detail-design.md` — Registered validator framework, Meta validator configuration, built-in validator migration, and test plan.
 - `Implementation/06-foreign-key-detail-design.md` — Foreign key raw/link model, referential-integrity validation, target semantics, codegen staging, and test plan.
 - `Implementation/07-object-table-step1-detail-design.md` — ObjectTable CSV `key,value` row layout, validation/export/codegen plan, and Step 1 test plan.
+- `Implementation/08-struct-expanded-value-detail-design.md` — Struct source layout auto detection and expanded CSV field-path layout for CollectionTable/ObjectTable, validation/export plan, and test plan.
 
 ## Technical Practice Set
 

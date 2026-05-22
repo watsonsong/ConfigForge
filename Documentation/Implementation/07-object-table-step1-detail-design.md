@@ -46,12 +46,10 @@ default = 0
 [[tables.fields]]
 name = "economy"
 type = "EconomyConfig"
-layout = "json_cell"
 
 [[tables.fields]]
 name = "start_item"
 type = "RewardItem"
-layout = "json_cell"
 ```
 
 目标 runtime JSON。注意：Step 1 不改变当前 runtime scalar value contract，scalar 仍保持 string；typed decode 由运行时代码或生成 loader 完成。
@@ -81,7 +79,7 @@ Step 1 不实现：
 - array/map schema 的完整类型系统。
 - runtime scalar typed export；如果未来要把 scalar 从 string 改为 typed int/float/bool，应作为全局 runtime export contract change，同时影响 CollectionTable 和 ObjectTable。
 
-复杂对象在 Step 1 中优先使用 named struct `json_cell`。数组、map 和 `expanded_value` field path rows 可以作为后续 Step 2 设计。
+复杂对象在 Step 1 中优先使用 named struct JSON cell。数组、map 和 struct field path rows 可以作为后续 Step 2 设计；struct source layout 自动判定与 expanded value 的后续实现方案见 `08-struct-expanded-value-detail-design.md`。
 
 ## 3. Source Layout
 
@@ -349,6 +347,6 @@ CLI integration tests：
 
 - 是否允许自定义 key/value column name？Step 1 暂不支持。
 - 是否允许 comments rows，例如 key 为空或以 `#` 开头？Step 1 建议不支持，避免和空 key 错误冲突。
-- field path rows 是否在 Step 1 支持 nested struct expand？建议先只允许 top-level field name；`economy.gold_rate` 留到 expanded_value Step 2。
+- field path rows 是否在 Step 1 支持 nested struct expand？Step 1 先只允许 top-level field name；后续由 source layout 自动判定决定 `economy` 使用 JSON cell 还是 `economy.gold_rate` 等 child paths，具体实现方案见 `08-struct-expanded-value-detail-design.md`。
 - ObjectTable source row number 是否需要 field-level source map？建议作为诊断增强后续实现。
 - ObjectTable codegen API 是 public field 还是 accessor method？需要结合三种语言生成风格统一决定。

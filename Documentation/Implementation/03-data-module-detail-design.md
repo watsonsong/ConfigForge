@@ -19,7 +19,7 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 - fragment join mode；
 - `override_sources`；
 - 非 CSV provider；
-- array / map / expanded value 的 typed parse；
+- array / map 的 typed parse；struct source layout 自动判定与 expanded value 需要在 Validation / Export 阶段从 flat field paths 组装为 nested object；
 - source location 精确到单元格的诊断。
 
 这些能力在 Meta validate 阶段应显式报 unsupported，避免 Data 阶段静默忽略。
@@ -105,7 +105,7 @@ pub struct DataTable {
 - `name` 对应 `TableMeta.name`。
 - `rows` 是 CSV 读取后的行集合。
 - `row_sources` 与 `rows` 等长，记录每行来自哪个 physical source。非 polymorphic 单 source 表也应填充，便于统一诊断。
-- 每个 row 的 key 来自 CSV header；fragment field 在 DataRow 中保留 `fragment.field` 形式，例如 `stats.attack`，不在读取阶段展开为嵌套结构。
+- 每个 row 的 key 来自 CSV header；fragment field 在 DataRow 中保留 `fragment.field` 形式，例如 `stats.attack`；struct source layout 自动判定相关的 child field path 也保留 `field.child` 形式，例如 `attributes.attack`。Data 模块不在读取阶段展开为嵌套结构。
 - 第一阶段不在 Data Load 阶段判断 header 是否匹配 Meta 字段；该判断放到 Validation 阶段。
 
 主要方法：
@@ -255,7 +255,7 @@ impl CsvDataReader {
 
 1. 使用 `csv::Reader::from_path` 打开文件。
 2. 第一行作为 header。
-3. 每条 record 与 header zip 成 `DataRow`；header 原样保留，包含 `stats.attack` 这类 fragment field path。
+3. 每条 record 与 header zip 成 `DataRow`；header 原样保留，包含 `stats.attack` 这类 fragment field path，以及 `attributes.attack` 这类 struct field path。
 4. 缺失 cell 当前不在读取阶段补齐；Validation 阶段按 required/default 处理。
 5. 多余 cell 当前由 csv crate 的 record 行为处理；后续如果需要严格列数，可在 Data 模块增加 header/record 长度校验。
 6. CsvDataReader 不理解 fragment schema；它只返回原始 row。DataLoader 在组装 DataTable 时为每行附加 `RowSourceInfo`。

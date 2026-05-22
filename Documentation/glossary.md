@@ -117,10 +117,10 @@
 | 表头 | Header | `Header`, `SheetHeader` | 映射 field path 的 header。 |
 | 表头映射 | Header Mapping | `HeaderMapping` | 从 header 到 field path 的映射。 |
 | Sheet Mapping | Sheet Mapping | `SheetMapping` | table-level source 解释规则。 |
-| 复合值书写方式 | Value Layout | `ValueLayout`, `layout` | `scalar_cell`、`json_cell`、`expanded_value`。 |
+| 复合值书写方式 | Value Layout | `ValueLayout`, `layout` | `scalar_cell`、`json_cell`、`expanded_value`；struct source layout 第一阶段推荐由 CSV/source 中出现 parent path 还是 child paths 自动判定。 |
 | 标量单元格 | Scalar Cell | `ValueLayout::ScalarCell`, `scalar_cell` | 简单值写在一个 cell 中。 |
 | JSON 单元格 | JSON Cell | `ValueLayout::JsonCell`, `json_cell` | struct/array 等聚合写入一个 JSON cell。 |
-| 展开值 | Expanded Value | `ValueLayout::ExpandedValue`, `expanded_value` | 复合值按 field path 展开；物理方向由表类型决定。 |
+| 展开值 | Expanded Value | `ValueLayout::ExpandedValue`, `expanded_value` | 复合值按 field path 展开；物理方向由表类型决定，struct 字段可由 CSV/source path 自动选择该写法。 |
 | 独立子表式明细布局 | Detail Table Layout | `DetailTableLayout` | 当前不支持的未来扩展：array 明细放在另一张表中按 key 关联。 |
 
 ## 数据模型与视图术语

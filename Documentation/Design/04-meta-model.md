@@ -10,7 +10,7 @@
 | XML Meta | Planned | 文档中的 XML 仅为目标态示例，当前 loader 不支持 XML。 |
 | primitive types | Implemented | 当前支持 `int`、`float`、`bool`、`string`、`text`、`asset`。 |
 | enum | Partial | 当前支持 enum 类型链接、default 校验与数据值校验。 |
-| struct | Partial | 当前支持 named struct 链接、`json_cell` 数据校验与 nested object 导出；`expanded_value`、array/map 与 struct child validators 暂未实现。 |
+| struct | Partial | 当前支持 named struct 链接、struct JSON cell 数据校验与 nested object 导出；目标设计支持由 CSV/source 形态自动决定同一个 struct field occurrence 使用 JSON cell 或 field path 展开，代码仍需实现；array/map 与 struct child validators 暂未实现。 |
 | default | Partial | 当前支持 primitive / enum scalar default。 |
 | multi-source / override / fragments | Partial | 当前已支持 polymorphic CollectionTable 的 fragment variant source mode：多个 CSV source 可追加完整 records，并由 source `fragments` 声明激活 fragment set；通用 multi-source split merge、ObjectTable 多源合并、`override_sources` 与 fragment join mode 仍未实现。 |
 | builtin value types | Planned | `vector3` 等 builtin value types 仍为目标态，当前尚未实现。 |
@@ -139,13 +139,13 @@ Step 1 语义：
 
 - `key` 列保存 Meta top-level field name；field path rows 留到后续 `expanded_value` 设计。
 - `value` 列保存该 field 的 raw cell value；scalar runtime export Step 1 保持与 CollectionTable 一致，仍输出 string。
-- 字段使用 `json_cell` layout 时可写当前已支持的 named struct JSON object；array/map schema 留到后续类型系统扩展。
+- named struct 字段可写当前已支持的 JSON object；后续也可由 CSV/source 形态决定写成 field path 展开；array/map schema 留到后续类型系统扩展。
 - 同一个 ObjectTable source 归一化为一个逻辑 object row，runtime data 导出为单个 object，而不是 records array。
 - 即使 source 只有 header、没有数据行，也必须归一化为一个 empty logical row `{}`，确保 required/default 在单对象上执行。
 - table-level `export/export_when` 和 field-level `export/export_when` 对 ObjectTable 生效；table 可见但所有字段被过滤时导出 `{}`。
 - ObjectTable Step 1 不支持 index、primary index、row_export、foreign key source/target、variant source fragments。
 - ObjectTable Step 1 只支持 `source = "...csv"`，不支持 `sources` / `override_sources`；后续应以 field path 为覆盖粒度扩展。
-- ObjectTable Step 1 不支持 field path 展开或“后续格子自动 expand 为数组元素”；复杂对象先使用 named struct JSON cell，数组和 `expanded_value` field path rows 留到后续设计补充。
+- ObjectTable Step 1 不支持 field path 展开或“后续格子自动 expand 为数组元素”；复杂对象先使用 named struct JSON cell。后续 struct `expanded_value` 应支持 `field.child` 形式的 field path rows；array/map 和数组自动扩展另行设计。
 
 Step 1 推荐 Meta：
 
@@ -163,12 +163,10 @@ required = true
 [[tables.fields]]
 name = "economy"
 type = "EconomyConfig"
-layout = "json_cell"
 
 [[tables.fields]]
 name = "start_item"
 type = "RewardItem"
-layout = "json_cell"
 ```
 
 ### CollectionTable
@@ -208,10 +206,17 @@ desc = "商店购买价格。"
 | `type` | 字段逻辑类型。 |
 | `required` | 当前验证视图中是否必须有值。 |
 | `default` | 数据未提供值时使用的默认值。 |
-| `layout` | 复合值在 source 中的书写方式，例如 scalar cell、JSON cell、expanded value。 |
+| `layout` | 复合值 source layout 的历史字段；named struct 字段不再通过 Meta 指定 JSON cell 或 expanded value，必须由 CSV/source 中实际出现的是 parent path 还是 child paths 自动决定。 |
 | `export` | 是否允许进入 runtime ExportView；`false` 表示强制不导出。 |
 | `export_when` | 按 target tags 判断是否进入当前 ExportView。 |
 | `special_exports` | 是否允许特殊导出器读取。 |
+
+字段路径相关命名规则：
+
+- table field name、struct field name、fragment name 是 canonical field path 的组成部分，第一阶段均不允许包含 `.`, `[`, `]`。
+- `.` 保留为 struct / fragment field path 分隔符；`[`、`]` 预留给未来固定槽 array path，例如 `rewards[0].item_id`。
+- 如果需要在 CSV 中展示更友好的表头，例如 `Attributes.Attack`、`属性.攻击`，应通过后续 header alias / source mapping 解决，不应进入 canonical name。
+- Meta validation 应在加载/校验阶段阻断包含保留字符的名称，避免 source path parser 产生歧义。
 
 ## 4.5 Target Tags 与 ExportView 过滤
 
@@ -466,6 +471,93 @@ ObjectTable 和 CollectionTable 的基础组织方式不同：
 | `expanded_value` | struct 或固定槽 array 按 field path 展开书写；具体表现为列还是行由 table kind 和 source mapping 决定。 |
 
 当前不要求支持“独立子表式明细布局”，即不要求把某个 array 的元素放在另一张明细表中再通过 parent key / child key 关联回来。
+
+### Struct Source Layout Auto Detection
+
+Named struct 字段不要求在 Meta 中固定声明使用 JSON cell 还是 expanded value。具体写法由每个 CSV/source 中实际出现的 field path 决定：如果出现 parent field path 本身，则该 occurrence 按 JSON cell 解析；如果出现 child field paths，则该 occurrence 按 expanded value 解析。同一个 named struct type 可以在不同 table、不同父级字段、甚至同一 table 的不同字段 occurrence 中采用不同写法。
+
+Field path 使用 **字段名** 逐级拼接，而不是使用 struct type name。比如 table field 名为 `attributes`，它的 child field 名为 `attack`，则展开路径是：
+
+```text
+attributes.attack
+attributes.max_health
+```
+
+这里的 `attributes` 是 table field name，不是 `Attributes` 类型名。如果同一个 `Attributes` struct type 在同一个父级中出现多次，应使用不同父级字段路径区分，例如：
+
+```csv
+id,base_attributes.attack,growth_attributes.attack
+1001,10,2
+```
+
+在 CSV header 中推荐使用 canonical dotted path。列名比较应按字段名大小写敏感；如果项目或表格作者更偏好 PascalCase header，例如 `Attributes.Attack`，应通过后续显式 header alias / source mapping 解决，不应改变 canonical field path。当前 canonical 规则仍是 Meta 中声明的各级 `field.name`。
+
+CollectionTable 中，struct expanded value 表现为同一 record 的多个列：
+
+```csv
+id,name,attributes.attack,attributes.max_health
+1001,Warrior,10,120
+1002,Mage,4,70
+```
+
+ObjectTable 的 Step 1 source 仍是 `key,value` 两列；struct expanded value 表现为多个 key rows：
+
+```csv
+key,value
+max_player_level,60
+default_attributes.attack,10
+default_attributes.max_health,120
+```
+
+Struct source layout 判定规则：
+
+- 判定单位是 struct field occurrence 的完整 parent field path，而不是 struct type。例如 `base_attributes` 和 `growth_attributes` 是两个独立 occurrence，即使它们类型相同，也分别扫描和判定。
+- 如果某个 occurrence 在当前 source 中出现 parent path，例如 `attributes`，且没有出现 `attributes.*` child paths，则按 JSON cell 解析。
+- 如果某个 occurrence 在当前 source 中没有 parent path，但出现一个或多个 `attributes.*` child paths，则按 expanded value 解析。
+- 不支持同一个 occurrence 同时使用 JSON cell 和 expanded value；如果同一 source 中同时出现 `attributes` 与 `attributes.attack`，必须报 source schema error。
+- nested struct occurrence 使用同样规则递归判定。某一级选择 expanded value 后，其内部 struct child 可以继续选择 JSON cell 或继续 expanded value；某一级选择 JSON cell 后，该 JSON cell 内部被视为 opaque object，source 中不允许再提供它的展开子项。
+- 例如 `attributes.offense` 可以是 JSON cell；如果没有 `attributes.offense` 但出现 `attributes.offense.attack`，则 `offense` 这个 occurrence 按 expanded value 解析；如果同时出现 `attributes.offense` 与 `attributes.offense.attack`，则属于同一 nested occurrence 混用，必须报错。
+- required/default/type/enum 校验作用于 child field path；child 未提供且有 default 时使用 default；child required 且没有有效值时报 `field.child is required`。
+- parent struct field 自身的 `required = true` 表示该 nested object 在当前验证视图中必须“有效存在”：至少一个当前可见 child path 提供非空值，或至少一个当前可见 child 有 default 被应用。child 是否必填仍由 child 自己的 `required` 控制。如果 parent 可见但当前 target 没有任何 visible child，parent required 不触发失败，runtime payload 可输出 empty object。
+- 第一阶段不支持 whole-struct parent default；struct field 不能通过 `default` 提供整个 object。expanded value 中仅支持 struct child fields 自己的 default。
+- target-aware export 先判断 parent field 是否可见，再判断 child field 是否可见；parent 可见但所有 child 被过滤时 runtime payload 输出 empty object。
+- runtime data shape 与 `json_cell` 保持一致，仍输出 nested object，例如 `{ "attributes": { "attack": "10", "max_health": "120" } }`；scalar child 第一阶段仍保持 string contract。
+
+Struct expanded value 与 fragment dotted key 相似但语义不同：fragment key 的第一段是 table fragment name，表示 polymorphic presence；struct expanded key 的每一段都是从当前 table field 或 struct field 继续解析得到的字段名路径。解析时必须先用 table meta 判定第一段属于 common field、fragment 还是未知名称，再沿 struct field schema 逐级解析，不能把 `attributes` 当作 type name 处理，也不能只根据是否包含 `.` 做统一处理。
+
+Nested struct 示例：
+
+```toml
+[[structs]]
+name = "Offense"
+
+[[structs.fields]]
+name = "attack"
+type = "int"
+
+[[structs]]
+name = "Attributes"
+
+[[structs.fields]]
+name = "offense"
+type = "Offense"
+```
+
+如果 source 中出现 direct child `attributes.offense`，且没有出现 `attributes.offense.*`，则 `offense` occurrence 按 JSON cell 解析：
+
+```csv
+id,attributes.offense
+1001,"{""attack"":""10""}"
+```
+
+如果 source 中没有 `attributes.offense`，但出现 `attributes.offense.attack`，则 `offense` occurrence 按 expanded value 解析。递归展开仍按每一级字段名判定，不能按 `Offense` 类型名判定。若同一 source 同时提供 `attributes.offense` 和 `attributes.offense.attack`，表示 `offense` 既作为 JSON cell 又继续展开，必须报混用错误。
+
+Layout 归属规则：
+
+- struct 是可复用类型，JSON cell / expanded value 是某个 source 中某个 field occurrence 的书写方式。为了让同一 struct type 能根据不同表格的编辑习惯复用，默认由 CSV/source 实际 field paths 决定。
+- 自动判定需要扫描当前 source 的 header/key 集合。只出现 parent path 时是 JSON cell；只出现 child paths 时是 expanded value；两者同时出现是混用错误。
+- Meta 仍负责定义字段类型、required/default/export_when 等逻辑 schema，不负责把某个 struct type 或 field occurrence 固定为展开或 JSON。
+- named struct 字段上的 `layout = "json_cell"` / `layout = "expanded_value"` 不再提供任何 source policy 语义；新设计要求省略该字段，避免 Meta 与 source header/key 之间出现第二套控制来源。
 
 ### Array FieldPath
 

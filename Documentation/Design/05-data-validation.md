@@ -91,6 +91,21 @@ fragment presence 的 target 判断顺序固定为：
 
 ObjectTable Step 1 的输入视图不是多行 records，而是由 CSV `key,value` rows 归一化出的单个 object row。即使 source 只有 header、没有数据行，也必须归一化为一个 empty logical row `{}`，使 required/default/type/enum/struct JSON cell 等字段级规则复用现有 field validation；但 index、row_export、foreign key、fragment-scoped validation 不适用于 ObjectTable Step 1。ObjectTable 的 table-level `export/export_when` 与 field-level `export/export_when` 仍生效；table 可见但字段都被过滤时，导出 empty object。
 
+Struct source layout 自动判定落地后，Full DataSet 与 ExportView 中的 logical row 仍保持 row-oriented map，但 source key 可以是 nested field path。CollectionTable 的 CSV header 使用 `field.child` 多列表达；ObjectTable 的 `key,value` source 使用多行 `field.child` 表达。Validation 需要按当前 row/source 的 key 集合扫描每个 struct field occurrence：只出现 parent path 时按 JSON cell 解析；只出现 child paths 时按 expanded value 解析；两者同时出现应视为同一 occurrence 混用 JSON cell 与 expanded cells 并报错。该规则递归作用于 nested struct：如果某一级 occurrence 选择 JSON cell，则该级以下不能再出现展开子项；如果某一级选择 expanded value，则其内部 struct child 可以继续独立选择 JSON cell 或 expanded value。Meta `layout` 不参与 named struct 的 source layout 判定。
+
+Source schema validation 独立于 target filtering 执行：所有 source 中出现的 dotted key 都必须能按 full schema 解析为 struct child occurrence 或 active fragment field，JSON/expanded 混用也应在这一层报错；inactive fragment 或未知 schema 应报错。普通不含 `.` 的 unknown CollectionTable column 继续沿用既有注释列/中间列策略，不因引入 expanded value 隐式变为错误；若项目希望严格拒绝普通 unknown column，应通过后续显式 `strict_source_schema` 配置表达。ObjectTable 的 `key,value` rows 不作为注释列处理，不含 `.` 的 unknown key 仍应报 unknown field key。
+
+Struct expanded value 的 ExportView 过滤顺序固定为：
+
+1. table `export/export_when` 判断整表是否进入当前 target。
+2. parent struct field `export/export_when` 判断整个 struct 是否可见。
+3. struct child field `export/export_when` 判断 nested object 中的字段是否可见。
+4. parent 可见但 child 全部不可见时，runtime payload 输出 empty object；parent 不可见时整个 nested object 不输出。
+
+Value validation 是 target-aware 的：只有当前 target 可见的 parent/child 执行 required/type/enum/range 等值校验。Parent struct field 的 `required = true` 在 expanded value 写法下表示当前验证视图中的 nested object 必须有效存在：至少一个当前可见 child path 提供非空值，或至少一个当前可见 child 有 default 被应用。child 自己的 required/default/type/enum 仍独立执行；parent required 不等价于“所有 child 都 required”。如果 parent field 本身不可见，跳过 parent required 和所有 child value validation；如果 parent 可见但当前 target 没有任何 visible child，parent required 不失败，runtime payload 可输出 empty object。JSON cell 写法下 parent required 仍表示 parent cell 本身必须存在且有效。第一阶段不支持 whole-struct parent default，只支持 child defaults。
+
+Struct expanded value 与 polymorphic fragment validation 共享 dotted key 形式，但二者的作用域不同：fragment dotted key 的第一段必须匹配 active fragment；struct expanded key 的第一段必须匹配 table field，并沿字段 schema 继续逐级匹配 struct child field。Validation 不应把未知 dotted key 静默归入任一机制，也不能把 path segment 当作 struct type name。
+
 ## 5.4 当前确认后的校验时机
 
 功能性校验面向所有 source 读取完成后的最终视图，而不是每个单独 source 或 override source。
