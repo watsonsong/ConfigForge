@@ -1,0 +1,77 @@
+[[tables]]
+name = "items"
+kind = "collection"
+polymorphic = true
+primary_index = "by_id"
+sources = [
+    { provider = "csv", path = "materials.csv", fragments = ["stack"] },
+    { provider = "csv", path = "weapons.csv", fragments = ["attributes", "skill"] },
+    { provider = "csv", path = "armors.csv", fragments = ["attributes"] },
+]
+desc = "统一道具运行时表。materials/weapons/armors 是同一 items 表的不同 source variant，共享 id/name/price，并通过 active fragments 表达各自差异。"
+
+[[tables.fields]]
+name = "id"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "name"
+type = "text"
+required = true
+export_when = { any = ["client"] }
+
+[[tables.fields]]
+name = "price"
+type = "int"
+required = true
+
+[[tables.fragments]]
+name = "stack"
+desc = "材料可堆叠信息。"
+
+[[tables.fragments.fields]]
+name = "max_stack"
+type = "int"
+required = true
+
+[[tables.fragments]]
+name = "attributes"
+desc = "装备属性。当前 fragment 字段暂以 scalar 展开；后续应支持 fragment 内复用 AttributeSet。"
+
+[[tables.fragments.fields]]
+name = "max_health"
+type = "int"
+default = 0
+
+[[tables.fragments.fields]]
+name = "max_stamina"
+type = "int"
+default = 0
+
+[[tables.fragments.fields]]
+name = "attack"
+type = "int"
+default = 0
+
+[[tables.fragments.fields]]
+name = "defence"
+type = "int"
+default = 0
+
+[[tables.fragments]]
+name = "skill"
+desc = "装备武器后赋予玩家的技能资源。"
+export_when = { any = ["client"] }
+
+[[tables.fragments.fields]]
+name = "skill_asset"
+type = "asset"
+required = true
+export_when = { any = ["client"] }
+
+[[tables.indexes]]
+name = "by_id"
+fields = ["id"]
+unique = true
+primary = true

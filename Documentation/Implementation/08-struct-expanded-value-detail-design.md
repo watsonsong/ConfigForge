@@ -282,6 +282,61 @@ enum ScalarValue { String(String), Int(i64), Float(f64), Bool(bool), Enum(String
 
 这样 JSON cell 与 expanded value 最终都解析为同一 `DataValue::Struct`，Validation 只验证结构化值，Exporter 只序列化结构化值。
 
+当前已落地基础 `DataResolver` / `ResolvedDataSet`，runtime exporter 主路径已消费 resolved value。标准参考游戏 fixture 进一步暴露出两个后续扩展方向：
+
+1. **Struct as top-level table field** 已支持：`class_levels.attributes.max_health` 等 CSV header 会解析为 `attributes: AttributeSet`，并导出 nested object。
+2. **Struct as fragment payload** 尚未支持：当前 fragment 只能声明字段列表，不能直接写 `[[tables.fragments]] name = "attributes" type = "AttributeSet"` 并把 `attributes.max_health` 解析为该 fragment payload 的 child。因此 weapons / armors fixture 需要在 fragment 中重复声明 `max_health/max_stamina/attack/defence`。下一步应让 fragment payload 也走同一个 StructOccurrenceEvaluator/DataResolver path，保持和 table field struct 完全一致的 JSON/expanded/default/target filtering 语义。设计上不新增专门的 fragment struct；fragment payload 复用标准 `[[structs]]`，`[[tables.fragments]]` 只负责声明 fragment name、target policy 和 payload type。
+
+建议的 typed fragment payload 实现方向：
+
+```rust
+enum LinkedFragmentPayload<'meta> {
+    InlineFields(Vec<LinkedFieldMeta<'meta>>),
+    Struct(LinkedStructType<'meta>),
+}
+```
+
+对应 raw meta 可以保持 `FragmentMeta` 为 table-local fragment 声明，并新增可选 `type_name` / TOML `type` 字段：
+
+```rust
+pub struct FragmentMeta {
+    pub name: String,
+    pub type_name: Option<String>, // #[serde(rename = "type")]
+    pub fields: Vec<FieldMeta>,
+    // desc/export/export_when...
+}
+```
+
+Meta validation 规则：
+
+- `type` 必须引用已存在的标准 struct；
+- `type` 与 `fields` 互斥，避免 inline payload 和 typed payload 混用；
+- fragment 仍不能直接声明 indexes / row_export / table-level validators；这些能力属于 table 或未来 validator scope，不属于 payload shape；
+- 如果 fragment 仅一次性使用且非常简单，可以继续使用 inline `fields` 作为兼容简写；推荐新业务优先使用标准 struct，减少 schema 概念数量。
+
+Source path classifier 规则：
+
+| Source key/path | inline fragment payload | typed struct payload |
+| --- | --- | --- |
+| `fragment` | 非法，inline fragment 没有 parent JSON cell。 | parent JSON cell，按 struct JSON cell 解析。 |
+| `fragment.field` | `field` 必须是 inline fragment direct field。 | `field` 作为 struct direct child，可继续按 child 类型判断 scalar / nested struct。 |
+| `fragment.child.grandchild` | 非法，inline fragment 第一阶段不支持多级 path。 | 递归 struct child path，例如 nested struct expanded value。 |
+| inactive `fragment.*` | 报 inactive fragment field。 | 同样报 inactive fragment field；不能因为 struct child 合法而绕过 active fragment 检查。 |
+| unknown `fragment.*` | 如果第一段不是 table field 或任一 fragment name，按 unknown dotted field path 报错。 | 同 inline。 |
+
+Layout mixing：typed fragment 与普通 struct occurrence 使用同一套规则。同一 row/source 中如果出现 parent JSON cell `attributes`，则不允许再出现 `attributes.attack` / `attributes.offense.attack` 等 descendant expanded path；反之亦然。诊断 field path 使用 fragment parent path，例如 `items.attributes`。
+
+Required/default 与 target filtering：source 声明 fragment 后，fragment presence 对该 source 的所有 rows 生效；typed payload 不再额外配置 `required`。当 fragment 在当前 target 可见时，struct child required/default/type 按普通 struct occurrence 规则执行，visible child default 可以构成 effective object。执行顺序为 row visibility -> fragment `export_when` -> struct child `export_when`。fragment 对 target 不可见时跳过 payload value validation/export/codegen；fragment 可见但某些 child 不可见时只跳过对应 child。
+
+Codegen：typed fragment 的 row member 应保留 optional presence，但成员类型复用标准 struct 或 target-specific projected struct：Rust 为 `Option<AttributeSet>`，TypeScript 为 `attributes?: AttributeSet`，C++ 为 `std::optional<AttributeSet>`。如果 target filtering 隐藏了 struct 部分 child，而生成器当前不能表达 partial named struct，应生成 target-specific fragment payload type，避免把 hidden child 暴露在当前 target API 中。
+
+Resolver 处理 active fragment 时：
+
+- inline fields 保持当前逻辑；
+- struct payload 将 fragment name 作为 occurrence parent path，调用 struct occurrence resolver。例如 fragment `attributes` + `type = "AttributeSet"` 读取 CSV header `attributes.attack`；
+- runtime payload key 仍为 fragment name；如果 payload 是 struct，直接输出 struct children，不额外包裹同名 child；
+- source schema validator 需要把 `fragment.child` 同时识别为 fragment inline field 或 fragment struct child，若二者混用/冲突应由 Meta validation 提前禁止。
+
 ## 5. Meta validation 修改
 
 需要修改 `validate_field_layout()`：
@@ -412,6 +467,8 @@ fn struct_child_effective_value(row, parent, child, target_tags) -> Option<Cow<'
 - required parent struct 可以由 visible child default 构成 effective value；validation 通过时 export 也必须输出对应 nested object。
 - optional expanded struct 中，只有 header/key 存在但所有 visible child cell 都为空且没有 default 时，视为 missing，不触发 child required，也不输出空 object。
 - target-hidden descendant 不应让当前 target 认为该 struct occurrence 已出现；occurrence 判断必须只统计 target-visible child path / default。
+
+标准参考游戏 fixture 中 `class_levels.attributes.*` 使用 expanded struct source，直接复用 `AttributeSet` named struct；`items` 表的 `weapons.csv` / `armors.csv` source variants 中，`attributes.*` 目前仍是 fragment scalar fields 的重复声明，作为后续 typed fragment payload 的测试入口。该 fixture 同时验证游戏语义中使用 `class` 表达角色职业，并把相关 CSV 放在统一 `data/` 根目录下。
 
 ### 7.3 Field validators
 

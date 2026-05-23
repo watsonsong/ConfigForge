@@ -21,16 +21,20 @@ Project Config
 
 ```text
 ConfigForge.toml
-Meta/
-  common.toml
+meta/
+  characters.toml
   items.toml
-  quests.toml
-Targets/
-  client.toml
-  server.toml
+  misc.toml
+data/
+  classes.csv
+  class_levels.csv
+  materials.csv
+  weapons.csv
+  armors.csv
+  game_rules.csv
 ```
 
-拆分时使用 Project Config 顶层 `imports` 统一导入其他工程配置片段。被导入的文件与根配置使用同一套格式：可以直接声明 `[[enums]]`、`[[structs]]`、`[[tables]]`、`[[targets]]`，也可以继续声明 `imports`。不再需要单独的 `meta = [...]` 列表；所有导入片段中的 Meta 定义和 target 定义最终合并为一次构建使用的工程配置。
+拆分时使用 Project Config 顶层 `imports` 统一导入其他工程配置片段。被导入的文件与根配置使用同一套格式：可以直接声明 `[[enums]]`、`[[structs]]`、`[[tables]]`、`[[targets]]`，也可以继续声明 `imports`。不再需要单独的 `meta = [...]` 列表；所有导入片段中的 Meta 定义和 target 定义最终合并为一次构建使用的工程配置。标准参考游戏 fixture 采用 `ConfigForge.toml` 作为总控入口，按 `meta/characters.toml`、`meta/items.toml`、`meta/misc.toml` 拆分角色、道具、杂项定义，并在总控文件中声明 client/server 构建 target。
 
 ## 3.2 Project Config
 
@@ -77,6 +81,7 @@ output = "Generated/TypeScript"
 - Meta 定义直接使用 `[[enums]]`、`[[structs]]`、`[[tables]]` 写在任意 Project Config 片段中；构建前会合并所有导入片段中的 Meta 定义。
 - `targets` 可以直接内联在根 Project Config 中，也可以放在被 `imports` 引入的配置片段中；每个 target 描述一次完整构建。
 - 每个配置片段中的相对路径都相对该片段自身所在目录解析。
+- 推荐由根 `ConfigForge.toml` 充当总控文件：集中声明工程元信息、meta fragment 引用和常用构建 target；领域 meta 文件只描述领域 schema，避免一个超大的 `meta.toml` 同时承担所有职责。
 
 要求：
 

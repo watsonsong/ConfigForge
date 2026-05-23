@@ -1,0 +1,7 @@
+class_id,level,attributes.max_health,attributes.max_stamina,attributes.attack,attributes.defence
+1,1,120,40,12,8
+1,2,145,45,16,11
+2,1,95,70,11,5
+2,2,110,82,15,7
+3,1,80,55,18,3
+3,2,92,65,25,4

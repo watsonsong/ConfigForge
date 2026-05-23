@@ -1,0 +1,93 @@
+[[structs]]
+name = "AttributeSet"
+desc = "战斗属性集合，可用于装备、角色职业等级等配置。"
+
+[[structs.fields]]
+name = "max_health"
+type = "int"
+default = 0
+
+[[structs.fields]]
+name = "max_stamina"
+type = "int"
+default = 0
+
+[[structs.fields]]
+name = "attack"
+type = "int"
+default = 0
+
+[[structs.fields]]
+name = "defence"
+type = "int"
+default = 0
+
+[[tables]]
+name = "classes"
+kind = "collection"
+primary_index = "by_id"
+source = "classes.csv"
+desc = "角色职业（Class）基础配置。游戏语境中 class 比 profession 更贴近职业/职业类型概念。"
+
+[[tables.fields]]
+name = "class_id"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "name"
+type = "text"
+required = true
+export_when = { any = ["client"] }
+
+[[tables.fields]]
+name = "description"
+type = "text"
+required = true
+export_when = { any = ["client"] }
+
+[[tables.fields]]
+name = "icon"
+type = "asset"
+required = true
+export_when = { any = ["client"] }
+
+[[tables.indexes]]
+name = "by_id"
+fields = ["class_id"]
+unique = true
+primary = true
+
+[[tables]]
+name = "class_levels"
+kind = "collection"
+primary_index = "by_class_level"
+source = "class_levels.csv"
+desc = "角色职业等级属性配置，class_id 与等级组成联合主键。"
+
+[[tables.fields]]
+name = "class_id"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "level"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "attributes"
+type = "AttributeSet"
+required = true
+
+[[tables.indexes]]
+name = "by_class_level"
+fields = ["class_id", "level"]
+unique = true
+primary = true
+
+[[tables.foreign_keys]]
+name = "class"
+fields = ["class_id"]
+target_table = "classes"
+target_index = "by_id"

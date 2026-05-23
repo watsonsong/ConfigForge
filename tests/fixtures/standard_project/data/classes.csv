@@ -1,0 +1,4 @@
+class_id,name,description,icon
+1,Warrior,A durable melee fighter.,assets/icons/classes/warrior.png
+2,Ranger,A nimble ranged attacker.,assets/icons/classes/ranger.png
+3,Mage,A spell caster with high burst damage.,assets/icons/classes/mage.png

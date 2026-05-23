@@ -15,7 +15,8 @@
 | multi-source / override / fragments | Partial | 当前已支持 polymorphic CollectionTable 的 fragment variant source mode：多个 CSV source 可追加完整 records，并由 source `fragments` 声明激活 fragment set；通用 multi-source split merge、ObjectTable 多源合并、`override_sources` 与 fragment join mode 仍未实现。 |
 | builtin value types | Planned | `vector3` 等 builtin value types 仍为目标态，当前尚未实现。 |
 | foreign key | Implemented MVP | 当前支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；Phase 1 仅支持 CollectionTable 到 CollectionTable。 |
-| ObjectTable 特化语义 | Planned Step 1 | 当前可解析 ObjectTable 但仍复用 row pipeline。下一步实现 CSV `key,value` 行式常量表：每行一个 top-level field key，导出单个 object；多源/override、FK、field path 展开、后续格子 expand 暂不实现。 |
+| shared table schema / typed fragments | Planned | 当前没有 table inheritance / base fields / reusable field group；field group 仍是方向性目标，不进入近期实现。fragment 也不能直接声明为 named struct payload 并把该 struct 的字段平铺到 fragment object；当前只能在 fragment 内重复声明 scalar fields，或声明一个额外 wrapper field。标准参考项目通过同一 `items` polymorphic table 的多个 variant sources 解决道具公共字段复用，不依赖 field group。 |
+| ObjectTable 特化语义 | Implemented MVP | 当前已支持 CSV `key,value` 行式 singleton ObjectTable：每行一个 top-level field key，导出单个 object，并支持 struct JSON/expanded value。ObjectTable 多源/override、FK、key-level source row 精确诊断、后续格子 expand 暂不实现。 |
 | target tags / export_when / row_export | Implemented | 当前 Project target 支持 `tags`；Meta 中 table / field / index 支持 `export` 与 `export_when`；collection table 支持 `row_export`，并已接入 validation、runtime data export 与 codegen 的 target-aware 视图。旧字段 `tool_only` / `filter_field` / `validator_only` 仅用于报 deprecated/unsupported 诊断，不再参与导出判断。 |
 
 ## 4.1 MetaModel
@@ -181,6 +182,107 @@ CollectionTable 表示多条记录，例如 items、quests、levels。
 - 可定义 `row_export`，按 target tags 裁剪集合记录。
 - override source 以整条 record 为单位覆盖，必须通过 primary index 匹配。
 - 可选择 `preserve_source_order = true` 暴露源顺序数组访问。
+
+### Shared table schema / reusable field groups（目标态）
+
+实际配置中常见“多张 source 表共享基础字段，进入同一运行时逻辑表”的建模方式。例如标准参考游戏中，策划侧可拆成 `materials.csv` / `weapons.csv` / `armors.csv` 三个 source，但它们都属于 `items` 运行时表，共享 `id`、`name`、`price`，并要求全局 ID 不重复；weapons / armors 还都拥有 attributes fragment。当前 variant source mode 已能表达“多个 source 合并为同一 polymorphic table”，但 Meta 没有 field group、mixin 或 reusable fragment schema，因此 common fields / fragment fields 仍需要在 `items` table 内手工声明，fragment payload 也暂时不能直接复用 `AttributeSet`。
+
+目标态可考虑新增 reusable field group：
+
+```toml
+[[field_groups]]
+name = "ItemCommonFields"
+
+[[field_groups.fields]]
+name = "id"
+type = "int"
+required = true
+
+[[field_groups.fields]]
+name = "name"
+type = "text"
+required = true
+export_when = { any = ["client"] }
+
+[[field_groups.fields]]
+name = "price"
+type = "int"
+required = true
+
+[[tables]]
+name = "weapons"
+use_fields = ["ItemCommonFields"]
+```
+
+field group 展开后应等价于在 table 中内联声明字段，并继续参与 duplicate field、index、foreign key、target filtering 和 codegen。该能力与 variant fragments 不同：field group 是 schema 复用机制，不表达 record 的 runtime presence。
+
+当前优先级判断：field group 仍保持 Planned，不作为 typed fragment payload 之前的近期实现项。若未来实现，建议采用最小保守规则：
+
+- `field_groups` 只包含 fields，不包含 index、foreign key、fragment、row_export 或 table-level validators；
+- 展开发生在 Project Config / Meta imports 全部 merge 完成之后、link 之前；
+- 多个 group 按 table `use_fields` 声明顺序稳定展开，再追加 table 本地 fields；
+- group field 与 table 本地 field 或其他 group 展开字段重名直接报错，不支持局部 override；
+- 展开后复用现有 duplicate field、index/FK 引用、target filtering、validation 和 codegen 逻辑；
+- group 名称使用全局 Meta namespace，重复 group name 按 duplicate meta definition 报错；
+- group 不被 struct 或 fragment typed payload 直接引用；fragment payload 复用标准 struct，而不是 field group。
+
+### Typed fragment payload（目标态）
+
+当前 fragment 是一组局部字段，runtime payload 输出为：
+
+```json
+{ "attributes": { "attack": "12", "defence": "3" } }
+```
+
+如果希望 `attributes` fragment 复用 named struct `AttributeSet`，当前只能重复声明 `max_health/max_stamina/attack/defence` 四个 fragment fields；若在 fragment 内声明一个 `attributes` struct field，则 payload 会多一层 wrapper，不符合期望。
+
+推荐方案：**不新增一套专门的 fragment struct 类型**。fragment 的 payload shape 直接复用标准 `[[structs]]`；`[[tables.fragments]]` 仍然需要存在，但它的职责是声明“这个 fragment 名称、激活条件、导出策略和 payload 类型”，而不是再定义一套独立结构系统。
+
+目标态建议允许 fragment 直接声明标准 struct 作为 payload type：
+
+```toml
+[[structs]]
+name = "AttributeSet"
+
+[[structs.fields]]
+name = "max_health"
+type = "int"
+default = 0
+
+[[structs.fields]]
+name = "attack"
+type = "int"
+default = 0
+
+[[tables.fragments]]
+name = "attributes"
+type = "AttributeSet"
+```
+
+其语义是：
+
+- fragment object 的字段由 named struct `AttributeSet` 提供，source header 使用 `attributes.max_health`、`attributes.attack` 等平铺路径；
+- validation / resolver 对 fragment payload 复用 struct JSON / expanded value、child default、target-aware child filtering；
+- runtime payload 仍是 fragment name 对应的 object，不额外包裹 wrapper field；
+- codegen 可以复用 `AttributeSet` 类型，避免为每张表重复生成等价 fragment shape。
+- `type` 指向已有标准 struct；不引入 `[[fragment_structs]]` / `[[tables.fragment_structs]]` 之类的新顶层概念，避免 struct 与 fragment struct 两套 schema 规则漂移。
+
+为了兼容非常小的一次性 fragment，`[[tables.fragments.fields]]` 可继续作为 inline payload 的简写；但推荐准则是：只要 payload 有复用可能、需要 codegen 命名稳定、或会被文档/工具单独理解，就定义标准 struct 并在 fragment 上引用 `type`。同一个 fragment 不应同时配置 `type` 和 `fields`，Meta validation 应明确拒绝这种混用。
+
+typed fragment payload 的详细规则：
+
+| 维度 | 规则 |
+| --- | --- |
+| Raw TOML | `[[tables.fragments]] type = "StructName"` 通过 serde rename 映射到 `FragmentMeta.type_name`；`type` 与 `fields` 互斥。 |
+| Link | `type` 必须能链接到标准 named struct；linked model 中 payload 表达为 `LinkedFragmentPayload::Struct`。 |
+| Empty fragment | inline fragment 可继续允许空 fields 以表达纯 presence；typed fragment 的 struct 可以没有 visible child，但 raw struct definition 仍必须合法。 |
+| Source parent path | fragment name 是 struct occurrence parent path。例如 `attributes` + `type = "AttributeSet"` 可读取 parent JSON cell `attributes = "{...}"`，也可读取 expanded descendant `attributes.attack`。 |
+| Nested path | typed fragment 复用 recursive struct path 规则，允许 `attributes.offense.attack` 这类 nested struct child path；旧的“fragment path 仅两段”限制只适用于 inline fragment fields。 |
+| Layout mixing | 同一 typed fragment occurrence 不允许同时出现 parent JSON cell 与任一 descendant expanded path，例如同一 row/source 中 `attributes` 与 `attributes.attack` 同时出现应报 mixing error。 |
+| Required/default | source 激活 typed fragment 时，该 fragment occurrence 被视为 active。struct child required/default 按普通 struct occurrence 规则执行；visible child default 可以构成 effective value。fragment 本身不新增 required 字段，presence 由 source fragments 决定。 |
+| Target filtering | 先判断 row 是否 visible，再判断 fragment `export_when`，最后判断 struct child `export_when`。fragment hidden 时跳过其 payload value validation/export/codegen；fragment visible 但某 child hidden 时跳过该 child。 |
+| Runtime payload | 输出仍是 `fragment_name -> struct children`，不增加 wrapper。fragment 在当前 target 没有任何 visible child 时，可保留空 object 以表达 presence，也可由 exporter policy 裁剪；默认与现有 fragment presence 行为保持一致。 |
+| Codegen | row 字段应使用 optional presence：`attributes: Option<AttributeSet>`（Rust）、`attributes?: AttributeSet`（TypeScript）、`std::optional<AttributeSet>`（C++）。target filtering 后如果 struct child 被裁剪，生成 target-specific 的可见 shape；若语言生成器无法生成 partial named struct，应生成 target-specific projected type，不能把 hidden child 暴露到该 target API。 |
 
 ## 4.4 Field
 
@@ -684,13 +786,13 @@ kind = "collection"
 polymorphic = true
 primary_index = "by_id"
 sources = [
-  { provider = "csv", path = "items/weapons.csv", fragments = ["stats", "skills"] },
-  { provider = "csv", path = "items/equipment.csv", fragments = ["stats"] },
-  { provider = "csv", path = "items/usable.csv", fragments = ["usable"] },
+  { provider = "csv", path = "materials.csv", fragments = ["stack"] },
+  { provider = "csv", path = "weapons.csv", fragments = ["attributes", "skill"] },
+  { provider = "csv", path = "armors.csv", fragments = ["attributes"] },
 ]
 ```
 
-fragment 本身建议定义为 table 内的命名字段组，复用 `FieldMeta` 的字段属性：
+当前实现中 fragment payload 只能定义为 table 内的 inline 字段组，复用 `FieldMeta` 的字段属性：
 
 ```toml
 [[tables.fragments]]
@@ -703,7 +805,7 @@ type = "int"
 default = 0
 
 [[tables.fragments.fields]]
-name = "defense"
+name = "defence"
 type = "int"
 default = 0
 
@@ -718,12 +820,50 @@ required = true
 
 > 说明：当前代码已落地 `FragmentMeta` / `LinkedFragmentMeta`，`TableMeta` 包含 `fragments: Vec<FragmentMeta>`，link 阶段会把 table-local fragments 链接为可查询结构。`SourceRef.fragments` 保留为每个 source 的 active fragment 名称集合，由 DataLoader 写入每行 `RowSourceInfo`，再由 Validation 阶段按行解释。
 
+目标态中，fragment payload 可以改为引用标准 struct，而不是继续重复 inline fields：
+
+```toml
+[[structs]]
+name = "ItemStack"
+
+[[structs.fields]]
+name = "max_stack"
+type = "int"
+required = true
+
+[[structs]]
+name = "SkillGrant"
+
+[[structs.fields]]
+name = "skill_asset"
+type = "asset"
+required = true
+export_when = { any = ["client"] }
+
+[[tables.fragments]]
+name = "stack"
+type = "ItemStack"
+
+[[tables.fragments]]
+name = "attributes"
+type = "AttributeSet"
+
+[[tables.fragments]]
+name = "skill"
+type = "SkillGrant"
+export_when = { any = ["client"] }
+```
+
+这里 `[[tables.fragments]]` 不是“专门的结构体定义”，而是 polymorphic presence 的声明：source 通过 `fragments = ["attributes"]` 激活该 fragment，运行时 payload key 仍为 `attributes`，payload shape 来自标准 struct。这样保持一套 struct 规则，同时保留 fragment 的按行 presence、source variant、target policy 和 runtime wrapper key 语义。
+
 目标 Rust schema：
 
 ```rust
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct FragmentMeta {
     pub name: String,
+    #[serde(default, rename = "type")]
+    pub type_name: Option<String>,
     #[serde(default)]
     pub desc: Option<String>,
     #[serde(default = "default_export")]
@@ -767,8 +907,9 @@ Phase 1 中 fragment 只表达一组可 target-filter 的字段，不引入完�
 - fragment name 不能与 table common field name 冲突，因为 runtime payload 的同一层级需要区分 common scalar/object field 与 fragment object。
 - fragment field names 只要求在所属 fragment 内唯一；不同 fragments 之间可以复用相同 field name，例如 `stats.value` 与 `cost.value`。
 - fragment field name 可以与 common field name 相同，因为 CSV header 和 runtime payload 都通过 fragment name 隔离该字段，例如 common field `value` 与 fragment field `stats.value` 可以同时存在。
-- CSV header 中 fragment field 使用 `fragment.field` 形式，例如 `stats.attack` / `stats.defense`；common field 仍使用裸 field name，例如 `id` / `name`。
-- Phase 1 不支持多级 fragment path；`stats.attack` 中 `stats` 必须是当前 table 的 fragment name，`attack` 必须是该 fragment 内的直接 field name。
+- CSV header 中 inline fragment field 使用 `fragment.field` 形式，例如 `stats.attack` / `stats.defence`；common field 仍使用裸 field name，例如 `id` / `name`。
+- Inline fragment fields 第一阶段不支持多级 fragment path；`stats.attack` 中 `stats` 必须是当前 table 的 fragment name，`attack` 必须是该 fragment 内的直接 field name。
+- Typed fragment payload 复用 struct occurrence path 规则，因此允许 `fragment.child.grandchild`。source path classifier 应先匹配 table common field，再匹配 active fragment name；若 fragment payload 是 inline fields，则按 direct field 匹配；若 payload 是 struct，则把剩余 path 作为 struct child path 递归解析。
 
 ### 4.14.3 与 fragment join mode 的边界
 

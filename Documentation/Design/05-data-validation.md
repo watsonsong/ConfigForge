@@ -181,6 +181,14 @@ target validation 下，fragment 校验基于当前 target 的 ExportView：
 - visible rows 中的 `fragment.field` dotted key 仍保持严格检查：fragment 必须存在、必须被该行 source 激活，field 必须属于该 fragment。
 - fragment / field 的 `export_when` 只影响当前 target 是否执行 required/type/export/codegen，不表示 visible row 的 CSV 可以出现任意 hidden dotted key。
 
+typed fragment payload 目标态下，Validation 应把 `[[tables.fragments]] type = "StructName"` 视为一个以 fragment name 为 parent path 的 struct occurrence：
+
+- source 激活该 fragment 时，`fragment` parent JSON cell 与 `fragment.child` expanded path 都合法，但同一 occurrence 不允许 JSON/expanded 混用；
+- `fragment.child.grandchild` 按 named struct 的 recursive child path 解析，不受 inline fragment “两段 path” 限制；
+- inactive typed fragment 的 `fragment.*` 仍报 inactive fragment field，而不是当作普通未知注释列；
+- required/default/type/enum/range 等 child value validation 按 target-visible struct child 执行；fragment 自身的 presence 由 source fragments 决定，不另设 fragment-level required；
+- runtime export 与 special exporter 读取 target ExportView，server target 不应因 client-only typed fragment child 缺失而失败。
+
 ### 5.6.2 Data load / merge validation
 
 需要检查：
@@ -197,7 +205,7 @@ runtime payload 应固定 fragment 表达方式。第一阶段推荐直接用 fr
 {
   "id": "1001",
   "name": "Iron Sword",
-  "stats": { "attack": "10", "defense": "0" },
+  "stats": { "attack": "10", "defence": "0" },
   "skills": { "skill_id": "slash" }
 }
 ```
@@ -250,6 +258,8 @@ Asset 字段应至少检查：
 
 Asset existence 默认对 ExportView 执行。被 target filter 排除的记录，其 asset 不阻塞该 target 导出，也不进入 asset manifest。
 
+当前实现状态：`asset` 仍按 string-like scalar 解析和导出，尚未实现 asset ref syntax、asset kind 和文件存在性校验。标准参考游戏 fixture 中 class icon、weapon skill asset 等字段用于锁定目标业务形态：这些字段一般只对 client target 可见，server target 不应因为 client-only asset 缺失而失败；client target 后续应能按配置的 asset root 检查真实资源是否存在，并生成 asset manifest。
+
 ### Text
 
 Text 字段第一阶段推荐使用原文驱动模型：
@@ -260,6 +270,8 @@ Text 字段第一阶段推荐使用原文驱动模型：
 - source reference 默认使用 source 表名和行列号，确保翻译人员和策划可以定位原始表格位置；
 - text 字段可以通过额外的映射列或映射行提供 translator comment，用于解释翻译语境、语气、变量含义或 UI 使用场景；
 - 被 filter 排除的记录不进入该 target 的 POT。
+
+当前实现状态：`text` 仍按 string-like scalar 解析和 runtime data 导出，尚未实现国际化 key/context、POT exporter、translator comment 或文本资源诊断。标准参考游戏 fixture 中 item/class name、class description 等字段用于表达目标语义：客户端需要 text，服务器通常不需要；target ExportView 过滤后，server target 不应输出这些字段，也不应把它们送入未来 POT / text validation。
 
 ## 5.9 Special Exporter 输入
 

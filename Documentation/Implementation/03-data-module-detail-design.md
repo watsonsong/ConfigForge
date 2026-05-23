@@ -6,13 +6,13 @@
 
 Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据模型，并在 Data Load 后提供 Meta-aware resolver。核心分层结论：**Reader 保持 source-neutral；Resolver 负责 Meta-aware 结构化；Validation 和 Exporter 应逐步只消费结构化后的统一数据模型。**
 
-第一阶段已覆盖 CSV raw load，下一阶段应在不破坏 raw `DataSet` 的前提下新增 `ResolvedDataSet` / `DataResolver`：
+当前已覆盖 CSV raw load，并已在不破坏 raw `DataSet` 的前提下引入 `ResolvedDataSet` / `DataResolver` MVP。后续目标是在 Validation / Exporter 中进一步收敛到 resolved view：
 
 1. 支持从 `TableMeta.source` / `TableMeta.sources` 中解析单个 CSV source。
 2. 支持按表加载 CSV，得到与 Meta 生命周期无关的 owned `DataSet`。
 3. Data 加载阶段不依赖 `LinkedMetaModel<'meta>`，只依赖可拥有的加载计划，因此可以与 Meta Link / Meta Validate 在流程上并行。
-4. 在 Meta Link 完成后，由 Data Resolver 使用 `LinkedMetaModel<'meta>` + raw `DataSet` 解析 JSON cell / expanded path / default / target visibility，得到结构化 `ResolvedDataSet` 或 target-specific resolved view。
-5. 暂不实现任务并行驱动，但类型设计保持 Data 与 Meta 的数据相互独立，后续可接入 executor 并行加载。
+4. 在 Meta Link 完成后，由 Data Resolver 使用 `LinkedMetaModel<'meta>` + raw `DataSet` 解析 JSON cell / expanded path / default / target visibility，得到结构化 `ResolvedDataSet` 或 target-specific resolved view；runtime export 主路径已消费 resolved value。
+5. Validation 仍处于迁移中：source schema 与 value resolve 已通过 resolver 统一，required/type/index/FK 等主流程仍保留部分 raw `DataRow` 逻辑，后续应迁移到 `validate_resolved_*`。
 
 当前阶段已实现 CSV source、DataSet、target-aware validation/export 的基础流程，并已按 **variant source mode** 支持 polymorphic fragments：polymorphic CollectionTable 可声明多个 CSV sources，每个 source 追加完整 records 并声明 active fragments。
 
@@ -29,6 +29,10 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 设计判断：不建议把 Meta-aware 解析下沉到 `CsvDataReader`。CSV / Xlsx / Lark 等 reader 只负责语法读取、raw string 和 source location；struct source layout、default、target visibility、fragment active set 和 typed scalar parsing 都需要 linked meta 与 target context，更适合放在 Data Load 之后的 resolver 阶段。当前代码中 Validation / Exporter 已能解释 struct expanded value，但这只是过渡实现；长期应收敛为共享 resolver，避免两边重复解释 JSON 字符串和 dotted path。
 
 variant source mode 下，`sources` 可以为同一 polymorphic collection table 声明多个 CSV source，但至少一个 source 必须声明非空 `fragments`，每个 source 必须贡献完整 record，不做按 ID 拼接。
+
+标准参考游戏 fixture 暴露出的后续差距：材料、武器、防具是同一个 `items` 运行时表的三类 source variants，共享 `id/name/price` 并要求 primary index `by_id` 在合并后的 items 表中全局唯一；武器与防具都拥有 attributes fragment，且 attributes 的 shape 与 `AttributeSet` named struct 相同。当前实现可以通过 variant source mode 合并 `materials.csv` / `weapons.csv` / `armors.csv`，并在一个 `items` table 内声明 common fields 与 fragments；但仍缺少 field group / base table schema / typed fragment payload 复用机制。Data 层后续若支持 typed fragment payload，应让 fragment 引用标准 `[[structs]]` 作为 payload type，而不是新增专门的 fragment struct 系统。resolver 中把 fragment payload 当作以 fragment name 为 parent path 的 struct occurrence 解析，但 runtime payload 仍直接输出在 fragment object 下，不增加 wrapper field。
+
+standard_project 作为参考游戏 fixture，当前采用工程总控 + 领域 meta 拆分：`ConfigForge.toml` 负责导入 `meta/items.toml`、`meta/characters.toml`、`meta/misc.toml` 并声明 client/server targets；领域 meta 文件只保存对应 tables / structs。数据 CSV 直接放在 `data/` 下，材料、武器、防具分别使用 `materials.csv`、`weapons.csv`、`armors.csv`，不再额外创建 `rpg/` 子目录，也不再保留额外的 `items.csv`。游戏语义中“职业”采用更常见的英文 `class`，因此表名和字段为 `classes`、`class_levels`、`class_id`，避免与现实职业 `profession` 混淆。
 
 ## 3.2 Rust 中的“类”和职责表达
 
@@ -177,7 +181,7 @@ pub type DataRow = BTreeMap<String, String>;
 - 值保持原始字符串。Raw DataRow 是 source-neutral 的事实层，不表达 typed value、默认值、target visibility 或 nested object。
 - 后续 resolver 可在此基础上生成结构化值；Validation / Exporter 不应长期直接从 raw `DataRow` 重复解释 struct JSON cell 和 dotted path。
 
-### 3.4.4 `ResolvedDataSet` / `DataValue`（下一阶段目标）
+### 3.4.4 `ResolvedDataSet` / `DataValue`（已实现 MVP，继续迁移）
 
 `ResolvedDataSet` 是 raw `DataSet` 之后的 Meta-aware 解析结果。它不替代 raw `DataSet`，而是与 raw source snapshot 并存：raw 层用于诊断、inspect、debug、source diff；resolved 层用于 validation/export 共享同一套结构化语义。
 
@@ -260,6 +264,12 @@ Resolver 职责：
 4. 应用 scalar / enum / struct child default；
 5. 按 target tags 生成 target-specific resolved view，或在 `ResolvedValue` 中保留 visibility 信息供 ExportView 裁剪；
 6. 保留 raw string 和 source trace 以生成精确诊断。
+
+当前实现状态与差距：
+
+- 已实现 `ResolvedDataSet` / `DataResolver` 基础类型、typed scalar parse、struct JSON cell / expanded value 统一解析、source schema 校验、target-aware row resolve、active fragment resolve、runtime export 主路径消费 resolved value。
+- 过渡中：Validation 仍保留 raw `DataRow` 上的 required/type/enum/index/FK 主流程，resolver 作为 source schema 与 value resolve 的预校验入口；后续应迁移到 `validate_resolved_*`。
+- 未实现：typed fragment payload（例如 `attributes` fragment 直接复用 `AttributeSet`）、field group/base table schema 复用、asset existence/text POT special export、ObjectTable key-level source trace、array/map path。
 
 注意：是否在 resolver 阶段把 scalar parse 成 `Int/Float/Bool` 需要结合现有 runtime scalar string contract 决定。短期可以先在 resolver 内保留 typed parse 结果与 raw string，runtime export 仍输出 string；长期如果 runtime artifact 改为 typed scalar，可直接复用 `ScalarValue`。
 
@@ -355,6 +365,13 @@ impl CsvDataReader {
 4. 缺失 cell 当前不在读取阶段补齐；Validation 阶段按 required/default 处理。
 5. 多余 cell 当前由 csv crate 的 record 行为处理；后续如果需要严格列数，可在 Data 模块增加 header/record 长度校验。
 6. CsvDataReader 不理解 fragment schema；它只返回原始 row。DataLoader 在组装 DataTable 时为每行附加 `RowSourceInfo`。
+
+当前 standard_project 参考游戏表格采用两种 source pattern：
+
+- 普通 collection：`classes.csv`、`class_levels.csv` 使用单 source，`class_levels` 通过 `attributes.max_health` 等 header 表达 expanded struct。
+- variant source collection：`materials.csv` / `weapons.csv` / `armors.csv` 都是同一个 `items` table 的 source variants。DataLoader 按 source 声明顺序把它们 append 到单张 `items` DataTable，并为每行记录 fragment presence；`by_id` unique/primary 校验在合并后的整张 items 表上执行，因此三类道具 ID 必须全局不重复。
+
+variant source mode 要求每个 source 贡献完整 record：common fields 必须在每个 source 中完整出现，不做跨 source join；fragment fields 只允许出现在声明了对应 active fragment 的 source 中。
 
 错误映射：
 
@@ -625,12 +642,16 @@ Resolved 层落地后，诊断模型需要同时支持 raw source 与 resolved v
 
 继续使用 `tests/fixtures/standard_project/`：
 
-1. CLI validate 通过标准工程。
-2. CLI export 输出 JSON 和 Rust stub。
-3. 后续可增加一个错误 fixture，覆盖非法 CSV 值和缺表场景。
-4. 增加 polymorphic items fixture：weapons/equipment/usable 三个 CSV source 合并为 `items` runtime data。
-5. 检查 runtime JSON/MessagePack 中包含 nested fragment objects，并以 object 是否存在表达 fragment presence；不额外要求 `fragments` metadata 数组。
-6. 检查生成代码包含 fragment 类型与 `has/get fragment` API。
+1. CLI validate/build 通过标准工程。
+2. CLI export 输出 JSON / MessagePack 和 Rust/C++/TypeScript stub。
+3. 标准参考工程根 `ConfigForge.toml` 应保持可执行；集成测试应直接运行该入口，或先复制整个 fixture 到 temp dir 后运行复制出的入口，避免根配置 imports、relative data path、targets 漂移。
+4. 后续可增加错误 fixture，覆盖非法 CSV 值和缺表场景。
+5. polymorphic items fixture：`materials.csv` / `weapons.csv` / `armors.csv` 三个 CSV source 合并为单一 `items` runtime data。
+6. 检查 runtime JSON/MessagePack 中包含 nested fragment objects，并以 object 是否存在表达 fragment presence；不额外要求 `fragments` metadata 数组。
+7. 检查生成代码包含 fragment 类型与 `has/get fragment` API。
+8. 增加跨 source duplicate item id 负向测试，确保 `materials` / `weapons` / `armors` 合并后按 `items.by_id` 全局唯一校验。
+9. 增加 `class_levels` 复合 primary index 负向测试，构造重复 `(class_id, level)` 并断言 CLI 失败。
+10. 增加 inactive fragment header 负向测试，例如 `materials.csv` 出现 `attributes.attack` 应失败。
 
 ## 3.12 第一阶段完成标准
 

@@ -12,7 +12,7 @@ fn builds_code_only_target_without_loading_data() {
         &project_path,
         format!(
             r#"
-                imports = ["{}"]
+                imports = [{}]
 
                 [project]
                 name = "standard_project"
@@ -24,7 +24,7 @@ fn builds_code_only_target_without_loading_data() {
                 language = "rust"
                 output = "{}"
             "#,
-            absolute_fixture_path("meta.toml"),
+            standard_core_meta_imports(),
             out_dir.display()
         ),
     )
@@ -58,7 +58,7 @@ fn builds_target_from_project_config() {
         &project_path,
         format!(
             r#"
-                imports = ["{}"]
+                imports = [{}]
 
                 [project]
                 name = "standard_project"
@@ -67,6 +67,7 @@ fn builds_target_from_project_config() {
 
                 [[targets]]
                 name = "client"
+                tags = ["client"]
 
                 [targets.data]
                 input = "{}"
@@ -85,7 +86,7 @@ fn builds_target_from_project_config() {
                 language = "typescript"
                 output = "{}"
             "#,
-            absolute_fixture_path("meta.toml"),
+            standard_core_meta_imports(),
             absolute_fixture_path("data"),
             data_out_dir.display(),
             rust_out_dir.display(),
@@ -151,6 +152,110 @@ fn builds_target_from_project_config() {
 }
 
 #[test]
+fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let client_out_dir = temp_dir.path().join("out/client_data");
+    let server_out_dir = temp_dir.path().join("out/server_data");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                name = "reference_game_fixture"
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [targets.data]
+                input = "{}"
+                output = "{}"
+                format = "json"
+
+                [[targets]]
+                name = "server"
+                tags = ["server"]
+
+                [targets.data]
+                input = "{}"
+                output = "{}"
+                format = "json"
+            "#,
+            standard_reference_game_meta_imports(),
+            absolute_fixture_path("data"),
+            client_out_dir.display(),
+            absolute_fixture_path("data"),
+            server_out_dir.display(),
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut client_cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    client_cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+    ]);
+    client_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target `client` built"));
+
+    let class_levels_json = fs::read_to_string(client_out_dir.join("class_levels.json"))
+        .expect("class levels json should exist");
+    let class_levels: serde_json::Value =
+        serde_json::from_str(&class_levels_json).expect("class levels json should parse");
+    assert_eq!(class_levels["rows"][0]["class_id"], "1");
+    assert_eq!(class_levels["rows"][0]["level"], "1");
+    assert_eq!(class_levels["rows"][0]["attributes"]["max_health"], "120");
+    assert_eq!(class_levels["rows"][0]["attributes"]["attack"], "12");
+
+    let items_json =
+        fs::read_to_string(client_out_dir.join("items.json")).expect("items json should exist");
+    let items: serde_json::Value =
+        serde_json::from_str(&items_json).expect("items json should parse");
+    let rows = items["rows"]
+        .as_array()
+        .expect("items rows should be array");
+    assert_eq!(rows.len(), 9);
+    assert_eq!(rows[0]["name"], "Iron Ore");
+    assert_eq!(rows[0]["stack"]["max_stack"], "999");
+    assert_eq!(rows[3]["name"], "Iron Sword");
+    assert_eq!(rows[3]["attributes"]["attack"], "12");
+    assert_eq!(rows[3]["skill"]["skill_asset"], "assets/skills/slash.asset");
+    assert_eq!(rows[6]["name"], "Leather Armor");
+    assert_eq!(rows[6]["attributes"]["defence"], "6");
+
+    let mut server_cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    server_cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "server",
+    ]);
+    server_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target `server` built"));
+
+    assert!(!client_out_dir.join("materials.json").exists());
+    assert!(!client_out_dir.join("weapons.json").exists());
+    assert!(!client_out_dir.join("armors.json").exists());
+
+    let server_items_json = fs::read_to_string(server_out_dir.join("items.json"))
+        .expect("server items json should exist");
+    let server_items: serde_json::Value =
+        serde_json::from_str(&server_items_json).expect("server items json should parse");
+    assert!(server_items["rows"][3].get("name").is_none());
+    assert!(server_items["rows"][3].get("skill").is_none());
+    assert_eq!(server_items["rows"][3]["attributes"]["attack"], "12");
+}
+
+#[test]
 fn builds_target_with_execution_resource_flags() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let out_dir = temp_dir.path().join("generated_code");
@@ -159,7 +264,7 @@ fn builds_target_with_execution_resource_flags() {
         &project_path,
         format!(
             r#"
-                imports = ["{}"]
+                imports = [{}]
 
                 [[targets]]
                 name = "code_only"
@@ -168,7 +273,7 @@ fn builds_target_with_execution_resource_flags() {
                 language = "rust"
                 output = "{}"
             "#,
-            absolute_fixture_path("meta.toml"),
+            standard_core_meta_imports(),
             out_dir.display()
         ),
     )
@@ -203,7 +308,7 @@ fn builds_target_with_serial_overriding_resource_flags() {
         &project_path,
         format!(
             r#"
-                imports = ["{}"]
+                imports = [{}]
 
                 [[targets]]
                 name = "code_only"
@@ -212,7 +317,7 @@ fn builds_target_with_serial_overriding_resource_flags() {
                 language = "rust"
                 output = "{}"
             "#,
-            absolute_fixture_path("meta.toml"),
+            standard_core_meta_imports(),
             out_dir.display()
         ),
     )
@@ -318,13 +423,14 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
         &project_path,
         format!(
             r#"
-                imports = ["{}"]
+                imports = [{}]
 
                 [project]
                 name = "standard_project"
 
                 [[targets]]
                 name = "client_messagepack"
+                tags = ["client"]
 
                 [targets.data]
                 input = "{}"
@@ -335,7 +441,7 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
                 language = "rust"
                 output = "{}"
             "#,
-            absolute_fixture_path("meta.toml"),
+            standard_core_meta_imports(),
             absolute_fixture_path("data"),
             data_out_dir.display(),
             rust_out_dir.display()
@@ -398,7 +504,8 @@ fn builds_target_from_imported_project_config_fragments() {
     .expect("root project config should be written");
     fs::write(
         meta_dir.join("items.toml"),
-        fs::read_to_string(absolute_fixture_path("meta.toml")).expect("fixture meta should exist"),
+        fs::read_to_string(absolute_fixture_path("meta/items.toml"))
+            .expect("fixture item meta should exist"),
     )
     .expect("meta config fragment should be written");
     fs::write(
@@ -679,6 +786,22 @@ fn absolute_fixture_path(relative_path: &str) -> String {
         .to_string()
 }
 
+fn standard_core_meta_imports() -> String {
+    ["meta/items.toml", "meta/misc.toml"]
+        .into_iter()
+        .map(|path| format!("\"{}\"", absolute_fixture_path(path)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn standard_reference_game_meta_imports() -> String {
+    ["meta/items.toml", "meta/characters.toml", "meta/misc.toml"]
+        .into_iter()
+        .map(|path| format!("\"{}\"", absolute_fixture_path(path)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bool) {
     fs::write(
         generated_dir.join("Cargo.toml"),
@@ -719,7 +842,9 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             id: 1,
                             name: "Potion".to_owned(),
                             price: 10,
-                            enabled: true,
+                            stack: None,
+                            attributes: None,
+                            skill: None,
                         }}])
                     }}
 
@@ -750,7 +875,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                 {serde_assertion}
             "#,
             serde_assertion = if derive_serde {
-                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, enabled: true }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true }).unwrap();\n}"
+                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, stack: None, attributes: None, skill: None }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true }).unwrap();\n}"
             } else {
                 ""
             }
@@ -777,7 +902,6 @@ fn verify_generated_cpp_header(generated_dir: &std::path::Path) {
                 row.id = 1;
                 row.name = "Potion";
                 row.price = 10;
-                row.enabled = true;
                 (void)row;
                 GameRulesRow rules{};
                 rules.max_player_level = 60;
@@ -822,7 +946,7 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     if (path !== "items.json") {
                         throw new Error(`unexpected path: ${path}`);
                     }
-                    return [{ id: 1, name: "Potion", price: 10, enabled: true }];
+                    return [{ id: 1, name: "Potion", price: 10 }];
                 },
                 loadGameRules(path: string): GameRulesRow {
                     if (path !== "game_rules.json") {

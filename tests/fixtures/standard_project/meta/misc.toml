@@ -1,0 +1,29 @@
+[[tables]]
+name = "game_rules"
+kind = "object"
+source = "game_rules.csv"
+
+[[tables.fields]]
+name = "max_player_level"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "starter_gold"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "stamina_cap"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "daily_reset_hour"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "pvp_enabled"
+type = "bool"
+required = true
