@@ -9,11 +9,8 @@ use serde::Serialize;
 
 use crate::{
     codegen::RuntimeDataFile,
-    data::{DataRow, DataSet, DataTable},
-    meta::{
-        LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, LinkedTableMeta,
-        TableKind, TargetTags,
-    },
+    data::{DataResolver, DataSet, DataTable, DataValue, ResolvedTable, ResolvedValue},
+    meta::{LinkedMetaModel, LinkedTableMeta, TableKind, TargetTags},
     ConfigForgeError, Result,
 };
 
@@ -239,36 +236,47 @@ pub fn build_exported_collection_payload(
     table: &DataTable,
     target_tags: &TargetTags,
 ) -> Result<ExportedTable> {
+    let visible_row_indices = table
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| {
+            table_meta
+                .meta
+                .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
+        })
+        .map(|(row_index, _)| row_index)
+        .collect::<Vec<_>>();
+    let resolved_table = DataResolver::resolve_table_rows(
+        table_meta,
+        table,
+        Some(target_tags),
+        visible_row_indices.iter().copied(),
+    )?;
     let exported_fields = table_meta
         .fields
         .iter()
         .filter(|field| field.meta.is_exported_for(target_tags))
         .collect::<Vec<_>>();
-    let rows = table
-        .rows
+    let rows = visible_row_indices
         .iter()
         .enumerate()
-        .filter(|row| {
-            let row = row.1;
-            table_meta
-                .meta
-                .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
-        })
-        .map(|(row_index, row)| {
+        .map(|(resolved_row_index, row_index)| {
+            let resolved_row = resolved_table.rows.get(resolved_row_index).ok_or_else(|| {
+                ConfigForgeError::Validation(format!(
+                    "resolved table `{}` is missing row {}",
+                    table_meta.meta.name,
+                    resolved_row_index + 1
+                ))
+            })?;
             let mut exported_row = BTreeMap::new();
             for field in &exported_fields {
-                if let Some(value) = export_field_value_from_row(
-                    table_meta.meta.name.as_str(),
-                    row_index + 1,
-                    field.meta.name.as_str(),
-                    field,
-                    row,
-                    target_tags,
-                )? {
+                if let Some(value) = resolved_row.get(&field.meta.name) {
+                    let value = exported_value_from_resolved(value)?;
                     exported_row.insert(field.meta.name.clone(), value);
                 }
             }
-            if let Some(row_source) = table.row_source(row_index) {
+            if let Some(row_source) = table.row_source(*row_index) {
                 // Variant-source rows export only fragments activated by their originating source.
                 for fragment_name in &row_source.fragments {
                     let Some(fragment) = table_meta.fragment(fragment_name) else {
@@ -277,31 +285,12 @@ pub fn build_exported_collection_payload(
                     if !fragment.meta.is_exported_for(target_tags) {
                         continue;
                     }
-                    let mut fragment_object = BTreeMap::new();
-                    for field in fragment
-                        .fields
-                        .iter()
-                        .filter(|field| field.meta.is_exported_for(target_tags))
-                    {
-                        let key = fragment_field_key(
-                            fragment.meta.name.as_str(),
-                            field.meta.name.as_str(),
+                    if let Some(value) = resolved_row.get(fragment.meta.name.as_str()) {
+                        exported_row.insert(
+                            fragment.meta.name.clone(),
+                            exported_value_from_resolved(value)?,
                         );
-                        if let Some(value) = export_field_value_from_row(
-                            table_meta.meta.name.as_str(),
-                            row_index + 1,
-                            &key,
-                            field,
-                            row,
-                            target_tags,
-                        )? {
-                            fragment_object.insert(field.meta.name.clone(), value);
-                        }
                     }
-                    exported_row.insert(
-                        fragment.meta.name.clone(),
-                        ExportedValue::Struct(fragment_object),
-                    );
                 }
             }
             Ok(exported_row)
@@ -338,6 +327,13 @@ pub fn build_exported_object_payload(
     {
         return Ok(BTreeMap::new());
     }
+    let resolved_table = DataResolver::resolve_table(table_meta, table, Some(target_tags))?;
+    let resolved_row = resolved_table.rows.first().ok_or_else(|| {
+        ConfigForgeError::Validation(format!(
+            "resolved object table `{}` is missing singleton row",
+            table_meta.meta.name
+        ))
+    })?;
 
     let mut exported_object = BTreeMap::new();
     for field in table_meta
@@ -345,14 +341,8 @@ pub fn build_exported_object_payload(
         .iter()
         .filter(|field| field.meta.is_exported_for(target_tags))
     {
-        if let Some(value) = export_field_value_from_row(
-            table_meta.meta.name.as_str(),
-            1,
-            field.meta.name.as_str(),
-            field,
-            row,
-            target_tags,
-        )? {
+        if let Some(value) = resolved_row.get(&field.meta.name) {
+            let value = exported_value_from_resolved(value)?;
             exported_object.insert(field.meta.name.clone(), value);
         }
     }
@@ -360,296 +350,90 @@ pub fn build_exported_object_payload(
     Ok(exported_object)
 }
 
-fn export_field_value(
-    table_name: &str,
-    row_number: usize,
-    field_path: &str,
-    field: &LinkedFieldMeta<'_>,
-    raw: &str,
-    target_tags: &TargetTags,
-) -> Result<Option<ExportedValue>> {
-    match &field.linked_field {
-        LinkedField::Struct(struct_type) => {
-            if raw.trim().is_empty() {
-                return Ok(None);
-            }
-            let value: serde_json::Value = serde_json::from_str(raw).map_err(|source| {
-                ConfigForgeError::Validation(format!(
-                    "table `{}` row {} field `{}` has invalid struct JSON: {}",
-                    table_name, row_number, field_path, source
-                ))
-            })?;
-            export_struct_value(
-                table_name,
-                row_number,
-                field_path,
-                struct_type,
-                &value,
-                target_tags,
-            )
-            .map(Some)
+/// Builds an exported payload from a resolved export view.
+///
+/// The input `ResolvedTable` must already be filtered for the target rows,
+/// fields, and fragments that should be exported. Use
+/// `build_exported_table_payload` for raw `DataTable` export because it applies
+/// target-aware row filtering before resolving values.
+pub fn build_exported_table_payload_from_resolved_export_view(
+    table_meta: &LinkedTableMeta<'_>,
+    table: &ResolvedTable,
+) -> Result<ExportedTablePayload> {
+    match table_meta.meta.kind {
+        TableKind::Collection => {
+            build_exported_collection_payload_from_resolved_export_view(table_meta, table)
+                .map(ExportedTablePayload::Collection)
         }
-        _ => Ok(Some(ExportedValue::Scalar(raw.to_owned()))),
+        TableKind::Object => {
+            build_exported_object_payload_from_resolved_export_view(table_meta, table)
+                .map(ExportedTablePayload::Object)
+        }
     }
 }
 
-fn export_field_value_from_row(
-    table_name: &str,
-    row_number: usize,
-    field_path: &str,
-    field: &LinkedFieldMeta<'_>,
-    row: &DataRow,
-    target_tags: &TargetTags,
-) -> Result<Option<ExportedValue>> {
-    match &field.linked_field {
-        LinkedField::Struct(struct_type) => export_struct_occurrence_value(
-            table_name,
-            row_number,
-            field_path,
-            struct_type,
-            row,
-            target_tags,
-        ),
-        _ => row
-            .get(field_path)
-            .map(|raw| {
-                export_field_value(table_name, row_number, field_path, field, raw, target_tags)
-            })
-            .transpose()
-            .map(Option::flatten),
-    }
-}
-
-fn export_struct_occurrence_value(
-    table_name: &str,
-    row_number: usize,
-    field_path: &str,
-    struct_type: &LinkedStructType<'_>,
-    row: &DataRow,
-    target_tags: &TargetTags,
-) -> Result<Option<ExportedValue>> {
-    if let Some(raw) = row
-        .get(field_path)
-        .map(String::as_str)
-        .filter(|raw| !raw.trim().is_empty())
-    {
-        let value: serde_json::Value = serde_json::from_str(raw).map_err(|source| {
-            ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` has invalid struct JSON: {}",
-                table_name, row_number, field_path, source
-            ))
-        })?;
-        return export_struct_value(
-            table_name,
-            row_number,
-            field_path,
-            struct_type,
-            &value,
-            target_tags,
-        )
-        .map(Some);
-    }
-
-    if !struct_occurrence_has_exportable_value(field_path, struct_type, row, target_tags) {
-        return Ok(None);
-    }
-
-    let mut exported = BTreeMap::new();
-    for field in struct_type
-        .fields
+/// Builds a collection payload from an already target-filtered resolved export view.
+pub fn build_exported_collection_payload_from_resolved_export_view(
+    table_meta: &LinkedTableMeta<'_>,
+    table: &ResolvedTable,
+) -> Result<ExportedTable> {
+    let rows = table
+        .rows
         .iter()
-        .filter(|field| field.meta.is_exported_for(target_tags))
-    {
-        let child_path = format!("{field_path}.{}", field.meta.name);
-        let exported_value = match &field.linked_field {
-            LinkedField::Struct(nested_struct) => export_struct_occurrence_value(
-                table_name,
-                row_number,
-                &child_path,
-                nested_struct,
-                row,
-                target_tags,
-            )?,
-            _ => export_scalar_child_occurrence(table_name, row_number, &child_path, field, row)?,
-        };
-        if let Some(exported_value) = exported_value {
-            exported.insert(field.meta.name.clone(), exported_value);
-        }
-    }
+        .map(|row| {
+            row.iter()
+                .map(|(field_name, value)| {
+                    Ok((field_name.clone(), exported_value_from_resolved(value)?))
+                })
+                .collect::<Result<BTreeMap<_, _>>>()
+        })
+        .collect::<Result<Vec<_>>>()?;
 
-    Ok(Some(ExportedValue::Struct(exported)))
+    Ok(ExportedTable {
+        meta: ExportedTableMeta {
+            name: table_meta.meta.name.clone(),
+        },
+        rows,
+    })
 }
 
-fn export_scalar_child_occurrence(
-    table_name: &str,
-    row_number: usize,
-    field_path: &str,
-    field: &LinkedFieldMeta<'_>,
-    row: &DataRow,
-) -> Result<Option<ExportedValue>> {
-    if let Some(raw) = row
-        .get(field_path)
-        .map(String::as_str)
-        .filter(|raw| !raw.trim().is_empty())
-    {
-        return Ok(Some(ExportedValue::Scalar(raw.to_owned())));
+/// Builds an object payload from an already target-filtered resolved export view.
+pub fn build_exported_object_payload_from_resolved_export_view(
+    table_meta: &LinkedTableMeta<'_>,
+    table: &ResolvedTable,
+) -> Result<BTreeMap<String, ExportedValue>> {
+    if table.rows.len() != 1 {
+        return Err(ConfigForgeError::Validation(format!(
+            "object table `{}` must normalize to exactly one logical row, got {}",
+            table_meta.meta.name,
+            table.rows.len()
+        )));
     }
-    let Some(default_value) = field.meta.default.as_ref().map(toml_default_to_json_value) else {
-        return Ok(None);
+    let Some(row) = table.rows.first() else {
+        return Ok(BTreeMap::new());
     };
-    if json_value_is_empty(&default_value) {
-        return Ok(None);
-    }
-    let scalar = json_value_to_scalar_cell(&default_value).map_err(|_| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` must be a scalar value",
-            table_name, row_number, field_path
-        ))
-    })?;
-    Ok(Some(ExportedValue::Scalar(scalar)))
+    row.iter()
+        .map(|(field_name, value)| Ok((field_name.clone(), exported_value_from_resolved(value)?)))
+        .collect()
 }
 
-fn struct_occurrence_has_exportable_value(
-    field_path: &str,
-    struct_type: &LinkedStructType<'_>,
-    row: &DataRow,
-    target_tags: &TargetTags,
-) -> bool {
-    if row
-        .get(field_path)
-        .map(String::as_str)
-        .is_some_and(|raw| !raw.trim().is_empty())
-    {
-        return true;
-    }
-
-    for field in struct_type
-        .fields
-        .iter()
-        .filter(|field| field.meta.is_exported_for(target_tags))
-    {
-        let child_path = format!("{field_path}.{}", field.meta.name);
-        match &field.linked_field {
-            LinkedField::Struct(nested_struct) => {
-                if struct_occurrence_has_exportable_value(
-                    &child_path,
-                    nested_struct,
-                    row,
-                    target_tags,
-                ) {
-                    return true;
-                }
-            }
-            _ => {
-                if row
-                    .get(&child_path)
-                    .map(String::as_str)
-                    .is_some_and(|raw| !raw.trim().is_empty())
-                {
-                    return true;
-                }
-                if field
-                    .meta
-                    .default
-                    .as_ref()
-                    .map(toml_default_to_json_value)
-                    .is_some_and(|value| !json_value_is_empty(&value))
-                {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
-}
-
-fn export_struct_value(
-    table_name: &str,
-    row_number: usize,
-    field_path: &str,
-    struct_type: &LinkedStructType<'_>,
-    value: &serde_json::Value,
-    target_tags: &TargetTags,
-) -> Result<ExportedValue> {
-    let object = value.as_object().ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` must be a JSON object for struct `{}`",
-            table_name, row_number, field_path, struct_type.meta.name
-        ))
-    })?;
-    for key in object.keys() {
-        if !struct_type
-            .fields
+fn exported_value_from_resolved(value: &ResolvedValue) -> Result<ExportedValue> {
+    match &value.value {
+        DataValue::Null => Ok(ExportedValue::Struct(BTreeMap::new())),
+        DataValue::Scalar(_) => Ok(ExportedValue::Scalar(
+            value.scalar_export_string().unwrap_or_default(),
+        )),
+        DataValue::Struct(children) | DataValue::Map(children) => children
             .iter()
-            .any(|field| field.meta.name == key.as_str())
-        {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` contains unknown struct key `{}`",
-                table_name, row_number, field_path, key
-            )));
-        }
-    }
-    let mut exported = BTreeMap::new();
-    for field in struct_type
-        .fields
-        .iter()
-        .filter(|field| field.meta.is_exported_for(target_tags))
-    {
-        let default_value = field.meta.default.as_ref().map(toml_default_to_json_value);
-        let Some(value) = object.get(&field.meta.name).or(default_value.as_ref()) else {
-            continue;
-        };
-        if json_value_is_empty(value) {
-            continue;
-        }
-        let child_path = format!("{field_path}.{}", field.meta.name);
-        let exported_value = match &field.linked_field {
-            LinkedField::Struct(nested_struct) => export_struct_value(
-                table_name,
-                row_number,
-                &child_path,
-                nested_struct,
-                value,
-                target_tags,
-            )?,
-            _ => ExportedValue::Scalar(json_value_to_scalar_cell(value)?),
-        };
-        exported.insert(field.meta.name.clone(), exported_value);
-    }
-    Ok(ExportedValue::Struct(exported))
-}
-
-fn toml_default_to_json_value(value: &toml::Value) -> serde_json::Value {
-    match value {
-        toml::Value::String(value) => serde_json::Value::String(value.clone()),
-        toml::Value::Integer(value) => serde_json::Value::Number((*value).into()),
-        toml::Value::Float(value) => serde_json::Number::from_f64(*value)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
-        toml::Value::Boolean(value) => serde_json::Value::Bool(*value),
-        _ => serde_json::Value::Null,
-    }
-}
-
-fn json_value_is_empty(value: &serde_json::Value) -> bool {
-    matches!(value, serde_json::Value::Null)
-        || value.as_str().map(str::trim).is_some_and(str::is_empty)
-}
-
-fn json_value_to_scalar_cell(value: &serde_json::Value) -> Result<String> {
-    match value {
-        serde_json::Value::String(value) => Ok(value.clone()),
-        serde_json::Value::Number(value) => Ok(value.to_string()),
-        serde_json::Value::Bool(value) => Ok(value.to_string()),
-        _ => Err(ConfigForgeError::Validation(
-            "struct scalar field value must be string, number, or bool".to_owned(),
+            .map(|(field_name, child)| {
+                Ok((field_name.clone(), exported_value_from_resolved(child)?))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()
+            .map(ExportedValue::Struct),
+        DataValue::Array(_) => Err(ConfigForgeError::Validation(
+            "array values are not supported by runtime data export yet".to_owned(),
         )),
     }
-}
-
-fn fragment_field_key(fragment_name: &str, field_name: &str) -> String {
-    format!("{fragment_name}.{field_name}")
 }
 
 pub struct JsonDataExporter;
@@ -1005,7 +789,7 @@ mod tests {
                     ("exclude_tags".to_owned(), String::new()),
                 ]),
                 BTreeMap::from([
-                    ("id".to_owned(), "2".to_owned()),
+                    ("id".to_owned(), "bad".to_owned()),
                     ("exclude_tags".to_owned(), "client".to_owned()),
                 ]),
             ],

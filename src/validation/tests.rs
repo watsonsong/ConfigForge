@@ -1594,7 +1594,7 @@ fn target_validation_skips_non_exported_tables_fields_and_rows() {
                 ("exclude_tags".to_owned(), String::new()),
             ]),
             BTreeMap::from([
-                ("id".to_owned(), "1".to_owned()),
+                ("id".to_owned(), "bad".to_owned()),
                 ("exclude_tags".to_owned(), "client".to_owned()),
             ]),
         ],

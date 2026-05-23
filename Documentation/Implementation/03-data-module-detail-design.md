@@ -1,15 +1,17 @@
 # 03. Data 模块详细设计
 
-本文档描述 Data 模块的第一阶段实现设计，用于把 Meta 中声明的 source 配置加载为独立的数据快照，并在 Meta 完成 Link 后支持数据合法性检测。产品语义以 `Documentation/Design/` 为准；本文档聚焦 Rust 模块边界、核心类型、主要方法、流程阶段和测试组织。
+本文档描述 Data 模块的实现设计，用于把 Meta 中声明的 source 配置加载为独立的数据快照，并在 Meta 完成 Link 后把 raw source 数据解析为可供 Validation / Export 共享的结构化数据视图。产品语义以 `Documentation/Design/` 为准；本文档聚焦 Rust 模块边界、核心类型、主要方法、流程阶段和测试组织。
 
 ## 3.1 设计目标
 
-Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据模型。第一阶段目标只覆盖 CSV：
+Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据模型，并在 Data Load 后提供 Meta-aware resolver。核心分层结论：**Reader 保持 source-neutral；Resolver 负责 Meta-aware 结构化；Validation 和 Exporter 应逐步只消费结构化后的统一数据模型。**
+
+第一阶段已覆盖 CSV raw load，下一阶段应在不破坏 raw `DataSet` 的前提下新增 `ResolvedDataSet` / `DataResolver`：
 
 1. 支持从 `TableMeta.source` / `TableMeta.sources` 中解析单个 CSV source。
 2. 支持按表加载 CSV，得到与 Meta 生命周期无关的 owned `DataSet`。
 3. Data 加载阶段不依赖 `LinkedMetaModel<'meta>`，只依赖可拥有的加载计划，因此可以与 Meta Link / Meta Validate 在流程上并行。
-4. 在 Meta Link 完成后，由 Validation 阶段使用 `LinkedMetaModel<'meta>` + `DataSet` 做字段存在性、required/default、类型、enum、unique index 等合法性检测。
+4. 在 Meta Link 完成后，由 Data Resolver 使用 `LinkedMetaModel<'meta>` + raw `DataSet` 解析 JSON cell / expanded path / default / target visibility，得到结构化 `ResolvedDataSet` 或 target-specific resolved view。
 5. 暂不实现任务并行驱动，但类型设计保持 Data 与 Meta 的数据相互独立，后续可接入 executor 并行加载。
 
 当前阶段已实现 CSV source、DataSet、target-aware validation/export 的基础流程，并已按 **variant source mode** 支持 polymorphic fragments：polymorphic CollectionTable 可声明多个 CSV sources，每个 source 追加完整 records 并声明 active fragments。
@@ -19,10 +21,12 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 - fragment join mode；
 - `override_sources`；
 - 非 CSV provider；
-- array / map 的 typed parse；struct source layout 自动判定与 expanded value 需要在 Validation / Export 阶段从 flat field paths 组装为 nested object；
+- array / map 的 typed parse；
 - source location 精确到单元格的诊断。
 
 这些能力在 Meta validate 阶段应显式报 unsupported，避免 Data 阶段静默忽略。
+
+设计判断：不建议把 Meta-aware 解析下沉到 `CsvDataReader`。CSV / Xlsx / Lark 等 reader 只负责语法读取、raw string 和 source location；struct source layout、default、target visibility、fragment active set 和 typed scalar parsing 都需要 linked meta 与 target context，更适合放在 Data Load 之后的 resolver 阶段。当前代码中 Validation / Exporter 已能解释 struct expanded value，但这只是过渡实现；长期应收敛为共享 resolver，避免两边重复解释 JSON 字符串和 dotted path。
 
 variant source mode 下，`sources` 可以为同一 polymorphic collection table 声明多个 CSV source，但至少一个 source 必须声明非空 `fragments`，每个 source 必须贡献完整 record，不做按 ID 拼接。
 
@@ -42,6 +46,9 @@ Rust 不使用传统 OO class。本文档中的“类”对应 Rust 的 `struct`
 | DataProvider | `enum DataProvider` | 当前支持的 provider，第一阶段只有 `Csv`。 |
 | DataLoader | `struct DataLoader` | 根据 `DataLoadPlan` 加载 `DataSet`。 |
 | CsvDataReader | `struct CsvDataReader` | CSV provider 的具体读取器。 |
+| DataResolver | `struct DataResolver` | 使用 linked meta 将 raw DataSet 解析为 ResolvedDataSet / target resolved view。 |
+| ResolvedDataSet | `struct ResolvedDataSet` | Meta-aware 的结构化数据快照，隐藏 JSON cell / expanded path 的 source 差异。 |
+| DataValue | `enum DataValue` | 结构化值，表达 typed scalar、nested struct，未来扩展 array/map。 |
 
 ## 3.3 建议模块结构
 
@@ -51,6 +58,8 @@ Rust 不使用传统 OO class。本文档中的“类”对应 Rust 的 `struct`
 src/data/
   mod.rs          # 对外 API 与 re-export
   model.rs        # DataSet / DataTable / DataRow / 查询方法
+  resolved.rs     # ResolvedDataSet / ResolvedTable / DataValue / SourceTrace
+  resolver.rs     # DataResolver / StructOccurrenceEvaluator
   plan.rs         # DataLoadPlan / DataSourcePlan / DataProvider
   loader.rs       # DataLoader，编排按计划加载各表
   csv.rs          # CsvDataReader，CSV 文件读取实现
@@ -125,7 +134,7 @@ impl DataTable {
 
 `new()` 用于测试、内存构造和非 source 数据构造，会自动为每行填充默认 `RowSourceInfo`：`source_index = 0`、`source_path = "<memory>"`、`source_row_number = row_index + 1`、`fragments = []`。`new_with_sources()` 用于真实 DataLoader，必须校验 `rows.len() == row_sources.len()`，不一致时返回 validation error。
 
-### 3.4.4 `RowSourceInfo`
+### 3.4.5 `RowSourceInfo`
 
 variant source mode 需要保留每行的 source fragment set，否则 validation 无法判断该行应该应用哪些 fragment fields。
 
@@ -165,7 +174,94 @@ pub type DataRow = BTreeMap<String, String>;
 说明：
 
 - 使用 `BTreeMap` 保持稳定序列化和测试输出。
-- 值保持原始字符串，后续 required/default/type/enum/unique 校验由 `validation` 根据 linked meta 执行。
+- 值保持原始字符串。Raw DataRow 是 source-neutral 的事实层，不表达 typed value、默认值、target visibility 或 nested object。
+- 后续 resolver 可在此基础上生成结构化值；Validation / Exporter 不应长期直接从 raw `DataRow` 重复解释 struct JSON cell 和 dotted path。
+
+### 3.4.4 `ResolvedDataSet` / `DataValue`（下一阶段目标）
+
+`ResolvedDataSet` 是 raw `DataSet` 之后的 Meta-aware 解析结果。它不替代 raw `DataSet`，而是与 raw source snapshot 并存：raw 层用于诊断、inspect、debug、source diff；resolved 层用于 validation/export 共享同一套结构化语义。
+
+建议类型：
+
+```rust
+pub struct ResolvedDataSet {
+    pub tables: Vec<ResolvedTable>,
+    table_index: HashMap<String, usize>,
+}
+
+pub struct ResolvedTable {
+    pub name: String,
+    pub rows: Vec<ResolvedRow>,
+    pub row_sources: Vec<RowSourceInfo>,
+}
+
+pub type ResolvedRow = BTreeMap<String, ResolvedValue>;
+
+pub struct ResolvedValue {
+    pub value: DataValue,
+    pub source: ValueSourceTrace,
+}
+
+pub enum DataValue {
+    Null,
+    Scalar(ScalarValue),
+    Struct(BTreeMap<String, ResolvedValue>),
+    Array(Vec<ResolvedValue>),             // future
+    Map(BTreeMap<String, ResolvedValue>),  // future
+}
+
+pub enum ScalarValue {
+    String(String),
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Enum(String),
+}
+```
+
+`ValueSourceTrace` 至少需要表达：
+
+- raw field path，例如 `attributes.attack`；
+- source kind：explicit cell、default、computed/empty object；
+- source row / source path；
+- 对 ObjectTable，未来应支持 key-level source row number，而不是仅有 singleton logical row。
+
+Resolved 后，无论 source 是：
+
+```csv
+id,attributes
+hero,"{""attack"":10,""max_health"":100}"
+```
+
+还是：
+
+```csv
+id,attributes.attack,attributes.max_health
+hero,10,100
+```
+
+Validation / Exporter 都看到统一结构：
+
+```rust
+{
+    "id": Scalar(String("hero")),
+    "attributes": Struct({
+        "attack": Scalar(Int(10)),
+        "max_health": Scalar(Int(100)),
+    }),
+}
+```
+
+Resolver 职责：
+
+1. 使用 linked meta 解析 primitive / enum / struct；
+2. 判定 struct occurrence 是 JSON cell、expanded value 还是 missing；
+3. 检查 JSON/expanded 混用、unknown dotted path、inactive fragment；
+4. 应用 scalar / enum / struct child default；
+5. 按 target tags 生成 target-specific resolved view，或在 `ResolvedValue` 中保留 visibility 信息供 ExportView 裁剪；
+6. 保留 raw string 和 source trace 以生成精确诊断。
+
+注意：是否在 resolver 阶段把 scalar parse 成 `Int/Float/Bool` 需要结合现有 runtime scalar string contract 决定。短期可以先在 resolver 内保留 typed parse 结果与 raw string，runtime export 仍输出 string；长期如果 runtime artifact 改为 typed scalar，可直接复用 `ScalarValue`。
 
 ## 3.5 加载计划结构
 
@@ -324,33 +420,76 @@ MetaModel::from_path(meta_path)
   MetaModel::link() -> LinkedMetaModel<'meta>
 
 阶段 B：Data load
-  DataLoader::new(data_root).load(&data_load_plan) -> DataSet
+  DataLoader::new(data_root).load(&data_load_plan) -> Raw DataSet
 
-阶段 C：Data validation
-  validate_data_set(&linked_meta, &data_set)
+阶段 C：Data resolve
+  DataResolver::new(&linked_meta).resolve(&data_set, target_tags?) -> ResolvedDataSet / ResolvedExportView
 
-阶段 D：Export
-  exporter consumes LinkedMetaModel + validated/default-applied DataSet
+阶段 D：Data validation
+  validate_resolved_data_set(&linked_meta, &resolved_data_set)
+
+阶段 E：Export
+  exporter consumes ResolvedDataSet / ResolvedExportView
 ```
 
-当前可以先顺序执行：
+当前代码已经完成 `DataLoadPlan -> DataLoader -> raw DataSet`，并在 Validation / Exporter 中直接解释 raw `DataRow`。这应视为过渡实现。下一阶段可以先顺序执行：
 
 ```rust
 let meta = MetaModel::from_path(meta_path)?;
 let data_plan = DataLoadPlan::from_meta_model(&meta)?;
 let linked_meta = meta.link().map_err(ConfigForgeError::MetaValidation)?;
-let data_set = DataLoader::new(data_root).load(&data_plan)?;
-validate_data_set(&linked_meta, &data_set)?;
+let raw_data_set = DataLoader::new(data_root).load(&data_plan)?;
+let resolved = DataResolver::new(&linked_meta).resolve(&raw_data_set, None)?;
+validate_resolved_data_set(&linked_meta, &resolved)?;
 ```
 
 未来并行化时，`linked_meta` 和 `data_set` 的构造可以拆成两个任务，因为：
 
 - `DataLoadPlan` 是 owned；
 - `DataLoader` 不借用 Meta；
-- `DataSet` 不保存 Meta 引用；
-- 只有 `validate_data_set` 需要同时拿到 `LinkedMetaModel<'meta>` 和 `DataSet`。
+- raw `DataSet` 不保存 Meta 引用；
+- `DataResolver` 才需要同时拿到 `LinkedMetaModel<'meta>` 和 raw `DataSet`。
 
-### 3.8.2 Validation API 调整
+### 3.8.2 Resolver 分阶段迁移路线
+
+不建议一次性替换现有 Validation / Exporter。推荐分阶段落地：
+
+**Phase 1：抽 StructOccurrenceEvaluator。**
+
+把当前 struct JSON cell / expanded path / child default / target-aware visibility / empty cell occurrence 判断从 validation 与 exporter 中抽为共享 helper：
+
+```rust
+pub struct StructOccurrenceEvaluator<'meta, 'data> {
+    table: &'meta LinkedTableMeta<'meta>,
+    row: &'data DataRow,
+    target_tags: Option<&'data TargetTags>,
+}
+
+pub struct ResolvedStructOccurrence<'meta> {
+    pub path: String,
+    pub layout: StructSourceLayout,
+    pub has_effective_value: bool,
+    pub children: BTreeMap<String, ResolvedValue>,
+    pub diagnostics: Vec<DataDiagnostic>,
+    pub field: &'meta LinkedFieldMeta<'meta>,
+}
+```
+
+Validation 使用 evaluator 结果做 required/type/enum/validator 报错；Exporter 使用同一个结果构建 `ExportedValue::Struct`。这一步优先解决 default/export 不一致、空 expanded cell 语义、target-hidden child 影响 occurrence 等问题。
+
+**Phase 2：沉淀通用 `DataValue`。**
+
+将 evaluator 的输出从 struct-only 扩展为 `DataValue::Scalar` / `DataValue::Struct`，并让 runtime exporter 优先消费 `DataValue`。
+
+**Phase 3：Validation 迁移到 `ResolvedDataSet`。**
+
+Validation 不再直接读 raw `DataRow`，而是读取 resolved row。RawDataSet 仍保留用于 source diagnostic、inspect、debug、reload 和 diff。
+
+**Phase 4：支持 array/map 与更多 source path。**
+
+等 `DataValue` 稳定后，再扩展 `items[0].id`、`rewards[gold]` 等 array/map path，避免 validation/export 各自实现 path parser。
+
+### 3.8.3 Validation API 调整
 
 当前已有单表校验：
 
@@ -358,21 +497,25 @@ validate_data_set(&linked_meta, &data_set)?;
 pub fn validate_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()>;
 ```
 
-Data 模块落地后建议增加数据集级入口：
+Data 模块落地后已有数据集级入口。引入 resolved 层后建议增加 resolved validation 入口，并保留 raw validation 作为兼容 facade：
 
 ```rust
 pub fn validate_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataSet) -> Result<()>;
+pub fn validate_resolved_data_set(
+    meta: &LinkedMetaModel<'_>,
+    data_set: &ResolvedDataSet,
+) -> Result<()>;
 ```
 
-职责：
+长期职责：
 
 1. 遍历 `meta.tables`。
-2. 在 `DataSet` 中按 table name 查找 `DataTable`。
+2. 在 `ResolvedDataSet` 中按 table name 查找 `ResolvedTable`。
 3. 缺失表时报错。
-4. 对每张表调用 `validate_table(table_meta, table)`。
-5. `validate_table` 内部继续执行 default、required、类型、enum、unique 等规则。
+4. 对每张表调用 resolved table validation。
+5. required/type/enum/range 等规则读取 `DataValue` 和 source trace，不再重复解析 raw JSON / dotted path。
 
-### 3.8.3 Exporter API 调整
+### 3.8.4 Exporter API 调整
 
 当前 exporter 内部按表直接读取 CSV。Data 模块落地后应调整为：
 
@@ -386,7 +529,7 @@ pub fn validate_project(meta_path: &Path, data_dir: &Path) -> Result<()> {
 }
 ```
 
-`export_project` 同理，应先得到 `DataSet`，再在导出阶段按 table name 查表，而不是在 exporter 中逐表读取 CSV。构建 `DataLoadPlan` 时应先用当前 target 的 `TargetTags` 过滤整表 `export_when`，避免加载不会导出的表；写出 runtime data 时继续按同一组 tags 过滤字段和 `row_export` 行。
+`export_project` 同理，应先得到 raw `DataSet`，再按 target 生成 `ResolvedExportView`。构建 `DataLoadPlan` 时可以先用当前 target 的 `TargetTags` 过滤整表 `export_when`，避免加载不会导出的表；写出 runtime data 时继续按同一组 tags 过滤字段和 `row_export` 行。长期 exporter 只负责 `DataValue -> JSON/MessagePack/future binary`，不再理解 source layout、default、target visibility 或 nested struct boundary。
 
 ## 3.9 与当前 `source.rs` 的关系
 
@@ -438,6 +581,14 @@ pub struct DataDiagnostic {
 ```
 
 但第一阶段不引入，避免过早扩大诊断体系。
+
+Resolved 层落地后，诊断模型需要同时支持 raw source 与 resolved value：
+
+- raw source error：CSV parse、duplicate header、ObjectTable duplicate key、invalid JSON cell、unknown dotted path；
+- resolve error：type parse、enum value、JSON/expanded mixing、inactive fragment、default 不可转换；
+- validation error：required、range、foreign key、unique index、target-aware visibility conflict。
+
+为了避免 resolved 后丢失定位信息，`ResolvedValue` 必须携带 `ValueSourceTrace`。ObjectTable 的 `key,value` source 还需要 key-level source map，否则 singleton logical row 只能报 row 1，不能指向真实 CSV key 行；这可以作为 resolved 层的 source trace 能力补齐。
 
 ## 3.11 测试计划
 

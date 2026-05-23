@@ -297,6 +297,271 @@ fn csv_reader_reports_object_table_ragged_rows() {
 }
 
 #[test]
+fn data_resolver_resolves_expanded_structs_with_typed_scalars_and_defaults() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Attributes"
+
+            [[structs.fields]]
+            name = "attack"
+            type = "int"
+            default = 1
+
+            [[structs.fields]]
+            name = "max_health"
+            type = "int"
+
+            [[tables]]
+            name = "characters"
+            source = "characters.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "string"
+
+            [[tables.fields]]
+            name = "attributes"
+            type = "Attributes"
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table = DataTable::new(
+        "characters",
+        vec![
+            DataRow::from([
+                ("id".to_owned(), "hero".to_owned()),
+                ("attributes.attack".to_owned(), "10".to_owned()),
+                ("attributes.max_health".to_owned(), "120".to_owned()),
+            ]),
+            DataRow::from([
+                ("id".to_owned(), "mage".to_owned()),
+                ("attributes.attack".to_owned(), "".to_owned()),
+                ("attributes.max_health".to_owned(), "80".to_owned()),
+            ]),
+        ],
+    );
+    let data_set = DataSet::new(vec![table]);
+
+    let resolved = DataResolver::new(&linked)
+        .resolve_required_tables(&data_set)
+        .expect("data should resolve");
+    let table = resolved.table("characters").expect("table should exist");
+
+    let DataValue::Struct(attributes) = &table.rows[0]["attributes"].value else {
+        panic!("attributes should resolve as struct");
+    };
+    assert_eq!(
+        attributes["attack"].value,
+        DataValue::Scalar(ScalarValue::Int(10))
+    );
+    assert_eq!(
+        attributes["max_health"].value,
+        DataValue::Scalar(ScalarValue::Int(120))
+    );
+    assert_eq!(
+        attributes["attack"].source.kind,
+        ValueSourceKind::ExplicitCell
+    );
+
+    let DataValue::Struct(attributes_with_default) = &table.rows[1]["attributes"].value else {
+        panic!("attributes should resolve as struct");
+    };
+    assert_eq!(
+        attributes_with_default["attack"].value,
+        DataValue::Scalar(ScalarValue::Int(1))
+    );
+    assert_eq!(
+        attributes_with_default["attack"].source.kind,
+        ValueSourceKind::DefaultValue
+    );
+}
+
+#[test]
+fn data_resolver_resolves_object_table_json_and_expanded_structs() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Attributes"
+
+            [[structs.fields]]
+            name = "attack"
+            type = "int"
+
+            [[structs.fields]]
+            name = "max_health"
+            type = "int"
+
+            [[tables]]
+            name = "game_rules"
+            kind = "object"
+            source = "game_rules.csv"
+
+            [[tables.fields]]
+            name = "default_attributes"
+            type = "Attributes"
+
+            [[tables.fields]]
+            name = "boss_attributes"
+            type = "Attributes"
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table = DataTable::new(
+        "game_rules",
+        vec![DataRow::from([
+            ("default_attributes.attack".to_owned(), "5".to_owned()),
+            ("default_attributes.max_health".to_owned(), "80".to_owned()),
+            (
+                "boss_attributes".to_owned(),
+                r#"{"attack":20,"max_health":500}"#.to_owned(),
+            ),
+        ])],
+    );
+    let data_set = DataSet::new(vec![table]);
+
+    let resolved = DataResolver::new(&linked)
+        .resolve_required_tables(&data_set)
+        .expect("data should resolve");
+    let row = &resolved
+        .table("game_rules")
+        .expect("table should exist")
+        .rows[0];
+
+    let DataValue::Struct(default_attributes) = &row["default_attributes"].value else {
+        panic!("default attributes should resolve as struct");
+    };
+    assert_eq!(
+        default_attributes["attack"].value,
+        DataValue::Scalar(ScalarValue::Int(5))
+    );
+
+    let DataValue::Struct(boss_attributes) = &row["boss_attributes"].value else {
+        panic!("boss attributes should resolve as struct");
+    };
+    assert_eq!(
+        boss_attributes["max_health"].value,
+        DataValue::Scalar(ScalarValue::Int(500))
+    );
+    assert_eq!(
+        row["boss_attributes"].source.kind,
+        ValueSourceKind::ExplicitCell
+    );
+}
+
+#[test]
+fn data_resolver_rejects_schema_errors_and_target_filters_hidden_children() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Attributes"
+
+            [[structs.fields]]
+            name = "attack"
+            type = "int"
+
+            [[structs.fields]]
+            name = "server_only"
+            type = "int"
+            [structs.fields.export_when]
+            any = ["server"]
+
+            [[tables]]
+            name = "characters"
+            source = "characters.csv"
+
+            [[tables.fields]]
+            name = "attributes"
+            type = "Attributes"
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+
+    let mixed = DataSet::new(vec![DataTable::new(
+        "characters",
+        vec![DataRow::from([
+            ("attributes".to_owned(), r#"{"attack":1}"#.to_owned()),
+            ("attributes.attack".to_owned(), "2".to_owned()),
+        ])],
+    )]);
+    let error = DataResolver::new(&linked)
+        .resolve_required_tables(&mixed)
+        .unwrap_err();
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("mixes struct JSON cell"))
+    );
+
+    let hidden_only = DataSet::new(vec![DataTable::new(
+        "characters",
+        vec![DataRow::from([(
+            "attributes.server_only".to_owned(),
+            "7".to_owned(),
+        )])],
+    )]);
+    let resolved = DataResolver::for_target(&linked, &crate::meta::TargetTags::new(["client"]))
+        .resolve_required_tables(&hidden_only)
+        .expect("hidden target child should not create visible occurrence");
+    assert!(resolved.table("characters").unwrap().rows[0].is_empty());
+}
+
+#[test]
+fn data_resolver_full_mode_includes_active_fragments() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            polymorphic = true
+            sources = [
+                { provider = "csv", path = "weapons.csv", fragments = ["weapon"] },
+            ]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "weapon"
+
+            [[tables.fragments.fields]]
+            name = "power"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table = DataTable::new_with_sources(
+        "items",
+        vec![DataRow::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("weapon.power".to_owned(), "10".to_owned()),
+        ])],
+        vec![RowSourceInfo {
+            source_index: 0,
+            source_path: PathBuf::from("weapons.csv"),
+            source_row_number: 1,
+            fragments: vec!["weapon".to_owned()],
+        }],
+    )
+    .expect("table should build");
+    let data_set = DataSet::new(vec![table]);
+
+    let resolved = DataResolver::new(&linked)
+        .resolve_required_tables(&data_set)
+        .expect("data should resolve");
+    let row = &resolved.table("items").expect("table should exist").rows[0];
+    let DataValue::Struct(weapon) = &row["weapon"].value else {
+        panic!("active fragment should resolve as struct");
+    };
+    assert_eq!(
+        weapon["power"].value,
+        DataValue::Scalar(ScalarValue::Int(10))
+    );
+}
+
+#[test]
 fn data_load_plan_reads_polymorphic_source_fragments() {
     let meta = MetaModel::from_toml_str(
         r#"

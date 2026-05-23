@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{
-    data::{DataRow, DataSet, DataTable},
+    data::{DataResolver, DataRow, DataSet, DataTable},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedIndexMeta, LinkedMetaModel,
         LinkedStructType, LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags, ValueLayout,
@@ -146,7 +146,7 @@ pub fn validate_table_for_target(
 }
 
 pub fn validate_normalized_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
-    validate_source_schema(meta, table)?;
+    DataResolver::resolve_table(meta, table, None)?;
 
     for field in &meta.fields {
         validate_supported_field_type(meta, field)?;
@@ -174,7 +174,7 @@ pub fn validate_normalized_table_for_target(
     target_tags: &TargetTags,
     table: &DataTable,
 ) -> Result<()> {
-    validate_source_schema(meta, table)?;
+    DataResolver::validate_table_source_schema(meta, table)?;
 
     let visible_fields = meta
         .fields
@@ -191,7 +191,13 @@ pub fn validate_normalized_table_for_target(
                 .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
         })
         .map(|(row_index, _)| visible_row_for(table, row_index))
-        .collect();
+        .collect::<Vec<_>>();
+    DataResolver::resolve_table_rows(
+        meta,
+        table,
+        Some(target_tags),
+        visible_rows.iter().map(|row| row.row_index),
+    )?;
     let table_view = ExportTableView::new(meta, table, visible_fields, visible_rows);
     validate_normalized_table_view(&table_view, Some(target_tags))
 }
@@ -702,164 +708,6 @@ fn foreign_key_row_key(row: &DataRow, fields: &[LinkedFieldMeta<'_>]) -> Vec<Str
         .collect()
 }
 
-fn validate_source_schema(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
-    for (row_index, row) in table.rows.iter().enumerate() {
-        let row_number = table
-            .row_source(row_index)
-            .map(|source| source.source_row_number)
-            .unwrap_or(row_index + 1);
-        let active_fragments = table
-            .row_source(row_index)
-            .map(|source| source.fragments.as_slice())
-            .unwrap_or(&[]);
-
-        for key in row.keys().filter(|key| key.contains('.')) {
-            validate_dotted_source_key(meta, key, row_number, active_fragments)?;
-        }
-        if meta.meta.kind == TableKind::Object {
-            for key in row.keys().filter(|key| !key.contains('.')) {
-                if meta.field(key).is_none() {
-                    return Err(ConfigForgeError::Validation(format!(
-                        "object table `{}` row {} references unknown field key `{}`",
-                        meta.meta.name, row_number, key
-                    )));
-                }
-            }
-        }
-
-        for field in &meta.fields {
-            if let LinkedField::Struct(struct_type) = &field.linked_field {
-                validate_struct_layout_mixing_for_row(
-                    meta.meta.name.as_str(),
-                    row,
-                    row_number,
-                    field.meta.name.as_str(),
-                    struct_type,
-                )?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn validate_dotted_source_key(
-    meta: &LinkedTableMeta<'_>,
-    key: &str,
-    row_number: usize,
-    active_fragments: &[String],
-) -> Result<()> {
-    let Some((first_segment, rest)) = key.split_once('.') else {
-        return Ok(());
-    };
-
-    if let Some(field) = meta.field(first_segment) {
-        let LinkedField::Struct(struct_type) = &field.linked_field else {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` uses child path but `{}` is not a struct field",
-                meta.meta.name, row_number, key, first_segment
-            )));
-        };
-        validate_struct_child_path(meta.meta.name.as_str(), row_number, key, struct_type, rest)?;
-        return Ok(());
-    }
-
-    if let Some(fragment) = meta.fragment(first_segment) {
-        if !active_fragments
-            .iter()
-            .any(|active| active == first_segment)
-        {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` belongs to inactive fragment `{}`",
-                meta.meta.name, row_number, key, first_segment
-            )));
-        }
-        if fragment.field(rest).is_none() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` references unknown fragment field `{}`",
-                meta.meta.name, row_number, key, rest
-            )));
-        }
-        return Ok(());
-    }
-
-    Err(ConfigForgeError::Validation(format!(
-        "table `{}` row {} field `{}` references unknown dotted field path",
-        meta.meta.name, row_number, key
-    )))
-}
-
-fn validate_struct_child_path(
-    table_name: &str,
-    row_number: usize,
-    full_path: &str,
-    struct_type: &LinkedStructType<'_>,
-    path: &str,
-) -> Result<()> {
-    let Some((segment, rest)) = path.split_once('.') else {
-        if struct_child(struct_type, path).is_some() {
-            return Ok(());
-        }
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` references unknown struct child `{}`",
-            table_name, row_number, full_path, path
-        )));
-    };
-
-    let Some(child) = struct_child(struct_type, segment) else {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` references unknown struct child `{}`",
-            table_name, row_number, full_path, segment
-        )));
-    };
-    let LinkedField::Struct(nested_struct) = &child.linked_field else {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` uses child path but `{}` is not a struct field",
-            table_name, row_number, full_path, segment
-        )));
-    };
-    validate_struct_child_path(table_name, row_number, full_path, nested_struct, rest)
-}
-
-fn validate_struct_layout_mixing_for_row(
-    table_name: &str,
-    row: &DataRow,
-    row_number: usize,
-    field_path: &str,
-    struct_type: &LinkedStructType<'_>,
-) -> Result<()> {
-    let parent_present = row.contains_key(field_path);
-    let descendant_path = first_descendant_path(row, field_path);
-    if parent_present {
-        if let Some(descendant_path) = descendant_path {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` mixes struct JSON cell with expanded child path `{}`",
-                table_name, row_number, field_path, descendant_path
-            )));
-        }
-        return Ok(());
-    }
-
-    if descendant_path.is_none() {
-        return Ok(());
-    }
-
-    for child in &struct_type.fields {
-        if let LinkedField::Struct(nested_struct) = &child.linked_field {
-            let child_path = format!("{field_path}.{}", child.meta.name);
-            validate_struct_layout_mixing_for_row(
-                table_name,
-                row,
-                row_number,
-                &child_path,
-                nested_struct,
-            )?;
-        }
-    }
-
-    Ok(())
-}
-
 fn validate_struct_field_value_for_row(
     meta: &LinkedTableMeta<'_>,
     row: &DataRow,
@@ -1056,23 +904,6 @@ fn child_is_visible(field: &LinkedFieldMeta<'_>, target_tags: Option<&TargetTags
     target_tags
         .map(|target_tags| field.meta.is_exported_for(target_tags))
         .unwrap_or(true)
-}
-
-fn struct_child<'meta>(
-    struct_type: &'meta LinkedStructType<'meta>,
-    name: &str,
-) -> Option<&'meta LinkedFieldMeta<'meta>> {
-    struct_type
-        .fields
-        .iter()
-        .find(|field| field.meta.name == name)
-}
-
-fn first_descendant_path<'a>(row: &'a DataRow, field_path: &str) -> Option<&'a str> {
-    let prefix = format!("{field_path}.");
-    row.keys()
-        .find(|key| key.starts_with(&prefix))
-        .map(String::as_str)
 }
 
 fn non_empty_row_value<'a>(row: &'a DataRow, field_path: &str) -> Option<&'a str> {

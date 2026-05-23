@@ -107,7 +107,7 @@ Struct 使用 JSON cell 还是 expanded value 应由 CSV/source 中出现的 fie
 
 ## 4. 数据模型策略
 
-### 4.1 保持 DataRow 扁平
+### 4.1 保持 Raw DataRow 扁平，新增 Resolved 层作为长期方向
 
 继续使用：
 
@@ -115,7 +115,7 @@ Struct 使用 JSON cell 还是 expanded value 应由 CSV/source 中出现的 fie
 pub type DataRow = BTreeMap<String, String>;
 ```
 
-CollectionTable 读取 CSV header 时保留原始 dotted key，例如 `attributes.attack`。
+CollectionTable 读取 CSV header 时保留原始 dotted key，例如 `attributes.attack`。这层应视为 RawDataSet：source-neutral、保留 raw string、便于诊断和 inspect。
 
 ObjectTable `read_object_table()` 当前把 key/value rows 归一化为单 logical row。支持 expanded value 后，只需允许 key 是合法 field path，并把：
 
@@ -126,9 +126,32 @@ default_attributes.max_health -> "120"
 
 写入同一个 DataRow。ObjectTable 的 duplicate key 检查仍按完整 key/path 检查。
 
+本功能的首个实现可以直接在 Validation / Export 里读取 raw `DataRow`，但这只是过渡方案。review 后确认的长期 Data 层方向是：在 Data Load 之后、Validation / Export 之前增加 Meta-aware resolver，生成 `ResolvedDataSet` / `ResolvedExportView`，让 Validation 和 Exporter 不再各自解释 JSON cell 与 dotted path。
+
+推荐链路：
+
+```text
+CSV / ObjectTable / future Sheet providers
+        ↓
+RawDataSet
+flat string + source location
+        ↓
+DataResolver / StructOccurrenceEvaluator
+Meta-aware: JSON cell / expanded path / default / target visibility
+        ↓
+ResolvedDataSet or ResolvedExportView
+typed scalar + nested struct + source trace
+        ↓
+Validation / Exporter
+```
+
+不建议把 struct expanded value 解析放进 `CsvDataReader`，因为 reader 不应依赖 linked meta、target tags、default、fragment active set 或 validator 语义；否则未来新增 xlsx、Lark、Google Sheet provider 时会复制 Meta-aware 解析逻辑。
+
 ### 4.2 必须新增 source layout scanner 与 row key classifier
 
 必须在 validation 或 data/schema helper 中增加 source layout scanner 与统一 row key classifier。scanner 负责基于当前 row/source 的 key 集合为每个 struct field occurrence 判定 JSON cell 或 expanded value；classifier 负责把具体 row key 归类为 table field、struct leaf、fragment field 或错误。required/default/type 校验、unknown dotted key 校验、fragment validation 和 export builder 都应使用同一套扫描/classification 结果；不能让 fragment validation 继续默认把所有 dotted key 的第一段都当成 fragment name。
+
+如果引入 `DataResolver`，scanner/classifier 应作为 resolver 的内部能力，并输出可复用的 struct occurrence evaluation，而不是分别在 validation/export 中重复实现。
 
 判定结果不应缓存为 table-level 全局 layout。CollectionTable 以每个 logical row 的 key set 作为 scanner 输入；由于 CSV reader 为每行保留 header keys，这等价于该 row 所属 physical source 的 header set。ObjectTable 以 singleton logical row 的 key set 作为 scanner 输入。Polymorphic multi-source 下，不同 source/row 可以对同一个 occurrence 使用不同 layout。
 
@@ -144,7 +167,6 @@ enum StructSourceLayout {
 struct StructOccurrenceLayout {
     parent_path: String,
     layout: StructSourceLayout,
-    policy: Option<ValueLayout>,
 }
 ```
 
@@ -213,6 +235,53 @@ struct StructOccurrenceRef<'meta> {
 
 Struct path 可以递归解析到 nested struct child，但每一级 occurrence 仍独立判定 JSON cell 或 expanded value。`attributes.offense.attack` 不是按 `Offense` 类型名解析，而是按字段路径 `attributes` -> `offense` -> `attack` 解析。
 
+### 4.3 StructOccurrenceEvaluator 与 ResolvedDataSet
+
+为避免 Validation 和 Exporter 重复实现 default / empty cell / target visibility / nested occurrence 规则，建议把 struct occurrence 解析提炼为共享 evaluator：
+
+```rust
+struct StructOccurrenceEvaluator<'meta, 'data> {
+    table: &'meta LinkedTableMeta<'meta>,
+    row: &'data DataRow,
+    target_tags: Option<&'data TargetTags>,
+}
+
+struct ResolvedStructOccurrence<'meta> {
+    path: String,
+    field: &'meta LinkedFieldMeta<'meta>,
+    layout: StructSourceLayout,
+    has_effective_value: bool,
+    value: Option<DataValue>,
+    source_trace: ValueSourceTrace,
+}
+```
+
+`has_effective_value` 的统一规则：
+
+- parent JSON cell 非空；或
+- 任一 target-visible descendant 有非空 source value；或
+- 任一 target-visible child 有非空 default；
+- 如果 target 下没有 visible child，则 parent required 不失败，可解析为空 object。
+
+空 expanded cell 不应单独构成 occurrence。CollectionTable 由于 header 会在每行都生成 key，如果某一行所有 target-visible child cell 都为空且没有 child default，则 optional parent struct 在该行视为 missing，不应触发 child required，也不应 export `{}`。
+
+`DataValue` 可先支持当前 struct MVP：
+
+```rust
+enum DataValue {
+    Scalar(String), // 短期保持 runtime scalar string contract
+    Struct(BTreeMap<String, DataValue>),
+}
+```
+
+长期可扩展为 typed scalar：
+
+```rust
+enum ScalarValue { String(String), Int(i64), Float(f64), Bool(bool), Enum(String) }
+```
+
+这样 JSON cell 与 expanded value 最终都解析为同一 `DataValue::Struct`，Validation 只验证结构化值，Exporter 只序列化结构化值。
+
 ## 5. Meta validation 修改
 
 需要修改 `validate_field_layout()`：
@@ -244,22 +313,21 @@ CSV reader 可继续原样读取 headers，不需要理解 meta。主要变化�
 
 ### 6.2 ObjectTable
 
-`read_object_table()` 现在使用 top-level `fields` 列表检查 key 是否存在。支持 expanded value 后，`DataSourcePlan.fields` 仅有 top-level 字段不够判断 dotted key。建议两种方案：
+`read_object_table()` 不应理解 linked struct schema。支持 expanded value 后，`DataSourcePlan.fields` 仅有 top-level 字段，不够判断 dotted key；如果继续在 loader 中做 schema 判断，会把 Meta-aware 解析提前到 source adapter。建议两种方案：
 
 方案 A：ObjectTable CSV loader 只做基础 key 非空 / duplicate / header 检查，unknown key/path 下沉到 validation。
 
 方案 B：扩展 `DataSourcePlan`，为 fields 增加 layout 和 direct child schema 快照，使 loader 可提前判断合法 field path。
 
-推荐采用 A 的变体：dotted key/path 的 schema 合法性下沉到 validation，因为它依赖 linked struct schema；不含 `.` 的 top-level key 继续在 ObjectTable loader 中用 `DataSourcePlan.fields` 做快速检查，以保留当前 unknown top-level key 的 CSV row 诊断体验。
+推荐采用 A：所有 key/path 的 schema 合法性下沉到 resolver / validation，因为它依赖 linked struct schema；loader 只检查 key 非空、完整 key/path 不重复、header 为 `key,value`。不含 `.` 的 top-level unknown key 也由 resolver / validation 报错，以保持 ObjectTable 与未来 Sheet provider 的 source adapter 行为一致。
 
-dotted key 下沉会带来诊断精度风险。因此 ObjectTable field source map 是本阶段实现要求：`read_object_table()` 在生成 singleton logical row 时，必须同时记录每个 key/path 的 source row number；Validation 对 ObjectTable 的 unknown dotted path、type、required 等错误优先使用该映射输出真实 CSV row。如果短期不改 `DataTable` public shape，可先增加可选 sidecar map 或 ObjectTable 专用 source map。
+key schema 下沉会带来诊断精度风险。因此 ObjectTable field source map 是 resolver 阶段的重要补充：`read_object_table()` 在生成 singleton logical row 时，未来应同时记录每个 key/path 的 source row number；resolver / validation 对 ObjectTable 的 unknown path、type、required 等错误优先使用该映射输出真实 CSV row。如果短期不改 `DataTable` public shape，可先增加可选 sidecar map 或 ObjectTable 专用 source map。
 
 实施方案 A 时：
 
 - ObjectTable loader 允许 `key` 中出现 `.`。
 - 仅检查 key 非空、完整 key/path 不重复、header 为 `key,value`。
-- 对没有 `.` 的 key，保留现有 top-level field 快速检查并继续输出原始 CSV row。
-- 对含 `.` 的 key，只做 duplicate/source row 记录，schema 检查交给 unified row key classifier；source row 记录必须进入 ObjectTable field source map。
+- 对所有 key，只做 duplicate/source row 记录，schema 检查交给 unified row key classifier；source row 记录后续应进入 ObjectTable field source map。
 
 ## 7. Validation 修改
 
@@ -316,7 +384,7 @@ id,attributes.offense.attack
 
 则 `attributes.offense` occurrence 按 expanded value 判定，并继续校验 `attack` child。
 
-Validation 和 Export 必须共享 child effective value 解析逻辑，避免 default/empty/target visibility 规则漂移。可以新增 view/helper：
+Validation 和 Export 必须共享 child effective value 解析逻辑，避免 default/empty/target visibility 规则漂移。下一阶段应优先抽到 `StructOccurrenceEvaluator` / `DataResolver`，可以新增 view/helper：
 
 ```rust
 struct StructObjectView<'a> {
@@ -338,6 +406,12 @@ struct StructChildValue<'a> {
 ```rust
 fn struct_child_effective_value(row, parent, child, target_tags) -> Option<Cow<'_, str>>
 ```
+
+当前已确认的 effective existence 语义：
+
+- required parent struct 可以由 visible child default 构成 effective value；validation 通过时 export 也必须输出对应 nested object。
+- optional expanded struct 中，只有 header/key 存在但所有 visible child cell 都为空且没有 default 时，视为 missing，不触发 child required，也不输出空 object。
+- target-hidden descendant 不应让当前 target 认为该 struct occurrence 已出现；occurrence 判断必须只统计 target-visible child path / default。
 
 ### 7.3 Field validators
 
@@ -459,11 +533,12 @@ type = "int"
 
 ## 11. 建议实施顺序
 
-1. 先补 Meta 名称约束、whole-struct default 禁止、parent required 语义测试，避免 field path parser 带着歧义进入实现。
-2. 调整 Meta validation：struct field 不再必须、也不允许通过 `layout = "expanded_value"` / `layout = "json_cell"` 控制展开或 JSON；source shape 完全由 header/key 判定。
-3. 新增 source layout scanner 和完整 occurrence path classifier，替换当前 fragment-only dotted key 假设；递归 nested occurrence 是本阶段范围，不拆到后续 milestone。
-4. 调整 ObjectTable CSV loader：允许 dotted key；保留 non-dotted top-level unknown key 的 loader 级诊断，并必须记录 dotted field path 的 source row 信息。
-5. 实现 shared struct occurrence effective value helper，输入包含 per row/source layout scan 结果。
-6. 改造 validation：target-independent source schema、JSON/expanded mixing 检查、target-aware required/default/type/enum、target-aware child visibility、parent required。
-7. 改造 runtime export：nested object builder 与 MessagePack/JSON shape，并复用 shared effective value helper。
-8. 补 collection/object/fragment coexistence/nested struct/同 type 多 occurrence/integration fixture 测试。
+当前 `feat(struct): support source-driven expanded values` 已完成 MVP：Meta 约束、ObjectTable dotted key 放行、source schema validation、recursive nested struct、JSON/expanded mixing error、target-aware child filtering、child default、JSON/MessagePack export shape 与回归测试均已落地。后续建议按 Data resolver 方向演进：
+
+1. 抽 `StructOccurrenceEvaluator`：把 validation/export 中关于 JSON cell、expanded path、default、empty cell、target visibility、nested occurrence 的判断集中到同一个 helper。
+2. 为 ObjectTable 增加 key/path -> source row number 的 sidecar source map，并让 evaluator / validation 使用真实 CSV key 行输出诊断。
+3. 引入最小 `DataValue::Scalar(String) | DataValue::Struct(...)`，让 evaluator 输出结构化 value；runtime exporter 改为优先消费该结构。
+4. 引入 `ResolvedDataSet` / `ResolvedExportView`：按 target tags 生成结构化视图，Validation 和 Exporter 不再直接解释 raw `DataRow`。
+5. 将现有 validation 迁移为 resolved validation：required/type/enum/range/foreign key/unique 读取 `DataValue` 和 `ValueSourceTrace`。
+6. 补集成 fixture：ObjectTable `key,value` nested expanded struct、同 named struct type 多 occurrence 分别使用 JSON/expanded、MessagePack shape。
+7. 在 `DataValue` 稳定后再设计 array/map expanded path，例如 `items[0].id`、`rewards[gold]`。
