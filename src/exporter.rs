@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     num::NonZeroUsize,
     path::{Path, PathBuf},
@@ -24,6 +24,8 @@ use crate::{
     validation::{normalize_data_set, validate_normalized_data_set_for_target_with_report},
     ConfigForgeError, Result,
 };
+
+const DEFAULT_DATA_TASK_NAME: &str = "default";
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuildOptions<'a> {
@@ -147,17 +149,47 @@ pub struct TargetConfig {
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
-    pub data: Option<TargetDataConfig>,
+    pub data: Vec<TargetDataConfig>,
     #[serde(default)]
     pub code: Vec<CodegenTaskConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct TargetDataConfig {
+    #[serde(default)]
+    pub name: Option<String>,
     pub input: PathBuf,
     pub output: PathBuf,
     #[serde(default = "default_data_format")]
     pub format: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NormalizedTargetConfig {
+    name: String,
+    tags: Vec<String>,
+    data: Vec<NormalizedTargetDataConfig>,
+    code: Vec<NormalizedCodegenTaskConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NormalizedTargetDataConfig {
+    name: String,
+    input: PathBuf,
+    output: PathBuf,
+    format: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NormalizedCodegenTaskConfig {
+    task: CodegenTaskConfig,
+    selected_data_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeConfigForgeResult {
+    data_name: String,
+    files: Vec<RuntimeDataFile>,
 }
 
 fn default_data_format() -> String {
@@ -178,15 +210,20 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
         .parent()
         .unwrap_or_else(|| Path::new("."));
     let target = project.target(options.target_name)?;
+    let target = target.normalize()?;
     let meta_set = project.meta_model()?;
     let linked_meta = meta_set.link().map_err(ConfigForgeError::MetaValidation)?;
     let target_tags = target.target_tags();
 
     let mut warnings = Vec::new();
     // Runtime data is exported before codegen so generated APIs can reference actual artifact paths.
-    let runtime_data_files = if let Some(data_config) = &target.data {
+    let runtime_data_results = if target.data.is_empty() {
+        Vec::new()
+    } else {
         let registry = DataFormatRegistry::with_builtin_exporters();
-        let data_exporter = registry.require(&data_config.format)?;
+        ensure_planned_runtime_output_paths(&target.data, &linked_meta, &target_tags, &registry)?;
+        let mut normalized_data_sets: BTreeMap<PathBuf, crate::data::DataSet> = BTreeMap::new();
+        let mut results = Vec::new();
         let data_plan = DataLoadPlan::from_tables(
             linked_meta
                 .tables
@@ -194,34 +231,46 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
                 .filter(|table| table.meta.is_exported_for(&target_tags))
                 .map(|table| table.meta),
         )?;
-        let data_set = DataLoader::new(project_root.join(&data_config.input))
-            .load_with_pool(&data_plan, &cpu_pool)?;
-        let data_set = normalize_data_set(&linked_meta, &data_set)?;
-        let validation_report = validate_normalized_data_set_for_target_with_report(
-            &linked_meta,
-            &target_tags,
-            &data_set,
-        )?;
-        warnings.extend(validation_report.warning_messages());
-        export_runtime_data(
-            &project_root.join(&data_config.output),
-            &linked_meta,
-            &target_tags,
-            &data_set,
-            data_exporter,
-            &cpu_pool,
-        )?
-    } else {
-        Vec::new()
+        for data_config in &target.data {
+            let data_exporter = registry.require(&data_config.format)?;
+            if !normalized_data_sets.contains_key(&data_config.input) {
+                let loaded_data_set =
+                    DataLoader::new(&data_config.input).load_with_pool(&data_plan, &cpu_pool)?;
+                let data_set = normalize_data_set(&linked_meta, &loaded_data_set)?;
+                let validation_report = validate_normalized_data_set_for_target_with_report(
+                    &linked_meta,
+                    &target_tags,
+                    &data_set,
+                )?;
+                warnings.extend(validation_report.warning_messages());
+                normalized_data_sets.insert(data_config.input.clone(), data_set);
+            }
+            let data_set = normalized_data_sets
+                .get(&data_config.input)
+                .expect("data set should be loaded before export");
+            let files = export_runtime_data(
+                &data_config.output,
+                &linked_meta,
+                &target_tags,
+                data_set,
+                data_exporter,
+                &cpu_pool,
+            )?;
+            results.push(RuntimeConfigForgeResult {
+                data_name: data_config.name.clone(),
+                files,
+            });
+        }
+        results
     };
 
     write_generated_code(
         project_root,
         &CodeExportProject::from(&project.project),
-        target,
+        &target,
         &target_tags,
         &linked_meta,
-        runtime_data_files,
+        runtime_data_results,
         &cpu_pool,
     )?;
 
@@ -230,6 +279,23 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
 
 impl TargetConfig {
     pub fn target_tags(&self) -> TargetTags {
+        TargetTags::new(self.tags.clone())
+    }
+
+    fn normalize(&self) -> Result<NormalizedTargetConfig> {
+        let data = normalize_target_data_tasks(&self.name, &self.data)?;
+        let code = normalize_codegen_tasks(&self.name, &data, &self.code)?;
+        Ok(NormalizedTargetConfig {
+            name: self.name.clone(),
+            tags: self.tags.clone(),
+            data,
+            code,
+        })
+    }
+}
+
+impl NormalizedTargetConfig {
+    fn target_tags(&self) -> TargetTags {
         TargetTags::new(self.tags.clone())
     }
 }
@@ -296,7 +362,7 @@ fn load_project_config_recursive(
 
 fn normalize_project_config_paths(config: &mut ProjectConfig, base_dir: &Path) {
     for target in &mut config.targets {
-        if let Some(data) = &mut target.data {
+        for data in &mut target.data {
             data.input = normalize_config_path(base_dir, &data.input);
             data.output = normalize_config_path(base_dir, &data.output);
         }
@@ -357,6 +423,124 @@ fn validate_unique_target_names(targets: &[TargetConfig]) -> Result<()> {
     Ok(())
 }
 
+fn normalize_target_data_tasks(
+    target_name: &str,
+    data_tasks: &[TargetDataConfig],
+) -> Result<Vec<NormalizedTargetDataConfig>> {
+    let mut normalized = Vec::with_capacity(data_tasks.len());
+    let mut seen = BTreeSet::new();
+    for data_task in data_tasks {
+        let name = match (&data_task.name, data_tasks.len()) {
+            (Some(name), _) => {
+                validate_data_task_name(target_name, name)?;
+                name.clone()
+            }
+            (None, 1) => DEFAULT_DATA_TASK_NAME.to_owned(),
+            (None, _) => {
+                return Err(ConfigForgeError::Validation(format!(
+                    "target `{target_name}` declares multiple data tasks, but one is missing `name`"
+                )))
+            }
+        };
+        if !seen.insert(name.clone()) {
+            return Err(ConfigForgeError::Validation(format!(
+                "target `{target_name}` declares duplicate data task `{name}`"
+            )));
+        }
+        normalized.push(NormalizedTargetDataConfig {
+            name,
+            input: data_task.input.clone(),
+            output: data_task.output.clone(),
+            format: data_task.format.clone(),
+        });
+    }
+    Ok(normalized)
+}
+
+fn validate_data_task_name(target_name: &str, name: &str) -> Result<()> {
+    let is_valid = !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        && name
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && name
+            .as_bytes()
+            .last()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric());
+    if is_valid {
+        Ok(())
+    } else {
+        Err(ConfigForgeError::Validation(format!(
+            "target `{target_name}` declares invalid data task name `{name}`; data task names must use ASCII letters, digits, `_` or `-`, and start and end with a letter or digit"
+        )))
+    }
+}
+
+fn normalize_codegen_tasks(
+    target_name: &str,
+    data_tasks: &[NormalizedTargetDataConfig],
+    code_tasks: &[CodegenTaskConfig],
+) -> Result<Vec<NormalizedCodegenTaskConfig>> {
+    code_tasks
+        .iter()
+        .map(|task| {
+            let selected_data_name = match (&task.data, data_tasks.len()) {
+                (Some(name), _) => {
+                    if data_tasks.iter().any(|data_task| data_task.name == *name) {
+                        Some(name.clone())
+                    } else {
+                        return Err(ConfigForgeError::Validation(format!(
+                            "target `{target_name}` code task for `{}` references unknown data task `{name}`",
+                            task.language.as_str()
+                        )));
+                    }
+                }
+                (None, 0) => None,
+                (None, 1) => Some(data_tasks[0].name.clone()),
+                (None, _) => {
+                    return Err(ConfigForgeError::Validation(format!(
+                        "target `{target_name}` code task for `{}` must set `data` when multiple data tasks are configured",
+                        task.language.as_str()
+                    )))
+                }
+            };
+            Ok(NormalizedCodegenTaskConfig {
+                task: task.clone(),
+                selected_data_name,
+            })
+        })
+        .collect()
+}
+
+fn ensure_planned_runtime_output_paths(
+    data_tasks: &[NormalizedTargetDataConfig],
+    linked_meta: &crate::meta::LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    registry: &DataFormatRegistry,
+) -> Result<()> {
+    let mut paths = BTreeSet::new();
+    for data_task in data_tasks {
+        let exporter = registry.require(&data_task.format)?;
+        for table_meta in &linked_meta.tables {
+            if !table_meta.meta.is_exported_for(target_tags) {
+                continue;
+            }
+            let plan = exporter.plan_table_artifact(table_meta)?;
+            let path = data_task.output.join(&plan.path);
+            if !paths.insert(path.clone()) {
+                return Err(ConfigForgeError::Validation(format!(
+                    "multiple runtime data artifacts target `{}`",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn finish_loading_project_meta(model: &MetaModel) -> Result<()> {
     let (_, mut diagnostics): (
         Option<crate::meta::LinkedMetaModel<'_>>,
@@ -386,10 +570,10 @@ impl From<&ProjectConfigMeta> for CodeExportProject {
 fn write_generated_code(
     project_root: &Path,
     project: &CodeExportProject,
-    target: &TargetConfig,
+    target: &NormalizedTargetConfig,
     target_tags: &TargetTags,
     linked_meta: &crate::meta::LinkedMetaModel<'_>,
-    runtime_data_files: Vec<RuntimeDataFile>,
+    runtime_data_results: Vec<RuntimeConfigForgeResult>,
     pool: &ThreadPool,
 ) -> Result<()> {
     let generated_at = generated_at();
@@ -399,7 +583,7 @@ fn write_generated_code(
         project,
         target_tags,
         linked_meta,
-        runtime_data_files: &runtime_data_files,
+        runtime_data_results: &runtime_data_results,
         generated_at: &generated_at,
         generators: &generators,
     };
@@ -448,36 +632,58 @@ struct CodegenTaskContext<'a, 'meta> {
     project: &'a CodeExportProject,
     target_tags: &'a TargetTags,
     linked_meta: &'meta crate::meta::LinkedMetaModel<'meta>,
-    runtime_data_files: &'a [RuntimeDataFile],
+    runtime_data_results: &'a [RuntimeConfigForgeResult],
     generated_at: &'a str,
     generators: &'a [Box<dyn CodeGenerator>],
 }
 
 fn generate_code_task(
     context: &CodegenTaskContext<'_, '_>,
-    code_task: &CodegenTaskConfig,
+    code_task: &NormalizedCodegenTaskConfig,
 ) -> Result<Vec<GeneratedFile>> {
     let generator = context
         .generators
         .iter()
-        .find(|generator| generator.language() == code_task.language)
+        .find(|generator| generator.language() == code_task.task.language)
         .ok_or_else(|| {
             ConfigForgeError::Validation(format!(
                 "no code generator registered for `{}`",
-                code_task.language.as_str()
+                code_task.task.language.as_str()
             ))
         })?;
-    let mut code_target = CodeExportTarget::from_task(code_task.clone());
+    let runtime_data_files = selected_runtime_data_files(context, code_task)?;
+    let mut code_target = CodeExportTarget::from_task(code_task.task.clone());
     code_target.out_dir = context.project_root.join(&code_target.out_dir);
     let input = CodeExportInput {
         meta: context.linked_meta,
         target_tags: context.target_tags.clone(),
         project: context.project.clone(),
         target: code_target,
-        runtime_data_files: context.runtime_data_files.to_vec(),
+        runtime_data_files,
         generated_at: context.generated_at.to_owned(),
     };
     generator.generate(&input)
+}
+
+fn selected_runtime_data_files(
+    context: &CodegenTaskContext<'_, '_>,
+    code_task: &NormalizedCodegenTaskConfig,
+) -> Result<Vec<RuntimeDataFile>> {
+    if let Some(data_name) = &code_task.selected_data_name {
+        let result = context
+            .runtime_data_results
+            .iter()
+            .find(|result| result.data_name == *data_name)
+            .ok_or_else(|| {
+                ConfigForgeError::Validation(format!(
+                    "code task for `{}` selected data task `{data_name}`, but no runtime data was exported for it",
+                    code_task.task.language.as_str()
+                ))
+            })?;
+        Ok(result.files.clone())
+    } else {
+        Ok(Vec::new())
+    }
 }
 
 fn generated_at() -> String {
@@ -512,8 +718,9 @@ fn civil_from_unix_days(days: i64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::path::PathBuf;
 
-    use crate::codegen::{default_module_name, CodeExportLanguage};
+    use crate::codegen::{default_module_name, CodeExportLanguage, CodegenTaskConfig};
     use crate::data::DataTable;
     use crate::config_forge::build_exported_table_payload;
 
@@ -630,13 +837,13 @@ mod tests {
             TargetConfig {
                 name: "client".to_owned(),
                 tags: Vec::new(),
-                data: None,
+                data: Vec::new(),
                 code: Vec::new(),
             },
             TargetConfig {
                 name: "client".to_owned(),
                 tags: Vec::new(),
-                data: None,
+                data: Vec::new(),
                 code: Vec::new(),
             },
         ])
@@ -644,6 +851,160 @@ mod tests {
 
         assert!(
             matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate target `client`"))
+        );
+    }
+
+    #[test]
+    fn normalizes_single_unnamed_data_task_to_default() {
+        let target = TargetConfig {
+            name: "client".to_owned(),
+            tags: vec!["client".to_owned()],
+            data: vec![TargetDataConfig {
+                name: None,
+                input: PathBuf::from("Data"),
+                output: PathBuf::from("Generated/Data"),
+                format: "json".to_owned(),
+            }],
+            code: vec![CodegenTaskConfig {
+                language: CodeExportLanguage::TypeScript,
+                output: PathBuf::from("Generated/TypeScript"),
+                data: None,
+                module_name: None,
+                namespace: None,
+                file_header: None,
+                keyword_conflict: None,
+                naming: Default::default(),
+                rust: Default::default(),
+                cpp: Default::default(),
+                typescript: Default::default(),
+            }],
+        };
+
+        let normalized = target.normalize().expect("target should normalize");
+
+        assert_eq!(normalized.data[0].name, DEFAULT_DATA_TASK_NAME);
+        assert_eq!(
+            normalized.code[0].selected_data_name.as_deref(),
+            Some(DEFAULT_DATA_TASK_NAME)
+        );
+    }
+
+    #[test]
+    fn explicit_default_data_binding_matches_single_unnamed_data_task() {
+        let target = TargetConfig {
+            name: "client".to_owned(),
+            tags: Vec::new(),
+            data: vec![TargetDataConfig {
+                name: None,
+                input: PathBuf::from("Data"),
+                output: PathBuf::from("Generated/Data"),
+                format: "json".to_owned(),
+            }],
+            code: vec![CodegenTaskConfig {
+                language: CodeExportLanguage::Rust,
+                output: PathBuf::from("Generated/Rust"),
+                data: Some(DEFAULT_DATA_TASK_NAME.to_owned()),
+                module_name: None,
+                namespace: None,
+                file_header: None,
+                keyword_conflict: None,
+                naming: Default::default(),
+                rust: Default::default(),
+                cpp: Default::default(),
+                typescript: Default::default(),
+            }],
+        };
+
+        let normalized = target.normalize().expect("target should normalize");
+
+        assert_eq!(
+            normalized.code[0].selected_data_name.as_deref(),
+            Some(DEFAULT_DATA_TASK_NAME)
+        );
+    }
+
+    #[test]
+    fn rejects_ambiguous_codegen_data_binding() {
+        let target = TargetConfig {
+            name: "client".to_owned(),
+            tags: Vec::new(),
+            data: vec![
+                TargetDataConfig {
+                    name: Some("json".to_owned()),
+                    input: PathBuf::from("Data"),
+                    output: PathBuf::from("Generated/Json"),
+                    format: "json".to_owned(),
+                },
+                TargetDataConfig {
+                    name: Some("messagepack".to_owned()),
+                    input: PathBuf::from("Data"),
+                    output: PathBuf::from("Generated/MessagePack"),
+                    format: "messagepack".to_owned(),
+                },
+            ],
+            code: vec![CodegenTaskConfig {
+                language: CodeExportLanguage::Cpp,
+                output: PathBuf::from("Generated/Cpp"),
+                data: None,
+                module_name: None,
+                namespace: None,
+                file_header: None,
+                keyword_conflict: None,
+                naming: Default::default(),
+                rust: Default::default(),
+                cpp: Default::default(),
+                typescript: Default::default(),
+            }],
+        };
+
+        let error = target.normalize().unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("must set `data`"))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_data_task_names() {
+        let error = normalize_target_data_tasks(
+            "client",
+            &[TargetDataConfig {
+                name: Some("bad name".to_owned()),
+                input: PathBuf::from("Data"),
+                output: PathBuf::from("Generated/Data"),
+                format: "json".to_owned(),
+            }],
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("invalid data task name"))
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_data_task_names() {
+        let error = normalize_target_data_tasks(
+            "client",
+            &[
+                TargetDataConfig {
+                    name: Some("json".to_owned()),
+                    input: PathBuf::from("Data"),
+                    output: PathBuf::from("Generated/DataA"),
+                    format: "json".to_owned(),
+                },
+                TargetDataConfig {
+                    name: Some("json".to_owned()),
+                    input: PathBuf::from("Data"),
+                    output: PathBuf::from("Generated/DataB"),
+                    format: "messagepack".to_owned(),
+                },
+            ],
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate data task `json`"))
         );
     }
 

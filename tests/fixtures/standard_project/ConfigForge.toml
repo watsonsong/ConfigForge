@@ -12,16 +12,37 @@ desc = "Standard reference game fixture used by integration tests."
 name = "client"
 tags = ["client"]
 
-[targets.data]
+[[targets.data]]
+name = "json"
 input = "data"
 output = "out/client_data"
 format = "json"
+
+[[targets.code]]
+language = "typescript"
+output = "out/client_code/typescript"
+module_name = "referenceGameConfig"
+data = "json"
+
+[[targets.code]]
+language = "cpp"
+output = "out/client_code/cpp"
+module_name = "ReferenceGameConfig"
+namespace = "reference::game::config"
+data = "json"
 
 [[targets]]
 name = "server"
 tags = ["server"]
 
-[targets.data]
+[[targets.data]]
+name = "messagepack"
 input = "data"
 output = "out/server_data"
-format = "json"
+format = "messagepack"
+
+[[targets.code]]
+language = "rust"
+output = "out/server_code/rust"
+module_name = "reference_game_config"
+data = "messagepack"

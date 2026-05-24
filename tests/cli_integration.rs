@@ -69,7 +69,7 @@ fn builds_target_from_project_config() {
                 name = "client"
                 tags = ["client"]
 
-                [targets.data]
+                [[targets.data]]
                 input = "{}"
                 output = "{}"
                 format = "json"
@@ -170,7 +170,7 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
                 name = "client"
                 tags = ["client"]
 
-                [targets.data]
+                [[targets.data]]
                 input = "{}"
                 output = "{}"
                 format = "json"
@@ -179,10 +179,10 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
                 name = "server"
                 tags = ["server"]
 
-                [targets.data]
+                [[targets.data]]
                 input = "{}"
                 output = "{}"
-                format = "json"
+                format = "messagepack"
             "#,
             standard_reference_game_meta_imports(),
             absolute_fixture_path("data"),
@@ -246,10 +246,10 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
     assert!(!client_out_dir.join("weapons.json").exists());
     assert!(!client_out_dir.join("armors.json").exists());
 
-    let server_items_json = fs::read_to_string(server_out_dir.join("items.json"))
-        .expect("server items json should exist");
+    let server_items_bytes = fs::read(server_out_dir.join("items.msgpack"))
+        .expect("server items messagepack should exist");
     let server_items: serde_json::Value =
-        serde_json::from_str(&server_items_json).expect("server items json should parse");
+        rmp_serde::from_slice(&server_items_bytes).expect("server items messagepack should parse");
     assert!(server_items["rows"][3].get("name").is_none());
     assert!(server_items["rows"][3].get("skill").is_none());
     assert_eq!(server_items["rows"][3]["attributes"]["attack"], "12");
@@ -432,7 +432,7 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
                 name = "client_messagepack"
                 tags = ["client"]
 
-                [targets.data]
+                [[targets.data]]
                 input = "{}"
                 output = "{}"
                 format = "messagepack"
@@ -480,6 +480,230 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
     assert!(!rust_code.contains("RuntimeDataFormat"));
 
     verify_generated_rust_crate(&rust_out_dir, false);
+}
+
+#[test]
+fn binds_code_tasks_to_selected_data_tasks() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let json_data_dir = temp_dir.path().join("out/data/json");
+    let messagepack_data_dir = temp_dir.path().join("out/data/messagepack");
+    let ts_out_dir = temp_dir.path().join("out/code/typescript");
+    let rust_out_dir = temp_dir.path().join("out/code/rust");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [[targets]]
+                name = "multi_artifact"
+                tags = ["client"]
+
+                [[targets.data]]
+                name = "json"
+                input = "{}"
+                output = "{}"
+                format = "json"
+
+                [[targets.data]]
+                name = "messagepack"
+                input = "{}"
+                output = "{}"
+                format = "messagepack"
+
+                [[targets.code]]
+                language = "typescript"
+                output = "{}"
+                data = "json"
+
+                [[targets.code]]
+                language = "rust"
+                output = "{}"
+                data = "messagepack"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            json_data_dir.display(),
+            absolute_fixture_path("data"),
+            messagepack_data_dir.display(),
+            ts_out_dir.display(),
+            rust_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "multi_artifact",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `multi_artifact` built"));
+
+    assert!(json_data_dir.join("items.json").exists());
+    assert!(messagepack_data_dir.join("items.msgpack").exists());
+    let ts_code = fs::read_to_string(ts_out_dir.join("generated.ts")).expect("ts code");
+    let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
+    assert!(ts_code.contains("static readonly dataFile = \"items.json\""));
+    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.msgpack\""));
+}
+
+#[test]
+fn rejects_code_task_without_data_binding_when_multiple_data_tasks_exist() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [[targets]]
+                name = "ambiguous"
+
+                [[targets.data]]
+                name = "json"
+                input = "{}"
+                output = "{}"
+                format = "json"
+
+                [[targets.data]]
+                name = "messagepack"
+                input = "{}"
+                output = "{}"
+                format = "messagepack"
+
+                [[targets.code]]
+                language = "rust"
+                output = "{}"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            temp_dir.path().join("out/json").display(),
+            absolute_fixture_path("data"),
+            temp_dir.path().join("out/messagepack").display(),
+            temp_dir.path().join("out/rust").display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "ambiguous",
+    ]);
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("must set `data`"));
+}
+
+#[test]
+fn rejects_runtime_data_path_conflict_before_writing_files() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_out_dir = temp_dir.path().join("out/data");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [[targets]]
+                name = "conflict"
+
+                [[targets.data]]
+                name = "json_a"
+                input = "{}"
+                output = "{}"
+                format = "json"
+
+                [[targets.data]]
+                name = "json_b"
+                input = "{}"
+                output = "{}"
+                format = "json"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            data_out_dir.display(),
+            absolute_fixture_path("data"),
+            data_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "conflict",
+    ]);
+
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "multiple runtime data artifacts target",
+    ));
+    assert!(!data_out_dir.join("items.json").exists());
+    assert!(!data_out_dir.join("game_rules.json").exists());
+}
+
+#[test]
+fn rejects_unknown_second_data_format_before_writing_first_data_task() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let json_out_dir = temp_dir.path().join("out/json");
+    let bad_out_dir = temp_dir.path().join("out/bad");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [[targets]]
+                name = "bad_format"
+
+                [[targets.data]]
+                name = "json"
+                input = "{}"
+                output = "{}"
+                format = "json"
+
+                [[targets.data]]
+                name = "bad"
+                input = "{}"
+                output = "{}"
+                format = "unknown_binary"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            json_out_dir.display(),
+            absolute_fixture_path("data"),
+            bad_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "bad_format",
+    ]);
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("no data exporter registered"));
+    assert!(!json_out_dir.join("items.json").exists());
+    assert!(!bad_out_dir.exists());
 }
 
 #[test]
@@ -609,7 +833,7 @@ fn target_tags_filter_validation_export_and_codegen() {
                 name = "client"
                 tags = ["client"]
 
-                [targets.data]
+                [[targets.data]]
                 input = "{}"
                 output = "{}"
                 format = "json"
@@ -691,7 +915,7 @@ fn range_validator_blocks_invalid_data_before_export() {
                 name = "client"
                 tags = ["client"]
 
-                [targets.data]
+                [[targets.data]]
                 input = "{}"
                 output = "{}"
                 format = "json"
@@ -751,7 +975,7 @@ fn warning_validator_is_visible_but_does_not_block_export() {
                 name = "client"
                 tags = ["client"]
 
-                [targets.data]
+                [[targets.data]]
                 input = "{}"
                 output = "{}"
                 format = "json"

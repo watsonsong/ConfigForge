@@ -121,6 +121,8 @@ pub struct CodegenTaskConfig {
     pub language: CodeExportLanguage,
     pub output: PathBuf,
     #[serde(default)]
+    pub data: Option<String>,
+    #[serde(default)]
     pub module_name: Option<String>,
     #[serde(default)]
     pub namespace: Option<String>,
