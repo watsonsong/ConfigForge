@@ -1,3 +1,1 @@
-mod range;
-
-pub use range::RangeValidatorFactory;
+pub(super) mod range;

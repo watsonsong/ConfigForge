@@ -4,7 +4,7 @@ use super::{
     FieldMeta, LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedFragmentMeta,
     LinkedFragmentPayload, LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType,
     LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
-    validate_meta_model,
+    validate::validate_meta_model,
 };
 
 /// Builds a borrowed linked view of a validated raw model.

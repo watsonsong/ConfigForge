@@ -1,6 +1,7 @@
 use std::fs;
 
 use super::*;
+use super::{link::link_meta_model, validate::validate_meta_model};
 use crate::ConfigForgeError;
 use tempfile::tempdir;
 

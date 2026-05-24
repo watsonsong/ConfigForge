@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::{
-    ValidationContext, ValidationIssue, ValidationReport, builtins::RangeValidatorFactory,
+    ValidationContext, ValidationIssue, ValidationReport, builtins::range::RangeValidatorFactory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -12,8 +12,6 @@ mod options;
 mod runtime;
 mod target;
 
-pub use crate::exporter::TargetDataConfig;
-pub use crate::project::{ProjectConfig, ProjectConfigMeta, TargetConfig};
 pub use options::{BuildOptions, BuildOutput, ExecutionOptions};
 
 use crate::{
@@ -24,6 +22,7 @@ use crate::{
     },
     exporter::RuntimeDataFile,
     meta::TargetTags,
+    project::ProjectConfig,
 };
 
 use runtime::{RuntimeConfigForgeResult, export_runtime_data_tasks};

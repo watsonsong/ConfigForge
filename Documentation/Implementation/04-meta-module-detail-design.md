@@ -30,7 +30,7 @@ Rust 不使用面向对象继承。本文档中的“类”对应 Rust 的 `stru
 
 - **数据结构**：`MetaModel`、`TableMeta`、`FieldMeta`、`LinkedMetaModel<'meta>`。
 - **多态变体**：`TableKind`、`PrimitiveFieldType`、`LinkedField<'meta>`。
-- **行为入口**：`impl MetaModel`、`link_meta_model`、`validate_meta_model`。
+- **行为入口**：`impl MetaModel`；`link_meta_model` / `validate_meta_model` 是 Meta 模块内部诊断阶段函数，供 `MetaModel::link()` / `MetaModel::validate()` 复用。
 - **继承关系**：不设计父类/子类；用组合、枚举分发和借用视图表达关系。
 
 Object table 与 collection table 通过 `TableKind` 区分，不拆成继承体系。Field 的 primitive / enum / struct 类型在 Link 阶段通过 `LinkedField<'meta>` 区分。
@@ -108,7 +108,7 @@ pub struct MetaModel {
 
 - `MetaModel` 是 serde 直接加载的 owned model。
 - 不包含 `HashMap` 索引，不包含内部引用。
-- `MetaSet` 当前是 `MetaModel` 的兼容别名。
+- `MetaSet` 兼容别名已删除；新代码统一使用 `MetaModel`。
 - Project 信息和配置片段导入关系属于 Project Config，不属于 MetaModel。
 
 主要方法：
@@ -563,13 +563,12 @@ impl MetaModel {
     pub fn finish_loading(self) -> Result<Self>;
 }
 
-pub fn load_meta_path(path: &Path) -> Result<MetaModel>;
 ```
 
 加载策略：
 
 - `from_toml_str`：直接 TOML 反序列化为 `MetaModel`，随后执行 `finish_loading`。
-- `from_path`：调用 `load_meta_path`。
+- `from_path`：读取指定 Meta TOML 文件并执行 `finish_loading`。
 - `from_paths`：合并多个显式传入的 Meta TOML 文件；不处理 imports。
 - Project Config 的 `imports` 递归、去重、片段合并由 Project 模块负责；Meta loader 只负责把已给定的 Meta 内容加载成 `MetaModel` 并完成 link/validate。
 - `merge_models`：按传入顺序合并 enums、structs、tables。
@@ -758,7 +757,7 @@ Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和�
 - 下游在需要类型解析或快速查询时，应在持有 `MetaModel` 的作用域内调用 `meta.link()` 得到 `LinkedMetaModel<'_>`。
 - `MetaModel::from_toml_str` / `from_path` / `from_paths` 返回的是已完成 link + validate 检查的 raw model；raw model 本身不保存 borrowed links。
 - `MetaModel::finish_loading()` 是给外部已构造 raw model 使用的统一收口入口，例如 Project 模块抽取出的 raw `MetaModel`；它不重新实现诊断合并逻辑，而是复用 `MetaModel::link()`。
-- `link_meta_model()` 每次调用都会基于 raw model 构造 runtime borrowed view并只返回引用解析 diagnostics；`MetaModel::link()` 会额外合并结构校验 diagnostics。调用方只能在 diagnostics 为空时消费 linked model；如果 diagnostics 非空，linked model 视为不可用。
+- `link_meta_model()` 每次调用都会基于 raw model 构造 runtime borrowed view并只返回引用解析 diagnostics；它不再从 `meta` 模块入口 re-export，外部调用方应优先使用 `MetaModel::link()`。`MetaModel::link()` 会额外合并结构校验 diagnostics，调用方只能在 diagnostics 为空时消费 linked model；如果 diagnostics 非空，linked model 视为不可用。
 - `ProjectConfig::raw_meta_model()` 只抽取 raw model，不做 Meta 校验；`build_target()` 对该 raw model 调用 `MetaModel::link()`，由 Meta 模块统一完成 link + validate 并返回当前执行阶段使用的 borrowed view。
 - `LinkedMetaModel<'_>` 不应跨越 `MetaModel` 生命周期；通常应在 export/validate 函数栈内临时创建并传递引用。
 - validation/exporter 不应再自行解析 `FieldMeta.field_type` 字符串；应读取 `LinkedFieldMeta.linked_field` 或 `primitive_type()`。

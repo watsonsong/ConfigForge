@@ -31,7 +31,7 @@ impl MetaModel {
     }
 }
 
-pub fn load_meta_path(path: &Path) -> Result<MetaModel> {
+fn load_meta_path(path: &Path) -> Result<MetaModel> {
     finish_loading_model(read_meta_file(path)?)
 }
 

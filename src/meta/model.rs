@@ -14,8 +14,6 @@ pub struct MetaModel {
     pub tables: Vec<TableMeta>,
 }
 
-pub type MetaSet = MetaModel;
-
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct EnumMeta {
     pub name: String,
@@ -368,8 +366,8 @@ impl MetaModel {
     }
 
     pub fn validate(&self) -> std::result::Result<(), Vec<crate::meta::MetaDiagnostic>> {
-        let (_, mut diagnostics) = crate::meta::link_meta_model(self);
-        diagnostics.extend(crate::meta::validate_meta_model(self));
+        let (_, mut diagnostics) = super::link::link_meta_model(self);
+        diagnostics.extend(super::validate::validate_meta_model(self));
         diagnostics.sort();
         diagnostics.dedup();
         if diagnostics.is_empty() {
