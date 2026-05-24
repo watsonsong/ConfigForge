@@ -65,6 +65,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 
 - `DevLogs/Readme.md` — developer log purpose, relationship to canonical documents, file naming, and writing rules.
 - `DevLogs/phase-0001.md` — first raw phase log covering foundation, targets, fragments, foreign keys, and workflow decisions through 2026-05-21.
+- `DevLogs/phase-0002.md` — second raw phase log covering runtime readers, module boundary cleanup, Artifact Writer, dry-run/write-mode, and documentation maintenance through 2026-05-24.
 
 ## Maintenance Rules
 
