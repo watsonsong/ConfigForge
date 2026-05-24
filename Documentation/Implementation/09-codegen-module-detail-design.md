@@ -81,13 +81,21 @@ src/codegen/
   mod.rs              # 对外 API、re-export、CodeExportTarget / CodeExportInput / Artifact 等核心模型
   ir.rs               # Language-neutral CodeModel IR
   naming.rs           # 目标语言命名规范、保留字处理、冲突检测
-  rust.rs             # RustCodeGenerator
-  cpp.rs              # CppCodeGenerator
-  typescript.rs       # TypeScriptCodeGenerator
-  tests.rs            # codegen 单元测试
+  rust/
+    mod.rs            # RustCodeGenerator
+    tests.rs          # Rust 生成器测试
+  cpp/
+    mod.rs            # CppCodeGenerator
+    tests.rs          # C++ 生成器测试
+  typescript/
+    mod.rs            # TypeScriptCodeGenerator
+    tests.rs          # TypeScript 生成器测试
+  tests.rs            # IR、配置、命名等语言无关公共测试
 ```
 
-`type_mapping.rs`、`index.rs`、`runtime.rs` 当前未拆分为独立文件；对应逻辑仍分别位于 IR 与各语言生成器内部，后续可在模块继续膨胀时再拆出。
+Codegen 模块遵循开闭原则：核心模块只定义语言无关模型、生成器 trait、注册表查找和公共配置结构；每种目标语言作为一等公民独立放在自己的目录中，语言专属的类型映射、运行时 reader contract 渲染、命名默认值和测试都在该目录内维护。新增语言时应优先通过新增 `src/codegen/<language>/`、实现 `CodeGenerator` 并注册到 builtin registry 完成，不回到 IR 或 build 编排层增加语言分支。
+
+`type_mapping.rs`、`index.rs`、`runtime.rs` 当前未拆分为独立文件；对应逻辑仍分别位于 IR 与各语言生成器内部，后续可在单个语言目录继续膨胀时再拆出到该语言目录下。
 
 `src/build/` 保留为执行编排层，负责：
 
@@ -126,21 +134,46 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 
 ## 9.4 核心输入输出模型
 
-### 9.4.1 `CodeExportLanguage`
+### 9.4.1 语言标识与生成器注册表
+
+目标语言使用字符串标识，不使用中心化枚举。这样新增一种语言时不需要修改 `CodeExportLanguage` 一类的核心 enum，也不需要在 build 层增加新的 match 分支。
 
 ```rust
-pub enum CodeExportLanguage {
-    Rust,
-    Cpp,
-    TypeScript,
+pub mod languages {
+    pub const RUST: &str = "rust";
+    pub const CPP: &str = "cpp";
+    pub const TYPESCRIPT: &str = "typescript";
 }
+
+pub trait CodeGenerator: Send + Sync {
+    fn language(&self) -> &'static str;
+    fn language_aliases(&self) -> &'static [&'static str] { &[] }
+    fn supports_language(&self, language: &str) -> bool;
+    fn default_module_name(&self) -> &'static str;
+    fn default_naming(&self) -> NamingConfig;
+    fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>>;
+}
+
+pub fn builtin_generators() -> Vec<Box<dyn CodeGenerator>>;
+pub fn find_generator<'a>(
+    generators: &'a [Box<dyn CodeGenerator>],
+    language: &str,
+) -> Option<&'a dyn CodeGenerator>;
 ```
+
+注册表职责：
+
+- `CodeGenerator::language()` 返回规范语言名，例如 `rust`、`cpp`、`typescript`。
+- `language_aliases()` 提供兼容别名，例如 C++ 支持 `c++`，TypeScript 支持 `ts`。
+- `CodeExportTarget::from_task` 接收已查找到的 `&dyn CodeGenerator`，由 generator 提供默认模块名和默认命名规则。
+- `src/build/` 只通过 `find_generator(context.generators, task.language)` 查找生成器；找不到时报告“未注册生成器”，不感知具体语言集合。
+- 内置语言的唯一集中注册点是 `builtin_generators()`。未来插件式生成器可以替换或扩展传入 build 上下文的 registry，而不改 IR。
 
 ### 9.4.2 `CodeExportTarget`
 
 ```rust
 pub struct CodeExportTarget {
-    pub language: CodeExportLanguage,
+    pub language: String,
     pub module_name: String,
     pub namespace: Option<String>,
     pub out_dir: PathBuf,
@@ -152,7 +185,7 @@ pub struct CodeExportTarget {
 
 | 字段 | 说明 |
 | --- | --- |
-| `language` | 目标语言。 |
+| `language` | 目标语言字符串标识，保存 registry 中 generator 的规范语言名。 |
 | `module_name` | 生成模块名，例如 Rust module、TS namespace/package、C++ 文件前缀。 |
 | `namespace` | C++ namespace / Rust module path / TS namespace 的可选覆盖。 |
 | `out_dir` | 生成代码输出目录。 |
@@ -187,10 +220,11 @@ pub struct TargetDataConfig {
 }
 
 pub struct CodegenTaskConfig {
-    pub language: CodeExportLanguage,
+    pub language: String,
     pub output: PathBuf,
     pub module_name: Option<String>,
     pub data: Option<String>,
+    pub language_options: HashMap<String, toml::Value>,
     // file_header / naming / language-specific options ...
 }
 ```
@@ -260,13 +294,7 @@ pub struct CodegenOptions {
     pub file_header: Option<String>,
     pub keyword_conflict: KeywordConflictPolicy,
     pub naming: NamingConfig,
-    pub language: LanguageCodegenOptions,
-}
-
-pub enum LanguageCodegenOptions {
-    Rust(RustCodegenOptions),
-    Cpp(CppCodegenOptions),
-    TypeScript(TypeScriptCodegenOptions),
+    pub language_options: HashMap<String, toml::Value>,
 }
 
 pub struct RustCodegenOptions {
@@ -327,9 +355,10 @@ derive_serde = true
 
 设计要求：
 
-- `CodegenOptions` 拆成通用配置和语言特定配置两层：`file_header`、`keyword_conflict`、`naming` 为通用层，`language` 为语言配置的 tagged enum。
-- 每个语言生成器只能读取自己的扩展配置，例如 `RustCodegenOptions`、`CppCodegenOptions`、`TypeScriptCodegenOptions`。
-- 新增语言时应新增 generator 和语言扩展解析逻辑，不修改 IR。
+- `CodegenOptions` 拆成通用配置和语言特定配置两层：`file_header`、`keyword_conflict`、`naming` 为通用层，`language_options` 保存 TOML 中按语言名展开的扩展配置。
+- 语言配置不使用 tagged enum；`CodegenTaskConfig` 通过 `#[serde(flatten)]` 把 `[rust]`、`[cpp]`、`[typescript]` 等表保存在 `HashMap<String, toml::Value>` 中。
+- 每个语言生成器只能读取自己的扩展配置，例如 `CodegenOptions::rust()`、`CodegenOptions::cpp()`、`CodegenOptions::typescript()` 内部都通过泛型 `language_options<T>(language)` 从 map 中解析目标类型。
+- 新增语言时应新增 generator、语言扩展 option struct 和该语言自己的解析 helper；不修改 IR，不增加中心化 `LanguageCodegenOptions` enum。
 - 如果配置中出现当前语言不支持的 `CaseStyle` 或 `KeywordConflictPolicy`，应在 codegen validate 阶段报错。
 
 ### 9.4.2.3 文件头模板
@@ -1441,8 +1470,12 @@ Table::load(loader)
 ## 9.12 生成器接口
 
 ```rust
-pub trait CodeGenerator {
-    fn language(&self) -> CodeExportLanguage;
+pub trait CodeGenerator: Send + Sync {
+    fn language(&self) -> &'static str;
+    fn language_aliases(&self) -> &'static [&'static str] { &[] }
+    fn supports_language(&self, language: &str) -> bool;
+    fn default_module_name(&self) -> &'static str;
+    fn default_naming(&self) -> NamingConfig;
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>>;
 }
 ```
@@ -1458,7 +1491,10 @@ pub struct TypeScriptCodeGenerator;
 生成过程：
 
 ```text
-CodeExportInput
+CodegenTaskConfig.language
+  -> find_generator(registry, language)
+  -> CodeExportTarget::from_task(task, generator)
+  -> CodeExportInput
   -> build CodeModel
   -> validate CodeModel
   -> render language files
@@ -1475,6 +1511,14 @@ CodeExportInput
 - unsupported runtime data format；
 - 输出路径冲突；
 - 目标语言需要的 runtime dependency 是否已声明。
+
+扩展新语言的步骤：
+
+1. 新增 `src/codegen/<language>/mod.rs`，实现 `CodeGenerator`，返回规范语言名、可选 alias、默认命名规则和生成逻辑。
+2. 新增 `src/codegen/<language>/tests.rs`，覆盖该语言的 loader/reader contract、row/object/parser、index 和命名冲突行为。
+3. 如有语言专属配置，新增 option struct，并通过 `CodegenOptions::language_options<T>("<language>")` 解析。
+4. 将 generator 加入 `builtin_generators()`；若未来使用外部插件 registry，则由调用方传入扩展后的 registry。
+5. 不修改 `CodeModel`、`src/build/` 的分发逻辑，也不新增中心化语言 enum。
 
 ## 9.13 Runtime data 与加载接口测试计划
 
@@ -1539,7 +1583,7 @@ config_forge_generated.ts
 pub struct CodegenDiagnostic {
     pub code: CodegenDiagnosticCode,
     pub message: String,
-    pub language: Option<CodeExportLanguage>,
+    pub language: Option<String>,
     pub meta_object: Option<String>,
 }
 ```

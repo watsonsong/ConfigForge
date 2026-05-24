@@ -10,7 +10,7 @@ use crate::{
 
 pub(crate) const DEFAULT_DATA_TASK_NAME: &str = "default";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NormalizedTargetConfig {
     pub(crate) name: String,
     pub(crate) tags: Vec<String>,
@@ -26,7 +26,7 @@ pub(crate) struct NormalizedTargetDataConfig {
     pub(crate) format: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NormalizedCodegenTaskConfig {
     pub(crate) task: CodegenTaskConfig,
     pub(crate) selected_data_name: Option<String>,
@@ -126,7 +126,7 @@ fn normalize_codegen_tasks(
                     } else {
                         return Err(ConfigForgeError::Validation(format!(
                             "target `{target_name}` code task for `{}` references unknown data task `{name}`",
-                            task.language.as_str()
+                            task.language
                         )));
                     }
                 }
@@ -135,7 +135,7 @@ fn normalize_codegen_tasks(
                 (None, _) => {
                     return Err(ConfigForgeError::Validation(format!(
                         "target `{target_name}` code task for `{}` must set `data` when multiple data tasks are configured",
-                        task.language.as_str()
+                        task.language
                     )));
                 }
             };
@@ -149,7 +149,7 @@ fn normalize_codegen_tasks(
 
 #[cfg(test)]
 mod tests {
-    use crate::codegen::CodeExportLanguage;
+    use crate::codegen::languages;
 
     use super::*;
 
@@ -165,7 +165,7 @@ mod tests {
                 format: "json".to_owned(),
             }],
             code: vec![CodegenTaskConfig {
-                language: CodeExportLanguage::TypeScript,
+                language: languages::TYPESCRIPT.to_owned(),
                 output: PathBuf::from("Generated/TypeScript"),
                 data: None,
                 module_name: None,
@@ -173,9 +173,7 @@ mod tests {
                 file_header: None,
                 keyword_conflict: None,
                 naming: Default::default(),
-                rust: Default::default(),
-                cpp: Default::default(),
-                typescript: Default::default(),
+                language_options: Default::default(),
             }],
         };
 
@@ -200,7 +198,7 @@ mod tests {
                 format: "json".to_owned(),
             }],
             code: vec![CodegenTaskConfig {
-                language: CodeExportLanguage::Rust,
+                language: languages::RUST.to_owned(),
                 output: PathBuf::from("Generated/Rust"),
                 data: Some(DEFAULT_DATA_TASK_NAME.to_owned()),
                 module_name: None,
@@ -208,9 +206,7 @@ mod tests {
                 file_header: None,
                 keyword_conflict: None,
                 naming: Default::default(),
-                rust: Default::default(),
-                cpp: Default::default(),
-                typescript: Default::default(),
+                language_options: Default::default(),
             }],
         };
 
@@ -242,7 +238,7 @@ mod tests {
                 },
             ],
             code: vec![CodegenTaskConfig {
-                language: CodeExportLanguage::Cpp,
+                language: languages::CPP.to_owned(),
                 output: PathBuf::from("Generated/Cpp"),
                 data: None,
                 module_name: None,
@@ -250,9 +246,7 @@ mod tests {
                 file_header: None,
                 keyword_conflict: None,
                 naming: Default::default(),
-                rust: Default::default(),
-                cpp: Default::default(),
-                typescript: Default::default(),
+                language_options: Default::default(),
             }],
         };
 

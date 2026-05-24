@@ -42,7 +42,7 @@ pub struct ProjectConfigMeta {
     pub copyright: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct TargetConfig {
     pub name: String,
     #[serde(default)]

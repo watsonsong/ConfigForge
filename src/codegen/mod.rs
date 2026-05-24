@@ -17,7 +17,7 @@ pub use self::typescript::TypeScriptCodeGenerator;
 
 use std::{collections::HashMap, path::PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
     ConfigForgeError, Result,
@@ -25,16 +25,15 @@ use crate::{
     meta::{LinkedMetaModel, TargetTags},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CodeExportLanguage {
-    Rust,
-    Cpp,
-    TypeScript,
+pub mod languages {
+    pub const RUST: &str = "rust";
+    pub const CPP: &str = "cpp";
+    pub const TYPESCRIPT: &str = "typescript";
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CodeExportTarget {
-    pub language: CodeExportLanguage,
+    pub language: String,
     pub out_dir: PathBuf,
     pub module_name: String,
     pub namespace: Option<String>,
@@ -48,34 +47,27 @@ pub struct CodeExportProject {
     pub copyright: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CodegenOptions {
     pub file_header: Option<String>,
     pub keyword_conflict: KeywordConflictPolicy,
     pub naming: NamingConfig,
-    pub language: LanguageCodegenOptions,
+    pub language_options: HashMap<String, toml::Value>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LanguageCodegenOptions {
-    Rust(RustCodegenOptions),
-    Cpp(CppCodegenOptions),
-    TypeScript(TypeScriptCodegenOptions),
-}
-
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RustCodegenOptions {
     #[serde(default)]
     pub derive_serde: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CppCodegenOptions {
     #[serde(default)]
     pub namespace: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TypeScriptCodegenOptions {
     #[serde(default)]
     pub readonly_fields: bool,
@@ -108,9 +100,9 @@ pub enum CaseStyle {
     ScreamingSnakeCase,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct CodegenTaskConfig {
-    pub language: CodeExportLanguage,
+    pub language: String,
     pub output: PathBuf,
     #[serde(default)]
     pub data: Option<String>,
@@ -124,12 +116,24 @@ pub struct CodegenTaskConfig {
     pub keyword_conflict: Option<KeywordConflictPolicy>,
     #[serde(default)]
     pub naming: PartialNamingConfig,
-    #[serde(default)]
-    pub rust: RustCodegenOptions,
-    #[serde(default)]
-    pub cpp: CppCodegenOptions,
-    #[serde(default)]
-    pub typescript: TypeScriptCodegenOptions,
+    #[serde(flatten)]
+    pub language_options: HashMap<String, toml::Value>,
+}
+
+impl CodegenTaskConfig {
+    pub fn for_language(language: &str) -> Self {
+        Self {
+            language: language.to_owned(),
+            output: PathBuf::new(),
+            data: None,
+            module_name: None,
+            namespace: None,
+            file_header: None,
+            keyword_conflict: None,
+            naming: PartialNamingConfig::default(),
+            language_options: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -146,154 +150,75 @@ pub struct PartialNamingConfig {
     pub constant: Option<CaseStyle>,
 }
 
-impl<'de> Deserialize<'de> for CodeExportLanguage {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::parse(&value).ok_or_else(|| {
-            serde::de::Error::custom(format!("unsupported codegen language `{value}`"))
-        })
-    }
-}
-
-impl CodeExportLanguage {
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "rust" => Some(Self::Rust),
-            "cpp" | "c++" => Some(Self::Cpp),
-            "typescript" | "ts" => Some(Self::TypeScript),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rust => "rust",
-            Self::Cpp => "cpp",
-            Self::TypeScript => "typescript",
-        }
-    }
-}
-
 impl CodeExportTarget {
-    pub fn from_task(task: CodegenTaskConfig) -> Self {
-        let language = task.language;
-        Self {
+    pub fn from_task(task: CodegenTaskConfig, generator: &dyn CodeGenerator) -> Result<Self> {
+        let language = generator.language().to_owned();
+        Ok(Self {
             language,
             out_dir: task.output,
             module_name: task
                 .module_name
-                .unwrap_or_else(|| default_module_name(language).to_owned()),
+                .unwrap_or_else(|| generator.default_module_name().to_owned()),
             namespace: task.namespace,
             options: CodegenOptions {
                 file_header: task.file_header,
                 keyword_conflict: task
                     .keyword_conflict
                     .unwrap_or(KeywordConflictPolicy::SuffixUnderscore),
-                naming: NamingConfig::for_language(language).merge(task.naming),
-                language: LanguageCodegenOptions::from_task(
-                    language,
-                    task.rust,
-                    task.cpp,
-                    task.typescript,
-                ),
+                naming: generator.default_naming().merge(task.naming),
+                language_options: task.language_options,
             },
-        }
-    }
-}
-
-impl LanguageCodegenOptions {
-    fn from_task(
-        language: CodeExportLanguage,
-        rust: RustCodegenOptions,
-        cpp: CppCodegenOptions,
-        typescript: TypeScriptCodegenOptions,
-    ) -> Self {
-        match language {
-            CodeExportLanguage::Rust => Self::Rust(rust),
-            CodeExportLanguage::Cpp => Self::Cpp(cpp),
-            CodeExportLanguage::TypeScript => Self::TypeScript(typescript),
-        }
+        })
     }
 }
 
 impl CodegenOptions {
-    pub fn for_language(language: CodeExportLanguage) -> Self {
-        Self {
+    pub fn for_generator(generator: &dyn CodeGenerator) -> Result<Self> {
+        let task = CodegenTaskConfig::for_language(generator.language());
+        Ok(Self {
             file_header: None,
             keyword_conflict: KeywordConflictPolicy::SuffixUnderscore,
-            naming: NamingConfig::for_language(language),
-            language: match language {
-                CodeExportLanguage::Rust => {
-                    LanguageCodegenOptions::Rust(RustCodegenOptions::default())
-                }
-                CodeExportLanguage::Cpp => {
-                    LanguageCodegenOptions::Cpp(CppCodegenOptions::default())
-                }
-                CodeExportLanguage::TypeScript => {
-                    LanguageCodegenOptions::TypeScript(TypeScriptCodegenOptions::default())
-                }
-            },
-        }
+            naming: generator.default_naming(),
+            language_options: task.language_options,
+        })
     }
 
-    pub fn rust(&self) -> Result<&RustCodegenOptions> {
-        match &self.language {
-            LanguageCodegenOptions::Rust(options) => Ok(options),
-            _ => Err(ConfigForgeError::Validation(
-                "rust codegen received non-rust language options".to_owned(),
-            )),
-        }
+    pub fn for_language(language: &str) -> Result<Self> {
+        let generators = builtin_generators();
+        let generator = find_generator(&generators, language).ok_or_else(|| {
+            ConfigForgeError::Validation(format!("no code generator registered for `{language}`"))
+        })?;
+        Self::for_generator(generator)
     }
 
-    pub fn cpp(&self) -> Result<&CppCodegenOptions> {
-        match &self.language {
-            LanguageCodegenOptions::Cpp(options) => Ok(options),
-            _ => Err(ConfigForgeError::Validation(
-                "cpp codegen received non-cpp language options".to_owned(),
-            )),
-        }
+    pub fn rust(&self) -> Result<RustCodegenOptions> {
+        self.language_options(languages::RUST)
     }
 
-    pub fn typescript(&self) -> Result<&TypeScriptCodegenOptions> {
-        match &self.language {
-            LanguageCodegenOptions::TypeScript(options) => Ok(options),
-            _ => Err(ConfigForgeError::Validation(
-                "typescript codegen received non-typescript language options".to_owned(),
-            )),
+    pub fn cpp(&self) -> Result<CppCodegenOptions> {
+        self.language_options(languages::CPP)
+    }
+
+    pub fn typescript(&self) -> Result<TypeScriptCodegenOptions> {
+        self.language_options(languages::TYPESCRIPT)
+    }
+
+    pub fn language_options<T>(&self, language: &str) -> Result<T>
+    where
+        T: DeserializeOwned + Default,
+    {
+        match self.language_options.get(language) {
+            Some(options) => options.clone().try_into().map_err(|source| {
+                ConfigForgeError::Validation(format!(
+                    "failed to parse {language} codegen options: {source}"
+                ))
+            }),
+            None => Ok(T::default()),
         }
     }
 }
 
 impl NamingConfig {
-    pub fn for_language(language: CodeExportLanguage) -> Self {
-        match language {
-            CodeExportLanguage::Rust => Self {
-                type_name: CaseStyle::PascalCase,
-                enum_value: CaseStyle::PascalCase,
-                field: CaseStyle::SnakeCase,
-                function: CaseStyle::SnakeCase,
-                constant: CaseStyle::ScreamingSnakeCase,
-            },
-            CodeExportLanguage::Cpp => Self {
-                type_name: CaseStyle::PascalCase,
-                enum_value: CaseStyle::PascalCase,
-                field: CaseStyle::SnakeCase,
-                function: CaseStyle::PascalCase,
-                constant: CaseStyle::PascalCase,
-            },
-            CodeExportLanguage::TypeScript => Self {
-                type_name: CaseStyle::PascalCase,
-                enum_value: CaseStyle::Preserve,
-                field: CaseStyle::CamelCase,
-                function: CaseStyle::CamelCase,
-                constant: CaseStyle::CamelCase,
-            },
-        }
-    }
-
     fn merge(self, partial: PartialNamingConfig) -> Self {
         Self {
             type_name: partial.type_name.unwrap_or(self.type_name),
@@ -307,16 +232,13 @@ impl NamingConfig {
 
 impl Default for CodegenOptions {
     fn default() -> Self {
-        Self::for_language(CodeExportLanguage::Rust)
+        Self::for_language(languages::RUST).expect("built-in Rust generator should be registered")
     }
 }
 
-pub fn default_module_name(language: CodeExportLanguage) -> &'static str {
-    match language {
-        CodeExportLanguage::Rust => "config_forge_generated",
-        CodeExportLanguage::Cpp => "config_forge_generated",
-        CodeExportLanguage::TypeScript => "configForgeGenerated",
-    }
+pub fn default_module_name(language: &str) -> Option<&'static str> {
+    let generators = builtin_generators();
+    find_generator(&generators, language).map(|generator| generator.default_module_name())
 }
 
 pub struct CodeExportInput<'meta> {
@@ -335,7 +257,17 @@ pub struct CodeExportInput<'meta> {
 /// thread-safe and reentrant; plugins with mutable caches must synchronize them
 /// internally or use a future factory-style registry to create per-task instances.
 pub trait CodeGenerator: Send + Sync {
-    fn language(&self) -> CodeExportLanguage;
+    fn language(&self) -> &'static str;
+    fn language_aliases(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn supports_language(&self, language: &str) -> bool {
+        self.language() == language || self.language_aliases().contains(&language)
+    }
+    fn default_module_name(&self) -> &'static str {
+        "config_forge_generated"
+    }
+    fn default_naming(&self) -> NamingConfig;
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>>;
 }
 
@@ -390,6 +322,16 @@ pub fn builtin_generators() -> Vec<Box<dyn CodeGenerator>> {
     ]
 }
 
+pub fn find_generator<'a>(
+    generators: &'a [Box<dyn CodeGenerator>],
+    language: &str,
+) -> Option<&'a dyn CodeGenerator> {
+    generators
+        .iter()
+        .map(Box::as_ref)
+        .find(|generator| generator.supports_language(language))
+}
+
 pub fn render_file_header(input: &CodeExportInput<'_>) -> String {
     let Some(template) = &input.target.options.file_header else {
         return String::from(
@@ -415,4 +357,4 @@ pub fn render_file_header(input: &CodeExportInput<'_>) -> String {
 }
 
 #[cfg(test)]
-mod tests;
+pub(in crate::codegen) mod tests;

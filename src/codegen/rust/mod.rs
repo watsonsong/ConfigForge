@@ -4,17 +4,30 @@
 use crate::{ConfigForgeError, Result};
 
 use super::{
-    CodeEnum, CodeExportInput, CodeExportLanguage, CodeFragmentPayload, CodeGenerator, CodeIndex,
-    CodeModel, CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, GeneratedFile,
-    GeneratedSymbol, build_code_model, ensure_unique_generated_symbols,
-    ir::require_non_empty_index_fields, naming, render_file_header,
+    CaseStyle, CodeEnum, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel,
+    CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, GeneratedFile,
+    GeneratedSymbol, NamingConfig, build_code_model, ensure_unique_generated_symbols,
+    ir::require_non_empty_index_fields, languages, naming, render_file_header,
 };
+
+#[cfg(test)]
+mod tests;
 
 pub struct RustCodeGenerator;
 
 impl CodeGenerator for RustCodeGenerator {
-    fn language(&self) -> CodeExportLanguage {
-        CodeExportLanguage::Rust
+    fn language(&self) -> &'static str {
+        languages::RUST
+    }
+
+    fn default_naming(&self) -> NamingConfig {
+        NamingConfig {
+            type_name: CaseStyle::PascalCase,
+            enum_value: CaseStyle::PascalCase,
+            field: CaseStyle::SnakeCase,
+            function: CaseStyle::SnakeCase,
+            constant: CaseStyle::ScreamingSnakeCase,
+        }
     }
 
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>> {

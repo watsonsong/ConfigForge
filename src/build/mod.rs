@@ -127,18 +127,15 @@ fn generate_code_task(
     context: &CodegenTaskContext<'_, '_>,
     code_task: &NormalizedCodegenTaskConfig,
 ) -> Result<Vec<GeneratedFile>> {
-    let generator = context
-        .generators
-        .iter()
-        .find(|generator| generator.language() == code_task.task.language)
+    let generator = crate::codegen::find_generator(context.generators, &code_task.task.language)
         .ok_or_else(|| {
             ConfigForgeError::Validation(format!(
                 "no code generator registered for `{}`",
-                code_task.task.language.as_str()
+                code_task.task.language
             ))
         })?;
     let runtime_data_files = selected_runtime_data_files(context, code_task)?;
-    let mut code_target = CodeExportTarget::from_task(code_task.task.clone());
+    let mut code_target = CodeExportTarget::from_task(code_task.task.clone(), generator)?;
     code_target.out_dir = context.project_root.join(&code_target.out_dir);
     let input = CodeExportInput {
         meta: context.linked_meta,
@@ -163,7 +160,7 @@ fn selected_runtime_data_files(
             .ok_or_else(|| {
                 ConfigForgeError::Validation(format!(
                     "code task for `{}` selected data task `{data_name}`, but no runtime data was exported for it",
-                    code_task.task.language.as_str()
+                    code_task.task.language
                 ))
             })?;
         Ok(result.files.clone())
@@ -205,7 +202,7 @@ fn civil_from_unix_days(days: i64) -> (i32, u32, u32) {
 mod tests {
     use std::collections::BTreeMap;
 
-    use crate::codegen::{CodeExportLanguage, default_module_name};
+    use crate::codegen::{default_module_name, languages};
     use crate::data::DataTable;
     use crate::exporter::build_exported_table_payload;
     use crate::meta::{MetaModel, TargetTags};
@@ -215,16 +212,16 @@ mod tests {
     #[test]
     fn maps_language_to_default_module_name() {
         assert_eq!(
-            default_module_name(CodeExportLanguage::Rust),
-            "config_forge_generated"
+            default_module_name(languages::RUST),
+            Some("config_forge_generated")
         );
         assert_eq!(
-            default_module_name(CodeExportLanguage::Cpp),
-            "config_forge_generated"
+            default_module_name(languages::CPP),
+            Some("config_forge_generated")
         );
         assert_eq!(
-            default_module_name(CodeExportLanguage::TypeScript),
-            "configForgeGenerated"
+            default_module_name(languages::TYPESCRIPT),
+            Some("configForgeGenerated")
         );
     }
 
