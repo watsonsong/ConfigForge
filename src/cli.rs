@@ -78,6 +78,18 @@ pub fn run_with_args(cli: Cli) -> anyhow::Result<()> {
         eprintln!("warning: {warning}");
     }
     if cli.dry_run {
+        println!(
+            "artifact plan ({} entries):",
+            output.artifacts.entries.len()
+        );
+        for entry in &output.artifacts.entries {
+            println!(
+                "  {} ({} bytes, written: {})",
+                entry.path.display(),
+                entry.bytes,
+                entry.written
+            );
+        }
         println!("target `{}` dry-run succeeded", cli.target);
     } else {
         println!("target `{}` built", cli.target);

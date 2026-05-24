@@ -90,9 +90,16 @@ fn dry_run_builds_plan_without_writing_artifacts() {
         "temp-commit",
     ]);
 
-    cmd.assert().success().stdout(predicate::str::contains(
-        "target `client` dry-run succeeded",
-    ));
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("artifact plan (3 entries):"))
+        .stdout(predicate::str::contains("items.json"))
+        .stdout(predicate::str::contains("game_rules.json"))
+        .stdout(predicate::str::contains("generated.rs"))
+        .stdout(predicate::str::contains("written: false"))
+        .stdout(predicate::str::contains(
+            "target `client` dry-run succeeded",
+        ));
 
     assert!(!data_out_dir.join("items.json").exists());
     assert!(!rust_out_dir.join("generated.rs").exists());

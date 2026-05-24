@@ -332,14 +332,14 @@ Artifact 内容类型：
 - 产物写入通过 Artifact Writer。
 - Artifact Writer 支持 `direct` 和 `temp-commit` 写入策略；CLI 默认 `direct`，可通过 `--write-mode temp-commit` 选择临时提交写入。
 - 并行生成不影响 artifact write result 顺序。
-- `temp-commit` 模式在写临时文件失败时不提交最终产物，并清理已创建的临时文件。
+- `temp-commit` 模式先完成所有临时文件写入，再按稳定顺序提交到最终路径；临时文件写入失败时不提交最终产物并清理已创建的临时文件，提交阶段失败可能保留已经 rename 成功的最终文件。
 - 未来 summary manifest 可作为 special exporter 产物；记录 runtime data artifact 时，应以 `(target_name, data_name, table_name)` 作为稳定 key，并额外记录 `format`、相对 data artifact root 的 `path` 和最终写入 path，避免同一 table 的多格式产物互相覆盖。
 
 写入策略：
 
 | 策略 | 说明 |
 | --- | --- |
-| `temp-commit` | 先写入临时文件或临时目录，所有 artifact 成功后再确定性提交到最终路径。 |
+| `temp-commit` | 先写入同目录临时文件；所有临时文件成功写入后，按稳定顺序 rename 到最终路径。 |
 | `direct` | 直接写入最终路径，适合本地调试或项目明确选择该行为的场景。 |
 
 无论使用哪种策略，都必须在写入前完成 export plan 和路径冲突检查。
@@ -358,7 +358,7 @@ config-forge --project ConfigForge.toml --target client
 | --- | --- |
 | `--project <FILE>` | Project Config 路径。 |
 | `--target <NAME>` | 要构建的 target 名称。 |
-| `--dry-run` | 执行完整构建计划和 artifact 路径冲突检查，但不创建目录、不写出文件。 |
+| `--dry-run` | 执行完整构建计划和 artifact 路径冲突检查，输出 artifact plan，但不创建目录、不写出文件。 |
 | `--write-mode <direct\|temp-commit>` | 非 dry-run 构建使用的 artifact 写入模式；默认 `direct`。如果同时传入 `--dry-run`，以 dry-run 行为为准。 |
 
 执行行为：

@@ -80,7 +80,7 @@ pub enum ArtifactWriteMode {
 
 - `DryRun`：检查路径冲突并返回写入计划，不创建目录、不写临时文件、不覆盖最终文件。
 - `Direct`：创建父目录并直接写最终路径。
-- `TempCommit`：先写入同目录临时文件，全部成功后再 rename/commit；失败时清理已创建的临时文件，未成功提交的 artifact 不写入最终路径。
+- `TempCommit`：先写入同目录临时文件，全部临时文件写入成功后再按稳定顺序 rename/commit；临时文件写入失败时清理已创建的临时文件，提交阶段失败可能保留已提交的最终文件。
 
 ### 7.3.4 `ArtifactWriteResult`
 
@@ -155,7 +155,7 @@ Build 是唯一编排者：
 2. Build 正常执行 project/meta/data/validation/exporter/codegen。
 3. Build 收集 runtime data artifacts 与 generated code artifacts。
 4. Build 调用 `ArtifactWriter`。
-5. Dry-run 模式下 Build 返回成功和计划结果，但不写文件。
+5. Build 返回 `ArtifactWriteResult`；dry-run 模式下 CLI 输出 artifact plan，但不写文件。
 
 CLI dry-run 不应跳过 validation 或 serialization/codegen，因为用户需要确认完整构建能成功，只是不提交文件系统变更。
 
@@ -168,7 +168,7 @@ CLI dry-run 不应跳过 validation 或 serialization/codegen，因为用户需�
 | 重复 artifact path | `ConfigForgeError::Validation` |
 | 创建目录失败 | `ConfigForgeError::WriteFile` |
 | 写最终文件失败 | `ConfigForgeError::WriteFile` |
-| temp commit rename 失败 | `ConfigForgeError::WriteFile` |
+| temp commit rename 失败 | `ConfigForgeError::WriteFile`；已 rename 成功的文件可能保留在最终路径 |
 
 后续如果 artifact 诊断增多，可新增 `ArtifactDiagnostic`，但不应让 exporter/codegen 为写入错误各自包装一套错误类型。
 
@@ -185,7 +185,7 @@ Artifact 模块单元测试应覆盖：
 
 集成测试应覆盖：
 
-1. CLI `--dry-run` 对标准工程执行成功但不产生输出文件。
+1. CLI `--dry-run` 对标准工程执行成功并输出 artifact plan，但不产生输出文件。
 2. 正常 build 仍产生 JSON / MessagePack / generated code。
 3. data output 与 code output 指向同一路径时报统一 artifact conflict。
 4. CLI `--write-mode temp-commit` 产生与 direct 模式等价的最终 artifact。
@@ -214,5 +214,5 @@ Artifact 模块单元测试应覆盖：
 
 - CLI 增加 `--dry-run`。
 - `BuildOptions` 增加 artifact write mode / dry-run 标志。
-- 实现 direct 与 dry-run 集成测试。
-- 后续补齐 temp-commit 原子提交。
+- 实现 direct、dry-run 与 temp-commit 集成测试。
+- temp-commit 当前提供临时文件阶段保护；提交阶段失败按 `ConfigForgeError::WriteFile` 报错，并可能保留已提交的最终文件。

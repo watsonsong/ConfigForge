@@ -62,10 +62,11 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
         &cpu_pool,
     )?);
 
-    ArtifactWriter::new(options.artifact_write_mode).write(artifacts)?;
+    let artifacts = ArtifactWriter::new(options.artifact_write_mode).write(artifacts)?;
 
     Ok(BuildOutput {
         warnings: runtime_export.warnings,
+        artifacts,
     })
 }
 

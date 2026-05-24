@@ -166,7 +166,7 @@ fn write_temp_commit(artifacts: &[Artifact]) -> Result<()> {
 }
 
 fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = parent_dir_to_create(path) {
         fs::create_dir_all(parent).map_err(|source| ConfigForgeError::WriteFile {
             path: parent.to_path_buf(),
             source,
@@ -176,6 +176,11 @@ fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn parent_dir_to_create(path: &Path) -> Option<&Path> {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
 }
 
 fn temp_path_for(path: &Path, index: usize) -> PathBuf {
@@ -214,7 +219,11 @@ fn lexical_normalize_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::{env, sync::Mutex};
+
     use super::*;
+
+    static CURRENT_DIR_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn dry_run_returns_sorted_entries_without_writing() {
@@ -259,6 +268,26 @@ mod tests {
         assert_eq!(
             fs::read(binary_path).expect("binary artifact"),
             vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn pure_file_name_path_does_not_try_to_create_empty_parent_dir() {
+        let _guard = CURRENT_DIR_LOCK.lock().expect("current dir lock");
+        let original_dir = env::current_dir().expect("current dir");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        env::set_current_dir(temp_dir.path()).expect("set current dir");
+
+        let result = ArtifactWriter::new(ArtifactWriteMode::Direct).write(vec![Artifact::text(
+            "generated.rs",
+            "pub struct Generated;",
+        )]);
+
+        env::set_current_dir(original_dir).expect("restore current dir");
+        result.expect("pure file name artifact should write");
+        assert_eq!(
+            fs::read_to_string(temp_dir.path().join("generated.rs")).expect("written artifact"),
+            "pub struct Generated;"
         );
     }
 

@@ -1,6 +1,9 @@
 use std::{num::NonZeroUsize, path::Path};
 
-use crate::{ConfigForgeError, Result, artifact::ArtifactWriteMode};
+use crate::{
+    ConfigForgeError, Result,
+    artifact::{ArtifactWriteMode, ArtifactWriteResult},
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuildOptions<'a> {
@@ -20,9 +23,10 @@ pub struct ExecutionOptions {
 
 pub(crate) const MAX_JOBS: usize = 128;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildOutput {
     pub warnings: Vec<String>,
+    pub artifacts: ArtifactWriteResult,
 }
 
 impl ExecutionOptions {
