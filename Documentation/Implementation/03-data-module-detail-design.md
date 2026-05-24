@@ -56,7 +56,7 @@ Rust 不使用传统 OO class。本文档中的“类”对应 Rust 的 `struct`
 
 ## 3.3 建议模块结构
 
-第一阶段建议新增目录模块 `src/data/`，逐步替代当前 `src/source.rs` 中的 CSV 读取职责：
+当前已采用目录模块 `src/data/` 承载 CSV 读取、数据加载计划、逻辑表模型和 resolved view：
 
 ```text
 src/data/
@@ -70,11 +70,11 @@ src/data/
   tests.rs        # Data 模块单元测试
 ```
 
-兼容迁移策略：
+迁移状态：
 
-- 短期可以保留 `src/source.rs`，但 exporter / validation 应逐步改为依赖 `crate::data::*`。
-- `source` 如果继续存在，应只表达“外部 source provider 原始读取”概念；逻辑表集合、DataSet 查询和 Data validation 输入应归入 `data`。
-- 待 Data 模块稳定后，可删除或收敛 `source.rs`。
+- `DataRow`、`DataTable`、`DataSet`、`DataLoadPlan`、`DataLoader` 等已由 `src/data/mod.rs` 统一 re-export。
+- exporter / validation 已依赖 `crate::data::*`，不再需要 `source.rs` 兼容层。
+- 外部 source provider 的原始读取能力后续继续归入 `src/data/` 下的 provider/reader 实现，而不是重新引入顶层 `source.rs`。
 
 ## 3.4 核心数据结构
 
@@ -548,30 +548,9 @@ pub fn validate_project(meta_path: &Path, data_dir: &Path) -> Result<()> {
 
 `export_project` 同理，应先得到 raw `DataSet`，再按 target 生成 `ResolvedExportView`。构建 `DataLoadPlan` 时可以先用当前 target 的 `TargetTags` 过滤整表 `export_when`，避免加载不会导出的表；写出 runtime data 时继续按同一组 tags 过滤字段和 `row_export` 行。长期 exporter 只负责 `DataValue -> JSON/MessagePack/future binary`，不再理解 source layout、default、target visibility 或 nested struct boundary。
 
-## 3.9 与当前 `source.rs` 的关系
+## 3.9 与旧 `source.rs` 的关系
 
-当前 `src/source.rs` 已有：
-
-```rust
-pub type DataRow = BTreeMap<String, String>;
-
-pub struct DataTable {
-    pub name: String,
-    pub rows: Vec<DataRow>,
-}
-
-impl DataTable {
-    pub fn from_csv_path(name: impl Into<String>, path: impl AsRef<Path>) -> Result<Self>;
-}
-```
-
-迁移建议：
-
-1. 将 `DataRow`、`DataTable` 移入 `src/data/model.rs`。
-2. 将 `from_csv_path` 的实现移动到 `src/data/csv.rs::CsvDataReader::read_table`。
-3. 对外由 `src/data/mod.rs` re-export `DataSet`、`DataTable`、`DataRow`、`DataLoadPlan`、`DataLoader`。
-4. exporter 和 validation 改为依赖 `crate::data::{DataSet, DataTable}`。
-5. 如果短期保留 `source.rs`，可以作为兼容 re-export，但不再新增逻辑。
+旧 `src/source.rs` 只剩 `DataRow` / `DataTable` 的兼容 re-export，工程内已无直接引用。随着 `src/data/` 稳定承载 CSV 读取、数据模型和 loader，顶层 `source.rs` 已无保留必要并可删除；需要使用原始行/表模型的代码应直接依赖 `crate::data::{DataRow, DataTable}`。
 
 ## 3.10 错误与诊断边界
 
