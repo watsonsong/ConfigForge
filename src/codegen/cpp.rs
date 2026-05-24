@@ -17,155 +17,166 @@ impl CodeGenerator for CppCodeGenerator {
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>> {
         let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
         require_non_empty_index_fields(&model)?;
-        reject_compound_indexes(&model)?;
         let cpp_options = input.target.options.cpp()?;
         let names = CppNames::new(&input.target.options);
         validate_generated_symbols(&model, &names)?;
-        let mut content = render_file_header(input);
-        content.push_str("#pragma once\n\n");
-        content.push_str("#include <cstdint>\n#include <cstddef>\n#include <optional>\n#include <string>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
+        let mut header = render_file_header(input);
+        header.push_str("#pragma once\n\n");
+        header.push_str("#include <cstdint>\n#include <cstddef>\n#include <map>\n#include <optional>\n#include <string>\n#include <tuple>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
         let namespace = cpp_options
             .namespace
             .as_ref()
             .or(input.target.namespace.as_ref());
+        let namespace = namespace.map(String::as_str);
         if let Some(namespace) = namespace {
-            content.push_str(&format!("namespace {namespace} {{\n\n"));
+            header.push_str(&format!("namespace {namespace} {{\n\n"));
         }
-        content.push_str("class IRuntimeDataLoader;\n\n");
+        header.push_str("class IRuntimeDataLoader;\n\n");
 
         for code_enum in &model.enums {
-            push_doc(&mut content, code_enum.desc.as_deref());
-            content.push_str(&format!(
+            push_doc(&mut header, code_enum.desc.as_deref());
+            header.push_str(&format!(
                 "enum class {} {{\n",
                 names.type_name(&code_enum.name)?
             ));
             for value in &code_enum.values {
-                push_doc_indented(&mut content, value.desc.as_deref(), "    ");
-                content.push_str(&format!("    {},\n", names.enum_variant_name(&value.name)?));
+                push_doc_indented(&mut header, value.desc.as_deref(), "    ");
+                header.push_str(&format!("    {},\n", names.enum_variant_name(&value.name)?));
             }
-            content.push_str("};\n\n");
+            header.push_str("};\n\n");
         }
 
         for code_struct in &model.structs {
-            push_doc(&mut content, code_struct.desc.as_deref());
-            content.push_str(&format!(
+            push_doc(&mut header, code_struct.desc.as_deref());
+            header.push_str(&format!(
                 "struct {} {{\n",
                 names.type_name(&code_struct.name)?
             ));
             for field in &code_struct.fields {
-                push_doc_indented(&mut content, field.desc.as_deref(), "    ");
-                content.push_str(&format!(
+                push_doc_indented(&mut header, field.desc.as_deref(), "    ");
+                header.push_str(&format!(
                     "    {} {};\n",
                     names.cpp_type(&field.code_type)?,
                     names.field_name(&field.name)?
                 ));
             }
-            content.push_str("};\n\n");
+            header.push_str("};\n\n");
         }
+
+        render_compound_index_key_structs(&mut header, &model, &names)?;
 
         for table in &model.tables {
             for fragment in &table.fragments {
                 if matches!(fragment.payload, CodeFragmentPayload::Struct { .. }) {
                     continue;
                 }
-                push_doc(&mut content, fragment.desc.as_deref());
-                content.push_str(&format!(
+                push_doc(&mut header, fragment.desc.as_deref());
+                header.push_str(&format!(
                     "struct {} {{\n",
                     names.fragment_type_name(&table.name, &fragment.name)?
                 ));
                 for field in &fragment.fields {
-                    push_doc_indented(&mut content, field.desc.as_deref(), "    ");
-                    content.push_str(&format!(
+                    push_doc_indented(&mut header, field.desc.as_deref(), "    ");
+                    header.push_str(&format!(
                         "    {} {};\n",
                         names.cpp_type(&field.code_type)?,
                         names.field_name(&field.name)?
                     ));
                 }
-                content.push_str("};\n\n");
+                header.push_str("};\n\n");
             }
         }
 
         for table in &model.tables {
-            push_doc(&mut content, table.desc.as_deref());
-            content.push_str(&format!(
+            push_doc(&mut header, table.desc.as_deref());
+            header.push_str(&format!(
                 "struct {} {{\n",
                 names.row_type_name(&table.name)?
             ));
             if table.kind == CodeTableKind::Object {
-                content.push_str(&format!(
+                header.push_str(&format!(
                     "    static constexpr const char* DataFile = {:?};\n",
                     table.data_file
                 ));
             }
             for field in &table.fields {
-                push_doc_indented(&mut content, field.desc.as_deref(), "    ");
-                content.push_str(&format!(
+                push_doc_indented(&mut header, field.desc.as_deref(), "    ");
+                header.push_str(&format!(
                     "    {} {};\n",
                     names.cpp_type(&field.code_type)?,
                     names.field_name(&field.name)?
                 ));
             }
             for fragment in &table.fragments {
-                content.push_str(&format!(
+                header.push_str(&format!(
                     "    std::optional<{}> {};\n",
                     names.fragment_payload_type_name(table, fragment)?,
                     names.field_name(&fragment.name)?
                 ));
             }
-            content.push_str("};\n\n");
+            header.push_str("};\n\n");
             if table.kind == CodeTableKind::Collection {
-                render_table(&mut content, table, &names)?;
+                render_table(&mut header, table, &names)?;
             }
         }
 
-        content.push_str(
+        header.push_str(
             "class IRuntimeDataLoader {\npublic:\n    virtual ~IRuntimeDataLoader() = default;\n",
         );
-        content.push_str("    // Implementations should read exported table files and return typed rows for CollectionTable or a typed object for ObjectTable.\n");
+        header.push_str("    // Implementations should read exported table files and map every runtime field into the generated row/object types.\n");
         for table in &model.tables {
             match table.kind {
-                CodeTableKind::Collection => content.push_str(&format!(
+                CodeTableKind::Collection => header.push_str(&format!(
                     "    virtual std::vector<{}> Load{}Rows(const std::string& path) = 0;\n",
                     names.row_type_name(&table.name)?,
                     names.type_name(&table.name)?
                 )),
-                CodeTableKind::Object => content.push_str(&format!(
+                CodeTableKind::Object => header.push_str(&format!(
                     "    virtual {} Load{}(const std::string& path) = 0;\n",
                     names.row_type_name(&table.name)?,
                     names.type_name(&table.name)?
                 )),
             }
         }
-        content.push_str("};\n\n");
+        header.push_str("};\n\n");
 
-        content.push_str("class GameData {\npublic:\n");
-        content.push_str("    static GameData Load(IRuntimeDataLoader& loader);\n");
+        header.push_str("class GameData {\npublic:\n");
+        header.push_str("    static GameData Load(IRuntimeDataLoader& loader);\n");
         for table in &model.tables {
-            content.push_str(&format!(
+            header.push_str(&format!(
                 "    const {}& {}() const {{ return {}; }}\n",
                 names.table_data_type_name(table)?,
                 names.type_name(&table.name)?,
                 names.member_name(&table.name)?
             ));
         }
-        content.push_str("private:\n");
+        header.push_str("private:\n");
         for table in &model.tables {
-            content.push_str(&format!(
+            header.push_str(&format!(
                 "    {} {};\n",
                 names.table_data_type_name(table)?,
                 names.member_name(&table.name)?
             ));
         }
-        content.push_str("};\n");
+        header.push_str("};\n");
         if let Some(namespace) = namespace {
-            content.push_str(&format!("\n}} // namespace {namespace}\n"));
+            header.push_str(&format!("\n}} // namespace {namespace}\n"));
         }
 
-        Ok(vec![GeneratedFile {
-            path: input.target.out_dir.join("generated.hpp"),
-            kind: ArtifactKind::GeneratedCode,
-            content,
-        }])
+        let source = render_source_file(input, &model, namespace, &names)?;
+
+        Ok(vec![
+            GeneratedFile {
+                path: input.target.out_dir.join("generated.hpp"),
+                kind: ArtifactKind::GeneratedCode,
+                content: header,
+            },
+            GeneratedFile {
+                path: input.target.out_dir.join("generated.cpp"),
+                kind: ArtifactKind::GeneratedCode,
+                content: source,
+            },
+        ])
     }
 }
 
@@ -212,6 +223,15 @@ fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>) -> Result
                 format!("{}_table", table.name),
                 names.repository_type_name(&table.name)?,
             ));
+        }
+        for index in &table.indexes {
+            if index.fields.len() > 1 {
+                type_symbols.push(GeneratedSymbol::new(
+                    "compound index key",
+                    format!("{}_{}_key", table.name, index.name),
+                    names.compound_index_key_type_name(table, index)?,
+                ));
+            }
         }
         for fragment in &table.fragments {
             if matches!(fragment.payload, CodeFragmentPayload::InlineFields) {
@@ -333,15 +353,214 @@ fn validate_named_symbols(
     ensure_unique_generated_symbols(language, scope, symbols.collect::<Result<Vec<_>>>()?)
 }
 
-fn reject_compound_indexes(model: &super::CodeModel) -> Result<()> {
+fn render_source_file(
+    input: &CodeExportInput<'_>,
+    model: &CodeModel,
+    namespace: Option<&str>,
+    names: &CppNames<'_>,
+) -> Result<String> {
+    let mut content = render_file_header(input);
+    content.push_str("#include \"generated.hpp\"\n\n");
+    content.push_str("#include <stdexcept>\n\n");
+    if let Some(namespace) = namespace {
+        content.push_str(&format!("namespace {namespace} {{\n\n"));
+    }
+
+    for table in &model.tables {
+        if table.kind == CodeTableKind::Collection {
+            render_table_source(&mut content, table, names)?;
+        }
+    }
+    render_game_data_load_source(&mut content, model, names)?;
+
+    if let Some(namespace) = namespace {
+        content.push_str(&format!("\n}} // namespace {namespace}\n"));
+    }
+    Ok(content)
+}
+
+fn render_table_source(
+    content: &mut String,
+    table: &CodeTable,
+    names: &CppNames<'_>,
+) -> Result<()> {
+    let repository_type = names.repository_type_name(&table.name)?;
+    let row_type = names.row_type_name(&table.name)?;
+    let load_rows_method = names.loader_rows_method_name(table)?;
+
+    content.push_str(&format!(
+        "{} {}::Load(IRuntimeDataLoader& loader) {{\n",
+        repository_type, repository_type
+    ));
+    content.push_str(&format!(
+        "    return FromRows(loader.{}(DataFile));\n",
+        load_rows_method
+    ));
+    content.push_str("}\n\n");
+
+    content.push_str(&format!(
+        "{} {}::FromRows(std::vector<{}> rows) {{\n",
+        repository_type, repository_type, row_type
+    ));
+    content.push_str(&format!("    {} table;\n", repository_type));
+    content.push_str("    table.rows_ = std::move(rows);\n");
+    content.push_str(
+        "    for (std::size_t row_index = 0; row_index < table.rows_.size(); ++row_index) {\n",
+    );
+    content.push_str("        const auto& row = table.rows_[row_index];\n");
+    for index in &table.indexes {
+        let storage_name = names.index_storage_name(index)?;
+        let key = names.cpp_row_key_expr(table, index, "row")?;
+        if index.unique {
+            content.push_str(&format!(
+                "        auto inserted_{storage_name} = table.{storage_name}.emplace({key}, row_index);\n"
+            ));
+            content.push_str(&format!(
+                "        if (!inserted_{storage_name}.second) {{ throw std::runtime_error(\"Duplicate unique index key for {}.{}\"); }}\n",
+                repository_type, index.name
+            ));
+        } else {
+            content.push_str(&format!(
+                "        table.{storage_name}[{key}].push_back(row_index);\n"
+            ));
+        }
+    }
+    content.push_str("    }\n");
+    content.push_str("    return table;\n");
+    content.push_str("}\n\n");
+
+    for index in &table.indexes {
+        render_index_function_source(content, table, index, names)?;
+    }
+    Ok(())
+}
+
+fn render_index_function_source(
+    content: &mut String,
+    table: &CodeTable,
+    index: &CodeIndex,
+    names: &CppNames<'_>,
+) -> Result<()> {
+    let params = names.cpp_index_params(index)?;
+    let repository_type = names.repository_type_name(&table.name)?;
+    let row_type = names.row_type_name(&table.name)?;
+    let function_name = names.index_function_name(index)?;
+    let storage_name = names.index_storage_name(index)?;
+    let key = names.cpp_lookup_key_expr(table, index)?;
+
+    if index.unique {
+        content.push_str(&format!(
+            "const {}* {}::{}({}) const {{\n",
+            row_type, repository_type, function_name, params
+        ));
+        content.push_str(&format!(
+            "    auto iter = {}.find({});\n",
+            storage_name, key
+        ));
+        content.push_str(&format!(
+            "    if (iter == {}.end()) {{ return nullptr; }}\n",
+            storage_name
+        ));
+        content.push_str("    return &rows_[iter->second];\n");
+        content.push_str("}\n\n");
+    } else {
+        content.push_str(&format!(
+            "std::vector<const {}*> {}::{}({}) const {{\n",
+            row_type, repository_type, function_name, params
+        ));
+        content.push_str(&format!(
+            "    auto iter = {}.find({});\n",
+            storage_name, key
+        ));
+        content.push_str(&format!(
+            "    if (iter == {}.end()) {{ return {{}}; }}\n",
+            storage_name
+        ));
+        content.push_str(&format!("    std::vector<const {}*> result;\n", row_type));
+        content.push_str("    result.reserve(iter->second.size());\n");
+        content.push_str("    for (std::size_t row_index : iter->second) {\n");
+        content.push_str("        result.push_back(&rows_[row_index]);\n");
+        content.push_str("    }\n");
+        content.push_str("    return result;\n");
+        content.push_str("}\n\n");
+    }
+    Ok(())
+}
+
+fn render_game_data_load_source(
+    content: &mut String,
+    model: &CodeModel,
+    names: &CppNames<'_>,
+) -> Result<()> {
+    content.push_str("GameData GameData::Load(IRuntimeDataLoader& loader) {\n");
+    content.push_str("    GameData data;\n");
+    for table in &model.tables {
+        let member_name = names.member_name(&table.name)?;
+        match table.kind {
+            CodeTableKind::Collection => content.push_str(&format!(
+                "    data.{member_name} = {}::Load(loader);\n",
+                names.repository_type_name(&table.name)?
+            )),
+            CodeTableKind::Object => content.push_str(&format!(
+                "    data.{member_name} = loader.{}({}::DataFile);\n",
+                names.loader_object_method_name(table)?,
+                names.row_type_name(&table.name)?
+            )),
+        }
+    }
+    content.push_str("    return data;\n");
+    content.push_str("}\n");
+    Ok(())
+}
+
+fn render_compound_index_key_structs(
+    content: &mut String,
+    model: &CodeModel,
+    names: &CppNames<'_>,
+) -> Result<()> {
     for table in &model.tables {
         for index in &table.indexes {
-            if index.fields.len() > 1 {
-                return Err(ConfigForgeError::Validation(format!(
-                    "cpp codegen: table `{}` index `{}` uses compound keys, which are not supported yet",
-                    table.name, index.name
-                )));
+            if index.fields.len() <= 1 {
+                continue;
             }
+
+            content.push_str(&format!(
+                "struct {} {{\n",
+                names.compound_index_key_type_name(table, index)?
+            ));
+            for field in &index.fields {
+                content.push_str(&format!(
+                    "    {} {};\n",
+                    names.cpp_type(&field.code_type)?,
+                    names.field_name(&field.name)?
+                ));
+            }
+            content.push('\n');
+            content.push_str(&format!(
+                "    bool operator<(const {}& other) const {{\n",
+                names.compound_index_key_type_name(table, index)?
+            ));
+            content.push_str("        return std::tie(");
+            content.push_str(
+                &index
+                    .fields
+                    .iter()
+                    .map(|field| names.field_name(&field.name))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", "),
+            );
+            content.push_str(") < std::tie(");
+            content.push_str(
+                &index
+                    .fields
+                    .iter()
+                    .map(|field| Ok(format!("other.{}", names.field_name(&field.name)?)))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", "),
+            );
+            content.push_str(");\n");
+            content.push_str("    }\n");
+            content.push_str("};\n\n");
         }
     }
     Ok(())
@@ -380,7 +599,7 @@ fn render_table(content: &mut String, table: &CodeTable, names: &CppNames<'_>) -
     for index in &table.indexes {
         content.push_str(&format!(
             "    {} {};\n",
-            names.cpp_index_storage(index)?,
+            names.cpp_index_storage(table, index)?,
             names.index_storage_name(index)?
         ));
     }
@@ -394,18 +613,7 @@ fn render_index_function(
     index: &CodeIndex,
     names: &CppNames<'_>,
 ) -> Result<()> {
-    let params = index
-        .fields
-        .iter()
-        .map(|field| {
-            Ok(format!(
-                "{} {}",
-                names.cpp_type(&field.code_type)?,
-                names.field_name(&field.name)?
-            ))
-        })
-        .collect::<Result<Vec<_>>>()?
-        .join(", ");
+    let params = names.cpp_index_params(index)?;
     if index.unique {
         content.push_str(&format!(
             "    const {}* {}({}) const;\n",
@@ -491,6 +699,29 @@ impl<'a> CppNames<'a> {
         self.identifier(&format!("{prefix}_{suffix}"), self.options.naming.function)
     }
 
+    fn loader_rows_method_name(&self, table: &CodeTable) -> Result<String> {
+        Ok(format!("Load{}Rows", self.type_name(&table.name)?))
+    }
+
+    fn loader_object_method_name(&self, table: &CodeTable) -> Result<String> {
+        Ok(format!("Load{}", self.type_name(&table.name)?))
+    }
+
+    fn cpp_index_params(&self, index: &CodeIndex) -> Result<String> {
+        index
+            .fields
+            .iter()
+            .map(|field| {
+                Ok(format!(
+                    "{} {}",
+                    self.cpp_type(&field.code_type)?,
+                    self.field_name(&field.name)?
+                ))
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(|params| params.join(", "))
+    }
+
     fn cpp_type(&self, code_type: &CodeTypeRef) -> Result<String> {
         Ok(match code_type {
             CodeTypeRef::Int => "std::int64_t".to_owned(),
@@ -503,23 +734,82 @@ impl<'a> CppNames<'a> {
         })
     }
 
-    fn cpp_index_storage(&self, index: &CodeIndex) -> Result<String> {
-        let key = self.cpp_key_type(index)?;
-        if index.unique {
-            Ok(format!("std::unordered_map<{key}, std::size_t>"))
+    fn cpp_index_storage(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
+        let key = self.cpp_key_type(table, index)?;
+        let map_type = if index.fields.len() == 1 {
+            "std::unordered_map"
         } else {
-            Ok(format!(
-                "std::unordered_map<{key}, std::vector<std::size_t>>"
-            ))
+            "std::map"
+        };
+        if index.unique {
+            Ok(format!("{map_type}<{key}, std::size_t>"))
+        } else {
+            Ok(format!("{map_type}<{key}, std::vector<std::size_t>>"))
         }
     }
 
-    fn cpp_key_type(&self, index: &CodeIndex) -> Result<String> {
+    fn cpp_key_type(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
         if index.fields.len() == 1 {
             self.cpp_type(&index.fields[0].code_type)
         } else {
-            self.type_name(&format!("{}_key", index.name))
+            self.compound_index_key_type_name(table, index)
         }
+    }
+
+    fn cpp_row_key_expr(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+        row_expr: &str,
+    ) -> Result<String> {
+        if index.fields.len() == 1 {
+            Ok(format!(
+                "{}.{}",
+                row_expr,
+                self.field_name(&index.fields[0].name)?
+            ))
+        } else {
+            self.cpp_compound_key_expr(
+                table,
+                index,
+                index
+                    .fields
+                    .iter()
+                    .map(|field| Ok(format!("{}.{}", row_expr, self.field_name(&field.name)?))),
+            )
+        }
+    }
+
+    fn cpp_lookup_key_expr(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
+        if index.fields.len() == 1 {
+            self.field_name(&index.fields[0].name)
+        } else {
+            self.cpp_compound_key_expr(
+                table,
+                index,
+                index
+                    .fields
+                    .iter()
+                    .map(|field| self.field_name(&field.name)),
+            )
+        }
+    }
+
+    fn cpp_compound_key_expr(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+        values: impl Iterator<Item = Result<String>>,
+    ) -> Result<String> {
+        Ok(format!(
+            "{}{{{}}}",
+            self.compound_index_key_type_name(table, index)?,
+            values.collect::<Result<Vec<_>>>()?.join(", ")
+        ))
+    }
+
+    fn compound_index_key_type_name(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
+        self.type_name(&format!("{}_{}_key", table.name, index.name))
     }
 
     fn identifier(&self, value: &str, style: super::CaseStyle) -> Result<String> {

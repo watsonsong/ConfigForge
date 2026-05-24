@@ -828,7 +828,9 @@ fn cpp_generator_emits_loader_and_repository_declarations() {
     });
 
     let files = CppCodeGenerator.generate(&input).expect("cpp code");
-    let content = &files[0].content;
+    assert_eq!(files.len(), 2);
+    let content = generated_content(&files, "generated.hpp");
+    let source = generated_content(&files, "generated.cpp");
 
     assert!(content.contains("class IRuntimeDataLoader"));
     assert!(content.contains("LoadItemsRows(const std::string& path)"));
@@ -843,6 +845,18 @@ fn cpp_generator_emits_loader_and_repository_declarations() {
     assert!(content.contains("class ItemsTable"));
     assert!(content.contains("const ItemsRow* GetById"));
     assert!(content.contains("std::vector<const ItemsRow*> FindByRarity"));
+    assert!(source.contains("#include \"generated.hpp\""));
+    assert!(source.contains("ItemsTable ItemsTable::Load(IRuntimeDataLoader& loader)"));
+    assert!(source.contains("return FromRows(loader.LoadItemsRows(DataFile));"));
+    assert!(source.contains("ItemsTable ItemsTable::FromRows(std::vector<ItemsRow> rows)"));
+    assert!(source.contains("table.by_id_.emplace(row.id, row_index);"));
+    assert!(source.contains("table.by_rarity_[row.rarity].push_back(row_index);"));
+    assert!(source.contains("const ItemsRow* ItemsTable::GetById(std::int64_t id) const"));
+    assert!(source.contains(
+        "std::vector<const ItemsRow*> ItemsTable::FindByRarity(ItemRarity rarity) const"
+    ));
+    assert!(source.contains("GameData GameData::Load(IRuntimeDataLoader& loader)"));
+    assert!(source.contains("data.items_ = ItemsTable::Load(loader);"));
 }
 
 #[test]
@@ -863,7 +877,8 @@ fn cpp_generator_emits_object_table_as_typed_object_not_repository() {
     let input = input_for(&meta, CodeExportLanguage::Cpp);
 
     let files = CppCodeGenerator.generate(&input).expect("cpp code");
-    let content = &files[0].content;
+    let content = generated_content(&files, "generated.hpp");
+    let source = generated_content(&files, "generated.cpp");
 
     assert!(content.contains("virtual GameConfigRow LoadGameConfig(const std::string& path) = 0;"));
     assert!(content.contains("static constexpr const char* DataFile = \"game_config.json\";"));
@@ -871,6 +886,16 @@ fn cpp_generator_emits_object_table_as_typed_object_not_repository() {
     assert!(content.contains("GameConfigRow game_config_;"));
     assert!(!content.contains("class GameConfigTable"));
     assert!(!content.contains("Rows() const"));
+    assert!(source.contains("data.game_config_ = loader.LoadGameConfig(GameConfigRow::DataFile);"));
+}
+
+fn generated_content<'a>(files: &'a [GeneratedFile], file_name: &str) -> &'a str {
+    files
+        .iter()
+        .find(|file| file.path.file_name().and_then(|name| name.to_str()) == Some(file_name))
+        .unwrap_or_else(|| panic!("generated file `{file_name}` should exist"))
+        .content
+        .as_str()
 }
 
 #[test]

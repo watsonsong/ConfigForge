@@ -1121,6 +1121,39 @@ fn verify_generated_cpp_header(generated_dir: &std::path::Path) {
         r#"
             #include "generated.hpp"
 
+            #include <stdexcept>
+
+            class MockLoader final : public IRuntimeDataLoader {
+            public:
+                std::vector<ItemsRow> LoadItemsRows(const std::string& path) override {
+                    if (path != "items.json") {
+                        throw std::runtime_error("unexpected items path");
+                    }
+                    ItemsRow potion{};
+                    potion.id = 1;
+                    potion.name = "Potion";
+                    potion.price = 10;
+                    ItemsRow ether{};
+                    ether.id = 2;
+                    ether.name = "Ether";
+                    ether.price = 20;
+                    return {potion, ether};
+                }
+
+                GameRulesRow LoadGameRules(const std::string& path) override {
+                    if (path != "game_rules.json") {
+                        throw std::runtime_error("unexpected game rules path");
+                    }
+                    GameRulesRow rules{};
+                    rules.max_player_level = 60;
+                    rules.starter_gold = 500;
+                    rules.stamina_cap = 120;
+                    rules.daily_reset_hour = 5;
+                    rules.pvp_enabled = true;
+                    return rules;
+                }
+            };
+
             int main() {
                 ItemsRow row{};
                 row.id = 1;
@@ -1137,6 +1170,18 @@ fn verify_generated_cpp_header(generated_dir: &std::path::Path) {
                     return 1;
                 }
                 (void)rules;
+                MockLoader loader;
+                GameData data = GameData::Load(loader);
+                const ItemsRow* item = data.Items().GetById(1);
+                if (item == nullptr || item->name != "Potion") {
+                    return 2;
+                }
+                if (data.Items().GetById(404) != nullptr) {
+                    return 3;
+                }
+                if (data.GameRules().max_player_level != 60) {
+                    return 4;
+                }
                 return 0;
             }
         "#,
@@ -1147,15 +1192,28 @@ fn verify_generated_cpp_header(generated_dir: &std::path::Path) {
         let output = StdCommand::new("c++")
             .args([
                 "-std=c++17",
-                "-fsyntax-only",
                 generated_dir
                     .join("compile_check.cpp")
                     .to_str()
                     .expect("utf8 path"),
+                generated_dir
+                    .join("generated.cpp")
+                    .to_str()
+                    .expect("utf8 path"),
+                "-o",
+                generated_dir
+                    .join("compile_check")
+                    .to_str()
+                    .expect("utf8 path"),
             ])
             .output()
-            .expect("generated C++ compile check should run");
+            .expect("generated C++ compile check should compile");
         assert_command_success(output, "generated C++ header compile");
+
+        let output = StdCommand::new(generated_dir.join("compile_check"))
+            .output()
+            .expect("generated C++ compile check should run");
+        assert_command_success(output, "generated C++ runtime check");
     }
 }
 
