@@ -25,7 +25,7 @@
 | Source | `src/source.rs` / `src/source/` | 将 CSV/XLSX/远程表格归一化为二维 `SourceSheet`。 | source declaration。 | `SourceSheet` / `DataTable`。 |
 | Data Model | `src/data/` | 将 source cell 解析为 typed value 和逻辑表数据。 | `LinkedMetaModel<'meta>`、`SourceSheet`。 | `DataSet`。 |
 | Validation | `src/validation.rs` / `src/validation/` | 业务规则、索引、外键、注册式 validator、过滤视图校验。 | `LinkedMetaModel<'meta>`、`DataSet`、`ExportContext`、`ValidatorRegistry`。 | 结构化诊断。 |
-| Exporter | `src/exporter.rs` / `src/exporter/` | 生成 runtime data、代码、special artifacts。 | `LinkedMetaModel<'meta>`、`TargetTags`、target config。 | `RuntimeDataFile` / generated files。 |
+| Exporter | `src/exporter.rs` / `src/exporter/` | 生成 runtime data、代码、special artifacts；同一 target 下支持多个 data task 与多个 code task 的 artifact 编排。 | `LinkedMetaModel<'meta>`、`TargetTags`、target config。 | data task 分组的 `RuntimeDataFile` / generated files。 |
 | Artifact Writer | `src/artifact/` | direct/temp_commit 写入策略、manifest 输出。 | `ArtifactPlan`。 | 文件系统产物。 |
 | Diagnostics | `src/diagnostics/` | 统一诊断模型、稳定排序、报告格式。 | 各模块诊断。 | `DiagnosticReport`。 |
 | Runtime/Executor | `src/executor/` | 异步 I/O、线程池、任务编排。 | 阶段任务。 | 阶段执行结果。 |
@@ -75,7 +75,7 @@ cli
 7. **DataSet Compose**：base source split merge 与 override apply。
 8. **ExportView Derive / Target Tags Filter**：按当前 `ValidationMode` 和 target tags 派生 validation/export 输入视图，过滤 table / field / index / runtime rows；`validate --all-targets` 会为每个 target 分别派生视图。
 9. **Validation on ExportView**：required/default、类型、索引、外键、validator、row export 引用等规则在当前 ExportView 上执行；需要完整数据集语义的规则必须显式声明 `input = "full_dataset"`。
-10. **Artifact Generate**：复用同一个 target ExportView 生成 runtime data、代码、POT、asset manifest 等，避免 validation 与实际导出语义不一致。
+10. **Artifact Generate**：复用同一个 target 的 `TargetTags` 和 Meta-level filtering 规则生成 runtime data、代码、POT、asset manifest 等，避免 validation 与实际导出语义不一致。同一 target 可以有多个 runtime data task（例如 JSON + MessagePack）和多个 code task；执行层应按 data input 分组，只有同 input 的 data task 才复用加载/归一化/校验结果和 DataSet-dependent ExportView，不同 input 必须分别派生 concrete ExportView；code task 按绑定的 data task 接收对应真实 `RuntimeDataFile`。
 11. **Artifact Write**：按 direct 或 temp_commit 写入，并输出 manifest。
 
 当前已重点落地第 2～5 步中与 TOML Meta 相关的部分。

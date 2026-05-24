@@ -21,7 +21,7 @@ id,name,icon,export_tags,exclude_tags
 name = "items"
 kind = "collection"
 desc = "所有可获得物品的基础配置。"
-source = { provider = "csv", path = "Data/items.csv" }
+source = "items.csv"
 primary_index = "by_id"
 
 [[tables.fields]]
@@ -82,7 +82,7 @@ name = "sample"
 name = "client_json_shipping"
 tags = ["client", "shipping"]
 
-[targets.data]
+[[targets.data]]
 input = "Data"
 output = "Generated/Data"
 format = "json"

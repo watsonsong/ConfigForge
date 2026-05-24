@@ -384,14 +384,14 @@ write_mode = "temp_commit"
 name = "items"
 kind = "collection"
 desc = "所有可获得物品的基础配置。"
-source = { provider = "csv", path = "Data/items.csv" }
+source = { provider = "csv", path = "items.csv" }
 primary_index = "by_id"
 
 [[targets]]
 name = "client_shipping"
 tags = ["client", "shipping"]
 
-[targets.data]
+[[targets.data]]
 input = "Data"
 output = "Generated/Data/ClientShipping"
 format = "json"

@@ -9,22 +9,36 @@
 | 字段 | 说明 |
 | --- | --- |
 | `name` | 稳定 target 名称。 |
-| `data` | 可选 runtime data 导出任务。存在时才读取 source data，并由 `format` 决定写出格式。 |
+| `data` | 可选 runtime data 导出任务列表。存在时才读取 source data，并由每个任务的 `format` 决定写出格式。 |
 | `code` | 当前 target 下的一个或多个代码生成任务。每个任务有独立语言、输出目录、文件头和命名策略。 |
 
 Project-level `name` / `desc` / `copyright` 可被 target 的代码生成器、schema exporter 或 manifest exporter 用于生成文件头。Target code task 可以通过 `file_header` 模板覆盖默认文件头。
 
+路径解析语义：
+
+- CLI `build --project path/to/ConfigForge.toml` 指定的 Project Config 文件所在目录是 project root。
+- `targets.data.input`、`targets.data.output`、`targets.code.output` 的相对路径均相对声明它们的 Project Config 文件所在目录解析；入口文件中的相对路径因此等价于相对 project root。
+- `imports` 引入的配置片段先按片段文件目录解析自身相对路径，再合并到总配置，避免片段移动到子目录后路径语义丢失。
+- Meta 中 table `source`、`sources[].path`、`override_sources[].path` 不直接相对 `ConfigForge.toml`，而是相对当前 target data task 的 `input` 目录查找。
+
 ### 6.1.1 Runtime Data Export Task
 
-`[targets.data]` 描述当前 target 是否导出 runtime data、从哪里读取 source data、写到哪里，以及使用哪种 runtime data format：
+`[[targets.data]]` 描述当前 target 是否导出 runtime data、从哪里读取 source data、写到哪里，以及使用哪种 runtime data format。一个 target 可以声明多套 data task，例如同时导出 JSON 供工具链调试、MessagePack 供客户端运行时加载：
 
 ```toml
 [[targets]]
 name = "client"
 
-[targets.data]
+[[targets.data]]
+name = "json"
 input = "Data"
-output = "Generated/Data"
+output = "Generated/Data/Json"
+format = "json"
+
+[[targets.data]]
+name = "messagepack"
+input = "Data"
+output = "Generated/Data/MessagePack"
 format = "messagepack"
 ```
 
@@ -32,7 +46,8 @@ format = "messagepack"
 
 | 字段 | 说明 |
 | --- | --- |
-| `input` | Source data 根目录。只有声明 `[targets.data]` 时才读取。 |
+| `name` | 当前 target 内唯一的 data task 名称。单 data task 可省略并由实现填入默认名；多 data task 必填。 |
+| `input` | Source data 根目录。Meta source path 以该目录为搜索基础；只有声明 `targets.data` 时才读取。 |
 | `output` | Runtime data 输出目录。 |
 | `format` | Runtime data 格式。当前第一阶段支持 `json` 和 `messagepack`，默认 `json`。 |
 
@@ -41,8 +56,10 @@ format = "messagepack"
 - 每张 table 输出一个 runtime data 文件。
 - `json` 使用 `.json` 后缀，`messagepack` 使用 `.msgpack` 后缀。
 - 两种格式承载同一套逻辑 payload：table meta 摘要和 normalized rows；字段名使用 Meta canonical name。
-- 同一个 target 的 code generation 必须感知该 target 的 runtime data format，生成的默认数据文件名、加载接口和格式常量必须与 `[targets.data].format` 一致。
-- code-only target 可以不声明 `[targets.data]`，但如果仍生成读取 runtime data 的代码，默认按 `json` 规划文件名；正式项目推荐 data 与 code 在同一个 target 中同时声明，避免格式不一致。
+- 同一 target 下多个 data task 如果 `input` 相同，执行层应只加载、归一化、校验一次，再分发给不同格式 exporter。
+- 同一个 target 的 code generation 必须感知它引用的 runtime data task，生成的默认数据文件名必须与对应 data task 的 `format` 和真实 artifact 路径一致。
+- code-only target 可以不声明 `targets.data`，但如果仍生成读取 runtime data 的代码，默认按 `json` 规划文件名；正式项目推荐 data 与 code 在同一个 target 中同时声明，避免格式不一致。
+- 项目当前仍处于开发阶段，不保留旧 `[targets.data]` table 形态兼容；正式配置统一使用 `[[targets.data]]` 数组表。
 
 ### 6.1.2 Code Generation Task
 
@@ -53,6 +70,7 @@ format = "messagepack"
 language = "cpp"
 output = "Generated/Cpp"
 module_name = "GameConfig"
+data = "messagepack"
 namespace = "game::config"
 file_header = "// {{project.name}}\n// {{project.copyright}}\n// Generated at {{datetime}}"
 keyword_conflict = "suffix_underscore"
@@ -72,6 +90,7 @@ namespace = "game::config"
 
 - `language` 决定使用哪个代码生成器。
 - `output` 是该代码生成任务的根目录，不与 target runtime data output 混淆。
+- `data` 指向当前 target 内的 runtime data task 名称。只有一个 data task 时可省略；多个 data task 时必须显式指定，避免默认文件名引用不确定。
 - `file_header` 是文本模板，支持 `{{project.name}}`、`{{project.desc}}`、`{{project.copyright}}`、`{{datetime}}`。
 - `keyword_conflict` 控制 Meta 名称转换成目标语言标识符后碰到关键字时如何处理。
 - `naming` 控制 type、field、function、constant 等符号的大小写组织。
@@ -166,7 +185,7 @@ Protobuf 未来规则：
 - 提供一个同时支持多种格式的 loader；
 - 在引擎侧复用已有资源加载和反序列化系统。
 
-格式选择由 target 的 `[targets.data].format` 决定，并影响导出的 table data file 后缀；生成代码只保留 data file path，不包含格式常量。
+格式选择由 code task 引用的 `targets.data` 任务决定，并影响导出的 table data file 后缀；生成代码只保留 data file path，不包含格式常量。若 target 同时导出 JSON 与 MessagePack，可以分别配置 TypeScript code task 引用 `data = "json"`、C++ code task 引用 `data = "messagepack"`。
 
 ## 6.3 Special Exporter
 
@@ -248,10 +267,12 @@ Artifact 类型：
 要求：
 
 - 导出前发现路径冲突。
+- 路径冲突检查使用规范化绝对 artifact path；两个 data task 如果规划出同 output + 同 format + 同 table 文件名，必须报错。
 - 产物写入通过 Artifact Writer。
 - Artifact Writer 支持 `temp_commit` 和 `direct` 写入策略；推荐默认 `temp_commit`。
 - 并行生成不影响 manifest 顺序。
 - 失败 target 不应提交部分产物。
+- 未来 manifest 记录 runtime data artifact 时，应以 `(target_name, data_name, table_name)` 作为稳定 key，并额外记录 `format`、相对 data artifact root 的 `path` 和最终写入 path，避免同一 table 的多格式产物互相覆盖。
 
 写入策略：
 
@@ -282,8 +303,8 @@ config-forge --project ConfigForge.toml --target client
 1. 解析 Project Config，并递归加载其顶层 `imports` 指向的工程配置片段。
 2. 按 `--target` 找到目标 target。
 3. 合并所有配置片段中的 `enums`、`structs`、`tables` 并完成 link/validate。
-4. 如果 target 声明 `[targets.data]`，再读取 Data source、归一化、校验并写出 runtime data。
-5. 如果 target 声明 `[[targets.code]]`，按每个 code task 的语言和输出目录生成代码。
+4. 如果 target 声明 `[[targets.data]]`，再按 data task 读取 Data source、归一化、校验并写出 runtime data；同 input 的多格式 data task 可复用加载结果，不同 input 必须分别派生 DataSet-dependent ExportView。
+5. 如果 target 声明 `[[targets.code]]`，按每个 code task 的语言、输出目录和绑定 data task 生成代码。
 6. 未声明的任务不读取对应输入、不产生对应输出。例如 code-only target 不读取 Data。
 
 ## 6.7 退出码

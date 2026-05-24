@@ -58,7 +58,7 @@ copyright = "Copyright 2026 Example Studio. All rights reserved."
 [[targets]]
 name = "client"
 
-[targets.data]
+[[targets.data]]
 input = "Data"
 output = "Generated/Data"
 format = "json"
@@ -86,7 +86,7 @@ output = "Generated/TypeScript"
 要求：
 
 - CLI 不提供 `--meta`、`--data`、`--out`、`validate/export` 子命令等重复入口。
-- 构建时根据 target 自动判断是否需要 Data：code-only target 只加载 Meta；声明 `[targets.data]` 的 target 才加载 Data。
+- 构建时根据 target 自动判断是否需要 Data：code-only target 只加载 Meta；声明 `[[targets.data]]` 的 target 才加载 Data。
 
 ## 3.3 Meta 文件
 
@@ -99,7 +99,7 @@ TOML 示例：
 name = "items"
 kind = "collection"
 desc = "所有可获得物品的基础配置。"
-source = { provider = "csv", path = "Data/items.csv" }
+source = { provider = "csv", path = "items.csv" }
 primary_index = "by_id"
 
 [[tables.fields]]
@@ -126,7 +126,7 @@ XML 示例：
 ```xml
 <meta>
   <table name="items" kind="collection" primaryIndex="by_id" desc="所有可获得物品的基础配置。">
-    <source provider="csv" path="Data/items.csv" />
+    <source provider="csv" path="items.csv" />
     <field name="id" type="int" required="true" desc="物品唯一 ID。" />
     <field name="name" type="text" required="true" desc="物品展示名称。" />
     <index name="by_id" unique="true" primary="true">
@@ -169,16 +169,16 @@ Source sheet 允许出现空行和空列。未映射到 field path 的行/列不
 单 source：
 
 ```toml
-source = { provider = "csv", path = "Data/items.csv" }
+source = { provider = "csv", path = "items.csv" }
 ```
 
 兼容 shorthand：
 
 ```toml
-source = "Data/items.csv"
+source = "items.csv"
 ```
 
-语义：根据文件后缀推断为 `{ provider = "csv", path = "Data/items.csv" }`。
+语义：根据文件后缀推断为 `{ provider = "csv", path = "items.csv" }`。
 
 多 source（Planned / Not implemented）：
 
@@ -202,30 +202,51 @@ override_sources = [
 
 ## 3.5 Target Config
 
-Target Config 定义一次可构建的导出目标。当前实现支持 runtime data 导出任务 `[targets.data]` 和一个或多个代码生成任务 `[[targets.code]]`。
+Target Config 定义一次可构建的导出目标。一个 target 共享同一组 `TargetTags` 和同一套 Meta-level filtering 规则，并可以挂载 0 个、1 个或多个 runtime data 导出任务，以及 0 个、1 个或多个代码生成任务。具体的 DataSet-dependent ExportView 必须按 `(target tags, data input/DataSet)` 派生；只有 `input` 完全相同的 data task 才能复用同一次 source load、normalize、validation 和 concrete ExportView。
+
+路径基准规则：
+
+- `ConfigForge.toml` 是工程入口文件；工程根目录（project root）默认是入口文件所在目录。
+- 写在入口 `ConfigForge.toml` 中的 `targets.data.input`、`targets.data.output`、`targets.code.output` 相对路径都以 project root 为基准。
+- 写在被 `imports` 引入的 Project Config 片段中的相对路径，以该片段文件所在目录为基准，并在加载阶段规范化为绝对路径后再合并；这样被复用的配置片段可以携带自己的相对资源目录。
+- `targets.data.input` 是 source data 根目录。Meta 中 table `source`、`sources[].path`、`override_sources[].path` 均相对该 data root 查找，而不是相对 Meta 文件或代码输出目录。
+- `targets.data.output` 和 `targets.code.output` 是产物输出根目录；二者彼此独立，所有 artifact 在写入前必须做路径冲突检查。
 
 ```toml
 [[targets]]
 name = "client_runtime"
 tags = ["client", "shipping"]
 
-[targets.data]
+[[targets.data]]
+name = "json"
 input = "Data"
-output = "Generated/Data"
+output = "Generated/Data/Json"
 format = "json"
+
+[[targets.data]]
+name = "messagepack"
+input = "Data"
+output = "Generated/Data/MessagePack"
+format = "messagepack"
 
 [[targets.code]]
 language = "rust"
 output = "Generated/Code/Rust"
 module_name = "game_config"
+data = "messagepack"
 
 [[targets.code]]
 language = "typescript"
 output = "Generated/Code/TypeScript"
 module_name = "gameConfig"
+data = "json"
 ```
 
+Runtime data 导出任务使用 `[[targets.data]]` 数组形式；每个任务有独立 `name`、`input`、`output` 和 `format`。这样同一个 target 可以同时输出 JSON、MessagePack 等多套 runtime data。项目当前仍处于开发阶段，不保留旧 `[targets.data]` table 形态兼容；正式配置统一使用 `[[targets.data]]`。
+
 一个 target 可以声明 0 个、1 个或多个代码生成任务。代码生成任务放在 `[[targets.code]]` 中；每个任务有独立语言、输出目录和语言专属参数。这样同一个 target 可以同时输出 runtime data、Rust 服务端访问代码、C++ 客户端访问代码和 TypeScript 工具链访问代码。
+
+当同一 target 有多套 runtime data 时，code task 通过 `data = "<targets.data.name>"` 选择自己默认引用的数据产物集合。若 target 只有一个 data task，`data` 可省略并自动使用该任务；若 target 有多个 data task，生成会暴露默认数据文件路径的 code task 必须显式声明 `data`，避免 JSON/MessagePack 默认文件名不确定。code-only target 可以没有 data task，此时仍按 `<table>.json` 推导默认文件名，但正式项目推荐显式配置 data task。
 
 `tags` 是 target 的核心上下文。每个 tag 代表一个导出特性，例如：
 
@@ -243,7 +264,8 @@ module_name = "gameConfig"
 name = "client_debug"
 tags = ["client", "debug"]
 
-[targets.data]
+[[targets.data]]
+name = "json"
 input = "Data"
 output = "Generated/Data/ClientDebug"
 format = "json"
@@ -252,7 +274,8 @@ format = "json"
 name = "client_shipping"
 tags = ["client", "shipping"]
 
-[targets.data]
+[[targets.data]]
+name = "messagepack"
 input = "Data"
 output = "Generated/Data/ClientShipping"
 format = "messagepack"
@@ -261,7 +284,8 @@ format = "messagepack"
 name = "server_shipping"
 tags = ["server", "shipping"]
 
-[targets.data]
+[[targets.data]]
+name = "json"
 input = "Data"
 output = "Generated/Data/ServerShipping"
 format = "json"
@@ -270,6 +294,7 @@ format = "json"
 language = "rust"
 output = "Generated/Code/Rust"
 module_name = "game_config"
+data = "json"
 file_header = "// Generated for {{project.name}} at {{datetime}}\n// {{project.copyright}}"
 keyword_conflict = "suffix_underscore"
 
@@ -286,6 +311,7 @@ derive_serde = true
 language = "typescript"
 output = "Generated/Code/TypeScript"
 module_name = "gameConfig"
+data = "json"
 file_header = "// {{project.name}} - {{project.desc}}\n// Generated at {{datetime}}"
 keyword_conflict = "suffix_underscore"
 
@@ -303,9 +329,21 @@ readonly_fields = true
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `tags` | `[]` | Target 的导出特性集合。用于匹配表、字段、行级 `export_when` / `row_export`。 |
-| `input` | 必填 | Source data 根目录。只有声明 `[targets.data]` 时才读取。 |
-| `output` | 必填 | Runtime data 输出目录。 |
+| `name` | 单 data task 可省略，规范化为 `default` | 当前 target 内稳定唯一的 data task 名称，用于 code task 通过 `data` 引用；多 data task 时必填。 |
+| `input` | 必填 | Source data 根目录。相对路径以 project root 或所在 import 片段目录为基准；Meta source path 以该目录为搜索基础。只有声明 `targets.data` 时才读取 source data。 |
+| `output` | 必填 | Runtime data 输出目录。相对路径以 project root 或所在 import 片段目录为基准。 |
 | `format` | `json` | Runtime data 格式。当前实现支持 `json` 和 `messagepack`。 |
+
+data task `name` 规范：
+
+- 如果用户显式写了 `name`，使用用户名称；如果单 data task 省略 `name`，规范化名称固定为 `default`。
+- 多 data task 时每个 task 必须显式写非空 `name`。
+- `name` 大小写敏感；只允许 ASCII 字母、数字、`_`、`-`，且必须以字母或数字开头和结尾。
+- 同一 target 下多个 data task 的规范化 `name` 必须唯一；保留名 `default` 允许作为显式名称，但仍遵守唯一性规则。
+
+多个 data task 可以共享同一个 `input`，实现应复用同一次加载、归一化和校验结果后写出不同格式。不同 `input` 表示同一 target tags 下的不同数据集，必须分别加载、归一化、校验并派生 DataSet-dependent ExportView。不同 data task 的最终输出文件路径不能相互覆盖，也不能与 code task 或未来 special exporter 的输出冲突；冲突检查基于规范化绝对 artifact path。
+
+`RuntimeDataFile.path` 表示相对当前 data artifact root / runtime loader root 的资源路径，例如 `items.json`，不是相对 code output 或 project root 的路径。生成代码只透传该路径常量，具体 runtime loader 决定如何把它映射到文件系统、包内资源或引擎资源。
 
 Planned / Not implemented：`engine`、`special_exporters`、POT、Asset Manifest、target-level `language` / `data_format` / `output` 属于旧设计或未来扩展，当前 Project Config 不应使用这些字段。
 
@@ -314,8 +352,9 @@ Planned / Not implemented：`engine`、`special_exporters`、POT、Asset Manifes
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `language` | 必填 | 代码生成语言，例如 `rust`、`cpp`、`typescript`。 |
-| `output` | 必填 | 当前代码生成任务的输出目录。相对路径以 project root 为基准。 |
+| `output` | 必填 | 当前代码生成任务的输出目录。相对路径以 project root 或所在 import 片段目录为基准。 |
 | `module_name` | language 默认值 | 模块名、包名、namespace 或生成文件前缀。具体语义由语言生成器决定。 |
+| `data` | 自动推导 | 当前 code task 默认引用的 runtime data task 名称。target 只有一个 data task 时可省略；多个 data task 时应显式声明。 |
 | `namespace` | 未设置 | 可选命名空间；C++ 可映射为 namespace，Rust/TS 可作为模块组织提示。 |
 | `file_header` | 生成器默认文件头 | 可选文件头模板。为空字符串表示不生成文件头。 |
 | `keyword_conflict` | `suffix_underscore` | 生成标识符与目标语言关键字冲突时的处理策略。 |
