@@ -1539,6 +1539,16 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
     fs::copy(harness_dir.join("lib.rs"), temp_dir.path().join("lib.rs"))
         .expect("rust harness lib.rs should be copied");
     fs::copy(
+        fixture_root.join("../../../runtime_readers/rust/core/src/value_reader.rs"),
+        temp_dir.path().join("runtime_reader_core.rs"),
+    )
+    .expect("rust runtime reader core should be copied");
+    fs::copy(
+        fixture_root.join("../../../runtime_readers/rust/messagepack_rmp/src/template.rs"),
+        temp_dir.path().join("runtime_loader.rs"),
+    )
+    .expect("rust runtime loader should be copied");
+    fs::copy(
         fixture_root.join("out/server_code/rust/generated.rs"),
         temp_dir.path().join("generated.rs"),
     )
@@ -1567,6 +1577,8 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
         .arg(fixture_root.join("out/client_code/cpp/generated.cpp"))
         .arg("-I")
         .arg(fixture_root.join("out/client_code/cpp"))
+        .arg("-I")
+        .arg(fixture_root.join("../../../runtime_readers/cpp/json_builtin/include"))
         .arg("-o")
         .arg(&binary_path)
         .output()
@@ -1578,6 +1590,66 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
         .output()
         .expect("standard generated C++ runtime test should run");
     assert_command_success(output, "standard generated C++ runtime test");
+
+    fs::write(
+        temp_dir.path().join("generated.hpp"),
+        r#"
+            #pragma once
+            #include <cstdint>
+            #include <cstddef>
+            #include <memory>
+            #include <string>
+
+            class IRuntimeDataReader {
+            public:
+                virtual ~IRuntimeDataReader() = default;
+                virtual std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const = 0;
+                virtual std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const = 0;
+                virtual std::size_t Size() const = 0;
+                virtual std::int64_t AsInt64() const = 0;
+                virtual double AsDouble() const = 0;
+                virtual bool AsBool() const = 0;
+                virtual std::string AsString() const = 0;
+                virtual bool IsNull() const = 0;
+            };
+
+            class IRuntimeDataLoader {
+            public:
+                virtual ~IRuntimeDataLoader() = default;
+                virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;
+            };
+        "#,
+    )
+    .expect("minimal generated C++ header should be written");
+    fs::write(
+        temp_dir.path().join("adapter_namespace_check.cpp"),
+        r#"
+            #define CONFIG_FORGE_RUNTIME_CPP_READER IRuntimeDataReader
+            #define CONFIG_FORGE_RUNTIME_CPP_LOADER IRuntimeDataLoader
+            #include "runtime_loader.hpp"
+
+            int main() {
+                return config_forge_runtime::JsonValueReader("\"1\"").AsBool() ? 0 : 1;
+            }
+        "#,
+    )
+    .expect("C++ adapter namespace check should be written");
+    let output = StdCommand::new("c++")
+        .args(["-std=c++17"])
+        .arg(temp_dir.path().join("adapter_namespace_check.cpp"))
+        .arg("-I")
+        .arg(temp_dir.path())
+        .arg("-I")
+        .arg(fixture_root.join("../../../runtime_readers/cpp/json_builtin/include"))
+        .arg("-o")
+        .arg(temp_dir.path().join("adapter_namespace_check"))
+        .output()
+        .expect("C++ adapter namespace check should compile");
+    assert_command_success(output, "C++ adapter namespace check compile");
+    let output = StdCommand::new(temp_dir.path().join("adapter_namespace_check"))
+        .output()
+        .expect("C++ adapter namespace check should run");
+    assert_command_success(output, "C++ adapter namespace check run");
 }
 
 fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) {
@@ -1593,6 +1665,11 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
         temp_dir.path().join("runtime_check.ts"),
     )
     .expect("TypeScript runtime harness should be copied");
+    fs::copy(
+        fixture_root.join("../../../runtime_readers/typescript/json/src/runtime_loader.ts"),
+        temp_dir.path().join("runtime_loader.ts"),
+    )
+    .expect("TypeScript runtime loader should be copied");
     fs::copy(
         harness_dir.join("tsconfig.json"),
         temp_dir.path().join("tsconfig.json"),

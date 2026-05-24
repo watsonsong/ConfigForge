@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use super::{
-    FieldMeta, LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedFragmentMeta,
-    LinkedFragmentPayload, LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType,
-    validate_meta_model, LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
+    validate_meta_model, FieldMeta, LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta,
+    LinkedFragmentMeta, LinkedFragmentPayload, LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta,
+    LinkedStructType, LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
     PrimitiveFieldType,
 };
 

@@ -7,5 +7,5 @@
     "outDir": "dist",
     "skipLibCheck": true
   },
-  "include": ["generated.ts", "runtime_check.ts"]
+  "include": ["generated.ts", "runtime_check.ts", "runtime_loader.ts"]
 }

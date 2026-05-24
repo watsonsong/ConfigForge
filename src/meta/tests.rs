@@ -1791,7 +1791,10 @@ fn link_reports_structural_validation_errors() {
     )
     .expect("raw invalid meta should deserialize");
 
-    let diagnostics = invalid.link().expect_err("link should include structural validation");
+    let diagnostics = match invalid.link() {
+        Ok(_) => panic!("link should include structural validation"),
+        Err(diagnostics) => diagnostics,
+    };
 
     assert!(diagnostics
         .iter()

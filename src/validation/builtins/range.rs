@@ -242,10 +242,13 @@ impl RangeFieldType {
                 .parse::<i64>()
                 .map(|value| value as f64)
                 .map_err(|_| ()),
-            Self::Float => value
-                .parse::<f64>()
-                .map_err(|_| ())
-                .and_then(|value| if value.is_finite() { Ok(value) } else { Err(()) }),
+            Self::Float => value.parse::<f64>().map_err(|_| ()).and_then(|value| {
+                if value.is_finite() {
+                    Ok(value)
+                } else {
+                    Err(())
+                }
+            }),
         }
     }
 }
