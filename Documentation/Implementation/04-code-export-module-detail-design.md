@@ -1018,7 +1018,7 @@ CodeExportInput
 5. 多 input：不同 input 分别加载、normalize、validation 并派生 DataSet-dependent ExportView，不能复用另一个 input 的 ExportView。
 6. code task 绑定：target 只有一个 data task 时 `CodegenTaskConfig.data` 可省略并在 normalized model 中填入 `selected_data_name`；多个 data task 且省略 `data` 时报错；显式 `data = "json"` / `data = "messagepack"` 时 `CodeExportInput.runtime_data_files` 使用对应真实路径；显式引用不存在 data task 时报错。
 7. 路径语义：入口 `ConfigForge.toml` 中 data input/output/code output 相对 project root；import 片段中的相对路径相对片段目录；Meta source path 相对 data input；`RuntimeDataFile.path` 相对 data artifact root。
-8. artifact 冲突：data task 之间、data task 与 code task 之间、多个 code task 之间的输出路径冲突都应报错。
+8. artifact 冲突：data task 之间、data task 与 code task 之间、多个 code task 之间的输出路径冲突都应报错。执行冲突检查前应做不依赖文件存在性的 lexical path normalization，至少消除 `.` / `..` 造成的字符串差异；对已存在路径可视需要再做 canonicalize，但不能要求输出目录预先存在。
 9. CodeModel 默认文件名：没有 runtime data artifact 时，默认推导 `.json`。
 10. Rust 生成代码包含：
    - `RuntimeDataLoader`；
@@ -1115,20 +1115,47 @@ pub struct CodegenDiagnostic {
 
 推荐先使用字符串 contains 测试，后续引入 snapshot 工具。
 
-### 4.15.3 生成代码编译测试
+### 4.15.3 生成代码编译与运行测试
 
-第一阶段建议至少覆盖 Rust 生成代码编译：
+生成代码测试不应只停留在“文件存在”和字符串片段断言。集成测试需要把 runtime data artifact 与 generated code artifact 串起来，验证生成代码能被目标语言工具链接受，并能通过 generated loader interface 读取真实导出的数据。
 
-1. 生成 Rust 代码到 temp dir。
-2. 创建临时 Cargo project 或 test module。
-3. `cargo check` 验证生成代码语法正确。
+通用流程：
 
-C++ / TypeScript 可后续增加：
+1. 在临时目录或被 `.gitignore` 忽略的 fixture `out/` 目录中执行 export，生成 runtime data 与对应语言代码。
+2. 为每种目标语言创建测试 harness。harness 只承担测试职责：实现生成代码要求的 `RuntimeDataLoader` / `IRuntimeDataLoader` 接口，读取本次 export 写出的真实 data 文件，并把 JSON / MessagePack payload 映射为生成代码中的 typed rows / typed object。
+3. 编译或类型检查 generated code 与 harness。
+4. 运行 harness 测试 `GameData` / facade 的加载入口。
+5. 断言代表性查询函数正常工作。测试不需要覆盖每一个字段和每一个 index，但必须覆盖当前功能类型：
+   - collection table 加载；
+   - object table 加载；
+   - 单字段 unique index 查询；
+   - 多字段联合 unique index 查询；
+   - 目标语言对默认 data file 常量的引用。
+6. 如果未来标准工程新增 non-unique index、foreign-key helper、special exporter manifest 等生成代码能力，应在同一类 generated-code runtime test 中补充一个代表性断言，而不是为所有表重复写同构断言。
 
-- C++：`clang++ -std=c++17 -fsyntax-only`。
-- TypeScript：`tsc --noEmit`。
+测试 harness 的 loader 是测试代码，不是产品默认 loader。生成代码仍保持对文件系统、JSON/MessagePack 库和引擎资源系统无依赖；真实项目可以按自己的资源系统实现同一 typed loader interface。
 
-### 4.15.4 集成测试
+每种语言的 harness 代码应作为 fixture 的一部分归档进代码仓库，例如 `tests/fixtures/standard_project/harness/{rust,cpp,typescript}/`。集成测试运行时将已归档的 harness 与本次 export 产生的 generated code / runtime data 组合到临时目录或编译命令中：harness 本身稳定纳入 review，generated artifacts 仍位于被忽略的 `out/` 或临时目录中，避免把本次生成结果当作源文件提交。
+
+### 4.15.4 分语言 generated-code runtime test 方案
+
+标准工程当前按 target 拆分：client 生成 JSON + TypeScript/C++，server 生成 MessagePack + Rust。因此 generated-code runtime test 可以复用标准工程配置，分别验证三种语言。
+
+| 语言 | 输入产物 | 工具链 | Harness 做法 | 必测断言 |
+| --- | --- | --- | --- | --- |
+| Rust | `out/server_code/rust/generated.rs` + `out/server_data/*.msgpack` | `cargo test` | 创建临时 Cargo project，将 `generated.rs` 作为 module 引入；实现 `RuntimeDataLoader`，用 `rmp-serde` 或等价测试依赖读取 MessagePack payload，再手动映射为 generated rows / objects。 | `GameData::load` 成功；`items.get_by_id(id)` 命中；`class_levels.get_by_class_level(class_id, level)` 命中联合索引；`game_rules` object 字段可访问。 |
+| TypeScript | `out/client_code/typescript/generated.ts` + `out/client_data/*.json` | `tsc` + `node` | 创建临时 TS test file，import `generated.ts`；实现 `RuntimeDataLoader`，用 Node `fs` 读取 JSON payload 并映射为 generated row interface/object，编译后用 Node 执行 runtime check。 | `GameData.load` 成功；`items.getById(id)` 命中；`classLevels.getByClassLevel(classId, level)` 命中联合索引；object table 可访问。 |
+| C++ | `out/client_code/cpp/generated.hpp` / `generated.cpp` + `out/client_data/*.json` | `c++ -std=c++17` | 创建临时 `compile_check.cpp`，include `generated.hpp` 并链接 `generated.cpp`；实现 `IRuntimeDataLoader`。测试 loader 可以使用轻量、fixture-specific 的 JSON 读取/映射逻辑，避免给生成代码引入第三方依赖。 | `GameData::Load` 成功；`Items().GetById(id)` 命中；`ClassLevels().GetByClassLevel(class_id, level)` 命中联合索引；object table 可访问。 |
+
+归档后的 harness 不应直接依赖仓库中某一次已生成的 `out/` 文件路径。推荐做法是：集成测试先执行 export，再把对应语言的 generated code 复制到临时 harness 工作目录（或通过 include path/link path 引用），最后执行目标语言测试命令。这样能确保测试的是“当前实现刚生成的代码和数据”，而不是历史残留 artifact。
+
+工具链缺失时的处理原则：
+
+- CI 环境应安装 Rust/Cargo、C++17 compiler、Node.js 和 TypeScript，使三类 runtime test 都能执行。
+- 本地开发环境如果缺少 C++ compiler、Node 或 `tsc`，对应测试可以显式 skip，但测试输出必须说明 skip 原因，不能静默通过。
+- Rust 生成代码测试不应 skip，因为项目本身依赖 Rust toolchain。
+
+### 4.15.5 CLI 集成测试
 
 在 `tests/fixtures/standard_project/` 上运行：
 
@@ -1136,7 +1163,9 @@ C++ / TypeScript 可后续增加：
 2. export 生成 Rust/C++/TS code。
 3. 检查输出文件存在。
 4. 检查关键 API 名称存在。
-5. Rust 生成代码可选执行 compile check。
+5. 运行分语言 generated-code runtime test，确认生成代码能通过 loader 加载真实导出数据并执行代表性查询。
+
+集成测试写出的 artifact 应位于 fixture-local `out/` 目录或临时目录。fixture-local `out/` 必须通过 `.gitignore` 忽略；新增 fixture 如果也写出导出结果，应遵循 `tests/fixtures/**/out/` 约定，避免误提交生成产物。
 
 ## 4.16 第一阶段落地状态
 

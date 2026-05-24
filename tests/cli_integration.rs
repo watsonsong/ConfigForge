@@ -122,6 +122,7 @@ fn builds_target_from_project_config() {
     assert!(game_rules.get("rows").is_none());
     let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
     let cpp_code = fs::read_to_string(cpp_out_dir.join("generated.hpp")).expect("cpp code");
+    let cpp_source = fs::read_to_string(cpp_out_dir.join("generated.cpp")).expect("cpp source");
     let ts_code = fs::read_to_string(ts_out_dir.join("generated.ts")).expect("ts code");
     assert!(rust_code.contains("pub struct ItemsRow"));
     assert!(rust_code.contains("pub struct GameRulesRow"));
@@ -139,6 +140,8 @@ fn builds_target_from_project_config() {
     assert!(!cpp_code.contains("class GameRulesTable"));
     assert!(!cpp_code.contains("RuntimeDataFormat"));
     assert!(cpp_code.contains("const ItemsRow* GetById"));
+    assert!(cpp_source.contains("GameData GameData::Load"));
+    assert!(cpp_source.contains("ItemsTable ItemsTable::FromRows"));
     assert!(ts_code.contains("export interface RuntimeDataLoader"));
     assert!(ts_code.contains("static readonly dataFile = \"items.json\""));
     assert!(ts_code.contains("loadGameRules(path: string): Promise<GameRulesRow> | GameRulesRow"));
@@ -147,7 +150,7 @@ fn builds_target_from_project_config() {
     assert!(ts_code.contains("getById(id: number): ItemsRow | undefined"));
 
     verify_generated_rust_crate(&rust_out_dir, false);
-    verify_generated_cpp_header(&cpp_out_dir);
+    verify_generated_cpp_runtime(&cpp_out_dir);
     verify_generated_typescript(&ts_out_dir);
 }
 
@@ -253,6 +256,47 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
     assert!(server_items["rows"][3].get("name").is_none());
     assert!(server_items["rows"][3].get("skill").is_none());
     assert_eq!(server_items["rows"][3]["attributes"]["attack"], "12");
+}
+
+#[test]
+fn standard_project_generated_code_loads_exported_runtime_data() {
+    let project_path = std::env::current_dir()
+        .expect("current dir")
+        .join("tests/fixtures/standard_project/ConfigForge.toml");
+    let fixture_root = project_path.parent().expect("standard project root");
+    let fixture_out_dir = fixture_root.join("out");
+    if fixture_out_dir.exists() {
+        fs::remove_dir_all(&fixture_out_dir)
+            .expect("stale standard project out dir should be removed");
+    }
+
+    let mut client_cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    client_cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+    ]);
+    client_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target `client` built"));
+
+    let mut server_cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    server_cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "server",
+    ]);
+    server_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target `server` built"));
+
+    verify_standard_generated_rust_runtime(fixture_root);
+    verify_standard_generated_cpp_runtime(fixture_root);
+    verify_standard_generated_typescript_runtime(fixture_root);
 }
 
 #[test]
@@ -636,6 +680,57 @@ fn rejects_runtime_data_path_conflict_before_writing_files() {
             data_out_dir.display(),
             absolute_fixture_path("data"),
             data_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "conflict",
+    ]);
+
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "multiple runtime data artifacts target",
+    ));
+    assert!(!data_out_dir.join("items.json").exists());
+    assert!(!data_out_dir.join("game_rules.json").exists());
+}
+
+#[test]
+fn rejects_lexically_equivalent_runtime_data_path_conflict_before_writing_files() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_out_dir = temp_dir.path().join("out/data");
+    let equivalent_data_out_dir = temp_dir.path().join("out/./data");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [[targets]]
+                name = "conflict"
+
+                [[targets.data]]
+                name = "json_a"
+                input = "{}"
+                output = "{}"
+                format = "json"
+
+                [[targets.data]]
+                name = "json_b"
+                input = "{}"
+                output = "{}"
+                format = "json"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            data_out_dir.display(),
+            absolute_fixture_path("data"),
+            equivalent_data_out_dir.display()
         ),
     )
     .expect("project config should be written");
@@ -1115,7 +1210,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
     assert_command_success(output, "generated Rust cargo test");
 }
 
-fn verify_generated_cpp_header(generated_dir: &std::path::Path) {
+fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
     fs::write(
         generated_dir.join("compile_check.cpp"),
         r#"
@@ -1188,33 +1283,36 @@ fn verify_generated_cpp_header(generated_dir: &std::path::Path) {
     )
     .expect("generated C++ compile check should be written");
 
-    if command_exists("c++") {
-        let output = StdCommand::new("c++")
-            .args([
-                "-std=c++17",
-                generated_dir
-                    .join("compile_check.cpp")
-                    .to_str()
-                    .expect("utf8 path"),
-                generated_dir
-                    .join("generated.cpp")
-                    .to_str()
-                    .expect("utf8 path"),
-                "-o",
-                generated_dir
-                    .join("compile_check")
-                    .to_str()
-                    .expect("utf8 path"),
-            ])
-            .output()
-            .expect("generated C++ compile check should compile");
-        assert_command_success(output, "generated C++ header compile");
-
-        let output = StdCommand::new(generated_dir.join("compile_check"))
-            .output()
-            .expect("generated C++ compile check should run");
-        assert_command_success(output, "generated C++ runtime check");
+    if !command_exists("c++") {
+        eprintln!("skipping generated C++ runtime check: c++ not found");
+        return;
     }
+
+    let output = StdCommand::new("c++")
+        .args([
+            "-std=c++17",
+            generated_dir
+                .join("compile_check.cpp")
+                .to_str()
+                .expect("utf8 path"),
+            generated_dir
+                .join("generated.cpp")
+                .to_str()
+                .expect("utf8 path"),
+            "-o",
+            generated_dir
+                .join("compile_check")
+                .to_str()
+                .expect("utf8 path"),
+        ])
+        .output()
+        .expect("generated C++ compile check should compile");
+    assert_command_success(output, "generated C++ header compile");
+
+    let output = StdCommand::new(generated_dir.join("compile_check"))
+        .output()
+        .expect("generated C++ compile check should run");
+    assert_command_success(output, "generated C++ runtime check");
 }
 
 fn verify_generated_typescript(generated_dir: &std::path::Path) {
@@ -1255,7 +1353,10 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 }
             }
 
-            void main();
+            main().catch((error) => {
+                console.error(error);
+                throw error;
+            });
         "#,
     )
     .expect("generated TypeScript compile check should be written");
@@ -1295,7 +1396,116 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 .expect("generated TypeScript npx type check should run"),
             "generated TypeScript npx tsc",
         );
+    } else {
+        eprintln!("skipping generated TypeScript type check: tsc/npx not found");
     }
+}
+
+fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
+    let temp_dir = tempfile::tempdir().expect("rust harness temp dir should be created");
+    let harness_dir = fixture_root.join("harness/rust");
+    fs::copy(
+        harness_dir.join("Cargo.toml"),
+        temp_dir.path().join("Cargo.toml"),
+    )
+    .expect("rust harness Cargo.toml should be copied");
+    fs::copy(harness_dir.join("lib.rs"), temp_dir.path().join("lib.rs"))
+        .expect("rust harness lib.rs should be copied");
+    fs::copy(
+        fixture_root.join("out/server_code/rust/generated.rs"),
+        temp_dir.path().join("generated.rs"),
+    )
+    .expect("generated Rust code should be copied into harness");
+
+    let output = StdCommand::new("cargo")
+        .args(["test", "--quiet", "--manifest-path"])
+        .arg(temp_dir.path().join("Cargo.toml"))
+        .env("DATA_DIR", fixture_root.join("out/server_data"))
+        .output()
+        .expect("standard generated Rust runtime test should run");
+    assert_command_success(output, "standard generated Rust runtime test");
+}
+
+fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
+    if !command_exists("c++") {
+        eprintln!("skipping standard generated C++ runtime test: c++ not found");
+        return;
+    }
+
+    let temp_dir = tempfile::tempdir().expect("cpp harness temp dir should be created");
+    let binary_path = temp_dir.path().join("runtime_check");
+    let output = StdCommand::new("c++")
+        .args(["-std=c++17"])
+        .arg(fixture_root.join("harness/cpp/runtime_check.cpp"))
+        .arg(fixture_root.join("out/client_code/cpp/generated.cpp"))
+        .arg("-I")
+        .arg(fixture_root.join("out/client_code/cpp"))
+        .arg("-o")
+        .arg(&binary_path)
+        .output()
+        .expect("standard generated C++ runtime test should compile");
+    assert_command_success(output, "standard generated C++ runtime compile");
+
+    let output = StdCommand::new(&binary_path)
+        .env("DATA_DIR", fixture_root.join("out/client_data"))
+        .output()
+        .expect("standard generated C++ runtime test should run");
+    assert_command_success(output, "standard generated C++ runtime test");
+}
+
+fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) {
+    if !command_exists("node") {
+        eprintln!("skipping standard generated TypeScript runtime test: node not found");
+        return;
+    }
+
+    let temp_dir = tempfile::tempdir().expect("typescript harness temp dir should be created");
+    let harness_dir = fixture_root.join("harness/typescript");
+    fs::copy(
+        harness_dir.join("runtime_check.ts"),
+        temp_dir.path().join("runtime_check.ts"),
+    )
+    .expect("TypeScript runtime harness should be copied");
+    fs::copy(
+        harness_dir.join("tsconfig.json"),
+        temp_dir.path().join("tsconfig.json"),
+    )
+    .expect("TypeScript tsconfig should be copied");
+    fs::copy(
+        fixture_root.join("out/client_code/typescript/generated.ts"),
+        temp_dir.path().join("generated.ts"),
+    )
+    .expect("generated TypeScript code should be copied into harness");
+
+    if command_exists("tsc") {
+        assert_command_success(
+            StdCommand::new("tsc")
+                .args(["--project"])
+                .arg(temp_dir.path().join("tsconfig.json"))
+                .output()
+                .expect("standard generated TypeScript tsc should run"),
+            "standard generated TypeScript tsc",
+        );
+    } else if command_exists("npx") {
+        assert_command_success(
+            StdCommand::new("npx")
+                .args(["--yes", "-p", "typescript", "tsc", "--project"])
+                .arg(temp_dir.path().join("tsconfig.json"))
+                .output()
+                .expect("standard generated TypeScript npx tsc should run"),
+            "standard generated TypeScript npx tsc",
+        );
+    } else {
+        eprintln!("skipping standard generated TypeScript runtime test: tsc/npx not found");
+        return;
+    }
+
+    let output = StdCommand::new("node")
+        .arg(temp_dir.path().join("dist/runtime_check.js"))
+        .env("DATA_DIR", fixture_root.join("out/client_data"))
+        .output()
+        .expect("standard generated TypeScript runtime test should run");
+    assert_command_success(output, "standard generated TypeScript runtime test");
 }
 
 fn command_exists(command: &str) -> bool {

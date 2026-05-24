@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     num::NonZeroUsize,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -373,11 +373,40 @@ fn normalize_project_config_paths(config: &mut ProjectConfig, base_dir: &Path) {
 }
 
 fn normalize_config_path(base_dir: &Path, path: &Path) -> PathBuf {
-    if path.is_absolute() {
+    let resolved = if path.is_absolute() {
         path.to_path_buf()
     } else {
         base_dir.join(path)
+    };
+    lexical_normalize_path(&resolved)
+}
+
+fn lexical_normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                match normalized.components().next_back() {
+                    Some(Component::Normal(_)) => {
+                        normalized.pop();
+                    }
+                    Some(Component::ParentDir) | None => {
+                        if !path.has_root() {
+                            normalized.push(component.as_os_str());
+                        }
+                    }
+                    Some(Component::Prefix(_))
+                    | Some(Component::RootDir)
+                    | Some(Component::CurDir) => {}
+                }
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
     }
+    normalized
 }
 
 fn merge_project_configs(fragments: Vec<ProjectConfig>) -> ProjectConfig {
@@ -529,7 +558,7 @@ fn ensure_planned_runtime_output_paths(
                 continue;
             }
             let plan = exporter.plan_table_artifact(table_meta)?;
-            let path = data_task.output.join(&plan.path);
+            let path = lexical_normalize_path(&data_task.output.join(&plan.path));
             if !paths.insert(path.clone()) {
                 return Err(ConfigForgeError::Validation(format!(
                     "multiple runtime data artifacts target `{}`",
@@ -718,7 +747,7 @@ fn civil_from_unix_days(days: i64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use crate::codegen::{default_module_name, CodeExportLanguage, CodegenTaskConfig};
     use crate::data::DataTable;
@@ -746,6 +775,30 @@ mod tests {
     fn converts_unix_days_to_civil_date() {
         assert_eq!(civil_from_unix_days(0), (1970, 1, 1));
         assert_eq!(civil_from_unix_days(20_590), (2026, 5, 17));
+    }
+
+    #[test]
+    fn lexical_normalize_path_collapses_current_and_parent_components() {
+        assert_eq!(
+            lexical_normalize_path(Path::new("out/./data/sub/../items.json")),
+            PathBuf::from("out/data/items.json")
+        );
+    }
+
+    #[test]
+    fn lexical_normalize_path_preserves_leading_parent_components() {
+        assert_eq!(
+            lexical_normalize_path(Path::new("../../data/../meta")),
+            PathBuf::from("../../meta")
+        );
+    }
+
+    #[test]
+    fn lexical_normalize_path_keeps_absolute_root_when_parent_escapes() {
+        assert_eq!(
+            lexical_normalize_path(Path::new("/../tmp/./data/..")),
+            PathBuf::from("/tmp")
+        );
     }
 
     #[test]
