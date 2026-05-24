@@ -318,29 +318,28 @@ Meta 中的 `desc` 是代码生成注释的主要来源。Code generator 应按�
 
 ## 6.5 Artifact Model
 
-Artifact 类型：
+Artifact 内容类型：
 
-| Kind | 说明 |
+| Content | 说明 |
 | --- | --- |
-| RuntimeData | 运行时数据。 |
-| GeneratedCode | 生成代码。 |
-| SpecialExport | POT、资源清单、schema、导出摘要等特殊导出产物。 |
+| Text | UTF-8 文本文件，例如 generated code、POT、CSV manifest。 |
+| Binary | 二进制文件，例如 MessagePack runtime data、未来二进制 schema。 |
 
 要求：
 
 - 导出前发现路径冲突。
 - 路径冲突检查使用规范化绝对 artifact path；两个 data task 如果规划出同 output + 同 format + 同 table 文件名，必须报错。
 - 产物写入通过 Artifact Writer。
-- Artifact Writer 支持 `temp_commit` 和 `direct` 写入策略；推荐默认 `temp_commit`。
+- Artifact Writer 支持 `direct` 和 `temp-commit` 写入策略；CLI 默认 `direct`，可通过 `--write-mode temp-commit` 选择临时提交写入。
 - 并行生成不影响 artifact write result 顺序。
-- 失败 target 不应提交部分产物。
+- `temp-commit` 模式在写临时文件失败时不提交最终产物，并清理已创建的临时文件。
 - 未来 summary manifest 可作为 special exporter 产物；记录 runtime data artifact 时，应以 `(target_name, data_name, table_name)` 作为稳定 key，并额外记录 `format`、相对 data artifact root 的 `path` 和最终写入 path，避免同一 table 的多格式产物互相覆盖。
 
 写入策略：
 
 | 策略 | 说明 |
 | --- | --- |
-| `temp_commit` | 先写入临时文件或临时目录，所有 artifact 成功后再确定性提交到最终路径。 |
+| `temp-commit` | 先写入临时文件或临时目录，所有 artifact 成功后再确定性提交到最终路径。 |
 | `direct` | 直接写入最终路径，适合本地调试或项目明确选择该行为的场景。 |
 
 无论使用哪种策略，都必须在写入前完成 export plan 和路径冲突检查。
@@ -359,6 +358,8 @@ config-forge --project ConfigForge.toml --target client
 | --- | --- |
 | `--project <FILE>` | Project Config 路径。 |
 | `--target <NAME>` | 要构建的 target 名称。 |
+| `--dry-run` | 执行完整构建计划和 artifact 路径冲突检查，但不创建目录、不写出文件。 |
+| `--write-mode <direct\|temp-commit>` | 非 dry-run 构建使用的 artifact 写入模式；默认 `direct`。如果同时传入 `--dry-run`，以 dry-run 行为为准。 |
 
 执行行为：
 
@@ -367,7 +368,9 @@ config-forge --project ConfigForge.toml --target client
 3. 合并所有配置片段中的 `enums`、`structs`、`tables` 并完成 link/validate。
 4. 如果 target 声明 `[[targets.data]]`，再按 data task 读取 Data source、归一化、校验并写出 runtime data；同 input 的多格式 data task 可复用加载结果，不同 input 必须分别派生 DataSet-dependent ExportView。
 5. 如果 target 声明 `[[targets.code]]`，按每个 code task 的语言、输出目录和绑定 data task 生成代码。
-6. 未声明的任务不读取对应输入、不产生对应输出。例如 code-only target 不读取 Data。
+6. 汇总 runtime data 和 generated code artifacts，统一完成路径归一化、稳定排序和冲突检查。
+7. 按 `--dry-run` / `--write-mode` 写出 artifact，或在 dry-run 模式下只返回写入计划。
+8. 未声明的任务不读取对应输入、不产生对应输出。例如 code-only target 不读取 Data。
 
 ## 6.7 退出码
 

@@ -9,8 +9,8 @@ Artifact 模块需要解决：
 1. 统一 runtime data 与 generated code 的制品模型，避免 exporter / codegen 各自定义写文件流程。
 2. 在写入前集中检查输出路径冲突，覆盖跨 data task、跨 code task、runtime data 与 generated code 之间的冲突。
 3. 支持 `dry-run`：完整执行配置加载、Meta link、data load、validation、serialization/codegen 和路径规划，但不写入最终文件。
-4. 支持 `direct` 与 `temp_commit` 两种写入策略；第一阶段可先实现 direct + dry-run，保留 temp-commit API 位置。
-5. 生成稳定的写入结果：路径稳定排序、artifact kind 明确、bytes/文本内容统一表达。
+4. 支持 `direct` 与 `temp-commit` 两种写入策略，并支持 `dry-run` 写入计划。
+5. 生成稳定的写入结果：路径稳定排序、bytes/文本内容统一表达。
 6. 保持模块依赖方向简单：artifact 是底层服务模块，不依赖 exporter、codegen、build、project、data、validation。
 
 非目标：
@@ -27,8 +27,8 @@ Artifact 模块需要解决：
 ```text
 src/artifact/
   mod.rs          # 对外 API 与 re-export
-  model.rs        # Artifact / ArtifactKind / ArtifactContent / ArtifactPath
-  writer.rs       # ArtifactWriter / ArtifactWriteMode / dry-run / direct / temp_commit
+  model.rs        # Artifact / ArtifactContent / ArtifactPath
+  writer.rs       # ArtifactWriter / ArtifactWriteMode / dry-run / direct / temp-commit
   tests.rs        # 路径冲突、dry-run、写入策略单元测试
 ```
 
@@ -41,7 +41,6 @@ src/artifact/
 ```rust
 pub struct Artifact {
     pub path: PathBuf,
-    pub kind: ArtifactKind,
     pub content: ArtifactContent,
 }
 ```
@@ -49,22 +48,9 @@ pub struct Artifact {
 语义：
 
 - `path` 是最终输出路径，可以是绝对路径，也可以是 build 已按 project root / target output 解析后的路径。
-- `kind` 表示制品来源与用途，用于诊断、日志和测试断言。
-- `content` 统一表达 binary/text 内容；写入层只处理 bytes。
+- `content` 统一表达 binary/text 内容；写入层只处理路径、bytes 和写入策略，不理解制品业务来源。
 
-### 7.3.2 `ArtifactKind`
-
-```rust
-pub enum ArtifactKind {
-    RuntimeData,
-    GeneratedCode,
-    SpecialExport,
-}
-```
-
-短期只需要 `RuntimeData` 与 `GeneratedCode`。`SpecialExport` 为后续 POT、asset manifest、summary manifest 等能力预留；Artifact 模块不需要区分它们的具体业务类型。
-
-### 7.3.3 `ArtifactContent`
+### 7.3.2 `ArtifactContent`
 
 ```rust
 pub enum ArtifactContent {
@@ -80,7 +66,7 @@ impl ArtifactContent {
 
 Codegen 可以返回 `Text`，runtime data exporter 可以返回 `Binary`。Artifact Writer 不关心文本编码转换之外的业务语义；文本统一以 UTF-8 写入。
 
-### 7.3.4 `ArtifactWriteMode`
+### 7.3.3 `ArtifactWriteMode`
 
 ```rust
 pub enum ArtifactWriteMode {
@@ -94,9 +80,9 @@ pub enum ArtifactWriteMode {
 
 - `DryRun`：检查路径冲突并返回写入计划，不创建目录、不写临时文件、不覆盖最终文件。
 - `Direct`：创建父目录并直接写最终路径。
-- `TempCommit`：先写入同目录临时文件，全部成功后再 rename/commit；失败时不提交最终产物。第一阶段可以保留枚举与错误提示，后续实现完整事务语义。
+- `TempCommit`：先写入同目录临时文件，全部成功后再 rename/commit；失败时清理已创建的临时文件，未成功提交的 artifact 不写入最终路径。
 
-### 7.3.5 `ArtifactWriteResult`
+### 7.3.4 `ArtifactWriteResult`
 
 ```rust
 pub struct ArtifactWriteResult {
@@ -116,10 +102,10 @@ Build collects Vec<Artifact>
   -> ensure no duplicate final path
   -> if DryRun: return ArtifactWriteResult without filesystem writes
   -> if Direct: create parent dirs and write bytes
-  -> if TempCommit: write temp files then commit atomically where possible
+  -> if TempCommit: write same-directory temp files, then rename to final paths
 ```
 
-路径冲突检查必须在任何写入前完成，错误信息包含冲突路径和至少两个 artifact kind，方便用户定位 data/code task 配置问题。
+路径冲突检查必须在任何写入前完成，错误信息包含冲突路径，方便用户定位 data/code task 配置问题。
 
 ## 7.5 与 Exporter 的关系
 
@@ -138,7 +124,6 @@ pub struct RuntimeDataArtifact {
 
 - `RuntimeDataFile` 仍是 codegen 需要消费的 runtime loader 路径契约。
 - `Artifact.path` 是实际写入路径，由 data task output root + runtime data file path 得到。
-- `Artifact.kind = ArtifactKind::RuntimeData`。
 - Exporter 不再调用 `fs::create_dir_all` / `fs::write`。
 
 `export_runtime_data()` 包装函数应通过 Artifact Writer 写出产物，避免存在两套写入路径。
@@ -150,7 +135,6 @@ Codegen 继续返回生成文件列表，但文件模型应迁移到 artifact �
 ```rust
 pub struct GeneratedFile {
     pub path: PathBuf,
-    pub kind: ArtifactKind,
     pub content: String,
 }
 ```
@@ -161,7 +145,7 @@ pub struct GeneratedFile {
 pub type GeneratedFile = Artifact;
 ```
 
-第一阶段推荐保留 `GeneratedFile` 作为 codegen 语义类型，但 `kind` 使用 `artifact::ArtifactKind`，Build 在写入前统一转换为 `ArtifactContent::Text`。
+第一阶段推荐保留 `GeneratedFile` 作为 codegen 语义类型，Build 在写入前统一转换为 `ArtifactContent::Text`。
 
 ## 7.7 与 Build / CLI 的关系
 
@@ -197,13 +181,14 @@ Artifact 模块单元测试应覆盖：
 3. direct 模式创建父目录并写入 text/binary 内容。
 4. write entries 按 path 稳定排序。
 5. runtime data artifact 与 generated code artifact 冲突时由统一 writer 报错。
-6. temp-commit 未实现阶段应有明确错误或受控 fallback，不允许静默 direct 写入。
+6. temp-commit 模式先写临时文件再提交最终路径，写临时文件失败时清理临时文件。
 
 集成测试应覆盖：
 
 1. CLI `--dry-run` 对标准工程执行成功但不产生输出文件。
 2. 正常 build 仍产生 JSON / MessagePack / generated code。
 3. data output 与 code output 指向同一路径时报统一 artifact conflict。
+4. CLI `--write-mode temp-commit` 产生与 direct 模式等价的最终 artifact。
 
 ## 7.10 分阶段落地
 
@@ -216,7 +201,7 @@ Artifact 模块单元测试应覆盖：
 ### Phase 2：最小 Artifact 模块
 
 - 新增 `src/artifact/`。
-- 实现 `Artifact`、`ArtifactKind`、`ArtifactContent`、`ArtifactWriter`、`ArtifactWriteMode::DryRun/Direct`。
+- 实现 `Artifact`、`ArtifactContent`、`ArtifactWriter`、`ArtifactWriteMode::DryRun/Direct`。
 - Build generated code 写入改走 Artifact Writer。
 
 ### Phase 3：Runtime data 迁移

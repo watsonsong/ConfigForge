@@ -5,8 +5,9 @@ use rayon::ThreadPool;
 
 use crate::{
     ConfigForgeError, Result,
+    artifact::Artifact,
     data::{DataLoadPlan, DataLoader},
-    exporter::{DataFormatRegistry, RuntimeDataFile, export_runtime_data},
+    exporter::{DataFormatRegistry, RuntimeDataFile, export_runtime_data_artifacts},
     meta::{LinkedMetaModel, TargetTags},
     project::lexical_normalize_path,
     validation::{normalize_data_set, validate_normalized_data_set_for_target_with_report},
@@ -23,6 +24,7 @@ pub(super) struct RuntimeConfigForgeResult {
 pub(super) struct RuntimeExportOutput {
     pub(super) warnings: Vec<String>,
     pub(super) results: Vec<RuntimeConfigForgeResult>,
+    pub(super) artifacts: Vec<Artifact>,
 }
 
 pub(super) fn export_runtime_data_tasks(
@@ -35,6 +37,7 @@ pub(super) fn export_runtime_data_tasks(
         return Ok(RuntimeExportOutput {
             warnings: Vec::new(),
             results: Vec::new(),
+            artifacts: Vec::new(),
         });
     }
 
@@ -51,6 +54,7 @@ pub(super) fn export_runtime_data_tasks(
     let mut normalized_data_sets: BTreeMap<PathBuf, crate::data::DataSet> = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut results = Vec::new();
+    let mut artifacts = Vec::new();
 
     for data_task in data_tasks {
         let data_exporter = registry.require(&data_task.format)?;
@@ -69,7 +73,7 @@ pub(super) fn export_runtime_data_tasks(
         let data_set = normalized_data_sets
             .get(&data_task.input)
             .expect("data set should be loaded before export");
-        let files = export_runtime_data(
+        let runtime_artifacts = export_runtime_data_artifacts(
             &data_task.output,
             linked_meta,
             target_tags,
@@ -77,13 +81,26 @@ pub(super) fn export_runtime_data_tasks(
             data_exporter,
             pool,
         )?;
+        let files = runtime_artifacts
+            .iter()
+            .map(|artifact| artifact.file.clone())
+            .collect::<Vec<_>>();
+        artifacts.extend(
+            runtime_artifacts
+                .into_iter()
+                .map(|artifact| artifact.artifact),
+        );
         results.push(RuntimeConfigForgeResult {
             data_name: data_task.name.clone(),
             files,
         });
     }
 
-    Ok(RuntimeExportOutput { warnings, results })
+    Ok(RuntimeExportOutput {
+        warnings,
+        results,
+        artifacts,
+    })
 }
 
 fn ensure_planned_runtime_output_paths(

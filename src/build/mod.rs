@@ -1,6 +1,4 @@
 use std::{
-    collections::BTreeSet,
-    fs,
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -16,6 +14,7 @@ pub use options::{BuildOptions, BuildOutput, ExecutionOptions};
 
 use crate::{
     ConfigForgeError, Result,
+    artifact::{Artifact, ArtifactWriter},
     codegen::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, GeneratedFile,
         builtin_generators,
@@ -52,7 +51,8 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
     let runtime_export =
         export_runtime_data_tasks(&target.data, &linked_meta, &target_tags, &cpu_pool)?;
 
-    write_generated_code(
+    let mut artifacts = runtime_export.artifacts;
+    artifacts.extend(collect_generated_code_artifacts(
         project_root,
         &CodeExportProject::from(&project.project),
         &target,
@@ -60,14 +60,16 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
         &linked_meta,
         runtime_export.results,
         &cpu_pool,
-    )?;
+    )?);
+
+    ArtifactWriter::new(options.artifact_write_mode).write(artifacts)?;
 
     Ok(BuildOutput {
         warnings: runtime_export.warnings,
     })
 }
 
-fn write_generated_code(
+fn collect_generated_code_artifacts(
     project_root: &Path,
     project: &CodeExportProject,
     target: &NormalizedTargetConfig,
@@ -75,7 +77,7 @@ fn write_generated_code(
     linked_meta: &crate::meta::LinkedMetaModel<'_>,
     runtime_data_results: Vec<RuntimeConfigForgeResult>,
     pool: &ThreadPool,
-) -> Result<()> {
+) -> Result<Vec<Artifact>> {
     let generated_at = generated_at();
     let generators = builtin_generators();
     let context = CodegenTaskContext {
@@ -101,30 +103,10 @@ fn write_generated_code(
         generated_files.extend(result?);
     }
 
-    let mut planned_paths = BTreeSet::new();
-    for file in &generated_files {
-        if !planned_paths.insert(file.path.clone()) {
-            return Err(ConfigForgeError::Validation(format!(
-                "multiple generated code artifacts target `{}`",
-                file.path.display()
-            )));
-        }
-    }
-
-    for file in generated_files {
-        if let Some(parent) = file.path.parent() {
-            fs::create_dir_all(parent).map_err(|source| ConfigForgeError::WriteFile {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-        fs::write(&file.path, file.content).map_err(|source| ConfigForgeError::WriteFile {
-            path: file.path,
-            source,
-        })?;
-    }
-
-    Ok(())
+    Ok(generated_files
+        .into_iter()
+        .map(|file| Artifact::text(file.path, file.content))
+        .collect())
 }
 
 struct CodegenTaskContext<'a, 'meta> {

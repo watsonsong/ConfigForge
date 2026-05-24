@@ -1,12 +1,13 @@
 use std::{num::NonZeroUsize, path::Path};
 
-use crate::{ConfigForgeError, Result};
+use crate::{ConfigForgeError, Result, artifact::ArtifactWriteMode};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuildOptions<'a> {
     pub project_path: &'a Path,
     pub target_name: &'a str,
     pub execution: ExecutionOptions,
+    pub artifact_write_mode: ArtifactWriteMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

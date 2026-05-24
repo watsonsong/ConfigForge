@@ -6,8 +6,6 @@ use crate::{
     meta::{LinkedField, LinkedFragmentPayload, LinkedMetaModel, PrimitiveFieldType, TableKind},
 };
 
-use super::ArtifactKind;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeModel {
     pub enums: Vec<CodeEnum>,
@@ -108,7 +106,6 @@ pub enum CodeTypeRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedFile {
     pub path: PathBuf,
-    pub kind: ArtifactKind,
     pub content: String,
 }
 

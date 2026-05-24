@@ -219,7 +219,7 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 
 ### Artifact Writer
 
-- `temp_commit` 模式下导出失败不提交部分最终产物。
+- `temp-commit` 模式下写临时文件失败不提交最终产物。
 - `direct` 模式下按项目配置直接写目标路径。
 - 路径冲突在任何写入前报错。
 - 并行 artifact 生成不影响 manifest 稳定排序。

@@ -216,9 +216,9 @@
 | 目标类型 | Target Type | `TargetTypeName` | 目标语言或引擎中的具体类型名。 |
 | 导出产物 | Export Artifact | `ExportArtifact` | 一个生成文件，例如 runtime data、code、POT、asset manifest。 |
 | 产物清单 | Artifact Manifest | `ArtifactManifest` | 可由 special exporter 生成的本次导出产物列表。 |
-| 产物写入器 | Artifact Writer | `ArtifactWriter` | 统一写文件、dry-run 和 temp commit 的组件。 |
-| 产物写入策略 | Artifact Write Mode | `ArtifactWriteMode` | `temp_commit` 或 `direct`。 |
-| 临时提交写入 | Temp Commit Write | `ArtifactWriteMode::TempCommit`, `temp_commit` | 先写临时文件，成功后统一提交到最终路径。 |
+| 产物写入器 | Artifact Writer | `ArtifactWriter` | 统一写文件、dry-run 和 temp-commit 的组件。 |
+| 产物写入策略 | Artifact Write Mode | `ArtifactWriteMode` | `dry-run`、`direct` 或 `temp-commit`。 |
+| 临时提交写入 | Temp Commit Write | `ArtifactWriteMode::TempCommit`, `temp-commit` | 先写临时文件，成功后统一提交到最终路径。 |
 | 直接写入 | Direct Write | `ArtifactWriteMode::Direct`, `direct` | 直接写最终路径。 |
 | CLI 命令 | CLI Command | `CliCommand` | `validate`、`export`、`inspect`、`debug`。 |
 | 校验命令 | Validate Command | `validate` | 只读取、组合、过滤和校验，不写正式产物。 |

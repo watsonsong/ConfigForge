@@ -1,3 +1,4 @@
+pub mod artifact;
 pub mod build;
 pub mod cli;
 pub mod codegen;

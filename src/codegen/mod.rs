@@ -316,11 +316,6 @@ pub fn default_module_name(language: CodeExportLanguage) -> &'static str {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ArtifactKind {
-    GeneratedCode,
-}
-
 pub struct CodeExportInput<'meta> {
     pub meta: &'meta LinkedMetaModel<'meta>,
     pub target_tags: TargetTags,

@@ -1,8 +1,11 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
-use crate::build::{BuildOptions, ExecutionOptions, build_target};
+use crate::{
+    artifact::ArtifactWriteMode,
+    build::{BuildOptions, ExecutionOptions, build_target},
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "config-forge")]
@@ -26,6 +29,27 @@ pub struct Cli {
     /// Run with one CPU worker and one I/O/network slot for reproducibility.
     #[arg(long)]
     serial: bool,
+    /// Execute the full build plan without writing artifacts.
+    #[arg(long)]
+    dry_run: bool,
+    /// Artifact write mode to use when not running with --dry-run.
+    #[arg(long, value_enum)]
+    write_mode: Option<CliWriteMode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum CliWriteMode {
+    Direct,
+    TempCommit,
+}
+
+impl From<CliWriteMode> for ArtifactWriteMode {
+    fn from(mode: CliWriteMode) -> Self {
+        match mode {
+            CliWriteMode::Direct => Self::Direct,
+            CliWriteMode::TempCommit => Self::TempCommit,
+        }
+    }
 }
 
 pub fn run() -> anyhow::Result<()> {
@@ -39,14 +63,24 @@ pub fn run_with_args(cli: Cli) -> anyhow::Result<()> {
         cli.network_concurrency,
         cli.serial,
     )?;
+    let artifact_write_mode = if cli.dry_run {
+        ArtifactWriteMode::DryRun
+    } else {
+        cli.write_mode.unwrap_or(CliWriteMode::Direct).into()
+    };
     let output = build_target(BuildOptions {
         project_path: &cli.project,
         target_name: &cli.target,
         execution,
+        artifact_write_mode,
     })?;
     for warning in output.warnings {
         eprintln!("warning: {warning}");
     }
-    println!("target `{}` built", cli.target);
+    if cli.dry_run {
+        println!("target `{}` dry-run succeeded", cli.target);
+    } else {
+        println!("target `{}` built", cli.target);
+    }
     Ok(())
 }

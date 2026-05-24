@@ -102,8 +102,8 @@ Artifact Writer 已拆为独立 `src/artifact/` 模块，Codegen 后续应通过
 ```text
 src/artifact/
   mod.rs
-  model.rs            # Artifact / ArtifactKind / ArtifactPath
-  writer.rs           # direct / temp_commit 写入策略
+  model.rs            # Artifact / ArtifactContent / ArtifactPath
+  writer.rs           # dry-run / direct / temp-commit 写入策略
 ```
 
 `CodeGenerator` 可以继续返回 `Vec<GeneratedFile>`，但 Build 写文件必须统一转换为 `artifact::Artifact` 并交给 Artifact Writer；Codegen 自身不直接写文件。
@@ -365,7 +365,6 @@ pub struct CodeExportInput<'meta> {
 ```rust
 pub struct GeneratedFile {
     pub path: PathBuf,
-    pub kind: ArtifactKind,
     pub content: String,
 }
 ```
@@ -1693,11 +1692,11 @@ pub struct CodegenDiagnostic {
 
 ### Phase 4：Artifact Writer
 
-状态：部分完成。
+状态：已完成当前阶段。
 
 1. runtime data 与 generated code 都以 `GeneratedFile`/artifact 形态参与写出。
 2. 已做输出路径冲突检查。
-3. 当前写入策略为 direct write；`temp_commit` 未实现。
+3. CLI 支持 dry-run、direct write 和 `temp-commit` 写入模式；`--dry-run` 优先于 `--write-mode`。
 4. summary manifest 可作为 special exporter 产物独立实现。
 
 ## 9.18 第一阶段完成标准

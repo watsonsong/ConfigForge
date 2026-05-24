@@ -1,11 +1,10 @@
 use crate::{ConfigForgeError, Result};
 
 use super::{
-    ArtifactKind, CodeEnum, CodeExportInput, CodeExportLanguage, CodeFragmentPayload,
-    CodeGenerator, CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTableKind, CodeTypeRef,
-    CodegenOptions, GeneratedFile, GeneratedSymbol, build_code_model,
-    ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
-    render_file_header,
+    CodeEnum, CodeExportInput, CodeExportLanguage, CodeFragmentPayload, CodeGenerator, CodeIndex,
+    CodeModel, CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, GeneratedFile,
+    GeneratedSymbol, build_code_model, ensure_unique_generated_symbols,
+    ir::require_non_empty_index_fields, naming, render_file_header,
 };
 
 pub struct CppCodeGenerator;
@@ -154,12 +153,10 @@ impl CodeGenerator for CppCodeGenerator {
         Ok(vec![
             GeneratedFile {
                 path: input.target.out_dir.join("generated.hpp"),
-                kind: ArtifactKind::GeneratedCode,
                 content: header,
             },
             GeneratedFile {
                 path: input.target.out_dir.join("generated.cpp"),
-                kind: ArtifactKind::GeneratedCode,
                 content: source,
             },
         ])

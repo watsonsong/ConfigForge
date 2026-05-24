@@ -438,23 +438,23 @@ build ExportValidationView for target
 
 Runtime data export 可拆成三段：
 
-1. Coordination task：先构造 `ArtifactPlan`，只包含 path/kind/producer/estimated_size，不包含 bytes。
+1. Coordination task：确定目标 artifact path，并在构建期汇总 artifact。
 2. CPU task：按 table 构建 payload 并序列化为 bytes。
 3. I/O task：写出文件。
 
 ```text
 PlanRuntimeData(table)
-  -> ArtifactPlan { path, kind, producer, estimated_size }
+  -> Artifact { path, content }
 conflict check by path
 bounded GenerateRuntimeData(table)
-  -> ArtifactContent::Bytes(bytes)
+  -> ArtifactContent::Binary(bytes)
 bounded WriteArtifact(path, bytes)
 ```
 
 路径冲突检查必须在写入前完成：
 
 ```text
-collect all ArtifactPlan
+collect all Artifact
   -> sort by path
   -> reject duplicate path
   -> bounded generate/write pipeline
@@ -502,19 +502,20 @@ Artifact write 是 async I/O task。
 建议语义：
 
 ```text
-ArtifactPlan[]
+Artifact[]
   -> detect conflicts
   -> ensure parent dirs
   -> write temp files concurrently
   -> commit/rename deterministically
 ```
 
-第一阶段可保持 direct write，但必须先统一做路径冲突检查。direct write 不保证失败时工作区不变；它只保证：
+当前实现支持 dry-run、direct write 和 temp-commit。direct write 不保证失败时工作区不变；它只保证：
 
 - path conflict 在任何写入前完成；
 - 单文件写入失败有明确诊断；
 - 不并发写同一路径；
-- 后续 `temp_commit` 才提供 all-or-nothing。
+
+`temp-commit` 写入模式先写同目录临时文件，再按稳定顺序 rename 到最终路径；写临时文件失败时清理已创建临时文件，避免提交未完成的最终产物。
 
 ## 7. 调度策略
 
@@ -660,25 +661,18 @@ pub trait SourceProvider: Send + Sync {
 ### 9.3 Artifact model
 
 ```rust
-pub struct ArtifactPlan {
+pub struct Artifact {
     pub path: PathBuf,
-    pub kind: ArtifactKind,
-    pub producer: TaskKey,
-    pub estimated_size: Option<u64>,
+    pub content: ArtifactContent,
 }
 
 pub enum ArtifactContent {
     Text(String),
-    Bytes(Vec<u8>),
-}
-
-pub struct GeneratedArtifact {
-    pub plan: ArtifactPlan,
-    pub content: ArtifactContent,
+    Binary(Vec<u8>),
 }
 ```
 
-runtime data 和 generated code 都应进入同一写出管线。`ArtifactPlan` 必须先于 content generation 汇总，用于 path conflict 检查；`GeneratedArtifact` 应通过 bounded pipeline 生成和写出，避免所有 artifact content 同时驻留内存。
+runtime data 和 generated code 都应进入同一写出管线。Artifact writer 只关心最终路径和文本/二进制内容，不承载 runtime data、generated code 或 producer 等业务语义。写出前必须统一完成路径归一化、稳定排序和 path conflict 检查；后续并发阶段应通过 bounded pipeline 生成和写出，避免所有 artifact content 同时驻留内存。
 
 ## 10. 迁移计划
 

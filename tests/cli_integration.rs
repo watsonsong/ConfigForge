@@ -47,6 +47,110 @@ fn builds_code_only_target_without_loading_data() {
 }
 
 #[test]
+fn dry_run_builds_plan_without_writing_artifacts() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_out_dir = temp_dir.path().join("out/data");
+    let rust_out_dir = temp_dir.path().join("out/code/rust");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [[targets.data]]
+                input = "{}"
+                output = "{}"
+                format = "json"
+
+                [[targets.code]]
+                language = "rust"
+                output = "{}"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            data_out_dir.display(),
+            rust_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+        "--dry-run",
+        "--write-mode",
+        "temp-commit",
+    ]);
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "target `client` dry-run succeeded",
+    ));
+
+    assert!(!data_out_dir.join("items.json").exists());
+    assert!(!rust_out_dir.join("generated.rs").exists());
+}
+
+#[test]
+fn temp_commit_write_mode_builds_artifacts() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_out_dir = temp_dir.path().join("out/data");
+    let rust_out_dir = temp_dir.path().join("out/code/rust");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [[targets.data]]
+                input = "{}"
+                output = "{}"
+                format = "json"
+
+                [[targets.code]]
+                language = "rust"
+                output = "{}"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            data_out_dir.display(),
+            rust_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+        "--write-mode",
+        "temp-commit",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `client` built"));
+
+    assert!(data_out_dir.join("items.json").exists());
+    let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
+    assert!(rust_code.contains("pub struct ItemsRow"));
+}
+
+#[test]
 fn builds_target_from_project_config() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let data_out_dir = temp_dir.path().join("out/data");

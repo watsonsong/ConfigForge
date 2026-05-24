@@ -1,6 +1,5 @@
 use std::{
     collections::BTreeMap,
-    fs,
     path::{Path, PathBuf},
 };
 
@@ -9,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ConfigForgeError, Result,
+    artifact::{Artifact, ArtifactWriteMode, ArtifactWriter},
     data::{DataResolver, DataSet, DataTable, DataValue, ResolvedValue},
     meta::{LinkedMetaModel, LinkedTableMeta, TableKind, TargetTags},
 };
@@ -133,11 +133,29 @@ pub fn export_runtime_data(
     exporter: &dyn DataFormatExporter,
     pool: &rayon::ThreadPool,
 ) -> Result<Vec<RuntimeDataFile>> {
-    fs::create_dir_all(out_dir).map_err(|source| ConfigForgeError::WriteFile {
-        path: out_dir.to_path_buf(),
-        source,
-    })?;
+    let artifacts =
+        export_runtime_data_artifacts(out_dir, linked_meta, target_tags, data_set, exporter, pool)?;
+    let files = artifacts
+        .iter()
+        .map(|artifact| artifact.file.clone())
+        .collect::<Vec<_>>();
+    ArtifactWriter::new(ArtifactWriteMode::Direct).write(
+        artifacts
+            .into_iter()
+            .map(|artifact| artifact.artifact)
+            .collect(),
+    )?;
+    Ok(files)
+}
 
+pub fn export_runtime_data_artifacts(
+    out_dir: &Path,
+    linked_meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    data_set: &DataSet,
+    exporter: &dyn DataFormatExporter,
+    pool: &rayon::ThreadPool,
+) -> Result<Vec<RuntimeDataArtifact>> {
     let mut plans = Vec::new();
     for table_meta in &linked_meta.tables {
         if table_meta.meta.is_exported_for(target_tags) {
@@ -153,7 +171,7 @@ pub fn export_runtime_data(
     let max_in_flight_artifacts = pool
         .current_num_threads()
         .clamp(1, MAX_IN_FLIGHT_RUNTIME_ARTIFACTS);
-    let mut runtime_data_files = Vec::new();
+    let mut artifacts = Vec::new();
     for chunk in plans.chunks(max_in_flight_artifacts) {
         let mut generated_results = pool.install(|| {
             chunk
@@ -188,29 +206,29 @@ pub fn export_runtime_data(
         for (_, artifact) in generated_results {
             let artifact = artifact?;
             let path = out_dir.join(&artifact.plan.path);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).map_err(|source| ConfigForgeError::WriteFile {
-                    path: parent.to_path_buf(),
-                    source,
-                })?;
-            }
-            fs::write(&path, artifact.content).map_err(|source| ConfigForgeError::WriteFile {
-                path: path.clone(),
-                source,
-            })?;
-            runtime_data_files.push(RuntimeDataFile {
+            let file = RuntimeDataFile {
                 table_name: artifact.plan.table_name,
                 path: artifact.plan.path.to_string_lossy().into_owned(),
+            };
+            artifacts.push(RuntimeDataArtifact {
+                file,
+                artifact: Artifact::binary(path, artifact.content),
             });
         }
     }
-    Ok(runtime_data_files)
+    Ok(artifacts)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeDataFile {
     pub table_name: String,
     pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeDataArtifact {
+    pub file: RuntimeDataFile,
+    pub artifact: Artifact,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
