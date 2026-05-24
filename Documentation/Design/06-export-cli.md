@@ -197,6 +197,54 @@ reader 的基础语义必须覆盖当前 Meta 类型：int、float、bool、stri
 
 格式选择由 code task 引用的 `targets.data` 任务决定，并影响导出的 table data file 后缀；生成代码保留 data file path，并按 data task format 生成对应的通用读取路径。若 target 同时导出 JSON 与 MessagePack，可以分别配置 TypeScript code task 引用 `data = "json"`、C++ code task 引用 `data = "messagepack"`。无论 Meta 新增多少表和字段，接入方的 RuntimeDataLoader 接口都不应变化；变化只体现在重新生成的解析代码中。
 
+### 6.2.2 标准 RuntimeDataReader 实现包
+
+ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader adapter，覆盖主流目标语言与 runtime data format 的组合。目标不是让生成代码强依赖这些 adapter，而是提供可直接复用、可拷贝修改、可作为测试 harness 基础实现的标准参考实现。
+
+设计原则：
+
+1. **生成代码核心仍保持无第三方 runtime 依赖**：Rust / C++ / TypeScript generated code 只声明 reader / loader 契约和 generated parser，不直接依赖 `serde_json`、`rmp-serde`、`nlohmann/json`、`msgpack-c`、npm MessagePack 包等。
+2. **标准 adapter 按语言和格式拆分**：如果有 N 种语言、M 种数据格式，至少应提供 N×M 个 reader adapter 单元。每个单元只负责“某语言中把某格式的通用 value/cursor 暴露为 RuntimeDataReader”。
+3. **资源加载与格式解码分层**：`RuntimeDataLoader` 的文件系统、HTTP、引擎资源系统等 transport 逻辑应与 JSON / MessagePack reader 解码逻辑分开。标准包可以提供常用组合（如 Node fs + JSON、Rust fs + MessagePack），但底层 reader 应可被自定义 loader 复用。
+4. **依赖显式可选**：不同语言/格式 adapter 允许依赖不同三方库，但依赖必须限制在对应 adapter 包/模块内，并通过 Cargo feature、npm optional dependency、CMake option / package manager 选项等机制显式启用。
+5. **测试与项目复用同源**：集成测试中的 harness 应优先使用这些标准 adapter 或其 fixture 包装，而不是在 harness 中长期内嵌一份独立 JSON / MessagePack reader 逻辑；这样测试能持续验证真实接入方会使用的 reader contract。
+
+首批格式矩阵建议：
+
+| 语言 | JSON adapter | MessagePack adapter | 依赖策略 |
+| --- | --- | --- | --- |
+| Rust | `serde_json::Value` reader | `rmp_serde` 解码到 `serde_json::Value` 或自有 value enum reader | Cargo features：`json`、`messagepack`、`fs`；默认只启用 core。 |
+| TypeScript | 原生 `JSON.parse` value reader | `@msgpack/msgpack` 或同类库解码后的 value reader | npm 包拆分或 optional peer dependency；Node fs / fetch loader 与格式 reader 分离。 |
+| C++ | 推荐 `nlohmann/json` reader；测试可保留轻量 JSON reader 作为 fallback 示例 | 推荐 `msgpack-c` reader，或解码到统一 variant/value 后适配 | CMake options：`DATAEXPORT_READER_JSON_NLOHMANN`、`DATAEXPORT_READER_MSGPACK_CPP`；不把三方头文件 vendored 到核心生成代码。 |
+
+标准 adapter 的产物形式按语言习惯决定：
+
+- **Rust**：由于当前 `RuntimeDataReader` trait 由 generated crate 声明，外部 crate 无法在不依赖用户 generated crate 的情况下“一次性”为 adapter 类型实现该 trait。短期应提供可复制/可 include 的 Rust module template，放入 generated crate 或业务 crate 后实现本地 trait；中期可评估把 reader trait 抽到稳定 runtime support crate，让 generated code 选择 `use config_forge_runtime::RuntimeDataReader`，从而使 adapter crate 可以直接实现 trait。
+- **TypeScript**：TypeScript 接口是结构化类型，标准 npm 包可以直接导出符合 `RuntimeDataReader` 形状的 classes/functions；generated code 无需 import adapter，业务侧把 adapter instance 传给 `GameData.load` 即可。
+- **C++**：`IRuntimeDataReader` 是 nominal virtual interface，adapter 需要与 generated header 一起编译。短期可提供 header/source template 或 header-only adapter，要求业务工程配置 generated header include path；中期可评估拆出稳定 runtime interface header，使 adapter 库不依赖某次 generated header。
+
+推荐仓库目录为顶层 `runtime_readers/`，例如：
+
+```text
+runtime_readers/
+  rust/
+    core/                 # trait glue/template、错误工具、测试 fixture glue
+    json_serde/           # serde_json reader + 可选 fs loader
+    messagepack_rmp/      # rmp-serde reader + 可选 fs loader
+  typescript/
+    core/                 # shared reader helpers / error helpers
+    json/                 # JSON.parse value reader
+    messagepack/          # @msgpack/msgpack value reader
+    loaders/              # node-fs、fetch 等 transport loader
+  cpp/
+    core/                 # adapter glue、错误工具、CMake helpers
+    json_nlohmann/        # nlohmann::json reader
+    messagepack_cpp/      # msgpack-c reader
+    loaders/              # filesystem / engine-resource 示例 loader
+```
+
+`runtime_readers/` 下的实现属于“标准 runtime adapter 源码/模板”，不是每次 codegen 的输出文件。后续可以通过 codegen option 选择是否把某个 adapter 拷贝到目标输出目录，也可以由游戏项目直接依赖该目录对应语言的 package/crate/library。
+
 ## 6.3 Special Exporter
 
 Special Exporter 当前属于 Planned / Not implemented。当前 `TargetConfig` 尚不支持 `special_exporters` 字段，正式可运行配置不应声明该字段；以下 POT 和 Asset Manifest 是目标态设计，后续应纳入统一 ArtifactPlan 后再实现。

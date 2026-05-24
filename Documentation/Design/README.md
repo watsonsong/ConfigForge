@@ -71,4 +71,5 @@
 | runtime data export | Implemented MVP | 支持 JSON 与 MessagePack registry；大表 streaming writer 仍为中期优化。 |
 | codegen backends | Implemented MVP | 已有 Rust / TypeScript / C++ 基础生成、loader/repository helper 和 target-aware IR；更丰富 FK helper/API 契约待后续确认。 |
 | generated runtime loader contract | Implemented MVP | 当前 Rust / C++ / TypeScript 生成代码已使用 Meta-agnostic `open + RuntimeDataReader + generated parser` 契约；用户 loader 新增表/字段时不变。上一阶段 typed loader 过渡契约已废弃。 |
+| standard runtime reader adapters | Planned | 应按语言×格式提供标准 RuntimeDataReader/RuntimeDataLoader adapter（如 Rust/JSON、Rust/MessagePack、TS/JSON、C++/JSON 等），方便游戏项目复用并作为集成测试 harness 基础；核心 generated code 仍不强依赖这些三方库。 |
 | diagnostics | Partial | 当前 Meta diagnostics 和部分 validation issues 已有 code/message 或局部结构；统一 path/table/field/source/span/hint/severity 仍待设计实现。 |
