@@ -498,7 +498,8 @@ fn rust_generator_emits_loader_table_and_index_helpers() {
     let content = &files[0].content;
 
     assert!(content.contains("pub trait RuntimeDataLoader"));
-    assert!(content.contains("fn load_items_rows(&self, path: &str)"));
+    assert!(content.contains("pub trait RuntimeDataReader"));
+    assert!(content.contains("fn open(&self, path: &str) -> Result<Self::Reader, String>;"));
     assert!(content.contains("pub const DATA_FILE: &'static str = \"items.json\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("RuntimeDataDecoder"));
@@ -509,6 +510,7 @@ fn rust_generator_emits_loader_table_and_index_helpers() {
     assert!(content.contains("pub enum ItemRarity"));
     assert!(content.contains("pub struct RewardInfo"));
     assert!(content.contains("pub struct ItemsRow"));
+    assert!(content.contains("fn read_from_reader<R: RuntimeDataReader>(reader: &R)"));
     assert!(content.contains("pub fn get_by_id"));
     assert!(content.contains("pub fn find_by_rarity"));
     assert!(content.contains("pub struct GameData"));
@@ -534,11 +536,11 @@ fn rust_generator_emits_object_table_as_typed_object_not_repository() {
     let files = RustCodeGenerator.generate(&input).expect("rust code");
     let content = &files[0].content;
 
-    assert!(content
-        .contains("fn load_game_config(&self, path: &str) -> Result<GameConfigRow, String>;"));
+    assert!(content.contains("fn open(&self, path: &str) -> Result<Self::Reader, String>;"));
     assert!(content.contains("pub game_config: GameConfigRow,"));
     assert!(content.contains("impl GameConfigRow"));
-    assert!(content.contains("loader.load_game_config(Self::DATA_FILE)"));
+    assert!(content.contains("let root = loader.open(Self::DATA_FILE)?;"));
+    assert!(content.contains("Self::read_from_reader(&root)"));
     assert!(!content.contains("pub struct GameConfigTable"));
     assert!(!content.contains("from_rows"));
     assert!(!content.contains("pub fn rows(&self)"));
@@ -774,13 +776,15 @@ fn typescript_generator_emits_async_loader_and_maps() {
     let content = &files[0].content;
 
     assert!(content.contains("export interface RuntimeDataLoader"));
-    assert!(content.contains("loadItemsRows(path: string): Promise<ItemsRow[]> | ItemsRow[];"));
+    assert!(content.contains("export interface RuntimeDataReader"));
+    assert!(content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;"));
     assert!(content.contains("static readonly dataFile = \"items.json\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("RuntimeDataDecoder"));
     assert!(!content.contains("loadBytes"));
     assert!(content.contains("export type ItemRarity"));
     assert!(content.contains("export interface ItemsRow"));
+    assert!(content.contains("function readItemsRow(reader: RuntimeDataReader): ItemsRow"));
     assert!(content.contains("readonly displayName: string;"));
     assert!(content.contains("static async load"));
     assert!(content.contains("getById(id: number): ItemsRow | undefined"));
@@ -810,11 +814,11 @@ fn typescript_generator_emits_object_table_as_typed_object_not_repository() {
         .expect("typescript code");
     let content = &files[0].content;
 
-    assert!(
-        content.contains("loadGameConfig(path: string): Promise<GameConfigRow> | GameConfigRow;")
-    );
+    assert!(content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;"));
     assert!(content.contains("readonly gameConfig: GameConfigRow;"));
-    assert!(content.contains("gameConfig: await loader.loadGameConfig(\"game_config.json\")"));
+    assert!(
+        content.contains("gameConfig: readGameConfigRow(await loader.open(\"game_config.json\"))")
+    );
     assert!(!content.contains("export class GameConfigTable"));
     assert!(!content.contains("rows(): readonly GameConfigRow[]"));
 }
@@ -833,7 +837,10 @@ fn cpp_generator_emits_loader_and_repository_declarations() {
     let source = generated_content(&files, "generated.cpp");
 
     assert!(content.contains("class IRuntimeDataLoader"));
-    assert!(content.contains("LoadItemsRows(const std::string& path)"));
+    assert!(content.contains("class IRuntimeDataReader"));
+    assert!(content.contains(
+        "virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;"
+    ));
     assert!(content.contains("static constexpr const char* DataFile = \"items.json\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("IRuntimeDataDecoder"));
@@ -847,7 +854,8 @@ fn cpp_generator_emits_loader_and_repository_declarations() {
     assert!(content.contains("std::vector<const ItemsRow*> FindByRarity"));
     assert!(source.contains("#include \"generated.hpp\""));
     assert!(source.contains("ItemsTable ItemsTable::Load(IRuntimeDataLoader& loader)"));
-    assert!(source.contains("return FromRows(loader.LoadItemsRows(DataFile));"));
+    assert!(source.contains("auto root = loader.Open(DataFile);"));
+    assert!(source.contains("rows.push_back(ReadItemsRow(*rows_reader->Index(row_index)));"));
     assert!(source.contains("ItemsTable ItemsTable::FromRows(std::vector<ItemsRow> rows)"));
     assert!(source.contains("table.by_id_.emplace(row.id, row_index);"));
     assert!(source.contains("table.by_rarity_[row.rarity].push_back(row_index);"));
@@ -880,13 +888,16 @@ fn cpp_generator_emits_object_table_as_typed_object_not_repository() {
     let content = generated_content(&files, "generated.hpp");
     let source = generated_content(&files, "generated.cpp");
 
-    assert!(content.contains("virtual GameConfigRow LoadGameConfig(const std::string& path) = 0;"));
+    assert!(content.contains(
+        "virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;"
+    ));
     assert!(content.contains("static constexpr const char* DataFile = \"game_config.json\";"));
     assert!(content.contains("const GameConfigRow& GameConfig() const"));
     assert!(content.contains("GameConfigRow game_config_;"));
     assert!(!content.contains("class GameConfigTable"));
     assert!(!content.contains("Rows() const"));
-    assert!(source.contains("data.game_config_ = loader.LoadGameConfig(GameConfigRow::DataFile);"));
+    assert!(source
+        .contains("data.game_config_ = ReadGameConfigRow(*loader.Open(GameConfigRow::DataFile));"));
 }
 
 fn generated_content<'a>(files: &'a [GeneratedFile], file_name: &str) -> &'a str {

@@ -1,6 +1,6 @@
 declare function require(name: string): any;
 
-import { GameData, RuntimeDataLoader } from "./generated";
+import { GameData, RuntimeDataLoader, RuntimeDataReader } from "./generated";
 
 const fs = require("fs");
 const pathModule = require("path");
@@ -11,86 +11,71 @@ if (!dataDir) {
   throw new Error("DATA_DIR should point to exported JSON data");
 }
 
-function readPayload(path: string): any {
-  const fullPath = pathModule.join(dataDir, path);
-  return JSON.parse(fs.readFileSync(fullPath, "utf8"));
-}
+class ValueReader implements RuntimeDataReader {
+  constructor(private readonly value: any) {}
 
-function rows(path: string): any[] {
-  const payload = readPayload(path);
-  if (!Array.isArray(payload.rows)) {
-    throw new Error(`collection payload ${path} should contain rows`);
+  field(name: string): RuntimeDataReader | undefined {
+    if (this.value === null || typeof this.value !== "object" || Array.isArray(this.value)) {
+      return undefined;
+    }
+    return Object.prototype.hasOwnProperty.call(this.value, name)
+      ? new ValueReader(this.value[name])
+      : undefined;
   }
-  return payload.rows;
-}
 
-function numberValue(value: unknown): number {
-  if (typeof value === "number") {
-    return value;
+  index(index: number): RuntimeDataReader {
+    if (!Array.isArray(this.value) || index < 0 || index >= this.value.length) {
+      throw new Error(`missing array index ${index}`);
+    }
+    return new ValueReader(this.value[index]);
   }
-  if (typeof value === "string") {
-    return Number(value);
-  }
-  throw new Error(`expected number-like value, got ${String(value)}`);
-}
 
-function boolValue(value: unknown): boolean {
-  if (typeof value === "boolean") {
-    return value;
+  length(): number {
+    if (Array.isArray(this.value)) {
+      return this.value.length;
+    }
+    if (this.value !== null && typeof this.value === "object") {
+      return Object.keys(this.value).length;
+    }
+    throw new Error("reader value is not array/object");
   }
-  if (typeof value === "string") {
-    return value === "true";
-  }
-  throw new Error(`expected bool-like value, got ${String(value)}`);
-}
 
-function attributeSet(value: any) {
-  return {
-    maxHealth: numberValue(value.max_health),
-    maxStamina: numberValue(value.max_stamina),
-    attack: numberValue(value.attack),
-    defence: numberValue(value.defence),
-  };
+  asNumber(): number {
+    if (typeof this.value === "number") {
+      return this.value;
+    }
+    if (typeof this.value === "string") {
+      return Number(this.value);
+    }
+    throw new Error(`expected number-like value, got ${String(this.value)}`);
+  }
+
+  asBool(): boolean {
+    if (typeof this.value === "boolean") {
+      return this.value;
+    }
+    if (typeof this.value === "string") {
+      return this.value === "true";
+    }
+    throw new Error(`expected bool-like value, got ${String(this.value)}`);
+  }
+
+  asString(): string {
+    if (typeof this.value === "string") {
+      return this.value;
+    }
+    throw new Error(`expected string value, got ${String(this.value)}`);
+  }
+
+  isNull(): boolean {
+    return this.value === null || this.value === undefined;
+  }
 }
 
 const loader: RuntimeDataLoader = {
-  loadItemsRows(path: string) {
-    return rows(path).map((row) => ({
-      id: numberValue(row.id),
-      name: String(row.name),
-      price: numberValue(row.price),
-      stack: row.stack ? { maxStack: numberValue(row.stack.max_stack) } : undefined,
-      attributes: row.attributes ? attributeSet(row.attributes) : undefined,
-      skill: row.skill ? { skillAsset: String(row.skill.skill_asset) } : undefined,
-    }));
-  },
-
-  loadClassesRows(path: string) {
-    return rows(path).map((row) => ({
-      classId: numberValue(row.class_id),
-      name: String(row.name),
-      description: String(row.description),
-      icon: String(row.icon),
-    }));
-  },
-
-  loadClassLevelsRows(path: string) {
-    return rows(path).map((row) => ({
-      classId: numberValue(row.class_id),
-      level: numberValue(row.level),
-      attributes: attributeSet(row.attributes),
-    }));
-  },
-
-  loadGameRules(path: string) {
-    const payload = readPayload(path);
-    return {
-      maxPlayerLevel: numberValue(payload.max_player_level),
-      starterGold: numberValue(payload.starter_gold),
-      staminaCap: numberValue(payload.stamina_cap),
-      dailyResetHour: numberValue(payload.daily_reset_hour),
-      pvpEnabled: boolValue(payload.pvp_enabled),
-    };
+  open(path: string) {
+    const fullPath = pathModule.join(dataDir, path);
+    return new ValueReader(JSON.parse(fs.readFileSync(fullPath, "utf8")));
   },
 };
 

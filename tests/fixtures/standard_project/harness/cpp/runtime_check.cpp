@@ -3,242 +3,191 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
-#include <vector>
 
 namespace cfg = reference::game::config;
 
-class FixtureLoader final : public cfg::IRuntimeDataLoader {
+namespace {
+
+std::string Trim(std::string value) {
+    std::size_t begin = 0;
+    while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin]))) {
+        ++begin;
+    }
+    std::size_t end = value.size();
+    while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1]))) {
+        --end;
+    }
+    return value.substr(begin, end - begin);
+}
+
+void SkipWhitespace(const std::string& content, std::size_t* pos) {
+    while (*pos < content.size() && std::isspace(static_cast<unsigned char>(content[*pos]))) {
+        ++(*pos);
+    }
+}
+
+std::size_t EndOfJsonValue(const std::string& content, std::size_t begin) {
+    SkipWhitespace(content, &begin);
+    if (begin >= content.size()) {
+        throw std::runtime_error("missing JSON value");
+    }
+
+    bool in_string = false;
+    bool escaped = false;
+    int object_depth = 0;
+    int array_depth = 0;
+    for (std::size_t pos = begin; pos < content.size(); ++pos) {
+        const char ch = content[pos];
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (ch == '\\') {
+                escaped = true;
+            } else if (ch == '"') {
+                in_string = false;
+                if (object_depth == 0 && array_depth == 0) {
+                    return pos + 1;
+                }
+            }
+            continue;
+        }
+
+        if (ch == '"') {
+            in_string = true;
+        } else if (ch == '{') {
+            ++object_depth;
+        } else if (ch == '}') {
+            if (object_depth == 0) {
+                return pos;
+            }
+            --object_depth;
+            if (object_depth == 0 && array_depth == 0) {
+                return pos + 1;
+            }
+        } else if (ch == '[') {
+            ++array_depth;
+        } else if (ch == ']') {
+            if (array_depth == 0) {
+                return pos;
+            }
+            --array_depth;
+            if (object_depth == 0 && array_depth == 0) {
+                return pos + 1;
+            }
+        } else if ((ch == ',' || std::isspace(static_cast<unsigned char>(ch))) && object_depth == 0 &&
+                   array_depth == 0) {
+            return pos;
+        }
+    }
+    return content.size();
+}
+
+std::string UnquoteJsonString(const std::string& value) {
+    const std::string trimmed = Trim(value);
+    if (trimmed.size() < 2 || trimmed.front() != '"' || trimmed.back() != '"') {
+        throw std::runtime_error("expected JSON string, got `" + trimmed + "`");
+    }
+
+    std::string result;
+    bool escaped = false;
+    for (std::size_t pos = 1; pos + 1 < trimmed.size(); ++pos) {
+        const char ch = trimmed[pos];
+        if (escaped) {
+            result.push_back(ch);
+            escaped = false;
+        } else if (ch == '\\') {
+            escaped = true;
+        } else {
+            result.push_back(ch);
+        }
+    }
+    return result;
+}
+
+class ValueReader final : public cfg::IRuntimeDataReader {
 public:
-    explicit FixtureLoader(std::string data_dir) : data_dir_(std::move(data_dir)) {}
+    explicit ValueReader(std::string value) : value_(Trim(std::move(value))) {}
 
-    std::vector<cfg::ItemsRow> LoadItemsRows(const std::string& path) override {
-        const std::string content = Read(path);
-        std::vector<cfg::ItemsRow> rows;
-        for (const std::string& object : ExtractRows(content, path)) {
-            cfg::ItemsRow row{};
-            row.id = ParseInt(ExtractString(object, "id", path));
-            row.name = ExtractString(object, "name", path);
-            row.price = ParseInt(ExtractString(object, "price", path));
-
-            std::string nested;
-            if (TryExtractObject(object, "stack", &nested)) {
-                cfg::ItemsStackFragment stack{};
-                stack.max_stack = ParseInt(ExtractString(nested, "max_stack", path));
-                row.stack = stack;
-            }
-            if (TryExtractObject(object, "attributes", &nested)) {
-                row.attributes = ParseAttributeSet(nested, path);
-            }
-            if (TryExtractObject(object, "skill", &nested)) {
-                cfg::ItemsSkillFragment skill{};
-                skill.skill_asset = ExtractString(nested, "skill_asset", path);
-                row.skill = skill;
-            }
-            rows.push_back(row);
-        }
-        return rows;
-    }
-
-    std::vector<cfg::ClassesRow> LoadClassesRows(const std::string& path) override {
-        const std::string content = Read(path);
-        std::vector<cfg::ClassesRow> rows;
-        for (const std::string& object : ExtractRows(content, path)) {
-            cfg::ClassesRow row{};
-            row.class_id = ParseInt(ExtractString(object, "class_id", path));
-            row.name = ExtractString(object, "name", path);
-            row.description = ExtractString(object, "description", path);
-            row.icon = ExtractString(object, "icon", path);
-            rows.push_back(row);
-        }
-        return rows;
-    }
-
-    std::vector<cfg::ClassLevelsRow> LoadClassLevelsRows(const std::string& path) override {
-        const std::string content = Read(path);
-        std::vector<cfg::ClassLevelsRow> rows;
-        for (const std::string& object : ExtractRows(content, path)) {
-            cfg::ClassLevelsRow row{};
-            row.class_id = ParseInt(ExtractString(object, "class_id", path));
-            row.level = ParseInt(ExtractString(object, "level", path));
-
-            std::string attributes;
-            if (!TryExtractObject(object, "attributes", &attributes)) {
-                throw std::runtime_error("class level row in `" + path + "` is missing attributes");
-            }
-            row.attributes = ParseAttributeSet(attributes, path);
-            rows.push_back(row);
-        }
-        return rows;
-    }
-
-    cfg::GameRulesRow LoadGameRules(const std::string& path) override {
-        const std::string content = Read(path);
-        cfg::GameRulesRow rules{};
-        rules.max_player_level = ParseInt(ExtractString(content, "max_player_level", path));
-        rules.starter_gold = ParseInt(ExtractString(content, "starter_gold", path));
-        rules.stamina_cap = ParseInt(ExtractString(content, "stamina_cap", path));
-        rules.daily_reset_hour = ParseInt(ExtractString(content, "daily_reset_hour", path));
-        rules.pvp_enabled = ParseBool(ExtractString(content, "pvp_enabled", path));
-        return rules;
-    }
-
-private:
-    std::string Read(const std::string& path) const {
-        std::ifstream file(data_dir_ + "/" + path);
-        if (!file) {
-            throw std::runtime_error("failed to open runtime data: " + path);
-        }
-        std::ostringstream buffer;
-        buffer << file.rdbuf();
-        return buffer.str();
-    }
-
-    static cfg::AttributeSet ParseAttributeSet(const std::string& object, const std::string& path) {
-        cfg::AttributeSet attributes{};
-        attributes.max_health = ParseInt(ExtractString(object, "max_health", path));
-        attributes.max_stamina = ParseInt(ExtractString(object, "max_stamina", path));
-        attributes.attack = ParseInt(ExtractString(object, "attack", path));
-        attributes.defence = ParseInt(ExtractString(object, "defence", path));
-        return attributes;
-    }
-
-    static std::vector<std::string> ExtractRows(const std::string& content, const std::string& path) {
-        const size_t value_pos = FindFieldValue(content, "rows", path);
-        if (value_pos >= content.size() || content[value_pos] != '[') {
-            throw std::runtime_error("collection payload `" + path + "` should contain rows");
+    std::unique_ptr<cfg::IRuntimeDataReader> Field(const std::string& name) const override {
+        if (value_.empty() || value_.front() != '{') {
+            return nullptr;
         }
 
-        std::vector<std::string> rows;
-        for (size_t pos = value_pos + 1; pos < content.size();) {
-            SkipWhitespace(content, &pos);
-            if (pos < content.size() && content[pos] == ']') {
-                return rows;
-            }
-            if (pos < content.size() && content[pos] == '{') {
-                std::string row = ExtractBraced(content, pos, path);
-                pos += row.size();
-                rows.push_back(std::move(row));
-                continue;
-            }
-            ++pos;
-        }
-        throw std::runtime_error("unterminated rows array in `" + path + "`");
-    }
-
-    static bool TryExtractObject(
-        const std::string& content,
-        const std::string& key,
-        std::string* object) {
-        const std::string quoted_key = "\"" + key + "\"";
-        size_t key_pos = content.find(quoted_key);
+        const std::string quoted_key = "\"" + name + "\"";
+        const std::size_t key_pos = value_.find(quoted_key);
         if (key_pos == std::string::npos) {
-            return false;
+            return nullptr;
         }
-        size_t value_pos = content.find(':', key_pos + quoted_key.size());
+        std::size_t value_pos = value_.find(':', key_pos + quoted_key.size());
         if (value_pos == std::string::npos) {
-            return false;
+            return nullptr;
         }
         ++value_pos;
-        SkipWhitespace(content, &value_pos);
-        if (value_pos >= content.size() || content[value_pos] != '{') {
-            return false;
-        }
-        *object = ExtractBraced(content, value_pos, key);
-        return true;
+        SkipWhitespace(value_, &value_pos);
+        const std::size_t value_end = EndOfJsonValue(value_, value_pos);
+        return std::make_unique<ValueReader>(value_.substr(value_pos, value_end - value_pos));
     }
 
-    static std::string ExtractBraced(
-        const std::string& content,
-        size_t open_pos,
-        const std::string& context) {
-        int depth = 0;
-        bool in_string = false;
-        bool escaped = false;
-        for (size_t pos = open_pos; pos < content.size(); ++pos) {
-            const char ch = content[pos];
-            if (in_string) {
-                if (escaped) {
-                    escaped = false;
-                } else if (ch == '\\') {
-                    escaped = true;
-                } else if (ch == '"') {
-                    in_string = false;
-                }
-                continue;
+    std::unique_ptr<cfg::IRuntimeDataReader> Index(std::size_t index) const override {
+        if (value_.empty() || value_.front() != '[') {
+            throw std::runtime_error("reader value is not an array");
+        }
+
+        std::size_t pos = 1;
+        std::size_t current = 0;
+        while (pos < value_.size()) {
+            SkipWhitespace(value_, &pos);
+            if (pos < value_.size() && value_[pos] == ']') {
+                break;
             }
-            if (ch == '"') {
-                in_string = true;
-            } else if (ch == '{') {
-                ++depth;
-            } else if (ch == '}') {
-                --depth;
-                if (depth == 0) {
-                    return content.substr(open_pos, pos - open_pos + 1);
-                }
+            const std::size_t value_begin = pos;
+            const std::size_t value_end = EndOfJsonValue(value_, value_begin);
+            if (current == index) {
+                return std::make_unique<ValueReader>(value_.substr(value_begin, value_end - value_begin));
             }
-        }
-        throw std::runtime_error("unterminated object while reading `" + context + "`");
-    }
-
-    static std::string ExtractString(
-        const std::string& content,
-        const std::string& key,
-        const std::string& path) {
-        size_t pos = FindFieldValue(content, key, path);
-        if (pos >= content.size()) {
-            throw std::runtime_error("missing value for `" + key + "` in `" + path + "`");
-        }
-        if (content[pos] == '"') {
-            ++pos;
-            std::string value;
-            bool escaped = false;
-            for (; pos < content.size(); ++pos) {
-                const char ch = content[pos];
-                if (escaped) {
-                    value.push_back(ch);
-                    escaped = false;
-                } else if (ch == '\\') {
-                    escaped = true;
-                } else if (ch == '"') {
-                    return value;
-                } else {
-                    value.push_back(ch);
-                }
+            pos = value_end;
+            SkipWhitespace(value_, &pos);
+            if (pos < value_.size() && value_[pos] == ',') {
+                ++pos;
             }
-            throw std::runtime_error("unterminated string for `" + key + "` in `" + path + "`");
+            ++current;
         }
-
-        const size_t end = content.find_first_of(",}\n\r", pos);
-        return Trim(content.substr(pos, end == std::string::npos ? std::string::npos : end - pos));
+        throw std::runtime_error("missing array index " + std::to_string(index));
     }
 
-    static size_t FindFieldValue(
-        const std::string& content,
-        const std::string& key,
-        const std::string& path) {
-        const std::string quoted_key = "\"" + key + "\"";
-        const size_t key_pos = content.find(quoted_key);
-        if (key_pos == std::string::npos) {
-            throw std::runtime_error("missing key `" + key + "` in runtime data `" + path + "`");
+    std::size_t Size() const override {
+        if (value_.empty() || value_.front() != '[') {
+            throw std::runtime_error("reader value is not an array");
         }
-        size_t value_pos = content.find(':', key_pos + quoted_key.size());
-        if (value_pos == std::string::npos) {
-            throw std::runtime_error("missing ':' after key `" + key + "` in runtime data `" + path + "`");
+
+        std::size_t pos = 1;
+        std::size_t count = 0;
+        while (pos < value_.size()) {
+            SkipWhitespace(value_, &pos);
+            if (pos < value_.size() && value_[pos] == ']') {
+                return count;
+            }
+            pos = EndOfJsonValue(value_, pos);
+            SkipWhitespace(value_, &pos);
+            if (pos < value_.size() && value_[pos] == ',') {
+                ++pos;
+            }
+            ++count;
         }
-        ++value_pos;
-        SkipWhitespace(content, &value_pos);
-        return value_pos;
+        throw std::runtime_error("unterminated JSON array");
     }
 
-    static int ParseInt(const std::string& value) {
-        return std::stoi(value);
-    }
+    std::int64_t AsInt64() const override { return std::stoll(ScalarText()); }
 
-    static bool ParseBool(const std::string& value) {
+    double AsDouble() const override { return std::stod(ScalarText()); }
+
+    bool AsBool() const override {
+        const std::string value = ScalarText();
         if (value == "true") {
             return true;
         }
@@ -248,26 +197,41 @@ private:
         throw std::runtime_error("expected bool-like value, got `" + value + "`");
     }
 
-    static void SkipWhitespace(const std::string& content, size_t* pos) {
-        while (*pos < content.size() && std::isspace(static_cast<unsigned char>(content[*pos]))) {
-            ++(*pos);
+    std::string AsString() const override { return UnquoteJsonString(value_); }
+
+    bool IsNull() const override { return value_ == "null"; }
+
+private:
+    std::string ScalarText() const {
+        const std::string trimmed = Trim(value_);
+        if (!trimmed.empty() && trimmed.front() == '"') {
+            return UnquoteJsonString(trimmed);
         }
+        return trimmed;
     }
 
-    static std::string Trim(std::string value) {
-        size_t begin = 0;
-        while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin]))) {
-            ++begin;
+    std::string value_;
+};
+
+class FixtureLoader final : public cfg::IRuntimeDataLoader {
+public:
+    explicit FixtureLoader(std::string data_dir) : data_dir_(std::move(data_dir)) {}
+
+    std::unique_ptr<cfg::IRuntimeDataReader> Open(const std::string& path) override {
+        std::ifstream file(data_dir_ + "/" + path);
+        if (!file) {
+            throw std::runtime_error("failed to open runtime data: " + path);
         }
-        size_t end = value.size();
-        while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1]))) {
-            --end;
-        }
-        return value.substr(begin, end - begin);
+        std::ostringstream buffer;
+        buffer << file.rdbuf();
+        return std::make_unique<ValueReader>(buffer.str());
     }
 
+private:
     std::string data_dir_;
 };
+
+} // namespace
 
 int main() {
     const char* data_dir = std::getenv("DATA_DIR");

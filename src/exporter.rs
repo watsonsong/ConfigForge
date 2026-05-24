@@ -386,21 +386,18 @@ fn lexical_normalize_path(path: &Path) -> PathBuf {
     for component in path.components() {
         match component {
             Component::CurDir => {}
-            Component::ParentDir => {
-                match normalized.components().next_back() {
-                    Some(Component::Normal(_)) => {
-                        normalized.pop();
-                    }
-                    Some(Component::ParentDir) | None => {
-                        if !path.has_root() {
-                            normalized.push(component.as_os_str());
-                        }
-                    }
-                    Some(Component::Prefix(_))
-                    | Some(Component::RootDir)
-                    | Some(Component::CurDir) => {}
+            Component::ParentDir => match normalized.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    normalized.pop();
                 }
-            }
+                Some(Component::ParentDir) | None => {
+                    if !path.has_root() {
+                        normalized.push(component.as_os_str());
+                    }
+                }
+                Some(Component::Prefix(_)) | Some(Component::RootDir) | Some(Component::CurDir) => {
+                }
+            },
             Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
                 normalized.push(component.as_os_str());
             }

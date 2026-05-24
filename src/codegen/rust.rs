@@ -2,9 +2,9 @@ use crate::{ConfigForgeError, Result};
 
 use super::{
     build_code_model, ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
-    render_file_header, ArtifactKind, CodeExportInput, CodeExportLanguage, CodeFragmentPayload,
-    CodeGenerator, CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions,
-    GeneratedFile, GeneratedSymbol,
+    render_file_header, ArtifactKind, CodeEnum, CodeExportInput, CodeExportLanguage,
+    CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTableKind,
+    CodeTypeRef, CodegenOptions, GeneratedFile, GeneratedSymbol,
 };
 
 pub struct RustCodeGenerator;
@@ -22,23 +22,8 @@ impl CodeGenerator for RustCodeGenerator {
         validate_generated_symbols(&model, &names)?;
         let mut content = render_file_header(input);
         content.push_str("use std::collections::HashMap;\n\n");
-        content.push_str("pub trait RuntimeDataLoader {\n");
-        content.push_str("    // Implementations should read exported table files such as DATA_FILE and return typed rows for CollectionTable or a typed object for ObjectTable.\n");
-        for table in &model.tables {
-            match table.kind {
-                CodeTableKind::Collection => content.push_str(&format!(
-                    "    fn load_{}_rows(&self, path: &str) -> Result<Vec<{}>, String>;\n",
-                    names.field_name(&table.name)?,
-                    names.row_type_name(&table.name)?
-                )),
-                CodeTableKind::Object => content.push_str(&format!(
-                    "    fn load_{}(&self, path: &str) -> Result<{}, String>;\n",
-                    names.field_name(&table.name)?,
-                    names.row_type_name(&table.name)?
-                )),
-            }
-        }
-        content.push_str("}\n\n");
+        render_runtime_reader_traits(&mut content);
+        render_runtime_reader_helpers(&mut content);
 
         for code_enum in &model.enums {
             push_doc(&mut content, code_enum.desc.as_deref(), "/// ");
@@ -59,6 +44,7 @@ impl CodeGenerator for RustCodeGenerator {
                 content.push_str(&format!("    {},\n", names.enum_variant_name(&value.name)?));
             }
             content.push_str("}\n\n");
+            render_enum_reader_impl(&mut content, code_enum, &names)?;
         }
 
         for code_struct in &model.structs {
@@ -84,6 +70,7 @@ impl CodeGenerator for RustCodeGenerator {
                 ));
             }
             content.push_str("}\n\n");
+            render_struct_reader_impl(&mut content, code_struct, &names)?;
         }
 
         for table in &model.tables {
@@ -113,6 +100,7 @@ impl CodeGenerator for RustCodeGenerator {
                     ));
                 }
                 content.push_str("}\n\n");
+                render_fragment_reader_impl(&mut content, table, fragment, &names)?;
             }
         }
 
@@ -149,6 +137,7 @@ impl CodeGenerator for RustCodeGenerator {
                 ));
             }
             content.push_str("}\n\n");
+            render_row_reader_impl(&mut content, table, &names)?;
             content.push_str(&format!("impl {} {{\n", names.row_type_name(&table.name)?));
             for fragment in &table.fragments {
                 content.push_str(&format!(
@@ -198,6 +187,168 @@ impl CodeGenerator for RustCodeGenerator {
             content,
         }])
     }
+}
+
+fn render_runtime_reader_traits(content: &mut String) {
+    content.push_str(
+        r#"pub trait RuntimeDataReader: Clone {
+    fn field(&self, name: &str) -> Result<Option<Self>, String>;
+    fn index(&self, index: usize) -> Result<Self, String>;
+    fn len(&self) -> Result<usize, String>;
+    fn as_i64(&self) -> Result<i64, String>;
+    fn as_f64(&self) -> Result<f64, String>;
+    fn as_bool(&self) -> Result<bool, String>;
+    fn as_string(&self) -> Result<String, String>;
+    fn is_null(&self) -> bool;
+}
+
+pub trait RuntimeDataLoader {
+    type Reader: RuntimeDataReader;
+    fn open(&self, path: &str) -> Result<Self::Reader, String>;
+}
+
+"#,
+    );
+}
+
+fn render_runtime_reader_helpers(content: &mut String) {
+    content.push_str(
+        r#"fn required_field<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<R, String> {
+    match reader.field(name)? {
+        Some(value) if !value.is_null() => Ok(value),
+        _ => Err(format!("missing required field `{name}`")),
+    }
+}
+
+fn optional_field<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<Option<R>, String> {
+    Ok(reader.field(name)?.filter(|value| !value.is_null()))
+}
+
+fn read_required_i64<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<i64, String> {
+    required_field(reader, name)?.as_i64()
+}
+
+fn read_required_f64<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<f64, String> {
+    required_field(reader, name)?.as_f64()
+}
+
+fn read_required_bool<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<bool, String> {
+    required_field(reader, name)?.as_bool()
+}
+
+fn read_required_string<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<String, String> {
+    required_field(reader, name)?.as_string()
+}
+
+"#,
+    );
+}
+
+fn render_enum_reader_impl(
+    content: &mut String,
+    code_enum: &CodeEnum,
+    names: &RustNames<'_>,
+) -> Result<()> {
+    content.push_str(&format!("impl {} {{\n", names.type_name(&code_enum.name)?));
+    content.push_str(
+        "    fn read_from_reader<R: RuntimeDataReader>(reader: &R) -> Result<Self, String> {\n",
+    );
+    content.push_str("        match reader.as_string()?.as_str() {\n");
+    for value in &code_enum.values {
+        content.push_str(&format!(
+            "            {:?} => Ok(Self::{}),\n",
+            value.name,
+            names.enum_variant_name(&value.name)?
+        ));
+    }
+    content.push_str(&format!(
+        "            other => Err(format!(\"unknown {} value `{{other}}`\")),\n",
+        code_enum.name
+    ));
+    content.push_str("        }\n");
+    content.push_str("    }\n");
+    content.push_str("}\n\n");
+    Ok(())
+}
+
+fn render_struct_reader_impl(
+    content: &mut String,
+    code_struct: &CodeStruct,
+    names: &RustNames<'_>,
+) -> Result<()> {
+    content.push_str(&format!(
+        "impl {} {{\n",
+        names.type_name(&code_struct.name)?
+    ));
+    render_read_from_reader_body(content, &code_struct.fields, None, &code_struct.name, names)?;
+    content.push_str("}\n\n");
+    Ok(())
+}
+
+fn render_fragment_reader_impl(
+    content: &mut String,
+    table: &CodeTable,
+    fragment: &super::CodeFragment,
+    names: &RustNames<'_>,
+) -> Result<()> {
+    content.push_str(&format!(
+        "impl {} {{\n",
+        names.fragment_type_name(&table.name, &fragment.name)?
+    ));
+    render_read_from_reader_body(content, &fragment.fields, None, &fragment.name, names)?;
+    content.push_str("}\n\n");
+    Ok(())
+}
+
+fn render_row_reader_impl(
+    content: &mut String,
+    table: &CodeTable,
+    names: &RustNames<'_>,
+) -> Result<()> {
+    content.push_str(&format!("impl {} {{\n", names.row_type_name(&table.name)?));
+    render_read_from_reader_body(content, &table.fields, Some(table), &table.name, names)?;
+    content.push_str("}\n\n");
+    Ok(())
+}
+
+fn render_read_from_reader_body(
+    content: &mut String,
+    fields: &[super::CodeField],
+    table: Option<&CodeTable>,
+    type_name: &str,
+    names: &RustNames<'_>,
+) -> Result<()> {
+    content.push_str(
+        "    fn read_from_reader<R: RuntimeDataReader>(reader: &R) -> Result<Self, String> {\n",
+    );
+    content.push_str("        Ok(Self {\n");
+    for field in fields {
+        content.push_str(&format!(
+            "            {}: {},\n",
+            names.field_name(&field.name)?,
+            names.rust_read_field_expr(field)?
+        ));
+    }
+    if let Some(table) = table {
+        for fragment in &table.fragments {
+            let field_name = names.field_name(&fragment.name)?;
+            let payload_type = names.fragment_payload_type_name(table, fragment)?;
+            content.push_str(&format!(
+                "            {field_name}: match optional_field(reader, {:?})? {{ Some(value) => Some({payload_type}::read_from_reader(&value)?), None => None }},\n",
+                fragment.name
+            ));
+        }
+    }
+    content.push_str("        })\n");
+    content.push_str("    }\n");
+    if fields.is_empty()
+        && table
+            .map(|table| table.fragments.is_empty())
+            .unwrap_or(true)
+    {
+        content.push_str(&format!("    // `{type_name}` has no runtime fields.\n"));
+    }
+    Ok(())
 }
 
 fn validate_generated_symbols(model: &CodeModel, names: &RustNames<'_>) -> Result<()> {
@@ -334,24 +485,7 @@ fn validate_generated_symbols(model: &CodeModel, names: &RustNames<'_>) -> Resul
         }),
     )?;
 
-    validate_named_symbols(
-        "rust",
-        "RuntimeDataLoader methods",
-        model.tables.iter().map(|table| {
-            Ok(match table.kind {
-                CodeTableKind::Collection => GeneratedSymbol::new(
-                    "loader method",
-                    &table.name,
-                    format!("load_{}_rows", names.field_name(&table.name)?),
-                ),
-                CodeTableKind::Object => GeneratedSymbol::new(
-                    "loader method",
-                    &table.name,
-                    format!("load_{}", names.field_name(&table.name)?),
-                ),
-            })
-        }),
-    )
+    Ok(())
 }
 
 fn validate_named_symbols(
@@ -394,10 +528,15 @@ fn render_table(content: &mut String, table: &CodeTable, names: &RustNames<'_>) 
     ));
     content
         .push_str("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
+    content.push_str("        let root = loader.open(Self::DATA_FILE)?;\n");
+    content.push_str("        let rows_reader = required_field(&root, \"rows\")?;\n");
+    content.push_str("        let mut rows = Vec::new();\n");
+    content.push_str("        for row_index in 0..rows_reader.len()? {\n");
     content.push_str(&format!(
-        "        let rows = loader.load_{}_rows(Self::DATA_FILE)?;\n",
-        names.field_name(&table.name)?
+        "            rows.push({}::read_from_reader(&rows_reader.index(row_index)?)?);\n",
+        names.row_type_name(&table.name)?
     ));
+    content.push_str("        }\n");
     content.push_str("        Self::from_rows(rows)\n");
     content.push_str("    }\n\n");
     content.push_str(&format!(
@@ -462,10 +601,8 @@ fn render_object_table(
     ));
     content
         .push_str("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
-    content.push_str(&format!(
-        "        loader.load_{}(Self::DATA_FILE)\n",
-        names.field_name(&table.name)?
-    ));
+    content.push_str("        let root = loader.open(Self::DATA_FILE)?;\n");
+    content.push_str("        Self::read_from_reader(&root)\n");
     content.push_str("    }\n");
     content.push_str("}\n\n");
     Ok(())
@@ -589,6 +726,22 @@ impl<'a> RustNames<'a> {
             CodeTypeRef::Bool => "bool".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
+        })
+    }
+
+    fn rust_read_field_expr(&self, field: &super::CodeField) -> Result<String> {
+        let source_name = format!("{:?}", field.name);
+        Ok(match &field.code_type {
+            CodeTypeRef::Int => format!("read_required_i64(reader, {source_name})?"),
+            CodeTypeRef::Float => format!("read_required_f64(reader, {source_name})?"),
+            CodeTypeRef::Bool => format!("read_required_bool(reader, {source_name})?"),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                format!("read_required_string(reader, {source_name})?")
+            }
+            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
+                "{}::read_from_reader(&required_field(reader, {source_name})?)?",
+                self.type_name(name)?
+            ),
         })
     }
 

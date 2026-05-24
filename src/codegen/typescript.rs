@@ -2,9 +2,9 @@ use crate::{ConfigForgeError, Result};
 
 use super::{
     build_code_model, ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
-    render_file_header, ArtifactKind, CodeExportInput, CodeExportLanguage, CodeFragmentPayload,
-    CodeGenerator, CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions,
-    GeneratedFile, GeneratedSymbol,
+    render_file_header, ArtifactKind, CodeEnum, CodeExportInput, CodeExportLanguage,
+    CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTableKind,
+    CodeTypeRef, CodegenOptions, GeneratedFile, GeneratedSymbol,
 };
 
 pub struct TypeScriptCodeGenerator;
@@ -22,25 +22,8 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         validate_generated_symbols(&model, &names)?;
         let mut content = render_file_header(input);
         content.push('\n');
-        content.push_str("export interface RuntimeDataLoader {\n");
-        content.push_str("  // Implementations should read exported table files and return typed rows for CollectionTable or a typed object for ObjectTable.\n");
-        for table in &model.tables {
-            match table.kind {
-                CodeTableKind::Collection => content.push_str(&format!(
-                    "  load{}Rows(path: string): Promise<{}[]> | {}[];\n",
-                    names.type_name(&table.name)?,
-                    names.row_type_name(&table.name)?,
-                    names.row_type_name(&table.name)?
-                )),
-                CodeTableKind::Object => content.push_str(&format!(
-                    "  load{}(path: string): Promise<{}> | {};\n",
-                    names.type_name(&table.name)?,
-                    names.row_type_name(&table.name)?,
-                    names.row_type_name(&table.name)?
-                )),
-            }
-        }
-        content.push_str("}\n\n");
+        render_runtime_reader_interfaces(&mut content);
+        render_runtime_reader_helpers(&mut content);
 
         for code_enum in &model.enums {
             push_doc(&mut content, code_enum.desc.as_deref());
@@ -54,6 +37,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                     .collect::<Result<Vec<_>>>()?
                     .join(" | ")
             ));
+            render_enum_reader_function(&mut content, code_enum, &names)?;
         }
 
         for code_struct in &model.structs {
@@ -72,6 +56,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 ));
             }
             content.push_str("}\n\n");
+            render_struct_reader_function(&mut content, code_struct, &names)?;
         }
 
         for table in &model.tables {
@@ -94,6 +79,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                     ));
                 }
                 content.push_str("}\n\n");
+                render_fragment_reader_function(&mut content, table, fragment, &names)?;
             }
         }
 
@@ -121,6 +107,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 ));
             }
             content.push_str("}\n\n");
+            render_row_reader_function(&mut content, table, &names)?;
             if table.kind == CodeTableKind::Collection {
                 render_table(&mut content, table, &names)?;
             }
@@ -161,9 +148,9 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                     names.repository_type_name(&table.name)?
                 )),
                 CodeTableKind::Object => content.push_str(&format!(
-                    "      {}: await loader.load{}({:?}),\n",
+                    "      {}: {}(await loader.open({:?})),\n",
                     names.field_name(&table.name)?,
-                    names.type_name(&table.name)?,
+                    names.reader_function_name(&names.row_type_name(&table.name)?)?,
                     table.data_file
                 )),
             }
@@ -180,9 +167,157 @@ impl CodeGenerator for TypeScriptCodeGenerator {
     }
 }
 
+fn render_runtime_reader_interfaces(content: &mut String) {
+    content.push_str(
+        r#"export interface RuntimeDataReader {
+  field(name: string): RuntimeDataReader | undefined;
+  index(index: number): RuntimeDataReader;
+  length(): number;
+  asNumber(): number;
+  asBool(): boolean;
+  asString(): string;
+  isNull(): boolean;
+}
+
+export interface RuntimeDataLoader {
+  open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;
+}
+
+"#,
+    );
+}
+
+fn render_runtime_reader_helpers(content: &mut String) {
+    content.push_str(
+        r#"function requiredField(reader: RuntimeDataReader, name: string): RuntimeDataReader {
+  const value = reader.field(name);
+  if (!value || value.isNull()) {
+    throw new Error(`missing required field ${name}`);
+  }
+  return value;
+}
+
+function optionalField(reader: RuntimeDataReader, name: string): RuntimeDataReader | undefined {
+  const value = reader.field(name);
+  return value && !value.isNull() ? value : undefined;
+}
+
+function readRequiredNumber(reader: RuntimeDataReader, name: string): number {
+  return requiredField(reader, name).asNumber();
+}
+
+function readRequiredBool(reader: RuntimeDataReader, name: string): boolean {
+  return requiredField(reader, name).asBool();
+}
+
+function readRequiredString(reader: RuntimeDataReader, name: string): string {
+  return requiredField(reader, name).asString();
+}
+
+"#,
+    );
+}
+
+fn render_enum_reader_function(
+    content: &mut String,
+    code_enum: &CodeEnum,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    let type_name = names.type_name(&code_enum.name)?;
+    let function_name = names.reader_function_name(&type_name)?;
+    content.push_str(&format!(
+        "function {function_name}(reader: RuntimeDataReader): {type_name} {{\n"
+    ));
+    content.push_str("  const value = reader.asString();\n");
+    let values = code_enum
+        .values
+        .iter()
+        .map(|value| {
+            Ok(format!(
+                "value === {:?}",
+                names.enum_value_name(&value.name)?
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?
+        .join(" || ");
+    content.push_str(&format!(
+        "  if ({values}) {{ return value as {type_name}; }}\n"
+    ));
+    content.push_str(&format!(
+        "  throw new Error(`unknown {} value ${{value}}`);\n",
+        code_enum.name
+    ));
+    content.push_str("}\n\n");
+    Ok(())
+}
+
+fn render_struct_reader_function(
+    content: &mut String,
+    code_struct: &CodeStruct,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    let type_name = names.type_name(&code_struct.name)?;
+    render_reader_function_body(content, &type_name, &code_struct.fields, None, names)
+}
+
+fn render_fragment_reader_function(
+    content: &mut String,
+    table: &CodeTable,
+    fragment: &super::CodeFragment,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    let type_name = names.fragment_payload_type_name(table, fragment)?;
+    render_reader_function_body(content, &type_name, &fragment.fields, None, names)
+}
+
+fn render_row_reader_function(
+    content: &mut String,
+    table: &CodeTable,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    let type_name = names.row_type_name(&table.name)?;
+    render_reader_function_body(content, &type_name, &table.fields, Some(table), names)
+}
+
+fn render_reader_function_body(
+    content: &mut String,
+    type_name: &str,
+    fields: &[super::CodeField],
+    table: Option<&CodeTable>,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    let function_name = names.reader_function_name(type_name)?;
+    content.push_str(&format!(
+        "function {function_name}(reader: RuntimeDataReader): {type_name} {{\n"
+    ));
+    content.push_str("  return {\n");
+    for field in fields {
+        content.push_str(&format!(
+            "    {}: {},\n",
+            names.field_name(&field.name)?,
+            names.ts_read_field_expr(field)?
+        ));
+    }
+    if let Some(table) = table {
+        for fragment in &table.fragments {
+            let field_name = names.field_name(&fragment.name)?;
+            let payload_type = names.fragment_payload_type_name(table, fragment)?;
+            let reader_function = names.reader_function_name(&payload_type)?;
+            content.push_str(&format!(
+                "    {field_name}: optionalField(reader, {:?}) ? {reader_function}(optionalField(reader, {:?})!) : undefined,\n",
+                fragment.name, fragment.name
+            ));
+        }
+    }
+    content.push_str("  };\n");
+    content.push_str("}\n\n");
+    Ok(())
+}
+
 fn validate_generated_symbols(model: &CodeModel, names: &TypeScriptNames<'_>) -> Result<()> {
     let mut type_symbols = vec![
         GeneratedSymbol::new("interface", "RuntimeDataLoader", "RuntimeDataLoader"),
+        GeneratedSymbol::new("interface", "RuntimeDataReader", "RuntimeDataReader"),
         GeneratedSymbol::new("class", "GameData", "GameData"),
     ];
     for code_enum in &model.enums {
@@ -319,24 +454,7 @@ fn validate_generated_symbols(model: &CodeModel, names: &TypeScriptNames<'_>) ->
         }),
     )?;
 
-    validate_named_symbols(
-        "typescript",
-        "RuntimeDataLoader methods",
-        model.tables.iter().map(|table| {
-            Ok(match table.kind {
-                CodeTableKind::Collection => GeneratedSymbol::new(
-                    "loader method",
-                    &table.name,
-                    format!("load{}Rows", names.type_name(&table.name)?),
-                ),
-                CodeTableKind::Object => GeneratedSymbol::new(
-                    "loader method",
-                    &table.name,
-                    format!("load{}", names.type_name(&table.name)?),
-                ),
-            })
-        }),
-    )
+    Ok(())
 }
 
 fn validate_named_symbols(
@@ -429,10 +547,18 @@ fn render_table(
         "  static async load(loader: RuntimeDataLoader): Promise<{}> {{\n",
         names.repository_type_name(&table.name)?
     ));
+    content.push_str("    const root = await loader.open(this.dataFile);\n");
+    content.push_str("    const rowsReader = requiredField(root, \"rows\");\n");
     content.push_str(&format!(
-        "    const rows = await loader.load{}Rows(this.dataFile);\n",
-        names.type_name(&table.name)?
+        "    const rows: {}[] = [];\n",
+        names.row_type_name(&table.name)?
     ));
+    content.push_str("    for (let rowIndex = 0; rowIndex < rowsReader.length(); rowIndex++) {\n");
+    content.push_str(&format!(
+        "      rows.push({}(rowsReader.index(rowIndex)));\n",
+        names.reader_function_name(&names.row_type_name(&table.name)?)?
+    ));
+    content.push_str("    }\n");
     content.push_str(&format!(
         "    return new {}(rows ?? []);\n",
         names.repository_type_name(&table.name)?
@@ -562,6 +688,38 @@ impl<'a> TypeScriptNames<'a> {
             CodeTypeRef::Bool => "boolean".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "string".to_owned(),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
+        })
+    }
+
+    fn reader_function_name(&self, type_name: &str) -> Result<String> {
+        if self.options.naming.function == super::CaseStyle::CamelCase {
+            return naming::resolve_keyword_conflict(
+                format!("read{type_name}"),
+                self.options.keyword_conflict,
+                naming::is_ts_keyword,
+                |_| None,
+            )
+            .map_err(|message| {
+                ConfigForgeError::Validation(format!("typescript codegen: {message}"))
+            });
+        }
+        self.identifier(&format!("read_{type_name}"), self.options.naming.function)
+    }
+
+    fn ts_read_field_expr(&self, field: &super::CodeField) -> Result<String> {
+        let source_name = format!("{:?}", field.name);
+        Ok(match &field.code_type {
+            CodeTypeRef::Int | CodeTypeRef::Float => {
+                format!("readRequiredNumber(reader, {source_name})")
+            }
+            CodeTypeRef::Bool => format!("readRequiredBool(reader, {source_name})"),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                format!("readRequiredString(reader, {source_name})")
+            }
+            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
+                "{}(requiredField(reader, {source_name}))",
+                self.reader_function_name(&self.type_name(name)?)?
+            ),
         })
     }
 

@@ -4,6 +4,73 @@ use std::{env, fs, path::PathBuf};
 
 use serde_json::Value;
 
+#[derive(Clone)]
+struct ValueReader {
+    value: Value,
+}
+
+impl RuntimeDataReader for ValueReader {
+    fn field(&self, name: &str) -> Result<Option<Self>, String> {
+        Ok(self
+            .value
+            .get(name)
+            .cloned()
+            .map(|value| ValueReader { value }))
+    }
+
+    fn index(&self, index: usize) -> Result<Self, String> {
+        self.value
+            .as_array()
+            .and_then(|values| values.get(index))
+            .cloned()
+            .map(|value| ValueReader { value })
+            .ok_or_else(|| format!("missing array index {index}"))
+    }
+
+    fn len(&self) -> Result<usize, String> {
+        self.value
+            .as_array()
+            .map(Vec::len)
+            .or_else(|| self.value.as_object().map(|object| object.len()))
+            .ok_or_else(|| "reader value is not array/object".to_owned())
+    }
+
+    fn as_i64(&self) -> Result<i64, String> {
+        match &self.value {
+            Value::Number(number) => number.as_i64().ok_or_else(|| "number is not i64".to_owned()),
+            Value::String(text) => text.parse().map_err(|error| format!("invalid i64: {error}")),
+            other => Err(format!("expected i64-like value, got {other:?}")),
+        }
+    }
+
+    fn as_f64(&self) -> Result<f64, String> {
+        match &self.value {
+            Value::Number(number) => number.as_f64().ok_or_else(|| "number is not f64".to_owned()),
+            Value::String(text) => text.parse().map_err(|error| format!("invalid f64: {error}")),
+            other => Err(format!("expected f64-like value, got {other:?}")),
+        }
+    }
+
+    fn as_bool(&self) -> Result<bool, String> {
+        match &self.value {
+            Value::Bool(value) => Ok(*value),
+            Value::String(text) => text.parse().map_err(|error| format!("invalid bool: {error}")),
+            other => Err(format!("expected bool-like value, got {other:?}")),
+        }
+    }
+
+    fn as_string(&self) -> Result<String, String> {
+        match &self.value {
+            Value::String(text) => Ok(text.clone()),
+            other => Err(format!("expected string value, got {other:?}")),
+        }
+    }
+
+    fn is_null(&self) -> bool {
+        self.value.is_null()
+    }
+}
+
 struct FixtureLoader {
     data_dir: PathBuf,
 }
@@ -15,107 +82,15 @@ impl FixtureLoader {
             data_dir: PathBuf::from(data_dir),
         }
     }
-
-    fn read_value(&self, path: &str) -> Value {
-        let bytes = fs::read(self.data_dir.join(path)).expect("runtime data should be readable");
-        rmp_serde::from_slice(&bytes).expect("runtime data should decode as MessagePack")
-    }
-
-    fn rows(&self, path: &str) -> Vec<Value> {
-        self.read_value(path)["rows"]
-            .as_array()
-            .expect("collection table payload should contain rows")
-            .clone()
-    }
 }
 
 impl RuntimeDataLoader for FixtureLoader {
-    fn load_items_rows(&self, path: &str) -> Result<Vec<ItemsRow>, String> {
-        if path != ItemsTable::DATA_FILE {
-            return Err(format!("unexpected items path: {path}"));
-        }
-        Ok(self
-            .rows(path)
-            .iter()
-            .map(|row| ItemsRow {
-                id: required_i64(row, "id"),
-                price: required_i64(row, "price"),
-                stack: row.get("stack").and_then(|stack| {
-                    stack.as_object().map(|_| ItemsStackFragment {
-                        max_stack: required_i64(stack, "max_stack"),
-                    })
-                }),
-                attributes: row.get("attributes").and_then(optional_attribute_set),
-            })
-            .collect())
-    }
+    type Reader = ValueReader;
 
-    fn load_classes_rows(&self, path: &str) -> Result<Vec<ClassesRow>, String> {
-        if path != ClassesTable::DATA_FILE {
-            return Err(format!("unexpected classes path: {path}"));
-        }
-        Ok(self
-            .rows(path)
-            .iter()
-            .map(|row| ClassesRow {
-                class_id: required_i64(row, "class_id"),
-            })
-            .collect())
-    }
-
-    fn load_class_levels_rows(&self, path: &str) -> Result<Vec<ClassLevelsRow>, String> {
-        if path != ClassLevelsTable::DATA_FILE {
-            return Err(format!("unexpected class levels path: {path}"));
-        }
-        Ok(self
-            .rows(path)
-            .iter()
-            .map(|row| ClassLevelsRow {
-                class_id: required_i64(row, "class_id"),
-                level: required_i64(row, "level"),
-                attributes: optional_attribute_set(&row["attributes"])
-                    .expect("class level attributes should exist"),
-            })
-            .collect())
-    }
-
-    fn load_game_rules(&self, path: &str) -> Result<GameRulesRow, String> {
-        if path != GameRulesRow::DATA_FILE {
-            return Err(format!("unexpected game rules path: {path}"));
-        }
-        let value = self.read_value(path);
-        Ok(GameRulesRow {
-            max_player_level: required_i64(&value, "max_player_level"),
-            starter_gold: required_i64(&value, "starter_gold"),
-            stamina_cap: required_i64(&value, "stamina_cap"),
-            daily_reset_hour: required_i64(&value, "daily_reset_hour"),
-            pvp_enabled: required_bool(&value, "pvp_enabled"),
-        })
-    }
-}
-
-fn optional_attribute_set(value: &Value) -> Option<AttributeSet> {
-    value.as_object().map(|_| AttributeSet {
-        max_health: required_i64(value, "max_health"),
-        max_stamina: required_i64(value, "max_stamina"),
-        attack: required_i64(value, "attack"),
-        defence: required_i64(value, "defence"),
-    })
-}
-
-fn required_i64(value: &Value, field: &str) -> i64 {
-    match &value[field] {
-        Value::Number(number) => number.as_i64().expect("integer number should fit i64"),
-        Value::String(text) => text.parse().expect("integer string should parse"),
-        other => panic!("field `{field}` should be integer-like, got {other:?}"),
-    }
-}
-
-fn required_bool(value: &Value, field: &str) -> bool {
-    match &value[field] {
-        Value::Bool(value) => *value,
-        Value::String(text) => text.parse().expect("bool string should parse"),
-        other => panic!("field `{field}` should be bool-like, got {other:?}"),
+    fn open(&self, path: &str) -> Result<Self::Reader, String> {
+        let bytes = fs::read(self.data_dir.join(path)).map_err(|error| error.to_string())?;
+        let value = rmp_serde::from_slice(&bytes).map_err(|error| error.to_string())?;
+        Ok(ValueReader { value })
     }
 }
 

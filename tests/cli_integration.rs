@@ -126,25 +126,31 @@ fn builds_target_from_project_config() {
     let ts_code = fs::read_to_string(ts_out_dir.join("generated.ts")).expect("ts code");
     assert!(rust_code.contains("pub struct ItemsRow"));
     assert!(rust_code.contains("pub struct GameRulesRow"));
-    assert!(rust_code.contains("fn load_game_rules(&self, path: &str)"));
+    assert!(rust_code.contains("pub trait RuntimeDataReader"));
+    assert!(rust_code.contains("fn open(&self, path: &str) -> Result<Self::Reader, String>;"));
     assert!(!rust_code.contains("pub struct GameRulesTable"));
     assert!(rust_code.contains("pub trait RuntimeDataLoader"));
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.json\""));
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"game_rules.json\""));
     assert!(!rust_code.contains("RuntimeDataFormat"));
     assert!(rust_code.contains("pub fn get_by_id"));
+    assert!(rust_code.contains("Self::read_from_reader(&root)"));
     assert!(cpp_code.contains("class IRuntimeDataLoader"));
+    assert!(cpp_code.contains("class IRuntimeDataReader"));
     assert!(cpp_code.contains("static constexpr const char* DataFile = \"items.json\""));
-    assert!(cpp_code.contains("virtual GameRulesRow LoadGameRules(const std::string& path)"));
+    assert!(cpp_code
+        .contains("virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path)"));
     assert!(cpp_code.contains("static constexpr const char* DataFile = \"game_rules.json\""));
     assert!(!cpp_code.contains("class GameRulesTable"));
     assert!(!cpp_code.contains("RuntimeDataFormat"));
     assert!(cpp_code.contains("const ItemsRow* GetById"));
     assert!(cpp_source.contains("GameData GameData::Load"));
     assert!(cpp_source.contains("ItemsTable ItemsTable::FromRows"));
+    assert!(cpp_source.contains("loader.Open(GameRulesRow::DataFile)"));
     assert!(ts_code.contains("export interface RuntimeDataLoader"));
+    assert!(ts_code.contains("export interface RuntimeDataReader"));
     assert!(ts_code.contains("static readonly dataFile = \"items.json\""));
-    assert!(ts_code.contains("loadGameRules(path: string): Promise<GameRulesRow> | GameRulesRow"));
+    assert!(ts_code.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader"));
     assert!(!ts_code.contains("export class GameRulesTable"));
     assert!(!ts_code.contains("RuntimeDataFormat"));
     assert!(ts_code.contains("getById(id: number): ItemsRow | undefined"));
@@ -1150,34 +1156,85 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
             r#"
                 include!("generated.rs");
 
+                #[derive(Clone)]
+                struct MockReader {{
+                    path: &'static str,
+                    index: Option<usize>,
+                    field: Option<&'static str>,
+                }}
+
+                impl MockReader {{
+                    fn root(path: &'static str) -> Self {{
+                        Self {{ path, index: None, field: None }}
+                    }}
+                }}
+
+                impl RuntimeDataReader for MockReader {{
+                    fn field(&self, name: &str) -> Result<Option<Self>, String> {{
+                        let field = match name {{
+                            "rows" => "rows",
+                            "id" => "id",
+                            "name" => "name",
+                            "price" => "price",
+                            "max_player_level" => "max_player_level",
+                            "starter_gold" => "starter_gold",
+                            "stamina_cap" => "stamina_cap",
+                            "daily_reset_hour" => "daily_reset_hour",
+                            "pvp_enabled" => "pvp_enabled",
+                            "stack" | "attributes" | "skill" => return Ok(None),
+                            other => return Err(format!("unexpected field: {{other}}")),
+                        }};
+                        Ok(Some(Self {{ path: self.path, index: self.index, field: Some(field) }}))
+                    }}
+
+                    fn index(&self, index: usize) -> Result<Self, String> {{
+                        if self.path == "items" && self.field == Some("rows") && index == 0 {{
+                            Ok(Self {{ path: self.path, index: Some(index), field: None }})
+                        }} else {{
+                            Err(format!("unexpected index: {{index}}"))
+                        }}
+                    }}
+
+                    fn len(&self) -> Result<usize, String> {{
+                        if self.path == "items" && self.field == Some("rows") {{ Ok(1) }} else {{ Err("unexpected len".to_owned()) }}
+                    }}
+
+                    fn as_i64(&self) -> Result<i64, String> {{
+                        match (self.path, self.field) {{
+                            ("items", Some("id")) => Ok(1),
+                            ("items", Some("price")) => Ok(10),
+                            ("game_rules", Some("max_player_level")) => Ok(60),
+                            ("game_rules", Some("starter_gold")) => Ok(500),
+                            ("game_rules", Some("stamina_cap")) => Ok(120),
+                            ("game_rules", Some("daily_reset_hour")) => Ok(5),
+                            _ => Err("unexpected i64".to_owned()),
+                        }}
+                    }}
+
+                    fn as_f64(&self) -> Result<f64, String> {{ Ok(self.as_i64()? as f64) }}
+
+                    fn as_bool(&self) -> Result<bool, String> {{
+                        if self.path == "game_rules" && self.field == Some("pvp_enabled") {{ Ok(true) }} else {{ Err("unexpected bool".to_owned()) }}
+                    }}
+
+                    fn as_string(&self) -> Result<String, String> {{
+                        if self.path == "items" && self.field == Some("name") {{ Ok("Potion".to_owned()) }} else {{ Err("unexpected string".to_owned()) }}
+                    }}
+
+                    fn is_null(&self) -> bool {{ false }}
+                }}
+
                 struct MockLoader;
 
                 impl RuntimeDataLoader for MockLoader {{
-                    fn load_items_rows(&self, path: &str) -> Result<Vec<ItemsRow>, String> {{
-                        if path != ItemsTable::DATA_FILE {{
-                            return Err(format!("unexpected path: {{path}}"));
-                        }}
-                        Ok(vec![ItemsRow {{
-                            id: 1,
-                            name: "Potion".to_owned(),
-                            price: 10,
-                            stack: None,
-                            attributes: None,
-                            skill: None,
-                        }}])
-                    }}
+                    type Reader = MockReader;
 
-                    fn load_game_rules(&self, path: &str) -> Result<GameRulesRow, String> {{
-                        if path != GameRulesRow::DATA_FILE {{
-                            return Err(format!("unexpected path: {{path}}"));
+                    fn open(&self, path: &str) -> Result<Self::Reader, String> {{
+                        match path {{
+                            "items.json" | "items.msgpack" => Ok(MockReader::root("items")),
+                            "game_rules.json" | "game_rules.msgpack" => Ok(MockReader::root("game_rules")),
+                            other => Err(format!("unexpected path: {{other}}")),
                         }}
-                        Ok(GameRulesRow {{
-                            max_player_level: 60,
-                            starter_gold: 500,
-                            stamina_cap: 120,
-                            daily_reset_hour: 5,
-                            pvp_enabled: true,
-                        }})
                     }}
                 }}
 
@@ -1216,36 +1273,71 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
         r#"
             #include "generated.hpp"
 
+            #include <memory>
             #include <stdexcept>
+
+            class MockReader final : public IRuntimeDataReader {
+            public:
+                MockReader(std::string path, std::string field = "", std::size_t index = 0)
+                    : path_(std::move(path)), field_(std::move(field)), index_(index) {}
+
+                std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const override {
+                    if (name == "stack" || name == "attributes" || name == "skill") {
+                        return nullptr;
+                    }
+                    return std::make_unique<MockReader>(path_, name, index_);
+                }
+
+                std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const override {
+                    if (path_ == "items.json" && field_ == "rows" && index == 0) {
+                        return std::make_unique<MockReader>(path_, "", index);
+                    }
+                    throw std::runtime_error("unexpected index");
+                }
+
+                std::size_t Size() const override {
+                    if (path_ == "items.json" && field_ == "rows") {
+                        return 1;
+                    }
+                    throw std::runtime_error("unexpected size");
+                }
+
+                std::int64_t AsInt64() const override {
+                    if (path_ == "items.json" && field_ == "id") { return 1; }
+                    if (path_ == "items.json" && field_ == "price") { return 10; }
+                    if (path_ == "game_rules.json" && field_ == "max_player_level") { return 60; }
+                    if (path_ == "game_rules.json" && field_ == "starter_gold") { return 500; }
+                    if (path_ == "game_rules.json" && field_ == "stamina_cap") { return 120; }
+                    if (path_ == "game_rules.json" && field_ == "daily_reset_hour") { return 5; }
+                    throw std::runtime_error("unexpected int64");
+                }
+
+                double AsDouble() const override { return static_cast<double>(AsInt64()); }
+
+                bool AsBool() const override {
+                    if (path_ == "game_rules.json" && field_ == "pvp_enabled") { return true; }
+                    throw std::runtime_error("unexpected bool");
+                }
+
+                std::string AsString() const override {
+                    if (path_ == "items.json" && field_ == "name") { return "Potion"; }
+                    throw std::runtime_error("unexpected string");
+                }
+
+                bool IsNull() const override { return false; }
+            private:
+                std::string path_;
+                std::string field_;
+                std::size_t index_;
+            };
 
             class MockLoader final : public IRuntimeDataLoader {
             public:
-                std::vector<ItemsRow> LoadItemsRows(const std::string& path) override {
-                    if (path != "items.json") {
-                        throw std::runtime_error("unexpected items path");
+                std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) override {
+                    if (path == "items.json" || path == "game_rules.json") {
+                        return std::make_unique<MockReader>(path);
                     }
-                    ItemsRow potion{};
-                    potion.id = 1;
-                    potion.name = "Potion";
-                    potion.price = 10;
-                    ItemsRow ether{};
-                    ether.id = 2;
-                    ether.name = "Ether";
-                    ether.price = 20;
-                    return {potion, ether};
-                }
-
-                GameRulesRow LoadGameRules(const std::string& path) override {
-                    if (path != "game_rules.json") {
-                        throw std::runtime_error("unexpected game rules path");
-                    }
-                    GameRulesRow rules{};
-                    rules.max_player_level = 60;
-                    rules.starter_gold = 500;
-                    rules.stamina_cap = 120;
-                    rules.daily_reset_hour = 5;
-                    rules.pvp_enabled = true;
-                    return rules;
+                    throw std::runtime_error("unexpected path");
                 }
             };
 
@@ -1319,26 +1411,61 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
     fs::write(
         generated_dir.join("compile_check.ts"),
         r#"
-            import { GameData, GameRulesRow, ItemsRow, RuntimeDataLoader } from "./generated";
+            import { GameData, RuntimeDataLoader, RuntimeDataReader } from "./generated";
+
+            class MockReader implements RuntimeDataReader {
+                constructor(private readonly path: string, private readonly fieldName = "") {}
+
+                field(name: string): RuntimeDataReader | undefined {
+                    if (name === "stack" || name === "attributes" || name === "skill") {
+                        return undefined;
+                    }
+                    return new MockReader(this.path, name);
+                }
+
+                index(index: number): RuntimeDataReader {
+                    if (this.path === "items.json" && this.fieldName === "rows" && index === 0) {
+                        return new MockReader(this.path);
+                    }
+                    throw new Error(`unexpected index: ${index}`);
+                }
+
+                length(): number {
+                    if (this.path === "items.json" && this.fieldName === "rows") {
+                        return 1;
+                    }
+                    throw new Error("unexpected length");
+                }
+
+                asNumber(): number {
+                    if (this.path === "items.json" && this.fieldName === "id") { return 1; }
+                    if (this.path === "items.json" && this.fieldName === "price") { return 10; }
+                    if (this.path === "game_rules.json" && this.fieldName === "max_player_level") { return 60; }
+                    if (this.path === "game_rules.json" && this.fieldName === "starter_gold") { return 500; }
+                    if (this.path === "game_rules.json" && this.fieldName === "stamina_cap") { return 120; }
+                    if (this.path === "game_rules.json" && this.fieldName === "daily_reset_hour") { return 5; }
+                    throw new Error("unexpected number");
+                }
+
+                asBool(): boolean {
+                    if (this.path === "game_rules.json" && this.fieldName === "pvp_enabled") { return true; }
+                    throw new Error("unexpected bool");
+                }
+
+                asString(): string {
+                    if (this.path === "items.json" && this.fieldName === "name") { return "Potion"; }
+                    throw new Error("unexpected string");
+                }
+
+                isNull(): boolean { return false; }
+            }
 
             const loader: RuntimeDataLoader = {
-                loadItemsRows(path: string): ItemsRow[] {
-                    if (path !== "items.json") {
-                        throw new Error(`unexpected path: ${path}`);
+                open(path: string): RuntimeDataReader {
+                    if (path === "items.json" || path === "game_rules.json") {
+                        return new MockReader(path);
                     }
-                    return [{ id: 1, name: "Potion", price: 10 }];
-                },
-                loadGameRules(path: string): GameRulesRow {
-                    if (path !== "game_rules.json") {
-                        throw new Error(`unexpected path: ${path}`);
-                    }
-                    return {
-                        maxPlayerLevel: 60,
-                        starterGold: 500,
-                        staminaCap: 120,
-                        dailyResetHour: 5,
-                        pvpEnabled: true,
-                    };
+                    throw new Error(`unexpected path: ${path}`);
                 },
             };
 

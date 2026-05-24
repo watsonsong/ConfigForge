@@ -2,9 +2,9 @@ use crate::{ConfigForgeError, Result};
 
 use super::{
     build_code_model, ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
-    render_file_header, ArtifactKind, CodeExportInput, CodeExportLanguage, CodeFragmentPayload,
-    CodeGenerator, CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions,
-    GeneratedFile, GeneratedSymbol,
+    render_file_header, ArtifactKind, CodeEnum, CodeExportInput, CodeExportLanguage,
+    CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTableKind,
+    CodeTypeRef, CodegenOptions, GeneratedFile, GeneratedSymbol,
 };
 
 pub struct CppCodeGenerator;
@@ -22,7 +22,7 @@ impl CodeGenerator for CppCodeGenerator {
         validate_generated_symbols(&model, &names)?;
         let mut header = render_file_header(input);
         header.push_str("#pragma once\n\n");
-        header.push_str("#include <cstdint>\n#include <cstddef>\n#include <map>\n#include <optional>\n#include <string>\n#include <tuple>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
+        header.push_str("#include <cstdint>\n#include <cstddef>\n#include <map>\n#include <memory>\n#include <optional>\n#include <string>\n#include <tuple>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
         let namespace = cpp_options
             .namespace
             .as_ref()
@@ -31,7 +31,9 @@ impl CodeGenerator for CppCodeGenerator {
         if let Some(namespace) = namespace {
             header.push_str(&format!("namespace {namespace} {{\n\n"));
         }
-        header.push_str("class IRuntimeDataLoader;\n\n");
+        header.push_str(
+            "class IRuntimeDataReader {\npublic:\n    virtual ~IRuntimeDataReader() = default;\n    virtual std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const = 0;\n    virtual std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const = 0;\n    virtual std::size_t Size() const = 0;\n    virtual std::int64_t AsInt64() const = 0;\n    virtual double AsDouble() const = 0;\n    virtual bool AsBool() const = 0;\n    virtual std::string AsString() const = 0;\n    virtual bool IsNull() const = 0;\n};\n\nclass IRuntimeDataLoader {\npublic:\n    virtual ~IRuntimeDataLoader() = default;\n    virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;\n};\n\n",
+        );
 
         for code_enum in &model.enums {
             push_doc(&mut header, code_enum.desc.as_deref());
@@ -120,26 +122,6 @@ impl CodeGenerator for CppCodeGenerator {
             }
         }
 
-        header.push_str(
-            "class IRuntimeDataLoader {\npublic:\n    virtual ~IRuntimeDataLoader() = default;\n",
-        );
-        header.push_str("    // Implementations should read exported table files and map every runtime field into the generated row/object types.\n");
-        for table in &model.tables {
-            match table.kind {
-                CodeTableKind::Collection => header.push_str(&format!(
-                    "    virtual std::vector<{}> Load{}Rows(const std::string& path) = 0;\n",
-                    names.row_type_name(&table.name)?,
-                    names.type_name(&table.name)?
-                )),
-                CodeTableKind::Object => header.push_str(&format!(
-                    "    virtual {} Load{}(const std::string& path) = 0;\n",
-                    names.row_type_name(&table.name)?,
-                    names.type_name(&table.name)?
-                )),
-            }
-        }
-        header.push_str("};\n\n");
-
         header.push_str("class GameData {\npublic:\n");
         header.push_str("    static GameData Load(IRuntimeDataLoader& loader);\n");
         for table in &model.tables {
@@ -181,11 +163,18 @@ impl CodeGenerator for CppCodeGenerator {
 }
 
 fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>) -> Result<()> {
-    let mut type_symbols = vec![GeneratedSymbol::new(
-        "runtime interface",
-        "IRuntimeDataLoader",
-        "IRuntimeDataLoader",
-    )];
+    let mut type_symbols = vec![
+        GeneratedSymbol::new(
+            "runtime interface",
+            "IRuntimeDataReader",
+            "IRuntimeDataReader",
+        ),
+        GeneratedSymbol::new(
+            "runtime interface",
+            "IRuntimeDataLoader",
+            "IRuntimeDataLoader",
+        ),
+    ];
     for code_enum in &model.enums {
         type_symbols.push(GeneratedSymbol::new(
             "enum",
@@ -327,22 +316,7 @@ fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>) -> Result
         }),
     )?;
 
-    let mut loader_symbols = vec![GeneratedSymbol::new(
-        "method",
-        "destructor",
-        "~IRuntimeDataLoader",
-    )];
-    for table in &model.tables {
-        loader_symbols.push(GeneratedSymbol::new(
-            "loader method",
-            &table.name,
-            match table.kind {
-                CodeTableKind::Collection => format!("Load{}Rows", names.type_name(&table.name)?),
-                CodeTableKind::Object => format!("Load{}", names.type_name(&table.name)?),
-            },
-        ));
-    }
-    ensure_unique_generated_symbols("cpp", "IRuntimeDataLoader methods", loader_symbols)
+    Ok(())
 }
 
 fn validate_named_symbols(
@@ -366,6 +340,25 @@ fn render_source_file(
         content.push_str(&format!("namespace {namespace} {{\n\n"));
     }
 
+    render_reader_helpers_source(&mut content);
+    for code_enum in &model.enums {
+        render_enum_reader_source(&mut content, code_enum, names)?;
+    }
+    for code_struct in &model.structs {
+        render_struct_reader_source(&mut content, code_struct, names)?;
+    }
+    for table in &model.tables {
+        for fragment in &table.fragments {
+            if matches!(fragment.payload, CodeFragmentPayload::InlineFields) {
+                render_fragment_reader_source(&mut content, table, fragment, names)?;
+            }
+        }
+    }
+    for table in &model.tables {
+        render_row_reader_source(&mut content, table, names)?;
+    }
+    content.push_str("} // namespace\n\n");
+
     for table in &model.tables {
         if table.kind == CodeTableKind::Collection {
             render_table_source(&mut content, table, names)?;
@@ -379,6 +372,104 @@ fn render_source_file(
     Ok(content)
 }
 
+fn render_reader_helpers_source(content: &mut String) {
+    content.push_str(
+        "namespace {\n\nstd::unique_ptr<IRuntimeDataReader> RequiredField(const IRuntimeDataReader& reader, const std::string& name) {\n    auto value = reader.Field(name);\n    if (!value || value->IsNull()) { throw std::runtime_error(\"missing required field `\" + name + \"`\"); }\n    return value;\n}\n\nstd::int64_t ReadRequiredInt64(const IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name)->AsInt64(); }\ndouble ReadRequiredDouble(const IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name)->AsDouble(); }\nbool ReadRequiredBool(const IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name)->AsBool(); }\nstd::string ReadRequiredString(const IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name)->AsString(); }\n\n",
+    );
+}
+
+fn render_enum_reader_source(
+    content: &mut String,
+    code_enum: &CodeEnum,
+    names: &CppNames<'_>,
+) -> Result<()> {
+    let type_name = names.type_name(&code_enum.name)?;
+    let function_name = names.reader_function_name(&type_name)?;
+    content.push_str(&format!(
+        "{} {}(const IRuntimeDataReader& reader) {{\n",
+        type_name, function_name
+    ));
+    content.push_str("    const std::string value = reader.AsString();\n");
+    for value in &code_enum.values {
+        content.push_str(&format!(
+            "    if (value == {:?}) {{ return {}::{}; }}\n",
+            value.name,
+            type_name,
+            names.enum_variant_name(&value.name)?
+        ));
+    }
+    content.push_str(&format!(
+        "    throw std::runtime_error(\"unknown {} value `\" + value + \"`\");\n",
+        code_enum.name
+    ));
+    content.push_str("}\n\n");
+    Ok(())
+}
+
+fn render_struct_reader_source(
+    content: &mut String,
+    code_struct: &CodeStruct,
+    names: &CppNames<'_>,
+) -> Result<()> {
+    let type_name = names.type_name(&code_struct.name)?;
+    render_reader_function_source(content, &type_name, &code_struct.fields, None, names)
+}
+
+fn render_fragment_reader_source(
+    content: &mut String,
+    table: &CodeTable,
+    fragment: &super::CodeFragment,
+    names: &CppNames<'_>,
+) -> Result<()> {
+    let type_name = names.fragment_payload_type_name(table, fragment)?;
+    render_reader_function_source(content, &type_name, &fragment.fields, None, names)
+}
+
+fn render_row_reader_source(
+    content: &mut String,
+    table: &CodeTable,
+    names: &CppNames<'_>,
+) -> Result<()> {
+    let type_name = names.row_type_name(&table.name)?;
+    render_reader_function_source(content, &type_name, &table.fields, Some(table), names)
+}
+
+fn render_reader_function_source(
+    content: &mut String,
+    type_name: &str,
+    fields: &[super::CodeField],
+    table: Option<&CodeTable>,
+    names: &CppNames<'_>,
+) -> Result<()> {
+    let function_name = names.reader_function_name(type_name)?;
+    content.push_str(&format!(
+        "{} {}(const IRuntimeDataReader& reader) {{\n",
+        type_name, function_name
+    ));
+    content.push_str(&format!("    {} value{{}};\n", type_name));
+    for field in fields {
+        content.push_str(&format!(
+            "    value.{} = {};\n",
+            names.field_name(&field.name)?,
+            names.cpp_read_field_expr(field)?
+        ));
+    }
+    if let Some(table) = table {
+        for fragment in &table.fragments {
+            let field_name = names.field_name(&fragment.name)?;
+            let payload_type = names.fragment_payload_type_name(table, fragment)?;
+            let reader_function = names.reader_function_name(&payload_type)?;
+            content.push_str(&format!(
+                "    if (auto fragment = reader.Field({:?}); fragment && !fragment->IsNull()) {{ value.{field_name} = {reader_function}(*fragment); }}\n",
+                fragment.name
+            ));
+        }
+    }
+    content.push_str("    return value;\n");
+    content.push_str("}\n\n");
+    Ok(())
+}
+
 fn render_table_source(
     content: &mut String,
     table: &CodeTable,
@@ -386,16 +477,24 @@ fn render_table_source(
 ) -> Result<()> {
     let repository_type = names.repository_type_name(&table.name)?;
     let row_type = names.row_type_name(&table.name)?;
-    let load_rows_method = names.loader_rows_method_name(table)?;
+    let row_reader_function = names.reader_function_name(&row_type)?;
 
     content.push_str(&format!(
         "{} {}::Load(IRuntimeDataLoader& loader) {{\n",
         repository_type, repository_type
     ));
+    content.push_str("    auto root = loader.Open(DataFile);\n");
+    content.push_str("    auto rows_reader = RequiredField(*root, \"rows\");\n");
+    content.push_str(&format!("    std::vector<{}> rows;\n", row_type));
+    content.push_str("    rows.reserve(rows_reader->Size());\n");
+    content.push_str(
+        "    for (std::size_t row_index = 0; row_index < rows_reader->Size(); ++row_index) {\n",
+    );
     content.push_str(&format!(
-        "    return FromRows(loader.{}(DataFile));\n",
-        load_rows_method
+        "        rows.push_back({row_reader_function}(*rows_reader->Index(row_index)));\n"
     ));
+    content.push_str("    }\n");
+    content.push_str("    return FromRows(std::move(rows));\n");
     content.push_str("}\n\n");
 
     content.push_str(&format!(
@@ -502,8 +601,8 @@ fn render_game_data_load_source(
                 names.repository_type_name(&table.name)?
             )),
             CodeTableKind::Object => content.push_str(&format!(
-                "    data.{member_name} = loader.{}({}::DataFile);\n",
-                names.loader_object_method_name(table)?,
+                "    data.{member_name} = {}(*loader.Open({}::DataFile));\n",
+                names.reader_function_name(&names.row_type_name(&table.name)?)?,
                 names.row_type_name(&table.name)?
             )),
         }
@@ -699,12 +798,8 @@ impl<'a> CppNames<'a> {
         self.identifier(&format!("{prefix}_{suffix}"), self.options.naming.function)
     }
 
-    fn loader_rows_method_name(&self, table: &CodeTable) -> Result<String> {
-        Ok(format!("Load{}Rows", self.type_name(&table.name)?))
-    }
-
-    fn loader_object_method_name(&self, table: &CodeTable) -> Result<String> {
-        Ok(format!("Load{}", self.type_name(&table.name)?))
+    fn reader_function_name(&self, type_name: &str) -> Result<String> {
+        self.identifier(&format!("read_{type_name}"), self.options.naming.function)
     }
 
     fn cpp_index_params(&self, index: &CodeIndex) -> Result<String> {
@@ -731,6 +826,22 @@ impl<'a> CppNames<'a> {
                 "std::string".to_owned()
             }
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
+        })
+    }
+
+    fn cpp_read_field_expr(&self, field: &super::CodeField) -> Result<String> {
+        let source_name = format!("{:?}", field.name);
+        Ok(match &field.code_type {
+            CodeTypeRef::Int => format!("ReadRequiredInt64(reader, {source_name})"),
+            CodeTypeRef::Float => format!("ReadRequiredDouble(reader, {source_name})"),
+            CodeTypeRef::Bool => format!("ReadRequiredBool(reader, {source_name})"),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                format!("ReadRequiredString(reader, {source_name})")
+            }
+            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
+                "{}(*RequiredField(reader, {source_name}))",
+                self.reader_function_name(&self.type_name(name)?)?
+            ),
         })
     }
 
