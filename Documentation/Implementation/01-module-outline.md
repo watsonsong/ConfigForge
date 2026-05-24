@@ -18,8 +18,7 @@
 | 模块 | 路径 | 责任 | 主要输入 | 主要输出 | 模块文档 |
 | --- | --- | --- | --- | --- | --- |
 | CLI | `src/cli.rs` / `src/main.rs` | 命令行参数、用户入口、错误展示。CLI 只做输入解析和调用 build，不承载业务流程。 | argv、环境变量。 | `BuildOptions`、用户可读输出。 | 本文档总览。 |
-| Diagnostic | `src/diagnostic/` | 统一诊断基础类型、严重级别、位置、报告聚合和格式化。 | 各模块诊断条目。 | `DiagnosticSeverity`、`DiagnosticLocation`、`DiagnosticReport<T>`。 | `02-diagnostic-module-detail-design.md` |
-| Error | `src/error.rs` | crate 级错误模型，把 I/O、parse、meta validation、data validation 等错误桥接到统一 `Result<T>`。 | 底层错误和诊断报告。 | `ConfigForgeError`。 | `02-diagnostic-module-detail-design.md` |
+| Diagnostic / Error | `src/diagnostic/` | 统一诊断基础类型、严重级别、位置、报告聚合、格式化，以及 crate 级错误桥接。 | 各模块诊断条目、底层错误。 | `DiagnosticSeverity`、`DiagnosticLocation`、`DiagnosticReport<T>`、`ConfigForgeError`。 | `02-diagnostic-module-detail-design.md` |
 | Project | `src/project/` | 加载 `ConfigForge.toml`、解析工程级配置、合并 imports、归一化路径、抽取 Meta。 | Project Config TOML。 | `ProjectConfig`、`TargetConfig`、`MetaModel`。 | `03-project-module-detail-design.md` |
 | Meta | `src/meta/` | Meta schema 加载、纯配置模型、link 借用视图、结构校验。 | Meta TOML 片段。 | `MetaModel`、`LinkedMetaModel<'meta>`、`MetaDiagnostic`。 | `04-meta-module-detail-design.md` |
 | Data | `src/data/` | 根据加载计划读取 CSV 等数据源，形成 raw `DataSet`，并提供 Meta-aware resolver。 | `DataLoadPlan`、source files、`LinkedMetaModel<'meta>`。 | `DataSet`、`ResolvedDataSet` / resolved view。 | `05-data-module-detail-design.md` |
@@ -57,13 +56,13 @@ main / cli
           ├─ meta
           └─ exporter       # 只消费 runtime data file 描述
 
-diagnostic / error 位于底层共享层，不依赖业务模块。
+diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 错误 facade，用于在边界层聚合各模块诊断。
 ```
 
 强制约束：
 
-- `diagnostic` 只能依赖标准库和通用 serde 等底层库，不能依赖 `meta`、`data`、`validation`、`exporter`、`codegen`、`project`、`build`。
-- `error` 作为 crate 错误桥接层可以引用稳定诊断类型，但不能承载业务逻辑，也不能让业务模块为了错误格式化反向依赖上层模块。
+- `diagnostic` 的基础类型只能依赖标准库和通用 serde 等底层库，不能依赖 `meta`、`data`、`validation`、`exporter`、`codegen`、`project`、`build`。
+- `diagnostic::error` 作为 crate 错误桥接层可以引用稳定诊断类型和各模块诊断集合，但不能承载业务逻辑，也不能让业务模块为了错误格式化反向依赖上层模块。
 - `meta` 不依赖 `project`、`data`、`validation`、`exporter`、`codegen`、`build`。Meta 只描述 schema 与 link/validate 结果。
 - `data` 可以依赖 `meta` 做 resolver，但 source reader 层应保持 source-neutral；CSV reader 不能读取 exporter/codegen/validation 语义。
 - `validation` 可以依赖 `meta`、`data`、`diagnostic`，不能依赖 `exporter`、`codegen`、`build`。

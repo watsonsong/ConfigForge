@@ -15,14 +15,16 @@
 
 ## Module Rules
 
-- `meta` owns schema definitions.
-- `source` owns input normalization.
-- `validation` owns correctness checks.
-- `exporter` owns generated outputs and orchestration.
-- `plugin` owns dynamic plugin loading, plugin manifests, and capability registration.
-- `diagnostics` owns structured diagnostics, collection, ordering, and reporting.
-- `runtime` or `executor` owns shared async/parallel task execution primitives if those primitives outgrow individual modules.
-- `cli` owns command-line parsing and user-facing messages.
+- `diagnostic` owns shared diagnostic foundations and the crate error facade.
+- `project` owns Project Config loading, imports, path normalization, target aggregation, and Meta extraction.
+- `meta` owns schema definitions, Load-then-Link, linked views, and Meta structural diagnostics.
+- `data` owns source loading, CSV readers, raw `DataSet`, row source trace, and Meta-aware resolving.
+- `validation` owns correctness checks, target-aware validation views, `ValidationReport`, and validator registry.
+- `exporter` owns runtime data export contracts, data format registry, JSON / MessagePack payloads, and future data format plugins.
+- `codegen` owns language-neutral CodeModel IR and Rust / TypeScript / C++ generated code.
+- `build` owns project build orchestration, target normalization, data/code task binding, and artifact scheduling/writes.
+- `cli` owns command-line parsing and user-facing messages. It should call `build` rather than orchestrating lower-level modules directly.
+- Future plugin or executor modules should follow the one-way dependency rules in `Documentation/Implementation/01-module-outline.md`.
 
 ## Comment Rules
 

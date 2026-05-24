@@ -2,7 +2,7 @@
 
 本文档描述 ConfigForge 后续任务系统的技术实现方案。目标是在不改变现有导出语义、诊断顺序和产物稳定性的前提下，合理利用 CPU 多核与操作系统异步 I/O 能力，支持用户通过 CLI 限制资源消耗，避免默认占满整台机器。
 
-当前实现仍以同步串行流程为主：`build_target` 依次完成 Project Config 读取、Meta Link、Data Source 读取、Normalize、Validation、Runtime Data Export、Codegen 与写文件。本文档作为后续重构的工程设计依据。
+当前实现已引入局部 Rayon CPU worker pool：`build_target` 仍按 Project Config 读取、Meta Link、Data Load、Normalize、Validation、Runtime Data Export、Codegen 与写文件的阶段顺序执行，但 DataLoader、runtime data serialization 和 codegen task 已在受 `jobs` 限制的 worker pool 中并行。远端 provider、async I/O、完整任务 DAG 和独立 artifact writer 仍属于后续演进范围。本文档作为后续重构的工程设计依据。
 
 ## 1. 设计目标
 

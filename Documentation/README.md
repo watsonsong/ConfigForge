@@ -11,6 +11,21 @@ This directory contains durable project knowledge for ConfigForge.
 - `Tech/` stores technical practice documents, including test coverage evaluation and engineering workflow notes.
 - `DevLogs/` stores raw phase-by-phase development logs for historical decision context, temporary decisions, and source material references.
 
+## How AI Agents Should Use These Docs
+
+`../AGENTS.md` is the short workspace entry point. This file is the durable documentation map. For future development work, choose documents by intent:
+
+| Intent | Read first | Then read |
+| --- | --- | --- |
+| Understand current product behavior | `Design/README.md` | The relevant `Design/0*.md` topic file. |
+| Change module boundaries or dependencies | `Implementation/01-module-outline.md` | The affected module documents under `Implementation/02`～`09`. |
+| Add or modify a feature | Relevant `Design/*.md` | Relevant `Implementation/*.md`, plus `code-style.md`. |
+| Work on concurrency, resource limits, or execution strategy | `Implementation/09-build-module-detail-design.md` | `Tech/task-system-design.md`. |
+| Work on testing quality | `code-style.md` | `Tech/unit-test-coverage.md`. |
+| Research historical reasoning | Current `Design/` / `Implementation/` docs | `DevLogs/` only as supporting evidence. |
+
+Canonical priority is: `Design/` for user-visible behavior, `Implementation/` for Rust module structure, `Tech/` for engineering workflow and tooling, `DevLogs/` for historical context only.
+
 ## Canonical Design Set
 
 For future technical overview design, detailed design, user manual writing, and QA test planning, use the consolidated documents under `Design/`:
@@ -55,5 +70,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 - Keep this directory focused on decisions that future contributors need.
 - Put concise navigation and project summaries in `../AGENTS.md`.
 - Update the consolidated `Design/` documents whenever product behavior is introduced, redesigned, or meaningfully expanded.
+- Update `Implementation/01-module-outline.md` and the affected module document whenever source module boundaries, dependency direction, or public APIs change.
+- Update `Tech/` documents when commands, toolchain requirements, concurrency/resource policies, or test/coverage workflows change.
 - When introducing new domain concepts, update `glossary.md` before or together with feature specs.
 - Use `DevLogs/` for phase snapshots and raw decision evidence; do not rewrite old logs as if they were canonical current design.

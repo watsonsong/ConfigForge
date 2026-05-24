@@ -2,6 +2,10 @@ use std::{fmt, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub mod error;
+
+pub use error::{ConfigForgeError, Result};
+
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticSeverity {

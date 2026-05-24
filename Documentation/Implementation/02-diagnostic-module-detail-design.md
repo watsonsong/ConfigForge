@@ -4,30 +4,29 @@
 
 ## 2.1 设计目标
 
-Diagnostic 模块作为底层共享模块，为 Meta、Data、Validation、Exporter、Build 等工作模块提供统一诊断基础：
+Diagnostic 模块为 Meta、Data、Validation、Exporter、Build 等工作模块提供统一诊断基础，并集中承载 crate 级错误 facade：
 
 1. 统一严重级别：Error / Warning。
 2. 统一定位信息：source path、table、field、row index、source row number。
 3. 统一格式化：不同模块保留自己的 code 和上下文字段，但输出规则一致。
 4. 统一报告聚合：支持在多线程任务中收集诊断，并在上层按 error / warning 分流。
-5. 保持底层依赖：`diagnostic` 不能依赖任何业务模块，避免循环依赖。
+5. 保持依赖边界：diagnostic foundation 不依赖任何业务模块；`diagnostic::error` 只作为边界错误 facade 聚合模块诊断，不承载业务逻辑。
 
-`src/error.rs` 保留为 crate 级 `Result<T>` 和 `ConfigForgeError` 桥接层，不替代各模块的结构化诊断。
+`ConfigForgeError` 和 crate `Result<T>` 已归入 `src/diagnostic/error.rs`。crate root 继续 re-export `ConfigForgeError` / `Result`，并保留 `crate::error::{...}` 兼容 re-export，外部调用方不需要直接依赖内部文件路径。
 
 ## 2.2 模块结构
 
 ```text
 src/diagnostic/
   mod.rs              # DiagnosticSeverity / DiagnosticLocation / DiagnosticEntry / DiagnosticReport
-
-src/error.rs          # ConfigForgeError 与 crate Result<T>
+  error.rs            # ConfigForgeError 与 crate Result<T>
 ```
 
 依赖规则：
 
-- `diagnostic` 只依赖标准库和 serde。
+- `diagnostic::mod` 中的 foundation 类型只依赖标准库和 serde。
 - 业务模块实现 `DiagnosticEntry` 接入统一格式化。
-- `error` 可以引用稳定诊断类型和具体业务诊断集合，但不能承载业务校验逻辑。
+- `diagnostic::error` 可以引用稳定诊断类型和具体业务诊断集合，但不能承载业务校验逻辑。
 
 ## 2.3 核心类型
 
