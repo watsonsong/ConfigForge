@@ -213,6 +213,7 @@ impl<'meta> RangeValidator<'meta> {
                 field: Some(self.field_name.to_owned()),
                 row_index: Some(row_index),
                 source_row_number,
+                ..Default::default()
             },
         );
         issue.target = ctx.target_tags.as_ref().map(format_target_tags);

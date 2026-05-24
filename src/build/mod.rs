@@ -12,8 +12,8 @@ mod options;
 mod runtime;
 mod target;
 
-pub use crate::project::{ProjectConfig, ProjectConfigMeta, TargetConfig};
 pub use crate::exporter::TargetDataConfig;
+pub use crate::project::{ProjectConfig, ProjectConfigMeta, TargetConfig};
 pub use options::{BuildOptions, BuildOutput, ExecutionOptions};
 
 use crate::{

@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 
+use crate::diagnostic::DiagnosticSeverity;
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct MetaModel {
     #[serde(default)]
@@ -215,13 +217,7 @@ pub struct ValidatorMeta {
     pub params: BTreeMap<String, toml::Value>,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ValidationSeverity {
-    #[default]
-    Error,
-    Warning,
-}
+pub type ValidationSeverity = DiagnosticSeverity;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ExportCondition {

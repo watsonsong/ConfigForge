@@ -1,4 +1,8 @@
-use crate::{ConfigForgeError, Result, meta::ValidationSeverity};
+use crate::{
+    ConfigForgeError, Result,
+    diagnostic::{DiagnosticEntry, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity},
+    meta::ValidationSeverity,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationIssue {
@@ -11,13 +15,7 @@ pub struct ValidationIssue {
     pub hint: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ValidationIssueLocation {
-    pub table: Option<String>,
-    pub field: Option<String>,
-    pub row_index: Option<usize>,
-    pub source_row_number: Option<usize>,
-}
+pub type ValidationIssueLocation = DiagnosticLocation;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ValidationReport {
@@ -34,25 +32,15 @@ impl ValidationReport {
     }
 
     pub fn has_error(&self) -> bool {
-        self.issues
-            .iter()
-            .any(|issue| issue.severity == ValidationSeverity::Error)
+        self.as_diagnostic_report().has_error()
     }
 
     pub fn warning_messages(&self) -> Vec<String> {
-        self.issues
-            .iter()
-            .filter(|issue| issue.severity == ValidationSeverity::Warning)
-            .map(format_issue)
-            .collect()
+        self.as_diagnostic_report().warning_messages()
     }
 
     pub fn error_messages(&self) -> Vec<String> {
-        self.issues
-            .iter()
-            .filter(|issue| issue.severity == ValidationSeverity::Error)
-            .map(|issue| issue.message.clone())
-            .collect()
+        self.as_diagnostic_report().error_messages()
     }
 
     pub fn into_result(self) -> Result<()> {
@@ -63,32 +51,11 @@ impl ValidationReport {
         let messages = self.error_messages().join("; ");
         Err(ConfigForgeError::Validation(messages))
     }
-}
 
-fn format_issue(issue: &ValidationIssue) -> String {
-    let mut parts = Vec::new();
-    if let Some(table) = &issue.location.table {
-        parts.push(format!("table `{table}`"));
-    }
-    if let Some(row_number) = issue.location.source_row_number {
-        parts.push(format!("row {row_number}"));
-    }
-    if let Some(field) = &issue.location.field {
-        parts.push(format!("field `{field}`"));
-    }
-    if let Some(target) = &issue.target {
-        parts.push(format!("target `{target}`"));
-    }
-
-    if parts.is_empty() {
-        format!("{}: {}", issue.validator, issue.message)
-    } else {
-        format!(
-            "{}: {} ({})",
-            issue.validator,
-            issue.message,
-            parts.join(", ")
-        )
+    fn as_diagnostic_report(&self) -> DiagnosticReport<&ValidationIssue> {
+        DiagnosticReport {
+            diagnostics: self.issues.iter().collect(),
+        }
     }
 }
 
@@ -124,5 +91,35 @@ impl ValidationIssue {
             message,
             location,
         )
+    }
+}
+
+impl DiagnosticEntry for ValidationIssue {
+    fn code(&self) -> String {
+        self.code.clone()
+    }
+
+    fn severity(&self) -> DiagnosticSeverity {
+        self.severity
+    }
+
+    fn message(&self) -> &str {
+        &self.message
+    }
+
+    fn location(&self) -> &DiagnosticLocation {
+        &self.location
+    }
+
+    fn source(&self) -> Option<&str> {
+        Some(&self.validator)
+    }
+
+    fn target(&self) -> Option<&str> {
+        self.target.as_deref()
+    }
+
+    fn hint(&self) -> Option<&str> {
+        self.hint.as_deref()
     }
 }
