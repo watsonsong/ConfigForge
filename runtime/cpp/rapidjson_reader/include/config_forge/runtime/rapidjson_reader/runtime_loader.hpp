@@ -28,8 +28,13 @@ namespace config_forge_runtime {
 // RapidJSON-backed adapter for generated ConfigForge C++ runtime interfaces.
 // Override these macros before including this header when generated code uses a
 // different namespace or global-scope runtime interfaces.
+#ifndef CONFIG_FORGE_RUNTIME_CPP_SUPPORTED_READER_CONTRACT_DEFINED
+#define CONFIG_FORGE_RUNTIME_CPP_SUPPORTED_READER_CONTRACT_DEFINED
 inline constexpr const char* SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0";
+#endif
 
+#ifndef CONFIG_FORGE_RUNTIME_CPP_SAFE_JOIN_PATH_DEFINED
+#define CONFIG_FORGE_RUNTIME_CPP_SAFE_JOIN_PATH_DEFINED
 inline std::string SafeJoinPath(const std::string& root, const std::string& logical_path) {
     if (logical_path.empty()) {
         throw std::runtime_error("runtime data path must not be empty");
@@ -70,6 +75,7 @@ inline std::string SafeJoinPath(const std::string& root, const std::string& logi
     }
     return result;
 }
+#endif
 
 class JsonValueReader final : public CONFIG_FORGE_RUNTIME_CPP_READER {
 public:

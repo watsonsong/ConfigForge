@@ -1740,7 +1740,7 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
             #include "generated.hpp"
             #define CONFIG_FORGE_RUNTIME_CPP_READER IRuntimeDataReader
             #define CONFIG_FORGE_RUNTIME_CPP_LOADER IRuntimeDataLoader
-            #include "runtime_loader.hpp"
+            #include "config_forge/runtime/rapidjson_reader/runtime_loader.hpp"
 
             int main() {
                 return config_forge_runtime::JsonValueReader("\"1\"").AsBool() ? 0 : 1;
@@ -1748,6 +1748,24 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
         "#,
     )
     .expect("C++ adapter namespace check should be written");
+    fs::write(
+        temp_dir.path().join("messagepack_adapter_namespace_check.cpp"),
+        r#"
+            #include "generated.hpp"
+            #include <msgpack.hpp>
+            #define CONFIG_FORGE_RUNTIME_CPP_READER IRuntimeDataReader
+            #define CONFIG_FORGE_RUNTIME_CPP_LOADER IRuntimeDataLoader
+            #include "config_forge/runtime/messagepack_reader/runtime_loader.hpp"
+
+            int main() {
+                msgpack::sbuffer buffer;
+                msgpack::packer<msgpack::sbuffer> packer(buffer);
+                packer.pack(std::string("1"));
+                return config_forge_runtime::MessagePackValueReader(buffer.data(), buffer.size()).AsBool() ? 0 : 1;
+            }
+        "#,
+    )
+    .expect("C++ MessagePack adapter namespace check should be written");
 
     fs::write(
         temp_dir.path().join("CMakeLists.txt"),
@@ -1759,6 +1777,7 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
                 set(CMAKE_CXX_STANDARD 17)
                 set(CMAKE_CXX_STANDARD_REQUIRED ON)
                 set(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER ON CACHE BOOL "" FORCE)
+                set(CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK_READER ON CACHE BOOL "" FORCE)
                 set(CONFIG_FORGE_RUNTIME_FETCH_DEPS ON CACHE BOOL "" FORCE)
                 add_subdirectory({runtime_cpp_dir:?} config_forge_runtime)
 
@@ -1771,6 +1790,10 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
                 add_executable(adapter_namespace_check adapter_namespace_check.cpp)
                 target_include_directories(adapter_namespace_check PRIVATE {temp_dir:?})
                 target_link_libraries(adapter_namespace_check PRIVATE config_forge_runtime::rapidjson_reader)
+
+                add_executable(messagepack_adapter_namespace_check messagepack_adapter_namespace_check.cpp)
+                target_include_directories(messagepack_adapter_namespace_check PRIVATE {temp_dir:?})
+                target_link_libraries(messagepack_adapter_namespace_check PRIVATE config_forge_runtime::messagepack_reader)
             "#,
             runtime_cpp_dir = runtime_cpp_dir.display().to_string(),
             harness_cpp = harness_cpp.display().to_string(),
@@ -1808,6 +1831,11 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
         .output()
         .expect("C++ adapter namespace check should run");
     assert_command_success(output, "C++ adapter namespace check run");
+
+    let output = StdCommand::new(build_dir.join("messagepack_adapter_namespace_check"))
+        .output()
+        .expect("C++ MessagePack adapter namespace check should run");
+    assert_command_success(output, "C++ MessagePack adapter namespace check run");
 }
 
 fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) {

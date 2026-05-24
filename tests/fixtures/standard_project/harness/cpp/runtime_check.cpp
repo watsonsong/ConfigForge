@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "runtime_loader.hpp"
+#include "config_forge/runtime/rapidjson_reader/runtime_loader.hpp"
 
 #include <cstdlib>
 #include <stdexcept>

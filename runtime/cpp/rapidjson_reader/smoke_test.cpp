@@ -27,7 +27,7 @@ public:
 
 #define CONFIG_FORGE_RUNTIME_CPP_READER IRuntimeDataReader
 #define CONFIG_FORGE_RUNTIME_CPP_LOADER IRuntimeDataLoader
-#include "runtime_loader.hpp"
+#include "config_forge/runtime/rapidjson_reader/runtime_loader.hpp"
 
 int main() {
     config_forge_runtime::JsonValueReader reader("{\"rows\":[{\"enabled\":\"1\"}]}");

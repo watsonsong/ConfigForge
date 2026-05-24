@@ -5,7 +5,7 @@
 `runtime/cpp/` 是 ConfigForge 为 C++ 项目提供 runtime helper 的入口。未来每个 runtime data format 都可能有自己的 reader adapter，例如：
 
 - `rapidjson_reader`：依赖 RapidJSON（header-only）；
-- `messagepack_msgpack_cpp`：可能依赖 msgpack-c / msgpack-cxx（可能是 header-only，也可能需要链接库，取决于发行包）；
+- `messagepack_reader`：依赖 msgpack-cxx（header-only C++ API，来自 msgpack/msgpack-c 的 cpp release）；
 - `yaml_yaml_cpp`：可能依赖 yaml-cpp（通常需要编译和链接库）；
 - `protobuf_*` / `flatbuffers_*`：通常依赖官方 C++ runtime（可能需要生成代码、编译库和链接库）。
 
@@ -56,7 +56,7 @@ option(CONFIG_FORGE_RUNTIME_WITH_<FORMAT>_<BACKEND> "Enable <Backend> <Format> a
 
 ```cmake
 option(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER "Enable RapidJSON reader adapter" OFF)
-option(CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK_MSGPACK_CPP "Enable msgpack-c/cxx MessagePack adapter" OFF)
+option(CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK_READER "Enable msgpack-cxx MessagePack reader adapter" OFF)
 option(CONFIG_FORGE_RUNTIME_WITH_YAML_YAML_CPP "Enable yaml-cpp YAML adapter" OFF)
 ```
 
@@ -223,9 +223,9 @@ endif()
 4. **编译选项污染**：第三方 target 不应把全局 warning、标准版本、异常/RTTI 设置污染到整个项目。
 5. **安装导出**：如果 ConfigForge 的 install package 暴露该 adapter target，安装后的 package config 必须能重新找到依赖。
 
-## msgpack-c / msgpack-cxx 指导
+## msgpack-cxx 指导
 
-MessagePack C++ 生态的 CMake target 名称在不同包管理器里可能不同。新增 `runtime/cpp/messagepack_msgpack_cpp` 时，建议同时兼容：
+MessagePack C++ adapter 选择 `msgpack-cxx`，即 `msgpack/msgpack-c` 仓库的 C++ API。它提供 `<msgpack.hpp>`、`msgpack::unpack` 和 `msgpack::object_handle`，适合实现 header-only reader；自动下载时固定使用 `cpp-6.1.1` tag，不跟随主分支。不同包管理器导出的 CMake target 名称可能不同，`runtime/cpp/messagepack_reader` 应同时兼容：
 
 ```cmake
 find_package(msgpack-cxx CONFIG QUIET)
@@ -234,17 +234,17 @@ if(NOT msgpack-cxx_FOUND)
 endif()
 
 if(TARGET msgpack-cxx)
-    target_link_libraries(config_forge_runtime_messagepack_msgpack_cpp INTERFACE msgpack-cxx)
+    target_link_libraries(config_forge_runtime_messagepack_reader INTERFACE msgpack-cxx)
 elseif(TARGET msgpackc-cxx)
-    target_link_libraries(config_forge_runtime_messagepack_msgpack_cpp INTERFACE msgpackc-cxx)
+    target_link_libraries(config_forge_runtime_messagepack_reader INTERFACE msgpackc-cxx)
 elseif(TARGET msgpack::msgpack)
-    target_link_libraries(config_forge_runtime_messagepack_msgpack_cpp INTERFACE msgpack::msgpack)
+    target_link_libraries(config_forge_runtime_messagepack_reader INTERFACE msgpack::msgpack)
 else()
-    # fallback to find_path/find_library or FetchContent
+    # fallback to find_path(MSGPACK_CXX_INCLUDE_DIR msgpack.hpp) or FetchContent.
 endif()
 ```
 
-如果使用 FetchContent，必须先确认所选 msgpack 仓库的 CMake option 和 target 名称；不要猜测 target。
+如果使用 FetchContent，应在 `FetchContent_MakeAvailable(msgpack_cxx)` 前关闭不需要的上游选项：`MSGPACK_USE_BOOST=OFF`、`MSGPACK_BUILD_DOCS=OFF`、`MSGPACK_BUILD_EXAMPLES=OFF`、`MSGPACK_BUILD_TESTS=OFF`，并设置 `MSGPACK_CXX17=ON`。优先把 `${msgpack_cxx_SOURCE_DIR}/include` 作为 include path；如果所选 package 创建了 imported target，则优先链接 target，让传递依赖由 package 自己传播。
 
 ## FetchContent 使用规则
 
@@ -322,7 +322,7 @@ Header-only 且通过 include path 使用的依赖，如果没有随 ConfigForge
 4. 按“find_package → find_path/find_library → FetchContent → fatal error”顺序解析依赖。
 5. 判断依赖类型：header-only 只传播 include path；compiled library 必须链接 target/library。
 6. 固定 FetchContent 版本，不跟随主分支。
-7. 创建 `config_forge_runtime::<format>_<backend>` alias target。
+7. 创建 `config_forge_runtime::<backend>_reader` alias target；必要时用 `<format>_<backend>_reader` 消除歧义。
 8. 将三方依赖只挂到 adapter target，不挂到 generated code。
 9. 补 smoke test / integration test；需要三方库时用 CMake configure 路径触发自动下载。
 10. 更新 `Documentation/Design/06-export-cli.md` 和 `Documentation/Implementation/09-codegen-module-detail-design.md` 的支持矩阵。
@@ -338,3 +338,9 @@ Header-only 且通过 include path 使用的依赖，如果没有随 ConfigForge
 - 对外只暴露 `config_forge_runtime::rapidjson_reader`。
 
 未来新增 C++ reader 时，应复制这套结构，而不是把三方库下载逻辑写进测试脚本或 generated code。若新依赖需要编译和链接库，应使用本文的 compiled library 模板，并额外处理 target 名称、传递依赖和安装后的 `find_dependency()`。
+
+`CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK_READER` 是第二个落地例子。它选择 msgpack-cxx 是因为：
+
+- C++ API 可直接把 MessagePack bytes 解码为 `msgpack::object_handle`，reader cursor 可以共享 owner，满足 generated reader contract 的生命周期要求；
+- 通过 `<msgpack.hpp>` 暴露 map / array / string / integer / float / bool / nil 类型，能完整覆盖当前 ConfigForge payload shape；
+- 常见包管理器支持 `find_package(msgpack-cxx CONFIG)` 或 `find_package(msgpack CONFIG)`，缺失时可显式 FetchContent 固定 `cpp-6.1.1`。
