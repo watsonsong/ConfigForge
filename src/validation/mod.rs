@@ -319,6 +319,9 @@ pub fn apply_field_defaults(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Re
             let Some(fragment) = meta.fragment(&fragment_name) else {
                 continue;
             };
+            if fragment.struct_type().is_some() {
+                continue;
+            }
             for field in &fragment.fields {
                 let key = fragment_field_key(fragment.meta.name.as_str(), field.meta.name.as_str());
                 let needs_default = row
@@ -900,6 +903,59 @@ fn visible_struct_child_count(
         .count()
 }
 
+fn visible_required_struct_child_count(
+    struct_type: &LinkedStructType<'_>,
+    target_tags: Option<&TargetTags>,
+) -> usize {
+    struct_type
+        .fields
+        .iter()
+        .filter(|field| field.meta.required && child_is_visible(field, target_tags))
+        .count()
+}
+
+fn validate_struct_child_path(
+    table_name: &str,
+    row_number: usize,
+    full_path: &str,
+    struct_type: &LinkedStructType<'_>,
+    path: &str,
+) -> Result<()> {
+    let Some((segment, rest)) = path.split_once('.') else {
+        if struct_child(struct_type, path).is_some() {
+            return Ok(());
+        }
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` references unknown struct child `{}`",
+            table_name, row_number, full_path, path
+        )));
+    };
+
+    let Some(child) = struct_child(struct_type, segment) else {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` references unknown struct child `{}`",
+            table_name, row_number, full_path, segment
+        )));
+    };
+    let LinkedField::Struct(nested_struct) = &child.linked_field else {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` uses child path but `{}` is not a struct field",
+            table_name, row_number, full_path, segment
+        )));
+    };
+    validate_struct_child_path(table_name, row_number, full_path, nested_struct, rest)
+}
+
+fn struct_child<'a, 'meta>(
+    struct_type: &'a LinkedStructType<'meta>,
+    name: &str,
+) -> Option<&'a LinkedFieldMeta<'meta>> {
+    struct_type
+        .fields
+        .iter()
+        .find(|child| child.meta.name == name)
+}
+
 fn child_is_visible(field: &LinkedFieldMeta<'_>, target_tags: Option<&TargetTags>) -> bool {
     target_tags
         .map(|target_tags| field.meta.is_exported_for(target_tags))
@@ -1110,7 +1166,15 @@ fn validate_fragment_values_for_row(
                 meta.meta.name, row_number, key, fragment_name
             )));
         }
-        if fragment.field(field_name).is_none() {
+        if let Some(struct_type) = fragment.struct_type() {
+            validate_struct_child_path(
+                meta.meta.name.as_str(),
+                row_number,
+                key,
+                struct_type,
+                field_name,
+            )?;
+        } else if fragment.field(field_name).is_none() {
             return Err(ConfigForgeError::Validation(format!(
                 "table `{}` row {} field `{}` references unknown fragment field `{}`",
                 meta.meta.name, row_number, key, field_name
@@ -1126,6 +1190,25 @@ fn validate_fragment_values_for_row(
             if !fragment.meta.is_exported_for(target_tags) {
                 continue;
             }
+        }
+        if let Some(struct_type) = fragment.struct_type() {
+            let has_effective_value = validate_struct_occurrence_value(
+                meta.meta.name.as_str(),
+                row,
+                row_number,
+                fragment.meta.name.as_str(),
+                struct_type,
+                target_tags,
+            )?;
+            if !has_effective_value
+                && visible_required_struct_child_count(struct_type, target_tags) > 0
+            {
+                return Err(ConfigForgeError::Validation(format!(
+                    "table `{}` row {} fragment `{}` is missing required struct payload values",
+                    meta.meta.name, row_number, fragment.meta.name
+                )));
+            }
+            continue;
         }
         for field in &fragment.fields {
             if let Some(target_tags) = target_tags {

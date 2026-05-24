@@ -6,6 +6,18 @@ use crate::{meta::MetaModel, ConfigForgeError};
 
 use super::*;
 
+fn fragment_row_source(source_row_number: usize, fragments: &[&str]) -> RowSourceInfo {
+    RowSourceInfo {
+        source_index: 0,
+        source_path: PathBuf::from("weapons.csv"),
+        source_row_number,
+        fragments: fragments
+            .iter()
+            .map(|fragment| (*fragment).to_owned())
+            .collect(),
+    }
+}
+
 #[test]
 fn data_provider_parses_supported_values() {
     assert_eq!(DataProvider::parse("csv"), Some(DataProvider::Csv));
@@ -558,6 +570,210 @@ fn data_resolver_full_mode_includes_active_fragments() {
     assert_eq!(
         weapon["power"].value,
         DataValue::Scalar(ScalarValue::Int(10))
+    );
+}
+
+#[test]
+fn data_resolver_resolves_typed_fragment_payload_as_struct_occurrence() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "AttributeSet"
+
+            [[structs.fields]]
+            name = "attack"
+            type = "int"
+
+            [[structs.fields]]
+            name = "defence"
+            type = "int"
+            default = 0
+
+            [[tables]]
+            name = "items"
+            polymorphic = true
+            sources = [{ provider = "csv", path = "weapons.csv", fragments = ["attributes"] }]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "attributes"
+            type = "AttributeSet"
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table = DataTable::new_with_sources(
+        "items",
+        vec![DataRow::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("attributes.attack".to_owned(), "10".to_owned()),
+        ])],
+        vec![RowSourceInfo {
+            source_index: 0,
+            source_path: PathBuf::from("weapons.csv"),
+            source_row_number: 1,
+            fragments: vec!["attributes".to_owned()],
+        }],
+    )
+    .expect("table should build");
+    let data_set = DataSet::new(vec![table]);
+
+    let resolved = DataResolver::new(&linked)
+        .resolve_required_tables(&data_set)
+        .expect("data should resolve");
+    let row = &resolved.table("items").expect("table should exist").rows[0];
+    let DataValue::Struct(attributes) = &row["attributes"].value else {
+        panic!("typed fragment payload should resolve as struct");
+    };
+    assert_eq!(
+        attributes["attack"].value,
+        DataValue::Scalar(ScalarValue::Int(10))
+    );
+    assert_eq!(
+        attributes["defence"].value,
+        DataValue::Scalar(ScalarValue::Int(0))
+    );
+}
+
+#[test]
+fn data_resolver_preserves_empty_active_typed_fragment_presence() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "AttributeSet"
+
+            [[structs.fields]]
+            name = "attack"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            polymorphic = true
+            sources = [{ provider = "csv", path = "weapons.csv", fragments = ["attributes"] }]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "attributes"
+            type = "AttributeSet"
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table = DataTable::new_with_sources(
+        "items",
+        vec![DataRow::from([("id".to_owned(), "1".to_owned())])],
+        vec![RowSourceInfo {
+            source_index: 0,
+            source_path: PathBuf::from("weapons.csv"),
+            source_row_number: 1,
+            fragments: vec!["attributes".to_owned()],
+        }],
+    )
+    .expect("table should build");
+    let data_set = DataSet::new(vec![table]);
+
+    let resolved = DataResolver::new(&linked)
+        .resolve_required_tables(&data_set)
+        .expect("empty typed fragment should preserve active presence");
+    let row = &resolved.table("items").expect("table should exist").rows[0];
+    let DataValue::Struct(attributes) = &row["attributes"].value else {
+        panic!("empty typed fragment payload should resolve as struct");
+    };
+    assert!(attributes.is_empty());
+}
+
+#[test]
+fn data_resolver_rejects_typed_fragment_layout_mixing_and_invalid_nested_paths() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Offense"
+
+            [[structs.fields]]
+            name = "attack"
+            type = "int"
+
+            [[structs]]
+            name = "AttributeSet"
+
+            [[structs.fields]]
+            name = "offense"
+            type = "Offense"
+
+            [[structs.fields]]
+            name = "scalar"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            polymorphic = true
+            sources = [{ provider = "csv", path = "weapons.csv", fragments = ["attributes"] }]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "attributes"
+            type = "AttributeSet"
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+
+    let valid_nested = DataTable::new_with_sources(
+        "items",
+        vec![DataRow::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("attributes.offense.attack".to_owned(), "10".to_owned()),
+        ])],
+        vec![fragment_row_source(1, &["attributes"])],
+    )
+    .expect("table should build");
+    DataResolver::new(&linked)
+        .resolve_required_tables(&DataSet::new(vec![valid_nested]))
+        .expect("nested typed fragment path should resolve");
+
+    let mixed = DataTable::new_with_sources(
+        "items",
+        vec![DataRow::from([
+            ("id".to_owned(), "1".to_owned()),
+            (
+                "attributes".to_owned(),
+                r#"{"offense":{"attack":1}}"#.to_owned(),
+            ),
+            ("attributes.offense.attack".to_owned(), "10".to_owned()),
+        ])],
+        vec![fragment_row_source(1, &["attributes"])],
+    )
+    .expect("table should build");
+    let error = DataResolver::new(&linked)
+        .resolve_required_tables(&DataSet::new(vec![mixed]))
+        .unwrap_err();
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("mixes struct JSON cell"))
+    );
+
+    let invalid_nested = DataTable::new_with_sources(
+        "items",
+        vec![DataRow::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("attributes.scalar.attack".to_owned(), "10".to_owned()),
+        ])],
+        vec![fragment_row_source(1, &["attributes"])],
+    )
+    .expect("table should build");
+    let error = DataResolver::new(&linked)
+        .resolve_required_tables(&DataSet::new(vec![invalid_nested]))
+        .unwrap_err();
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("uses child path") && message.contains("scalar"))
     );
 }
 

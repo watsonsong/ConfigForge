@@ -1,3 +1,27 @@
+[[structs]]
+name = "AttributeSet"
+desc = "战斗属性集合，可用于装备、角色职业等级等配置。"
+
+[[structs.fields]]
+name = "max_health"
+type = "int"
+default = 0
+
+[[structs.fields]]
+name = "max_stamina"
+type = "int"
+default = 0
+
+[[structs.fields]]
+name = "attack"
+type = "int"
+default = 0
+
+[[structs.fields]]
+name = "defence"
+type = "int"
+default = 0
+
 [[tables]]
 name = "items"
 kind = "collection"
@@ -37,27 +61,8 @@ required = true
 
 [[tables.fragments]]
 name = "attributes"
-desc = "装备属性。当前 fragment 字段暂以 scalar 展开；后续应支持 fragment 内复用 AttributeSet。"
-
-[[tables.fragments.fields]]
-name = "max_health"
-type = "int"
-default = 0
-
-[[tables.fragments.fields]]
-name = "max_stamina"
-type = "int"
-default = 0
-
-[[tables.fragments.fields]]
-name = "attack"
-type = "int"
-default = 0
-
-[[tables.fragments.fields]]
-name = "defence"
-type = "int"
-default = 0
+type = "AttributeSet"
+desc = "装备属性，复用标准 AttributeSet struct 作为 fragment payload。"
 
 [[tables.fragments]]
 name = "skill"

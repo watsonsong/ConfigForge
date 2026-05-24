@@ -1288,6 +1288,14 @@ mod tests {
     fn fragment_export_locks_empty_and_hidden_fragment_presence() {
         let meta = MetaModel::from_toml_str(
             r#"
+                [[structs]]
+                name = "AttributeSet"
+
+                [[structs.fields]]
+                name = "server_power"
+                type = "int"
+                export_when = { any = ["server"] }
+
                 [[tables]]
                 name = "items"
                 source = "items.csv"
@@ -1313,6 +1321,11 @@ mod tests {
                 [[tables.fragments.fields]]
                 name = "value"
                 type = "int"
+
+                [[tables.fragments]]
+                name = "typed_marker"
+                type = "AttributeSet"
+                export_when = { any = ["client"] }
             "#,
         )
         .expect("meta should load");
@@ -1329,7 +1342,11 @@ mod tests {
                 source_index: 0,
                 source_path: PathBuf::from("items.csv"),
                 source_row_number: 1,
-                fragments: vec!["client_marker".to_owned(), "server_marker".to_owned()],
+                fragments: vec![
+                    "client_marker".to_owned(),
+                    "server_marker".to_owned(),
+                    "typed_marker".to_owned(),
+                ],
             }],
         )
         .expect("table should build");
@@ -1342,6 +1359,10 @@ mod tests {
         assert!(value["rows"][0]["client_marker"]
             .as_object()
             .expect("client marker should be object")
+            .is_empty());
+        assert!(value["rows"][0]["typed_marker"]
+            .as_object()
+            .expect("typed marker should be object")
             .is_empty());
         assert!(value["rows"][0].get("server_marker").is_none());
     }

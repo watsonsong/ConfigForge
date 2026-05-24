@@ -205,6 +205,27 @@ fn resolve_active_fragments(
         if target_tags.is_some_and(|target_tags| !fragment.meta.is_exported_for(target_tags)) {
             continue;
         }
+        if let Some(struct_type) = fragment.struct_type() {
+            let value = resolve_struct_occurrence_value(
+                table_meta.meta.name.as_str(),
+                row,
+                row_source,
+                row_number,
+                fragment.meta.name.as_str(),
+                struct_type,
+                target_tags,
+            )?
+            .unwrap_or_else(|| {
+                ResolvedValue::computed_empty_object(
+                    fragment.meta.name.clone(),
+                    DataValue::Struct(BTreeMap::new()),
+                    row_source,
+                )
+            });
+            resolved_row.insert(fragment.meta.name.clone(), value);
+            continue;
+        }
+
         let mut fragment_object = BTreeMap::new();
         for field in fragment
             .fields
@@ -546,6 +567,21 @@ fn validate_source_schema(
             )?;
         }
     }
+    for fragment_name in active_fragments {
+        let Some(fragment) = meta.fragment(fragment_name) else {
+            continue;
+        };
+        let Some(struct_type) = fragment.struct_type() else {
+            continue;
+        };
+        validate_struct_layout_mixing_for_row(
+            meta.meta.name.as_str(),
+            row,
+            row_number,
+            fragment.meta.name.as_str(),
+            struct_type,
+        )?;
+    }
     Ok(())
 }
 
@@ -580,7 +616,15 @@ fn validate_dotted_source_key(
                 meta.meta.name, row_number, key, first_segment
             )));
         }
-        if fragment.field(rest).is_none() {
+        if let Some(struct_type) = fragment.struct_type() {
+            validate_struct_child_path(
+                meta.meta.name.as_str(),
+                row_number,
+                key,
+                struct_type,
+                rest,
+            )?;
+        } else if fragment.field(rest).is_none() {
             return Err(ConfigForgeError::Validation(format!(
                 "table `{}` row {} field `{}` references unknown fragment field `{}`",
                 meta.meta.name, row_number, key, rest

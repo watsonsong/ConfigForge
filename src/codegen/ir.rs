@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
-    meta::{LinkedField, LinkedMetaModel, PrimitiveFieldType, TableKind},
+    meta::{LinkedField, LinkedFragmentPayload, LinkedMetaModel, PrimitiveFieldType, TableKind},
     ConfigForgeError, Result,
 };
 
@@ -58,6 +58,13 @@ pub struct CodeFragment {
     pub name: String,
     pub desc: Option<String>,
     pub fields: Vec<CodeField>,
+    pub payload: CodeFragmentPayload,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodeFragmentPayload {
+    InlineFields,
+    Struct { name: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -198,6 +205,12 @@ pub fn build_code_model(
                         name: fragment.meta.name.clone(),
                         desc: fragment.meta.desc.clone(),
                         fields,
+                        payload: match &fragment.payload {
+                            LinkedFragmentPayload::InlineFields => CodeFragmentPayload::InlineFields,
+                            LinkedFragmentPayload::Struct(struct_type) => CodeFragmentPayload::Struct {
+                                name: struct_type.meta.name.clone(),
+                            },
+                        },
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;

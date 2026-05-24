@@ -158,6 +158,13 @@ fn code_model_marks_object_tables_and_skips_indexes() {
 fn codegen_includes_fragment_structs_and_optional_row_members() {
     let meta = MetaModel::from_toml_str(
         r#"
+            [[structs]]
+            name = "AttributeSet"
+
+            [[structs.fields]]
+            name = "attack"
+            type = "int"
+
             [[tables]]
             name = "items"
             source = "items.csv"
@@ -178,6 +185,10 @@ fn codegen_includes_fragment_structs_and_optional_row_members() {
             name = "internal_note"
             type = "string"
             export = false
+
+            [[tables.fragments]]
+            name = "attributes"
+            type = "AttributeSet"
 
             [[tables.fragments]]
             name = "client_marker"
@@ -211,6 +222,17 @@ fn codegen_includes_fragment_structs_and_optional_row_members() {
         .fields
         .iter()
         .any(|field| field.name == "internal_note"));
+    let attributes = model.tables[0]
+        .fragments
+        .iter()
+        .find(|fragment| fragment.name == "attributes")
+        .expect("typed fragment should be generated");
+    assert_eq!(
+        attributes.payload,
+        CodeFragmentPayload::Struct {
+            name: "AttributeSet".to_owned()
+        }
+    );
 
     let client_model = build_code_model(input.meta, &TargetTags::new(["client"]), &[])
         .expect("client model should build");
@@ -231,6 +253,8 @@ fn codegen_includes_fragment_structs_and_optional_row_members() {
     let rust_content = &rust[0].content;
     assert!(rust_content.contains("pub struct ItemsWeaponFragment"));
     assert!(rust_content.contains("pub weapon: Option<ItemsWeaponFragment>"));
+    assert!(!rust_content.contains("pub struct ItemsAttributesFragment"));
+    assert!(rust_content.contains("pub attributes: Option<AttributeSet>"));
     assert!(rust_content.contains("pub fn has_weapon(&self) -> bool"));
 
     let client_rust = RustCodeGenerator
@@ -251,6 +275,8 @@ fn codegen_includes_fragment_structs_and_optional_row_members() {
     let ts_content = &typescript[0].content;
     assert!(ts_content.contains("export interface ItemsWeaponFragment"));
     assert!(ts_content.contains("weapon?: ItemsWeaponFragment;"));
+    assert!(!ts_content.contains("export interface ItemsAttributesFragment"));
+    assert!(ts_content.contains("attributes?: AttributeSet;"));
 
     let client_typescript = TypeScriptCodeGenerator
         .generate(&CodeExportInput {
@@ -269,6 +295,8 @@ fn codegen_includes_fragment_structs_and_optional_row_members() {
     let cpp_content = &cpp[0].content;
     assert!(cpp_content.contains("struct ItemsWeaponFragment"));
     assert!(cpp_content.contains("std::optional<ItemsWeaponFragment> weapon"));
+    assert!(!cpp_content.contains("struct ItemsAttributesFragment"));
+    assert!(cpp_content.contains("std::optional<AttributeSet> attributes"));
 
     let client_cpp = CppCodeGenerator
         .generate(&CodeExportInput {

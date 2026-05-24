@@ -2,9 +2,9 @@ use crate::{ConfigForgeError, Result};
 
 use super::{
     build_code_model, ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
-    render_file_header, ArtifactKind, CodeExportInput, CodeExportLanguage, CodeGenerator,
-    CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, GeneratedFile,
-    GeneratedSymbol,
+    render_file_header, ArtifactKind, CodeExportInput, CodeExportLanguage, CodeFragmentPayload,
+    CodeGenerator, CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions,
+    GeneratedFile, GeneratedSymbol,
 };
 
 pub struct TypeScriptCodeGenerator;
@@ -76,6 +76,9 @@ impl CodeGenerator for TypeScriptCodeGenerator {
 
         for table in &model.tables {
             for fragment in &table.fragments {
+                if matches!(fragment.payload, CodeFragmentPayload::Struct { .. }) {
+                    continue;
+                }
                 push_doc(&mut content, fragment.desc.as_deref());
                 content.push_str(&format!(
                     "export interface {} {{\n",
@@ -114,7 +117,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                     "  {}{}?: {};\n",
                     readonly_prefix(typescript_options.readonly_fields),
                     names.field_name(&fragment.name)?,
-                    names.fragment_type_name(&table.name, &fragment.name)?
+                    names.fragment_payload_type_name(table, fragment)?
                 ));
             }
             content.push_str("}\n\n");
@@ -221,22 +224,24 @@ fn validate_generated_symbols(model: &CodeModel, names: &TypeScriptNames<'_>) ->
             ));
         }
         for fragment in &table.fragments {
-            type_symbols.push(GeneratedSymbol::new(
-                "fragment interface",
-                format!("{}_{}", table.name, fragment.name),
-                names.fragment_type_name(&table.name, &fragment.name)?,
-            ));
-            validate_named_symbols(
-                "typescript",
-                &format!("table `{}` fragment `{}` fields", table.name, fragment.name),
-                fragment.fields.iter().map(|field| {
-                    Ok(GeneratedSymbol::new(
-                        "field",
-                        &field.name,
-                        names.field_name(&field.name)?,
-                    ))
-                }),
-            )?;
+            if matches!(fragment.payload, CodeFragmentPayload::InlineFields) {
+                type_symbols.push(GeneratedSymbol::new(
+                    "fragment interface",
+                    format!("{}_{}", table.name, fragment.name),
+                    names.fragment_type_name(&table.name, &fragment.name)?,
+                ));
+                validate_named_symbols(
+                    "typescript",
+                    &format!("table `{}` fragment `{}` fields", table.name, fragment.name),
+                    fragment.fields.iter().map(|field| {
+                        Ok(GeneratedSymbol::new(
+                            "field",
+                            &field.name,
+                            names.field_name(&field.name)?,
+                        ))
+                    }),
+                )?;
+            }
         }
 
         validate_named_symbols(
@@ -515,6 +520,19 @@ impl<'a> TypeScriptNames<'a> {
 
     fn fragment_type_name(&self, table_name: &str, fragment_name: &str) -> Result<String> {
         self.type_name(&format!("{table_name}_{fragment_name}_fragment"))
+    }
+
+    fn fragment_payload_type_name(
+        &self,
+        table: &CodeTable,
+        fragment: &super::CodeFragment,
+    ) -> Result<String> {
+        match &fragment.payload {
+            CodeFragmentPayload::InlineFields => {
+                self.fragment_type_name(&table.name, &fragment.name)
+            }
+            CodeFragmentPayload::Struct { name } => self.type_name(name),
+        }
     }
 
     fn enum_value_name(&self, name: &str) -> Result<String> {

@@ -680,6 +680,23 @@ fn validate_fragment_meta(
         ));
     }
     validate_export_condition_tags(&owner, &fragment.export_when, diagnostics);
+    if fragment.type_name.is_some() && !fragment.fields.is_empty() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "{} declares both `type` and inline fields; fragment payload must use exactly one form",
+                owner
+            ),
+        ));
+    }
+    if let Some(type_name) = fragment.type_name.as_deref() {
+        if model.struct_meta(type_name).is_none() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnknownFieldType,
+                format!("{} references unknown struct type `{}`", owner, type_name),
+            ));
+        }
+    }
     validate_field_names(
         &owner,
         fragment.fields.iter().map(|field| field.name.as_str()),

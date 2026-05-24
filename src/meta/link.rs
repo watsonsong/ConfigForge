@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use super::{
     FieldMeta, LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedFragmentMeta,
-    LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType, LinkedTableMeta,
-    MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
+    LinkedFragmentPayload, LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType,
+    LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
 };
 
 /// Builds a borrowed linked view of a validated raw model.
@@ -42,14 +42,9 @@ pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<M
             .fragments
             .iter()
             .map(|fragment| {
-                let linked_fields = link_fields(
-                    &enum_index,
-                    &struct_index,
-                    &fragment.fields,
-                    &mut Vec::new(),
-                    &mut diagnostics,
-                );
-                LinkedFragmentMeta::new(fragment, linked_fields)
+                let linked_payload =
+                    link_fragment_payload(&enum_index, &struct_index, fragment, &mut diagnostics);
+                LinkedFragmentMeta::new(fragment, linked_payload.fields, linked_payload.payload)
             })
             .collect::<Vec<_>>();
         let linked_indexes = link_indexes(table, &linked_fields, &mut diagnostics);
@@ -102,6 +97,63 @@ impl MetaModel {
         } else {
             Err(diagnostics)
         }
+    }
+}
+
+struct LinkedFragmentPayloadResult<'meta> {
+    fields: Vec<LinkedFieldMeta<'meta>>,
+    payload: LinkedFragmentPayload<'meta>,
+}
+
+fn link_fragment_payload<'meta>(
+    enum_index: &HashMap<&'meta str, &'meta super::EnumMeta>,
+    struct_index: &HashMap<&'meta str, &'meta super::StructMeta>,
+    fragment: &'meta super::FragmentMeta,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) -> LinkedFragmentPayloadResult<'meta> {
+    if let Some(type_name) = fragment.type_name.as_deref() {
+        let Some(struct_meta) = struct_index.get(type_name).copied() else {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnknownFieldType,
+                format!(
+                    "fragment `{}` references unknown struct type `{}`",
+                    fragment.name, type_name
+                ),
+            ));
+            return LinkedFragmentPayloadResult {
+                fields: Vec::new(),
+                payload: LinkedFragmentPayload::InlineFields,
+            };
+        };
+        let Some(struct_type) = link_struct_type(
+            enum_index,
+            struct_index,
+            struct_meta,
+            &mut Vec::new(),
+            diagnostics,
+        ) else {
+            return LinkedFragmentPayloadResult {
+                fields: Vec::new(),
+                payload: LinkedFragmentPayload::InlineFields,
+            };
+        };
+        let fields = struct_type.fields.clone();
+        return LinkedFragmentPayloadResult {
+            fields,
+            payload: LinkedFragmentPayload::Struct(struct_type),
+        };
+    }
+
+    let fields = link_fields(
+        enum_index,
+        struct_index,
+        &fragment.fields,
+        &mut Vec::new(),
+        diagnostics,
+    );
+    LinkedFragmentPayloadResult {
+        fields,
+        payload: LinkedFragmentPayload::InlineFields,
     }
 }
 

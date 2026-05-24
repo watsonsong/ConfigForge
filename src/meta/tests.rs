@@ -1267,6 +1267,90 @@ fn accepts_multi_source_variant_source_mode() {
 }
 
 #[test]
+fn validates_typed_fragment_payload_shape() {
+    let valid = parse(
+        r#"
+            [[structs]]
+            name = "AttributeSet"
+
+            [[structs.fields]]
+            name = "attack"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            polymorphic = true
+            sources = [{ provider = "csv", path = "weapons.csv", fragments = ["attributes"] }]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "attributes"
+            type = "AttributeSet"
+        "#,
+    );
+    assert!(validate_meta_model(&valid).is_empty());
+    let linked = valid.link().expect("typed fragment should link");
+    assert_eq!(
+        linked.tables[0].fragments[0]
+            .struct_type()
+            .expect("payload should be struct")
+            .meta
+            .name,
+        "AttributeSet"
+    );
+
+    let mixed = diagnostics(
+        r#"
+            [[structs]]
+            name = "AttributeSet"
+
+            [[tables]]
+            name = "items"
+            polymorphic = true
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "attributes"
+            type = "AttributeSet"
+
+            [[tables.fragments.fields]]
+            name = "attack"
+            type = "int"
+        "#,
+    );
+    assert!(mixed.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+            && diagnostic.message.contains("both `type` and inline fields")
+    }));
+
+    let unknown = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            polymorphic = true
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "attributes"
+            type = "MissingStruct"
+        "#,
+    );
+    assert!(unknown.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnknownFieldType
+            && diagnostic.message.contains("MissingStruct")
+    }));
+}
+
+#[test]
 fn validates_primitive_and_enum_default_values() {
     let meta = parse(
         r#"

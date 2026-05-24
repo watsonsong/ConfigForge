@@ -2,9 +2,9 @@ use crate::{ConfigForgeError, Result};
 
 use super::{
     build_code_model, ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
-    render_file_header, ArtifactKind, CodeExportInput, CodeExportLanguage, CodeGenerator,
-    CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, GeneratedFile,
-    GeneratedSymbol,
+    render_file_header, ArtifactKind, CodeExportInput, CodeExportLanguage, CodeFragmentPayload,
+    CodeGenerator, CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions,
+    GeneratedFile, GeneratedSymbol,
 };
 
 pub struct RustCodeGenerator;
@@ -88,6 +88,9 @@ impl CodeGenerator for RustCodeGenerator {
 
         for table in &model.tables {
             for fragment in &table.fragments {
+                if matches!(fragment.payload, CodeFragmentPayload::Struct { .. }) {
+                    continue;
+                }
                 push_doc(&mut content, fragment.desc.as_deref(), "/// ");
                 push_derive(
                     &mut content,
@@ -142,7 +145,7 @@ impl CodeGenerator for RustCodeGenerator {
                 content.push_str(&format!(
                     "    pub {}: Option<{}>,\n",
                     names.field_name(&fragment.name)?,
-                    names.fragment_type_name(&table.name, &fragment.name)?
+                    names.fragment_payload_type_name(table, fragment)?
                 ));
             }
             content.push_str("}\n\n");
@@ -156,7 +159,7 @@ impl CodeGenerator for RustCodeGenerator {
                 content.push_str(&format!(
                     "    pub fn {}(&self) -> Option<&{}> {{ self.{}.as_ref() }}\n",
                     names.field_name(&fragment.name)?,
-                    names.fragment_type_name(&table.name, &fragment.name)?,
+                    names.fragment_payload_type_name(table, fragment)?,
                     names.field_name(&fragment.name)?
                 ));
             }
@@ -261,22 +264,24 @@ fn validate_generated_symbols(model: &CodeModel, names: &RustNames<'_>) -> Resul
         )?;
 
         for fragment in &table.fragments {
-            type_symbols.push(GeneratedSymbol::new(
-                "fragment",
-                format!("{}_{}", table.name, fragment.name),
-                names.fragment_type_name(&table.name, &fragment.name)?,
-            ));
-            validate_named_symbols(
-                "rust",
-                &format!("table `{}` fragment `{}` fields", table.name, fragment.name),
-                fragment.fields.iter().map(|field| {
-                    Ok(GeneratedSymbol::new(
-                        "field",
-                        &field.name,
-                        names.field_name(&field.name)?,
-                    ))
-                }),
-            )?;
+            if matches!(fragment.payload, CodeFragmentPayload::InlineFields) {
+                type_symbols.push(GeneratedSymbol::new(
+                    "fragment",
+                    format!("{}_{}", table.name, fragment.name),
+                    names.fragment_type_name(&table.name, &fragment.name)?,
+                ));
+                validate_named_symbols(
+                    "rust",
+                    &format!("table `{}` fragment `{}` fields", table.name, fragment.name),
+                    fragment.fields.iter().map(|field| {
+                        Ok(GeneratedSymbol::new(
+                            "field",
+                            &field.name,
+                            names.field_name(&field.name)?,
+                        ))
+                    }),
+                )?;
+            }
         }
 
         if table.kind == CodeTableKind::Object {
@@ -544,6 +549,19 @@ impl<'a> RustNames<'a> {
 
     fn fragment_type_name(&self, table_name: &str, fragment_name: &str) -> Result<String> {
         self.type_name(&format!("{table_name}_{fragment_name}_fragment"))
+    }
+
+    fn fragment_payload_type_name(
+        &self,
+        table: &CodeTable,
+        fragment: &super::CodeFragment,
+    ) -> Result<String> {
+        match &fragment.payload {
+            CodeFragmentPayload::InlineFields => {
+                self.fragment_type_name(&table.name, &fragment.name)
+            }
+            CodeFragmentPayload::Struct { name } => self.type_name(name),
+        }
     }
 
     fn enum_variant_name(&self, name: &str) -> Result<String> {

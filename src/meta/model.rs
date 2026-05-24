@@ -81,6 +81,8 @@ pub struct FragmentMeta {
     pub name: String,
     #[serde(default)]
     pub desc: Option<String>,
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub type_name: Option<String>,
     #[serde(default = "default_export")]
     pub export: bool,
     #[serde(default)]
@@ -630,7 +632,14 @@ pub struct LinkedTableMeta<'meta> {
 pub struct LinkedFragmentMeta<'meta> {
     pub meta: &'meta FragmentMeta,
     pub fields: Vec<LinkedFieldMeta<'meta>>,
+    pub payload: LinkedFragmentPayload<'meta>,
     field_index: HashMap<&'meta str, usize>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LinkedFragmentPayload<'meta> {
+    InlineFields,
+    Struct(LinkedStructType<'meta>),
 }
 
 pub struct LinkedStructMeta<'meta> {
@@ -807,7 +816,11 @@ impl LinkedForeignKeyMeta<'_> {
 }
 
 impl<'meta> LinkedFragmentMeta<'meta> {
-    pub fn new(meta: &'meta FragmentMeta, fields: Vec<LinkedFieldMeta<'meta>>) -> Self {
+    pub fn new(
+        meta: &'meta FragmentMeta,
+        fields: Vec<LinkedFieldMeta<'meta>>,
+        payload: LinkedFragmentPayload<'meta>,
+    ) -> Self {
         let field_index = fields
             .iter()
             .enumerate()
@@ -816,7 +829,15 @@ impl<'meta> LinkedFragmentMeta<'meta> {
         Self {
             meta,
             fields,
+            payload,
             field_index,
+        }
+    }
+
+    pub fn struct_type(&self) -> Option<&LinkedStructType<'meta>> {
+        match &self.payload {
+            LinkedFragmentPayload::Struct(struct_type) => Some(struct_type),
+            LinkedFragmentPayload::InlineFields => None,
         }
     }
 
