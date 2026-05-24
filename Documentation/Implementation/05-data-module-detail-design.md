@@ -2,7 +2,7 @@
 
 本文档描述 Data 模块的实现设计，用于把 Meta 中声明的 source 配置加载为独立的数据快照，并在 Meta 完成 Link 后把 raw source 数据解析为可供 Validation / Export 共享的结构化数据视图。产品语义以 `Documentation/Design/` 为准；本文档聚焦 Rust 模块边界、核心类型、主要方法、流程阶段和测试组织。
 
-## 3.1 设计目标
+## 5.1 设计目标
 
 Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据模型，并在 Data Load 后提供 Meta-aware resolver。核心分层结论：**Reader 保持 source-neutral；Resolver 负责 Meta-aware 结构化；Validation 和 Exporter 应逐步只消费结构化后的统一数据模型。**
 
@@ -26,7 +26,7 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 
 这些能力在 Meta validate 阶段应显式报 unsupported，避免 Data 阶段静默忽略。
 
-设计判断：不建议把 Meta-aware 解析下沉到 `CsvDataReader`。CSV / Xlsx / Lark 等 reader 只负责语法读取、raw string 和 source location；struct source layout、default、target visibility、fragment active set 和 typed scalar parsing 都需要 linked meta 与 target context，更适合放在 Data Load 之后的 resolver 阶段。当前代码中 Validation / Exporter 已能解释 struct expanded value，但这只是过渡实现；长期应收敛为共享 resolver，避免两边重复解释 JSON 字符串和 dotted path。
+设计判断：不建议把 Meta-aware 解析下沉到 `CsvDataReader`。CSV / Xlsx / Lark 等 reader 只负责语法读取、raw string 和 source location；struct source layout、default、target visibility、fragment active set 和 typed scalar parsing 都需要 linked meta 与 target context，更适合放在 Data Load 之后的 resolver 阶段。Validation / Exporter 应收敛为共享 resolver，避免两边重复解释 JSON 字符串和 dotted path。
 
 variant source mode 下，`sources` 可以为同一 polymorphic collection table 声明多个 CSV source，但至少一个 source 必须声明非空 `fragments`，每个 source 必须贡献完整 record，不做按 ID 拼接。
 
@@ -34,7 +34,7 @@ variant source mode 下，`sources` 可以为同一 polymorphic collection table
 
 standard_project 作为参考游戏 fixture，当前采用工程总控 + 领域 meta 拆分：`ConfigForge.toml` 负责导入 `meta/items.toml`、`meta/characters.toml`、`meta/misc.toml` 并声明 client/server targets；领域 meta 文件只保存对应 tables / structs。数据 CSV 直接放在 `data/` 下，材料、武器、防具分别使用 `materials.csv`、`weapons.csv`、`armors.csv`，不再额外创建 `rpg/` 子目录，也不再保留额外的 `items.csv`。游戏语义中“职业”采用更常见的英文 `class`，因此表名和字段为 `classes`、`class_levels`、`class_id`，避免与现实职业 `profession` 混淆。
 
-## 3.2 Rust 中的“类”和职责表达
+## 5.2 Rust 中的“类”和职责表达
 
 Rust 不使用传统 OO class。本文档中的“类”对应 Rust 的 `struct`、`enum`、`trait` 与 `impl`：
 
@@ -54,7 +54,7 @@ Rust 不使用传统 OO class。本文档中的“类”对应 Rust 的 `struct`
 | ResolvedDataSet | `struct ResolvedDataSet` | Meta-aware 的结构化数据快照，隐藏 JSON cell / expanded path 的 source 差异。 |
 | DataValue | `enum DataValue` | 结构化值，表达 typed scalar、nested struct，未来扩展 array/map。 |
 
-## 3.3 建议模块结构
+## 5.3 建议模块结构
 
 当前已采用目录模块 `src/data/` 承载 CSV 读取、数据加载计划、逻辑表模型和 resolved view：
 
@@ -74,9 +74,9 @@ src/data/
 
 - `DataRow`、`DataTable`、`DataSet`、`DataLoadPlan`、`DataLoader` 等已由 `src/data/mod.rs` 统一 re-export。
 
-## 3.4 核心数据结构
+## 5.4 核心数据结构
 
-### 3.4.1 `DataSet`
+### 5.4.1 `DataSet`
 
 ```rust
 pub struct DataSet {
@@ -101,7 +101,7 @@ impl DataSet {
 }
 ```
 
-### 3.4.2 `DataTable`
+### 5.4.2 `DataTable`
 
 ```rust
 pub struct DataTable {
@@ -136,7 +136,7 @@ impl DataTable {
 
 `new()` 用于测试、内存构造和非 source 数据构造，会自动为每行填充默认 `RowSourceInfo`：`source_index = 0`、`source_path = "<memory>"`、`source_row_number = row_index + 1`、`fragments = []`。`new_with_sources()` 用于真实 DataLoader，必须校验 `rows.len() == row_sources.len()`，不一致时返回 validation error。
 
-### 3.4.5 `RowSourceInfo`
+### 5.4.3 `RowSourceInfo`
 
 variant source mode 需要保留每行的 source fragment set，否则 validation 无法判断该行应该应用哪些 fragment fields。
 
@@ -167,7 +167,7 @@ pub struct DataRecord {
 
 然后将 `DataTable.rows` 从 `Vec<DataRow>` 演进为 `Vec<DataRecord>`。考虑当前代码大量使用 `table.rows`，更小改动是保留 `rows` 并新增并行 `row_sources`，但需要测试保证长度一致。
 
-### 3.4.3 `DataRow`
+### 5.4.4 `DataRow`
 
 ```rust
 pub type DataRow = BTreeMap<String, String>;
@@ -179,7 +179,7 @@ pub type DataRow = BTreeMap<String, String>;
 - 值保持原始字符串。Raw DataRow 是 source-neutral 的事实层，不表达 typed value、默认值、target visibility 或 nested object。
 - 后续 resolver 可在此基础上生成结构化值；Validation / Exporter 不应长期直接从 raw `DataRow` 重复解释 struct JSON cell 和 dotted path。
 
-### 3.4.4 `ResolvedDataSet` / `DataValue`（已实现 MVP，继续迁移）
+### 5.4.5 `ResolvedDataSet` / `DataValue`（已实现 MVP，继续迁移）
 
 `ResolvedDataSet` 是 raw `DataSet` 之后的 Meta-aware 解析结果。它不替代 raw `DataSet`，而是与 raw source snapshot 并存：raw 层用于诊断、inspect、debug、source diff；resolved 层用于 validation/export 共享同一套结构化语义。
 
@@ -271,9 +271,9 @@ Resolver 职责：
 
 注意：是否在 resolver 阶段把 scalar parse 成 `Int/Float/Bool` 需要结合现有 runtime scalar string contract 决定。短期可以先在 resolver 内保留 typed parse 结果与 raw string，runtime export 仍输出 string；长期如果 runtime artifact 改为 typed scalar，可直接复用 `ScalarValue`。
 
-## 3.5 加载计划结构
+## 5.5 加载计划结构
 
-### 3.5.1 `DataProvider`
+### 5.5.1 `DataProvider`
 
 ```rust
 pub enum DataProvider {
@@ -292,7 +292,7 @@ impl DataProvider {
 
 第一阶段只接受 `csv`。非 `csv` provider 应在 Meta validate 或 DataLoadPlan 构造阶段返回错误，不进入读取器分发。
 
-### 3.5.2 `DataSourcePlan`
+### 5.5.2 `DataSourcePlan`
 
 ```rust
 pub struct DataSourcePlan {
@@ -310,7 +310,7 @@ pub struct DataSourcePlan {
 - `fragments` 是该 source 声明的 polymorphic fragment 名称；普通表和 legacy `source` 为空。
 - variant source mode 下，polymorphic collection table 可以拥有多个 `DataSourcePlan`；非 polymorphic table 仍只允许一个 source。为了避免把普通 append mode 与未来通用 multi-source merge 混淆，多 source 必须由至少一个 source 的非空 `fragments` 声明驱动。
 
-### 3.5.3 `DataLoadPlan`
+### 5.5.3 `DataLoadPlan`
 
 ```rust
 pub struct DataLoadPlan {
@@ -339,9 +339,9 @@ impl DataLoadPlan {
   - 一边做 `MetaModel::link()` / Meta validate；
   - 一边执行 `DataLoader::load(&plan)`。
 
-## 3.6 CSV 读取器
+## 5.6 CSV 读取器
 
-### 3.6.1 `CsvDataReader`
+### 5.6.1 `CsvDataReader`
 
 ```rust
 pub struct CsvDataReader;
@@ -371,7 +371,7 @@ impl CsvDataReader {
 
 variant source mode 要求每个 source 贡献完整 record：common fields 必须在每个 source 中完整出现，不做跨 source join；fragment fields 只允许出现在声明了对应 active fragment 的 source 中。
 
-### 3.6.2 ObjectTable `key,value` source layout
+### 5.6.2 ObjectTable `key,value` source layout
 
 ObjectTable Step 1 的 source 过程文档已并入 Data 模块。当前 `kind = "object"` 的 table 使用固定 CSV `key,value` 行式布局：
 
@@ -420,7 +420,7 @@ DataTable rows:
 - 文件无法打开、CSV parse 失败统一映射为 `ConfigForgeError::ParseCsv { path, source }`。
 - source declaration 缺失或 provider 不支持可以映射为 `ConfigForgeError::Validation`，中期应迁移到结构化 Data diagnostic。
 
-## 3.7 DataLoader
+## 5.7 DataLoader
 
 ```rust
 pub struct DataLoader {
@@ -446,7 +446,7 @@ impl DataLoader {
 - 对同一 `table_name` 的多个 `DataSourcePlan`，DataLoader 需要把 rows append 到同一个 `DataTable`，并同步 append 对应 `RowSourceInfo`。
 - `DataSet::try_new()` 仍应拒绝重复 table name；多 source 合并必须发生在 DataLoader 内部，而不是先生成多个同名 DataTable 再交给 DataSet。
 
-### 3.7.1 Variant source merge 流程
+### 5.7.1 Variant source merge 流程
 
 variant source mode 的 DataLoader 组装流程：
 
@@ -466,9 +466,9 @@ DataSet::try_new(pending_tables in first-seen table order)
 - DataLoader 不做 fragment field required/default；Validation 阶段根据 `row_sources[row_index].fragments` 决定应用哪些 fragment schemas。
 - 如果某个 source 读取失败，错误需要包含 source path；如果后续引入 source ordinal，可在 Data diagnostic 中补充。
 
-## 3.8 与 Meta / Validation / Exporter 的流程关系
+## 5.8 与 Meta / Validation / Exporter 的流程关系
 
-### 3.8.1 当前建议执行流程
+### 5.8.1 当前建议执行流程
 
 ```text
 MetaModel::from_path(meta_path)
@@ -491,7 +491,7 @@ MetaModel::from_path(meta_path)
   exporter consumes ResolvedDataSet / ResolvedExportView
 ```
 
-当前代码已经完成 `DataLoadPlan -> DataLoader -> raw DataSet`，并在 Validation / Exporter 中直接解释 raw `DataRow`。这应视为过渡实现。下一阶段可以先顺序执行：
+当前计划是以 `DataLoadPlan -> DataLoader -> raw DataSet -> DataResolver -> ResolvedDataSet` 作为 Data 模块主链路。下一阶段可以先顺序执行：
 
 ```rust
 let meta = MetaModel::from_path(meta_path)?;
@@ -509,7 +509,7 @@ validate_resolved_data_set(&linked_meta, &resolved)?;
 - raw `DataSet` 不保存 Meta 引用；
 - `DataResolver` 才需要同时拿到 `LinkedMetaModel<'meta>` 和 raw `DataSet`。
 
-### 3.8.2 Resolver 分阶段迁移路线
+### 5.8.2 Resolver 分阶段迁移路线
 
 不建议一次性替换现有 Validation / Exporter。推荐分阶段落地：
 
@@ -548,7 +548,7 @@ Validation 不再直接读 raw `DataRow`，而是读取 resolved row。RawDataSe
 
 等 `DataValue` 稳定后，再扩展 `items[0].id`、`rewards[gold]` 等 array/map path，避免 validation/export 各自实现 path parser。
 
-### 3.8.3 Validation API 调整
+### 5.8.3 Validation API 调整
 
 当前已有单表校验：
 
@@ -574,7 +574,7 @@ pub fn validate_resolved_data_set(
 4. 对每张表调用 resolved table validation。
 5. required/type/enum/range 等规则读取 `DataValue` 和 source trace，不再重复解析 raw JSON / dotted path。
 
-### 3.8.4 Exporter API 调整
+### 5.8.4 Exporter API 调整
 
 当前 exporter 内部按表直接读取 CSV。Data 模块落地后应调整为：
 
@@ -590,7 +590,7 @@ pub fn validate_project(meta_path: &Path, data_dir: &Path) -> Result<()> {
 
 `export_project` 同理，应先得到 raw `DataSet`，再按 target 生成 `ResolvedExportView`。构建 `DataLoadPlan` 时可以先用当前 target 的 `TargetTags` 过滤整表 `export_when`，避免加载不会导出的表；写出 runtime data 时继续按同一组 tags 过滤字段和 `row_export` 行。长期 exporter 只负责 `DataValue -> JSON/MessagePack/future binary`，不再理解 source layout、default、target visibility 或 nested struct boundary。
 
-## 3.9 错误与诊断边界
+## 5.9 错误与诊断边界
 
 第一阶段沿用 `ConfigForgeError`：
 
@@ -624,7 +624,7 @@ Resolved 层落地后，诊断模型需要同时支持 raw source 与 resolved v
 
 为了避免 resolved 后丢失定位信息，`ResolvedValue` 必须携带 `ValueSourceTrace`。ObjectTable 的 `key,value` source 还需要 key-level source map，否则 singleton logical row 只能报 row 1，不能指向真实 CSV key 行；这可以作为 resolved 层的 source trace 能力补齐。
 
-## 3.10 测试计划
+## 5.10 测试计划
 
 ### Data 模块单元测试
 
@@ -670,7 +670,7 @@ Resolved 层落地后，诊断模型需要同时支持 raw source 与 resolved v
 9. 增加 `class_levels` 复合 primary index 负向测试，构造重复 `(class_id, level)` 并断言 CLI 失败。
 10. 增加 inactive fragment header 负向测试，例如 `materials.csv` 出现 `attributes.attack` 应失败。
 
-## 3.11 第一阶段完成标准
+## 5.11 第一阶段完成标准
 
 Data 模块第一阶段完成时应满足：
 

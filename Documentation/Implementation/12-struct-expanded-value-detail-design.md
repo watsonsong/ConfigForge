@@ -1,8 +1,8 @@
-# 11. Struct Source Layout 与 Expanded Value 专项实现详细设计
+# 12. Struct Source Layout 与 Expanded Value 专项实现详细设计
 
 本文档描述 named struct 字段在 CSV 中根据 source 形态自动选择 JSON cell 或 expanded value 的实现方案。产品语义以 `Documentation/Design/04-meta-model.md` 和 `Documentation/Design/05-data-validation.md` 为准；本文档聚焦 Rust 实现边界、数据模型、校验、导出和测试计划。
 
-## 1. 结论：当前结构不能直接支持
+## 12.1 结论：当前结构不能直接支持
 
 当前代码已有 `ValueLayout::ExpandedValue` 枚举，但还不能完成 struct source layout 自动判定和展开：
 
@@ -14,7 +14,7 @@
 
 因此需要开发。推荐保留现有 row-oriented `DataRow`，新增 field path 解析和 struct expanded object 构建逻辑，而不是重写 Data 模块为 typed tree。
 
-## 2. 目标
+## 12.2 目标
 
 实现 named struct 字段的 source layout 自动判定与 expanded value：
 
@@ -78,7 +78,7 @@ Runtime payload：
 }
 ```
 
-## 3. 非目标
+## 12.3 非目标
 
 第一阶段不实现：
 
@@ -90,7 +90,7 @@ Runtime payload：
 - runtime scalar typed export；scalar child 仍沿用 string payload contract。
 - struct child validators 的完整 registry 化；第一阶段只复用 child 的 required/default/type/enum 和 export filter。
 
-## 3.1 Layout 归属决策
+## 12.4 Layout 归属决策
 
 Struct 使用 JSON cell 还是 expanded value 应由 CSV/source 中出现的 field paths 决定，而不是由 named struct type 或 table field Meta 写死。
 
@@ -105,9 +105,9 @@ Struct 使用 JSON cell 还是 expanded value 应由 CSV/source 中出现的 fie
 
 这样选择的原因是：struct 是可复用类型，同一个 struct 在不同 Table、不同父级字段、不同数据编辑场景中可能更适合不同写法。把 layout 固定在 Meta field 上会让同一结构体复用时不够灵活；由 source field paths 判定可以让表格作者根据表格密度自行选择 JSON cell 或展开列，同时通过“禁止同一 occurrence 混用”避免覆盖顺序和 required/default 歧义。递归场景下，某一级展开后，内部 struct child 仍可继续选择 JSON 或展开；某一级选择 JSON 后，该 JSON cell 下方不再允许展开子项。
 
-## 4. 数据模型策略
+## 12.5 数据模型策略
 
-### 4.1 保持 Raw DataRow 扁平，新增 Resolved 层作为长期方向
+### 12.5.1 保持 Raw DataRow 扁平，新增 Resolved 层作为长期方向
 
 继续使用：
 
@@ -126,7 +126,7 @@ default_attributes.max_health -> "120"
 
 写入同一个 DataRow。ObjectTable 的 duplicate key 检查仍按完整 key/path 检查。
 
-本功能的首个实现可以直接在 Validation / Export 里读取 raw `DataRow`，但这只是过渡方案。review 后确认的长期 Data 层方向是：在 Data Load 之后、Validation / Export 之前增加 Meta-aware resolver，生成 `ResolvedDataSet` / `ResolvedExportView`，让 Validation 和 Exporter 不再各自解释 JSON cell 与 dotted path。
+Data 层方向是：在 Data Load 之后、Validation / Export 之前增加 Meta-aware resolver，生成 `ResolvedDataSet` / `ResolvedExportView`，让 Validation 和 Exporter 不再各自解释 JSON cell 与 dotted path。
 
 推荐链路：
 
@@ -147,7 +147,7 @@ Validation / Exporter
 
 不建议把 struct expanded value 解析放进 `CsvDataReader`，因为 reader 不应依赖 linked meta、target tags、default、fragment active set 或 validator 语义；否则未来新增 xlsx、Lark、Google Sheet provider 时会复制 Meta-aware 解析逻辑。
 
-### 4.2 必须新增 source layout scanner 与 row key classifier
+### 12.5.2 必须新增 source layout scanner 与 row key classifier
 
 必须在 validation 或 data/schema helper 中增加 source layout scanner 与统一 row key classifier。scanner 负责基于当前 row/source 的 key 集合为每个 struct field occurrence 判定 JSON cell 或 expanded value；classifier 负责把具体 row key 归类为 table field、struct leaf、fragment field 或错误。required/default/type 校验、unknown dotted key 校验、fragment validation 和 export builder 都应使用同一套扫描/classification 结果；不能让 fragment validation 继续默认把所有 dotted key 的第一段都当成 fragment name。
 
@@ -235,7 +235,7 @@ struct StructOccurrenceRef<'meta> {
 
 Struct path 可以递归解析到 nested struct child，但每一级 occurrence 仍独立判定 JSON cell 或 expanded value。`attributes.offense.attack` 不是按 `Offense` 类型名解析，而是按字段路径 `attributes` -> `offense` -> `attack` 解析。
 
-### 4.3 StructOccurrenceEvaluator 与 ResolvedDataSet
+### 12.5.3 StructOccurrenceEvaluator 与 ResolvedDataSet
 
 为避免 Validation 和 Exporter 重复实现 default / empty cell / target visibility / nested occurrence 规则，建议把 struct occurrence 解析提炼为共享 evaluator：
 
@@ -337,7 +337,7 @@ Resolver 处理 active fragment 时：
 - runtime payload key 仍为 fragment name；如果 payload 是 struct，直接输出 struct children，不额外包裹同名 child；
 - source schema validator 需要把 `fragment.child` 同时识别为 fragment inline field 或 fragment struct child，若二者混用/冲突应由 Meta validation 提前禁止。
 
-## 5. Meta validation 修改
+## 12.6 Meta validation 修改
 
 需要修改 `validate_field_layout()`：
 
@@ -360,13 +360,13 @@ Resolver 处理 active fragment 时：
 - struct `scalar_cell` 仍失败。
 - table field / struct child / fragment name 包含 `.`, `[`, `]` 时失败。
 
-## 6. Data load 修改
+## 12.7 Data load 修改
 
-### 6.1 CollectionTable
+### 12.7.1 CollectionTable
 
 CSV reader 可继续原样读取 headers，不需要理解 meta。主要变化在 validation：原来未知 header `attributes.attack` 会被视为未知字段；现在应识别为 expanded struct child。
 
-### 6.2 ObjectTable
+### 12.7.2 ObjectTable
 
 `read_object_table()` 不应理解 linked struct schema。支持 expanded value 后，`DataSourcePlan.fields` 仅有 top-level 字段，不够判断 dotted key；如果继续在 loader 中做 schema 判断，会把 Meta-aware 解析提前到 source adapter。建议两种方案：
 
@@ -384,9 +384,9 @@ key schema 下沉会带来诊断精度风险。因此 ObjectTable field source m
 - 仅检查 key 非空、完整 key/path 不重复、header 为 `key,value`。
 - 对所有 key，只做 duplicate/source row 记录，schema 检查交给 unified row key classifier；source row 记录后续应进入 ObjectTable field source map。
 
-## 7. Validation 修改
+## 12.8 Validation 修改
 
-### 7.1 Source schema validation
+### 12.8.1 Source schema validation
 
 新增 row key schema validation：
 
@@ -396,7 +396,7 @@ key schema 下沉会带来诊断精度风险。因此 ObjectTable field source m
 - 同一 struct occurrence 不允许同时出现 parent JSON cell 与 child expanded cells。
 - common expanded struct key 与 fragment key 可以在同一 table 中共存，但必须由 unified row key classifier 根据 table field、active fragment 和 source fragments 统一判定。
 
-### 7.2 Required/default/type
+### 12.8.2 Required/default/type
 
 当前 validation 对每个 top-level field 调用 scalar 或 struct JSON 校验。需要拆分 struct field 分支：
 
@@ -470,7 +470,7 @@ fn struct_child_effective_value(row, parent, child, target_tags) -> Option<Cow<'
 
 标准参考游戏 fixture 中 `class_levels.attributes.*` 使用 expanded struct source，直接复用 `AttributeSet` named struct；`items` 表的 `weapons.csv` / `armors.csv` source variants 中，`attributes.*` 目前仍是 fragment scalar fields 的重复声明，作为后续 typed fragment payload 的测试入口。该 fixture 同时验证游戏语义中使用 `class` 表达角色职业，并把相关 CSV 放在统一 `data/` 根目录下。
 
-### 7.3 Field validators
+### 12.8.3 Field validators
 
 现有 field validator 主要绑定 top-level field。第一阶段建议：
 
@@ -478,7 +478,7 @@ fn struct_child_effective_value(row, parent, child, target_tags) -> Option<Cow<'
 - struct child field validators 暂不执行或在 Meta validation 中报 unsupported，避免看似配置生效但实际跳过。
 - range 等基础 scalar validator 未来可扩展为 child field path validator。
 
-## 8. Runtime export 修改
+## 12.9 Runtime export 修改
 
 Export builder 需要按 layout 构建 nested object：
 
@@ -511,7 +511,7 @@ CollectionTable 与 ObjectTable 共用同一 helper，因为二者进入 export 
 
 Export 不应重新实现一套 default/empty/target visibility 判断。它应复用 validation 使用的 `StructObjectView` / `struct_child_effective_value` 等共享 helper，确保“validation 通过的 effective value”和“runtime payload 输出的 value”一致。
 
-## 9. Codegen 影响
+## 12.10 Codegen 影响
 
 Codegen 类型不需要因 layout 改变：
 
@@ -521,9 +521,9 @@ Codegen 类型不需要因 layout 改变：
 
 如果未来生成 loader decoder，则 decoder 读取的是 runtime payload shape，不需要知道 source layout 是 JSON cell 还是 expanded value。
 
-## 10. 测试计划
+## 12.11 测试计划
 
-### Meta tests
+### 12.11.1 Meta tests
 
 - struct 字段省略 layout 时允许通过，并可由 source scanner 判定 JSON cell / expanded value。
 - struct 字段上的 `json_cell` / `expanded_value` 不再允许通过；诊断应提示删除 `layout`，改由 source header/key 自动判定。
@@ -532,7 +532,7 @@ Codegen 类型不需要因 layout 改变：
 - struct `scalar_cell` 失败。
 - field / struct child / fragment name 包含 `.`, `[`, `]` 时失败。
 
-### Validation tests
+### 12.11.2 Validation tests
 
 - CollectionTable expanded struct child type 校验通过。
 - CollectionTable expanded struct required child 缺失失败。
@@ -560,7 +560,7 @@ Codegen 类型不需要因 layout 改变：
 - ObjectTable dotted key type error 能定位到真实 CSV row。
 - dotted key 不匹配 struct 或 fragment 时失败。
 
-### Export tests
+### 12.11.3 Export tests
 
 - JSON CollectionTable 输出 nested object。
 - JSON ObjectTable 输出 nested object。
@@ -569,7 +569,7 @@ Codegen 类型不需要因 layout 改变：
 - child default 输出。
 - child enum/primitive scalar 仍是 string。
 
-### Integration fixture
+### 12.11.4 Integration fixture
 
 建议在 `tests/fixtures/standard_project` 中给角色等级、武器或装备添加复用的 `Attributes` struct：
 
@@ -588,9 +588,9 @@ type = "int"
 
 然后在至少一张 CollectionTable 与一张 ObjectTable 中通过 CSV/header key 使用 child paths，验证两类表都能导出 nested object；另保留一张表用 parent JSON cell，验证同一个 named struct type 可在不同 source 中选择不同写法。
 
-## 11. 建议实施顺序
+## 12.12 建议实施顺序
 
-当前 `feat(struct): support source-driven expanded values` 已完成 MVP：Meta 约束、ObjectTable dotted key 放行、source schema validation、recursive nested struct、JSON/expanded mixing error、target-aware child filtering、child default、JSON/MessagePack export shape 与回归测试均已落地。后续建议按 Data resolver 方向演进：
+当前 source-driven expanded values 已支持：Meta 约束、ObjectTable dotted key 放行、source schema validation、recursive nested struct、JSON/expanded mixing error、target-aware child filtering、child default、JSON/MessagePack export shape 与回归测试。计划按 Data resolver 方向演进：
 
 1. 抽 `StructOccurrenceEvaluator`：把 validation/export 中关于 JSON cell、expanded path、default、empty cell、target visibility、nested occurrence 的判断集中到同一个 helper。
 2. 为 ObjectTable 增加 key/path -> source row number 的 sidecar source map，并让 evaluator / validation 使用真实 CSV key 行输出诊断。

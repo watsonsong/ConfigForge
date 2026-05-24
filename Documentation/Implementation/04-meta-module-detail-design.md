@@ -2,7 +2,7 @@
 
 本文档描述当前 Meta 模块的实际实现设计，用于指导后续继续扩展 Meta 能力。产品语义以 `Documentation/Design/04-meta-model.md` 为准；本文档聚焦 Rust 类型边界、生命周期表达、Load-then-Link 策略、主要方法和测试组织。
 
-## 2.1 设计目标
+## 4.1 设计目标
 
 Meta 模块负责把一个或多个 Meta 文件转换为可被后续模块使用的两类数据：
 
@@ -24,7 +24,7 @@ Meta 模块负责把一个或多个 Meta 文件转换为可被后续模块使用
 
 计划字段说明：`validators: Vec<ValidatorMeta>` 已在 `src/meta/model.rs` 落地，当前 TOML 接受 `[[tables.validators]]` 与 `[[tables.fields.validators]]`，并由 validation registry 在 compile 阶段解释具体 `kind` 与参数；当前内置已实现 `range` field validator。`foreign_keys: Vec<ForeignKeyMeta>` 已完成 MVP，支持 table-level / field-level foreign key 声明、link、Meta 结构校验和数据引用完整性校验。validator 详细实现见 `06-validation-module-detail-design.md`。
 
-## 2.2 Rust 中的“类”和继承策略
+## 4.2 Rust 中的“类”和继承策略
 
 Rust 不使用面向对象继承。本文档中的“类”对应 Rust 的 `struct`、`enum`、`trait`：
 
@@ -35,7 +35,7 @@ Rust 不使用面向对象继承。本文档中的“类”对应 Rust 的 `stru
 
 Object table 与 collection table 通过 `TableKind` 区分，不拆成继承体系。Field 的 primitive / enum / struct 类型在 Link 阶段通过 `LinkedField<'meta>` 区分。
 
-## 2.3 当前模块结构
+## 4.3 当前模块结构
 
 ```text
 src/meta/
@@ -60,9 +60,9 @@ src/meta/
 | `diagnostic.rs` | Meta 专属诊断 code 与 `MetaDiagnostic`；共享 severity、location 和格式化能力来自 `src/diagnostic/`。 |
 | `tests.rs` | 使用内联 TOML 和临时目录 fixture 测试 Meta 行为。 |
 
-## 2.4 Load-then-Link 架构
+## 4.4 Load-then-Link 架构
 
-### 2.4.1 阶段划分
+### 4.4.1 阶段划分
 
 ```text
 TOML input
@@ -74,7 +74,7 @@ TOML input
 
 Load 阶段只得到可拥有、可序列化、可反序列化的配置数据；Link 阶段要求所有 Meta 都已加载完成，因此能用 Rust 生命周期表达“linked view 不能长于原始 MetaModel”。
 
-### 2.4.2 为什么不把引用写回 `MetaModel`
+### 4.4.2 为什么不把引用写回 `MetaModel`
 
 如果把 `LinkedField` 或 `&FieldMeta` 写回 `MetaModel` 内部，会形成“结构体拥有数据，同时字段又引用自己内部数据”的自引用结构，普通 Rust 安全借用模型不适合这样表达。
 
@@ -92,9 +92,9 @@ LinkedMetaModel<'meta> borrows from &'meta MetaModel
 - Link 完成后整体只读，不需要单独释放其中某个对象。
 - 运行期索引可以保存 `&'meta str`、`&'meta FieldMeta`、`&'meta EnumMeta` 等引用。
 
-## 2.5 纯配置数据结构
+## 4.5 纯配置数据结构
 
-### 2.5.1 `MetaModel`
+### 4.5.1 `MetaModel`
 
 ```rust
 pub struct MetaModel {
@@ -108,7 +108,7 @@ pub struct MetaModel {
 
 - `MetaModel` 是 serde 直接加载的 owned model。
 - 不包含 `HashMap` 索引，不包含内部引用。
-- `MetaSet` 兼容别名已删除；新代码统一使用 `MetaModel`。
+- 对外模型统一使用 `MetaModel`。
 - Project 信息和配置片段导入关系属于 Project Config，不属于 MetaModel。
 
 主要方法：
@@ -128,11 +128,11 @@ impl MetaModel {
 }
 ```
 
-### 2.5.2 Project 信息边界
+### 4.5.2 Project 信息边界
 
 Project 信息由 `ProjectConfig` 管理，不再在 Meta 模块中重复定义 `ProjectMeta`。Meta 片段只描述 enum、struct、table、field、index 等数据结构语义；Project Config 顶层 `imports` 负责组合多个配置片段，Project Config 的 `[project]` 负责提供生成文件头所需的 `name`、`desc`、`copyright`。
 
-### 2.5.3 enum 与 struct
+### 4.5.3 enum 与 struct
 
 ```rust
 pub struct EnumMeta {
@@ -159,7 +159,7 @@ pub struct StructMeta {
 - struct field 与 table field 共用 `FieldMeta`。
 - struct 的 field type 同样在 Link 阶段解析为 primitive / enum / struct。
 
-### 2.5.4 `TableMeta`
+### 4.5.4 `TableMeta`
 
 ```rust
 pub struct TableMeta {
@@ -196,7 +196,7 @@ pub struct TableMeta {
 - `foreign_keys` 已在当前 `TableMeta` 中落地。外键不是普通 validator，而是一等关系数据：当前 MVP 会完成 link、Meta 结构校验和数据引用完整性校验；进入 CodeModel 生成关联查询 API 属于后续扩展。
 - `fragments` 是 polymorphic variant source mode 的 table-local fragment schema。当前代码已落地该字段，并要求多 source variant source mode 至少由一个 source 声明非空 `fragments` 驱动；`SourceRef.fragments` 的合法性由 Meta validation 检查。
 
-### 2.5.5 `FragmentMeta`
+### 4.5.5 `FragmentMeta`
 
 ```rust
 pub struct FragmentMeta {
@@ -221,7 +221,7 @@ pub struct FragmentMeta {
 - fragment field names 只要求在所属 fragment 内唯一；不同 fragments 可以复用相同 field name，fragment field 也可以与 common field 同名。
 - CSV header 使用 `fragment.field` 表达 fragment field，例如 `stats.attack`；common field 使用裸字段名，例如 `attack`。
 
-### 2.5.6 `TableKind`
+### 4.5.6 `TableKind`
 
 ```rust
 #[serde(rename_all = "snake_case")]
@@ -237,7 +237,7 @@ pub enum TableKind {
 - `Collection`：可以定义 index；override 等后续逻辑会依赖 primary index。
 - ObjectTable Step 1 的过程文档已并入模块文档。当前 Meta 层限制 ObjectTable 不能声明 indexes / primary_index / row_export / fragments / foreign_keys，也不能使用 `sources` / `override_sources`；ObjectTable source layout 详见 `05-data-module-detail-design.md`。
 
-### 2.5.7 `FieldMeta`
+### 4.5.7 `FieldMeta`
 
 ```rust
 pub struct FieldMeta {
@@ -269,7 +269,7 @@ pub struct FieldMeta {
 - `tool_only`、`filter_field`、`validator_only` 已由 target tags 机制替代；当前仅保留为 `Option<bool>` 以便检测用户仍在使用并输出 `UnsupportedFeature` 诊断，不再参与导出判断。
 - `unique` 是内置便捷字段；当前基础 validation 会直接校验 single-field unique，codegen 也会生成对应 single-field unique index。复合唯一性建议优先通过 `IndexMeta { unique = true }` 表达；未来也可迁移为 implicit validator。
 
-### 2.5.8 `ValidatorMeta`
+### 4.5.8 `ValidatorMeta`
 
 Validator 采用注册式框架。Meta 层只保存 raw 配置，不依赖具体 validator 实现：
 
@@ -297,7 +297,7 @@ pub struct ValidatorMeta {
 
 详细框架见 `06-validation-module-detail-design.md`。
 
-### 2.5.8 `ForeignKeyMeta`
+### 4.5.9 `ForeignKeyMeta`
 
 外键关系是一等 Meta 数据，不放在 `validators` 中：
 
@@ -325,7 +325,7 @@ pub struct ForeignKeyMeta {
 - Link 阶段解析为 `LinkedForeignKeyMeta<'meta>`，供 validation 执行引用完整性检查；codegen 关联查询 helper 属于后续扩展。
 - 当前 MVP 仅支持 CollectionTable 到 CollectionTable 的 FK；ObjectTable 作为 source/target 暂不支持。
 
-### 2.5.9 Target Tags 与导出条件
+### 4.5.10 Target Tags 与导出条件
 
 ```rust
 pub struct TargetTags {
@@ -358,7 +358,7 @@ pub enum TagMatchMode {
 - `RowExportPolicy` 从数据行中的 `required_tags_field` / `excluded_tags_field` 读取逗号分隔 tag 列表；命中 excluded tag 时该行不导出；required tags 为空时默认导出；非空时按 `match = "any" | "all"` 与 target tags 匹配。
 - Meta 校验阶段确认 `row_export` 引用的字段存在，但不把它们 link 成字段引用；当前 row 过滤只需要字段名查值。
 
-### 2.5.10 primitive 类型
+### 4.5.11 primitive 类型
 
 ```rust
 pub enum PrimitiveFieldType {
@@ -382,7 +382,7 @@ pub enum PrimitiveFieldType {
 | `text` | `Text` |
 | `asset` | `Asset` |
 
-### 2.5.11 `IndexMeta`
+### 4.5.12 `IndexMeta`
 
 ```rust
 pub struct IndexMeta {
@@ -403,9 +403,9 @@ pub struct IndexMeta {
 - `export = false` / `export_when` 控制 index 是否生成到目标代码；primary index 如果引用了当前 target 不导出的字段，应报错；非 primary index 引用了不导出的字段时跳过该 index。
 - 当前只支持 table 顶层简单字段名；后续如支持 `a.b[0].c`，应引入 `FieldPath` 和 `LinkedFieldPath<'meta>`。
 
-## 2.6 Linked 数据结构
+## 4.6 Linked 数据结构
 
-### 2.6.1 `LinkedField<'meta>`
+### 4.6.1 `LinkedField<'meta>`
 
 ```rust
 pub enum LinkedField<'meta> {
@@ -421,7 +421,7 @@ pub enum LinkedField<'meta> {
 - enum / struct 保存对 `MetaModel` 内部 owned meta 的借用引用。
 - 未解析成功时产生 `UnknownFieldType`，该字段不会进入 linked fields。
 
-### 2.6.2 `LinkedFieldMeta<'meta>`
+### 4.6.2 `LinkedFieldMeta<'meta>`
 
 ```rust
 pub struct LinkedFieldMeta<'meta> {
@@ -432,7 +432,7 @@ pub struct LinkedFieldMeta<'meta> {
 
 `meta` 指向原始字段配置；`linked_field` 是解析后的字段类型。后续 validation/exporter 需要字段名、desc、default 等原始属性时从 `meta` 读取，需要类型时从 `linked_field` 读取。
 
-### 2.6.3 `LinkedIndexMeta<'meta>`
+### 4.6.3 `LinkedIndexMeta<'meta>`
 
 ```rust
 pub struct LinkedIndexMeta<'meta> {
@@ -443,7 +443,7 @@ pub struct LinkedIndexMeta<'meta> {
 
 `meta.fields` 保留原始字符串；`fields` 是解析到同一 table 字段列表中的真实字段引用。
 
-### 2.6.4 `LinkedTableMeta<'meta>`
+### 4.6.4 `LinkedTableMeta<'meta>`
 
 ```rust
 pub struct LinkedTableMeta<'meta> {
@@ -472,7 +472,7 @@ impl<'meta> LinkedTableMeta<'meta> {
 - `primary_index` 保存选中主索引在 `indexes` 中的下标，避免在结构体内保存指向自身 `Vec` 元素的自引用；查询时通过 `primary_index()` 返回 `&LinkedIndexMeta<'meta>`。
 - `fields` 中只包含类型成功解析的字段；加载入口会把 Link diagnostics 和 validate diagnostics 合并后返回错误，避免下游拿到部分错误模型。
 
-### 2.6.5 `LinkedStructMeta<'meta>`
+### 4.6.5 `LinkedStructMeta<'meta>`
 
 ```rust
 pub struct LinkedStructMeta<'meta> {
@@ -484,7 +484,7 @@ pub struct LinkedStructMeta<'meta> {
 
 struct 的字段 Link 规则与 table 相同。
 
-### 2.6.6 `LinkedMetaModel<'meta>`
+### 4.6.6 `LinkedMetaModel<'meta>`
 
 ```rust
 pub struct LinkedMetaModel<'meta> {
@@ -511,7 +511,7 @@ impl<'meta> LinkedMetaModel<'meta> {
 
 `HashMap` 用于运行期查询加速。需要稳定诊断顺序时，不依赖 HashMap 遍历顺序，而是在诊断列表上排序。
 
-## 2.7 Link 流程
+## 4.7 Link 流程
 
 入口：
 
@@ -551,7 +551,7 @@ PrimitiveFieldType::parse(field.field_type)
   -> UnknownFieldType
 ```
 
-## 2.8 Loader 与配置片段边界
+## 4.8 Loader 与配置片段边界
 
 入口：
 
@@ -574,9 +574,9 @@ impl MetaModel {
 - `merge_models`：按传入顺序合并 enums、structs、tables。
 - `finish_loading` / `MetaModel::finish_loading()`：统一复用 `MetaModel::link()` 的 link + validate 诊断生命周期，排序并去重后返回；该方法只返回已完成校验的 owned raw model，不保存 borrowed linked view。
 
-## 2.9 校验与诊断
+## 4.9 校验与诊断
 
-### 2.9.1 `MetaDiagnostic`
+### 4.9.1 `MetaDiagnostic`
 
 ```rust
 pub struct MetaDiagnostic {
@@ -587,7 +587,7 @@ pub struct MetaDiagnostic {
 
 当前诊断不包含 source location；通过 `PartialOrd` / `Ord` 对 code 和 message 排序，保证输出稳定。
 
-### 2.9.2 `MetaDiagnosticCode`
+### 4.9.2 `MetaDiagnosticCode`
 
 ```rust
 pub enum MetaDiagnosticCode {
@@ -605,7 +605,7 @@ pub enum MetaDiagnosticCode {
 }
 ```
 
-### 2.9.3 当前校验内容
+### 4.9.3 当前校验内容
 
 `validate_meta_model` 当前覆盖：
 
@@ -629,9 +629,9 @@ pub enum MetaDiagnosticCode {
 
 - field type 不是 primitive、enum、struct 时产生 `UnknownFieldType`。
 
-## 2.10 已 Link 与后续可 Link 的部分
+## 4.10 已 Link 与后续可 Link 的部分
 
-### 2.10.1 当前已 Link
+### 4.10.1 当前已 Link
 
 | 原始配置位置 | Raw 表达 | Linked 表达 | 当前收益 |
 | --- | --- | --- | --- |
@@ -645,7 +645,7 @@ pub enum MetaDiagnosticCode {
 | struct 查询 | `MetaModel.structs: Vec<StructMeta>` | `LinkedMetaModel.struct_index` / `struct_meta_index` | 同时支持 linked struct 和 raw struct 查询。 |
 | enum 查询 | `MetaModel.enums: Vec<EnumMeta>` | `LinkedMetaModel.enum_index` | enum 类型解析和查询加速。 |
 
-### 2.10.2 建议后续 Link
+### 4.10.2 建议后续 Link
 
 | 候选位置 | Raw 表达 | 建议 Linked 表达 | 触发条件 |
 | --- | --- | --- | --- |
@@ -657,7 +657,7 @@ pub enum MetaDiagnosticCode {
 | struct dependency graph | struct field type 字符串 | DAG / topological order | 代码生成需要 struct 输出顺序或循环检测时补充。 |
 | source provider | `SourceRef.provider: String` | provider registry handle | source plugin/registry 落地后补充。 |
 
-## 2.11 TOML 输入格式
+## 4.11 TOML 输入格式
 
 推荐 canonical TOML：
 
@@ -706,7 +706,7 @@ primary = true
 desc = "按物品 ID 查询。"
 ```
 
-兼容写法：
+单 source 简写：
 
 ```toml
 [[tables]]
@@ -719,7 +719,7 @@ type = "i64"
 required = true
 ```
 
-## 2.12 单元测试组织
+## 4.12 单元测试组织
 
 Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和临时目录构造多文件显式加载场景；ProjectConfig imports 递归测试由 exporter / CLI 相关测试覆盖。
 
@@ -742,7 +742,7 @@ Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和�
 8. index 系列
    - 缺失字段、primary mismatch、非 unique primary index。
 
-后续建议补充：
+计划补充：
 
 - duplicate enum / struct / enum value 的显式测试。
 - ProjectConfig import / import cycle 的去重测试。
@@ -751,7 +751,7 @@ Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和�
 - `LinkedStructMeta.field` 查询测试。
 - `MetaModel::from_paths` 多入口合并测试。
 
-## 2.13 与下游模块的接口约束
+## 4.13 与下游模块的接口约束
 
 - Loader 返回 `MetaModel`，因为它是 owned 数据，便于调用方控制生命周期。
 - 下游在需要类型解析或快速查询时，应在持有 `MetaModel` 的作用域内调用 `meta.link()` 得到 `LinkedMetaModel<'_>`。
@@ -763,7 +763,7 @@ Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和�
 - validation/exporter 不应再自行解析 `FieldMeta.field_type` 字符串；应读取 `LinkedFieldMeta.linked_field` 或 `primitive_type()`。
 - 对 index 逻辑，应优先使用 `LinkedIndexMeta.fields`，避免重复做 field name 查找。
 
-## 2.14 当前完成标准
+## 4.14 当前完成标准
 
 Meta 模块当前阶段完成的判断标准：
 

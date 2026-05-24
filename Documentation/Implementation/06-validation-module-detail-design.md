@@ -62,9 +62,9 @@ Data validation 阶段规则：
 - ObjectTable CSV `key,value` 读取放在 `src/data/tests.rs`。
 - ObjectTable runtime payload 放在 `src/exporter/` tests。
 
-## 5.1 设计目标
+## 6.1 设计目标
 
-### 5.1.1 必须解决的问题
+### 6.1.1 必须解决的问题
 
 1. **避免校验逻辑继续硬编码扩散**
    - 早期 `src/validation.rs` 直接写死 required、type、enum、unique index 等规则；当前已拆成 `src/validation/` 模块并引入 registry，基础规则仍保留 hardcoded，新增 range 走 registry。
@@ -89,15 +89,15 @@ Data validation 阶段规则：
    - 第一阶段不能一次重写所有 validation。
    - 应先引入 registry 和新 validator 配置，再逐步把现有 hardcoded 规则迁移进去。
 
-### 5.1.2 非目标
+### 6.1.2 非目标
 
 - 第一阶段不实现动态加载外部二进制插件。
 - 第一阶段不要求把所有诊断模型替换成结构化 `DiagnosticReport`；可以继续桥接到 `ConfigForgeError::Validation(String)`。
 - 第一阶段不实现表达式语言。跨字段/跨表复杂规则先通过注册 validator 的 typed config 表达。
 
-## 5.2 Meta 配置设计
+## 6.2 Meta 配置设计
 
-### 5.2.1 通用 validator 配置形态
+### 6.2.1 通用 validator 配置形态
 
 Validator 配置采用“固定公共字段 + validator 专属参数 flatten”的结构。用户在 TOML 中写：
 
@@ -154,7 +154,7 @@ pub struct ValidatorMeta {
 - 公共字段名属于 reserved keys：`kind`、`name`、`desc`、`severity`、`export_when`、`message`，不得被 validator 专属参数复用。
 - 每个 `ValidatorFactory` 在 compile 阶段必须检查必填参数、参数类型和未知参数；未知参数必须诊断为配置错误，避免拼写错误被静默忽略。例如 `kind = "range"` 中出现 `minn = 1` 应提示 unknown parameter `minn`，并尽量给出 `min` 的建议。
 
-### 5.2.2 Field-level validators
+### 6.2.2 Field-level validators
 
 字段级 validator 放在字段下：
 
@@ -196,7 +196,7 @@ Range validator 不直接在 `FieldMeta` 上增加 `min` / `max` 字段，原因
 - 未来新增 regex、length、asset_exists 不需要继续修改 `FieldMeta` 的顶层字段。
 - registry factory 可以把 `params` 编译成 typed `RangeConfig`，既保持 meta 扩展性，又保持执行阶段类型安全。
 
-### 5.2.3 Table-level validators
+### 6.2.3 Table-level validators
 
 表级 validator 放在 table 下：
 
@@ -229,7 +229,7 @@ input = "full_dataset"
 
 Record-level validator 也声明在 `[[tables.validators]]` 下，由 registry factory 的 `scope()` 决定按单行执行还是按整表执行。例如 begin/end 时间关系、条件 required、多字段互斥、多字段至少填一个都属于 `ValidatorScope::Record`。因此 `TableMeta.validators` 同时承载 record-level 与 table-level validator 的 raw 配置；compile 阶段根据 factory scope 生成不同执行策略。
 
-### 5.2.4 便捷字段与 implicit validators
+### 6.2.4 便捷字段与 implicit validators
 
 注册式 validator 是扩展机制，不意味着所有内置常用规则都必须手写 `validators` 数组。对于高频、稳定、语义清晰的内置规则，应继续提供便捷字段，然后在 validation compile 阶段转换成 implicit validator。
 
@@ -254,7 +254,7 @@ Record-level validator 也声明在 `[[tables.validators]]` 下，由 registry f
 
 这样既保留用户书写便利，又让执行层遵守开闭原则：便捷字段只在 compile 阶段生成 implicit validator，不把具体检查逻辑散落在 validation pipeline 中。
 
-### 5.2.5 Foreign key 是关系数据，不是普通 validator
+### 6.2.5 Foreign key 是关系数据，不是普通 validator
 
 外键关系应成为 `TableMeta` 上的一等 Meta 数据。推荐配置：
 
@@ -350,7 +350,7 @@ codegen 规则：
   - 若外键被 `export_when` 排除，则跳过。
 - target index 必须唯一，生成代码才能返回单条关联记录；非唯一关系应建模为另一类 relation，例如 `many_to_one = false` / `relation = "many"`，第一阶段不支持。
 
-## 5.3 代码模块结构
+## 6.3 代码模块结构
 
 当前已拆成目录模块：
 
@@ -368,9 +368,9 @@ src/validation/
 
 `ValidatorMeta`、`ValidationSeverity` 当前放在 `src/meta/model.rs`；raw `ValidatorMeta -> CompiledValidator` 的 compile 流程由 `src/validation/registry.rs` 中的 `CompiledValidationPlan::compile` 负责。required / type / enum / unique 仍在 `src/validation/mod.rs` 中作为基础校验执行；后续可按需新增 `builtins/unique.rs`、`builtins/referential_integrity.rs` 等模块继续迁移。
 
-## 5.4 核心 trait 与类型
+## 6.4 核心 trait 与类型
 
-### 5.4.1 Validator scope
+### 6.4.1 Validator scope
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -391,7 +391,7 @@ Scope 说明：
 | `Table` | 单表可见 rows | unique、权重总和、最少行数。 |
 | `DataSet` | 多表视图 | 外键关系完整性、跨表一致性、资源 manifest 检查。 |
 
-### 5.4.2 ValidatorFactory
+### 6.4.2 ValidatorFactory
 
 Factory 负责把 raw `ValidatorMeta.params` 编译成类型安全的 executable validator。
 
@@ -429,7 +429,7 @@ pub enum ValidatorLocation<'meta> {
 
 `Record` 与 `Table` 都来自 `[[tables.validators]]`，区别只在执行粒度：`Record` 对每个可见 row 分别执行，`Table` 对当前 ExportView 的整表 rows 执行。
 
-### 5.4.3 CompiledValidator
+### 6.4.3 CompiledValidator
 
 CompiledValidator 负责执行。为了兼容不同 scope，第一阶段可用一个统一 context，并由 validator 自己读取需要的数据：
 
@@ -478,7 +478,7 @@ pub struct VisibleRow {
 
 当前已经有 `validate_normalized_data_set_for_target` 的 target-aware 逻辑，后续可以把其中的 table/field/row 过滤收敛到 `ExportValidationView`。
 
-### 5.4.4 ValidatorRegistry
+### 6.4.4 ValidatorRegistry
 
 ```rust
 pub struct ValidatorRegistry {
@@ -506,7 +506,7 @@ pub fn builtin_validator_registry() -> ValidatorRegistry {
 }
 ```
 
-## 5.5 编译流程
+## 6.5 编译流程
 
 Validator 不应在每行执行时反复解析 TOML 参数或查找字段引用。推荐编译流程：
 
@@ -572,9 +572,9 @@ pub enum ValidatorSource {
 - unique key 重复；
 - 外键关系指向不存在的 target row。
 
-## 5.6 内置 validator 设计
+## 6.6 内置 validator 设计
 
-### 5.6.1 RangeValidator
+### 6.6.1 RangeValidator
 
 适用范围：field-level。
 
@@ -610,7 +610,7 @@ pub enum NumericBound {
 validation failed: table `items` row 12 field `max_stack` value `1000` exceeds max `999`
 ```
 
-### 5.6.2 UniqueValidator
+### 6.6.2 UniqueValidator
 
 适用范围：table-level。
 
@@ -637,7 +637,7 @@ pub struct UniqueValidatorConfig<'meta> {
 - `IndexMeta.unique = true` 仍同时保留 index/codegen 语义：CodeModel 继续根据 unique index 生成 `get_by_* -> Option<Row>`，而 validation compile 额外生成同名 implicit `UniqueValidator`。
 - `FieldMeta.unique = true` 是用户便捷写法：CodeModel 可继续生成 synthetic `by_<field>` index，validation compile 同步生成 synthetic `UniqueValidator`，二者共享同一命名策略，避免“校验唯一但运行时代码没有查询 API”的语义断裂。
 
-### 5.6.3 ReferentialIntegrityValidator
+### 6.6.3 ReferentialIntegrityValidator
 
 适用范围：dataset-level。它不是用户直接手写的普通 validator，而是由 `ForeignKeyMeta` 关系数据隐式生成，用于检查外键引用完整性。
 
@@ -664,7 +664,7 @@ pub struct ReferentialIntegrityValidatorConfig<'meta> {
 - 非空 key 不存在时报错。
 - key 使用 normalize 后的 raw string cell，与 unique index 语义保持一致；Phase 1 不做 primitive typed canonicalization，例如 `"01"` 与 `"1"` 是不同 key。
 
-### 5.6.4 Required / Type / Enum 的迁移
+### 6.6.4 Required / Type / Enum 的迁移
 
 Required、type、enum 当前已存在 hardcoded 实现。建议迁移顺序：
 
@@ -674,7 +674,7 @@ Required、type、enum 当前已存在 hardcoded 实现。建议迁移顺序：
 
 这样可以降低一次性重构风险。
 
-## 5.7 与 Target Tags / ExportView 的关系
+## 6.7 与 Target Tags / ExportView 的关系
 
 Validator 执行时必须明确输入视图：
 
@@ -719,7 +719,7 @@ CLI 规则：
 - `validate --all-targets`：对项目配置中的所有 target 分别派生 ExportView 并执行，诊断中标明 target 名称。
 - `validate` 不带 target：如果项目未定义 targets，可执行 `FullDataSet`；如果项目定义了 targets，应要求用户显式指定 `--target` 或 `--all-targets`，避免 target-only 规则被跳过后产生“假通过”。
 
-## 5.8 诊断模型
+## 6.8 诊断模型
 
 短期可以继续输出 `ConfigForgeError::Validation(String)`，但 validator 内部建议先生成结构化 issue：
 
@@ -763,7 +763,7 @@ impl ValidationReport {
 | unique | `table.unique_duplicate` |
 | referential_integrity | `dataset.foreign_key_missing` |
 
-## 5.9 修改路径
+## 6.9 修改路径
 
 ### Phase 1：引入 registry 与 range validator
 
@@ -840,7 +840,7 @@ impl ValidationReport {
 2. `ValidationIssue` 成为 validation 模块内部标准输出。
 3. CLI 层统一格式化 validation diagnostics。
 
-## 5.10 执行顺序
+## 6.10 执行顺序
 
 推荐顺序：
 
@@ -857,7 +857,7 @@ impl ValidationReport {
 
 第一阶段可以继续发现第一个错误即返回；中期应收集多个 `ValidationIssue`，统一排序后输出。
 
-## 5.11 测试计划
+## 6.11 测试计划
 
 ### 单元测试
 
@@ -884,7 +884,7 @@ impl ValidationReport {
 - target tags validation 行为不得回退。
 - `cargo fmt`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test` 通过。
 
-## 5.12 推荐第一步实现切片
+## 6.12 推荐第一步实现切片
 
 最小可交付切片：
 

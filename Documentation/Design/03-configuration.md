@@ -242,7 +242,7 @@ module_name = "gameConfig"
 data = "json"
 ```
 
-Runtime data 导出任务使用 `[[targets.data]]` 数组形式；每个任务有独立 `name`、`input`、`output` 和 `format`。这样同一个 target 可以同时输出 JSON、MessagePack 等多套 runtime data。项目当前仍处于开发阶段，不保留旧 `[targets.data]` table 形态兼容；正式配置统一使用 `[[targets.data]]`。
+Runtime data 导出任务使用 `[[targets.data]]` 数组形式；每个任务有独立 `name`、`input`、`output` 和 `format`。这样同一个 target 可以同时输出 JSON、MessagePack 等多套 runtime data。Project Config 使用 `[[targets.data]]` 数组表表达 runtime data 导出任务。
 
 一个 target 可以声明 0 个、1 个或多个代码生成任务。代码生成任务放在 `[[targets.code]]` 中；每个任务有独立语言、输出目录和语言专属参数。这样同一个 target 可以同时输出 runtime data、Rust 服务端访问代码、C++ 客户端访问代码和 TypeScript 工具链访问代码。
 
@@ -346,7 +346,7 @@ data task `name` 规范：
 
 `RuntimeDataFile.path` 表示相对当前 data artifact root / runtime loader root 的资源路径，例如 `items.json`，不是相对 code output 或 project root 的路径。生成代码只透传该路径常量，具体 runtime loader 决定如何把它映射到文件系统、包内资源或引擎资源。
 
-Planned / Not implemented：`engine`、`special_exporters`、POT、Asset Manifest、target-level `language` / `data_format` / `output` 属于旧设计或未来扩展，当前 Project Config 不应使用这些字段。
+Planned / Not implemented：`engine`、`special_exporters`、POT、Asset Manifest、target-level `language` / `data_format` / `output` 属于未来扩展，当前 Project Config 不应使用这些字段。
 
 `targets.code` 字段：
 

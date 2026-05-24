@@ -1,8 +1,8 @@
-# 10. Foreign Key 专项实现详细设计
+# 11. Foreign Key 专项实现详细设计
 
 本文档描述 ConfigForge 外键（Foreign Key / FK）能力的实现方案。产品语义以 `Documentation/Design/04-meta-model.md` 与 `Documentation/Design/05-data-validation.md` 为准；本文档聚焦 Rust 类型、模块边界、Link/Validation/Codegen 接入点、阶段拆分和测试计划。
 
-## 6.1 背景与目标
+## 11.1 背景与目标
 
 当前项目已经具备：
 
@@ -43,7 +43,7 @@ allow_empty = true
 4. 与 target tags、`export_when`、`row_export` 和 ExportView 语义保持一致。
 5. 为后续 codegen 生成关联查询 helper 预留 IR 和类型结构。
 
-## 6.2 非目标与阶段边界
+## 11.2 非目标与阶段边界
 
 Phase 1 只实现外键关系的 Meta / Link / Validation 闭环，暂不一次性实现所有关系型能力。
 
@@ -70,9 +70,9 @@ Phase 1 不支持：
 - reverse relation / back reference；
 - cascade、override、join 等数据库式关系操作。
 
-## 6.3 配置模型
+## 11.3 配置模型
 
-### 6.3.1 字段级单键语法糖
+### 11.3.1 字段级单键语法糖
 
 单字段外键是最常见场景，Phase 1 应直接支持字段级语法糖，避免用户为了一个 `item_id -> items.by_id` 关系额外编写 table-level `[[tables.foreign_keys]]`。
 
@@ -115,7 +115,7 @@ foreign_key = {
 
 字段级语法糖与 table-level FK 最终进入同一套 linked/validation/codegen 逻辑。实现上推荐在 helper 方法或 link/validate 阶段把字段级声明展开为规范化 FK 视图，而不是在多个模块分别处理两套逻辑。
 
-### 6.3.2 Table-level 外键配置
+### 11.3.2 Table-level 外键配置
 
 复合外键或需要显式列出多个 source fields 时，使用 table-level 配置：
 
@@ -155,7 +155,7 @@ fields = ["item_id"]
 target_table = "items"
 ```
 
-## 6.4 Meta Raw Model
+## 11.4 Meta Raw Model
 
 在 `src/meta/model.rs` 增加：
 
@@ -275,9 +275,9 @@ impl ForeignKeyMeta {
 }
 ```
 
-## 6.5 Linked Model
+## 11.5 Linked Model
 
-### 6.5.1 类型定义
+### 11.5.1 类型定义
 
 在 `src/meta/model.rs` 增加：
 
@@ -328,7 +328,7 @@ foreign_key_index: HashMap<&'meta str, usize>,
 pub fn foreign_key(&self, name: &str) -> Option<&LinkedForeignKeyMeta<'meta>>;
 ```
 
-### 6.5.2 Link 流程
+### 11.5.2 Link 流程
 
 在 `src/meta/link.rs` 中：
 
@@ -350,7 +350,7 @@ pub fn foreign_key(&self, name: &str) -> Option<&LinkedForeignKeyMeta<'meta>>;
 - 因此外键 target table/index/source field 也建议在 Link 阶段 fail-fast；
 - Meta validate 仍保留面向用户的多诊断检查，便于一次性报告多个结构错误。
 
-## 6.6 Meta Validation
+## 11.6 Meta Validation
 
 在 `src/meta/validate.rs` 增加 `validate_foreign_keys()`。
 
@@ -390,11 +390,11 @@ pub fn foreign_key(&self, name: &str) -> Option<&LinkedForeignKeyMeta<'meta>>;
 
 建议新增 `MetaDiagnosticCode::InvalidForeignKeyDeclaration`，避免把所有外键错误混入 index / field 诊断。
 
-## 6.7 Validation 执行设计
+## 11.7 Validation 执行设计
 
 外键不是用户显式 validator，但 Validation 阶段可把 linked FK 当作 implicit dataset validator 执行。
 
-### 6.7.1 接入位置
+### 11.7.1 接入位置
 
 推荐先在 `src/validation/mod.rs` 中实现 hardcoded FK 校验，与当前 required/type/unique 保持一致：
 
@@ -418,7 +418,7 @@ Phase 1 为降低改动范围，可以先 hardcoded，文档和命名上保留�
 
 Phase 1 的 hardcoded FK 校验暂不进入 `ValidationReport` 聚合：发现第一个 FK 错误时直接返回 `ConfigForgeError::Validation(String)`，与当前 required/type/unique 基础校验保持一致。后续迁移为 implicit `CompiledValidator` 后，再产出结构化 `ValidationIssue` 并进入 `validate_*_with_report` 的聚合结果。
 
-### 6.7.2 Full validation 与 target validation
+### 11.7.2 Full validation 与 target validation
 
 Full validation：
 
@@ -438,7 +438,7 @@ Target validation：
 - source table 只有 visible rows 参与；
 - target key set 只从 target table 当前 target visible rows 中构建，被 `row_export` 排除的 target row 不可被引用。
 
-### 6.7.3 Key 构造
+### 11.7.3 Key 构造
 
 定义内部 key：
 
@@ -469,7 +469,7 @@ target index 已保证 unique，因此如果目标数据本身重复，会由现
 
 Phase 1 不做 primitive typed canonicalization，FK resolution 使用与 unique index 相同的 raw cell key 语义。例如 int 字段中 raw cell `"01"` 与 `"1"` 是两个不同 key，即使两者都能通过 int 类型校验。若未来引入 typed key canonicalization，必须同步升级 unique index、codegen index 与 FK，否则同一 key 在不同模块会出现不一致语义。
 
-### 6.7.4 诊断信息
+### 11.7.4 诊断信息
 
 缺引用错误：
 
@@ -511,7 +511,7 @@ field `monsters.drop_item_id` foreign key references composite index `items.by_i
 
 row number 优先使用 `RowSourceInfo.source_row_number`，与当前 fragment / ExportView 行号策略一致。
 
-### 6.7.5 与现有 validation 顺序
+### 11.7.5 与现有 validation 顺序
 
 推荐顺序：
 
@@ -527,7 +527,7 @@ row number 优先使用 `RowSourceInfo.source_row_number`，与当前 fragment /
 - target unique index 冲突应优先报告；
 - 业务 validator 可以依赖外键已经通过的前提。
 
-## 6.8 Codegen 与 IR 预留
+## 11.8 Codegen 与 IR 预留
 
 Phase 1 不生成语言 helper，但建议在 CodeModel 中预留结构，便于后续演进。
 
@@ -558,7 +558,7 @@ pub struct CodeForeignKey {
 
 具体 API 需要结合 repository ownership、lifetime 和 GameData 聚合结构另行设计。
 
-## 6.9 与 Fragment 的关系
+## 11.9 与 Fragment 的关系
 
 Phase 1 FK 只允许 common fields：
 
@@ -579,7 +579,7 @@ Phase 1 FK 只允许 common fields：
 - fragment target visibility 与 relation visibility；
 - codegen 中 optional fragment relation helper 的返回策略。
 
-## 6.10 实施步骤
+## 11.10 实施步骤
 
 建议拆成小提交：
 
@@ -617,7 +617,7 @@ Phase 1 FK 只允许 common fields：
 - 更新 `Documentation/Design/05-data-validation.md` FK validation 语义。
 - 在 standard project fixture 中增加一个小型 FK 示例。
 
-## 6.11 测试计划
+## 11.11 测试计划
 
 ### Meta tests
 
@@ -668,7 +668,7 @@ Phase 1 FK 只允许 common fields：
 2. 修复数据后 JSON / MessagePack export 成功。
 3. target tags 下 FK 与 row_export 行为一致。
 
-## 6.12 风险与开放问题
+## 11.12 风险与开放问题
 
 1. **Full validation 是否受 `export` / `export_when` 影响**  
    建议 full validation 检查全部 FK；target validation 才按 target 过滤。若 CLI 的默认 validate 已经绑定 target，则以 target 语义为准。
@@ -685,7 +685,7 @@ Phase 1 FK 只允许 common fields：
 5. **target visibility 下字段不可见时的行为**  
    推荐严格报错：一个当前 target 可见的 FK，不应引用当前 target 不可见的 target table、target index、source field 或 target index field。否则 codegen / runtime relation helper 会缺少必要目标或字段。
 
-## 6.13 完成标准
+## 11.13 完成标准
 
 外键 Phase 1 完成时应满足：
 

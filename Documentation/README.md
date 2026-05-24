@@ -20,7 +20,7 @@ This directory contains durable project knowledge for ConfigForge.
 | Understand current product behavior | `Design/README.md` | The relevant `Design/0*.md` topic file. |
 | Change module boundaries or dependencies | `Implementation/01-module-outline.md` | The affected module documents under `Implementation/02`～`09`. |
 | Add or modify a feature | Relevant `Design/*.md` | Relevant `Implementation/*.md`, plus `code-style.md`. |
-| Work on concurrency, resource limits, or execution strategy | `Implementation/09-build-module-detail-design.md` | `Tech/task-system-design.md`. |
+| Work on concurrency, resource limits, or execution strategy | `Implementation/10-build-module-detail-design.md` | `Tech/task-system-design.md`. |
 | Work on testing quality | `code-style.md` | `Tech/unit-test-coverage.md`. |
 | Research historical reasoning | Current `Design/` / `Implementation/` docs | `DevLogs/` only as supporting evidence. |
 
@@ -49,11 +49,12 @@ Use the implementation documents after product behavior has been confirmed in `D
 - `Implementation/04-meta-module-detail-design.md` — Meta module data structures, Load-then-Link strategy, main APIs, migration path, and unit test plan.
 - `Implementation/05-data-module-detail-design.md` — Data load/model/resolver flow, CSV readers, ObjectTable source layout, and DataSet design.
 - `Implementation/06-validation-module-detail-design.md` — Validation flow, registered validator framework, diagnostics, ExportValidationView, and test plan.
-- `Implementation/07-exporter-module-detail-design.md` — Runtime data exporter contracts, format registry, JSON / MessagePack output, and ObjectTable payload shape.
-- `Implementation/08-codegen-module-detail-design.md` — Codegen IR, generator contracts, runtime reader contract, and multi-language output design.
-- `Implementation/09-build-module-detail-design.md` — Build orchestration, target normalization, data/code task binding, and artifact write boundaries.
-- `Implementation/10-foreign-key-detail-design.md` — Foreign key raw/link model, referential-integrity validation, target semantics, codegen staging, and test plan.
-- `Implementation/11-struct-expanded-value-detail-design.md` — Struct source layout auto detection and expanded CSV field-path layout for CollectionTable/ObjectTable, validation/export plan, and test plan.
+- `Implementation/07-artifact-module-detail-design.md` — Artifact model, writer, dry-run, direct/temp-commit strategy, and write result design.
+- `Implementation/08-exporter-module-detail-design.md` — Runtime data exporter contracts, format registry, JSON / MessagePack output, and ObjectTable payload shape.
+- `Implementation/09-codegen-module-detail-design.md` — Codegen IR, generator contracts, runtime reader contract, and multi-language output design.
+- `Implementation/10-build-module-detail-design.md` — Build orchestration, target normalization, data/code task binding, and artifact write boundaries.
+- `Implementation/11-foreign-key-detail-design.md` — Foreign key raw/link model, referential-integrity validation, target semantics, codegen staging, and test plan.
+- `Implementation/12-struct-expanded-value-detail-design.md` — Struct source layout auto detection and expanded CSV field-path layout for CollectionTable/ObjectTable, validation/export plan, and test plan.
 
 ## Technical Practice Set
 
@@ -73,4 +74,5 @@ Use the implementation documents after product behavior has been confirmed in `D
 - Update `Implementation/01-module-outline.md` and the affected module document whenever source module boundaries, dependency direction, or public APIs change.
 - Update `Tech/` documents when commands, toolchain requirements, concurrency/resource policies, or test/coverage workflows change.
 - When introducing new domain concepts, update `glossary.md` before or together with feature specs.
+- Keep canonical `Design/`, `Implementation/`, and `Tech/` documents focused on current state and planned future state; put historical reasoning, removed approaches, and temporary transition notes in `DevLogs/`.
 - Use `DevLogs/` for phase snapshots and raw decision evidence; do not rewrite old logs as if they were canonical current design.

@@ -433,17 +433,17 @@ id,name,export_tags,exclude_tags
 
 `export_tags` / `exclude_tags` 字段通常设置 `export = false`，因为它们只用于形成 ExportView，不进入 runtime data。字段是否可被行过滤引用不再需要额外 `filter_field` 开关。
 
-## 4.7 废弃的旧导出字段
+## 4.7 Unsupported 导出字段
 
-目标态不再保留 `tool_only`、`validator_only`、`filter_field` 作为 Meta 导出机制：
+Meta 导出机制使用 `export`、`export_when` 与 `row_export`；以下字段在当前设计中不作为有效配置：
 
-| 旧字段 | 替代方式 |
+| 字段 | 推荐表达 |
 | --- | --- |
 | `tool_only = true` | `export = false`，或通过工具专用 target tags 单独导出。 |
 | `validator_only = true` | `export = false`；校验仍基于 Full DataSet 或目标 ExportView 执行。 |
 | `filter_field = true` | `row_export.required_tags_field` / `row_export.excluded_tags_field` 显式引用字段。 |
 
-后续实现应直接迁移到新机制，不提供旧字段兼容语义。
+实现应对这些字段输出 unsupported 诊断，避免用户误以为它们会参与 ExportView 构造。
 
 ## 4.8 Missing、Default、Required
 

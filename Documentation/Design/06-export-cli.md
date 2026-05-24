@@ -59,7 +59,7 @@ format = "messagepack"
 - 同一 target 下多个 data task 如果 `input` 相同，执行层应只加载、归一化、校验一次，再分发给不同格式 exporter。
 - 同一个 target 的 code generation 必须感知它引用的 runtime data task，生成的默认数据文件名必须与对应 data task 的 `format` 和真实 artifact 路径一致。
 - code-only target 可以不声明 `targets.data`，但如果仍生成读取 runtime data 的代码，默认按 `json` 规划文件名；正式项目推荐 data 与 code 在同一个 target 中同时声明，避免格式不一致。
-- 项目当前仍处于开发阶段，不保留旧 `[targets.data]` table 形态兼容；正式配置统一使用 `[[targets.data]]` 数组表。
+- Project Config 使用 `[[targets.data]]` 数组表表达 runtime data 导出任务。
 
 ### 6.1.2 Code Generation Task
 
@@ -166,7 +166,7 @@ Protobuf 未来规则：
 
 ### 6.2.1 生成代码的 Runtime Data 加载抽象
 
-当前实现状态：Rust / C++ / TypeScript 生成代码已落地 **Meta-agnostic reader loader 契约**，即接入方只实现通用 `open(path)` 并返回 `RuntimeDataReader` / `IRuntimeDataReader`；生成代码内部负责按 Meta 读取表、字段、fragment 和 object payload，并构造 typed rows / objects。上一阶段按表生成 `load_<table>_rows` / `Load<Table>Rows` / `load<Table>Rows` 等方法的 typed loader 过渡契约已废弃，不再是当前生成代码 API。
+当前实现状态：Rust / C++ / TypeScript 生成代码使用 **Meta-agnostic reader loader 契约**，即接入方只实现通用 `open(path)` 并返回 `RuntimeDataReader` / `IRuntimeDataReader`；生成代码内部负责按 Meta 读取表、字段、fragment 和 object payload，并构造 typed rows / objects。生成代码 API 不包含按表生成的 `load_<table>_rows` / `Load<Table>Rows` / `load<Table>Rows` loader 方法。
 
 生成代码必须把“如何取得配置文件”和“如何把通用序列化数据组装成当前 Meta 对应的 typed rows / typed objects”分层：
 
@@ -250,7 +250,7 @@ runtime_readers/
 
 `runtime_readers/` 下的实现属于“标准 runtime adapter 源码/模板”，不是每次 codegen 的输出文件。后续可以通过 codegen option 选择是否把某个 adapter 拷贝到目标输出目录，也可以由游戏项目直接依赖该目录对应语言的 package/crate/library。
 
-C++ adapter 需要有独立工程化入口。推荐支持 `add_subdirectory(runtime_readers/cpp)` 和安装后的 `find_package(ConfigForgeRuntimeReaders CONFIG)` 两种接入方式，并暴露 `config_forge_runtime::core`、`config_forge_runtime::json_builtin_test_fallback`、`config_forge_runtime::json_rapidjson`、`config_forge_runtime::messagepack_msgpack_cpp`、`config_forge_runtime::filesystem_loader` 等 CMake targets。普通业务构建默认不启用 builtin fallback，测试构建可显式启用；生产项目显式打开 RapidJSON / msgpack-c 选项。详细 CMake option、target、三方依赖解析、C++ ownership、runtime_reader option 校验、emit 语义和 CI 矩阵见 `Documentation/Implementation/08-codegen-module-detail-design.md` 的“标准 RuntimeDataReader adapter 工程结构”。
+C++ adapter 需要有独立工程化入口。推荐支持 `add_subdirectory(runtime_readers/cpp)` 和安装后的 `find_package(ConfigForgeRuntimeReaders CONFIG)` 两种接入方式，并暴露 `config_forge_runtime::core`、`config_forge_runtime::json_builtin_test_fallback`、`config_forge_runtime::json_rapidjson`、`config_forge_runtime::messagepack_msgpack_cpp`、`config_forge_runtime::filesystem_loader` 等 CMake targets。普通业务构建默认不启用 builtin fallback，测试构建可显式启用；生产项目显式打开 RapidJSON / msgpack-c 选项。详细 CMake option、target、三方依赖解析、C++ ownership、runtime_reader option 校验、emit 语义和 CI 矩阵见 `Documentation/Implementation/09-codegen-module-detail-design.md` 的“标准 RuntimeDataReader adapter 工程结构”。
 
 ## 6.3 Special Exporter
 
@@ -323,11 +323,8 @@ Artifact 类型：
 | Kind | 说明 |
 | --- | --- |
 | RuntimeData | 运行时数据。 |
-| RuntimeSchema | schema，例如未来 proto。 |
 | GeneratedCode | 生成代码。 |
-| LocalizationTemplate | POT。 |
-| AssetManifest | 资源清单。 |
-| Manifest | 本次导出的产物列表。 |
+| SpecialExport | POT、资源清单、schema、导出摘要等特殊导出产物。 |
 
 要求：
 
@@ -335,9 +332,9 @@ Artifact 类型：
 - 路径冲突检查使用规范化绝对 artifact path；两个 data task 如果规划出同 output + 同 format + 同 table 文件名，必须报错。
 - 产物写入通过 Artifact Writer。
 - Artifact Writer 支持 `temp_commit` 和 `direct` 写入策略；推荐默认 `temp_commit`。
-- 并行生成不影响 manifest 顺序。
+- 并行生成不影响 artifact write result 顺序。
 - 失败 target 不应提交部分产物。
-- 未来 manifest 记录 runtime data artifact 时，应以 `(target_name, data_name, table_name)` 作为稳定 key，并额外记录 `format`、相对 data artifact root 的 `path` 和最终写入 path，避免同一 table 的多格式产物互相覆盖。
+- 未来 summary manifest 可作为 special exporter 产物；记录 runtime data artifact 时，应以 `(target_name, data_name, table_name)` 作为稳定 key，并额外记录 `format`、相对 data artifact root 的 `path` 和最终写入 path，避免同一 table 的多格式产物互相覆盖。
 
 写入策略：
 

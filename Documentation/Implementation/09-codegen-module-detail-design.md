@@ -1,10 +1,10 @@
-# 08. Codegen 模块详细设计
+# 09. Codegen 模块详细设计
 
 本文档描述 ConfigForge 的代码导出任务设计。目标是在已加载、已链接并通过校验的 Meta 与 Data 基础上，生成 Rust、C++ 和 TypeScript 三种语言的运行时代码，覆盖枚举、结构体、数据表、索引辅助查找函数，并提供抽象的数据文件加载器接口，让接入方可以从本地文件、包内资源、网络或引擎资源系统中加载实际数据。加载器接口必须与具体 Meta、表和字段解耦；所有按表/字段解析和 typed row/object 构造职责属于生成代码。
 
 产品层语义仍以 `Documentation/Design/` 为准；本文档聚焦程序实现模块、生成代码形态、跨语言约束、运行时加载抽象和测试策略。
 
-## 4.1 设计目标
+## 9.1 设计目标
 
 当前已落地第一阶段 Code Export 需要达成：
 
@@ -22,7 +22,7 @@
 7. 保持生成代码确定性：同一份 Meta 生成稳定文件名、声明顺序和 API 名称。
 8. 在生成前发现命名冲突、保留字、目标语言类型映射缺失、输出路径冲突等问题。
 
-当前 loader contract 已迁移到 Meta-agnostic reader loader：生成抽象 `RuntimeDataLoader` / `RuntimeDataReader`，由接入方负责打开资源并提供通用 object / array / scalar 读取能力；生成代码负责读取 payload envelope `{ meta, rows }`、按 Meta 字段映射到 typed rows / typed objects。loader 不能按表生成方法，也不能返回具体 `TableRow` 类型。上一阶段 typed loader 仅作为历史过渡契约保留在旧提交中，不再是当前可运行 API。
+当前 loader contract 使用 Meta-agnostic reader loader：生成抽象 `RuntimeDataLoader` / `RuntimeDataReader`，由接入方负责打开资源并提供通用 object / array / scalar 读取能力；生成代码负责读取 payload envelope `{ meta, rows }`、按 Meta 字段映射到 typed rows / typed objects。loader 不能按表生成方法，也不能返回具体 `TableRow` 类型。
 
 第一阶段不实现：
 
@@ -35,7 +35,7 @@
 
 这些能力应在生成器 API 上预留扩展点，但不阻塞第一阶段落地。
 
-## 4.2 与现有流程的关系
+## 9.2 与现有流程的关系
 
 当前 exporter 已经完成的基础流程：
 
@@ -51,7 +51,7 @@ ProjectConfig::from_path
   -> write generated files
 ```
 
-Code Export 已从旧的 exporter 编排层下沉到独立 `src/codegen/` 模块；当前 `src/build/` 负责构造输入、分发生成器、检查输出路径冲突并写出 artifact。
+Code Export 位于独立 `src/codegen/` 模块；当前 `src/build/` 负责构造输入、分发生成器、检查输出路径冲突并写出 artifact。
 
 目标态流程仍可继续演进为：
 
@@ -72,7 +72,7 @@ Data Load / Normalize / Validate
 - Runtime data 文件和 generated code 文件都应进入同一套 Artifact Plan，统一检查路径冲突。
 - Data 文件格式第一阶段支持 JSON 与 MessagePack；目标态生成代码只约束通用 `RuntimeDataLoader` / reader 协议。loader 实现负责打开具体文件并暴露格式无关的读取 cursor，生成代码本身不绑定文件系统、引擎资源系统、JSON 库或 MessagePack 库，但负责所有 table / field 级解析逻辑。
 
-## 4.3 模块结构建议
+## 9.3 模块结构建议
 
 当前 `src/codegen/` 目录模块：
 
@@ -97,19 +97,18 @@ src/codegen/
 - 调用对应 `CodeGenerator`；
 - 写出 Artifact。
 
-后续可以再拆出 `src/artifact/`：
+Artifact Writer 已拆为独立 `src/artifact/` 模块，Codegen 后续应通过 Artifact 模块统一写出：
 
 ```text
 src/artifact/
   mod.rs
   model.rs            # Artifact / ArtifactKind / ArtifactPath
   writer.rs           # direct / temp_commit 写入策略
-  manifest.rs         # manifest 生成
 ```
 
-第一阶段如果不想一次性扩大范围，可以先让 `CodeGenerator` 返回 `Vec<GeneratedFile>`，由 exporter 顺序写入；但类型命名应为未来 Artifact Writer 预留。
+`CodeGenerator` 可以继续返回 `Vec<GeneratedFile>`，但 Build 写文件必须统一转换为 `artifact::Artifact` 并交给 Artifact Writer；Codegen 自身不直接写文件。
 
-### 4.3.1 ObjectTable codegen 边界
+### 9.3.1 ObjectTable codegen 边界
 
 ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 
@@ -125,9 +124,9 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 - TypeScript：`data.gameConfig` 或 `getGameConfig()`。
 - C++：`GetGameConfig()` 返回 const reference。
 
-## 4.4 核心输入输出模型
+## 9.4 核心输入输出模型
 
-### 4.4.1 `CodeExportLanguage`
+### 9.4.1 `CodeExportLanguage`
 
 ```rust
 pub enum CodeExportLanguage {
@@ -137,7 +136,7 @@ pub enum CodeExportLanguage {
 }
 ```
 
-### 4.4.2 `CodeExportTarget`
+### 9.4.2 `CodeExportTarget`
 
 ```rust
 pub struct CodeExportTarget {
@@ -161,14 +160,14 @@ pub struct CodeExportTarget {
 
 `CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.code]]`。runtime data 的具体格式由 code task 引用的 `[[targets.data]]` 任务选择，并通过 `RuntimeDataFile.path` 的真实后缀传递给 CodeModel；code-only target 没有 data artifact 时当前默认推导 `<table>.json`。
 
-### 4.4.2.1 Runtime data format
+### 9.4.2.1 Runtime data format
 
 解析规则：
 
 - Project Config 中 `[[targets.data]].format = "json"` 选择 JSON exporter。
 - Project Config 中 `[[targets.data]].format = "messagepack"` 选择 MessagePack exporter。
 - 可兼容解析 `"msgpack"` 为 MessagePack，但错误信息、文档、生成代码和 manifest 中统一使用规范名 `messagepack`。
-- 项目当前仍处于开发阶段，不保留旧 `[targets.data]` table 形态兼容；Project Config 只接受 `[[targets.data]]` 数组表。
+- Project Config 使用 `[[targets.data]]` 数组表表达 runtime data 导出任务。
 
 Project Config 层建议模型（`TargetConfig` 是 project-level 聚合结构；`TargetDataConfig` 由 exporter 模块定义，`CodegenTaskConfig` 由 codegen 模块定义）：
 
@@ -254,7 +253,7 @@ pub struct RuntimeConfigForgeResult {
 
 `write_generated_code` 在构造每个 `CodeExportInput` 时只传入该 code task 的 `selected_data_name` 对应的 `RuntimeConfigForgeResult.files`，避免同一 table 同时出现 `items.json` 和 `items.msgpack` 时 CodeModel 无法确定默认文件名。未来 manifest 可以记录所有 data task；codegen 输入只保留当前 code task 所需的视图。
 
-### 4.4.2.2 `CodegenOptions`
+### 9.4.2.2 `CodegenOptions`
 
 ```rust
 pub struct CodegenOptions {
@@ -333,7 +332,7 @@ derive_serde = true
 - 新增语言时应新增 generator 和语言扩展解析逻辑，不修改 IR。
 - 如果配置中出现当前语言不支持的 `CaseStyle` 或 `KeywordConflictPolicy`，应在 codegen validate 阶段报错。
 
-### 4.4.2.3 文件头模板
+### 9.4.2.3 文件头模板
 
 `file_header` 是可选模板。模板渲染上下文来自 Project Config 和执行上下文：
 
@@ -346,7 +345,7 @@ derive_serde = true
 
 文件头渲染应发生在语言生成器写入每个 `GeneratedFile` 内容前。语言生成器可以决定是否为每行追加注释前缀，但模板本身应允许用户完整控制文本。
 
-### 4.4.3 `CodeExportInput`
+### 9.4.3 `CodeExportInput`
 
 ```rust
 pub struct CodeExportInput<'meta> {
@@ -361,7 +360,7 @@ pub struct CodeExportInput<'meta> {
 
 `project` 来自 Project Config，用于渲染文件头模板；`target_tags` 来自当前 target 的 `tags`，用于构造目标相关的 CodeModel；`runtime_data_files` 来自数据导出阶段的 Artifact 规划，用于生成加载函数中的默认资源名。例如 JSON target 中 `items.json` 对应 `ItemsTable::DATA_FILE`，MessagePack target 中 `items.msgpack` 对应同一个常量。`generated_at` 由 exporter 注入，用于渲染文件头中的 `{{datetime}}`。
 
-### 4.4.4 `GeneratedFile`
+### 9.4.4 `GeneratedFile`
 
 ```rust
 pub struct GeneratedFile {
@@ -373,7 +372,7 @@ pub struct GeneratedFile {
 
 第一阶段只生成文本代码文件。后续如果生成二进制 schema 或 manifest，可扩展为 `GeneratedContent::Text | Bytes`。
 
-## 4.5 语言无关 CodeModel IR
+## 9.5 语言无关 CodeModel IR
 
 为了避免 Rust/C++/TypeScript 三套生成器重复理解 Meta，建议先把 `LinkedMetaModel<'meta>` 转换为语言无关 IR：
 
@@ -474,7 +473,7 @@ Foreign key 对 CodeModel 的要求：
 - source table、target table、target index、source fields、target index fields 都必须在当前 target CodeModel 可见。
 - target index 必须 unique，第一阶段只生成 many-to-one helper；一对多反向索引可在后续 relation 设计中扩展。
 
-### 4.5.1 Polymorphic Fragment CodeModel
+### 9.5.1 Polymorphic Fragment CodeModel
 
 variant source mode 落地后，CodeModel 需要表达三件事：
 
@@ -506,11 +505,11 @@ variant source mode 落地后，CodeModel 需要表达三件事：
 
 runtime loader 只负责把底层 JSON / MessagePack / 引擎资源暴露为通用 reader。生成代码负责识别 fragment object 是否存在、读取 fragment 内字段、执行 string -> typed primitive 转换并构造 typed rows；fragment fields 与普通字段遵循同一 generated parser 规则。
 
-## 4.6 命名策略与冲突检测
+## 9.6 命名策略与冲突检测
 
 代码生成必须先解决命名合法性问题，不允许直接使用 Meta 名称。命名策略由 `targets.code.naming` 配置，并由每个语言生成器解释。
 
-### 4.6.1 通用规则
+### 9.6.1 通用规则
 
 1. Meta 名称可保持较宽松；代码名称必须符合目标语言标识符规则。
 2. 非 ASCII 字符第一阶段不直接生成标识符，应转义或报错。推荐先报错，后续再支持 transliteration。
@@ -519,7 +518,7 @@ runtime loader 只负责把底层 JSON / MessagePack / 引擎资源暴露为通�
 5. 保留字按 `keyword_conflict` 处理：追加 `_`、raw identifier 或报错。
 6. 同一作用域内 code name 冲突必须报错，而不是静默覆盖。
 
-### 4.6.1.1 命名配置解析
+### 9.6.1.1 命名配置解析
 
 生成器应把通用 `NamingConfig` 映射为自己的命名函数。例如 Rust 默认：
 
@@ -553,7 +552,7 @@ C++ 默认：
 
 命名转换应是 generator-local 的能力；`CodeModel` 只提供原始语义名称。
 
-### 4.6.2 建议命名映射
+### 9.6.2 建议命名映射
 
 | Meta 对象 | Rust | C++ | TypeScript |
 | --- | --- | --- | --- |
@@ -566,7 +565,7 @@ C++ 默认：
 | index key type | `PascalCase` + index + `Key` | 同 Rust | 同 Rust |
 | lookup function | `find_by_xxx` / `get_by_xxx` | `FindByXxx` / `GetByXxx` | `findByXxx` / `getByXxx` |
 
-### 4.6.3 冲突场景
+### 9.6.3 冲突场景
 
 必须检查：
 
@@ -577,9 +576,9 @@ C++ 默认：
 - 生成文件路径重名；
 - 生成名称与 runtime helper 类型重名，例如 `DataLoader`、`GameData`。
 
-## 4.7 类型映射
+## 9.7 类型映射
 
-### 4.7.1 Primitive 映射
+### 9.7.1 Primitive 映射
 
 | Meta type | Rust | C++ | TypeScript |
 | --- | --- | --- | --- |
@@ -592,7 +591,7 @@ C++ 默认：
 
 第一阶段建议 `asset` 先映射为字符串，后续通过 target type mapping 支持自定义 `AssetRef`。
 
-### 4.7.2 Enum 映射
+### 9.7.2 Enum 映射
 
 - Rust：`enum ItemRarity { Common, Rare }`，建议 derive `Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize`。
 - C++：`enum class ItemRarity { Common, Rare };`，生成 `FromString` / `ToString`。
@@ -604,7 +603,7 @@ export type ItemRarity = "common" | "rare";
 
 如果使用 TS `enum`，需要考虑运行时代码体积和 JSON 字符串转换。
 
-### 4.7.3 Struct 映射
+### 9.7.3 Struct 映射
 
 - Rust：`struct Reward { ... }`。
 - C++：`struct Reward { ... };`。
@@ -616,9 +615,9 @@ export type ItemRarity = "common" | "rare";
 - table row 中的 struct 字段 parse / load 标记为 unsupported 或要求 runtime data 已经是对象结构；
 - 在导出前由 Validation 阶段继续阻断 struct 数据值，避免生成代码承诺已可运行。
 
-## 4.8 生成内容
+## 9.8 生成内容
 
-### 4.8.1 Rust 生成内容
+### 9.8.1 Rust 生成内容
 
 当前实现采用单文件输出：`generated.rs`。以下多文件布局仍是后续拆分方向：
 
@@ -697,7 +696,7 @@ Rust 约束：
 - 若生成 serde 代码，需要生成 `serde` feature 说明或由项目配置决定是否带 derive。
 - 生成代码只定义通用 `RuntimeDataLoader` / `RuntimeDataReader` trait，不强制生成 JSON 或 MessagePack 的具体 decoder；业务 runtime 可以用 `serde_json`、`rmp-serde` 或项目自研库实现 reader。`ItemsTable::load` 打开 `DATA_FILE` 后由生成代码读取 `rows` 数组、逐行调用 `read_row` 并构建索引。
 
-### 4.8.2 C++ 生成内容
+### 9.8.2 C++ 生成内容
 
 当前实现采用单文件头输出：`generated.hpp`。以下多文件布局仍是后续拆分方向：
 
@@ -770,7 +769,7 @@ C++ 约束：
 - 复合 key 需要生成 `struct Key`、`operator==` 和 hash。
 - enum class 需要生成 hash 或转换为底层整数用于 unordered_map。
 
-### 4.8.3 TypeScript 生成内容
+### 9.8.3 TypeScript 生成内容
 
 当前实现采用单文件输出：`generated.ts`。以下多文件布局仍是后续拆分方向：
 
@@ -840,13 +839,13 @@ Reader 基础语义：
 - `index(i)` 用于 array 或 positional record。越界是读取错误，应带上 index 上下文。
 - `len` / `Size` / `length` 只对 array / object / map 有意义；对 scalar 调用应报错。
 - 最小 scalar API 包含 int、float/number、bool、string。`text`、`asset` 按 string 读取；enum 先按 string 读取，再由 generated parser 校验枚举值。
-- 在当前 exporter 仍可能输出字符串 cell 的过渡期，推荐 generated parser helper 兼容 string-to-int、string-to-float、string-to-bool；reader 也可以直接在 `as_*` 中兼容字符串，但跨语言一致性以 generated parser 规则为准。
+- 当 exporter 输出字符串 cell 时，推荐 generated parser helper 兼容 string-to-int、string-to-float、string-to-bool；reader 也可以直接在 `as_*` 中兼容字符串，但跨语言一致性以 generated parser 规则为准。
 - missing 与 null 必须区分：missing 表示字段不存在；null 表示字段存在但值为空。required 字段 missing 或 null 都应由 generated parser 报错；optional field / optional fragment missing 时得到 `None` / `undefined`；null 是否允许作为 optional empty value 由生成器策略统一决定，第一阶段建议将 null 等价为 optional empty，但对 required 字段仍报错。
 - 错误上下文由 generated parser 包装 table、file、row index、field path；reader 只需要报告底层类型/格式错误。
 
-## 4.9 索引辅助查找函数设计
+## 9.9 索引辅助查找函数设计
 
-### 4.9.1 索引来源
+### 9.9.1 索引来源
 
 索引来自 `TableMeta.indexes`，Link 后为 `LinkedTableMeta.indexes`。每个 index 包含：
 
@@ -857,7 +856,7 @@ Reader 基础语义：
 
 `FieldMeta.unique = true` 可视为单字段 unique index，建议在 CodeModel 中统一转成 synthetic index，命名为 `by_<field>`。
 
-### 4.9.2 API 规则
+### 9.9.2 API 规则
 
 | 索引类型 | Rust | C++ | TypeScript |
 | --- | --- | --- | --- |
@@ -866,7 +865,7 @@ Reader 基础语义：
 | unique compound | `get_by_a_b(a, b) -> Option<&Row>` | `GetByAB(a, b) -> const Row*` | `getByAB(a, b): Row | undefined` |
 | non-unique compound | `find_by_a_b(a, b) -> Vec<&Row>` | `FindByAB(a, b) -> vector<const Row*>` | `findByAB(a, b): readonly Row[]` |
 
-### 4.9.3 索引构建规则
+### 9.9.3 索引构建规则
 
 1. Repository 构造时一次性遍历 rows 构建所有索引。
 2. unique index 如果发现重复，加载阶段返回错误。理论上导出前 validation 已经检查，但 generated runtime 仍应防御。
@@ -877,7 +876,7 @@ Reader 基础语义：
    - `text` / `asset` 作为字符串 key 允许；
    - struct key 不支持。
 
-### 4.9.4 Primary index
+### 9.9.4 Primary index
 
 如果存在 primary index，额外生成主访问函数：
 
@@ -889,9 +888,9 @@ Reader 基础语义：
 
 第一阶段建议生成 `get_by_<primary_index_name>`，避免主索引字段变化导致 `get(...)` 语义不清。后续可配置是否生成短别名 `get(...)`。
 
-## 4.10 抽象加载器设计
+## 9.10 抽象加载器设计
 
-### 4.10.1 为什么需要抽象加载器
+### 9.10.1 为什么需要抽象加载器
 
 生成代码不应该假设数据来自本地文件系统。不同接入环境可能是：
 
@@ -899,9 +898,9 @@ Reader 基础语义：
 - C++ 游戏客户端：从包内资源、虚拟文件系统或引擎 AssetManager 读取；
 - TypeScript：从 HTTP、Node fs、浏览器 bundle 或 IndexedDB 读取。
 
-因此当前生成代码依赖一个通用 loader / reader 抽象：loader 给定逻辑 data file path，负责打开对应 JSON / MessagePack / 引擎资源并返回格式无关的 reader；生成代码再用 reader 读取 payload envelope `{ meta, rows }`、逐字段解析并返回 typed rows。上一阶段按表生成 typed loader 方法的形态已经废弃，避免用户每新增表或字段都要修改 loader 实现。
+因此当前生成代码依赖一个通用 loader / reader 抽象：loader 给定逻辑 data file path，负责打开对应 JSON / MessagePack / 引擎资源并返回格式无关的 reader；生成代码再用 reader 读取 payload envelope `{ meta, rows }`、逐字段解析并返回 typed rows。loader 接口不包含按表生成的 typed loader 方法，避免用户每新增表或字段都要修改 loader 实现。
 
-### 4.10.2 语言无关接口
+### 9.10.2 语言无关接口
 
 ```text
 RuntimeDataLoader
@@ -921,7 +920,7 @@ reader 需要支持两种读取模式：
 1. named-field：生成代码调用 `field("id")`、`field("name")` 等方法，适合 JSON object、MessagePack map、引擎反射对象。
 2. positional：生成代码按 CodeModel 中稳定字段顺序调用 `index(0)`、`index(1)` 或连续 `read_next_*`，适合未来紧密二进制布局。选择 positional layout 时，exporter 和 codegen 必须共享同一字段顺序；顺序定义应来自 linked Meta 中 target-visible fields、fragment fields 和 object fields 的稳定遍历结果。
 
-### 4.10.3 数据格式适配
+### 9.10.3 数据格式适配
 
 加载器实现只负责打开资源并提供通用 reader；生成代码负责解析业务对象：
 
@@ -938,7 +937,7 @@ loader.open("items.msgpack")
 
 这样让生成代码保持对文件系统和具体解析库无绑定，同时让用户 loader 保持稳定。代价是生成代码需要包含每种语言的 runtime parser helper（字段读取、类型转换、required/default/optional 处理、错误上下文），但这些 helper 可以由生成器稳定输出，不需要用户手写。
 
-### 4.10.4 默认 loader
+### 9.10.4 默认 loader
 
 可以为每种语言生成一个可选的默认 loader / reader adapter 示例，但核心产物只依赖接口，不强制生成默认文件 loader：
 
@@ -961,7 +960,7 @@ loader.open("items.msgpack")
 - 通用 reader/value 到 typed rows 的解析放在生成代码中。
 - MessagePack decoder 不绑定具体 npm / C++ / Rust 包。
 
-### 4.10.5 标准 RuntimeDataReader adapter 工程结构
+### 9.10.5 标准 RuntimeDataReader adapter 工程结构
 
 生成代码只声明 reader / loader contract，这解决了 Meta-specific 逻辑与业务资源系统耦合的问题，但实际游戏项目仍需要可运行的 JSON / MessagePack 等格式 reader。项目应提供标准 RuntimeDataReader adapter 源码/模板，作为 generated code 之外的 runtime support 层。
 
@@ -1356,7 +1355,7 @@ CI 中三方依赖策略：
 - 完整 CI / nightly 跑 production adapter：TS MessagePack、C++ RapidJSON、C++ msgpack-c。
 - 如果三方包不可用，测试应明确 skip 或 fail-fast 给出安装提示，不能静默退回 builtin parser 造成覆盖误判。
 
-### 4.10.6 reader loader 落地状态
+### 9.10.6 reader loader 落地状态
 
 迁移已完成：
 
@@ -1367,7 +1366,7 @@ CI 中三方依赖策略：
 
 当前验收标准：生成代码不再出现按表的 loader 方法；新增表、字段、fragment 或 object table 字段时，用户侧 loader / reader 接口和 harness loader 实现不需要改动，只需要重新生成代码并更新业务断言。
 
-## 4.11 Runtime data 文件约定
+## 9.11 Runtime data 文件约定
 
 当前 exporter 输出形态是包含 `meta` 和 `rows` 的 payload。JSON 与 MessagePack 使用同一逻辑结构，只是编码方式不同。目标态中业务侧 `RuntimeDataLoader` 只需要把该 payload 暴露为通用 reader；生成代码读取时至少应支持当前 shape：
 
@@ -1401,7 +1400,7 @@ CI 中三方依赖策略：
 1. Codegen 第一阶段先兼容当前 `{ meta, rows }`，由通用 reader 暴露 runtime value，并由生成代码把字段 parse 为目标类型。
 2. Data typed export 落地后，生成代码的 parse helper 可以减少 string parsing；loader / reader 接口仍保持不变。
 
-## 4.11.1 Exporter 写出实现方案
+## 9.11.1 Exporter 写出实现方案
 
 runtime data format 由 data export registry 选择，并通过 `RuntimeDataFile.path` 的文件名后缀传给 codegen；当前 codegen 层不再生成 `RuntimeDataFormat` 类型。目标态可用枚举描述如下：
 
@@ -1433,7 +1432,7 @@ rmp-serde = "1"
 
 如果后续引入 manifest，manifest 中也应以 `(target_name, data_name, table_name)` 作为 runtime data artifact key，并记录每个 artifact 的 `format`、相对 data artifact root 的 `path`、最终写入 path 和 `table_name`。
 
-## 4.11.2 Codegen 读取实现方案
+## 9.11.2 Codegen 读取实现方案
 
 CodeModel 构建时需要使用 `RuntimeDataFile`：
 
@@ -1455,7 +1454,7 @@ Table::load(loader)
 
 这样 JSON 与 MessagePack 的字节解析差异落在 loader / reader 实现里，表结构、字段名、字段顺序、类型转换、required/default/optional 处理落在生成代码里，repository、index、GameData facade 不需要关心具体解析库。
 
-## 4.12 生成器接口
+## 9.12 生成器接口
 
 ```rust
 pub trait CodeGenerator {
@@ -1493,7 +1492,7 @@ CodeExportInput
 - 输出路径冲突；
 - 目标语言需要的 runtime dependency 是否已声明。
 
-## 4.15 测试计划
+## 9.13 Runtime data 与加载接口测试计划
 
 数据格式与生成代码加载接口相关测试应覆盖：
 
@@ -1523,9 +1522,9 @@ CodeExportInput
    - row interface、table parser、table repository 和 index helper。
 13. CLI integration：分别构建 JSON target、MessagePack target，以及同 target 多 data + 多 code 的标准工程，验证 runtime data 文件和 generated code 文件同时生成，并检查代码中引用的默认文件名与绑定 data task 一致。
 
-## 4.13 文件组织策略
+## 9.14 文件组织策略
 
-### 4.13.1 多文件模式，推荐默认
+### 9.14.1 多文件模式，推荐默认
 
 优点：便于阅读和差异比较。
 
@@ -1536,7 +1535,7 @@ tables.*
 index.*
 ```
 
-### 4.13.2 单文件模式
+### 9.14.2 单文件模式
 
 适合小项目或直接拷贝接入：
 
@@ -1548,7 +1547,7 @@ config_forge_generated.ts
 
 第一阶段可以只实现单文件模式以降低复杂度，但 IR 和 GeneratedFile 应支持多文件。
 
-## 4.14 错误与诊断
+## 9.15 错误与诊断
 
 第一阶段可以继续使用 `ConfigForgeError::Validation(String)`，但建议新增 codegen diagnostic 模型：
 
@@ -1573,9 +1572,9 @@ pub struct CodegenDiagnostic {
 | `OutputPathConflict` | 多个 artifact 指向同一路径。 |
 | `RuntimeDependencyMissing` | 生成代码要求的依赖未配置。 |
 
-## 4.15 测试计划
+## 9.16 测试计划
 
-### 4.15.1 CodeModel 单元测试
+### 9.16.1 CodeModel 单元测试
 
 1. enum / struct / table 都能进入 `CodeModel`。
 2. primitive / enum / struct 字段映射为正确 `CodeTypeRef`。
@@ -1587,7 +1586,7 @@ pub struct CodegenDiagnostic {
 8. 同名 fragment 出现在不同 table 时，生成类型名应包含 table scope，避免冲突。
 9. fragment field 不能作为 index key；Meta/CodeModel 层应给出明确错误或在 Meta validation 阶段提前拒绝。
 
-### 4.15.2 语言生成器 snapshot 测试
+### 9.16.2 语言生成器 snapshot 测试
 
 对同一个小 Meta fixture 生成三种语言代码，断言关键片段：
 
@@ -1605,7 +1604,7 @@ pub struct CodegenDiagnostic {
 
 推荐先使用字符串 contains 测试，后续引入 snapshot 工具。
 
-### 4.15.3 生成代码编译与运行测试
+### 9.16.3 生成代码编译与运行测试
 
 生成代码测试不应只停留在“文件存在”和字符串片段断言。集成测试需要把 runtime data artifact 与 generated code artifact 串起来，验证生成代码能被目标语言工具链接受，并能通过 generated loader interface 读取真实导出的数据。
 
@@ -1629,7 +1628,7 @@ pub struct CodegenDiagnostic {
 
 每种语言的 harness 代码应作为 fixture 的一部分归档进代码仓库，例如 `tests/fixtures/standard_project/harness/{rust,cpp,typescript}/`。集成测试运行时将已归档的 harness 与本次 export 产生的 generated code / runtime data 组合到临时目录或编译命令中：harness 本身稳定纳入 review，generated artifacts 仍位于被忽略的 `out/` 或临时目录中，避免把本次生成结果当作源文件提交。
 
-### 4.15.4 分语言 generated-code runtime test 方案
+### 9.16.4 分语言 generated-code runtime test 方案
 
 标准工程当前按 target 拆分：client 生成 JSON + TypeScript/C++，server 生成 MessagePack + Rust。因此 generated-code runtime test 可以复用标准工程配置，分别验证三种语言。
 
@@ -1647,7 +1646,7 @@ pub struct CodegenDiagnostic {
 - 本地开发环境如果缺少 C++ compiler、Node 或 `tsc`，对应测试可以显式 skip，但测试输出必须说明 skip 原因，不能静默通过。
 - Rust 生成代码测试不应 skip，因为项目本身依赖 Rust toolchain。
 
-### 4.15.5 CLI 集成测试
+### 9.16.5 CLI 集成测试
 
 在 `tests/fixtures/standard_project/` 上运行：
 
@@ -1659,7 +1658,7 @@ pub struct CodegenDiagnostic {
 
 集成测试写出的 artifact 应位于 fixture-local `out/` 目录或临时目录。fixture-local `out/` 必须通过 `.gitignore` 忽略；新增 fixture 如果也写出导出结果，应遵循 `tests/fixtures/**/out/` 约定，避免误提交生成产物。
 
-## 4.16 第一阶段落地状态
+## 9.17 第一阶段落地状态
 
 当前第一阶段主体已落地，历史分阶段计划更新为实现状态：
 
@@ -1692,16 +1691,16 @@ pub struct CodegenDiagnostic {
 3. 已生成 enum、row、repository 和 index helper。
 4. 后续可再拆 `.hpp` / `.cpp` 或补充更完整 enum conversion。
 
-### Phase 4：Artifact Writer 和 manifest
+### Phase 4：Artifact Writer
 
 状态：部分完成。
 
 1. runtime data 与 generated code 都以 `GeneratedFile`/artifact 形态参与写出。
 2. 已做输出路径冲突检查。
 3. 当前写入策略为 direct write；`temp_commit` 未实现。
-4. manifest 未实现。
+4. summary manifest 可作为 special exporter 产物独立实现。
 
-## 4.17 第一阶段完成标准
+## 9.18 第一阶段完成标准
 
 完成时应满足：
 

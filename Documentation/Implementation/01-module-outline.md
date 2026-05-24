@@ -7,9 +7,9 @@
 `Documentation/Implementation/` 按“模块文档优先，专项技术文档随后”的结构维护：
 
 1. `01-module-outline.md`：总览模块职责、依赖方向、执行流水线和测试分层。
-2. `02`～`09`：每个已落地核心模块各自维护一份实现文档，描述该模块内部结构、公共 API、依赖约束和测试边界。
-3. `10` 起：跨模块专项技术点文档，例如 foreign key、struct expanded value 等。
-4. 已完成的过程型阶段文档不再单独保留，例如 ObjectTable Step 1 已并入 Meta / Data / Validation / Exporter / Codegen 模块文档。
+2. `02`～`10`：每个已落地或即将落地的核心模块各自维护一份实现文档，描述该模块内部结构、公共 API、依赖约束和测试边界。
+3. `11` 起：跨模块专项技术点文档，例如 foreign key、struct expanded value 等。
+4. 过程型阶段记录放在 `Documentation/DevLogs/`；模块文档只描述当前模块边界和计划中的实现状态。
 
 ## 1.2 顶层模块划分
 
@@ -23,9 +23,10 @@
 | Meta | `src/meta/` | Meta schema 加载、纯配置模型、link 借用视图、结构校验。 | Meta TOML 片段。 | `MetaModel`、`LinkedMetaModel<'meta>`、`MetaDiagnostic`。 | `04-meta-module-detail-design.md` |
 | Data | `src/data/` | 根据加载计划读取 CSV 等数据源，形成 raw `DataSet`，并提供 Meta-aware resolver。 | `DataLoadPlan`、source files、`LinkedMetaModel<'meta>`。 | `DataSet`、`ResolvedDataSet` / resolved view。 | `05-data-module-detail-design.md` |
 | Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、注册式 validator。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
-| Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack exporter、data format registry、`TargetDataConfig`。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`。 | `RuntimeDataFile` / runtime data artifacts。 | `07-exporter-module-detail-design.md` |
-| Codegen | `src/codegen/` | 语言无关 CodeModel IR，Rust / TypeScript / C++ 代码生成。 | `LinkedMetaModel<'meta>`、target tags、runtime data files。 | `GeneratedFile`。 | `08-codegen-module-detail-design.md` |
-| Build | `src/build/` | 工程构建主编排：归一化 target，绑定 data/code task，并按 target 调度 data load、validation、runtime export、codegen、写文件。 | `ProjectConfig`、CLI options。 | `BuildOutput`、文件系统产物。 | `09-build-module-detail-design.md` |
+| Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 列表、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
+| Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack exporter、data format registry、`TargetDataConfig`。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`。 | `RuntimeDataFile` / runtime data artifacts。 | `08-exporter-module-detail-design.md` |
+| Codegen | `src/codegen/` | 语言无关 CodeModel IR，Rust / TypeScript / C++ 代码生成。 | `LinkedMetaModel<'meta>`、target tags、runtime data files。 | `GeneratedFile`。 | `09-codegen-module-detail-design.md` |
+| Build | `src/build/` | 工程构建主编排：归一化 target，绑定 data/code task，并按 target 调度 data load、validation、runtime export、codegen、artifact 写入。 | `ProjectConfig`、CLI options。 | `BuildOutput`、文件系统产物。 | `10-build-module-detail-design.md` |
 
 ## 1.3 强制单向依赖规则
 
@@ -51,10 +52,13 @@ main / cli
       ├─ exporter
       │   ├─ meta
       │   ├─ data
+      │   ├─ artifact
       │   └─ diagnostic
-      └─ codegen
-          ├─ meta
-          └─ exporter       # 只消费 runtime data file 描述
+      ├─ codegen
+      │   ├─ meta
+      │   ├─ exporter       # 只消费 runtime data file 描述
+      │   └─ artifact
+      └─ artifact
 
 diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 错误 facade，用于在边界层聚合各模块诊断。
 ```
@@ -66,8 +70,9 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 - `meta` 不依赖 `project`、`data`、`validation`、`exporter`、`codegen`、`build`。Meta 只描述 schema 与 link/validate 结果。
 - `data` 可以依赖 `meta` 做 resolver，但 source reader 层应保持 source-neutral；CSV reader 不能读取 exporter/codegen/validation 语义。
 - `validation` 可以依赖 `meta`、`data`、`diagnostic`，不能依赖 `exporter`、`codegen`、`build`。
-- `exporter` 可以依赖 `meta`、`data`、`diagnostic`，不能依赖 `validation`、`codegen`、`build`；导出前校验由 build 编排层调用 validation。
-- `codegen` 可以依赖 `meta` 和 exporter 暴露的 runtime data file 描述；不能依赖 `data`、`validation`、`build`。
+- `artifact` 可以依赖标准库、`diagnostic::error` 等底层能力，不能依赖 `meta`、`data`、`validation`、`exporter`、`codegen`、`project`、`build`。
+- `exporter` 可以依赖 `meta`、`data`、`artifact`、`diagnostic`，不能依赖 `validation`、`codegen`、`build`；导出前校验由 build 编排层调用 validation。
+- `codegen` 可以依赖 `meta`、`artifact` 和 exporter 暴露的 runtime data file 描述；不能依赖 `data`、`validation`、`build`。
 - `project` 可以引用 `codegen::CodegenTaskConfig` 和 `exporter::TargetDataConfig` 来表达 Project TOML 聚合结构，但不能依赖 `build`。
 - `build` 是顶层业务编排层，可以依赖 `project`、`meta`、`data`、`validation`、`exporter`、`codegen`；这些被编排模块不能反向依赖 `build`。
 - `cli` 只能调用 `build` 和展示错误；不能绕过 build 直接串联底层模块。
@@ -91,7 +96,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 7. **Target-aware Validation**：`validation` 派生 `ExportValidationView`，执行 required/type/enum/index/FK/validator 等规则并输出 `ValidationReport`。
 8. **Runtime Data Export**：`exporter` 使用同一个 target tags 和 export view 语义生成 JSON / MessagePack runtime data。
 9. **Codegen**：`codegen` 基于 `LinkedMetaModel<'meta>`、target tags 和真实 runtime data file 列表生成代码。
-10. **Artifact Write**：当前由 `build` 直接写出产物；后续若能力膨胀，可再拆独立 artifact 模块，但仍应由 build 编排。
+10. **Artifact Write**：`artifact` 统一检查制品路径冲突并执行 dry-run / direct / temp-commit 写入；由 build 负责收集 exporter/codegen 产物并调用。
 
 ## 1.5 当前 Implementation 文档目录
 
@@ -103,11 +108,12 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `04-meta-module-detail-design.md` | 模块 | Meta 模型、Load-then-Link、结构校验和 Meta 诊断。 |
 | `05-data-module-detail-design.md` | 模块 | Data load、CSV reader、DataSet、RowSourceInfo、DataResolver、ObjectTable source layout。 |
 | `06-validation-module-detail-design.md` | 模块 | Validation 主流程、ExportValidationView、ValidationReport、validator registry。 |
-| `07-exporter-module-detail-design.md` | 模块 | Runtime data exporter、格式 registry、JSON / MessagePack、ObjectTable payload。 |
-| `08-codegen-module-detail-design.md` | 模块 | CodeModel IR、语言生成器、runtime reader contract。 |
-| `09-build-module-detail-design.md` | 模块 | 构建编排、target/task binding、并行执行边界和写文件策略。 |
-| `10-foreign-key-detail-design.md` | 专项 | 外键 raw/link model、引用完整性校验、target 语义、codegen staging。 |
-| `11-struct-expanded-value-detail-design.md` | 专项 | Struct source layout 自动判定和 expanded CSV field-path。 |
+| `07-artifact-module-detail-design.md` | 模块 | Artifact model、writer、dry-run、direct/temp-commit 策略和写入结果。 |
+| `08-exporter-module-detail-design.md` | 模块 | Runtime data exporter、格式 registry、JSON / MessagePack、ObjectTable payload。 |
+| `09-codegen-module-detail-design.md` | 模块 | CodeModel IR、语言生成器、runtime reader contract。 |
+| `10-build-module-detail-design.md` | 模块 | 构建编排、target/task binding、并行执行边界和 artifact 写入策略。 |
+| `11-foreign-key-detail-design.md` | 专项 | 外键 raw/link model、引用完整性校验、target 语义、codegen staging。 |
+| `12-struct-expanded-value-detail-design.md` | 专项 | Struct source layout 自动判定和 expanded CSV field-path。 |
 
 ## 1.6 测试分层
 

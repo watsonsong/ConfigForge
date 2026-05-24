@@ -1,6 +1,6 @@
 # Glossary
 
-本文档记录 ConfigForge 当前设计中的核心术语、中英文命名和推荐代码符号。术语以 `Documentation/Design/` 下的收敛版设计为准；旧设计中已经取消或不再推荐的术语不再作为正式术语使用。
+本文档记录 ConfigForge 当前设计中的核心术语、中英文命名和推荐代码符号。术语以 `Documentation/Design/` 下的收敛版设计为准。
 
 ## 命名原则
 
@@ -215,8 +215,8 @@
 | 类型映射 | Type Mapping | `TypeMapping` | 逻辑类型到目标语言/引擎类型的映射。 |
 | 目标类型 | Target Type | `TargetTypeName` | 目标语言或引擎中的具体类型名。 |
 | 导出产物 | Export Artifact | `ExportArtifact` | 一个生成文件，例如 runtime data、code、POT、asset manifest。 |
-| 产物清单 | Artifact Manifest | `ArtifactManifest` | 本次导出的产物列表。 |
-| 产物写入器 | Artifact Writer | `ArtifactWriter` | 统一写文件和 commit manifest 的组件。 |
+| 产物清单 | Artifact Manifest | `ArtifactManifest` | 可由 special exporter 生成的本次导出产物列表。 |
+| 产物写入器 | Artifact Writer | `ArtifactWriter` | 统一写文件、dry-run 和 temp commit 的组件。 |
 | 产物写入策略 | Artifact Write Mode | `ArtifactWriteMode` | `temp_commit` 或 `direct`。 |
 | 临时提交写入 | Temp Commit Write | `ArtifactWriteMode::TempCommit`, `temp_commit` | 先写临时文件，成功后统一提交到最终路径。 |
 | 直接写入 | Direct Write | `ArtifactWriteMode::Direct`, `direct` | 直接写最终路径。 |
