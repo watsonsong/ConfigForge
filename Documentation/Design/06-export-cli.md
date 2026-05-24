@@ -217,7 +217,7 @@ ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader ad
 | --- | --- | --- | --- |
 | Rust | `serde_json::Value` reader template | `rmp_serde` template；中期收敛到 ConfigForge Runtime Value | Cargo features：`json`、`messagepack`、`fs`；当前为 `copyable_template`，默认只启用 core。 |
 | TypeScript | 原生 `JSON.parse` value reader | `@msgpack/msgpack` 解码后的 value reader | npm 包拆分与 peer dependency；Node fs / fetch loader 与格式 reader 分离。 |
-| C++ | 生产推荐 `RapidJSON` reader；`json_builtin` 仅作为无依赖 test fallback | 推荐 `msgpack-c` reader，解码到 msgpack object/value 后适配 | CMake options：`DATAEXPORT_RUNTIME_WITH_JSON_RAPIDJSON`、`DATAEXPORT_RUNTIME_WITH_MESSAGEPACK`；通过 `find_package` / package manager / 显式 `FetchContent` 引入三方库，不 vendored 到 generated code。 |
+| C++ | 生产推荐 `RapidJSON` reader；`json_builtin` 仅作为无依赖 test fallback | 推荐 `msgpack-c` reader，解码到 msgpack object/value 后适配 | CMake options：`CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON`、`CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK`；通过 `find_package` / package manager / 显式 `FetchContent` 引入三方库，不 vendored 到 generated code。 |
 
 标准 adapter 的产物形式按语言习惯决定：
 

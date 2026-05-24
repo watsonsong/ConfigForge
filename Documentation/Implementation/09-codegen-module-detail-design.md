@@ -1140,7 +1140,7 @@ runtime_readers/
 依赖策略：
 
 - Rust 使用 Cargo feature 控制，如 `json`、`messagepack`、`fs`，默认 feature 尽量为空或只包含 core。
-- TypeScript 使用拆包和 peer dependency：`@configforge/runtime-reader-json` 不依赖 MessagePack；`@configforge/runtime-reader-messagepack` peer-depend on `@msgpack/msgpack`，避免只用 JSON 的项目被迫安装 MessagePack 包。
+- TypeScript 使用拆包和 peer dependency：`@config-forge/runtime-reader-json` 不依赖 MessagePack；`@config-forge/runtime-reader-messagepack` peer-depend on `@msgpack/msgpack`，避免只用 JSON 的项目被迫安装 MessagePack 包。
 - C++ 使用 CMake options / package manager `find_package` 控制第三方库启用，不 vendored 到 generated code。允许在 examples/CI 中用 `FetchContent` 或包管理器（vcpkg、Conan、系统包）下载三方库，但必须是显式 opt-in。
 - adapter 版本应与 generated reader contract 版本兼容；当 reader interface 发生 breaking change，adapter 需要同步升级并在包名、feature、manifest 或文档中标明兼容范围。
 
@@ -1151,14 +1151,14 @@ C++ runtime readers 采用 CMake target 管理，目标是让游戏项目能通�
 ##### CMake options
 
 ```cmake
-option(DATAEXPORT_RUNTIME_BUILD_TESTS "Build ConfigForge runtime reader tests" OFF)
-option(DATAEXPORT_RUNTIME_WITH_JSON_BUILTIN "Enable minimal builtin JSON fallback" OFF)
-option(DATAEXPORT_RUNTIME_WITH_JSON_RAPIDJSON "Enable RapidJSON adapter" OFF)
-option(DATAEXPORT_RUNTIME_WITH_MESSAGEPACK "Enable msgpack-c adapter" OFF)
-option(DATAEXPORT_RUNTIME_FETCH_DEPS "Allow FetchContent for missing third-party deps" OFF)
+option(CONFIG_FORGE_RUNTIME_BUILD_TESTS "Build ConfigForge runtime reader tests" OFF)
+option(CONFIG_FORGE_RUNTIME_WITH_JSON_BUILTIN "Enable minimal builtin JSON fallback" OFF)
+option(CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON "Enable RapidJSON adapter" OFF)
+option(CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK "Enable msgpack-c adapter" OFF)
+option(CONFIG_FORGE_RUNTIME_FETCH_DEPS "Allow FetchContent for missing third-party deps" OFF)
 ```
 
-普通业务构建默认不启用 `json_builtin`，避免最容易链接的 target 被误用到生产。测试构建可以在 `DATAEXPORT_RUNTIME_BUILD_TESTS=ON` 时显式打开 `DATAEXPORT_RUNTIME_WITH_JSON_BUILTIN=ON`，用于无三方依赖 smoke test。生产项目推荐显式启用 RapidJSON 或 MessagePack adapter：
+普通业务构建默认不启用 `json_builtin`，避免最容易链接的 target 被误用到生产。测试构建可以在 `CONFIG_FORGE_RUNTIME_BUILD_TESTS=ON` 时显式打开 `CONFIG_FORGE_RUNTIME_WITH_JSON_BUILTIN=ON`，用于无三方依赖 smoke test。生产项目推荐显式启用 RapidJSON 或 MessagePack adapter：
 
 ```cmake
 add_subdirectory(path/to/ConfigForge/runtime_readers/cpp)
@@ -1186,8 +1186,8 @@ target_include_directories(game_config_runtime PRIVATE
 
 ##### 三方依赖解析
 
-- `json_rapidjson` 优先 `find_package(RapidJSON CONFIG QUIET)`；找不到时，如果 `DATAEXPORT_RUNTIME_FETCH_DEPS=ON`，可用 `FetchContent` 拉取 RapidJSON；否则给出明确 CMake error，提示通过 vcpkg/Conan/system package 安装。
-- `messagepack_msgpack_cpp` 优先 `find_package(msgpack-cxx CONFIG QUIET)` 或项目约定的 `find_package(msgpack CONFIG QUIET)`；找不到时同样只在 `DATAEXPORT_RUNTIME_FETCH_DEPS=ON` 时自动拉取。
+- `json_rapidjson` 优先 `find_package(RapidJSON CONFIG QUIET)`；找不到时，如果 `CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON`，可用 `FetchContent` 拉取 RapidJSON；否则给出明确 CMake error，提示通过 vcpkg/Conan/system package 安装。
+- `messagepack_msgpack_cpp` 优先 `find_package(msgpack-cxx CONFIG QUIET)` 或项目约定的 `find_package(msgpack CONFIG QUIET)`；找不到时同样只在 `CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON` 时自动拉取。
 - 三方库只链接到 adapter target，不出现在 generated code target 的 public API 中。业务可替换为引擎内置 JSON / MessagePack 实现，只要实现同一 `IRuntimeDataReader` contract。
 - 如果用户显式链接 `json_builtin_test_fallback`，该 target 应暴露类似 `CONFIG_FORGE_RUNTIME_JSON_BUILTIN_TEST_FALLBACK=1` 的 compile definition，便于业务工程在 review / CI 中识别 fallback 使用。
 
@@ -1244,10 +1244,10 @@ runtime_readers/typescript/
 
 | package | 依赖 | 导出 |
 | --- | --- | --- |
-| `@configforge/runtime-reader-core` | 无 | `RuntimeDataReaderLike`、shared `ValueReader`、scalar conversion helpers。 |
-| `@configforge/runtime-reader-json` | `core` | `JsonValueReader`、`decodeJson`。 |
-| `@configforge/runtime-reader-messagepack` | `core` + peer `@msgpack/msgpack` | `MessagePackValueReader`、`decodeMessagePack`。 |
-| `@configforge/runtime-loader-node-fs` | `core` | Node fs loader；decoder 由 JSON/MessagePack 包注入。 |
+| `@config-forge/runtime-reader-core` | 无 | `RuntimeDataReaderLike`、shared `ValueReader`、scalar conversion helpers。 |
+| `@config-forge/runtime-reader-json` | `core` | `JsonValueReader`、`decodeJson`。 |
+| `@config-forge/runtime-reader-messagepack` | `core` + peer `@msgpack/msgpack` | `MessagePackValueReader`、`decodeMessagePack`。 |
+| `@config-forge/runtime-loader-node-fs` | `core` | Node fs loader；decoder 由 JSON/MessagePack 包注入。 |
 
 Loader / decoder 边界允许同步或异步，保持与 generated `RuntimeDataLoader.open` 的 `Promise<RuntimeDataReader> | RuntimeDataReader` 契约一致：
 
@@ -1262,8 +1262,8 @@ export type RuntimeReaderDecoder =
 
 ```ts
 import { decode } from "@msgpack/msgpack";
-import { MessagePackValueReader } from "@configforge/runtime-reader-messagepack";
-import { FsRuntimeDataLoader } from "@configforge/runtime-loader-node-fs";
+import { MessagePackValueReader } from "@config-forge/runtime-reader-messagepack";
+import { FsRuntimeDataLoader } from "@config-forge/runtime-loader-node-fs";
 import { GameData } from "./generated";
 
 const loader = new FsRuntimeDataLoader(dataDir, bytes => new MessagePackValueReader(decode(bytes)));
@@ -1343,7 +1343,7 @@ Rust / TypeScript / C++ adapter 都必须跑同一套 compliance cases。覆盖�
 
 | 层级 | Rust | TypeScript | C++ |
 | --- | --- | --- | --- |
-| adapter unit | `cargo test --manifest-path runtime_readers/rust/<adapter>/Cargo.toml` | `npm test` / `tsc -p` per package | `cmake -S runtime_readers/cpp -B build -DDATAEXPORT_RUNTIME_BUILD_TESTS=ON ... && cmake --build build && ctest` |
+| adapter unit | `cargo test --manifest-path runtime_readers/rust/<adapter>/Cargo.toml` | `npm test` / `tsc -p` per package | `cmake -S runtime_readers/cpp -B build -DCONFIG_FORGE_RUNTIME_BUILD_TESTS=ON ... && cmake --build build && ctest` |
 | format matrix | JSON + MessagePack | JSON + MessagePack | JSON builtin smoke、RapidJSON JSON、msgpack-c MessagePack |
 | canonical payload | collection envelope、object table、nested struct、fragment object、missing/null、bool `1/0`、finite float、escaped string | 同左 | 同左 |
 | integration harness | standard_project Rust MessagePack + JSON compile check | standard_project TypeScript JSON，后续增加 MessagePack fixture | standard_project C++ JSON builtin smoke；后续增加 RapidJSON JSON 与 MessagePack compile/run |

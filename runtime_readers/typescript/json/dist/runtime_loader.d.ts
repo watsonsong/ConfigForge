@@ -1,4 +1,4 @@
-import { RuntimeDataReaderLike, RuntimeValueReader, SUPPORTED_CONFIG_FORGE_READER_CONTRACT } from "@configforge/runtime-reader-core";
+import { RuntimeDataReaderLike, RuntimeValueReader, SUPPORTED_CONFIG_FORGE_READER_CONTRACT } from "@config-forge/runtime-reader-core";
 export { SUPPORTED_CONFIG_FORGE_READER_CONTRACT };
 export declare class JsonValueReader extends RuntimeValueReader implements RuntimeDataReaderLike {
 }

@@ -221,7 +221,7 @@ mod tests {
         );
         assert_eq!(
             default_module_name(CodeExportLanguage::TypeScript),
-            "dataExportGenerated"
+            "configForgeGenerated"
         );
     }
 

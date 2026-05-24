@@ -1,11 +1,11 @@
 {
-  "name": "@configforge/runtime-reader-json",
+  "name": "@config-forge/runtime-reader-json",
   "version": "0.1.0",
   "type": "commonjs",
   "main": "dist/runtime_loader.js",
   "types": "dist/runtime_loader.d.ts",
   "dependencies": {
-    "@configforge/runtime-reader-core": "0.1.0"
+    "@config-forge/runtime-reader-core": "0.1.0"
   },
   "scripts": {
     "build": "tsc --project tsconfig.build.json",

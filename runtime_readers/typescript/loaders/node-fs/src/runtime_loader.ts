@@ -4,7 +4,7 @@ import {
   RuntimeDataReaderLike,
   RuntimeReaderDecoder,
   SUPPORTED_CONFIG_FORGE_READER_CONTRACT,
-} from "@configforge/runtime-reader-core";
+} from "@config-forge/runtime-reader-core";
 
 export { SUPPORTED_CONFIG_FORGE_READER_CONTRACT };
 

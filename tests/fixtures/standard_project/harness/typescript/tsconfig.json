@@ -17,7 +17,7 @@
     "baseUrl": ".",
     "ignoreDeprecations": "6.0",
     "paths": {
-      "@configforge/runtime-reader-core": ["./runtime_reader_core.ts"]
+      "@config-forge/runtime-reader-core": ["./runtime_reader_core.ts"]
     }
   }
 }

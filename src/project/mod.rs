@@ -64,7 +64,9 @@ impl ProjectConfig {
         self.targets
             .iter()
             .find(|target| target.name == target_name)
-            .ok_or_else(|| ConfigForgeError::Validation(format!("target `{target_name}` not found")))
+            .ok_or_else(|| {
+                ConfigForgeError::Validation(format!("target `{target_name}` not found"))
+            })
     }
 
     pub(crate) fn raw_meta_model(&self) -> MetaModel {

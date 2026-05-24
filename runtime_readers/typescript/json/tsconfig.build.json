@@ -6,7 +6,7 @@
     "rootDir": "src",
     "outDir": "dist",
     "paths": {
-      "@configforge/runtime-reader-core": ["../core/dist/runtime_reader.d.ts"]
+      "@config-forge/runtime-reader-core": ["../core/dist/runtime_reader.d.ts"]
     }
   }
 }

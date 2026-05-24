@@ -30,7 +30,7 @@ fn builds_code_only_target_without_loading_data() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -79,7 +79,7 @@ fn dry_run_builds_plan_without_writing_artifacts() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -138,7 +138,7 @@ fn temp_commit_write_mode_builds_artifacts() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -207,7 +207,7 @@ fn builds_target_from_project_config() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -315,7 +315,7 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
     )
     .expect("project config should be written");
 
-    let mut client_cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut client_cmd = Command::cargo_bin("config-forge").expect("binary should build");
     client_cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -352,7 +352,7 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
     assert_eq!(rows[6]["name"], "Leather Armor");
     assert_eq!(rows[6]["attributes"]["defence"], "6");
 
-    let mut server_cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut server_cmd = Command::cargo_bin("config-forge").expect("binary should build");
     server_cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -389,7 +389,7 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
             .expect("stale standard project out dir should be removed");
     }
 
-    let mut client_cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut client_cmd = Command::cargo_bin("config-forge").expect("binary should build");
     client_cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -401,7 +401,7 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
         .success()
         .stdout(predicate::str::contains("target `client` built"));
 
-    let mut server_cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut server_cmd = Command::cargo_bin("config-forge").expect("binary should build");
     server_cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -442,7 +442,7 @@ fn builds_target_with_execution_resource_flags() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -486,7 +486,7 @@ fn builds_target_with_serial_overriding_resource_flags() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -520,7 +520,7 @@ fn rejects_zero_jobs_flag() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -560,7 +560,7 @@ fn rejects_zero_io_and_network_concurrency_flags() {
         )
         .expect("project config should be written");
 
-        let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+        let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
         cmd.args([
             "--project",
             project_path.to_str().expect("path should be utf8"),
@@ -612,7 +612,7 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -698,7 +698,7 @@ fn binds_code_tasks_to_selected_data_tasks() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -757,7 +757,7 @@ fn rejects_code_task_without_data_binding_when_multiple_data_tasks_exist() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -805,7 +805,7 @@ fn rejects_runtime_data_path_conflict_before_writing_files() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -856,7 +856,7 @@ fn rejects_lexically_equivalent_runtime_data_path_conflict_before_writing_files(
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -907,7 +907,7 @@ fn rejects_unknown_second_data_format_before_writing_first_data_task() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -965,7 +965,7 @@ fn builds_target_from_imported_project_config_fragments() {
     .expect("target config fragment should be written");
 
     let imported_project_path = config_dir.join("ConfigForge.toml");
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         imported_project_path.to_str().expect("path should be utf8"),
@@ -1065,7 +1065,7 @@ fn target_tags_filter_validation_export_and_codegen() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -1142,7 +1142,7 @@ fn range_validator_blocks_invalid_data_before_export() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -1202,7 +1202,7 @@ fn warning_validator_is_visible_but_does_not_block_export() {
     )
     .expect("project config should be written");
 
-    let mut cmd = Command::cargo_bin("config_forge").expect("binary should build");
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
     cmd.args([
         "--project",
         project_path.to_str().expect("path should be utf8"),
@@ -1849,7 +1849,7 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
 
     let package_dir = temp_dir
         .path()
-        .join("node_modules/@configforge/runtime-reader-core");
+        .join("node_modules/@config-forge/runtime-reader-core");
     fs::create_dir_all(&package_dir)
         .expect("TypeScript core runtime package dir should be created");
     fs::write(

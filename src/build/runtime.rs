@@ -57,7 +57,7 @@ pub(super) fn export_runtime_data_tasks(
     let mut artifacts = Vec::new();
 
     for data_task in data_tasks {
-        let data_exporter = registry.require(&data_task.format)?;
+        let format_exporter = registry.require(&data_task.format)?;
         if !normalized_data_sets.contains_key(&data_task.input) {
             let loaded_data_set =
                 DataLoader::new(&data_task.input).load_with_pool(&data_plan, pool)?;
@@ -78,7 +78,7 @@ pub(super) fn export_runtime_data_tasks(
             linked_meta,
             target_tags,
             data_set,
-            data_exporter,
+            format_exporter,
             pool,
         )?;
         let files = runtime_artifacts

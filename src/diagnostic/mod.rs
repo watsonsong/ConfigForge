@@ -86,16 +86,7 @@ impl Diagnostic {
 
 impl fmt::Display for Diagnostic {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        format_diagnostic_parts(
-            formatter,
-            &self.code,
-            self.severity,
-            self.source.as_deref(),
-            &self.message,
-            &self.location,
-            self.target.as_deref(),
-            self.hint.as_deref(),
-        )
+        format_diagnostic_parts(formatter, self)
     }
 }
 
@@ -181,16 +172,7 @@ impl DiagnosticEntry for Diagnostic {
 
 impl fmt::Display for dyn DiagnosticEntry + '_ {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        format_diagnostic_parts(
-            formatter,
-            &self.code(),
-            self.severity(),
-            self.source(),
-            self.message(),
-            self.location(),
-            self.target(),
-            self.hint(),
-        )
+        format_diagnostic_parts(formatter, self)
     }
 }
 
@@ -237,30 +219,30 @@ impl<T: DiagnosticEntry> DiagnosticReport<T> {
 
 fn format_diagnostic_parts(
     formatter: &mut fmt::Formatter<'_>,
-    code: &str,
-    severity: DiagnosticSeverity,
-    source: Option<&str>,
-    message: &str,
-    location: &DiagnosticLocation,
-    target: Option<&str>,
-    hint: Option<&str>,
+    diagnostic: &dyn DiagnosticEntry,
 ) -> fmt::Result {
-    if let Some(source) = source {
+    if let Some(source) = diagnostic.source() {
         write!(formatter, "{source}: ")?;
     }
-    write!(formatter, "{severity:?} {code}: {message}")?;
+    write!(
+        formatter,
+        "{:?} {}: {}",
+        diagnostic.severity(),
+        diagnostic.code(),
+        diagnostic.message()
+    )?;
 
     let mut context = Vec::new();
-    if !location.is_empty() {
-        context.push(location.to_string());
+    if !diagnostic.location().is_empty() {
+        context.push(diagnostic.location().to_string());
     }
-    if let Some(target) = target {
+    if let Some(target) = diagnostic.target() {
         context.push(format!("target `{target}`"));
     }
     if !context.is_empty() {
         write!(formatter, " ({})", context.join(", "))?;
     }
-    if let Some(hint) = hint {
+    if let Some(hint) = diagnostic.hint() {
         write!(formatter, " [{hint}]")?;
     }
     Ok(())

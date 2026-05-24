@@ -1,6 +1,6 @@
 # ConfigForge Project Index
 
-ConfigForge is a Rust CLI tool for game data export workflows. It lets game designers author data in spreadsheet-like sources, validates that data against explicit meta definitions, and produces runtime-ready artifacts for game projects.
+ConfigForge is a schema-driven game configuration export tool that validates designer-authored data and generates runtime-ready artifacts.
 
 ## Project Goals
 

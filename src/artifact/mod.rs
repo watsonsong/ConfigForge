@@ -148,9 +148,11 @@ fn write_temp_commit(artifacts: &[Artifact]) -> Result<()> {
         }
 
         for (artifact, temp_path) in artifacts.iter().zip(temp_paths.iter()) {
-            fs::rename(temp_path, &artifact.path).map_err(|source| ConfigForgeError::WriteFile {
-                path: artifact.path.clone(),
-                source,
+            fs::rename(temp_path, &artifact.path).map_err(|source| {
+                ConfigForgeError::WriteFile {
+                    path: artifact.path.clone(),
+                    source,
+                }
             })?;
         }
         Ok(())

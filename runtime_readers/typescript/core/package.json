@@ -1,5 +1,5 @@
 {
-  "name": "@configforge/runtime-reader-core",
+  "name": "@config-forge/runtime-reader-core",
   "version": "0.1.0",
   "type": "commonjs",
   "main": "dist/runtime_reader.js",

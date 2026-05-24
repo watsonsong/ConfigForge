@@ -1,9 +1,9 @@
 [package]
-name = "config_forge"
+name = "config-forge"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "A Rust CLI toolkit for validating designer-authored game data and exporting runtime-ready assets."
+description = "ConfigForge is a schema-driven game configuration export tool that validates designer-authored data and generates runtime-ready artifacts."
 
 [lib]
 name = "config_forge"
