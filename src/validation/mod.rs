@@ -1297,7 +1297,7 @@ fn validate_value_type_at_row_number(
 fn validate_scalar_value(field: &LinkedFieldMeta<'_>, value: &str) -> bool {
     match &field.linked_field {
         LinkedField::Primitive(PrimitiveFieldType::Int) => value.parse::<i64>().is_ok(),
-        LinkedField::Primitive(PrimitiveFieldType::Float) => value.parse::<f64>().is_ok(),
+        LinkedField::Primitive(PrimitiveFieldType::Float) => parse_finite_float(value).is_some(),
         LinkedField::Primitive(PrimitiveFieldType::Bool) => {
             matches!(value, "true" | "false" | "1" | "0")
         }
@@ -1310,6 +1310,10 @@ fn validate_scalar_value(field: &LinkedFieldMeta<'_>, value: &str) -> bool {
             .any(|enum_value| enum_value.name == value),
         LinkedField::Struct(_) => false,
     }
+}
+
+fn parse_finite_float(value: &str) -> Option<f64> {
+    value.parse::<f64>().ok().filter(|value| value.is_finite())
 }
 
 fn validate_struct_json_cell(

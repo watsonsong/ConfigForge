@@ -1752,15 +1752,50 @@ fn rejects_ambiguous_or_reserved_custom_type_names() {
 
             [[structs]]
             name = "int"
+
+            [[structs]]
+            name = "MetaModel"
         "#,
     );
 
     assert!(diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTypeName));
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == MetaDiagnosticCode::ReservedTypeName)
+            .count(),
+        2
+    );
     assert!(diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::ReservedTypeName));
+        .any(|diagnostic| diagnostic.message.contains("primitive field type")));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.message.contains("internal meta model type")));
+}
+
+#[test]
+fn link_reports_structural_validation_errors() {
+    let invalid: MetaModel = toml::from_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables]]
+            name = "items"
+            source = "items-override.csv"
+        "#,
+    )
+    .expect("raw invalid meta should deserialize");
+
+    let diagnostics = invalid.link().expect_err("link should include structural validation");
+
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTableName));
 }
 
 #[test]

@@ -242,7 +242,10 @@ impl RangeFieldType {
                 .parse::<i64>()
                 .map(|value| value as f64)
                 .map_err(|_| ()),
-            Self::Float => value.parse::<f64>().map_err(|_| ()),
+            Self::Float => value
+                .parse::<f64>()
+                .map_err(|_| ())
+                .and_then(|value| if value.is_finite() { Ok(value) } else { Err(()) }),
         }
     }
 }
@@ -293,10 +296,12 @@ fn optional_number(meta: &ValidatorMeta, key: &str) -> Result<Option<f64>> {
         return Ok(Some(value as f64));
     }
     if let Some(value) = value.as_float() {
-        return Ok(Some(value));
+        if value.is_finite() {
+            return Ok(Some(value));
+        }
     }
     Err(ConfigForgeError::Validation(format!(
-        "validator `range` parameter `{key}` must be integer or float"
+        "validator `range` parameter `{key}` must be finite integer or float"
     )))
 }
 

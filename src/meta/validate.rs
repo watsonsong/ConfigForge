@@ -117,6 +117,12 @@ fn validate_type_namespace_names(model: &MetaModel, diagnostics: &mut Vec<MetaDi
                 format!("custom type `{type_name}` conflicts with a primitive field type"),
             ));
         }
+        if matches!(type_name, "MetaModel" | "LinkedMetaModel") {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::ReservedTypeName,
+                format!("custom type `{type_name}` conflicts with an internal meta model type"),
+            ));
+        }
     }
 }
 
@@ -876,7 +882,8 @@ fn validate_default_value(
     let valid = match PrimitiveFieldType::parse(&field.field_type) {
         Some(PrimitiveFieldType::Int) => default.as_integer().is_some(),
         Some(PrimitiveFieldType::Float) => {
-            default.as_float().is_some() || default.as_integer().is_some()
+            default.as_integer().is_some()
+                || default.as_float().map_or(false, f64::is_finite)
         }
         Some(PrimitiveFieldType::Bool) => default.as_bool().is_some(),
         Some(PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset) => {

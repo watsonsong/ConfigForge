@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use super::{
     FieldMeta, LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedFragmentMeta,
     LinkedFragmentPayload, LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType,
-    LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
+    validate_meta_model, LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
+    PrimitiveFieldType,
 };
 
 /// Builds a borrowed linked view of a validated raw model.
@@ -90,8 +91,15 @@ pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<M
 }
 
 impl MetaModel {
+    /// Builds a borrowed linked view after running both link-time and structural validation.
+    ///
+    /// Prefer this method for external callers. Use [`link_meta_model`] only when the
+    /// caller intentionally needs raw link diagnostics before structural validation.
     pub fn link(&self) -> std::result::Result<LinkedMetaModel<'_>, Vec<MetaDiagnostic>> {
-        let (linked_model, diagnostics) = link_meta_model(self);
+        let (linked_model, mut diagnostics) = link_meta_model(self);
+        diagnostics.extend(validate_meta_model(self));
+        diagnostics.sort();
+        diagnostics.dedup();
         if diagnostics.is_empty() {
             Ok(linked_model.expect("linked model should exist when diagnostics are empty"))
         } else {

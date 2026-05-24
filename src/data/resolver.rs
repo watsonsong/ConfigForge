@@ -724,8 +724,10 @@ fn parse_scalar_value(
             .map_err(|_| scalar_type_error(table_name, row_number, field_path, field, value)),
         LinkedField::Primitive(PrimitiveFieldType::Float) => value
             .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())
             .map(ScalarValue::Float)
-            .map_err(|_| scalar_type_error(table_name, row_number, field_path, field, value)),
+            .ok_or_else(|| scalar_type_error(table_name, row_number, field_path, field, value)),
         LinkedField::Primitive(PrimitiveFieldType::Bool) => match value {
             "true" | "1" => Ok(ScalarValue::Bool(true)),
             "false" | "0" => Ok(ScalarValue::Bool(false)),

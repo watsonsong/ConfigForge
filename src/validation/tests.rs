@@ -1930,6 +1930,39 @@ fn range_validator_supports_exclusive_bounds_and_float_values() {
 }
 
 #[test]
+fn rejects_non_finite_float_values() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "ratio"
+            type = "float"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+
+    for value in ["NaN", "inf", "-inf"] {
+        let data_set = DataSet::new(vec![DataTable::new(
+            "items",
+            vec![BTreeMap::from([("ratio".to_owned(), value.to_owned())])],
+        )]);
+
+        let message = validate_error(validate_data_set(&linked_meta, &data_set));
+        assert!(message.contains("does not match type"));
+    }
+
+    let scientific = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([("ratio".to_owned(), "1e-3".to_owned())])],
+    )]);
+    assert!(validate_data_set(&linked_meta, &scientific).is_ok());
+}
+
+#[test]
 fn range_validator_declared_on_table_reports_scope_error() {
     let meta = MetaModel::from_toml_str(
         r#"

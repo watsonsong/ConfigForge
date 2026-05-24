@@ -12,16 +12,17 @@ Meta 模块负责把一个或多个 Meta 文件转换为可被后续模块使用
 当前已实现的基础能力：
 
 - TOML Meta 加载。
-- `imports` 多文件递归加载和 canonical path 去重。
+- standalone Meta loader 支持单文件加载和显式 `from_paths` 合并；Project Config 层支持 `imports` 多文件递归加载和 canonical path 去重。
 - project / enum / struct / table / field / index 建模。
 - `FieldMeta.field_type` 以字符串保存，Link 后解析为 primitive / enum / struct。
 - `IndexMeta.fields` 以字符串保存，Link 后解析为 `Vec<&FieldMeta>`。
 - target tags / `export_when` / `row_export` 建模与公共结构校验。
 - validator raw meta 建模：`ValidatorMeta`、`ValidationSeverity`、table / field validators。
+- foreign key MVP 建模、link 和引用完整性校验。
 - 基础结构校验与稳定诊断。
-- 模块内单元测试覆盖加载、Link、imports、诊断。
+- 模块内单元测试覆盖加载、Link、显式多路径合并、诊断；ProjectConfig imports 由 exporter / CLI 测试覆盖。
 
-计划字段说明：`validators: Vec<ValidatorMeta>` 已在 `src/meta/model.rs` 落地，当前 TOML 接受 `[[tables.validators]]` 与 `[[tables.fields.validators]]`，并由 validation registry 在 compile 阶段解释具体 `kind` 与参数；当前内置已实现 `range` field validator。`foreign_keys: Vec<ForeignKeyMeta>` 仍属于后续实现目标，当前 TOML 尚不接受 foreign key 配置。validator 详细实现见 `05-validator-framework-detail-design.md`。
+计划字段说明：`validators: Vec<ValidatorMeta>` 已在 `src/meta/model.rs` 落地，当前 TOML 接受 `[[tables.validators]]` 与 `[[tables.fields.validators]]`，并由 validation registry 在 compile 阶段解释具体 `kind` 与参数；当前内置已实现 `range` field validator。`foreign_keys: Vec<ForeignKeyMeta>` 已完成 MVP，支持 table-level / field-level foreign key 声明、link、Meta 结构校验和数据引用完整性校验。validator 详细实现见 `05-validator-framework-detail-design.md`。
 
 ## 2.2 Rust 中的“类”和继承策略
 
@@ -40,7 +41,7 @@ Object table 与 collection table 通过 `TableKind` 区分，不拆成继承体
 src/meta/
   mod.rs              # 对外 API 与 re-export
   model.rs            # 纯配置模型、Linked* 借用视图、查询方法
-  loader.rs           # TOML 字符串/路径加载、imports 递归、合并、加载后校验
+  loader.rs           # TOML 字符串/路径加载、显式多路径合并、加载后校验
   link.rs             # MetaModel -> LinkedMetaModel<'meta> 的链接过程
   validate.rs         # Meta 结构校验
   diagnostic.rs       # MetaDiagnosticCode、MetaDiagnostic
@@ -175,6 +176,7 @@ pub struct TableMeta {
     pub fields: Vec<FieldMeta>,
     pub fragments: Vec<FragmentMeta>,
     pub indexes: Vec<IndexMeta>,
+    pub foreign_keys: Vec<ForeignKeyMeta>,
     pub primary_index: Option<String>,
     pub preserve_source_order: bool,
     pub polymorphic: bool,
@@ -191,7 +193,7 @@ pub struct TableMeta {
 - `export_when` 根据 target tags 判断整表是否进入 runtime data 与 codegen。
 - `row_export` 只作用于 collection runtime data 行过滤，常用于 `shipping` / `debug` 等 target 差异。
 - `validators` 保存 table-level / record-level validator 的 raw 配置；公共字段由 Meta validate 做轻量检查，scope、unknown kind 与专属参数由 validation registry compile 阶段诊断。当前实现已解析 TOML，但内置 validator 仅提供 field-scope `range`，因此 table-level `range` 会被 scope 校验拒绝。
-- `foreign_keys` 尚未在当前 `TableMeta` 中落地。外键不是普通 validator，未来会作为一等关系数据保存：它既会隐式生成引用完整性校验，也会进入 CodeModel 影响生成代码的关联查询 API。该能力仍是 Phase 3 计划。
+- `foreign_keys` 已在当前 `TableMeta` 中落地。外键不是普通 validator，而是一等关系数据：当前 MVP 会完成 link、Meta 结构校验和数据引用完整性校验；进入 CodeModel 生成关联查询 API 属于后续扩展。
 - `fragments` 是 polymorphic variant source mode 的 table-local fragment schema。当前代码已落地该字段，并要求多 source variant source mode 至少由一个 source 声明非空 `fragments` 驱动；`SourceRef.fragments` 的合法性由 Meta validation 检查。
 
 ### 2.5.5 `FragmentMeta`
@@ -200,6 +202,7 @@ pub struct TableMeta {
 pub struct FragmentMeta {
     pub name: String,
     pub desc: Option<String>,
+    pub type_name: Option<String>,
     pub export: bool,
     pub export_when: ExportCondition,
     pub fields: Vec<FieldMeta>,
@@ -209,6 +212,7 @@ pub struct FragmentMeta {
 说明：
 
 - fragment 是 table-local 的字段组，只用于 `polymorphic = true` 的 CollectionTable。
+- `type_name` 对应 TOML 中的 `type`，可引用已定义 `StructMeta` 作为 typed fragment payload；未设置时使用 inline fields。
 - `export = false` 是 fragment 级运行时导出硬关闭；默认 `true`。
 - `export_when` 根据 target tags 判断整个 fragment 是否进入当前 ExportView。
 - `fields` 复用 `FieldMeta`，但 Phase 1 只支持基础字段语义：required、default、type、export、export_when。
@@ -296,7 +300,7 @@ pub struct ValidatorMeta {
 
 外键关系是一等 Meta 数据，不放在 `validators` 中：
 
-状态：Phase 3 计划新增。当前实现尚未定义 `ForeignKeyMeta`，也不会解析 `[[tables.foreign_keys]]` TOML。
+状态：已实现 MVP。当前实现已定义 `ForeignKeyMeta` 与 field-level `FieldForeignKeyMeta`，会解析 `[[tables.foreign_keys]]` 和 `[tables.fields.foreign_key]` TOML，并在 Link / Meta validate / data validate 阶段形成闭环。
 
 ```rust
 pub struct ForeignKeyMeta {
@@ -317,8 +321,8 @@ pub struct ForeignKeyMeta {
 - `target_table` / `target_index` 描述被引用的目标表和唯一索引；`target_index` 为空时使用目标表 primary index。
 - `allow_empty` 允许 optional FK 全空时跳过引用完整性检查；省略时按 source fields 的 `required` 派生，所有 source fields 都是 optional 时允许全空，否则不允许全空。
 - `export` / `export_when` 控制该关系是否进入当前 target 的 CodeModel；validation 也默认只检查当前 target 可见关系。
-- Link 阶段应解析为 `LinkedForeignKeyMeta<'meta>`，供 validation 隐式生成 referential-integrity validator，并供 codegen 生成关联查询 helper。
-- Phase 1 仅支持 CollectionTable 到 CollectionTable 的 FK；ObjectTable 作为 source/target 暂不支持。
+- Link 阶段解析为 `LinkedForeignKeyMeta<'meta>`，供 validation 执行引用完整性检查；codegen 关联查询 helper 属于后续扩展。
+- 当前 MVP 仅支持 CollectionTable 到 CollectionTable 的 FK；ObjectTable 作为 source/target 暂不支持。
 
 ### 2.5.9 Target Tags 与导出条件
 
@@ -520,6 +524,8 @@ impl MetaModel {
 }
 ```
 
+`link_meta_model` 只收集类型、索引、fragment、foreign key 等引用解析阶段的 diagnostics；`MetaModel::link()` 面向外部调用方，会合并 `link_meta_model` 与 `validate_meta_model` 的结果，避免手工构造 raw model 时绕过结构校验。
+
 流程：
 
 1. 从 `model.enums` 构建临时 `HashMap<&str, &EnumMeta>`。
@@ -528,6 +534,8 @@ impl MetaModel {
    - 为当前 table 构建 field name -> `&FieldMeta` 的临时 HashMap。
    - 调用 `link_fields` 解析每个 field 的 `field_type`。
    - 调用 `link_indexes` 将 `IndexMeta.fields` 解析为 `Vec<&FieldMeta>`。
+   - link table fragments，解析 inline / typed fragment payload。
+   - link foreign keys，解析 source fields、target table 和 target index。
    - 根据 `TableMeta.primary_index` 或 `IndexMeta.primary` 解析当前 table 选中的 primary index。
    - 构造 `LinkedTableMeta<'meta>`。
 4. 遍历 structs，按同样方式构造 `LinkedStructMeta<'meta>`。
@@ -628,6 +636,8 @@ pub enum MetaDiagnosticCode {
 | struct field `type` | `FieldMeta.field_type: String` | `LinkedFieldMeta.linked_field` | struct 字段与 table 字段共享解析逻辑。 |
 | table index fields | `IndexMeta.fields: Vec<String>` | `LinkedIndexMeta.fields: Vec<&FieldMeta>` | 索引字段引用不再需要下游重复查找。 |
 | table primary index | `TableMeta.primary_index: Option<String>` + `IndexMeta.primary` | `LinkedTableMeta::primary_index() -> Option<&LinkedIndexMeta>` | 直接取得当前 table 选中的主索引。 |
+| typed / inline fragment | `FragmentMeta.type_name` / `FragmentMeta.fields` | `LinkedFragmentPayload<'meta>` | fragment payload 可统一表现为 struct typed payload 或 inline fields。 |
+| foreign key | `ForeignKeyMeta { fields, target_table, target_index }` / `FieldForeignKeyMeta` | `LinkedForeignKeyMeta<'meta>` | 外键关系可直接用于引用完整性校验。 |
 | table 查询 | `MetaModel.tables: Vec<TableMeta>` | `LinkedMetaModel.table_index` | 按名称快速查 linked table。 |
 | struct 查询 | `MetaModel.structs: Vec<StructMeta>` | `LinkedMetaModel.struct_index` / `struct_meta_index` | 同时支持 linked struct 和 raw struct 查询。 |
 | enum 查询 | `MetaModel.enums: Vec<EnumMeta>` | `LinkedMetaModel.enum_index` | enum 类型解析和查询加速。 |
@@ -637,8 +647,7 @@ pub enum MetaDiagnosticCode {
 | 候选位置 | Raw 表达 | 建议 Linked 表达 | 触发条件 |
 | --- | --- | --- | --- |
 | field path | `String` | `LinkedFieldPath<'meta>` | 支持 expanded value、嵌套 struct、数组 slot 后补充。 |
-| foreign key | `ForeignKeyMeta { fields, target_table, target_index }` | `LinkedForeignKeyMeta<'meta>` | 外键是一等关系数据，validation 用于引用完整性检查，codegen 用于关联查询 helper。 |
-| source fragments | `SourceRef.fragments: Vec<String>` | `Vec<&FragmentMeta>` | FragmentMeta 落地后补充。 |
+| source fragments | `SourceRef.fragments: Vec<String>` | `Vec<&FragmentMeta>` | source 到 fragment 声明的引用加速。 |
 | validator 引用 | validator 名字符串 | `LinkedValidator<'meta>` 或 compiled handle | validator registry 落地后补充。 |
 | default value | `toml::Value` | `LinkedDefaultValue` / typed value | 需要按 `LinkedField` 判断 TOML 值是否合法。 |
 | export/filter 字段引用 | 字符串或表达式 | linked field refs / compiled predicate | export view 和 filter 表达式设计落地后补充。 |
@@ -709,7 +718,7 @@ required = true
 
 ## 2.12 单元测试组织
 
-Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和临时目录构造多文件 imports。
+Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和临时目录构造多文件显式加载场景；ProjectConfig imports 递归测试由 exporter / CLI 相关测试覆盖。
 
 当前测试重点：
 
@@ -720,7 +729,7 @@ Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和�
 3. `links_custom_enum_and_struct_types_after_loading_all_meta`
    - enum / struct 自定义类型在全部加载后解析为引用。
 4. `supports_imported_meta_files_before_linking_field_types`
-   - root 文件通过 `imports` 引入类型文件，再成功 Link。
+   - root/types 文件通过 `MetaModel::from_paths` 显式合并后，再成功 Link。
 5. `accepts_canonical_and_legacy_primitive_field_types`
    - `int` / `float` 与 `i64` / `f64` 兼容。
 6. `rejects_unknown_field_type_after_linking`
@@ -733,7 +742,7 @@ Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和�
 后续建议补充：
 
 - duplicate enum / struct / enum value 的显式测试。
-- duplicate import / import cycle 的去重测试。
+- ProjectConfig import / import cycle 的去重测试。
 - `LinkedIndexMeta.fields` 持有真实 `&FieldMeta` 的断言。
 - `LinkedTableMeta::primary_index()` 在 `primary_index = "..."` 和 `primary = true` 两种写法下都能返回选中的 linked index。
 - `LinkedStructMeta.field` 查询测试。
@@ -744,7 +753,7 @@ Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和�
 - Loader 返回 `MetaModel`，因为它是 owned 数据，便于调用方控制生命周期。
 - 下游在需要类型解析或快速查询时，应在持有 `MetaModel` 的作用域内调用 `meta.link()` 得到 `LinkedMetaModel<'_>`。
 - `MetaModel::from_toml_str` / `from_path` / `from_paths` 返回的是已完成 link + validate 检查的 raw model；raw model 本身不保存 borrowed links。
-- `link_meta_model()` / `MetaModel::link()` 每次调用都会基于 raw model 构造 runtime borrowed view。调用方只能在 diagnostics 为空时消费 linked model；如果 diagnostics 非空，linked model 视为不可用。
+- `link_meta_model()` 每次调用都会基于 raw model 构造 runtime borrowed view并只返回引用解析 diagnostics；`MetaModel::link()` 会额外合并结构校验 diagnostics。调用方只能在 diagnostics 为空时消费 linked model；如果 diagnostics 非空，linked model 视为不可用。
 - `ProjectConfig::meta_model()` 同样返回已完成 link + validate 检查的 raw model；`build_target()` 随后再次调用 `link()` 是为了获得当前执行阶段使用的 borrowed view，而不是重复修改 raw model。
 - `LinkedMetaModel<'_>` 不应跨越 `MetaModel` 生命周期；通常应在 export/validate 函数栈内临时创建并传递引用。
 - validation/exporter 不应再自行解析 `FieldMeta.field_type` 字符串；应读取 `LinkedFieldMeta.linked_field` 或 `primitive_type()`。
@@ -755,11 +764,11 @@ Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和�
 Meta 模块当前阶段完成的判断标准：
 
 - `MetaModel` 可从 TOML 字符串、路径、多路径加载。
-- `imports` 能递归加载，重复 canonical path 只加载一次。
+- standalone Meta loader 支持显式多路径合并；ProjectConfig imports 能递归加载，重复 canonical path 只加载一次。
 - 所有 Meta 文件加载完成后再执行 Link。
 - `MetaModel` 保持纯配置；运行期 HashMap 索引只存在于 `LinkedMetaModel<'meta>` 及子结构。
 - field type 从字符串 Link 为 primitive / enum / struct 引用。
 - index field 从字符串 Link 为 `&FieldMeta` 引用。
 - primary index 从 table/index 声明 Link 为 `LinkedTableMeta` 上可查询的 selected linked index。
 - Link 和 validate diagnostics 会在加载完成前合并返回，避免下游使用不完整模型。
-- 单元测试覆盖基础加载、primitive 兼容、自定义类型、imports、未知类型、重复命名和 primary index 校验。
+- 单元测试覆盖基础加载、primitive 兼容、自定义类型、显式多路径合并、未知类型、重复命名和 primary index 校验；ProjectConfig imports 由 exporter / CLI 相关测试覆盖。
