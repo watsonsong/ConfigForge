@@ -6,7 +6,7 @@ declare function require(name: string): any;
 import { GameData, RuntimeDataLoader } from "./generated";
 import { SyncFsRuntimeDataLoader } from "./runtime_loader_node_fs";
 import { decodeJsonValue, JsonValueReader } from "./runtime_loader_json";
-import { decodeMessagePackValue } from "./runtime_loader_messagepack";
+import { createMessagePackRuntimeDecoder } from "./runtime_loader_messagepack";
 
 const process = require("process");
 
@@ -16,8 +16,9 @@ if (!dataDir) {
 }
 
 const loader = new SyncFsRuntimeDataLoader(dataDir, decodeJsonValue);
-const messagePackLoader: RuntimeDataLoader = new SyncFsRuntimeDataLoader(dataDir, (bytes) =>
-  decodeMessagePackValue(bytes, () => ({ rows: [] })),
+const messagePackLoader: RuntimeDataLoader = new SyncFsRuntimeDataLoader(
+  dataDir,
+  createMessagePackRuntimeDecoder(() => ({ rows: [] })),
 );
 void messagePackLoader;
 
