@@ -1,23 +1,33 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use serde::{Deserialize, Serialize};
+
 use crate::{ConfigForgeError, Result};
 
 use super::{
     CaseStyle, CodeEnum, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel,
     CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, GeneratedFile,
     GeneratedSymbol, NamingConfig, build_code_model, ensure_unique_generated_symbols,
-    ir::require_non_empty_index_fields, languages, naming, render_file_header,
+    ir::require_non_empty_index_fields, naming, render_file_header,
 };
 
 #[cfg(test)]
 mod tests;
 
+pub const LANGUAGE: &str = "rust";
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct RustCodegenOptions {
+    #[serde(default)]
+    pub derive_serde: bool,
+}
+
 pub struct RustCodeGenerator;
 
 impl CodeGenerator for RustCodeGenerator {
     fn language(&self) -> &'static str {
-        languages::RUST
+        LANGUAGE
     }
 
     fn default_naming(&self) -> NamingConfig {
@@ -33,7 +43,10 @@ impl CodeGenerator for RustCodeGenerator {
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>> {
         let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
         require_non_empty_index_fields(&model)?;
-        let rust_options = input.target.options.rust()?;
+        let rust_options = input
+            .target
+            .options
+            .language_options::<RustCodegenOptions>(LANGUAGE)?;
         let names = RustNames::new(&input.target.options);
         validate_generated_symbols(&model, &names)?;
         let mut content = render_file_header(input);

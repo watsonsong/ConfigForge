@@ -13,6 +13,21 @@
 - Prefer async-capable boundaries for source loading and artifact writing.
 - Keep parallel execution deterministic by sorting diagnostics and artifact manifests before reporting.
 
+## General Code Size Rules
+
+- Keep source files small enough to review and reason about. With a reasonable design, any
+  non-test source file over roughly 800 lines should trigger extra scrutiny for cohesion,
+  naming, and hidden submodules; over roughly 1,000 lines should normally prompt a module
+  split or a clear documented reason to keep it together.
+- Unit tests, integration tests, fixtures, and generated or vendored artifacts can be looser:
+  when the structure is repetitive but clear, test files of several thousand lines may be
+  acceptable.
+- Prefer keeping code lines within roughly 100 characters, but prioritize readability over
+  mechanical wrapping. Break long expressions, fluent chains, generic bounds, and data
+  literals according to the target language's idioms; if a language lacks a clear split point,
+  or forced line breaks make the code harder to read, keeping a longer line is acceptable.
+  This commonly applies to text-rendering string templates.
+
 ## Module Rules
 
 - `diagnostic` owns shared diagnostic foundations and the crate error facade.

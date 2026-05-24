@@ -1,35 +1,26 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-mod cpp;
+pub mod cpp;
 mod ir;
 mod naming;
-mod rust;
-mod typescript;
+pub mod rust;
+pub mod typescript;
 
-pub use self::cpp::CppCodeGenerator;
 pub use self::ir::{
     CodeEnum, CodeEnumValue, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel,
     CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, GeneratedFile, build_code_model,
 };
-pub use self::rust::RustCodeGenerator;
-pub use self::typescript::TypeScriptCodeGenerator;
 
 use std::{collections::HashMap, path::PathBuf};
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, de::DeserializeOwned};
 
 use crate::{
     ConfigForgeError, Result,
     exporter::RuntimeDataFile,
     meta::{LinkedMetaModel, TargetTags},
 };
-
-pub mod languages {
-    pub const RUST: &str = "rust";
-    pub const CPP: &str = "cpp";
-    pub const TYPESCRIPT: &str = "typescript";
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodeExportTarget {
@@ -53,24 +44,6 @@ pub struct CodegenOptions {
     pub keyword_conflict: KeywordConflictPolicy,
     pub naming: NamingConfig,
     pub language_options: HashMap<String, toml::Value>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct RustCodegenOptions {
-    #[serde(default)]
-    pub derive_serde: bool,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct CppCodegenOptions {
-    #[serde(default)]
-    pub namespace: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct TypeScriptCodegenOptions {
-    #[serde(default)]
-    pub readonly_fields: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -191,18 +164,6 @@ impl CodegenOptions {
         Self::for_generator(generator)
     }
 
-    pub fn rust(&self) -> Result<RustCodegenOptions> {
-        self.language_options(languages::RUST)
-    }
-
-    pub fn cpp(&self) -> Result<CppCodegenOptions> {
-        self.language_options(languages::CPP)
-    }
-
-    pub fn typescript(&self) -> Result<TypeScriptCodegenOptions> {
-        self.language_options(languages::TYPESCRIPT)
-    }
-
     pub fn language_options<T>(&self, language: &str) -> Result<T>
     where
         T: DeserializeOwned + Default,
@@ -232,7 +193,18 @@ impl NamingConfig {
 
 impl Default for CodegenOptions {
     fn default() -> Self {
-        Self::for_language(languages::RUST).expect("built-in Rust generator should be registered")
+        Self {
+            file_header: None,
+            keyword_conflict: KeywordConflictPolicy::SuffixUnderscore,
+            naming: NamingConfig {
+                type_name: CaseStyle::Preserve,
+                enum_value: CaseStyle::Preserve,
+                field: CaseStyle::Preserve,
+                function: CaseStyle::Preserve,
+                constant: CaseStyle::Preserve,
+            },
+            language_options: HashMap::new(),
+        }
     }
 }
 
@@ -316,9 +288,9 @@ pub(crate) fn ensure_unique_generated_symbols(
 
 pub fn builtin_generators() -> Vec<Box<dyn CodeGenerator>> {
     vec![
-        Box::new(RustCodeGenerator),
-        Box::new(CppCodeGenerator),
-        Box::new(TypeScriptCodeGenerator),
+        Box::new(rust::RustCodeGenerator),
+        Box::new(cpp::CppCodeGenerator),
+        Box::new(typescript::TypeScriptCodeGenerator),
     ]
 }
 

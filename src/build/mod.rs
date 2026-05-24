@@ -202,7 +202,7 @@ fn civil_from_unix_days(days: i64) -> (i32, u32, u32) {
 mod tests {
     use std::collections::BTreeMap;
 
-    use crate::codegen::{default_module_name, languages};
+    use crate::codegen::{cpp, default_module_name, rust, typescript};
     use crate::data::DataTable;
     use crate::exporter::build_exported_table_payload;
     use crate::meta::{MetaModel, TargetTags};
@@ -212,15 +212,15 @@ mod tests {
     #[test]
     fn maps_language_to_default_module_name() {
         assert_eq!(
-            default_module_name(languages::RUST),
+            default_module_name(rust::LANGUAGE),
             Some("config_forge_generated")
         );
         assert_eq!(
-            default_module_name(languages::CPP),
+            default_module_name(cpp::LANGUAGE),
             Some("config_forge_generated")
         );
         assert_eq!(
-            default_module_name(languages::TYPESCRIPT),
+            default_module_name(typescript::LANGUAGE),
             Some("configForgeGenerated")
         );
     }

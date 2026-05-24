@@ -149,7 +149,7 @@ fn normalize_codegen_tasks(
 
 #[cfg(test)]
 mod tests {
-    use crate::codegen::languages;
+    use crate::codegen::{cpp, rust, typescript};
 
     use super::*;
 
@@ -165,7 +165,7 @@ mod tests {
                 format: "json".to_owned(),
             }],
             code: vec![CodegenTaskConfig {
-                language: languages::TYPESCRIPT.to_owned(),
+                language: typescript::LANGUAGE.to_owned(),
                 output: PathBuf::from("Generated/TypeScript"),
                 data: None,
                 module_name: None,
@@ -198,7 +198,7 @@ mod tests {
                 format: "json".to_owned(),
             }],
             code: vec![CodegenTaskConfig {
-                language: languages::RUST.to_owned(),
+                language: rust::LANGUAGE.to_owned(),
                 output: PathBuf::from("Generated/Rust"),
                 data: Some(DEFAULT_DATA_TASK_NAME.to_owned()),
                 module_name: None,
@@ -238,7 +238,7 @@ mod tests {
                 },
             ],
             code: vec![CodegenTaskConfig {
-                language: languages::CPP.to_owned(),
+                language: cpp::LANGUAGE.to_owned(),
                 output: PathBuf::from("Generated/Cpp"),
                 data: None,
                 module_name: None,

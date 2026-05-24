@@ -3,20 +3,21 @@
 
 use crate::{
     codegen::{
-        CaseStyle, CodeExportInput, CodeGenerator, RustCodeGenerator, RustCodegenOptions,
-        languages,
+        CaseStyle, CodeExportInput, CodeGenerator,
         tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
     },
     exporter::RuntimeDataFile,
     meta::{MetaModel, TargetTags},
 };
 
+use super::{LANGUAGE, RustCodeGenerator, RustCodegenOptions};
+
 #[test]
 fn emits_loader_table_and_index_helpers() {
     let meta = linked_fixture();
-    let mut input = input_for(&meta, languages::RUST);
+    let mut input = input_for(&meta, LANGUAGE);
     input.target.options.language_options.insert(
-        languages::RUST.to_owned(),
+        LANGUAGE.to_owned(),
         toml::Value::try_from(RustCodegenOptions { derive_serde: true }).expect("rust options"),
     );
 
@@ -48,7 +49,7 @@ fn emits_fragment_structs_and_optional_row_members() {
     let meta = fragment_fixture();
 
     let rust = RustCodeGenerator
-        .generate(&input_for(&meta, languages::RUST))
+        .generate(&input_for(&meta, LANGUAGE))
         .expect("rust code");
     let rust_content = &rust[0].content;
     assert!(rust_content.contains("pub struct ItemsWeaponFragment"));
@@ -60,7 +61,7 @@ fn emits_fragment_structs_and_optional_row_members() {
     let client_rust = RustCodeGenerator
         .generate(&CodeExportInput {
             target_tags: TargetTags::new(["client"]),
-            ..input_for(&meta, languages::RUST)
+            ..input_for(&meta, LANGUAGE)
         })
         .expect("client rust code");
     let client_rust_content = &client_rust[0].content;
@@ -112,7 +113,7 @@ fn sanitizes_gen_keyword_across_api_surface() {
         "#,
     )
     .expect("meta should load");
-    let mut input = input_for(&meta, languages::RUST);
+    let mut input = input_for(&meta, LANGUAGE);
     input.target.options.naming.enum_value = CaseStyle::Preserve;
     input.runtime_data_files = vec![RuntimeDataFile {
         table_name: "gen".to_owned(),
@@ -138,7 +139,7 @@ fn sanitizes_gen_keyword_across_api_surface() {
 #[test]
 fn emits_object_table_as_typed_object_not_repository() {
     let meta = object_table_fixture();
-    let input = input_for(&meta, languages::RUST);
+    let input = input_for(&meta, LANGUAGE);
 
     let files = RustCodeGenerator.generate(&input).expect("rust code");
     let content = &files[0].content;
@@ -158,7 +159,7 @@ fn rejects_duplicate_generated_field_names() {
     let meta = duplicate_field_fixture();
 
     assert_duplicate_generated_identifier(
-        RustCodeGenerator.generate(&input_for(&meta, languages::RUST)),
+        RustCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
         "rust codegen",
         "duplicate generated identifier `foo_bar`",
         "table `items` row fields",
@@ -170,8 +171,8 @@ fn rejects_duplicate_top_level_generated_types() {
     let meta = duplicate_top_level_fixture();
 
     assert_duplicate_generated_identifier(
-        RustCodeGenerator.generate(&input_for(&meta, languages::RUST)),
-        languages::RUST,
+        RustCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+        LANGUAGE,
         "duplicate generated identifier `ItemsRow`",
         "top-level types",
     );
@@ -192,7 +193,7 @@ fn rejects_runtime_reader_trait_name_conflicts() {
     .expect("meta should load");
 
     assert_duplicate_generated_identifier(
-        RustCodeGenerator.generate(&input_for(&meta, languages::RUST)),
+        RustCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
         "rust codegen",
         "duplicate generated identifier `RuntimeDataReader`",
         "top-level types",

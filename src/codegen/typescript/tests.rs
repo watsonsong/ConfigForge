@@ -3,19 +3,20 @@
 
 use crate::{
     codegen::{
-        CodeExportInput, CodeGenerator, TypeScriptCodeGenerator, TypeScriptCodegenOptions,
-        languages,
+        CodeExportInput, CodeGenerator,
         tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
     },
     meta::{MetaModel, TargetTags},
 };
 
+use super::{LANGUAGE, TypeScriptCodeGenerator, TypeScriptCodegenOptions};
+
 #[test]
 fn emits_async_loader_and_maps() {
     let meta = linked_fixture();
-    let mut input = input_for(&meta, languages::TYPESCRIPT);
+    let mut input = input_for(&meta, LANGUAGE);
     input.target.options.language_options.insert(
-        languages::TYPESCRIPT.to_owned(),
+        LANGUAGE.to_owned(),
         toml::Value::try_from(TypeScriptCodegenOptions {
             readonly_fields: true,
         })
@@ -54,7 +55,7 @@ fn emits_fragment_structs_and_optional_row_members() {
     let meta = fragment_fixture();
 
     let typescript = TypeScriptCodeGenerator
-        .generate(&input_for(&meta, languages::TYPESCRIPT))
+        .generate(&input_for(&meta, LANGUAGE))
         .expect("typescript code");
     let ts_content = &typescript[0].content;
     assert!(ts_content.contains("export interface ItemsWeaponFragment"));
@@ -65,7 +66,7 @@ fn emits_fragment_structs_and_optional_row_members() {
     let client_typescript = TypeScriptCodeGenerator
         .generate(&CodeExportInput {
             target_tags: TargetTags::new(["client"]),
-            ..input_for(&meta, languages::TYPESCRIPT)
+            ..input_for(&meta, LANGUAGE)
         })
         .expect("client typescript code");
     let client_ts_content = &client_typescript[0].content;
@@ -105,7 +106,7 @@ fn reads_optional_fragment_once() {
     .expect("meta should load");
 
     let files = TypeScriptCodeGenerator
-        .generate(&input_for(&meta, languages::TYPESCRIPT))
+        .generate(&input_for(&meta, LANGUAGE))
         .expect("typescript code");
     let content = &files[0].content;
 
@@ -119,7 +120,7 @@ fn reads_optional_fragment_once() {
 #[test]
 fn emits_object_table_as_typed_object_not_repository() {
     let meta = object_table_fixture();
-    let input = input_for(&meta, languages::TYPESCRIPT);
+    let input = input_for(&meta, LANGUAGE);
 
     let files = TypeScriptCodeGenerator
         .generate(&input)
@@ -142,7 +143,7 @@ fn rejects_duplicate_generated_field_names() {
     let meta = duplicate_field_fixture();
 
     assert_duplicate_generated_identifier(
-        TypeScriptCodeGenerator.generate(&input_for(&meta, languages::TYPESCRIPT)),
+        TypeScriptCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
         "typescript codegen",
         "duplicate generated identifier `fooBar`",
         "table `items` row fields",
@@ -154,8 +155,8 @@ fn rejects_duplicate_top_level_generated_types() {
     let meta = duplicate_top_level_fixture();
 
     assert_duplicate_generated_identifier(
-        TypeScriptCodeGenerator.generate(&input_for(&meta, languages::TYPESCRIPT)),
-        languages::TYPESCRIPT,
+        TypeScriptCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+        LANGUAGE,
         "duplicate generated identifier `ItemsRow`",
         "top-level exports",
     );

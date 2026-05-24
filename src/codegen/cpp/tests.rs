@@ -3,19 +3,20 @@
 
 use crate::{
     codegen::{
-        CodeExportInput, CodeGenerator, CppCodeGenerator, CppCodegenOptions, GeneratedFile,
-        languages,
+        CodeExportInput, CodeGenerator, GeneratedFile,
         tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
     },
     meta::{MetaModel, TargetTags},
 };
 
+use super::{CppCodeGenerator, CppCodegenOptions, LANGUAGE};
+
 #[test]
 fn emits_loader_and_repository_declarations() {
     let meta = linked_fixture();
-    let mut input = input_for(&meta, languages::CPP);
+    let mut input = input_for(&meta, LANGUAGE);
     input.target.options.language_options.insert(
-        languages::CPP.to_owned(),
+        LANGUAGE.to_owned(),
         toml::Value::try_from(CppCodegenOptions {
             namespace: Some("game::config".to_owned()),
         })
@@ -68,7 +69,7 @@ fn emits_fragment_structs_and_optional_row_members() {
     let meta = fragment_fixture();
 
     let cpp = CppCodeGenerator
-        .generate(&input_for(&meta, languages::CPP))
+        .generate(&input_for(&meta, LANGUAGE))
         .expect("cpp code");
     let cpp_content = &cpp[0].content;
     assert!(cpp_content.contains("struct ItemsWeaponFragment"));
@@ -79,7 +80,7 @@ fn emits_fragment_structs_and_optional_row_members() {
     let client_cpp = CppCodeGenerator
         .generate(&CodeExportInput {
             target_tags: TargetTags::new(["client"]),
-            ..input_for(&meta, languages::CPP)
+            ..input_for(&meta, LANGUAGE)
         })
         .expect("client cpp code");
     let client_cpp_content = &client_cpp[0].content;
@@ -91,7 +92,7 @@ fn emits_fragment_structs_and_optional_row_members() {
 #[test]
 fn emits_object_table_as_typed_object_not_repository() {
     let meta = object_table_fixture();
-    let input = input_for(&meta, languages::CPP);
+    let input = input_for(&meta, LANGUAGE);
 
     let files = CppCodeGenerator.generate(&input).expect("cpp code");
     let content = generated_content(&files, "generated.hpp");
@@ -117,7 +118,7 @@ fn rejects_duplicate_generated_field_names() {
     let meta = duplicate_field_fixture();
 
     assert_duplicate_generated_identifier(
-        CppCodeGenerator.generate(&input_for(&meta, languages::CPP)),
+        CppCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
         "cpp codegen",
         "duplicate generated identifier `foo_bar`",
         "table `items` row fields",
@@ -129,8 +130,8 @@ fn rejects_duplicate_top_level_generated_types() {
     let meta = duplicate_top_level_fixture();
 
     assert_duplicate_generated_identifier(
-        CppCodeGenerator.generate(&input_for(&meta, languages::CPP)),
-        languages::CPP,
+        CppCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+        LANGUAGE,
         "duplicate generated identifier `ItemsRow`",
         "top-level types",
     );
