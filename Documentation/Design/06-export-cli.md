@@ -215,11 +215,13 @@ ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader ad
 
 | 语言 | JSON adapter | MessagePack adapter | 依赖策略 |
 | --- | --- | --- | --- |
-| Rust | `serde_json::Value` reader template | `rmp_serde` template；中期收敛到 ConfigForge Runtime Value | Cargo features：`json`、`messagepack`、`fs`；当前为 `copyable_template`，默认只启用 core。 |
+| Rust | `serde_json::Value` reader template；`serde_json_reader` | `rmp-serde` template；`serde_msgpack_reader` | Cargo features：`json`、`messagepack`、`fs`；当前为 `copyable_template`，默认只启用 core。 |
 | TypeScript | 原生 `JSON.parse` value reader | `@msgpack/msgpack` 解码后的 value reader | npm 包拆分与 peer dependency；Node fs / fetch loader 与格式 reader 分离。 |
-| C++ | 生产推荐 `RapidJSON` reader；`rapidjson_reader` 为生产推荐 JSON adapter | 推荐 `msgpack-cxx` reader；`messagepack_reader` 解码到 msgpack object/value 后适配 | CMake options：`CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER`、`CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK_READER`；通过 `find_package` / package manager / 显式 `FetchContent` 引入三方库，不 vendored 到 generated code。 |
+| C++ | 生产推荐 `RapidJSON` reader；`rapidjson_reader` 为生产推荐 JSON adapter | 推荐 `msgpack-cxx` reader；`msgpackc_reader` 解码到 msgpack object/value 后适配 | CMake options：`CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER`、`CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER`；通过 `find_package` / package manager / 显式 `FetchContent` 引入三方库，不 vendored 到 generated code。 |
 
 标准 adapter 的产物形式按语言习惯决定：
+
+reader 目录和包名应优先表达“具体三方读取库”，而不是只表达文件格式。默认规则是 `<third_party_library>_reader`，例如 `rapidjson_reader`、`msgpackc_reader`、`serde_json_reader`；如果三方库名称本身缺少明确文件格式，再使用 `<third_party_library>_<format>_reader`。这样做是因为同一种语言下同一格式通常有多个三方库可选，目标用户也可能已经在项目中使用另一套 JSON / MessagePack 库。Rust 中 `rmp` 本身是 Rust MessagePack 的缩写，结合当前实现依赖 `rmp-serde` / serde value，因此目录命名为 `serde_msgpack_reader`。
 
 - **Rust**：由于当前 `RuntimeDataReader` trait 由 generated crate 声明，外部 crate 无法在不依赖用户 generated crate 的情况下“一次性”为 adapter 类型实现该 trait。短期应提供可复制/可 include 的 Rust module template，放入 generated crate 或业务 crate 后实现本地 trait；中期可评估把 reader trait 抽到稳定 runtime support crate，让 generated code 选择 `use config_forge_runtime::RuntimeDataReader`，从而使 adapter crate 可以直接实现 trait。
 - **TypeScript**：TypeScript 接口是结构化类型，标准 npm 包可以直接导出符合 `RuntimeDataReader` 形状的 classes/functions；generated code 无需 import adapter，业务侧把 adapter instance 传给 `GameData.load` 即可。
@@ -232,8 +234,8 @@ runtime/
   compliance/            # 跨语言 reader contract payload / expected cases
   rust/
     reader_core/          # trait glue/template、错误工具、测试 fixture glue
-    json_reader_serde/    # serde_json reader + 可选 fs loader
-    messagepack_reader_rmp/ # rmp-serde reader + 可选 fs loader
+    serde_json_reader/    # serde_json reader + 可选 fs loader
+    serde_msgpack_reader/ # rmp-serde reader + 可选 fs loader
   typescript/
     reader_core/          # shared reader helpers / error helpers
     json_reader/          # JSON.parse value reader
@@ -241,14 +243,14 @@ runtime/
     loaders/              # node-fs、fetch 等 transport loader
   cpp/
     rapidjson_reader/     # RapidJSON reader；生产推荐 JSON adapter
-    messagepack_reader/   # msgpack-cxx reader；生产推荐 MessagePack adapter
+    msgpackc_reader/      # msgpack-cxx reader；生产推荐 MessagePack adapter
     loaders/              # filesystem / engine-resource 示例 loader
     CMakeLists.txt        # adapter targets、options、find_package、tests
 ```
 
 `runtime/` 下的实现属于“标准 runtime adapter 源码/模板”，不是每次 codegen 的输出文件。后续可以通过 codegen option 选择是否把某个 adapter 拷贝到目标输出目录，也可以由游戏项目直接依赖该目录对应语言的 package/crate/library。
 
-C++ adapter 需要有独立工程化入口。推荐支持 `add_subdirectory(runtime/cpp)` 和安装后的 `find_package(ConfigForgeRuntime CONFIG)` 两种接入方式，并暴露 `config_forge_runtime::rapidjson_reader`、`config_forge_runtime::messagepack_reader`、`config_forge_runtime::filesystem_loader` 等 CMake targets。当前短期方案不提供单独的 `core` target，adapter 直接依赖 generated header 中的 `IRuntimeDataReader` / `IRuntimeDataLoader` contract；后续如拆出稳定 runtime interface header，再重新评估 stable interface target。生产项目显式打开 RapidJSON / msgpack-cxx 选项；测试环境如果缺少 RapidJSON 或 msgpack-cxx headers 可跳过对应 adapter smoke。详细 CMake option、target、三方依赖解析、C++ ownership、runtime_reader option 校验、emit 语义和 CI 矩阵见 `Documentation/Implementation/09-codegen-module-detail-design.md` 的“标准 RuntimeDataReader adapter 工程结构”。
+C++ adapter 需要有独立工程化入口。推荐支持 `add_subdirectory(runtime/cpp)` 和安装后的 `find_package(ConfigForgeRuntime CONFIG)` 两种接入方式，并暴露 `config_forge_runtime::rapidjson_reader`、`config_forge_runtime::msgpackc_reader`、`config_forge_runtime::filesystem_loader` 等 CMake targets。当前短期方案不提供单独的 `core` target，adapter 直接依赖 generated header 中的 `IRuntimeDataReader` / `IRuntimeDataLoader` contract；后续如拆出稳定 runtime interface header，再重新评估 stable interface target。生产项目显式打开 RapidJSON / msgpack-cxx 选项；测试环境如果缺少 RapidJSON 或 msgpack-cxx headers 可跳过对应 adapter smoke。详细 CMake option、target、三方依赖解析、C++ ownership、runtime_reader option 校验、emit 语义和 CI 矩阵见 `Documentation/Implementation/09-codegen-module-detail-design.md` 的“标准 RuntimeDataReader adapter 工程结构”。
 
 ## 6.3 Special Exporter
 

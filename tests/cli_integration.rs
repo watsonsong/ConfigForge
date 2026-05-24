@@ -1662,7 +1662,7 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
     )
     .expect("rust runtime reader core should be copied");
     fs::copy(
-        fixture_root.join("../../../runtime/rust/messagepack_reader_rmp/src/template.rs"),
+        fixture_root.join("../../../runtime/rust/serde_msgpack_reader/src/template.rs"),
         temp_dir.path().join("runtime_loader.rs"),
     )
     .expect("rust runtime loader should be copied");
@@ -1755,7 +1755,7 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
             #include <msgpack.hpp>
             #define CONFIG_FORGE_RUNTIME_CPP_READER IRuntimeDataReader
             #define CONFIG_FORGE_RUNTIME_CPP_LOADER IRuntimeDataLoader
-            #include "config_forge/runtime/messagepack_reader/runtime_loader.hpp"
+            #include "config_forge/runtime/msgpackc_reader/runtime_loader.hpp"
 
             int main() {
                 msgpack::sbuffer buffer;
@@ -1777,7 +1777,7 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
                 set(CMAKE_CXX_STANDARD 17)
                 set(CMAKE_CXX_STANDARD_REQUIRED ON)
                 set(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER ON CACHE BOOL "" FORCE)
-                set(CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK_READER ON CACHE BOOL "" FORCE)
+                set(CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER ON CACHE BOOL "" FORCE)
                 set(CONFIG_FORGE_RUNTIME_FETCH_DEPS ON CACHE BOOL "" FORCE)
                 add_subdirectory({runtime_cpp_dir:?} config_forge_runtime)
 
@@ -1793,7 +1793,7 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
 
                 add_executable(messagepack_adapter_namespace_check messagepack_adapter_namespace_check.cpp)
                 target_include_directories(messagepack_adapter_namespace_check PRIVATE {temp_dir:?})
-                target_link_libraries(messagepack_adapter_namespace_check PRIVATE config_forge_runtime::messagepack_reader)
+                target_link_libraries(messagepack_adapter_namespace_check PRIVATE config_forge_runtime::msgpackc_reader)
             "#,
             runtime_cpp_dir = runtime_cpp_dir.display().to_string(),
             harness_cpp = harness_cpp.display().to_string(),

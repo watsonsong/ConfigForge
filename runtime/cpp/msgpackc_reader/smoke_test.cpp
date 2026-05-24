@@ -29,7 +29,7 @@ public:
 
 #define CONFIG_FORGE_RUNTIME_CPP_READER IRuntimeDataReader
 #define CONFIG_FORGE_RUNTIME_CPP_LOADER IRuntimeDataLoader
-#include "config_forge/runtime/messagepack_reader/runtime_loader.hpp"
+#include "config_forge/runtime/msgpackc_reader/runtime_loader.hpp"
 
 int main() {
     msgpack::sbuffer buffer;
