@@ -3,55 +3,11 @@
 
 include!("generated.rs");
 
-mod runtime_reader_core;
 mod runtime_loader;
 
 use std::env;
 
 use runtime_loader::FsMessagePackRuntimeDataLoader;
-use runtime_reader_core::ValueReader;
-
-impl RuntimeDataReader for ValueReader {
-    fn field(&self, name: &str) -> Result<Option<Self>, String> {
-        ValueReader::field(self, name)
-    }
-
-    fn index(&self, index: usize) -> Result<Self, String> {
-        ValueReader::index(self, index)
-    }
-
-    fn len(&self) -> Result<usize, String> {
-        ValueReader::len(self)
-    }
-
-    fn as_i64(&self) -> Result<i64, String> {
-        ValueReader::as_i64(self)
-    }
-
-    fn as_f64(&self) -> Result<f64, String> {
-        ValueReader::as_f64(self)
-    }
-
-    fn as_bool(&self) -> Result<bool, String> {
-        ValueReader::as_bool(self)
-    }
-
-    fn as_string(&self) -> Result<String, String> {
-        ValueReader::as_string(self)
-    }
-
-    fn is_null(&self) -> bool {
-        ValueReader::is_null(self)
-    }
-}
-
-impl RuntimeDataLoader for FsMessagePackRuntimeDataLoader {
-    type Reader = ValueReader;
-
-    fn open(&self, path: &str) -> Result<Self::Reader, String> {
-        self.open_reader(path)
-    }
-}
 
 fn fixture_loader_from_env() -> FsMessagePackRuntimeDataLoader {
     FsMessagePackRuntimeDataLoader::new(

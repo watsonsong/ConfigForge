@@ -942,14 +942,14 @@ loader.open("items.msgpack")
 
 | Language | 默认实现 |
 | --- | --- |
-| Rust | `FsRuntimeDataLoader { root: PathBuf }` + `SerdeValueReader`，可选生成 |
+| Rust | `FsJsonRuntimeDataLoader` + `JsonValueReader` 或 `FsMessagePackRuntimeDataLoader` + `MessagePackValueReader`，可选生成/复制 |
 | C++ | `FileSystemDataFileLoader { root }` + JSON/MessagePack value reader，依赖可选生成 |
 | TypeScript | `FetchDataFileLoader` / `NodeFsDataFileLoader` + JS value reader，二选一或都不默认生成 |
 
 当前实现：
 
 - Rust / C++ / TypeScript 当前已生成通用 loader / reader interface，并由生成代码完成 typed parsing。
-- 集成测试 harness 已实现一次通用 reader，新增表或字段时无需改 harness 中的 loader 接口，只需要更新断言覆盖代表性查询。
+- 集成测试 harness 直接复用 `runtime/rust/serde_msgpack_reader/src/runtime_reader.rs`，新增表或字段时无需在 harness 中维护自定义 reader，只需要更新断言覆盖代表性查询。
 - 后续可按语言新增可选 adapter，而不是强制把文件系统或第三方解析库纳入生成代码。
 
 默认 decoder 策略：
@@ -1039,9 +1039,8 @@ missing/null 语义：
 
 | 当前目录 | 定位 | 当前状态 |
 | --- | --- | --- |
-| `runtime/rust/reader_core` | Rust shared value reader template | 已有 `serde_json::Value` based reader。 |
-| `runtime/rust/serde_json_reader` | Rust JSON fs loader template | 已有基于 `serde_json` 的 JSON loader template。 |
-| `runtime/rust/serde_msgpack_reader` | Rust MessagePack fs loader template | 已有基于 `rmp-serde` 的 MessagePack loader template，并被 Rust integration harness 使用。 |
+| `runtime/rust/serde_json_reader` | Rust JSON reader module | 已有基于 `serde_json` 的 `JsonValueReader` 与 fs loader。 |
+| `runtime/rust/serde_msgpack_reader` | Rust MessagePack reader module | 已有基于 `rmp-serde` 的 `MessagePackValueReader` 与 fs loader，并被 Rust integration harness 使用。 |
 | `runtime/typescript/json_reader` | TypeScript JSON reader + Node fs loader | 已有 JSON reader，使用结构化类型，不依赖 generated.ts。 |
 | `runtime/typescript/messagepack_reader` | TypeScript MessagePack value reader | 已有基于 `@msgpack/msgpack` peer dependency 的 reader，复用 shared TypeScript core。 |
 | `runtime/cpp/rapidjson_reader` | C++ RapidJSON reader adapter | 已有 header-only RapidJSON adapter，可用于测试与生产接入。 |
@@ -1067,14 +1066,11 @@ runtime/
     payloads/             # 跨语言共享 payload cases
     expected/             # scalar / error case expectations
   rust/
-    reader_core/          # shared ValueReader、错误上下文、测试工具
-      Cargo.toml          # 后续补齐；默认不启用具体格式
-      src/
     serde_json_reader/
-      src/                # serde_json::Value reader、JSON decode helper
+      src/runtime_reader.rs # JsonValueReader、JSON fs loader、generated trait glue
       Cargo.toml          # features: fs
     serde_msgpack_reader/
-      src/                # rmp-serde decode helper、MessagePack value reader
+      src/runtime_reader.rs # MessagePackValueReader、MessagePack fs loader、generated trait glue
       Cargo.toml          # features: fs
   typescript/
     reader_core/
@@ -1122,8 +1118,8 @@ runtime/
 
 | 语言 | 格式 | adapter 单元 | 支持等级 | 形态 | 依赖与启用方式 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
-| Rust | JSON | `runtime/rust/serde_json_reader` | `stable` | `copyable_template` | `serde_json`；Cargo feature `json` / `fs` | 当前 trait 由 generated crate 声明，短期是生产可用模板；stable runtime crate 落地后再升级为 standalone package。 |
-| Rust | MessagePack | `runtime/rust/serde_msgpack_reader` | `stable` | `copyable_template` | `rmp-serde`；Cargo feature `messagepack` / `fs` | `rmp` 是 Rust MessagePack 缩写，因此目录使用 serde + 文件格式命名，避免 `rmp` 与格式名重复。 |
+| Rust | JSON | `runtime/rust/serde_json_reader` | `stable` | `copyable_template` | `serde_json`；Cargo feature `json` / `fs` | 当前 trait 由 generated crate 声明，短期是生产可用模块；`JsonValueReader` 留在 JSON reader 内，stable runtime crate 落地后再升级为 standalone package。 |
+| Rust | MessagePack | `runtime/rust/serde_msgpack_reader` | `stable` | `copyable_template` | `rmp-serde` + `serde_json::Value` 作为中间 value；Cargo feature `messagepack` / `fs` | `MessagePackValueReader` 留在 MessagePack reader 内，避免测试 harness 自定义 reader；中期可收敛到真正的 ConfigForge Runtime Value。 |
 | TypeScript | JSON | `runtime/typescript/json_reader` | `stable` | `standalone_package` | 原生 `JSON.parse`；独立 npm package | 不依赖 generated.ts，Node fs/fetch loader 分离。 |
 | TypeScript | MessagePack | `runtime/typescript/messagepack_reader` | `preview -> stable` | `standalone_package` | `@msgpack/msgpack` 作为 peer dependency；独立 npm package | 解码后的 unknown value 复用 core reader 语义。 |
 | C++ | JSON | `runtime/cpp/rapidjson_reader` | `preview -> stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(RapidJSON CONFIG)` / package manager | 用 RapidJSON 完整处理转义、Unicode、数字和 parse error；替代生产场景的 builtin parser。 |
@@ -1265,7 +1261,7 @@ MessagePack adapter 的 value 语义应与 JSON adapter 对齐：object/map 支�
 
 不同语言的 reader interface 绑定方式不同，adapter 形态也不同：
 
-- **Rust**：当前 trait 由 generated crate 声明，外部 crate 无法不依赖用户 generated crate 就直接实现该 trait。短期方案是提供可复制 module/template，例如 `runtime/rust/serde_json_reader/src/template.rs`，由 codegen option 或用户复制进 generated crate/业务 crate 后实现本地 trait；中期方案是拆出稳定 `config_forge_runtime` support crate，让 generated code 可配置为 `use config_forge_runtime::{RuntimeDataReader, RuntimeDataLoader}`，adapter crate 再直接实现这些 trait。
+- **Rust**：当前 trait 由 generated crate 声明，外部 crate 无法不依赖用户 generated crate 就直接实现该 trait。短期方案是提供可复制 reader module，例如 `runtime/rust/serde_json_reader/src/runtime_reader.rs`，由 codegen option 或用户复制进 generated crate/业务 crate 后实现本地 trait；中期方案是拆出稳定 `config_forge_runtime` support crate，让 generated code 可配置为 `use config_forge_runtime::{RuntimeDataReader, RuntimeDataLoader}`，adapter crate 再直接实现这些 trait。
 - **TypeScript**：接口是结构化类型，adapter package 只要导出同形状 class 即可直接传给 `GameData.load`。因此 TypeScript adapter 可以最早做成标准 npm workspace 包。
 - **C++**：`IRuntimeDataReader` 是 nominal virtual interface，adapter 需要看到 generated header 或稳定 runtime interface header。短期方案是 adapter header/source 通过 include path 引用 generated header；中期方案是拆出稳定 `config_forge_runtime.hpp`，generated code 和 adapter 都依赖该 header，降低每次生成代码对 adapter 编译的耦合。
 

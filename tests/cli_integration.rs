@@ -1657,15 +1657,10 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
     fs::copy(harness_dir.join("lib.rs"), temp_dir.path().join("lib.rs"))
         .expect("rust harness lib.rs should be copied");
     fs::copy(
-        fixture_root.join("../../../runtime/rust/reader_core/src/value_reader.rs"),
-        temp_dir.path().join("runtime_reader_core.rs"),
-    )
-    .expect("rust runtime reader core should be copied");
-    fs::copy(
-        fixture_root.join("../../../runtime/rust/serde_msgpack_reader/src/template.rs"),
+        fixture_root.join("../../../runtime/rust/serde_msgpack_reader/src/runtime_reader.rs"),
         temp_dir.path().join("runtime_loader.rs"),
     )
-    .expect("rust runtime loader should be copied");
+    .expect("rust MessagePack runtime reader should be copied");
     fs::copy(
         fixture_root.join("out/server_code/rust/generated.rs"),
         temp_dir.path().join("generated.rs"),
