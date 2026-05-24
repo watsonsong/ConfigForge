@@ -2,10 +2,11 @@ use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
     ConfigForgeError, Result,
+    exporter::RuntimeDataFile,
     meta::{LinkedField, LinkedFragmentPayload, LinkedMetaModel, PrimitiveFieldType, TableKind},
 };
 
-use super::{ArtifactKind, RuntimeDataFile};
+use super::ArtifactKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeModel {

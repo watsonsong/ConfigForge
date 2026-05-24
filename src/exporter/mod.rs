@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ConfigForgeError, Result,
-    codegen::RuntimeDataFile,
     data::{DataResolver, DataSet, DataTable, DataValue, ResolvedValue},
     meta::{LinkedMetaModel, LinkedTableMeta, TableKind, TargetTags},
 };
@@ -206,6 +205,12 @@ pub fn export_runtime_data(
         }
     }
     Ok(runtime_data_files)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeDataFile {
+    pub table_name: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

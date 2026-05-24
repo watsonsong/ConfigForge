@@ -2,12 +2,12 @@ use std::{fs, path::Path};
 
 use crate::{ConfigForgeError, Result};
 
-use super::{MetaDiagnostic, MetaModel, link_meta_model, validate_meta_model};
+use super::MetaModel;
 
 impl MetaModel {
     pub fn from_toml_str(input: &str) -> Result<Self> {
         let model: Self = toml::from_str(input).map_err(ConfigForgeError::ParseMetaString)?;
-        finish_loading(model)
+        finish_loading_model(model)
     }
 
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
@@ -23,12 +23,16 @@ impl MetaModel {
         for path in paths {
             loaded.push(read_meta_file(path.as_ref())?);
         }
-        finish_loading(merge_models(loaded))
+        finish_loading_model(merge_models(loaded))
+    }
+
+    pub fn finish_loading(self) -> Result<Self> {
+        finish_loading_model(self)
     }
 }
 
 pub fn load_meta_path(path: &Path) -> Result<MetaModel> {
-    finish_loading(read_meta_file(path)?)
+    finish_loading_model(read_meta_file(path)?)
 }
 
 fn read_meta_file(path: &Path) -> Result<MetaModel> {
@@ -66,16 +70,9 @@ fn merge_models(models: Vec<MetaModel>) -> MetaModel {
     merged
 }
 
-fn finish_loading(model: MetaModel) -> Result<MetaModel> {
-    let (_, mut diagnostics): (Option<super::LinkedMetaModel<'_>>, Vec<MetaDiagnostic>) =
-        link_meta_model(&model);
-    diagnostics.extend(validate_meta_model(&model));
-    diagnostics.sort();
-    diagnostics.dedup();
-
-    if diagnostics.is_empty() {
-        Ok(model)
-    } else {
-        Err(ConfigForgeError::MetaValidation(diagnostics))
+fn finish_loading_model(model: MetaModel) -> Result<MetaModel> {
+    if let Err(diagnostics) = model.link() {
+        return Err(ConfigForgeError::MetaValidation(diagnostics));
     }
+    Ok(model)
 }

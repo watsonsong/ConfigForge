@@ -73,8 +73,6 @@ src/data/
 迁移状态：
 
 - `DataRow`、`DataTable`、`DataSet`、`DataLoadPlan`、`DataLoader` 等已由 `src/data/mod.rs` 统一 re-export。
-- exporter / validation 已依赖 `crate::data::*`，不再需要 `source.rs` 兼容层。
-- 外部 source provider 的原始读取能力后续继续归入 `src/data/` 下的 provider/reader 实现，而不是重新引入顶层 `source.rs`。
 
 ## 3.4 核心数据结构
 
@@ -592,11 +590,7 @@ pub fn validate_project(meta_path: &Path, data_dir: &Path) -> Result<()> {
 
 `export_project` 同理，应先得到 raw `DataSet`，再按 target 生成 `ResolvedExportView`。构建 `DataLoadPlan` 时可以先用当前 target 的 `TargetTags` 过滤整表 `export_when`，避免加载不会导出的表；写出 runtime data 时继续按同一组 tags 过滤字段和 `row_export` 行。长期 exporter 只负责 `DataValue -> JSON/MessagePack/future binary`，不再理解 source layout、default、target visibility 或 nested struct boundary。
 
-## 3.9 与旧 `source.rs` 的关系
-
-旧 `src/source.rs` 只剩 `DataRow` / `DataTable` 的兼容 re-export，工程内已无直接引用。随着 `src/data/` 稳定承载 CSV 读取、数据模型和 loader，顶层 `source.rs` 已无保留必要并可删除；需要使用原始行/表模型的代码应直接依赖 `crate::data::{DataRow, DataTable}`。
-
-## 3.10 错误与诊断边界
+## 3.9 错误与诊断边界
 
 第一阶段沿用 `ConfigForgeError`：
 
@@ -630,7 +624,7 @@ Resolved 层落地后，诊断模型需要同时支持 raw source 与 resolved v
 
 为了避免 resolved 后丢失定位信息，`ResolvedValue` 必须携带 `ValueSourceTrace`。ObjectTable 的 `key,value` source 还需要 key-level source map，否则 singleton logical row 只能报 row 1，不能指向真实 CSV key 行；这可以作为 resolved 层的 source trace 能力补齐。
 
-## 3.11 测试计划
+## 3.10 测试计划
 
 ### Data 模块单元测试
 
@@ -676,7 +670,7 @@ Resolved 层落地后，诊断模型需要同时支持 raw source 与 resolved v
 9. 增加 `class_levels` 复合 primary index 负向测试，构造重复 `(class_id, level)` 并断言 CLI 失败。
 10. 增加 inactive fragment header 负向测试，例如 `materials.csv` 出现 `attributes.attack` 应失败。
 
-## 3.12 第一阶段完成标准
+## 3.11 第一阶段完成标准
 
 Data 模块第一阶段完成时应满足：
 

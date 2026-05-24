@@ -560,6 +560,7 @@ impl MetaModel {
     pub fn from_toml_str(input: &str) -> Result<Self>;
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self>;
     pub fn from_paths<I, P>(paths: I) -> Result<Self>;
+    pub fn finish_loading(self) -> Result<Self>;
 }
 
 pub fn load_meta_path(path: &Path) -> Result<MetaModel>;
@@ -570,9 +571,9 @@ pub fn load_meta_path(path: &Path) -> Result<MetaModel>;
 - `from_toml_str`：直接 TOML 反序列化为 `MetaModel`，随后执行 `finish_loading`。
 - `from_path`：调用 `load_meta_path`。
 - `from_paths`：合并多个显式传入的 Meta TOML 文件；不处理 imports。
-- Project Config 的 `imports` 递归、去重、片段合并由 exporter/config resolve 层负责；Meta loader 只负责把已给定的 Meta 内容加载成 `MetaModel` 并完成 link/validate。
+- Project Config 的 `imports` 递归、去重、片段合并由 Project 模块负责；Meta loader 只负责把已给定的 Meta 内容加载成 `MetaModel` 并完成 link/validate。
 - `merge_models`：按传入顺序合并 enums、structs、tables。
-- `finish_loading`：先 `link_meta_model` 收集未知类型等 Link diagnostics，再 `validate_meta_model` 收集结构 diagnostics，排序并去重后返回。
+- `finish_loading` / `MetaModel::finish_loading()`：统一复用 `MetaModel::link()` 的 link + validate 诊断生命周期，排序并去重后返回；该方法只返回已完成校验的 owned raw model，不保存 borrowed linked view。
 
 ## 2.9 校验与诊断
 
@@ -756,8 +757,9 @@ Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和�
 - Loader 返回 `MetaModel`，因为它是 owned 数据，便于调用方控制生命周期。
 - 下游在需要类型解析或快速查询时，应在持有 `MetaModel` 的作用域内调用 `meta.link()` 得到 `LinkedMetaModel<'_>`。
 - `MetaModel::from_toml_str` / `from_path` / `from_paths` 返回的是已完成 link + validate 检查的 raw model；raw model 本身不保存 borrowed links。
+- `MetaModel::finish_loading()` 是给外部已构造 raw model 使用的统一收口入口，例如 Project 模块抽取出的 raw `MetaModel`；它不重新实现诊断合并逻辑，而是复用 `MetaModel::link()`。
 - `link_meta_model()` 每次调用都会基于 raw model 构造 runtime borrowed view并只返回引用解析 diagnostics；`MetaModel::link()` 会额外合并结构校验 diagnostics。调用方只能在 diagnostics 为空时消费 linked model；如果 diagnostics 非空，linked model 视为不可用。
-- `ProjectConfig::meta_model()` 同样返回已完成 link + validate 检查的 raw model；`build_target()` 随后再次调用 `link()` 是为了获得当前执行阶段使用的 borrowed view，而不是重复修改 raw model。
+- `ProjectConfig::raw_meta_model()` 只抽取 raw model，不做 Meta 校验；`build_target()` 对该 raw model 调用 `MetaModel::link()`，由 Meta 模块统一完成 link + validate 并返回当前执行阶段使用的 borrowed view。
 - `LinkedMetaModel<'_>` 不应跨越 `MetaModel` 生命周期；通常应在 export/validate 函数栈内临时创建并传递引用。
 - validation/exporter 不应再自行解析 `FieldMeta.field_type` 字符串；应读取 `LinkedFieldMeta.linked_field` 或 `primitive_type()`。
 - 对 index 逻辑，应优先使用 `LinkedIndexMeta.fields`，避免重复做 field name 查找。

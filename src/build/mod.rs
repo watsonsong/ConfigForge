@@ -20,8 +20,9 @@ use crate::{
     ConfigForgeError, Result,
     codegen::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, GeneratedFile,
-        RuntimeDataFile, builtin_generators,
+        builtin_generators,
     },
+    exporter::RuntimeDataFile,
     meta::TargetTags,
 };
 
@@ -43,7 +44,7 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
         .unwrap_or_else(|| Path::new("."));
     let target = project.target(options.target_name)?;
     let target = target.normalize()?;
-    let meta_set = project.meta_model()?;
+    let meta_set = project.raw_meta_model();
     let linked_meta = meta_set.link().map_err(ConfigForgeError::MetaValidation)?;
     let target_tags = target.target_tags();
 

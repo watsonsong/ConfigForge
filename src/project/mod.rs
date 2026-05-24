@@ -10,10 +10,7 @@ use crate::{
     ConfigForgeError, Result,
     codegen::{CodeExportProject, CodegenTaskConfig},
     exporter::TargetDataConfig,
-    meta::{
-        EnumMeta, MetaDiagnostic, MetaModel, StructMeta, TableMeta, link_meta_model,
-        validate_meta_model,
-    },
+    meta::{EnumMeta, MetaModel, StructMeta, TableMeta},
 };
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -70,14 +67,12 @@ impl ProjectConfig {
             .ok_or_else(|| ConfigForgeError::Validation(format!("target `{target_name}` not found")))
     }
 
-    pub(crate) fn meta_model(&self) -> Result<MetaModel> {
-        let model = MetaModel {
+    pub(crate) fn raw_meta_model(&self) -> MetaModel {
+        MetaModel {
             enums: self.enums.clone(),
             structs: self.structs.clone(),
             tables: self.tables.clone(),
-        };
-        finish_loading_project_meta(&model)?;
-        Ok(model)
+        }
     }
 }
 
@@ -200,22 +195,6 @@ pub(crate) fn validate_unique_target_names(targets: &[TargetConfig]) -> Result<(
     }
 
     Ok(())
-}
-
-fn finish_loading_project_meta(model: &MetaModel) -> Result<()> {
-    let (_, mut diagnostics): (
-        Option<crate::meta::LinkedMetaModel<'_>>,
-        Vec<MetaDiagnostic>,
-    ) = link_meta_model(model);
-    diagnostics.extend(validate_meta_model(model));
-    diagnostics.sort();
-    diagnostics.dedup();
-
-    if diagnostics.is_empty() {
-        Ok(())
-    } else {
-        Err(ConfigForgeError::MetaValidation(diagnostics))
-    }
 }
 
 impl From<&ProjectConfigMeta> for CodeExportProject {

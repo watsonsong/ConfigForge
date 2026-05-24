@@ -18,6 +18,7 @@ use serde::Deserialize;
 
 use crate::{
     ConfigForgeError, Result,
+    exporter::RuntimeDataFile,
     meta::{LinkedMetaModel, TargetTags},
 };
 
@@ -313,12 +314,6 @@ pub fn default_module_name(language: CodeExportLanguage) -> &'static str {
         CodeExportLanguage::Cpp => "config_forge_generated",
         CodeExportLanguage::TypeScript => "dataExportGenerated",
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeDataFile {
-    pub table_name: String,
-    pub path: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -72,7 +72,7 @@ build_target(options)
   -> ProjectConfig::from_path
   -> select target
   -> target.normalize()
-  -> project.meta_model()
+  -> project.raw_meta_model()
   -> MetaModel::link()
   -> export_runtime_data_tasks(...)
       -> DataLoadPlan::from_tables(target-visible tables)

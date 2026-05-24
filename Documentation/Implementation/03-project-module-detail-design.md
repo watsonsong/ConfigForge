@@ -11,7 +11,7 @@ Project 模块解决以下问题：
 3. 将不同配置片段中的 `project`、`enums`、`structs`、`tables`、`targets` 合并成一个 `ProjectConfig`。
 4. 将相对路径按声明文件所在目录归一化，避免 imports 后路径相对根目录漂移。
 5. 保留 target 聚合结构：每个 target 可声明多个 runtime data task 和多个 codegen task。
-6. 从工程配置中抽取 `MetaModel`，并在返回前完成 meta link / validate 的基础校验。
+6. 从工程配置中抽取 raw `MetaModel`；Meta 的 link / validate 生命周期统一由 `src/meta/` 提供，Build 只负责按流程调用。
 
 非目标：
 
@@ -115,7 +115,7 @@ Project 模块位于 Meta 与 Build 之间：
 ```text
 build
   -> project
-      -> meta       # 使用 Meta 数据结构和校验入口
+      -> meta       # 复用 Meta 数据结构，不执行 Meta link/validate
       -> exporter   # 仅引用 TargetDataConfig
       -> codegen    # 仅引用 CodegenTaskConfig
 ```
@@ -124,7 +124,8 @@ build
 
 - `project` 不能依赖 `build`。
 - `project` 不调用 `DataLoader`，不创建线程池。
-- `project.meta_model()` 返回 `MetaModel` 前可以调用 meta link/validate 做 fail-fast，但不持有 `LinkedMetaModel<'meta>`，因为 linked view 的生命周期属于调用方。
+- `project.raw_meta_model()` 只把合并后的 `enums` / `structs` / `tables` 克隆为 raw `MetaModel`，不调用 `link_meta_model()`、`validate_meta_model()` 或 `MetaModel::link()`。
+- Meta link / validate 的唯一业务入口属于 Meta 模块：standalone loader 通过 `MetaModel::finish_loading()` 完成加载后校验，Build 对 Project 抽取出的 raw model 直接调用 `MetaModel::link()` 获取当前执行阶段使用的 borrowed view。
 
 ## 3.7 测试边界
 
