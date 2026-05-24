@@ -3,6 +3,8 @@
 
 @PACKAGE_INIT@
 
-include("${CMAKE_CURRENT_LIST_DIR}/ConfigForgeRuntimeTargets.cmake")
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/ConfigForgeRuntimeTargets.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/ConfigForgeRuntimeTargets.cmake")
+endif()
 
 check_required_components(ConfigForgeRuntime)

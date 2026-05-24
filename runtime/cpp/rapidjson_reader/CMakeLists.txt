@@ -27,13 +27,13 @@ if(NOT RapidJSON_FOUND AND NOT TARGET RapidJSON::RapidJSON AND NOT RAPIDJSON_INC
     set(RAPIDJSON_INCLUDE_DIR "${rapidjson_SOURCE_DIR}/include")
 endif()
 
-add_library(config_forge_runtime_json_rapidjson INTERFACE)
-add_library(config_forge_runtime::json_rapidjson ALIAS config_forge_runtime_json_rapidjson)
-target_include_directories(config_forge_runtime_json_rapidjson INTERFACE
+add_library(config_forge_runtime_rapidjson_reader INTERFACE)
+add_library(config_forge_runtime::rapidjson_reader ALIAS config_forge_runtime_rapidjson_reader)
+target_include_directories(config_forge_runtime_rapidjson_reader INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>)
-target_compile_features(config_forge_runtime_json_rapidjson INTERFACE cxx_std_17)
+target_compile_features(config_forge_runtime_rapidjson_reader INTERFACE cxx_std_17)
 if(TARGET RapidJSON::RapidJSON)
-    target_link_libraries(config_forge_runtime_json_rapidjson INTERFACE RapidJSON::RapidJSON)
+    target_link_libraries(config_forge_runtime_rapidjson_reader INTERFACE RapidJSON::RapidJSON)
 elseif(RAPIDJSON_INCLUDE_DIR)
-    target_include_directories(config_forge_runtime_json_rapidjson INTERFACE ${RAPIDJSON_INCLUDE_DIR})
+    target_include_directories(config_forge_runtime_rapidjson_reader INTERFACE ${RAPIDJSON_INCLUDE_DIR})
 endif()

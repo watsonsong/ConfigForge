@@ -1043,7 +1043,7 @@ missing/null 语义：
 | `runtime/rust/json_reader_serde` | Rust JSON fs loader template | 已有 JSON loader template。 |
 | `runtime/rust/messagepack_reader_rmp` | Rust MessagePack fs loader template | 已有 MessagePack loader template，并被 Rust integration harness 使用。 |
 | `runtime/typescript/json_reader` | TypeScript JSON reader + Node fs loader | 已有 JSON reader，使用结构化类型，不依赖 generated.ts。 |
-| `runtime/cpp/json_rapidjson` | C++ RapidJSON reader adapter | 已有 header-only RapidJSON adapter，可用于测试与生产接入。 |
+| `runtime/cpp/rapidjson_reader` | C++ RapidJSON reader adapter | 已有 header-only RapidJSON adapter，可用于测试与生产接入。 |
 
 主要缺口：
 
@@ -1090,10 +1090,7 @@ runtime/
       node-fs/            # Node fs transport loader
       fetch/              # browser/fetch transport loader
   cpp/
-    core/
-      include/            # adapter glue、diagnostic helpers、stable helpers
-      CMakeLists.txt
-    json_rapidjson/
+    rapidjson_reader/
       include/            # RapidJSON-backed header-only reader adapter
       CMakeLists.txt
     messagepack_msgpack_cpp/
@@ -1129,7 +1126,7 @@ runtime/
 | Rust | MessagePack | `runtime/rust/messagepack_reader_rmp` | `stable` | `copyable_template` | `rmp-serde`；Cargo feature `messagepack` / `fs` | 短期可解码到 shared value；中期收敛到 ConfigForge Runtime Value，避免 MessagePack 语义长期 JSON 化。 |
 | TypeScript | JSON | `runtime/typescript/json_reader` | `stable` | `standalone_package` | 原生 `JSON.parse`；独立 npm package | 不依赖 generated.ts，Node fs/fetch loader 分离。 |
 | TypeScript | MessagePack | `runtime/typescript/messagepack_reader` | `preview -> stable` | `standalone_package` | `@msgpack/msgpack` 作为 peer dependency；独立 npm package | 解码后的 unknown value 复用 core reader 语义。 |
-| C++ | JSON | `runtime/cpp/json_rapidjson` | `preview -> stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(RapidJSON CONFIG)` / package manager | 用 RapidJSON 完整处理转义、Unicode、数字和 parse error；替代生产场景的 builtin parser。 |
+| C++ | JSON | `runtime/cpp/rapidjson_reader` | `preview -> stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(RapidJSON CONFIG)` / package manager | 用 RapidJSON 完整处理转义、Unicode、数字和 parse error；替代生产场景的 builtin parser。 |
 | C++ | MessagePack | `runtime/cpp/messagepack_msgpack_cpp` | `preview -> stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(msgpack-cxx CONFIG)` 或 `msgpack-c` | 不手写二进制 parser；解码到 msgpack object/value 后适配 reader。 |
 
 依赖策略：
@@ -1147,20 +1144,18 @@ C++ runtime helpers 采用 CMake target 管理，目标是让游戏项目能通�
 
 ```cmake
 option(CONFIG_FORGE_RUNTIME_BUILD_TESTS "Build ConfigForge runtime reader tests" OFF)
-option(CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON "Enable minimal RapidJSON adapter" OFF)
-option(CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON "Enable RapidJSON adapter" OFF)
+option(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER "Enable RapidJSON reader adapter" OFF)
 option(CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK "Enable msgpack-c adapter" OFF)
 option(CONFIG_FORGE_RUNTIME_FETCH_DEPS "Allow FetchContent for missing third-party deps" OFF)
 ```
 
-普通业务构建默认不启用 `json_rapidjson`，避免最容易链接的 target 被误用到生产。测试构建可以在 `CONFIG_FORGE_RUNTIME_BUILD_TESTS=ON` 时显式打开 `CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON=ON`，用于无三方依赖 smoke test。生产项目推荐显式启用 RapidJSON 或 MessagePack adapter：
+普通业务构建默认不启用 `rapidjson_reader`，避免最容易链接的 target 被误用到生产。测试构建可以在 `CONFIG_FORGE_RUNTIME_BUILD_TESTS=ON` 时显式打开 `CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER=ON`，用于 RapidJSON reader smoke test。生产项目推荐显式启用 RapidJSON 或 MessagePack adapter：
 
 ```cmake
 add_subdirectory(path/to/ConfigForge/runtime/cpp)
 
 target_link_libraries(game_config_runtime PRIVATE
-  config_forge_runtime::core
-  config_forge_runtime::json_rapidjson
+  config_forge_runtime::rapidjson_reader
   config_forge_runtime::filesystem_loader
 )
 
@@ -1173,14 +1168,15 @@ target_include_directories(game_config_runtime PRIVATE
 
 | target | 类型 | 说明 |
 | --- | --- | --- |
-| `config_forge_runtime::core` | interface/static | 错误类型、shared helper、可选 stable interface glue。 |
-| `config_forge_runtime::json_rapidjson` | static/interface | RapidJSON based reader，生产推荐 JSON adapter。 |
+| `config_forge_runtime::rapidjson_reader` | static/interface | RapidJSON based reader，生产推荐 JSON adapter。 |
 | `config_forge_runtime::messagepack_msgpack_cpp` | static/interface | msgpack-c based reader，生产推荐 MessagePack adapter。 |
 | `config_forge_runtime::filesystem_loader` | static/interface | 文件系统 transport，可组合 JSON 或 MessagePack reader。 |
 
+当前 C++ adapter 不提供单独的 `config_forge_runtime::core` target。短期以 generated header 中的 `IRuntimeDataReader` / `IRuntimeDataLoader` 作为唯一 C++ contract，adapter 通过宏绑定到该 generated interface，避免同时存在 generated interface 与 runtime core interface 两套 nominal virtual 类型。后续如拆出稳定 `config_forge_runtime.hpp`，再重新引入独立 stable interface target。
+
 ##### 三方依赖解析
 
-- `json_rapidjson` 优先 `find_package(RapidJSON CONFIG QUIET)`；找不到时，如果 `CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON`，可用 `FetchContent` 拉取 RapidJSON；否则给出明确 CMake error，提示通过 vcpkg/Conan/system package 安装。
+- `rapidjson_reader` 优先 `find_package(RapidJSON CONFIG QUIET)`；找不到时，如果 `CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON`，可用 `FetchContent` 拉取 RapidJSON；否则给出明确 CMake error，提示通过 vcpkg/Conan/system package 安装。
 - `messagepack_msgpack_cpp` 优先 `find_package(msgpack-cxx CONFIG QUIET)` 或项目约定的 `find_package(msgpack CONFIG QUIET)`；找不到时同样只在 `CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON` 时自动拉取。
 - 三方库只链接到 adapter target，不出现在 generated code target 的 public API 中。业务可替换为引擎内置 JSON / MessagePack 实现，只要实现同一 `IRuntimeDataReader` contract。
 
@@ -1191,7 +1187,7 @@ target_include_directories(game_config_runtime PRIVATE
 ```cpp
 #define CONFIG_FORGE_RUNTIME_CPP_READER my::game::config::IRuntimeDataReader
 #define CONFIG_FORGE_RUNTIME_CPP_LOADER my::game::config::IRuntimeDataLoader
-#include "config_forge/runtime/json_rapidjson/runtime_loader.hpp"
+#include "config_forge/runtime/rapidjson_reader/runtime_loader.hpp"
 ```
 
 Phase 1.5 优先评估拆出稳定 `config_forge_runtime.hpp`：generated C++ 提供 `interface = "inline" | "external"` 选项。默认 `inline` 保持当前 generated header 自带 interface；production adapter 推荐 `external`，由 generated code 和 adapter 同时 include 稳定 header。这样 adapter library 不再依赖某次 generated header，CMake target 可以更像普通第三方库被复用。
@@ -1279,14 +1275,14 @@ Codegen 后续可增加 runtime adapter 相关选项，但默认仍不强制输�
 
 ```toml
 [targets.code.runtime_reader]
-adapter = "rust/messagepack_reader_rmp"   # 或 "typescript/messagepack_reader", "cpp/json_rapidjson"
+adapter = "rust/messagepack_reader_rmp"   # 或 "typescript/messagepack_reader", "cpp/rapidjson_reader"
 emit = "copy"                      # copy / reference / none
 loader = "fs"                      # fs / fetch / none / custom
 ```
 
 配置校验规则：
 
-- `adapter` 的 language 必须与 code target language 匹配，例如 TypeScript target 不能选择 `cpp/json_rapidjson`。
+- `adapter` 的 language 必须与 code target language 匹配，例如 TypeScript target 不能选择 `cpp/rapidjson_reader`。
 - `adapter` 的 format 必须与 code task 绑定的 `targets.data.format` 匹配：JSON data task 不能选择 MessagePack-only adapter，MessagePack data task 不能选择 JSON-only adapter。
 - `loader` 必须被所选语言和 adapter 支持，例如 `fetch` 只对提供 fetch transport 的 TypeScript/browser adapter 合法。
 - `emit = "reference"` 时，必须能解析到对应 package/crate/CMake target；无法解析时应在 config 阶段报错或生成明确 diagnostic，不应延迟到编译/运行时。
@@ -1304,9 +1300,9 @@ loader = "fs"                      # fs / fetch / none / custom
 
 建议推进顺序：
 
-1. 将 C++ JSON adapter 收敛为 `json_rapidjson`，移除无依赖 builtin fallback，测试与生产都通过 RapidJSON 路径验证。
+1. 将 C++ JSON adapter 收敛为 `rapidjson_reader`，移除无依赖 builtin fallback，测试与生产都通过 RapidJSON 路径验证。
 2. 补 TypeScript MessagePack adapter 与 shared TypeScript core，形成 TS JSON / MessagePack 对称结构。
-3. 补 C++ 顶层 CMake 工程、`json_rapidjson` stable adapter、`messagepack_msgpack_cpp` stable adapter；在此之前优先评估 Phase 1.5 stable interface header。
+3. 补 C++ 顶层 CMake 工程、`rapidjson_reader` stable adapter、`messagepack_msgpack_cpp` stable adapter；在此之前优先评估 Phase 1.5 stable interface header。
 4. 集成测试 harness 改为引用或复制这些 adapter，避免 harness 内长期维护独立 reader 实现。
 5. 增加 adapter 自测：每个 adapter 至少用同一份 canonical payload 验证 field/index/len/scalar/null、missing vs null、string-to-number/bool、finite float、escaped string。
 6. 再考虑是否提供 codegen option 自动复制 adapter 到目标工程输出目录。

@@ -9,19 +9,11 @@ include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
 option(CONFIG_FORGE_RUNTIME_BUILD_TESTS "Build ConfigForge runtime helper tests" OFF)
-option(CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON "Enable RapidJSON adapter" OFF)
+option(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER "Enable RapidJSON reader adapter" OFF)
 option(CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK "Enable msgpack-c adapter" OFF)
 option(CONFIG_FORGE_RUNTIME_FETCH_DEPS "Allow FetchContent for missing third-party deps" OFF)
 
-add_library(config_forge_runtime_core INTERFACE)
-add_library(config_forge_runtime::core ALIAS config_forge_runtime_core)
-set_target_properties(config_forge_runtime_core PROPERTIES EXPORT_NAME core)
-target_include_directories(config_forge_runtime_core INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-target_compile_features(config_forge_runtime_core INTERFACE cxx_std_17)
-
-if(CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON)
+if(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER)
     find_package(RapidJSON CONFIG QUIET)
     if(RapidJSON_FOUND AND NOT TARGET RapidJSON::RapidJSON)
         foreach(config_forge_runtime_rapidjson_var
@@ -51,17 +43,17 @@ if(CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON)
             message(FATAL_ERROR "RapidJSON was not found. Install it with vcpkg/Conan/system packages, set RAPIDJSON_INCLUDE_DIR, or enable CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON.")
         endif()
     endif()
-    add_library(config_forge_runtime_json_rapidjson INTERFACE)
-    add_library(config_forge_runtime::json_rapidjson ALIAS config_forge_runtime_json_rapidjson)
-    set_target_properties(config_forge_runtime_json_rapidjson PROPERTIES EXPORT_NAME json_rapidjson)
-    target_include_directories(config_forge_runtime_json_rapidjson INTERFACE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/json_rapidjson/include>
+    add_library(config_forge_runtime_rapidjson_reader INTERFACE)
+    add_library(config_forge_runtime::rapidjson_reader ALIAS config_forge_runtime_rapidjson_reader)
+    set_target_properties(config_forge_runtime_rapidjson_reader PROPERTIES EXPORT_NAME rapidjson_reader)
+    target_include_directories(config_forge_runtime_rapidjson_reader INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rapidjson_reader/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-    target_link_libraries(config_forge_runtime_json_rapidjson INTERFACE config_forge_runtime::core)
+    target_compile_features(config_forge_runtime_rapidjson_reader INTERFACE cxx_std_17)
     if(TARGET RapidJSON::RapidJSON)
-        target_link_libraries(config_forge_runtime_json_rapidjson INTERFACE RapidJSON::RapidJSON)
+        target_link_libraries(config_forge_runtime_rapidjson_reader INTERFACE RapidJSON::RapidJSON)
     elseif(RAPIDJSON_INCLUDE_DIR)
-        target_include_directories(config_forge_runtime_json_rapidjson INTERFACE ${RAPIDJSON_INCLUDE_DIR})
+        target_include_directories(config_forge_runtime_rapidjson_reader INTERFACE ${RAPIDJSON_INCLUDE_DIR})
     endif()
 endif()
 
@@ -79,7 +71,7 @@ if(CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK)
     add_library(config_forge_runtime_messagepack_msgpack_cpp INTERFACE)
     add_library(config_forge_runtime::messagepack_msgpack_cpp ALIAS config_forge_runtime_messagepack_msgpack_cpp)
     set_target_properties(config_forge_runtime_messagepack_msgpack_cpp PROPERTIES EXPORT_NAME messagepack_msgpack_cpp)
-    target_link_libraries(config_forge_runtime_messagepack_msgpack_cpp INTERFACE config_forge_runtime::core)
+    target_compile_features(config_forge_runtime_messagepack_msgpack_cpp INTERFACE cxx_std_17)
     if(msgpack-cxx_FOUND)
         target_link_libraries(config_forge_runtime_messagepack_msgpack_cpp INTERFACE msgpack-cxx)
     elseif(TARGET msgpackc-cxx)
@@ -87,25 +79,26 @@ if(CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK)
     endif()
 endif()
 
-set(config_forge_runtime_install_targets config_forge_runtime_core)
-if(TARGET config_forge_runtime_json_rapidjson)
-    list(APPEND config_forge_runtime_install_targets config_forge_runtime_json_rapidjson)
+set(config_forge_runtime_install_targets)
+if(TARGET config_forge_runtime_rapidjson_reader)
+    list(APPEND config_forge_runtime_install_targets config_forge_runtime_rapidjson_reader)
 endif()
 if(TARGET config_forge_runtime_messagepack_msgpack_cpp)
     list(APPEND config_forge_runtime_install_targets config_forge_runtime_messagepack_msgpack_cpp)
 endif()
 
-install(TARGETS ${config_forge_runtime_install_targets}
-    EXPORT ConfigForgeRuntimeTargets)
-install(DIRECTORY core/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+if(config_forge_runtime_install_targets)
+    install(TARGETS ${config_forge_runtime_install_targets}
+        EXPORT ConfigForgeRuntimeTargets)
 
-if(TARGET config_forge_runtime_json_rapidjson)
-    install(DIRECTORY json_rapidjson/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    install(EXPORT ConfigForgeRuntimeTargets
+        NAMESPACE config_forge_runtime::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ConfigForgeRuntime)
 endif()
 
-install(EXPORT ConfigForgeRuntimeTargets
-    NAMESPACE config_forge_runtime::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ConfigForgeRuntime)
+if(TARGET config_forge_runtime_rapidjson_reader)
+    install(DIRECTORY rapidjson_reader/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+endif()
 
 configure_package_config_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ConfigForgeRuntimeConfig.cmake.in
@@ -124,9 +117,9 @@ install(FILES
 
 if(CONFIG_FORGE_RUNTIME_BUILD_TESTS)
     enable_testing()
-    if(CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON)
-        add_executable(config_forge_runtime_json_rapidjson_smoke json_rapidjson/smoke_test.cpp)
-        target_link_libraries(config_forge_runtime_json_rapidjson_smoke PRIVATE config_forge_runtime::json_rapidjson)
-        add_test(NAME config_forge_runtime_json_rapidjson_smoke COMMAND config_forge_runtime_json_rapidjson_smoke)
+    if(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER)
+        add_executable(config_forge_runtime_rapidjson_reader_smoke rapidjson_reader/smoke_test.cpp)
+        target_link_libraries(config_forge_runtime_rapidjson_reader_smoke PRIVATE config_forge_runtime::rapidjson_reader)
+        add_test(NAME config_forge_runtime_rapidjson_reader_smoke COMMAND config_forge_runtime_rapidjson_reader_smoke)
     endif()
 endif()

@@ -4,7 +4,7 @@
 
 `runtime/cpp/` 是 ConfigForge 为 C++ 项目提供 runtime helper 的入口。未来每个 runtime data format 都可能有自己的 reader adapter，例如：
 
-- `json_rapidjson`：依赖 RapidJSON（header-only）；
+- `rapidjson_reader`：依赖 RapidJSON（header-only）；
 - `messagepack_msgpack_cpp`：可能依赖 msgpack-c / msgpack-cxx（可能是 header-only，也可能需要链接库，取决于发行包）；
 - `yaml_yaml_cpp`：可能依赖 yaml-cpp（通常需要编译和链接库）；
 - `protobuf_*` / `flatbuffers_*`：通常依赖官方 C++ runtime（可能需要生成代码、编译库和链接库）。
@@ -39,7 +39,7 @@ option(CONFIG_FORGE_RUNTIME_FETCH_DEPS "Allow FetchContent for missing third-par
 
 ```cmake
 target_link_libraries(game_config PRIVATE
-    config_forge_runtime::json_rapidjson)
+    config_forge_runtime::rapidjson_reader)
 ```
 
 而不是让 generated code target 直接链接 `RapidJSON::RapidJSON`、`yaml-cpp::yaml-cpp` 或 `msgpack-cxx`。
@@ -55,7 +55,7 @@ option(CONFIG_FORGE_RUNTIME_WITH_<FORMAT>_<BACKEND> "Enable <Backend> <Format> a
 示例：
 
 ```cmake
-option(CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON "Enable RapidJSON JSON adapter" OFF)
+option(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER "Enable RapidJSON reader adapter" OFF)
 option(CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK_MSGPACK_CPP "Enable msgpack-c/cxx MessagePack adapter" OFF)
 option(CONFIG_FORGE_RUNTIME_WITH_YAML_YAML_CPP "Enable yaml-cpp YAML adapter" OFF)
 ```
@@ -136,17 +136,17 @@ if(NOT RapidJSON_FOUND AND NOT TARGET RapidJSON::RapidJSON AND NOT RAPIDJSON_INC
     endif()
 endif()
 
-add_library(config_forge_runtime_json_rapidjson INTERFACE)
-add_library(config_forge_runtime::json_rapidjson ALIAS config_forge_runtime_json_rapidjson)
-target_include_directories(config_forge_runtime_json_rapidjson INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/json_rapidjson/include>
+add_library(config_forge_runtime_rapidjson_reader INTERFACE)
+add_library(config_forge_runtime::rapidjson_reader ALIAS config_forge_runtime_rapidjson_reader)
+target_include_directories(config_forge_runtime_rapidjson_reader INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rapidjson_reader/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-target_link_libraries(config_forge_runtime_json_rapidjson INTERFACE config_forge_runtime::core)
+target_compile_features(config_forge_runtime_rapidjson_reader INTERFACE cxx_std_17)
 
 if(TARGET RapidJSON::RapidJSON)
-    target_link_libraries(config_forge_runtime_json_rapidjson INTERFACE RapidJSON::RapidJSON)
+    target_link_libraries(config_forge_runtime_rapidjson_reader INTERFACE RapidJSON::RapidJSON)
 elseif(RAPIDJSON_INCLUDE_DIR)
-    target_include_directories(config_forge_runtime_json_rapidjson INTERFACE ${RAPIDJSON_INCLUDE_DIR})
+    target_include_directories(config_forge_runtime_rapidjson_reader INTERFACE ${RAPIDJSON_INCLUDE_DIR})
 endif()
 ```
 
@@ -201,7 +201,7 @@ endif()
 
 add_library(config_forge_runtime_yaml_yaml_cpp INTERFACE)
 add_library(config_forge_runtime::yaml_yaml_cpp ALIAS config_forge_runtime_yaml_yaml_cpp)
-target_link_libraries(config_forge_runtime_yaml_yaml_cpp INTERFACE config_forge_runtime::core)
+target_compile_features(config_forge_runtime_yaml_yaml_cpp INTERFACE cxx_std_17)
 
 if(TARGET yaml-cpp::yaml-cpp)
     target_link_libraries(config_forge_runtime_yaml_yaml_cpp INTERFACE yaml-cpp::yaml-cpp)
@@ -287,13 +287,13 @@ FetchContent_MakeAvailable(dep_name)
 ### 安装 adapter 自身 headers
 
 ```cmake
-install(DIRECTORY json_rapidjson/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY rapidjson_reader/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 ```
 
 ### adapter target 加入 export
 
 ```cmake
-list(APPEND config_forge_runtime_install_targets config_forge_runtime_json_rapidjson)
+list(APPEND config_forge_runtime_install_targets config_forge_runtime_rapidjson_reader)
 install(TARGETS ${config_forge_runtime_install_targets}
     EXPORT ConfigForgeRuntimeTargets)
 ```
@@ -316,7 +316,7 @@ Header-only 且通过 include path 使用的依赖，如果没有随 ConfigForge
 
 ## 新增 reader 的 checklist
 
-1. 目录命名：`runtime/cpp/<format>_<backend>/`，例如 `json_rapidjson`、`yaml_yaml_cpp`。
+1. 目录命名：`runtime/cpp/<backend>_reader/`，例如 `rapidjson_reader`；需要显式格式时可使用 `<format>_<backend>_reader`。
 2. 提供 headers / sources，并只实现 generated reader contract，不侵入 generated code。
 3. 在 `runtime/cpp/CMakeLists.txt` 增加独立 option。
 4. 按“find_package → find_path/find_library → FetchContent → fatal error”顺序解析依赖。
@@ -330,11 +330,11 @@ Header-only 且通过 include path 使用的依赖，如果没有随 ConfigForge
 
 ## 当前项目的落地示例
 
-当前 `runtime/cpp/CMakeLists.txt` 中的 `CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON` 是本指南的第一个落地例子。它展示了：
+当前 `runtime/cpp/CMakeLists.txt` 中的 `CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER` 是本指南的第一个落地例子。它展示了：
 
 - adapter 独立 option；
 - 优先使用系统/包管理器提供的 RapidJSON；
 - RapidJSON 是 header-only，因此缺失时在 `CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON` 下用 FetchContent 下载并传播 include path；
-- 对外只暴露 `config_forge_runtime::json_rapidjson`。
+- 对外只暴露 `config_forge_runtime::rapidjson_reader`。
 
 未来新增 C++ reader 时，应复制这套结构，而不是把三方库下载逻辑写进测试脚本或 generated code。若新依赖需要编译和链接库，应使用本文的 compiled library 模板，并额外处理 target 名称、传递依赖和安装后的 `find_dependency()`。

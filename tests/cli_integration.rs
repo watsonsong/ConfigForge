@@ -1758,7 +1758,7 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
 
                 set(CMAKE_CXX_STANDARD 17)
                 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-                set(CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON ON CACHE BOOL "" FORCE)
+                set(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER ON CACHE BOOL "" FORCE)
                 set(CONFIG_FORGE_RUNTIME_FETCH_DEPS ON CACHE BOOL "" FORCE)
                 add_subdirectory({runtime_cpp_dir:?} config_forge_runtime)
 
@@ -1766,11 +1766,11 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
                     {harness_cpp:?}
                     {generated_cpp:?})
                 target_include_directories(standard_runtime_check PRIVATE {generated_cpp_dir:?})
-                target_link_libraries(standard_runtime_check PRIVATE config_forge_runtime::json_rapidjson)
+                target_link_libraries(standard_runtime_check PRIVATE config_forge_runtime::rapidjson_reader)
 
                 add_executable(adapter_namespace_check adapter_namespace_check.cpp)
                 target_include_directories(adapter_namespace_check PRIVATE {temp_dir:?})
-                target_link_libraries(adapter_namespace_check PRIVATE config_forge_runtime::json_rapidjson)
+                target_link_libraries(adapter_namespace_check PRIVATE config_forge_runtime::rapidjson_reader)
             "#,
             runtime_cpp_dir = runtime_cpp_dir.display().to_string(),
             harness_cpp = harness_cpp.display().to_string(),
