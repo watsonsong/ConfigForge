@@ -166,26 +166,36 @@ Protobuf 未来规则：
 
 ### 6.2.1 生成代码的 Runtime Data 加载抽象
 
-生成代码必须把“如何取得配置文件”和“如何解析配置格式”接口化，避免把 runtime 绑定到 exporter 所在机器的文件系统或某个具体引擎 API。
+当前实现状态：已落地的 Rust / C++ / TypeScript 生成代码仍使用 **typed loader 过渡契约**，即按表生成 `load_<table>_rows` / `Load<Table>Rows` / `load<Table>Rows` 等方法，由接入方 loader 返回 typed rows / objects。下面定义的是下一阶段目标态契约；迁移完成前，当前可运行契约仍以生成代码实际输出为准。
 
-推荐抽象为一层：**RuntimeDataLoader**。生成代码只声明每张表所需的 typed row 加载方法，具体 runtime 自行决定如何读取文件、如何识别格式、如何解码成 row 列表。
+生成代码必须把“如何取得配置文件”和“如何把通用序列化数据组装成当前 Meta 对应的 typed rows / typed objects”分层：
 
-语言 API 形态可以按语言习惯调整，但语义应一致：
+- **接入方实现的 RuntimeDataLoader 必须是 Meta-agnostic 的通用加载/读取协议**，不应包含按表、按字段生成的方法，也不应返回 `ItemRow`、`GameRulesRow` 等 Meta-specific 类型。
+- **生成代码负责所有 Meta-specific 逻辑**：打开哪一个 table data file、读取 collection/object payload、按字段名或约定顺序读取字段、执行 runtime value 到目标语言类型的转换、构造 row/object、构建索引和 facade。
 
-| 语言 | Runtime 加载接口 |
+推荐抽象仍命名为 **RuntimeDataLoader**，但它表达的是“通用序列化 reader / cursor provider”，而不是“每张表的 typed row factory”。语言 API 形态可以按语言习惯调整，但语义应一致：
+
+| 语言 | Runtime 加载接口语义 |
 | --- | --- |
-| Rust | `RuntimeDataLoader::load_<table>_rows(path) -> Result<Vec<TableRow>, String>` |
-| C++ | `IRuntimeDataLoader::Load<Table>Rows(path) -> std::vector<TableRow>` |
-| TypeScript | `RuntimeDataLoader.load<Table>Rows(path) -> Promise<TableRow[]> | TableRow[]` |
+| Rust | `RuntimeDataLoader::open(path) -> Result<RuntimeDataReader, Error>`；reader 提供 begin/end object、begin/end array、按字段名读取 value、按序读取 value 等通用方法。 |
+| C++ | `IRuntimeDataLoader::Open(path) -> std::unique_ptr<IRuntimeDataReader>`；reader 只暴露格式无关的 object / array / field / scalar 读取能力。 |
+| TypeScript | `RuntimeDataLoader.open(path): Promise<RuntimeDataReader> | RuntimeDataReader`；reader 提供通用 JSON-like / MessagePack-like 读取 cursor。 |
 
-生成代码中的 repository / `GameData::load` 不直接打开文件，也不感知数据格式，而是接收 runtime loader。业务 runtime 可以选择：
+通用 reader 至少需要覆盖两类 layout：
 
-- 提供 JSON decoder；
-- 提供 MessagePack decoder；
-- 提供一个同时支持多种格式的 loader；
-- 在引擎侧复用已有资源加载和反序列化系统。
+1. **Named-field layout**：例如 JSON object、MessagePack map。生成代码传入字段名，reader 定位并返回字段值；字段顺序不作为语义要求。
+2. **Positional / packed layout**：例如未来紧密排布的数组、二进制 record。生成代码按 Meta 中稳定的字段顺序调用 reader；exporter 与 codegen 必须使用同一字段顺序定义，reader 不需要知道字段名。
 
-格式选择由 code task 引用的 `targets.data` 任务决定，并影响导出的 table data file 后缀；生成代码只保留 data file path，不包含格式常量。若 target 同时导出 JSON 与 MessagePack，可以分别配置 TypeScript code task 引用 `data = "json"`、C++ code task 引用 `data = "messagepack"`。
+reader 的基础语义必须覆盖当前 Meta 类型：int、float、bool、string/text/asset、enum、object/array。enum 按 string 读取后由生成代码校验枚举值；`text` 和 `asset` 按 string 读取。字段缺失和字段存在但为 null 必须区分：required 字段缺失或 null 都由生成代码报错；optional field / optional fragment 缺失时视为 absent；null 是否等价 optional absent 由生成器策略统一定义，第一阶段建议只对 optional 视为 empty。当前 exporter 仍可能输出字符串 cell 时，string-to-int / string-to-bool / string-to-float 的兼容规则应由 generated parser helper 统一处理，避免每个业务 loader 重复实现。
+
+因此业务 runtime 只需要长期维护一次通用 loader / reader 实现，可以选择：
+
+- 用 JSON parser 实现通用 reader；
+- 用 MessagePack decoder 实现通用 reader；
+- 提供一个同时支持多种格式的 reader；
+- 在引擎侧复用已有资源加载和反序列化 cursor。
+
+格式选择由 code task 引用的 `targets.data` 任务决定，并影响导出的 table data file 后缀；生成代码保留 data file path，并按 data task format 生成对应的通用读取路径。若 target 同时导出 JSON 与 MessagePack，可以分别配置 TypeScript code task 引用 `data = "json"`、C++ code task 引用 `data = "messagepack"`。无论 Meta 新增多少表和字段，接入方的 RuntimeDataLoader 接口都不应变化；变化只体现在重新生成的解析代码中。
 
 ## 6.3 Special Exporter
 
