@@ -327,6 +327,7 @@ fn code_model_includes_visible_foreign_keys() {
             [[tables]]
             name = "items"
             source = "items.csv"
+            polymorphic = true
             primary_index = "by_id"
 
             [[tables.fields]]
@@ -373,6 +374,7 @@ fn code_model_rejects_visible_foreign_key_to_hidden_target_index() {
             [[tables]]
             name = "items"
             source = "items.csv"
+            polymorphic = true
             primary_index = "by_id"
 
             [[tables.fields]]
@@ -749,6 +751,28 @@ fn generators_reject_duplicate_top_level_generated_types() {
     }
 }
 
+#[test]
+fn rust_generator_rejects_runtime_reader_trait_name_conflicts() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "runtime_data_reader"
+
+            [[structs.fields]]
+            name = "value"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+
+    assert_duplicate_generated_identifier(
+        RustCodeGenerator.generate(&input_for(&meta, CodeExportLanguage::Rust)),
+        "rust codegen",
+        "duplicate generated identifier `RuntimeDataReader`",
+        "top-level types",
+    );
+}
+
 fn assert_duplicate_generated_identifier(
     result: crate::Result<Vec<GeneratedFile>>,
     language: &str,
@@ -790,6 +814,48 @@ fn typescript_generator_emits_async_loader_and_maps() {
     assert!(content.contains("getById(id: number): ItemsRow | undefined"));
     assert!(content.contains("findByRarity(rarity: ItemRarity): readonly ItemsRow[]"));
     assert!(content.contains("Duplicate unique index key for ItemsTable.by_id"));
+}
+
+#[test]
+fn typescript_generator_reads_optional_fragment_once() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            polymorphic = true
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables.fragments]]
+            name = "stack"
+
+            [[tables.fragments.fields]]
+            name = "max_stack"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+
+    let files = TypeScriptCodeGenerator
+        .generate(&input_for(&meta, CodeExportLanguage::TypeScript))
+        .expect("typescript code");
+    let content = &files[0].content;
+
+    assert!(content.contains("const stackReader = optionalField(reader, \"stack\");"));
+    assert!(
+        content.contains("stack: stackReader ? readItemsStackFragment(stackReader) : undefined,")
+    );
+    assert!(!content.contains("optionalField(reader, \"stack\") ?"));
 }
 
 #[test]

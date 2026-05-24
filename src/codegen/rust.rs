@@ -352,7 +352,18 @@ fn render_read_from_reader_body(
 }
 
 fn validate_generated_symbols(model: &CodeModel, names: &RustNames<'_>) -> Result<()> {
-    let mut type_symbols = Vec::new();
+    let mut type_symbols = vec![
+        GeneratedSymbol::new(
+            "runtime interface",
+            "RuntimeDataReader",
+            "RuntimeDataReader",
+        ),
+        GeneratedSymbol::new(
+            "runtime interface",
+            "RuntimeDataLoader",
+            "RuntimeDataLoader",
+        ),
+    ];
     for code_enum in &model.enums {
         type_symbols.push(GeneratedSymbol::new(
             "enum",

@@ -290,6 +290,15 @@ fn render_reader_function_body(
     content.push_str(&format!(
         "function {function_name}(reader: RuntimeDataReader): {type_name} {{\n"
     ));
+    if let Some(table) = table {
+        for fragment in &table.fragments {
+            content.push_str(&format!(
+                "  const {}Reader = optionalField(reader, {:?});\n",
+                names.field_name(&fragment.name)?,
+                fragment.name
+            ));
+        }
+    }
     content.push_str("  return {\n");
     for field in fields {
         content.push_str(&format!(
@@ -304,8 +313,7 @@ fn render_reader_function_body(
             let payload_type = names.fragment_payload_type_name(table, fragment)?;
             let reader_function = names.reader_function_name(&payload_type)?;
             content.push_str(&format!(
-                "    {field_name}: optionalField(reader, {:?}) ? {reader_function}(optionalField(reader, {:?})!) : undefined,\n",
-                fragment.name, fragment.name
+                "    {field_name}: {field_name}Reader ? {reader_function}({field_name}Reader) : undefined,\n"
             ));
         }
     }

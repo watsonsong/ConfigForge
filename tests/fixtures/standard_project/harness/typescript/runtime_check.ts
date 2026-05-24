@@ -41,13 +41,18 @@ class ValueReader implements RuntimeDataReader {
   }
 
   asNumber(): number {
+    let parsed: number;
     if (typeof this.value === "number") {
-      return this.value;
+      parsed = this.value;
+    } else if (typeof this.value === "string") {
+      parsed = Number(this.value);
+    } else {
+      throw new Error(`expected number-like value, got ${String(this.value)}`);
     }
-    if (typeof this.value === "string") {
-      return Number(this.value);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`expected finite number-like value, got ${String(this.value)}`);
     }
-    throw new Error(`expected number-like value, got ${String(this.value)}`);
+    return parsed;
   }
 
   asBool(): boolean {

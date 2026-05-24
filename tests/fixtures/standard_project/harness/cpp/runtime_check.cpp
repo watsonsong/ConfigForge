@@ -118,19 +118,40 @@ public:
             return nullptr;
         }
 
-        const std::string quoted_key = "\"" + name + "\"";
-        const std::size_t key_pos = value_.find(quoted_key);
-        if (key_pos == std::string::npos) {
-            return nullptr;
+        std::size_t pos = 1;
+        while (pos < value_.size()) {
+            SkipWhitespace(value_, &pos);
+            if (pos < value_.size() && value_[pos] == '}') {
+                return nullptr;
+            }
+            if (pos >= value_.size() || value_[pos] != '"') {
+                throw std::runtime_error("expected object field key");
+            }
+
+            const std::size_t key_begin = pos;
+            const std::size_t key_end = EndOfJsonValue(value_, key_begin);
+            const std::string key = UnquoteJsonString(value_.substr(key_begin, key_end - key_begin));
+            pos = key_end;
+            SkipWhitespace(value_, &pos);
+            if (pos >= value_.size() || value_[pos] != ':') {
+                throw std::runtime_error("missing ':' after object field key");
+            }
+            ++pos;
+            SkipWhitespace(value_, &pos);
+
+            const std::size_t value_begin = pos;
+            const std::size_t value_end = EndOfJsonValue(value_, value_begin);
+            if (key == name) {
+                return std::make_unique<ValueReader>(value_.substr(value_begin, value_end - value_begin));
+            }
+
+            pos = value_end;
+            SkipWhitespace(value_, &pos);
+            if (pos < value_.size() && value_[pos] == ',') {
+                ++pos;
+            }
         }
-        std::size_t value_pos = value_.find(':', key_pos + quoted_key.size());
-        if (value_pos == std::string::npos) {
-            return nullptr;
-        }
-        ++value_pos;
-        SkipWhitespace(value_, &value_pos);
-        const std::size_t value_end = EndOfJsonValue(value_, value_pos);
-        return std::make_unique<ValueReader>(value_.substr(value_pos, value_end - value_pos));
+        throw std::runtime_error("unterminated JSON object");
     }
 
     std::unique_ptr<cfg::IRuntimeDataReader> Index(std::size_t index) const override {
@@ -182,9 +203,25 @@ public:
         throw std::runtime_error("unterminated JSON array");
     }
 
-    std::int64_t AsInt64() const override { return std::stoll(ScalarText()); }
+    std::int64_t AsInt64() const override {
+        const std::string value = ScalarText();
+        std::size_t consumed = 0;
+        const std::int64_t parsed = std::stoll(value, &consumed);
+        if (consumed != value.size()) {
+            throw std::runtime_error("expected int64-like value, got `" + value + "`");
+        }
+        return parsed;
+    }
 
-    double AsDouble() const override { return std::stod(ScalarText()); }
+    double AsDouble() const override {
+        const std::string value = ScalarText();
+        std::size_t consumed = 0;
+        const double parsed = std::stod(value, &consumed);
+        if (consumed != value.size()) {
+            throw std::runtime_error("expected double-like value, got `" + value + "`");
+        }
+        return parsed;
+    }
 
     bool AsBool() const override {
         const std::string value = ScalarText();

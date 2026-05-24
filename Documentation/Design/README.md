@@ -70,5 +70,5 @@
 | foreign keys | Implemented MVP | 支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；Phase 1 仅支持 CollectionTable 到 CollectionTable。 |
 | runtime data export | Implemented MVP | 支持 JSON 与 MessagePack registry；大表 streaming writer 仍为中期优化。 |
 | codegen backends | Implemented MVP | 已有 Rust / TypeScript / C++ 基础生成、loader/repository helper 和 target-aware IR；更丰富 FK helper/API 契约待后续确认。 |
-| generated runtime loader contract | Partial | 当前生成代码仍使用按表返回 typed rows / objects 的 typed loader 过渡契约；目标态为 Meta-agnostic `open + RuntimeDataReader + generated parser`，用户 loader 新增表/字段时不变。 |
+| generated runtime loader contract | Implemented MVP | 当前 Rust / C++ / TypeScript 生成代码已使用 Meta-agnostic `open + RuntimeDataReader + generated parser` 契约；用户 loader 新增表/字段时不变。上一阶段 typed loader 过渡契约已废弃。 |
 | diagnostics | Partial | 当前 Meta diagnostics 和部分 validation issues 已有 code/message 或局部结构；统一 path/table/field/source/span/hint/severity 仍待设计实现。 |

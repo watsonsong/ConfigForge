@@ -166,7 +166,7 @@ Protobuf 未来规则：
 
 ### 6.2.1 生成代码的 Runtime Data 加载抽象
 
-当前实现状态：已落地的 Rust / C++ / TypeScript 生成代码仍使用 **typed loader 过渡契约**，即按表生成 `load_<table>_rows` / `Load<Table>Rows` / `load<Table>Rows` 等方法，由接入方 loader 返回 typed rows / objects。下面定义的是下一阶段目标态契约；迁移完成前，当前可运行契约仍以生成代码实际输出为准。
+当前实现状态：Rust / C++ / TypeScript 生成代码已落地 **Meta-agnostic reader loader 契约**，即接入方只实现通用 `open(path)` 并返回 `RuntimeDataReader` / `IRuntimeDataReader`；生成代码内部负责按 Meta 读取表、字段、fragment 和 object payload，并构造 typed rows / objects。上一阶段按表生成 `load_<table>_rows` / `Load<Table>Rows` / `load<Table>Rows` 等方法的 typed loader 过渡契约已废弃，不再是当前生成代码 API。
 
 生成代码必须把“如何取得配置文件”和“如何把通用序列化数据组装成当前 Meta 对应的 typed rows / typed objects”分层：
 
