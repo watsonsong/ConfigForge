@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+pub mod json;
+pub mod messagepack;
+
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -101,13 +104,18 @@ impl DataFormatRegistry {
 
     pub fn with_builtin_exporters() -> Self {
         let mut registry = Self::new();
-        registry.register(JsonDataExporter);
-        registry.register(MessagePackDataExporter);
+        for exporter in builtin_exporters() {
+            registry.register_boxed(exporter);
+        }
         registry
     }
 
     pub fn register(&mut self, exporter: impl DataFormatExporter + 'static) {
         self.exporters.push(Box::new(exporter));
+    }
+
+    pub fn register_boxed(&mut self, exporter: Box<dyn DataFormatExporter>) {
+        self.exporters.push(exporter);
     }
 
     pub fn get(&self, format: &str) -> Option<&dyn DataFormatExporter> {
@@ -126,6 +134,13 @@ impl DataFormatRegistry {
     pub fn formats(&self) -> impl Iterator<Item = &dyn DataFormatExporter> {
         self.exporters.iter().map(Box::as_ref)
     }
+}
+
+pub fn builtin_exporters() -> Vec<Box<dyn DataFormatExporter>> {
+    vec![
+        Box::new(json::JsonDataExporter),
+        Box::new(messagepack::MessagePackDataExporter),
+    ]
 }
 
 pub fn export_runtime_data(
@@ -406,55 +421,6 @@ fn exported_value_from_resolved(value: &ResolvedValue) -> Result<ExportedValue> 
         DataValue::Array(_) => Err(ConfigForgeError::Validation(
             "array values are not supported by runtime data export yet".to_owned(),
         )),
-    }
-}
-
-pub struct JsonDataExporter;
-
-impl DataFormatExporter for JsonDataExporter {
-    fn name(&self) -> &'static str {
-        "json"
-    }
-
-    fn extension(&self) -> &'static str {
-        "json"
-    }
-
-    fn serialize_table(
-        &self,
-        table_meta: &LinkedTableMeta<'_>,
-        table: &DataTable,
-        target_tags: &TargetTags,
-    ) -> Result<Vec<u8>> {
-        let payload = build_exported_table_payload(table_meta, table, target_tags)?;
-        Ok(serde_json::to_vec_pretty(&payload)?)
-    }
-}
-
-pub struct MessagePackDataExporter;
-
-impl DataFormatExporter for MessagePackDataExporter {
-    fn name(&self) -> &'static str {
-        "messagepack"
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        &["msgpack"]
-    }
-
-    fn extension(&self) -> &'static str {
-        "msgpack"
-    }
-
-    fn serialize_table(
-        &self,
-        table_meta: &LinkedTableMeta<'_>,
-        table: &DataTable,
-        target_tags: &TargetTags,
-    ) -> Result<Vec<u8>> {
-        let payload = build_exported_table_payload(table_meta, table, target_tags)?;
-        rmp_serde::to_vec_named(&payload)
-            .map_err(|source| ConfigForgeError::SerializeMessagePack { source })
     }
 }
 
@@ -780,63 +746,6 @@ mod tests {
     }
 
     #[test]
-    fn struct_json_cell_exports_as_nested_object_and_filters_children() {
-        let meta = MetaModel::from_toml_str(
-            r#"
-                [[structs]]
-                name = "Reward"
-
-                [[structs.fields]]
-                name = "item_id"
-                type = "string"
-
-                [[structs.fields]]
-                name = "count"
-                type = "int"
-
-                [[structs.fields]]
-                name = "internal_note"
-                type = "string"
-                export = false
-
-                [[tables]]
-                name = "items"
-                source = "items.csv"
-
-                [[tables.fields]]
-                name = "id"
-                type = "int"
-
-                [[tables.fields]]
-                name = "reward"
-                type = "Reward"
-            "#,
-        )
-        .expect("meta should load");
-        let linked = meta.link().expect("meta should link");
-        let table_meta = linked.table("items").expect("linked table");
-        let table = DataTable::new(
-            "items",
-            vec![BTreeMap::from([
-                ("id".to_owned(), "1".to_owned()),
-                (
-                    "reward".to_owned(),
-                    r#"{"item_id":"coin","count":100,"internal_note":"hidden"}"#.to_owned(),
-                ),
-            ])],
-        );
-
-        let payload = build_exported_table_payload(table_meta, &table, &TargetTags::empty())
-            .expect("payload should build");
-        let value = serde_json::to_value(payload).expect("payload should serialize");
-
-        assert_eq!(value["rows"][0]["id"], "1");
-        assert_eq!(value["rows"][0]["reward"]["item_id"], "coin");
-        assert_eq!(value["rows"][0]["reward"]["count"], "100");
-        assert!(value["rows"][0]["reward"].get("internal_note").is_none());
-    }
-
-    #[test]
     fn struct_expanded_value_exports_as_nested_object_for_collection_and_object() {
         let meta = MetaModel::from_toml_str(
             r#"
@@ -977,46 +886,6 @@ mod tests {
                 .is_none()
         );
         assert!(value["rows"][0].get("optional_reward").is_none());
-    }
-
-    #[test]
-    fn messagepack_export_preserves_expanded_struct_nested_map() {
-        let meta = MetaModel::from_toml_str(
-            r#"
-                [[structs]]
-                name = "Attributes"
-
-                [[structs.fields]]
-                name = "attack"
-                type = "int"
-
-                [[tables]]
-                name = "characters"
-                source = "characters.csv"
-
-                [[tables.fields]]
-                name = "attributes"
-                type = "Attributes"
-            "#,
-        )
-        .expect("meta should load");
-        let linked = meta.link().expect("meta should link");
-        let table_meta = linked.table("characters").expect("linked table");
-        let table = DataTable::new(
-            "characters",
-            vec![BTreeMap::from([(
-                "attributes.attack".to_owned(),
-                "10".to_owned(),
-            )])],
-        );
-
-        let bytes = MessagePackDataExporter
-            .serialize_table(table_meta, &table, &TargetTags::empty())
-            .expect("messagepack should serialize");
-        let value: serde_json::Value =
-            rmp_serde::from_slice(&bytes).expect("messagepack should decode");
-
-        assert_eq!(value["rows"][0]["attributes"]["attack"], "10");
     }
 
     #[test]
@@ -1401,91 +1270,5 @@ mod tests {
         assert!(
             matches!(&error, ConfigForgeError::Validation(message) if message.contains("field `reward` contains unknown struct key `extra`"))
         );
-    }
-
-    #[test]
-    fn messagepack_export_preserves_struct_nested_map() {
-        let meta = MetaModel::from_toml_str(
-            r#"
-                [[structs]]
-                name = "Reward"
-
-                [[structs.fields]]
-                name = "item_id"
-                type = "string"
-
-                [[structs.fields]]
-                name = "count"
-                type = "int"
-
-                [[tables]]
-                name = "items"
-                source = "items.csv"
-
-                [[tables.fields]]
-                name = "reward"
-                type = "Reward"
-            "#,
-        )
-        .expect("meta should load");
-        let linked = meta.link().expect("meta should link");
-        let table_meta = linked.table("items").expect("linked table");
-        let table = DataTable::new(
-            "items",
-            vec![BTreeMap::from([(
-                "reward".to_owned(),
-                r#"{"item_id":"coin","count":100}"#.to_owned(),
-            )])],
-        );
-
-        let bytes = MessagePackDataExporter
-            .serialize_table(table_meta, &table, &TargetTags::empty())
-            .expect("messagepack should serialize");
-        let value: serde_json::Value =
-            rmp_serde::from_slice(&bytes).expect("messagepack should decode");
-
-        assert_eq!(value["rows"][0]["reward"]["item_id"], "coin");
-        assert_eq!(value["rows"][0]["reward"]["count"], "100");
-    }
-
-    #[test]
-    fn messagepack_object_table_preserves_object_shape_without_collection_envelope() {
-        let meta = MetaModel::from_toml_str(
-            r#"
-                [[tables]]
-                name = "game_config"
-                kind = "object"
-                source = "game_config.csv"
-
-                [[tables.fields]]
-                name = "max_level"
-                type = "int"
-
-                [[tables.fields]]
-                name = "pvp_enabled"
-                type = "bool"
-            "#,
-        )
-        .expect("meta should load");
-        let linked = meta.link().expect("meta should link");
-        let table_meta = linked.table("game_config").expect("linked table");
-        let table = DataTable::new(
-            "game_config",
-            vec![BTreeMap::from([
-                ("max_level".to_owned(), "60".to_owned()),
-                ("pvp_enabled".to_owned(), "true".to_owned()),
-            ])],
-        );
-
-        let bytes = MessagePackDataExporter
-            .serialize_table(table_meta, &table, &TargetTags::empty())
-            .expect("messagepack should serialize");
-        let value: serde_json::Value =
-            rmp_serde::from_slice(&bytes).expect("messagepack should decode");
-
-        assert_eq!(value["max_level"], "60");
-        assert_eq!(value["pvp_enabled"], "true");
-        assert!(value.get("rows").is_none());
-        assert!(value.get("meta").is_none());
     }
 }

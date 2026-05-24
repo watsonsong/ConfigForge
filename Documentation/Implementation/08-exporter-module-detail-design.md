@@ -21,14 +21,16 @@ Exporter 模块需要达成：
 
 ## 8.2 模块结构
 
-当前实现集中在：
+当前实现按格式拆分为：
 
 ```text
 src/exporter/
-  mod.rs              # TargetDataConfig / DataFormatExporter / registry / payload builder / JSON / MessagePack / tests
+  mod.rs              # TargetDataConfig / DataFormatExporter / registry / payload builder / tests
+  json.rs             # JsonDataExporter
+  messagepack.rs      # MessagePackDataExporter
 ```
 
-后续可按职责拆分：
+后续可继续按职责拆分：
 
 ```text
 src/exporter/
@@ -70,6 +72,8 @@ pub trait DataFormatExporter: Send + Sync {
 ```
 
 `DataFormatRegistry` 保存 exporter 列表并按 name / alias 查询。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行序列化多个 table artifact。
+
+内置格式通过 `builtin_exporters()` 返回 `Vec<Box<dyn DataFormatExporter>>` 并注册到 `DataFormatRegistry`。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现 `DataFormatExporter`，格式名、alias、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。
 
 ## 8.4 Runtime payload contract
 
