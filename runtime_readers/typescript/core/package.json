@@ -2,9 +2,10 @@
   "name": "@configforge/runtime-reader-core",
   "version": "0.1.0",
   "type": "commonjs",
-  "main": "dist/src/runtime_reader.js",
-  "types": "dist/src/runtime_reader.d.ts",
+  "main": "dist/runtime_reader.js",
+  "types": "dist/runtime_reader.d.ts",
   "scripts": {
+    "build": "tsc --project tsconfig.build.json",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

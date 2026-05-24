@@ -1,8 +1,6 @@
 # ObjectTable Step 1 详细设计
 
-本文档描述 ObjectTable 的第一阶段实现方案。目标是先支持最常见的“常量配置表”场景：CSV 使用 `key,value` 行式布局，每一行提供一个字段值，最终导出为单个 object。
-
-本阶段只做设计，不在本文档中假设代码已经完成。
+本文档描述 ObjectTable 的第一阶段实现方案与当前落地边界。能力状态以 `Documentation/Design/README.md` 的状态矩阵为准：Step 1 已形成 MVP，支持最常见的“常量配置表”场景，即 CSV 使用 `key,value` 行式布局，每一行提供一个 top-level 字段值，最终导出为单个 object。
 
 ## 1. 目标
 

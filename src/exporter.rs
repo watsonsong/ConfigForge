@@ -216,7 +216,8 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
     let target_tags = target.target_tags();
 
     let mut warnings = Vec::new();
-    // Runtime data is exported before codegen so generated APIs can reference actual artifact paths.
+    // Runtime data is exported before codegen so generated APIs can reference logical
+    // runtime data file paths relative to the loader root.
     let runtime_data_results = if target.data.is_empty() {
         Vec::new()
     } else {

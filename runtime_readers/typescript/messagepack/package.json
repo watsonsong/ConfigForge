@@ -2,8 +2,8 @@
   "name": "@configforge/runtime-reader-messagepack",
   "version": "0.1.0",
   "type": "commonjs",
-  "main": "dist/src/runtime_loader.js",
-  "types": "dist/src/runtime_loader.d.ts",
+  "main": "dist/runtime_loader.js",
+  "types": "dist/runtime_loader.d.ts",
   "dependencies": {
     "@configforge/runtime-reader-core": "0.1.0"
   },
@@ -11,6 +11,7 @@
     "@msgpack/msgpack": "^3.0.0"
   },
   "scripts": {
+    "build": "tsc --project tsconfig.build.json",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

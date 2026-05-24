@@ -162,7 +162,7 @@ Source declaration 描述 provider 和定位信息。
 | `lark_sheet` | Planned / Not implemented，Lark/飞书表格 | `uri` 或 provider-specific id，通常需要 `auth_ref` |
 | `google_sheet` | Planned / Not implemented，Google Sheet | `uri` 或 sheet id，通常需要 `auth_ref` |
 
-当前实现只支持单个 CSV source。其他 provider、多 source 和 override sources 属于目标态设计。
+当前实现状态以 `Documentation/Design/README.md` 的状态矩阵为准：CSV provider 已稳定支持；同一逻辑表的多 CSV source 追加 records 已形成 MVP，主要服务 polymorphic variant source mode；`override_sources` 与非 CSV provider 仍属于目标态设计，当前会显式拒绝或不提供入口。
 
 Source sheet 允许出现空行和空列。未映射到 field path 的行/列不会进入导出结果，可用于策划注释、公式中间结果或视觉分隔。
 
