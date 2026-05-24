@@ -1,0 +1,13 @@
+{
+  "private": true,
+  "workspaces": [
+    "reader_core",
+    "json_reader",
+    "messagepack_reader",
+    "loaders/node-fs"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @config-forge/runtime-reader-core && npm run build --workspace @config-forge/runtime-reader-json && npm run build --workspace @config-forge/runtime-reader-messagepack && npm run build --workspace @config-forge/runtime-loader-node-fs",
+    "typecheck": "npm run typecheck --workspace @config-forge/runtime-reader-core && npm run typecheck --workspace @config-forge/runtime-reader-json && npm run typecheck --workspace @config-forge/runtime-reader-messagepack && npm run typecheck --workspace @config-forge/runtime-loader-node-fs"
+  }
+}

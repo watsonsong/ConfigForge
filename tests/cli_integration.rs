@@ -1657,12 +1657,12 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
     fs::copy(harness_dir.join("lib.rs"), temp_dir.path().join("lib.rs"))
         .expect("rust harness lib.rs should be copied");
     fs::copy(
-        fixture_root.join("../../../runtime_readers/rust/core/src/value_reader.rs"),
+        fixture_root.join("../../../runtime/rust/reader_core/src/value_reader.rs"),
         temp_dir.path().join("runtime_reader_core.rs"),
     )
     .expect("rust runtime reader core should be copied");
     fs::copy(
-        fixture_root.join("../../../runtime_readers/rust/messagepack_rmp/src/template.rs"),
+        fixture_root.join("../../../runtime/rust/messagepack_reader_rmp/src/template.rs"),
         temp_dir.path().join("runtime_loader.rs"),
     )
     .expect("rust runtime loader should be copied");
@@ -1693,32 +1693,16 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
 }
 
 fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
-    if !command_exists("c++") {
-        eprintln!("skipping standard generated C++ runtime test: c++ not found");
+    if !command_exists("cmake") {
+        eprintln!("skipping standard generated C++ runtime test: cmake not found");
         return;
     }
 
     let temp_dir = tempfile::tempdir().expect("cpp harness temp dir should be created");
-    let binary_path = temp_dir.path().join("runtime_check");
-    let output = StdCommand::new("c++")
-        .args(["-std=c++17"])
-        .arg(fixture_root.join("harness/cpp/runtime_check.cpp"))
-        .arg(fixture_root.join("out/client_code/cpp/generated.cpp"))
-        .arg("-I")
-        .arg(fixture_root.join("out/client_code/cpp"))
-        .arg("-I")
-        .arg(fixture_root.join("../../../runtime_readers/cpp/json_builtin/include"))
-        .arg("-o")
-        .arg(&binary_path)
-        .output()
-        .expect("standard generated C++ runtime test should compile");
-    assert_command_success(output, "standard generated C++ runtime compile");
-
-    let output = StdCommand::new(&binary_path)
-        .env("DATA_DIR", fixture_root.join("out/client_data"))
-        .output()
-        .expect("standard generated C++ runtime test should run");
-    assert_command_success(output, "standard generated C++ runtime test");
+    let runtime_cpp_dir = fixture_root.join("../../../runtime/cpp");
+    let generated_cpp_dir = fixture_root.join("out/client_code/cpp");
+    let harness_cpp = fixture_root.join("harness/cpp/runtime_check.cpp");
+    let generated_cpp = generated_cpp_dir.join("generated.cpp");
 
     fs::write(
         temp_dir.path().join("generated.hpp"),
@@ -1764,19 +1748,63 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
         "#,
     )
     .expect("C++ adapter namespace check should be written");
-    let output = StdCommand::new("c++")
-        .args(["-std=c++17"])
-        .arg(temp_dir.path().join("adapter_namespace_check.cpp"))
-        .arg("-I")
+
+    fs::write(
+        temp_dir.path().join("CMakeLists.txt"),
+        format!(
+            r#"
+                cmake_minimum_required(VERSION 3.16)
+                project(ConfigForgeStandardCppRuntimeHarness LANGUAGES CXX)
+
+                set(CMAKE_CXX_STANDARD 17)
+                set(CMAKE_CXX_STANDARD_REQUIRED ON)
+                set(CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON ON CACHE BOOL "" FORCE)
+                set(CONFIG_FORGE_RUNTIME_FETCH_DEPS ON CACHE BOOL "" FORCE)
+                add_subdirectory({runtime_cpp_dir:?} config_forge_runtime)
+
+                add_executable(standard_runtime_check
+                    {harness_cpp:?}
+                    {generated_cpp:?})
+                target_include_directories(standard_runtime_check PRIVATE {generated_cpp_dir:?})
+                target_link_libraries(standard_runtime_check PRIVATE config_forge_runtime::json_rapidjson)
+
+                add_executable(adapter_namespace_check adapter_namespace_check.cpp)
+                target_include_directories(adapter_namespace_check PRIVATE {temp_dir:?})
+                target_link_libraries(adapter_namespace_check PRIVATE config_forge_runtime::json_rapidjson)
+            "#,
+            runtime_cpp_dir = runtime_cpp_dir.display().to_string(),
+            harness_cpp = harness_cpp.display().to_string(),
+            generated_cpp = generated_cpp.display().to_string(),
+            generated_cpp_dir = generated_cpp_dir.display().to_string(),
+            temp_dir = temp_dir.path().display().to_string()
+        ),
+    )
+    .expect("C++ CMake harness should be written");
+
+    let build_dir = temp_dir.path().join("build");
+    let output = StdCommand::new("cmake")
+        .arg("-S")
         .arg(temp_dir.path())
-        .arg("-I")
-        .arg(fixture_root.join("../../../runtime_readers/cpp/json_builtin/include"))
-        .arg("-o")
-        .arg(temp_dir.path().join("adapter_namespace_check"))
+        .arg("-B")
+        .arg(&build_dir)
         .output()
-        .expect("C++ adapter namespace check should compile");
-    assert_command_success(output, "C++ adapter namespace check compile");
-    let output = StdCommand::new(temp_dir.path().join("adapter_namespace_check"))
+        .expect("standard generated C++ CMake configure should run");
+    assert_command_success(output, "standard generated C++ CMake configure");
+
+    let output = StdCommand::new("cmake")
+        .arg("--build")
+        .arg(&build_dir)
+        .output()
+        .expect("standard generated C++ CMake build should run");
+    assert_command_success(output, "standard generated C++ CMake build");
+
+    let output = StdCommand::new(build_dir.join("standard_runtime_check"))
+        .env("DATA_DIR", fixture_root.join("out/client_data"))
+        .output()
+        .expect("standard generated C++ runtime test should run");
+    assert_command_success(output, "standard generated C++ runtime test");
+
+    let output = StdCommand::new(build_dir.join("adapter_namespace_check"))
         .output()
         .expect("C++ adapter namespace check should run");
     assert_command_success(output, "C++ adapter namespace check run");
@@ -1796,23 +1824,22 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
     )
     .expect("TypeScript runtime harness should be copied");
     fs::copy(
-        fixture_root.join("../../../runtime_readers/typescript/core/src/runtime_reader.ts"),
+        fixture_root.join("../../../runtime/typescript/reader_core/src/runtime_reader.ts"),
         temp_dir.path().join("runtime_reader_core.ts"),
     )
     .expect("TypeScript runtime reader core should be copied");
     fs::copy(
-        fixture_root.join("../../../runtime_readers/typescript/json/src/runtime_loader.ts"),
+        fixture_root.join("../../../runtime/typescript/json_reader/src/runtime_loader.ts"),
         temp_dir.path().join("runtime_loader_json.ts"),
     )
     .expect("TypeScript JSON runtime loader should be copied");
     fs::copy(
-        fixture_root
-            .join("../../../runtime_readers/typescript/loaders/node-fs/src/runtime_loader.ts"),
+        fixture_root.join("../../../runtime/typescript/loaders/node-fs/src/runtime_loader.ts"),
         temp_dir.path().join("runtime_loader_node_fs.ts"),
     )
     .expect("TypeScript Node fs runtime loader should be copied");
     fs::copy(
-        fixture_root.join("../../../runtime_readers/typescript/messagepack/src/runtime_loader.ts"),
+        fixture_root.join("../../../runtime/typescript/messagepack_reader/src/runtime_loader.ts"),
         temp_dir.path().join("runtime_loader_messagepack.ts"),
     )
     .expect("TypeScript MessagePack runtime loader should be copied");

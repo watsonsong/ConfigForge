@@ -60,12 +60,13 @@ Use the implementation documents after product behavior has been confirmed in `D
 
 - `Tech/unit-test-coverage.md` — Rust unit test coverage tooling, commands, evaluation criteria, and current coverage baseline.
 - `Tech/task-system-design.md` — Task system, async I/O, CPU worker pool, resource limits, and phased migration design.
+- `Tech/cpp-runtime-dependencies.md` — C++ runtime reader 三方依赖的 CMake 查找、自动下载、target 接入与新增 reader checklist。
 
 ## Developer Logs
 
 - `DevLogs/Readme.md` — developer log purpose, relationship to canonical documents, file naming, and writing rules.
 - `DevLogs/phase-0001.md` — first raw phase log covering foundation, targets, fragments, foreign keys, and workflow decisions through 2026-05-21.
-- `DevLogs/phase-0002.md` — second raw phase log covering runtime readers, module boundary cleanup, Artifact Writer, dry-run/write-mode, and documentation maintenance through 2026-05-24.
+- `DevLogs/phase-0002.md` — second raw phase log covering runtime helpers, module boundary cleanup, Artifact Writer, dry-run/write-mode, and documentation maintenance through 2026-05-24.
 
 ## Maintenance Rules
 

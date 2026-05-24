@@ -193,7 +193,10 @@ fn temp_path_for(path: &Path, index: usize) -> PathBuf {
         .file_name()
         .map(|name| name.to_string_lossy())
         .unwrap_or_else(|| "artifact".into());
-    let temp_name = format!(".{file_name}.configforge-tmp-{}-{index}", std::process::id());
+    let temp_name = format!(
+        ".{file_name}.configforge-tmp-{}-{index}",
+        std::process::id()
+    );
     path.with_file_name(temp_name)
 }
 

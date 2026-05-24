@@ -14,7 +14,7 @@ Phase 0001 established the first practical ConfigForge foundation: TOML project 
 Phase 0002 moved the project from “feature-complete MVP pieces” toward clearer engineering boundaries and a more stable export/codegen toolchain. The major work was:
 
 - turn generated code from plain type stubs into runtime-reader-aware access code;
-- add standard runtime reader packages and cross-language compliance fixtures;
+- add standard runtime helper packages and cross-language compliance fixtures;
 - migrate the Rust baseline to Rust 2024 and handle new identifier constraints;
 - refactor exporter, build, diagnostic, and module ownership boundaries;
 - introduce a dedicated `src/artifact/` bottom-layer module so runtime data and generated code share one write pipeline;
@@ -32,8 +32,8 @@ This log is historical context. The current canonical behavior is still defined 
   - generated readers parse exported runtime payloads rather than leaving parsing entirely to caller code;
   - generated code is aware of runtime data file paths from selected data tasks;
   - ObjectTable codegen is represented as typed singleton objects rather than collection repositories.
-- Standard runtime reader packages:
-  - `runtime_readers/` now contains standard reader adapters/templates and compliance fixtures;
+- Standard runtime helper packages:
+  - `runtime/` now contains standard reader adapters/templates and compliance fixtures;
   - generated runtime code can be validated against exported fixture data across Rust, TypeScript, and C++ paths.
 - Runtime format support:
   - JSON and MessagePack exports remain registry-backed runtime data formats;
@@ -106,15 +106,15 @@ Rationale:
 
 - Users need generated code that can actually load the exported artifacts, not only type definitions.
 - Keeping runtime file contracts in exporter/build and passing them into codegen avoids language generators independently reconstructing file names or formats.
-- The generated API becomes testable against fixture exports and standard runtime readers.
+- The generated API becomes testable against fixture exports and standard runtime helpers.
 
 Source material:
 
 - `Documentation/Implementation/09-codegen-module-detail-design.md`
-- `runtime_readers/`
+- `runtime/`
 - Commits:
   - `e6fca57 feat(codegen): move runtime parsing into generated readers`
-  - `5199d6b feat(codegen): add standard runtime readers`
+  - `5199d6b feat(codegen): add standard runtime helpers`
   - `409803b feat(runtime): engineer reader packages`
 
 ### 2. ObjectTable Should Be a Typed Singleton Shape
@@ -290,9 +290,9 @@ Representative commits:
 
 ```text
 d17d7c0 fix(codegen): address runtime reader review feedback
-44eb592 docs(codegen): plan standard runtime reader adapters
+44eb592 docs(codegen): plan standard runtime helpers
 4fe25bf fix(meta): address review feedback
-5199d6b feat(codegen): add standard runtime readers
+5199d6b feat(codegen): add standard runtime helpers
 b0b9526 chore(rust): migrate toolchain baseline to Rust 2024
 7291648 docs(codegen): refine runtime reader engineering design
 409803b feat(runtime): engineer reader packages

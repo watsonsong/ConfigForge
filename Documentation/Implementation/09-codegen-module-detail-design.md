@@ -959,7 +959,7 @@ loader.open("items.msgpack")
 - 通用 reader/value 到 typed rows 的解析放在生成代码中。
 - MessagePack decoder 不绑定具体 npm / C++ / Rust 包。
 
-### 9.10.5 标准 RuntimeDataReader adapter 工程结构
+### 9.10.5 标准 runtime helper 工程结构
 
 生成代码只声明 reader / loader contract，这解决了 Meta-specific 逻辑与业务资源系统耦合的问题，但实际游戏项目仍需要可运行的 JSON / MessagePack 等格式 reader。项目应提供标准 RuntimeDataReader adapter 源码/模板，作为 generated code 之外的 runtime support 层。
 
@@ -1035,23 +1035,22 @@ missing/null 语义：
 
 #### 4.10.5.3 工程化目标与当前缺口
 
-`runtime_readers/` 的目标不是只服务 standard_project harness，而是成为游戏项目可直接引用的 runtime support 层。当前仓库已经有首批源码：
+`runtime/` 的目标不是只服务 standard_project harness，而是成为游戏项目可直接引用的 runtime support 层。当前仓库已经有首批源码：
 
 | 当前目录 | 定位 | 当前状态 |
 | --- | --- | --- |
-| `runtime_readers/rust/core` | Rust shared value reader template | 已有 `serde_json::Value` based reader。 |
-| `runtime_readers/rust/json_serde` | Rust JSON fs loader template | 已有 JSON loader template。 |
-| `runtime_readers/rust/messagepack_rmp` | Rust MessagePack fs loader template | 已有 MessagePack loader template，并被 Rust integration harness 使用。 |
-| `runtime_readers/typescript/json` | TypeScript JSON reader + Node fs loader | 已有 JSON reader，使用结构化类型，不依赖 generated.ts。 |
-| `runtime_readers/cpp/json_builtin` | C++ minimal JSON fallback | 已有 header-only fallback，主要用于测试与无三方依赖示例，不作为生产推荐实现。 |
+| `runtime/rust/reader_core` | Rust shared value reader template | 已有 `serde_json::Value` based reader。 |
+| `runtime/rust/json_reader_serde` | Rust JSON fs loader template | 已有 JSON loader template。 |
+| `runtime/rust/messagepack_reader_rmp` | Rust MessagePack fs loader template | 已有 MessagePack loader template，并被 Rust integration harness 使用。 |
+| `runtime/typescript/json_reader` | TypeScript JSON reader + Node fs loader | 已有 JSON reader，使用结构化类型，不依赖 generated.ts。 |
+| `runtime/cpp/json_rapidjson` | C++ RapidJSON reader adapter | 已有 header-only RapidJSON adapter，可用于测试与生产接入。 |
 
 主要缺口：
 
 1. TypeScript 缺少 MessagePack adapter，导致 `[[targets.data]].format = "messagepack"` 的 TS runtime 接入没有标准实现。
 2. C++ 缺少 MessagePack adapter，无法覆盖 `*.msgpack` 的客户端加载路径。
-3. C++ JSON 目前只有手写 `json_builtin` fallback，对字符串转义、Unicode、数字边界、错误上下文等复杂 JSON 语义不够鲁棒。
-4. C++ 缺少工程化入口：没有顶层 `CMakeLists.txt`、可选三方库开关、`find_package` / package manager 接入策略、可独立编译的 adapter 测试 target。
-5. 各语言 adapter 缺少统一 compatibility / test matrix 描述，无法明确哪些 adapter 是生产推荐、哪些只是 fixture fallback。
+3. C++ MessagePack adapter 仍待补齐，当前 C++ 只覆盖 JSON + RapidJSON 路径。
+4. 各语言 adapter 缺少统一 compatibility / test matrix 描述，无法明确哪些 adapter 是生产推荐、哪些只是 custom/example。
 
 因此 runtime loader 工程化按“两层稳定 + 多 adapter 可选”的方向推进：
 
@@ -1060,31 +1059,31 @@ missing/null 语义：
 
 #### 4.10.5.4 目录布局
 
-推荐在仓库顶层维护 `runtime_readers/` 作为标准 adapter 源码/模板目录：
+推荐在仓库顶层维护 `runtime/` 作为标准 adapter 源码/模板目录：
 
 ```text
-runtime_readers/
+runtime/
   compliance/
     payloads/             # 跨语言共享 payload cases
     expected/             # scalar / error case expectations
   rust/
-    core/                 # shared ValueReader、错误上下文、测试工具
+    reader_core/          # shared ValueReader、错误上下文、测试工具
       Cargo.toml          # 后续补齐；默认不启用具体格式
       src/
-    json_serde/
+    json_reader_serde/
       src/                # serde_json::Value reader、JSON decode helper
       Cargo.toml          # features: fs
-    messagepack_rmp/
+    messagepack_reader_rmp/
       src/                # rmp-serde decode helper、MessagePack value reader
       Cargo.toml          # features: fs
   typescript/
-    core/
+    reader_core/
       src/                # shared reader helpers、error helpers
       package.json
-    json/
+    json_reader/
       src/                # JSON.parse value reader
       package.json
-    messagepack/
+    messagepack_reader/
       src/                # @msgpack/msgpack based value reader
       package.json
     loaders/
@@ -1094,11 +1093,8 @@ runtime_readers/
     core/
       include/            # adapter glue、diagnostic helpers、stable helpers
       CMakeLists.txt
-    json_builtin/
-      include/            # dependency-free minimal fallback；测试/示例用途
-      CMakeLists.txt
     json_rapidjson/
-      include/ src/       # RapidJSON reader；生产推荐 JSON adapter
+      include/            # RapidJSON-backed header-only reader adapter
       CMakeLists.txt
     messagepack_msgpack_cpp/
       include/ src/       # msgpack-c reader
@@ -1107,11 +1103,11 @@ runtime_readers/
       filesystem/         # filesystem transport loader example
       CMakeLists.txt
     cmake/
-      ConfigForgeRuntimeReadersConfig.cmake.in
+      ConfigForgeRuntimeConfig.cmake.in
     CMakeLists.txt        # options、find_package、adapter targets、tests
 ```
 
-`runtime_readers/` 不是每次 export 的输出目录；它是 ConfigForge 源码仓库中维护的标准 runtime adapter 集合。未来如增加 `yaml`、`sqlite`、自定义二进制等 data format，应按同样结构补充对应语言子目录。
+`runtime/` 不是每次 export 的输出目录；它是 ConfigForge 源码仓库中维护的标准 runtime adapter 集合。未来如增加 `yaml`、`sqlite`、自定义二进制等 data format，应按同样结构补充对应语言子目录。
 
 #### 4.10.5.5 官方支持矩阵、推荐等级与依赖策略
 
@@ -1122,20 +1118,19 @@ runtime_readers/
 - 依赖的三方库与启用方式；
 - 是否提供 transport loader；
 - 是否用于 CI / integration harness；
-- 支持等级：`stable`、`preview`、`test_fallback`、`custom/example`；
+- 支持等级：`stable`、`preview`、`custom/example`；
 - 形态：`standalone_package`、`copyable_template`、`generated_header_bound`。
 
 首批矩阵：
 
 | 语言 | 格式 | adapter 单元 | 支持等级 | 形态 | 依赖与启用方式 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
-| Rust | JSON | `runtime_readers/rust/json_serde` | `stable` | `copyable_template` | `serde_json`；Cargo feature `json` / `fs` | 当前 trait 由 generated crate 声明，短期是生产可用模板；stable runtime crate 落地后再升级为 standalone package。 |
-| Rust | MessagePack | `runtime_readers/rust/messagepack_rmp` | `stable` | `copyable_template` | `rmp-serde`；Cargo feature `messagepack` / `fs` | 短期可解码到 shared value；中期收敛到 ConfigForge Runtime Value，避免 MessagePack 语义长期 JSON 化。 |
-| TypeScript | JSON | `runtime_readers/typescript/json` | `stable` | `standalone_package` | 原生 `JSON.parse`；独立 npm package | 不依赖 generated.ts，Node fs/fetch loader 分离。 |
-| TypeScript | MessagePack | `runtime_readers/typescript/messagepack` | `preview -> stable` | `standalone_package` | `@msgpack/msgpack` 作为 peer dependency；独立 npm package | 解码后的 unknown value 复用 core reader 语义。 |
-| C++ | JSON | `runtime_readers/cpp/json_rapidjson` | `preview -> stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(RapidJSON CONFIG)` / package manager | 用 RapidJSON 完整处理转义、Unicode、数字和 parse error；替代生产场景的 builtin parser。 |
-| C++ | JSON fallback | `runtime_readers/cpp/json_builtin` | `test_fallback` | `generated_header_bound` | 无三方依赖；header-only | 仅用于 smoke test、示例、极简环境；不承诺完整 JSON 语义。 |
-| C++ | MessagePack | `runtime_readers/cpp/messagepack_msgpack_cpp` | `preview -> stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(msgpack-cxx CONFIG)` 或 `msgpack-c` | 不手写二进制 parser；解码到 msgpack object/value 后适配 reader。 |
+| Rust | JSON | `runtime/rust/json_reader_serde` | `stable` | `copyable_template` | `serde_json`；Cargo feature `json` / `fs` | 当前 trait 由 generated crate 声明，短期是生产可用模板；stable runtime crate 落地后再升级为 standalone package。 |
+| Rust | MessagePack | `runtime/rust/messagepack_reader_rmp` | `stable` | `copyable_template` | `rmp-serde`；Cargo feature `messagepack` / `fs` | 短期可解码到 shared value；中期收敛到 ConfigForge Runtime Value，避免 MessagePack 语义长期 JSON 化。 |
+| TypeScript | JSON | `runtime/typescript/json_reader` | `stable` | `standalone_package` | 原生 `JSON.parse`；独立 npm package | 不依赖 generated.ts，Node fs/fetch loader 分离。 |
+| TypeScript | MessagePack | `runtime/typescript/messagepack_reader` | `preview -> stable` | `standalone_package` | `@msgpack/msgpack` 作为 peer dependency；独立 npm package | 解码后的 unknown value 复用 core reader 语义。 |
+| C++ | JSON | `runtime/cpp/json_rapidjson` | `preview -> stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(RapidJSON CONFIG)` / package manager | 用 RapidJSON 完整处理转义、Unicode、数字和 parse error；替代生产场景的 builtin parser。 |
+| C++ | MessagePack | `runtime/cpp/messagepack_msgpack_cpp` | `preview -> stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(msgpack-cxx CONFIG)` 或 `msgpack-c` | 不手写二进制 parser；解码到 msgpack object/value 后适配 reader。 |
 
 依赖策略：
 
@@ -1146,22 +1141,22 @@ runtime_readers/
 
 #### 4.10.5.6 C++ CMake 工程化方案
 
-C++ runtime readers 采用 CMake target 管理，目标是让游戏项目能通过 `add_subdirectory(runtime_readers/cpp)` 或安装后的 `find_package(ConfigForgeRuntimeReaders CONFIG)` 引入 adapter。
+C++ runtime helpers 采用 CMake target 管理，目标是让游戏项目能通过 `add_subdirectory(runtime/cpp)` 或安装后的 `find_package(ConfigForgeRuntime CONFIG)` 引入 adapter。
 
 ##### CMake options
 
 ```cmake
 option(CONFIG_FORGE_RUNTIME_BUILD_TESTS "Build ConfigForge runtime reader tests" OFF)
-option(CONFIG_FORGE_RUNTIME_WITH_JSON_BUILTIN "Enable minimal builtin JSON fallback" OFF)
+option(CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON "Enable minimal RapidJSON adapter" OFF)
 option(CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON "Enable RapidJSON adapter" OFF)
 option(CONFIG_FORGE_RUNTIME_WITH_MESSAGEPACK "Enable msgpack-c adapter" OFF)
 option(CONFIG_FORGE_RUNTIME_FETCH_DEPS "Allow FetchContent for missing third-party deps" OFF)
 ```
 
-普通业务构建默认不启用 `json_builtin`，避免最容易链接的 target 被误用到生产。测试构建可以在 `CONFIG_FORGE_RUNTIME_BUILD_TESTS=ON` 时显式打开 `CONFIG_FORGE_RUNTIME_WITH_JSON_BUILTIN=ON`，用于无三方依赖 smoke test。生产项目推荐显式启用 RapidJSON 或 MessagePack adapter：
+普通业务构建默认不启用 `json_rapidjson`，避免最容易链接的 target 被误用到生产。测试构建可以在 `CONFIG_FORGE_RUNTIME_BUILD_TESTS=ON` 时显式打开 `CONFIG_FORGE_RUNTIME_WITH_JSON_RAPIDJSON=ON`，用于无三方依赖 smoke test。生产项目推荐显式启用 RapidJSON 或 MessagePack adapter：
 
 ```cmake
-add_subdirectory(path/to/ConfigForge/runtime_readers/cpp)
+add_subdirectory(path/to/ConfigForge/runtime/cpp)
 
 target_link_libraries(game_config_runtime PRIVATE
   config_forge_runtime::core
@@ -1179,7 +1174,6 @@ target_include_directories(game_config_runtime PRIVATE
 | target | 类型 | 说明 |
 | --- | --- | --- |
 | `config_forge_runtime::core` | interface/static | 错误类型、shared helper、可选 stable interface glue。 |
-| `config_forge_runtime::json_builtin_test_fallback` | interface | 现有无依赖 fallback；target 名称显式标明测试定位，只建议 smoke test / 示例使用。 |
 | `config_forge_runtime::json_rapidjson` | static/interface | RapidJSON based reader，生产推荐 JSON adapter。 |
 | `config_forge_runtime::messagepack_msgpack_cpp` | static/interface | msgpack-c based reader，生产推荐 MessagePack adapter。 |
 | `config_forge_runtime::filesystem_loader` | static/interface | 文件系统 transport，可组合 JSON 或 MessagePack reader。 |
@@ -1189,7 +1183,6 @@ target_include_directories(game_config_runtime PRIVATE
 - `json_rapidjson` 优先 `find_package(RapidJSON CONFIG QUIET)`；找不到时，如果 `CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON`，可用 `FetchContent` 拉取 RapidJSON；否则给出明确 CMake error，提示通过 vcpkg/Conan/system package 安装。
 - `messagepack_msgpack_cpp` 优先 `find_package(msgpack-cxx CONFIG QUIET)` 或项目约定的 `find_package(msgpack CONFIG QUIET)`；找不到时同样只在 `CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON` 时自动拉取。
 - 三方库只链接到 adapter target，不出现在 generated code target 的 public API 中。业务可替换为引擎内置 JSON / MessagePack 实现，只要实现同一 `IRuntimeDataReader` contract。
-- 如果用户显式链接 `json_builtin_test_fallback`，该 target 应暴露类似 `CONFIG_FORGE_RUNTIME_JSON_BUILTIN_TEST_FALLBACK=1` 的 compile definition，便于业务工程在 review / CI 中识别 fallback 使用。
 
 ##### generated header / stable interface 绑定
 
@@ -1198,7 +1191,7 @@ target_include_directories(game_config_runtime PRIVATE
 ```cpp
 #define CONFIG_FORGE_RUNTIME_CPP_READER my::game::config::IRuntimeDataReader
 #define CONFIG_FORGE_RUNTIME_CPP_LOADER my::game::config::IRuntimeDataLoader
-#include "config_forge/runtime_readers/json_rapidjson/runtime_loader.hpp"
+#include "config_forge/runtime/json_rapidjson/runtime_loader.hpp"
 ```
 
 Phase 1.5 优先评估拆出稳定 `config_forge_runtime.hpp`：generated C++ 提供 `interface = "inline" | "external"` 选项。默认 `inline` 保持当前 generated header 自带 interface；production adapter 推荐 `external`，由 generated code 和 adapter 同时 include 稳定 header。这样 adapter library 不再依赖某次 generated header，CMake target 可以更像普通第三方库被复用。
@@ -1232,7 +1225,7 @@ Phase 1.5 优先评估拆出稳定 `config_forge_runtime.hpp`：generated C++ �
 TypeScript adapter 使用结构化类型，不需要 import generated module。包结构推荐：
 
 ```text
-runtime_readers/typescript/
+runtime/typescript/
   core/                 # RuntimeDataReaderLike、ValueReader、shared scalar conversion
   json/                 # JsonValueReader、decodeJsonValue
   messagepack/          # MessagePackValueReader、decodeMessagePackValue
@@ -1276,7 +1269,7 @@ MessagePack adapter 的 value 语义应与 JSON adapter 对齐：object/map 支�
 
 不同语言的 reader interface 绑定方式不同，adapter 形态也不同：
 
-- **Rust**：当前 trait 由 generated crate 声明，外部 crate 无法不依赖用户 generated crate 就直接实现该 trait。短期方案是提供可复制 module/template，例如 `runtime_readers/rust/json_serde/src/template.rs`，由 codegen option 或用户复制进 generated crate/业务 crate 后实现本地 trait；中期方案是拆出稳定 `config_forge_runtime` support crate，让 generated code 可配置为 `use config_forge_runtime::{RuntimeDataReader, RuntimeDataLoader}`，adapter crate 再直接实现这些 trait。
+- **Rust**：当前 trait 由 generated crate 声明，外部 crate 无法不依赖用户 generated crate 就直接实现该 trait。短期方案是提供可复制 module/template，例如 `runtime/rust/json_reader_serde/src/template.rs`，由 codegen option 或用户复制进 generated crate/业务 crate 后实现本地 trait；中期方案是拆出稳定 `config_forge_runtime` support crate，让 generated code 可配置为 `use config_forge_runtime::{RuntimeDataReader, RuntimeDataLoader}`，adapter crate 再直接实现这些 trait。
 - **TypeScript**：接口是结构化类型，adapter package 只要导出同形状 class 即可直接传给 `GameData.load`。因此 TypeScript adapter 可以最早做成标准 npm workspace 包。
 - **C++**：`IRuntimeDataReader` 是 nominal virtual interface，adapter 需要看到 generated header 或稳定 runtime interface header。短期方案是 adapter header/source 通过 include path 引用 generated header；中期方案是拆出稳定 `config_forge_runtime.hpp`，generated code 和 adapter 都依赖该 header，降低每次生成代码对 adapter 编译的耦合。
 
@@ -1286,7 +1279,7 @@ Codegen 后续可增加 runtime adapter 相关选项，但默认仍不强制输�
 
 ```toml
 [targets.code.runtime_reader]
-adapter = "rust/messagepack_rmp"   # 或 "typescript/messagepack", "cpp/json_rapidjson"
+adapter = "rust/messagepack_reader_rmp"   # 或 "typescript/messagepack_reader", "cpp/json_rapidjson"
 emit = "copy"                      # copy / reference / none
 loader = "fs"                      # fs / fetch / none / custom
 ```
@@ -1307,11 +1300,11 @@ loader = "fs"                      # fs / fetch / none / custom
 | `copy` | 复制 adapter source/template 到目标输出目录；同时复制必要 package/Cargo/CMake 片段或 manifest。复制内容必须带 adapter version / contract range 注释。 | 快速接入、示例工程、没有包管理体系的游戏项目。 |
 | `reference` | 不复制源码；生成依赖接入提示或 manifest，例如 Rust path/crate dependency、TypeScript npm package、C++ CMake target。 | 正式项目通过包管理或 submodule 引入 runtime support。 |
 
-`copy` 模式应避免覆盖用户手改：adapter 输出目录建议独立于 generated core code，例如 `Generated/RuntimeReaders/<adapter>/`；若目标文件已存在且 adapter version 不一致，默认报 diagnostic，提示用户清理或显式允许覆盖。
+`copy` 模式应避免覆盖用户手改：adapter 输出目录建议独立于 generated core code，例如 `Generated/Runtime/<adapter>/`；若目标文件已存在且 adapter version 不一致，默认报 diagnostic，提示用户清理或显式允许覆盖。
 
 建议推进顺序：
 
-1. 保持现有 `json_builtin` 作为 C++ fallback，但 CMake target 命名为 `json_builtin_test_fallback`，并默认不在普通业务构建中启用。
+1. 将 C++ JSON adapter 收敛为 `json_rapidjson`，移除无依赖 builtin fallback，测试与生产都通过 RapidJSON 路径验证。
 2. 补 TypeScript MessagePack adapter 与 shared TypeScript core，形成 TS JSON / MessagePack 对称结构。
 3. 补 C++ 顶层 CMake 工程、`json_rapidjson` stable adapter、`messagepack_msgpack_cpp` stable adapter；在此之前优先评估 Phase 1.5 stable interface header。
 4. 集成测试 harness 改为引用或复制这些 adapter，避免 harness 内长期维护独立 reader 实现。
@@ -1323,7 +1316,7 @@ loader = "fs"                      # fs / fetch / none / custom
 canonical payload 应升级为正式 compliance suite，而不是只停留在矩阵描述。推荐目录：
 
 ```text
-runtime_readers/compliance/
+runtime/compliance/
   payloads/
     collection_envelope.json
     object_table.json
@@ -1339,14 +1332,14 @@ runtime_readers/compliance/
 
 Rust / TypeScript / C++ adapter 都必须跑同一套 compliance cases。覆盖范围包括 missing vs null、bool `true/false/1/0`、numeric string、NaN/Infinity、int overflow、escaped string、array 越界、MessagePack 非 string map key、binary/ext unsupported 等场景。MessagePack cases 可以由同一份 logical fixture 生成 `.msgpack` payload，避免 JSON 与 MessagePack fixture 漂移。
 
-标准 runtime readers 的 CI 至少覆盖：
+标准 runtime helpers 的 CI 至少覆盖：
 
 | 层级 | Rust | TypeScript | C++ |
 | --- | --- | --- | --- |
-| adapter unit | `cargo test --manifest-path runtime_readers/rust/<adapter>/Cargo.toml` | `npm test` / `tsc -p` per package | `cmake -S runtime_readers/cpp -B build -DCONFIG_FORGE_RUNTIME_BUILD_TESTS=ON ... && cmake --build build && ctest` |
-| format matrix | JSON + MessagePack | JSON + MessagePack | JSON builtin smoke、RapidJSON JSON、msgpack-c MessagePack |
+| adapter unit | `cargo test --manifest-path runtime/rust/<adapter>/Cargo.toml` | `npm test` / `tsc -p` per package | `cmake -S runtime/cpp -B build -DCONFIG_FORGE_RUNTIME_BUILD_TESTS=ON ... && cmake --build build && ctest` |
+| format matrix | JSON + MessagePack | JSON + MessagePack | RapidJSON JSON smoke、RapidJSON JSON、msgpack-c MessagePack |
 | canonical payload | collection envelope、object table、nested struct、fragment object、missing/null、bool `1/0`、finite float、escaped string | 同左 | 同左 |
-| integration harness | standard_project Rust MessagePack + JSON compile check | standard_project TypeScript JSON，后续增加 MessagePack fixture | standard_project C++ JSON builtin smoke；后续增加 RapidJSON JSON 与 MessagePack compile/run |
+| integration harness | standard_project Rust MessagePack + JSON compile check | standard_project TypeScript JSON，后续增加 MessagePack fixture | standard_project C++ RapidJSON JSON smoke；后续增加 RapidJSON JSON 与 MessagePack compile/run |
 
 CI 中三方依赖策略：
 

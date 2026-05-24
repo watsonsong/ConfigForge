@@ -42,7 +42,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
 | Validation, validators, diagnostics | `Implementation/06-validation-module-detail-design.md`, `Implementation/02-diagnostic-module-detail-design.md`, `Design/05-data-validation.md`. |
 | Artifact writing, dry-run, output path conflicts | `Implementation/07-artifact-module-detail-design.md`, `Design/06-export-cli.md`. |
 | Runtime data export | `Implementation/08-exporter-module-detail-design.md`, `Design/06-export-cli.md`. |
-| Code generation or runtime readers | `Implementation/09-codegen-module-detail-design.md`, `Design/06-export-cli.md`. |
+| Code generation or runtime helpers | `Implementation/09-codegen-module-detail-design.md`, `Design/06-export-cli.md`. |
 | Build orchestration, target data/code tasks, parallel execution | `Implementation/10-build-module-detail-design.md`, `Tech/task-system-design.md`. |
 | Testing/coverage quality | `Documentation/code-style.md`, `Tech/unit-test-coverage.md`. |
 
@@ -58,7 +58,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
 - `src/build/` — project build orchestration, target normalization, runtime/code task binding, and artifact generation scheduling.
 - `src/exporter/` — runtime data export contracts, JSON / MessagePack exporters, and future data format exporter extension point.
 - `src/diagnostic/` — shared diagnostic foundations and crate error model.
-- `runtime_readers/` — standard runtime reader adapters/templates and compliance fixtures.
+- `runtime/` — standard runtime helpers/templates and compliance fixtures.
 - `tests/cli_integration.rs` — end-to-end CLI integration tests.
 - `tests/fixtures/standard_project/` — canonical sample project for integration validation.
 
