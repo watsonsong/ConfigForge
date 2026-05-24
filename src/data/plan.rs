@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use crate::{
-    meta::{MetaModel, SourceRef, TableKind, TableMeta},
     ConfigForgeError, Result,
+    meta::{MetaModel, SourceRef, TableKind, TableMeta},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

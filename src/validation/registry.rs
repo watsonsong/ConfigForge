@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    meta::{LinkedMetaModel, ValidatorMeta},
     ConfigForgeError, Result,
+    meta::{LinkedMetaModel, ValidatorMeta},
 };
 
 use super::{
-    builtins::RangeValidatorFactory, ValidationContext, ValidationIssue, ValidationReport,
+    ValidationContext, ValidationIssue, ValidationReport, builtins::RangeValidatorFactory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use crate::{
-    meta::{MetaModel, TargetTags},
     ConfigForgeError,
+    meta::{MetaModel, TargetTags},
 };
 
 use super::*;
@@ -104,22 +104,30 @@ fn builds_code_model_with_types_tables_and_indexes() {
     assert_eq!(model.structs[0].name, "RewardInfo");
     assert_eq!(model.tables[0].name, "items");
     assert_eq!(model.tables[0].kind, CodeTableKind::Collection);
-    assert!(model.tables[0]
-        .fields
-        .iter()
-        .any(|field| field.name == "display_name"));
-    assert!(!model.tables[0]
-        .fields
-        .iter()
-        .any(|field| field.name == "internal_note"));
-    assert!(model.tables[0]
-        .indexes
-        .iter()
-        .any(|index| index.name == "by_id" && index.unique));
-    assert!(model.tables[0]
-        .indexes
-        .iter()
-        .any(|index| index.name == "by_rarity" && !index.unique));
+    assert!(
+        model.tables[0]
+            .fields
+            .iter()
+            .any(|field| field.name == "display_name")
+    );
+    assert!(
+        !model.tables[0]
+            .fields
+            .iter()
+            .any(|field| field.name == "internal_note")
+    );
+    assert!(
+        model.tables[0]
+            .indexes
+            .iter()
+            .any(|index| index.name == "by_id" && index.unique)
+    );
+    assert!(
+        model.tables[0]
+            .indexes
+            .iter()
+            .any(|index| index.name == "by_rarity" && !index.unique)
+    );
     assert_eq!(model.tables[0].data_file, "items.json");
 }
 
@@ -214,14 +222,18 @@ fn codegen_includes_fragment_structs_and_optional_row_members() {
     let model = build_code_model(input.meta, &TargetTags::empty(), &input.runtime_data_files)
         .expect("model should build");
     assert_eq!(model.tables[0].fragments[0].name, "weapon");
-    assert!(model.tables[0].fragments[0]
-        .fields
-        .iter()
-        .any(|field| field.name == "power"));
-    assert!(!model.tables[0].fragments[0]
-        .fields
-        .iter()
-        .any(|field| field.name == "internal_note"));
+    assert!(
+        model.tables[0].fragments[0]
+            .fields
+            .iter()
+            .any(|field| field.name == "power")
+    );
+    assert!(
+        !model.tables[0].fragments[0]
+            .fields
+            .iter()
+            .any(|field| field.name == "internal_note")
+    );
     let attributes = model.tables[0]
         .fragments
         .iter()
@@ -242,10 +254,12 @@ fn codegen_includes_fragment_structs_and_optional_row_members() {
         .find(|fragment| fragment.name == "client_marker")
         .expect("client marker should be generated");
     assert!(client_marker.fields.is_empty());
-    assert!(!client_model.tables[0]
-        .fragments
-        .iter()
-        .any(|fragment| fragment.name == "server_marker"));
+    assert!(
+        !client_model.tables[0]
+            .fragments
+            .iter()
+            .any(|fragment| fragment.name == "server_marker")
+    );
 
     let rust = RustCodeGenerator
         .generate(&input_for(&meta, CodeExportLanguage::Rust))
@@ -402,9 +416,11 @@ fn code_model_rejects_visible_foreign_key_to_hidden_target_index() {
     let linked = meta.link().expect("meta should link");
 
     let error = build_code_model(&linked, &TargetTags::new(["client"]), &[]).unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("target index `items.by_id` which is not exported"));
+    assert!(
+        error
+            .to_string()
+            .contains("target index `items.by_id` which is not exported")
+    );
 }
 
 #[test]
@@ -484,9 +500,11 @@ fn code_model_rejects_visible_foreign_key_to_hidden_source_field() {
     let linked = meta.link().expect("meta should link");
 
     let error = build_code_model(&linked, &TargetTags::new(["client"]), &[]).unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("non-exported source field `drop_item_id`"));
+    assert!(
+        error
+            .to_string()
+            .contains("non-exported source field `drop_item_id`")
+    );
 }
 
 #[test]
@@ -516,6 +534,71 @@ fn rust_generator_emits_loader_table_and_index_helpers() {
     assert!(content.contains("pub fn get_by_id"));
     assert!(content.contains("pub fn find_by_rarity"));
     assert!(content.contains("pub struct GameData"));
+}
+
+#[test]
+fn rust_generator_sanitizes_gen_keyword_across_api_surface() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[enums]]
+            name = "gen_enum"
+
+            [[enums.values]]
+            name = "gen"
+
+            [[structs]]
+            name = "gen"
+
+            [[structs.fields]]
+            name = "gen"
+            type = "int"
+
+            [[tables]]
+            name = "gen"
+            source = "gen.csv"
+            primary_index = "gen"
+
+            [[tables.fields]]
+            name = "gen"
+            type = "int"
+
+            [[tables.fields]]
+            name = "kind"
+            type = "gen_enum"
+
+            [[tables.fields]]
+            name = "payload"
+            type = "gen"
+
+            [[tables.indexes]]
+            name = "gen"
+            fields = ["gen"]
+            unique = true
+            primary = true
+        "#,
+    )
+    .expect("meta should load");
+    let mut input = input_for(&meta, CodeExportLanguage::Rust);
+    input.target.options.naming.enum_value = CaseStyle::Preserve;
+    input.runtime_data_files = vec![RuntimeDataFile {
+        table_name: "gen".to_owned(),
+        path: "gen.json".to_owned(),
+    }];
+
+    let files = RustCodeGenerator.generate(&input).expect("rust code");
+    let content = &files[0].content;
+
+    assert!(content.contains("pub enum GenEnum"));
+    assert!(content.contains("    gen_,"));
+    assert!(content.contains("\"gen\" => Ok(Self::gen_)"));
+    assert!(content.contains("pub struct Gen"));
+    assert!(content.contains("pub gen_: i64,"));
+    assert!(content.contains("pub struct GenRow"));
+    assert!(content.contains("pub struct GenTable"));
+    assert!(content.contains("gen_: HashMap<i64, usize>"));
+    assert!(content.contains("pub fn get_by_gen(&self, gen_: i64) -> Option<&GenRow>"));
+    assert!(content.contains("pub gen_: GenTable,"));
+    assert!(content.contains("gen_: GenTable::load(loader)?"));
 }
 
 #[test]
@@ -632,10 +715,12 @@ fn code_model_filters_tables_fields_and_indexes_by_target_tags() {
         .expect("items table should exist");
     assert!(items.fields.iter().any(|field| field.name == "icon"));
     assert!(!items.fields.iter().any(|field| field.name == "drop_weight"));
-    assert!(!items
-        .indexes
-        .iter()
-        .any(|index| index.name == "by_drop_weight"));
+    assert!(
+        !items
+            .indexes
+            .iter()
+            .any(|index| index.name == "by_drop_weight")
+    );
 }
 
 #[test]
@@ -801,7 +886,9 @@ fn typescript_generator_emits_async_loader_and_maps() {
 
     assert!(content.contains("export interface RuntimeDataLoader"));
     assert!(content.contains("export interface RuntimeDataReader"));
-    assert!(content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;"));
+    assert!(
+        content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;")
+    );
     assert!(content.contains("static readonly dataFile = \"items.json\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("RuntimeDataDecoder"));
@@ -880,7 +967,9 @@ fn typescript_generator_emits_object_table_as_typed_object_not_repository() {
         .expect("typescript code");
     let content = &files[0].content;
 
-    assert!(content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;"));
+    assert!(
+        content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;")
+    );
     assert!(content.contains("readonly gameConfig: GameConfigRow;"));
     assert!(
         content.contains("gameConfig: readGameConfigRow(await loader.open(\"game_config.json\"))")
@@ -962,8 +1051,11 @@ fn cpp_generator_emits_object_table_as_typed_object_not_repository() {
     assert!(content.contains("GameConfigRow game_config_;"));
     assert!(!content.contains("class GameConfigTable"));
     assert!(!content.contains("Rows() const"));
-    assert!(source
-        .contains("data.game_config_ = ReadGameConfigRow(*loader.Open(GameConfigRow::DataFile));"));
+    assert!(
+        source.contains(
+            "data.game_config_ = ReadGameConfigRow(*loader.Open(GameConfigRow::DataFile));"
+        )
+    );
 }
 
 fn generated_content<'a>(files: &'a [GeneratedFile], file_name: &str) -> &'a str {
@@ -992,6 +1084,18 @@ fn naming_handles_reserved_words_and_cases() {
         )
         .expect("identifier"),
         "type_"
+    );
+    assert!(crate::codegen::naming::is_rust_keyword("gen"));
+    assert_eq!(
+        crate::codegen::naming::make_identifier(
+            "gen",
+            CaseStyle::SnakeCase,
+            KeywordConflictPolicy::SuffixUnderscore,
+            crate::codegen::naming::is_rust_keyword,
+            |identifier| Some(format!("r#{identifier}")),
+        )
+        .expect("identifier"),
+        "gen_"
     );
     assert_eq!(crate::codegen::naming::camel_case("item-name"), "itemName");
 }

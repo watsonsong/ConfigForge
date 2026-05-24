@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use crate::exporter::{build_target, BuildOptions, ExecutionOptions};
+use crate::exporter::{BuildOptions, ExecutionOptions, build_target};
 
 #[derive(Debug, Parser)]
 #[command(name = "config-forge")]

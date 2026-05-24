@@ -1,7 +1,8 @@
 [package]
 name = "config_forge"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 description = "A Rust CLI toolkit for validating designer-authored game data and exporting runtime-ready assets."
 
 [lib]

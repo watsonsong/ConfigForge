@@ -1,12 +1,12 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{
+    ConfigForgeError, Result,
     data::{DataResolver, DataRow, DataSet, DataTable},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedIndexMeta, LinkedMetaModel,
         LinkedStructType, LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags, ValueLayout,
     },
-    ConfigForgeError, Result,
 };
 
 mod builtins;
@@ -15,7 +15,7 @@ mod diagnostic;
 mod registry;
 
 pub use context::{
-    visible_row_for, ExportTableView, ExportValidationView, ValidationContext, VisibleRow,
+    ExportTableView, ExportValidationView, ValidationContext, VisibleRow, visible_row_for,
 };
 pub use diagnostic::{ValidationIssue, ValidationIssueLocation, ValidationReport};
 pub use registry::{
@@ -561,9 +561,7 @@ fn validate_foreign_key_source_field_visibility(
         if !source_table_view.is_field_visible(field.meta.name.as_str()) {
             return Err(ConfigForgeError::Validation(format!(
                 "table `{}` foreign key `{}` references non-exported source field `{}` for current target",
-                source_table_view.meta.meta.name,
-                foreign_key.name,
-                field.meta.name
+                source_table_view.meta.meta.name, foreign_key.name, field.meta.name
             )));
         }
     }
@@ -1241,19 +1239,17 @@ fn validate_supported_field_type(
 ) -> Result<()> {
     match (&field.linked_field, field.meta.layout) {
         (LinkedField::Struct(_), None) => Ok(()),
-        (LinkedField::Struct(_), Some(_)) => {
-            Err(ConfigForgeError::Validation(format!(
-                "table `{}` field `{}` uses struct type `{}` with unsupported layout; struct source layout is decided by source headers or keys",
-                meta.meta.name, field.meta.name, field.meta.field_type
-            )))
-        }
+        (LinkedField::Struct(_), Some(_)) => Err(ConfigForgeError::Validation(format!(
+            "table `{}` field `{}` uses struct type `{}` with unsupported layout; struct source layout is decided by source headers or keys",
+            meta.meta.name, field.meta.name, field.meta.field_type
+        ))),
         (_, None | Some(ValueLayout::ScalarCell)) => Ok(()),
-        (_, Some(ValueLayout::JsonCell | ValueLayout::ExpandedValue)) => Err(
-            ConfigForgeError::Validation(format!(
+        (_, Some(ValueLayout::JsonCell | ValueLayout::ExpandedValue)) => {
+            Err(ConfigForgeError::Validation(format!(
                 "table `{}` field `{}` uses unsupported layout; non-struct fields only support scalar_cell in this phase",
                 meta.meta.name, field.meta.name
-            )),
-        ),
+            )))
+        }
     }
 }
 

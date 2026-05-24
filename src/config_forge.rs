@@ -8,10 +8,10 @@ use rayon::prelude::*;
 use serde::Serialize;
 
 use crate::{
+    ConfigForgeError, Result,
     codegen::RuntimeDataFile,
     data::{DataResolver, DataSet, DataTable, DataValue, ResolvedTable, ResolvedValue},
     meta::{LinkedMetaModel, LinkedTableMeta, TableKind, TargetTags},
-    ConfigForgeError, Result,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -998,9 +998,11 @@ mod tests {
 
         assert_eq!(value["rows"][0]["required_attributes"]["max_health"], "100");
         assert_eq!(value["rows"][0]["optional_attributes"]["max_health"], "100");
-        assert!(value["rows"][0]["optional_attributes"]
-            .get("attack")
-            .is_none());
+        assert!(
+            value["rows"][0]["optional_attributes"]
+                .get("attack")
+                .is_none()
+        );
         assert!(value["rows"][0].get("optional_reward").is_none());
     }
 
@@ -1159,10 +1161,12 @@ mod tests {
         )
         .expect("payload should build");
         let value = serde_json::to_value(payload).expect("payload should serialize");
-        assert!(value
-            .as_object()
-            .expect("payload should be object")
-            .is_empty());
+        assert!(
+            value
+                .as_object()
+                .expect("payload should be object")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1196,10 +1200,12 @@ mod tests {
                 .expect("payload should build");
         let value = serde_json::to_value(payload).expect("payload should serialize");
 
-        assert!(value
-            .as_object()
-            .expect("payload should be object")
-            .is_empty());
+        assert!(
+            value
+                .as_object()
+                .expect("payload should be object")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1356,14 +1362,18 @@ mod tests {
                 .expect("payload should build");
         let value = serde_json::to_value(payload).expect("payload should serialize");
 
-        assert!(value["rows"][0]["client_marker"]
-            .as_object()
-            .expect("client marker should be object")
-            .is_empty());
-        assert!(value["rows"][0]["typed_marker"]
-            .as_object()
-            .expect("typed marker should be object")
-            .is_empty());
+        assert!(
+            value["rows"][0]["client_marker"]
+                .as_object()
+                .expect("client marker should be object")
+                .is_empty()
+        );
+        assert!(
+            value["rows"][0]["typed_marker"]
+                .as_object()
+                .expect("typed marker should be object")
+                .is_empty()
+        );
         assert!(value["rows"][0].get("server_marker").is_none());
     }
 

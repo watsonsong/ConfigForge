@@ -138,8 +138,10 @@ fn builds_target_from_project_config() {
     assert!(cpp_code.contains("class IRuntimeDataLoader"));
     assert!(cpp_code.contains("class IRuntimeDataReader"));
     assert!(cpp_code.contains("static constexpr const char* DataFile = \"items.json\""));
-    assert!(cpp_code
-        .contains("virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path)"));
+    assert!(
+        cpp_code
+            .contains("virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path)")
+    );
     assert!(cpp_code.contains("static constexpr const char* DataFile = \"game_rules.json\""));
     assert!(!cpp_code.contains("class GameRulesTable"));
     assert!(!cpp_code.contains("RuntimeDataFormat"));
@@ -519,10 +521,12 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
         rmp_serde::from_slice(&messagepack_bytes).expect("messagepack should decode");
     assert_eq!(payload["meta"]["name"], "items");
     assert!(payload["meta"].get("fields").is_none());
-    assert!(!payload["rows"]
-        .as_array()
-        .expect("rows should be array")
-        .is_empty());
+    assert!(
+        !payload["rows"]
+            .as_array()
+            .expect("rows should be array")
+            .is_empty()
+    );
 
     let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.msgpack\""));
@@ -1128,20 +1132,22 @@ fn standard_reference_game_meta_imports() -> String {
 }
 
 fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bool) {
-    fs::write(
+    for edition in ["2021", "2024"] {
+        fs::write(
         generated_dir.join("Cargo.toml"),
         format!(
             r#"
                 [package]
                 name = "generated_config_check"
                 version = "0.1.0"
-                edition = "2021"
+                edition = "{edition}"
 
                 [lib]
                 path = "lib.rs"
 
                 {dependencies}
             "#,
+            edition = edition,
             dependencies = if derive_serde {
                 "[dependencies]\nserde = { version = \"1.0\", features = [\"derive\"] }\nserde_json = \"1.0\""
             } else {
@@ -1150,7 +1156,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
         ),
     )
     .expect("generated rust Cargo.toml should be written");
-    fs::write(
+        fs::write(
         generated_dir.join("lib.rs"),
         format!(
             r#"
@@ -1259,12 +1265,13 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
     )
     .expect("generated rust lib.rs should be written");
 
-    let output = StdCommand::new("cargo")
-        .args(["test", "--quiet", "--manifest-path"])
-        .arg(generated_dir.join("Cargo.toml"))
-        .output()
-        .expect("generated Rust cargo test should run");
-    assert_command_success(output, "generated Rust cargo test");
+        let output = StdCommand::new("cargo")
+            .args(["test", "--quiet", "--manifest-path"])
+            .arg(generated_dir.join("Cargo.toml"))
+            .output()
+            .expect("generated Rust cargo test should run");
+        assert_command_success(output, &format!("generated Rust cargo test ({edition})"));
+    }
 }
 
 fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
@@ -1531,11 +1538,8 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
 fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
     let temp_dir = tempfile::tempdir().expect("rust harness temp dir should be created");
     let harness_dir = fixture_root.join("harness/rust");
-    fs::copy(
-        harness_dir.join("Cargo.toml"),
-        temp_dir.path().join("Cargo.toml"),
-    )
-    .expect("rust harness Cargo.toml should be copied");
+    let harness_cargo_toml = fs::read_to_string(harness_dir.join("Cargo.toml"))
+        .expect("rust harness Cargo.toml should be read");
     fs::copy(harness_dir.join("lib.rs"), temp_dir.path().join("lib.rs"))
         .expect("rust harness lib.rs should be copied");
     fs::copy(
@@ -1554,13 +1558,24 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
     )
     .expect("generated Rust code should be copied into harness");
 
-    let output = StdCommand::new("cargo")
-        .args(["test", "--quiet", "--manifest-path"])
-        .arg(temp_dir.path().join("Cargo.toml"))
-        .env("DATA_DIR", fixture_root.join("out/server_data"))
-        .output()
-        .expect("standard generated Rust runtime test should run");
-    assert_command_success(output, "standard generated Rust runtime test");
+    for edition in ["2021", "2024"] {
+        fs::write(
+            temp_dir.path().join("Cargo.toml"),
+            harness_cargo_toml.replace("edition = \"2024\"", &format!("edition = \"{edition}\"")),
+        )
+        .expect("rust harness Cargo.toml should be written");
+
+        let output = StdCommand::new("cargo")
+            .args(["test", "--quiet", "--manifest-path"])
+            .arg(temp_dir.path().join("Cargo.toml"))
+            .env("DATA_DIR", fixture_root.join("out/server_data"))
+            .output()
+            .expect("standard generated Rust runtime test should run");
+        assert_command_success(
+            output,
+            &format!("standard generated Rust runtime test ({edition})"),
+        );
+    }
 }
 
 fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {

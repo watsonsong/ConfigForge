@@ -1,8 +1,8 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
-    meta::{LinkedField, LinkedFragmentPayload, LinkedMetaModel, PrimitiveFieldType, TableKind},
     ConfigForgeError, Result,
+    meta::{LinkedField, LinkedFragmentPayload, LinkedMetaModel, PrimitiveFieldType, TableKind},
 };
 
 use super::{ArtifactKind, RuntimeDataFile};
@@ -433,12 +433,12 @@ fn is_runtime_codegen_field(
 
 fn validate_index_key_type(table_name: &str, index_name: &str, field: &CodeField) -> Result<()> {
     match field.code_type {
-        CodeTypeRef::Float | CodeTypeRef::Struct { .. } => Err(ConfigForgeError::Validation(
-            format!(
+        CodeTypeRef::Float | CodeTypeRef::Struct { .. } => {
+            Err(ConfigForgeError::Validation(format!(
                 "table `{table_name}` index `{index_name}` field `{}` uses unsupported index key type `{:?}`",
                 field.name, field.code_type
-            ),
-        )),
+            )))
+        }
         CodeTypeRef::Int
         | CodeTypeRef::Bool
         | CodeTypeRef::String

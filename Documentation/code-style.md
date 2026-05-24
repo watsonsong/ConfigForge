@@ -2,7 +2,9 @@
 
 ## Rust Conventions
 
-- Use Rust 2021 edition.
+- Use Rust 2024 edition for ConfigForge tool code.
+- Require Rust 1.85+ as the minimum supported toolchain for the ConfigForge crate.
+- Keep generated Rust code Rust 2021-compatible by default unless a target option explicitly selects Rust 2024-only output.
 - Keep domain logic in `src/lib.rs` modules; keep `src/main.rs` as a thin entry point.
 - Prefer explicit domain errors through `ConfigForgeError` for library code.
 - Use `anyhow` at CLI boundaries where human-facing error propagation is sufficient.

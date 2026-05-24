@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
 use crate::{
+    ConfigForgeError, Result,
     meta::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, LinkedTableMeta,
         PrimitiveFieldType, TableKind, TargetTags,
     },
-    ConfigForgeError, Result,
 };
 
 use super::{

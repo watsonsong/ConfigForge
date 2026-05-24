@@ -1,4 +1,4 @@
-use crate::{meta::ValidationSeverity, ConfigForgeError, Result};
+use crate::{ConfigForgeError, Result, meta::ValidationSeverity};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationIssue {

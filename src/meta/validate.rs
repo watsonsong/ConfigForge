@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use super::{
-    model::normalize_tag, FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
-    PrimitiveFieldType, TableKind, TableMeta, ValidatorMeta, ValueLayout,
+    FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
+    TableKind, TableMeta, ValidatorMeta, ValueLayout, model::normalize_tag,
 };
 
 pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
@@ -497,7 +497,9 @@ fn validate_object_table_restrictions(table: &TableMeta, diagnostics: &mut Vec<M
     if table.primary_index.is_some() {
         diagnostics.push(MetaDiagnostic::new(
             MetaDiagnosticCode::UnsupportedFeature,
-            format!("{owner} is an ObjectTable, but ObjectTable Step 1 does not support `primary_index`"),
+            format!(
+                "{owner} is an ObjectTable, but ObjectTable Step 1 does not support `primary_index`"
+            ),
         ));
     }
     if !table.foreign_keys.is_empty() {

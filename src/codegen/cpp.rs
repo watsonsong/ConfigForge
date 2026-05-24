@@ -1,10 +1,11 @@
 use crate::{ConfigForgeError, Result};
 
 use super::{
-    build_code_model, ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
-    render_file_header, ArtifactKind, CodeEnum, CodeExportInput, CodeExportLanguage,
-    CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTableKind,
-    CodeTypeRef, CodegenOptions, GeneratedFile, GeneratedSymbol,
+    ArtifactKind, CodeEnum, CodeExportInput, CodeExportLanguage, CodeFragmentPayload,
+    CodeGenerator, CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTableKind, CodeTypeRef,
+    CodegenOptions, GeneratedFile, GeneratedSymbol, build_code_model,
+    ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
+    render_file_header,
 };
 
 pub struct CppCodeGenerator;

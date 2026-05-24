@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use crate::{ConfigForgeError, Result};
 
-use super::{link_meta_model, validate_meta_model, MetaDiagnostic, MetaModel};
+use super::{MetaDiagnostic, MetaModel, link_meta_model, validate_meta_model};
 
 impl MetaModel {
     pub fn from_toml_str(input: &str) -> Result<Self> {

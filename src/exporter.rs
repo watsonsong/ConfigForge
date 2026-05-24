@@ -6,23 +6,23 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use rayon::prelude::*;
 use rayon::ThreadPool;
+use rayon::prelude::*;
 use serde::Deserialize;
 
 use crate::{
+    ConfigForgeError, Result,
     codegen::{
-        builtin_generators, CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator,
-        CodegenTaskConfig, GeneratedFile, RuntimeDataFile,
+        CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, CodegenTaskConfig,
+        GeneratedFile, RuntimeDataFile, builtin_generators,
     },
     data::{DataLoadPlan, DataLoader},
-    config_forge::{export_runtime_data, DataFormatRegistry},
+    config_forge::{DataFormatRegistry, export_runtime_data},
     meta::{
-        link_meta_model, validate_meta_model, EnumMeta, MetaDiagnostic, MetaModel, StructMeta,
-        TableMeta, TargetTags,
+        EnumMeta, MetaDiagnostic, MetaModel, StructMeta, TableMeta, TargetTags, link_meta_model,
+        validate_meta_model,
     },
     validation::{normalize_data_set, validate_normalized_data_set_for_target_with_report},
-    ConfigForgeError, Result,
 };
 
 const DEFAULT_DATA_TASK_NAME: &str = "default";
@@ -465,7 +465,7 @@ fn normalize_target_data_tasks(
             (None, _) => {
                 return Err(ConfigForgeError::Validation(format!(
                     "target `{target_name}` declares multiple data tasks, but one is missing `name`"
-                )))
+                )));
             }
         };
         if !seen.insert(name.clone()) {
@@ -746,7 +746,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
 
-    use crate::codegen::{default_module_name, CodeExportLanguage, CodegenTaskConfig};
+    use crate::codegen::{CodeExportLanguage, CodegenTaskConfig, default_module_name};
     use crate::data::DataTable;
     use crate::config_forge::build_exported_table_payload;
 

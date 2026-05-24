@@ -1,11 +1,11 @@
 use std::collections::BTreeSet;
 
 use crate::{
+    ConfigForgeError, Result,
     meta::{
         ExportCondition, LinkedField, LinkedMetaModel, PrimitiveFieldType, TargetTags,
         ValidationSeverity, ValidatorMeta,
     },
-    ConfigForgeError, Result,
 };
 
 use crate::validation::diagnostic::ValidationIssueLocation;

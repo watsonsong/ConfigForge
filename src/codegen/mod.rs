@@ -6,8 +6,8 @@ mod typescript;
 
 pub use self::cpp::CppCodeGenerator;
 pub use self::ir::{
-    build_code_model, CodeEnum, CodeEnumValue, CodeField, CodeFragment, CodeFragmentPayload,
-    CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, GeneratedFile,
+    CodeEnum, CodeEnumValue, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel,
+    CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, GeneratedFile, build_code_model,
 };
 pub use self::rust::RustCodeGenerator;
 pub use self::typescript::TypeScriptCodeGenerator;
@@ -17,8 +17,8 @@ use std::{collections::HashMap, path::PathBuf};
 use serde::Deserialize;
 
 use crate::{
-    meta::{LinkedMetaModel, TargetTags},
     ConfigForgeError, Result,
+    meta::{LinkedMetaModel, TargetTags},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
