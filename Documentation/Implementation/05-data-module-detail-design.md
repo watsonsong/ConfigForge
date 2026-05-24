@@ -1,4 +1,4 @@
-# 03. Data 模块详细设计
+# 05. Data 模块详细设计
 
 本文档描述 Data 模块的实现设计，用于把 Meta 中声明的 source 配置加载为独立的数据快照，并在 Meta 完成 Link 后把 raw source 数据解析为可供 Validation / Export 共享的结构化数据视图。产品语义以 `Documentation/Design/` 为准；本文档聚焦 Rust 模块边界、核心类型、主要方法、流程阶段和测试组织。
 
@@ -372,6 +372,50 @@ impl CsvDataReader {
 - variant source collection：`materials.csv` / `weapons.csv` / `armors.csv` 都是同一个 `items` table 的 source variants。DataLoader 按 source 声明顺序把它们 append 到单张 `items` DataTable，并为每行记录 fragment presence；`by_id` unique/primary 校验在合并后的整张 items 表上执行，因此三类道具 ID 必须全局不重复。
 
 variant source mode 要求每个 source 贡献完整 record：common fields 必须在每个 source 中完整出现，不做跨 source join；fragment fields 只允许出现在声明了对应 active fragment 的 source 中。
+
+### 3.6.2 ObjectTable `key,value` source layout
+
+ObjectTable Step 1 的 source 过程文档已并入 Data 模块。当前 `kind = "object"` 的 table 使用固定 CSV `key,value` 行式布局：
+
+```csv
+key,value
+max_level,100
+start_gold,500
+economy,"{""gold_rate"":""1.2"",""drop_rate"":""0.8""}"
+```
+
+读取规则：
+
+1. header 必须恰好两列，trim 后分别为 `key` 和 `value`。
+2. 每个数据行第一列是 top-level field key 或后续支持的 field path，第二列是 raw value。
+3. `key` 不能为空。
+4. 同一个 ObjectTable source 中 key 不能重复。
+5. `key` 必须能被当前 table schema 识别；unknown key 应失败而不是静默忽略。
+6. 只有 header、没有数据行时，也必须产出一个 empty logical row。
+7. ObjectTable source 归一化后始终是一个 logical row：`DataTable.rows.len() == 1`。
+
+归一化示例：
+
+```text
+CSV rows:
+  key=max_level, value=100
+  key=start_gold, value=500
+
+DataTable rows:
+  [ { "max_level": "100", "start_gold": "500" } ]
+```
+
+这样做的原因：
+
+- required/default/type/enum validation 可以复用普通 row 校验逻辑。
+- exporter 可以在 `TableKind::Object` 分支上选择 object payload shape。
+- codegen IR 仍只需要识别 table kind，不需要理解 CSV 物理布局。
+
+当前限制：
+
+- ObjectTable Step 1 只支持 legacy/simple `source = "...csv"`，不支持 `sources` / `override_sources`。
+- ObjectTable 不支持 fragments / row_export / indexes / foreign keys；这些限制由 Meta / Validation 模块维护。
+- ObjectTable key-level source trace 仍需后续增强；当前 singleton logical row 会损失真实 key 行定位的一部分精度。
 
 错误映射：
 

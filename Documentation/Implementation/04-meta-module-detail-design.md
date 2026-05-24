@@ -1,4 +1,4 @@
-# 02. Meta 模块详细设计
+# 04. Meta 模块详细设计
 
 本文档描述当前 Meta 模块的实际实现设计，用于指导后续继续扩展 Meta 能力。产品语义以 `Documentation/Design/04-meta-model.md` 为准；本文档聚焦 Rust 类型边界、生命周期表达、Load-then-Link 策略、主要方法和测试组织。
 
@@ -22,7 +22,7 @@ Meta 模块负责把一个或多个 Meta 文件转换为可被后续模块使用
 - 基础结构校验与稳定诊断。
 - 模块内单元测试覆盖加载、Link、显式多路径合并、诊断；ProjectConfig imports 由 exporter / CLI 测试覆盖。
 
-计划字段说明：`validators: Vec<ValidatorMeta>` 已在 `src/meta/model.rs` 落地，当前 TOML 接受 `[[tables.validators]]` 与 `[[tables.fields.validators]]`，并由 validation registry 在 compile 阶段解释具体 `kind` 与参数；当前内置已实现 `range` field validator。`foreign_keys: Vec<ForeignKeyMeta>` 已完成 MVP，支持 table-level / field-level foreign key 声明、link、Meta 结构校验和数据引用完整性校验。validator 详细实现见 `05-validator-framework-detail-design.md`。
+计划字段说明：`validators: Vec<ValidatorMeta>` 已在 `src/meta/model.rs` 落地，当前 TOML 接受 `[[tables.validators]]` 与 `[[tables.fields.validators]]`，并由 validation registry 在 compile 阶段解释具体 `kind` 与参数；当前内置已实现 `range` field validator。`foreign_keys: Vec<ForeignKeyMeta>` 已完成 MVP，支持 table-level / field-level foreign key 声明、link、Meta 结构校验和数据引用完整性校验。validator 详细实现见 `06-validation-module-detail-design.md`。
 
 ## 2.2 Rust 中的“类”和继承策略
 
@@ -57,7 +57,7 @@ src/meta/
 | `loader.rs` | Meta 文件读取、TOML 反序列化、显式路径列表合并、加载后 link/validate。 |
 | `link.rs` | 构建 `LinkedMetaModel<'meta>`，解析字段类型和索引字段引用。 |
 | `validate.rs` | 独立结构校验；不构造运行时数据。 |
-| `diagnostic.rs` | 诊断 code、message、排序和展示。 |
+| `diagnostic.rs` | Meta 专属诊断 code 与 `MetaDiagnostic`；共享 severity、location 和格式化能力来自 `src/diagnostic/`。 |
 | `tests.rs` | 使用内联 TOML 和临时目录 fixture 测试 Meta 行为。 |
 
 ## 2.4 Load-then-Link 架构
@@ -235,6 +235,7 @@ pub enum TableKind {
 
 - `Object`：可以没有 index。
 - `Collection`：可以定义 index；override 等后续逻辑会依赖 primary index。
+- ObjectTable Step 1 的过程文档已并入模块文档。当前 Meta 层限制 ObjectTable 不能声明 indexes / primary_index / row_export / fragments / foreign_keys，也不能使用 `sources` / `override_sources`；ObjectTable source layout 详见 `05-data-module-detail-design.md`。
 
 ### 2.5.7 `FieldMeta`
 
@@ -294,7 +295,7 @@ pub struct ValidatorMeta {
 - `severity` 支持 `error` / `warning`；error 会阻断导出，warning 会保留在 `ValidationReport` 中并由 CLI 以 warning 输出但不阻断。
 - Meta validate 阶段只检查公共字段、tag 合法性和明显结构错误；unknown kind、参数类型、字段引用等由 validation compile 阶段根据 registry 诊断。
 
-详细框架见 `05-validator-framework-detail-design.md`。
+详细框架见 `06-validation-module-detail-design.md`。
 
 ### 2.5.8 `ForeignKeyMeta`
 
@@ -621,6 +622,8 @@ pub enum MetaDiagnosticCode {
 - table `primary_index` 必须引用存在的 index。
 - table `primary_index` 指向的 index 必须 unique。
 - 多个 `primary = true` 或 `primary_index` 与 `primary = true` 冲突时产生 `PrimaryIndexMismatch`。
+- ObjectTable Step 1 不支持 indexes / primary_index / row_export / fragments / table-level foreign_keys / field-level foreign_key / multi-source declarations。
+- CollectionTable 的 foreign key target 不能指向 ObjectTable。
 
 `link_meta_model` 当前覆盖：
 

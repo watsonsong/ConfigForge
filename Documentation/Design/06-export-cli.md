@@ -250,7 +250,7 @@ runtime_readers/
 
 `runtime_readers/` 下的实现属于“标准 runtime adapter 源码/模板”，不是每次 codegen 的输出文件。后续可以通过 codegen option 选择是否把某个 adapter 拷贝到目标输出目录，也可以由游戏项目直接依赖该目录对应语言的 package/crate/library。
 
-C++ adapter 需要有独立工程化入口。推荐支持 `add_subdirectory(runtime_readers/cpp)` 和安装后的 `find_package(ConfigForgeRuntimeReaders CONFIG)` 两种接入方式，并暴露 `config_forge_runtime::core`、`config_forge_runtime::json_builtin_test_fallback`、`config_forge_runtime::json_rapidjson`、`config_forge_runtime::messagepack_msgpack_cpp`、`config_forge_runtime::filesystem_loader` 等 CMake targets。普通业务构建默认不启用 builtin fallback，测试构建可显式启用；生产项目显式打开 RapidJSON / msgpack-c 选项。详细 CMake option、target、三方依赖解析、C++ ownership、runtime_reader option 校验、emit 语义和 CI 矩阵见 `Documentation/Implementation/04-code-export-module-detail-design.md` 的“标准 RuntimeDataReader adapter 工程结构”。
+C++ adapter 需要有独立工程化入口。推荐支持 `add_subdirectory(runtime_readers/cpp)` 和安装后的 `find_package(ConfigForgeRuntimeReaders CONFIG)` 两种接入方式，并暴露 `config_forge_runtime::core`、`config_forge_runtime::json_builtin_test_fallback`、`config_forge_runtime::json_rapidjson`、`config_forge_runtime::messagepack_msgpack_cpp`、`config_forge_runtime::filesystem_loader` 等 CMake targets。普通业务构建默认不启用 builtin fallback，测试构建可显式启用；生产项目显式打开 RapidJSON / msgpack-c 选项。详细 CMake option、target、三方依赖解析、C++ ownership、runtime_reader option 校验、emit 语义和 CI 矩阵见 `Documentation/Implementation/08-codegen-module-detail-design.md` 的“标准 RuntimeDataReader adapter 工程结构”。
 
 ## 6.3 Special Exporter
 

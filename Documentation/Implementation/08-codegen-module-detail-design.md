@@ -1,4 +1,4 @@
-# 04. Code Export 模块详细设计
+# 08. Codegen 模块详细设计
 
 本文档描述 ConfigForge 的代码导出任务设计。目标是在已加载、已链接并通过校验的 Meta 与 Data 基础上，生成 Rust、C++ 和 TypeScript 三种语言的运行时代码，覆盖枚举、结构体、数据表、索引辅助查找函数，并提供抽象的数据文件加载器接口，让接入方可以从本地文件、包内资源、网络或引擎资源系统中加载实际数据。加载器接口必须与具体 Meta、表和字段解耦；所有按表/字段解析和 typed row/object 构造职责属于生成代码。
 
@@ -51,7 +51,7 @@ ProjectConfig::from_path
   -> write generated files
 ```
 
-Code Export 已从 `exporter` 编排层下沉到独立 `src/codegen/` 模块；`exporter.rs` 负责构造输入、分发生成器、检查输出路径冲突并写出 artifact。
+Code Export 已从旧的 exporter 编排层下沉到独立 `src/codegen/` 模块；当前 `src/build/` 负责构造输入、分发生成器、检查输出路径冲突并写出 artifact。
 
 目标态流程仍可继续演进为：
 
@@ -108,6 +108,22 @@ src/artifact/
 ```
 
 第一阶段如果不想一次性扩大范围，可以先让 `CodeGenerator` 返回 `Vec<GeneratedFile>`，由 exporter 顺序写入；但类型命名应为未来 Artifact Writer 预留。
+
+### 4.3.1 ObjectTable codegen 边界
+
+ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
+
+- `CodeTable.kind` 区分 `Object` / `Collection`。
+- ObjectTable 生成目标语言中的 singleton object 类型和访问入口。
+- ObjectTable 不生成 collection repository，不生成 index lookup helpers。
+- Rust / TypeScript / C++ 都应避免把 ObjectTable 误表达为 rows collection。
+- Runtime data file path 仍由 build 传入的 `RuntimeDataFile` 决定；codegen 不关心 ObjectTable 的 CSV `key,value` 物理布局。
+
+建议 API 形态：
+
+- Rust：`GameData::game_config() -> &GameConfig` 或 public field `game_config: GameConfig`。
+- TypeScript：`data.gameConfig` 或 `getGameConfig()`。
+- C++：`GetGameConfig()` 返回 const reference。
 
 ## 4.4 核心输入输出模型
 

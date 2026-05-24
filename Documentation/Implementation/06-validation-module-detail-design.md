@@ -1,10 +1,66 @@
-# 05. 注册式 Validator 框架详细设计
+# 06. Validation 模块详细设计
 
 本文档描述 ConfigForge validator 框架的实现设计。当前已在保留 required / type / enum / unique / target-aware validation 行为的基础上，引入可注册、可扩展、可配置的 validator 机制；已落地 registry、结构化 `ValidationReport` 和内置 `range` validator。required / type / enum / unique 仍作为基础规则保留在 validation 主流程中，后续可继续迁移为 implicit validators。
 
 需要特别区分：**validator 是检查规则，foreign key 是数据关系模型**。外键关系不仅用于导出前校验，还会影响 runtime data/codegen，例如生成自动查找关联记录的 helper。因此外键不应只作为 `kind = "foreign_key"` 的普通 validator 配置存在；它应成为 Meta 中的一等关系数据，再由 validation 阶段从外键关系隐式生成 referential-integrity validator。
 
-产品语义仍以 `Documentation/Design/05-data-validation.md` 为准；本文档聚焦 Rust 代码结构、Meta 配置承载方式、registry 编译流程、迁移路径和测试计划。
+产品语义仍以 `Documentation/Design/05-data-validation.md` 为准；本文档聚焦 Rust 代码结构、Meta 配置承载方式、validation 主流程、registry 编译流程、迁移路径和测试计划。
+
+## 6.0 模块职责与当前结构
+
+Validation 模块负责对已加载并归一化的数据执行结构化校验。它可以依赖 `meta`、`data` 和 `diagnostic`，但不能依赖 `exporter`、`codegen` 或 `build`。
+
+当前目录结构：
+
+```text
+src/validation/
+  mod.rs              # normalize / validate 入口、基础规则、FK / index / target-aware validation
+  context.rs          # ExportValidationView / ExportTableView / VisibleRow / ValidationContext
+  diagnostic.rs       # ValidationIssue / ValidationReport，接入 shared diagnostic
+  registry.rs         # ValidatorFactory / CompiledValidator / ValidatorRegistry / CompiledValidationPlan
+  builtins/
+    mod.rs
+    range.rs          # 内置 range validator
+  tests.rs            # validation 单元测试
+```
+
+核心入口：
+
+- `validate_data_set()`：完整数据集校验，返回 `Result<()>`。
+- `validate_data_set_with_report()`：完整数据集校验，保留 warning report。
+- `validate_data_set_for_target()`：target-aware 校验。
+- `validate_data_set_for_target_with_report()`：target-aware 校验并返回 `ValidationReport`。
+- `normalize_data_set()`：应用 default，产出后续校验和导出共享的 normalized data。
+
+## 6.0.1 ObjectTable 校验边界
+
+ObjectTable Step 1 的过程文档已并入各模块文档。Validation 模块中的 ObjectTable 规则如下：
+
+Meta validation 阶段限制：
+
+- ObjectTable 不能声明 indexes / primary_index。
+- ObjectTable 不能声明 `row_export`。
+- ObjectTable 不能声明 fragments。
+- ObjectTable 不能声明 table-level `foreign_keys`。
+- ObjectTable field 不能声明 field-level `foreign_key`。
+- CollectionTable 的 FK target 不能指向 ObjectTable。
+- ObjectTable Step 1 只支持 legacy/simple `source = "...csv"`，不能声明 `sources` 或 `override_sources`。
+
+Data validation 阶段规则：
+
+- ObjectTable 必须归一化为一个 logical row。
+- required/default/type/enum/field validator 复用现有字段规则。
+- struct JSON cell 与 expanded value 由 DataResolver 统一解析。
+- index / unique / FK / row_export / fragment validation 对 ObjectTable 跳过或在 Meta 阶段禁止。
+- table-level `export/export_when` 生效；field-level `export/export_when` 生效。
+- table 可见但所有字段被过滤时，后续 exporter 输出 `{}`。
+
+测试归属：
+
+- Meta 限制放在 `src/meta/tests.rs`。
+- ObjectTable singleton row、required/default/type、field validator 放在 `src/validation/tests.rs`。
+- ObjectTable CSV `key,value` 读取放在 `src/data/tests.rs`。
+- ObjectTable runtime payload 放在 `src/exporter/` tests。
 
 ## 5.1 设计目标
 

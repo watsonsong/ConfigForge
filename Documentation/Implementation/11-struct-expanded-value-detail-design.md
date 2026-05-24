@@ -1,4 +1,4 @@
-# Struct Source Layout 与 Expanded Value 详细设计
+# 11. Struct Source Layout 与 Expanded Value 专项实现详细设计
 
 本文档描述 named struct 字段在 CSV 中根据 source 形态自动选择 JSON cell 或 expanded value 的实现方案。产品语义以 `Documentation/Design/04-meta-model.md` 和 `Documentation/Design/05-data-validation.md` 为准；本文档聚焦 Rust 实现边界、数据模型、校验、导出和测试计划。
 

@@ -28,14 +28,17 @@ For future technical overview design, detailed design, user manual writing, and 
 
 Use the implementation documents after product behavior has been confirmed in `Design/`:
 
-- `Implementation/01-module-outline.md` — Rust module boundaries, dependency direction, execution pipeline mapping, and first-stage completion criteria.
-- `Implementation/02-meta-module-detail-design.md` — Meta module data structures, Rust inheritance/composition strategy, main APIs, migration path, and unit test plan.
-- `Implementation/03-data-module-detail-design.md` — Data load/model/validation/exporter flow design.
-- `Implementation/04-code-export-module-detail-design.md` — Code export IR, generator contracts, and multi-language output design.
-- `Implementation/05-validator-framework-detail-design.md` — Registered validator framework, Meta validator configuration, built-in validator migration, and test plan.
-- `Implementation/06-foreign-key-detail-design.md` — Foreign key raw/link model, referential-integrity validation, target semantics, codegen staging, and test plan.
-- `Implementation/07-object-table-step1-detail-design.md` — ObjectTable CSV `key,value` row layout, validation/export/codegen plan, and Step 1 test plan.
-- `Implementation/08-struct-expanded-value-detail-design.md` — Struct source layout auto detection and expanded CSV field-path layout for CollectionTable/ObjectTable, validation/export plan, and test plan.
+- `Implementation/01-module-outline.md` — Rust module boundaries, one-way dependency rules, execution pipeline mapping, and implementation document index.
+- `Implementation/02-diagnostic-module-detail-design.md` — Shared diagnostic foundations and crate error bridge.
+- `Implementation/03-project-module-detail-design.md` — Project Config loading, imports, path normalization, target aggregation, and Meta extraction.
+- `Implementation/04-meta-module-detail-design.md` — Meta module data structures, Load-then-Link strategy, main APIs, migration path, and unit test plan.
+- `Implementation/05-data-module-detail-design.md` — Data load/model/resolver flow, CSV readers, ObjectTable source layout, and DataSet design.
+- `Implementation/06-validation-module-detail-design.md` — Validation flow, registered validator framework, diagnostics, ExportValidationView, and test plan.
+- `Implementation/07-exporter-module-detail-design.md` — Runtime data exporter contracts, format registry, JSON / MessagePack output, and ObjectTable payload shape.
+- `Implementation/08-codegen-module-detail-design.md` — Codegen IR, generator contracts, runtime reader contract, and multi-language output design.
+- `Implementation/09-build-module-detail-design.md` — Build orchestration, target normalization, data/code task binding, and artifact write boundaries.
+- `Implementation/10-foreign-key-detail-design.md` — Foreign key raw/link model, referential-integrity validation, target semantics, codegen staging, and test plan.
+- `Implementation/11-struct-expanded-value-detail-design.md` — Struct source layout auto detection and expanded CSV field-path layout for CollectionTable/ObjectTable, validation/export plan, and test plan.
 
 ## Technical Practice Set
 

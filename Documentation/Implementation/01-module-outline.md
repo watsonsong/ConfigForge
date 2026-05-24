@@ -2,181 +2,121 @@
 
 本文档是 ConfigForge 的程序实现概要设计，用于把 `Documentation/Design/` 中的产品设计落到 Rust 工程模块边界。产品语义仍以 `Documentation/Design/` 为准；本目录只约束实现结构、依赖方向、阶段目标和测试组织。
 
-## 1.1 近期开发目标
+## 1.1 文档组织原则
 
-当前阶段以 **Meta 模块可用闭环** 为中心，目标是让后续 Source / Validation / Exporter 都依赖同一份已校验、已链接的 Meta：
+`Documentation/Implementation/` 按“模块文档优先，专项技术文档随后”的结构维护：
 
-1. 能从单个或多个 TOML Meta 文件加载配置。
-2. 能处理 `imports`，递归加载依赖文件并做路径去重。
-3. 能把 serde 反序列化得到的纯配置 `MetaModel` 保留下来，避免在 owned 数据内保存自引用。
-4. 能在所有 Meta 加载完成后执行 Link，把字段类型、索引字段等字符串引用解析为借用引用。
-5. 能执行基础结构校验，例如重复命名、未知字段类型、索引字段引用、主索引一致性。
-6. 能通过 Meta 模块单元测试覆盖加载、Link、校验、imports 等基础行为。
+1. `01-module-outline.md`：总览模块职责、依赖方向、执行流水线和测试分层。
+2. `02`～`09`：每个已落地核心模块各自维护一份实现文档，描述该模块内部结构、公共 API、依赖约束和测试边界。
+3. `10` 起：跨模块专项技术点文档，例如 foreign key、struct expanded value 等。
+4. 已完成的过程型阶段文档不再单独保留，例如 ObjectTable Step 1 已并入 Meta / Data / Validation / Exporter / Codegen 模块文档。
 
 ## 1.2 顶层模块划分
 
-仓库核心业务模块采用目录模块承载实现；`src/` 外层尽量只保留 CLI、crate 入口和少量稳定公共入口文件。
+仓库核心业务模块采用目录模块承载实现；`src/` 外层只保留 crate 入口、CLI 入口和少量稳定公共入口文件。
 
-| 模块 | 建议路径 | 责任 | 主要输入 | 主要输出 |
-| --- | --- | --- | --- | --- |
-| CLI | `src/cli.rs` | 命令行参数、用户入口、错误展示。 | argv、环境变量。 | `ExportCommand`、用户可读输出。 |
-| Project Config | `src/project/` | 加载 `ConfigForge.toml`、解析工程级配置、合并 imports、归一化配置路径；`TargetConfig` 只作为 project-level 聚合结构引用 codegen/exporter 的 task config。 | Project Config TOML。 | `ProjectConfig` / `TargetConfig`。 |
-| Meta | `src/meta/` | 加载、合并、链接、校验 Meta。 | TOML/XML Meta 文件。 | `MetaModel`、`LinkedMetaModel<'meta>`、`MetaDiagnostic`。 |
-| Source/Data Load | `src/data/` | 将 CSV/XLSX/远程表格归一化为二维表，并将 source cell 解析为 typed value 和逻辑表数据。 | `LinkedMetaModel<'meta>`、source declaration。 | `DataSet` / `DataTable` / resolved view。 |
-| Validation | `src/validation.rs` / `src/validation/` | 业务规则、索引、外键、注册式 validator、过滤视图校验。 | `LinkedMetaModel<'meta>`、`DataSet`、`ExportContext`、`ValidatorRegistry`。 | 结构化诊断。 |
-| Builder | `src/build/` | 驱动工程构建主路径；归一化 target；绑定 data/code task；按 target 并行编排 runtime data export 与 codegen。 | `ProjectConfig`、`LinkedMetaModel<'meta>`、`TargetTags`、target config。 | data task 分组的 `RuntimeDataFile` / generated files。 |
-| Exporter | `src/exporter/` | 定义 `TargetDataConfig`、runtime data export contract、runtime data format registry 与 JSON / MessagePack / future format exporter 扩展点。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`。 | runtime data artifacts。 |
-| Artifact Writer | `src/artifact/` | direct/temp_commit 写入策略、manifest 输出。 | `ArtifactPlan`。 | 文件系统产物。 |
-| Diagnostics | `src/diagnostics/` | 统一诊断模型、稳定排序、报告格式。 | 各模块诊断。 | `DiagnosticReport`。 |
-| Runtime/Executor | `src/executor/` | 异步 I/O、线程池、任务编排。 | 阶段任务。 | 阶段执行结果。 |
-| Plugin | `src/plugin/` | 插件声明、能力注册、扩展点。 | plugin config。 | registry/capability。 |
+| 模块 | 路径 | 责任 | 主要输入 | 主要输出 | 模块文档 |
+| --- | --- | --- | --- | --- | --- |
+| CLI | `src/cli.rs` / `src/main.rs` | 命令行参数、用户入口、错误展示。CLI 只做输入解析和调用 build，不承载业务流程。 | argv、环境变量。 | `BuildOptions`、用户可读输出。 | 本文档总览。 |
+| Diagnostic | `src/diagnostic/` | 统一诊断基础类型、严重级别、位置、报告聚合和格式化。 | 各模块诊断条目。 | `DiagnosticSeverity`、`DiagnosticLocation`、`DiagnosticReport<T>`。 | `02-diagnostic-module-detail-design.md` |
+| Error | `src/error.rs` | crate 级错误模型，把 I/O、parse、meta validation、data validation 等错误桥接到统一 `Result<T>`。 | 底层错误和诊断报告。 | `ConfigForgeError`。 | `02-diagnostic-module-detail-design.md` |
+| Project | `src/project/` | 加载 `ConfigForge.toml`、解析工程级配置、合并 imports、归一化路径、抽取 Meta。 | Project Config TOML。 | `ProjectConfig`、`TargetConfig`、`MetaModel`。 | `03-project-module-detail-design.md` |
+| Meta | `src/meta/` | Meta schema 加载、纯配置模型、link 借用视图、结构校验。 | Meta TOML 片段。 | `MetaModel`、`LinkedMetaModel<'meta>`、`MetaDiagnostic`。 | `04-meta-module-detail-design.md` |
+| Data | `src/data/` | 根据加载计划读取 CSV 等数据源，形成 raw `DataSet`，并提供 Meta-aware resolver。 | `DataLoadPlan`、source files、`LinkedMetaModel<'meta>`。 | `DataSet`、`ResolvedDataSet` / resolved view。 | `05-data-module-detail-design.md` |
+| Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、注册式 validator。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
+| Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack exporter、data format registry、`TargetDataConfig`。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`。 | `RuntimeDataFile` / runtime data artifacts。 | `07-exporter-module-detail-design.md` |
+| Codegen | `src/codegen/` | 语言无关 CodeModel IR，Rust / TypeScript / C++ 代码生成。 | `LinkedMetaModel<'meta>`、target tags、runtime data files。 | `GeneratedFile`。 | `08-codegen-module-detail-design.md` |
+| Build | `src/build/` | 工程构建主编排：归一化 target，绑定 data/code task，并按 target 调度 data load、validation、runtime export、codegen、写文件。 | `ProjectConfig`、CLI options。 | `BuildOutput`、文件系统产物。 | `09-build-module-detail-design.md` |
 
-## 1.3 模块依赖方向
+## 1.3 强制单向依赖规则
 
-依赖应尽量单向，避免循环引用：
+模块之间必须保持**单向依赖**，禁止形成循环依赖。任何新增 API、re-export 或 helper 都必须先判断是否会让下层模块反向依赖上层模块。
+
+当前目标依赖方向：
 
 ```text
-cli
- └─ build
-     ├─ project
-     ├─ meta
-     │   └─ diagnostics
-     ├─ data
-     │   ├─ meta
-     │   └─ diagnostics
-     ├─ validation
-     │   ├─ meta
-     │   └─ data
-     ├─ exporter
-     ├─ codegen
-     ├─ artifact
-     └─ executor
+main / cli
+  └─ build
+      ├─ project
+      │   ├─ meta
+      │   ├─ codegen        # 仅引用 task config 类型
+      │   └─ exporter       # 仅引用 data task config 类型
+      ├─ meta
+      ├─ data
+      │   ├─ meta
+      │   └─ diagnostic
+      ├─ validation
+      │   ├─ meta
+      │   ├─ data
+      │   └─ diagnostic
+      ├─ exporter
+      │   ├─ meta
+      │   ├─ data
+      │   └─ diagnostic
+      └─ codegen
+          ├─ meta
+          └─ exporter       # 只消费 runtime data file 描述
+
+diagnostic / error 位于底层共享层，不依赖业务模块。
 ```
 
-约束：
+强制约束：
 
-- `meta` 不依赖 `source`、`data`、`validation`、`exporter`。
-- `MetaModel` 是纯 serde-owned 配置数据，不保存运行期索引和内部引用。
-- `LinkedMetaModel<'meta>` 是从 `&'meta MetaModel` 派生出的只读借用视图，运行期索引和跨对象引用都放在这里。
-- `source` 不理解字段类型和业务语义，只输出二维表与 source location。
-- `data`、`validation`、`exporter` 对需要类型解析和快速查询的逻辑，应优先使用 `LinkedMetaModel<'meta>` / `LinkedTableMeta<'meta>`。
-- `project` 可以引用 `codegen::CodegenTaskConfig` 和 `exporter::TargetDataConfig` 来表达 Project TOML 聚合结构，但不能依赖 `build`，避免工程配置与执行编排形成循环。
-- `build` 是顶层业务编排层，可以依赖 `project`、`meta`、`data`、`validation`、`exporter`、`codegen`；这些被编排模块不反向依赖 `build`。
-- `diagnostics` 是底层共享模块，不能反向依赖业务模块。
+- `diagnostic` 只能依赖标准库和通用 serde 等底层库，不能依赖 `meta`、`data`、`validation`、`exporter`、`codegen`、`project`、`build`。
+- `error` 作为 crate 错误桥接层可以引用稳定诊断类型，但不能承载业务逻辑，也不能让业务模块为了错误格式化反向依赖上层模块。
+- `meta` 不依赖 `project`、`data`、`validation`、`exporter`、`codegen`、`build`。Meta 只描述 schema 与 link/validate 结果。
+- `data` 可以依赖 `meta` 做 resolver，但 source reader 层应保持 source-neutral；CSV reader 不能读取 exporter/codegen/validation 语义。
+- `validation` 可以依赖 `meta`、`data`、`diagnostic`，不能依赖 `exporter`、`codegen`、`build`。
+- `exporter` 可以依赖 `meta`、`data`、`diagnostic`，不能依赖 `validation`、`codegen`、`build`；导出前校验由 build 编排层调用 validation。
+- `codegen` 可以依赖 `meta` 和 exporter 暴露的 runtime data file 描述；不能依赖 `data`、`validation`、`build`。
+- `project` 可以引用 `codegen::CodegenTaskConfig` 和 `exporter::TargetDataConfig` 来表达 Project TOML 聚合结构，但不能依赖 `build`。
+- `build` 是顶层业务编排层，可以依赖 `project`、`meta`、`data`、`validation`、`exporter`、`codegen`；这些被编排模块不能反向依赖 `build`。
+- `cli` 只能调用 `build` 和展示错误；不能绕过 build 直接串联底层模块。
+
+如果一个新增能力需要跨模块协作，优先选择：
+
+1. 把共享数据结构下沉到更底层模块；
+2. 由上层 build 编排组合多个模块；
+3. 使用 trait / input model 反转具体实现，而不是让下层模块引用上层模块。
 
 ## 1.4 执行流水线与模块边界
 
 实现应对应产品设计中的执行阶段：
 
-1. **CLI / Config Resolve**：解析命令，读取工程配置，并递归展开 Project Config 顶层 `imports` 指向的配置片段。
-2. **Meta Extract / Merge**：从合并后的 Project Config 中提取 `enums`、`structs`、`tables`，组成纯配置 `MetaModel`。
-3. **Meta Link**：在所有 enum、struct、table 都加载完成后，构造 `LinkedMetaModel<'meta>`，解析类型和索引引用。
-4. **Meta Validate**：对纯配置和可解析引用执行结构校验，输出稳定排序的 `MetaDiagnostic`。
-5. **Source Load**：按 provider 加载二维表，可并发 I/O。
-6. **Sheet Mapping / Data Parse**：根据已链接 Meta 映射 field path 并解析 typed value。
-7. **DataSet Compose**：base source split merge 与 override apply。
-8. **ExportView Derive / Target Tags Filter**：按当前 `ValidationMode` 和 target tags 派生 validation/export 输入视图，过滤 table / field / index / runtime rows；`validate --all-targets` 会为每个 target 分别派生视图。
-9. **Validation on ExportView**：required/default、类型、索引、外键、validator、row export 引用等规则在当前 ExportView 上执行；需要完整数据集语义的规则必须显式声明 `input = "full_dataset"`。
-10. **Artifact Generate**：复用同一个 target 的 `TargetTags` 和 Meta-level filtering 规则生成 runtime data、代码、POT、asset manifest 等，避免 validation 与实际导出语义不一致。同一 target 可以有多个 runtime data task（例如 JSON + MessagePack）和多个 code task；执行层应按 data input 分组，只有同 input 的 data task 才复用加载/归一化/校验结果和 DataSet-dependent ExportView，不同 input 必须分别派生 concrete ExportView；code task 按绑定的 data task 接收对应真实 `RuntimeDataFile`。
-11. **Artifact Write**：按 direct 或 temp_commit 写入，并输出 manifest。
+1. **CLI / Options**：`cli` 解析命令和参数，转换为 build options。
+2. **Project Load / Merge**：`project` 加载 `ConfigForge.toml`，递归展开 imports，归一化工程路径。
+3. **Meta Extract / Link / Validate**：`project` 抽取 `MetaModel`，`meta` 构造 `LinkedMetaModel<'meta>` 并输出结构诊断。
+4. **Target Normalize**：`build` 归一化 target、data task、code task 和 task binding。
+5. **Data Load**：`data` 根据 target 可见表和 source declaration 生成加载计划并读取 `DataSet`。
+6. **Data Normalize / Resolve**：`validation` 调用 DataResolver 应用 default、struct JSON / expanded value、fragment 等规则，形成可校验输入。
+7. **Target-aware Validation**：`validation` 派生 `ExportValidationView`，执行 required/type/enum/index/FK/validator 等规则并输出 `ValidationReport`。
+8. **Runtime Data Export**：`exporter` 使用同一个 target tags 和 export view 语义生成 JSON / MessagePack runtime data。
+9. **Codegen**：`codegen` 基于 `LinkedMetaModel<'meta>`、target tags 和真实 runtime data file 列表生成代码。
+10. **Artifact Write**：当前由 `build` 直接写出产物；后续若能力膨胀，可再拆独立 artifact 模块，但仍应由 build 编排。
 
-当前已重点落地第 2～5 步中与 TOML Meta 相关的部分。
+## 1.5 当前 Implementation 文档目录
 
-## 1.5 当前 Meta 目录结构
+| 文档 | 类型 | 内容 |
+| --- | --- | --- |
+| `01-module-outline.md` | 总览 | 模块职责、依赖方向、流水线和测试分层。 |
+| `02-diagnostic-module-detail-design.md` | 模块 | 统一诊断与 crate 错误桥接。 |
+| `03-project-module-detail-design.md` | 模块 | Project Config schema、imports、路径归一化和 Meta 抽取。 |
+| `04-meta-module-detail-design.md` | 模块 | Meta 模型、Load-then-Link、结构校验和 Meta 诊断。 |
+| `05-data-module-detail-design.md` | 模块 | Data load、CSV reader、DataSet、RowSourceInfo、DataResolver、ObjectTable source layout。 |
+| `06-validation-module-detail-design.md` | 模块 | Validation 主流程、ExportValidationView、ValidationReport、validator registry。 |
+| `07-exporter-module-detail-design.md` | 模块 | Runtime data exporter、格式 registry、JSON / MessagePack、ObjectTable payload。 |
+| `08-codegen-module-detail-design.md` | 模块 | CodeModel IR、语言生成器、runtime reader contract。 |
+| `09-build-module-detail-design.md` | 模块 | 构建编排、target/task binding、并行执行边界和写文件策略。 |
+| `10-foreign-key-detail-design.md` | 专项 | 外键 raw/link model、引用完整性校验、target 语义、codegen staging。 |
+| `11-struct-expanded-value-detail-design.md` | 专项 | Struct source layout 自动判定和 expanded CSV field-path。 |
 
-当前 Meta 模块已经拆分为目录模块：
-
-```text
-src/meta/
-  mod.rs              # 对外 API 与 re-export
-  model.rs            # 纯配置模型、Linked* 借用视图、查询方法
-  loader.rs           # TOML 字符串/路径加载、imports 递归、合并、加载后校验
-  link.rs             # MetaModel -> LinkedMetaModel<'meta> 的链接过程
-  validate.rs         # Meta 结构校验
-  diagnostic.rs       # MetaDiagnosticCode、MetaDiagnostic
-  tests.rs            # Meta 单元测试
-```
-
-后续增长时可再补充：
-
-```text
-src/meta/
-  syntax.rs           # TOML/XML raw syntax 与兼容层；目前直接 serde 到 MetaModel
-  path.rs             # FieldPath、ArraySlot、path parser
-  source_ref.rs       # SourceRef、fragment、provider 解析规则
-  default_value.rs    # default 按 LinkedField 类型解析后的结构
-  validator_ref.rs    # validator 声明与引用解析
-```
-
-Validator 的注册、编译和执行框架详见 `05-validator-framework-detail-design.md`。Meta 模块只承载 raw validator 配置和轻量结构校验，不依赖具体 validator 实现。
-
-## 1.6 Load-then-Link 策略
-
-Meta 模块采用两阶段策略：
-
-```text
-TOML files/imports
-  --load/merge--> MetaModel
-  --link-------> LinkedMetaModel<'meta>
-  --validate---> diagnostics
-```
-
-核心规则：
-
-- `MetaModel` 只保存 `String`、`Vec`、`Option` 等 serde 可直接加载的数据。
-- 需要跨对象解析的字段先保持字符串形式，例如 `FieldMeta.field_type`、`IndexMeta.fields`、`TableMeta.primary_index`。
-- Link 阶段要求所有 Meta 文件已经加载完成，因此可以安全地从 `LinkedMetaModel<'meta>` 借用 `&'meta MetaModel` 内部对象。
-- Link 结果是只读视图；不把引用写回 `MetaModel`，避免 Rust 自引用结构问题。
-- 运行期查询加速结构使用 `HashMap`，并放在 `LinkedMetaModel<'meta>` / `LinkedTableMeta<'meta>` / `LinkedStructMeta<'meta>` 内。
-
-## 1.7 已 Link 与后续可 Link 的部分
-
-当前已链接：
-
-| 原始配置位置 | Raw 表达 | Linked 表达 | 目的 |
-| --- | --- | --- | --- |
-| `FieldMeta.field_type` | `String` | `LinkedField::Primitive` / `Enum(&EnumMeta)` / `Struct(&StructMeta)` | 区分 primitive、enum、struct，并发现未知类型。 |
-| `TableMeta.indexes[].fields` | `Vec<String>` | `LinkedIndexMeta.fields: Vec<&FieldMeta>` | 索引校验和数据唯一性检查不再重复查字段名。 |
-| `TableMeta.primary_index` / `IndexMeta.primary` | `Option<String>` / `bool` | `LinkedTableMeta::primary_index() -> Option<&LinkedIndexMeta>` | 解析出 table 当前选中的主索引。 |
-| table / struct fields | `Vec<FieldMeta>` | `LinkedFieldMeta { meta, linked_field }` | 保留原始字段配置并附加解析后的字段类型。 |
-| 全局查询索引 | 线性扫描 | `HashMap<&str, ...>` | 加速 table、struct、enum 查询。 |
-
-后续适合继续 Link 的部分：
-
-| 候选位置 | 当前/未来 Raw 表达 | 建议 Linked 表达 | 说明 |
-| --- | --- | --- | --- |
-| foreign key | `ForeignKeyMeta { fields, target_table, target_index }` | `LinkedForeignKeyMeta<'meta>` | 外键是一等关系数据，供 validation 隐式生成 referential-integrity validator，并供 codegen 生成关联查询 helper。 |
-| `SourceRef.fragments` | `Vec<String>` | `Vec<&FragmentMeta>` | fragment 元数据落地后再解析。 |
-| validator 引用 | validator 名字符串 | `&ValidatorMeta` 或 compiled validator handle | 需要 validator registry。 |
-| export/filter 字段引用 | 字符串 field path | `LinkedFieldPath<'meta>` | 需要 field path parser 和 struct/array 展开规则。 |
-| default value | `toml::Value` | typed default value | 需要依据 `LinkedField` 做类型化解析。 |
-| struct 依赖图 | struct field type 字符串 | struct dependency graph | 可用于循环依赖检测和生成顺序。 |
-
-## 1.8 测试分层
+## 1.6 测试分层
 
 | 测试层级 | 位置 | 覆盖内容 |
 | --- | --- | --- |
-| 单元测试 | `src/meta/tests.rs` 与对应模块内 `#[cfg(test)]` | loader、link、validate、primitive/custom type、imports、错误诊断。 |
-| fixture 单元测试 | `tests/fixtures/meta/` 或模块内字符串 fixture | 多表、多文件、错误样例。 |
+| 模块单元测试 | `src/<module>/tests.rs` 或模块内 `#[cfg(test)]` | 单模块数据结构、边界条件、错误诊断。 |
+| 跨模块单元测试 | build / exporter / codegen 模块测试 | target normalization、data/code binding、runtime data file 与 codegen 对接。 |
 | 集成测试 | `tests/cli_integration.rs` | CLI 从工程配置到执行结果的跨模块流程。 |
-| 回归测试 | `tests/fixtures/standard_project/` | 标准工程样例稳定输出。 |
+| fixture 回归测试 | `tests/fixtures/standard_project/` | 标准工程样例稳定输出、runtime reader 编译与读取。 |
 
-Meta 测试以模块内内联 TOML 为主，避免过早引入完整 CLI 流程；标准工程 fixture 用于覆盖跨模块回归。
-
-## 1.9 当前完成标准
-
-当前 Meta 阶段完成时应满足：
-
-- `MetaModel` 能从 TOML 字符串、单文件路径和多路径加载。
-- `imports` 支持相对路径递归加载，并通过 canonical path 去重。
-- `MetaModel` 保持纯配置结构；`MetaSet` 仅作为 `MetaModel` 兼容别名。
-- `FieldMeta.field_type` 保持字符串，Link 后解析为 primitive / enum / struct 引用。
-- `IndexMeta.fields` 保持字符串，Link 后解析为 `LinkedIndexMeta.fields: Vec<&FieldMeta>`。
-- `TableMeta.primary_index` 和 `IndexMeta.primary` Link 后可通过 `LinkedTableMeta::primary_index()` 取得选中的 `LinkedIndexMeta`。
-- `LinkedMetaModel<'meta>` 及其子结构使用 `HashMap` 提供查询加速。
-- `TableKind::Object` / `TableKind::Collection` 可解析，默认 `collection`。
-- primitive 覆盖 `int`、`float`、`bool`、`string`、`text`、`asset`，并兼容 `i64` / `f64`。
-- `desc` 可在 project、table、field、index、enum、struct 上保留。
-- `primary_index` 与 index `primary = true` 的一致性可校验。
-- 重复 table / enum / struct / enum value / field / index，索引引用不存在字段，未知 field type 都能产生确定性错误。
-- Meta 单元测试可通过 `cargo test meta` 或 `cargo test` 运行；若本地工具链不支持依赖 edition，需要在环境说明中标注。
+新增模块或专项能力时，应同时明确其单元测试归属和至少一个端到端回归入口；如果能力只影响模块内部，不应为了测试方便突破单向依赖规则。

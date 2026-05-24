@@ -1,4 +1,4 @@
-# 06. Foreign Key 实现详细设计
+# 10. Foreign Key 专项实现详细设计
 
 本文档描述 ConfigForge 外键（Foreign Key / FK）能力的实现方案。产品语义以 `Documentation/Design/04-meta-model.md` 与 `Documentation/Design/05-data-validation.md` 为准；本文档聚焦 Rust 类型、模块边界、Link/Validation/Codegen 接入点、阶段拆分和测试计划。
 
