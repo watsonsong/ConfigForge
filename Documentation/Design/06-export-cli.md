@@ -203,19 +203,21 @@ ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader ad
 
 设计原则：
 
-1. **生成代码核心仍保持无第三方 runtime 依赖**：Rust / C++ / TypeScript generated code 只声明 reader / loader 契约和 generated parser，不直接依赖 `serde_json`、`rmp-serde`、`nlohmann/json`、`msgpack-c`、npm MessagePack 包等。
-2. **标准 adapter 按语言和格式拆分**：如果有 N 种语言、M 种数据格式，至少应提供 N×M 个 reader adapter 单元。每个单元只负责“某语言中把某格式的通用 value/cursor 暴露为 RuntimeDataReader”。
+1. **生成代码核心仍保持无第三方 runtime 依赖**：Rust / C++ / TypeScript generated code 只声明 reader / loader 契约和 generated parser，不直接依赖 `serde_json`、`rmp-serde`、`RapidJSON`、`msgpack-c`、npm MessagePack 包等。
+2. **标准 adapter 按官方支持矩阵拆分**：stable runtime data format 应覆盖官方 target language；experimental format 可以先只覆盖部分语言。每个 adapter 单元只负责“某语言中把某格式的通用 value/cursor 暴露为 RuntimeDataReader”，transport loader 作为可组合层，不进入语言 × 格式矩阵。
 3. **资源加载与格式解码分层**：`RuntimeDataLoader` 的文件系统、HTTP、引擎资源系统等 transport 逻辑应与 JSON / MessagePack reader 解码逻辑分开。标准包可以提供常用组合（如 Node fs + JSON、Rust fs + MessagePack），但底层 reader 应可被自定义 loader 复用。
 4. **依赖显式可选**：不同语言/格式 adapter 允许依赖不同三方库，但依赖必须限制在对应 adapter 包/模块内，并通过 Cargo feature、npm optional dependency、CMake option / package manager 选项等机制显式启用。
 5. **测试与项目复用同源**：集成测试中的 harness 应优先使用这些标准 adapter 或其 fixture 包装，而不是在 harness 中长期内嵌一份独立 JSON / MessagePack reader 逻辑；这样测试能持续验证真实接入方会使用的 reader contract。
+
+标准 adapter 必须声明 reader contract 版本与支持范围。当前 contract 版本为 `1.0`，统一规定 ConfigForge Runtime Value、missing/null、scalar conversion 和错误上下文语义；Rust / TypeScript / C++ adapter 应通过共享 compliance suite 验证这些行为一致。Rust 当前 adapter 由于 trait 由 generated crate 声明，短期定位为可复制/可 include 的 `copyable_template`；等稳定 `config_forge_runtime` crate 落地后再升级为 standalone package。
 
 首批格式矩阵建议：
 
 | 语言 | JSON adapter | MessagePack adapter | 依赖策略 |
 | --- | --- | --- | --- |
-| Rust | `serde_json::Value` reader | `rmp_serde` 解码到 `serde_json::Value` 或自有 value enum reader | Cargo features：`json`、`messagepack`、`fs`；默认只启用 core。 |
-| TypeScript | 原生 `JSON.parse` value reader | `@msgpack/msgpack` 或同类库解码后的 value reader | npm 包拆分或 optional peer dependency；Node fs / fetch loader 与格式 reader 分离。 |
-| C++ | 推荐 `nlohmann/json` reader；测试可保留轻量 JSON reader 作为 fallback 示例 | 推荐 `msgpack-c` reader，或解码到统一 variant/value 后适配 | CMake options：`DATAEXPORT_READER_JSON_NLOHMANN`、`DATAEXPORT_READER_MSGPACK_CPP`；不把三方头文件 vendored 到核心生成代码。 |
+| Rust | `serde_json::Value` reader template | `rmp_serde` template；中期收敛到 ConfigForge Runtime Value | Cargo features：`json`、`messagepack`、`fs`；当前为 `copyable_template`，默认只启用 core。 |
+| TypeScript | 原生 `JSON.parse` value reader | `@msgpack/msgpack` 解码后的 value reader | npm 包拆分与 peer dependency；Node fs / fetch loader 与格式 reader 分离。 |
+| C++ | 生产推荐 `RapidJSON` reader；`json_builtin` 仅作为无依赖 test fallback | 推荐 `msgpack-c` reader，解码到 msgpack object/value 后适配 | CMake options：`DATAEXPORT_RUNTIME_WITH_JSON_RAPIDJSON`、`DATAEXPORT_RUNTIME_WITH_MESSAGEPACK`；通过 `find_package` / package manager / 显式 `FetchContent` 引入三方库，不 vendored 到 generated code。 |
 
 标准 adapter 的产物形式按语言习惯决定：
 
@@ -227,6 +229,7 @@ ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader ad
 
 ```text
 runtime_readers/
+  compliance/            # 跨语言 reader contract payload / expected cases
   rust/
     core/                 # trait glue/template、错误工具、测试 fixture glue
     json_serde/           # serde_json reader + 可选 fs loader
@@ -238,12 +241,16 @@ runtime_readers/
     loaders/              # node-fs、fetch 等 transport loader
   cpp/
     core/                 # adapter glue、错误工具、CMake helpers
-    json_nlohmann/        # nlohmann::json reader
-    messagepack_cpp/      # msgpack-c reader
+    json_builtin/         # 无依赖 minimal fallback；测试/示例用途
+    json_rapidjson/       # RapidJSON reader；生产推荐 JSON adapter
+    messagepack_msgpack_cpp/ # msgpack-c reader；生产推荐 MessagePack adapter
     loaders/              # filesystem / engine-resource 示例 loader
+    CMakeLists.txt        # adapter targets、options、find_package、tests
 ```
 
 `runtime_readers/` 下的实现属于“标准 runtime adapter 源码/模板”，不是每次 codegen 的输出文件。后续可以通过 codegen option 选择是否把某个 adapter 拷贝到目标输出目录，也可以由游戏项目直接依赖该目录对应语言的 package/crate/library。
+
+C++ adapter 需要有独立工程化入口。推荐支持 `add_subdirectory(runtime_readers/cpp)` 和安装后的 `find_package(ConfigForgeRuntimeReaders CONFIG)` 两种接入方式，并暴露 `config_forge_runtime::core`、`config_forge_runtime::json_builtin_test_fallback`、`config_forge_runtime::json_rapidjson`、`config_forge_runtime::messagepack_msgpack_cpp`、`config_forge_runtime::filesystem_loader` 等 CMake targets。普通业务构建默认不启用 builtin fallback，测试构建可显式启用；生产项目显式打开 RapidJSON / msgpack-c 选项。详细 CMake option、target、三方依赖解析、C++ ownership、runtime_reader option 校验、emit 语义和 CI 矩阵见 `Documentation/Implementation/04-code-export-module-detail-design.md` 的“标准 RuntimeDataReader adapter 工程结构”。
 
 ## 6.3 Special Exporter
 
