@@ -5,14 +5,28 @@ use std::{
 };
 
 use rayon::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     ConfigForgeError, Result,
     codegen::RuntimeDataFile,
-    data::{DataResolver, DataSet, DataTable, DataValue, ResolvedTable, ResolvedValue},
+    data::{DataResolver, DataSet, DataTable, DataValue, ResolvedValue},
     meta::{LinkedMetaModel, LinkedTableMeta, TableKind, TargetTags},
 };
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct TargetDataConfig {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub input: PathBuf,
+    pub output: PathBuf,
+    #[serde(default = "default_data_format")]
+    pub format: String,
+}
+
+fn default_data_format() -> String {
+    "json".to_owned()
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportedTable {
@@ -348,73 +362,6 @@ pub fn build_exported_object_payload(
     }
 
     Ok(exported_object)
-}
-
-/// Builds an exported payload from a resolved export view.
-///
-/// The input `ResolvedTable` must already be filtered for the target rows,
-/// fields, and fragments that should be exported. Use
-/// `build_exported_table_payload` for raw `DataTable` export because it applies
-/// target-aware row filtering before resolving values.
-pub fn build_exported_table_payload_from_resolved_export_view(
-    table_meta: &LinkedTableMeta<'_>,
-    table: &ResolvedTable,
-) -> Result<ExportedTablePayload> {
-    match table_meta.meta.kind {
-        TableKind::Collection => {
-            build_exported_collection_payload_from_resolved_export_view(table_meta, table)
-                .map(ExportedTablePayload::Collection)
-        }
-        TableKind::Object => {
-            build_exported_object_payload_from_resolved_export_view(table_meta, table)
-                .map(ExportedTablePayload::Object)
-        }
-    }
-}
-
-/// Builds a collection payload from an already target-filtered resolved export view.
-pub fn build_exported_collection_payload_from_resolved_export_view(
-    table_meta: &LinkedTableMeta<'_>,
-    table: &ResolvedTable,
-) -> Result<ExportedTable> {
-    let rows = table
-        .rows
-        .iter()
-        .map(|row| {
-            row.iter()
-                .map(|(field_name, value)| {
-                    Ok((field_name.clone(), exported_value_from_resolved(value)?))
-                })
-                .collect::<Result<BTreeMap<_, _>>>()
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    Ok(ExportedTable {
-        meta: ExportedTableMeta {
-            name: table_meta.meta.name.clone(),
-        },
-        rows,
-    })
-}
-
-/// Builds an object payload from an already target-filtered resolved export view.
-pub fn build_exported_object_payload_from_resolved_export_view(
-    table_meta: &LinkedTableMeta<'_>,
-    table: &ResolvedTable,
-) -> Result<BTreeMap<String, ExportedValue>> {
-    if table.rows.len() != 1 {
-        return Err(ConfigForgeError::Validation(format!(
-            "object table `{}` must normalize to exactly one logical row, got {}",
-            table_meta.meta.name,
-            table.rows.len()
-        )));
-    }
-    let Some(row) = table.rows.first() else {
-        return Ok(BTreeMap::new());
-    };
-    row.iter()
-        .map(|(field_name, value)| Ok((field_name.clone(), exported_value_from_resolved(value)?)))
-        .collect()
 }
 
 fn exported_value_from_resolved(value: &ResolvedValue) -> Result<ExportedValue> {

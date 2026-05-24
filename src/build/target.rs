@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use crate::{
     ConfigForgeError, Result,
     codegen::CodegenTaskConfig,
+    exporter::TargetDataConfig,
     meta::TargetTags,
-    project::{TargetConfig, TargetDataConfig},
+    project::TargetConfig,
 };
 
 pub(crate) const DEFAULT_DATA_TASK_NAME: &str = "default";

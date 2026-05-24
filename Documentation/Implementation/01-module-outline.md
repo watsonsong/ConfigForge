@@ -15,16 +15,17 @@
 
 ## 1.2 顶层模块划分
 
-仓库已采用 `src/meta/` 目录模块承载 Meta 实现。其他扁平模块可在职责增长后再按同样方式拆分。
+仓库核心业务模块采用目录模块承载实现；`src/` 外层尽量只保留 CLI、crate 入口和少量稳定公共入口文件。
 
 | 模块 | 建议路径 | 责任 | 主要输入 | 主要输出 |
 | --- | --- | --- | --- | --- |
 | CLI | `src/cli.rs` | 命令行参数、用户入口、错误展示。 | argv、环境变量。 | `ExportCommand`、用户可读输出。 |
-| Project Config | `src/project.rs` | 加载 `ConfigForge.toml`、解析工程级配置、合并 imports、归一化配置路径。 | Project Config TOML。 | `ProjectConfig` / `TargetConfig`。 |
+| Project Config | `src/project/` | 加载 `ConfigForge.toml`、解析工程级配置、合并 imports、归一化配置路径；`TargetConfig` 只作为 project-level 聚合结构引用 codegen/exporter 的 task config。 | Project Config TOML。 | `ProjectConfig` / `TargetConfig`。 |
 | Meta | `src/meta/` | 加载、合并、链接、校验 Meta。 | TOML/XML Meta 文件。 | `MetaModel`、`LinkedMetaModel<'meta>`、`MetaDiagnostic`。 |
 | Source/Data Load | `src/data/` | 将 CSV/XLSX/远程表格归一化为二维表，并将 source cell 解析为 typed value 和逻辑表数据。 | `LinkedMetaModel<'meta>`、source declaration。 | `DataSet` / `DataTable` / resolved view。 |
 | Validation | `src/validation.rs` / `src/validation/` | 业务规则、索引、外键、注册式 validator、过滤视图校验。 | `LinkedMetaModel<'meta>`、`DataSet`、`ExportContext`、`ValidatorRegistry`。 | 结构化诊断。 |
-| Exporter | `src/exporter.rs` / `src/exporter/` | 生成 runtime data、代码、special artifacts；承载 runtime data format registry 与 JSON / MessagePack / future format exporter 扩展点；同一 target 下支持多个 data task 与多个 code task 的 artifact 编排。 | `LinkedMetaModel<'meta>`、`TargetTags`、target config。 | data task 分组的 `RuntimeDataFile` / generated files。 |
+| Builder | `src/build/` | 驱动工程构建主路径；归一化 target；绑定 data/code task；按 target 并行编排 runtime data export 与 codegen。 | `ProjectConfig`、`LinkedMetaModel<'meta>`、`TargetTags`、target config。 | data task 分组的 `RuntimeDataFile` / generated files。 |
+| Exporter | `src/exporter/` | 定义 `TargetDataConfig`、runtime data export contract、runtime data format registry 与 JSON / MessagePack / future format exporter 扩展点。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`。 | runtime data artifacts。 |
 | Artifact Writer | `src/artifact/` | direct/temp_commit 写入策略、manifest 输出。 | `ArtifactPlan`。 | 文件系统产物。 |
 | Diagnostics | `src/diagnostics/` | 统一诊断模型、稳定排序、报告格式。 | 各模块诊断。 | `DiagnosticReport`。 |
 | Runtime/Executor | `src/executor/` | 异步 I/O、线程池、任务编排。 | 阶段任务。 | 阶段执行结果。 |
@@ -36,16 +37,18 @@
 
 ```text
 cli
- └─ orchestrator/exporter
-     ├─ config
+ └─ build
+     ├─ project
      ├─ meta
      │   └─ diagnostics
-    ├─ data
-    │   ├─ meta
-    │   └─ diagnostics
+     ├─ data
+     │   ├─ meta
+     │   └─ diagnostics
      ├─ validation
      │   ├─ meta
      │   └─ data
+     ├─ exporter
+     ├─ codegen
      ├─ artifact
      └─ executor
 ```
@@ -57,6 +60,8 @@ cli
 - `LinkedMetaModel<'meta>` 是从 `&'meta MetaModel` 派生出的只读借用视图，运行期索引和跨对象引用都放在这里。
 - `source` 不理解字段类型和业务语义，只输出二维表与 source location。
 - `data`、`validation`、`exporter` 对需要类型解析和快速查询的逻辑，应优先使用 `LinkedMetaModel<'meta>` / `LinkedTableMeta<'meta>`。
+- `project` 可以引用 `codegen::CodegenTaskConfig` 和 `exporter::TargetDataConfig` 来表达 Project TOML 聚合结构，但不能依赖 `build`，避免工程配置与执行编排形成循环。
+- `build` 是顶层业务编排层，可以依赖 `project`、`meta`、`data`、`validation`、`exporter`、`codegen`；这些被编排模块不反向依赖 `build`。
 - `diagnostics` 是底层共享模块，不能反向依赖业务模块。
 
 ## 1.4 执行流水线与模块边界

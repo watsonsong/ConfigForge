@@ -1111,27 +1111,23 @@ fn naming_handles_reserved_words_and_cases() {
 
 #[test]
 fn parses_codegen_task_config_and_merges_naming_defaults() {
-    let config: ProjectCodegenConfig = toml::from_str(
+    let config: CodegenTaskConfig = toml::from_str(
         r#"
-            [[targets]]
-            name = "client"
-
-            [[targets.code]]
             language = "typescript"
             output = "Generated/TS"
             file_header = "// {{project.name}} {{datetime}}"
             keyword_conflict = "error"
 
-            [targets.code.naming]
+            [naming]
             field = "snake_case"
 
-            [targets.code.typescript]
+            [typescript]
             readonly_fields = true
         "#,
     )
     .expect("config should parse");
 
-    let target = CodeExportTarget::from_task(config.targets[0].code[0].clone());
+    let target = CodeExportTarget::from_task(config);
 
     assert_eq!(target.language, CodeExportLanguage::TypeScript);
     assert_eq!(target.out_dir, PathBuf::from("Generated/TS"));

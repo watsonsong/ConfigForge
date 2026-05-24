@@ -89,7 +89,7 @@ src/codegen/
 
 `type_mapping.rs`、`index.rs`、`runtime.rs` 当前未拆分为独立文件；对应逻辑仍分别位于 IR 与各语言生成器内部，后续可在模块继续膨胀时再拆出。
 
-`src/exporter.rs` 保留为执行编排层，负责：
+`src/build/` 保留为执行编排层，负责：
 
 - 加载 Meta 和 Data；
 - 归一化与校验；
@@ -154,7 +154,7 @@ pub struct CodeExportTarget {
 - 可兼容解析 `"msgpack"` 为 MessagePack，但错误信息、文档、生成代码和 manifest 中统一使用规范名 `messagepack`。
 - 项目当前仍处于开发阶段，不保留旧 `[targets.data]` table 形态兼容；Project Config 只接受 `[[targets.data]]` 数组表。
 
-Project Config 层建议模型：
+Project Config 层建议模型（`TargetConfig` 是 project-level 聚合结构；`TargetDataConfig` 由 exporter 模块定义，`CodegenTaskConfig` 由 codegen 模块定义）：
 
 ```rust
 pub struct TargetConfig {

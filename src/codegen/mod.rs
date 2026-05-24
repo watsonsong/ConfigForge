@@ -105,18 +105,6 @@ pub enum CaseStyle {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct ProjectCodegenConfig {
-    pub targets: Vec<ProjectTargetConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct ProjectTargetConfig {
-    pub name: String,
-    #[serde(default)]
-    pub code: Vec<CodegenTaskConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct CodegenTaskConfig {
     pub language: CodeExportLanguage,
     pub output: PathBuf,

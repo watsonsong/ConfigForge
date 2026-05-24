@@ -8,16 +8,12 @@ use std::{
 use rayon::ThreadPool;
 use rayon::prelude::*;
 
-#[path = "exporter/data.rs"]
-pub mod data;
-#[path = "exporter/options.rs"]
 mod options;
-#[path = "exporter/runtime.rs"]
 mod runtime;
-#[path = "exporter/target.rs"]
 mod target;
 
-pub use crate::project::{ProjectConfig, ProjectConfigMeta, TargetConfig, TargetDataConfig};
+pub use crate::project::{ProjectConfig, ProjectConfigMeta, TargetConfig};
+pub use crate::exporter::TargetDataConfig;
 pub use options::{BuildOptions, BuildOutput, ExecutionOptions};
 
 use crate::{
@@ -225,7 +221,7 @@ mod tests {
 
     use crate::codegen::{CodeExportLanguage, default_module_name};
     use crate::data::DataTable;
-    use crate::exporter::data::build_exported_table_payload;
+    use crate::exporter::build_exported_table_payload;
     use crate::meta::{MetaModel, TargetTags};
 
     use super::*;

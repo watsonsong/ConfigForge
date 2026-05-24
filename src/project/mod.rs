@@ -9,6 +9,7 @@ use serde::Deserialize;
 use crate::{
     ConfigForgeError, Result,
     codegen::{CodeExportProject, CodegenTaskConfig},
+    exporter::TargetDataConfig,
     meta::{
         EnumMeta, MetaDiagnostic, MetaModel, StructMeta, TableMeta, link_meta_model,
         validate_meta_model,
@@ -50,20 +51,6 @@ pub struct TargetConfig {
     pub data: Vec<TargetDataConfig>,
     #[serde(default)]
     pub code: Vec<CodegenTaskConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct TargetDataConfig {
-    #[serde(default)]
-    pub name: Option<String>,
-    pub input: PathBuf,
-    pub output: PathBuf,
-    #[serde(default = "default_data_format")]
-    pub format: String,
-}
-
-fn default_data_format() -> String {
-    "json".to_owned()
 }
 
 impl ProjectConfig {
@@ -244,6 +231,8 @@ impl From<&ProjectConfigMeta> for CodeExportProject {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
+
+    use crate::exporter::TargetDataConfig;
 
     use super::*;
 

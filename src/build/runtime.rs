@@ -7,12 +7,13 @@ use crate::{
     ConfigForgeError, Result,
     codegen::RuntimeDataFile,
     data::{DataLoadPlan, DataLoader},
+    exporter::{DataFormatRegistry, export_runtime_data},
     meta::{LinkedMetaModel, TargetTags},
     project::lexical_normalize_path,
     validation::{normalize_data_set, validate_normalized_data_set_for_target_with_report},
 };
 
-use super::{data::{DataFormatRegistry, export_runtime_data}, target::NormalizedTargetDataConfig};
+use super::target::NormalizedTargetDataConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RuntimeConfigForgeResult {

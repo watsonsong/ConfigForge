@@ -29,8 +29,9 @@ ConfigForge is a Rust CLI tool for game data export workflows. It lets game desi
 - `src/data/` — CSV data source loading, data load planning, normalization, and resolved row models.
 - `src/codegen/` — language-neutral CodeModel IR plus Rust / TypeScript / C++ generators.
 - `src/validation/` — schema, target-aware data validation, diagnostics, and validator registry.
-- `src/project.rs` — ConfigForge project TOML schema, import merging, path normalization, and Meta extraction.
-- `src/exporter.rs` / `src/exporter/` — export orchestration, target normalization, runtime data format registry, and artifact generation.
+- `src/project/` — ConfigForge project TOML schema, import merging, path normalization, and Meta extraction.
+- `src/build/` — project build orchestration, target normalization, runtime/code task binding, and artifact generation scheduling.
+- `src/exporter/` — runtime data export contracts, JSON / MessagePack exporters, and future data format exporter extension point.
 - `src/error.rs` — shared error model.
 - `runtime_readers/` — standard runtime reader adapters/templates and compliance fixtures.
 - `tests/cli_integration.rs` — end-to-end CLI integration tests.
