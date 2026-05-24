@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fs,
     num::NonZeroUsize,
     path::{Component, Path, PathBuf},
@@ -10,20 +10,22 @@ use rayon::ThreadPool;
 use rayon::prelude::*;
 use serde::Deserialize;
 
+#[path = "exporter/runtime.rs"]
+mod runtime;
+
 use crate::{
     ConfigForgeError, Result,
     codegen::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, CodegenTaskConfig,
         GeneratedFile, RuntimeDataFile, builtin_generators,
     },
-    data::{DataLoadPlan, DataLoader},
-    config_forge::{DataFormatRegistry, export_runtime_data},
     meta::{
         EnumMeta, MetaDiagnostic, MetaModel, StructMeta, TableMeta, TargetTags, link_meta_model,
         validate_meta_model,
     },
-    validation::{normalize_data_set, validate_normalized_data_set_for_target_with_report},
 };
+
+use runtime::{RuntimeConfigForgeResult, export_runtime_data_tasks};
 
 const DEFAULT_DATA_TASK_NAME: &str = "default";
 
@@ -186,12 +188,6 @@ struct NormalizedCodegenTaskConfig {
     selected_data_name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeConfigForgeResult {
-    data_name: String,
-    files: Vec<RuntimeDataFile>,
-}
-
 fn default_data_format() -> String {
     "json".to_owned()
 }
@@ -215,55 +211,10 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
     let linked_meta = meta_set.link().map_err(ConfigForgeError::MetaValidation)?;
     let target_tags = target.target_tags();
 
-    let mut warnings = Vec::new();
     // Runtime data is exported before codegen so generated APIs can reference logical
     // runtime data file paths relative to the loader root.
-    let runtime_data_results = if target.data.is_empty() {
-        Vec::new()
-    } else {
-        let registry = DataFormatRegistry::with_builtin_exporters();
-        ensure_planned_runtime_output_paths(&target.data, &linked_meta, &target_tags, &registry)?;
-        let mut normalized_data_sets: BTreeMap<PathBuf, crate::data::DataSet> = BTreeMap::new();
-        let mut results = Vec::new();
-        let data_plan = DataLoadPlan::from_tables(
-            linked_meta
-                .tables
-                .iter()
-                .filter(|table| table.meta.is_exported_for(&target_tags))
-                .map(|table| table.meta),
-        )?;
-        for data_config in &target.data {
-            let data_exporter = registry.require(&data_config.format)?;
-            if !normalized_data_sets.contains_key(&data_config.input) {
-                let loaded_data_set =
-                    DataLoader::new(&data_config.input).load_with_pool(&data_plan, &cpu_pool)?;
-                let data_set = normalize_data_set(&linked_meta, &loaded_data_set)?;
-                let validation_report = validate_normalized_data_set_for_target_with_report(
-                    &linked_meta,
-                    &target_tags,
-                    &data_set,
-                )?;
-                warnings.extend(validation_report.warning_messages());
-                normalized_data_sets.insert(data_config.input.clone(), data_set);
-            }
-            let data_set = normalized_data_sets
-                .get(&data_config.input)
-                .expect("data set should be loaded before export");
-            let files = export_runtime_data(
-                &data_config.output,
-                &linked_meta,
-                &target_tags,
-                data_set,
-                data_exporter,
-                &cpu_pool,
-            )?;
-            results.push(RuntimeConfigForgeResult {
-                data_name: data_config.name.clone(),
-                files,
-            });
-        }
-        results
-    };
+    let runtime_export =
+        export_runtime_data_tasks(&target.data, &linked_meta, &target_tags, &cpu_pool)?;
 
     write_generated_code(
         project_root,
@@ -271,11 +222,13 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
         &target,
         &target_tags,
         &linked_meta,
-        runtime_data_results,
+        runtime_export.results,
         &cpu_pool,
     )?;
 
-    Ok(BuildOutput { warnings })
+    Ok(BuildOutput {
+        warnings: runtime_export.warnings,
+    })
 }
 
 impl TargetConfig {
@@ -540,32 +493,6 @@ fn normalize_codegen_tasks(
             })
         })
         .collect()
-}
-
-fn ensure_planned_runtime_output_paths(
-    data_tasks: &[NormalizedTargetDataConfig],
-    linked_meta: &crate::meta::LinkedMetaModel<'_>,
-    target_tags: &TargetTags,
-    registry: &DataFormatRegistry,
-) -> Result<()> {
-    let mut paths = BTreeSet::new();
-    for data_task in data_tasks {
-        let exporter = registry.require(&data_task.format)?;
-        for table_meta in &linked_meta.tables {
-            if !table_meta.meta.is_exported_for(target_tags) {
-                continue;
-            }
-            let plan = exporter.plan_table_artifact(table_meta)?;
-            let path = lexical_normalize_path(&data_task.output.join(&plan.path));
-            if !paths.insert(path.clone()) {
-                return Err(ConfigForgeError::Validation(format!(
-                    "multiple runtime data artifacts target `{}`",
-                    path.display()
-                )));
-            }
-        }
-    }
-    Ok(())
 }
 
 fn finish_loading_project_meta(model: &MetaModel) -> Result<()> {

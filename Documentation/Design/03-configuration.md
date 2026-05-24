@@ -180,7 +180,7 @@ source = "items.csv"
 
 语义：根据文件后缀推断为 `{ provider = "csv", path = "items.csv" }`。
 
-多 source（Planned / Not implemented）：
+多 source（Implemented MVP，限同一逻辑表多个 CSV source 按声明顺序 append records，主要服务 polymorphic variant source mode）：
 
 ```toml
 sources = [
@@ -328,11 +328,12 @@ readonly_fields = true
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `tags` | `[]` | Target 的导出特性集合。用于匹配表、字段、行级 `export_when` / `row_export`。 |
 | `name` | 单 data task 可省略，规范化为 `default` | 当前 target 内稳定唯一的 data task 名称，用于 code task 通过 `data` 引用；多 data task 时必填。 |
 | `input` | 必填 | Source data 根目录。相对路径以 project root 或所在 import 片段目录为基准；Meta source path 以该目录为搜索基础。只有声明 `targets.data` 时才读取 source data。 |
 | `output` | 必填 | Runtime data 输出目录。相对路径以 project root 或所在 import 片段目录为基准。 |
 | `format` | `json` | Runtime data 格式。当前实现支持 `json` 和 `messagepack`。 |
+
+Data task 继承所在 target 的 `tags`；当前没有 `[[targets.data]].tags` 字段。
 
 data task `name` 规范：
 

@@ -372,7 +372,10 @@ impl MetaModel {
     }
 
     pub fn validate(&self) -> std::result::Result<(), Vec<crate::meta::MetaDiagnostic>> {
-        let diagnostics = crate::meta::validate_meta_model(self);
+        let (_, mut diagnostics) = crate::meta::link_meta_model(self);
+        diagnostics.extend(crate::meta::validate_meta_model(self));
+        diagnostics.sort();
+        diagnostics.dedup();
         if diagnostics.is_empty() {
             Ok(())
         } else {

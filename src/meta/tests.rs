@@ -812,6 +812,27 @@ fn validates_model_directly_with_ok_and_error_results() {
             .iter()
             .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTableName)
     );
+
+    let invalid_link: MetaModel = toml::from_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "rarity"
+            type = "MissingType"
+        "#,
+    )
+    .expect("raw link-invalid meta should deserialize");
+    let diagnostics = invalid_link
+        .validate()
+        .expect_err("link diagnostics should fail validation");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::UnknownFieldType)
+    );
 }
 
 #[test]

@@ -223,7 +223,7 @@ CollectionTable 当前导出 rows array。ObjectTable Step 1 应导出单个 obj
 
 需要同步调整 MessagePack exporter，使 JSON 与 MessagePack 的逻辑 shape 一致。
 
-实现上不能只修改 `build_exported_table_payload` 的内部内容，因为当前 payload 类型是 collection-oriented。建议引入共享 payload 类型，确保 JSON 与 MessagePack 使用同一 builder：
+当前实现已采用共享 payload enum，确保 JSON 与 MessagePack 使用同一 builder，并由 collection/object builder 根据 `TableKind` 分派：
 
 ```rust
 #[derive(Serialize)]
@@ -234,7 +234,7 @@ pub enum ExportedTablePayload {
 }
 ```
 
-也可以拆分为 `build_exported_collection_payload` 与 `build_exported_object_payload`，再由 `serialize_table` 根据 `TableKind` 分派。无论采用哪种形式，都应保持 ObjectTable 与 CollectionTable 的 scalar value contract 一致：Step 1 仍使用 `ExportedValue::Scalar(String)`。
+当前仍应保持 ObjectTable 与 CollectionTable 的 scalar value contract 一致：Step 1 使用 `ExportedValue::Scalar(String)`。剩余未实现能力包括 ObjectTable key-level source trace、多源/override、array/map schema 与后续格子自动 expand 等。
 
 ## 7. Codegen IR 与生成器
 
