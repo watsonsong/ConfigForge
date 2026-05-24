@@ -1657,8 +1657,13 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
     fs::copy(harness_dir.join("lib.rs"), temp_dir.path().join("lib.rs"))
         .expect("rust harness lib.rs should be copied");
     fs::copy(
+        fixture_root.join("../../../runtime/rust/serde_json_reader/src/runtime_reader.rs"),
+        temp_dir.path().join("json_runtime_reader.rs"),
+    )
+    .expect("rust JSON runtime reader should be copied");
+    fs::copy(
         fixture_root.join("../../../runtime/rust/serde_msgpack_reader/src/runtime_reader.rs"),
-        temp_dir.path().join("runtime_loader.rs"),
+        temp_dir.path().join("msgpack_runtime_reader.rs"),
     )
     .expect("rust MessagePack runtime reader should be copied");
     fs::copy(
@@ -1677,7 +1682,8 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
         let output = StdCommand::new("cargo")
             .args(["test", "--quiet", "--manifest-path"])
             .arg(temp_dir.path().join("Cargo.toml"))
-            .env("DATA_DIR", fixture_root.join("out/server_data"))
+            .env("JSON_DATA_DIR", fixture_root.join("out/client_data"))
+            .env("MSGPACK_DATA_DIR", fixture_root.join("out/server_data"))
             .output()
             .expect("standard generated Rust runtime test should run");
         assert_command_success(

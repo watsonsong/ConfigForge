@@ -3,22 +3,49 @@
 
 include!("generated.rs");
 
-mod runtime_loader;
+mod json_runtime_reader;
+mod msgpack_runtime_reader;
 
 use std::env;
 
-use runtime_loader::FsMessagePackRuntimeDataLoader;
+use json_runtime_reader::{FsJsonRuntimeDataLoader, JsonValueReader};
+use msgpack_runtime_reader::FsMessagePackRuntimeDataLoader;
 
-fn fixture_loader_from_env() -> FsMessagePackRuntimeDataLoader {
-    FsMessagePackRuntimeDataLoader::new(
-        env::var("DATA_DIR").expect("DATA_DIR should point to exported data"),
+#[derive(Debug, Clone)]
+struct JsonFixtureRuntimeDataLoader {
+    inner: FsJsonRuntimeDataLoader,
+}
+
+impl JsonFixtureRuntimeDataLoader {
+    fn new(data_dir: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            inner: FsJsonRuntimeDataLoader::new(data_dir),
+        }
+    }
+}
+
+impl RuntimeDataLoader for JsonFixtureRuntimeDataLoader {
+    type Reader = JsonValueReader;
+
+    fn open(&self, path: &str) -> Result<Self::Reader, String> {
+        self.inner.open_reader(&path.replace(".msgpack", ".json"))
+    }
+}
+
+fn json_fixture_loader_from_env() -> JsonFixtureRuntimeDataLoader {
+    JsonFixtureRuntimeDataLoader::new(
+        env::var("JSON_DATA_DIR").expect("JSON_DATA_DIR should point to exported JSON data"),
     )
 }
 
-#[test]
-fn generated_rust_loads_exported_messagepack_and_queries_indexes() {
-    let data = GameData::load(&fixture_loader_from_env()).expect("generated data should load");
+fn msgpack_fixture_loader_from_env() -> FsMessagePackRuntimeDataLoader {
+    FsMessagePackRuntimeDataLoader::new(
+        env::var("MSGPACK_DATA_DIR")
+            .expect("MSGPACK_DATA_DIR should point to exported MessagePack data"),
+    )
+}
 
+fn assert_standard_data(data: &GameData) {
     let item = data.items.get_by_id(2001).expect("item id should be indexed");
     assert_eq!(item.price, 5);
     assert_eq!(item.stack().expect("stack fragment").max_stack, 999);
@@ -33,4 +60,18 @@ fn generated_rust_loads_exported_messagepack_and_queries_indexes() {
 
     assert_eq!(data.game_rules.max_player_level, 60);
     assert!(data.game_rules.pvp_enabled);
+}
+
+#[test]
+fn generated_rust_loads_exported_json_and_queries_indexes() {
+    let data = GameData::load(&json_fixture_loader_from_env())
+        .expect("generated data should load from JSON runtime reader");
+    assert_standard_data(&data);
+}
+
+#[test]
+fn generated_rust_loads_exported_messagepack_and_queries_indexes() {
+    let data = GameData::load(&msgpack_fixture_loader_from_env())
+        .expect("generated data should load from MessagePack runtime reader");
+    assert_standard_data(&data);
 }

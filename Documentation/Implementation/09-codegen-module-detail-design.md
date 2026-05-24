@@ -949,7 +949,7 @@ loader.open("items.msgpack")
 当前实现：
 
 - Rust / C++ / TypeScript 当前已生成通用 loader / reader interface，并由生成代码完成 typed parsing。
-- 集成测试 harness 直接复用 `runtime/rust/serde_msgpack_reader/src/runtime_reader.rs`，新增表或字段时无需在 harness 中维护自定义 reader，只需要更新断言覆盖代表性查询。
+- 集成测试 harness 直接复用 `runtime/rust/serde_json_reader/src/runtime_reader.rs` 与 `runtime/rust/serde_msgpack_reader/src/runtime_reader.rs`，确保同一份 generated Rust code 可通过不同格式 reader 读取等价数据；新增表或字段时无需在 harness 中维护自定义 reader，只需要更新断言覆盖代表性查询。
 - 后续可按语言新增可选 adapter，而不是强制把文件系统或第三方解析库纳入生成代码。
 
 默认 decoder 策略：
