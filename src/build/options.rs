@@ -1,3 +1,6 @@
+// Copyright (c) 2026 ConfigForge contributors
+// SPDX-License-Identifier: Apache-2.0
+
 use std::{num::NonZeroUsize, path::Path};
 
 use crate::{

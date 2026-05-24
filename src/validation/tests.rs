@@ -1,3 +1,6 @@
+// Copyright (c) 2026 ConfigForge contributors
+// SPDX-License-Identifier: Apache-2.0
+
 use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::data::RowSourceInfo;

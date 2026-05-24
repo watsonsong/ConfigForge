@@ -1,3 +1,6 @@
+# Copyright (c) 2026 ConfigForge contributors
+# SPDX-License-Identifier: Apache-2.0
+
 add_library(config_forge_runtime_json_builtin_test_fallback INTERFACE)
 add_library(config_forge_runtime::json_builtin_test_fallback ALIAS config_forge_runtime_json_builtin_test_fallback)
 target_include_directories(config_forge_runtime_json_builtin_test_fallback INTERFACE

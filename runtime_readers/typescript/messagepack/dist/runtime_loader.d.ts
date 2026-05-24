@@ -1,3 +1,6 @@
+// Copyright (c) 2026 ConfigForge contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import { RuntimeDataReaderLike, RuntimeValueReader, SUPPORTED_CONFIG_FORGE_READER_CONTRACT } from "@config-forge/runtime-reader-core";
 export { SUPPORTED_CONFIG_FORGE_READER_CONTRACT };
 export type MessagePackDecode = (bytes: Uint8Array) => unknown;

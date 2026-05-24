@@ -1,3 +1,6 @@
+# Copyright (c) 2026 ConfigForge contributors
+# SPDX-License-Identifier: Apache-2.0
+
 [[structs]]
 name = "AttributeSet"
 desc = "战斗属性集合，可用于装备、角色职业等级等配置。"

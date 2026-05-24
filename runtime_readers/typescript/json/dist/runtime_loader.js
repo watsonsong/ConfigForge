@@ -1,3 +1,6 @@
+// Copyright (c) 2026 ConfigForge contributors
+// SPDX-License-Identifier: Apache-2.0
+
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.JsonValueReader = exports.SUPPORTED_CONFIG_FORGE_READER_CONTRACT = void 0;

@@ -1,9 +1,13 @@
+# Copyright (c) 2026 ConfigForge contributors
+# SPDX-License-Identifier: Apache-2.0
+
 [package]
 name = "config-forge"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 description = "ConfigForge is a schema-driven game configuration export tool that validates designer-authored data and generates runtime-ready artifacts."
+license = "Apache-2.0"
 
 [lib]
 name = "config_forge"

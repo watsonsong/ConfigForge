@@ -1,3 +1,6 @@
+// Copyright (c) 2026 ConfigForge contributors
+// SPDX-License-Identifier: Apache-2.0
+
 use serde_json::Value;
 
 pub const SUPPORTED_CONFIG_FORGE_READER_CONTRACT: &str = "^1.0";

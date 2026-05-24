@@ -1,3 +1,6 @@
+# Copyright (c) 2026 ConfigForge contributors
+# SPDX-License-Identifier: Apache-2.0
+
 [alias]
 # Text summary in terminal. Requires: cargo install cargo-llvm-cov --locked
 coverage = "llvm-cov --workspace --all-features --summary-only"

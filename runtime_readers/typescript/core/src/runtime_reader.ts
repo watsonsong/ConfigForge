@@ -1,3 +1,6 @@
+// Copyright (c) 2026 ConfigForge contributors
+// SPDX-License-Identifier: Apache-2.0
+
 export const SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0" as const;
 
 export interface RuntimeDataReaderLike {
