@@ -1,0 +1,9 @@
+{
+  "meta": { "name": "missing_vs_null" },
+  "rows": [
+    {
+      "id": "1",
+      "explicit_null": null
+    }
+  ]
+}

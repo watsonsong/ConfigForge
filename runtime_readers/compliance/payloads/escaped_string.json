@@ -1,0 +1,9 @@
+{
+  "meta": { "name": "escaped_string" },
+  "rows": [
+    {
+      "id": "1",
+      "text": "line\nnext\t\"quoted\""
+    }
+  ]
+}

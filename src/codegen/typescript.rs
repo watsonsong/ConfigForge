@@ -23,6 +23,8 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         validate_generated_symbols(&model, &names)?;
         let mut content = render_file_header(input);
         content.push('\n');
+        content
+            .push_str("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;\n\n");
         render_runtime_reader_interfaces(&mut content);
         render_runtime_reader_helpers(&mut content);
 

@@ -1,0 +1,7 @@
+add_library(config_forge_runtime_json_builtin_test_fallback INTERFACE)
+add_library(config_forge_runtime::json_builtin_test_fallback ALIAS config_forge_runtime_json_builtin_test_fallback)
+target_include_directories(config_forge_runtime_json_builtin_test_fallback INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>)
+target_compile_features(config_forge_runtime_json_builtin_test_fallback INTERFACE cxx_std_17)
+target_compile_definitions(config_forge_runtime_json_builtin_test_fallback INTERFACE
+    CONFIG_FORGE_RUNTIME_JSON_BUILTIN_TEST_FALLBACK=1)

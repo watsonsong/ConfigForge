@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+pub const SUPPORTED_CONFIG_FORGE_READER_CONTRACT: &str = "^1.0";
+
 #[derive(Debug, Clone)]
 pub struct ValueReader {
     value: Value,

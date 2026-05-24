@@ -1,0 +1,15 @@
+{
+  "meta": { "name": "scalar_compat" },
+  "rows": [
+    {
+      "id": "7",
+      "level": 12,
+      "ratio": "1.5",
+      "enabled_text": "1",
+      "disabled_text": "0",
+      "enabled_bool": true,
+      "name": "Potion",
+      "nullable": null
+    }
+  ]
+}

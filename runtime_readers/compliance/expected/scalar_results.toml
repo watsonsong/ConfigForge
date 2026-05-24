@@ -1,0 +1,15 @@
+[contract]
+version = "1.0"
+
+[scalar_compat]
+id = 7
+level = 12
+ratio = 1.5
+enabled_text = true
+disabled_text = false
+enabled_bool = true
+name = "Potion"
+nullable_is_null = true
+
+[escaped_string]
+text = "line\nnext\t\"quoted\""

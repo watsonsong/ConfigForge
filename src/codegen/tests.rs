@@ -519,6 +519,7 @@ fn rust_generator_emits_loader_table_and_index_helpers() {
 
     assert!(content.contains("pub trait RuntimeDataLoader"));
     assert!(content.contains("pub trait RuntimeDataReader"));
+    assert!(content.contains("pub const CONFIG_FORGE_READER_CONTRACT_VERSION: &str = \"1.0\";"));
     assert!(content.contains("fn open(&self, path: &str) -> Result<Self::Reader, String>;"));
     assert!(content.contains("pub const DATA_FILE: &'static str = \"items.json\";"));
     assert!(!content.contains("RuntimeDataFormat"));
@@ -887,6 +888,9 @@ fn typescript_generator_emits_async_loader_and_maps() {
     assert!(content.contains("export interface RuntimeDataLoader"));
     assert!(content.contains("export interface RuntimeDataReader"));
     assert!(
+        content.contains("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;")
+    );
+    assert!(
         content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;")
     );
     assert!(content.contains("static readonly dataFile = \"items.json\";"));
@@ -996,6 +1000,11 @@ fn cpp_generator_emits_loader_and_repository_declarations() {
     assert!(content.contains(
         "virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;"
     ));
+    assert!(
+        content.contains(
+            "inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";"
+        )
+    );
     assert!(content.contains("static constexpr const char* DataFile = \"items.json\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("IRuntimeDataDecoder"));

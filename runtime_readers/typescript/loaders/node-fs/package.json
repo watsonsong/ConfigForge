@@ -1,0 +1,16 @@
+{
+  "name": "@configforge/runtime-loader-node-fs",
+  "version": "0.1.0",
+  "type": "commonjs",
+  "main": "dist/src/runtime_loader.js",
+  "types": "dist/src/runtime_loader.d.ts",
+  "dependencies": {
+    "@configforge/runtime-reader-core": "0.1.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

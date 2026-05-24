@@ -1,7 +1,9 @@
 declare function require(name: string): any;
 
-import { GameData } from "./generated";
-import { JsonFsRuntimeDataLoader, JsonValueReader } from "./runtime_loader";
+import { GameData, RuntimeDataLoader } from "./generated";
+import { SyncFsRuntimeDataLoader } from "./runtime_loader_node_fs";
+import { decodeJsonValue, JsonValueReader } from "./runtime_loader_json";
+import { decodeMessagePackValue } from "./runtime_loader_messagepack";
 
 const process = require("process");
 
@@ -10,7 +12,11 @@ if (!dataDir) {
   throw new Error("DATA_DIR should point to exported JSON data");
 }
 
-const loader = new JsonFsRuntimeDataLoader(dataDir);
+const loader = new SyncFsRuntimeDataLoader(dataDir, decodeJsonValue);
+const messagePackLoader: RuntimeDataLoader = new SyncFsRuntimeDataLoader(dataDir, (bytes) =>
+  decodeMessagePackValue(bytes, () => ({ rows: [] })),
+);
+void messagePackLoader;
 
 if (!new JsonValueReader("1").asBool() || new JsonValueReader("0").asBool()) {
   throw new Error("numeric bool string parsing failed");

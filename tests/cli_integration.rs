@@ -1639,6 +1639,7 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
     fs::write(
         temp_dir.path().join("adapter_namespace_check.cpp"),
         r#"
+            #include "generated.hpp"
             #define CONFIG_FORGE_RUNTIME_CPP_READER IRuntimeDataReader
             #define CONFIG_FORGE_RUNTIME_CPP_LOADER IRuntimeDataLoader
             #include "runtime_loader.hpp"
@@ -1681,10 +1682,26 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
     )
     .expect("TypeScript runtime harness should be copied");
     fs::copy(
-        fixture_root.join("../../../runtime_readers/typescript/json/src/runtime_loader.ts"),
-        temp_dir.path().join("runtime_loader.ts"),
+        fixture_root.join("../../../runtime_readers/typescript/core/src/runtime_reader.ts"),
+        temp_dir.path().join("runtime_reader_core.ts"),
     )
-    .expect("TypeScript runtime loader should be copied");
+    .expect("TypeScript runtime reader core should be copied");
+    fs::copy(
+        fixture_root.join("../../../runtime_readers/typescript/json/src/runtime_loader.ts"),
+        temp_dir.path().join("runtime_loader_json.ts"),
+    )
+    .expect("TypeScript JSON runtime loader should be copied");
+    fs::copy(
+        fixture_root
+            .join("../../../runtime_readers/typescript/loaders/node-fs/src/runtime_loader.ts"),
+        temp_dir.path().join("runtime_loader_node_fs.ts"),
+    )
+    .expect("TypeScript Node fs runtime loader should be copied");
+    fs::copy(
+        fixture_root.join("../../../runtime_readers/typescript/messagepack/src/runtime_loader.ts"),
+        temp_dir.path().join("runtime_loader_messagepack.ts"),
+    )
+    .expect("TypeScript MessagePack runtime loader should be copied");
     fs::copy(
         harness_dir.join("tsconfig.json"),
         temp_dir.path().join("tsconfig.json"),
@@ -1718,6 +1735,22 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
         eprintln!("skipping standard generated TypeScript runtime test: tsc/npx not found");
         return;
     }
+
+    let package_dir = temp_dir
+        .path()
+        .join("node_modules/@configforge/runtime-reader-core");
+    fs::create_dir_all(&package_dir)
+        .expect("TypeScript core runtime package dir should be created");
+    fs::write(
+        package_dir.join("package.json"),
+        r#"{"type":"commonjs","main":"index.js"}"#,
+    )
+    .expect("TypeScript core runtime package metadata should be written");
+    fs::write(
+        package_dir.join("index.js"),
+        r#"module.exports = require("../../../dist/runtime_reader_core.js");"#,
+    )
+    .expect("TypeScript core runtime package entry should be written");
 
     let output = StdCommand::new("node")
         .arg(temp_dir.path().join("dist/runtime_check.js"))

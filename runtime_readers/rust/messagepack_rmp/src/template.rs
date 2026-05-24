@@ -1,6 +1,11 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Component, Path, PathBuf},
+};
 
 use crate::runtime_reader_core::ValueReader;
+
+pub const SUPPORTED_CONFIG_FORGE_READER_CONTRACT: &str = "^1.0";
 
 #[derive(Debug, Clone)]
 pub struct FsMessagePackRuntimeDataLoader {
@@ -15,10 +20,37 @@ impl FsMessagePackRuntimeDataLoader {
     }
 
     pub fn open_reader(&self, path: &str) -> Result<ValueReader, String> {
-        let bytes = fs::read(self.data_dir.join(path)).map_err(|error| error.to_string())?;
+        let bytes = fs::read(safe_join(&self.data_dir, path)?).map_err(|error| error.to_string())?;
         let value = rmp_serde::from_slice(&bytes).map_err(|error| error.to_string())?;
         Ok(ValueReader::new(value))
     }
+}
+
+fn safe_join(root: &Path, logical_path: &str) -> Result<PathBuf, String> {
+    let path = Path::new(logical_path);
+    if path.is_absolute() {
+        return Err(format!("runtime data path must be relative: {logical_path}"));
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return Err(format!(
+                        "runtime data path escapes data root: {logical_path}"
+                    ));
+                }
+            }
+            _ => {
+                return Err(format!("unsupported runtime data path: {logical_path}"));
+            }
+        }
+    }
+
+    Ok(root.join(normalized))
 }
 
 #[cfg(test)]
@@ -54,5 +86,12 @@ mod tests {
         assert_eq!(row.field("id").unwrap().unwrap().as_i64().unwrap(), 7);
 
         fs::remove_dir_all(&dir).expect("temp runtime data dir should be removed");
+    }
+
+    #[test]
+    fn fs_messagepack_loader_rejects_path_traversal() {
+        let loader = FsMessagePackRuntimeDataLoader::new("/tmp/config_forge_runtime_root");
+        assert!(loader.open_reader("../secret.msgpack").unwrap_err().contains("escapes"));
+        assert!(loader.open_reader("/tmp/secret.msgpack").unwrap_err().contains("relative"));
     }
 }

@@ -23,6 +23,7 @@ impl CodeGenerator for RustCodeGenerator {
         validate_generated_symbols(&model, &names)?;
         let mut content = render_file_header(input);
         content.push_str("use std::collections::HashMap;\n\n");
+        content.push_str("pub const CONFIG_FORGE_READER_CONTRACT_VERSION: &str = \"1.0\";\n\n");
         render_runtime_reader_traits(&mut content);
         render_runtime_reader_helpers(&mut content);
 

@@ -1,0 +1,21 @@
+[[cases]]
+name = "missing_field"
+payload = "missing_vs_null.json"
+path = "rows[0].missing"
+expected = "missing"
+
+[[cases]]
+name = "array_index_out_of_bounds"
+payload = "scalar_compat.json"
+path = "rows[99]"
+expected = "array index error"
+
+[[cases]]
+name = "messagepack_non_string_map_key"
+format = "messagepack"
+expected = "unsupported non-string map key"
+
+[[cases]]
+name = "messagepack_binary_ext"
+format = "messagepack"
+expected = "unsupported binary/ext value"
