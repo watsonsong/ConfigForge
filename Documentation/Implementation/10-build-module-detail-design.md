@@ -97,7 +97,8 @@ Build 保证 runtime data 先于 codegen 执行，因为生成代码需要引用
 - 为当前 target 可见 tables 构造 `DataLoadPlan`。
 - 同一个 `input` 目录的多个 data task 复用同一个 normalized `DataSet`，避免重复读取和重复 validation。
 - 每个 data task 可使用不同 `format` 和 `output`，例如 JSON + MessagePack。
-- 每个 data task 调用 `exporter::export_runtime_data()`，返回 `RuntimeDataFile` 列表。
+- 每个 data task 调用 `exporter::export_runtime_data()` 生成 runtime artifacts，并从中提取
+  `RuntimeDataFile` 列表供 codegen 使用。
 - validation warning 被收集到 `BuildOutput.warnings`，error 直接阻断 build。
 
 路径冲突分层：

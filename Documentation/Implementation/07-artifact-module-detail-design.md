@@ -109,10 +109,10 @@ Build collects Vec<Artifact>
 
 ## 7.5 与 Exporter 的关系
 
-Exporter 的职责从“序列化并写文件”收敛为“序列化并返回 runtime data artifacts”。建议 API 演进：
+Exporter 的职责从“序列化并写文件”收敛为“序列化并返回 runtime data artifacts”：
 
 ```rust
-pub fn export_runtime_data_artifacts(...) -> Result<Vec<RuntimeDataArtifact>>;
+pub(crate) fn export_runtime_data(...) -> Result<Vec<RuntimeDataArtifact>>;
 
 pub struct RuntimeDataArtifact {
     pub file: RuntimeDataFile,
@@ -124,9 +124,11 @@ pub struct RuntimeDataArtifact {
 
 - `RuntimeDataFile` 仍是 codegen 需要消费的 runtime loader 路径契约。
 - `Artifact.path` 是实际写入路径，由 data task output root + runtime data file path 得到。
-- Exporter 不再调用 `fs::create_dir_all` / `fs::write`。
+- Exporter 不再调用 `fs::create_dir_all` / `fs::write`，也不选择 `ArtifactWriteMode`。
 
-`export_runtime_data()` 包装函数应通过 Artifact Writer 写出产物，避免存在两套写入路径。
+正式 build 流程统一由 build 收集 exporter/codegen artifacts，再按 `BuildOptions.artifact_write_mode`
+调用 `ArtifactWriter` 写出；测试若需要落盘断言，应在测试模块内定义辅助函数，不应作为 exporter
+正式 API 暴露。
 
 ## 7.6 与 Codegen 的关系
 

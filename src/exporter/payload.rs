@@ -9,7 +9,7 @@ use crate::{
     meta::{LinkedTableMeta, TableKind, TargetTags},
 };
 
-use super::{ExportedTable, ExportedTableMeta, ExportedTablePayload, ExportedValue};
+use super::{ExportedTable, ExportedTablePayload, ExportedValue, model::ExportedTableMeta};
 
 pub fn build_exported_table_payload(
     table_meta: &LinkedTableMeta<'_>,
@@ -24,7 +24,7 @@ pub fn build_exported_table_payload(
     }
 }
 
-pub fn build_exported_collection_payload(
+fn build_exported_collection_payload(
     table_meta: &LinkedTableMeta<'_>,
     table: &DataTable,
     target_tags: &TargetTags,
@@ -98,7 +98,7 @@ pub fn build_exported_collection_payload(
     })
 }
 
-pub fn build_exported_object_payload(
+fn build_exported_object_payload(
     table_meta: &LinkedTableMeta<'_>,
     table: &DataTable,
     target_tags: &TargetTags,

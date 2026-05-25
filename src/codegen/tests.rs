@@ -102,7 +102,7 @@ pub(in crate::codegen) fn input_for<'a>(
 #[test]
 fn builds_code_model_with_types_tables_and_indexes() {
     let meta = linked_fixture();
-    let input = input_for(&meta, rust::LANGUAGE);
+    let input = input_for(&meta, RustCodeGenerator.language());
 
     let model =
         build_code_model(input.meta, &input.target_tags, &input.runtime_data_files).expect("model");
@@ -158,7 +158,7 @@ fn code_model_marks_object_tables_and_skips_indexes() {
         "#,
     )
     .expect("meta should load");
-    let input = input_for(&meta, rust::LANGUAGE);
+    let input = input_for(&meta, RustCodeGenerator.language());
 
     let model = build_code_model(input.meta, &TargetTags::new(["client"]), &[]).expect("model");
 
@@ -224,7 +224,7 @@ fn code_model_includes_fragment_structs_and_optional_row_members() {
         "#,
     )
     .expect("meta should load");
-    let input = input_for(&meta, rust::LANGUAGE);
+    let input = input_for(&meta, RustCodeGenerator.language());
 
     let model = build_code_model(input.meta, &TargetTags::empty(), &input.runtime_data_files)
         .expect("model should build");
@@ -635,10 +635,9 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
     )
     .expect("config should parse");
 
-    let target =
-        CodeExportTarget::from_task(config, &typescript::TypeScriptCodeGenerator).expect("target");
+    let target = CodeExportTarget::from_task(config, &TypeScriptCodeGenerator).expect("target");
 
-    assert_eq!(target.language, typescript::LANGUAGE);
+    assert_eq!(target.language, TypeScriptCodeGenerator.language());
     assert_eq!(target.out_dir, PathBuf::from("Generated/TS"));
     assert_eq!(
         target.options.keyword_conflict,
@@ -650,9 +649,9 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
     assert_eq!(
         target
             .options
-            .language_options::<typescript::TypeScriptCodegenOptions>(typescript::LANGUAGE)
+            .language_options::<TypeScriptCodegenOptions>(TypeScriptCodeGenerator.language())
             .expect("typescript options should parse"),
-        typescript::TypeScriptCodegenOptions {
+        TypeScriptCodegenOptions {
             readonly_fields: true,
         }
     );
@@ -661,7 +660,7 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
 #[test]
 fn render_file_header_replaces_project_variables_and_datetime() {
     let meta = MetaModel::from_toml_str("").expect("meta should parse");
-    let mut input = input_for(&meta, rust::LANGUAGE);
+    let mut input = input_for(&meta, RustCodeGenerator.language());
     input.target.options.file_header = Some(
         "// {{project.name}} | {{project.desc}} | {{project.copyright}} | {{datetime}}".to_owned(),
     );

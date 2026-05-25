@@ -7,6 +7,7 @@ use tempfile::tempdir;
 
 use crate::{
     ConfigForgeError, Result,
+    artifact::{ArtifactWriteMode, ArtifactWriter},
     data::DataTable,
     meta::{LinkedTableMeta, MetaModel, TargetTags},
 };
@@ -15,6 +16,29 @@ use super::*;
 
 struct CustomDataExporter {
     seen_tables: Mutex<Vec<String>>,
+}
+
+fn export_runtime_data_to_disk(
+    out_dir: &std::path::Path,
+    linked_meta: &crate::meta::LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    data_set: &crate::data::DataSet,
+    exporter: &dyn DataFormatExporter,
+    pool: &rayon::ThreadPool,
+) -> Result<Vec<RuntimeDataFile>> {
+    let artifacts =
+        export_runtime_data(out_dir, linked_meta, target_tags, data_set, exporter, pool)?;
+    let files = artifacts
+        .iter()
+        .map(|artifact| artifact.file.clone())
+        .collect::<Vec<_>>();
+    ArtifactWriter::new(ArtifactWriteMode::Direct).write(
+        artifacts
+            .into_iter()
+            .map(|artifact| artifact.artifact)
+            .collect(),
+    )?;
+    Ok(files)
 }
 
 impl DataFormatExporter for CustomDataExporter {
@@ -106,7 +130,7 @@ fn export_runtime_data_uses_registered_exporter() {
         .build()
         .expect("test thread pool should build");
 
-    let files = export_runtime_data(
+    let files = export_runtime_data_to_disk(
         out_dir.path(),
         &linked,
         &TargetTags::empty(),
@@ -206,7 +230,7 @@ fn export_runtime_data_preserves_plan_order_for_multiple_artifacts() {
         .build()
         .expect("test thread pool should build");
 
-    let files = export_runtime_data(
+    let files = export_runtime_data_to_disk(
         out_dir.path(),
         &linked,
         &TargetTags::empty(),

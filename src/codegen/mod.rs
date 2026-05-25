@@ -1,16 +1,19 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-pub mod cpp;
+mod cpp;
 mod ir;
 mod naming;
-pub mod rust;
-pub mod typescript;
+mod rust;
+mod typescript;
 
 pub use self::ir::{
     CodeEnum, CodeEnumValue, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel,
     CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, GeneratedFile, build_code_model,
 };
+pub use cpp::{CppCodeGenerator, CppCodegenOptions};
+pub use rust::{RustCodeGenerator, RustCodegenOptions};
+pub use typescript::{TypeScriptCodeGenerator, TypeScriptCodegenOptions};
 
 use std::{collections::HashMap, path::PathBuf};
 
@@ -288,9 +291,9 @@ pub(crate) fn ensure_unique_generated_symbols(
 
 pub fn builtin_generators() -> Vec<Box<dyn CodeGenerator>> {
     vec![
-        Box::new(rust::RustCodeGenerator),
-        Box::new(cpp::CppCodeGenerator),
-        Box::new(typescript::TypeScriptCodeGenerator),
+        Box::new(RustCodeGenerator),
+        Box::new(CppCodeGenerator),
+        Box::new(TypeScriptCodeGenerator),
     ]
 }
 

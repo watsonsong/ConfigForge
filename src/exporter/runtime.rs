@@ -7,37 +7,14 @@ use rayon::prelude::*;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{Artifact, ArtifactWriteMode, ArtifactWriter},
+    artifact::Artifact,
     data::DataSet,
     meta::{LinkedMetaModel, TargetTags},
 };
 
 use super::DataFormatExporter;
 
-pub fn export_runtime_data(
-    out_dir: &Path,
-    linked_meta: &LinkedMetaModel<'_>,
-    target_tags: &TargetTags,
-    data_set: &DataSet,
-    exporter: &dyn DataFormatExporter,
-    pool: &rayon::ThreadPool,
-) -> Result<Vec<RuntimeDataFile>> {
-    let artifacts =
-        export_runtime_data_artifacts(out_dir, linked_meta, target_tags, data_set, exporter, pool)?;
-    let files = artifacts
-        .iter()
-        .map(|artifact| artifact.file.clone())
-        .collect::<Vec<_>>();
-    ArtifactWriter::new(ArtifactWriteMode::Direct).write(
-        artifacts
-            .into_iter()
-            .map(|artifact| artifact.artifact)
-            .collect(),
-    )?;
-    Ok(files)
-}
-
-pub fn export_runtime_data_artifacts(
+pub(crate) fn export_runtime_data(
     out_dir: &Path,
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
@@ -115,7 +92,7 @@ pub struct RuntimeDataFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeDataArtifact {
+pub(crate) struct RuntimeDataArtifact {
     pub file: RuntimeDataFile,
     pub artifact: Artifact,
 }

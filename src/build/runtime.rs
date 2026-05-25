@@ -10,7 +10,7 @@ use crate::{
     ConfigForgeError, Result,
     artifact::Artifact,
     data::{DataLoadPlan, DataLoader},
-    exporter::{DataFormatRegistry, RuntimeDataFile, export_runtime_data_artifacts},
+    exporter::{DataFormatRegistry, RuntimeDataFile, export_runtime_data},
     meta::{LinkedMetaModel, TargetTags},
     project::lexical_normalize_path,
     validation::{normalize_data_set, validate_normalized_data_set_for_target_with_report},
@@ -76,7 +76,7 @@ pub(super) fn export_runtime_data_tasks(
         let data_set = normalized_data_sets
             .get(&data_task.input)
             .expect("data set should be loaded before export");
-        let runtime_artifacts = export_runtime_data_artifacts(
+        let runtime_artifacts = export_runtime_data(
             &data_task.output,
             linked_meta,
             target_tags,

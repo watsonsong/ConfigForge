@@ -13,7 +13,7 @@ use crate::{
 #[derive(Debug, Parser)]
 #[command(name = "config-forge")]
 #[command(about = "Validate and export designer-authored game data", long_about = None)]
-pub struct Cli {
+struct Cli {
     /// Path to ConfigForge project config.
     #[arg(long)]
     project: PathBuf,
@@ -59,7 +59,7 @@ pub fn run() -> anyhow::Result<()> {
     run_with_args(Cli::parse())
 }
 
-pub fn run_with_args(cli: Cli) -> anyhow::Result<()> {
+fn run_with_args(cli: Cli) -> anyhow::Result<()> {
     let execution = ExecutionOptions::from_cli(
         cli.jobs,
         cli.io_concurrency,

@@ -10,6 +10,11 @@
 - Use `anyhow` at CLI boundaries where human-facing error propagation is sufficient.
 - Keep structs serializable/deserializable when they represent configuration or exportable data.
 - Keep plugin-facing APIs behind explicit registries and stable capability IDs.
+- Prefer the smallest practical public API. Use private `mod` plus explicit `pub use` facades
+  instead of `pub mod` when submodules are implementation organization. Do not expose struct
+  fields, helper functions, concrete modules, or nested namespaces unless callers need them for a
+  stable contract, configuration schema, plugin extension point, or testable cross-module result.
+  Start with private visibility, widen to `pub(crate)` or `pub` only when a real caller requires it.
 - Prefer async-capable boundaries for source loading and artifact writing.
 - Keep parallel execution deterministic by sorting diagnostics and artifact manifests before reporting.
 
@@ -40,6 +45,8 @@
 - `build` owns project build orchestration, target normalization, data/code task binding, and artifact scheduling/writes.
 - `cli` owns command-line parsing and user-facing messages. It should call `build` rather than orchestrating lower-level modules directly.
 - Future plugin or executor modules should follow the one-way dependency rules in `Documentation/Implementation/01-module-outline.md`.
+- Public module roots should act as narrow facades. Internal files may be split freely for cohesion,
+  but those files should normally stay private and be exposed through selected root-level re-exports.
 
 ## Comment Rules
 
