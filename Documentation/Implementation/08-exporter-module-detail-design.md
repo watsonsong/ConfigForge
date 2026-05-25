@@ -21,27 +21,23 @@ Exporter 模块需要达成：
 
 ## 8.2 模块结构
 
-当前实现按格式拆分为：
-
-```text
-src/exporter/
-  mod.rs              # TargetDataConfig / DataFormatExporter / registry / payload builder / tests
-  json.rs             # JsonDataExporter
-  messagepack.rs      # MessagePackDataExporter
-```
-
-后续可继续按职责拆分：
+当前实现按职责拆分为：
 
 ```text
 src/exporter/
   mod.rs              # 对外 API 与 re-export
   config.rs           # TargetDataConfig
-  registry.rs         # DataFormatRegistry / DataFormatExporter
-  payload.rs          # ExportedTablePayload / ExportedValue builders
+  model.rs            # ExportedTable / ExportedTablePayload / ExportedValue
+  registry.rs         # DataFormatRegistry / DataFormatExporter / builtin_exporters
+  runtime.rs          # runtime artifact plan、并行导出编排、artifact 写入入口
+  payload.rs          # CollectionTable / ObjectTable 共享 payload builder
   json.rs             # JsonDataExporter
   messagepack.rs      # MessagePackDataExporter
-  tests.rs
+  tests.rs            # exporter 核心行为测试
 ```
+
+`mod.rs` 仅保留模块声明和公共 re-export，确保既有消费者仍可通过 `crate::exporter::*`
+访问稳定 API；新增格式应优先落在独立格式模块中，核心 registry / runtime / payload 不内联具体格式逻辑。
 
 ## 8.3 配置与 registry
 
