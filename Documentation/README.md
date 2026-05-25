@@ -55,6 +55,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 - `Implementation/10-build-module-detail-design.md` — Build orchestration, target normalization, data/code task binding, and artifact write boundaries.
 - `Implementation/11-foreign-key-detail-design.md` — Foreign key raw/link model, referential-integrity validation, target semantics, codegen staging, and test plan.
 - `Implementation/12-struct-expanded-value-detail-design.md` — Struct source layout auto detection and expanded CSV field-path layout for CollectionTable/ObjectTable, validation/export plan, and test plan.
+- `Implementation/13-runtime-binary-format-detail-design.md` — Planned `bin` runtime data packed binary format, schema revision, encoding rules, exporter/codegen/reader integration, and compliance fixtures.
 
 ## Technical Practice Set
 

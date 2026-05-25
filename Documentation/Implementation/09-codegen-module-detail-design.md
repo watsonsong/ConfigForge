@@ -17,7 +17,7 @@
    - table repository / collection type；
    - index key type 和辅助查找函数。
 4. 生成一个统一的 DataSet / Database facade，便于业务侧一次加载后按表访问。
-5. 支持 JSON 与 MessagePack 两种 runtime data format；生成代码通过 runtime data export 阶段返回的真实文件名暴露每张表的默认数据文件路径。
+5. 支持 JSON 与 MessagePack 两种 runtime data format；planned 支持 `bin` 紧密二进制格式。生成代码通过 runtime data export 阶段返回的真实文件名暴露每张表的默认数据文件路径。
 6. 生成抽象 `RuntimeDataLoader` / `RuntimeDataReader`，由接入方 loader 只负责打开数据文件并提供通用 reader，生成代码负责所有表/字段解析和 typed row/object 构造。
 7. 保持生成代码确定性：同一份 Meta 生成稳定文件名、声明顺序和 API 名称。
 8. 在生成前发现命名冲突、保留字、目标语言类型映射缺失、输出路径冲突等问题。
@@ -27,7 +27,7 @@
 第一阶段不实现：
 
 - 生成代码的插件化动态加载；
-- JSON / MessagePack 之外的复杂二进制数据格式；
+- JSON / MessagePack 之外的复杂二进制数据格式（`bin` 已进入专项设计，尚未实现）；
 - 跨语言运行时库发布；
 - struct/json cell 的完整解析；
 - foreign key 自动跳转接口；
@@ -70,7 +70,7 @@ Data Load / Normalize / Validate
 - Code Export 只依赖已 linked 的 Meta，不直接读取 TOML。
 - Code Export 不重新读取 CSV，不直接依赖 `DataLoader`。
 - Runtime data 文件和 generated code 文件都应进入同一套 Artifact Plan，统一检查路径冲突。
-- Data 文件格式第一阶段支持 JSON 与 MessagePack；目标态生成代码只约束通用 `RuntimeDataLoader` / reader 协议。loader 实现负责打开具体文件并暴露格式无关的读取 cursor，生成代码本身不绑定文件系统、引擎资源系统、JSON 库或 MessagePack 库，但负责所有 table / field 级解析逻辑。
+- Data 文件格式第一阶段支持 JSON 与 MessagePack；planned `bin` 使用 positional packed layout。目标态生成代码只约束通用 `RuntimeDataLoader` / reader 协议。loader 实现负责打开具体文件并暴露格式无关的读取 cursor，生成代码本身不绑定文件系统、引擎资源系统、JSON 库、MessagePack 库或 binary decoder，但负责所有 table / field 级解析逻辑。
 
 ## 9.3 模块结构建议
 
@@ -186,7 +186,7 @@ pub struct CodeExportTarget {
 | `out_dir` | 生成代码输出目录。 |
 | `options` | 从 `targets.code` 解析出的通用和语言专属选项，包括文件头、命名策略、关键字冲突策略、语言扩展参数等。 |
 
-`CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.code]]`。runtime data 的具体格式由 code task 引用的 `[[targets.data]]` 任务选择，并通过 `RuntimeDataFile.path` 的真实后缀传递给 CodeModel；code-only target 没有 data artifact 时当前默认推导 `<table>.json`。
+`CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.code]]`。runtime data 的具体格式由 code task 引用的 `[[targets.data]]` 任务选择，并通过 `RuntimeDataFile.format` 显式传递给 CodeModel；code-only target 没有 data artifact 时当前默认推导 `<table>.json` 与 `format = "json"`。
 
 ### 9.4.2.1 Runtime data format
 
@@ -194,6 +194,7 @@ pub struct CodeExportTarget {
 
 - Project Config 中 `[[targets.data]].format = "json"` 选择 JSON exporter。
 - Project Config 中 `[[targets.data]].format = "messagepack"` 选择 MessagePack exporter。
+- Planned：Project Config 中 `[[targets.data]].format = "bin"` 选择私有紧密二进制 exporter。
 - 可兼容解析 `"msgpack"` 为 MessagePack，但错误信息、文档、生成代码和 manifest 中统一使用规范名 `messagepack`。
 - Project Config 使用 `[[targets.data]]` 数组表表达 runtime data 导出任务。
 
@@ -265,8 +266,9 @@ pub struct NormalizedCodegenTaskConfig {
 | --- | --- | --- | --- |
 | `Json` | `.json` | `serde_json::to_vec_pretty` 写出 payload envelope。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 打开 JSON payload 为通用 reader；生成代码读取 rows 并构造 typed rows。 |
 | `MessagePack` | `.msgpack` | `rmp-serde` 写出同一 payload envelope 的 MessagePack bytes。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 打开 MessagePack payload 为通用 reader；生成代码读取 rows 并构造 typed rows。 |
+| `Bin` | `.bin` | planned：写入 `magic = "CFGB"`、format version、header size、`u64 schema_revision` 后，按 target-aware schema 顺序紧密排列 record，不保存 tag/name。 | planned：generated code 携带每张表的 expected revision，binary reader 校验 magic/version/header/revision 后按 positional layout 顺序读取。 |
 
-`RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json` 或 `items.msgpack`。该路径相对当前 data artifact root / runtime loader root，不相对 code output 或 project root。CodeModel 优先使用 runtime data export 阶段返回的真实路径；当 target 没有 data export artifact 时，才默认推导 `<table>.json`。
+`RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json`、`items.msgpack` 或 planned `items.bin`。该路径相对当前 data artifact root / runtime loader root，不相对 code output 或 project root。CodeModel 优先使用 runtime data export 阶段返回的真实路径；当 target 没有 data export artifact 时，才默认推导 `<table>.json` 与 `format = "json"`。支持 `bin` 前，`RuntimeDataFile` / CodeModel 必须显式携带 `format`，unknown format 在 build/codegen 阶段报错，不允许仅靠后缀推断 reader layout。
 
 当一个 target 同时导出多套 data task 时，`build_target` 应按 data task 分组返回：
 
@@ -280,7 +282,7 @@ pub struct RuntimeConfigForgeResult {
 }
 ```
 
-`write_generated_code` 在构造每个 `CodeExportInput` 时只传入该 code task 的 `selected_data_name` 对应的 `RuntimeConfigForgeResult.files`，避免同一 table 同时出现 `items.json` 和 `items.msgpack` 时 CodeModel 无法确定默认文件名。未来 manifest 可以记录所有 data task；codegen 输入只保留当前 code task 所需的视图。
+`write_generated_code` 在构造每个 `CodeExportInput` 时只传入该 code task 的 `selected_data_name` 对应的 `RuntimeConfigForgeResult.files`，避免同一 table 同时出现 `items.json`、`items.msgpack` 和 `items.bin` 时 CodeModel 无法确定默认文件名和 reader layout。未来 manifest 可以记录所有 data task；codegen 输入只保留当前 code task 所需的视图。
 
 ### 9.4.2.2 `CodegenOptions`
 
@@ -1398,12 +1400,13 @@ CI 中三方依赖策略：
 
 ## 9.11.1 Exporter 写出实现方案
 
-runtime data format 由 data export registry 选择，并通过 `RuntimeDataFile.path` 的文件名后缀传给 codegen；当前 codegen 层不再生成 `RuntimeDataFormat` 类型。目标态可用枚举描述如下：
+runtime data format 由 data export registry 选择，并通过 `RuntimeDataFile.format` 显式传给 codegen；文件名后缀只描述 artifact path，不作为 reader layout 的唯一来源。当前 codegen 层不再生成 `RuntimeDataFormat` 类型。目标态可用枚举描述如下：
 
 ```rust
 pub enum TargetDataFormat {
     Json,
     MessagePack,
+    Bin,
 }
 ```
 
@@ -1412,11 +1415,11 @@ pub enum TargetDataFormat {
 1. Project Config load 后先构造 `NormalizedTargetConfig`，完成 data task name 规范化、code task `selected_data_name` 自动绑定和引用校验。
 2. `build_target` 消费当前 target 的 `Vec<NormalizedTargetDataConfig>`。没有 data task 时跳过 runtime data 导出，进入 code-only 流程。
 3. 按 `NormalizedTargetDataConfig.input` 分组。每个不同 input 构造一次 `DataLoadPlan`，使用 `DataLoader::new(data_root)` 加载；Meta 中 source path 继续由 `data_root.join(source.path)` 解析。
-4. 对每个不同 input 的 DataSet 执行 normalize、target validation，并派生 DataSet-dependent ExportView；同 input 的 JSON / MessagePack 等多个 data task 复用该结果。不同 input 即使属于同一 target，也不能复用另一个 input 的 DataSet / validation view / concrete ExportView。
+4. 对每个不同 input 的 DataSet 执行 normalize、target validation，并派生 DataSet-dependent ExportView；同 input 的 JSON / MessagePack / Bin 等多个 data task 复用该结果。不同 input 即使属于同一 target，也不能复用另一个 input 的 DataSet / validation view / concrete ExportView。
 5. 每个 data task 根据自身 `format` 从 `DataFormatRegistry` 选择 exporter，根据自身 `output` 写出一套 runtime data artifact。
 6. `Json` 使用 `serde_json::to_vec_pretty` 写出 `<table>.json`。
 7. `MessagePack` 使用 `rmp_serde::to_vec_named` 或等价 named-field 编码写出 `<table>.msgpack`。
-8. 每个 data task 返回独立的 `RuntimeConfigForgeResult { data_name, input, output, format, files }`，其中 `RuntimeDataFile { table_name, path }` 必须使用真实写出的文件名。
+8. 每个 data task 返回独立的 `RuntimeConfigForgeResult { data_name, input, output, format, files }`，其中 `RuntimeDataFile { table_name, path, format }` 必须使用真实写出的文件名和规范格式名。
 9. `write_generated_code` 根据每个 `NormalizedCodegenTaskConfig.selected_data_name` 选择对应 `RuntimeConfigForgeResult.files` 传入 `CodeExportInput`，让 CodeModel 使用当前 code task 绑定的数据文件名。
 10. Artifact path 规划必须跨所有 data task、code task 和未来 special exporter 统一检查，不能只在 codegen 内检查 generated code 的重复路径。
 
@@ -1433,8 +1436,9 @@ rmp-serde = "1"
 CodeModel 构建时需要使用 `RuntimeDataFile`：
 
 - 若 `runtime_data_files` 中存在 table 对应 artifact，使用 artifact path。
-- 若不存在，则默认推导 `<table>.json`。
+- 若不存在，则默认推导 `<table>.json` 和 `format = "json"`。
 - 每个 `CodeTable` 保留 `data_file`，语言生成器用它生成常量。
+- 每个 `CodeTable` 同时保留 data format；支持 `bin` 后，生成代码据此选择 named-field parser 或 positional parser。
 - 同一个 `CodeExportInput.runtime_data_files` 中同一 table 只能出现一个 artifact；多个 data format 的选择在 exporter 编排层通过 `NormalizedCodegenTaskConfig.selected_data_name` 完成，不进入 CodeModel 决策。
 
 生成代码的 load 流程统一为：

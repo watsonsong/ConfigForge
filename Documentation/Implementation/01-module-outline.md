@@ -119,6 +119,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `10-build-module-detail-design.md` | 模块 | 构建编排、target/task binding、并行执行边界和 artifact 写入策略。 |
 | `11-foreign-key-detail-design.md` | 专项 | 外键 raw/link model、引用完整性校验、target 语义、codegen staging。 |
 | `12-struct-expanded-value-detail-design.md` | 专项 | Struct source layout 自动判定和 expanded CSV field-path。 |
+| `13-runtime-binary-format-detail-design.md` | 专项 | `bin` runtime data 紧密二进制格式、schema revision、编码规则和 reader 方案。 |
 
 ## 1.6 测试分层
 

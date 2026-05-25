@@ -68,7 +68,7 @@
 | validators | Implemented MVP | 已有 validator registry 和 `range` field validator；后续可扩展更多 built-in/plugin validators。 |
 | fragments | Implemented MVP | 已支持 polymorphic variant source mode；fragment join mode 不实现。 |
 | foreign keys | Implemented MVP | 支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；Phase 1 仅支持 CollectionTable 到 CollectionTable。 |
-| runtime data export | Implemented MVP | 支持 JSON 与 MessagePack registry；大表 streaming writer 仍为中期优化。 |
+| runtime data export | Implemented MVP | 支持 JSON 与 MessagePack registry；`bin` 私有紧密二进制格式为 planned / not implemented；大表 streaming writer 仍为中期优化。 |
 | codegen backends | Implemented MVP | 已有 Rust / TypeScript / C++ 基础生成、loader/repository helper 和 target-aware IR；更丰富 FK helper/API 契约待后续确认。 |
 | generated runtime loader contract | Implemented MVP | 当前 Rust / C++ / TypeScript 生成代码使用 Meta-agnostic `open + RuntimeDataReader + generated parser` 契约；用户 loader 新增表/字段时不变。 |
 | standard runtime helpers | Partial | 顶层 `runtime/` 已有 Rust JSON/MessagePack copyable templates、TypeScript core/JSON/MessagePack/node-fs source packages、C++ RapidJSON JSON adapter、C++ msgpack-cxx MessagePack adapter、C++ CMake targets 与初始 compliance fixtures；已声明 reader contract version。尚缺自动 compliance runner、Rust stable runtime crate 与 C++ stable interface header 完整接入。核心 generated code 仍不强依赖这些三方库。 |
