@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigForgeError, Result};
+use crate::{ConfigForgeError, Result, exporter::BINARY_FORMAT};
 
 use super::{
     CaseStyle, CodeEnum, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel,
@@ -55,7 +55,7 @@ impl CodeGenerator for CppCodeGenerator {
         validate_generated_symbols(&model, &names)?;
         let mut header = render_file_header(input);
         header.push_str("#pragma once\n\n");
-        header.push_str("#include <cstdint>\n#include <cstddef>\n#include <map>\n#include <memory>\n#include <optional>\n#include <string>\n#include <tuple>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
+        header.push_str("#include <cstdint>\n#include <cstddef>\n#include <map>\n#include <memory>\n#include <optional>\n#include <stdexcept>\n#include <string>\n#include <tuple>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
         let namespace = cpp_options
             .namespace
             .as_ref()
@@ -68,7 +68,7 @@ impl CodeGenerator for CppCodeGenerator {
             "inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";\n\n",
         );
         header.push_str(
-            "class IRuntimeDataReader {\npublic:\n    virtual ~IRuntimeDataReader() = default;\n    virtual std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const = 0;\n    virtual std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const = 0;\n    virtual std::size_t Size() const = 0;\n    virtual std::int64_t AsInt64() const = 0;\n    virtual double AsDouble() const = 0;\n    virtual bool AsBool() const = 0;\n    virtual std::string AsString() const = 0;\n    virtual bool IsNull() const = 0;\n};\n\nclass IRuntimeDataLoader {\npublic:\n    virtual ~IRuntimeDataLoader() = default;\n    virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;\n};\n\n",
+            "class IRuntimeDataReader {\npublic:\n    virtual ~IRuntimeDataReader() = default;\n    virtual std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const = 0;\n    virtual std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const = 0;\n    virtual std::size_t Size() const = 0;\n    virtual std::int64_t AsInt64() const = 0;\n    virtual double AsDouble() const = 0;\n    virtual bool AsBool() const = 0;\n    virtual std::string AsString() const = 0;\n    virtual bool IsNull() const = 0;\n    virtual std::optional<std::uint64_t> SchemaRevision() const { return std::nullopt; }\n    virtual std::size_t ReadRowCount() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual void BeginRecord(std::size_t) { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual bool ReadOptionalPresent(std::size_t) { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual std::int64_t ReadNextInt64() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual double ReadNextDouble() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual bool ReadNextBool() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual std::string ReadNextString() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual std::uint64_t ReadEnumOrdinal() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual void EnsureExhausted() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n};\n\nclass IRuntimeDataLoader {\npublic:\n    virtual ~IRuntimeDataLoader() = default;\n    virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;\n};\n\n",
         );
 
         for code_enum in &model.enums {
@@ -136,6 +136,11 @@ impl CodeGenerator for CppCodeGenerator {
                     "    static constexpr const char* DataFile = {:?};\n",
                     table.data_file
                 ));
+                if let Some(revision) = table.schema_revision {
+                    header.push_str(&format!(
+                        "    static constexpr std::uint64_t ExpectedSchemaRevision = {revision}ULL;\n"
+                    ));
+                }
             }
             for field in &table.fields {
                 push_doc_indented(&mut header, field.desc.as_deref(), "    ");
@@ -437,6 +442,25 @@ fn render_enum_reader_source(
         code_enum.name
     ));
     content.push_str("}\n\n");
+    content.push_str(&format!(
+        "{} {}(std::uint64_t ordinal) {{\n",
+        type_name,
+        names.binary_enum_reader_function_name(&type_name)?
+    ));
+    content.push_str("    switch (ordinal) {\n");
+    for (ordinal, value) in code_enum.values.iter().enumerate() {
+        content.push_str(&format!(
+            "    case {ordinal}: return {}::{};\n",
+            type_name,
+            names.enum_variant_name(&value.name)?
+        ));
+    }
+    content.push_str(&format!(
+        "    default: throw std::runtime_error(\"unknown {} ordinal\");\n",
+        code_enum.name
+    ));
+    content.push_str("    }\n");
+    content.push_str("}\n\n");
     Ok(())
 }
 
@@ -446,7 +470,15 @@ fn render_struct_reader_source(
     names: &CppNames<'_>,
 ) -> Result<()> {
     let type_name = names.type_name(&code_struct.name)?;
-    render_reader_function_source(content, &type_name, &code_struct.fields, None, names)
+    render_reader_function_source(content, &type_name, &code_struct.fields, None, names)?;
+    render_binary_reader_function_source(
+        content,
+        &type_name,
+        &code_struct.name,
+        &code_struct.fields,
+        &[],
+        names,
+    )
 }
 
 fn render_fragment_reader_source(
@@ -456,7 +488,15 @@ fn render_fragment_reader_source(
     names: &CppNames<'_>,
 ) -> Result<()> {
     let type_name = names.fragment_payload_type_name(table, fragment)?;
-    render_reader_function_source(content, &type_name, &fragment.fields, None, names)
+    render_reader_function_source(content, &type_name, &fragment.fields, None, names)?;
+    render_binary_reader_function_source(
+        content,
+        &type_name,
+        &fragment.name,
+        &fragment.fields,
+        &[],
+        names,
+    )
 }
 
 fn render_row_reader_source(
@@ -465,7 +505,15 @@ fn render_row_reader_source(
     names: &CppNames<'_>,
 ) -> Result<()> {
     let type_name = names.row_type_name(&table.name)?;
-    render_reader_function_source(content, &type_name, &table.fields, Some(table), names)
+    render_reader_function_source(content, &type_name, &table.fields, Some(table), names)?;
+    render_binary_reader_function_source(
+        content,
+        &type_name,
+        &table.name,
+        &table.fields,
+        &table.fragments,
+        names,
+    )
 }
 
 fn render_reader_function_source(
@@ -504,6 +552,65 @@ fn render_reader_function_source(
     Ok(())
 }
 
+fn render_binary_reader_function_source(
+    content: &mut String,
+    type_name: &str,
+    owner_name: &str,
+    fields: &[super::CodeField],
+    fragments: &[super::CodeFragment],
+    names: &CppNames<'_>,
+) -> Result<()> {
+    let function_name = names.binary_reader_function_name(type_name)?;
+    let optional_slot_count =
+        fields.iter().filter(|field| !field.required).count() + fragments.len();
+    content.push_str(&format!(
+        "{} {}(IRuntimeDataReader& reader) {{\n",
+        type_name, function_name
+    ));
+    content.push_str(&format!("    reader.BeginRecord({optional_slot_count});\n"));
+    let mut optional_index = 0usize;
+    for field in fields {
+        if !field.required {
+            content.push_str(&format!(
+                "    const bool present_{} = reader.ReadOptionalPresent({optional_index});\n",
+                names.field_name(&field.name)?
+            ));
+            optional_index += 1;
+        }
+    }
+    for fragment in fragments {
+        content.push_str(&format!(
+            "    const bool present_{} = reader.ReadOptionalPresent({optional_index});\n",
+            names.field_name(&fragment.name)?
+        ));
+        optional_index += 1;
+    }
+    content.push_str(&format!("    {} value{{}};\n", type_name));
+    for field in fields {
+        let field_name = names.field_name(&field.name)?;
+        let expr = names.cpp_read_binary_field_expr(field)?;
+        if field.required {
+            content.push_str(&format!("    value.{field_name} = {expr};\n"));
+        } else {
+            content.push_str(&format!(
+                "    if (present_{field_name}) {{ value.{field_name} = {expr}; }} else {{ throw std::runtime_error(\"missing optional field `{}` in binary {type_name}\"); }}\n",
+                field.name
+            ));
+        }
+    }
+    for fragment in fragments {
+        let field_name = names.field_name(&fragment.name)?;
+        let payload_type = names.fragment_payload_type_name_for_type_name(owner_name, fragment)?;
+        let reader_function = names.binary_reader_function_name(&payload_type)?;
+        content.push_str(&format!(
+            "    if (present_{field_name}) {{ value.{field_name} = {reader_function}(reader); }}\n"
+        ));
+    }
+    content.push_str("    return value;\n");
+    content.push_str("}\n\n");
+    Ok(())
+}
+
 fn render_table_source(
     content: &mut String,
     table: &CodeTable,
@@ -512,25 +619,56 @@ fn render_table_source(
     let repository_type = names.repository_type_name(&table.name)?;
     let row_type = names.row_type_name(&table.name)?;
     let row_reader_function = names.reader_function_name(&row_type)?;
+    let binary_row_reader_function = names.binary_reader_function_name(&row_type)?;
 
     content.push_str(&format!(
         "{} {}::Load(IRuntimeDataLoader& loader) {{\n",
         repository_type, repository_type
     ));
     content.push_str("    auto root = loader.Open(DataFile);\n");
-    content.push_str("    auto rows_reader = RequiredField(*root, \"rows\");\n");
-    content.push_str(&format!("    std::vector<{}> rows;\n", row_type));
-    content.push_str("    rows.reserve(rows_reader->Size());\n");
-    content.push_str(
-        "    for (std::size_t row_index = 0; row_index < rows_reader->Size(); ++row_index) {\n",
-    );
-    content.push_str(&format!(
-        "        rows.push_back({row_reader_function}(*rows_reader->Index(row_index)));\n"
-    ));
-    content.push_str("    }\n");
-    content.push_str("    return FromRows(std::move(rows));\n");
-    content.push_str("}\n\n");
+    if table.data_format == BINARY_FORMAT {
+        content.push_str("    if (!root->SchemaRevision() || *root->SchemaRevision() != ExpectedSchemaRevision) { throw std::runtime_error(\"schema revision mismatch for binary runtime data\"); }\n");
+        content.push_str("    const std::size_t row_count = root->ReadRowCount();\n");
+        content.push_str(&format!("    std::vector<{}> rows;\n", row_type));
+        content.push_str(
+            "    for (std::size_t row_index = 0; row_index < row_count; ++row_index) {\n",
+        );
+        content.push_str(&format!(
+            "        rows.push_back({binary_row_reader_function}(*root));\n"
+        ));
+        content.push_str("    }\n");
+        content.push_str("    root->EnsureExhausted();\n");
+        content.push_str("    return FromRows(std::move(rows));\n");
+        content.push_str("}\n\n");
+    } else {
+        content.push_str("    auto rows_reader = RequiredField(*root, \"rows\");\n");
+        content.push_str(&format!("    std::vector<{}> rows;\n", row_type));
+        content.push_str("    rows.reserve(rows_reader->Size());\n");
+        content.push_str(
+            "    for (std::size_t row_index = 0; row_index < rows_reader->Size(); ++row_index) {\n",
+        );
+        content.push_str(&format!(
+            "        rows.push_back({row_reader_function}(*rows_reader->Index(row_index)));\n"
+        ));
+        content.push_str("    }\n");
+        content.push_str("    return FromRows(std::move(rows));\n");
+        content.push_str("}\n\n");
+    }
+    if table.data_format == BINARY_FORMAT {
+        // named path has already been emitted in the `else` branch.
+    } else {
+        return render_from_rows_source(content, table, names, &repository_type, &row_type);
+    }
+    render_from_rows_source(content, table, names, &repository_type, &row_type)
+}
 
+fn render_from_rows_source(
+    content: &mut String,
+    table: &CodeTable,
+    names: &CppNames<'_>,
+    repository_type: &str,
+    row_type: &str,
+) -> Result<()> {
     content.push_str(&format!(
         "{} {}::FromRows(std::vector<{}> rows) {{\n",
         repository_type, repository_type, row_type
@@ -634,11 +772,28 @@ fn render_game_data_load_source(
                 "    data.{member_name} = {}::Load(loader);\n",
                 names.repository_type_name(&table.name)?
             )),
-            CodeTableKind::Object => content.push_str(&format!(
-                "    data.{member_name} = {}(*loader.Open({}::DataFile));\n",
-                names.reader_function_name(&names.row_type_name(&table.name)?)?,
-                names.row_type_name(&table.name)?
-            )),
+            CodeTableKind::Object => {
+                if table.data_format == BINARY_FORMAT {
+                    let row_type = names.row_type_name(&table.name)?;
+                    content.push_str(&format!(
+                        "    auto root_{member_name} = loader.Open({row_type}::DataFile);\n"
+                    ));
+                    content.push_str(&format!(
+                        "    if (!root_{member_name}->SchemaRevision() || *root_{member_name}->SchemaRevision() != {row_type}::ExpectedSchemaRevision) {{ throw std::runtime_error(\"schema revision mismatch for binary runtime data\"); }}\n"
+                    ));
+                    content.push_str(&format!(
+                        "    data.{member_name} = {}(*root_{member_name});\n",
+                        names.binary_reader_function_name(&row_type)?
+                    ));
+                    content.push_str(&format!("    root_{member_name}->EnsureExhausted();\n"));
+                } else {
+                    content.push_str(&format!(
+                        "    data.{member_name} = {}(*loader.Open({}::DataFile));\n",
+                        names.reader_function_name(&names.row_type_name(&table.name)?)?,
+                        names.row_type_name(&table.name)?
+                    ));
+                }
+            }
         }
     }
     content.push_str("    return data;\n");
@@ -708,6 +863,11 @@ fn render_table(content: &mut String, table: &CodeTable, names: &CppNames<'_>) -
         "    static constexpr const char* DataFile = {:?};\n",
         table.data_file
     ));
+    if let Some(revision) = table.schema_revision {
+        content.push_str(&format!(
+            "    static constexpr std::uint64_t ExpectedSchemaRevision = {revision}ULL;\n"
+        ));
+    }
     content.push_str(&format!(
         "    static {} Load(IRuntimeDataLoader& loader);\n",
         names.repository_type_name(&table.name)?
@@ -802,9 +962,17 @@ impl<'a> CppNames<'a> {
         table: &CodeTable,
         fragment: &super::CodeFragment,
     ) -> Result<String> {
+        self.fragment_payload_type_name_for_type_name(&table.name, fragment)
+    }
+
+    fn fragment_payload_type_name_for_type_name(
+        &self,
+        table_name: &str,
+        fragment: &super::CodeFragment,
+    ) -> Result<String> {
         match &fragment.payload {
             CodeFragmentPayload::InlineFields => {
-                self.fragment_type_name(&table.name, &fragment.name)
+                self.fragment_type_name(table_name, &fragment.name)
             }
             CodeFragmentPayload::Struct { name } => self.type_name(name),
         }
@@ -834,6 +1002,20 @@ impl<'a> CppNames<'a> {
 
     fn reader_function_name(&self, type_name: &str) -> Result<String> {
         self.identifier(&format!("read_{type_name}"), self.options.naming.function)
+    }
+
+    fn binary_reader_function_name(&self, type_name: &str) -> Result<String> {
+        self.identifier(
+            &format!("read_{type_name}_binary"),
+            self.options.naming.function,
+        )
+    }
+
+    fn binary_enum_reader_function_name(&self, type_name: &str) -> Result<String> {
+        self.identifier(
+            &format!("read_{type_name}_binary_ordinal"),
+            self.options.naming.function,
+        )
     }
 
     fn cpp_index_params(&self, index: &CodeIndex) -> Result<String> {
@@ -875,6 +1057,25 @@ impl<'a> CppNames<'a> {
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
                 "{}(*RequiredField(reader, {source_name}))",
                 self.reader_function_name(&self.type_name(name)?)?
+            ),
+        })
+    }
+
+    fn cpp_read_binary_field_expr(&self, field: &super::CodeField) -> Result<String> {
+        Ok(match &field.code_type {
+            CodeTypeRef::Int => "reader.ReadNextInt64()".to_owned(),
+            CodeTypeRef::Float => "reader.ReadNextDouble()".to_owned(),
+            CodeTypeRef::Bool => "reader.ReadNextBool()".to_owned(),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                "reader.ReadNextString()".to_owned()
+            }
+            CodeTypeRef::Enum { name } => format!(
+                "{}(reader.ReadEnumOrdinal())",
+                self.binary_enum_reader_function_name(&self.type_name(name)?)?
+            ),
+            CodeTypeRef::Struct { name } => format!(
+                "{}(reader)",
+                self.binary_reader_function_name(&self.type_name(name)?)?
             ),
         })
     }

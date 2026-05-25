@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigForgeError, Result};
+use crate::{ConfigForgeError, Result, exporter::BINARY_FORMAT};
 
 use super::{
     CaseStyle, CodeEnum, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel,
@@ -229,6 +229,16 @@ fn render_runtime_reader_traits(content: &mut String) {
     fn as_bool(&self) -> Result<bool, String>;
     fn as_string(&self) -> Result<String, String>;
     fn is_null(&self) -> bool;
+    fn schema_revision(&self) -> Option<u64> { None }
+    fn read_row_count(&self) -> Result<usize, String> { Err("positional runtime reader is not supported".to_owned()) }
+    fn begin_record(&self, _optional_slot_count: usize) -> Result<(), String> { Err("positional runtime reader is not supported".to_owned()) }
+    fn read_optional_present(&self, _slot_index: usize) -> Result<bool, String> { Err("positional runtime reader is not supported".to_owned()) }
+    fn read_next_i64(&self) -> Result<i64, String> { Err("positional runtime reader is not supported".to_owned()) }
+    fn read_next_f64(&self) -> Result<f64, String> { Err("positional runtime reader is not supported".to_owned()) }
+    fn read_next_bool(&self) -> Result<bool, String> { Err("positional runtime reader is not supported".to_owned()) }
+    fn read_next_string(&self) -> Result<String, String> { Err("positional runtime reader is not supported".to_owned()) }
+    fn read_enum_ordinal(&self) -> Result<u64, String> { Err("positional runtime reader is not supported".to_owned()) }
+    fn ensure_exhausted(&self) -> Result<(), String> { Err("positional runtime reader is not supported".to_owned()) }
 }
 
 pub trait RuntimeDataLoader {
@@ -296,6 +306,21 @@ fn render_enum_reader_impl(
     ));
     content.push_str("        }\n");
     content.push_str("    }\n");
+    content.push_str("\n");
+    content.push_str("    fn from_binary_ordinal(ordinal: u64) -> Result<Self, String> {\n");
+    content.push_str("        match ordinal {\n");
+    for (ordinal, value) in code_enum.values.iter().enumerate() {
+        content.push_str(&format!(
+            "            {ordinal} => Ok(Self::{}),\n",
+            names.enum_variant_name(&value.name)?
+        ));
+    }
+    content.push_str(&format!(
+        "            other => Err(format!(\"unknown {} ordinal `{{other}}`\")),\n",
+        code_enum.name
+    ));
+    content.push_str("        }\n");
+    content.push_str("    }\n");
     content.push_str("}\n\n");
     Ok(())
 }
@@ -310,6 +335,13 @@ fn render_struct_reader_impl(
         names.type_name(&code_struct.name)?
     ));
     render_read_from_reader_body(content, &code_struct.fields, None, &code_struct.name, names)?;
+    render_read_from_binary_reader_body(
+        content,
+        &code_struct.fields,
+        &[],
+        &code_struct.name,
+        names,
+    )?;
     content.push_str("}\n\n");
     Ok(())
 }
@@ -325,6 +357,7 @@ fn render_fragment_reader_impl(
         names.fragment_type_name(&table.name, &fragment.name)?
     ));
     render_read_from_reader_body(content, &fragment.fields, None, &fragment.name, names)?;
+    render_read_from_binary_reader_body(content, &fragment.fields, &[], &fragment.name, names)?;
     content.push_str("}\n\n");
     Ok(())
 }
@@ -336,6 +369,13 @@ fn render_row_reader_impl(
 ) -> Result<()> {
     content.push_str(&format!("impl {} {{\n", names.row_type_name(&table.name)?));
     render_read_from_reader_body(content, &table.fields, Some(table), &table.name, names)?;
+    render_read_from_binary_reader_body(
+        content,
+        &table.fields,
+        &table.fragments,
+        &table.name,
+        names,
+    )?;
     content.push_str("}\n\n");
     Ok(())
 }
@@ -377,6 +417,66 @@ fn render_read_from_reader_body(
     {
         content.push_str(&format!("    // `{type_name}` has no runtime fields.\n"));
     }
+    Ok(())
+}
+
+fn render_read_from_binary_reader_body(
+    content: &mut String,
+    fields: &[super::CodeField],
+    fragments: &[super::CodeFragment],
+    type_name: &str,
+    names: &RustNames<'_>,
+) -> Result<()> {
+    let optional_slot_count =
+        fields.iter().filter(|field| !field.required).count() + fragments.len();
+    content.push_str(
+        "    fn read_from_binary_reader<R: RuntimeDataReader>(reader: &R) -> Result<Self, String> {\n",
+    );
+    content.push_str(&format!(
+        "        reader.begin_record({optional_slot_count})?;\n"
+    ));
+    let mut optional_index = 0usize;
+    for field in fields {
+        if !field.required {
+            content.push_str(&format!(
+                "        let __present_{} = reader.read_optional_present({optional_index})?;\n",
+                names.field_name(&field.name)?
+            ));
+            optional_index += 1;
+        }
+    }
+    for fragment in fragments {
+        content.push_str(&format!(
+            "        let __present_{} = reader.read_optional_present({optional_index})?;\n",
+            names.field_name(&fragment.name)?
+        ));
+        optional_index += 1;
+    }
+    content.push_str("        Ok(Self {\n");
+    for field in fields {
+        let generated_field_name = names.field_name(&field.name)?;
+        let expr = names.rust_read_binary_field_expr(field)?;
+        if field.required {
+            content.push_str(&format!("            {generated_field_name}: {expr},\n"));
+        } else {
+            let error = format!(
+                "missing optional field `{}` in binary {type_name}",
+                field.name
+            );
+            content.push_str(&format!(
+                "            {generated_field_name}: if __present_{generated_field_name} {{ {expr} }} else {{ return Err({error:?}.to_owned()); }},\n"
+            ));
+        }
+    }
+    for fragment in fragments {
+        let generated_field_name = names.field_name(&fragment.name)?;
+        let payload_type = names.fragment_payload_type_name_for_type_name(type_name, fragment)?;
+        content.push_str(&format!(
+            "            {generated_field_name}: if __present_{generated_field_name} {{ Some({payload_type}::read_from_binary_reader(reader)?) }} else {{ None }},\n"
+        ));
+    }
+    content.push_str("        })\n");
+    content.push_str("    }\n");
     Ok(())
 }
 
@@ -566,9 +666,27 @@ fn render_table(content: &mut String, table: &CodeTable, names: &RustNames<'_>) 
         "    pub const DATA_FILE: &'static str = {:?};\n\n",
         table.data_file
     ));
+    if let Some(revision) = table.schema_revision {
+        content.push_str(&format!(
+            "    pub const EXPECTED_SCHEMA_REVISION: u64 = {revision};\n\n"
+        ));
+    }
     content
         .push_str("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
     content.push_str("        let root = loader.open(Self::DATA_FILE)?;\n");
+    if table.data_format == BINARY_FORMAT {
+        content.push_str("        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) { return Err(format!(\"schema revision mismatch for `{}`: expected {}, got {:?}\", Self::DATA_FILE, Self::EXPECTED_SCHEMA_REVISION, root.schema_revision())); }\n");
+        content.push_str("        let row_count = root.read_row_count()?;\n");
+        content.push_str("        let mut rows = Vec::new();\n");
+        content.push_str("        for _ in 0..row_count {\n");
+        content.push_str(&format!(
+            "            rows.push({}::read_from_binary_reader(&root)?);\n",
+            names.row_type_name(&table.name)?
+        ));
+        content.push_str("        }\n");
+        content.push_str("        root.ensure_exhausted()?;\n");
+        content.push_str("        return Self::from_rows(rows);\n");
+    }
     content.push_str("        let rows_reader = required_field(&root, \"rows\")?;\n");
     content.push_str("        let mut rows = Vec::new();\n");
     content.push_str("        for row_index in 0..rows_reader.len()? {\n");
@@ -639,9 +757,20 @@ fn render_object_table(
         "    pub const DATA_FILE: &'static str = {:?};\n\n",
         table.data_file
     ));
+    if let Some(revision) = table.schema_revision {
+        content.push_str(&format!(
+            "    pub const EXPECTED_SCHEMA_REVISION: u64 = {revision};\n\n"
+        ));
+    }
     content
         .push_str("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
     content.push_str("        let root = loader.open(Self::DATA_FILE)?;\n");
+    if table.data_format == BINARY_FORMAT {
+        content.push_str("        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) { return Err(format!(\"schema revision mismatch for `{}`: expected {}, got {:?}\", Self::DATA_FILE, Self::EXPECTED_SCHEMA_REVISION, root.schema_revision())); }\n");
+        content.push_str("        let value = Self::read_from_binary_reader(&root)?;\n");
+        content.push_str("        root.ensure_exhausted()?;\n");
+        content.push_str("        return Ok(value);\n");
+    }
     content.push_str("        Self::read_from_reader(&root)\n");
     content.push_str("    }\n");
     content.push_str("}\n\n");
@@ -733,9 +862,17 @@ impl<'a> RustNames<'a> {
         table: &CodeTable,
         fragment: &super::CodeFragment,
     ) -> Result<String> {
+        self.fragment_payload_type_name_for_type_name(&table.name, fragment)
+    }
+
+    fn fragment_payload_type_name_for_type_name(
+        &self,
+        table_name: &str,
+        fragment: &super::CodeFragment,
+    ) -> Result<String> {
         match &fragment.payload {
             CodeFragmentPayload::InlineFields => {
-                self.fragment_type_name(&table.name, &fragment.name)
+                self.fragment_type_name(table_name, &fragment.name)
             }
             CodeFragmentPayload::Struct { name } => self.type_name(name),
         }
@@ -782,6 +919,29 @@ impl<'a> RustNames<'a> {
                 "{}::read_from_reader(&required_field(reader, {source_name})?)?",
                 self.type_name(name)?
             ),
+        })
+    }
+
+    fn rust_read_binary_field_expr(&self, field: &super::CodeField) -> Result<String> {
+        Ok(match &field.code_type {
+            CodeTypeRef::Int => "reader.read_next_i64()?".to_owned(),
+            CodeTypeRef::Float => "reader.read_next_f64()?".to_owned(),
+            CodeTypeRef::Bool => "reader.read_next_bool()?".to_owned(),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                "reader.read_next_string()?".to_owned()
+            }
+            CodeTypeRef::Enum { name } => {
+                format!(
+                    "{}::from_binary_ordinal(reader.read_enum_ordinal()?)?",
+                    self.type_name(name)?
+                )
+            }
+            CodeTypeRef::Struct { name } => {
+                format!(
+                    "{}::read_from_binary_reader(reader)?",
+                    self.type_name(name)?
+                )
+            }
         })
     }
 

@@ -13,6 +13,14 @@ option(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER "Enable RapidJSON reader adapt
 option(CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER "Enable msgpack-cxx MessagePack reader adapter" OFF)
 option(CONFIG_FORGE_RUNTIME_FETCH_DEPS "Allow FetchContent for missing third-party deps" OFF)
 
+add_library(config_forge_runtime_binary_reader INTERFACE)
+add_library(config_forge_runtime::binary_reader ALIAS config_forge_runtime_binary_reader)
+set_target_properties(config_forge_runtime_binary_reader PROPERTIES EXPORT_NAME binary_reader)
+target_include_directories(config_forge_runtime_binary_reader INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/binary_reader/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_compile_features(config_forge_runtime_binary_reader INTERFACE cxx_std_17)
+
 if(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER)
     find_package(RapidJSON CONFIG QUIET)
     if(RapidJSON_FOUND AND NOT TARGET RapidJSON::RapidJSON)
@@ -102,7 +110,7 @@ if(CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER)
     endif()
 endif()
 
-set(config_forge_runtime_install_targets)
+set(config_forge_runtime_install_targets config_forge_runtime_binary_reader)
 if(TARGET config_forge_runtime_rapidjson_reader)
     list(APPEND config_forge_runtime_install_targets config_forge_runtime_rapidjson_reader)
 endif()
@@ -110,15 +118,14 @@ if(TARGET config_forge_runtime_msgpackc_reader)
     list(APPEND config_forge_runtime_install_targets config_forge_runtime_msgpackc_reader)
 endif()
 
-if(config_forge_runtime_install_targets)
-    install(TARGETS ${config_forge_runtime_install_targets}
-        EXPORT ConfigForgeRuntimeTargets)
+install(TARGETS ${config_forge_runtime_install_targets}
+    EXPORT ConfigForgeRuntimeTargets)
 
-    install(EXPORT ConfigForgeRuntimeTargets
-        NAMESPACE config_forge_runtime::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ConfigForgeRuntime)
-endif()
+install(EXPORT ConfigForgeRuntimeTargets
+    NAMESPACE config_forge_runtime::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ConfigForgeRuntime)
 
+install(DIRECTORY binary_reader/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 if(TARGET config_forge_runtime_rapidjson_reader)
     install(DIRECTORY rapidjson_reader/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 endif()
@@ -143,6 +150,9 @@ install(FILES
 
 if(CONFIG_FORGE_RUNTIME_BUILD_TESTS)
     enable_testing()
+    add_executable(config_forge_runtime_binary_reader_smoke binary_reader/smoke_test.cpp)
+    target_link_libraries(config_forge_runtime_binary_reader_smoke PRIVATE config_forge_runtime::binary_reader)
+    add_test(NAME config_forge_runtime_binary_reader_smoke COMMAND config_forge_runtime_binary_reader_smoke)
     if(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER)
         add_executable(config_forge_runtime_rapidjson_reader_smoke rapidjson_reader/smoke_test.cpp)
         target_link_libraries(config_forge_runtime_rapidjson_reader_smoke PRIVATE config_forge_runtime::rapidjson_reader)

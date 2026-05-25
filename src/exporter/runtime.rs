@@ -75,6 +75,7 @@ pub(crate) fn export_runtime_data(
             let file = RuntimeDataFile {
                 table_name: artifact.plan.table_name,
                 path: artifact.plan.path.to_string_lossy().into_owned(),
+                format: exporter.name().to_owned(),
             };
             artifacts.push(RuntimeDataArtifact {
                 file,
@@ -89,6 +90,7 @@ pub(crate) fn export_runtime_data(
 pub struct RuntimeDataFile {
     pub table_name: String,
     pub path: String,
+    pub format: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

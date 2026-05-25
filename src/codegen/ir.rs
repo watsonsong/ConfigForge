@@ -5,7 +5,9 @@ use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
     ConfigForgeError, Result,
-    exporter::RuntimeDataFile,
+    exporter::{
+        BINARY_FORMAT, JSON_FORMAT, MESSAGEPACK_FORMAT, RuntimeDataFile, binary_schema_revision,
+    },
     meta::{LinkedField, LinkedFragmentPayload, LinkedMetaModel, PrimitiveFieldType, TableKind},
 };
 
@@ -47,6 +49,8 @@ pub struct CodeTable {
     pub foreign_keys: Vec<CodeForeignKey>,
     pub primary_index: Option<String>,
     pub data_file: String,
+    pub data_format: String,
+    pub schema_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +78,7 @@ pub struct CodeField {
     pub name: String,
     pub code_type: CodeTypeRef,
     pub desc: Option<String>,
+    pub required: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,7 +124,7 @@ pub fn build_code_model(
 ) -> Result<CodeModel> {
     let data_file_index = runtime_data_files
         .iter()
-        .map(|file| (file.table_name.as_str(), file.path.as_str()))
+        .map(|file| (file.table_name.as_str(), file))
         .collect::<HashMap<_, _>>();
     let enums = meta
         .model
@@ -300,12 +305,20 @@ pub fn build_code_model(
                 Vec::new()
             };
 
-            let data_file = data_file_index
-                .get(table_meta.meta.name.as_str())
-                .copied()
-                .map(str::to_owned)
+            let runtime_file = data_file_index.get(table_meta.meta.name.as_str()).copied();
+            let data_file = runtime_file
+                .map(|file| file.path.clone())
                 // Code-only targets still need a stable conventional data path in generated APIs.
                 .unwrap_or_else(|| format!("{}.json", table_meta.meta.name));
+            let data_format = runtime_file
+                .map(|file| file.format.clone())
+                .unwrap_or_else(|| JSON_FORMAT.to_owned());
+            ensure_supported_runtime_format(&data_format)?;
+            let schema_revision = if data_format == BINARY_FORMAT {
+                Some(binary_schema_revision(table_meta, target_tags))
+            } else {
+                None
+            };
             let primary_index = indexes
                 .iter()
                 .find(|index| index.primary)
@@ -320,6 +333,8 @@ pub fn build_code_model(
                 foreign_keys,
                 primary_index,
                 data_file,
+                data_format,
+                schema_revision,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -454,6 +469,7 @@ fn code_field_from_linked(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<Co
         name: field.meta.name.clone(),
         code_type: code_type_from_linked(field)?,
         desc: field.meta.desc.clone(),
+        required: field.meta.required,
     })
 }
 
@@ -472,6 +488,15 @@ fn code_type_from_linked(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<Cod
             name: struct_type.meta.name.clone(),
         },
     })
+}
+
+fn ensure_supported_runtime_format(format: &str) -> Result<()> {
+    match format {
+        JSON_FORMAT | MESSAGEPACK_FORMAT | BINARY_FORMAT => Ok(()),
+        other => Err(ConfigForgeError::Validation(format!(
+            "unsupported runtime data format `{other}` for code generation"
+        ))),
+    }
 }
 
 pub fn require_non_empty_index_fields(model: &CodeModel) -> Result<()> {

@@ -1,0 +1,15 @@
+# Copyright (c) 2026 ConfigForge contributors
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "config-forge-runtime-binary-reader"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+
+[lib]
+name = "config_forge_runtime_binary_reader"
+path = "src/lib.rs"
+
+[dependencies]

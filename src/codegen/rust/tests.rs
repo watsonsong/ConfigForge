@@ -118,6 +118,7 @@ fn sanitizes_gen_keyword_across_api_surface() {
     input.runtime_data_files = vec![RuntimeDataFile {
         table_name: "gen".to_owned(),
         path: "gen.json".to_owned(),
+        format: "json".to_owned(),
     }];
 
     let files = RustCodeGenerator.generate(&input).expect("rust code");

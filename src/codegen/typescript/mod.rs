@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigForgeError, Result};
+use crate::{ConfigForgeError, Result, exporter::BINARY_FORMAT};
 
 use super::{
     CaseStyle, CodeEnum, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel,
@@ -186,12 +186,25 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                     names.field_name(&table.name)?,
                     names.repository_type_name(&table.name)?
                 )),
-                CodeTableKind::Object => content.push_str(&format!(
-                    "      {}: {}(await loader.open({:?})),\n",
-                    names.field_name(&table.name)?,
-                    names.reader_function_name(&names.row_type_name(&table.name)?)?,
-                    table.data_file
-                )),
+                CodeTableKind::Object => {
+                    if table.data_format == BINARY_FORMAT {
+                        content.push_str(&format!(
+                            "      {}: await Promise.resolve(loader.open({:?})).then(root => {{ if (!root.schemaRevision || BigInt(root.schemaRevision()) !== {}n) {{ throw new Error(`schema revision mismatch for {}`); }} if (!root.ensureExhausted) {{ throw new Error('binary reader does not support EOF validation'); }} const value = {}(root); root.ensureExhausted(); return value; }}),\n",
+                            names.field_name(&table.name)?,
+                            table.data_file,
+                            table.schema_revision.unwrap_or_default(),
+                            table.data_file,
+                            names.binary_reader_function_name(&names.row_type_name(&table.name)?)?
+                        ))
+                    } else {
+                        content.push_str(&format!(
+                            "      {}: {}(await loader.open({:?})),\n",
+                            names.field_name(&table.name)?,
+                            names.reader_function_name(&names.row_type_name(&table.name)?)?,
+                            table.data_file
+                        ))
+                    }
+                }
             }
         }
         content.push_str("    });\n");
@@ -215,6 +228,17 @@ fn render_runtime_reader_interfaces(content: &mut String) {
   asBool(): boolean;
   asString(): string;
   isNull(): boolean;
+  schemaRevision?(): bigint | number | undefined;
+  readRowCount?(): number;
+  beginRecord?(optionalSlotCount: number): void;
+  readOptionalPresent?(slotIndex: number): boolean;
+  readNextInt64?(): number;
+  readNextFloat64?(): number;
+  readNextNumber?(): number;
+  readNextBool?(): boolean;
+  readNextString?(): string;
+  readEnumOrdinal?(): number;
+  ensureExhausted?(): void;
 }
 
 export interface RuntimeDataLoader {
@@ -286,6 +310,23 @@ fn render_enum_reader_function(
         code_enum.name
     ));
     content.push_str("}\n\n");
+    content.push_str(&format!(
+        "function {}FromBinaryOrdinal(ordinal: number): {type_name} {{\n",
+        function_name
+    ));
+    content.push_str("  switch (ordinal) {\n");
+    for (ordinal, value) in code_enum.values.iter().enumerate() {
+        content.push_str(&format!(
+            "    case {ordinal}: return {:?};\n",
+            names.enum_value_name(&value.name)?
+        ));
+    }
+    content.push_str(&format!(
+        "    default: throw new Error(`unknown {} ordinal ${{ordinal}}`);\n",
+        code_enum.name
+    ));
+    content.push_str("  }\n");
+    content.push_str("}\n\n");
     Ok(())
 }
 
@@ -295,7 +336,15 @@ fn render_struct_reader_function(
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
     let type_name = names.type_name(&code_struct.name)?;
-    render_reader_function_body(content, &type_name, &code_struct.fields, None, names)
+    render_reader_function_body(content, &type_name, &code_struct.fields, None, names)?;
+    render_binary_reader_function_body(
+        content,
+        &type_name,
+        &code_struct.name,
+        &code_struct.fields,
+        &[],
+        names,
+    )
 }
 
 fn render_fragment_reader_function(
@@ -305,7 +354,15 @@ fn render_fragment_reader_function(
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
     let type_name = names.fragment_payload_type_name(table, fragment)?;
-    render_reader_function_body(content, &type_name, &fragment.fields, None, names)
+    render_reader_function_body(content, &type_name, &fragment.fields, None, names)?;
+    render_binary_reader_function_body(
+        content,
+        &type_name,
+        &fragment.name,
+        &fragment.fields,
+        &[],
+        names,
+    )
 }
 
 fn render_row_reader_function(
@@ -314,7 +371,15 @@ fn render_row_reader_function(
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
     let type_name = names.row_type_name(&table.name)?;
-    render_reader_function_body(content, &type_name, &table.fields, Some(table), names)
+    render_reader_function_body(content, &type_name, &table.fields, Some(table), names)?;
+    render_binary_reader_function_body(
+        content,
+        &type_name,
+        &table.name,
+        &table.fields,
+        &table.fragments,
+        names,
+    )
 }
 
 fn render_reader_function_body(
@@ -354,6 +419,65 @@ fn render_reader_function_body(
                 "    {field_name}: {field_name}Reader ? {reader_function}({field_name}Reader) : undefined,\n"
             ));
         }
+    }
+    content.push_str("  };\n");
+    content.push_str("}\n\n");
+    Ok(())
+}
+
+fn render_binary_reader_function_body(
+    content: &mut String,
+    type_name: &str,
+    owner_name: &str,
+    fields: &[super::CodeField],
+    fragments: &[super::CodeFragment],
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    let function_name = names.binary_reader_function_name(type_name)?;
+    let optional_slot_count =
+        fields.iter().filter(|field| !field.required).count() + fragments.len();
+    content.push_str(&format!(
+        "function {function_name}(reader: RuntimeDataReader): {type_name} {{\n"
+    ));
+    content.push_str("  if (!reader.beginRecord || !reader.readOptionalPresent) { throw new Error('binary reader does not support positional records'); }\n");
+    content.push_str(&format!("  reader.beginRecord({optional_slot_count});\n"));
+    let mut optional_index = 0usize;
+    for field in fields {
+        if !field.required {
+            content.push_str(&format!(
+                "  const __present_{} = reader.readOptionalPresent({optional_index});\n",
+                names.field_name(&field.name)?
+            ));
+            optional_index += 1;
+        }
+    }
+    for fragment in fragments {
+        content.push_str(&format!(
+            "  const __present_{} = reader.readOptionalPresent({optional_index});\n",
+            names.field_name(&fragment.name)?
+        ));
+        optional_index += 1;
+    }
+    content.push_str("  return {\n");
+    for field in fields {
+        let field_name = names.field_name(&field.name)?;
+        let expr = names.ts_read_binary_field_expr(field)?;
+        if field.required {
+            content.push_str(&format!("    {field_name}: {expr},\n"));
+        } else {
+            content.push_str(&format!(
+                "    {field_name}: __present_{field_name} ? {expr} : (() => {{ throw new Error({:?}); }})(),\n",
+                format!("missing optional field `{}` in binary {type_name}", field.name)
+            ));
+        }
+    }
+    for fragment in fragments {
+        let field_name = names.field_name(&fragment.name)?;
+        let payload_type = names.fragment_payload_type_name_for_type_name(owner_name, fragment)?;
+        let reader_function = names.binary_reader_function_name(&payload_type)?;
+        content.push_str(&format!(
+            "    {field_name}: __present_{field_name} ? {reader_function}(reader) : undefined,\n"
+        ));
     }
     content.push_str("  };\n");
     content.push_str("}\n\n");
@@ -524,6 +648,11 @@ fn render_table(
         "  static readonly dataFile = {:?};\n",
         table.data_file
     ));
+    if let Some(revision) = table.schema_revision {
+        content.push_str(&format!(
+            "  static readonly expectedSchemaRevision = {revision}n;\n"
+        ));
+    }
     content.push_str(&format!(
         "  private readonly rows_: {}[];\n",
         names.row_type_name(&table.name)?
@@ -594,6 +723,37 @@ fn render_table(
         names.repository_type_name(&table.name)?
     ));
     content.push_str("    const root = await loader.open(this.dataFile);\n");
+    if table.data_format == BINARY_FORMAT {
+        content.push_str("    if (!root.schemaRevision || BigInt(root.schemaRevision()) !== this.expectedSchemaRevision) { throw new Error(`schema revision mismatch for ${this.dataFile}`); }\n");
+        content.push_str("    if (!root.readRowCount) { throw new Error('binary reader does not support row count'); }\n");
+        content.push_str("    if (!root.ensureExhausted) { throw new Error('binary reader does not support EOF validation'); }\n");
+        content.push_str("    const rowCount = root.readRowCount();\n");
+        content.push_str(&format!(
+            "    const rows: {}[] = [];\n",
+            names.row_type_name(&table.name)?
+        ));
+        content.push_str("    for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {\n");
+        content.push_str(&format!(
+            "      rows.push({}(root));\n",
+            names.binary_reader_function_name(&names.row_type_name(&table.name)?)?
+        ));
+        content.push_str("    }\n");
+        content.push_str("    root.ensureExhausted();\n");
+        content.push_str(&format!(
+            "    return new {}(rows ?? []);\n",
+            names.repository_type_name(&table.name)?
+        ));
+        content.push_str("  }\n\n");
+        content.push_str(&format!(
+            "  rows(): readonly {}[] {{ return this.rows_; }}\n\n",
+            names.row_type_name(&table.name)?
+        ));
+        for index in &table.indexes {
+            render_index_function(content, table, index, names)?;
+        }
+        content.push_str("}\n\n");
+        return Ok(());
+    }
     content.push_str("    const rowsReader = requiredField(root, \"rows\");\n");
     content.push_str(&format!(
         "    const rows: {}[] = [];\n",
@@ -699,9 +859,17 @@ impl<'a> TypeScriptNames<'a> {
         table: &CodeTable,
         fragment: &super::CodeFragment,
     ) -> Result<String> {
+        self.fragment_payload_type_name_for_type_name(&table.name, fragment)
+    }
+
+    fn fragment_payload_type_name_for_type_name(
+        &self,
+        table_name: &str,
+        fragment: &super::CodeFragment,
+    ) -> Result<String> {
         match &fragment.payload {
             CodeFragmentPayload::InlineFields => {
-                self.fragment_type_name(&table.name, &fragment.name)
+                self.fragment_type_name(table_name, &fragment.name)
             }
             CodeFragmentPayload::Struct { name } => self.type_name(name),
         }
@@ -752,6 +920,24 @@ impl<'a> TypeScriptNames<'a> {
         self.identifier(&format!("read_{type_name}"), self.options.naming.function)
     }
 
+    fn binary_reader_function_name(&self, type_name: &str) -> Result<String> {
+        if self.options.naming.function == super::CaseStyle::CamelCase {
+            return naming::resolve_keyword_conflict(
+                format!("read{type_name}Binary"),
+                self.options.keyword_conflict,
+                naming::is_ts_keyword,
+                |_| None,
+            )
+            .map_err(|message| {
+                ConfigForgeError::Validation(format!("typescript codegen: {message}"))
+            });
+        }
+        self.identifier(
+            &format!("read_{type_name}_binary"),
+            self.options.naming.function,
+        )
+    }
+
     fn ts_read_field_expr(&self, field: &super::CodeField) -> Result<String> {
         let source_name = format!("{:?}", field.name);
         Ok(match &field.code_type {
@@ -765,6 +951,25 @@ impl<'a> TypeScriptNames<'a> {
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
                 "{}(requiredField(reader, {source_name}))",
                 self.reader_function_name(&self.type_name(name)?)?
+            ),
+        })
+    }
+
+    fn ts_read_binary_field_expr(&self, field: &super::CodeField) -> Result<String> {
+        Ok(match &field.code_type {
+            CodeTypeRef::Int => "reader.readNextInt64!()".to_owned(),
+            CodeTypeRef::Float => "reader.readNextFloat64!()".to_owned(),
+            CodeTypeRef::Bool => "reader.readNextBool!()".to_owned(),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                "reader.readNextString!()".to_owned()
+            }
+            CodeTypeRef::Enum { name } => format!(
+                "{}FromBinaryOrdinal(reader.readEnumOrdinal!())",
+                self.reader_function_name(&self.type_name(name)?)?
+            ),
+            CodeTypeRef::Struct { name } => format!(
+                "{}(reader)",
+                self.binary_reader_function_name(&self.type_name(name)?)?
             ),
         })
     }

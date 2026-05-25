@@ -11,6 +11,17 @@ export interface RuntimeDataReaderLike {
   asBool(): boolean;
   asString(): string;
   isNull(): boolean;
+  schemaRevision?(): bigint | number | undefined;
+  readRowCount?(): number;
+  beginRecord?(optionalSlotCount: number): void;
+  readOptionalPresent?(slotIndex: number): boolean;
+  readNextInt64?(): number;
+  readNextFloat64?(): number;
+  readNextNumber?(): number;
+  readNextBool?(): boolean;
+  readNextString?(): string;
+  readEnumOrdinal?(): number;
+  ensureExhausted?(): void;
 }
 
 export interface RuntimeDataLoaderLike {

@@ -94,6 +94,7 @@ pub(in crate::codegen) fn input_for<'a>(
         runtime_data_files: vec![RuntimeDataFile {
             table_name: "items".to_owned(),
             path: "items.json".to_owned(),
+            format: "json".to_owned(),
         }],
         generated_at: "2026-05-17T00:00:00Z".to_owned(),
     }

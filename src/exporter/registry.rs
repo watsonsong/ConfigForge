@@ -9,7 +9,7 @@ use crate::{
     meta::{LinkedTableMeta, TargetTags},
 };
 
-use super::{RuntimeArtifactPlan, json, messagepack};
+use super::{RuntimeArtifactPlan, binary, json, messagepack};
 
 /// Runtime data format exporter.
 ///
@@ -93,5 +93,6 @@ pub fn builtin_exporters() -> Vec<Box<dyn DataFormatExporter>> {
     vec![
         Box::new(json::JsonDataExporter),
         Box::new(messagepack::MessagePackDataExporter),
+        Box::new(binary::BinaryDataExporter),
     ]
 }

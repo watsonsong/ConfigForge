@@ -85,6 +85,8 @@ fn registry_resolves_builtin_exporters_and_aliases() {
         "msgpack"
     );
     assert_eq!(registry.require("msgpack").unwrap().extension(), "msgpack");
+    assert_eq!(registry.require("bin").unwrap().extension(), "bin");
+    assert_eq!(registry.require("binary").unwrap().extension(), "bin");
     assert!(registry.require("unknown").is_err());
 }
 
@@ -149,6 +151,119 @@ fn export_runtime_data_uses_registered_exporter() {
         vec!["items"]
     );
     assert!(out_dir.path().join("custom/items.custom").exists());
+}
+
+#[test]
+fn binary_exporter_writes_header_row_count_bitmap_and_values() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+                [[enums]]
+                name = "Rarity"
+
+                [[enums.values]]
+                name = "common"
+
+                [[enums.values]]
+                name = "rare"
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "enabled"
+                type = "bool"
+                required = true
+
+                [[tables.fields]]
+                name = "name"
+                type = "string"
+                required = false
+
+                [[tables.fields]]
+                name = "rarity"
+                type = "Rarity"
+                required = true
+            "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table_meta = linked.table("items").expect("items table should exist");
+    let data_table = DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("id".to_owned(), "-7".to_owned()),
+            ("enabled".to_owned(), "true".to_owned()),
+            ("name".to_owned(), "Potion".to_owned()),
+            ("rarity".to_owned(), "rare".to_owned()),
+        ])],
+    );
+
+    let bytes = BinaryDataExporter
+        .serialize_table(table_meta, &data_table, &TargetTags::empty())
+        .expect("binary data should serialize");
+
+    assert_eq!(&bytes[0..4], b"CFGB");
+    assert_eq!(u16::from_le_bytes(bytes[4..6].try_into().unwrap()), 1);
+    assert_eq!(u16::from_le_bytes(bytes[6..8].try_into().unwrap()), 16);
+    assert_eq!(
+        u64::from_le_bytes(bytes[8..16].try_into().unwrap()),
+        binary_schema_revision(table_meta, &TargetTags::empty())
+    );
+
+    let mut offset = 16;
+    assert_eq!(read_varuint_for_test(&bytes, &mut offset), 1);
+    assert_eq!(bytes[offset], 0b0000_0001);
+    offset += 1;
+    assert_eq!(read_i64_for_test(&bytes, &mut offset), -7);
+    assert_eq!(bytes[offset], 1);
+    offset += 1;
+    let name_len = read_varuint_for_test(&bytes, &mut offset) as usize;
+    assert_eq!(&bytes[offset..offset + name_len], b"Potion");
+    offset += name_len;
+    assert_eq!(read_varuint_for_test(&bytes, &mut offset), 1);
+    assert_eq!(offset, bytes.len());
+}
+
+#[test]
+fn binary_exporter_rejects_absent_optional_fields() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "subtitle"
+                type = "string"
+                required = false
+            "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table_meta = linked.table("items").expect("items table should exist");
+    let data_table = DataTable::new(
+        "items",
+        vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+    );
+
+    let error = BinaryDataExporter
+        .serialize_table(table_meta, &data_table, &TargetTags::empty())
+        .unwrap_err();
+
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("missing optional field `items.subtitle`"))
+    );
 }
 
 struct ConflictDataExporter;
@@ -860,4 +975,23 @@ fn struct_json_cell_export_errors_include_row_and_field_context() {
     assert!(
         matches!(&error, ConfigForgeError::Validation(message) if message.contains("field `reward` contains unknown struct key `extra`"))
     );
+}
+
+fn read_i64_for_test(bytes: &[u8], offset: &mut usize) -> i64 {
+    let encoded = read_varuint_for_test(bytes, offset);
+    ((encoded >> 1) as i64) ^ (-((encoded & 1) as i64))
+}
+
+fn read_varuint_for_test(bytes: &[u8], offset: &mut usize) -> u64 {
+    let mut value = 0u64;
+    let mut shift = 0u32;
+    loop {
+        let byte = bytes[*offset];
+        *offset += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if (byte & 0x80) == 0 {
+            return value;
+        }
+        shift += 7;
+    }
 }

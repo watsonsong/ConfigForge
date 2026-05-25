@@ -1,4 +1,5 @@
-/target
+target/
+**/target/
 tests/fixtures/**/out/
 tarpaulin-report.html
 cobertura.xml

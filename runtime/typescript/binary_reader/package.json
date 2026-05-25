@@ -1,0 +1,17 @@
+{
+  "name": "@config-forge/runtime-reader-binary",
+  "version": "0.1.0",
+  "type": "commonjs",
+  "main": "dist/runtime_loader.js",
+  "types": "dist/runtime_loader.d.ts",
+  "dependencies": {
+    "@config-forge/runtime-reader-core": "0.1.0"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
