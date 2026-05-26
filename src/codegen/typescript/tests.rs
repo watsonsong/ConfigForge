@@ -6,6 +6,7 @@ use crate::{
         CodeExportInput, CodeGenerator,
         tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
     },
+    exporter::RuntimeDataFile,
     meta::{MetaModel, TargetTags},
 };
 
@@ -73,6 +74,31 @@ fn emits_fragment_structs_and_optional_row_members() {
     assert!(client_ts_content.contains("export interface ItemsClientMarkerFragment"));
     assert!(client_ts_content.contains("clientMarker?: ItemsClientMarkerFragment;"));
     assert!(!client_ts_content.contains("serverMarker"));
+}
+
+#[test]
+fn emits_optional_scalar_and_struct_field_types() {
+    let meta = optional_field_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.runtime_data_files = vec![RuntimeDataFile {
+        table_name: "items".to_owned(),
+        path: "items.bin".to_owned(),
+        format: "bin".to_owned(),
+    }];
+
+    let typescript = TypeScriptCodeGenerator
+        .generate(&input)
+        .expect("typescript code");
+    let content = &typescript[0].content;
+
+    assert!(content.contains("bonus?: number;"));
+    assert!(content.contains("note?: string;"));
+    assert!(content.contains("payload?: RewardInfo;"));
+    assert!(content.contains("bonus: __present_bonus ? reader.readNextInt64!() : undefined,"));
+    assert!(
+        content.contains("payload: __present_payload ? readRewardInfoBinary(reader) : undefined,")
+    );
+    assert!(content.contains("bonus: optionalField(reader, \"bonus\")?.asNumber(),"));
 }
 
 #[test]
@@ -219,6 +245,55 @@ fn object_table_fixture() -> MetaModel {
             [[tables.fields]]
             name = "max_level"
             type = "int"
+        "#,
+    )
+    .expect("meta should load")
+}
+
+fn optional_field_fixture() -> MetaModel {
+    MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "RewardInfo"
+
+            [[structs.fields]]
+            name = "amount"
+            type = "int"
+
+            [[structs.fields]]
+            name = "note"
+            type = "string"
+            required = false
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "bonus"
+            type = "int"
+            required = false
+
+            [[tables.fields]]
+            name = "note"
+            type = "string"
+            required = false
+
+            [[tables.fields]]
+            name = "payload"
+            type = "RewardInfo"
+            required = false
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
         "#,
     )
     .expect("meta should load")

@@ -55,7 +55,7 @@ impl CodeGenerator for CppCodeGenerator {
         validate_generated_symbols(&model, &names)?;
         let mut header = render_file_header(input);
         header.push_str("#pragma once\n\n");
-        header.push_str("#include <cstdint>\n#include <cstddef>\n#include <map>\n#include <memory>\n#include <optional>\n#include <stdexcept>\n#include <string>\n#include <tuple>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
+        header.push_str("#include <cstdint>\n#include <cstddef>\n#include <map>\n#include <memory>\n#include <optional>\n#include <stdexcept>\n#include <string>\n#include <tuple>\n#include <type_traits>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
         let namespace = cpp_options
             .namespace
             .as_ref()
@@ -94,7 +94,7 @@ impl CodeGenerator for CppCodeGenerator {
                 push_doc_indented(&mut header, field.desc.as_deref(), "    ");
                 header.push_str(&format!(
                     "    {} {};\n",
-                    names.cpp_type(&field.code_type)?,
+                    names.cpp_field_type(field)?,
                     names.field_name(&field.name)?
                 ));
             }
@@ -117,7 +117,7 @@ impl CodeGenerator for CppCodeGenerator {
                     push_doc_indented(&mut header, field.desc.as_deref(), "    ");
                     header.push_str(&format!(
                         "    {} {};\n",
-                        names.cpp_type(&field.code_type)?,
+                        names.cpp_field_type(field)?,
                         names.field_name(&field.name)?
                     ));
                 }
@@ -146,7 +146,7 @@ impl CodeGenerator for CppCodeGenerator {
                 push_doc_indented(&mut header, field.desc.as_deref(), "    ");
                 header.push_str(&format!(
                     "    {} {};\n",
-                    names.cpp_type(&field.code_type)?,
+                    names.cpp_field_type(field)?,
                     names.field_name(&field.name)?
                 ));
             }
@@ -413,7 +413,7 @@ fn render_source_file(
 
 fn render_reader_helpers_source(content: &mut String) {
     content.push_str(
-        "namespace {\n\nstd::unique_ptr<IRuntimeDataReader> RequiredField(const IRuntimeDataReader& reader, const std::string& name) {\n    auto value = reader.Field(name);\n    if (!value || value->IsNull()) { throw std::runtime_error(\"missing required field `\" + name + \"`\"); }\n    return value;\n}\n\nstd::int64_t ReadRequiredInt64(const IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name)->AsInt64(); }\ndouble ReadRequiredDouble(const IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name)->AsDouble(); }\nbool ReadRequiredBool(const IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name)->AsBool(); }\nstd::string ReadRequiredString(const IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name)->AsString(); }\n\n",
+        "namespace {\n\nstd::unique_ptr<IRuntimeDataReader> RequiredField(const IRuntimeDataReader& reader, const std::string& name) {\n    auto value = reader.Field(name);\n    if (!value || value->IsNull()) { throw std::runtime_error(\"missing required field `\" + name + \"`\"); }\n    return value;\n}\n\ntemplate <typename F>\nauto OptionalField(const IRuntimeDataReader& reader, const std::string& name, F convert) -> std::optional<decltype(convert(std::declval<const IRuntimeDataReader&>()))> {\n    auto value = reader.Field(name);\n    if (!value || value->IsNull()) { return std::nullopt; }\n    return convert(*value);\n}\n\nstd::int64_t ReadRequiredInt64(const IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name)->AsInt64(); }\ndouble ReadRequiredDouble(const IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name)->AsDouble(); }\nbool ReadRequiredBool(const IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name)->AsBool(); }\nstd::string ReadRequiredString(const IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name)->AsString(); }\n\n",
     );
 }
 
@@ -593,8 +593,7 @@ fn render_binary_reader_function_source(
             content.push_str(&format!("    value.{field_name} = {expr};\n"));
         } else {
             content.push_str(&format!(
-                "    if (present_{field_name}) {{ value.{field_name} = {expr}; }} else {{ throw std::runtime_error(\"missing optional field `{}` in binary {type_name}\"); }}\n",
-                field.name
+                "    if (present_{field_name}) {{ value.{field_name} = {expr}; }}\n"
             ));
         }
     }
@@ -819,7 +818,7 @@ fn render_compound_index_key_structs(
             for field in &index.fields {
                 content.push_str(&format!(
                     "    {} {};\n",
-                    names.cpp_type(&field.code_type)?,
+                    names.cpp_field_type(field)?,
                     names.field_name(&field.name)?
                 ));
             }
@@ -1025,7 +1024,7 @@ impl<'a> CppNames<'a> {
             .map(|field| {
                 Ok(format!(
                     "{} {}",
-                    self.cpp_type(&field.code_type)?,
+                    self.cpp_field_type(field)?,
                     self.field_name(&field.name)?
                 ))
             })
@@ -1045,17 +1044,47 @@ impl<'a> CppNames<'a> {
         })
     }
 
+    fn cpp_field_type(&self, field: &super::CodeField) -> Result<String> {
+        let base_type = self.cpp_type(&field.code_type)?;
+        if field.required {
+            Ok(base_type)
+        } else {
+            Ok(format!("std::optional<{base_type}>"))
+        }
+    }
+
     fn cpp_read_field_expr(&self, field: &super::CodeField) -> Result<String> {
         let source_name = format!("{:?}", field.name);
+        if field.required {
+            return Ok(match &field.code_type {
+                CodeTypeRef::Int => format!("ReadRequiredInt64(reader, {source_name})"),
+                CodeTypeRef::Float => format!("ReadRequiredDouble(reader, {source_name})"),
+                CodeTypeRef::Bool => format!("ReadRequiredBool(reader, {source_name})"),
+                CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                    format!("ReadRequiredString(reader, {source_name})")
+                }
+                CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
+                    "{}(*RequiredField(reader, {source_name}))",
+                    self.reader_function_name(&self.type_name(name)?)?
+                ),
+            });
+        }
+
         Ok(match &field.code_type {
-            CodeTypeRef::Int => format!("ReadRequiredInt64(reader, {source_name})"),
-            CodeTypeRef::Float => format!("ReadRequiredDouble(reader, {source_name})"),
-            CodeTypeRef::Bool => format!("ReadRequiredBool(reader, {source_name})"),
-            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
-                format!("ReadRequiredString(reader, {source_name})")
-            }
+            CodeTypeRef::Int => format!(
+                "OptionalField(reader, {source_name}, [](const IRuntimeDataReader& value) {{ return value.AsInt64(); }})"
+            ),
+            CodeTypeRef::Float => format!(
+                "OptionalField(reader, {source_name}, [](const IRuntimeDataReader& value) {{ return value.AsDouble(); }})"
+            ),
+            CodeTypeRef::Bool => format!(
+                "OptionalField(reader, {source_name}, [](const IRuntimeDataReader& value) {{ return value.AsBool(); }})"
+            ),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => format!(
+                "OptionalField(reader, {source_name}, [](const IRuntimeDataReader& value) {{ return value.AsString(); }})"
+            ),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
-                "{}(*RequiredField(reader, {source_name}))",
+                "OptionalField(reader, {source_name}, [](const IRuntimeDataReader& value) {{ return {}(value); }})",
                 self.reader_function_name(&self.type_name(name)?)?
             ),
         })
@@ -1096,7 +1125,7 @@ impl<'a> CppNames<'a> {
 
     fn cpp_key_type(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
         if index.fields.len() == 1 {
-            self.cpp_type(&index.fields[0].code_type)
+            self.cpp_field_type(&index.fields[0])
         } else {
             self.compound_index_key_type_name(table, index)
         }

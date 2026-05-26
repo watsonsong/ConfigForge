@@ -72,6 +72,36 @@ fn emits_fragment_structs_and_optional_row_members() {
 }
 
 #[test]
+fn emits_optional_scalar_and_struct_field_types() {
+    let meta = optional_field_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.runtime_data_files = vec![RuntimeDataFile {
+        table_name: "items".to_owned(),
+        path: "items.bin".to_owned(),
+        format: "bin".to_owned(),
+    }];
+
+    let rust = RustCodeGenerator.generate(&input).expect("rust code");
+    let content = &rust[0].content;
+
+    assert!(content.contains("pub bonus: Option<i64>,"));
+    assert!(content.contains("pub note: Option<String>,"));
+    assert!(content.contains("pub payload: Option<RewardInfo>,"));
+    assert!(
+        content
+            .contains("bonus: if __present_bonus { Some(reader.read_next_i64()?) } else { None },")
+    );
+    assert!(content.contains(
+        "payload: if __present_payload { Some(RewardInfo::read_from_binary_reader(reader)?) } else { None },"
+    ));
+    assert!(
+        content.contains(
+            "optional_field(reader, \"bonus\")?.map(|value| value.as_i64()).transpose()?"
+        )
+    );
+}
+
+#[test]
 fn sanitizes_gen_keyword_across_api_surface() {
     let meta = MetaModel::from_toml_str(
         r#"
@@ -87,6 +117,7 @@ fn sanitizes_gen_keyword_across_api_surface() {
             [[structs.fields]]
             name = "gen"
             type = "int"
+            required = true
 
             [[tables]]
             name = "gen"
@@ -96,14 +127,17 @@ fn sanitizes_gen_keyword_across_api_surface() {
             [[tables.fields]]
             name = "gen"
             type = "int"
+            required = true
 
             [[tables.fields]]
             name = "kind"
             type = "gen_enum"
+            required = true
 
             [[tables.fields]]
             name = "payload"
             type = "gen"
+            required = true
 
             [[tables.indexes]]
             name = "gen"
@@ -258,6 +292,55 @@ fn object_table_fixture() -> MetaModel {
             [[tables.fields]]
             name = "max_level"
             type = "int"
+        "#,
+    )
+    .expect("meta should load")
+}
+
+fn optional_field_fixture() -> MetaModel {
+    MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "RewardInfo"
+
+            [[structs.fields]]
+            name = "amount"
+            type = "int"
+
+            [[structs.fields]]
+            name = "note"
+            type = "string"
+            required = false
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "bonus"
+            type = "int"
+            required = false
+
+            [[tables.fields]]
+            name = "note"
+            type = "string"
+            required = false
+
+            [[tables.fields]]
+            name = "payload"
+            type = "RewardInfo"
+            required = false
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
         "#,
     )
     .expect("meta should load")

@@ -95,7 +95,7 @@ impl CodeGenerator for RustCodeGenerator {
                 content.push_str(&format!(
                     "    pub {}: {},\n",
                     names.field_name(&field.name)?,
-                    names.rust_type(&field.code_type)?
+                    names.rust_field_type(field)?
                 ));
             }
             content.push_str("}\n\n");
@@ -125,7 +125,7 @@ impl CodeGenerator for RustCodeGenerator {
                     content.push_str(&format!(
                         "    pub {}: {},\n",
                         names.field_name(&field.name)?,
-                        names.rust_type(&field.code_type)?
+                        names.rust_field_type(field)?
                     ));
                 }
                 content.push_str("}\n\n");
@@ -152,7 +152,7 @@ impl CodeGenerator for RustCodeGenerator {
                 content.push_str(&format!(
                     "    pub {}: {},\n",
                     names.field_name(&field.name)?,
-                    names.rust_type(&field.code_type)?
+                    names.rust_field_type(field)?
                 ));
             }
             for fragment in &table.fragments {
@@ -436,12 +436,8 @@ fn render_read_from_binary_reader_body(
         if field.required {
             content.push_str(&format!("            {generated_field_name}: {expr},\n"));
         } else {
-            let error = format!(
-                "missing optional field `{}` in binary {type_name}",
-                field.name
-            );
             content.push_str(&format!(
-                "            {generated_field_name}: if __present_{generated_field_name} {{ {expr} }} else {{ return Err({error:?}.to_owned()); }},\n"
+                "            {generated_field_name}: if __present_{generated_field_name} {{ Some({expr}) }} else {{ None }},\n"
             ));
         }
     }
@@ -767,7 +763,7 @@ fn render_index_function(
             Ok(format!(
                 "{}: {}",
                 names.field_name(&field.name)?,
-                names.rust_type(&field.code_type)?
+                names.rust_field_type(field)?
             ))
         })
         .collect::<Result<Vec<_>>>()?
@@ -883,17 +879,55 @@ impl<'a> RustNames<'a> {
         })
     }
 
+    fn rust_field_type(&self, field: &super::CodeField) -> Result<String> {
+        let base_type = self.rust_type(&field.code_type)?;
+        if field.required {
+            Ok(base_type)
+        } else {
+            Ok(format!("Option<{base_type}>"))
+        }
+    }
+
     fn rust_read_field_expr(&self, field: &super::CodeField) -> Result<String> {
         let source_name = format!("{:?}", field.name);
+        if field.required {
+            return Ok(match &field.code_type {
+                CodeTypeRef::Int => format!("read_required_i64(reader, {source_name})?"),
+                CodeTypeRef::Float => format!("read_required_f64(reader, {source_name})?"),
+                CodeTypeRef::Bool => format!("read_required_bool(reader, {source_name})?"),
+                CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                    format!("read_required_string(reader, {source_name})?")
+                }
+                CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
+                    "{}::read_from_reader(&required_field(reader, {source_name})?)?",
+                    self.type_name(name)?
+                ),
+            });
+        }
+
         Ok(match &field.code_type {
-            CodeTypeRef::Int => format!("read_required_i64(reader, {source_name})?"),
-            CodeTypeRef::Float => format!("read_required_f64(reader, {source_name})?"),
-            CodeTypeRef::Bool => format!("read_required_bool(reader, {source_name})?"),
+            CodeTypeRef::Int => {
+                format!(
+                    "optional_field(reader, {source_name})?.map(|value| value.as_i64()).transpose()?"
+                )
+            }
+            CodeTypeRef::Float => {
+                format!(
+                    "optional_field(reader, {source_name})?.map(|value| value.as_f64()).transpose()?"
+                )
+            }
+            CodeTypeRef::Bool => {
+                format!(
+                    "optional_field(reader, {source_name})?.map(|value| value.as_bool()).transpose()?"
+                )
+            }
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
-                format!("read_required_string(reader, {source_name})?")
+                format!(
+                    "optional_field(reader, {source_name})?.map(|value| value.as_string()).transpose()?"
+                )
             }
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
-                "{}::read_from_reader(&required_field(reader, {source_name})?)?",
+                "match optional_field(reader, {source_name})? {{ Some(value) => Some({}::read_from_reader(&value)?), None => None }}",
                 self.type_name(name)?
             ),
         })
@@ -933,14 +967,14 @@ impl<'a> RustNames<'a> {
 
     fn rust_key_type(&self, index: &CodeIndex) -> Result<String> {
         if index.fields.len() == 1 {
-            self.rust_type(&index.fields[0].code_type)
+            self.rust_field_type(&index.fields[0])
         } else {
             Ok(format!(
                 "({})",
                 index
                     .fields
                     .iter()
-                    .map(|field| self.rust_type(&field.code_type))
+                    .map(|field| self.rust_field_type(field))
                     .collect::<Result<Vec<_>>>()?
                     .join(", ")
             ))

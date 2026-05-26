@@ -238,12 +238,7 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
                         self.table_meta.meta.name, field.meta.name
                     )));
                 }
-                None => {
-                    return Err(ConfigForgeError::Validation(format!(
-                        "binary export missing optional field `{}.{}`; optional scalar/object fields are not supported by current generated binary readers",
-                        self.table_meta.meta.name, field.meta.name
-                    )));
-                }
+                None => {}
             }
         }
         for fragment in fragments {
@@ -313,12 +308,7 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
                         field.meta.name, context
                     )));
                 }
-                None => {
-                    return Err(ConfigForgeError::Validation(format!(
-                        "binary export missing optional field `{}` in {}; optional scalar/object fields are not supported by current generated binary readers",
-                        field.meta.name, context
-                    )));
-                }
+                None => {}
             }
         }
         Ok(())

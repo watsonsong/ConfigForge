@@ -88,9 +88,10 @@ impl CodeGenerator for TypeScriptCodeGenerator {
             for field in &code_struct.fields {
                 push_doc_indented(&mut content, field.desc.as_deref(), "  ");
                 content.push_str(&format!(
-                    "  {}{}: {};\n",
+                    "  {}{}{}: {};\n",
                     readonly_prefix(typescript_options.readonly_fields),
                     names.field_name(&field.name)?,
+                    names.ts_optional_property_suffix(field),
                     names.ts_type(&field.code_type)?
                 ));
             }
@@ -111,9 +112,10 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 for field in &fragment.fields {
                     push_doc_indented(&mut content, field.desc.as_deref(), "  ");
                     content.push_str(&format!(
-                        "  {}{}: {};\n",
+                        "  {}{}{}: {};\n",
                         readonly_prefix(typescript_options.readonly_fields),
                         names.field_name(&field.name)?,
+                        names.ts_optional_property_suffix(field),
                         names.ts_type(&field.code_type)?
                     ));
                 }
@@ -131,9 +133,10 @@ impl CodeGenerator for TypeScriptCodeGenerator {
             for field in &table.fields {
                 push_doc_indented(&mut content, field.desc.as_deref(), "  ");
                 content.push_str(&format!(
-                    "  {}{}: {};\n",
+                    "  {}{}{}: {};\n",
                     readonly_prefix(typescript_options.readonly_fields),
                     names.field_name(&field.name)?,
+                    names.ts_optional_property_suffix(field),
                     names.ts_type(&field.code_type)?
                 ));
             }
@@ -466,8 +469,7 @@ fn render_binary_reader_function_body(
             content.push_str(&format!("    {field_name}: {expr},\n"));
         } else {
             content.push_str(&format!(
-                "    {field_name}: __present_{field_name} ? {expr} : (() => {{ throw new Error({:?}); }})(),\n",
-                format!("missing optional field `{}` in binary {type_name}", field.name)
+                "    {field_name}: __present_{field_name} ? {expr} : undefined,\n"
             ));
         }
     }
@@ -794,7 +796,7 @@ fn render_index_function(
             Ok(format!(
                 "{}: {}",
                 names.field_name(&field.name)?,
-                names.ts_type(&field.code_type)?
+                names.ts_field_type(field)?
             ))
         })
         .collect::<Result<Vec<_>>>()?
@@ -905,6 +907,19 @@ impl<'a> TypeScriptNames<'a> {
         })
     }
 
+    fn ts_field_type(&self, field: &super::CodeField) -> Result<String> {
+        let base_type = self.ts_type(&field.code_type)?;
+        if field.required {
+            Ok(base_type)
+        } else {
+            Ok(format!("{base_type} | undefined"))
+        }
+    }
+
+    fn ts_optional_property_suffix(&self, field: &super::CodeField) -> &'static str {
+        if field.required { "" } else { "?" }
+    }
+
     fn reader_function_name(&self, type_name: &str) -> Result<String> {
         if self.options.naming.function == super::CaseStyle::CamelCase {
             return naming::resolve_keyword_conflict(
@@ -940,16 +955,32 @@ impl<'a> TypeScriptNames<'a> {
 
     fn ts_read_field_expr(&self, field: &super::CodeField) -> Result<String> {
         let source_name = format!("{:?}", field.name);
+        if field.required {
+            return Ok(match &field.code_type {
+                CodeTypeRef::Int | CodeTypeRef::Float => {
+                    format!("readRequiredNumber(reader, {source_name})")
+                }
+                CodeTypeRef::Bool => format!("readRequiredBool(reader, {source_name})"),
+                CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                    format!("readRequiredString(reader, {source_name})")
+                }
+                CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
+                    "{}(requiredField(reader, {source_name}))",
+                    self.reader_function_name(&self.type_name(name)?)?
+                ),
+            });
+        }
+
         Ok(match &field.code_type {
             CodeTypeRef::Int | CodeTypeRef::Float => {
-                format!("readRequiredNumber(reader, {source_name})")
+                format!("optionalField(reader, {source_name})?.asNumber()")
             }
-            CodeTypeRef::Bool => format!("readRequiredBool(reader, {source_name})"),
+            CodeTypeRef::Bool => format!("optionalField(reader, {source_name})?.asBool()"),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
-                format!("readRequiredString(reader, {source_name})")
+                format!("optionalField(reader, {source_name})?.asString()")
             }
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
-                "{}(requiredField(reader, {source_name}))",
+                "(() => {{ const value = optionalField(reader, {source_name}); return value ? {}(value) : undefined; }})()",
                 self.reader_function_name(&self.type_name(name)?)?
             ),
         })
@@ -976,7 +1007,7 @@ impl<'a> TypeScriptNames<'a> {
 
     fn ts_index_storage(&self, index: &CodeIndex, table: &CodeTable) -> Result<String> {
         let key_type = if index.fields.len() == 1 {
-            self.ts_type(&index.fields[0].code_type)?
+            self.ts_field_type(&index.fields[0])?
         } else {
             "string".to_owned()
         };

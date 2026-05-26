@@ -6,6 +6,7 @@ use crate::{
         CodeExportInput, CodeGenerator, GeneratedFile,
         tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
     },
+    exporter::RuntimeDataFile,
     meta::{MetaModel, TargetTags},
 };
 
@@ -87,6 +88,30 @@ fn emits_fragment_structs_and_optional_row_members() {
     assert!(client_cpp_content.contains("struct ItemsClientMarkerFragment"));
     assert!(client_cpp_content.contains("std::optional<ItemsClientMarkerFragment> client_marker"));
     assert!(!client_cpp_content.contains("server_marker"));
+}
+
+#[test]
+fn emits_optional_scalar_and_struct_field_types() {
+    let meta = optional_field_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.runtime_data_files = vec![RuntimeDataFile {
+        table_name: "items".to_owned(),
+        path: "items.bin".to_owned(),
+        format: "bin".to_owned(),
+    }];
+
+    let cpp = CppCodeGenerator.generate(&input).expect("cpp code");
+    let header = generated_content(&cpp, "generated.hpp");
+    let source = generated_content(&cpp, "generated.cpp");
+
+    assert!(header.contains("std::optional<std::int64_t> bonus"));
+    assert!(header.contains("std::optional<std::string> note"));
+    assert!(header.contains("std::optional<RewardInfo> payload"));
+    assert!(source.contains("if (present_bonus) { value.bonus = reader.ReadNextInt64(); }"));
+    assert!(
+        source.contains("if (present_payload) { value.payload = ReadRewardInfoBinary(reader); }")
+    );
+    assert!(source.contains("OptionalField(reader, \"bonus\", [](const IRuntimeDataReader& value) { return value.AsInt64(); })"));
 }
 
 #[test]
@@ -203,6 +228,55 @@ fn object_table_fixture() -> MetaModel {
             [[tables.fields]]
             name = "max_level"
             type = "int"
+        "#,
+    )
+    .expect("meta should load")
+}
+
+fn optional_field_fixture() -> MetaModel {
+    MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "RewardInfo"
+
+            [[structs.fields]]
+            name = "amount"
+            type = "int"
+
+            [[structs.fields]]
+            name = "note"
+            type = "string"
+            required = false
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "bonus"
+            type = "int"
+            required = false
+
+            [[tables.fields]]
+            name = "note"
+            type = "string"
+            required = false
+
+            [[tables.fields]]
+            name = "payload"
+            type = "RewardInfo"
+            required = false
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
         "#,
     )
     .expect("meta should load")

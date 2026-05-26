@@ -55,8 +55,8 @@ fn assert_standard_data(data: &GameData) {
         .class_levels
         .get_by_class_level(1, 2)
         .expect("compound class level index should resolve");
-    assert_eq!(class_level.attributes.max_health, 145);
-    assert_eq!(class_level.attributes.attack, 16);
+    assert_eq!(class_level.attributes.max_health, Some(145));
+    assert_eq!(class_level.attributes.attack, Some(16));
 
     assert_eq!(data.game_rules.max_player_level, 60);
     assert!(data.game_rules.pvp_enabled);

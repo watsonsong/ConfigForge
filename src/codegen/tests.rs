@@ -30,6 +30,7 @@ pub(in crate::codegen) fn linked_fixture() -> MetaModel {
             [[structs.fields]]
             name = "count"
             type = "int"
+            required = true
 
             [[tables]]
             name = "items"
@@ -40,15 +41,18 @@ pub(in crate::codegen) fn linked_fixture() -> MetaModel {
             [[tables.fields]]
             name = "id"
             type = "int"
+            required = true
             unique = true
 
             [[tables.fields]]
             name = "display_name"
             type = "string"
+            required = true
 
             [[tables.fields]]
             name = "rarity"
             type = "ItemRarity"
+            required = true
 
             [[tables.fields]]
             name = "internal_note"

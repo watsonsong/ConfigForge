@@ -231,7 +231,7 @@ fn binary_exporter_writes_header_row_count_bitmap_and_values() {
 }
 
 #[test]
-fn binary_exporter_rejects_absent_optional_fields() {
+fn binary_exporter_omits_absent_optional_fields() {
     let meta = MetaModel::from_toml_str(
         r#"
                 [[tables]]
@@ -257,13 +257,14 @@ fn binary_exporter_rejects_absent_optional_fields() {
         vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
     );
 
-    let error = BinaryDataExporter
+    let bytes = BinaryDataExporter
         .serialize_table(table_meta, &data_table, &TargetTags::empty())
-        .unwrap_err();
+        .expect("binary data should serialize with absent optional fields");
 
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("missing optional field `items.subtitle`"))
-    );
+    assert_eq!(bytes[16], 1); // row_count
+    assert_eq!(bytes[17], 0); // subtitle optional absent
+    assert_eq!(bytes[18], 2); // zigzag(1)
+    assert_eq!(bytes.len(), 19);
 }
 
 struct ConflictDataExporter;
