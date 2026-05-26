@@ -240,10 +240,9 @@ fn builds_target_from_project_config() {
     let ts_code = fs::read_to_string(ts_out_dir.join("generated.ts")).expect("ts code");
     assert!(rust_code.contains("pub struct ItemsRow"));
     assert!(rust_code.contains("pub struct GameRulesRow"));
-    assert!(rust_code.contains("pub trait RuntimeDataReader"));
-    assert!(rust_code.contains("fn open(&self, path: &str) -> Result<Self::Reader, String>;"));
+    assert!(rust_code.contains("pub use config_forge_runtime_reader_core"));
     assert!(!rust_code.contains("pub struct GameRulesTable"));
-    assert!(rust_code.contains("pub trait RuntimeDataLoader"));
+    assert!(rust_code.contains("RuntimeDataLoader"));
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.json\""));
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"game_rules.json\""));
     assert!(!rust_code.contains("RuntimeDataFormat"));
@@ -644,7 +643,7 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
 
     let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.msgpack\""));
-    assert!(rust_code.contains("pub trait RuntimeDataLoader"));
+    assert!(rust_code.contains("pub use config_forge_runtime_reader_core"));
     assert!(!rust_code.contains("RuntimeDataFormat"));
 
     verify_generated_rust_crate(&rust_out_dir, false);
@@ -1246,11 +1245,15 @@ fn standard_reference_game_meta_imports() -> String {
 }
 
 fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bool) {
+    let reader_core_dependency = format!(
+        "config-forge-runtime-reader-core = {{ path = {:?} }}",
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/rust/reader_core")
+    );
     for edition in ["2021", "2024"] {
         fs::write(
-        generated_dir.join("Cargo.toml"),
-        format!(
-            r#"
+            generated_dir.join("Cargo.toml"),
+            format!(
+                r#"
                 [package]
                 name = "generated_config_check"
                 version = "0.1.0"
@@ -1259,17 +1262,20 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                 [lib]
                 path = "lib.rs"
 
+                [dependencies]
+                {reader_core_dependency}
                 {dependencies}
             "#,
-            edition = edition,
-            dependencies = if derive_serde {
-                "[dependencies]\nserde = { version = \"1.0\", features = [\"derive\"] }\nserde_json = \"1.0\""
-            } else {
-                ""
-            }
-        ),
-    )
-    .expect("generated rust Cargo.toml should be written");
+                edition = edition,
+                reader_core_dependency = reader_core_dependency,
+                dependencies = if derive_serde {
+                    "serde = { version = \"1.0\", features = [\"derive\"] }\nserde_json = \"1.0\""
+                } else {
+                    ""
+                }
+            ),
+        )
+        .expect("generated rust Cargo.toml should be written");
         fs::write(
         generated_dir.join("lib.rs"),
         format!(
@@ -1654,6 +1660,13 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
     let harness_dir = fixture_root.join("harness/rust");
     let harness_cargo_toml = fs::read_to_string(harness_dir.join("Cargo.toml"))
         .expect("rust harness Cargo.toml should be read");
+    let harness_cargo_toml = harness_cargo_toml.replace(
+        "../../../../../runtime/rust/reader_core",
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("runtime/rust/reader_core")
+            .display()
+            .to_string(),
+    );
     fs::copy(harness_dir.join("lib.rs"), temp_dir.path().join("lib.rs"))
         .expect("rust harness lib.rs should be copied");
     fs::copy(

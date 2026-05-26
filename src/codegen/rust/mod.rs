@@ -51,8 +51,7 @@ impl CodeGenerator for RustCodeGenerator {
         validate_generated_symbols(&model, &names)?;
         let mut content = render_file_header(input);
         content.push_str("use std::collections::HashMap;\n\n");
-        content.push_str("pub const CONFIG_FORGE_READER_CONTRACT_VERSION: &str = \"1.0\";\n\n");
-        render_runtime_reader_traits(&mut content);
+        render_runtime_reader_imports(&mut content);
         render_runtime_reader_helpers(&mut content);
 
         for code_enum in &model.enums {
@@ -218,33 +217,11 @@ impl CodeGenerator for RustCodeGenerator {
     }
 }
 
-fn render_runtime_reader_traits(content: &mut String) {
+fn render_runtime_reader_imports(content: &mut String) {
     content.push_str(
-        r#"pub trait RuntimeDataReader: Clone {
-    fn field(&self, name: &str) -> Result<Option<Self>, String>;
-    fn index(&self, index: usize) -> Result<Self, String>;
-    fn len(&self) -> Result<usize, String>;
-    fn as_i64(&self) -> Result<i64, String>;
-    fn as_f64(&self) -> Result<f64, String>;
-    fn as_bool(&self) -> Result<bool, String>;
-    fn as_string(&self) -> Result<String, String>;
-    fn is_null(&self) -> bool;
-    fn schema_revision(&self) -> Option<u64> { None }
-    fn read_row_count(&self) -> Result<usize, String> { Err("positional runtime reader is not supported".to_owned()) }
-    fn begin_record(&self, _optional_slot_count: usize) -> Result<(), String> { Err("positional runtime reader is not supported".to_owned()) }
-    fn read_optional_present(&self, _slot_index: usize) -> Result<bool, String> { Err("positional runtime reader is not supported".to_owned()) }
-    fn read_next_i64(&self) -> Result<i64, String> { Err("positional runtime reader is not supported".to_owned()) }
-    fn read_next_f64(&self) -> Result<f64, String> { Err("positional runtime reader is not supported".to_owned()) }
-    fn read_next_bool(&self) -> Result<bool, String> { Err("positional runtime reader is not supported".to_owned()) }
-    fn read_next_string(&self) -> Result<String, String> { Err("positional runtime reader is not supported".to_owned()) }
-    fn read_enum_ordinal(&self) -> Result<u64, String> { Err("positional runtime reader is not supported".to_owned()) }
-    fn ensure_exhausted(&self) -> Result<(), String> { Err("positional runtime reader is not supported".to_owned()) }
-}
-
-pub trait RuntimeDataLoader {
-    type Reader: RuntimeDataReader;
-    fn open(&self, path: &str) -> Result<Self::Reader, String>;
-}
+        r#"pub use config_forge_runtime_reader_core::{
+    CONFIG_FORGE_READER_CONTRACT_VERSION, RuntimeDataLoader, RuntimeDataReader,
+};
 
 "#,
     );

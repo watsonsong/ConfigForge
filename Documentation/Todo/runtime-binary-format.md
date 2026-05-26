@@ -4,9 +4,9 @@
 
 ## P0：首版稳定化前必须完成
 
-- [ ] 统一 Rust runtime reader contract。
-  - 当前 generated Rust 仍内联生成 `RuntimeDataReader` / `RuntimeDataLoader` trait，runtime helper crate 也定义了一套同名 trait。
-  - 需要设计共享 runtime contract crate，或明确 runtime helper 作为 copyable template 的定位，避免用户误以为独立 crate 可直接传给 generated `GameData::load`。
+- [x] 统一 Rust runtime reader contract。
+  - 已选择共享 core crate 模式：`runtime/rust/reader_core` 定义 `RuntimeDataReader` / `RuntimeDataLoader`，generated Rust 通过 `config_forge_runtime_reader_core` 复用同一套 trait。
+  - Rust runtime helper crates 不再各自定义同名 trait，避免名义类型不兼容。
 - [ ] 补齐 optional scalar / struct field 的目标语言类型表达。
   - 当前短期策略是在 binary exporter 遇到缺失 optional field 时直接报错，避免导出不可读 `.bin`。
   - 后续应让 CodeModel 传播 optional 字段语义，并在 Rust / TypeScript / C++ 中分别生成 `Option<T>`、`T | undefined` / optional property、`std::optional<T>`。

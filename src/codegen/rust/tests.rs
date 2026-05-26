@@ -24,10 +24,10 @@ fn emits_loader_table_and_index_helpers() {
     let files = RustCodeGenerator.generate(&input).expect("rust code");
     let content = &files[0].content;
 
-    assert!(content.contains("pub trait RuntimeDataLoader"));
-    assert!(content.contains("pub trait RuntimeDataReader"));
-    assert!(content.contains("pub const CONFIG_FORGE_READER_CONTRACT_VERSION: &str = \"1.0\";"));
-    assert!(content.contains("fn open(&self, path: &str) -> Result<Self::Reader, String>;"));
+    assert!(content.contains("pub use config_forge_runtime_reader_core"));
+    assert!(content.contains("RuntimeDataLoader"));
+    assert!(content.contains("RuntimeDataReader"));
+    assert!(content.contains("CONFIG_FORGE_READER_CONTRACT_VERSION"));
     assert!(content.contains("pub const DATA_FILE: &'static str = \"items.json\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("RuntimeDataDecoder"));
@@ -145,7 +145,7 @@ fn emits_object_table_as_typed_object_not_repository() {
     let files = RustCodeGenerator.generate(&input).expect("rust code");
     let content = &files[0].content;
 
-    assert!(content.contains("fn open(&self, path: &str) -> Result<Self::Reader, String>;"));
+    assert!(content.contains("pub use config_forge_runtime_reader_core"));
     assert!(content.contains("pub game_config: GameConfigRow,"));
     assert!(content.contains("impl GameConfigRow"));
     assert!(content.contains("let root = loader.open(Self::DATA_FILE)?;"));

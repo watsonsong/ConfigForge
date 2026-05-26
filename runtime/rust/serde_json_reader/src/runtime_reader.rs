@@ -8,9 +8,8 @@ use std::{
 
 use serde_json::Value;
 
-use crate::{RuntimeDataLoader, RuntimeDataReader};
-
-pub const SUPPORTED_CONFIG_FORGE_READER_CONTRACT: &str = "^1.0";
+pub use config_forge_runtime_reader_core::SUPPORTED_CONFIG_FORGE_READER_CONTRACT;
+use config_forge_runtime_reader_core::{RuntimeDataLoader, RuntimeDataReader};
 
 #[derive(Debug, Clone)]
 pub struct JsonValueReader {

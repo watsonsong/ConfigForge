@@ -8,9 +8,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::{RuntimeDataLoader, RuntimeDataReader};
-
-pub const SUPPORTED_CONFIG_FORGE_READER_CONTRACT: &str = "^1.0";
+use config_forge_runtime_reader_core::{RuntimeDataLoader, RuntimeDataReader};
 
 #[derive(Clone)]
 pub struct BinaryRuntimeDataReader {
