@@ -10,10 +10,10 @@
 - [x] 补齐 optional scalar / struct field 的目标语言类型表达。
   - CodeModel 已传播 optional 字段语义，Rust / TypeScript / C++ 分别生成 `Option<T>`、optional property、`std::optional<T>`。
   - Binary exporter 现在可通过 presence bitmap 省略缺失 optional scalar / struct field，不再因 generated binary reader 不支持而拒绝导出。
-- [ ] 增加真实 generated code + binary runtime helper 的端到端测试。
-  - Rust：generated crate + Rust binary reader contract 集成。
-  - TypeScript：generated code 加载 `.bin` fixture。
-  - C++：generated C++ + binary adapter 编译并加载 fixture。
+- [x] 增加真实 generated code + binary runtime helper 的端到端测试。
+  - Rust：standard project generated crate 通过 `config-forge-runtime-binary-reader` 加载 `.bin` fixture。
+  - TypeScript：standard project generated code 通过 `decodeBinaryRuntimeData` 加载 `.bin` fixture。
+  - C++：standard project generated C++ 通过 binary adapter 编译并加载 `.bin` fixture。
 
 ## P1：首版发布前建议完成
 

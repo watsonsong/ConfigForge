@@ -415,6 +415,18 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
         .success()
         .stdout(predicate::str::contains("target `server` built"));
 
+    let mut binary_cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    binary_cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "binary",
+    ]);
+    binary_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target `binary` built"));
+
     verify_standard_generated_rust_runtime(fixture_root);
     verify_standard_generated_cpp_runtime(fixture_root);
     verify_standard_generated_typescript_runtime(fixture_root);
@@ -1667,6 +1679,13 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
             .display()
             .to_string(),
     );
+    let harness_cargo_toml = format!(
+        "{harness_cargo_toml}config-forge-runtime-binary-reader = {{ path = {:?} }}\n",
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("runtime/rust/binary_reader")
+            .display()
+            .to_string()
+    );
     fs::copy(harness_dir.join("lib.rs"), temp_dir.path().join("lib.rs"))
         .expect("rust harness lib.rs should be copied");
     fs::copy(
@@ -1679,12 +1698,6 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
         temp_dir.path().join("msgpack_runtime_reader.rs"),
     )
     .expect("rust MessagePack runtime reader should be copied");
-    fs::copy(
-        fixture_root.join("out/server_code/rust/generated.rs"),
-        temp_dir.path().join("generated.rs"),
-    )
-    .expect("generated Rust code should be copied into harness");
-
     for edition in ["2021", "2024"] {
         fs::write(
             temp_dir.path().join("Cargo.toml"),
@@ -1692,16 +1705,65 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
         )
         .expect("rust harness Cargo.toml should be written");
 
+        fs::copy(
+            fixture_root.join("out/server_code/rust/generated.rs"),
+            temp_dir.path().join("generated.rs"),
+        )
+        .expect("generated Rust MessagePack code should be copied into harness");
         let output = StdCommand::new("cargo")
             .args(["test", "--quiet", "--manifest-path"])
             .arg(temp_dir.path().join("Cargo.toml"))
+            .arg("generated_rust_loads_exported_json_and_queries_indexes")
+            .env(
+                "CARGO_TARGET_DIR",
+                temp_dir.path().join(format!("target-{edition}-json")),
+            )
             .env("JSON_DATA_DIR", fixture_root.join("out/client_data"))
             .env("MSGPACK_DATA_DIR", fixture_root.join("out/server_data"))
             .output()
-            .expect("standard generated Rust runtime test should run");
+            .expect("standard generated Rust JSON runtime test should run");
         assert_command_success(
             output,
-            &format!("standard generated Rust runtime test ({edition})"),
+            &format!("standard generated Rust JSON runtime test ({edition})"),
+        );
+        let output = StdCommand::new("cargo")
+            .args(["test", "--quiet", "--manifest-path"])
+            .arg(temp_dir.path().join("Cargo.toml"))
+            .arg("generated_rust_loads_exported_messagepack_and_queries_indexes")
+            .env(
+                "CARGO_TARGET_DIR",
+                temp_dir
+                    .path()
+                    .join(format!("target-{edition}-messagepack")),
+            )
+            .env("JSON_DATA_DIR", fixture_root.join("out/client_data"))
+            .env("MSGPACK_DATA_DIR", fixture_root.join("out/server_data"))
+            .output()
+            .expect("standard generated Rust MessagePack runtime test should run");
+        assert_command_success(
+            output,
+            &format!("standard generated Rust MessagePack runtime test ({edition})"),
+        );
+
+        fs::copy(
+            fixture_root.join("out/binary_code/rust/generated.rs"),
+            temp_dir.path().join("generated.rs"),
+        )
+        .expect("generated Rust binary code should be copied into harness");
+        let output = StdCommand::new("cargo")
+            .args(["test", "--quiet", "--manifest-path"])
+            .arg(temp_dir.path().join("Cargo.toml"))
+            .arg("generated_rust_loads_exported_binary_and_queries_indexes")
+            .env(
+                "CARGO_TARGET_DIR",
+                temp_dir.path().join(format!("target-{edition}-binary")),
+            )
+            .env("BIN_DATA_DIR", fixture_root.join("out/binary_data"))
+            .output()
+            .expect("standard generated Rust binary runtime test should run");
+        assert_command_success(
+            output,
+            &format!("standard generated Rust binary runtime test ({edition})"),
         );
     }
 }
@@ -1801,6 +1863,13 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
                 target_include_directories(standard_runtime_check PRIVATE {generated_cpp_dir:?})
                 target_link_libraries(standard_runtime_check PRIVATE config_forge_runtime::rapidjson_reader)
 
+                add_executable(standard_binary_runtime_check
+                    {harness_cpp:?}
+                    {binary_generated_cpp:?})
+                target_include_directories(standard_binary_runtime_check PRIVATE {binary_generated_cpp_dir:?})
+                target_compile_definitions(standard_binary_runtime_check PRIVATE CONFIG_FORGE_USE_BINARY_RUNTIME_READER)
+                target_link_libraries(standard_binary_runtime_check PRIVATE config_forge_runtime::binary_reader)
+
                 add_executable(adapter_namespace_check adapter_namespace_check.cpp)
                 target_include_directories(adapter_namespace_check PRIVATE {temp_dir:?})
                 target_link_libraries(adapter_namespace_check PRIVATE config_forge_runtime::rapidjson_reader)
@@ -1812,7 +1881,15 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
             runtime_cpp_dir = runtime_cpp_dir.display().to_string(),
             harness_cpp = harness_cpp.display().to_string(),
             generated_cpp = generated_cpp.display().to_string(),
+            binary_generated_cpp = fixture_root
+                .join("out/binary_code/cpp/generated.cpp")
+                .display()
+                .to_string(),
             generated_cpp_dir = generated_cpp_dir.display().to_string(),
+            binary_generated_cpp_dir = fixture_root
+                .join("out/binary_code/cpp")
+                .display()
+                .to_string(),
             temp_dir = temp_dir.path().display().to_string()
         ),
     )
@@ -1840,6 +1917,12 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
         .output()
         .expect("standard generated C++ runtime test should run");
     assert_command_success(output, "standard generated C++ runtime test");
+
+    let output = StdCommand::new(build_dir.join("standard_binary_runtime_check"))
+        .env("DATA_DIR", fixture_root.join("out/binary_data"))
+        .output()
+        .expect("standard generated C++ binary runtime test should run");
+    assert_command_success(output, "standard generated C++ binary runtime test");
 
     let output = StdCommand::new(build_dir.join("adapter_namespace_check"))
         .output()
@@ -1871,6 +1954,11 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
     )
     .expect("TypeScript runtime reader core should be copied");
     fs::copy(
+        fixture_root.join("../../../runtime/typescript/binary_reader/src/runtime_loader.ts"),
+        temp_dir.path().join("runtime_loader_binary.ts"),
+    )
+    .expect("TypeScript binary runtime loader should be copied");
+    fs::copy(
         fixture_root.join("../../../runtime/typescript/json_reader/src/runtime_loader.ts"),
         temp_dir.path().join("runtime_loader_json.ts"),
     )
@@ -1891,7 +1979,7 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
     )
     .expect("TypeScript tsconfig should be copied");
     fs::copy(
-        fixture_root.join("out/client_code/typescript/generated.ts"),
+        fixture_root.join("out/binary_code/typescript/generated.ts"),
         temp_dir.path().join("generated.ts"),
     )
     .expect("generated TypeScript code should be copied into harness");
@@ -1938,6 +2026,7 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
     let output = StdCommand::new("node")
         .arg(temp_dir.path().join("dist/runtime_check.js"))
         .env("DATA_DIR", fixture_root.join("out/client_data"))
+        .env("BIN_DATA_DIR", fixture_root.join("out/binary_data"))
         .output()
         .expect("standard generated TypeScript runtime test should run");
     assert_command_success(output, "standard generated TypeScript runtime test");

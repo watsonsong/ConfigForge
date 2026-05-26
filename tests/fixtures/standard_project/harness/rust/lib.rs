@@ -8,6 +8,7 @@ mod msgpack_runtime_reader;
 
 use std::env;
 
+use config_forge_runtime_binary_reader::FsBinaryRuntimeDataLoader;
 use json_runtime_reader::{FsJsonRuntimeDataLoader, JsonValueReader};
 use msgpack_runtime_reader::FsMessagePackRuntimeDataLoader;
 
@@ -28,7 +29,29 @@ impl RuntimeDataLoader for JsonFixtureRuntimeDataLoader {
     type Reader = JsonValueReader;
 
     fn open(&self, path: &str) -> Result<Self::Reader, String> {
-        self.inner.open_reader(&path.replace(".msgpack", ".json"))
+        self.inner
+            .open_reader(&path.replace(".msgpack", ".json").replace(".bin", ".json"))
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MessagePackFixtureRuntimeDataLoader {
+    inner: FsMessagePackRuntimeDataLoader,
+}
+
+impl MessagePackFixtureRuntimeDataLoader {
+    fn new(data_dir: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            inner: FsMessagePackRuntimeDataLoader::new(data_dir),
+        }
+    }
+}
+
+impl RuntimeDataLoader for MessagePackFixtureRuntimeDataLoader {
+    type Reader = msgpack_runtime_reader::MessagePackValueReader;
+
+    fn open(&self, path: &str) -> Result<Self::Reader, String> {
+        self.inner.open_reader(&path.replace(".bin", ".msgpack"))
     }
 }
 
@@ -38,10 +61,16 @@ fn json_fixture_loader_from_env() -> JsonFixtureRuntimeDataLoader {
     )
 }
 
-fn msgpack_fixture_loader_from_env() -> FsMessagePackRuntimeDataLoader {
-    FsMessagePackRuntimeDataLoader::new(
+fn msgpack_fixture_loader_from_env() -> MessagePackFixtureRuntimeDataLoader {
+    MessagePackFixtureRuntimeDataLoader::new(
         env::var("MSGPACK_DATA_DIR")
             .expect("MSGPACK_DATA_DIR should point to exported MessagePack data"),
+    )
+}
+
+fn binary_fixture_loader_from_env() -> FsBinaryRuntimeDataLoader {
+    FsBinaryRuntimeDataLoader::new(
+        env::var("BIN_DATA_DIR").expect("BIN_DATA_DIR should point to exported binary data"),
     )
 }
 
@@ -73,5 +102,12 @@ fn generated_rust_loads_exported_json_and_queries_indexes() {
 fn generated_rust_loads_exported_messagepack_and_queries_indexes() {
     let data = GameData::load(&msgpack_fixture_loader_from_env())
         .expect("generated data should load from MessagePack runtime reader");
+    assert_standard_data(&data);
+}
+
+#[test]
+fn generated_rust_loads_exported_binary_and_queries_indexes() {
+    let data = GameData::load(&binary_fixture_loader_from_env())
+        .expect("generated data should load from binary runtime reader");
     assert_standard_data(&data);
 }

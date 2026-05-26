@@ -3,6 +3,7 @@
     "generated.ts",
     "runtime_check.ts",
     "runtime_reader_core.ts",
+    "runtime_loader_binary.ts",
     "runtime_loader_json.ts",
     "runtime_loader_node_fs.ts",
     "runtime_loader_messagepack.ts"

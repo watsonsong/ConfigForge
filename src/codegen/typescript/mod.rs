@@ -192,7 +192,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 CodeTableKind::Object => {
                     if table.data_format == BINARY_FORMAT {
                         content.push_str(&format!(
-                            "      {}: await Promise.resolve(loader.open({:?})).then(root => {{ if (!root.schemaRevision || BigInt(root.schemaRevision()) !== {}n) {{ throw new Error(`schema revision mismatch for {}`); }} if (!root.ensureExhausted) {{ throw new Error('binary reader does not support EOF validation'); }} const value = {}(root); root.ensureExhausted(); return value; }}),\n",
+                            "      {}: await Promise.resolve(loader.open({:?})).then(root => {{ const schemaRevision = root.schemaRevision?.(); if (schemaRevision === undefined || BigInt(schemaRevision) !== {}n) {{ throw new Error(`schema revision mismatch for {}`); }} if (!root.ensureExhausted) {{ throw new Error('binary reader does not support EOF validation'); }} const value = {}(root); root.ensureExhausted(); return value; }}),\n",
                             names.field_name(&table.name)?,
                             table.data_file,
                             table.schema_revision.unwrap_or_default(),
@@ -726,7 +726,8 @@ fn render_table(
     ));
     content.push_str("    const root = await loader.open(this.dataFile);\n");
     if table.data_format == BINARY_FORMAT {
-        content.push_str("    if (!root.schemaRevision || BigInt(root.schemaRevision()) !== this.expectedSchemaRevision) { throw new Error(`schema revision mismatch for ${this.dataFile}`); }\n");
+        content.push_str("    const schemaRevision = root.schemaRevision?.();\n");
+        content.push_str("    if (schemaRevision === undefined || BigInt(schemaRevision) !== this.expectedSchemaRevision) { throw new Error(`schema revision mismatch for ${this.dataFile}`); }\n");
         content.push_str("    if (!root.readRowCount) { throw new Error('binary reader does not support row count'); }\n");
         content.push_str("    if (!root.ensureExhausted) { throw new Error('binary reader does not support EOF validation'); }\n");
         content.push_str("    const rowCount = root.readRowCount();\n");
