@@ -197,7 +197,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                             table.data_file,
                             table.schema_revision.unwrap_or_default(),
                             table.data_file,
-                            names.binary_reader_function_name(&names.row_type_name(&table.name)?)?
+                            names.reader_function_name(&names.row_type_name(&table.name)?)?
                         ))
                     } else {
                         content.push_str(&format!(
@@ -232,8 +232,10 @@ fn render_runtime_reader_interfaces(content: &mut String) {
   asString(): string;
   isNull(): boolean;
   schemaRevision?(): bigint | number | undefined;
+  isPositional?(): boolean;
   readRowCount?(): number;
   beginRecord?(optionalSlotCount: number): void;
+  endRecord?(): void;
   readOptionalPresent?(slotIndex: number): boolean;
   readNextInt64?(): number;
   readNextFloat64?(): number;
@@ -267,16 +269,60 @@ function optionalField(reader: RuntimeDataReader, name: string): RuntimeDataRead
   return value && !value.isNull() ? value : undefined;
 }
 
-function readRequiredNumber(reader: RuntimeDataReader, name: string): number {
+function readRequiredInt64(reader: RuntimeDataReader, name: string): number {
+  if (reader.isPositional?.()) {
+    return reader.readNextInt64!();
+  }
+  return requiredField(reader, name).asNumber();
+}
+
+function readRequiredFloat64(reader: RuntimeDataReader, name: string): number {
+  if (reader.isPositional?.()) {
+    return reader.readNextFloat64!();
+  }
   return requiredField(reader, name).asNumber();
 }
 
 function readRequiredBool(reader: RuntimeDataReader, name: string): boolean {
+  if (reader.isPositional?.()) {
+    return reader.asBool();
+  }
   return requiredField(reader, name).asBool();
 }
 
 function readRequiredString(reader: RuntimeDataReader, name: string): string {
+  if (reader.isPositional?.()) {
+    return reader.asString();
+  }
   return requiredField(reader, name).asString();
+}
+
+function readOptionalInt64(reader: RuntimeDataReader, name: string): number | undefined {
+  if (reader.isPositional?.()) {
+    return reader.readOptionalPresent!(0) ? reader.readNextInt64!() : undefined;
+  }
+  return optionalField(reader, name)?.asNumber();
+}
+
+function readOptionalFloat64(reader: RuntimeDataReader, name: string): number | undefined {
+  if (reader.isPositional?.()) {
+    return reader.readOptionalPresent!(0) ? reader.readNextFloat64!() : undefined;
+  }
+  return optionalField(reader, name)?.asNumber();
+}
+
+function readOptionalBool(reader: RuntimeDataReader, name: string): boolean | undefined {
+  if (reader.isPositional?.()) {
+    return reader.readOptionalPresent!(0) ? reader.asBool() : undefined;
+  }
+  return optionalField(reader, name)?.asBool();
+}
+
+function readOptionalString(reader: RuntimeDataReader, name: string): string | undefined {
+  if (reader.isPositional?.()) {
+    return reader.readOptionalPresent!(0) ? reader.asString() : undefined;
+  }
+  return optionalField(reader, name)?.asString();
 }
 
 "#,
@@ -292,6 +338,10 @@ fn render_enum_reader_function(
     let function_name = names.reader_function_name(&type_name)?;
     content.push_str(&format!(
         "function {function_name}(reader: RuntimeDataReader): {type_name} {{\n"
+    ));
+    content.push_str(&format!(
+        "  if (reader.isPositional?.()) {{ return {}FromBinaryOrdinal(reader.readEnumOrdinal!()); }}\n",
+        function_name
     ));
     content.push_str("  const value = reader.asString();\n");
     let values = code_enum
@@ -340,14 +390,7 @@ fn render_struct_reader_function(
 ) -> Result<()> {
     let type_name = names.type_name(&code_struct.name)?;
     render_reader_function_body(content, &type_name, &code_struct.fields, None, names)?;
-    render_binary_reader_function_body(
-        content,
-        &type_name,
-        &code_struct.name,
-        &code_struct.fields,
-        &[],
-        names,
-    )
+    Ok(())
 }
 
 fn render_fragment_reader_function(
@@ -358,14 +401,7 @@ fn render_fragment_reader_function(
 ) -> Result<()> {
     let type_name = names.fragment_payload_type_name(table, fragment)?;
     render_reader_function_body(content, &type_name, &fragment.fields, None, names)?;
-    render_binary_reader_function_body(
-        content,
-        &type_name,
-        &fragment.name,
-        &fragment.fields,
-        &[],
-        names,
-    )
+    Ok(())
 }
 
 fn render_row_reader_function(
@@ -375,14 +411,7 @@ fn render_row_reader_function(
 ) -> Result<()> {
     let type_name = names.row_type_name(&table.name)?;
     render_reader_function_body(content, &type_name, &table.fields, Some(table), names)?;
-    render_binary_reader_function_body(
-        content,
-        &type_name,
-        &table.name,
-        &table.fields,
-        &table.fragments,
-        names,
-    )
+    Ok(())
 }
 
 fn render_reader_function_body(
@@ -393,19 +422,23 @@ fn render_reader_function_body(
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
     let function_name = names.reader_function_name(type_name)?;
+    let fragment_count = table.map(|table| table.fragments.len()).unwrap_or(0);
+    let optional_slot_count =
+        fields.iter().filter(|field| !field.required).count() + fragment_count;
     content.push_str(&format!(
         "function {function_name}(reader: RuntimeDataReader): {type_name} {{\n"
     ));
+    content.push_str(&format!("  reader.beginRecord?.({optional_slot_count});\n"));
     if let Some(table) = table {
         for fragment in &table.fragments {
             content.push_str(&format!(
-                "  const {}Reader = optionalField(reader, {:?});\n",
+                "  const {}Reader = reader.isPositional?.() ? undefined : optionalField(reader, {:?});\n",
                 names.field_name(&fragment.name)?,
                 fragment.name
             ));
         }
     }
-    content.push_str("  return {\n");
+    content.push_str("  const value = {\n");
     for field in fields {
         content.push_str(&format!(
             "    {}: {},\n",
@@ -419,69 +452,13 @@ fn render_reader_function_body(
             let payload_type = names.fragment_payload_type_name(table, fragment)?;
             let reader_function = names.reader_function_name(&payload_type)?;
             content.push_str(&format!(
-                "    {field_name}: {field_name}Reader ? {reader_function}({field_name}Reader) : undefined,\n"
+                "    {field_name}: reader.isPositional?.() ? (reader.readOptionalPresent!(0) ? {reader_function}(reader) : undefined) : ({field_name}Reader ? {reader_function}({field_name}Reader) : undefined),\n"
             ));
         }
     }
     content.push_str("  };\n");
-    content.push_str("}\n\n");
-    Ok(())
-}
-
-fn render_binary_reader_function_body(
-    content: &mut String,
-    type_name: &str,
-    owner_name: &str,
-    fields: &[super::CodeField],
-    fragments: &[super::CodeFragment],
-    names: &TypeScriptNames<'_>,
-) -> Result<()> {
-    let function_name = names.binary_reader_function_name(type_name)?;
-    let optional_slot_count =
-        fields.iter().filter(|field| !field.required).count() + fragments.len();
-    content.push_str(&format!(
-        "function {function_name}(reader: RuntimeDataReader): {type_name} {{\n"
-    ));
-    content.push_str("  if (!reader.beginRecord || !reader.readOptionalPresent) { throw new Error('binary reader does not support positional records'); }\n");
-    content.push_str(&format!("  reader.beginRecord({optional_slot_count});\n"));
-    let mut optional_index = 0usize;
-    for field in fields {
-        if !field.required {
-            content.push_str(&format!(
-                "  const __present_{} = reader.readOptionalPresent({optional_index});\n",
-                names.field_name(&field.name)?
-            ));
-            optional_index += 1;
-        }
-    }
-    for fragment in fragments {
-        content.push_str(&format!(
-            "  const __present_{} = reader.readOptionalPresent({optional_index});\n",
-            names.field_name(&fragment.name)?
-        ));
-        optional_index += 1;
-    }
-    content.push_str("  return {\n");
-    for field in fields {
-        let field_name = names.field_name(&field.name)?;
-        let expr = names.ts_read_binary_field_expr(field)?;
-        if field.required {
-            content.push_str(&format!("    {field_name}: {expr},\n"));
-        } else {
-            content.push_str(&format!(
-                "    {field_name}: __present_{field_name} ? {expr} : undefined,\n"
-            ));
-        }
-    }
-    for fragment in fragments {
-        let field_name = names.field_name(&fragment.name)?;
-        let payload_type = names.fragment_payload_type_name_for_type_name(owner_name, fragment)?;
-        let reader_function = names.binary_reader_function_name(&payload_type)?;
-        content.push_str(&format!(
-            "    {field_name}: __present_{field_name} ? {reader_function}(reader) : undefined,\n"
-        ));
-    }
-    content.push_str("  };\n");
+    content.push_str("  reader.endRecord?.();\n");
+    content.push_str("  return value;\n");
     content.push_str("}\n\n");
     Ok(())
 }
@@ -738,7 +715,7 @@ fn render_table(
         content.push_str("    for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {\n");
         content.push_str(&format!(
             "      rows.push({}(root));\n",
-            names.binary_reader_function_name(&names.row_type_name(&table.name)?)?
+            names.reader_function_name(&names.row_type_name(&table.name)?)?
         ));
         content.push_str("    }\n");
         content.push_str("    root.ensureExhausted();\n");
@@ -936,73 +913,40 @@ impl<'a> TypeScriptNames<'a> {
         self.identifier(&format!("read_{type_name}"), self.options.naming.function)
     }
 
-    fn binary_reader_function_name(&self, type_name: &str) -> Result<String> {
-        if self.options.naming.function == super::CaseStyle::CamelCase {
-            return naming::resolve_keyword_conflict(
-                format!("read{type_name}Binary"),
-                self.options.keyword_conflict,
-                naming::is_ts_keyword,
-                |_| None,
-            )
-            .map_err(|message| {
-                ConfigForgeError::Validation(format!("typescript codegen: {message}"))
-            });
-        }
-        self.identifier(
-            &format!("read_{type_name}_binary"),
-            self.options.naming.function,
-        )
-    }
-
     fn ts_read_field_expr(&self, field: &super::CodeField) -> Result<String> {
         let source_name = format!("{:?}", field.name);
         if field.required {
             return Ok(match &field.code_type {
-                CodeTypeRef::Int | CodeTypeRef::Float => {
-                    format!("readRequiredNumber(reader, {source_name})")
-                }
+                CodeTypeRef::Int => format!("readRequiredInt64(reader, {source_name})"),
+                CodeTypeRef::Float => format!("readRequiredFloat64(reader, {source_name})"),
                 CodeTypeRef::Bool => format!("readRequiredBool(reader, {source_name})"),
                 CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                     format!("readRequiredString(reader, {source_name})")
                 }
-                CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
-                    "{}(requiredField(reader, {source_name}))",
-                    self.reader_function_name(&self.type_name(name)?)?
-                ),
+                CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
+                    let type_name = self.type_name(name)?;
+                    let reader_function = self.reader_function_name(&type_name)?;
+                    format!(
+                        "reader.isPositional?.() ? {reader_function}(reader) : {reader_function}(requiredField(reader, {source_name}))"
+                    )
+                }
             });
         }
 
         Ok(match &field.code_type {
-            CodeTypeRef::Int | CodeTypeRef::Float => {
-                format!("optionalField(reader, {source_name})?.asNumber()")
-            }
-            CodeTypeRef::Bool => format!("optionalField(reader, {source_name})?.asBool()"),
+            CodeTypeRef::Int => format!("readOptionalInt64(reader, {source_name})"),
+            CodeTypeRef::Float => format!("readOptionalFloat64(reader, {source_name})"),
+            CodeTypeRef::Bool => format!("readOptionalBool(reader, {source_name})"),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
-                format!("optionalField(reader, {source_name})?.asString()")
+                format!("readOptionalString(reader, {source_name})")
             }
-            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => format!(
-                "(() => {{ const value = optionalField(reader, {source_name}); return value ? {}(value) : undefined; }})()",
-                self.reader_function_name(&self.type_name(name)?)?
-            ),
-        })
-    }
-
-    fn ts_read_binary_field_expr(&self, field: &super::CodeField) -> Result<String> {
-        Ok(match &field.code_type {
-            CodeTypeRef::Int => "reader.readNextInt64!()".to_owned(),
-            CodeTypeRef::Float => "reader.readNextFloat64!()".to_owned(),
-            CodeTypeRef::Bool => "reader.readNextBool!()".to_owned(),
-            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
-                "reader.readNextString!()".to_owned()
+            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
+                let type_name = self.type_name(name)?;
+                let reader_function = self.reader_function_name(&type_name)?;
+                format!(
+                    "reader.isPositional?.() ? (reader.readOptionalPresent!(0) ? {reader_function}(reader) : undefined) : (() => {{ const value = optionalField(reader, {source_name}); return value ? {reader_function}(value) : undefined; }})()"
+                )
             }
-            CodeTypeRef::Enum { name } => format!(
-                "{}FromBinaryOrdinal(reader.readEnumOrdinal!())",
-                self.reader_function_name(&self.type_name(name)?)?
-            ),
-            CodeTypeRef::Struct { name } => format!(
-                "{}(reader)",
-                self.binary_reader_function_name(&self.type_name(name)?)?
-            ),
         })
     }
 

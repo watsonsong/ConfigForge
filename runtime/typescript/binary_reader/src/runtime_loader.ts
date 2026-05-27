@@ -13,7 +13,7 @@ const textDecoder = new TextDecoder("utf-8", { fatal: true });
 export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   private offset = 16;
   private readonly revision: bigint;
-  private bitmap: Uint8Array<ArrayBufferLike> = new Uint8Array();
+  private readonly records: Array<{ bitmap: Uint8Array<ArrayBufferLike>; nextOptionalSlot: number }> = [];
 
   constructor(private readonly bytes: Uint8Array) {
     if (bytes.length < 16) {
@@ -66,17 +66,36 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     return this.revision;
   }
 
+  isPositional(): boolean {
+    return true;
+  }
+
   readRowCount(): number {
     return this.readVaruintAsNumber("row count");
   }
 
   beginRecord(optionalSlotCount: number): void {
     const byteCount = Math.ceil(optionalSlotCount / 8);
-    this.bitmap = this.readExact(byteCount);
+    this.records.push({ bitmap: this.readExact(byteCount), nextOptionalSlot: 0 });
   }
 
-  readOptionalPresent(slotIndex: number): boolean {
-    const byte = this.bitmap[Math.floor(slotIndex / 8)];
+  endRecord(): void {
+    const record = this.records.pop();
+    if (!record) {
+      throw new Error("binary reader record stack underflow");
+    }
+    if (record.nextOptionalSlot > record.bitmap.length * 8) {
+      throw new Error("binary reader consumed more optional slots than current record bitmap");
+    }
+  }
+
+  readOptionalPresent(_slotIndex: number): boolean {
+    const record = this.records[this.records.length - 1];
+    if (!record) {
+      throw new Error("binary reader is not inside a record");
+    }
+    const slotIndex = record.nextOptionalSlot++;
+    const byte = record.bitmap[Math.floor(slotIndex / 8)];
     if (byte === undefined) {
       throw new Error(`optional slot ${slotIndex} is out of current record bitmap`);
     }

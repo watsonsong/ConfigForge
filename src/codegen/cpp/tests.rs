@@ -107,11 +107,9 @@ fn emits_optional_scalar_and_struct_field_types() {
     assert!(header.contains("std::optional<std::int64_t> bonus"));
     assert!(header.contains("std::optional<std::string> note"));
     assert!(header.contains("std::optional<RewardInfo> payload"));
-    assert!(source.contains("if (present_bonus) { value.bonus = reader.ReadNextInt64(); }"));
-    assert!(
-        source.contains("if (present_payload) { value.payload = ReadRewardInfoBinary(reader); }")
-    );
-    assert!(source.contains("OptionalField(reader, \"bonus\", [](const IRuntimeDataReader& value) { return value.AsInt64(); })"));
+    assert!(source.contains("value.bonus = ReadOptionalInt64(reader, \"bonus\");"));
+    assert!(source.contains("std::optional<RewardInfo>(ReadRewardInfo(reader))"));
+    assert!(!source.contains("ReadRewardInfoBinary"));
 }
 
 #[test]

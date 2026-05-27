@@ -94,11 +94,11 @@ fn emits_optional_scalar_and_struct_field_types() {
     assert!(content.contains("bonus?: number;"));
     assert!(content.contains("note?: string;"));
     assert!(content.contains("payload?: RewardInfo;"));
-    assert!(content.contains("bonus: __present_bonus ? reader.readNextInt64!() : undefined,"));
+    assert!(content.contains("bonus: readOptionalInt64(reader, \"bonus\"),"));
     assert!(
-        content.contains("payload: __present_payload ? readRewardInfoBinary(reader) : undefined,")
+        content.contains("reader.readOptionalPresent!(0) ? readRewardInfo(reader) : undefined")
     );
-    assert!(content.contains("bonus: optionalField(reader, \"bonus\")?.asNumber(),"));
+    assert!(!content.contains("readRewardInfoBinary"));
 }
 
 #[test]
@@ -136,9 +136,11 @@ fn reads_optional_fragment_once() {
         .expect("typescript code");
     let content = &files[0].content;
 
-    assert!(content.contains("const stackReader = optionalField(reader, \"stack\");"));
+    assert!(content.contains(
+        "const stackReader = reader.isPositional?.() ? undefined : optionalField(reader, \"stack\");"
+    ));
     assert!(
-        content.contains("stack: stackReader ? readItemsStackFragment(stackReader) : undefined,")
+        content.contains("stack: reader.isPositional?.() ? (reader.readOptionalPresent!(0) ? readItemsStackFragment(reader) : undefined) : (stackReader ? readItemsStackFragment(stackReader) : undefined),")
     );
     assert!(!content.contains("optionalField(reader, \"stack\") ?"));
 }

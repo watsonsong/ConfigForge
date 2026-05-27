@@ -16,11 +16,17 @@ pub trait RuntimeDataReader: Clone {
     fn schema_revision(&self) -> Option<u64> {
         None
     }
+    fn is_positional(&self) -> bool {
+        false
+    }
     fn read_row_count(&self) -> Result<usize, String> {
         Err("positional runtime reader is not supported".to_owned())
     }
     fn begin_record(&self, _optional_slot_count: usize) -> Result<(), String> {
-        Err("positional runtime reader is not supported".to_owned())
+        Ok(())
+    }
+    fn end_record(&self) -> Result<(), String> {
+        Ok(())
     }
     fn read_optional_present(&self, _slot_index: usize) -> Result<bool, String> {
         Err("positional runtime reader is not supported".to_owned())

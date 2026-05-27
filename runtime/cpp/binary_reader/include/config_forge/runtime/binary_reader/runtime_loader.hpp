@@ -115,6 +115,8 @@ public:
 
     std::optional<std::uint64_t> SchemaRevision() const override { return state_->schema_revision; }
 
+    bool IsPositional() const override { return true; }
+
     std::size_t ReadRowCount() override {
         return CheckedSize(ReadVaruint(), "row count");
     }
@@ -122,15 +124,27 @@ public:
     void BeginRecord(std::size_t optional_slot_count) override {
         const std::size_t byte_count = (optional_slot_count + 7) / 8;
         const std::uint8_t* bytes = ReadExact(byte_count);
-        state_->bitmap.assign(bytes, bytes + byte_count);
+        state_->records.push_back(RecordState{std::vector<std::uint8_t>(bytes, bytes + byte_count), 0});
     }
 
-    bool ReadOptionalPresent(std::size_t slot_index) override {
+    void EndRecord() override {
+        if (state_->records.empty()) {
+            throw std::runtime_error("binary reader record stack underflow");
+        }
+        state_->records.pop_back();
+    }
+
+    bool ReadOptionalPresent(std::size_t) override {
+        if (state_->records.empty()) {
+            throw std::runtime_error("binary reader is not inside a record");
+        }
+        auto& record = state_->records.back();
+        const std::size_t slot_index = record.next_optional_slot++;
         const std::size_t byte_index = slot_index / 8;
-        if (byte_index >= state_->bitmap.size()) {
+        if (byte_index >= record.bitmap.size()) {
             throw std::runtime_error("optional slot is out of current record bitmap");
         }
-        return (state_->bitmap[byte_index] & (1u << (slot_index % 8))) != 0;
+        return (record.bitmap[byte_index] & (1u << (slot_index % 8))) != 0;
     }
 
     std::int64_t ReadNextInt64() override { return ReadNextInt64Value(); }
@@ -150,13 +164,18 @@ public:
     }
 
 private:
+    struct RecordState {
+        std::vector<std::uint8_t> bitmap;
+        std::size_t next_optional_slot = 0;
+    };
+
     struct State {
         explicit State(std::vector<std::uint8_t> input) : bytes(std::move(input)) {}
 
         std::vector<std::uint8_t> bytes;
         std::size_t offset = 16;
         std::uint64_t schema_revision = 0;
-        std::vector<std::uint8_t> bitmap;
+        std::vector<RecordState> records;
     };
 
     std::int64_t ReadNextInt64Value() const {

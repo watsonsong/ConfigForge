@@ -19,7 +19,12 @@ struct BinaryState {
     bytes: Vec<u8>,
     offset: usize,
     schema_revision: u64,
+    records: Vec<RecordState>,
+}
+
+struct RecordState {
     bitmap: Vec<u8>,
+    next_optional_slot: usize,
 }
 
 pub struct FsBinaryRuntimeDataLoader {
@@ -52,7 +57,7 @@ impl BinaryRuntimeDataReader {
                 bytes,
                 offset: 16,
                 schema_revision,
-                bitmap: Vec::new(),
+                records: Vec::new(),
             })),
         })
     }
@@ -95,6 +100,10 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         Some(self.state.borrow().schema_revision)
     }
 
+    fn is_positional(&self) -> bool {
+        true
+    }
+
     fn read_row_count(&self) -> Result<usize, String> {
         let value = read_varuint(&mut self.state.borrow_mut())?;
         usize::try_from(value).map_err(|_| "row count exceeds usize".to_owned())
@@ -104,13 +113,32 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         let byte_count = optional_slot_count.div_ceil(8);
         let mut state = self.state.borrow_mut();
         let bytes = read_exact(&mut state, byte_count)?.to_vec();
-        state.bitmap = bytes;
+        state.records.push(RecordState {
+            bitmap: bytes,
+            next_optional_slot: 0,
+        });
         Ok(())
     }
 
-    fn read_optional_present(&self, slot_index: usize) -> Result<bool, String> {
-        let state = self.state.borrow();
-        let Some(byte) = state.bitmap.get(slot_index / 8) else {
+    fn end_record(&self) -> Result<(), String> {
+        let mut state = self.state.borrow_mut();
+        let Some(record) = state.records.pop() else {
+            return Err("binary reader record stack underflow".to_owned());
+        };
+        if record.next_optional_slot > record.bitmap.len() * 8 {
+            return Err("binary reader consumed more optional slots than current record bitmap".to_owned());
+        }
+        Ok(())
+    }
+
+    fn read_optional_present(&self, _slot_index: usize) -> Result<bool, String> {
+        let mut state = self.state.borrow_mut();
+        let Some(record) = state.records.last_mut() else {
+            return Err("binary reader is not inside a record".to_owned());
+        };
+        let slot_index = record.next_optional_slot;
+        record.next_optional_slot += 1;
+        let Some(byte) = record.bitmap.get(slot_index / 8) else {
             return Err(format!(
                 "optional slot {slot_index} is out of current record bitmap"
             ));

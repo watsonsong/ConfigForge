@@ -87,18 +87,9 @@ fn emits_optional_scalar_and_struct_field_types() {
     assert!(content.contains("pub bonus: Option<i64>,"));
     assert!(content.contains("pub note: Option<String>,"));
     assert!(content.contains("pub payload: Option<RewardInfo>,"));
-    assert!(
-        content
-            .contains("bonus: if __present_bonus { Some(reader.read_next_i64()?) } else { None },")
-    );
-    assert!(content.contains(
-        "payload: if __present_payload { Some(RewardInfo::read_from_binary_reader(reader)?) } else { None },"
-    ));
-    assert!(
-        content.contains(
-            "optional_field(reader, \"bonus\")?.map(|value| value.as_i64()).transpose()?"
-        )
-    );
+    assert!(content.contains("bonus: read_optional_i64(reader, \"bonus\")?"));
+    assert!(content.contains("Some(RewardInfo::read_from_reader(reader)?)"));
+    assert!(!content.contains("read_from_binary_reader"));
 }
 
 #[test]
