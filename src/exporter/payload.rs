@@ -145,19 +145,15 @@ fn build_exported_object_payload(
 
 fn exported_value_from_resolved(value: &ResolvedValue) -> Result<ExportedValue> {
     match &value.value {
-        DataValue::Null => Ok(ExportedValue::Struct(BTreeMap::new())),
         DataValue::Scalar(_) => Ok(ExportedValue::Scalar(
             value.scalar_export_string().unwrap_or_default(),
         )),
-        DataValue::Struct(children) | DataValue::Map(children) => children
+        DataValue::Struct(children) => children
             .iter()
             .map(|(field_name, child)| {
                 Ok((field_name.clone(), exported_value_from_resolved(child)?))
             })
             .collect::<Result<BTreeMap<_, _>>>()
             .map(ExportedValue::Struct),
-        DataValue::Array(_) => Err(ConfigForgeError::Validation(
-            "array values are not supported by runtime data export yet".to_owned(),
-        )),
     }
 }

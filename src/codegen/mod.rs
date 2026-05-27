@@ -8,9 +8,10 @@ mod rust;
 mod typescript;
 mod writer;
 
-pub use self::ir::{
-    CodeEnum, CodeEnumValue, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel,
-    CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, GeneratedFile, build_code_model,
+pub use self::ir::GeneratedFile;
+pub(crate) use self::ir::{
+    CodeEnum, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel, CodeStruct,
+    CodeTable, CodeTableKind, CodeTypeRef, build_code_model,
 };
 pub use cpp::{CppCodeGenerator, CppCodegenOptions};
 pub use rust::{RustCodeGenerator, RustCodegenOptions};

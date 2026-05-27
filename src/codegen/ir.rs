@@ -12,34 +12,34 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeModel {
+pub(crate) struct CodeModel {
     pub enums: Vec<CodeEnum>,
     pub structs: Vec<CodeStruct>,
     pub tables: Vec<CodeTable>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeEnum {
+pub(crate) struct CodeEnum {
     pub name: String,
     pub desc: Option<String>,
     pub values: Vec<CodeEnumValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeEnumValue {
+pub(crate) struct CodeEnumValue {
     pub name: String,
     pub desc: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeStruct {
+pub(crate) struct CodeStruct {
     pub name: String,
     pub desc: Option<String>,
     pub fields: Vec<CodeField>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeTable {
+pub(crate) struct CodeTable {
     pub name: String,
     pub kind: CodeTableKind,
     pub desc: Option<String>,
@@ -54,13 +54,13 @@ pub struct CodeTable {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CodeTableKind {
+pub(crate) enum CodeTableKind {
     Object,
     Collection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeFragment {
+pub(crate) struct CodeFragment {
     pub name: String,
     pub desc: Option<String>,
     pub fields: Vec<CodeField>,
@@ -68,13 +68,13 @@ pub struct CodeFragment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CodeFragmentPayload {
+pub(crate) enum CodeFragmentPayload {
     InlineFields,
     Struct { name: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeField {
+pub(crate) struct CodeField {
     pub name: String,
     pub code_type: CodeTypeRef,
     pub desc: Option<String>,
@@ -82,7 +82,7 @@ pub struct CodeField {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeIndex {
+pub(crate) struct CodeIndex {
     pub name: String,
     pub unique: bool,
     pub primary: bool,
@@ -90,7 +90,7 @@ pub struct CodeIndex {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeForeignKey {
+pub(crate) struct CodeForeignKey {
     pub name: String,
     pub desc: Option<String>,
     pub fields: Vec<CodeField>,
@@ -100,7 +100,7 @@ pub struct CodeForeignKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CodeTypeRef {
+pub(crate) enum CodeTypeRef {
     Int,
     Float,
     Bool,
@@ -117,7 +117,7 @@ pub struct GeneratedFile {
     pub content: String,
 }
 
-pub fn build_code_model(
+pub(crate) fn build_code_model(
     meta: &LinkedMetaModel<'_>,
     target_tags: &crate::meta::TargetTags,
     runtime_data_files: &[RuntimeDataFile],

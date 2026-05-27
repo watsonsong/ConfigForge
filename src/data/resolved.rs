@@ -1,16 +1,17 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    path::PathBuf,
-};
+use std::{collections::BTreeMap, path::PathBuf};
+
+#[cfg(test)]
+use std::collections::HashMap;
 
 use crate::{ConfigForgeError, Result};
 
 use super::RowSourceInfo;
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg(test)]
 pub struct ResolvedDataSet {
     pub tables: Vec<ResolvedTable>,
     table_index: HashMap<String, usize>,
@@ -33,11 +34,8 @@ pub struct ResolvedValue {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DataValue {
-    Null,
     Scalar(ScalarValue),
     Struct(BTreeMap<String, ResolvedValue>),
-    Array(Vec<ResolvedValue>),
-    Map(BTreeMap<String, ResolvedValue>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -66,11 +64,8 @@ pub struct ValueSourceTrace {
     pub raw_value: Option<String>,
 }
 
+#[cfg(test)]
 impl ResolvedDataSet {
-    pub fn new(tables: Vec<ResolvedTable>) -> Self {
-        Self::try_new(tables).expect("resolved data set should not contain duplicate table names")
-    }
-
     pub fn try_new(tables: Vec<ResolvedTable>) -> Result<Self> {
         let mut table_index = HashMap::new();
         for (index, table) in tables.iter().enumerate() {
@@ -92,10 +87,6 @@ impl ResolvedDataSet {
         self.table_index
             .get(name)
             .and_then(|index| self.tables.get(*index))
-    }
-
-    pub fn tables(&self) -> &[ResolvedTable] {
-        &self.tables
     }
 }
 
@@ -119,18 +110,6 @@ impl ResolvedTable {
             rows,
             row_sources,
         })
-    }
-
-    pub fn row_source(&self, row_index: usize) -> Option<&RowSourceInfo> {
-        self.row_sources.get(row_index)
-    }
-
-    pub fn row_count(&self) -> usize {
-        self.rows.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.rows.is_empty()
     }
 }
 

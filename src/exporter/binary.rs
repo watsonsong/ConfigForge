@@ -261,7 +261,7 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
         fragment: &LinkedFragmentMeta<'meta>,
         value: &ResolvedValue,
     ) -> Result<()> {
-        let (DataValue::Struct(children) | DataValue::Map(children)) = &value.value else {
+        let DataValue::Struct(children) = &value.value else {
             return Err(ConfigForgeError::Validation(format!(
                 "binary export expected struct value for fragment `{}`",
                 fragment.meta.name
@@ -397,7 +397,7 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
         struct_type: &LinkedStructType<'meta>,
         value: &ResolvedValue,
     ) -> Result<()> {
-        let (DataValue::Struct(children) | DataValue::Map(children)) = &value.value else {
+        let DataValue::Struct(children) = &value.value else {
             return Err(ConfigForgeError::Validation(format!(
                 "binary export expected struct `{}` value",
                 struct_type.meta.name

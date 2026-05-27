@@ -13,11 +13,11 @@ pub use self::csv::CsvDataReader;
 pub use self::loader::DataLoader;
 pub use self::model::{DataRow, DataSet, DataTable, RowSourceInfo};
 pub use self::plan::{DataLoadPlan, DataProvider, DataSourceLayout, DataSourcePlan};
-pub use self::resolved::{
-    DataValue, ResolvedDataSet, ResolvedRow, ResolvedTable, ResolvedValue, ScalarValue,
-    ValueSourceKind, ValueSourceTrace,
-};
-pub use self::resolver::{DataResolver, StructOccurrenceLayout, StructSourceLayout};
+pub use self::resolved::{DataValue, ResolvedRow, ResolvedTable, ResolvedValue, ScalarValue};
+pub use self::resolver::DataResolver;
+
+#[cfg(test)]
+pub use self::resolved::{ResolvedDataSet, ValueSourceKind};
 
 #[cfg(test)]
 mod tests;

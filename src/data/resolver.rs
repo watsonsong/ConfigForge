@@ -15,29 +15,21 @@ use crate::{
 };
 
 use super::{
-    DataRow, DataSet, DataTable, DataValue, ResolvedDataSet, ResolvedRow, ResolvedTable,
-    ResolvedValue, RowSourceInfo, ScalarValue,
+    DataRow, DataTable, DataValue, ResolvedRow, ResolvedTable, ResolvedValue, RowSourceInfo,
+    ScalarValue,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StructSourceLayout {
-    JsonCell,
-    ExpandedValue,
-    Missing,
-}
+#[cfg(test)]
+use super::{DataSet, ResolvedDataSet};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructOccurrenceLayout {
-    pub parent_path: String,
-    pub layout: StructSourceLayout,
-}
-
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct DataResolver<'meta> {
     meta: &'meta LinkedMetaModel<'meta>,
     target_tags: Option<TargetTags>,
 }
 
 impl<'meta> DataResolver<'meta> {
+    #[cfg(test)]
     pub fn new(meta: &'meta LinkedMetaModel<'meta>) -> Self {
         Self {
             meta,
@@ -45,6 +37,7 @@ impl<'meta> DataResolver<'meta> {
         }
     }
 
+    #[cfg(test)]
     pub fn for_target(meta: &'meta LinkedMetaModel<'meta>, target_tags: &TargetTags) -> Self {
         Self {
             meta,
@@ -52,24 +45,7 @@ impl<'meta> DataResolver<'meta> {
         }
     }
 
-    pub fn resolve(&self, data_set: &DataSet) -> Result<ResolvedDataSet> {
-        let mut tables = Vec::with_capacity(data_set.tables().len());
-        for table in data_set.tables() {
-            let table_meta = self.meta.table(&table.name).ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "data set contains table `{}` missing from linked meta",
-                    table.name
-                ))
-            })?;
-            tables.push(Self::resolve_table(
-                table_meta,
-                table,
-                self.target_tags.as_ref(),
-            )?);
-        }
-        ResolvedDataSet::try_new(tables)
-    }
-
+    #[cfg(test)]
     pub fn resolve_required_tables(&self, data_set: &DataSet) -> Result<ResolvedDataSet> {
         let mut tables = Vec::with_capacity(self.meta.tables.len());
         for table_meta in &self.meta.tables {
