@@ -86,7 +86,7 @@ impl ExecutionOptions {
 impl Default for ExecutionOptions {
     fn default() -> Self {
         let available = std::thread::available_parallelism()
-            .unwrap_or_else(|_| NonZeroUsize::new(1).expect("1 is non-zero"))
+            .unwrap_or(NonZeroUsize::MIN)
             .get();
         let jobs = available.clamp(1, 4);
         let io_concurrency = (jobs * 2).clamp(4, 16);

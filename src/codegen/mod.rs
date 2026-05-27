@@ -319,17 +319,13 @@ pub(crate) fn ensure_unique_generated_symbols(
     let mut seen: HashMap<String, GeneratedSymbol> = HashMap::new();
     for symbol in symbols {
         let generated = symbol.generated.clone();
-        if let Some(previous) = seen.insert(generated.clone(), symbol) {
-            let duplicate = seen.get(&generated).expect("inserted symbol should exist");
+        if let Some(previous) = seen.get(&generated) {
             return Err(ConfigForgeError::Validation(format!(
                 "{language} codegen: duplicate generated identifier `{}` in {scope}; {} `{}` and {} `{}` both map to it",
-                duplicate.generated,
-                previous.kind,
-                previous.original,
-                duplicate.kind,
-                duplicate.original
+                generated, previous.kind, previous.original, symbol.kind, symbol.original
             )));
         }
+        seen.insert(generated, symbol);
     }
     Ok(())
 }

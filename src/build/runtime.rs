@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 use std::path::PathBuf;
 
 use rayon::ThreadPool;
@@ -61,21 +61,21 @@ pub(super) fn export_runtime_data_tasks(
 
     for data_task in data_tasks {
         let format_exporter = registry.require(&data_task.format)?;
-        if !normalized_data_sets.contains_key(&data_task.input) {
-            let loaded_data_set =
-                DataLoader::new(&data_task.input).load_with_pool(&data_plan, pool)?;
-            let data_set = normalize_data_set(linked_meta, &loaded_data_set)?;
-            let validation_report = validate_normalized_data_set_for_target_with_report(
-                linked_meta,
-                target_tags,
-                &data_set,
-            )?;
-            warnings.extend(validation_report.warning_messages());
-            normalized_data_sets.insert(data_task.input.clone(), data_set);
-        }
-        let data_set = normalized_data_sets
-            .get(&data_task.input)
-            .expect("data set should be loaded before export");
+        let data_set = match normalized_data_sets.entry(data_task.input.clone()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let loaded_data_set =
+                    DataLoader::new(&data_task.input).load_with_pool(&data_plan, pool)?;
+                let data_set = normalize_data_set(linked_meta, &loaded_data_set)?;
+                let validation_report = validate_normalized_data_set_for_target_with_report(
+                    linked_meta,
+                    target_tags,
+                    &data_set,
+                )?;
+                warnings.extend(validation_report.warning_messages());
+                entry.insert(data_set)
+            }
+        };
         let runtime_artifacts = export_runtime_data(
             &data_task.output,
             linked_meta,

@@ -86,10 +86,9 @@ impl DataLoader {
 
         let mut tables = Vec::with_capacity(table_order.len());
         for table_name in table_order {
-            let (rows, row_sources) = merged
-                .remove(&table_name)
-                .expect("table was inserted into merged map");
-            tables.push(DataTable::new_with_sources(table_name, rows, row_sources)?);
+            if let Some((rows, row_sources)) = merged.remove(&table_name) {
+                tables.push(DataTable::new_with_sources(table_name, rows, row_sources)?);
+            }
         }
         DataSet::try_new(tables)
     }
