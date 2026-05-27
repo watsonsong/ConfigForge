@@ -85,6 +85,18 @@ impl Diagnostic {
             hint: None,
         }
     }
+
+    pub fn from_entry(entry: &impl DiagnosticEntry) -> Self {
+        Self {
+            code: entry.code(),
+            severity: entry.severity(),
+            message: entry.message().to_owned(),
+            location: entry.location().clone(),
+            source: entry.source().map(str::to_owned),
+            target: entry.target().map(str::to_owned),
+            hint: entry.hint().map(str::to_owned),
+        }
+    }
 }
 
 impl fmt::Display for Diagnostic {

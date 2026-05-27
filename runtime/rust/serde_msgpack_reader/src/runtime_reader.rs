@@ -9,7 +9,9 @@ use std::{
 use serde_json::Value;
 
 pub use config_forge_runtime_reader_core::SUPPORTED_CONFIG_FORGE_READER_CONTRACT;
-use config_forge_runtime_reader_core::{RuntimeDataLoader, RuntimeDataReader};
+use config_forge_runtime_reader_core::{
+    RuntimeDataError, RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult,
+};
 
 #[derive(Debug, Clone)]
 pub struct MessagePackValueReader {
@@ -23,68 +25,85 @@ impl MessagePackValueReader {
 }
 
 impl RuntimeDataReader for MessagePackValueReader {
-    fn field(&self, name: &str) -> Result<Option<Self>, String> {
+    fn field(&self, name: &str) -> RuntimeDataResult<Option<Self>> {
         Ok(self.value.get(name).cloned().map(Self::new))
     }
 
-    fn index(&self, index: usize) -> Result<Self, String> {
+    fn index(&self, index: usize) -> RuntimeDataResult<Self> {
         self.value
             .as_array()
             .and_then(|values| values.get(index))
             .cloned()
             .map(Self::new)
-            .ok_or_else(|| format!("missing array index {index}"))
+            .ok_or_else(|| RuntimeDataError::not_found(format!("missing array index {index}")))
     }
 
-    fn len(&self) -> Result<usize, String> {
+    fn len(&self) -> RuntimeDataResult<usize> {
         self.value
             .as_array()
             .map(Vec::len)
             .or_else(|| self.value.as_object().map(|object| object.len()))
-            .ok_or_else(|| "reader value is not array/object".to_owned())
+            .ok_or_else(|| RuntimeDataError::type_mismatch("reader value is not array/object"))
     }
 
-    fn as_i64(&self) -> Result<i64, String> {
+    fn as_i64(&self) -> RuntimeDataResult<i64> {
         match &self.value {
             Value::Number(number) => number
                 .as_i64()
-                .ok_or_else(|| "number is not i64".to_owned()),
-            Value::String(text) => text.parse().map_err(|error| format!("invalid i64: {error}")),
-            other => Err(format!("expected i64-like value, got {other:?}")),
+                .ok_or_else(|| RuntimeDataError::type_mismatch("number is not i64")),
+            Value::String(text) => text
+                .parse()
+                .map_err(|error| RuntimeDataError::decode(format!("invalid i64: {error}"))),
+            other => Err(RuntimeDataError::type_mismatch(format!(
+                "expected i64-like value, got {other:?}"
+            ))),
         }
     }
 
-    fn as_f64(&self) -> Result<f64, String> {
+    fn as_f64(&self) -> RuntimeDataResult<f64> {
         let parsed = match &self.value {
             Value::Number(number) => number
                 .as_f64()
-                .ok_or_else(|| "number is not f64".to_owned())?,
-            Value::String(text) => text.parse().map_err(|error| format!("invalid f64: {error}"))?,
-            other => return Err(format!("expected f64-like value, got {other:?}")),
+                .ok_or_else(|| RuntimeDataError::type_mismatch("number is not f64"))?,
+            Value::String(text) => text
+                .parse()
+                .map_err(|error| RuntimeDataError::decode(format!("invalid f64: {error}")))?,
+            other => {
+                return Err(RuntimeDataError::type_mismatch(format!(
+                    "expected f64-like value, got {other:?}"
+                )));
+            }
         };
         if parsed.is_finite() {
             Ok(parsed)
         } else {
-            Err(format!("expected finite f64-like value, got {:?}", self.value))
+            Err(RuntimeDataError::type_mismatch(format!(
+                "expected finite f64-like value, got {:?}",
+                self.value
+            )))
         }
     }
 
-    fn as_bool(&self) -> Result<bool, String> {
+    fn as_bool(&self) -> RuntimeDataResult<bool> {
         match &self.value {
             Value::Bool(value) => Ok(*value),
             Value::String(text) => match text.as_str() {
                 "true" | "1" => Ok(true),
                 "false" | "0" => Ok(false),
-                _ => Err(format!("invalid bool: {text}")),
+                _ => Err(RuntimeDataError::decode(format!("invalid bool: {text}"))),
             },
-            other => Err(format!("expected bool-like value, got {other:?}")),
+            other => Err(RuntimeDataError::type_mismatch(format!(
+                "expected bool-like value, got {other:?}"
+            ))),
         }
     }
 
-    fn as_string(&self) -> Result<String, String> {
+    fn as_string(&self) -> RuntimeDataResult<String> {
         match &self.value {
             Value::String(text) => Ok(text.clone()),
-            other => Err(format!("expected string value, got {other:?}")),
+            other => Err(RuntimeDataError::type_mismatch(format!(
+                "expected string value, got {other:?}"
+            ))),
         }
     }
 
@@ -105,10 +124,12 @@ impl FsMessagePackRuntimeDataLoader {
         }
     }
 
-    pub fn open_reader(&self, path: &str) -> Result<MessagePackValueReader, String> {
-        let bytes =
-            fs::read(safe_join(&self.data_dir, path)?).map_err(|error| error.to_string())?;
-        let value = rmp_serde::from_slice(&bytes).map_err(|error| error.to_string())?;
+    pub fn open_reader(&self, path: &str) -> RuntimeDataResult<MessagePackValueReader> {
+        let full_path = safe_join(&self.data_dir, path)?;
+        let bytes = fs::read(&full_path)
+            .map_err(|error| RuntimeDataError::io(full_path.display().to_string(), error))?;
+        let value = rmp_serde::from_slice(&bytes)
+            .map_err(|error| RuntimeDataError::decode(error.to_string()))?;
         Ok(MessagePackValueReader::new(value))
     }
 }
@@ -116,15 +137,17 @@ impl FsMessagePackRuntimeDataLoader {
 impl RuntimeDataLoader for FsMessagePackRuntimeDataLoader {
     type Reader = MessagePackValueReader;
 
-    fn open(&self, path: &str) -> Result<Self::Reader, String> {
+    fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {
         self.open_reader(path)
     }
 }
 
-fn safe_join(root: &Path, logical_path: &str) -> Result<PathBuf, String> {
+fn safe_join(root: &Path, logical_path: &str) -> RuntimeDataResult<PathBuf> {
     let path = Path::new(logical_path);
     if path.is_absolute() {
-        return Err(format!("runtime data path must be relative: {logical_path}"));
+        return Err(RuntimeDataError::invalid_path(format!(
+            "runtime data path must be relative: {logical_path}"
+        )));
     }
 
     let mut normalized = PathBuf::new();
@@ -134,13 +157,15 @@ fn safe_join(root: &Path, logical_path: &str) -> Result<PathBuf, String> {
             Component::CurDir => {}
             Component::ParentDir => {
                 if !normalized.pop() {
-                    return Err(format!(
+                    return Err(RuntimeDataError::invalid_path(format!(
                         "runtime data path escapes data root: {logical_path}"
-                    ));
+                    )));
                 }
             }
             _ => {
-                return Err(format!("unsupported runtime data path: {logical_path}"));
+                return Err(RuntimeDataError::invalid_path(format!(
+                    "unsupported runtime data path: {logical_path}"
+                )));
             }
         }
     }
@@ -189,10 +214,12 @@ mod tests {
         assert!(loader
             .open_reader("../secret.msgpack")
             .unwrap_err()
+            .message
             .contains("escapes"));
         assert!(loader
             .open_reader("/tmp/secret.msgpack")
             .unwrap_err()
+            .message
             .contains("relative"));
     }
 

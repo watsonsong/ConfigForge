@@ -133,8 +133,8 @@ pub fn validate_normalized_data_set_for_target_with_report(
 
 fn report_into_result(report: ValidationReport) -> Result<ValidationReport> {
     if report.has_error() {
-        return Err(ConfigForgeError::Validation(
-            report.error_messages().join("; "),
+        return Err(ConfigForgeError::ValidationReport(
+            report.clone().into_diagnostic_report(),
         ));
     }
     Ok(report)

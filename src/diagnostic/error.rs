@@ -5,7 +5,10 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::meta::MetaDiagnostic;
+use crate::{
+    diagnostic::{Diagnostic, DiagnosticReport},
+    meta::MetaDiagnostic,
+};
 
 pub type Result<T> = std::result::Result<T, ConfigForgeError>;
 
@@ -63,6 +66,9 @@ pub enum ConfigForgeError {
 
     #[error("validation failed: {0}")]
     Validation(String),
+
+    #[error("validation failed: {}", format_diagnostic_report(.0))]
+    ValidationReport(DiagnosticReport<Diagnostic>),
 }
 
 fn format_meta_diagnostics(diagnostics: &[MetaDiagnostic]) -> String {
@@ -71,4 +77,8 @@ fn format_meta_diagnostics(diagnostics: &[MetaDiagnostic]) -> String {
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+fn format_diagnostic_report(report: &DiagnosticReport<Diagnostic>) -> String {
+    report.error_messages().join("; ")
 }

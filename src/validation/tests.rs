@@ -16,6 +16,7 @@ use super::*;
 fn validate_error(result: Result<()>) -> String {
     match result.unwrap_err() {
         ConfigForgeError::Validation(message) => message,
+        ConfigForgeError::ValidationReport(report) => report.error_messages().join("; "),
         error => panic!("expected validation error, got {error}"),
     }
 }

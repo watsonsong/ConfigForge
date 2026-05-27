@@ -27,6 +27,8 @@ fn emits_loader_table_and_index_helpers() {
     assert!(content.contains("pub use config_forge_runtime_reader_core"));
     assert!(content.contains("RuntimeDataLoader"));
     assert!(content.contains("RuntimeDataReader"));
+    assert!(content.contains("RuntimeDataError"));
+    assert!(content.contains("RuntimeDataResult"));
     assert!(content.contains("CONFIG_FORGE_READER_CONTRACT_VERSION"));
     assert!(content.contains("pub const DATA_FILE: &'static str = \"items.json\";"));
     assert!(!content.contains("RuntimeDataFormat"));
@@ -38,7 +40,9 @@ fn emits_loader_table_and_index_helpers() {
     assert!(content.contains("pub enum ItemRarity"));
     assert!(content.contains("pub struct RewardInfo"));
     assert!(content.contains("pub struct ItemsRow"));
-    assert!(content.contains("fn read_from_reader<R: RuntimeDataReader>(reader: &R)"));
+    assert!(content.contains(
+        "fn read_from_reader<R: RuntimeDataReader>(reader: &R) -> RuntimeDataResult<Self>"
+    ));
     assert!(content.contains("pub fn get_by_id"));
     assert!(content.contains("pub fn find_by_rarity"));
     assert!(content.contains("pub struct GameData"));

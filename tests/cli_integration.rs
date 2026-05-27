@@ -1308,7 +1308,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                 }}
 
                 impl RuntimeDataReader for MockReader {{
-                    fn field(&self, name: &str) -> Result<Option<Self>, String> {{
+                    fn field(&self, name: &str) -> RuntimeDataResult<Option<Self>> {{
                         let field = match name {{
                             "rows" => "rows",
                             "id" => "id",
@@ -1320,24 +1320,24 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             "daily_reset_hour" => "daily_reset_hour",
                             "pvp_enabled" => "pvp_enabled",
                             "stack" | "attributes" | "skill" => return Ok(None),
-                            other => return Err(format!("unexpected field: {{other}}")),
+                            other => return Err(RuntimeDataError::not_found(format!("unexpected field: {{other}}"))),
                         }};
                         Ok(Some(Self {{ path: self.path, index: self.index, field: Some(field) }}))
                     }}
 
-                    fn index(&self, index: usize) -> Result<Self, String> {{
+                    fn index(&self, index: usize) -> RuntimeDataResult<Self> {{
                         if self.path == "items" && self.field == Some("rows") && index == 0 {{
                             Ok(Self {{ path: self.path, index: Some(index), field: None }})
                         }} else {{
-                            Err(format!("unexpected index: {{index}}"))
+                            Err(RuntimeDataError::not_found(format!("unexpected index: {{index}}")))
                         }}
                     }}
 
-                    fn len(&self) -> Result<usize, String> {{
-                        if self.path == "items" && self.field == Some("rows") {{ Ok(1) }} else {{ Err("unexpected len".to_owned()) }}
+                    fn len(&self) -> RuntimeDataResult<usize> {{
+                        if self.path == "items" && self.field == Some("rows") {{ Ok(1) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
                     }}
 
-                    fn as_i64(&self) -> Result<i64, String> {{
+                    fn as_i64(&self) -> RuntimeDataResult<i64> {{
                         match (self.path, self.field) {{
                             ("items", Some("id")) => Ok(1),
                             ("items", Some("price")) => Ok(10),
@@ -1345,18 +1345,18 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             ("game_rules", Some("starter_gold")) => Ok(500),
                             ("game_rules", Some("stamina_cap")) => Ok(120),
                             ("game_rules", Some("daily_reset_hour")) => Ok(5),
-                            _ => Err("unexpected i64".to_owned()),
+                            _ => Err(RuntimeDataError::type_mismatch("unexpected i64")),
                         }}
                     }}
 
-                    fn as_f64(&self) -> Result<f64, String> {{ Ok(self.as_i64()? as f64) }}
+                    fn as_f64(&self) -> RuntimeDataResult<f64> {{ Ok(self.as_i64()? as f64) }}
 
-                    fn as_bool(&self) -> Result<bool, String> {{
-                        if self.path == "game_rules" && self.field == Some("pvp_enabled") {{ Ok(true) }} else {{ Err("unexpected bool".to_owned()) }}
+                    fn as_bool(&self) -> RuntimeDataResult<bool> {{
+                        if self.path == "game_rules" && self.field == Some("pvp_enabled") {{ Ok(true) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected bool")) }}
                     }}
 
-                    fn as_string(&self) -> Result<String, String> {{
-                        if self.path == "items" && self.field == Some("name") {{ Ok("Potion".to_owned()) }} else {{ Err("unexpected string".to_owned()) }}
+                    fn as_string(&self) -> RuntimeDataResult<String> {{
+                        if self.path == "items" && self.field == Some("name") {{ Ok("Potion".to_owned()) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected string")) }}
                     }}
 
                     fn is_null(&self) -> bool {{ false }}
@@ -1367,11 +1367,11 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                 impl RuntimeDataLoader for MockLoader {{
                     type Reader = MockReader;
 
-                    fn open(&self, path: &str) -> Result<Self::Reader, String> {{
+                    fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {{
                         match path {{
                             "items.json" | "items.msgpack" => Ok(MockReader::root("items")),
                             "game_rules.json" | "game_rules.msgpack" => Ok(MockReader::root("game_rules")),
-                            other => Err(format!("unexpected path: {{other}}")),
+                            other => Err(RuntimeDataError::not_found(format!("unexpected path: {{other}}"))),
                         }}
                     }}
                 }}

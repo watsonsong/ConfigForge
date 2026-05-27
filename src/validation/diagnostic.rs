@@ -3,7 +3,9 @@
 
 use crate::{
     ConfigForgeError, Result,
-    diagnostic::{DiagnosticEntry, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity},
+    diagnostic::{
+        Diagnostic, DiagnosticEntry, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity,
+    },
     meta::ValidationSeverity,
 };
 
@@ -51,8 +53,19 @@ impl ValidationReport {
             return Ok(());
         }
 
-        let messages = self.error_messages().join("; ");
-        Err(ConfigForgeError::Validation(messages))
+        Err(ConfigForgeError::ValidationReport(
+            self.into_diagnostic_report(),
+        ))
+    }
+
+    pub fn into_diagnostic_report(self) -> DiagnosticReport<Diagnostic> {
+        DiagnosticReport {
+            diagnostics: self
+                .issues
+                .into_iter()
+                .map(|issue| Diagnostic::from_entry(&issue))
+                .collect(),
+        }
     }
 
     fn as_diagnostic_report(&self) -> DiagnosticReport<&ValidationIssue> {

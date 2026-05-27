@@ -8,7 +8,9 @@ use std::{
     rc::Rc,
 };
 
-use config_forge_runtime_reader_core::{RuntimeDataLoader, RuntimeDataReader};
+use config_forge_runtime_reader_core::{
+    RuntimeDataError, RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult,
+};
 
 #[derive(Clone)]
 pub struct BinaryRuntimeDataReader {
@@ -32,24 +34,26 @@ pub struct FsBinaryRuntimeDataLoader {
 }
 
 impl BinaryRuntimeDataReader {
-    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, String> {
+    pub fn from_bytes(bytes: Vec<u8>) -> RuntimeDataResult<Self> {
         if bytes.len() < 16 {
-            return Err("truncated binary runtime data header".to_owned());
+            return Err(RuntimeDataError::decode(
+                "truncated binary runtime data header",
+            ));
         }
         if &bytes[0..4] != b"CFGB" {
-            return Err("invalid binary runtime data magic".to_owned());
+            return Err(RuntimeDataError::decode("invalid binary runtime data magic"));
         }
         let version = u16::from_le_bytes(bytes[4..6].try_into().expect("header slice"));
         if version != 1 {
-            return Err(format!(
+            return Err(RuntimeDataError::decode(format!(
                 "unsupported binary runtime data version `{version}`"
-            ));
+            )));
         }
         let header_size = u16::from_le_bytes(bytes[6..8].try_into().expect("header slice"));
         if header_size != 16 {
-            return Err(format!(
+            return Err(RuntimeDataError::decode(format!(
                 "unsupported binary runtime data header size `{header_size}`"
-            ));
+            )));
         }
         let schema_revision = u64::from_le_bytes(bytes[8..16].try_into().expect("header slice"));
         Ok(Self {
@@ -64,31 +68,37 @@ impl BinaryRuntimeDataReader {
 }
 
 impl RuntimeDataReader for BinaryRuntimeDataReader {
-    fn field(&self, _name: &str) -> Result<Option<Self>, String> {
-        Err("binary reader does not support named fields".to_owned())
+    fn field(&self, _name: &str) -> RuntimeDataResult<Option<Self>> {
+        Err(RuntimeDataError::unsupported(
+            "binary reader does not support named fields",
+        ))
     }
 
-    fn index(&self, _index: usize) -> Result<Self, String> {
-        Err("binary reader does not support random index access".to_owned())
+    fn index(&self, _index: usize) -> RuntimeDataResult<Self> {
+        Err(RuntimeDataError::unsupported(
+            "binary reader does not support random index access",
+        ))
     }
 
-    fn len(&self) -> Result<usize, String> {
-        Err("binary reader does not support named array length".to_owned())
+    fn len(&self) -> RuntimeDataResult<usize> {
+        Err(RuntimeDataError::unsupported(
+            "binary reader does not support named array length",
+        ))
     }
 
-    fn as_i64(&self) -> Result<i64, String> {
+    fn as_i64(&self) -> RuntimeDataResult<i64> {
         self.read_next_i64()
     }
 
-    fn as_f64(&self) -> Result<f64, String> {
+    fn as_f64(&self) -> RuntimeDataResult<f64> {
         self.read_next_f64()
     }
 
-    fn as_bool(&self) -> Result<bool, String> {
+    fn as_bool(&self) -> RuntimeDataResult<bool> {
         self.read_next_bool()
     }
 
-    fn as_string(&self) -> Result<String, String> {
+    fn as_string(&self) -> RuntimeDataResult<String> {
         self.read_next_string()
     }
 
@@ -104,12 +114,12 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         true
     }
 
-    fn read_row_count(&self) -> Result<usize, String> {
+    fn read_row_count(&self) -> RuntimeDataResult<usize> {
         let value = read_varuint(&mut self.state.borrow_mut())?;
-        usize::try_from(value).map_err(|_| "row count exceeds usize".to_owned())
+        usize::try_from(value).map_err(|_| RuntimeDataError::decode("row count exceeds usize"))
     }
 
-    fn begin_record(&self, optional_slot_count: usize) -> Result<(), String> {
+    fn begin_record(&self, optional_slot_count: usize) -> RuntimeDataResult<()> {
         let byte_count = optional_slot_count.div_ceil(8);
         let mut state = self.state.borrow_mut();
         let bytes = read_exact(&mut state, byte_count)?.to_vec();
@@ -120,77 +130,88 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         Ok(())
     }
 
-    fn end_record(&self) -> Result<(), String> {
+    fn end_record(&self) -> RuntimeDataResult<()> {
         let mut state = self.state.borrow_mut();
         let Some(record) = state.records.pop() else {
-            return Err("binary reader record stack underflow".to_owned());
+            return Err(RuntimeDataError::decode(
+                "binary reader record stack underflow",
+            ));
         };
         if record.next_optional_slot > record.bitmap.len() * 8 {
-            return Err("binary reader consumed more optional slots than current record bitmap".to_owned());
+            return Err(RuntimeDataError::decode(
+                "binary reader consumed more optional slots than current record bitmap",
+            ));
         }
         Ok(())
     }
 
-    fn read_optional_present(&self, _slot_index: usize) -> Result<bool, String> {
+    fn read_optional_present(&self, _slot_index: usize) -> RuntimeDataResult<bool> {
         let mut state = self.state.borrow_mut();
         let Some(record) = state.records.last_mut() else {
-            return Err("binary reader is not inside a record".to_owned());
+            return Err(RuntimeDataError::decode(
+                "binary reader is not inside a record",
+            ));
         };
         let slot_index = record.next_optional_slot;
         record.next_optional_slot += 1;
         let Some(byte) = record.bitmap.get(slot_index / 8) else {
-            return Err(format!(
+            return Err(RuntimeDataError::decode(format!(
                 "optional slot {slot_index} is out of current record bitmap"
-            ));
+            )));
         };
         Ok((byte & (1 << (slot_index % 8))) != 0)
     }
 
-    fn read_next_i64(&self) -> Result<i64, String> {
+    fn read_next_i64(&self) -> RuntimeDataResult<i64> {
         let encoded = read_varuint(&mut self.state.borrow_mut())?;
         Ok(((encoded >> 1) as i64) ^ (-((encoded & 1) as i64)))
     }
 
-    fn read_next_f64(&self) -> Result<f64, String> {
+    fn read_next_f64(&self) -> RuntimeDataResult<f64> {
         let mut state = self.state.borrow_mut();
         let bytes = read_exact(&mut state, 8)?;
         let value = f64::from_le_bytes(bytes.try_into().expect("f64 slice"));
         if value.is_finite() {
             Ok(value)
         } else {
-            Err("non-finite float in binary runtime data".to_owned())
+            Err(RuntimeDataError::decode(
+                "non-finite float in binary runtime data",
+            ))
         }
     }
 
-    fn read_next_bool(&self) -> Result<bool, String> {
+    fn read_next_bool(&self) -> RuntimeDataResult<bool> {
         match read_exact(&mut self.state.borrow_mut(), 1)?[0] {
             0 => Ok(false),
             1 => Ok(true),
-            other => Err(format!("invalid bool byte `{other}`")),
+            other => Err(RuntimeDataError::decode(format!(
+                "invalid bool byte `{other}`"
+            ))),
         }
     }
 
-    fn read_next_string(&self) -> Result<String, String> {
+    fn read_next_string(&self) -> RuntimeDataResult<String> {
         let mut state = self.state.borrow_mut();
         let len = usize::try_from(read_varuint(&mut state)?)
-            .map_err(|_| "string length exceeds usize".to_owned())?;
+            .map_err(|_| RuntimeDataError::decode("string length exceeds usize"))?;
         let bytes = read_exact(&mut state, len)?.to_vec();
-        String::from_utf8(bytes).map_err(|source| format!("invalid UTF-8 string: {source}"))
+        String::from_utf8(bytes)
+            .map_err(|source| RuntimeDataError::decode(format!("invalid UTF-8 string: {source}")))
     }
 
-    fn read_enum_ordinal(&self) -> Result<u64, String> {
+    fn read_enum_ordinal(&self) -> RuntimeDataResult<u64> {
         read_varuint(&mut self.state.borrow_mut())
     }
 
-    fn ensure_exhausted(&self) -> Result<(), String> {
+    fn ensure_exhausted(&self) -> RuntimeDataResult<()> {
         let state = self.state.borrow();
         if state.offset == state.bytes.len() {
             Ok(())
         } else {
-            Err(format!(
+            Err(RuntimeDataError::decode(format!(
                 "trailing bytes in binary runtime data: {} bytes remaining",
                 state.bytes.len() - state.offset
-            ))
+            )))
         }
     }
 }
@@ -204,21 +225,21 @@ impl FsBinaryRuntimeDataLoader {
 impl RuntimeDataLoader for FsBinaryRuntimeDataLoader {
     type Reader = BinaryRuntimeDataReader;
 
-    fn open(&self, path: &str) -> Result<Self::Reader, String> {
+    fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {
         let full_path = safe_join(&self.root, path)?;
         let bytes = fs::read(&full_path)
-            .map_err(|source| format!("failed to read {}: {source}", full_path.display()))?;
+            .map_err(|source| RuntimeDataError::io(full_path.display().to_string(), source))?;
         BinaryRuntimeDataReader::from_bytes(bytes)
     }
 }
 
-fn read_varuint(state: &mut BinaryState) -> Result<u64, String> {
+fn read_varuint(state: &mut BinaryState) -> RuntimeDataResult<u64> {
     let mut value = 0u64;
     let mut shift = 0u32;
     for index in 0..10 {
         let byte = read_exact(state, 1)?[0];
         if index == 9 && (byte & 0x7f) > 1 {
-            return Err("varuint exceeds u64".to_owned());
+            return Err(RuntimeDataError::decode("varuint exceeds u64"));
         }
         value |= u64::from(byte & 0x7f) << shift;
         if (byte & 0x80) == 0 {
@@ -226,26 +247,28 @@ fn read_varuint(state: &mut BinaryState) -> Result<u64, String> {
         }
         shift += 7;
     }
-    Err("malformed varuint".to_owned())
+    Err(RuntimeDataError::decode("malformed varuint"))
 }
 
-fn read_exact(state: &mut BinaryState, len: usize) -> Result<&[u8], String> {
+fn read_exact(state: &mut BinaryState, len: usize) -> RuntimeDataResult<&[u8]> {
     let end = state
         .offset
         .checked_add(len)
-        .ok_or_else(|| "binary cursor overflow".to_owned())?;
+        .ok_or_else(|| RuntimeDataError::decode("binary cursor overflow"))?;
     if end > state.bytes.len() {
-        return Err("truncated binary runtime data".to_owned());
+        return Err(RuntimeDataError::decode("truncated binary runtime data"));
     }
     let start = state.offset;
     state.offset = end;
     Ok(&state.bytes[start..end])
 }
 
-fn safe_join(root: &Path, relative: &str) -> Result<PathBuf, String> {
+fn safe_join(root: &Path, relative: &str) -> RuntimeDataResult<PathBuf> {
     let path = Path::new(relative);
     if path.is_absolute() {
-        return Err(format!("runtime data path `{relative}` must be relative"));
+        return Err(RuntimeDataError::invalid_path(format!(
+            "runtime data path `{relative}` must be relative"
+        )));
     }
     let mut result = PathBuf::from(root);
     for component in path.components() {
@@ -253,10 +276,14 @@ fn safe_join(root: &Path, relative: &str) -> Result<PathBuf, String> {
             Component::Normal(part) => result.push(part),
             Component::CurDir => {}
             Component::ParentDir => {
-                return Err(format!("runtime data path `{relative}` escapes data root"));
+                return Err(RuntimeDataError::invalid_path(format!(
+                    "runtime data path `{relative}` escapes data root"
+                )));
             }
             Component::RootDir | Component::Prefix(_) => {
-                return Err(format!("runtime data path `{relative}` must be relative"));
+                return Err(RuntimeDataError::invalid_path(format!(
+                    "runtime data path `{relative}` must be relative"
+                )));
             }
         }
     }

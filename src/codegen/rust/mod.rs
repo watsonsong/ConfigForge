@@ -206,7 +206,8 @@ impl CodeGenerator for RustCodeGenerator {
         }
         content.raw("}\n\n");
         content.raw("impl GameData {\n");
-        content.raw("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
+        content
+            .raw("    pub fn load(loader: &impl RuntimeDataLoader) -> RuntimeDataResult<Self> {\n");
         content.raw("        Ok(Self {\n");
         for table in &model.tables {
             content.raw_fmt(format_args!(
@@ -229,7 +230,8 @@ impl CodeGenerator for RustCodeGenerator {
 fn render_runtime_reader_imports(content: &mut CodeWriter) {
     content.raw(
         r#"pub use config_forge_runtime_reader_core::{
-    CONFIG_FORGE_READER_CONTRACT_VERSION, RuntimeDataLoader, RuntimeDataReader,
+    CONFIG_FORGE_READER_CONTRACT_VERSION, RuntimeDataError, RuntimeDataLoader, RuntimeDataReader,
+    RuntimeDataResult,
 };
 
 "#,
@@ -238,67 +240,67 @@ fn render_runtime_reader_imports(content: &mut CodeWriter) {
 
 fn render_runtime_reader_helpers(content: &mut CodeWriter) {
     content.raw(
-        r#"fn required_field<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<R, String> {
+        r#"fn required_field<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<R> {
     match reader.field(name)? {
         Some(value) if !value.is_null() => Ok(value),
-        _ => Err(format!("missing required field `{name}`")),
+        _ => Err(RuntimeDataError::not_found(format!("missing required field `{name}`"))),
     }
 }
 
-fn optional_field<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<Option<R>, String> {
+fn optional_field<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<Option<R>> {
     Ok(reader.field(name)?.filter(|value| !value.is_null()))
 }
 
-fn read_required_i64<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<i64, String> {
+fn read_required_i64<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<i64> {
     if reader.is_positional() {
         return reader.as_i64();
     }
     required_field(reader, name)?.as_i64()
 }
 
-fn read_required_f64<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<f64, String> {
+fn read_required_f64<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<f64> {
     if reader.is_positional() {
         return reader.as_f64();
     }
     required_field(reader, name)?.as_f64()
 }
 
-fn read_required_bool<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<bool, String> {
+fn read_required_bool<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<bool> {
     if reader.is_positional() {
         return reader.as_bool();
     }
     required_field(reader, name)?.as_bool()
 }
 
-fn read_required_string<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<String, String> {
+fn read_required_string<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<String> {
     if reader.is_positional() {
         return reader.as_string();
     }
     required_field(reader, name)?.as_string()
 }
 
-fn read_optional_i64<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<Option<i64>, String> {
+fn read_optional_i64<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<Option<i64>> {
     if reader.is_positional() {
         return if reader.read_optional_present(0)? { Ok(Some(reader.as_i64()?)) } else { Ok(None) };
     }
     optional_field(reader, name)?.map(|value| value.as_i64()).transpose()
 }
 
-fn read_optional_f64<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<Option<f64>, String> {
+fn read_optional_f64<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<Option<f64>> {
     if reader.is_positional() {
         return if reader.read_optional_present(0)? { Ok(Some(reader.as_f64()?)) } else { Ok(None) };
     }
     optional_field(reader, name)?.map(|value| value.as_f64()).transpose()
 }
 
-fn read_optional_bool<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<Option<bool>, String> {
+fn read_optional_bool<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<Option<bool>> {
     if reader.is_positional() {
         return if reader.read_optional_present(0)? { Ok(Some(reader.as_bool()?)) } else { Ok(None) };
     }
     optional_field(reader, name)?.map(|value| value.as_bool()).transpose()
 }
 
-fn read_optional_string<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<Option<String>, String> {
+fn read_optional_string<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<Option<String>> {
     if reader.is_positional() {
         return if reader.read_optional_present(0)? { Ok(Some(reader.as_string()?)) } else { Ok(None) };
     }
@@ -319,7 +321,7 @@ fn render_enum_reader_impl(
         names.type_name(&code_enum.name)?
     ));
     content.raw(
-        "    fn read_from_reader<R: RuntimeDataReader>(reader: &R) -> Result<Self, String> {\n",
+        "    fn read_from_reader<R: RuntimeDataReader>(reader: &R) -> RuntimeDataResult<Self> {\n",
     );
     content.raw("        if reader.is_positional() { return Self::from_binary_ordinal(reader.read_enum_ordinal()?); }\n");
     content.raw("        match reader.as_string()?.as_str() {\n");
@@ -331,13 +333,13 @@ fn render_enum_reader_impl(
         ));
     }
     content.raw_fmt(format_args!(
-        "            other => Err(format!(\"unknown {} value `{{other}}`\")),\n",
+        "            other => Err(RuntimeDataError::decode(format!(\"unknown {} value `{{other}}`\"))),\n",
         code_enum.name
     ));
     content.raw("        }\n");
     content.raw("    }\n");
     content.raw("\n");
-    content.raw("    fn from_binary_ordinal(ordinal: u64) -> Result<Self, String> {\n");
+    content.raw("    fn from_binary_ordinal(ordinal: u64) -> RuntimeDataResult<Self> {\n");
     content.raw("        match ordinal {\n");
     for (ordinal, value) in code_enum.values.iter().enumerate() {
         content.raw_fmt(format_args!(
@@ -346,7 +348,7 @@ fn render_enum_reader_impl(
         ));
     }
     content.raw_fmt(format_args!(
-        "            other => Err(format!(\"unknown {} ordinal `{{other}}`\")),\n",
+        "            other => Err(RuntimeDataError::decode(format!(\"unknown {} ordinal `{{other}}`\"))),\n",
         code_enum.name
     ));
     content.raw("        }\n");
@@ -409,7 +411,7 @@ fn render_read_from_reader_body(
     let optional_slot_count =
         fields.iter().filter(|field| !field.required).count() + fragment_count;
     content.raw(
-        "    fn read_from_reader<R: RuntimeDataReader>(reader: &R) -> Result<Self, String> {\n",
+        "    fn read_from_reader<R: RuntimeDataReader>(reader: &R) -> RuntimeDataResult<Self> {\n",
     );
     content.raw_fmt(format_args!(
         "        reader.begin_record({optional_slot_count})?;\n"
@@ -654,17 +656,17 @@ fn render_table(content: &mut CodeWriter, table: &CodeTable, names: &RustNames<'
             "    pub const EXPECTED_SCHEMA_REVISION: u64 = {revision};\n\n"
         ));
     }
-    content.raw("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
+    content.raw("    pub fn load(loader: &impl RuntimeDataLoader) -> RuntimeDataResult<Self> {\n");
     content.raw("        let root = loader.open(Self::DATA_FILE)?;\n");
     if table.data_format == BINARY_FORMAT {
         content.raw(concat!(
             "        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) {\n",
-            "            return Err(format!(\n",
+            "            return Err(RuntimeDataError::schema_mismatch(format!(\n",
             "                \"schema revision mismatch for `{}`: expected {}, got {:?}\",\n",
             "                Self::DATA_FILE,\n",
             "                Self::EXPECTED_SCHEMA_REVISION,\n",
             "                root.schema_revision()\n",
-            "            ));\n",
+            "            )));\n",
             "        }\n",
         ));
         content.raw("        let row_count = root.read_row_count()?;\n");
@@ -689,7 +691,7 @@ fn render_table(content: &mut CodeWriter, table: &CodeTable, names: &RustNames<'
     content.raw("        Self::from_rows(rows)\n");
     content.raw("    }\n\n");
     content.raw_fmt(format_args!(
-        "    pub fn from_rows(rows: Vec<{}>) -> Result<Self, String> {{\n",
+        "    pub fn from_rows(rows: Vec<{}>) -> RuntimeDataResult<Self> {{\n",
         names.row_type_name(&table.name)?
     ));
     for index in &table.indexes {
@@ -703,7 +705,7 @@ fn render_table(content: &mut CodeWriter, table: &CodeTable, names: &RustNames<'
         let key = names.rust_key_expr(index)?;
         if index.unique {
             content.raw_fmt(format_args!(
-                "            if {}.insert({}, row_index).is_some() {{ return Err(format!(\"duplicate unique index {}\")); }}\n",
+                "            if {}.insert({}, row_index).is_some() {{ return Err(RuntimeDataError::schema_mismatch(format!(\"duplicate unique index {}\"))); }}\n",
                 names.index_storage_name(index)?,
                 key,
                 index.name
@@ -756,17 +758,17 @@ fn render_object_table(
             "    pub const EXPECTED_SCHEMA_REVISION: u64 = {revision};\n\n"
         ));
     }
-    content.raw("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
+    content.raw("    pub fn load(loader: &impl RuntimeDataLoader) -> RuntimeDataResult<Self> {\n");
     content.raw("        let root = loader.open(Self::DATA_FILE)?;\n");
     if table.data_format == BINARY_FORMAT {
         content.raw(concat!(
             "        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) {\n",
-            "            return Err(format!(\n",
+            "            return Err(RuntimeDataError::schema_mismatch(format!(\n",
             "                \"schema revision mismatch for `{}`: expected {}, got {:?}\",\n",
             "                Self::DATA_FILE,\n",
             "                Self::EXPECTED_SCHEMA_REVISION,\n",
             "                root.schema_revision()\n",
-            "            ));\n",
+            "            )));\n",
             "        }\n",
         ));
         content.raw("        let value = Self::read_from_reader(&root)?;\n");

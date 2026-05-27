@@ -28,7 +28,7 @@ impl JsonFixtureRuntimeDataLoader {
 impl RuntimeDataLoader for JsonFixtureRuntimeDataLoader {
     type Reader = JsonValueReader;
 
-    fn open(&self, path: &str) -> Result<Self::Reader, String> {
+    fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {
         self.inner
             .open_reader(&path.replace(".msgpack", ".json").replace(".bin", ".json"))
     }
@@ -50,7 +50,7 @@ impl MessagePackFixtureRuntimeDataLoader {
 impl RuntimeDataLoader for MessagePackFixtureRuntimeDataLoader {
     type Reader = msgpack_runtime_reader::MessagePackValueReader;
 
-    fn open(&self, path: &str) -> Result<Self::Reader, String> {
+    fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {
         self.inner.open_reader(&path.replace(".bin", ".msgpack"))
     }
 }
