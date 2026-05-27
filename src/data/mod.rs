@@ -7,6 +7,7 @@ mod model;
 mod plan;
 mod resolved;
 mod resolver;
+pub(crate) mod value_conversion;
 
 pub use self::csv::CsvDataReader;
 pub use self::loader::DataLoader;

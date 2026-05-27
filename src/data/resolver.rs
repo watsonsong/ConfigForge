@@ -5,6 +5,9 @@ use std::collections::BTreeMap;
 
 use crate::{
     ConfigForgeError, Result,
+    data::value_conversion::{
+        json_value_is_empty, json_value_to_scalar_cell_for_field, toml_default_to_json_value,
+    },
     meta::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, LinkedTableMeta,
         PrimitiveFieldType, TableKind, TargetTags,
@@ -309,12 +312,8 @@ fn resolve_scalar_cell_value(
     if json_value_is_empty(&default_value) {
         return Ok(None);
     }
-    let raw = json_value_to_scalar_cell(&default_value).map_err(|_| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` must be a scalar value",
-            table_name, row_number, field_path
-        ))
-    })?;
+    let raw =
+        json_value_to_scalar_cell_for_field(&default_value, table_name, row_number, field_path)?;
     let scalar = parse_scalar_value(table_name, row_number, field_path, field, &raw)?;
     Ok(Some(ResolvedValue::defaulted(
         field_path,
@@ -458,12 +457,12 @@ fn resolve_struct_json_value(
                 }
             }
             _ => {
-                let raw = json_value_to_scalar_cell(child_value).map_err(|_| {
-                    ConfigForgeError::Validation(format!(
-                        "table `{}` row {} field `{}` must be a scalar value",
-                        table_name, row_number, child_path
-                    ))
-                })?;
+                let raw = json_value_to_scalar_cell_for_field(
+                    child_value,
+                    table_name,
+                    row_number,
+                    &child_path,
+                )?;
                 let scalar = parse_scalar_value(table_name, row_number, &child_path, child, &raw)?;
                 if source_is_default {
                     ResolvedValue::defaulted(
@@ -524,12 +523,12 @@ fn struct_occurrence_has_effective_value(
                 if json_value_is_empty(&default_value) {
                     continue;
                 }
-                let raw = json_value_to_scalar_cell(&default_value).map_err(|_| {
-                    ConfigForgeError::Validation(format!(
-                        "table `{}` row {} field `{}` must be a scalar value",
-                        table_name, row_number, child_path
-                    ))
-                })?;
+                let raw = json_value_to_scalar_cell_for_field(
+                    &default_value,
+                    table_name,
+                    row_number,
+                    &child_path,
+                )?;
                 parse_scalar_value(table_name, row_number, &child_path, child, &raw)?;
                 return Ok(true);
             }
@@ -805,32 +804,4 @@ fn non_empty_row_value<'a>(row: &'a DataRow, field_path: &str) -> Option<&'a str
 
 fn fragment_field_key(fragment_name: &str, field_name: &str) -> String {
     format!("{fragment_name}.{field_name}")
-}
-
-fn toml_default_to_json_value(value: &toml::Value) -> serde_json::Value {
-    match value {
-        toml::Value::String(value) => serde_json::Value::String(value.clone()),
-        toml::Value::Integer(value) => serde_json::Value::Number((*value).into()),
-        toml::Value::Float(value) => serde_json::Number::from_f64(*value)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
-        toml::Value::Boolean(value) => serde_json::Value::Bool(*value),
-        _ => serde_json::Value::Null,
-    }
-}
-
-fn json_value_is_empty(value: &serde_json::Value) -> bool {
-    matches!(value, serde_json::Value::Null)
-        || value.as_str().map(str::trim).is_some_and(str::is_empty)
-}
-
-fn json_value_to_scalar_cell(value: &serde_json::Value) -> Result<String> {
-    match value {
-        serde_json::Value::String(value) => Ok(value.clone()),
-        serde_json::Value::Number(value) => Ok(value.to_string()),
-        serde_json::Value::Bool(value) => Ok(value.to_string()),
-        _ => Err(ConfigForgeError::Validation(
-            "struct scalar field value must be string, number, or bool".to_owned(),
-        )),
-    }
 }

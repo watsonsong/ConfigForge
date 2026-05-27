@@ -5,7 +5,13 @@ use std::collections::{BTreeSet, HashSet};
 
 use crate::{
     ConfigForgeError, Result,
-    data::{DataResolver, DataRow, DataSet, DataTable},
+    data::{
+        DataResolver, DataRow, DataSet, DataTable,
+        value_conversion::{
+            default_value_to_cell, json_value_is_empty, json_value_to_scalar_cell_for_field,
+            toml_default_to_json_value,
+        },
+    },
     meta::{
         LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedIndexMeta, LinkedMetaModel,
         LinkedStructType, LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags, ValueLayout,
@@ -313,7 +319,7 @@ pub fn apply_field_defaults(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Re
             if let Some(default) = &field.meta.default {
                 row.insert(
                     field.meta.name.clone(),
-                    default_value_to_cell(meta, field, default)?,
+                    default_value_to_cell(&meta.meta.name, &field.meta.name, default)?,
                 );
             }
         }
@@ -336,37 +342,16 @@ pub fn apply_field_defaults(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Re
                 }
 
                 if let Some(default) = &field.meta.default {
-                    row.insert(key, default_value_to_cell(meta, field, default)?);
+                    row.insert(
+                        key,
+                        default_value_to_cell(&meta.meta.name, &field.meta.name, default)?,
+                    );
                 }
             }
         }
     }
 
     Ok(table)
-}
-
-fn default_value_to_cell(
-    meta: &LinkedTableMeta<'_>,
-    field: &LinkedFieldMeta<'_>,
-    default: &toml::Value,
-) -> Result<String> {
-    if let Some(value) = default.as_str() {
-        return Ok(value.to_owned());
-    }
-    if let Some(value) = default.as_integer() {
-        return Ok(value.to_string());
-    }
-    if let Some(value) = default.as_float() {
-        return Ok(value.to_string());
-    }
-    if let Some(value) = default.as_bool() {
-        return Ok(value.to_string());
-    }
-
-    Err(ConfigForgeError::Validation(format!(
-        "table `{}` field `{}` has unsupported default value `{}`",
-        meta.meta.name, field.meta.name, default
-    )))
 }
 
 fn validate_index_uniqueness(
@@ -814,7 +799,12 @@ fn validate_struct_occurrence_value(
                     .as_ref()
                     .filter(|value| !json_value_is_empty(value))
                     .map(|value| {
-                        json_value_to_scalar_cell(value, table_name, row_number, &child_path)
+                        json_value_to_scalar_cell_for_field(
+                            value,
+                            table_name,
+                            row_number,
+                            &child_path,
+                        )
                     })
                     .transpose()?;
                 let effective_value = raw.or(default_scalar.as_deref());
@@ -880,7 +870,12 @@ fn struct_occurrence_has_effective_value(
                     .as_ref()
                     .filter(|value| !json_value_is_empty(value))
                     .map(|value| {
-                        json_value_to_scalar_cell(value, table_name, row_number, &child_path)
+                        json_value_to_scalar_cell_for_field(
+                            value,
+                            table_name,
+                            row_number,
+                            &child_path,
+                        )
                     })
                     .transpose()?;
                 if default_scalar.is_some() {
@@ -1384,7 +1379,7 @@ fn validate_struct_json_cell(
                 )?;
             }
             _ => {
-                let scalar = json_value_to_scalar_cell(
+                let scalar = json_value_to_scalar_cell_for_field(
                     effective_value.expect("checked non-empty"),
                     table_name,
                     row_number,
@@ -1401,40 +1396,6 @@ fn validate_struct_json_cell(
     }
 
     Ok(())
-}
-
-fn toml_default_to_json_value(value: &toml::Value) -> serde_json::Value {
-    match value {
-        toml::Value::String(value) => serde_json::Value::String(value.clone()),
-        toml::Value::Integer(value) => serde_json::Value::Number((*value).into()),
-        toml::Value::Float(value) => serde_json::Number::from_f64(*value)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
-        toml::Value::Boolean(value) => serde_json::Value::Bool(*value),
-        _ => serde_json::Value::Null,
-    }
-}
-
-fn json_value_is_empty(value: &serde_json::Value) -> bool {
-    matches!(value, serde_json::Value::Null)
-        || value.as_str().map(str::trim).is_some_and(str::is_empty)
-}
-
-fn json_value_to_scalar_cell(
-    value: &serde_json::Value,
-    table_name: &str,
-    row_number: usize,
-    field_path: &str,
-) -> Result<String> {
-    match value {
-        serde_json::Value::String(value) => Ok(value.clone()),
-        serde_json::Value::Number(value) => Ok(value.to_string()),
-        serde_json::Value::Bool(value) => Ok(value.to_string()),
-        _ => Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` must be a scalar value",
-            table_name, row_number, field_path
-        ))),
-    }
 }
 
 fn fragment_field_key(fragment_name: &str, field_name: &str) -> String {
