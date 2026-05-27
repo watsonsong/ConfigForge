@@ -196,7 +196,20 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 CodeTableKind::Object => {
                     if table.data_format == BINARY_FORMAT {
                         content.raw_fmt(format_args!(
-                            "      {}: await Promise.resolve(loader.open({:?})).then(root => {{ const schemaRevision = root.schemaRevision?.(); if (schemaRevision === undefined || BigInt(schemaRevision) !== {}n) {{ throw new Error(`schema revision mismatch for {}`); }} if (!root.ensureExhausted) {{ throw new Error('binary reader does not support EOF validation'); }} const value = {}(root); root.ensureExhausted(); return value; }}),\n",
+                            concat!(
+                                "      {}: await Promise.resolve(loader.open({:?})).then(root => {{\n",
+                                "        const schemaRevision = root.schemaRevision?.();\n",
+                                "        if (schemaRevision === undefined || BigInt(schemaRevision) !== {}n) {{\n",
+                                "          throw new Error(`schema revision mismatch for {}`);\n",
+                                "        }}\n",
+                                "        if (!root.ensureExhausted) {{\n",
+                                "          throw new Error('binary reader does not support EOF validation');\n",
+                                "        }}\n",
+                                "        const value = {}(root);\n",
+                                "        root.ensureExhausted();\n",
+                                "        return value;\n",
+                                "      }}),\n",
+                            ),
                             names.field_name(&table.name)?,
                             table.data_file,
                             table.schema_revision.unwrap_or_default(),
@@ -458,7 +471,13 @@ fn render_reader_function_body(
             let payload_type = names.fragment_payload_type_name(table, fragment)?;
             let reader_function = names.reader_function_name(&payload_type)?;
             content.raw_fmt(format_args!(
-                "    {field_name}: reader.isPositional?.() ? (reader.readOptionalPresent!(0) ? {reader_function}(reader) : undefined) : ({field_name}Reader ? {reader_function}({field_name}Reader) : undefined),\n"
+                concat!(
+                    "    {field_name}: reader.isPositional?.()\n",
+                    "      ? (reader.readOptionalPresent!(0) ? {reader_function}(reader) : undefined)\n",
+                    "      : ({field_name}Reader ? {reader_function}({field_name}Reader) : undefined),\n",
+                ),
+                field_name = field_name,
+                reader_function = reader_function,
             ));
         }
     }
@@ -710,7 +729,11 @@ fn render_table(
     content.raw("    const root = await loader.open(this.dataFile);\n");
     if table.data_format == BINARY_FORMAT {
         content.raw("    const schemaRevision = root.schemaRevision?.();\n");
-        content.raw("    if (schemaRevision === undefined || BigInt(schemaRevision) !== this.expectedSchemaRevision) { throw new Error(`schema revision mismatch for ${this.dataFile}`); }\n");
+        content.raw(concat!(
+            "    if (schemaRevision === undefined || BigInt(schemaRevision) !== this.expectedSchemaRevision) {\n",
+            "      throw new Error(`schema revision mismatch for ${this.dataFile}`);\n",
+            "    }\n",
+        ));
         content.raw("    if (!root.readRowCount) { throw new Error('binary reader does not support row count'); }\n");
         content.raw("    if (!root.ensureExhausted) { throw new Error('binary reader does not support EOF validation'); }\n");
         content.raw("    const rowCount = root.readRowCount();\n");
@@ -950,7 +973,16 @@ impl<'a> TypeScriptNames<'a> {
                 let type_name = self.type_name(name)?;
                 let reader_function = self.reader_function_name(&type_name)?;
                 format!(
-                    "reader.isPositional?.() ? (reader.readOptionalPresent!(0) ? {reader_function}(reader) : undefined) : (() => {{ const value = optionalField(reader, {source_name}); return value ? {reader_function}(value) : undefined; }})()"
+                    concat!(
+                        "reader.isPositional?.()\n",
+                        "      ? (reader.readOptionalPresent!(0) ? {reader_function}(reader) : undefined)\n",
+                        "      : (() => {{\n",
+                        "          const value = optionalField(reader, {source_name});\n",
+                        "          return value ? {reader_function}(value) : undefined;\n",
+                        "        }})()",
+                    ),
+                    reader_function = reader_function,
+                    source_name = source_name,
                 )
             }
         })

@@ -60,7 +60,20 @@ impl CodeGenerator for CppCodeGenerator {
         let mut header = CodeWriter::new(input.target.options.formatting);
         self.write_file_header(&mut header, input);
         header.raw("#pragma once\n\n");
-        header.raw("#include <cstdint>\n#include <cstddef>\n#include <map>\n#include <memory>\n#include <optional>\n#include <stdexcept>\n#include <string>\n#include <tuple>\n#include <type_traits>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n");
+        header.raw(concat!(
+            "#include <cstdint>\n",
+            "#include <cstddef>\n",
+            "#include <map>\n",
+            "#include <memory>\n",
+            "#include <optional>\n",
+            "#include <stdexcept>\n",
+            "#include <string>\n",
+            "#include <tuple>\n",
+            "#include <type_traits>\n",
+            "#include <unordered_map>\n",
+            "#include <utility>\n",
+            "#include <vector>\n\n",
+        ));
         let namespace = cpp_options
             .namespace
             .as_ref()
@@ -72,9 +85,39 @@ impl CodeGenerator for CppCodeGenerator {
         header.raw(
             "inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";\n\n",
         );
-        header.raw(
-            "class IRuntimeDataReader {\npublic:\n    virtual ~IRuntimeDataReader() = default;\n    virtual std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const = 0;\n    virtual std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const = 0;\n    virtual std::size_t Size() const = 0;\n    virtual std::int64_t AsInt64() const = 0;\n    virtual double AsDouble() const = 0;\n    virtual bool AsBool() const = 0;\n    virtual std::string AsString() const = 0;\n    virtual bool IsNull() const = 0;\n    virtual std::optional<std::uint64_t> SchemaRevision() const { return std::nullopt; }\n    virtual bool IsPositional() const { return false; }\n    virtual std::size_t ReadRowCount() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual void BeginRecord(std::size_t) {}\n    virtual void EndRecord() {}\n    virtual bool ReadOptionalPresent(std::size_t) { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual std::int64_t ReadNextInt64() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual double ReadNextDouble() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual bool ReadNextBool() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual std::string ReadNextString() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual std::uint64_t ReadEnumOrdinal() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n    virtual void EnsureExhausted() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n};\n\nclass IRuntimeDataLoader {\npublic:\n    virtual ~IRuntimeDataLoader() = default;\n    virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;\n};\n\n",
-        );
+        header.raw(concat!(
+            "class IRuntimeDataReader {\n",
+            "public:\n",
+            "    virtual ~IRuntimeDataReader() = default;\n",
+            "    virtual std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const = 0;\n",
+            "    virtual std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const = 0;\n",
+            "    virtual std::size_t Size() const = 0;\n",
+            "    virtual std::int64_t AsInt64() const = 0;\n",
+            "    virtual double AsDouble() const = 0;\n",
+            "    virtual bool AsBool() const = 0;\n",
+            "    virtual std::string AsString() const = 0;\n",
+            "    virtual bool IsNull() const = 0;\n",
+            "    virtual std::optional<std::uint64_t> SchemaRevision() const { return std::nullopt; }\n",
+            "    virtual bool IsPositional() const { return false; }\n",
+            "    virtual std::size_t ReadRowCount() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
+            "    virtual void BeginRecord(std::size_t) {}\n",
+            "    virtual void EndRecord() {}\n",
+            "    virtual bool ReadOptionalPresent(std::size_t) {\n",
+            "        throw std::runtime_error(\"positional runtime reader is not supported\");\n",
+            "    }\n",
+            "    virtual std::int64_t ReadNextInt64() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
+            "    virtual double ReadNextDouble() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
+            "    virtual bool ReadNextBool() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
+            "    virtual std::string ReadNextString() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
+            "    virtual std::uint64_t ReadEnumOrdinal() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
+            "    virtual void EnsureExhausted() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
+            "};\n\n",
+            "class IRuntimeDataLoader {\n",
+            "public:\n",
+            "    virtual ~IRuntimeDataLoader() = default;\n",
+            "    virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;\n",
+            "};\n\n",
+        ));
 
         for code_enum in &model.enums {
             push_doc(&mut header, code_enum.desc.as_deref());
@@ -422,9 +465,63 @@ fn render_source_file(
 }
 
 fn render_reader_helpers_source(content: &mut CodeWriter) {
-    content.raw(
-        "namespace {\n\nstd::unique_ptr<IRuntimeDataReader> RequiredField(const IRuntimeDataReader& reader, const std::string& name) {\n    auto value = reader.Field(name);\n    if (!value || value->IsNull()) { throw std::runtime_error(\"missing required field `\" + name + \"`\"); }\n    return value;\n}\n\ntemplate <typename F>\nauto OptionalField(const IRuntimeDataReader& reader, const std::string& name, F convert) -> std::optional<decltype(convert(std::declval<IRuntimeDataReader&>()))> {\n    auto value = reader.Field(name);\n    if (!value || value->IsNull()) { return std::nullopt; }\n    return convert(*value);\n}\n\nstd::int64_t ReadRequiredInt64(IRuntimeDataReader& reader, const std::string& name) { return reader.IsPositional() ? reader.AsInt64() : RequiredField(reader, name)->AsInt64(); }\ndouble ReadRequiredDouble(IRuntimeDataReader& reader, const std::string& name) { return reader.IsPositional() ? reader.AsDouble() : RequiredField(reader, name)->AsDouble(); }\nbool ReadRequiredBool(IRuntimeDataReader& reader, const std::string& name) { return reader.IsPositional() ? reader.AsBool() : RequiredField(reader, name)->AsBool(); }\nstd::string ReadRequiredString(IRuntimeDataReader& reader, const std::string& name) { return reader.IsPositional() ? reader.AsString() : RequiredField(reader, name)->AsString(); }\n\nstd::optional<std::int64_t> ReadOptionalInt64(IRuntimeDataReader& reader, const std::string& name) { if (reader.IsPositional()) { return reader.ReadOptionalPresent(0) ? std::optional<std::int64_t>(reader.AsInt64()) : std::nullopt; } return OptionalField(reader, name, [](IRuntimeDataReader& value) { return value.AsInt64(); }); }\nstd::optional<double> ReadOptionalDouble(IRuntimeDataReader& reader, const std::string& name) { if (reader.IsPositional()) { return reader.ReadOptionalPresent(0) ? std::optional<double>(reader.AsDouble()) : std::nullopt; } return OptionalField(reader, name, [](IRuntimeDataReader& value) { return value.AsDouble(); }); }\nstd::optional<bool> ReadOptionalBool(IRuntimeDataReader& reader, const std::string& name) { if (reader.IsPositional()) { return reader.ReadOptionalPresent(0) ? std::optional<bool>(reader.AsBool()) : std::nullopt; } return OptionalField(reader, name, [](IRuntimeDataReader& value) { return value.AsBool(); }); }\nstd::optional<std::string> ReadOptionalString(IRuntimeDataReader& reader, const std::string& name) { if (reader.IsPositional()) { return reader.ReadOptionalPresent(0) ? std::optional<std::string>(reader.AsString()) : std::nullopt; } return OptionalField(reader, name, [](IRuntimeDataReader& value) { return value.AsString(); }); }\n\n",
-    );
+    content.raw(concat!(
+        "namespace {\n\n",
+        "std::unique_ptr<IRuntimeDataReader> RequiredField(\n",
+        "    const IRuntimeDataReader& reader,\n",
+        "    const std::string& name) {\n",
+        "    auto value = reader.Field(name);\n",
+        "    if (!value || value->IsNull()) {\n",
+        "        throw std::runtime_error(\"missing required field `\" + name + \"`\");\n",
+        "    }\n",
+        "    return value;\n",
+        "}\n\n",
+        "template <typename F>\n",
+        "auto OptionalField(\n",
+        "    const IRuntimeDataReader& reader,\n",
+        "    const std::string& name,\n",
+        "    F convert) -> std::optional<decltype(convert(std::declval<IRuntimeDataReader&>()))> {\n",
+        "    auto value = reader.Field(name);\n",
+        "    if (!value || value->IsNull()) { return std::nullopt; }\n",
+        "    return convert(*value);\n",
+        "}\n\n",
+        "std::int64_t ReadRequiredInt64(IRuntimeDataReader& reader, const std::string& name) {\n",
+        "    return reader.IsPositional() ? reader.AsInt64() : RequiredField(reader, name)->AsInt64();\n",
+        "}\n\n",
+        "double ReadRequiredDouble(IRuntimeDataReader& reader, const std::string& name) {\n",
+        "    return reader.IsPositional() ? reader.AsDouble() : RequiredField(reader, name)->AsDouble();\n",
+        "}\n\n",
+        "bool ReadRequiredBool(IRuntimeDataReader& reader, const std::string& name) {\n",
+        "    return reader.IsPositional() ? reader.AsBool() : RequiredField(reader, name)->AsBool();\n",
+        "}\n\n",
+        "std::string ReadRequiredString(IRuntimeDataReader& reader, const std::string& name) {\n",
+        "    return reader.IsPositional() ? reader.AsString() : RequiredField(reader, name)->AsString();\n",
+        "}\n\n",
+        "std::optional<std::int64_t> ReadOptionalInt64(IRuntimeDataReader& reader, const std::string& name) {\n",
+        "    if (reader.IsPositional()) {\n",
+        "        return reader.ReadOptionalPresent(0) ? std::optional<std::int64_t>(reader.AsInt64()) : std::nullopt;\n",
+        "    }\n",
+        "    return OptionalField(reader, name, [](IRuntimeDataReader& value) { return value.AsInt64(); });\n",
+        "}\n\n",
+        "std::optional<double> ReadOptionalDouble(IRuntimeDataReader& reader, const std::string& name) {\n",
+        "    if (reader.IsPositional()) {\n",
+        "        return reader.ReadOptionalPresent(0) ? std::optional<double>(reader.AsDouble()) : std::nullopt;\n",
+        "    }\n",
+        "    return OptionalField(reader, name, [](IRuntimeDataReader& value) { return value.AsDouble(); });\n",
+        "}\n\n",
+        "std::optional<bool> ReadOptionalBool(IRuntimeDataReader& reader, const std::string& name) {\n",
+        "    if (reader.IsPositional()) {\n",
+        "        return reader.ReadOptionalPresent(0) ? std::optional<bool>(reader.AsBool()) : std::nullopt;\n",
+        "    }\n",
+        "    return OptionalField(reader, name, [](IRuntimeDataReader& value) { return value.AsBool(); });\n",
+        "}\n\n",
+        "std::optional<std::string> ReadOptionalString(IRuntimeDataReader& reader, const std::string& name) {\n",
+        "    if (reader.IsPositional()) {\n",
+        "        return reader.ReadOptionalPresent(0) ? std::optional<std::string>(reader.AsString()) : std::nullopt;\n",
+        "    }\n",
+        "    return OptionalField(reader, name, [](IRuntimeDataReader& value) { return value.AsString(); });\n",
+        "}\n\n",
+    ));
 }
 
 fn render_enum_reader_source(
@@ -538,8 +635,18 @@ fn render_reader_function_source(
             let payload_type = names.fragment_payload_type_name(table, fragment)?;
             let reader_function = names.reader_function_name(&payload_type)?;
             content.raw_fmt(format_args!(
-                "    if (reader.IsPositional()) {{ if (reader.ReadOptionalPresent(0)) {{ value.{field_name} = {reader_function}(reader); }} }} else if (auto fragment = reader.Field({:?}); fragment && !fragment->IsNull()) {{ value.{field_name} = {reader_function}(*fragment); }}\n",
-                fragment.name
+                concat!(
+                    "    if (reader.IsPositional()) {{\n",
+                    "        if (reader.ReadOptionalPresent(0)) {{\n",
+                    "            value.{field_name} = {reader_function}(reader);\n",
+                    "        }}\n",
+                    "    }} else if (auto fragment = reader.Field({:?}); fragment && !fragment->IsNull()) {{\n",
+                    "        value.{field_name} = {reader_function}(*fragment);\n",
+                    "    }}\n",
+                ),
+                fragment.name,
+                field_name = field_name,
+                reader_function = reader_function
             ));
         }
     }
@@ -564,7 +671,11 @@ fn render_table_source(
     ));
     content.raw("    auto root = loader.Open(DataFile);\n");
     if table.data_format == BINARY_FORMAT {
-        content.raw("    if (!root->SchemaRevision() || *root->SchemaRevision() != ExpectedSchemaRevision) { throw std::runtime_error(\"schema revision mismatch for binary runtime data\"); }\n");
+        content.raw(concat!(
+            "    if (!root->SchemaRevision() || *root->SchemaRevision() != ExpectedSchemaRevision) {\n",
+            "        throw std::runtime_error(\"schema revision mismatch for binary runtime data\");\n",
+            "    }\n",
+        ));
         content.raw("    const std::size_t row_count = root->ReadRowCount();\n");
         content.raw_fmt(format_args!("    std::vector<{}> rows;\n", row_type));
         content.raw("    for (std::size_t row_index = 0; row_index < row_count; ++row_index) {\n");
@@ -717,7 +828,14 @@ fn render_game_data_load_source(
                         "    auto root_{member_name} = loader.Open({row_type}::DataFile);\n"
                     ));
                     content.raw_fmt(format_args!(
-                        "    if (!root_{member_name}->SchemaRevision() || *root_{member_name}->SchemaRevision() != {row_type}::ExpectedSchemaRevision) {{ throw std::runtime_error(\"schema revision mismatch for binary runtime data\"); }}\n"
+                        concat!(
+                            "    if (!root_{member_name}->SchemaRevision() ||\n",
+                            "        *root_{member_name}->SchemaRevision() != {row_type}::ExpectedSchemaRevision) {{\n",
+                            "        throw std::runtime_error(\"schema revision mismatch for binary runtime data\");\n",
+                            "    }}\n",
+                        ),
+                        member_name = member_name,
+                        row_type = row_type,
                     ));
                     content.raw_fmt(format_args!(
                         "    data.{member_name} = {}(*root_{member_name});\n",
@@ -999,7 +1117,13 @@ impl<'a> CppNames<'a> {
                     let type_name = self.type_name(name)?;
                     let reader_function = self.reader_function_name(&type_name)?;
                     format!(
-                        "reader.IsPositional() ? {reader_function}(reader) : {reader_function}(*RequiredField(reader, {source_name}))"
+                        concat!(
+                            "reader.IsPositional()\n",
+                            "        ? {reader_function}(reader)\n",
+                            "        : {reader_function}(*RequiredField(reader, {source_name}))",
+                        ),
+                        reader_function = reader_function,
+                        source_name = source_name,
                     )
                 }
             });
@@ -1016,7 +1140,18 @@ impl<'a> CppNames<'a> {
                 let type_name = self.type_name(name)?;
                 let reader_function = self.reader_function_name(&type_name)?;
                 format!(
-                    "reader.IsPositional() ? (reader.ReadOptionalPresent(0) ? std::optional<{type_name}>({reader_function}(reader)) : std::nullopt) : OptionalField(reader, {source_name}, [](IRuntimeDataReader& value) {{ return {reader_function}(value); }})"
+                    concat!(
+                        "reader.IsPositional()\n",
+                        "        ? (reader.ReadOptionalPresent(0)\n",
+                        "            ? std::optional<{type_name}>({reader_function}(reader))\n",
+                        "            : std::nullopt)\n",
+                        "        : OptionalField(reader, {source_name}, [](IRuntimeDataReader& value) {{\n",
+                        "            return {reader_function}(value);\n",
+                        "        }})",
+                    ),
+                    type_name = type_name,
+                    reader_function = reader_function,
+                    source_name = source_name,
                 )
             }
         })

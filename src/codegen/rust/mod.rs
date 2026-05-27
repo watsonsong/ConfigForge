@@ -427,8 +427,23 @@ fn render_read_from_reader_body(
             let field_name = names.field_name(&fragment.name)?;
             let payload_type = names.fragment_payload_type_name(table, fragment)?;
             content.raw_fmt(format_args!(
-                "            {field_name}: if reader.is_positional() {{ if reader.read_optional_present(0)? {{ Some({payload_type}::read_from_reader(reader)?) }} else {{ None }} }} else {{ match optional_field(reader, {:?})? {{ Some(value) => Some({payload_type}::read_from_reader(&value)?), None => None }} }},\n",
-                fragment.name
+                concat!(
+                    "            {field_name}: if reader.is_positional() {{\n",
+                    "                if reader.read_optional_present(0)? {{\n",
+                    "                    Some({payload_type}::read_from_reader(reader)?)\n",
+                    "                }} else {{\n",
+                    "                    None\n",
+                    "                }}\n",
+                    "            }} else {{\n",
+                    "                match optional_field(reader, {:?})? {{\n",
+                    "                    Some(value) => Some({payload_type}::read_from_reader(&value)?),\n",
+                    "                    None => None,\n",
+                    "                }}\n",
+                    "            }},\n",
+                ),
+                fragment.name,
+                field_name = field_name,
+                payload_type = payload_type
             ));
         }
     }
@@ -642,7 +657,16 @@ fn render_table(content: &mut CodeWriter, table: &CodeTable, names: &RustNames<'
     content.raw("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
     content.raw("        let root = loader.open(Self::DATA_FILE)?;\n");
     if table.data_format == BINARY_FORMAT {
-        content.raw("        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) { return Err(format!(\"schema revision mismatch for `{}`: expected {}, got {:?}\", Self::DATA_FILE, Self::EXPECTED_SCHEMA_REVISION, root.schema_revision())); }\n");
+        content.raw(concat!(
+            "        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) {\n",
+            "            return Err(format!(\n",
+            "                \"schema revision mismatch for `{}`: expected {}, got {:?}\",\n",
+            "                Self::DATA_FILE,\n",
+            "                Self::EXPECTED_SCHEMA_REVISION,\n",
+            "                root.schema_revision()\n",
+            "            ));\n",
+            "        }\n",
+        ));
         content.raw("        let row_count = root.read_row_count()?;\n");
         content.raw("        let mut rows = Vec::new();\n");
         content.raw("        for _ in 0..row_count {\n");
@@ -735,7 +759,16 @@ fn render_object_table(
     content.raw("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
     content.raw("        let root = loader.open(Self::DATA_FILE)?;\n");
     if table.data_format == BINARY_FORMAT {
-        content.raw("        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) { return Err(format!(\"schema revision mismatch for `{}`: expected {}, got {:?}\", Self::DATA_FILE, Self::EXPECTED_SCHEMA_REVISION, root.schema_revision())); }\n");
+        content.raw(concat!(
+            "        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) {\n",
+            "            return Err(format!(\n",
+            "                \"schema revision mismatch for `{}`: expected {}, got {:?}\",\n",
+            "                Self::DATA_FILE,\n",
+            "                Self::EXPECTED_SCHEMA_REVISION,\n",
+            "                root.schema_revision()\n",
+            "            ));\n",
+            "        }\n",
+        ));
         content.raw("        let value = Self::read_from_reader(&root)?;\n");
         content.raw("        root.ensure_exhausted()?;\n");
         content.raw("        return Ok(value);\n");
@@ -786,7 +819,12 @@ fn render_index_function(
             names.row_type_name(&table.name)?
         ));
         content.raw_fmt(format_args!(
-            "        self.{}.get(&{}).map(|indexes| indexes.iter().filter_map(|index| self.rows.get(*index)).collect()).unwrap_or_default()\n",
+            concat!(
+                "        self.{}\n",
+                "            .get(&{})\n",
+                "            .map(|indexes| indexes.iter().filter_map(|index| self.rows.get(*index)).collect())\n",
+                "            .unwrap_or_default()\n",
+            ),
             names.index_storage_name(index)?, key
         ));
         content.raw("    }\n\n");
@@ -897,7 +935,15 @@ impl<'a> RustNames<'a> {
                 CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                     let type_name = self.type_name(name)?;
                     format!(
-                        "if reader.is_positional() {{ {type_name}::read_from_reader(reader)? }} else {{ {type_name}::read_from_reader(&required_field(reader, {source_name})?)? }}"
+                        concat!(
+                            "if reader.is_positional() {{\n",
+                            "                {type_name}::read_from_reader(reader)?\n",
+                            "            }} else {{\n",
+                            "                {type_name}::read_from_reader(&required_field(reader, {source_name})?)?\n",
+                            "            }}",
+                        ),
+                        type_name = type_name,
+                        source_name = source_name,
                     )
                 }
             });
@@ -913,7 +959,22 @@ impl<'a> RustNames<'a> {
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                 let type_name = self.type_name(name)?;
                 format!(
-                    "if reader.is_positional() {{ if reader.read_optional_present(0)? {{ Some({type_name}::read_from_reader(reader)?) }} else {{ None }} }} else {{ match optional_field(reader, {source_name})? {{ Some(value) => Some({type_name}::read_from_reader(&value)?), None => None }} }}"
+                    concat!(
+                        "if reader.is_positional() {{\n",
+                        "                if reader.read_optional_present(0)? {{\n",
+                        "                    Some({type_name}::read_from_reader(reader)?)\n",
+                        "                }} else {{\n",
+                        "                    None\n",
+                        "                }}\n",
+                        "            }} else {{\n",
+                        "                match optional_field(reader, {source_name})? {{\n",
+                        "                    Some(value) => Some({type_name}::read_from_reader(&value)?),\n",
+                        "                    None => None,\n",
+                        "                }}\n",
+                        "            }}",
+                    ),
+                    type_name = type_name,
+                    source_name = source_name,
                 )
             }
         })

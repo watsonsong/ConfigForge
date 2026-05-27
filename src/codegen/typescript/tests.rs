@@ -139,9 +139,11 @@ fn reads_optional_fragment_once() {
     assert!(content.contains(
         "const stackReader = reader.isPositional?.() ? undefined : optionalField(reader, \"stack\");"
     ));
-    assert!(
-        content.contains("stack: reader.isPositional?.() ? (reader.readOptionalPresent!(0) ? readItemsStackFragment(reader) : undefined) : (stackReader ? readItemsStackFragment(stackReader) : undefined),")
-    );
+    assert!(content.contains(concat!(
+        "stack: reader.isPositional?.()\n",
+        "      ? (reader.readOptionalPresent!(0) ? readItemsStackFragment(reader) : undefined)\n",
+        "      : (stackReader ? readItemsStackFragment(stackReader) : undefined),",
+    )));
     assert!(!content.contains("optionalField(reader, \"stack\") ?"));
 }
 
