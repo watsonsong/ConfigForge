@@ -7,10 +7,9 @@ use crate::{ConfigForgeError, Result, exporter::BINARY_FORMAT};
 
 use super::{
     CaseStyle, CodeEnum, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel,
-    CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodeWriterConfig, CodegenOptions,
-    GeneratedFile, GeneratedSymbol, NamingConfig, build_code_model,
+    CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodeWriter, CodeWriterConfig,
+    CodegenOptions, GeneratedFile, GeneratedSymbol, NamingConfig, build_code_model,
     ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
-    render_file_header,
 };
 
 #[cfg(test)]
@@ -62,16 +61,16 @@ impl CodeGenerator for TypeScriptCodeGenerator {
             .language_options::<TypeScriptCodegenOptions>(LANGUAGE)?;
         let names = TypeScriptNames::new(&input.target.options);
         validate_generated_symbols(&model, &names)?;
-        let mut content = render_file_header(input);
-        content.push('\n');
-        content
-            .push_str("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;\n\n");
+        let mut content = CodeWriter::new(input.target.options.formatting);
+        self.write_file_header(&mut content, input);
+        content.newline();
+        content.raw("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;\n\n");
         render_runtime_reader_interfaces(&mut content);
         render_runtime_reader_helpers(&mut content);
 
         for code_enum in &model.enums {
             push_doc(&mut content, code_enum.desc.as_deref());
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "export type {} = {};\n\n",
                 names.type_name(&code_enum.name)?,
                 code_enum
@@ -86,13 +85,13 @@ impl CodeGenerator for TypeScriptCodeGenerator {
 
         for code_struct in &model.structs {
             push_doc(&mut content, code_struct.desc.as_deref());
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "export interface {} {{\n",
                 names.type_name(&code_struct.name)?
             ));
             for field in &code_struct.fields {
                 push_doc_indented(&mut content, field.desc.as_deref(), "  ");
-                content.push_str(&format!(
+                content.raw_fmt(format_args!(
                     "  {}{}{}: {};\n",
                     readonly_prefix(typescript_options.readonly_fields),
                     names.field_name(&field.name)?,
@@ -100,7 +99,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                     names.ts_type(&field.code_type)?
                 ));
             }
-            content.push_str("}\n\n");
+            content.raw("}\n\n");
             render_struct_reader_function(&mut content, code_struct, &names)?;
         }
 
@@ -110,13 +109,13 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                     continue;
                 }
                 push_doc(&mut content, fragment.desc.as_deref());
-                content.push_str(&format!(
+                content.raw_fmt(format_args!(
                     "export interface {} {{\n",
                     names.fragment_type_name(&table.name, &fragment.name)?
                 ));
                 for field in &fragment.fields {
                     push_doc_indented(&mut content, field.desc.as_deref(), "  ");
-                    content.push_str(&format!(
+                    content.raw_fmt(format_args!(
                         "  {}{}{}: {};\n",
                         readonly_prefix(typescript_options.readonly_fields),
                         names.field_name(&field.name)?,
@@ -124,20 +123,20 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                         names.ts_type(&field.code_type)?
                     ));
                 }
-                content.push_str("}\n\n");
+                content.raw("}\n\n");
                 render_fragment_reader_function(&mut content, table, fragment, &names)?;
             }
         }
 
         for table in &model.tables {
             push_doc(&mut content, table.desc.as_deref());
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "export interface {} {{\n",
                 names.row_type_name(&table.name)?
             ));
             for field in &table.fields {
                 push_doc_indented(&mut content, field.desc.as_deref(), "  ");
-                content.push_str(&format!(
+                content.raw_fmt(format_args!(
                     "  {}{}{}: {};\n",
                     readonly_prefix(typescript_options.readonly_fields),
                     names.field_name(&field.name)?,
@@ -146,57 +145,57 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 ));
             }
             for fragment in &table.fragments {
-                content.push_str(&format!(
+                content.raw_fmt(format_args!(
                     "  {}{}?: {};\n",
                     readonly_prefix(typescript_options.readonly_fields),
                     names.field_name(&fragment.name)?,
                     names.fragment_payload_type_name(table, fragment)?
                 ));
             }
-            content.push_str("}\n\n");
+            content.raw("}\n\n");
             render_row_reader_function(&mut content, table, &names)?;
             if table.kind == CodeTableKind::Collection {
                 render_table(&mut content, table, &names)?;
             }
         }
 
-        content.push_str("export class GameData {\n");
+        content.raw("export class GameData {\n");
         for table in &model.tables {
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "  readonly {}: {};\n",
                 names.field_name(&table.name)?,
                 names.table_data_type_name(table)?
             ));
         }
-        content.push_str("\n  private constructor(args: {\n");
+        content.raw("\n  private constructor(args: {\n");
         for table in &model.tables {
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "    {}: {};\n",
                 names.field_name(&table.name)?,
                 names.table_data_type_name(table)?
             ));
         }
-        content.push_str("  }) {\n");
+        content.raw("  }) {\n");
         for table in &model.tables {
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "    this.{} = args.{};\n",
                 names.field_name(&table.name)?,
                 names.field_name(&table.name)?
             ));
         }
-        content.push_str("  }\n\n");
-        content.push_str("  static async load(loader: RuntimeDataLoader): Promise<GameData> {\n");
-        content.push_str("    return new GameData({\n");
+        content.raw("  }\n\n");
+        content.raw("  static async load(loader: RuntimeDataLoader): Promise<GameData> {\n");
+        content.raw("    return new GameData({\n");
         for table in &model.tables {
             match table.kind {
-                CodeTableKind::Collection => content.push_str(&format!(
+                CodeTableKind::Collection => content.raw_fmt(format_args!(
                     "      {}: await {}.load(loader),\n",
                     names.field_name(&table.name)?,
                     names.repository_type_name(&table.name)?
                 )),
                 CodeTableKind::Object => {
                     if table.data_format == BINARY_FORMAT {
-                        content.push_str(&format!(
+                        content.raw_fmt(format_args!(
                             "      {}: await Promise.resolve(loader.open({:?})).then(root => {{ const schemaRevision = root.schemaRevision?.(); if (schemaRevision === undefined || BigInt(schemaRevision) !== {}n) {{ throw new Error(`schema revision mismatch for {}`); }} if (!root.ensureExhausted) {{ throw new Error('binary reader does not support EOF validation'); }} const value = {}(root); root.ensureExhausted(); return value; }}),\n",
                             names.field_name(&table.name)?,
                             table.data_file,
@@ -205,7 +204,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                             names.reader_function_name(&names.row_type_name(&table.name)?)?
                         ))
                     } else {
-                        content.push_str(&format!(
+                        content.raw_fmt(format_args!(
                             "      {}: {}(await loader.open({:?})),\n",
                             names.field_name(&table.name)?,
                             names.reader_function_name(&names.row_type_name(&table.name)?)?,
@@ -215,20 +214,19 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 }
             }
         }
-        content.push_str("    });\n");
-        content.push_str("  }\n");
-        content.push_str("}\n");
+        content.raw("    });\n");
+        content.raw("  }\n");
+        content.raw("}\n");
 
         Ok(vec![GeneratedFile {
             path: input.target.out_dir.join("generated.ts"),
-            content: super::CodeWriter::with_content(content, input.target.options.formatting)
-                .finish(),
+            content: content.finish(),
         }])
     }
 }
 
-fn render_runtime_reader_interfaces(content: &mut String) {
-    content.push_str(
+fn render_runtime_reader_interfaces(content: &mut CodeWriter) {
+    content.raw(
         r#"export interface RuntimeDataReader {
   field(name: string): RuntimeDataReader | undefined;
   index(index: number): RuntimeDataReader;
@@ -260,8 +258,8 @@ export interface RuntimeDataLoader {
     );
 }
 
-fn render_runtime_reader_helpers(content: &mut String) {
-    content.push_str(
+fn render_runtime_reader_helpers(content: &mut CodeWriter) {
+    content.raw(
         r#"function requiredField(reader: RuntimeDataReader, name: string): RuntimeDataReader {
   const value = reader.field(name);
   if (!value || value.isNull()) {
@@ -336,20 +334,20 @@ function readOptionalString(reader: RuntimeDataReader, name: string): string | u
 }
 
 fn render_enum_reader_function(
-    content: &mut String,
+    content: &mut CodeWriter,
     code_enum: &CodeEnum,
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
     let type_name = names.type_name(&code_enum.name)?;
     let function_name = names.reader_function_name(&type_name)?;
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "function {function_name}(reader: RuntimeDataReader): {type_name} {{\n"
     ));
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "  if (reader.isPositional?.()) {{ return {}FromBinaryOrdinal(reader.readEnumOrdinal!()); }}\n",
         function_name
     ));
-    content.push_str("  const value = reader.asString();\n");
+    content.raw("  const value = reader.asString();\n");
     let values = code_enum
         .values
         .iter()
@@ -361,36 +359,36 @@ fn render_enum_reader_function(
         })
         .collect::<Result<Vec<_>>>()?
         .join(" || ");
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "  if ({values}) {{ return value as {type_name}; }}\n"
     ));
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "  throw new Error(`unknown {} value ${{value}}`);\n",
         code_enum.name
     ));
-    content.push_str("}\n\n");
-    content.push_str(&format!(
+    content.raw("}\n\n");
+    content.raw_fmt(format_args!(
         "function {}FromBinaryOrdinal(ordinal: number): {type_name} {{\n",
         function_name
     ));
-    content.push_str("  switch (ordinal) {\n");
+    content.raw("  switch (ordinal) {\n");
     for (ordinal, value) in code_enum.values.iter().enumerate() {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "    case {ordinal}: return {:?};\n",
             names.enum_value_name(&value.name)?
         ));
     }
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "    default: throw new Error(`unknown {} ordinal ${{ordinal}}`);\n",
         code_enum.name
     ));
-    content.push_str("  }\n");
-    content.push_str("}\n\n");
+    content.raw("  }\n");
+    content.raw("}\n\n");
     Ok(())
 }
 
 fn render_struct_reader_function(
-    content: &mut String,
+    content: &mut CodeWriter,
     code_struct: &CodeStruct,
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
@@ -400,7 +398,7 @@ fn render_struct_reader_function(
 }
 
 fn render_fragment_reader_function(
-    content: &mut String,
+    content: &mut CodeWriter,
     table: &CodeTable,
     fragment: &super::CodeFragment,
     names: &TypeScriptNames<'_>,
@@ -411,7 +409,7 @@ fn render_fragment_reader_function(
 }
 
 fn render_row_reader_function(
-    content: &mut String,
+    content: &mut CodeWriter,
     table: &CodeTable,
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
@@ -421,7 +419,7 @@ fn render_row_reader_function(
 }
 
 fn render_reader_function_body(
-    content: &mut String,
+    content: &mut CodeWriter,
     type_name: &str,
     fields: &[super::CodeField],
     table: Option<&CodeTable>,
@@ -431,22 +429,24 @@ fn render_reader_function_body(
     let fragment_count = table.map(|table| table.fragments.len()).unwrap_or(0);
     let optional_slot_count =
         fields.iter().filter(|field| !field.required).count() + fragment_count;
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "function {function_name}(reader: RuntimeDataReader): {type_name} {{\n"
     ));
-    content.push_str(&format!("  reader.beginRecord?.({optional_slot_count});\n"));
+    content.raw_fmt(format_args!(
+        "  reader.beginRecord?.({optional_slot_count});\n"
+    ));
     if let Some(table) = table {
         for fragment in &table.fragments {
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "  const {}Reader = reader.isPositional?.() ? undefined : optionalField(reader, {:?});\n",
                 names.field_name(&fragment.name)?,
                 fragment.name
             ));
         }
     }
-    content.push_str("  const value = {\n");
+    content.raw("  const value = {\n");
     for field in fields {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "    {}: {},\n",
             names.field_name(&field.name)?,
             names.ts_read_field_expr(field)?
@@ -457,15 +457,15 @@ fn render_reader_function_body(
             let field_name = names.field_name(&fragment.name)?;
             let payload_type = names.fragment_payload_type_name(table, fragment)?;
             let reader_function = names.reader_function_name(&payload_type)?;
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "    {field_name}: reader.isPositional?.() ? (reader.readOptionalPresent!(0) ? {reader_function}(reader) : undefined) : ({field_name}Reader ? {reader_function}({field_name}Reader) : undefined),\n"
             ));
         }
     }
-    content.push_str("  };\n");
-    content.push_str("  reader.endRecord?.();\n");
-    content.push_str("  return value;\n");
-    content.push_str("}\n\n");
+    content.raw("  };\n");
+    content.raw("  reader.endRecord?.();\n");
+    content.raw("  return value;\n");
+    content.raw("}\n\n");
     Ok(())
 }
 
@@ -621,79 +621,79 @@ fn validate_named_symbols(
 }
 
 fn render_table(
-    content: &mut String,
+    content: &mut CodeWriter,
     table: &CodeTable,
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "export class {} {{\n",
         names.repository_type_name(&table.name)?
     ));
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "  static readonly dataFile = {:?};\n",
         table.data_file
     ));
     if let Some(revision) = table.schema_revision {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "  static readonly expectedSchemaRevision = {revision}n;\n"
         ));
     }
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "  private readonly rows_: {}[];\n",
         names.row_type_name(&table.name)?
     ));
     for index in &table.indexes {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "  private readonly {}: {};\n",
             names.index_storage_name(index)?,
             names.ts_index_storage(index, table)?
         ));
     }
-    content.push('\n');
-    content.push_str(&format!(
+    content.newline();
+    content.raw_fmt(format_args!(
         "  private constructor(rows: {}[]) {{\n",
         names.row_type_name(&table.name)?
     ));
-    content.push_str("    this.rows_ = rows;\n");
+    content.raw("    this.rows_ = rows;\n");
     for index in &table.indexes {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "    this.{} = new Map();\n",
             names.index_storage_name(index)?
         ));
     }
-    content.push_str("    for (const row of rows) {\n");
+    content.raw("    for (const row of rows) {\n");
     for index in &table.indexes {
         let key = names.ts_key_expr(index)?;
         if index.unique {
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "      const key_{} = {};\n",
                 names.index_storage_name(index)?,
                 key
             ));
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "      if (this.{}.has(key_{})) {{ throw new Error(\"Duplicate unique index key for {}.{}\"); }}\n",
                 names.index_storage_name(index)?,
                 names.index_storage_name(index)?,
                 names.repository_type_name(&table.name)?,
                 index.name
             ));
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "      this.{}.set(key_{}, row);\n",
                 names.index_storage_name(index)?,
                 names.index_storage_name(index)?
             ));
         } else {
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "      const list_{} = this.{}.get({}) ?? [];\n",
                 names.index_storage_name(index)?,
                 names.index_storage_name(index)?,
                 key
             ));
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "      list_{}.push(row);\n",
                 names.index_storage_name(index)?
             ));
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "      this.{}.set({}, list_{});\n",
                 names.index_storage_name(index)?,
                 key,
@@ -701,74 +701,74 @@ fn render_table(
             ));
         }
     }
-    content.push_str("    }\n");
-    content.push_str("  }\n\n");
-    content.push_str(&format!(
+    content.raw("    }\n");
+    content.raw("  }\n\n");
+    content.raw_fmt(format_args!(
         "  static async load(loader: RuntimeDataLoader): Promise<{}> {{\n",
         names.repository_type_name(&table.name)?
     ));
-    content.push_str("    const root = await loader.open(this.dataFile);\n");
+    content.raw("    const root = await loader.open(this.dataFile);\n");
     if table.data_format == BINARY_FORMAT {
-        content.push_str("    const schemaRevision = root.schemaRevision?.();\n");
-        content.push_str("    if (schemaRevision === undefined || BigInt(schemaRevision) !== this.expectedSchemaRevision) { throw new Error(`schema revision mismatch for ${this.dataFile}`); }\n");
-        content.push_str("    if (!root.readRowCount) { throw new Error('binary reader does not support row count'); }\n");
-        content.push_str("    if (!root.ensureExhausted) { throw new Error('binary reader does not support EOF validation'); }\n");
-        content.push_str("    const rowCount = root.readRowCount();\n");
-        content.push_str(&format!(
+        content.raw("    const schemaRevision = root.schemaRevision?.();\n");
+        content.raw("    if (schemaRevision === undefined || BigInt(schemaRevision) !== this.expectedSchemaRevision) { throw new Error(`schema revision mismatch for ${this.dataFile}`); }\n");
+        content.raw("    if (!root.readRowCount) { throw new Error('binary reader does not support row count'); }\n");
+        content.raw("    if (!root.ensureExhausted) { throw new Error('binary reader does not support EOF validation'); }\n");
+        content.raw("    const rowCount = root.readRowCount();\n");
+        content.raw_fmt(format_args!(
             "    const rows: {}[] = [];\n",
             names.row_type_name(&table.name)?
         ));
-        content.push_str("    for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {\n");
-        content.push_str(&format!(
+        content.raw("    for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {\n");
+        content.raw_fmt(format_args!(
             "      rows.push({}(root));\n",
             names.reader_function_name(&names.row_type_name(&table.name)?)?
         ));
-        content.push_str("    }\n");
-        content.push_str("    root.ensureExhausted();\n");
-        content.push_str(&format!(
+        content.raw("    }\n");
+        content.raw("    root.ensureExhausted();\n");
+        content.raw_fmt(format_args!(
             "    return new {}(rows ?? []);\n",
             names.repository_type_name(&table.name)?
         ));
-        content.push_str("  }\n\n");
-        content.push_str(&format!(
+        content.raw("  }\n\n");
+        content.raw_fmt(format_args!(
             "  rows(): readonly {}[] {{ return this.rows_; }}\n\n",
             names.row_type_name(&table.name)?
         ));
         for index in &table.indexes {
             render_index_function(content, table, index, names)?;
         }
-        content.push_str("}\n\n");
+        content.raw("}\n\n");
         return Ok(());
     }
-    content.push_str("    const rowsReader = requiredField(root, \"rows\");\n");
-    content.push_str(&format!(
+    content.raw("    const rowsReader = requiredField(root, \"rows\");\n");
+    content.raw_fmt(format_args!(
         "    const rows: {}[] = [];\n",
         names.row_type_name(&table.name)?
     ));
-    content.push_str("    for (let rowIndex = 0; rowIndex < rowsReader.length(); rowIndex++) {\n");
-    content.push_str(&format!(
+    content.raw("    for (let rowIndex = 0; rowIndex < rowsReader.length(); rowIndex++) {\n");
+    content.raw_fmt(format_args!(
         "      rows.push({}(rowsReader.index(rowIndex)));\n",
         names.reader_function_name(&names.row_type_name(&table.name)?)?
     ));
-    content.push_str("    }\n");
-    content.push_str(&format!(
+    content.raw("    }\n");
+    content.raw_fmt(format_args!(
         "    return new {}(rows ?? []);\n",
         names.repository_type_name(&table.name)?
     ));
-    content.push_str("  }\n\n");
-    content.push_str(&format!(
+    content.raw("  }\n\n");
+    content.raw_fmt(format_args!(
         "  rows(): readonly {}[] {{ return this.rows_; }}\n\n",
         names.row_type_name(&table.name)?
     ));
     for index in &table.indexes {
         render_index_function(content, table, index, names)?;
     }
-    content.push_str("}\n\n");
+    content.raw("}\n\n");
     Ok(())
 }
 
 fn render_index_function(
-    content: &mut String,
+    content: &mut CodeWriter,
     table: &CodeTable,
     index: &CodeIndex,
     names: &TypeScriptNames<'_>,
@@ -787,7 +787,7 @@ fn render_index_function(
         .join(", ");
     let key = names.ts_lookup_key(index)?;
     if index.unique {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "  {}({}): {} | undefined {{ return this.{}.get({}); }}\n\n",
             names.index_function_name(index)?,
             params,
@@ -796,7 +796,7 @@ fn render_index_function(
             key
         ));
     } else {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "  {}({}): readonly {}[] {{ return this.{}.get({}) ?? []; }}\n\n",
             names.index_function_name(index)?,
             params,
@@ -1019,22 +1019,22 @@ impl<'a> TypeScriptNames<'a> {
     }
 }
 
-fn push_doc(content: &mut String, desc: Option<&str>) {
+fn push_doc(content: &mut CodeWriter, desc: Option<&str>) {
     push_doc_indented(content, desc, "");
 }
 
-fn push_doc_indented(content: &mut String, desc: Option<&str>, indent: &str) {
+fn push_doc_indented(content: &mut CodeWriter, desc: Option<&str>, indent: &str) {
     if let Some(desc) = desc {
-        content.push_str(indent);
-        content.push_str("/**\n");
+        content.raw(indent);
+        content.raw("/**\n");
         for line in desc.lines() {
-            content.push_str(indent);
-            content.push_str(" * ");
-            content.push_str(line);
-            content.push('\n');
+            content.raw(indent);
+            content.raw(" * ");
+            content.raw(line);
+            content.newline();
         }
-        content.push_str(indent);
-        content.push_str(" */\n");
+        content.raw(indent);
+        content.raw(" */\n");
     }
 }
 

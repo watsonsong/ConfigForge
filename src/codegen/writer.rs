@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use serde::Deserialize;
+use std::fmt::{self, Write as _};
 
 /// Shared configuration for generated source formatting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +122,13 @@ impl CodeWriter {
         self.line_start = self.output.ends_with('\n') || self.output.is_empty();
     }
 
+    pub fn raw_fmt(&mut self, args: fmt::Arguments<'_>) {
+        self.output
+            .write_fmt(args)
+            .expect("writing to String should not fail");
+        self.line_start = self.output.ends_with('\n') || self.output.is_empty();
+    }
+
     pub fn write(&mut self, text: impl AsRef<str>) {
         let text = text.as_ref();
         for segment in text.split_inclusive('\n') {
@@ -134,6 +142,16 @@ impl CodeWriter {
 
     pub fn line(&mut self, text: impl AsRef<str>) {
         self.write(text);
+        self.newline();
+    }
+
+    pub fn line_fmt(&mut self, args: fmt::Arguments<'_>) {
+        if self.line_start {
+            self.write_indent();
+        }
+        self.output
+            .write_fmt(args)
+            .expect("writing to String should not fail");
         self.newline();
     }
 

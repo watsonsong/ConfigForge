@@ -7,10 +7,9 @@ use crate::{ConfigForgeError, Result, exporter::BINARY_FORMAT};
 
 use super::{
     CaseStyle, CodeEnum, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel,
-    CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodeWriterConfig, CodegenOptions,
-    GeneratedFile, GeneratedSymbol, NamingConfig, build_code_model,
+    CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodeWriter, CodeWriterConfig,
+    CodegenOptions, GeneratedFile, GeneratedSymbol, NamingConfig, build_code_model,
     ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
-    render_file_header,
 };
 
 #[cfg(test)]
@@ -54,8 +53,9 @@ impl CodeGenerator for RustCodeGenerator {
             .language_options::<RustCodegenOptions>(LANGUAGE)?;
         let names = RustNames::new(&input.target.options);
         validate_generated_symbols(&model, &names)?;
-        let mut content = render_file_header(input);
-        content.push_str("use std::collections::HashMap;\n\n");
+        let mut content = CodeWriter::new(input.target.options.formatting);
+        self.write_file_header(&mut content, input);
+        content.raw("use std::collections::HashMap;\n\n");
         render_runtime_reader_imports(&mut content);
         render_runtime_reader_helpers(&mut content);
 
@@ -66,18 +66,21 @@ impl CodeGenerator for RustCodeGenerator {
                 "Debug, Clone, PartialEq, Eq, Hash",
                 rust_options.derive_serde,
             );
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "pub enum {} {{\n",
                 names.type_name(&code_enum.name)?
             ));
             for value in &code_enum.values {
                 push_doc(&mut content, value.desc.as_deref(), "    /// ");
                 if rust_options.derive_serde {
-                    content.push_str(&format!("    #[serde(rename = {:?})]\n", value.name));
+                    content.raw_fmt(format_args!("    #[serde(rename = {:?})]\n", value.name));
                 }
-                content.push_str(&format!("    {},\n", names.enum_variant_name(&value.name)?));
+                content.raw_fmt(format_args!(
+                    "    {},\n",
+                    names.enum_variant_name(&value.name)?
+                ));
             }
-            content.push_str("}\n\n");
+            content.raw("}\n\n");
             render_enum_reader_impl(&mut content, code_enum, &names)?;
         }
 
@@ -88,22 +91,22 @@ impl CodeGenerator for RustCodeGenerator {
                 "Debug, Clone, PartialEq",
                 rust_options.derive_serde,
             );
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "pub struct {} {{\n",
                 names.type_name(&code_struct.name)?
             ));
             for field in &code_struct.fields {
                 push_doc(&mut content, field.desc.as_deref(), "    /// ");
                 if rust_options.derive_serde {
-                    content.push_str(&format!("    #[serde(rename = {:?})]\n", field.name));
+                    content.raw_fmt(format_args!("    #[serde(rename = {:?})]\n", field.name));
                 }
-                content.push_str(&format!(
+                content.raw_fmt(format_args!(
                     "    pub {}: {},\n",
                     names.field_name(&field.name)?,
                     names.rust_field_type(field)?
                 ));
             }
-            content.push_str("}\n\n");
+            content.raw("}\n\n");
             render_struct_reader_impl(&mut content, code_struct, &names)?;
         }
 
@@ -118,22 +121,22 @@ impl CodeGenerator for RustCodeGenerator {
                     "Debug, Clone, PartialEq",
                     rust_options.derive_serde,
                 );
-                content.push_str(&format!(
+                content.raw_fmt(format_args!(
                     "pub struct {} {{\n",
                     names.fragment_type_name(&table.name, &fragment.name)?
                 ));
                 for field in &fragment.fields {
                     push_doc(&mut content, field.desc.as_deref(), "    /// ");
                     if rust_options.derive_serde {
-                        content.push_str(&format!("    #[serde(rename = {:?})]\n", field.name));
+                        content.raw_fmt(format_args!("    #[serde(rename = {:?})]\n", field.name));
                     }
-                    content.push_str(&format!(
+                    content.raw_fmt(format_args!(
                         "    pub {}: {},\n",
                         names.field_name(&field.name)?,
                         names.rust_field_type(field)?
                     ));
                 }
-                content.push_str("}\n\n");
+                content.raw("}\n\n");
                 render_fragment_reader_impl(&mut content, table, fragment, &names)?;
             }
         }
@@ -145,16 +148,16 @@ impl CodeGenerator for RustCodeGenerator {
                 "Debug, Clone, PartialEq",
                 rust_options.derive_serde,
             );
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "pub struct {} {{\n",
                 names.row_type_name(&table.name)?
             ));
             for field in &table.fields {
                 push_doc(&mut content, field.desc.as_deref(), "    /// ");
                 if rust_options.derive_serde {
-                    content.push_str(&format!("    #[serde(rename = {:?})]\n", field.name));
+                    content.raw_fmt(format_args!("    #[serde(rename = {:?})]\n", field.name));
                 }
-                content.push_str(&format!(
+                content.raw_fmt(format_args!(
                     "    pub {}: {},\n",
                     names.field_name(&field.name)?,
                     names.rust_field_type(field)?
@@ -162,69 +165,69 @@ impl CodeGenerator for RustCodeGenerator {
             }
             for fragment in &table.fragments {
                 if rust_options.derive_serde {
-                    content.push_str(&format!("    #[serde(rename = {:?})]\n", fragment.name));
+                    content.raw_fmt(format_args!("    #[serde(rename = {:?})]\n", fragment.name));
                 }
-                content.push_str(&format!(
+                content.raw_fmt(format_args!(
                     "    pub {}: Option<{}>,\n",
                     names.field_name(&fragment.name)?,
                     names.fragment_payload_type_name(table, fragment)?
                 ));
             }
-            content.push_str("}\n\n");
+            content.raw("}\n\n");
             render_row_reader_impl(&mut content, table, &names)?;
-            content.push_str(&format!("impl {} {{\n", names.row_type_name(&table.name)?));
+            content.raw_fmt(format_args!(
+                "impl {} {{\n",
+                names.row_type_name(&table.name)?
+            ));
             for fragment in &table.fragments {
-                content.push_str(&format!(
+                content.raw_fmt(format_args!(
                     "    pub fn has_{}(&self) -> bool {{ self.{}.is_some() }}\n",
                     names.field_name(&fragment.name)?,
                     names.field_name(&fragment.name)?
                 ));
-                content.push_str(&format!(
+                content.raw_fmt(format_args!(
                     "    pub fn {}(&self) -> Option<&{}> {{ self.{}.as_ref() }}\n",
                     names.field_name(&fragment.name)?,
                     names.fragment_payload_type_name(table, fragment)?,
                     names.field_name(&fragment.name)?
                 ));
             }
-            content.push_str("}\n\n");
+            content.raw("}\n\n");
             render_table(&mut content, table, &names)?;
         }
 
-        content.push_str("pub struct GameData {\n");
+        content.raw("pub struct GameData {\n");
         for table in &model.tables {
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "    pub {}: {},\n",
                 names.field_name(&table.name)?,
                 names.table_data_type_name(table)?
             ));
         }
-        content.push_str("}\n\n");
-        content.push_str("impl GameData {\n");
-        content.push_str(
-            "    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n",
-        );
-        content.push_str("        Ok(Self {\n");
+        content.raw("}\n\n");
+        content.raw("impl GameData {\n");
+        content.raw("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
+        content.raw("        Ok(Self {\n");
         for table in &model.tables {
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "            {}: {}::load(loader)?,\n",
                 names.field_name(&table.name)?,
                 names.table_data_type_name(table)?
             ));
         }
-        content.push_str("        })\n");
-        content.push_str("    }\n");
-        content.push_str("}\n");
+        content.raw("        })\n");
+        content.raw("    }\n");
+        content.raw("}\n");
 
         Ok(vec![GeneratedFile {
             path: input.target.out_dir.join("generated.rs"),
-            content: super::CodeWriter::with_content(content, input.target.options.formatting)
-                .finish(),
+            content: content.finish(),
         }])
     }
 }
 
-fn render_runtime_reader_imports(content: &mut String) {
-    content.push_str(
+fn render_runtime_reader_imports(content: &mut CodeWriter) {
+    content.raw(
         r#"pub use config_forge_runtime_reader_core::{
     CONFIG_FORGE_READER_CONTRACT_VERSION, RuntimeDataLoader, RuntimeDataReader,
 };
@@ -233,8 +236,8 @@ fn render_runtime_reader_imports(content: &mut String) {
     );
 }
 
-fn render_runtime_reader_helpers(content: &mut String) {
-    content.push_str(
+fn render_runtime_reader_helpers(content: &mut CodeWriter) {
+    content.raw(
         r#"fn required_field<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<R, String> {
     match reader.field(name)? {
         Some(value) if !value.is_null() => Ok(value),
@@ -307,90 +310,96 @@ fn read_optional_string<R: RuntimeDataReader>(reader: &R, name: &str) -> Result<
 }
 
 fn render_enum_reader_impl(
-    content: &mut String,
+    content: &mut CodeWriter,
     code_enum: &CodeEnum,
     names: &RustNames<'_>,
 ) -> Result<()> {
-    content.push_str(&format!("impl {} {{\n", names.type_name(&code_enum.name)?));
-    content.push_str(
+    content.raw_fmt(format_args!(
+        "impl {} {{\n",
+        names.type_name(&code_enum.name)?
+    ));
+    content.raw(
         "    fn read_from_reader<R: RuntimeDataReader>(reader: &R) -> Result<Self, String> {\n",
     );
-    content.push_str("        if reader.is_positional() { return Self::from_binary_ordinal(reader.read_enum_ordinal()?); }\n");
-    content.push_str("        match reader.as_string()?.as_str() {\n");
+    content.raw("        if reader.is_positional() { return Self::from_binary_ordinal(reader.read_enum_ordinal()?); }\n");
+    content.raw("        match reader.as_string()?.as_str() {\n");
     for value in &code_enum.values {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "            {:?} => Ok(Self::{}),\n",
             value.name,
             names.enum_variant_name(&value.name)?
         ));
     }
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "            other => Err(format!(\"unknown {} value `{{other}}`\")),\n",
         code_enum.name
     ));
-    content.push_str("        }\n");
-    content.push_str("    }\n");
-    content.push_str("\n");
-    content.push_str("    fn from_binary_ordinal(ordinal: u64) -> Result<Self, String> {\n");
-    content.push_str("        match ordinal {\n");
+    content.raw("        }\n");
+    content.raw("    }\n");
+    content.raw("\n");
+    content.raw("    fn from_binary_ordinal(ordinal: u64) -> Result<Self, String> {\n");
+    content.raw("        match ordinal {\n");
     for (ordinal, value) in code_enum.values.iter().enumerate() {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "            {ordinal} => Ok(Self::{}),\n",
             names.enum_variant_name(&value.name)?
         ));
     }
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "            other => Err(format!(\"unknown {} ordinal `{{other}}`\")),\n",
         code_enum.name
     ));
-    content.push_str("        }\n");
-    content.push_str("    }\n");
-    content.push_str("}\n\n");
+    content.raw("        }\n");
+    content.raw("    }\n");
+    content.raw("}\n\n");
     Ok(())
 }
 
 fn render_struct_reader_impl(
-    content: &mut String,
+    content: &mut CodeWriter,
     code_struct: &CodeStruct,
     names: &RustNames<'_>,
 ) -> Result<()> {
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "impl {} {{\n",
         names.type_name(&code_struct.name)?
     ));
     render_read_from_reader_body(content, &code_struct.fields, None, &code_struct.name, names)?;
-    content.push_str("}\n\n");
+    content.raw("}\n\n");
     Ok(())
 }
 
 fn render_fragment_reader_impl(
-    content: &mut String,
+    content: &mut CodeWriter,
     table: &CodeTable,
     fragment: &super::CodeFragment,
     names: &RustNames<'_>,
 ) -> Result<()> {
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "impl {} {{\n",
         names.fragment_type_name(&table.name, &fragment.name)?
     ));
     render_read_from_reader_body(content, &fragment.fields, None, &fragment.name, names)?;
-    content.push_str("}\n\n");
+    content.raw("}\n\n");
     Ok(())
 }
 
 fn render_row_reader_impl(
-    content: &mut String,
+    content: &mut CodeWriter,
     table: &CodeTable,
     names: &RustNames<'_>,
 ) -> Result<()> {
-    content.push_str(&format!("impl {} {{\n", names.row_type_name(&table.name)?));
+    content.raw_fmt(format_args!(
+        "impl {} {{\n",
+        names.row_type_name(&table.name)?
+    ));
     render_read_from_reader_body(content, &table.fields, Some(table), &table.name, names)?;
-    content.push_str("}\n\n");
+    content.raw("}\n\n");
     Ok(())
 }
 
 fn render_read_from_reader_body(
-    content: &mut String,
+    content: &mut CodeWriter,
     fields: &[super::CodeField],
     table: Option<&CodeTable>,
     type_name: &str,
@@ -399,15 +408,15 @@ fn render_read_from_reader_body(
     let fragment_count = table.map(|table| table.fragments.len()).unwrap_or(0);
     let optional_slot_count =
         fields.iter().filter(|field| !field.required).count() + fragment_count;
-    content.push_str(
+    content.raw(
         "    fn read_from_reader<R: RuntimeDataReader>(reader: &R) -> Result<Self, String> {\n",
     );
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "        reader.begin_record({optional_slot_count})?;\n"
     ));
-    content.push_str("        let value = Self {\n");
+    content.raw("        let value = Self {\n");
     for field in fields {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "            {}: {},\n",
             names.field_name(&field.name)?,
             names.rust_read_field_expr(field)?
@@ -417,22 +426,24 @@ fn render_read_from_reader_body(
         for fragment in &table.fragments {
             let field_name = names.field_name(&fragment.name)?;
             let payload_type = names.fragment_payload_type_name(table, fragment)?;
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "            {field_name}: if reader.is_positional() {{ if reader.read_optional_present(0)? {{ Some({payload_type}::read_from_reader(reader)?) }} else {{ None }} }} else {{ match optional_field(reader, {:?})? {{ Some(value) => Some({payload_type}::read_from_reader(&value)?), None => None }} }},\n",
                 fragment.name
             ));
         }
     }
-    content.push_str("        };\n");
-    content.push_str("        reader.end_record()?;\n");
-    content.push_str("        Ok(value)\n");
-    content.push_str("    }\n");
+    content.raw("        };\n");
+    content.raw("        reader.end_record()?;\n");
+    content.raw("        Ok(value)\n");
+    content.raw("    }\n");
     if fields.is_empty()
         && table
             .map(|table| table.fragments.is_empty())
             .unwrap_or(true)
     {
-        content.push_str(&format!("    // `{type_name}` has no runtime fields.\n"));
+        content.raw_fmt(format_args!(
+            "    // `{type_name}` has no runtime fields.\n"
+        ));
     }
     Ok(())
 }
@@ -593,149 +604,150 @@ fn validate_named_symbols(
     ensure_unique_generated_symbols(language, scope, symbols.collect::<Result<Vec<_>>>()?)
 }
 
-fn render_table(content: &mut String, table: &CodeTable, names: &RustNames<'_>) -> Result<()> {
+fn render_table(content: &mut CodeWriter, table: &CodeTable, names: &RustNames<'_>) -> Result<()> {
     if table.kind == CodeTableKind::Object {
         return render_object_table(content, table, names);
     }
 
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "pub struct {} {{\n",
         names.repository_type_name(&table.name)?
     ));
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "    rows: Vec<{}>,\n",
         names.row_type_name(&table.name)?
     ));
     for index in &table.indexes {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "    {}: {},\n",
             names.index_storage_name(index)?,
             names.rust_index_storage(index)?
         ));
     }
-    content.push_str("}\n\n");
+    content.raw("}\n\n");
 
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "impl {} {{\n",
         names.repository_type_name(&table.name)?
     ));
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
         "    pub const DATA_FILE: &'static str = {:?};\n\n",
         table.data_file
     ));
     if let Some(revision) = table.schema_revision {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "    pub const EXPECTED_SCHEMA_REVISION: u64 = {revision};\n\n"
         ));
     }
-    content
-        .push_str("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
-    content.push_str("        let root = loader.open(Self::DATA_FILE)?;\n");
+    content.raw("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
+    content.raw("        let root = loader.open(Self::DATA_FILE)?;\n");
     if table.data_format == BINARY_FORMAT {
-        content.push_str("        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) { return Err(format!(\"schema revision mismatch for `{}`: expected {}, got {:?}\", Self::DATA_FILE, Self::EXPECTED_SCHEMA_REVISION, root.schema_revision())); }\n");
-        content.push_str("        let row_count = root.read_row_count()?;\n");
-        content.push_str("        let mut rows = Vec::new();\n");
-        content.push_str("        for _ in 0..row_count {\n");
-        content.push_str(&format!(
+        content.raw("        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) { return Err(format!(\"schema revision mismatch for `{}`: expected {}, got {:?}\", Self::DATA_FILE, Self::EXPECTED_SCHEMA_REVISION, root.schema_revision())); }\n");
+        content.raw("        let row_count = root.read_row_count()?;\n");
+        content.raw("        let mut rows = Vec::new();\n");
+        content.raw("        for _ in 0..row_count {\n");
+        content.raw_fmt(format_args!(
             "            rows.push({}::read_from_reader(&root)?);\n",
             names.row_type_name(&table.name)?
         ));
-        content.push_str("        }\n");
-        content.push_str("        root.ensure_exhausted()?;\n");
-        content.push_str("        return Self::from_rows(rows);\n");
+        content.raw("        }\n");
+        content.raw("        root.ensure_exhausted()?;\n");
+        content.raw("        return Self::from_rows(rows);\n");
     }
-    content.push_str("        let rows_reader = required_field(&root, \"rows\")?;\n");
-    content.push_str("        let mut rows = Vec::new();\n");
-    content.push_str("        for row_index in 0..rows_reader.len()? {\n");
-    content.push_str(&format!(
+    content.raw("        let rows_reader = required_field(&root, \"rows\")?;\n");
+    content.raw("        let mut rows = Vec::new();\n");
+    content.raw("        for row_index in 0..rows_reader.len()? {\n");
+    content.raw_fmt(format_args!(
         "            rows.push({}::read_from_reader(&rows_reader.index(row_index)?)?);\n",
         names.row_type_name(&table.name)?
     ));
-    content.push_str("        }\n");
-    content.push_str("        Self::from_rows(rows)\n");
-    content.push_str("    }\n\n");
-    content.push_str(&format!(
+    content.raw("        }\n");
+    content.raw("        Self::from_rows(rows)\n");
+    content.raw("    }\n\n");
+    content.raw_fmt(format_args!(
         "    pub fn from_rows(rows: Vec<{}>) -> Result<Self, String> {{\n",
         names.row_type_name(&table.name)?
     ));
     for index in &table.indexes {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "        let mut {} = HashMap::new();\n",
             names.index_storage_name(index)?
         ));
     }
-    content.push_str("        for (row_index, row) in rows.iter().enumerate() {\n");
+    content.raw("        for (row_index, row) in rows.iter().enumerate() {\n");
     for index in &table.indexes {
         let key = names.rust_key_expr(index)?;
         if index.unique {
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "            if {}.insert({}, row_index).is_some() {{ return Err(format!(\"duplicate unique index {}\")); }}\n",
                 names.index_storage_name(index)?,
                 key,
                 index.name
             ));
         } else {
-            content.push_str(&format!(
+            content.raw_fmt(format_args!(
                 "            {}.entry({}).or_insert_with(Vec::new).push(row_index);\n",
                 names.index_storage_name(index)?,
                 key
             ));
         }
     }
-    content.push_str("        }\n");
-    content.push_str("        Ok(Self {\n");
-    content.push_str("            rows,\n");
+    content.raw("        }\n");
+    content.raw("        Ok(Self {\n");
+    content.raw("            rows,\n");
     for index in &table.indexes {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "            {},\n",
             names.index_storage_name(index)?
         ));
     }
-    content.push_str("        })\n");
-    content.push_str("    }\n\n");
-    content.push_str(&format!(
+    content.raw("        })\n");
+    content.raw("    }\n\n");
+    content.raw_fmt(format_args!(
         "    pub fn rows(&self) -> &[{}] {{ &self.rows }}\n\n",
         names.row_type_name(&table.name)?
     ));
     for index in &table.indexes {
         render_index_function(content, table, index, names)?;
     }
-    content.push_str("}\n\n");
+    content.raw("}\n\n");
     Ok(())
 }
 
 fn render_object_table(
-    content: &mut String,
+    content: &mut CodeWriter,
     table: &CodeTable,
     names: &RustNames<'_>,
 ) -> Result<()> {
-    content.push_str(&format!("impl {} {{\n", names.row_type_name(&table.name)?));
-    content.push_str(&format!(
+    content.raw_fmt(format_args!(
+        "impl {} {{\n",
+        names.row_type_name(&table.name)?
+    ));
+    content.raw_fmt(format_args!(
         "    pub const DATA_FILE: &'static str = {:?};\n\n",
         table.data_file
     ));
     if let Some(revision) = table.schema_revision {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "    pub const EXPECTED_SCHEMA_REVISION: u64 = {revision};\n\n"
         ));
     }
-    content
-        .push_str("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
-    content.push_str("        let root = loader.open(Self::DATA_FILE)?;\n");
+    content.raw("    pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String> {\n");
+    content.raw("        let root = loader.open(Self::DATA_FILE)?;\n");
     if table.data_format == BINARY_FORMAT {
-        content.push_str("        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) { return Err(format!(\"schema revision mismatch for `{}`: expected {}, got {:?}\", Self::DATA_FILE, Self::EXPECTED_SCHEMA_REVISION, root.schema_revision())); }\n");
-        content.push_str("        let value = Self::read_from_reader(&root)?;\n");
-        content.push_str("        root.ensure_exhausted()?;\n");
-        content.push_str("        return Ok(value);\n");
+        content.raw("        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) { return Err(format!(\"schema revision mismatch for `{}`: expected {}, got {:?}\", Self::DATA_FILE, Self::EXPECTED_SCHEMA_REVISION, root.schema_revision())); }\n");
+        content.raw("        let value = Self::read_from_reader(&root)?;\n");
+        content.raw("        root.ensure_exhausted()?;\n");
+        content.raw("        return Ok(value);\n");
     }
-    content.push_str("        Self::read_from_reader(&root)\n");
-    content.push_str("    }\n");
-    content.push_str("}\n\n");
+    content.raw("        Self::read_from_reader(&root)\n");
+    content.raw("    }\n");
+    content.raw("}\n\n");
     Ok(())
 }
 
 fn render_index_function(
-    content: &mut String,
+    content: &mut CodeWriter,
     table: &CodeTable,
     index: &CodeIndex,
     names: &RustNames<'_>,
@@ -754,30 +766,30 @@ fn render_index_function(
         .join(", ");
     let key = names.rust_lookup_key(index)?;
     if index.unique {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "    pub fn {}(&self, {}) -> Option<&{}> {{\n",
             names.index_function_name(index)?,
             params,
             names.row_type_name(&table.name)?
         ));
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "        self.{}.get(&{}).and_then(|index| self.rows.get(*index))\n",
             names.index_storage_name(index)?,
             key
         ));
-        content.push_str("    }\n\n");
+        content.raw("    }\n\n");
     } else {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "    pub fn {}(&self, {}) -> Vec<&{}> {{\n",
             names.index_function_name(index)?,
             params,
             names.row_type_name(&table.name)?
         ));
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "        self.{}.get(&{}).map(|indexes| indexes.iter().filter_map(|index| self.rows.get(*index)).collect()).unwrap_or_default()\n",
             names.index_storage_name(index)?, key
         ));
-        content.push_str("    }\n\n");
+        content.raw("    }\n\n");
     }
     Ok(())
 }
@@ -979,22 +991,22 @@ impl<'a> RustNames<'a> {
     }
 }
 
-fn push_doc(content: &mut String, desc: Option<&str>, prefix: &str) {
+fn push_doc(content: &mut CodeWriter, desc: Option<&str>, prefix: &str) {
     if let Some(desc) = desc {
         for line in desc.lines() {
-            content.push_str(prefix);
-            content.push_str(line);
-            content.push('\n');
+            content.raw(prefix);
+            content.raw(line);
+            content.newline();
         }
     }
 }
 
-fn push_derive(content: &mut String, base_derives: &str, derive_serde: bool) {
+fn push_derive(content: &mut CodeWriter, base_derives: &str, derive_serde: bool) {
     if derive_serde {
-        content.push_str(&format!(
+        content.raw_fmt(format_args!(
             "#[derive({base_derives}, serde::Serialize, serde::Deserialize)]\n"
         ));
     } else {
-        content.push_str(&format!("#[derive({base_derives})]\n"));
+        content.raw_fmt(format_args!("#[derive({base_derives})]\n"));
     }
 }
