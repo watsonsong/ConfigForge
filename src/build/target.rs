@@ -171,6 +171,7 @@ mod tests {
                 file_header: None,
                 keyword_conflict: None,
                 naming: Default::default(),
+                formatting: Default::default(),
                 language_options: Default::default(),
             }],
         };
@@ -204,6 +205,7 @@ mod tests {
                 file_header: None,
                 keyword_conflict: None,
                 naming: Default::default(),
+                formatting: Default::default(),
                 language_options: Default::default(),
             }],
         };
@@ -244,6 +246,7 @@ mod tests {
                 file_header: None,
                 keyword_conflict: None,
                 naming: Default::default(),
+                formatting: Default::default(),
                 language_options: Default::default(),
             }],
         };

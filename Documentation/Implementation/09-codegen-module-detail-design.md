@@ -291,7 +291,20 @@ pub struct CodegenOptions {
     pub file_header: Option<String>,
     pub keyword_conflict: KeywordConflictPolicy,
     pub naming: NamingConfig,
+    pub formatting: CodeWriterConfig,
     pub language_options: HashMap<String, toml::Value>,
+}
+
+pub struct CodeWriterConfig {
+    pub indent_style: IndentStyle,
+    pub indent_width: usize,
+    pub trailing_newline: bool,
+    pub trailing_blank_line: bool,
+}
+
+pub enum IndentStyle {
+    Spaces,
+    Tab,
 }
 
 pub enum KeywordConflictPolicy {
@@ -334,6 +347,12 @@ field = "snake_case"
 function = "snake_case"
 constant = "screaming_snake_case"
 
+[targets.code.formatting]
+indent_style = "spaces"
+indent_width = 4
+trailing_newline = true
+trailing_blank_line = false
+
 [targets.code.rust]
 derive_serde = true
 ```
@@ -341,12 +360,45 @@ derive_serde = true
 设计要求：
 
 - `CodegenOptions` 拆成通用配置和语言特定配置两层：`file_header`、`keyword_conflict`、`naming` 为通用层，`language_options` 保存 TOML 中按语言名展开的扩展配置。
+- `formatting` 是代码生成的跨语言通用格式配置，用于驱动共享 `CodeWriter`：`indent_style = "spaces" | "tab"` 控制缩进 token，`indent_width` 控制 spaces 模式下每级缩进宽度，`trailing_newline` 控制文件末尾是否至少保留一个换行，`trailing_blank_line` 控制文件结束是否保留一个空行（即内容以两个换行结束）。
+- 每个语言生成器通过 `CodeGenerator::default_formatting()` 声明语言默认格式：Rust / C++ 默认为 4 空格，TypeScript 默认为 2 空格；TOML 中 `[targets.code.formatting]` 只覆盖显式声明的字段。
 - 语言配置不使用 tagged enum；`CodegenTaskConfig` 通过 `#[serde(flatten)]` 把 `[rust]`、`[cpp]`、`[typescript]` 等表保存在 `HashMap<String, toml::Value>` 中。
 - 每个语言生成器只能读取自己的扩展配置，例如 `RustCodegenOptions` 定义在 `src/codegen/rust/mod.rs`，并由 Rust generator 通过 `CodegenOptions::language_options::<RustCodegenOptions>(LANGUAGE)` 解析。
 - 新增语言时应新增 generator、语言扩展 option struct 和该语言自己的解析逻辑；不修改 IR，不增加中心化 `LanguageCodegenOptions` enum，也不在核心模块增加语言专属 helper。
 - 如果配置中出现当前语言不支持的 `CaseStyle` 或 `KeywordConflictPolicy`，应在 codegen validate 阶段报错。
 
-### 9.4.2.3 文件头模板
+### 9.4.2.3 `CodeWriter`
+
+代码生成器应逐步从直接 `String::push_str(&format!(...))` 迁移到共享 `CodeWriter`。`CodeWriter` 位于 `src/codegen/writer.rs`，属于语言无关基础设施，只负责文本组织和格式策略，不感知 Meta、IR、目标语言 AST 或 artifact 写入。
+
+目标 API：
+
+```rust
+pub struct CodeWriter { /* ... */ }
+
+impl CodeWriter {
+    pub fn new(config: CodeWriterConfig) -> Self;
+    pub fn with_content(content: impl Into<String>, config: CodeWriterConfig) -> Self;
+    pub fn raw(&mut self, text: impl AsRef<str>);
+    pub fn write(&mut self, text: impl AsRef<str>);
+    pub fn line(&mut self, text: impl AsRef<str>);
+    pub fn blank_line(&mut self);
+    pub fn indent(&mut self);
+    pub fn dedent(&mut self);
+    pub fn indented<R>(&mut self, write_body: impl FnOnce(&mut Self) -> R) -> R;
+    pub fn finish(self) -> String;
+}
+```
+
+职责边界：
+
+- `line(...)` 在当前缩进层级写入一行并追加换行；`write(...)` 支持写入多行文本并在每个非空新行开始处补齐当前缩进；`raw(...)` 仅追加已有文本，不自动缩进，用于迁移阶段包裹既有生成片段或写入已格式化的大块 runtime helper。
+- `indent()` / `dedent()` 管理块级缩进；`indented(...)` 用于保证局部块结束后恢复缩进层级。
+- `finish()` 是唯一做文件尾规范化的位置：当 `trailing_blank_line = true` 时文件内容以 `\n\n` 结束；否则当 `trailing_newline = true` 时以单个 `\n` 结束；当 `trailing_newline = false` 且未要求 trailing blank line 时移除末尾换行。
+- 表达式层仍可返回 `String`，例如目标语言类型表达式、reader helper 表达式和 index key 表达式；语句/块/文件层应使用 `CodeWriter`，避免在高层继续扩散 `push_str(&format!(...))`。
+- 迁移允许分阶段进行：先使用 `CodeWriter::with_content(...).finish()` 统一文件尾策略和配置解析，再将 TypeScript、Rust、C++ 的 statement/block 生成函数逐步改为接收 `&mut CodeWriter`。
+
+### 9.4.2.4 文件头模板
 
 `file_header` 是可选模板。模板渲染上下文来自 Project Config 和执行上下文：
 

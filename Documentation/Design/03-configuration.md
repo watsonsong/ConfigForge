@@ -304,6 +304,12 @@ enum_value = "pascal_case"
 field = "snake_case"
 function = "snake_case"
 
+[targets.code.formatting]
+indent_style = "spaces"
+indent_width = 4
+trailing_newline = true
+trailing_blank_line = false
+
 [targets.code.rust]
 derive_serde = true
 
@@ -360,6 +366,7 @@ Planned / Not implemented：`engine`、`special_exporters`、POT、Asset Manifes
 | `file_header` | 生成器默认文件头 | 可选文件头模板。为空字符串表示不生成文件头。 |
 | `keyword_conflict` | `suffix_underscore` | 生成标识符与目标语言关键字冲突时的处理策略。 |
 | `naming` | 语言默认命名策略 | 当前语言各类符号的大小写组织方式。 |
+| `formatting` | 语言默认格式策略 | 生成源码的缩进与文件尾换行/空行策略。 |
 
 语言特定配置必须放在当前 `[[targets.code]]` 任务下的语言子表中，采用 tagged enum 的语义解析，避免不同语言的配置字段互相污染：
 
@@ -405,6 +412,17 @@ Planned / Not implemented：`engine`、`special_exporters`、POT、Asset Manifes
 | `camel_case` | `item_id` -> `itemId` |
 | `snake_case` | `item-id` -> `item_id` |
 | `screaming_snake_case` | `item-id` -> `ITEM_ID` |
+
+`targets.code.formatting` 是语言生成器的通用格式配置。第一阶段统一支持以下 key：
+
+| Key | 默认值 | 说明 |
+| --- | --- | --- |
+| `indent_style` | `"spaces"` | 缩进 token，可选 `"spaces"` 或 `"tab"`。 |
+| `indent_width` | 语言默认 | `indent_style = "spaces"` 时每一级缩进的空格数；tab 模式下保留该配置但每级缩进输出一个 tab。 |
+| `trailing_newline` | `true` | 文件结束是否至少保留一个换行。 |
+| `trailing_blank_line` | `false` | 文件结束是否额外保留一个空行；启用时内容以两个换行结束，并优先于 `trailing_newline`。 |
+
+语言默认缩进：Rust / C++ 使用 4 空格，TypeScript 使用 2 空格。Project Config 只需要声明与语言默认值不同的字段；未声明的 formatting 字段由对应语言生成器默认值补齐。
 
 原则：
 

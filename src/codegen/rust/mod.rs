@@ -7,9 +7,10 @@ use crate::{ConfigForgeError, Result, exporter::BINARY_FORMAT};
 
 use super::{
     CaseStyle, CodeEnum, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel,
-    CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, GeneratedFile,
-    GeneratedSymbol, NamingConfig, build_code_model, ensure_unique_generated_symbols,
-    ir::require_non_empty_index_fields, naming, render_file_header,
+    CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodeWriterConfig, CodegenOptions,
+    GeneratedFile, GeneratedSymbol, NamingConfig, build_code_model,
+    ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
+    render_file_header,
 };
 
 #[cfg(test)]
@@ -38,6 +39,10 @@ impl CodeGenerator for RustCodeGenerator {
             function: CaseStyle::SnakeCase,
             constant: CaseStyle::ScreamingSnakeCase,
         }
+    }
+
+    fn default_formatting(&self) -> CodeWriterConfig {
+        CodeWriterConfig::default().with_indent_width(4)
     }
 
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>> {
@@ -212,7 +217,8 @@ impl CodeGenerator for RustCodeGenerator {
 
         Ok(vec![GeneratedFile {
             path: input.target.out_dir.join("generated.rs"),
-            content,
+            content: super::CodeWriter::with_content(content, input.target.options.formatting)
+                .finish(),
         }])
     }
 }

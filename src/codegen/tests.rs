@@ -634,6 +634,11 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
             [naming]
             field = "snake_case"
 
+            [formatting]
+            indent_style = "tab"
+            indent_width = 8
+            trailing_blank_line = true
+
             [typescript]
             readonly_fields = true
         "#,
@@ -651,6 +656,10 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
     assert_eq!(target.options.naming.type_name, CaseStyle::PascalCase);
     assert_eq!(target.options.naming.field, CaseStyle::SnakeCase);
     assert_eq!(target.options.naming.function, CaseStyle::CamelCase);
+    assert_eq!(target.options.formatting.indent_style, IndentStyle::Tab);
+    assert_eq!(target.options.formatting.indent_width, 8);
+    assert!(target.options.formatting.trailing_newline);
+    assert!(target.options.formatting.trailing_blank_line);
     assert_eq!(
         target
             .options
@@ -660,6 +669,44 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
             readonly_fields: true,
         }
     );
+}
+
+#[test]
+fn builtin_generators_use_language_specific_formatting_defaults() {
+    assert_eq!(
+        CodegenOptions::for_language(RustCodeGenerator.language())
+            .expect("rust options")
+            .formatting
+            .indent_width,
+        4
+    );
+    assert_eq!(
+        CodegenOptions::for_language(CppCodeGenerator.language())
+            .expect("cpp options")
+            .formatting
+            .indent_width,
+        4
+    );
+    assert_eq!(
+        CodegenOptions::for_language(TypeScriptCodeGenerator.language())
+            .expect("typescript options")
+            .formatting
+            .indent_width,
+        2
+    );
+}
+
+#[test]
+fn generated_content_respects_trailing_blank_line_option() {
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, TypeScriptCodeGenerator.language());
+    input.target.options.formatting.trailing_blank_line = true;
+
+    let files = TypeScriptCodeGenerator
+        .generate(&input)
+        .expect("typescript code should generate");
+
+    assert!(files[0].content.ends_with("\n\n"));
 }
 
 #[test]

@@ -6,6 +6,7 @@ mod ir;
 mod naming;
 mod rust;
 mod typescript;
+mod writer;
 
 pub use self::ir::{
     CodeEnum, CodeEnumValue, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel,
@@ -14,6 +15,7 @@ pub use self::ir::{
 pub use cpp::{CppCodeGenerator, CppCodegenOptions};
 pub use rust::{RustCodeGenerator, RustCodegenOptions};
 pub use typescript::{TypeScriptCodeGenerator, TypeScriptCodegenOptions};
+pub use writer::{CodeWriter, CodeWriterConfig, IndentStyle, PartialCodeWriterConfig};
 
 use std::{collections::HashMap, path::PathBuf};
 
@@ -46,6 +48,7 @@ pub struct CodegenOptions {
     pub file_header: Option<String>,
     pub keyword_conflict: KeywordConflictPolicy,
     pub naming: NamingConfig,
+    pub formatting: CodeWriterConfig,
     pub language_options: HashMap<String, toml::Value>,
 }
 
@@ -92,6 +95,8 @@ pub struct CodegenTaskConfig {
     pub keyword_conflict: Option<KeywordConflictPolicy>,
     #[serde(default)]
     pub naming: PartialNamingConfig,
+    #[serde(default)]
+    pub formatting: PartialCodeWriterConfig,
     #[serde(flatten)]
     pub language_options: HashMap<String, toml::Value>,
 }
@@ -107,6 +112,7 @@ impl CodegenTaskConfig {
             file_header: None,
             keyword_conflict: None,
             naming: PartialNamingConfig::default(),
+            formatting: PartialCodeWriterConfig::default(),
             language_options: HashMap::new(),
         }
     }
@@ -142,6 +148,7 @@ impl CodeExportTarget {
                     .keyword_conflict
                     .unwrap_or(KeywordConflictPolicy::SuffixUnderscore),
                 naming: generator.default_naming().merge(task.naming),
+                formatting: generator.default_formatting().merge(task.formatting),
                 language_options: task.language_options,
             },
         })
@@ -155,6 +162,7 @@ impl CodegenOptions {
             file_header: None,
             keyword_conflict: KeywordConflictPolicy::SuffixUnderscore,
             naming: generator.default_naming(),
+            formatting: generator.default_formatting(),
             language_options: task.language_options,
         })
     }
@@ -206,6 +214,7 @@ impl Default for CodegenOptions {
                 function: CaseStyle::Preserve,
                 constant: CaseStyle::Preserve,
             },
+            formatting: CodeWriterConfig::default(),
             language_options: HashMap::new(),
         }
     }
@@ -243,6 +252,9 @@ pub trait CodeGenerator: Send + Sync {
         "config_forge_generated"
     }
     fn default_naming(&self) -> NamingConfig;
+    fn default_formatting(&self) -> CodeWriterConfig {
+        CodeWriterConfig::default()
+    }
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>>;
 }
 
