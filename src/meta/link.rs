@@ -4,10 +4,10 @@
 use std::collections::HashMap;
 
 use super::{
-    FieldMeta, LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedFragmentMeta,
-    LinkedFragmentPayload, LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType,
-    LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
-    validate::validate_meta_model,
+    validate::validate_meta_model, FieldMeta, LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta,
+    LinkedFragmentMeta, LinkedFragmentPayload, LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta,
+    LinkedStructType, LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
+    PrimitiveFieldType,
 };
 
 /// Builds a borrowed linked view of a validated raw model.

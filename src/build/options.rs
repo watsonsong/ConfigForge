@@ -4,8 +4,8 @@
 use std::{num::NonZeroUsize, path::Path};
 
 use crate::{
-    ConfigForgeError, Result,
     artifact::{ArtifactWriteMode, ArtifactWriteResult},
+    ConfigForgeError, Result,
 };
 
 #[derive(Debug, Clone, Copy)]

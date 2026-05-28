@@ -10,10 +10,10 @@ use std::{
 use serde::Deserialize;
 
 use crate::{
-    ConfigForgeError, Result,
     codegen::{CodeExportProject, CodegenTaskConfig},
     exporter::TargetDataConfig,
     meta::{EnumMeta, MetaModel, StructMeta, TableMeta},
+    ConfigForgeError, Result,
 };
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]

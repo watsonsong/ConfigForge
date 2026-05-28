@@ -3,13 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigForgeError, Result, exporter::BINARY_FORMAT};
+use crate::{exporter::BINARY_FORMAT, ConfigForgeError, Result};
 
 use super::{
+    build_code_model, ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
     CaseStyle, CodeEnum, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel,
     CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodeWriter, CodeWriterConfig,
-    CodegenOptions, GeneratedFile, GeneratedSymbol, NamingConfig, build_code_model,
-    ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
+    CodegenOptions, GeneratedFile, GeneratedSymbol, NamingConfig,
 };
 
 #[cfg(test)]
@@ -703,11 +703,15 @@ fn render_table(content: &mut CodeWriter, table: &CodeTable, names: &RustNames<'
         content.raw("        return Self::from_rows(rows);\n");
     }
     content.raw("        if !root.enter_field(\"rows\")? {\n");
-    content.raw("            return Err(RuntimeDataError::not_found(\"missing required field `rows`\"));\n");
+    content.raw(
+        "            return Err(RuntimeDataError::not_found(\"missing required field `rows`\"));\n",
+    );
     content.raw("        }\n");
     content.raw("        if root.is_null() {\n");
     content.raw("            root.exit()?;\n");
-    content.raw("            return Err(RuntimeDataError::not_found(\"missing required field `rows`\"));\n");
+    content.raw(
+        "            return Err(RuntimeDataError::not_found(\"missing required field `rows`\"));\n",
+    );
     content.raw("        }\n");
     content.raw("        let mut rows = Vec::new();\n");
     content.raw("        for row_index in 0..root.len()? {\n");

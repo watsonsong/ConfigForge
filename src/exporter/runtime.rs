@@ -6,10 +6,10 @@ use std::{collections::BTreeSet, path::Path};
 use rayon::prelude::*;
 
 use crate::{
-    ConfigForgeError, Result,
     artifact::Artifact,
     data::DataSet,
     meta::{LinkedMetaModel, TargetTags},
+    ConfigForgeError, Result,
 };
 
 use super::DataFormatExporter;

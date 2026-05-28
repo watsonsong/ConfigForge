@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use crate::{
-    ConfigForgeError, Result,
     meta::{MetaModel, SourceRef, TableKind, TableMeta},
+    ConfigForgeError, Result,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

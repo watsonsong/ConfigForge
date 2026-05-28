@@ -4,8 +4,8 @@
 use std::collections::BTreeSet;
 
 use super::{
-    FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
-    TableKind, TableMeta, ValidatorMeta, ValueLayout, model::normalize_tag,
+    model::normalize_tag, FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
+    PrimitiveFieldType, TableKind, TableMeta, ValidatorMeta, ValueLayout,
 };
 
 pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {

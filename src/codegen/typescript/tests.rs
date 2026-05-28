@@ -3,14 +3,14 @@
 
 use crate::{
     codegen::{
-        CodeExportInput, CodeGenerator,
         tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
+        CodeExportInput, CodeGenerator,
     },
     exporter::RuntimeDataFile,
     meta::{MetaModel, TargetTags},
 };
 
-use super::{LANGUAGE, TypeScriptCodeGenerator, TypeScriptCodegenOptions};
+use super::{TypeScriptCodeGenerator, TypeScriptCodegenOptions, LANGUAGE};
 
 #[test]
 fn emits_async_loader_and_maps() {
@@ -34,9 +34,7 @@ fn emits_async_loader_and_maps() {
     assert!(
         content.contains("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;")
     );
-    assert!(
-        content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;")
-    );
+    assert!(content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;"));
     assert!(content.contains("static readonly dataFile = \"items.json\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("RuntimeDataDecoder"));
@@ -95,9 +93,7 @@ fn emits_optional_scalar_and_struct_field_types() {
     assert!(content.contains("note?: string;"));
     assert!(content.contains("payload?: RewardInfo;"));
     assert!(content.contains("bonus: readOptionalInt64(reader, \"bonus\"),"));
-    assert!(
-        content.contains("reader.readOptionalPresent!(0) ? readRewardInfo(reader) : undefined")
-    );
+    assert!(content.contains("reader.readOptionalPresent!(0) ? readRewardInfo(reader) : undefined"));
     assert!(!content.contains("readRewardInfoBinary"));
 }
 
@@ -154,9 +150,7 @@ fn emits_object_table_as_typed_object_not_repository() {
         .expect("typescript code");
     let content = &files[0].content;
 
-    assert!(
-        content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;")
-    );
+    assert!(content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;"));
     assert!(content.contains("readonly gameConfig: GameConfigRow;"));
     assert!(
         content.contains("gameConfig: readGameConfigRow(await loader.open(\"game_config.json\"))")

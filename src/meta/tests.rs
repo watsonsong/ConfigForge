@@ -811,11 +811,9 @@ fn validates_model_directly_with_ok_and_error_results() {
     )
     .expect("raw invalid meta should deserialize");
     let diagnostics = invalid.validate().expect_err("validation should fail");
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTableName)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTableName));
 
     let invalid_link: MetaModel = toml::from_str(
         r#"
@@ -832,11 +830,9 @@ fn validates_model_directly_with_ok_and_error_results() {
     let diagnostics = invalid_link
         .validate()
         .expect_err("link diagnostics should fail validation");
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::UnknownFieldType)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::UnknownFieldType));
 }
 
 #[test]
@@ -853,11 +849,9 @@ fn rejects_unknown_field_type_after_linking() {
         "#,
     );
 
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::UnknownFieldType)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::UnknownFieldType));
 }
 
 #[test]
@@ -874,11 +868,9 @@ fn rejects_duplicate_table_names() {
         "#,
     );
 
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTableName)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTableName));
 }
 
 #[test]
@@ -899,11 +891,9 @@ fn rejects_duplicate_field_names() {
         "#,
     );
 
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateFieldName)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateFieldName));
 }
 
 #[test]
@@ -925,11 +915,9 @@ fn rejects_index_referencing_missing_field() {
         "#,
     );
 
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::MissingFieldReference)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::MissingFieldReference));
 }
 
 #[test]
@@ -993,11 +981,9 @@ fn rejects_primary_index_mismatch() {
         "#,
     );
 
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::PrimaryIndexMismatch)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::PrimaryIndexMismatch));
 }
 
 #[test]
@@ -1019,11 +1005,9 @@ fn rejects_non_unique_primary_index() {
         "#,
     );
 
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::InvalidPrimaryIndex)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::InvalidPrimaryIndex));
 }
 
 #[test]
@@ -1519,24 +1503,20 @@ fn validates_phase_one_struct_layout_rules() {
         "#,
     );
 
-    assert!(
-        explicit_expanded_value_diagnostics
-            .iter()
-            .any(|diagnostic| {
-                diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
-                    && diagnostic.message.contains("remove `layout`")
-            })
-    );
-    assert!(
-        explicit_expanded_value_diagnostics
-            .iter()
-            .any(|diagnostic| {
-                diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
-                    && diagnostic
-                        .message
-                        .contains("non-struct fields only support scalar_cell")
-            })
-    );
+    assert!(explicit_expanded_value_diagnostics
+        .iter()
+        .any(|diagnostic| {
+            diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+                && diagnostic.message.contains("remove `layout`")
+        }));
+    assert!(explicit_expanded_value_diagnostics
+        .iter()
+        .any(|diagnostic| {
+            diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+                && diagnostic
+                    .message
+                    .contains("non-struct fields only support scalar_cell")
+        }));
 }
 
 #[test]
@@ -1638,26 +1618,18 @@ fn rejects_duplicate_enum_struct_enum_value_and_index_names() {
         "#,
     );
 
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateEnumName)
-    );
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateEnumValueName)
-    );
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateStructName)
-    );
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateIndexName)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateEnumName));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateEnumValueName));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateStructName));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateIndexName));
 }
 
 #[test]
@@ -1677,11 +1649,9 @@ fn rejects_duplicate_struct_field_names() {
         "#,
     );
 
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateFieldName)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateFieldName));
 }
 
 #[test]
@@ -1719,11 +1689,9 @@ fn rejects_empty_index_fields_missing_primary_index_and_multiple_primary_flags()
         "#,
     );
 
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::EmptyIndexFields)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::EmptyIndexFields));
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic.code == MetaDiagnosticCode::InvalidPrimaryIndex
             && diagnostic.message.contains("does not exist")
@@ -1813,11 +1781,9 @@ fn rejects_ambiguous_or_reserved_custom_type_names() {
         "#,
     );
 
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTypeName)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTypeName));
     assert_eq!(
         diagnostics
             .iter()
@@ -1825,16 +1791,12 @@ fn rejects_ambiguous_or_reserved_custom_type_names() {
             .count(),
         2
     );
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("primitive field type"))
-    );
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("internal meta model type"))
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.message.contains("primitive field type")));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.message.contains("internal meta model type")));
 }
 
 #[test]
@@ -1857,11 +1819,9 @@ fn link_reports_structural_validation_errors() {
         Err(diagnostics) => diagnostics,
     };
 
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTableName)
-    );
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::DuplicateTableName));
 }
 
 #[test]

@@ -6,8 +6,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use rayon::ThreadPool;
 use rayon::prelude::*;
+use rayon::ThreadPool;
 
 mod options;
 mod runtime;
@@ -16,18 +16,18 @@ mod target;
 pub use options::{BuildOptions, BuildOutput, ExecutionOptions};
 
 use crate::{
-    ConfigForgeError, Result,
     artifact::{Artifact, ArtifactWriter},
     codegen::{
-        CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, GeneratedFile,
-        builtin_generators,
+        builtin_generators, CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator,
+        GeneratedFile,
     },
     exporter::RuntimeDataFile,
     meta::TargetTags,
     project::ProjectConfig,
+    ConfigForgeError, Result,
 };
 
-use runtime::{RuntimeConfigForgeResult, export_runtime_data_tasks};
+use runtime::{export_runtime_data_tasks, RuntimeConfigForgeResult};
 use target::{NormalizedCodegenTaskConfig, NormalizedTargetConfig};
 
 pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {

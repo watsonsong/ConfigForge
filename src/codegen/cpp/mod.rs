@@ -3,13 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigForgeError, Result, exporter::BINARY_FORMAT};
+use crate::{exporter::BINARY_FORMAT, ConfigForgeError, Result};
 
 use super::{
+    build_code_model, ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
     CaseStyle, CodeEnum, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel,
     CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodeWriter, CodeWriterConfig,
-    CodegenOptions, GeneratedFile, GeneratedSymbol, NamingConfig, build_code_model,
-    ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
+    CodegenOptions, GeneratedFile, GeneratedSymbol, NamingConfig,
 };
 
 #[cfg(test)]
@@ -714,9 +714,8 @@ fn render_table_source(
         content.raw("    auto rows_scope = EnterRequiredField(*root, \"rows\");\n");
         content.raw_fmt(format_args!("    std::vector<{}> rows;\n", row_type));
         content.raw("    rows.reserve(root->Size());\n");
-        content.raw(
-            "    for (std::size_t row_index = 0; row_index < root->Size(); ++row_index) {\n",
-        );
+        content
+            .raw("    for (std::size_t row_index = 0; row_index < root->Size(); ++row_index) {\n");
         content.raw("        root->EnterIndex(row_index);\n");
         content.raw("        ReaderScope row_scope(*root);\n");
         content.raw_fmt(format_args!(

@@ -4,7 +4,6 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ConfigForgeError, Result,
     data::value_conversion::{
         json_value_is_empty, json_value_to_scalar_cell_for_field, toml_default_to_json_value,
     },
@@ -12,6 +11,7 @@ use crate::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, LinkedTableMeta,
         PrimitiveFieldType, TableKind, TargetTags,
     },
+    ConfigForgeError, Result,
 };
 
 use super::{

@@ -3,8 +3,8 @@
 
 use crate::{
     codegen::{
-        CodeExportInput, CodeGenerator, GeneratedFile,
         tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
+        CodeExportInput, CodeGenerator, GeneratedFile,
     },
     exporter::RuntimeDataFile,
     meta::{MetaModel, TargetTags},
@@ -34,11 +34,8 @@ fn emits_loader_and_repository_declarations() {
     assert!(content.contains(
         "virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;"
     ));
-    assert!(
-        content.contains(
-            "inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";"
-        )
-    );
+    assert!(content
+        .contains("inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";"));
     assert!(content.contains("static constexpr const char* DataFile = \"items.json\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("IRuntimeDataDecoder"));
@@ -130,11 +127,8 @@ fn emits_object_table_as_typed_object_not_repository() {
     assert!(content.contains("GameConfigRow game_config_;"));
     assert!(!content.contains("class GameConfigTable"));
     assert!(!content.contains("Rows() const"));
-    assert!(
-        source.contains(
-            "data.game_config_ = ReadGameConfigRow(*loader.Open(GameConfigRow::DataFile));"
-        )
-    );
+    assert!(source
+        .contains("data.game_config_ = ReadGameConfigRow(*loader.Open(GameConfigRow::DataFile));"));
 }
 
 #[test]

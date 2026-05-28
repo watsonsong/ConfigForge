@@ -3,14 +3,14 @@
 
 use crate::{
     codegen::{
-        CaseStyle, CodeExportInput, CodeGenerator,
         tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
+        CaseStyle, CodeExportInput, CodeGenerator,
     },
     exporter::RuntimeDataFile,
     meta::{MetaModel, TargetTags},
 };
 
-use super::{LANGUAGE, RustCodeGenerator, RustCodegenOptions};
+use super::{RustCodeGenerator, RustCodegenOptions, LANGUAGE};
 
 #[test]
 fn emits_loader_table_and_index_helpers() {

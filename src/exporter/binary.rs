@@ -4,12 +4,12 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ConfigForgeError, Result,
     data::{DataResolver, DataTable, DataValue, ResolvedValue, ScalarValue},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedFragmentMeta, LinkedStructType, LinkedTableMeta,
         PrimitiveFieldType, TableKind, TargetTags,
     },
+    ConfigForgeError, Result,
 };
 
 use super::DataFormatExporter;
@@ -584,7 +584,7 @@ mod tests {
         meta::{MetaModel, TargetTags},
     };
 
-    use super::{BinaryDataExporter, FORMAT_VERSION, HEADER_SIZE, MAGIC, schema_revision};
+    use super::{schema_revision, BinaryDataExporter, FORMAT_VERSION, HEADER_SIZE, MAGIC};
 
     #[test]
     fn writes_header_and_collection_rows() {

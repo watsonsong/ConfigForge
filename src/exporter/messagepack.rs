@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result,
     data::DataTable,
     meta::{LinkedTableMeta, TargetTags},
+    ConfigForgeError, Result,
 };
 
-use super::{DataFormatExporter, build_exported_table_payload};
+use super::{build_exported_table_payload, DataFormatExporter};
 
 pub const FORMAT: &str = "messagepack";
 

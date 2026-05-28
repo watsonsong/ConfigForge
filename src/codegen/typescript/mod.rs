@@ -3,13 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigForgeError, Result, exporter::BINARY_FORMAT};
+use crate::{exporter::BINARY_FORMAT, ConfigForgeError, Result};
 
 use super::{
+    build_code_model, ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
     CaseStyle, CodeEnum, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel,
     CodeStruct, CodeTable, CodeTableKind, CodeTypeRef, CodeWriter, CodeWriterConfig,
-    CodegenOptions, GeneratedFile, GeneratedSymbol, NamingConfig, build_code_model,
-    ensure_unique_generated_symbols, ir::require_non_empty_index_fields, naming,
+    CodegenOptions, GeneratedFile, GeneratedSymbol, NamingConfig,
 };
 
 #[cfg(test)]
@@ -768,8 +768,12 @@ fn render_table(
         content.raw("}\n\n");
         return Ok(());
     }
-    content.raw("    if (!root.enterField(\"rows\")) { throw new Error('missing required field rows'); }\n");
-    content.raw("    if (root.isNull()) { root.exit(); throw new Error('missing required field rows'); }\n");
+    content.raw(
+        "    if (!root.enterField(\"rows\")) { throw new Error('missing required field rows'); }\n",
+    );
+    content.raw(
+        "    if (root.isNull()) { root.exit(); throw new Error('missing required field rows'); }\n",
+    );
     content.raw_fmt(format_args!(
         "    const rows: {}[] = [];\n",
         names.row_type_name(&table.name)?
@@ -939,7 +943,11 @@ impl<'a> TypeScriptNames<'a> {
     }
 
     fn ts_optional_property_suffix(&self, field: &super::CodeField) -> &'static str {
-        if field.required { "" } else { "?" }
+        if field.required {
+            ""
+        } else {
+            "?"
+        }
     }
 
     fn reader_function_name(&self, type_name: &str) -> Result<String> {
@@ -1083,5 +1091,9 @@ fn push_doc_indented(content: &mut CodeWriter, desc: Option<&str>, indent: &str)
 }
 
 fn readonly_prefix(readonly_fields: bool) -> &'static str {
-    if readonly_fields { "readonly " } else { "" }
+    if readonly_fields {
+        "readonly "
+    } else {
+        ""
+    }
 }

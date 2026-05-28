@@ -7,7 +7,7 @@ use clap::{Parser, ValueEnum};
 
 use crate::{
     artifact::ArtifactWriteMode,
-    build::{BuildOptions, ExecutionOptions, build_target},
+    build::{build_target, BuildOptions, ExecutionOptions},
 };
 
 #[derive(Debug, Parser)]

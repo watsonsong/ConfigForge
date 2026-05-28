@@ -4,7 +4,7 @@
 use std::fmt;
 
 use crate::diagnostic::{
-    DiagnosticEntry, DiagnosticLocation, DiagnosticSeverity, format_diagnostic,
+    format_diagnostic, DiagnosticEntry, DiagnosticLocation, DiagnosticSeverity,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

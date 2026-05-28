@@ -4,11 +4,11 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
-    ConfigForgeError, Result,
     exporter::{
-        BINARY_FORMAT, JSON_FORMAT, MESSAGEPACK_FORMAT, RuntimeDataFile, binary_schema_revision,
+        binary_schema_revision, RuntimeDataFile, BINARY_FORMAT, JSON_FORMAT, MESSAGEPACK_FORMAT,
     },
     meta::{LinkedField, LinkedFragmentPayload, LinkedMetaModel, PrimitiveFieldType, TableKind},
+    ConfigForgeError, Result,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

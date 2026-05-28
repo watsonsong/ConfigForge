@@ -4,9 +4,9 @@
 use std::path::PathBuf;
 
 use crate::{
-    ConfigForgeError,
     exporter::RuntimeDataFile,
     meta::{MetaModel, TargetTags},
+    ConfigForgeError,
 };
 
 use super::*;
@@ -116,30 +116,22 @@ fn builds_code_model_with_types_tables_and_indexes() {
     assert_eq!(model.structs[0].name, "RewardInfo");
     assert_eq!(model.tables[0].name, "items");
     assert_eq!(model.tables[0].kind, CodeTableKind::Collection);
-    assert!(
-        model.tables[0]
-            .fields
-            .iter()
-            .any(|field| field.name == "display_name")
-    );
-    assert!(
-        !model.tables[0]
-            .fields
-            .iter()
-            .any(|field| field.name == "internal_note")
-    );
-    assert!(
-        model.tables[0]
-            .indexes
-            .iter()
-            .any(|index| index.name == "by_id" && index.unique)
-    );
-    assert!(
-        model.tables[0]
-            .indexes
-            .iter()
-            .any(|index| index.name == "by_rarity" && !index.unique)
-    );
+    assert!(model.tables[0]
+        .fields
+        .iter()
+        .any(|field| field.name == "display_name"));
+    assert!(!model.tables[0]
+        .fields
+        .iter()
+        .any(|field| field.name == "internal_note"));
+    assert!(model.tables[0]
+        .indexes
+        .iter()
+        .any(|index| index.name == "by_id" && index.unique));
+    assert!(model.tables[0]
+        .indexes
+        .iter()
+        .any(|index| index.name == "by_rarity" && !index.unique));
     assert_eq!(model.tables[0].data_file, "items.json");
 }
 
@@ -234,18 +226,14 @@ fn code_model_includes_fragment_structs_and_optional_row_members() {
     let model = build_code_model(input.meta, &TargetTags::empty(), &input.runtime_data_files)
         .expect("model should build");
     assert_eq!(model.tables[0].fragments[0].name, "weapon");
-    assert!(
-        model.tables[0].fragments[0]
-            .fields
-            .iter()
-            .any(|field| field.name == "power")
-    );
-    assert!(
-        !model.tables[0].fragments[0]
-            .fields
-            .iter()
-            .any(|field| field.name == "internal_note")
-    );
+    assert!(model.tables[0].fragments[0]
+        .fields
+        .iter()
+        .any(|field| field.name == "power"));
+    assert!(!model.tables[0].fragments[0]
+        .fields
+        .iter()
+        .any(|field| field.name == "internal_note"));
     let attributes = model.tables[0]
         .fragments
         .iter()
@@ -266,12 +254,10 @@ fn code_model_includes_fragment_structs_and_optional_row_members() {
         .find(|fragment| fragment.name == "client_marker")
         .expect("client marker should be generated");
     assert!(client_marker.fields.is_empty());
-    assert!(
-        !client_model.tables[0]
-            .fragments
-            .iter()
-            .any(|fragment| fragment.name == "server_marker")
-    );
+    assert!(!client_model.tables[0]
+        .fragments
+        .iter()
+        .any(|fragment| fragment.name == "server_marker"));
 }
 
 #[test]
@@ -366,11 +352,9 @@ fn code_model_rejects_visible_foreign_key_to_hidden_target_index() {
     let linked = meta.link().expect("meta should link");
 
     let error = build_code_model(&linked, &TargetTags::new(["client"]), &[]).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("target index `items.by_id` which is not exported")
-    );
+    assert!(error
+        .to_string()
+        .contains("target index `items.by_id` which is not exported"));
 }
 
 #[test]
@@ -450,11 +434,9 @@ fn code_model_rejects_visible_foreign_key_to_hidden_source_field() {
     let linked = meta.link().expect("meta should link");
 
     let error = build_code_model(&linked, &TargetTags::new(["client"]), &[]).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("non-exported source field `drop_item_id`")
-    );
+    assert!(error
+        .to_string()
+        .contains("non-exported source field `drop_item_id`"));
 }
 
 #[test]
@@ -541,12 +523,10 @@ fn code_model_filters_tables_fields_and_indexes_by_target_tags() {
         .expect("items table should exist");
     assert!(items.fields.iter().any(|field| field.name == "icon"));
     assert!(!items.fields.iter().any(|field| field.name == "drop_weight"));
-    assert!(
-        !items
-            .indexes
-            .iter()
-            .any(|index| index.name == "by_drop_weight")
-    );
+    assert!(!items
+        .indexes
+        .iter()
+        .any(|index| index.name == "by_drop_weight"));
 }
 
 #[test]

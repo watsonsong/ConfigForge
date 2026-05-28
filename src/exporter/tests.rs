@@ -6,10 +6,10 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Mutex};
 use tempfile::tempdir;
 
 use crate::{
-    ConfigForgeError, Result,
     artifact::{ArtifactWriteMode, ArtifactWriter},
     data::DataTable,
     meta::{LinkedTableMeta, MetaModel, TargetTags},
+    ConfigForgeError, Result,
 };
 
 use super::*;
@@ -592,11 +592,9 @@ fn struct_expanded_value_exports_defaults_and_omits_empty_optional_occurrence() 
 
     assert_eq!(value["rows"][0]["required_attributes"]["max_health"], "100");
     assert_eq!(value["rows"][0]["optional_attributes"]["max_health"], "100");
-    assert!(
-        value["rows"][0]["optional_attributes"]
-            .get("attack")
-            .is_none()
-    );
+    assert!(value["rows"][0]["optional_attributes"]
+        .get("attack")
+        .is_none());
     assert!(value["rows"][0].get("optional_reward").is_none());
 }
 
@@ -714,12 +712,10 @@ fn object_table_only_header_exports_empty_or_default_object() {
     )
     .expect("payload should build");
     let value = serde_json::to_value(payload).expect("payload should serialize");
-    assert!(
-        value
-            .as_object()
-            .expect("payload should be object")
-            .is_empty()
-    );
+    assert!(value
+        .as_object()
+        .expect("payload should be object")
+        .is_empty());
 }
 
 #[test]
@@ -752,12 +748,10 @@ fn object_table_exports_empty_object_when_all_fields_hidden_for_target() {
         .expect("payload should build");
     let value = serde_json::to_value(payload).expect("payload should serialize");
 
-    assert!(
-        value
-            .as_object()
-            .expect("payload should be object")
-            .is_empty()
-    );
+    assert!(value
+        .as_object()
+        .expect("payload should be object")
+        .is_empty());
 }
 
 #[test]
@@ -912,18 +906,14 @@ fn fragment_export_locks_empty_and_hidden_fragment_presence() {
         .expect("payload should build");
     let value = serde_json::to_value(payload).expect("payload should serialize");
 
-    assert!(
-        value["rows"][0]["client_marker"]
-            .as_object()
-            .expect("client marker should be object")
-            .is_empty()
-    );
-    assert!(
-        value["rows"][0]["typed_marker"]
-            .as_object()
-            .expect("typed marker should be object")
-            .is_empty()
-    );
+    assert!(value["rows"][0]["client_marker"]
+        .as_object()
+        .expect("client marker should be object")
+        .is_empty());
+    assert!(value["rows"][0]["typed_marker"]
+        .as_object()
+        .expect("typed marker should be object")
+        .is_empty());
     assert!(value["rows"][0].get("server_marker").is_none());
 }
 

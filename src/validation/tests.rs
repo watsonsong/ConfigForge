@@ -804,50 +804,46 @@ fn target_fragment_validation_uses_visible_rows() {
     .expect("meta should load");
     let linked_meta = meta.link().expect("meta should link");
 
-    let data_set = DataSet::new(vec![
-        DataTable::new_with_sources(
-            "items",
-            vec![
-                BTreeMap::from([
-                    ("id".to_owned(), "1".to_owned()),
-                    ("exclude_tags".to_owned(), String::new()),
-                    ("weapon.power".to_owned(), "10".to_owned()),
-                ]),
-                BTreeMap::from([
-                    ("id".to_owned(), "2".to_owned()),
-                    ("exclude_tags".to_owned(), "client".to_owned()),
-                ]),
-                BTreeMap::from([
-                    ("id".to_owned(), "3".to_owned()),
-                    ("exclude_tags".to_owned(), "client".to_owned()),
-                    ("weapon.power".to_owned(), "bad".to_owned()),
-                ]),
-            ],
-            vec![
-                fragment_row_source(1, &["weapon"]),
-                fragment_row_source(2, &["weapon"]),
-                fragment_row_source(3, &["weapon"]),
-            ],
-        )
-        .expect("table should build"),
-    ]);
+    let data_set = DataSet::new(vec![DataTable::new_with_sources(
+        "items",
+        vec![
+            BTreeMap::from([
+                ("id".to_owned(), "1".to_owned()),
+                ("exclude_tags".to_owned(), String::new()),
+                ("weapon.power".to_owned(), "10".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("id".to_owned(), "2".to_owned()),
+                ("exclude_tags".to_owned(), "client".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("id".to_owned(), "3".to_owned()),
+                ("exclude_tags".to_owned(), "client".to_owned()),
+                ("weapon.power".to_owned(), "bad".to_owned()),
+            ]),
+        ],
+        vec![
+            fragment_row_source(1, &["weapon"]),
+            fragment_row_source(2, &["weapon"]),
+            fragment_row_source(3, &["weapon"]),
+        ],
+    )
+    .expect("table should build")]);
 
     assert!(
         validate_data_set_for_target(&linked_meta, &TargetTags::new(["client"]), &data_set).is_ok()
     );
     assert!(validate_data_set(&linked_meta, &data_set).is_err());
 
-    let visible_invalid = DataSet::new(vec![
-        DataTable::new_with_sources(
-            "items",
-            vec![BTreeMap::from([
-                ("id".to_owned(), "1".to_owned()),
-                ("exclude_tags".to_owned(), String::new()),
-            ])],
-            vec![fragment_row_source(1, &["weapon"])],
-        )
-        .expect("table should build"),
-    ]);
+    let visible_invalid = DataSet::new(vec![DataTable::new_with_sources(
+        "items",
+        vec![BTreeMap::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("exclude_tags".to_owned(), String::new()),
+        ])],
+        vec![fragment_row_source(1, &["weapon"])],
+    )
+    .expect("table should build")]);
     let error =
         validate_data_set_for_target(&linked_meta, &TargetTags::new(["client"]), &visible_invalid)
             .unwrap_err();
@@ -1374,14 +1370,12 @@ fn object_table_validation_uses_single_logical_row_and_field_rules() {
     let data_set = DataSet::new(vec![DataTable::new("game_config", vec![BTreeMap::new()])]);
     let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
 
-    assert!(
-        validate_normalized_data_set_for_target(
-            &linked_meta,
-            &TargetTags::new(["client"]),
-            &normalized
-        )
-        .is_ok()
-    );
+    assert!(validate_normalized_data_set_for_target(
+        &linked_meta,
+        &TargetTags::new(["client"]),
+        &normalized
+    )
+    .is_ok());
     assert!(validate_normalized_data_set(&linked_meta, &normalized).is_err());
     assert_eq!(
         normalized.table("game_config").unwrap().rows[0]
@@ -1611,14 +1605,12 @@ fn target_validation_skips_non_exported_tables_fields_and_rows() {
     )]);
     let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
 
-    assert!(
-        validate_normalized_data_set_for_target(
-            &linked_meta,
-            &TargetTags::new(["client"]),
-            &normalized
-        )
-        .is_ok()
-    );
+    assert!(validate_normalized_data_set_for_target(
+        &linked_meta,
+        &TargetTags::new(["client"]),
+        &normalized
+    )
+    .is_ok());
     assert!(validate_normalized_data_set(&linked_meta, &normalized).is_err());
 }
 
@@ -1736,14 +1728,12 @@ fn range_validator_respects_target_field_visibility() {
     )]);
     let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
 
-    assert!(
-        validate_normalized_data_set_for_target(
-            &linked_meta,
-            &TargetTags::new(["client"]),
-            &normalized
-        )
-        .is_ok()
-    );
+    assert!(validate_normalized_data_set_for_target(
+        &linked_meta,
+        &TargetTags::new(["client"]),
+        &normalized
+    )
+    .is_ok());
 }
 
 #[test]
@@ -1886,14 +1876,12 @@ fn range_validator_export_when_filters_validator_itself() {
     )]);
     let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
 
-    assert!(
-        validate_normalized_data_set_for_target(
-            &linked_meta,
-            &TargetTags::new(["client"]),
-            &normalized
-        )
-        .is_ok()
-    );
+    assert!(validate_normalized_data_set_for_target(
+        &linked_meta,
+        &TargetTags::new(["client"]),
+        &normalized
+    )
+    .is_ok());
 
     let message = validate_error(validate_normalized_data_set_for_target(
         &linked_meta,

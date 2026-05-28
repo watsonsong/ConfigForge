@@ -4,12 +4,12 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ConfigForgeError, Result,
     data::{DataResolver, DataTable, DataValue, ResolvedValue},
     meta::{LinkedTableMeta, TableKind, TargetTags},
+    ConfigForgeError, Result,
 };
 
-use super::{ExportedTable, ExportedTablePayload, ExportedValue, model::ExportedTableMeta};
+use super::{model::ExportedTableMeta, ExportedTable, ExportedTablePayload, ExportedValue};
 
 pub fn build_exported_table_payload(
     table_meta: &LinkedTableMeta<'_>,
