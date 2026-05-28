@@ -1,0 +1,231 @@
+// Copyright (c) 2026 ConfigForge contributors
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::{
+    codegen::{
+        naming, CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
+        CodeTableKind, CodeTypeRef, CodegenOptions,
+    },
+    ConfigForgeError, Result,
+};
+
+pub(super) struct TypeScriptNames<'a> {
+    options: &'a CodegenOptions,
+}
+
+impl<'a> TypeScriptNames<'a> {
+    pub(super) fn new(options: &'a CodegenOptions) -> Self {
+        Self { options }
+    }
+
+    pub(super) fn type_name(&self, name: &str) -> Result<String> {
+        self.identifier(name, self.options.naming.type_name)
+    }
+
+    pub(super) fn row_type_name(&self, table_name: &str) -> Result<String> {
+        self.type_name(&format!("{table_name}_row"))
+    }
+
+    pub(super) fn repository_type_name(&self, table_name: &str) -> Result<String> {
+        self.type_name(&format!("{table_name}_table"))
+    }
+
+    pub(super) fn table_data_type_name(&self, table: &CodeTable) -> Result<String> {
+        match table.kind {
+            CodeTableKind::Object => self.row_type_name(&table.name),
+            CodeTableKind::Collection => self.repository_type_name(&table.name),
+        }
+    }
+
+    pub(super) fn fragment_type_name(&self, table_name: &str, fragment_name: &str) -> Result<String> {
+        self.type_name(&format!("{table_name}_{fragment_name}_fragment"))
+    }
+
+    pub(super) fn fragment_payload_type_name(
+        &self,
+        table: &CodeTable,
+        fragment: &CodeFragment,
+    ) -> Result<String> {
+        self.fragment_payload_type_name_for_type_name(&table.name, fragment)
+    }
+
+    pub(super) fn fragment_payload_type_name_for_type_name(
+        &self,
+        table_name: &str,
+        fragment: &CodeFragment,
+    ) -> Result<String> {
+        match &fragment.payload {
+            CodeFragmentPayload::InlineFields => {
+                self.fragment_type_name(table_name, &fragment.name)
+            }
+            CodeFragmentPayload::Struct { name } => self.type_name(name),
+        }
+    }
+
+    pub(super) fn enum_value_name(&self, name: &str) -> Result<String> {
+        self.identifier(name, self.options.naming.enum_value)
+    }
+
+    pub(super) fn field_name(&self, name: &str) -> Result<String> {
+        self.identifier(name, self.options.naming.field)
+    }
+
+    pub(super) fn index_storage_name(&self, index: &CodeIndex) -> Result<String> {
+        self.identifier(
+            &format!("{}_index", self.index_function_name(index)?),
+            self.options.naming.field,
+        )
+    }
+
+    pub(super) fn index_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let prefix = if index.unique { "get_by" } else { "find_by" };
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("{prefix}_{suffix}"), self.options.naming.function)
+    }
+
+    pub(super) fn ts_type(&self, code_type: &CodeTypeRef) -> Result<String> {
+        Ok(match code_type {
+            CodeTypeRef::Int | CodeTypeRef::Float => "number".to_owned(),
+            CodeTypeRef::Bool => "boolean".to_owned(),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "string".to_owned(),
+            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
+        })
+    }
+
+    pub(super) fn ts_field_type(&self, field: &CodeField) -> Result<String> {
+        let base_type = self.ts_type(&field.code_type)?;
+        if field.required {
+            Ok(base_type)
+        } else {
+            Ok(format!("{base_type} | undefined"))
+        }
+    }
+
+    pub(super) fn ts_optional_property_suffix(&self, field: &CodeField) -> &'static str {
+        if field.required {
+            ""
+        } else {
+            "?"
+        }
+    }
+
+    pub(super) fn reader_function_name(&self, type_name: &str) -> Result<String> {
+        if self.options.naming.function == CaseStyle::CamelCase {
+            return naming::resolve_keyword_conflict(
+                format!("read{type_name}"),
+                self.options.keyword_conflict,
+                naming::is_ts_keyword,
+                |_| None,
+            )
+            .map_err(|message| {
+                ConfigForgeError::Validation(format!("typescript codegen: {message}"))
+            });
+        }
+        self.identifier(&format!("read_{type_name}"), self.options.naming.function)
+    }
+
+    pub(super) fn ts_read_field_expr(&self, field: &CodeField) -> Result<String> {
+        let source_name = format!("{:?}", field.name);
+        if field.required {
+            return Ok(match &field.code_type {
+                CodeTypeRef::Int => format!("readRequiredInt64(reader, {source_name})"),
+                CodeTypeRef::Float => format!("readRequiredFloat64(reader, {source_name})"),
+                CodeTypeRef::Bool => format!("readRequiredBool(reader, {source_name})"),
+                CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                    format!("readRequiredString(reader, {source_name})")
+                }
+                CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
+                    let type_name = self.type_name(name)?;
+                    let reader_function = self.reader_function_name(&type_name)?;
+                    format!(
+                        "reader.isPositional?.() ? {reader_function}(reader) : requiredField(reader, {source_name}, (value) => {reader_function}(value))"
+                    )
+                }
+            });
+        }
+
+        Ok(match &field.code_type {
+            CodeTypeRef::Int => format!("readOptionalInt64(reader, {source_name})"),
+            CodeTypeRef::Float => format!("readOptionalFloat64(reader, {source_name})"),
+            CodeTypeRef::Bool => format!("readOptionalBool(reader, {source_name})"),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                format!("readOptionalString(reader, {source_name})")
+            }
+            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
+                let type_name = self.type_name(name)?;
+                let reader_function = self.reader_function_name(&type_name)?;
+                format!(
+                    concat!(
+                        "reader.isPositional?.()\n",
+                        "      ? (reader.readOptionalPresent!(0) ? {reader_function}(reader) : undefined)\n",
+                        "      : optionalField(reader, {source_name}, (value) => {reader_function}(value))",
+                    ),
+                    reader_function = reader_function,
+                    source_name = source_name,
+                )
+            }
+        })
+    }
+
+    pub(super) fn ts_index_storage(&self, index: &CodeIndex, table: &CodeTable) -> Result<String> {
+        let key_type = if index.fields.len() == 1 {
+            self.ts_field_type(&index.fields[0])?
+        } else {
+            "string".to_owned()
+        };
+        if index.unique {
+            Ok(format!(
+                "Map<{key_type}, {}>",
+                self.row_type_name(&table.name)?
+            ))
+        } else {
+            Ok(format!(
+                "Map<{key_type}, {}[]>",
+                self.row_type_name(&table.name)?
+            ))
+        }
+    }
+
+    pub(super) fn ts_key_expr(&self, index: &CodeIndex) -> Result<String> {
+        if index.fields.len() == 1 {
+            Ok(format!("row.{}", self.field_name(&index.fields[0].name)?))
+        } else {
+            Ok(format!(
+                "JSON.stringify([{}])",
+                index
+                    .fields
+                    .iter()
+                    .map(|field| Ok(format!("row.{}", self.field_name(&field.name)?)))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", ")
+            ))
+        }
+    }
+
+    pub(super) fn ts_lookup_key(&self, index: &CodeIndex) -> Result<String> {
+        if index.fields.len() == 1 {
+            self.field_name(&index.fields[0].name)
+        } else {
+            Ok(format!(
+                "JSON.stringify([{}])",
+                index
+                    .fields
+                    .iter()
+                    .map(|field| self.field_name(&field.name))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", ")
+            ))
+        }
+    }
+
+    pub(super) fn identifier(&self, value: &str, style: CaseStyle) -> Result<String> {
+        naming::make_identifier(
+            value,
+            style,
+            self.options.keyword_conflict,
+            naming::is_ts_keyword,
+            |_| None,
+        )
+        .map_err(|message| ConfigForgeError::Validation(format!("typescript codegen: {message}")))
+    }
+}

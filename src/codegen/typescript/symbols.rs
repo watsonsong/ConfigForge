@@ -1,0 +1,157 @@
+// Copyright (c) 2026 ConfigForge contributors
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::{codegen::{ensure_unique_generated_symbols, CodeFragmentPayload, CodeModel, CodeTableKind, GeneratedSymbol}, Result};
+
+use super::types::TypeScriptNames;
+
+pub(super) fn validate_generated_symbols(model: &CodeModel, names: &TypeScriptNames<'_>) -> Result<()> {
+    let mut type_symbols = vec![
+        GeneratedSymbol::new("interface", "RuntimeDataLoader", "RuntimeDataLoader"),
+        GeneratedSymbol::new("interface", "RuntimeDataReader", "RuntimeDataReader"),
+        GeneratedSymbol::new("class", "GameData", "GameData"),
+    ];
+    for code_enum in &model.enums {
+        type_symbols.push(GeneratedSymbol::new(
+            "enum type",
+            &code_enum.name,
+            names.type_name(&code_enum.name)?,
+        ));
+    }
+    for code_struct in &model.structs {
+        type_symbols.push(GeneratedSymbol::new(
+            "struct interface",
+            &code_struct.name,
+            names.type_name(&code_struct.name)?,
+        ));
+        validate_named_symbols(
+            "typescript",
+            &format!("interface `{}` fields", code_struct.name),
+            code_struct.fields.iter().map(|field| {
+                Ok(GeneratedSymbol::new(
+                    "field",
+                    &field.name,
+                    names.field_name(&field.name)?,
+                ))
+            }),
+        )?;
+    }
+    for table in &model.tables {
+        type_symbols.push(GeneratedSymbol::new(
+            "table row interface",
+            format!("{}_row", table.name),
+            names.row_type_name(&table.name)?,
+        ));
+        if table.kind == CodeTableKind::Collection {
+            type_symbols.push(GeneratedSymbol::new(
+                "table class",
+                format!("{}_table", table.name),
+                names.repository_type_name(&table.name)?,
+            ));
+        }
+        for fragment in &table.fragments {
+            if matches!(fragment.payload, CodeFragmentPayload::InlineFields) {
+                type_symbols.push(GeneratedSymbol::new(
+                    "fragment interface",
+                    format!("{}_{}", table.name, fragment.name),
+                    names.fragment_type_name(&table.name, &fragment.name)?,
+                ));
+                validate_named_symbols(
+                    "typescript",
+                    &format!("table `{}` fragment `{}` fields", table.name, fragment.name),
+                    fragment.fields.iter().map(|field| {
+                        Ok(GeneratedSymbol::new(
+                            "field",
+                            &field.name,
+                            names.field_name(&field.name)?,
+                        ))
+                    }),
+                )?;
+            }
+        }
+
+        validate_named_symbols(
+            "typescript",
+            &format!("table `{}` row fields", table.name),
+            table
+                .fields
+                .iter()
+                .map(|field| {
+                    Ok(GeneratedSymbol::new(
+                        "field",
+                        &field.name,
+                        names.field_name(&field.name)?,
+                    ))
+                })
+                .chain(table.fragments.iter().map(|fragment| {
+                    Ok(GeneratedSymbol::new(
+                        "fragment field",
+                        &fragment.name,
+                        names.field_name(&fragment.name)?,
+                    ))
+                })),
+        )?;
+
+        if table.kind == CodeTableKind::Object {
+            continue;
+        }
+
+        let mut member_symbols = vec![
+            GeneratedSymbol::new("static field", "dataFile", "dataFile"),
+            GeneratedSymbol::new("field", "rows_", "rows_"),
+        ];
+        for index in &table.indexes {
+            member_symbols.push(GeneratedSymbol::new(
+                "index storage",
+                &index.name,
+                names.index_storage_name(index)?,
+            ));
+        }
+        ensure_unique_generated_symbols(
+            "typescript",
+            &format!("table `{}` class members", table.name),
+            member_symbols,
+        )?;
+
+        let mut method_symbols = vec![
+            GeneratedSymbol::new("method", "constructor", "constructor"),
+            GeneratedSymbol::new("method", "load", "load"),
+            GeneratedSymbol::new("method", "rows", "rows"),
+        ];
+        for index in &table.indexes {
+            method_symbols.push(GeneratedSymbol::new(
+                "index function",
+                &index.name,
+                names.index_function_name(index)?,
+            ));
+        }
+        ensure_unique_generated_symbols(
+            "typescript",
+            &format!("table `{}` class methods", table.name),
+            method_symbols,
+        )?;
+    }
+    ensure_unique_generated_symbols("typescript", "top-level exports", type_symbols)?;
+
+    validate_named_symbols(
+        "typescript",
+        "GameData fields",
+        model.tables.iter().map(|table| {
+            Ok(GeneratedSymbol::new(
+                "table field",
+                &table.name,
+                names.field_name(&table.name)?,
+            ))
+        }),
+    )?;
+
+    Ok(())
+}
+
+fn validate_named_symbols(
+    language: &str,
+    scope: &str,
+    symbols: impl Iterator<Item = Result<GeneratedSymbol>>,
+) -> Result<()> {
+    ensure_unique_generated_symbols(language, scope, symbols.collect::<Result<Vec<_>>>()?)
+}
