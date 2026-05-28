@@ -14,9 +14,14 @@ Validation 模块负责对已加载并归一化的数据执行结构化校验。
 
 ```text
 src/validation/
-  mod.rs              # normalize / validate 入口、基础规则、FK / index / target-aware validation
+  mod.rs              # 模块声明与稳定 public re-export
   context.rs          # ExportValidationView / ExportTableView / VisibleRow / ValidationContext
   diagnostic.rs       # ValidationIssue / ValidationReport，接入 shared diagnostic
+  entry.rs            # validate_data_set* / validate_table* 等对外入口
+  table.rs            # table-level 基础规则、unique/index、target-aware table validation
+  foreign_key.rs      # full / target-aware foreign key referential integrity validation
+  struct_value.rs     # struct JSON cell / expanded value 校验
+  defaults.rs         # default 应用与 normalize_data_set / normalize_table
   registry.rs         # ValidatorFactory / CompiledValidator / ValidatorRegistry / CompiledValidationPlan
   builtins/
     mod.rs
@@ -356,9 +361,14 @@ codegen 规则：
 
 ```text
 src/validation/
-  mod.rs              # 对外 API：validate_data_set_for_target 等
+  mod.rs              # 模块声明与 public re-export
   context.rs          # ValidationContext、ExportValidationView
   diagnostic.rs       # ValidationDiagnostic / ValidationIssue，桥接 ConfigForgeError
+  entry.rs            # validate_data_set* / validate_table* 入口
+  table.rs            # required/type/enum/unique/index/object-table 等基础规则
+  foreign_key.rs      # FK referential integrity 校验
+  struct_value.rs     # struct value 校验
+  defaults.rs         # defaults 与 normalize
   registry.rs         # ValidatorRegistry、ValidatorFactory 注册与 lookup
   builtins/
     mod.rs
@@ -366,7 +376,7 @@ src/validation/
   tests.rs
 ```
 
-`ValidatorMeta`、`ValidationSeverity` 当前放在 `src/meta/model.rs`；raw `ValidatorMeta -> CompiledValidator` 的 compile 流程由 `src/validation/registry.rs` 中的 `CompiledValidationPlan::compile` 负责。required / type / enum / unique 仍在 `src/validation/mod.rs` 中作为基础校验执行；后续可按需新增 `builtins/unique.rs`、`builtins/referential_integrity.rs` 等模块继续迁移。
+`ValidatorMeta`、`ValidationSeverity` 当前由 `src/meta/model/` 下的 raw model 定义并经 `src/meta/model.rs` re-export；raw `ValidatorMeta -> CompiledValidator` 的 compile 流程由 `src/validation/registry.rs` 中的 `CompiledValidationPlan::compile` 负责。required / type / enum / unique 仍在 `src/validation/table.rs` 中作为基础校验执行；foreign key referential integrity 当前在 `src/validation/foreign_key.rs` 中执行，尚未迁移为 registry 内置 validator。后续可按需新增 `builtins/unique.rs`、`builtins/referential_integrity.rs` 等模块继续迁移。
 
 ## 6.4 核心 trait 与类型
 
@@ -414,20 +424,17 @@ pub trait ValidatorFactory: Send + Sync {
 ```rust
 pub enum ValidatorLocation<'meta> {
     Field {
-        table: &'meta LinkedTableMeta<'meta>,
-        field: &'meta LinkedFieldMeta<'meta>,
+        table_name: &'meta str,
+        field_name: &'meta str,
     },
     Table {
-        table: &'meta LinkedTableMeta<'meta>,
-    },
-    Record {
-        table: &'meta LinkedTableMeta<'meta>,
+        table_name: &'meta str,
     },
     DataSet,
 }
 ```
 
-`Record` 与 `Table` 都来自 `[[tables.validators]]`，区别只在执行粒度：`Record` 对每个可见 row 分别执行，`Table` 对当前 ExportView 的整表 rows 执行。
+`Record` 与 `Table` 都来自 `[[tables.validators]]`，当前 location 都以 `ValidatorLocation::Table` 表达，registry 通过 factory 的 `scope()` 判断该声明是否可放在 table 下；区别在执行粒度：`Record` 对每个可见 row 分别执行，`Table` 对当前 ExportView 的整表 rows 执行。
 
 ### 6.4.3 CompiledValidator
 
@@ -436,7 +443,6 @@ CompiledValidator 负责执行。为了兼容不同 scope，第一阶段可用�
 ```rust
 pub trait CompiledValidator<'meta>: Send + Sync {
     fn kind(&self) -> &'static str;
-    fn scope(&self) -> ValidatorScope;
     fn validate<'data>(&self, ctx: &ValidationContext<'meta, 'data>, issues: &mut Vec<ValidationIssue>);
 }
 ```
@@ -489,7 +495,6 @@ impl ValidatorRegistry {
     pub fn new() -> Self;
     pub fn with_builtin_validators() -> Self;
     pub fn register(&mut self, factory: impl ValidatorFactory + 'static);
-    pub fn get(&self, kind: &str) -> Option<&dyn ValidatorFactory>;
     pub fn require(&self, kind: &str) -> Result<&dyn ValidatorFactory>;
 }
 ```
@@ -497,14 +502,10 @@ impl ValidatorRegistry {
 内置注册：
 
 ```rust
-pub fn builtin_validator_registry() -> ValidatorRegistry {
-    let mut registry = ValidatorRegistry::new();
-    registry.register(RangeValidatorFactory);
-    registry.register(UniqueValidatorFactory);
-    registry.register(ReferentialIntegrityValidatorFactory);
-    registry
-}
+let registry = ValidatorRegistry::with_builtin_validators();
 ```
+
+当前内置 registry 只注册 `RangeValidatorFactory`。unique、required、type、enum 和 foreign key referential integrity 仍由 validation 主流程中的基础规则模块执行，后续迁移时再增加对应 factory。
 
 ## 6.5 编译流程
 
@@ -516,8 +517,9 @@ MetaModel load
   -> LinkedMetaModel
   -> ValidatorRegistry compile
        - explicit validators from FieldMeta/TableMeta
-       - implicit validators from required/type/enum/index unique/field unique
-       - implicit referential-integrity validators from ForeignKeyMeta
+       - currently: range and other registered explicit validators
+       - future: implicit validators from required/type/enum/index unique/field unique
+       - future: implicit referential-integrity validators from ForeignKeyMeta
        - resolve field/table/index refs
        - parse params into typed config
   -> CompiledValidationPlan
@@ -612,6 +614,8 @@ validation failed: table `items` row 12 field `max_stack` value `1000` exceeds m
 
 ### 6.6.2 UniqueValidator
 
+当前实现状态：unique 仍由 `src/validation/table.rs` 的基础规则执行，尚未实现 `UniqueValidatorFactory` 或 implicit unique compile。以下是迁移目标设计。
+
 适用范围：table-level。
 
 来源：
@@ -638,6 +642,8 @@ pub struct UniqueValidatorConfig<'meta> {
 - `FieldMeta.unique = true` 是用户便捷写法：CodeModel 可继续生成 synthetic `by_<field>` index，validation compile 同步生成 synthetic `UniqueValidator`，二者共享同一命名策略，避免“校验唯一但运行时代码没有查询 API”的语义断裂。
 
 ### 6.6.3 ReferentialIntegrityValidator
+
+当前实现状态：foreign key relation 已在 Meta/link 中落地，数据引用完整性由 `src/validation/foreign_key.rs` 的 full / target-aware 流程执行，尚未实现 `ReferentialIntegrityValidatorFactory` 或 implicit referential-integrity compile。以下是迁移目标设计。
 
 适用范围：dataset-level。它不是用户直接手写的普通 validator，而是由 `ForeignKeyMeta` 关系数据隐式生成，用于检查外键引用完整性。
 
@@ -702,7 +708,7 @@ validator.meta.export_when.matches(target_tags)
 && validator 所在 table/field 在当前 view 可见
 ```
 
-Validation 入口必须显式表达当前视图模式，避免 CLI / CI / QA 在未指定 target 时得到不稳定结果：
+目标态 Validation 入口应显式表达当前视图模式，避免 CLI / CI / QA 在未指定 target 时得到不稳定结果。当前代码尚未引入统一 `ValidationMode` enum，而是通过 `validate_data_set*` 与 `validate_data_set_for_target*` 两组入口区分 full dataset 与 target-aware 校验：
 
 ```rust
 pub enum ValidationMode {
@@ -771,7 +777,7 @@ impl ValidationReport {
 
 修改点：
 
-1. `src/meta/model.rs`
+1. `src/meta/model/raw.rs`（经 `src/meta/model.rs` re-export）
    - 新增 `ValidatorMeta`、`ValidationSeverity`。
    - `FieldMeta` 增加 `validators: Vec<ValidatorMeta>`。
    - `TableMeta` 增加 `validators: Vec<ValidatorMeta>`。
@@ -783,12 +789,13 @@ impl ValidationReport {
 
 3. `src/validation/registry.rs`
    - 新增 `ValidatorRegistry`、`ValidatorFactory`、`CompiledValidator`。
-   - 新增 `ValidationMode`、`ValidationReport` / `ValidationIssue` collector，明确 warning 不影响退出码。
+   - 新增 `ValidationReport` / `ValidationIssue` collector，明确 warning 不影响退出码。
+   - `ValidationMode` 仍为目标态入口设计，当前实现使用 full / target-aware 函数入口区分校验模式。
 
 4. `src/validation/builtins/range.rs`
    - 实现 range factory 和 compiled validator。
 
-5. `src/validation/mod.rs`
+5. `src/validation/entry.rs` / `src/validation/table.rs`
    - 在现有 target-aware validation 中插入 `CompiledValidationPlan::run`。
    - 第一阶段 required/type/enum/unique 可继续保留 hardcoded；range 走 registry。
 
@@ -813,26 +820,26 @@ impl ValidationReport {
 
 ### Phase 3：实现 foreign key 关系数据与 referential-integrity validator
 
-目标：支持跨表关系建模、跨表一致性校验，并让 codegen 能基于外键关系生成自动查找关联记录的 helper。
+目标：支持跨表关系建模、跨表一致性校验，并让 codegen 能基于外键关系生成自动查找关联记录的 helper。当前已完成关系建模、link、target-aware 引用完整性校验和 CodeModel IR；registry 化 `ReferentialIntegrityValidatorFactory` 与语言级 helper API 仍是后续迁移项。
 
 修改点：
 
-1. `TableMeta` 增加 `foreign_keys: Vec<ForeignKeyMeta>`。
-2. Link 阶段解析为 `LinkedForeignKeyMeta<'meta>`，解析 source fields、target table、target index。
-3. Validation compile 阶段从 `LinkedForeignKeyMeta` 隐式生成 `ReferentialIntegrityValidator`。
-4. CodeModel 增加 `CodeForeignKey`，语言生成器基于它生成关联查找 helper。
-5. 执行阶段在 target ExportView 上构建 target key set。
+1. `TableMeta` 增加 `foreign_keys: Vec<ForeignKeyMeta>`（已落地）。
+2. Link 阶段解析为 `LinkedForeignKeyMeta<'meta>`，解析 source fields、target table、target index（已落地）。
+3. 当前 `src/validation/foreign_key.rs` 在 full / target-aware validation 中直接执行 referential integrity；后续可迁移为从 `LinkedForeignKeyMeta` 隐式生成 `ReferentialIntegrityValidator`。
+4. CodeModel 已增加 `CodeForeignKey`；语言生成器可在后续基于它生成关联查找 helper。
+5. 执行阶段已在 target ExportView 上构建 target key set。
 6. 测试：
    - target row 存在通过；
    - target row 缺失报错；
    - optional FK 全空跳过；
    - composite FK 部分为空报错；
    - target tags 过滤 target row 后 FK 报错。
-   - generated code 包含外键关联 helper，且 source/target 被 target tags 过滤时行为正确。
+   - 后续 generated code 包含外键关联 helper，且 source/target 被 target tags 过滤时行为正确。
 
 ### Phase 4：迁移 required/type/enum 并引入结构化诊断
 
-目标：`src/validation/mod.rs` 不再硬编码具体规则，只负责上下文、视图和执行顺序。
+目标：`src/validation/table.rs` 不再硬编码具体规则，只负责上下文、视图和执行顺序；`mod.rs` 保持模块声明与 public re-export。
 
 修改点：
 

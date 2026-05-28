@@ -22,7 +22,7 @@ Meta 模块负责把一个或多个 Meta 文件转换为可被后续模块使用
 - 基础结构校验与稳定诊断。
 - 模块内单元测试覆盖加载、Link、显式多路径合并、诊断；ProjectConfig imports 由 exporter / CLI 测试覆盖。
 
-计划字段说明：`validators: Vec<ValidatorMeta>` 已在 `src/meta/model.rs` 落地，当前 TOML 接受 `[[tables.validators]]` 与 `[[tables.fields.validators]]`，并由 validation registry 在 compile 阶段解释具体 `kind` 与参数；当前内置已实现 `range` field validator。`foreign_keys: Vec<ForeignKeyMeta>` 已完成 MVP，支持 table-level / field-level foreign key 声明、link、Meta 结构校验和数据引用完整性校验。validator 详细实现见 `06-validation-module-detail-design.md`。
+计划字段说明：`validators: Vec<ValidatorMeta>` 已在 `src/meta/model/raw.rs` 落地并经 `src/meta/model.rs` re-export，当前 TOML 接受 `[[tables.validators]]` 与 `[[tables.fields.validators]]`，并由 validation registry 在 compile 阶段解释具体 `kind` 与参数；当前内置已实现 `range` field validator。`foreign_keys: Vec<ForeignKeyMeta>` 已完成 MVP，支持 table-level / field-level foreign key 声明、link、Meta 结构校验和数据引用完整性校验。validator 详细实现见 `06-validation-module-detail-design.md`。
 
 ## 4.2 Rust 中的“类”和继承策略
 
@@ -40,7 +40,12 @@ Object table 与 collection table 通过 `TableKind` 区分，不拆成继承体
 ```text
 src/meta/
   mod.rs              # 对外 API 与 re-export
-  model.rs            # 纯配置模型、Linked* 借用视图、查询方法
+  model.rs            # model 子模块声明与 re-export
+  model/
+    raw.rs            # serde-owned raw Meta 配置模型
+    linked.rs         # Linked* 借用视图与查询方法
+    types.rs          # TableKind、PrimitiveFieldType、ValueLayout 等类型枚举
+    conditions.rs     # TargetTags、ExportCondition 等 target 条件模型
   loader.rs           # TOML 字符串/路径加载、显式多路径合并、加载后校验
   link.rs             # MetaModel -> LinkedMetaModel<'meta> 的链接过程
   validate.rs         # Meta 结构校验
@@ -53,7 +58,11 @@ src/meta/
 | 子模块 | 责任 |
 | --- | --- |
 | `mod.rs` | 只负责声明子模块和 re-export 对外 API。 |
-| `model.rs` | 定义 serde 数据结构、linked 数据结构、查询方法和 primitive 类型解析。 |
+| `model.rs` | 只负责声明 `model/` 子模块并 re-export 稳定模型 API。 |
+| `model/raw.rs` | 定义 serde-owned raw 配置数据结构。 |
+| `model/linked.rs` | 定义 linked 借用视图、查询方法和解析后的关系结构。 |
+| `model/types.rs` | 定义表类型、字段 primitive 类型、source/value layout 等枚举。 |
+| `model/conditions.rs` | 定义 target tags、export condition、条件匹配逻辑。 |
 | `loader.rs` | Meta 文件读取、TOML 反序列化、显式路径列表合并、加载后 link/validate。 |
 | `link.rs` | 构建 `LinkedMetaModel<'meta>`，解析字段类型和索引字段引用。 |
 | `validate.rs` | 独立结构校验；不构造运行时数据。 |

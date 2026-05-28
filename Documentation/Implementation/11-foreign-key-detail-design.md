@@ -157,7 +157,7 @@ target_table = "items"
 
 ## 11.4 Meta Raw Model
 
-在 `src/meta/model.rs` 增加：
+在 `src/meta/model/raw.rs` 增加，并经 `src/meta/model.rs` re-export：
 
 ```rust
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -279,7 +279,7 @@ impl ForeignKeyMeta {
 
 ### 11.5.1 类型定义
 
-在 `src/meta/model.rs` 增加：
+在 `src/meta/model/linked.rs` 增加，并经 `src/meta/model.rs` re-export：
 
 ```rust
 pub struct LinkedForeignKeyMeta<'meta> {
@@ -396,7 +396,7 @@ pub fn foreign_key(&self, name: &str) -> Option<&LinkedForeignKeyMeta<'meta>>;
 
 ### 11.7.1 接入位置
 
-推荐先在 `src/validation/mod.rs` 中实现 hardcoded FK 校验，与当前 required/type/unique 保持一致：
+当前已在 `src/validation/foreign_key.rs` 中实现 hardcoded FK 校验，并由 `src/validation/entry.rs` 的 full / target-aware validation 入口调用；这种方式与当前 required/type/unique 基础规则保持一致：
 
 ```rust
 pub fn validate_normalized_data_set_with_report(...) -> Result<ValidationReport> {

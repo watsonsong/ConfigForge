@@ -7,7 +7,7 @@
 当前代码已有 `ValueLayout::ExpandedValue` 枚举，但还不能完成 struct source layout 自动判定和展开：
 
 - Meta validation 当前拒绝 struct + `expanded_value`，但仍可能把 `json_cell` 当作 struct JSON cell 的显式写法；目标设计要求 named struct 字段不再由 Meta `layout` 控制，代码需统一改为由 source header/key 自动判定。
-- Runtime validation 对 struct 字段统一进入 JSON cell 解析，`src/validation/mod.rs` 中 `validate_value_type_at_row_number()` 看到 `LinkedField::Struct` 就调用 `validate_struct_json_cell()`。
+- Runtime validation 对 struct 字段的 JSON cell / expanded value 校验已拆到 `src/validation/struct_value.rs`，由 table validation 在遇到 `LinkedField::Struct` 时调用。
 - DataRow 当前是 `BTreeMap<String, String>`，可以容纳 `attributes.attack` 这类 dotted key，但 validation/export 还没有把 dotted key 归并为 parent struct object 的逻辑。
 - Export 当前的 struct nested object builder 基于 parent field 的 JSON cell 字符串；没有从多个 child cells 构建 nested object。
 - Fragment 已经使用 `fragment.field` dotted key，但那是 polymorphic fragment presence 语义，不能直接复用为 struct expanded value，否则会和 common field / fragment 解析冲突。

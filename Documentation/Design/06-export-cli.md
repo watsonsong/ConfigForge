@@ -23,7 +23,7 @@ Project-level `name` / `desc` / `copyright` 可被 target 的代码生成器、s
 
 ### 6.1.1 Runtime Data Export Task
 
-`[[targets.data]]` 描述当前 target 是否导出 runtime data、从哪里读取 source data、写到哪里，以及使用哪种 runtime data format。一个 target 可以声明多套 data task，例如同时导出 JSON 供工具链调试、MessagePack 或 planned `bin` 供客户端运行时加载：
+`[[targets.data]]` 描述当前 target 是否导出 runtime data、从哪里读取 source data、写到哪里，以及使用哪种 runtime data format。一个 target 可以声明多套 data task，例如同时导出 JSON 供工具链调试、MessagePack 或 `bin` 供客户端运行时加载：
 
 ```toml
 [[targets]]
@@ -49,13 +49,13 @@ format = "messagepack"
 | `name` | 当前 target 内唯一的 data task 名称。单 data task 可省略并由实现填入默认名；多 data task 必填。 |
 | `input` | Source data 根目录。Meta source path 以该目录为搜索基础；只有声明 `targets.data` 时才读取。 |
 | `output` | Runtime data 输出目录。 |
-| `format` | Runtime data 格式。当前第一阶段支持 `json` 和 `messagepack`，默认 `json`；planned 支持 `bin`。 |
+| `format` | Runtime data 格式。当前第一阶段支持 `json`、`messagepack` 和 `bin`，默认 `json`。 |
 
 导出规则：
 
 - 每张 table 输出一个 runtime data 文件。
-- `json` 使用 `.json` 后缀，`messagepack` 使用 `.msgpack` 后缀，planned `bin` 使用 `.bin` 后缀。
-- JSON / MessagePack 承载同一套 named payload：table meta 摘要和 normalized rows；字段名使用 Meta canonical name。planned `bin` 使用同一 target-aware export view，但 wire layout 不保存 name/tag，按 generated code 共享的 schema 顺序紧密排列。
+- `json` 使用 `.json` 后缀，`messagepack` 使用 `.msgpack` 后缀，`bin` 使用 `.bin` 后缀。
+- JSON / MessagePack 承载同一套 named payload：table meta 摘要和 normalized rows；字段名使用 Meta canonical name。`bin` 使用同一 target-aware export view，但 wire layout 不保存 name/tag，按 generated code 共享的 schema 顺序紧密排列。
 - 同一 target 下多个 data task 如果 `input` 相同，执行层应只加载、归一化、校验一次，再分发给不同格式 exporter。
 - 同一个 target 的 code generation 必须感知它引用的 runtime data task，生成的默认数据文件名必须与对应 data task 的 `format` 和真实 artifact 路径一致。
 - code-only target 可以不声明 `targets.data`，但如果仍生成读取 runtime data 的代码，默认按 `json` 规划文件名；正式项目推荐 data 与 code 在同一个 target 中同时声明，避免格式不一致。
@@ -138,8 +138,9 @@ namespace = "game::config"
 | --- | --- |
 | `json` | 默认格式，便于调试和通用接入。 |
 | `messagepack` | 紧凑二进制格式，用于包体和加载性能更敏感的 runtime。 |
+| `bin` | ConfigForge 私有紧密二进制格式；使用 positional typed layout、`.bin` 后缀、最小 magic/version header 和 generated code 的 expected schema revision，不改变 JSON / MessagePack named payload contract。 |
 
-格式实现采用注册工厂模式：核心导出流程只根据 `format` 字符串从 `DataFormatRegistry` 中查找 `DataFormatExporter`，不在流程中通过枚举 `match` 分发。新增导出格式应通过注册新的 exporter 实现扩展，避免修改核心导出编排逻辑。当前内置注册器提供 `json` 与 `messagepack`；planned `bin` 的具体 wire format 见 `../Implementation/13-runtime-binary-format-detail-design.md`。
+格式实现采用注册工厂模式：核心导出流程只根据 `format` 字符串从 `DataFormatRegistry` 中查找 `DataFormatExporter`，不在流程中通过枚举 `match` 分发。新增导出格式应通过注册新的 exporter 实现扩展，避免修改核心导出编排逻辑。当前内置注册器提供 `json`、`messagepack` 与 `bin`；`bin` 的具体 wire format 见 `../Implementation/13-runtime-binary-format-detail-design.md`。
 
 别名策略：
 
@@ -154,7 +155,6 @@ namespace = "game::config"
 | `lua_table` | Lua 特殊模式，代码和数据可合一。 |
 | `yaml` | 可选文本格式。 |
 | `sqlite` | 可选数据库格式。 |
-| `bin` | ConfigForge 私有紧密二进制格式，planned；使用 positional typed layout、`.bin` 后缀、最小 magic/version header 和 generated code 的 expected schema revision，不改变 JSON / MessagePack named payload contract。 |
 | `protobuf` | 未来设计，不作为当前实现要求。 |
 
 不使用 `custom` 作为模糊格式。自定义格式必须声明明确 ID，例如 `studio_binary_v1`。

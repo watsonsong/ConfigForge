@@ -20,12 +20,12 @@
 | CLI | `src/cli.rs` / `src/main.rs` | 命令行参数、用户入口、错误展示。CLI 只做输入解析和调用 build，不承载业务流程。 | argv、环境变量。 | `BuildOptions`、用户可读输出。 | 本文档总览。 |
 | Diagnostic / Error | `src/diagnostic/` | 统一诊断基础类型、严重级别、位置、报告聚合、格式化，以及 crate 级错误桥接。 | 各模块诊断条目、底层错误。 | `DiagnosticSeverity`、`DiagnosticLocation`、`DiagnosticReport<T>`、`ConfigForgeError`。 | `02-diagnostic-module-detail-design.md` |
 | Project | `src/project/` | 加载 `ConfigForge.toml`、解析工程级配置、合并 imports、归一化路径、抽取 Meta。 | Project Config TOML。 | `ProjectConfig`、`TargetConfig`、`MetaModel`。 | `03-project-module-detail-design.md` |
-| Meta | `src/meta/` | Meta schema 加载、纯配置模型、link 借用视图、结构校验。 | Meta TOML 片段。 | `MetaModel`、`LinkedMetaModel<'meta>`、`MetaDiagnostic`。 | `04-meta-module-detail-design.md` |
+| Meta | `src/meta/` | Meta schema 加载、纯配置模型、link 借用视图、结构校验；模型定义按 raw / linked / types / conditions 拆分。 | Meta TOML 片段。 | `MetaModel`、`LinkedMetaModel<'meta>`、`MetaDiagnostic`。 | `04-meta-module-detail-design.md` |
 | Data | `src/data/` | 根据加载计划读取 CSV 等数据源，形成 raw `DataSet`，并提供 Meta-aware resolver。 | `DataLoadPlan`、source files、`LinkedMetaModel<'meta>`。 | `DataSet`、`ResolvedDataSet` / resolved view。 | `05-data-module-detail-design.md` |
-| Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、注册式 validator。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
+| Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、注册式 validator；入口、table、FK、struct value、default 逻辑分文件维护。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
 | Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 列表、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
-| Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack exporter、data format registry、`TargetDataConfig`。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`。 | `RuntimeDataFile` / runtime data artifacts。 | `08-exporter-module-detail-design.md` |
-| Codegen | `src/codegen/` | 语言无关 CodeModel IR，Rust / TypeScript / C++ 代码生成。 | `LinkedMetaModel<'meta>`、target tags、runtime data files。 | `GeneratedFile`。 | `09-codegen-module-detail-design.md` |
+| Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack / `bin` exporter、data format registry、`TargetDataConfig`。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`。 | `RuntimeDataFile` / runtime data artifacts。 | `08-exporter-module-detail-design.md` |
+| Codegen | `src/codegen/` | 语言无关 CodeModel IR，Rust / TypeScript / C++ 代码生成；每种语言按 runtime / types / reader / repository / symbols 拆分。 | `LinkedMetaModel<'meta>`、target tags、runtime data files。 | `GeneratedFile`。 | `09-codegen-module-detail-design.md` |
 | Build | `src/build/` | 工程构建主编排：归一化 target，绑定 data/code task，并按 target 调度 data load、validation、runtime export、codegen、artifact 写入。 | `ProjectConfig`、CLI options。 | `BuildOutput`、文件系统产物。 | `10-build-module-detail-design.md` |
 
 ## 1.3 强制单向依赖规则
@@ -99,7 +99,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 5. **Data Load**：`data` 根据 target 可见表和 source declaration 生成加载计划并读取 `DataSet`。
 6. **Data Normalize / Resolve**：`validation` 调用 DataResolver 应用 default、struct JSON / expanded value、fragment 等规则，形成可校验输入。
 7. **Target-aware Validation**：`validation` 派生 `ExportValidationView`，执行 required/type/enum/index/FK/validator 等规则并输出 `ValidationReport`。
-8. **Runtime Data Export**：`exporter` 使用同一个 target tags 和 export view 语义生成 JSON / MessagePack runtime data。
+8. **Runtime Data Export**：`exporter` 使用同一个 target tags 和 export view 语义生成 JSON / MessagePack / `bin` runtime data。
 9. **Codegen**：`codegen` 基于 `LinkedMetaModel<'meta>`、target tags 和真实 runtime data file 列表生成代码。
 10. **Artifact Write**：`artifact` 统一检查制品路径冲突并执行 dry-run / direct / temp-commit 写入；由 build 负责收集 exporter/codegen 产物并调用。
 
@@ -114,8 +114,8 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `05-data-module-detail-design.md` | 模块 | Data load、CSV reader、DataSet、RowSourceInfo、DataResolver、ObjectTable source layout。 |
 | `06-validation-module-detail-design.md` | 模块 | Validation 主流程、ExportValidationView、ValidationReport、validator registry。 |
 | `07-artifact-module-detail-design.md` | 模块 | Artifact model、writer、dry-run、direct/temp-commit 策略和写入结果。 |
-| `08-exporter-module-detail-design.md` | 模块 | Runtime data exporter、格式 registry、JSON / MessagePack、ObjectTable payload。 |
-| `09-codegen-module-detail-design.md` | 模块 | CodeModel IR、语言生成器、runtime reader contract。 |
+| `08-exporter-module-detail-design.md` | 模块 | Runtime data exporter、格式 registry、JSON / MessagePack / `bin`、ObjectTable payload。 |
+| `09-codegen-module-detail-design.md` | 模块 | CodeModel IR、语言生成器、runtime reader contract 和按语言拆分的生成器结构。 |
 | `10-build-module-detail-design.md` | 模块 | 构建编排、target/task binding、并行执行边界和 artifact 写入策略。 |
 | `11-foreign-key-detail-design.md` | 专项 | 外键 raw/link model、引用完整性校验、target 语义、codegen staging。 |
 | `12-struct-expanded-value-detail-design.md` | 专项 | Struct source layout 自动判定和 expanded CSV field-path。 |

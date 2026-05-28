@@ -17,7 +17,7 @@
    - table repository / collection type；
    - index key type 和辅助查找函数。
 4. 生成一个统一的 DataSet / Database facade，便于业务侧一次加载后按表访问。
-5. 支持 JSON 与 MessagePack 两种 runtime data format；planned 支持 `bin` 紧密二进制格式。生成代码通过 runtime data export 阶段返回的真实文件名暴露每张表的默认数据文件路径。
+5. 支持 JSON、MessagePack 与 `bin` 紧密二进制 runtime data format。生成代码通过 runtime data export 阶段返回的真实文件名暴露每张表的默认数据文件路径；`bin` 额外携带每表 schema revision 供 generated reader 校验。
 6. 生成抽象 `RuntimeDataLoader` / `RuntimeDataReader`，由接入方 loader 只负责打开数据文件并提供通用 reader，生成代码负责所有表/字段解析和 typed row/object 构造。
 7. 保持生成代码确定性：同一份 Meta 生成稳定文件名、声明顺序和 API 名称。
 8. 在生成前发现命名冲突、保留字、目标语言类型映射缺失、输出路径冲突等问题。
@@ -27,7 +27,7 @@
 第一阶段不实现：
 
 - 生成代码的插件化动态加载；
-- JSON / MessagePack 之外的复杂二进制数据格式（`bin` 已进入专项设计，尚未实现）；
+- `bin` v1 之外的复杂二进制数据格式、schema evolution 和随机访问；
 - 跨语言运行时库发布；
 - struct/json cell 的完整解析；
 - foreign key 自动跳转接口；
@@ -70,7 +70,7 @@ Data Load / Normalize / Validate
 - Code Export 只依赖已 linked 的 Meta，不直接读取 TOML。
 - Code Export 不重新读取 CSV，不直接依赖 `DataLoader`。
 - Runtime data 文件和 generated code 文件都应进入同一套 Artifact Plan，统一检查路径冲突。
-- Data 文件格式第一阶段支持 JSON 与 MessagePack；planned `bin` 使用 positional packed layout。目标态生成代码只约束通用 `RuntimeDataLoader` / reader 协议。loader 实现负责打开具体文件并暴露格式无关的读取 cursor，生成代码本身不绑定文件系统、引擎资源系统、JSON 库、MessagePack 库或 binary decoder，但负责所有 table / field 级解析逻辑。
+- Data 文件格式第一阶段支持 JSON、MessagePack 与 `bin`。`bin` 使用 positional packed layout，并通过 exporter 与 CodeModel 共享的 schema revision 保证 generated reader 与数据文件布局一致。目标态生成代码只约束通用 `RuntimeDataLoader` / reader 协议。loader 实现负责打开具体文件并暴露格式无关的读取 cursor，生成代码本身不绑定文件系统、引擎资源系统、JSON 库、MessagePack 库或 binary decoder，但负责所有 table / field 级解析逻辑。
 
 ## 9.3 模块结构建议
 
@@ -82,20 +82,36 @@ src/codegen/
   ir.rs               # Language-neutral CodeModel IR
   naming.rs           # 目标语言命名规范、保留字处理、冲突检测
   rust/
-    mod.rs            # RustCodeGenerator
+    mod.rs            # RustCodeGenerator 与生成编排
+    runtime.rs        # Rust runtime loader/reader contract 渲染
+    types.rs          # Rust enum/struct/table row/fragment 类型渲染
+    reader.rs         # Rust table/object payload reader 渲染
+    repository.rs     # Rust repository、index、database facade 渲染
+    symbols.rs        # RustNames 与符号冲突检查
     tests.rs          # Rust 生成器测试
   cpp/
-    mod.rs            # CppCodeGenerator
+    mod.rs            # CppCodeGenerator 与 header/source 编排
+    runtime.rs        # C++ runtime loader/reader contract 渲染
+    types.rs          # C++ enum/struct/table row/fragment 类型渲染
+    reader.rs         # C++ table/object payload reader 渲染
+    repository.rs     # C++ repository、index、database facade 渲染
+    symbols.rs        # CppNames 与符号冲突检查
     tests.rs          # C++ 生成器测试
   typescript/
-    mod.rs            # TypeScriptCodeGenerator
+    mod.rs            # TypeScriptCodeGenerator 与生成编排
+    runtime.rs        # TypeScript runtime loader/reader contract 渲染
+    types.rs          # TypeScript enum/interface/fragment 类型渲染
+    reader.rs         # TypeScript table/object payload reader 渲染
+    repository.rs     # TypeScript repository、index、database facade 渲染
+    symbols.rs        # TypeScriptNames 与符号冲突检查
     tests.rs          # TypeScript 生成器测试
+  writer.rs           # CodeWriter / indentation / trailing newline helper
   tests.rs            # IR、配置、命名等语言无关公共测试
 ```
 
 Codegen 模块遵循开闭原则：核心模块只定义语言无关模型、生成器 trait、注册表查找和公共配置结构；每种目标语言作为一等公民独立放在自己的目录中，语言标识常量、语言专属 options、类型映射、运行时 reader contract 渲染、命名默认值和测试都在该目录内维护。新增语言时应优先通过新增 `src/codegen/<language>/`、实现 `CodeGenerator` 并注册到 builtin registry 完成，不回到 IR 或 build 编排层增加语言分支，也不在核心 `mod.rs` 中新增语言常量或语言 options。
 
-`type_mapping.rs`、`index.rs`、`runtime.rs` 当前未拆分为独立文件；对应逻辑仍分别位于 IR 与各语言生成器内部，后续可在单个语言目录继续膨胀时再拆出到该语言目录下。
+每个语言目录的 `mod.rs` 只负责实现 `CodeGenerator`、构造 `CodeModel`、调用语言内各渲染模块并返回 `GeneratedFile`；实际渲染逻辑按 runtime contract、类型声明、reader、repository 和符号解析拆分。类型映射当前随 `types.rs` / `reader.rs` 保持在语言目录内；若单一语言继续膨胀，可继续在该语言目录内拆出 `type_mapping.rs`、`index.rs` 等，不应把语言专属逻辑回流到核心 `src/codegen/mod.rs`。
 
 `src/build/` 保留为执行编排层，负责：
 
@@ -194,7 +210,7 @@ pub struct CodeExportTarget {
 
 - Project Config 中 `[[targets.data]].format = "json"` 选择 JSON exporter。
 - Project Config 中 `[[targets.data]].format = "messagepack"` 选择 MessagePack exporter。
-- Planned：Project Config 中 `[[targets.data]].format = "bin"` 选择私有紧密二进制 exporter。
+- Project Config 中 `[[targets.data]].format = "bin"` 选择私有紧密二进制 exporter。
 - 可兼容解析 `"msgpack"` 为 MessagePack，但错误信息、文档、生成代码和 manifest 中统一使用规范名 `messagepack`。
 - Project Config 使用 `[[targets.data]]` 数组表表达 runtime data 导出任务。
 
@@ -266,9 +282,9 @@ pub struct NormalizedCodegenTaskConfig {
 | --- | --- | --- | --- |
 | `Json` | `.json` | `serde_json::to_vec_pretty` 写出 payload envelope。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 打开 JSON payload 为通用 reader；生成代码读取 rows 并构造 typed rows。 |
 | `MessagePack` | `.msgpack` | `rmp-serde` 写出同一 payload envelope 的 MessagePack bytes。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 打开 MessagePack payload 为通用 reader；生成代码读取 rows 并构造 typed rows。 |
-| `Bin` | `.bin` | planned：写入 `magic = "CFGB"`、format version、header size、`u64 schema_revision` 后，按 target-aware schema 顺序紧密排列 record，不保存 tag/name。 | planned：generated code 携带每张表的 expected revision，binary reader 校验 magic/version/header/revision 后按 positional layout 顺序读取。 |
+| `Bin` | `.bin` | 写入 `magic = "CFGB"`、format version、header size、`u64 schema_revision` 后，按 target-aware schema 顺序紧密排列 record，不保存 tag/name。 | generated code 携带每张表的 expected revision，binary reader 校验 magic/version/header/revision 后按 positional layout 顺序读取。 |
 
-`RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json`、`items.msgpack` 或 planned `items.bin`。该路径相对当前 data artifact root / runtime loader root，不相对 code output 或 project root。CodeModel 优先使用 runtime data export 阶段返回的真实路径；当 target 没有 data export artifact 时，才默认推导 `<table>.json` 与 `format = "json"`。支持 `bin` 前，`RuntimeDataFile` / CodeModel 必须显式携带 `format`，unknown format 在 build/codegen 阶段报错，不允许仅靠后缀推断 reader layout。
+`RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json`、`items.msgpack` 或 `items.bin`。该路径相对当前 data artifact root / runtime loader root，不相对 code output 或 project root。CodeModel 优先使用 runtime data export 阶段返回的真实路径；当 target 没有 data export artifact 时，才默认推导 `<table>.json` 与 `format = "json"`。`RuntimeDataFile` / CodeModel 必须显式携带 `format`，unknown format 在 build/codegen 阶段报错，不允许仅靠后缀推断 reader layout；`bin` 还会在 CodeModel 中保存 schema revision。
 
 当一个 target 同时导出多套 data task 时，`build_target` 应按 data task 分组返回：
 
@@ -462,6 +478,7 @@ pub struct CodeStruct {
 
 pub struct CodeTable {
     pub name: String,
+    pub kind: CodeTableKind,
     pub desc: Option<String>,
     pub fields: Vec<CodeField>,
     pub fragments: Vec<CodeFragment>,
@@ -469,12 +486,25 @@ pub struct CodeTable {
     pub foreign_keys: Vec<CodeForeignKey>,
     pub primary_index: Option<String>,
     pub data_file: String,
+    pub data_format: String,
+    pub schema_revision: Option<u64>,
+}
+
+pub enum CodeTableKind {
+    Object,
+    Collection,
 }
 
 pub struct CodeFragment {
     pub name: String,
     pub desc: Option<String>,
     pub fields: Vec<CodeField>,
+    pub payload: CodeFragmentPayload,
+}
+
+pub enum CodeFragmentPayload {
+    InlineFields,
+    Struct { name: String },
 }
 
 pub struct CodeForeignKey {
@@ -492,7 +522,7 @@ IR 职责：
 1. 保留 Meta 中的语义名称和描述信息。
 2. 根据 `target_tags` 过滤不应导出的表、字段和索引，例如 `export = false`、`export_when = { any = ["client"] }`。
 3. 保留 table、field、index、foreign key、enum、struct 的语言无关关系。
-4. 保留 runtime data file 信息。
+4. 保留 runtime data file 信息、format 和 `bin` schema revision。
 5. 把 `LinkedField` 转换为目标语言无关的 `CodeTypeRef`。
 6. 对 polymorphic table 保留 fragment 类型、table-fragment 关联和当前 target 可见的 fragment fields。
 
@@ -528,15 +558,15 @@ pub enum CodeTypeRef {
 - 把 `CodeTypeRef` 映射为语言类型；
 - 渲染语法；
 - 渲染 loader / repository / index API；
-- 渲染 foreign key 关联 helper，例如 Rust `fn item<'a>(&self, data: &'a GameData, row: &QuestRow) -> Option<&'a ItemsRow>`、C++ `GetItem`、TypeScript `getItem`；
+- 后续可基于 `CodeForeignKey` 渲染 foreign key 关联 helper，例如 Rust `fn item<'a>(&self, data: &'a GameData, row: &QuestRow) -> Option<&'a ItemsRow>`、C++ `GetItem`、TypeScript `getItem`；当前实现已在 IR 中保留 target-aware foreign key 关系，更丰富的语言级 helper API 仍待后续确认；
 - 处理 import/include/use。
 
 Foreign key 对 CodeModel 的要求：
 
-- 外键不是普通 validator，而是 Meta 关系数据。validation 只负责保证关系完整性；codegen 需要读取同一份 `LinkedForeignKeyMeta` 生成关联查询 API。
+- 外键不是普通 validator，而是 Meta 关系数据。validation 负责保证关系完整性；CodeModel 已读取同一份 `LinkedForeignKeyMeta` 并暴露 `CodeForeignKey`，为后续语言生成器生成关联查询 API 提供输入。
 - 只有当前 target 可导出的 foreign key 进入 `CodeForeignKey`。
 - source table、target table、target index、source fields、target index fields 都必须在当前 target CodeModel 可见。
-- target index 必须 unique，第一阶段只生成 many-to-one helper；一对多反向索引可在后续 relation 设计中扩展。
+- target index 必须 unique，当前 IR 仅表达 many-to-one 关系；语言级 helper 和一对多反向索引可在后续 relation 设计中扩展。
 
 ### 9.5.1 Polymorphic Fragment CodeModel
 

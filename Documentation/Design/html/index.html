@@ -350,7 +350,7 @@
           <div class="step"><div><h3>Meta Link / Validate</h3><p>从 Project Config 抽取 MetaModel，构造 LinkedMetaModel 并输出结构化 Meta diagnostics。</p></div></div>
           <div class="step"><div><h3>Data Load / Resolve</h3><p>按 DataLoadPlan 加载 CSV，保留 RowSourceInfo，并用 DataResolver 统一解释 default、struct JSON cell / expanded value、fragment presence。</p></div></div>
           <div class="step"><div><h3>Validation / ExportView</h3><p>按 target tags、表/字段 <code>export_when</code>、行级 <code>row_export</code> 派生 ExportValidationView 并执行基础规则和 validator registry。</p></div></div>
-          <div class="step"><div><h3>Runtime Export / Codegen</h3><p>生成 JSON / MessagePack runtime data，再把真实 runtime data file 列表传给 Rust / TypeScript / C++ codegen。</p></div></div>
+          <div class="step"><div><h3>Runtime Export / Codegen</h3><p>生成 JSON / MessagePack / bin runtime data，再把真实 runtime data file 列表传给 Rust / TypeScript / C++ codegen。</p></div></div>
         </div>
         <div class="callout"><strong>并发策略：</strong>当前实现已使用受 <code>jobs</code> 限制的 Rayon CPU worker pool 并行 DataLoader、runtime serialization 和 codegen task；远端 provider、async I/O、完整任务 DAG 和独立 Artifact Writer 仍是后续演进。</div>
       </section>
@@ -366,7 +366,7 @@
             <tr><td>ObjectTable</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 CSV <code>key,value</code> 常量表、单 object runtime payload；多源、override、FK 暂不支持。</td></tr>
             <tr><td>Struct fields / expanded value</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 named struct、JSON cell、source-driven expanded value、recursive nested struct、target-aware child filtering 和 child default；array/map 与 struct child validators 待后续。</td></tr>
             <tr><td>Foreign keys</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 field/table-level FK、link、Meta validate、target-aware referential integrity 和 CodeModel IR；Phase 1 限定 CollectionTable 到 CollectionTable。</td></tr>
-            <tr><td>Runtime data export</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 JSON 与 MessagePack registry；streaming writer 和更多格式是后续扩展。</td></tr>
+            <tr><td>Runtime data export</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 JSON、MessagePack 与 bin registry；streaming writer 和更多格式是后续扩展。</td></tr>
             <tr><td>Codegen backends</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 Rust / TypeScript / C++ 基础生成、loader/repository helpers 和 target-aware IR。</td></tr>
             <tr><td>Diagnostics</td><td><span class="tag orange">Implemented MVP</span></td><td><code>src/diagnostic/</code> 已提供 severity、location、formatting、report aggregation 和 crate error facade；Data/Exporter/Codegen 领域 code 与完整 source trace 仍可增强。</td></tr>
           </tbody>

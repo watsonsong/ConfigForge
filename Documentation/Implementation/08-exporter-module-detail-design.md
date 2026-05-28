@@ -8,7 +8,7 @@ Exporter 模块需要达成：
 
 1. 定义 target data task 配置 `TargetDataConfig`。
 2. 定义 runtime data format exporter trait 和 registry。
-3. 内置 JSON 与 MessagePack 两种 data format，并为 `bin` 紧密二进制格式预留实现入口。
+3. 内置 JSON、MessagePack 与 `bin` 三种 data format；`bin` 使用 schema-aware positional typed layout。
 4. 对 CollectionTable 与 ObjectTable 生成正确 runtime payload shape。
 5. 复用 DataResolver 解释 struct JSON cell / expanded value / target visibility，避免 exporter 自己重复实现 source layout 解析。
 6. 为未来二进制格式、自定义格式 exporter 和 artifact writer 留出扩展点。
@@ -33,7 +33,7 @@ src/exporter/
   payload.rs          # CollectionTable / ObjectTable 共享 payload builder
   json.rs             # JsonDataExporter
   messagepack.rs      # MessagePackDataExporter
-  binary.rs           # BinaryDataExporter（planned）
+  binary.rs           # BinaryDataExporter：CFGB header + schema revision + positional typed payload
   tests.rs            # exporter 核心行为测试
 ```
 
@@ -56,7 +56,7 @@ pub struct TargetDataConfig {
 - `name`：可选 data task 名称。多个 data task 时必须显式命名；单个未命名 task 由 build 归一化为 `default`。
 - `input`：数据根目录。
 - `output`：runtime data 输出目录。
-- `format`：格式名称，默认 `json`；当前内置支持 `json`、`messagepack`，并接受 `msgpack` alias；planned 支持 `bin` 紧密二进制格式，详见 `13-runtime-binary-format-detail-design.md`。
+- `format`：格式名称，默认 `json`；当前内置支持 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
 
 ```rust
 pub trait DataFormatExporter: Send + Sync {
@@ -70,7 +70,7 @@ pub trait DataFormatExporter: Send + Sync {
 
 `DataFormatRegistry` 保存 exporter 列表并按 name / alias 查询。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行序列化多个 table artifact。
 
-内置格式通过 `builtin_exporters()` 返回 `Vec<Box<dyn DataFormatExporter>>` 并注册到 `DataFormatRegistry`。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现 `DataFormatExporter`，格式名、alias、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。`bin` 属于私有 positional wire layout，不应直接 serde 序列化 `ExportedTablePayload`，而应与 JSON / MessagePack 共享 target-aware resolved export view 后分别渲染为 named 或 positional layout。
+内置格式通过 `builtin_exporters()` 返回 `Vec<Box<dyn DataFormatExporter>>` 并注册到 `DataFormatRegistry`，当前包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现 `DataFormatExporter`，格式名、alias、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
 
 ## 8.4 Runtime payload contract
 
@@ -120,8 +120,8 @@ ObjectTable Step 1 已并入 Exporter 模块语义：ObjectTable 不输出 rows 
 
 - ObjectTable 必须已经归一化为一个 logical row。
 - table 可见但所有字段被 target 过滤时输出 `{}`。
-- JSON 与 MessagePack 必须通过同一 payload builder，确保逻辑 shape 一致；planned `bin` 必须复用同一份 resolved export view，但 wire layout 按 schema 顺序紧密排列，不保存字段名。
-- JSON / MessagePack 的 scalar runtime contract 当前仍为 string-compatible；如果未来改为 typed scalar，必须作为 named payload 的全局 runtime data contract change 同时影响 CollectionTable。planned `bin` 是 schema-aware typed binary encoding，按 Meta type 写 int/float/bool/enum bytes，不改变 JSON / MessagePack 的 named payload contract。
+- JSON 与 MessagePack 必须通过同一 payload builder，确保逻辑 shape 一致；`bin` 复用同一份 resolved export view，但 wire layout 按 schema 顺序紧密排列，不保存字段名。
+- JSON / MessagePack 的 scalar runtime contract 当前仍为 string-compatible；如果未来改为 typed scalar，必须作为 named payload 的全局 runtime data contract change 同时影响 CollectionTable。`bin` 是 schema-aware typed binary encoding，按 Meta type 写 int/float/bool/enum bytes，不改变 JSON / MessagePack 的 named payload contract。
 
 ObjectTable source layout、校验限制和 codegen 表达分别记录在 Data / Validation / Codegen 模块文档，不再保留单独的 Step 1 过程文档。
 
@@ -159,4 +159,5 @@ Exporter 模块测试应覆盖：
 - CollectionTable 输出 rows envelope。
 - ObjectTable 输出单 object shape，包括 only-header、default、target field filtering、all fields filtered。
 - JSON 与 MessagePack 对 struct / ObjectTable 使用同一逻辑 payload。
+- `bin` 写出 CFGB header、schema revision 与 target-aware positional payload。
 - struct expanded value 和 JSON cell 都能导出为 nested object。
