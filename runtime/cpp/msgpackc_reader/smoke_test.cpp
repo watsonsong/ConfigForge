@@ -11,8 +11,9 @@
 class IRuntimeDataReader {
 public:
     virtual ~IRuntimeDataReader() = default;
-    virtual std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const = 0;
-    virtual std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const = 0;
+    virtual bool EnterField(const std::string& name) = 0;
+    virtual void EnterIndex(std::size_t index) = 0;
+    virtual void Exit() = 0;
     virtual std::size_t Size() const = 0;
     virtual std::int64_t AsInt64() const = 0;
     virtual double AsDouble() const = 0;
@@ -47,16 +48,20 @@ int main() {
     if (reader.Size() != 1) {
         return 2;
     }
-    auto rows = reader.Field("rows");
-    auto row = rows->Index(0);
-    auto enabled = row->Field("enabled");
-    if (!enabled->AsBool()) {
+    if (!reader.EnterField("rows")) {
+        return 5;
+    }
+    reader.EnterIndex(0);
+    if (!reader.EnterField("enabled") || !reader.AsBool()) {
         return 1;
     }
-    auto id = row->Field("id");
-    if (id->AsInt64() != 42) {
+    reader.Exit();
+    if (!reader.EnterField("id") || reader.AsInt64() != 42) {
         return 4;
     }
+    reader.Exit();
+    reader.Exit();
+    reader.Exit();
 
     try {
         config_forge_runtime::MessagePackFsRuntimeDataLoader loader(".");

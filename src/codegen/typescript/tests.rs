@@ -136,15 +136,12 @@ fn reads_optional_fragment_once() {
         .expect("typescript code");
     let content = &files[0].content;
 
-    assert!(content.contains(
-        "const stackReader = reader.isPositional?.() ? undefined : optionalField(reader, \"stack\");"
-    ));
     assert!(content.contains(concat!(
         "stack: reader.isPositional?.()\n",
         "      ? (reader.readOptionalPresent!(0) ? readItemsStackFragment(reader) : undefined)\n",
-        "      : (stackReader ? readItemsStackFragment(stackReader) : undefined),",
+        "      : optionalField(reader, \"stack\", (value) => readItemsStackFragment(value)),",
     )));
-    assert!(!content.contains("optionalField(reader, \"stack\") ?"));
+    assert!(!content.contains("stackReader"));
 }
 
 #[test]

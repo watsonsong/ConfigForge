@@ -11,8 +11,9 @@
 class IRuntimeDataReader {
 public:
     virtual ~IRuntimeDataReader() = default;
-    virtual std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const = 0;
-    virtual std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const = 0;
+    virtual bool EnterField(const std::string& name) = 0;
+    virtual void EnterIndex(std::size_t index) = 0;
+    virtual void Exit() = 0;
     virtual std::size_t Size() const = 0;
     virtual std::int64_t AsInt64() const = 0;
     virtual double AsDouble() const = 0;
@@ -20,8 +21,10 @@ public:
     virtual std::string AsString() const = 0;
     virtual bool IsNull() const = 0;
     virtual std::optional<std::uint64_t> SchemaRevision() const { return std::nullopt; }
+    virtual bool IsPositional() const { return false; }
     virtual std::size_t ReadRowCount() { return 0; }
     virtual void BeginRecord(std::size_t) {}
+    virtual void EndRecord() {}
     virtual bool ReadOptionalPresent(std::size_t) { return false; }
     virtual std::int64_t ReadNextInt64() { return 0; }
     virtual double ReadNextDouble() { return 0.0; }

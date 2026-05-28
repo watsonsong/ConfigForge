@@ -1294,21 +1294,23 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
             r#"
                 include!("generated.rs");
 
-                #[derive(Clone)]
                 struct MockReader {{
                     path: &'static str,
-                    index: Option<usize>,
-                    field: Option<&'static str>,
+                    fields: std::cell::RefCell<Vec<&'static str>>,
                 }}
 
                 impl MockReader {{
                     fn root(path: &'static str) -> Self {{
-                        Self {{ path, index: None, field: None }}
+                        Self {{ path, fields: std::cell::RefCell::new(Vec::new()) }}
+                    }}
+
+                    fn current_field(&self) -> Option<&'static str> {{
+                        self.fields.borrow().last().copied()
                     }}
                 }}
 
                 impl RuntimeDataReader for MockReader {{
-                    fn field(&self, name: &str) -> RuntimeDataResult<Option<Self>> {{
+                    fn enter_field(&self, name: &'static str) -> RuntimeDataResult<bool> {{
                         let field = match name {{
                             "rows" => "rows",
                             "id" => "id",
@@ -1319,26 +1321,36 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             "stamina_cap" => "stamina_cap",
                             "daily_reset_hour" => "daily_reset_hour",
                             "pvp_enabled" => "pvp_enabled",
-                            "stack" | "attributes" | "skill" => return Ok(None),
+                            "stack" | "attributes" | "skill" => return Ok(false),
                             other => return Err(RuntimeDataError::not_found(format!("unexpected field: {{other}}"))),
                         }};
-                        Ok(Some(Self {{ path: self.path, index: self.index, field: Some(field) }}))
+                        self.fields.borrow_mut().push(field);
+                        Ok(true)
                     }}
 
-                    fn index(&self, index: usize) -> RuntimeDataResult<Self> {{
-                        if self.path == "items" && self.field == Some("rows") && index == 0 {{
-                            Ok(Self {{ path: self.path, index: Some(index), field: None }})
+                    fn enter_index(&self, index: usize) -> RuntimeDataResult<()> {{
+                        if self.path == "items" && self.current_field() == Some("rows") && index == 0 {{
+                            self.fields.borrow_mut().push("");
+                            Ok(())
                         }} else {{
                             Err(RuntimeDataError::not_found(format!("unexpected index: {{index}}")))
                         }}
                     }}
 
+                    fn exit(&self) -> RuntimeDataResult<()> {{
+                        self.fields
+                            .borrow_mut()
+                            .pop()
+                            .map(|_| ())
+                            .ok_or_else(|| RuntimeDataError::decode("unexpected exit"))
+                    }}
+
                     fn len(&self) -> RuntimeDataResult<usize> {{
-                        if self.path == "items" && self.field == Some("rows") {{ Ok(1) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
+                        if self.path == "items" && self.current_field() == Some("rows") {{ Ok(1) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
                     }}
 
                     fn as_i64(&self) -> RuntimeDataResult<i64> {{
-                        match (self.path, self.field) {{
+                        match (self.path, self.current_field()) {{
                             ("items", Some("id")) => Ok(1),
                             ("items", Some("price")) => Ok(10),
                             ("game_rules", Some("max_player_level")) => Ok(60),
@@ -1352,11 +1364,11 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                     fn as_f64(&self) -> RuntimeDataResult<f64> {{ Ok(self.as_i64()? as f64) }}
 
                     fn as_bool(&self) -> RuntimeDataResult<bool> {{
-                        if self.path == "game_rules" && self.field == Some("pvp_enabled") {{ Ok(true) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected bool")) }}
+                        if self.path == "game_rules" && self.current_field() == Some("pvp_enabled") {{ Ok(true) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected bool")) }}
                     }}
 
                     fn as_string(&self) -> RuntimeDataResult<String> {{
-                        if self.path == "items" && self.field == Some("name") {{ Ok("Potion".to_owned()) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected string")) }}
+                        if self.path == "items" && self.current_field() == Some("name") {{ Ok("Potion".to_owned()) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected string")) }}
                     }}
 
                     fn is_null(&self) -> bool {{ false }}
@@ -1414,60 +1426,71 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
 
             #include <memory>
             #include <stdexcept>
+            #include <vector>
 
             class MockReader final : public IRuntimeDataReader {
             public:
-                MockReader(std::string path, std::string field = "", std::size_t index = 0)
-                    : path_(std::move(path)), field_(std::move(field)), index_(index) {}
+                explicit MockReader(std::string path) : path_(std::move(path)) {}
 
-                std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const override {
+                bool EnterField(const std::string& name) override {
                     if (name == "stack" || name == "attributes" || name == "skill") {
-                        return nullptr;
+                        return false;
                     }
-                    return std::make_unique<MockReader>(path_, name, index_);
+                    fields_.push_back(name);
+                    return true;
                 }
 
-                std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const override {
-                    if (path_ == "items.json" && field_ == "rows" && index == 0) {
-                        return std::make_unique<MockReader>(path_, "", index);
+                void EnterIndex(std::size_t index) override {
+                    if (path_ == "items.json" && CurrentField() == "rows" && index == 0) {
+                        fields_.push_back("");
+                        return;
                     }
                     throw std::runtime_error("unexpected index");
                 }
 
+                void Exit() override {
+                    if (fields_.empty()) { throw std::runtime_error("unexpected exit"); }
+                    fields_.pop_back();
+                }
+
                 std::size_t Size() const override {
-                    if (path_ == "items.json" && field_ == "rows") {
+                    if (path_ == "items.json" && CurrentField() == "rows") {
                         return 1;
                     }
                     throw std::runtime_error("unexpected size");
                 }
 
                 std::int64_t AsInt64() const override {
-                    if (path_ == "items.json" && field_ == "id") { return 1; }
-                    if (path_ == "items.json" && field_ == "price") { return 10; }
-                    if (path_ == "game_rules.json" && field_ == "max_player_level") { return 60; }
-                    if (path_ == "game_rules.json" && field_ == "starter_gold") { return 500; }
-                    if (path_ == "game_rules.json" && field_ == "stamina_cap") { return 120; }
-                    if (path_ == "game_rules.json" && field_ == "daily_reset_hour") { return 5; }
+                    if (path_ == "items.json" && CurrentField() == "id") { return 1; }
+                    if (path_ == "items.json" && CurrentField() == "price") { return 10; }
+                    if (path_ == "game_rules.json" && CurrentField() == "max_player_level") { return 60; }
+                    if (path_ == "game_rules.json" && CurrentField() == "starter_gold") { return 500; }
+                    if (path_ == "game_rules.json" && CurrentField() == "stamina_cap") { return 120; }
+                    if (path_ == "game_rules.json" && CurrentField() == "daily_reset_hour") { return 5; }
                     throw std::runtime_error("unexpected int64");
                 }
 
                 double AsDouble() const override { return static_cast<double>(AsInt64()); }
 
                 bool AsBool() const override {
-                    if (path_ == "game_rules.json" && field_ == "pvp_enabled") { return true; }
+                    if (path_ == "game_rules.json" && CurrentField() == "pvp_enabled") { return true; }
                     throw std::runtime_error("unexpected bool");
                 }
 
                 std::string AsString() const override {
-                    if (path_ == "items.json" && field_ == "name") { return "Potion"; }
+                    if (path_ == "items.json" && CurrentField() == "name") { return "Potion"; }
                     throw std::runtime_error("unexpected string");
                 }
 
                 bool IsNull() const override { return false; }
             private:
+                const std::string& CurrentField() const {
+                    static const std::string root;
+                    return fields_.empty() ? root : fields_.back();
+                }
+
                 std::string path_;
-                std::string field_;
-                std::size_t index_;
+                std::vector<std::string> fields_;
             };
 
             class MockLoader final : public IRuntimeDataLoader {
@@ -1553,50 +1576,65 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
             import { GameData, RuntimeDataLoader, RuntimeDataReader } from "./generated";
 
             class MockReader implements RuntimeDataReader {
-                constructor(private readonly path: string, private readonly fieldName = "") {}
+                private readonly fields: string[] = [];
 
-                field(name: string): RuntimeDataReader | undefined {
+                constructor(private readonly path: string) {}
+
+                enterField(name: string): boolean {
                     if (name === "stack" || name === "attributes" || name === "skill") {
-                        return undefined;
+                        return false;
                     }
-                    return new MockReader(this.path, name);
+                    this.fields.push(name);
+                    return true;
                 }
 
-                index(index: number): RuntimeDataReader {
-                    if (this.path === "items.json" && this.fieldName === "rows" && index === 0) {
-                        return new MockReader(this.path);
+                enterIndex(index: number): void {
+                    if (this.path === "items.json" && this.currentField() === "rows" && index === 0) {
+                        this.fields.push("");
+                        return;
                     }
                     throw new Error(`unexpected index: ${index}`);
                 }
 
+                exit(): void {
+                    if (this.fields.length === 0) {
+                        throw new Error("unexpected exit");
+                    }
+                    this.fields.pop();
+                }
+
                 length(): number {
-                    if (this.path === "items.json" && this.fieldName === "rows") {
+                    if (this.path === "items.json" && this.currentField() === "rows") {
                         return 1;
                     }
                     throw new Error("unexpected length");
                 }
 
                 asNumber(): number {
-                    if (this.path === "items.json" && this.fieldName === "id") { return 1; }
-                    if (this.path === "items.json" && this.fieldName === "price") { return 10; }
-                    if (this.path === "game_rules.json" && this.fieldName === "max_player_level") { return 60; }
-                    if (this.path === "game_rules.json" && this.fieldName === "starter_gold") { return 500; }
-                    if (this.path === "game_rules.json" && this.fieldName === "stamina_cap") { return 120; }
-                    if (this.path === "game_rules.json" && this.fieldName === "daily_reset_hour") { return 5; }
+                    if (this.path === "items.json" && this.currentField() === "id") { return 1; }
+                    if (this.path === "items.json" && this.currentField() === "price") { return 10; }
+                    if (this.path === "game_rules.json" && this.currentField() === "max_player_level") { return 60; }
+                    if (this.path === "game_rules.json" && this.currentField() === "starter_gold") { return 500; }
+                    if (this.path === "game_rules.json" && this.currentField() === "stamina_cap") { return 120; }
+                    if (this.path === "game_rules.json" && this.currentField() === "daily_reset_hour") { return 5; }
                     throw new Error("unexpected number");
                 }
 
                 asBool(): boolean {
-                    if (this.path === "game_rules.json" && this.fieldName === "pvp_enabled") { return true; }
+                    if (this.path === "game_rules.json" && this.currentField() === "pvp_enabled") { return true; }
                     throw new Error("unexpected bool");
                 }
 
                 asString(): string {
-                    if (this.path === "items.json" && this.fieldName === "name") { return "Potion"; }
+                    if (this.path === "items.json" && this.currentField() === "name") { return "Potion"; }
                     throw new Error("unexpected string");
                 }
 
                 isNull(): boolean { return false; }
+
+                private currentField(): string {
+                    return this.fields[this.fields.length - 1] ?? "";
+                }
             }
 
             const loader: RuntimeDataLoader = {
@@ -1792,8 +1830,9 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
             class IRuntimeDataReader {
             public:
                 virtual ~IRuntimeDataReader() = default;
-                virtual std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const = 0;
-                virtual std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const = 0;
+                virtual bool EnterField(const std::string& name) = 0;
+                virtual void EnterIndex(std::size_t index) = 0;
+                virtual void Exit() = 0;
                 virtual std::size_t Size() const = 0;
                 virtual std::int64_t AsInt64() const = 0;
                 virtual double AsDouble() const = 0;

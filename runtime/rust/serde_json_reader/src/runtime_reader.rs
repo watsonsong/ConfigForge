@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
+    cell::RefCell,
     fs,
     path::{Component, Path, PathBuf},
+    rc::Rc,
 };
 
 use serde_json::Value;
@@ -13,41 +15,92 @@ use config_forge_runtime_reader_core::{
     RuntimeDataError, RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct JsonValueReader {
-    value: Value,
+    value: Rc<Value>,
+    path: Rc<RefCell<Vec<JsonPathSegment>>>,
+}
+
+#[derive(Debug)]
+enum JsonPathSegment {
+    Field(&'static str),
+    Index(usize),
 }
 
 impl JsonValueReader {
     pub fn new(value: Value) -> Self {
-        Self { value }
+        Self {
+            value: Rc::new(value),
+            path: Rc::new(RefCell::new(Vec::with_capacity(8))),
+        }
+    }
+
+    fn value_at<'a>(value: &'a Value, path: &[JsonPathSegment]) -> Option<&'a Value> {
+        let mut current = value;
+        for segment in path {
+            current = match segment {
+                JsonPathSegment::Field(name) => current.get(name)?,
+                JsonPathSegment::Index(index) => current.as_array()?.get(*index)?,
+            };
+        }
+        Some(current)
+    }
+
+    fn with_current<T>(&self, read: impl FnOnce(&Value) -> RuntimeDataResult<T>) -> RuntimeDataResult<T> {
+        let path = self.path.borrow();
+        let value = Self::value_at(&self.value, &path)
+            .ok_or_else(|| RuntimeDataError::decode("runtime reader cursor is invalid"))?;
+        read(value)
     }
 }
 
 impl RuntimeDataReader for JsonValueReader {
-    fn field(&self, name: &str) -> RuntimeDataResult<Option<Self>> {
-        Ok(self.value.get(name).cloned().map(Self::new))
+    fn enter_field(&self, name: &'static str) -> RuntimeDataResult<bool> {
+        let found = {
+            let path = self.path.borrow();
+            Self::value_at(&self.value, &path).and_then(|value| value.get(name)).is_some()
+        };
+        if found {
+            self.path.borrow_mut().push(JsonPathSegment::Field(name));
+        }
+        Ok(found)
     }
 
-    fn index(&self, index: usize) -> RuntimeDataResult<Self> {
-        self.value
-            .as_array()
-            .and_then(|values| values.get(index))
-            .cloned()
-            .map(Self::new)
-            .ok_or_else(|| RuntimeDataError::not_found(format!("missing array index {index}")))
+    fn enter_index(&self, index: usize) -> RuntimeDataResult<()> {
+        let found = {
+            let path = self.path.borrow();
+            Self::value_at(&self.value, &path)
+                .and_then(Value::as_array)
+                .and_then(|values| values.get(index))
+                .is_some()
+        };
+        if !found {
+            return Err(RuntimeDataError::not_found(format!("missing array index {index}")));
+        }
+        self.path.borrow_mut().push(JsonPathSegment::Index(index));
+        Ok(())
+    }
+
+    fn exit(&self) -> RuntimeDataResult<()> {
+        self.path
+            .borrow_mut()
+            .pop()
+            .map(|_| ())
+            .ok_or_else(|| RuntimeDataError::decode("runtime reader cursor stack underflow"))
     }
 
     fn len(&self) -> RuntimeDataResult<usize> {
-        self.value
-            .as_array()
-            .map(Vec::len)
-            .or_else(|| self.value.as_object().map(|object| object.len()))
-            .ok_or_else(|| RuntimeDataError::type_mismatch("reader value is not array/object"))
+        self.with_current(|value| {
+            value
+                .as_array()
+                .map(Vec::len)
+                .or_else(|| value.as_object().map(|object| object.len()))
+                .ok_or_else(|| RuntimeDataError::type_mismatch("reader value is not array/object"))
+        })
     }
 
     fn as_i64(&self) -> RuntimeDataResult<i64> {
-        match &self.value {
+        self.with_current(|value| match value {
             Value::Number(number) => number
                 .as_i64()
                 .ok_or_else(|| RuntimeDataError::type_mismatch("number is not i64")),
@@ -57,35 +110,32 @@ impl RuntimeDataReader for JsonValueReader {
             other => Err(RuntimeDataError::type_mismatch(format!(
                 "expected i64-like value, got {other:?}"
             ))),
-        }
+        })
     }
 
     fn as_f64(&self) -> RuntimeDataResult<f64> {
-        let parsed = match &self.value {
-            Value::Number(number) => number
-                .as_f64()
-                .ok_or_else(|| RuntimeDataError::type_mismatch("number is not f64"))?,
-            Value::String(text) => text
-                .parse()
-                .map_err(|error| RuntimeDataError::decode(format!("invalid f64: {error}")))?,
-            other => {
-                return Err(RuntimeDataError::type_mismatch(format!(
+        let parsed = self.with_current(|value| {
+            match value {
+                Value::Number(number) => number
+                    .as_f64()
+                    .ok_or_else(|| RuntimeDataError::type_mismatch("number is not f64")),
+                Value::String(text) => text
+                    .parse()
+                    .map_err(|error| RuntimeDataError::decode(format!("invalid f64: {error}"))),
+                other => Err(RuntimeDataError::type_mismatch(format!(
                     "expected f64-like value, got {other:?}"
-                )));
+                ))),
             }
-        };
+        })?;
         if parsed.is_finite() {
             Ok(parsed)
         } else {
-            Err(RuntimeDataError::type_mismatch(format!(
-                "expected finite f64-like value, got {:?}",
-                self.value
-            )))
+            Err(RuntimeDataError::type_mismatch("expected finite f64-like value"))
         }
     }
 
     fn as_bool(&self) -> RuntimeDataResult<bool> {
-        match &self.value {
+        self.with_current(|value| match value {
             Value::Bool(value) => Ok(*value),
             Value::String(text) => match text.as_str() {
                 "true" | "1" => Ok(true),
@@ -95,20 +145,20 @@ impl RuntimeDataReader for JsonValueReader {
             other => Err(RuntimeDataError::type_mismatch(format!(
                 "expected bool-like value, got {other:?}"
             ))),
-        }
+        })
     }
 
     fn as_string(&self) -> RuntimeDataResult<String> {
-        match &self.value {
+        self.with_current(|value| match value {
             Value::String(text) => Ok(text.clone()),
             other => Err(RuntimeDataError::type_mismatch(format!(
                 "expected string value, got {other:?}"
             ))),
-        }
+        })
     }
 
     fn is_null(&self) -> bool {
-        self.value.is_null()
+        self.with_current(|value| Ok(value.is_null())).unwrap_or(false)
     }
 }
 
@@ -191,13 +241,13 @@ mod tests {
         fs::write(dir.join("items.json"), serde_json::to_vec(&payload).unwrap()).unwrap();
 
         let reader = FsJsonRuntimeDataLoader::new(&dir).open("items.json").unwrap();
-        let row = reader
-            .field("rows")
-            .unwrap()
-            .expect("rows")
-            .index(0)
-            .unwrap();
-        assert_eq!(row.field("id").unwrap().unwrap().as_i64().unwrap(), 7);
+        assert!(reader.enter_field("rows").unwrap());
+        reader.enter_index(0).unwrap();
+        assert!(reader.enter_field("id").unwrap());
+        assert_eq!(reader.as_i64().unwrap(), 7);
+        reader.exit().unwrap();
+        reader.exit().unwrap();
+        reader.exit().unwrap();
 
         fs::remove_dir_all(&dir).expect("temp runtime data dir should be removed");
     }
@@ -223,17 +273,27 @@ mod tests {
             "rows": [{ "id": "1", "ratio": "1.5", "enabled": "true", "name": "Potion" }]
         }));
 
-        let rows = reader.field("rows").unwrap().expect("rows field");
-        assert_eq!(rows.len().unwrap(), 1);
-        let row = rows.index(0).unwrap();
-        assert_eq!(row.field("id").unwrap().unwrap().as_i64().unwrap(), 1);
-        assert_eq!(row.field("ratio").unwrap().unwrap().as_f64().unwrap(), 1.5);
-        assert!(row.field("enabled").unwrap().unwrap().as_bool().unwrap());
+        assert!(reader.enter_field("rows").unwrap());
+        assert_eq!(reader.len().unwrap(), 1);
+        reader.enter_index(0).unwrap();
+        assert!(reader.enter_field("id").unwrap());
+        assert_eq!(reader.as_i64().unwrap(), 1);
+        reader.exit().unwrap();
+        assert!(reader.enter_field("ratio").unwrap());
+        assert_eq!(reader.as_f64().unwrap(), 1.5);
+        reader.exit().unwrap();
+        assert!(reader.enter_field("enabled").unwrap());
+        assert!(reader.as_bool().unwrap());
+        reader.exit().unwrap();
+        assert!(reader.enter_field("name").unwrap());
         assert_eq!(
-            row.field("name").unwrap().unwrap().as_string().unwrap(),
+            reader.as_string().unwrap(),
             "Potion"
         );
-        assert!(row.field("missing").unwrap().is_none());
+        reader.exit().unwrap();
+        assert!(!reader.enter_field("missing").unwrap());
+        reader.exit().unwrap();
+        reader.exit().unwrap();
     }
 
     #[test]

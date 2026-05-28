@@ -701,13 +701,10 @@ generated/rust/
 ```rust
 pub trait RuntimeDataReader {
     // 通用 reader cursor；实现可以包装 JSON value、MessagePack value、二进制 reader 或引擎序列化对象。
-    // 字段缺失返回 Ok(None)，读取/格式错误返回 Err。
-    fn field(&self, name: &str) -> Result<Option<Self>, String>
-    where
-        Self: Sized;
-    fn index(&self, index: usize) -> Result<Self, String>
-    where
-        Self: Sized;
+    // enter_* 在当前 reader 内部移动 cursor，exit 回到上一层，避免每次字段/数组访问创建子 reader。
+    fn enter_field(&self, name: &'static str) -> RuntimeDataResult<bool>;
+    fn enter_index(&self, index: usize) -> RuntimeDataResult<()>;
+    fn exit(&self) -> RuntimeDataResult<()>;
     fn len(&self) -> Result<usize, String>;
     fn as_i64(&self) -> Result<i64, String>;
     fn as_f64(&self) -> Result<f64, String>;
@@ -779,9 +776,9 @@ generated/cpp/
 class IRuntimeDataReader {
 public:
     virtual ~IRuntimeDataReader() = default;
-    virtual bool HasField(const std::string& name) const = 0;
-    virtual std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const = 0;
-    virtual std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const = 0;
+    virtual bool EnterField(const std::string& name) = 0;
+    virtual void EnterIndex(std::size_t index) = 0;
+    virtual void Exit() = 0;
     virtual std::size_t Size() const = 0;
     virtual std::int64_t AsInt64() const = 0;
     virtual double AsDouble() const = 0;
@@ -850,8 +847,9 @@ generated/ts/
 
 ```ts
 export interface RuntimeDataReader {
-  field(name: string): RuntimeDataReader | undefined;
-  index(index: number): RuntimeDataReader;
+  enterField(name: string): boolean;
+  enterIndex(index: number): void;
+  exit(): void;
   length(): number;
   asNumber(): number;
   asBool(): boolean;
@@ -900,8 +898,9 @@ TypeScript 约束：
 
 Reader 基础语义：
 
-- `field(name)` / `Field(name)` / `field(name)` 用于 named-field layout。字段不存在时应返回 `None` / `undefined` / 可检测的 missing 状态，而不是伪造空值；读取过程本身出错才返回 error / throw。
-- `index(i)` 用于 array 或 positional record。越界是读取错误，应带上 index 上下文。
+- `enter_field(name)` / `EnterField(name)` / `enterField(name)` 用于 named-field layout。字段不存在时应返回 `false`，而不是伪造空值；读取过程本身出错才返回 error / throw。进入成功后，后续 scalar/len/read 调用均作用于该字段值，调用方必须用 `exit` 返回上一层。
+- `enter_index(i)` / `EnterIndex(i)` / `enterIndex(i)` 用于 array 或 positional record。越界是读取错误，应带上 index 上下文。进入成功后同样通过 `exit` 返回上一层。
+- reader contract 采用可回退 cursor，而不是每次字段/数组访问返回新的 reader 对象。C++ adapter 因此避免 `std::make_unique` 子 reader 堆分配；TypeScript adapter 避免频繁临时对象；Rust adapter 避免 cloning `serde_json::Value` / MessagePack `Value` 子树。
 - `len` / `Size` / `length` 只对 array / object / map 有意义；对 scalar 调用应报错。
 - 最小 scalar API 包含 int、float/number、bool、string。`text`、`asset` 按 string 读取；enum 先按 string 读取，再由 generated parser 校验枚举值。
 - 当 exporter 输出字符串 cell 时，推荐 generated parser helper 兼容 string-to-int、string-to-float、string-to-bool；reader 也可以直接在 `as_*` 中兼容字符串，但跨语言一致性以 generated parser 规则为准。

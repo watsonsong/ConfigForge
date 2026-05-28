@@ -83,29 +83,28 @@ class MessagePackValueReader final : public CONFIG_FORGE_RUNTIME_CPP_READER {
 public:
     explicit MessagePackValueReader(const std::string& bytes)
         : handle_(std::make_shared<msgpack::object_handle>(msgpack::unpack(bytes.data(), bytes.size()))) {
-        value_ = &handle_->get();
+        stack_.reserve(8);
+        stack_.push_back(&handle_->get());
     }
 
     MessagePackValueReader(const char* bytes, std::size_t size)
         : handle_(std::make_shared<msgpack::object_handle>(msgpack::unpack(bytes, size))) {
-        value_ = &handle_->get();
+        stack_.reserve(8);
+        stack_.push_back(&handle_->get());
     }
 
     explicit MessagePackValueReader(std::shared_ptr<msgpack::object_handle> handle)
-        : handle_(std::move(handle)), value_(&handle_->get()) {}
-
-    MessagePackValueReader(std::shared_ptr<msgpack::object_handle> handle, const msgpack::object* value)
-        : handle_(std::move(handle)), value_(value) {
-        if (value_ == nullptr) {
-            throw std::runtime_error("MessagePack reader cannot wrap a null value pointer");
-        }
+        : handle_(std::move(handle)) {
+        stack_.reserve(8);
+        stack_.push_back(&handle_->get());
     }
 
-    std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Field(const std::string& name) const override {
-        if (value_->type != msgpack::type::MAP) {
-            return nullptr;
+    bool EnterField(const std::string& name) override {
+        const msgpack::object& value = Current();
+        if (value.type != msgpack::type::MAP) {
+            return false;
         }
-        const msgpack::object_map& map = value_->via.map;
+        const msgpack::object_map& map = value.via.map;
         for (std::uint32_t index = 0; index < map.size; ++index) {
             const msgpack::object& key = map.ptr[index].key;
             if (key.type != msgpack::type::STR) {
@@ -113,36 +112,47 @@ public:
             }
             if (key.via.str.size == name.size() &&
                 std::memcmp(key.via.str.ptr, name.data(), name.size()) == 0) {
-                return std::make_unique<MessagePackValueReader>(handle_, &map.ptr[index].val);
+                stack_.push_back(&map.ptr[index].val);
+                return true;
             }
         }
-        return nullptr;
+        return false;
     }
 
-    std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Index(std::size_t index) const override {
-        if (value_->type != msgpack::type::ARRAY || index >= value_->via.array.size) {
+    void EnterIndex(std::size_t index) override {
+        const msgpack::object& value = Current();
+        if (value.type != msgpack::type::ARRAY || index >= value.via.array.size) {
             throw std::runtime_error("missing array index " + std::to_string(index));
         }
-        return std::make_unique<MessagePackValueReader>(handle_, &value_->via.array.ptr[index]);
+        stack_.push_back(&value.via.array.ptr[index]);
+    }
+
+    void Exit() override {
+        if (stack_.size() <= 1) {
+            throw std::runtime_error("MessagePack reader cursor stack underflow");
+        }
+        stack_.pop_back();
     }
 
     std::size_t Size() const override {
-        if (value_->type == msgpack::type::ARRAY) {
-            return value_->via.array.size;
+        const msgpack::object& value = Current();
+        if (value.type == msgpack::type::ARRAY) {
+            return value.via.array.size;
         }
-        if (value_->type == msgpack::type::MAP) {
-            return value_->via.map.size;
+        if (value.type == msgpack::type::MAP) {
+            return value.via.map.size;
         }
         throw std::runtime_error("reader value is not an array/map");
     }
 
     std::int64_t AsInt64() const override {
-        if (value_->type == msgpack::type::NEGATIVE_INTEGER) {
-            return value_->via.i64;
+        const msgpack::object& value = Current();
+        if (value.type == msgpack::type::NEGATIVE_INTEGER) {
+            return value.via.i64;
         }
-        if (value_->type == msgpack::type::POSITIVE_INTEGER) {
-            if (value_->via.u64 <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
-                return static_cast<std::int64_t>(value_->via.u64);
+        if (value.type == msgpack::type::POSITIVE_INTEGER) {
+            if (value.via.u64 <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+                return static_cast<std::int64_t>(value.via.u64);
             }
             throw std::runtime_error("MessagePack positive integer exceeds int64 range");
         }
@@ -156,17 +166,18 @@ public:
     }
 
     double AsDouble() const override {
-        if (value_->type == msgpack::type::FLOAT32 || value_->type == msgpack::type::FLOAT64) {
-            if (!std::isfinite(value_->via.f64)) {
+        const msgpack::object& value = Current();
+        if (value.type == msgpack::type::FLOAT32 || value.type == msgpack::type::FLOAT64) {
+            if (!std::isfinite(value.via.f64)) {
                 throw std::runtime_error("expected finite double-like value");
             }
-            return value_->via.f64;
+            return value.via.f64;
         }
-        if (value_->type == msgpack::type::NEGATIVE_INTEGER) {
-            return static_cast<double>(value_->via.i64);
+        if (value.type == msgpack::type::NEGATIVE_INTEGER) {
+            return static_cast<double>(value.via.i64);
         }
-        if (value_->type == msgpack::type::POSITIVE_INTEGER) {
-            return static_cast<double>(value_->via.u64);
+        if (value.type == msgpack::type::POSITIVE_INTEGER) {
+            return static_cast<double>(value.via.u64);
         }
         const std::string value = ScalarText();
         std::size_t consumed = 0;
@@ -178,18 +189,19 @@ public:
     }
 
     bool AsBool() const override {
-        if (value_->type == msgpack::type::BOOLEAN) {
-            return value_->via.boolean;
+        const msgpack::object& value = Current();
+        if (value.type == msgpack::type::BOOLEAN) {
+            return value.via.boolean;
         }
-        if (value_->type == msgpack::type::POSITIVE_INTEGER) {
-            if (value_->via.u64 == 1) {
+        if (value.type == msgpack::type::POSITIVE_INTEGER) {
+            if (value.via.u64 == 1) {
                 return true;
             }
-            if (value_->via.u64 == 0) {
+            if (value.via.u64 == 0) {
                 return false;
             }
         }
-        if (value_->type == msgpack::type::NEGATIVE_INTEGER && value_->via.i64 == 0) {
+        if (value.type == msgpack::type::NEGATIVE_INTEGER && value.via.i64 == 0) {
             return false;
         }
         const std::string value = ScalarText();
@@ -203,28 +215,30 @@ public:
     }
 
     std::string AsString() const override {
-        if (value_->type != msgpack::type::STR) {
+        const msgpack::object& value = Current();
+        if (value.type != msgpack::type::STR) {
             throw std::runtime_error("expected string value");
         }
-        return std::string(value_->via.str.ptr, value_->via.str.size);
+        return std::string(value.via.str.ptr, value.via.str.size);
     }
 
-    bool IsNull() const override { return value_->type == msgpack::type::NIL; }
+    bool IsNull() const override { return Current().type == msgpack::type::NIL; }
 
 private:
     std::string ScalarText() const {
-        switch (value_->type) {
+        const msgpack::object& value = Current();
+        switch (value.type) {
             case msgpack::type::STR:
-                return std::string(value_->via.str.ptr, value_->via.str.size);
+                return std::string(value.via.str.ptr, value.via.str.size);
             case msgpack::type::BOOLEAN:
-                return value_->via.boolean ? "true" : "false";
+                return value.via.boolean ? "true" : "false";
             case msgpack::type::NEGATIVE_INTEGER:
-                return std::to_string(value_->via.i64);
+                return std::to_string(value.via.i64);
             case msgpack::type::POSITIVE_INTEGER:
-                return std::to_string(value_->via.u64);
+                return std::to_string(value.via.u64);
             case msgpack::type::FLOAT32:
             case msgpack::type::FLOAT64:
-                return std::to_string(value_->via.f64);
+                return std::to_string(value.via.f64);
             case msgpack::type::NIL:
                 return "null";
             default:
@@ -232,8 +246,10 @@ private:
         }
     }
 
+    const msgpack::object& Current() const { return *stack_.back(); }
+
     std::shared_ptr<msgpack::object_handle> handle_;
-    const msgpack::object* value_ = nullptr;
+    std::vector<const msgpack::object*> stack_;
 };
 
 class MessagePackFsRuntimeDataLoader final : public CONFIG_FORGE_RUNTIME_CPP_LOADER {

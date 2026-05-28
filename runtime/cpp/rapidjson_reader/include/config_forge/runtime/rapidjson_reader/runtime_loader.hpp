@@ -84,53 +84,62 @@ public:
         if (document_->HasParseError()) {
             throw std::runtime_error("failed to parse JSON runtime data");
         }
-        value_ = document_.get();
+        stack_.reserve(8);
+        stack_.push_back(document_.get());
     }
 
     explicit JsonValueReader(std::shared_ptr<rapidjson::Document> document)
-        : document_(std::move(document)), value_(document_.get()) {}
-
-    JsonValueReader(std::shared_ptr<rapidjson::Document> document, const rapidjson::Value* value)
-        : document_(std::move(document)), value_(value) {
-        if (value_ == nullptr) {
-            throw std::runtime_error("JSON reader cannot wrap a null value pointer");
-        }
+        : document_(std::move(document)) {
+        stack_.reserve(8);
+        stack_.push_back(document_.get());
     }
 
-    std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Field(const std::string& name) const override {
-        if (!value_->IsObject()) {
-            return nullptr;
+    bool EnterField(const std::string& name) override {
+        const rapidjson::Value& value = Current();
+        if (!value.IsObject()) {
+            return false;
         }
-        const auto member = value_->FindMember(name.c_str());
-        if (member == value_->MemberEnd()) {
-            return nullptr;
+        const auto member = value.FindMember(name.c_str());
+        if (member == value.MemberEnd()) {
+            return false;
         }
-        return std::make_unique<JsonValueReader>(document_, &member->value);
+        stack_.push_back(&member->value);
+        return true;
     }
 
-    std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Index(std::size_t index) const override {
-        if (!value_->IsArray() || index >= value_->Size()) {
+    void EnterIndex(std::size_t index) override {
+        const rapidjson::Value& value = Current();
+        if (!value.IsArray() || index >= value.Size()) {
             throw std::runtime_error("missing array index " + std::to_string(index));
         }
-        return std::make_unique<JsonValueReader>(document_, &(*value_)[static_cast<rapidjson::SizeType>(index)]);
+        stack_.push_back(&value[static_cast<rapidjson::SizeType>(index)]);
+    }
+
+    void Exit() override {
+        if (stack_.size() <= 1) {
+            throw std::runtime_error("JSON reader cursor stack underflow");
+        }
+        stack_.pop_back();
     }
 
     std::size_t Size() const override {
-        if (value_->IsArray()) {
-            return value_->Size();
+        const rapidjson::Value& value = Current();
+        if (value.IsArray()) {
+            return value.Size();
         }
-        if (value_->IsObject()) {
-            return value_->MemberCount();
+        if (value.IsObject()) {
+            return value.MemberCount();
         }
         throw std::runtime_error("reader value is not an array/object");
     }
 
     std::int64_t AsInt64() const override {
-        if (value_->IsInt64()) {
-            return value_->GetInt64();
+        const rapidjson::Value& value = Current();
+        if (value.IsInt64()) {
+            return value.GetInt64();
         }
-        if (value_->IsUint64()) {
-            const auto parsed = value_->GetUint64();
+        if (value.IsUint64()) {
+            const auto parsed = value.GetUint64();
             if (parsed <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
                 return static_cast<std::int64_t>(parsed);
             }
@@ -145,8 +154,9 @@ public:
     }
 
     double AsDouble() const override {
-        if (value_->IsNumber()) {
-            return value_->GetDouble();
+        const rapidjson::Value& value = Current();
+        if (value.IsNumber()) {
+            return value.GetDouble();
         }
         const std::string value = ScalarText();
         std::size_t consumed = 0;
@@ -158,14 +168,15 @@ public:
     }
 
     bool AsBool() const override {
-        if (value_->IsBool()) {
-            return value_->GetBool();
+        const rapidjson::Value& value = Current();
+        if (value.IsBool()) {
+            return value.GetBool();
         }
-        if (value_->IsInt()) {
-            if (value_->GetInt() == 1) {
+        if (value.IsInt()) {
+            if (value.GetInt() == 1) {
                 return true;
             }
-            if (value_->GetInt() == 0) {
+            if (value.GetInt() == 0) {
                 return false;
             }
         }
@@ -180,39 +191,43 @@ public:
     }
 
     std::string AsString() const override {
-        if (!value_->IsString()) {
+        const rapidjson::Value& value = Current();
+        if (!value.IsString()) {
             throw std::runtime_error("expected string value");
         }
-        return std::string(value_->GetString(), value_->GetStringLength());
+        return std::string(value.GetString(), value.GetStringLength());
     }
 
-    bool IsNull() const override { return value_->IsNull(); }
+    bool IsNull() const override { return Current().IsNull(); }
 
 private:
     std::string ScalarText() const {
-        if (value_->IsString()) {
-            return std::string(value_->GetString(), value_->GetStringLength());
+        const rapidjson::Value& value = Current();
+        if (value.IsString()) {
+            return std::string(value.GetString(), value.GetStringLength());
         }
-        if (value_->IsBool()) {
-            return value_->GetBool() ? "true" : "false";
+        if (value.IsBool()) {
+            return value.GetBool() ? "true" : "false";
         }
-        if (value_->IsInt64()) {
-            return std::to_string(value_->GetInt64());
+        if (value.IsInt64()) {
+            return std::to_string(value.GetInt64());
         }
-        if (value_->IsUint64()) {
-            return std::to_string(value_->GetUint64());
+        if (value.IsUint64()) {
+            return std::to_string(value.GetUint64());
         }
-        if (value_->IsDouble()) {
-            return std::to_string(value_->GetDouble());
+        if (value.IsDouble()) {
+            return std::to_string(value.GetDouble());
         }
-        if (value_->IsNull()) {
+        if (value.IsNull()) {
             return "null";
         }
         throw std::runtime_error("expected scalar JSON value");
     }
 
+    const rapidjson::Value& Current() const { return *stack_.back(); }
+
     std::shared_ptr<rapidjson::Document> document_;
-    const rapidjson::Value* value_ = nullptr;
+    std::vector<const rapidjson::Value*> stack_;
 };
 
 class JsonFsRuntimeDataLoader final : public CONFIG_FORGE_RUNTIME_CPP_LOADER {

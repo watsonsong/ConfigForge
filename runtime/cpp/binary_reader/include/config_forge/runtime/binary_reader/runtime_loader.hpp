@@ -91,12 +91,16 @@ public:
         ParseHeader();
     }
 
-    std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Field(const std::string&) const override {
+    bool EnterField(const std::string&) override {
         throw std::runtime_error("binary reader does not support named fields");
     }
 
-    std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Index(std::size_t) const override {
+    void EnterIndex(std::size_t) override {
         throw std::runtime_error("binary reader does not support random index access");
+    }
+
+    void Exit() override {
+        throw std::runtime_error("binary reader does not support nested named readers");
     }
 
     std::size_t Size() const override {

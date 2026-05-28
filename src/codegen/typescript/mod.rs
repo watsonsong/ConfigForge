@@ -241,8 +241,9 @@ impl CodeGenerator for TypeScriptCodeGenerator {
 fn render_runtime_reader_interfaces(content: &mut CodeWriter) {
     content.raw(
         r#"export interface RuntimeDataReader {
-  field(name: string): RuntimeDataReader | undefined;
-  index(index: number): RuntimeDataReader;
+  enterField(name: string): boolean;
+  enterIndex(index: number): void;
+  exit(): void;
   length(): number;
   asNumber(): number;
   asBool(): boolean;
@@ -273,73 +274,85 @@ export interface RuntimeDataLoader {
 
 fn render_runtime_reader_helpers(content: &mut CodeWriter) {
     content.raw(
-        r#"function requiredField(reader: RuntimeDataReader, name: string): RuntimeDataReader {
-  const value = reader.field(name);
-  if (!value || value.isNull()) {
+        r#"function requiredField<T>(reader: RuntimeDataReader, name: string, convert: (value: RuntimeDataReader) => T): T {
+  if (!reader.enterField(name)) {
     throw new Error(`missing required field ${name}`);
   }
-  return value;
+  try {
+    if (reader.isNull()) {
+      throw new Error(`missing required field ${name}`);
+    }
+    return convert(reader);
+  } finally {
+    reader.exit();
+  }
 }
 
-function optionalField(reader: RuntimeDataReader, name: string): RuntimeDataReader | undefined {
-  const value = reader.field(name);
-  return value && !value.isNull() ? value : undefined;
+function optionalField<T>(reader: RuntimeDataReader, name: string, convert: (value: RuntimeDataReader) => T): T | undefined {
+  if (!reader.enterField(name)) {
+    return undefined;
+  }
+  try {
+    return reader.isNull() ? undefined : convert(reader);
+  } finally {
+    reader.exit();
+  }
 }
 
 function readRequiredInt64(reader: RuntimeDataReader, name: string): number {
   if (reader.isPositional?.()) {
     return reader.readNextInt64!();
   }
-  return requiredField(reader, name).asNumber();
+  return requiredField(reader, name, (value) => value.asNumber());
 }
 
 function readRequiredFloat64(reader: RuntimeDataReader, name: string): number {
   if (reader.isPositional?.()) {
     return reader.readNextFloat64!();
   }
-  return requiredField(reader, name).asNumber();
+  return requiredField(reader, name, (value) => value.asNumber());
 }
 
 function readRequiredBool(reader: RuntimeDataReader, name: string): boolean {
   if (reader.isPositional?.()) {
     return reader.asBool();
   }
-  return requiredField(reader, name).asBool();
+  return requiredField(reader, name, (value) => value.asBool());
 }
 
 function readRequiredString(reader: RuntimeDataReader, name: string): string {
   if (reader.isPositional?.()) {
     return reader.asString();
   }
-  return requiredField(reader, name).asString();
+  return requiredField(reader, name, (value) => value.asString());
 }
 
 function readOptionalInt64(reader: RuntimeDataReader, name: string): number | undefined {
   if (reader.isPositional?.()) {
     return reader.readOptionalPresent!(0) ? reader.readNextInt64!() : undefined;
   }
-  return optionalField(reader, name)?.asNumber();
+  return optionalField(reader, name, (value) => value.asNumber());
 }
 
 function readOptionalFloat64(reader: RuntimeDataReader, name: string): number | undefined {
   if (reader.isPositional?.()) {
     return reader.readOptionalPresent!(0) ? reader.readNextFloat64!() : undefined;
   }
-  return optionalField(reader, name)?.asNumber();
+  return optionalField(reader, name, (value) => value.asNumber());
 }
 
 function readOptionalBool(reader: RuntimeDataReader, name: string): boolean | undefined {
   if (reader.isPositional?.()) {
     return reader.readOptionalPresent!(0) ? reader.asBool() : undefined;
   }
-  return optionalField(reader, name)?.asBool();
+  return optionalField(reader, name, (value) => value.asBool());
 }
 
 function readOptionalString(reader: RuntimeDataReader, name: string): string | undefined {
   if (reader.isPositional?.()) {
     return reader.readOptionalPresent!(0) ? reader.asString() : undefined;
   }
-  return optionalField(reader, name)?.asString();
+  return optionalField(reader, name, (value) => value.asString());
 }
 
 "#,
@@ -448,15 +461,6 @@ fn render_reader_function_body(
     content.raw_fmt(format_args!(
         "  reader.beginRecord?.({optional_slot_count});\n"
     ));
-    if let Some(table) = table {
-        for fragment in &table.fragments {
-            content.raw_fmt(format_args!(
-                "  const {}Reader = reader.isPositional?.() ? undefined : optionalField(reader, {:?});\n",
-                names.field_name(&fragment.name)?,
-                fragment.name
-            ));
-        }
-    }
     content.raw("  const value = {\n");
     for field in fields {
         content.raw_fmt(format_args!(
@@ -474,9 +478,10 @@ fn render_reader_function_body(
                 concat!(
                     "    {field_name}: reader.isPositional?.()\n",
                     "      ? (reader.readOptionalPresent!(0) ? {reader_function}(reader) : undefined)\n",
-                    "      : ({field_name}Reader ? {reader_function}({field_name}Reader) : undefined),\n",
+                    "      : optionalField(reader, {source_name}, (value) => {reader_function}(value)),\n",
                 ),
                 field_name = field_name,
+                source_name = format!("{:?}", fragment.name),
                 reader_function = reader_function,
             ));
         }
@@ -763,16 +768,26 @@ fn render_table(
         content.raw("}\n\n");
         return Ok(());
     }
-    content.raw("    const rowsReader = requiredField(root, \"rows\");\n");
+    content.raw("    if (!root.enterField(\"rows\")) { throw new Error('missing required field rows'); }\n");
+    content.raw("    if (root.isNull()) { root.exit(); throw new Error('missing required field rows'); }\n");
     content.raw_fmt(format_args!(
         "    const rows: {}[] = [];\n",
         names.row_type_name(&table.name)?
     ));
-    content.raw("    for (let rowIndex = 0; rowIndex < rowsReader.length(); rowIndex++) {\n");
+    content.raw("    try {\n");
+    content.raw("      for (let rowIndex = 0; rowIndex < root.length(); rowIndex++) {\n");
+    content.raw("        root.enterIndex(rowIndex);\n");
+    content.raw("        try {\n");
     content.raw_fmt(format_args!(
-        "      rows.push({}(rowsReader.index(rowIndex)));\n",
+        "          rows.push({}(root));\n",
         names.reader_function_name(&names.row_type_name(&table.name)?)?
     ));
+    content.raw("        } finally {\n");
+    content.raw("          root.exit();\n");
+    content.raw("        }\n");
+    content.raw("      }\n");
+    content.raw("    } finally {\n");
+    content.raw("      root.exit();\n");
     content.raw("    }\n");
     content.raw_fmt(format_args!(
         "    return new {}(rows ?? []);\n",
@@ -956,7 +971,7 @@ impl<'a> TypeScriptNames<'a> {
                     let type_name = self.type_name(name)?;
                     let reader_function = self.reader_function_name(&type_name)?;
                     format!(
-                        "reader.isPositional?.() ? {reader_function}(reader) : {reader_function}(requiredField(reader, {source_name}))"
+                        "reader.isPositional?.() ? {reader_function}(reader) : requiredField(reader, {source_name}, (value) => {reader_function}(value))"
                     )
                 }
             });
@@ -976,10 +991,7 @@ impl<'a> TypeScriptNames<'a> {
                     concat!(
                         "reader.isPositional?.()\n",
                         "      ? (reader.readOptionalPresent!(0) ? {reader_function}(reader) : undefined)\n",
-                        "      : (() => {{\n",
-                        "          const value = optionalField(reader, {source_name});\n",
-                        "          return value ? {reader_function}(value) : undefined;\n",
-                        "        }})()",
+                        "      : optionalField(reader, {source_name}, (value) => {reader_function}(value))",
                     ),
                     reader_function = reader_function,
                     source_name = source_name,

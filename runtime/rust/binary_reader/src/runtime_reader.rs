@@ -12,7 +12,6 @@ use config_forge_runtime_reader_core::{
     RuntimeDataError, RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult,
 };
 
-#[derive(Clone)]
 pub struct BinaryRuntimeDataReader {
     state: Rc<RefCell<BinaryState>>,
 }
@@ -68,15 +67,21 @@ impl BinaryRuntimeDataReader {
 }
 
 impl RuntimeDataReader for BinaryRuntimeDataReader {
-    fn field(&self, _name: &str) -> RuntimeDataResult<Option<Self>> {
+    fn enter_field(&self, _name: &'static str) -> RuntimeDataResult<bool> {
         Err(RuntimeDataError::unsupported(
             "binary reader does not support named fields",
         ))
     }
 
-    fn index(&self, _index: usize) -> RuntimeDataResult<Self> {
+    fn enter_index(&self, _index: usize) -> RuntimeDataResult<()> {
         Err(RuntimeDataError::unsupported(
             "binary reader does not support random index access",
+        ))
+    }
+
+    fn exit(&self) -> RuntimeDataResult<()> {
+        Err(RuntimeDataError::unsupported(
+            "binary reader does not support nested named readers",
         ))
     }
 
@@ -336,7 +341,11 @@ mod tests {
 
         let reader = BinaryRuntimeDataReader::from_bytes(bytes).unwrap();
         assert_eq!(reader.read_row_count().unwrap(), 0);
-        assert!(reader.ensure_exhausted().unwrap_err().contains("trailing"));
+        assert!(reader
+            .ensure_exhausted()
+            .unwrap_err()
+            .message
+            .contains("trailing"));
 
         let mut oversized = Vec::new();
         oversized.extend_from_slice(b"CFGB");
@@ -347,7 +356,7 @@ mod tests {
         oversized.push(0x02);
 
         let reader = BinaryRuntimeDataReader::from_bytes(oversized).unwrap();
-        assert!(reader.read_row_count().unwrap_err().contains("u64"));
+        assert!(reader.read_row_count().unwrap_err().message.contains("u64"));
     }
 
     #[test]
@@ -357,12 +366,12 @@ mod tests {
             .open("../secret.bin")
             .err()
             .expect("path traversal should be rejected");
-        assert!(traversal_error.contains("escapes"));
+        assert!(traversal_error.message.contains("escapes"));
         let absolute_error = loader
             .open("/tmp/secret.bin")
             .err()
             .expect("absolute path should be rejected");
-        assert!(absolute_error.contains("relative"));
+        assert!(absolute_error.message.contains("relative"));
     }
 
     #[test]

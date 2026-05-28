@@ -89,8 +89,9 @@ impl CodeGenerator for CppCodeGenerator {
             "class IRuntimeDataReader {\n",
             "public:\n",
             "    virtual ~IRuntimeDataReader() = default;\n",
-            "    virtual std::unique_ptr<IRuntimeDataReader> Field(const std::string& name) const = 0;\n",
-            "    virtual std::unique_ptr<IRuntimeDataReader> Index(std::size_t index) const = 0;\n",
+            "    virtual bool EnterField(const std::string& name) = 0;\n",
+            "    virtual void EnterIndex(std::size_t index) = 0;\n",
+            "    virtual void Exit() = 0;\n",
             "    virtual std::size_t Size() const = 0;\n",
             "    virtual std::int64_t AsInt64() const = 0;\n",
             "    virtual double AsDouble() const = 0;\n",
@@ -467,35 +468,55 @@ fn render_source_file(
 fn render_reader_helpers_source(content: &mut CodeWriter) {
     content.raw(concat!(
         "namespace {\n\n",
-        "std::unique_ptr<IRuntimeDataReader> RequiredField(\n",
-        "    const IRuntimeDataReader& reader,\n",
-        "    const std::string& name) {\n",
-        "    auto value = reader.Field(name);\n",
-        "    if (!value || value->IsNull()) {\n",
+        "class ReaderScope {\n",
+        "public:\n",
+        "    explicit ReaderScope(IRuntimeDataReader& reader) : reader_(&reader) {}\n",
+        "    ReaderScope(ReaderScope&& other) noexcept : reader_(other.reader_) { other.reader_ = nullptr; }\n",
+        "    ReaderScope(const ReaderScope&) = delete;\n",
+        "    ReaderScope& operator=(const ReaderScope&) = delete;\n",
+        "    ~ReaderScope() noexcept { if (reader_) { try { reader_->Exit(); } catch (...) {} } }\n",
+        "private:\n",
+        "    IRuntimeDataReader* reader_;\n",
+        "};\n\n",
+        "ReaderScope EnterRequiredField(IRuntimeDataReader& reader, const std::string& name) {\n",
+        "    if (!reader.EnterField(name)) {\n",
         "        throw std::runtime_error(\"missing required field `\" + name + \"`\");\n",
         "    }\n",
-        "    return value;\n",
+        "    ReaderScope scope(reader);\n",
+        "    if (reader.IsNull()) {\n",
+        "        throw std::runtime_error(\"missing required field `\" + name + \"`\");\n",
+        "    }\n",
+        "    return scope;\n",
+        "}\n\n",
+        "template <typename F>\n",
+        "auto RequiredField(\n",
+        "    IRuntimeDataReader& reader,\n",
+        "    const std::string& name,\n",
+        "    F convert) -> decltype(convert(std::declval<IRuntimeDataReader&>())) {\n",
+        "    auto scope = EnterRequiredField(reader, name);\n",
+        "    return convert(reader);\n",
         "}\n\n",
         "template <typename F>\n",
         "auto OptionalField(\n",
-        "    const IRuntimeDataReader& reader,\n",
+        "    IRuntimeDataReader& reader,\n",
         "    const std::string& name,\n",
         "    F convert) -> std::optional<decltype(convert(std::declval<IRuntimeDataReader&>()))> {\n",
-        "    auto value = reader.Field(name);\n",
-        "    if (!value || value->IsNull()) { return std::nullopt; }\n",
-        "    return convert(*value);\n",
+        "    if (!reader.EnterField(name)) { return std::nullopt; }\n",
+        "    ReaderScope scope(reader);\n",
+        "    if (reader.IsNull()) { return std::nullopt; }\n",
+        "    return convert(reader);\n",
         "}\n\n",
         "std::int64_t ReadRequiredInt64(IRuntimeDataReader& reader, const std::string& name) {\n",
-        "    return reader.IsPositional() ? reader.AsInt64() : RequiredField(reader, name)->AsInt64();\n",
+        "    return reader.IsPositional() ? reader.AsInt64() : RequiredField(reader, name, [](IRuntimeDataReader& value) { return value.AsInt64(); });\n",
         "}\n\n",
         "double ReadRequiredDouble(IRuntimeDataReader& reader, const std::string& name) {\n",
-        "    return reader.IsPositional() ? reader.AsDouble() : RequiredField(reader, name)->AsDouble();\n",
+        "    return reader.IsPositional() ? reader.AsDouble() : RequiredField(reader, name, [](IRuntimeDataReader& value) { return value.AsDouble(); });\n",
         "}\n\n",
         "bool ReadRequiredBool(IRuntimeDataReader& reader, const std::string& name) {\n",
-        "    return reader.IsPositional() ? reader.AsBool() : RequiredField(reader, name)->AsBool();\n",
+        "    return reader.IsPositional() ? reader.AsBool() : RequiredField(reader, name, [](IRuntimeDataReader& value) { return value.AsBool(); });\n",
         "}\n\n",
         "std::string ReadRequiredString(IRuntimeDataReader& reader, const std::string& name) {\n",
-        "    return reader.IsPositional() ? reader.AsString() : RequiredField(reader, name)->AsString();\n",
+        "    return reader.IsPositional() ? reader.AsString() : RequiredField(reader, name, [](IRuntimeDataReader& value) { return value.AsString(); });\n",
         "}\n\n",
         "std::optional<std::int64_t> ReadOptionalInt64(IRuntimeDataReader& reader, const std::string& name) {\n",
         "    if (reader.IsPositional()) {\n",
@@ -640,8 +661,11 @@ fn render_reader_function_source(
                     "        if (reader.ReadOptionalPresent(0)) {{\n",
                     "            value.{field_name} = {reader_function}(reader);\n",
                     "        }}\n",
-                    "    }} else if (auto fragment = reader.Field({:?}); fragment && !fragment->IsNull()) {{\n",
-                    "        value.{field_name} = {reader_function}(*fragment);\n",
+                    "    }} else if (reader.EnterField({:?})) {{\n",
+                    "        ReaderScope fragment_scope(reader);\n",
+                    "        if (!reader.IsNull()) {{\n",
+                    "            value.{field_name} = {reader_function}(reader);\n",
+                    "        }}\n",
                     "    }}\n",
                 ),
                 fragment.name,
@@ -687,14 +711,16 @@ fn render_table_source(
         content.raw("    return FromRows(std::move(rows));\n");
         content.raw("}\n\n");
     } else {
-        content.raw("    auto rows_reader = RequiredField(*root, \"rows\");\n");
+        content.raw("    auto rows_scope = EnterRequiredField(*root, \"rows\");\n");
         content.raw_fmt(format_args!("    std::vector<{}> rows;\n", row_type));
-        content.raw("    rows.reserve(rows_reader->Size());\n");
+        content.raw("    rows.reserve(root->Size());\n");
         content.raw(
-            "    for (std::size_t row_index = 0; row_index < rows_reader->Size(); ++row_index) {\n",
+            "    for (std::size_t row_index = 0; row_index < root->Size(); ++row_index) {\n",
         );
+        content.raw("        root->EnterIndex(row_index);\n");
+        content.raw("        ReaderScope row_scope(*root);\n");
         content.raw_fmt(format_args!(
-            "        rows.push_back({row_reader_function}(*rows_reader->Index(row_index)));\n"
+            "        rows.push_back({row_reader_function}(*root));\n"
         ));
         content.raw("    }\n");
         content.raw("    return FromRows(std::move(rows));\n");
@@ -1120,7 +1146,9 @@ impl<'a> CppNames<'a> {
                         concat!(
                             "reader.IsPositional()\n",
                             "        ? {reader_function}(reader)\n",
-                            "        : {reader_function}(*RequiredField(reader, {source_name}))",
+                            "        : RequiredField(reader, {source_name}, [](IRuntimeDataReader& value) {{\n",
+                            "            return {reader_function}(value);\n",
+                            "        }})",
                         ),
                         reader_function = reader_function,
                         source_name = source_name,

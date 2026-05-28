@@ -34,12 +34,16 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     this.revision = view.getBigUint64(8, true);
   }
 
-  field(_name: string): RuntimeDataReaderLike | undefined {
+  enterField(_name: string): boolean {
     throw new Error("binary reader does not support named fields");
   }
 
-  index(_index: number): RuntimeDataReaderLike {
+  enterIndex(_index: number): void {
     throw new Error("binary reader does not support random index access");
+  }
+
+  exit(): void {
+    throw new Error("binary reader does not support nested named readers");
   }
 
   length(): number {

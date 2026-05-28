@@ -240,71 +240,96 @@ fn render_runtime_reader_imports(content: &mut CodeWriter) {
 
 fn render_runtime_reader_helpers(content: &mut CodeWriter) {
     content.raw(
-        r#"fn required_field<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<R> {
-    match reader.field(name)? {
-        Some(value) if !value.is_null() => Ok(value),
-        _ => Err(RuntimeDataError::not_found(format!("missing required field `{name}`"))),
+        r#"fn with_required_field<R: RuntimeDataReader, T>(
+    reader: &R,
+    name: &'static str,
+    read: impl FnOnce(&R) -> RuntimeDataResult<T>,
+) -> RuntimeDataResult<T> {
+    if !reader.enter_field(name)? {
+        return Err(RuntimeDataError::not_found(format!("missing required field `{name}`")));
+    }
+    let result = if reader.is_null() {
+        Err(RuntimeDataError::not_found(format!("missing required field `{name}`")))
+    } else {
+        read(reader)
+    };
+    match (result, reader.exit()) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
     }
 }
 
-fn optional_field<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<Option<R>> {
-    Ok(reader.field(name)?.filter(|value| !value.is_null()))
+fn with_optional_field<R: RuntimeDataReader, T>(
+    reader: &R,
+    name: &'static str,
+    read: impl FnOnce(&R) -> RuntimeDataResult<T>,
+) -> RuntimeDataResult<Option<T>> {
+    if !reader.enter_field(name)? {
+        return Ok(None);
+    }
+    let result = if reader.is_null() { Ok(None) } else { read(reader).map(Some) };
+    match (result, reader.exit()) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+    }
 }
 
-fn read_required_i64<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<i64> {
+fn read_required_i64<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<i64> {
     if reader.is_positional() {
         return reader.as_i64();
     }
-    required_field(reader, name)?.as_i64()
+    with_required_field(reader, name, |value| value.as_i64())
 }
 
-fn read_required_f64<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<f64> {
+fn read_required_f64<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<f64> {
     if reader.is_positional() {
         return reader.as_f64();
     }
-    required_field(reader, name)?.as_f64()
+    with_required_field(reader, name, |value| value.as_f64())
 }
 
-fn read_required_bool<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<bool> {
+fn read_required_bool<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<bool> {
     if reader.is_positional() {
         return reader.as_bool();
     }
-    required_field(reader, name)?.as_bool()
+    with_required_field(reader, name, |value| value.as_bool())
 }
 
-fn read_required_string<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<String> {
+fn read_required_string<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<String> {
     if reader.is_positional() {
         return reader.as_string();
     }
-    required_field(reader, name)?.as_string()
+    with_required_field(reader, name, |value| value.as_string())
 }
 
-fn read_optional_i64<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<Option<i64>> {
+fn read_optional_i64<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<Option<i64>> {
     if reader.is_positional() {
         return if reader.read_optional_present(0)? { Ok(Some(reader.as_i64()?)) } else { Ok(None) };
     }
-    optional_field(reader, name)?.map(|value| value.as_i64()).transpose()
+    with_optional_field(reader, name, |value| value.as_i64())
 }
 
-fn read_optional_f64<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<Option<f64>> {
+fn read_optional_f64<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<Option<f64>> {
     if reader.is_positional() {
         return if reader.read_optional_present(0)? { Ok(Some(reader.as_f64()?)) } else { Ok(None) };
     }
-    optional_field(reader, name)?.map(|value| value.as_f64()).transpose()
+    with_optional_field(reader, name, |value| value.as_f64())
 }
 
-fn read_optional_bool<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<Option<bool>> {
+fn read_optional_bool<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<Option<bool>> {
     if reader.is_positional() {
         return if reader.read_optional_present(0)? { Ok(Some(reader.as_bool()?)) } else { Ok(None) };
     }
-    optional_field(reader, name)?.map(|value| value.as_bool()).transpose()
+    with_optional_field(reader, name, |value| value.as_bool())
 }
 
-fn read_optional_string<R: RuntimeDataReader>(reader: &R, name: &str) -> RuntimeDataResult<Option<String>> {
+fn read_optional_string<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<Option<String>> {
     if reader.is_positional() {
         return if reader.read_optional_present(0)? { Ok(Some(reader.as_string()?)) } else { Ok(None) };
     }
-    optional_field(reader, name)?.map(|value| value.as_string()).transpose()
+    with_optional_field(reader, name, |value| value.as_string())
 }
 
 "#,
@@ -437,10 +462,7 @@ fn render_read_from_reader_body(
                     "                    None\n",
                     "                }}\n",
                     "            }} else {{\n",
-                    "                match optional_field(reader, {:?})? {{\n",
-                    "                    Some(value) => Some({payload_type}::read_from_reader(&value)?),\n",
-                    "                    None => None,\n",
-                    "                }}\n",
+                    "                with_optional_field(reader, {:?}, {payload_type}::read_from_reader)?\n",
                     "            }},\n",
                 ),
                 fragment.name,
@@ -680,14 +702,23 @@ fn render_table(content: &mut CodeWriter, table: &CodeTable, names: &RustNames<'
         content.raw("        root.ensure_exhausted()?;\n");
         content.raw("        return Self::from_rows(rows);\n");
     }
-    content.raw("        let rows_reader = required_field(&root, \"rows\")?;\n");
+    content.raw("        if !root.enter_field(\"rows\")? {\n");
+    content.raw("            return Err(RuntimeDataError::not_found(\"missing required field `rows`\"));\n");
+    content.raw("        }\n");
+    content.raw("        if root.is_null() {\n");
+    content.raw("            root.exit()?;\n");
+    content.raw("            return Err(RuntimeDataError::not_found(\"missing required field `rows`\"));\n");
+    content.raw("        }\n");
     content.raw("        let mut rows = Vec::new();\n");
-    content.raw("        for row_index in 0..rows_reader.len()? {\n");
+    content.raw("        for row_index in 0..root.len()? {\n");
+    content.raw("            root.enter_index(row_index)?;\n");
     content.raw_fmt(format_args!(
-        "            rows.push({}::read_from_reader(&rows_reader.index(row_index)?)?);\n",
+        "            rows.push({}::read_from_reader(&root)?);\n",
         names.row_type_name(&table.name)?
     ));
+    content.raw("            root.exit()?;\n");
     content.raw("        }\n");
+    content.raw("        root.exit()?;\n");
     content.raw("        Self::from_rows(rows)\n");
     content.raw("    }\n\n");
     content.raw_fmt(format_args!(
@@ -941,7 +972,7 @@ impl<'a> RustNames<'a> {
                             "if reader.is_positional() {{\n",
                             "                {type_name}::read_from_reader(reader)?\n",
                             "            }} else {{\n",
-                            "                {type_name}::read_from_reader(&required_field(reader, {source_name})?)?\n",
+                            "                with_required_field(reader, {source_name}, {type_name}::read_from_reader)?\n",
                             "            }}",
                         ),
                         type_name = type_name,
@@ -969,10 +1000,7 @@ impl<'a> RustNames<'a> {
                         "                    None\n",
                         "                }}\n",
                         "            }} else {{\n",
-                        "                match optional_field(reader, {source_name})? {{\n",
-                        "                    Some(value) => Some({type_name}::read_from_reader(&value)?),\n",
-                        "                    None => None,\n",
-                        "                }}\n",
+                        "                with_optional_field(reader, {source_name}, {type_name}::read_from_reader)?\n",
                         "            }}",
                     ),
                     type_name = type_name,

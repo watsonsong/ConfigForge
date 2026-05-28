@@ -1,7 +1,8 @@
 export declare const SUPPORTED_CONFIG_FORGE_READER_CONTRACT: "^1.0";
 export interface RuntimeDataReaderLike {
-    field(name: string): RuntimeDataReaderLike | undefined;
-    index(index: number): RuntimeDataReaderLike;
+    enterField(name: string): boolean;
+    enterIndex(index: number): void;
+    exit(): void;
     length(): number;
     asNumber(): number;
     asBool(): boolean;
@@ -13,13 +14,15 @@ export interface RuntimeDataLoaderLike {
 }
 export type RuntimeReaderDecoder = (bytes: Uint8Array, path: string) => RuntimeDataReaderLike | Promise<RuntimeDataReaderLike>;
 export declare class RuntimeValueReader implements RuntimeDataReaderLike {
-    private readonly value;
+    private readonly stack;
     constructor(value: unknown);
-    field(name: string): RuntimeDataReaderLike | undefined;
-    index(index: number): RuntimeDataReaderLike;
+    enterField(name: string): boolean;
+    enterIndex(index: number): void;
+    exit(): void;
     length(): number;
     asNumber(): number;
     asBool(): boolean;
     asString(): string;
     isNull(): boolean;
+    private currentValue;
 }

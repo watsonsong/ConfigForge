@@ -96,9 +96,10 @@ impl From<&str> for RuntimeDataError {
     }
 }
 
-pub trait RuntimeDataReader: Clone {
-    fn field(&self, name: &str) -> RuntimeDataResult<Option<Self>>;
-    fn index(&self, index: usize) -> RuntimeDataResult<Self>;
+pub trait RuntimeDataReader {
+    fn enter_field(&self, name: &'static str) -> RuntimeDataResult<bool>;
+    fn enter_index(&self, index: usize) -> RuntimeDataResult<()>;
+    fn exit(&self) -> RuntimeDataResult<()>;
     fn len(&self) -> RuntimeDataResult<usize>;
     fn as_i64(&self) -> RuntimeDataResult<i64>;
     fn as_f64(&self) -> RuntimeDataResult<f64>;
