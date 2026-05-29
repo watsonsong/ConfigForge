@@ -138,7 +138,7 @@ public:
         state_->records.pop_back();
     }
 
-    bool ReadOptionalPresent(std::size_t) override {
+    bool ReadOptionalPresent() override {
         if (state_->records.empty()) {
             throw std::runtime_error("binary reader is not inside a record");
         }

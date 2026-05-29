@@ -118,7 +118,7 @@ fn render_reader_function_source(
             content.raw_fmt(format_args!(
                 concat!(
                     "    if (reader.IsPositional()) {{\n",
-                    "        if (reader.ReadOptionalPresent(0)) {{\n",
+                    "        if (reader.ReadOptionalPresent()) {{\n",
                     "            value.{field_name} = {reader_function}(reader);\n",
                     "        }}\n",
                     "    }} else if (reader.EnterField({:?})) {{\n",

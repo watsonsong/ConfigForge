@@ -138,7 +138,7 @@ impl<'a> RustNames<'a> {
                 format!(
                     concat!(
                         "if reader.is_positional() {{\n",
-                        "                if reader.read_optional_present(0)? {{\n",
+                        "                if reader.read_optional_present()? {{\n",
                         "                    Some({type_name}::read_from_reader(reader)?)\n",
                         "                }} else {{\n",
                         "                    None\n",

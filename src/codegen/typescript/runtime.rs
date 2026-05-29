@@ -19,7 +19,7 @@ pub(super) fn render_runtime_reader_interfaces(content: &mut CodeWriter) {
   readRowCount?(): number;
   beginRecord?(optionalSlotCount: number): void;
   endRecord?(): void;
-  readOptionalPresent?(slotIndex: number): boolean;
+  readOptionalPresent?(): boolean;
   readNextInt64?(): number;
   readNextFloat64?(): number;
   readNextNumber?(): number;
@@ -94,28 +94,28 @@ function readRequiredString(reader: RuntimeDataReader, name: string): string {
 
 function readOptionalInt64(reader: RuntimeDataReader, name: string): number | undefined {
   if (reader.isPositional?.()) {
-    return reader.readOptionalPresent!(0) ? reader.readNextInt64!() : undefined;
+    return reader.readOptionalPresent!() ? reader.readNextInt64!() : undefined;
   }
   return optionalField(reader, name, (value) => value.asNumber());
 }
 
 function readOptionalFloat64(reader: RuntimeDataReader, name: string): number | undefined {
   if (reader.isPositional?.()) {
-    return reader.readOptionalPresent!(0) ? reader.readNextFloat64!() : undefined;
+    return reader.readOptionalPresent!() ? reader.readNextFloat64!() : undefined;
   }
   return optionalField(reader, name, (value) => value.asNumber());
 }
 
 function readOptionalBool(reader: RuntimeDataReader, name: string): boolean | undefined {
   if (reader.isPositional?.()) {
-    return reader.readOptionalPresent!(0) ? reader.asBool() : undefined;
+    return reader.readOptionalPresent!() ? reader.asBool() : undefined;
   }
   return optionalField(reader, name, (value) => value.asBool());
 }
 
 function readOptionalString(reader: RuntimeDataReader, name: string): string | undefined {
   if (reader.isPositional?.()) {
-    return reader.readOptionalPresent!(0) ? reader.asString() : undefined;
+    return reader.readOptionalPresent!() ? reader.asString() : undefined;
   }
   return optionalField(reader, name, (value) => value.asString());
 }

@@ -93,7 +93,7 @@ fn emits_optional_scalar_and_struct_field_types() {
     assert!(content.contains("note?: string;"));
     assert!(content.contains("payload?: RewardInfo;"));
     assert!(content.contains("bonus: readOptionalInt64(reader, \"bonus\"),"));
-    assert!(content.contains("reader.readOptionalPresent!(0) ? readRewardInfo(reader) : undefined"));
+    assert!(content.contains("reader.readOptionalPresent!() ? readRewardInfo(reader) : undefined"));
     assert!(!content.contains("readRewardInfoBinary"));
 }
 
@@ -134,7 +134,7 @@ fn reads_optional_fragment_once() {
 
     assert!(content.contains(concat!(
         "stack: reader.isPositional?.()\n",
-        "      ? (reader.readOptionalPresent!(0) ? readItemsStackFragment(reader) : undefined)\n",
+        "      ? (reader.readOptionalPresent!() ? readItemsStackFragment(reader) : undefined)\n",
         "      : optionalField(reader, \"stack\", (value) => readItemsStackFragment(value)),",
     )));
     assert!(!content.contains("stackReader"));

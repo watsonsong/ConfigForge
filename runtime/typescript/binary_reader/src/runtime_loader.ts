@@ -93,7 +93,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     }
   }
 
-  readOptionalPresent(_slotIndex: number): boolean {
+  readOptionalPresent(): boolean {
     const record = this.records[this.records.length - 1];
     if (!record) {
       throw new Error("binary reader is not inside a record");

@@ -172,7 +172,7 @@ impl<'a> CppNames<'a> {
                 format!(
                     concat!(
                         "reader.IsPositional()\n",
-                        "        ? (reader.ReadOptionalPresent(0)\n",
+                        "        ? (reader.ReadOptionalPresent()\n",
                         "            ? std::optional<{type_name}>({reader_function}(reader))\n",
                         "            : std::nullopt)\n",
                         "        : OptionalField(reader, {source_name}, [](IRuntimeDataReader& value) {{\n",

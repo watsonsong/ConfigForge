@@ -17,7 +17,7 @@ export interface RuntimeDataReaderLike {
   readRowCount?(): number;
   beginRecord?(optionalSlotCount: number): void;
   endRecord?(): void;
-  readOptionalPresent?(slotIndex: number): boolean;
+  readOptionalPresent?(): boolean;
   readNextInt64?(): number;
   readNextFloat64?(): number;
   readNextNumber?(): number;

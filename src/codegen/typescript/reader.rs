@@ -123,7 +123,7 @@ fn render_reader_function_body(
             content.raw_fmt(format_args!(
                 concat!(
                     "    {field_name}: reader.isPositional?.()\n",
-                    "      ? (reader.readOptionalPresent!(0) ? {reader_function}(reader) : undefined)\n",
+                    "      ? (reader.readOptionalPresent!() ? {reader_function}(reader) : undefined)\n",
                     "      : optionalField(reader, {source_name}, (value) => {reader_function}(value)),\n",
                 ),
                 field_name = field_name,

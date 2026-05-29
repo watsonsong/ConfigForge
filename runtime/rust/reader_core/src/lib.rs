@@ -123,7 +123,7 @@ pub trait RuntimeDataReader {
     fn end_record(&self) -> RuntimeDataResult<()> {
         Ok(())
     }
-    fn read_optional_present(&self, _slot_index: usize) -> RuntimeDataResult<bool> {
+    fn read_optional_present(&self) -> RuntimeDataResult<bool> {
         Err(RuntimeDataError::unsupported(
             "positional runtime reader is not supported",
         ))

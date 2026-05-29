@@ -157,7 +157,7 @@ impl<'a> TypeScriptNames<'a> {
                 format!(
                     concat!(
                         "reader.isPositional?.()\n",
-                        "      ? (reader.readOptionalPresent!(0) ? {reader_function}(reader) : undefined)\n",
+                        "      ? (reader.readOptionalPresent!() ? {reader_function}(reader) : undefined)\n",
                         "      : optionalField(reader, {source_name}, (value) => {reader_function}(value))",
                     ),
                     reader_function = reader_function,

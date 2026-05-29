@@ -125,7 +125,7 @@ fn render_read_from_reader_body(
             content.raw_fmt(format_args!(
                 concat!(
                     "            {field_name}: if reader.is_positional() {{\n",
-                    "                if reader.read_optional_present(0)? {{\n",
+                    "                if reader.read_optional_present()? {{\n",
                     "                    Some({payload_type}::read_from_reader(reader)?)\n",
                     "                }} else {{\n",
                     "                    None\n",

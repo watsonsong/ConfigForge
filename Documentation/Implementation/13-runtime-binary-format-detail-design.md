@@ -339,7 +339,7 @@ schema_revision() -> Option<u64>
 begin_collection() / next_row()
 begin_record(optional_slot_count)
 read_required_<type>()
-read_optional_present(slot_index)
+read_optional_present()
 read_<type>()
 ```
 

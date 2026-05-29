@@ -25,7 +25,7 @@ public:
     virtual std::size_t ReadRowCount() { return 0; }
     virtual void BeginRecord(std::size_t) {}
     virtual void EndRecord() {}
-    virtual bool ReadOptionalPresent(std::size_t) { return false; }
+    virtual bool ReadOptionalPresent() { return false; }
     virtual std::int64_t ReadNextInt64() { return 0; }
     virtual double ReadNextDouble() { return 0.0; }
     virtual bool ReadNextBool() { return false; }
@@ -77,7 +77,7 @@ int main() {
         return 1;
     }
     reader.BeginRecord(1);
-    if (!reader.ReadOptionalPresent(0) || reader.ReadNextInt64() != 7 || !reader.ReadNextBool() || reader.ReadEnumOrdinal() != 3) {
+    if (!reader.ReadOptionalPresent() || reader.ReadNextInt64() != 7 || !reader.ReadNextBool() || reader.ReadEnumOrdinal() != 3) {
         return 2;
     }
     reader.EnsureExhausted();

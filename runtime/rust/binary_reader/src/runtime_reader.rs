@@ -150,7 +150,7 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         Ok(())
     }
 
-    fn read_optional_present(&self, _slot_index: usize) -> RuntimeDataResult<bool> {
+    fn read_optional_present(&self) -> RuntimeDataResult<bool> {
         let mut state = self.state.borrow_mut();
         let Some(record) = state.records.last_mut() else {
             return Err(RuntimeDataError::decode(
@@ -320,7 +320,7 @@ mod tests {
         assert_eq!(reader.schema_revision(), Some(42));
         assert_eq!(reader.read_row_count().unwrap(), 1);
         reader.begin_record(1).unwrap();
-        assert!(reader.read_optional_present(0).unwrap());
+        assert!(reader.read_optional_present().unwrap());
         assert_eq!(reader.read_next_i64().unwrap(), -7);
         assert_eq!(reader.read_next_f64().unwrap(), 1.5);
         assert!(reader.read_next_bool().unwrap());

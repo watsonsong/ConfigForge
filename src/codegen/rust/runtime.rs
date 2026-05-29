@@ -82,28 +82,28 @@ fn read_required_string<R: RuntimeDataReader>(reader: &R, name: &'static str) ->
 
 fn read_optional_i64<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<Option<i64>> {
     if reader.is_positional() {
-        return if reader.read_optional_present(0)? { Ok(Some(reader.as_i64()?)) } else { Ok(None) };
+        return if reader.read_optional_present()? { Ok(Some(reader.as_i64()?)) } else { Ok(None) };
     }
     with_optional_field(reader, name, |value| value.as_i64())
 }
 
 fn read_optional_f64<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<Option<f64>> {
     if reader.is_positional() {
-        return if reader.read_optional_present(0)? { Ok(Some(reader.as_f64()?)) } else { Ok(None) };
+        return if reader.read_optional_present()? { Ok(Some(reader.as_f64()?)) } else { Ok(None) };
     }
     with_optional_field(reader, name, |value| value.as_f64())
 }
 
 fn read_optional_bool<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<Option<bool>> {
     if reader.is_positional() {
-        return if reader.read_optional_present(0)? { Ok(Some(reader.as_bool()?)) } else { Ok(None) };
+        return if reader.read_optional_present()? { Ok(Some(reader.as_bool()?)) } else { Ok(None) };
     }
     with_optional_field(reader, name, |value| value.as_bool())
 }
 
 fn read_optional_string<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<Option<String>> {
     if reader.is_positional() {
-        return if reader.read_optional_present(0)? { Ok(Some(reader.as_string()?)) } else { Ok(None) };
+        return if reader.read_optional_present()? { Ok(Some(reader.as_string()?)) } else { Ok(None) };
     }
     with_optional_field(reader, name, |value| value.as_string())
 }
