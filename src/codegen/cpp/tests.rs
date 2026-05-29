@@ -53,6 +53,7 @@ fn emits_loader_and_repository_declarations() {
     assert!(source.contains("#include \"generated.hpp\""));
     assert!(source.contains("ItemsTable ItemsTable::Load(IRuntimeDataLoader& loader)"));
     assert!(source.contains("auto root = loader.Open(DataFile);"));
+    assert!(source.contains("const std::size_t row_count = root->ReadRowCount();"));
     assert!(source.contains("root->EnterIndex(row_index);"));
     assert!(source.contains("rows.push_back(ReadItemsRow(*root));"));
     assert!(source.contains("ItemsTable ItemsTable::FromRows(std::vector<ItemsRow> rows)"));

@@ -136,9 +136,9 @@ fn reads_optional_fragment_once() {
         .expect("typescript code");
     let content = &files[0].content;
 
-    assert!(content.contains(concat!(
-        "stack: optionalField(reader, \"stack\", (value) => readItemsStackFragment(value)),",
-    )));
+    assert!(content.contains(
+        "stack: optionalField(reader, \"stack\", (value) => readItemsStackFragment(value)),"
+    ));
     assert!(!content.contains("stackReader"));
 }
 

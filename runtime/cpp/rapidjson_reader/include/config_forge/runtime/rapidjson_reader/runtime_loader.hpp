@@ -94,19 +94,6 @@ public:
         stack_.push_back(document_.get());
     }
 
-    bool EnterField(const std::string& name) override {
-        const rapidjson::Value& value = Current();
-        if (!value.IsObject()) {
-            return false;
-        }
-        const auto member = value.FindMember(name.c_str());
-        if (member == value.MemberEnd()) {
-            return false;
-        }
-        stack_.push_back(&member->value);
-        return true;
-    }
-
     void EnterIndex(std::size_t index) override {
         const rapidjson::Value& value = Current();
         if (!value.IsArray() || index >= value.Size()) {
@@ -115,22 +102,19 @@ public:
         stack_.push_back(&value[static_cast<rapidjson::SizeType>(index)]);
     }
 
-    void Exit() override {
+    void ExitField() override {
         if (stack_.size() <= 1) {
             throw std::runtime_error("JSON reader cursor stack underflow");
         }
         stack_.pop_back();
     }
 
-    std::size_t Size() const override {
+    std::size_t ReadRowCount() override {
         const rapidjson::Value& value = Current();
         if (value.IsArray()) {
             return value.Size();
         }
-        if (value.IsObject()) {
-            return value.MemberCount();
-        }
-        throw std::runtime_error("reader value is not an array/object");
+        throw std::runtime_error("reader value is not an array");
     }
 
     std::int64_t AsInt64() const override {
@@ -200,7 +184,41 @@ public:
 
     bool IsNull() const override { return Current().IsNull(); }
 
+    void EnterRequiredField(const std::string& name) override {
+        if (!EnterNamedField(name)) {
+            throw std::runtime_error("missing required field `" + name + "`");
+        }
+        if (IsNull()) {
+            ExitField();
+            throw std::runtime_error("missing required field `" + name + "`");
+        }
+    }
+
+    bool EnterOptionalField(const std::string& name) override {
+        if (!EnterNamedField(name)) {
+            return false;
+        }
+        if (IsNull()) {
+            ExitField();
+            return false;
+        }
+        return true;
+    }
+
 private:
+    bool EnterNamedField(const std::string& name) {
+        const rapidjson::Value& value = Current();
+        if (!value.IsObject()) {
+            return false;
+        }
+        const auto member = value.FindMember(name.c_str());
+        if (member == value.MemberEnd()) {
+            return false;
+        }
+        stack_.push_back(&member->value);
+        return true;
+    }
+
     std::string ScalarText() const {
         const rapidjson::Value& value = Current();
         if (value.IsString()) {

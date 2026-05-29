@@ -12,26 +12,16 @@
 class IRuntimeDataReader {
 public:
     virtual ~IRuntimeDataReader() = default;
-    virtual bool EnterField(const std::string& name) = 0;
     virtual void EnterIndex(std::size_t index) = 0;
-    virtual void Exit() = 0;
-    virtual std::size_t Size() const = 0;
     virtual std::int64_t AsInt64() const = 0;
     virtual double AsDouble() const = 0;
     virtual bool AsBool() const = 0;
     virtual std::string AsString() const = 0;
     virtual bool IsNull() const = 0;
     virtual std::optional<std::uint64_t> SchemaRevision() const { return std::nullopt; }
-    virtual void EnterRequiredField(const std::string& name) {
-        if (!EnterField(name)) { throw std::runtime_error("missing required field"); }
-        if (IsNull()) { Exit(); throw std::runtime_error("missing required field"); }
-    }
-    virtual bool EnterOptionalField(const std::string& name) {
-        if (!EnterField(name)) { return false; }
-        if (IsNull()) { Exit(); return false; }
-        return true;
-    }
-    virtual void ExitField() { Exit(); }
+    virtual void EnterRequiredField(const std::string& name) = 0;
+    virtual bool EnterOptionalField(const std::string& name) = 0;
+    virtual void ExitField() = 0;
     virtual std::size_t ReadEnumIndex(const std::vector<std::string>& variants) {
         const std::string value = AsString();
         for (std::size_t index = 0; index < variants.size(); ++index) {

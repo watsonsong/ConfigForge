@@ -810,19 +810,17 @@ generated/cpp/
 class IRuntimeDataReader {
 public:
     virtual ~IRuntimeDataReader() = default;
-    virtual bool EnterField(const std::string& name) = 0;
     virtual void EnterIndex(std::size_t index) = 0;
-    virtual void Exit() = 0;
-    virtual std::size_t Size() const = 0;
     virtual std::int64_t AsInt64() const = 0;
     virtual double AsDouble() const = 0;
     virtual bool AsBool() const = 0;
     virtual std::string AsString() const = 0;
     virtual bool IsNull() const = 0;
-    virtual void EnterRequiredField(const std::string& name);
-    virtual bool EnterOptionalField(const std::string& name);
-    virtual void ExitField();
+    virtual void EnterRequiredField(const std::string& name) = 0;
+    virtual bool EnterOptionalField(const std::string& name) = 0;
+    virtual void ExitField() = 0;
     virtual std::size_t ReadEnumIndex(const std::vector<std::string>& variants);
+    virtual std::size_t ReadRowCount() = 0;
 };
 
 class IRuntimeDataLoader {
@@ -940,13 +938,13 @@ TypeScript 约束：
 
 Reader 基础语义：
 
-- `enter_field(name)` / `EnterField(name)` / `enterField(name)` 用于 named-field layout。字段不存在时应返回 `false`，而不是伪造空值；读取过程本身出错才返回 error / throw。进入成功后，后续 scalar/len/read 调用均作用于该字段值，调用方必须用 `exit` 返回上一层。
-- `enter_required_field(name)` / `EnterRequiredField(name)` / `enterRequiredField(name)` 是 generated parser 优先使用的 schema-driven 字段入口。Named reader 默认按 `enter_field` + required/null 校验实现；binary reader 对 required 字段执行 no-op，因为字段由 generated schema 顺序隐式定位。
+- `enter_field(name)` / `enterField(name)` 用于 Rust / TypeScript named-field layout 的底层 cursor API。C++ runtime contract 已收敛为 schema-driven 字段 API，不再暴露 `EnterField`。
+- `enter_required_field(name)` / `EnterRequiredField(name)` / `enterRequiredField(name)` 是 generated parser 优先使用的 schema-driven 字段入口。Named reader 按字段名进入并执行 required/null 校验；binary reader 对 required 字段执行 no-op，因为字段由 generated schema 顺序隐式定位。
 - `enter_optional_field(name)` / `EnterOptionalField(name)` / `enterOptionalField(name)` 返回字段是否 present。Named reader 默认按字段 missing/null 判断；binary reader 消费当前 record 的下一个 optional presence bit。present 后 generated parser 读取字段 payload，并通过 `exit_field` / `ExitField` / `exitField` 结束字段；binary reader 的 exit field 是 no-op。
 - `read_enum_index(variants)` / `ReadEnumIndex(variants)` / `readEnumIndex(variants)` 统一 enum 读取。Named reader 将 string enum value 映射为 variants 下标；binary reader 读取 ordinal 并校验范围。Generated enum parser 只根据 index 构造目标语言 enum，不再分支判断 reader layout。
-- `enter_index(i)` / `EnterIndex(i)` / `enterIndex(i)` 用于 array 或 positional record。越界是读取错误，应带上 index 上下文。进入成功后同样通过 `exit` 返回上一层。
+- `enter_index(i)` / `EnterIndex(i)` / `enterIndex(i)` 用于 array 或 positional record。越界是读取错误，应带上 index 上下文。进入成功后通过 `exit` / `ExitField` / `exitField` 返回上一层；C++ 使用 `ExitField` 作为统一回退 API。
 - reader contract 采用可回退 cursor，而不是每次字段/数组访问返回新的 reader 对象。C++ adapter 因此避免 `std::make_unique` 子 reader 堆分配；TypeScript adapter 避免频繁临时对象；Rust adapter 避免 cloning `serde_json::Value` / MessagePack `Value` 子树。
-- `len` / `Size` / `length` 只对 array / object / map 有意义；对 scalar 调用应报错。
+- `len` / `length` 只对 array / object / map 有意义；对 scalar 调用应报错。C++ runtime contract 已用 `ReadRowCount()` 覆盖 generated collection row 数量读取，不再暴露通用 `Size()`。
 - 最小 scalar API 包含 int、float/number、bool、string。`text`、`asset` 按 string 读取；enum 先按 string 读取，再由 generated parser 校验枚举值。
 - 当 exporter 输出字符串 cell 时，推荐 generated parser helper 兼容 string-to-int、string-to-float、string-to-bool；reader 也可以直接在 `as_*` 中兼容字符串，但跨语言一致性以 generated parser 规则为准。
 - missing 与 null 必须区分：missing 表示字段不存在；null 表示字段存在但值为空。required 字段 missing 或 null 都应由 generated parser 报错；optional field / optional fragment missing 时得到 `None` / `undefined`；null 是否允许作为 optional empty value 由生成器策略统一决定，第一阶段建议将 null 等价为 optional empty，但对 required 字段仍报错。
@@ -1139,7 +1137,7 @@ missing/null 语义：
 - `field(name)` 找不到字段表示 missing：Rust/TS 返回 `None` / `undefined`，C++ 返回 `nullptr`。
 - 字段存在且值为 null/nil 表示 explicit null：必须返回 non-null reader，且 `is_null()` / `IsNull()` 为 true。
 - `index(i)` 越界必须报错，不返回 null reader。
-- `length()` / `len()` / `Size()` 对 array 返回元素数；对 object/map 返回字段数；对 scalar/null 报错。
+- `length()` / `len()` 对 array 返回元素数；对 object/map 返回字段数；对 scalar/null 报错。C++ adapter 不再暴露通用 `Size()`，generated collection 读取使用 `ReadRowCount()`。
 
 错误上下文要求：adapter 抛出的错误应包含 logical data path、reader path（field/index 链）、expected type、actual type/value。transport loader 还应包含 resolved resource path 或 URL。
 
@@ -1306,8 +1304,8 @@ Phase 1.5 优先评估拆出稳定 `config_forge_runtime.hpp`：generated C++ �
 - MessagePack map / array / integer / float / bool / string / nil；
 - `field` 区分 missing 与 explicit null：missing 返回 `nullptr` / `std::nullopt`，null reader 的 `IsNull()` 返回 true；
 - reader cursor 必须 owning 或共享持有 root document/value，不能返回指向临时 DOM 节点的悬垂指针；RapidJSON cursor 通常应通过 `std::shared_ptr<Document>` 或等价 owner 维持 root 生命周期；
-- `Field` 返回的新 reader、`Index` 返回的新 reader 都必须满足同样 ownership 规则；
-- `Index` 越界应抛出 `std::runtime_error` 或 ConfigForge runtime 定义的派生异常；`Size()` 对 array/object 返回元素/字段数，对 scalar/null 抛错；
+- field / index cursor 都必须满足同样 ownership 规则；
+- `Index` 越界应抛出 `std::runtime_error` 或 ConfigForge runtime 定义的派生异常；C++ `ReadRowCount()` 对 array 返回元素数，对非 array 抛错；
 - bool string 兼容 `"true"` / `"false"` / `"1"` / `"0"`，与 ConfigForge validation/export 语义保持一致；
 - float 必须有限，非 finite 值报错；
 - 错误信息包含 path / field / index 上下文，便于定位运行时数据问题。

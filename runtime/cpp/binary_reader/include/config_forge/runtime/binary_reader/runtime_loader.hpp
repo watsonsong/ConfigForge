@@ -91,20 +91,8 @@ public:
         ParseHeader();
     }
 
-    bool EnterField(const std::string&) override {
-        throw std::runtime_error("binary reader does not support named fields");
-    }
-
     void EnterIndex(std::size_t) override {
         throw std::runtime_error("binary reader does not support random index access");
-    }
-
-    void Exit() override {
-        throw std::runtime_error("binary reader does not support nested named readers");
-    }
-
-    std::size_t Size() const override {
-        throw std::runtime_error("binary reader does not support named array length");
     }
 
     std::int64_t AsInt64() const override { return ReadNextInt64Value(); }

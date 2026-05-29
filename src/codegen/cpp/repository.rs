@@ -41,10 +41,10 @@ pub(super) fn render_table_source(
         content.raw("}\n\n");
     } else {
         content.raw("    auto rows_scope = EnterRequiredField(*root, \"rows\");\n");
+        content.raw("    const std::size_t row_count = root->ReadRowCount();\n");
         content.raw_fmt(format_args!("    std::vector<{}> rows;\n", row_type));
-        content.raw("    rows.reserve(root->Size());\n");
-        content
-            .raw("    for (std::size_t row_index = 0; row_index < root->Size(); ++row_index) {\n");
+        content.raw("    rows.reserve(row_count);\n");
+        content.raw("    for (std::size_t row_index = 0; row_index < row_count; ++row_index) {\n");
         content.raw("        root->EnterIndex(row_index);\n");
         content.raw("        ReaderScope row_scope(*root);\n");
         content.raw_fmt(format_args!(
@@ -240,7 +240,7 @@ pub(super) fn render_compound_index_key_structs(
             ));
             content.raw("        return std::tie(");
             content.raw(
-                &index
+                index
                     .fields
                     .iter()
                     .map(|field| names.field_name(&field.name))
@@ -249,7 +249,7 @@ pub(super) fn render_compound_index_key_structs(
             );
             content.raw(") < std::tie(");
             content.raw(
-                &index
+                index
                     .fields
                     .iter()
                     .map(|field| Ok(format!("other.{}", names.field_name(&field.name)?)))

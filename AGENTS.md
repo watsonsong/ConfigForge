@@ -72,5 +72,5 @@ Use this file as the short entry index. For any non-trivial change, follow the l
 6. Keep canonical documentation focused on current state and planned future state; put historical reasoning, removed approaches, and temporary transition notes in `Documentation/DevLogs/`.
 7. Prefer small, typed Rust modules with unit tests near the logic and integration tests under `tests/`.
 8. Keep generated/exported outputs out of version control unless they are intentional fixtures.
-9. Run `cargo fmt` and `cargo test` before considering a code change complete. Run `cargo lint` for code changes when the local toolchain has Clippy available.
+9. Run `cargo fmt` and `cargo test` before considering a code change complete. Ensure the relevant integration tests and runtime harness checks are covered, not only unit tests; when changing testable logic, evaluate whether unit-test coverage remains sufficient and add focused tests where coverage is weak. Run `cargo lint` for code changes when the local toolchain has Clippy available.
 10. Keep module dependencies one-way as defined in `Documentation/Implementation/01-module-outline.md`; do not introduce cycles for convenience.

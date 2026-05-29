@@ -99,26 +99,6 @@ public:
         stack_.push_back(&handle_->get());
     }
 
-    bool EnterField(const std::string& name) override {
-        const msgpack::object& value = Current();
-        if (value.type != msgpack::type::MAP) {
-            return false;
-        }
-        const msgpack::object_map& map = value.via.map;
-        for (std::uint32_t index = 0; index < map.size; ++index) {
-            const msgpack::object& key = map.ptr[index].key;
-            if (key.type != msgpack::type::STR) {
-                throw std::runtime_error("MessagePack map key is not a string");
-            }
-            if (key.via.str.size == name.size() &&
-                std::memcmp(key.via.str.ptr, name.data(), name.size()) == 0) {
-                stack_.push_back(&map.ptr[index].val);
-                return true;
-            }
-        }
-        return false;
-    }
-
     void EnterIndex(std::size_t index) override {
         const msgpack::object& value = Current();
         if (value.type != msgpack::type::ARRAY || index >= value.via.array.size) {
@@ -127,22 +107,19 @@ public:
         stack_.push_back(&value.via.array.ptr[index]);
     }
 
-    void Exit() override {
+    void ExitField() override {
         if (stack_.size() <= 1) {
             throw std::runtime_error("MessagePack reader cursor stack underflow");
         }
         stack_.pop_back();
     }
 
-    std::size_t Size() const override {
+    std::size_t ReadRowCount() override {
         const msgpack::object& value = Current();
         if (value.type == msgpack::type::ARRAY) {
             return value.via.array.size;
         }
-        if (value.type == msgpack::type::MAP) {
-            return value.via.map.size;
-        }
-        throw std::runtime_error("reader value is not an array/map");
+        throw std::runtime_error("reader value is not an array");
     }
 
     std::int64_t AsInt64() const override {
@@ -224,7 +201,48 @@ public:
 
     bool IsNull() const override { return Current().type == msgpack::type::NIL; }
 
+    void EnterRequiredField(const std::string& name) override {
+        if (!EnterNamedField(name)) {
+            throw std::runtime_error("missing required field `" + name + "`");
+        }
+        if (IsNull()) {
+            ExitField();
+            throw std::runtime_error("missing required field `" + name + "`");
+        }
+    }
+
+    bool EnterOptionalField(const std::string& name) override {
+        if (!EnterNamedField(name)) {
+            return false;
+        }
+        if (IsNull()) {
+            ExitField();
+            return false;
+        }
+        return true;
+    }
+
 private:
+    bool EnterNamedField(const std::string& name) {
+        const msgpack::object& value = Current();
+        if (value.type != msgpack::type::MAP) {
+            return false;
+        }
+        const msgpack::object_map& map = value.via.map;
+        for (std::uint32_t index = 0; index < map.size; ++index) {
+            const msgpack::object& key = map.ptr[index].key;
+            if (key.type != msgpack::type::STR) {
+                throw std::runtime_error("MessagePack map key is not a string");
+            }
+            if (key.via.str.size == name.size() &&
+                std::memcmp(key.via.str.ptr, name.data(), name.size()) == 0) {
+                stack_.push_back(&map.ptr[index].val);
+                return true;
+            }
+        }
+        return false;
+    }
+
     std::string ScalarText() const {
         const msgpack::object& value = Current();
         switch (value.type) {

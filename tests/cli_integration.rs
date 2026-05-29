@@ -1432,14 +1432,6 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
             public:
                 explicit MockReader(std::string path) : path_(std::move(path)) {}
 
-                bool EnterField(const std::string& name) override {
-                    if (name == "stack" || name == "attributes" || name == "skill") {
-                        return false;
-                    }
-                    fields_.push_back(name);
-                    return true;
-                }
-
                 void EnterIndex(std::size_t index) override {
                     if (path_ == "items.json" && CurrentField() == "rows" && index == 0) {
                         fields_.push_back("");
@@ -1448,16 +1440,16 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                     throw std::runtime_error("unexpected index");
                 }
 
-                void Exit() override {
+                void ExitField() override {
                     if (fields_.empty()) { throw std::runtime_error("unexpected exit"); }
                     fields_.pop_back();
                 }
 
-                std::size_t Size() const override {
+                std::size_t ReadRowCount() override {
                     if (path_ == "items.json" && CurrentField() == "rows") {
                         return 1;
                     }
-                    throw std::runtime_error("unexpected size");
+                    throw std::runtime_error("unexpected row count");
                 }
 
                 std::int64_t AsInt64() const override {
@@ -1483,7 +1475,23 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 }
 
                 bool IsNull() const override { return false; }
+
+                void EnterRequiredField(const std::string& name) override {
+                    if (!EnterNamedField(name)) { throw std::runtime_error("missing required field"); }
+                }
+
+                bool EnterOptionalField(const std::string& name) override {
+                    return EnterNamedField(name);
+                }
             private:
+                bool EnterNamedField(const std::string& name) {
+                    if (name == "stack" || name == "attributes" || name == "skill") {
+                        return false;
+                    }
+                    fields_.push_back(name);
+                    return true;
+                }
+
                 const std::string& CurrentField() const {
                     static const std::string root;
                     return fields_.empty() ? root : fields_.back();
@@ -1830,15 +1838,16 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
             class IRuntimeDataReader {
             public:
                 virtual ~IRuntimeDataReader() = default;
-                virtual bool EnterField(const std::string& name) = 0;
                 virtual void EnterIndex(std::size_t index) = 0;
-                virtual void Exit() = 0;
-                virtual std::size_t Size() const = 0;
                 virtual std::int64_t AsInt64() const = 0;
                 virtual double AsDouble() const = 0;
                 virtual bool AsBool() const = 0;
                 virtual std::string AsString() const = 0;
                 virtual bool IsNull() const = 0;
+                virtual void EnterRequiredField(const std::string& name) = 0;
+                virtual bool EnterOptionalField(const std::string& name) = 0;
+                virtual void ExitField() = 0;
+                virtual std::size_t ReadRowCount() = 0;
             };
 
             class IRuntimeDataLoader {
