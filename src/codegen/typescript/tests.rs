@@ -3,14 +3,14 @@
 
 use crate::{
     codegen::{
-        tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
         CodeExportInput, CodeGenerator,
+        tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
     },
     exporter::RuntimeDataFile,
     meta::{MetaModel, TargetTags},
 };
 
-use super::{TypeScriptCodeGenerator, TypeScriptCodegenOptions, LANGUAGE};
+use super::{LANGUAGE, TypeScriptCodeGenerator, TypeScriptCodegenOptions};
 
 #[test]
 fn emits_async_loader_and_maps() {
@@ -34,7 +34,9 @@ fn emits_async_loader_and_maps() {
     assert!(
         content.contains("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;")
     );
-    assert!(content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;"));
+    assert!(
+        content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;")
+    );
     assert!(content.contains("static readonly dataFile = \"items.json\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("RuntimeDataDecoder"));
@@ -93,7 +95,9 @@ fn emits_optional_scalar_and_struct_field_types() {
     assert!(content.contains("note?: string;"));
     assert!(content.contains("payload?: RewardInfo;"));
     assert!(content.contains("bonus: readOptionalInt64(reader, \"bonus\"),"));
-    assert!(content.contains("reader.readOptionalPresent!() ? readRewardInfo(reader) : undefined"));
+    assert!(
+        content.contains("optionalField(reader, \"payload\", (value) => readRewardInfo(value))")
+    );
     assert!(!content.contains("readRewardInfoBinary"));
 }
 
@@ -133,9 +137,7 @@ fn reads_optional_fragment_once() {
     let content = &files[0].content;
 
     assert!(content.contains(concat!(
-        "stack: reader.isPositional?.()\n",
-        "      ? (reader.readOptionalPresent!() ? readItemsStackFragment(reader) : undefined)\n",
-        "      : optionalField(reader, \"stack\", (value) => readItemsStackFragment(value)),",
+        "stack: optionalField(reader, \"stack\", (value) => readItemsStackFragment(value)),",
     )));
     assert!(!content.contains("stackReader"));
 }
@@ -150,7 +152,9 @@ fn emits_object_table_as_typed_object_not_repository() {
         .expect("typescript code");
     let content = &files[0].content;
 
-    assert!(content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;"));
+    assert!(
+        content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;")
+    );
     assert!(content.contains("readonly gameConfig: GameConfigRow;"));
     assert!(
         content.contains("gameConfig: readGameConfigRow(await loader.open(\"game_config.json\"))")

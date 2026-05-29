@@ -1,7 +1,10 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{codegen::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriter}, Result};
+use crate::{
+    Result,
+    codegen::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriter},
+};
 
 use super::types::TypeScriptNames;
 
@@ -15,35 +18,14 @@ pub(super) fn render_enum_reader_function(
     content.raw_fmt(format_args!(
         "function {function_name}(reader: RuntimeDataReader): {type_name} {{\n"
     ));
-    content.raw_fmt(format_args!(
-        "  if (reader.isPositional?.()) {{ return {}FromBinaryOrdinal(reader.readEnumOrdinal!()); }}\n",
-        function_name
-    ));
-    content.raw("  const value = reader.asString();\n");
-    let values = code_enum
-        .values
-        .iter()
-        .map(|value| {
-            Ok(format!(
-                "value === {:?}",
-                names.enum_value_name(&value.name)?
-            ))
-        })
-        .collect::<Result<Vec<_>>>()?
-        .join(" || ");
-    content.raw_fmt(format_args!(
-        "  if ({values}) {{ return value as {type_name}; }}\n"
-    ));
-    content.raw_fmt(format_args!(
-        "  throw new Error(`unknown {} value ${{value}}`);\n",
-        code_enum.name
-    ));
-    content.raw("}\n\n");
-    content.raw_fmt(format_args!(
-        "function {}FromBinaryOrdinal(ordinal: number): {type_name} {{\n",
-        function_name
-    ));
-    content.raw("  switch (ordinal) {\n");
+    content.raw("  switch (readEnumIndex(reader, [\n");
+    for value in &code_enum.values {
+        content.raw_fmt(format_args!(
+            "    {:?},\n",
+            names.enum_value_name(&value.name)?
+        ));
+    }
+    content.raw("  ])) {\n");
     for (ordinal, value) in code_enum.values.iter().enumerate() {
         content.raw_fmt(format_args!(
             "    case {ordinal}: return {:?};\n",
@@ -51,7 +33,7 @@ pub(super) fn render_enum_reader_function(
         ));
     }
     content.raw_fmt(format_args!(
-        "    default: throw new Error(`unknown {} ordinal ${{ordinal}}`);\n",
+        "    default: throw new Error('unknown {} enum index');\n",
         code_enum.name
     ));
     content.raw("  }\n");
@@ -122,9 +104,7 @@ fn render_reader_function_body(
             let reader_function = names.reader_function_name(&payload_type)?;
             content.raw_fmt(format_args!(
                 concat!(
-                    "    {field_name}: reader.isPositional?.()\n",
-                    "      ? (reader.readOptionalPresent!() ? {reader_function}(reader) : undefined)\n",
-                    "      : optionalField(reader, {source_name}, (value) => {reader_function}(value)),\n",
+                    "    {field_name}: optionalField(reader, {source_name}, (value) => {reader_function}(value)),\n",
                 ),
                 field_name = field_name,
                 source_name = format!("{:?}", fragment.name),

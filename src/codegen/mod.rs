@@ -10,8 +10,8 @@ mod writer;
 
 pub use self::ir::GeneratedFile;
 pub(crate) use self::ir::{
-    build_code_model, CodeEnum, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel,
-    CodeStruct, CodeTable, CodeTableKind, CodeTypeRef,
+    CodeEnum, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel, CodeStruct,
+    CodeTable, CodeTableKind, CodeTypeRef, build_code_model,
 };
 pub use cpp::{CppCodeGenerator, CppCodegenOptions};
 pub use rust::{RustCodeGenerator, RustCodegenOptions};
@@ -20,12 +20,12 @@ pub use writer::{CodeWriter, CodeWriterConfig, IndentStyle, PartialCodeWriterCon
 
 use std::{collections::HashMap, path::PathBuf};
 
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{Deserialize, de::DeserializeOwned};
 
 use crate::{
+    ConfigForgeError, Result,
     exporter::RuntimeDataFile,
     meta::{LinkedMetaModel, TargetTags},
-    ConfigForgeError, Result,
 };
 
 #[derive(Debug, Clone, PartialEq)]

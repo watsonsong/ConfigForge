@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
+    ConfigForgeError, Result,
     data::{
+        DataRow,
         value_conversion::{
             json_value_is_empty, json_value_to_scalar_cell_for_field, toml_default_to_json_value,
         },
-        DataRow,
     },
     meta::{
         LinkedField, LinkedFieldMeta, LinkedStructType, LinkedTableMeta, PrimitiveFieldType,
         TargetTags, ValueLayout,
     },
-    ConfigForgeError, Result,
 };
 
 pub(super) fn validate_struct_field_value_for_row(

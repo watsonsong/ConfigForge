@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    codegen::{
-        naming, CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
-        CodeTableKind, CodeTypeRef, CodegenOptions,
-    },
     ConfigForgeError, Result,
+    codegen::{
+        CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
+        CodeTableKind, CodeTypeRef, CodegenOptions, naming,
+    },
 };
 
 pub(super) struct CppNames<'a> {
@@ -37,7 +37,11 @@ impl<'a> CppNames<'a> {
         }
     }
 
-    pub(super) fn fragment_type_name(&self, table_name: &str, fragment_name: &str) -> Result<String> {
+    pub(super) fn fragment_type_name(
+        &self,
+        table_name: &str,
+        fragment_name: &str,
+    ) -> Result<String> {
         self.type_name(&format!("{table_name}_{fragment_name}_fragment"))
     }
 
@@ -86,13 +90,6 @@ impl<'a> CppNames<'a> {
 
     pub(super) fn reader_function_name(&self, type_name: &str) -> Result<String> {
         self.identifier(&format!("read_{type_name}"), self.options.naming.function)
-    }
-
-    pub(super) fn binary_enum_reader_function_name(&self, type_name: &str) -> Result<String> {
-        self.identifier(
-            &format!("read_{type_name}_binary_ordinal"),
-            self.options.naming.function,
-        )
     }
 
     pub(super) fn cpp_index_params(&self, index: &CodeIndex) -> Result<String> {
@@ -146,9 +143,7 @@ impl<'a> CppNames<'a> {
                     let reader_function = self.reader_function_name(&type_name)?;
                     format!(
                         concat!(
-                            "reader.IsPositional()\n",
-                            "        ? {reader_function}(reader)\n",
-                            "        : RequiredField(reader, {source_name}, [](IRuntimeDataReader& value) {{\n",
+                            "RequiredField(reader, {source_name}, [](IRuntimeDataReader& value) {{\n",
                             "            return {reader_function}(value);\n",
                             "        }})",
                         ),
@@ -171,15 +166,10 @@ impl<'a> CppNames<'a> {
                 let reader_function = self.reader_function_name(&type_name)?;
                 format!(
                     concat!(
-                        "reader.IsPositional()\n",
-                        "        ? (reader.ReadOptionalPresent()\n",
-                        "            ? std::optional<{type_name}>({reader_function}(reader))\n",
-                        "            : std::nullopt)\n",
-                        "        : OptionalField(reader, {source_name}, [](IRuntimeDataReader& value) {{\n",
+                        "OptionalField(reader, {source_name}, [](IRuntimeDataReader& value) {{\n",
                         "            return {reader_function}(value);\n",
                         "        }})",
                     ),
-                    type_name = type_name,
                     reader_function = reader_function,
                     source_name = source_name,
                 )
@@ -233,7 +223,11 @@ impl<'a> CppNames<'a> {
         }
     }
 
-    pub(super) fn cpp_lookup_key_expr(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
+    pub(super) fn cpp_lookup_key_expr(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+    ) -> Result<String> {
         if index.fields.len() == 1 {
             self.field_name(&index.fields[0].name)
         } else {
@@ -261,7 +255,11 @@ impl<'a> CppNames<'a> {
         ))
     }
 
-    pub(super) fn compound_index_key_type_name(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
+    pub(super) fn compound_index_key_type_name(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+    ) -> Result<String> {
         self.type_name(&format!("{}_{}_key", table.name, index.name))
     }
 

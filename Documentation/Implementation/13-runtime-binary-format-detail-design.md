@@ -310,7 +310,7 @@ pub struct RuntimeDataFile {
 ```text
 load table file
   -> create RuntimeDataReader adapter for json/messagepack/bin
-  -> generated parser checks layout capability
+  -> generated parser calls schema-driven field APIs
   -> parse table envelope/record
   -> construct typed rows/object
 ```
@@ -330,20 +330,22 @@ Binary reader 提供 positional packed layout：
 
 ### 13.8.3 Reader contract 扩展
 
-RuntimeDataReader contract 建议新增 layout capability：
+RuntimeDataReader contract 使用 schema-driven field APIs 消化 named / positional 差异，generated parser 不再通过 `is_positional` / `IsPositional` / `isPositional` 判断 reader layout。建议接口形态：
 
 ```text
-supports_named_fields() -> bool
-supports_positional_fields() -> bool
 schema_revision() -> Option<u64>
-begin_collection() / next_row()
+read_row_count()
 begin_record(optional_slot_count)
-read_required_<type>()
+enter_required_field(name)
+enter_optional_field(name) -> bool
+exit_field()
+read_enum_index(variants) -> usize
 read_optional_present()
 read_<type>()
+ensure_exhausted()
 ```
 
-各语言可以按语言习惯命名，但语义必须一致。JSON / MessagePack adapter 可以对 positional 方法返回 unsupported；Binary adapter 可以对 named lookup 返回 unsupported。Generated code 根据 table data format 选择正确路径，不应在运行时盲目尝试两套方法。
+各语言可以按语言习惯命名，但语义必须一致。JSON / MessagePack adapter 的 `enter_required_field` / `enter_optional_field` 按字段名进入对象字段，`exit_field` 回退 cursor，`read_enum_index` 将 enum string 映射到 generated variants 下标。Binary adapter 的 `enter_required_field` 是 no-op，`enter_optional_field` 消费当前 record presence bitmap，`exit_field` 是 no-op，`read_enum_index` 读取 enum ordinal 并校验范围。低层 named cursor API 和 positional sequential API 可以继续作为 adapter 实现细节保留，但 generated parser 不应直接按 layout 分支读取字段。
 
 ### 13.8.4 标准 runtime helper 覆盖矩阵
 

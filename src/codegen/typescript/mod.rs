@@ -3,12 +3,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{exporter::BINARY_FORMAT, Result};
+use crate::{Result, exporter::BINARY_FORMAT};
 
 use super::{
-    build_code_model, ir::require_non_empty_index_fields, CaseStyle, CodeExportInput,
-    CodeFragmentPayload, CodeGenerator, CodeTableKind, CodeWriter, CodeWriterConfig, GeneratedFile,
-    NamingConfig,
+    CaseStyle, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeTableKind, CodeWriter,
+    CodeWriterConfig, GeneratedFile, NamingConfig, build_code_model,
+    ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -252,7 +252,6 @@ impl CodeGenerator for TypeScriptCodeGenerator {
     }
 }
 
-
 fn push_doc(content: &mut CodeWriter, desc: Option<&str>) {
     push_doc_indented(content, desc, "");
 }
@@ -273,9 +272,5 @@ fn push_doc_indented(content: &mut CodeWriter, desc: Option<&str>, indent: &str)
 }
 
 fn readonly_prefix(readonly_fields: bool) -> &'static str {
-    if readonly_fields {
-        "readonly "
-    } else {
-        ""
-    }
+    if readonly_fields { "readonly " } else { "" }
 }

@@ -1,11 +1,19 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{codegen::{CodeIndex, CodeTable, CodeTableKind, CodeWriter}, exporter::BINARY_FORMAT, Result};
+use crate::{
+    Result,
+    codegen::{CodeIndex, CodeTable, CodeTableKind, CodeWriter},
+    exporter::BINARY_FORMAT,
+};
 
 use super::types::RustNames;
 
-pub(super) fn render_table(content: &mut CodeWriter, table: &CodeTable, names: &RustNames<'_>) -> Result<()> {
+pub(super) fn render_table(
+    content: &mut CodeWriter,
+    table: &CodeTable,
+    names: &RustNames<'_>,
+) -> Result<()> {
     if table.kind == CodeTableKind::Object {
         return render_object_table(content, table, names);
     }

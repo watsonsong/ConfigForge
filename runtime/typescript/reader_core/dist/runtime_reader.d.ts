@@ -8,6 +8,22 @@ export interface RuntimeDataReaderLike {
     asBool(): boolean;
     asString(): string;
     isNull(): boolean;
+    schemaRevision?(): bigint | number | undefined;
+    enterRequiredField?(name: string): void;
+    enterOptionalField?(name: string): boolean;
+    exitField?(): void;
+    readEnumIndex?(variants: readonly string[]): number;
+    readRowCount?(): number;
+    beginRecord?(optionalSlotCount: number): void;
+    endRecord?(): void;
+    readOptionalPresent?(): boolean;
+    readNextInt64?(): number;
+    readNextFloat64?(): number;
+    readNextNumber?(): number;
+    readNextBool?(): boolean;
+    readNextString?(): string;
+    readEnumOrdinal?(): number;
+    ensureExhausted?(): void;
 }
 export interface RuntimeDataLoaderLike {
     open(path: string): RuntimeDataReaderLike | Promise<RuntimeDataReaderLike>;

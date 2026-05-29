@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    data::{value_conversion::default_value_to_cell, DataSet, DataTable},
-    meta::{LinkedMetaModel, LinkedTableMeta},
     Result,
+    data::{DataSet, DataTable, value_conversion::default_value_to_cell},
+    meta::{LinkedMetaModel, LinkedTableMeta},
 };
 
 use super::fragment_field_key;

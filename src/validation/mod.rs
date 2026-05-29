@@ -12,7 +12,7 @@ mod struct_value;
 mod table;
 
 pub use context::{
-    visible_row_for, ExportTableView, ExportValidationView, ValidationContext, VisibleRow,
+    ExportTableView, ExportValidationView, ValidationContext, VisibleRow, visible_row_for,
 };
 pub use defaults::{apply_field_defaults, normalize_data_set, normalize_table};
 pub use diagnostic::{ValidationIssue, ValidationIssueLocation, ValidationReport};

@@ -741,6 +741,10 @@ pub trait RuntimeDataReader {
     fn as_bool(&self) -> Result<bool, String>;
     fn as_string(&self) -> Result<String, String>;
     fn is_null(&self) -> bool;
+    fn enter_required_field(&self, name: &'static str) -> RuntimeDataResult<()>;
+    fn enter_optional_field(&self, name: &'static str) -> RuntimeDataResult<bool>;
+    fn exit_field(&self) -> RuntimeDataResult<()>;
+    fn read_enum_index(&self, variants: &[&str]) -> RuntimeDataResult<usize>;
 }
 
 pub trait RuntimeDataLoader {
@@ -815,6 +819,10 @@ public:
     virtual bool AsBool() const = 0;
     virtual std::string AsString() const = 0;
     virtual bool IsNull() const = 0;
+    virtual void EnterRequiredField(const std::string& name);
+    virtual bool EnterOptionalField(const std::string& name);
+    virtual void ExitField();
+    virtual std::size_t ReadEnumIndex(const std::vector<std::string>& variants);
 };
 
 class IRuntimeDataLoader {
@@ -885,6 +893,10 @@ export interface RuntimeDataReader {
   asBool(): boolean;
   asString(): string;
   isNull(): boolean;
+  enterRequiredField?(name: string): void;
+  enterOptionalField?(name: string): boolean;
+  exitField?(): void;
+  readEnumIndex?(variants: readonly string[]): number;
 }
 
 export interface RuntimeDataLoader {
@@ -929,6 +941,9 @@ TypeScript 约束：
 Reader 基础语义：
 
 - `enter_field(name)` / `EnterField(name)` / `enterField(name)` 用于 named-field layout。字段不存在时应返回 `false`，而不是伪造空值；读取过程本身出错才返回 error / throw。进入成功后，后续 scalar/len/read 调用均作用于该字段值，调用方必须用 `exit` 返回上一层。
+- `enter_required_field(name)` / `EnterRequiredField(name)` / `enterRequiredField(name)` 是 generated parser 优先使用的 schema-driven 字段入口。Named reader 默认按 `enter_field` + required/null 校验实现；binary reader 对 required 字段执行 no-op，因为字段由 generated schema 顺序隐式定位。
+- `enter_optional_field(name)` / `EnterOptionalField(name)` / `enterOptionalField(name)` 返回字段是否 present。Named reader 默认按字段 missing/null 判断；binary reader 消费当前 record 的下一个 optional presence bit。present 后 generated parser 读取字段 payload，并通过 `exit_field` / `ExitField` / `exitField` 结束字段；binary reader 的 exit field 是 no-op。
+- `read_enum_index(variants)` / `ReadEnumIndex(variants)` / `readEnumIndex(variants)` 统一 enum 读取。Named reader 将 string enum value 映射为 variants 下标；binary reader 读取 ordinal 并校验范围。Generated enum parser 只根据 index 构造目标语言 enum，不再分支判断 reader layout。
 - `enter_index(i)` / `EnterIndex(i)` / `enterIndex(i)` 用于 array 或 positional record。越界是读取错误，应带上 index 上下文。进入成功后同样通过 `exit` 返回上一层。
 - reader contract 采用可回退 cursor，而不是每次字段/数组访问返回新的 reader 对象。C++ adapter 因此避免 `std::make_unique` 子 reader 堆分配；TypeScript adapter 避免频繁临时对象；Rust adapter 避免 cloning `serde_json::Value` / MessagePack `Value` 子树。
 - `len` / `Size` / `length` 只对 array / object / map 有意义；对 scalar 调用应报错。

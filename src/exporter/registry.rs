@@ -4,12 +4,12 @@
 use std::path::PathBuf;
 
 use crate::{
+    ConfigForgeError, Result,
     data::DataTable,
     meta::{LinkedTableMeta, TargetTags},
-    ConfigForgeError, Result,
 };
 
-use super::{binary, json, messagepack, RuntimeArtifactPlan};
+use super::{RuntimeArtifactPlan, binary, json, messagepack};
 
 /// Runtime data format exporter.
 ///

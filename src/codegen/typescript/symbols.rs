@@ -1,11 +1,20 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{codegen::{ensure_unique_generated_symbols, CodeFragmentPayload, CodeModel, CodeTableKind, GeneratedSymbol}, Result};
+use crate::{
+    Result,
+    codegen::{
+        CodeFragmentPayload, CodeModel, CodeTableKind, GeneratedSymbol,
+        ensure_unique_generated_symbols,
+    },
+};
 
 use super::types::TypeScriptNames;
 
-pub(super) fn validate_generated_symbols(model: &CodeModel, names: &TypeScriptNames<'_>) -> Result<()> {
+pub(super) fn validate_generated_symbols(
+    model: &CodeModel,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
     let mut type_symbols = vec![
         GeneratedSymbol::new("interface", "RuntimeDataLoader", "RuntimeDataLoader"),
         GeneratedSymbol::new("interface", "RuntimeDataReader", "RuntimeDataReader"),

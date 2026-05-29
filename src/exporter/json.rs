@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
+    Result,
     data::DataTable,
     meta::{LinkedTableMeta, TargetTags},
-    Result,
 };
 
-use super::{build_exported_table_payload, DataFormatExporter};
+use super::{DataFormatExporter, build_exported_table_payload};
 
 pub const FORMAT: &str = "json";
 

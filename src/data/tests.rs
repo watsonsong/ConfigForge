@@ -5,7 +5,7 @@ use std::{fs, path::PathBuf};
 
 use tempfile::tempdir;
 
-use crate::{meta::MetaModel, ConfigForgeError};
+use crate::{ConfigForgeError, meta::MetaModel};
 
 use super::*;
 

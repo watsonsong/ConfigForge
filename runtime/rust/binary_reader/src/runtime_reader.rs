@@ -115,8 +115,28 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         Some(self.state.borrow().schema_revision)
     }
 
-    fn is_positional(&self) -> bool {
-        true
+    fn enter_required_field(&self, _name: &'static str) -> RuntimeDataResult<()> {
+        Ok(())
+    }
+
+    fn enter_optional_field(&self, _name: &'static str) -> RuntimeDataResult<bool> {
+        self.read_optional_present()
+    }
+
+    fn exit_field(&self) -> RuntimeDataResult<()> {
+        Ok(())
+    }
+
+    fn read_enum_index(&self, variants: &[&str]) -> RuntimeDataResult<usize> {
+        let ordinal = usize::try_from(self.read_enum_ordinal()?)
+            .map_err(|_| RuntimeDataError::decode("enum ordinal exceeds usize"))?;
+        if ordinal < variants.len() {
+            Ok(ordinal)
+        } else {
+            Err(RuntimeDataError::decode(format!(
+                "enum ordinal `{ordinal}` is out of range"
+            )))
+        }
     }
 
     fn read_row_count(&self) -> RuntimeDataResult<usize> {
@@ -325,7 +345,7 @@ mod tests {
         assert_eq!(reader.read_next_f64().unwrap(), 1.5);
         assert!(reader.read_next_bool().unwrap());
         assert_eq!(reader.read_next_string().unwrap(), "Potion");
-        assert_eq!(reader.read_enum_ordinal().unwrap(), 3);
+        assert_eq!(reader.read_enum_index(&["zero", "one", "two", "three"]).unwrap(), 3);
         reader.ensure_exhausted().unwrap();
     }
 

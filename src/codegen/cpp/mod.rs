@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::Result;
 
 use super::{
-    build_code_model, ir::require_non_empty_index_fields, CaseStyle, CodeExportInput,
-    CodeFragmentPayload, CodeGenerator, CodeModel, CodeTableKind, CodeWriter, CodeWriterConfig,
-    GeneratedFile, NamingConfig,
+    CaseStyle, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeModel, CodeTableKind,
+    CodeWriter, CodeWriterConfig, GeneratedFile, NamingConfig, build_code_model,
+    ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -233,7 +233,6 @@ impl CodeGenerator for CppCodeGenerator {
         ])
     }
 }
-
 
 fn render_source_file(
     generator: &dyn CodeGenerator,

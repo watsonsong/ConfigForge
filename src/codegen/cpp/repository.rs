@@ -1,7 +1,11 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{codegen::{CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriter}, exporter::BINARY_FORMAT, Result};
+use crate::{
+    Result,
+    codegen::{CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriter},
+    exporter::BINARY_FORMAT,
+};
 
 use super::types::CppNames;
 
@@ -260,7 +264,11 @@ pub(super) fn render_compound_index_key_structs(
     Ok(())
 }
 
-pub(super) fn render_table(content: &mut CodeWriter, table: &CodeTable, names: &CppNames<'_>) -> Result<()> {
+pub(super) fn render_table(
+    content: &mut CodeWriter,
+    table: &CodeTable,
+    names: &CppNames<'_>,
+) -> Result<()> {
     content.raw_fmt(format_args!(
         "class {} {{\npublic:\n",
         names.repository_type_name(&table.name)?

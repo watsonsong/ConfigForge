@@ -3,14 +3,14 @@
 
 use crate::{
     codegen::{
-        tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
         CaseStyle, CodeExportInput, CodeGenerator,
+        tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
     },
     exporter::RuntimeDataFile,
     meta::{MetaModel, TargetTags},
 };
 
-use super::{RustCodeGenerator, RustCodegenOptions, LANGUAGE};
+use super::{LANGUAGE, RustCodeGenerator, RustCodegenOptions};
 
 #[test]
 fn emits_loader_table_and_index_helpers() {
@@ -92,7 +92,9 @@ fn emits_optional_scalar_and_struct_field_types() {
     assert!(content.contains("pub note: Option<String>,"));
     assert!(content.contains("pub payload: Option<RewardInfo>,"));
     assert!(content.contains("bonus: read_optional_i64(reader, \"bonus\")?"));
-    assert!(content.contains("Some(RewardInfo::read_from_reader(reader)?)"));
+    assert!(content.contains(
+        "payload: with_optional_field(reader, \"payload\", RewardInfo::read_from_reader)?"
+    ));
     assert!(!content.contains("read_from_binary_reader"));
 }
 
@@ -155,7 +157,9 @@ fn sanitizes_gen_keyword_across_api_surface() {
 
     assert!(content.contains("pub enum GenEnum"));
     assert!(content.contains("    gen_,"));
-    assert!(content.contains("\"gen\" => Ok(Self::gen_)"));
+    assert!(content.contains("match reader.read_enum_index(&["));
+    assert!(content.contains("            \"gen\","));
+    assert!(content.contains("            0 => Ok(Self::gen_),"));
     assert!(content.contains("pub struct Gen"));
     assert!(content.contains("pub gen_: i64,"));
     assert!(content.contains("pub struct GenRow"));

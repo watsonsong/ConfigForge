@@ -20,13 +20,13 @@ pub use artifact::{
     Artifact, ArtifactContent, ArtifactWriteEntry, ArtifactWriteMode, ArtifactWriteResult,
     ArtifactWriter,
 };
-pub use build::{build_target, BuildOptions, BuildOutput, ExecutionOptions};
+pub use build::{BuildOptions, BuildOutput, ExecutionOptions, build_target};
 pub use codegen::{
-    builtin_generators, default_module_name, find_generator, CaseStyle, CodeExportInput,
-    CodeExportProject, CodeExportTarget, CodeGenerator, CodeWriterConfig, CodegenOptions,
-    CodegenTaskConfig, CppCodeGenerator, CppCodegenOptions, GeneratedFile, IndentStyle,
-    KeywordConflictPolicy, NamingConfig, PartialCodeWriterConfig, PartialNamingConfig,
-    RustCodeGenerator, RustCodegenOptions, TypeScriptCodeGenerator, TypeScriptCodegenOptions,
+    CaseStyle, CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator,
+    CodeWriterConfig, CodegenOptions, CodegenTaskConfig, CppCodeGenerator, CppCodegenOptions,
+    GeneratedFile, IndentStyle, KeywordConflictPolicy, NamingConfig, PartialCodeWriterConfig,
+    PartialNamingConfig, RustCodeGenerator, RustCodegenOptions, TypeScriptCodeGenerator,
+    TypeScriptCodegenOptions, builtin_generators, default_module_name, find_generator,
 };
 pub use data::{
     CsvDataReader, DataLoadPlan, DataLoader, DataProvider, DataRow, DataSet, DataSourceLayout,
@@ -37,9 +37,9 @@ pub use diagnostic::{
     DiagnosticSeverity, Result,
 };
 pub use exporter::{
-    builtin_exporters, BinaryDataExporter, DataFormatExporter, DataFormatRegistry, ExportedTable,
+    BinaryDataExporter, DataFormatExporter, DataFormatRegistry, ExportedTable,
     ExportedTablePayload, ExportedValue, JsonDataExporter, MessagePackDataExporter,
-    RuntimeArtifactPlan, RuntimeDataFile, TargetDataConfig,
+    RuntimeArtifactPlan, RuntimeDataFile, TargetDataConfig, builtin_exporters,
 };
 pub use meta::{
     EnumMeta, EnumValueMeta, ExportCondition, FieldForeignKeyMeta, FieldMeta,
@@ -52,14 +52,14 @@ pub use meta::{
 };
 pub use project::{ProjectConfig, ProjectConfigMeta, TargetConfig};
 pub use validation::{
-    apply_field_defaults, normalize_data_set, normalize_table, validate_data_set,
-    validate_data_set_for_target, validate_data_set_for_target_with_report,
-    validate_data_set_with_report, validate_normalized_data_set,
-    validate_normalized_data_set_for_target, validate_normalized_data_set_for_target_with_report,
-    validate_normalized_table, validate_normalized_table_for_target, validate_table,
-    validate_table_for_target, CompiledValidationPlan, CompiledValidator, ExportTableView,
-    ExportValidationView, ValidationContext, ValidationIssue, ValidationIssueLocation,
-    ValidationReport, ValidatorFactory, ValidatorRegistry, VisibleRow,
+    CompiledValidationPlan, CompiledValidator, ExportTableView, ExportValidationView,
+    ValidationContext, ValidationIssue, ValidationIssueLocation, ValidationReport,
+    ValidatorFactory, ValidatorRegistry, VisibleRow, apply_field_defaults, normalize_data_set,
+    normalize_table, validate_data_set, validate_data_set_for_target,
+    validate_data_set_for_target_with_report, validate_data_set_with_report,
+    validate_normalized_data_set, validate_normalized_data_set_for_target,
+    validate_normalized_data_set_for_target_with_report, validate_normalized_table,
+    validate_normalized_table_for_target, validate_table, validate_table_for_target,
 };
 
 pub fn run_cli() -> anyhow::Result<()> {

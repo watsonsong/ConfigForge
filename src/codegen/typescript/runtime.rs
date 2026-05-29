@@ -15,7 +15,10 @@ pub(super) fn render_runtime_reader_interfaces(content: &mut CodeWriter) {
   asString(): string;
   isNull(): boolean;
   schemaRevision?(): bigint | number | undefined;
-  isPositional?(): boolean;
+  enterRequiredField?(name: string): void;
+  enterOptionalField?(name: string): boolean;
+  exitField?(): void;
+  readEnumIndex?(variants: readonly string[]): number;
   readRowCount?(): number;
   beginRecord?(optionalSlotCount: number): void;
   endRecord?(): void;
@@ -40,83 +43,102 @@ export interface RuntimeDataLoader {
 pub(super) fn render_runtime_reader_helpers(content: &mut CodeWriter) {
     content.raw(
         r#"function requiredField<T>(reader: RuntimeDataReader, name: string, convert: (value: RuntimeDataReader) => T): T {
-  if (!reader.enterField(name)) {
-    throw new Error(`missing required field ${name}`);
-  }
+  enterRequiredField(reader, name);
   try {
-    if (reader.isNull()) {
-      throw new Error(`missing required field ${name}`);
-    }
     return convert(reader);
   } finally {
-    reader.exit();
+    exitField(reader);
   }
 }
 
 function optionalField<T>(reader: RuntimeDataReader, name: string, convert: (value: RuntimeDataReader) => T): T | undefined {
-  if (!reader.enterField(name)) {
+  if (!enterOptionalField(reader, name)) {
     return undefined;
   }
   try {
-    return reader.isNull() ? undefined : convert(reader);
+    return convert(reader);
   } finally {
+    exitField(reader);
+  }
+}
+
+function enterRequiredField(reader: RuntimeDataReader, name: string): void {
+  if (reader.enterRequiredField) {
+    reader.enterRequiredField(name);
+    return;
+  }
+  if (!reader.enterField(name)) {
+    throw new Error(`missing required field ${name}`);
+  }
+  if (reader.isNull()) {
+    reader.exit();
+    throw new Error(`missing required field ${name}`);
+  }
+}
+
+function enterOptionalField(reader: RuntimeDataReader, name: string): boolean {
+  if (reader.enterOptionalField) {
+    return reader.enterOptionalField(name);
+  }
+  if (!reader.enterField(name)) {
+    return false;
+  }
+  if (reader.isNull()) {
+    reader.exit();
+    return false;
+  }
+  return true;
+}
+
+function exitField(reader: RuntimeDataReader): void {
+  if (reader.exitField) {
+    reader.exitField();
+  } else {
     reader.exit();
   }
 }
 
-function readRequiredInt64(reader: RuntimeDataReader, name: string): number {
-  if (reader.isPositional?.()) {
-    return reader.readNextInt64!();
+function readEnumIndex(reader: RuntimeDataReader, variants: readonly string[]): number {
+  if (reader.readEnumIndex) {
+    return reader.readEnumIndex(variants);
   }
-  return requiredField(reader, name, (value) => value.asNumber());
+  const value = reader.asString();
+  const index = variants.indexOf(value);
+  if (index < 0) {
+    throw new Error(`unknown enum value ${value}`);
+  }
+  return index;
+}
+
+function readRequiredInt64(reader: RuntimeDataReader, name: string): number {
+  return requiredField(reader, name, (value) => value.readNextInt64 ? value.readNextInt64() : value.asNumber());
 }
 
 function readRequiredFloat64(reader: RuntimeDataReader, name: string): number {
-  if (reader.isPositional?.()) {
-    return reader.readNextFloat64!();
-  }
-  return requiredField(reader, name, (value) => value.asNumber());
+  return requiredField(reader, name, (value) => value.readNextFloat64 ? value.readNextFloat64() : value.asNumber());
 }
 
 function readRequiredBool(reader: RuntimeDataReader, name: string): boolean {
-  if (reader.isPositional?.()) {
-    return reader.asBool();
-  }
   return requiredField(reader, name, (value) => value.asBool());
 }
 
 function readRequiredString(reader: RuntimeDataReader, name: string): string {
-  if (reader.isPositional?.()) {
-    return reader.asString();
-  }
   return requiredField(reader, name, (value) => value.asString());
 }
 
 function readOptionalInt64(reader: RuntimeDataReader, name: string): number | undefined {
-  if (reader.isPositional?.()) {
-    return reader.readOptionalPresent!() ? reader.readNextInt64!() : undefined;
-  }
-  return optionalField(reader, name, (value) => value.asNumber());
+  return optionalField(reader, name, (value) => value.readNextInt64 ? value.readNextInt64() : value.asNumber());
 }
 
 function readOptionalFloat64(reader: RuntimeDataReader, name: string): number | undefined {
-  if (reader.isPositional?.()) {
-    return reader.readOptionalPresent!() ? reader.readNextFloat64!() : undefined;
-  }
-  return optionalField(reader, name, (value) => value.asNumber());
+  return optionalField(reader, name, (value) => value.readNextFloat64 ? value.readNextFloat64() : value.asNumber());
 }
 
 function readOptionalBool(reader: RuntimeDataReader, name: string): boolean | undefined {
-  if (reader.isPositional?.()) {
-    return reader.readOptionalPresent!() ? reader.asBool() : undefined;
-  }
   return optionalField(reader, name, (value) => value.asBool());
 }
 
 function readOptionalString(reader: RuntimeDataReader, name: string): string | undefined {
-  if (reader.isPositional?.()) {
-    return reader.readOptionalPresent!() ? reader.asString() : undefined;
-  }
   return optionalField(reader, name, (value) => value.asString());
 }
 

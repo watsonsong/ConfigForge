@@ -119,7 +119,19 @@ public:
 
     std::optional<std::uint64_t> SchemaRevision() const override { return state_->schema_revision; }
 
-    bool IsPositional() const override { return true; }
+    void EnterRequiredField(const std::string&) override {}
+
+    bool EnterOptionalField(const std::string&) override { return ReadOptionalPresent(); }
+
+    void ExitField() override {}
+
+    std::size_t ReadEnumIndex(const std::vector<std::string>& variants) override {
+        const std::size_t ordinal = CheckedSize(ReadEnumOrdinal(), "enum ordinal");
+        if (ordinal >= variants.size()) {
+            throw std::runtime_error("enum ordinal is out of range");
+        }
+        return ordinal;
+    }
 
     std::size_t ReadRowCount() override {
         return CheckedSize(ReadVaruint(), "row count");

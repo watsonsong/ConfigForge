@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -21,7 +22,23 @@ public:
     virtual std::string AsString() const = 0;
     virtual bool IsNull() const = 0;
     virtual std::optional<std::uint64_t> SchemaRevision() const { return std::nullopt; }
-    virtual bool IsPositional() const { return false; }
+    virtual void EnterRequiredField(const std::string& name) {
+        if (!EnterField(name)) { throw std::runtime_error("missing required field"); }
+        if (IsNull()) { Exit(); throw std::runtime_error("missing required field"); }
+    }
+    virtual bool EnterOptionalField(const std::string& name) {
+        if (!EnterField(name)) { return false; }
+        if (IsNull()) { Exit(); return false; }
+        return true;
+    }
+    virtual void ExitField() { Exit(); }
+    virtual std::size_t ReadEnumIndex(const std::vector<std::string>& variants) {
+        const std::string value = AsString();
+        for (std::size_t index = 0; index < variants.size(); ++index) {
+            if (variants[index] == value) { return index; }
+        }
+        throw std::runtime_error("unknown enum value");
+    }
     virtual std::size_t ReadRowCount() { return 0; }
     virtual void BeginRecord(std::size_t) {}
     virtual void EndRecord() {}
@@ -77,7 +94,8 @@ int main() {
         return 1;
     }
     reader.BeginRecord(1);
-    if (!reader.ReadOptionalPresent() || reader.ReadNextInt64() != 7 || !reader.ReadNextBool() || reader.ReadEnumOrdinal() != 3) {
+    if (!reader.ReadOptionalPresent() || reader.ReadNextInt64() != 7 || !reader.ReadNextBool() ||
+        reader.ReadEnumIndex({"zero", "one", "two", "three"}) != 3) {
         return 2;
     }
     reader.EnsureExhausted();

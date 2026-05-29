@@ -109,8 +109,39 @@ pub trait RuntimeDataReader {
     fn schema_revision(&self) -> Option<u64> {
         None
     }
-    fn is_positional(&self) -> bool {
-        false
+    fn enter_required_field(&self, name: &'static str) -> RuntimeDataResult<()> {
+        if !self.enter_field(name)? {
+            return Err(RuntimeDataError::not_found(format!(
+                "missing required field `{name}`"
+            )));
+        }
+        if self.is_null() {
+            self.exit()?;
+            return Err(RuntimeDataError::not_found(format!(
+                "missing required field `{name}`"
+            )));
+        }
+        Ok(())
+    }
+    fn enter_optional_field(&self, name: &'static str) -> RuntimeDataResult<bool> {
+        if !self.enter_field(name)? {
+            return Ok(false);
+        }
+        if self.is_null() {
+            self.exit()?;
+            return Ok(false);
+        }
+        Ok(true)
+    }
+    fn exit_field(&self) -> RuntimeDataResult<()> {
+        self.exit()
+    }
+    fn read_enum_index(&self, variants: &[&str]) -> RuntimeDataResult<usize> {
+        let value = self.as_string()?;
+        variants
+            .iter()
+            .position(|variant| *variant == value.as_str())
+            .ok_or_else(|| RuntimeDataError::decode(format!("unknown enum value `{value}`")))
     }
     fn read_row_count(&self) -> RuntimeDataResult<usize> {
         Err(RuntimeDataError::unsupported(

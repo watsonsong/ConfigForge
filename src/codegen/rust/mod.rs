@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::Result;
 
 use super::{
-    build_code_model, ir::require_non_empty_index_fields, CaseStyle, CodeExportInput,
-    CodeFragmentPayload, CodeGenerator, CodeWriter, CodeWriterConfig, GeneratedFile, NamingConfig,
+    CaseStyle, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeWriter, CodeWriterConfig,
+    GeneratedFile, NamingConfig, build_code_model, ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -239,7 +239,6 @@ impl CodeGenerator for RustCodeGenerator {
         }])
     }
 }
-
 
 fn push_doc(content: &mut CodeWriter, desc: Option<&str>, prefix: &str) {
     if let Some(desc) = desc {

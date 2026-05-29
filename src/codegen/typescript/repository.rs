@@ -1,7 +1,11 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{codegen::{CodeIndex, CodeTable, CodeWriter}, exporter::BINARY_FORMAT, Result};
+use crate::{
+    Result,
+    codegen::{CodeIndex, CodeTable, CodeWriter},
+    exporter::BINARY_FORMAT,
+};
 
 use super::types::TypeScriptNames;
 

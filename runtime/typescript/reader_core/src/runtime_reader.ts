@@ -13,7 +13,10 @@ export interface RuntimeDataReaderLike {
   asString(): string;
   isNull(): boolean;
   schemaRevision?(): bigint | number | undefined;
-  isPositional?(): boolean;
+  enterRequiredField?(name: string): void;
+  enterOptionalField?(name: string): boolean;
+  exitField?(): void;
+  readEnumIndex?(variants: readonly string[]): number;
   readRowCount?(): number;
   beginRecord?(optionalSlotCount: number): void;
   endRecord?(): void;

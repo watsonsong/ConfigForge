@@ -4,9 +4,9 @@
 use std::collections::BTreeSet;
 
 use crate::{
+    ConfigForgeError, Result,
     data::{DataSet, DataTable},
     meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
-    ConfigForgeError, Result,
 };
 
 pub struct ValidationContext<'meta, 'data> {

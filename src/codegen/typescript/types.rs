@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    codegen::{
-        naming, CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
-        CodeTableKind, CodeTypeRef, CodegenOptions,
-    },
     ConfigForgeError, Result,
+    codegen::{
+        CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
+        CodeTableKind, CodeTypeRef, CodegenOptions, naming,
+    },
 };
 
 pub(super) struct TypeScriptNames<'a> {
@@ -37,7 +37,11 @@ impl<'a> TypeScriptNames<'a> {
         }
     }
 
-    pub(super) fn fragment_type_name(&self, table_name: &str, fragment_name: &str) -> Result<String> {
+    pub(super) fn fragment_type_name(
+        &self,
+        table_name: &str,
+        fragment_name: &str,
+    ) -> Result<String> {
         self.type_name(&format!("{table_name}_{fragment_name}_fragment"))
     }
 
@@ -102,11 +106,7 @@ impl<'a> TypeScriptNames<'a> {
     }
 
     pub(super) fn ts_optional_property_suffix(&self, field: &CodeField) -> &'static str {
-        if field.required {
-            ""
-        } else {
-            "?"
-        }
+        if field.required { "" } else { "?" }
     }
 
     pub(super) fn reader_function_name(&self, type_name: &str) -> Result<String> {
@@ -138,7 +138,7 @@ impl<'a> TypeScriptNames<'a> {
                     let type_name = self.type_name(name)?;
                     let reader_function = self.reader_function_name(&type_name)?;
                     format!(
-                        "reader.isPositional?.() ? {reader_function}(reader) : requiredField(reader, {source_name}, (value) => {reader_function}(value))"
+                        "requiredField(reader, {source_name}, (value) => {reader_function}(value))"
                     )
                 }
             });
@@ -154,15 +154,7 @@ impl<'a> TypeScriptNames<'a> {
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                 let type_name = self.type_name(name)?;
                 let reader_function = self.reader_function_name(&type_name)?;
-                format!(
-                    concat!(
-                        "reader.isPositional?.()\n",
-                        "      ? (reader.readOptionalPresent!() ? {reader_function}(reader) : undefined)\n",
-                        "      : optionalField(reader, {source_name}, (value) => {reader_function}(value))",
-                    ),
-                    reader_function = reader_function,
-                    source_name = source_name,
-                )
+                format!("optionalField(reader, {source_name}, (value) => {reader_function}(value))")
             }
         })
     }

@@ -1,7 +1,10 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{codegen::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriter}, Result};
+use crate::{
+    Result,
+    codegen::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriter},
+};
 
 use super::types::RustNames;
 
@@ -17,24 +20,11 @@ pub(super) fn render_enum_reader_impl(
     content.raw(
         "    fn read_from_reader<R: RuntimeDataReader>(reader: &R) -> RuntimeDataResult<Self> {\n",
     );
-    content.raw("        if reader.is_positional() { return Self::from_binary_ordinal(reader.read_enum_ordinal()?); }\n");
-    content.raw("        match reader.as_string()?.as_str() {\n");
+    content.raw("        match reader.read_enum_index(&[\n");
     for value in &code_enum.values {
-        content.raw_fmt(format_args!(
-            "            {:?} => Ok(Self::{}),\n",
-            value.name,
-            names.enum_variant_name(&value.name)?
-        ));
+        content.raw_fmt(format_args!("            {:?},\n", value.name));
     }
-    content.raw_fmt(format_args!(
-        "            other => Err(RuntimeDataError::decode(format!(\"unknown {} value `{{other}}`\"))),\n",
-        code_enum.name
-    ));
-    content.raw("        }\n");
-    content.raw("    }\n");
-    content.raw("\n");
-    content.raw("    fn from_binary_ordinal(ordinal: u64) -> RuntimeDataResult<Self> {\n");
-    content.raw("        match ordinal {\n");
+    content.raw("        ])? {\n");
     for (ordinal, value) in code_enum.values.iter().enumerate() {
         content.raw_fmt(format_args!(
             "            {ordinal} => Ok(Self::{}),\n",
@@ -42,7 +32,7 @@ pub(super) fn render_enum_reader_impl(
         ));
     }
     content.raw_fmt(format_args!(
-        "            other => Err(RuntimeDataError::decode(format!(\"unknown {} ordinal `{{other}}`\"))),\n",
+        "            other => Err(RuntimeDataError::decode(format!(\"unknown {} enum index `{{other}}`\"))),\n",
         code_enum.name
     ));
     content.raw("        }\n");
@@ -124,15 +114,7 @@ fn render_read_from_reader_body(
             let payload_type = names.fragment_payload_type_name(table, fragment)?;
             content.raw_fmt(format_args!(
                 concat!(
-                    "            {field_name}: if reader.is_positional() {{\n",
-                    "                if reader.read_optional_present()? {{\n",
-                    "                    Some({payload_type}::read_from_reader(reader)?)\n",
-                    "                }} else {{\n",
-                    "                    None\n",
-                    "                }}\n",
-                    "            }} else {{\n",
-                    "                with_optional_field(reader, {:?}, {payload_type}::read_from_reader)?\n",
-                    "            }},\n",
+                    "            {field_name}: with_optional_field(reader, {:?}, {payload_type}::read_from_reader)?,\n",
                 ),
                 fragment.name,
                 field_name = field_name,

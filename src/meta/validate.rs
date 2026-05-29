@@ -4,8 +4,8 @@
 use std::collections::BTreeSet;
 
 use super::{
-    model::normalize_tag, FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
-    PrimitiveFieldType, TableKind, TableMeta, ValidatorMeta, ValueLayout,
+    FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
+    TableKind, TableMeta, ValidatorMeta, ValueLayout, model::normalize_tag,
 };
 
 pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
@@ -205,11 +205,7 @@ fn validate_table_meta(
             field,
             diagnostics,
         );
-        validate_unsupported_field_options(
-            &format!("table `{}`", table.name),
-            field,
-            diagnostics,
-        );
+        validate_unsupported_field_options(&format!("table `{}`", table.name), field, diagnostics);
         validate_field_layout(
             model,
             &format!("table `{}`", table.name),

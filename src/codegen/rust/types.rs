@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    codegen::{
-        naming, CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
-        CodeTableKind, CodeTypeRef, CodegenOptions,
-    },
     ConfigForgeError, Result,
+    codegen::{
+        CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
+        CodeTableKind, CodeTypeRef, CodegenOptions, naming,
+    },
 };
 
 pub(super) struct RustNames<'a> {
@@ -37,7 +37,11 @@ impl<'a> RustNames<'a> {
         }
     }
 
-    pub(super) fn fragment_type_name(&self, table_name: &str, fragment_name: &str) -> Result<String> {
+    pub(super) fn fragment_type_name(
+        &self,
+        table_name: &str,
+        fragment_name: &str,
+    ) -> Result<String> {
         self.type_name(&format!("{table_name}_{fragment_name}_fragment"))
     }
 
@@ -112,15 +116,7 @@ impl<'a> RustNames<'a> {
                 CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                     let type_name = self.type_name(name)?;
                     format!(
-                        concat!(
-                            "if reader.is_positional() {{\n",
-                            "                {type_name}::read_from_reader(reader)?\n",
-                            "            }} else {{\n",
-                            "                with_required_field(reader, {source_name}, {type_name}::read_from_reader)?\n",
-                            "            }}",
-                        ),
-                        type_name = type_name,
-                        source_name = source_name,
+                        "with_required_field(reader, {source_name}, {type_name}::read_from_reader)?"
                     )
                 }
             });
@@ -136,19 +132,7 @@ impl<'a> RustNames<'a> {
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                 let type_name = self.type_name(name)?;
                 format!(
-                    concat!(
-                        "if reader.is_positional() {{\n",
-                        "                if reader.read_optional_present()? {{\n",
-                        "                    Some({type_name}::read_from_reader(reader)?)\n",
-                        "                }} else {{\n",
-                        "                    None\n",
-                        "                }}\n",
-                        "            }} else {{\n",
-                        "                with_optional_field(reader, {source_name}, {type_name}::read_from_reader)?\n",
-                        "            }}",
-                    ),
-                    type_name = type_name,
-                    source_name = source_name,
+                    "with_optional_field(reader, {source_name}, {type_name}::read_from_reader)?"
                 )
             }
         })

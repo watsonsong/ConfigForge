@@ -1,7 +1,10 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{codegen::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriter}, Result};
+use crate::{
+    Result,
+    codegen::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriter},
+};
 
 use super::types::CppNames;
 
@@ -16,30 +19,11 @@ pub(super) fn render_enum_reader_source(
         "{} {}(IRuntimeDataReader& reader) {{\n",
         type_name, function_name
     ));
-    content.raw_fmt(format_args!(
-        "    if (reader.IsPositional()) {{ return {}(reader.ReadEnumOrdinal()); }}\n",
-        names.binary_enum_reader_function_name(&type_name)?
-    ));
-    content.raw("    const std::string value = reader.AsString();\n");
+    content.raw("    switch (reader.ReadEnumIndex({\n");
     for value in &code_enum.values {
-        content.raw_fmt(format_args!(
-            "    if (value == {:?}) {{ return {}::{}; }}\n",
-            value.name,
-            type_name,
-            names.enum_variant_name(&value.name)?
-        ));
+        content.raw_fmt(format_args!("        {:?},\n", value.name));
     }
-    content.raw_fmt(format_args!(
-        "    throw std::runtime_error(\"unknown {} value `\" + value + \"`\");\n",
-        code_enum.name
-    ));
-    content.raw("}\n\n");
-    content.raw_fmt(format_args!(
-        "{} {}(std::uint64_t ordinal) {{\n",
-        type_name,
-        names.binary_enum_reader_function_name(&type_name)?
-    ));
-    content.raw("    switch (ordinal) {\n");
+    content.raw("    })) {\n");
     for (ordinal, value) in code_enum.values.iter().enumerate() {
         content.raw_fmt(format_args!(
             "    case {ordinal}: return {}::{};\n",
@@ -48,7 +32,7 @@ pub(super) fn render_enum_reader_source(
         ));
     }
     content.raw_fmt(format_args!(
-        "    default: throw std::runtime_error(\"unknown {} ordinal\");\n",
+        "    default: throw std::runtime_error(\"unknown {} enum index\");\n",
         code_enum.name
     ));
     content.raw("    }\n");
@@ -117,15 +101,9 @@ fn render_reader_function_source(
             let reader_function = names.reader_function_name(&payload_type)?;
             content.raw_fmt(format_args!(
                 concat!(
-                    "    if (reader.IsPositional()) {{\n",
-                    "        if (reader.ReadOptionalPresent()) {{\n",
-                    "            value.{field_name} = {reader_function}(reader);\n",
-                    "        }}\n",
-                    "    }} else if (reader.EnterField({:?})) {{\n",
+                    "    if (reader.EnterOptionalField({:?})) {{\n",
                     "        ReaderScope fragment_scope(reader);\n",
-                    "        if (!reader.IsNull()) {{\n",
-                    "            value.{field_name} = {reader_function}(reader);\n",
-                    "        }}\n",
+                    "        value.{field_name} = {reader_function}(reader);\n",
                     "    }}\n",
                 ),
                 fragment.name,

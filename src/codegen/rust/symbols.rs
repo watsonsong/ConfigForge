@@ -1,7 +1,13 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{codegen::{ensure_unique_generated_symbols, CodeFragmentPayload, CodeModel, CodeTableKind, GeneratedSymbol}, Result};
+use crate::{
+    Result,
+    codegen::{
+        CodeFragmentPayload, CodeModel, CodeTableKind, GeneratedSymbol,
+        ensure_unique_generated_symbols,
+    },
+};
 
 use super::types::RustNames;
 

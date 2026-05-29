@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
+    ConfigForgeError, Result,
     data::{DataSet, DataTable},
     meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
-    ConfigForgeError, Result,
 };
 
 use super::{

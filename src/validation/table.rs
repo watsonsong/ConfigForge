@@ -4,9 +4,9 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{
+    ConfigForgeError, Result,
     data::{DataResolver, DataRow, DataTable},
     meta::{LinkedField, LinkedFieldMeta, LinkedIndexMeta, LinkedTableMeta, TableKind, TargetTags},
-    ConfigForgeError, Result,
 };
 
 use super::struct_value::{
@@ -14,7 +14,7 @@ use super::struct_value::{
     validate_struct_occurrence_value, validate_supported_field_type, validate_value_type,
     validate_value_type_at_row_number, visible_required_struct_child_count,
 };
-use super::{fragment_field_key, visible_row_for, ExportTableView};
+use super::{ExportTableView, fragment_field_key, visible_row_for};
 
 pub fn validate_normalized_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
     DataResolver::resolve_table(meta, table, None)?;

@@ -4,12 +4,12 @@
 use std::collections::HashSet;
 
 use crate::{
+    ConfigForgeError, Result,
     data::{DataRow, DataSet, DataTable},
     meta::{
         LinkedFieldMeta, LinkedForeignKeyMeta, LinkedIndexMeta, LinkedMetaModel, LinkedTableMeta,
         TargetTags,
     },
-    ConfigForgeError, Result,
 };
 
 use super::{ExportTableView, ExportValidationView};

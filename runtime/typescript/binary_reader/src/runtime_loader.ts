@@ -70,8 +70,22 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     return this.revision;
   }
 
-  isPositional(): boolean {
-    return true;
+  enterRequiredField(_name: string): void {
+  }
+
+  enterOptionalField(_name: string): boolean {
+    return this.readOptionalPresent();
+  }
+
+  exitField(): void {
+  }
+
+  readEnumIndex(variants: readonly string[]): number {
+    const ordinal = this.readEnumOrdinal();
+    if (ordinal >= variants.length) {
+      throw new Error(`enum ordinal ${ordinal} is out of range`);
+    }
+    return ordinal;
   }
 
   readRowCount(): number {

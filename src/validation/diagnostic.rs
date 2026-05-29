@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
+    ConfigForgeError, Result,
     diagnostic::{
         Diagnostic, DiagnosticEntry, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity,
     },
     meta::ValidationSeverity,
-    ConfigForgeError, Result,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
