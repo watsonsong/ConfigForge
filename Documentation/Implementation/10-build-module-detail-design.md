@@ -11,8 +11,8 @@ Build 模块需要解决：
 3. 创建和管理 CPU worker pool。
 4. 按 target tags 组织 runtime data export。
 5. 在导出前加载、归一化、校验数据。
-6. 支持一个 target 内多个 data task，以及多个 code task 绑定指定 data task。
-7. 将 runtime data task 产出的真实 file list 传给 codegen。
+6. 支持一个 target 内多个 data task，以及多个格式无关 code task。
+7. 运行时数据格式选择停留在 data task / runtime loader 层，不进入 codegen 绑定。
 8. 收集 runtime data / generated code artifacts，交给 `artifact` 模块统一检查路径冲突、dry-run 和写出文件。
 
 非目标：
@@ -27,7 +27,7 @@ Build 模块需要解决：
 src/build/
   mod.rs              # build_target 主入口、codegen task 执行、artifact 收集与写入调用
   options.rs          # BuildOptions / ExecutionOptions / BuildOutput
-  target.rs           # TargetConfig normalization、data/code task binding
+  target.rs           # TargetConfig normalization、data task naming、code task format-agnostic validation
   runtime.rs          # runtime data task 编排、data load / validation / export
 ```
 
@@ -36,7 +36,7 @@ src/build/
 | 子模块 | 责任 |
 | --- | --- |
 | `options.rs` | CLI 传入 build 的稳定参数对象；执行资源限制默认值与合法性。 |
-| `target.rs` | target tags、data task 默认命名、data task 名称校验、code task 到 data task 的绑定规则。 |
+| `target.rs` | target tags、data task 默认命名、data task 名称校验、code task 禁止绑定 data 的格式无关校验。 |
 | `runtime.rs` | runtime data task 执行：构造 DataLoadPlan、复用同 input 的 DataSet、收集 validation warning、调用 exporter。 |
 | `mod.rs` | `build_target()` 主流程、codegen task 并行执行、artifact 收集与 Artifact Writer 调用。 |
 
@@ -59,10 +59,9 @@ pub(crate) struct NormalizedTargetConfig {
 - 多个 data task 必须全部显式命名。
 - data task name 只能使用 ASCII 字母、数字、`_`、`-`，且首尾必须是字母或数字。
 - 同一 target 内 data task name 不能重复。
-- code task 如果显式指定 `data`，必须引用存在的 data task。
-- 无 data task 时，code task 可以不绑定 data，用于 code-only target。
-- 只有一个 data task 时，未指定 `data` 的 code task 自动绑定该 task。
-- 多个 data task 时，code task 必须显式指定 `data`，避免生成代码不知道应该引用哪组 runtime data files。
+- code task 禁止显式指定 `data`；若设置则配置校验失败。
+- 无论 target 有 0 个、1 个还是多个 data task，code task 都只依赖 Meta 和 target tags。
+- 生成代码使用逻辑 table name，由运行时 loader / reader 决定实际加载 `.json`、`.msgpack` 或 `.bin` 等具体格式文件。
 
 ## 10.4 Build 主流程
 
@@ -81,14 +80,14 @@ build_target(options)
       -> validate_normalized_data_set_for_target_with_report
       -> export_runtime_data
   -> write_generated_code(...)
-      -> selected runtime data files by code task binding
+      -> format-agnostic codegen input
       -> CodeGenerator::generate
       -> collect generated code artifacts
   -> ArtifactWriter::write(all artifacts)
   -> BuildOutput { warnings }
 ```
 
-Build 保证 runtime data 先于 codegen 执行，因为生成代码需要引用当前 data task 实际产出的 runtime data file paths。
+Build 当前仍先执行 runtime data 再执行 codegen，以保持统一 artifact 收集顺序；但生成代码不再引用某个 data task 的真实 runtime data file path。
 
 ## 10.5 Runtime data task 编排
 
@@ -97,8 +96,7 @@ Build 保证 runtime data 先于 codegen 执行，因为生成代码需要引用
 - 为当前 target 可见 tables 构造 `DataLoadPlan`。
 - 同一个 `input` 目录的多个 data task 复用同一个 normalized `DataSet`，避免重复读取和重复 validation。
 - 每个 data task 可使用不同 `format` 和 `output`，例如 JSON + MessagePack。
-- 每个 data task 调用 `exporter::export_runtime_data()` 生成 runtime artifacts，并从中提取
-  `RuntimeDataFile` 列表供 codegen 使用。
+- 每个 data task 调用 `exporter::export_runtime_data()` 生成 runtime artifacts，并保留 `RuntimeDataFile` 列表供未来 manifest 或诊断使用；codegen 不绑定该列表。
 - validation warning 被收集到 `BuildOutput.warnings`，error 直接阻断 build。
 
 路径冲突分层：
@@ -111,8 +109,8 @@ Build 保证 runtime data 先于 codegen 执行，因为生成代码需要引用
 `write_generated_code()` 负责 code task：
 
 - 内置生成器由 `codegen::builtin_generators()` 提供。
-- code task 根据 normalized binding 选择对应 data task 的 `RuntimeDataFile`。
-- 每个 code task 构造 `CodeExportInput`，包含 linked meta、target tags、project 信息、target language config、runtime data file list、generated_at。
+- code task 不选择 data task，也不消费 `RuntimeDataFile`。
+- 每个 code task 构造 `CodeExportInput`，包含 linked meta、target tags、project 信息、target language config、空 runtime data file list、generated_at。
 - code task 可以并行生成，但交给 Artifact Writer 前必须恢复 task 声明顺序；全局路径冲突由 artifact 模块统一检查。
 
 ## 10.7 依赖边界
@@ -135,10 +133,10 @@ Build 模块测试应覆盖：
 
 - execution options 默认值和非法值。
 - data task 默认命名、重复命名、非法命名。
-- code task 与 data task binding 规则。
+- code task 禁止 `data` 字段的格式无关规则。
 - 多 data task / code task / runtime-code 之间输出路径冲突在写文件前失败。
 - CLI dry-run 完整执行但不写输出文件。
 - runtime data task warning 不阻断 build，但 error 阻断 build。
 - code-only target 不加载数据。
-- JSON + MessagePack 多 data task 能被 codegen 正确引用。
+- JSON + MessagePack + bin 多 data task 不影响同一份格式无关 codegen 输出。
 - CLI integration 覆盖完整 build target 流程。

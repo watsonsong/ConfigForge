@@ -4,7 +4,6 @@
 use crate::{
     Result,
     codegen::{CodeIndex, CodeTable, CodeTableKind, CodeWriter},
-    exporter::BINARY_FORMAT,
 };
 
 use super::types::RustNames;
@@ -50,49 +49,33 @@ pub(super) fn render_table(
     }
     content.raw("    pub fn load(loader: &impl RuntimeDataLoader) -> RuntimeDataResult<Self> {\n");
     content.raw("        let root = loader.open(Self::DATA_FILE)?;\n");
-    if table.data_format == BINARY_FORMAT {
+    if table.schema_revision.is_some() {
         content.raw(concat!(
-            "        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) {\n",
-            "            return Err(RuntimeDataError::schema_mismatch(format!(\n",
-            "                \"schema revision mismatch for `{}`: expected {}, got {:?}\",\n",
-            "                Self::DATA_FILE,\n",
-            "                Self::EXPECTED_SCHEMA_REVISION,\n",
-            "                root.schema_revision()\n",
-            "            )));\n",
+            "        if let Some(schema_revision) = root.schema_revision() {\n",
+            "            if schema_revision != Self::EXPECTED_SCHEMA_REVISION {\n",
+            "                return Err(RuntimeDataError::schema_mismatch(format!(\n",
+            "                    \"schema revision mismatch for `{}`: expected {}, got {:?}\",\n",
+            "                    Self::DATA_FILE,\n",
+            "                    Self::EXPECTED_SCHEMA_REVISION,\n",
+            "                    schema_revision\n",
+            "                )));\n",
+            "            }\n",
             "        }\n",
         ));
-        content.raw("        let row_count = root.read_row_count()?;\n");
-        content.raw("        let mut rows = Vec::new();\n");
-        content.raw("        for _ in 0..row_count {\n");
-        content.raw_fmt(format_args!(
-            "            rows.push({}::read_from_reader(&root)?);\n",
-            names.row_type_name(&table.name)?
-        ));
-        content.raw("        }\n");
-        content.raw("        root.ensure_exhausted()?;\n");
-        content.raw("        return Self::from_rows(rows);\n");
     }
-    content.raw("        if !root.enter_field(\"rows\")? {\n");
-    content.raw(
-        "            return Err(RuntimeDataError::not_found(\"missing required field `rows`\"));\n",
-    );
-    content.raw("        }\n");
-    content.raw("        if root.is_null() {\n");
-    content.raw("            root.exit()?;\n");
-    content.raw(
-        "            return Err(RuntimeDataError::not_found(\"missing required field `rows`\"));\n",
-    );
-    content.raw("        }\n");
+    content.raw("        root.enter_required_field(\"rows\")?;\n");
+    content.raw("        let row_count = root.read_row_count()?;\n");
     content.raw("        let mut rows = Vec::new();\n");
-    content.raw("        for row_index in 0..root.len()? {\n");
+    content.raw("        for row_index in 0..row_count {\n");
     content.raw("            root.enter_index(row_index)?;\n");
     content.raw_fmt(format_args!(
         "            rows.push({}::read_from_reader(&root)?);\n",
         names.row_type_name(&table.name)?
     ));
-    content.raw("            root.exit()?;\n");
+    content.raw("            root.exit_field()?;\n");
     content.raw("        }\n");
-    content.raw("        root.exit()?;\n");
+    content.raw("        root.exit_field()?;\n");
+    content.raw("        root.ensure_exhausted()?;\n");
     content.raw("        Self::from_rows(rows)\n");
     content.raw("    }\n\n");
     content.raw_fmt(format_args!(
@@ -165,22 +148,23 @@ fn render_object_table(
     }
     content.raw("    pub fn load(loader: &impl RuntimeDataLoader) -> RuntimeDataResult<Self> {\n");
     content.raw("        let root = loader.open(Self::DATA_FILE)?;\n");
-    if table.data_format == BINARY_FORMAT {
+    if table.schema_revision.is_some() {
         content.raw(concat!(
-            "        if root.schema_revision() != Some(Self::EXPECTED_SCHEMA_REVISION) {\n",
-            "            return Err(RuntimeDataError::schema_mismatch(format!(\n",
-            "                \"schema revision mismatch for `{}`: expected {}, got {:?}\",\n",
-            "                Self::DATA_FILE,\n",
-            "                Self::EXPECTED_SCHEMA_REVISION,\n",
-            "                root.schema_revision()\n",
-            "            )));\n",
+            "        if let Some(schema_revision) = root.schema_revision() {\n",
+            "            if schema_revision != Self::EXPECTED_SCHEMA_REVISION {\n",
+            "                return Err(RuntimeDataError::schema_mismatch(format!(\n",
+            "                    \"schema revision mismatch for `{}`: expected {}, got {:?}\",\n",
+            "                    Self::DATA_FILE,\n",
+            "                    Self::EXPECTED_SCHEMA_REVISION,\n",
+            "                    schema_revision\n",
+            "                )));\n",
+            "            }\n",
             "        }\n",
         ));
-        content.raw("        let value = Self::read_from_reader(&root)?;\n");
-        content.raw("        root.ensure_exhausted()?;\n");
-        content.raw("        return Ok(value);\n");
     }
-    content.raw("        Self::read_from_reader(&root)\n");
+    content.raw("        let value = Self::read_from_reader(&root)?;\n");
+    content.raw("        root.ensure_exhausted()?;\n");
+    content.raw("        Ok(value)\n");
     content.raw("    }\n");
     content.raw("}\n\n");
     Ok(())

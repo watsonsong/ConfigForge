@@ -4,7 +4,6 @@
 use crate::{
     Result,
     codegen::{CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriter},
-    exporter::BINARY_FORMAT,
 };
 
 use super::types::CppNames;
@@ -23,42 +22,27 @@ pub(super) fn render_table_source(
         repository_type, repository_type
     ));
     content.raw("    auto root = loader.Open(DataFile);\n");
-    if table.data_format == BINARY_FORMAT {
+    if table.schema_revision.is_some() {
         content.raw(concat!(
-            "    if (!root->SchemaRevision() || *root->SchemaRevision() != ExpectedSchemaRevision) {\n",
-            "        throw std::runtime_error(\"schema revision mismatch for binary runtime data\");\n",
+            "    if (root->SchemaRevision() && *root->SchemaRevision() != ExpectedSchemaRevision) {\n",
+            "        throw std::runtime_error(\"schema revision mismatch for runtime data\");\n",
             "    }\n",
         ));
-        content.raw("    const std::size_t row_count = root->ReadRowCount();\n");
-        content.raw_fmt(format_args!("    std::vector<{}> rows;\n", row_type));
-        content.raw("    for (std::size_t row_index = 0; row_index < row_count; ++row_index) {\n");
-        content.raw_fmt(format_args!(
-            "        rows.push_back({row_reader_function}(*root));\n"
-        ));
-        content.raw("    }\n");
-        content.raw("    root->EnsureExhausted();\n");
-        content.raw("    return FromRows(std::move(rows));\n");
-        content.raw("}\n\n");
-    } else {
-        content.raw("    auto rows_scope = EnterRequiredField(*root, \"rows\");\n");
-        content.raw("    const std::size_t row_count = root->ReadRowCount();\n");
-        content.raw_fmt(format_args!("    std::vector<{}> rows;\n", row_type));
-        content.raw("    rows.reserve(row_count);\n");
-        content.raw("    for (std::size_t row_index = 0; row_index < row_count; ++row_index) {\n");
-        content.raw("        root->EnterIndex(row_index);\n");
-        content.raw("        ReaderScope row_scope(*root);\n");
-        content.raw_fmt(format_args!(
-            "        rows.push_back({row_reader_function}(*root));\n"
-        ));
-        content.raw("    }\n");
-        content.raw("    return FromRows(std::move(rows));\n");
-        content.raw("}\n\n");
     }
-    if table.data_format == BINARY_FORMAT {
-        // named path has already been emitted in the `else` branch.
-    } else {
-        return render_from_rows_source(content, table, names, &repository_type, &row_type);
-    }
+    content.raw("    auto rows_scope = EnterRequiredField(*root, \"rows\");\n");
+    content.raw("    const std::size_t row_count = root->ReadRowCount();\n");
+    content.raw_fmt(format_args!("    std::vector<{}> rows;\n", row_type));
+    content.raw("    rows.reserve(row_count);\n");
+    content.raw("    for (std::size_t row_index = 0; row_index < row_count; ++row_index) {\n");
+    content.raw("        root->EnterIndex(row_index);\n");
+    content.raw("        ReaderScope row_scope(*root);\n");
+    content.raw_fmt(format_args!(
+        "        rows.push_back({row_reader_function}(*root));\n"
+    ));
+    content.raw("    }\n");
+    content.raw("    root->EnsureExhausted();\n");
+    content.raw("    return FromRows(std::move(rows));\n");
+    content.raw("}\n\n");
     render_from_rows_source(content, table, names, &repository_type, &row_type)
 }
 
@@ -176,33 +160,27 @@ pub(super) fn render_game_data_load_source(
                 names.repository_type_name(&table.name)?
             )),
             CodeTableKind::Object => {
-                if table.data_format == BINARY_FORMAT {
-                    let row_type = names.row_type_name(&table.name)?;
-                    content.raw_fmt(format_args!(
-                        "    auto root_{member_name} = loader.Open({row_type}::DataFile);\n"
-                    ));
+                let row_type = names.row_type_name(&table.name)?;
+                content.raw_fmt(format_args!(
+                    "    auto root_{member_name} = loader.Open({row_type}::DataFile);\n"
+                ));
+                if table.schema_revision.is_some() {
                     content.raw_fmt(format_args!(
                         concat!(
-                            "    if (!root_{member_name}->SchemaRevision() ||\n",
+                            "    if (root_{member_name}->SchemaRevision() &&\n",
                             "        *root_{member_name}->SchemaRevision() != {row_type}::ExpectedSchemaRevision) {{\n",
-                            "        throw std::runtime_error(\"schema revision mismatch for binary runtime data\");\n",
+                            "        throw std::runtime_error(\"schema revision mismatch for runtime data\");\n",
                             "    }}\n",
                         ),
                         member_name = member_name,
                         row_type = row_type,
                     ));
-                    content.raw_fmt(format_args!(
-                        "    data.{member_name} = {}(*root_{member_name});\n",
-                        names.reader_function_name(&row_type)?
-                    ));
-                    content.raw_fmt(format_args!("    root_{member_name}->EnsureExhausted();\n"));
-                } else {
-                    content.raw_fmt(format_args!(
-                        "    data.{member_name} = {}(*loader.Open({}::DataFile));\n",
-                        names.reader_function_name(&names.row_type_name(&table.name)?)?,
-                        names.row_type_name(&table.name)?
-                    ));
                 }
+                content.raw_fmt(format_args!(
+                    "    data.{member_name} = {}(*root_{member_name});\n",
+                    names.reader_function_name(&row_type)?
+                ));
+                content.raw_fmt(format_args!("    root_{member_name}->EnsureExhausted();\n"));
             }
         }
     }

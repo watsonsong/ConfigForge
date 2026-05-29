@@ -140,7 +140,7 @@ fn builds_code_model_with_types_tables_and_indexes() {
             .iter()
             .any(|index| index.name == "by_rarity" && !index.unique)
     );
-    assert_eq!(model.tables[0].data_file, "items.json");
+    assert_eq!(model.tables[0].data_file, "items");
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn code_model_marks_object_tables_and_skips_indexes() {
     assert_eq!(model.tables[0].kind, CodeTableKind::Object);
     assert!(model.tables[0].indexes.is_empty());
     assert!(model.tables[0].foreign_keys.is_empty());
-    assert_eq!(model.tables[0].data_file, "game_config.json");
+    assert_eq!(model.tables[0].data_file, "game_config");
 }
 
 #[test]
@@ -275,13 +275,13 @@ fn code_model_includes_fragment_structs_and_optional_row_members() {
 }
 
 #[test]
-fn code_model_defaults_data_file_to_json_when_no_runtime_file_is_available() {
+fn code_model_uses_logical_table_name_when_no_runtime_file_is_available() {
     let meta = linked_fixture();
     let linked = meta.link().expect("fixture meta should link");
 
     let model = build_code_model(&linked, &TargetTags::empty(), &[]).expect("model");
 
-    assert_eq!(model.tables[0].data_file, "items.json");
+    assert_eq!(model.tables[0].data_file, "items");
 }
 
 #[test]

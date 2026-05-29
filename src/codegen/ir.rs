@@ -5,9 +5,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
     ConfigForgeError, Result,
-    exporter::{
-        BINARY_FORMAT, JSON_FORMAT, MESSAGEPACK_FORMAT, RuntimeDataFile, binary_schema_revision,
-    },
+    exporter::{JSON_FORMAT, RuntimeDataFile, binary_schema_revision},
     meta::{LinkedField, LinkedFragmentPayload, LinkedMetaModel, PrimitiveFieldType, TableKind},
 };
 
@@ -120,12 +118,8 @@ pub struct GeneratedFile {
 pub(crate) fn build_code_model(
     meta: &LinkedMetaModel<'_>,
     target_tags: &crate::meta::TargetTags,
-    runtime_data_files: &[RuntimeDataFile],
+    _runtime_data_files: &[RuntimeDataFile],
 ) -> Result<CodeModel> {
-    let data_file_index = runtime_data_files
-        .iter()
-        .map(|file| (file.table_name.as_str(), file))
-        .collect::<HashMap<_, _>>();
     let enums = meta
         .model
         .enums
@@ -305,20 +299,9 @@ pub(crate) fn build_code_model(
                 Vec::new()
             };
 
-            let runtime_file = data_file_index.get(table_meta.meta.name.as_str()).copied();
-            let data_file = runtime_file
-                .map(|file| file.path.clone())
-                // Code-only targets still need a stable conventional data path in generated APIs.
-                .unwrap_or_else(|| format!("{}.json", table_meta.meta.name));
-            let data_format = runtime_file
-                .map(|file| file.format.clone())
-                .unwrap_or_else(|| JSON_FORMAT.to_owned());
-            ensure_supported_runtime_format(&data_format)?;
-            let schema_revision = if data_format == BINARY_FORMAT {
-                Some(binary_schema_revision(table_meta, target_tags))
-            } else {
-                None
-            };
+            let data_file = table_meta.meta.name.clone();
+            let data_format = JSON_FORMAT.to_owned();
+            let schema_revision = Some(binary_schema_revision(table_meta, target_tags));
             let primary_index = indexes
                 .iter()
                 .find(|index| index.primary)
@@ -488,15 +471,6 @@ fn code_type_from_linked(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<Cod
             name: struct_type.meta.name.clone(),
         },
     })
-}
-
-fn ensure_supported_runtime_format(format: &str) -> Result<()> {
-    match format {
-        JSON_FORMAT | MESSAGEPACK_FORMAT | BINARY_FORMAT => Ok(()),
-        other => Err(ConfigForgeError::Validation(format!(
-            "unsupported runtime data format `{other}` for code generation"
-        ))),
-    }
 }
 
 pub fn require_non_empty_index_fields(model: &CodeModel) -> Result<()> {

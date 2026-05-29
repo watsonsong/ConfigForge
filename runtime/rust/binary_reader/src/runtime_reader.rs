@@ -20,6 +20,7 @@ struct BinaryState {
     bytes: Vec<u8>,
     offset: usize,
     schema_revision: u64,
+    next_row_index: usize,
     records: Vec<RecordState>,
 }
 
@@ -60,6 +61,7 @@ impl BinaryRuntimeDataReader {
                 bytes,
                 offset: 16,
                 schema_revision,
+                next_row_index: 0,
                 records: Vec::new(),
             })),
         })
@@ -73,10 +75,16 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         ))
     }
 
-    fn enter_index(&self, _index: usize) -> RuntimeDataResult<()> {
-        Err(RuntimeDataError::unsupported(
-            "binary reader does not support random index access",
-        ))
+    fn enter_index(&self, index: usize) -> RuntimeDataResult<()> {
+        let mut state = self.state.borrow_mut();
+        if index != state.next_row_index {
+            return Err(RuntimeDataError::decode(format!(
+                "binary reader rows must be read sequentially: expected index {}, got {index}",
+                state.next_row_index
+            )));
+        }
+        state.next_row_index += 1;
+        Ok(())
     }
 
     fn exit(&self) -> RuntimeDataResult<()> {
@@ -141,7 +149,10 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
 
     fn read_row_count(&self) -> RuntimeDataResult<usize> {
         let value = read_varuint(&mut self.state.borrow_mut())?;
-        usize::try_from(value).map_err(|_| RuntimeDataError::decode("row count exceeds usize"))
+        let row_count = usize::try_from(value)
+            .map_err(|_| RuntimeDataError::decode("row count exceeds usize"))?;
+        self.state.borrow_mut().next_row_index = 0;
+        Ok(row_count)
     }
 
     fn begin_record(&self, optional_slot_count: usize) -> RuntimeDataResult<()> {
@@ -251,7 +262,7 @@ impl RuntimeDataLoader for FsBinaryRuntimeDataLoader {
     type Reader = BinaryRuntimeDataReader;
 
     fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {
-        let full_path = safe_join(&self.root, path)?;
+        let full_path = safe_join(&self.root, &with_extension(path, "bin"))?;
         let bytes = fs::read(&full_path)
             .map_err(|source| RuntimeDataError::io(full_path.display().to_string(), source))?;
         BinaryRuntimeDataReader::from_bytes(bytes)
@@ -313,6 +324,14 @@ fn safe_join(root: &Path, relative: &str) -> RuntimeDataResult<PathBuf> {
         }
     }
     Ok(result)
+}
+
+fn with_extension(logical_path: &str, extension: &str) -> String {
+    if Path::new(logical_path).extension().is_some() {
+        logical_path.to_owned()
+    } else {
+        format!("{logical_path}.{extension}")
+    }
 }
 
 #[cfg(test)]

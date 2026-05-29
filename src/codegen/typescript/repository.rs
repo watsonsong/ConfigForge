@@ -4,7 +4,6 @@
 use crate::{
     Result,
     codegen::{CodeIndex, CodeTable, CodeWriter},
-    exporter::BINARY_FORMAT,
 };
 
 use super::types::TypeScriptNames;
@@ -97,54 +96,22 @@ pub(super) fn render_table(
         names.repository_type_name(&table.name)?
     ));
     content.raw("    const root = await loader.open(this.dataFile);\n");
-    if table.data_format == BINARY_FORMAT {
+    if table.schema_revision.is_some() {
         content.raw("    const schemaRevision = root.schemaRevision?.();\n");
         content.raw(concat!(
-            "    if (schemaRevision === undefined || BigInt(schemaRevision) !== this.expectedSchemaRevision) {\n",
+            "    if (schemaRevision !== undefined && BigInt(schemaRevision) !== this.expectedSchemaRevision) {\n",
             "      throw new Error(`schema revision mismatch for ${this.dataFile}`);\n",
             "    }\n",
         ));
-        content.raw("    if (!root.readRowCount) { throw new Error('binary reader does not support row count'); }\n");
-        content.raw("    if (!root.ensureExhausted) { throw new Error('binary reader does not support EOF validation'); }\n");
-        content.raw("    const rowCount = root.readRowCount();\n");
-        content.raw_fmt(format_args!(
-            "    const rows: {}[] = [];\n",
-            names.row_type_name(&table.name)?
-        ));
-        content.raw("    for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {\n");
-        content.raw_fmt(format_args!(
-            "      rows.push({}(root));\n",
-            names.reader_function_name(&names.row_type_name(&table.name)?)?
-        ));
-        content.raw("    }\n");
-        content.raw("    root.ensureExhausted();\n");
-        content.raw_fmt(format_args!(
-            "    return new {}(rows ?? []);\n",
-            names.repository_type_name(&table.name)?
-        ));
-        content.raw("  }\n\n");
-        content.raw_fmt(format_args!(
-            "  rows(): readonly {}[] {{ return this.rows_; }}\n\n",
-            names.row_type_name(&table.name)?
-        ));
-        for index in &table.indexes {
-            render_index_function(content, table, index, names)?;
-        }
-        content.raw("}\n\n");
-        return Ok(());
     }
-    content.raw(
-        "    if (!root.enterField(\"rows\")) { throw new Error('missing required field rows'); }\n",
-    );
-    content.raw(
-        "    if (root.isNull()) { root.exit(); throw new Error('missing required field rows'); }\n",
-    );
+    content.raw("    enterRequiredField(root, \"rows\");\n");
+    content.raw("    const rowCount = readRowCount(root);\n");
     content.raw_fmt(format_args!(
         "    const rows: {}[] = [];\n",
         names.row_type_name(&table.name)?
     ));
     content.raw("    try {\n");
-    content.raw("      for (let rowIndex = 0; rowIndex < root.length(); rowIndex++) {\n");
+    content.raw("      for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {\n");
     content.raw("        root.enterIndex(rowIndex);\n");
     content.raw("        try {\n");
     content.raw_fmt(format_args!(
@@ -152,12 +119,13 @@ pub(super) fn render_table(
         names.reader_function_name(&names.row_type_name(&table.name)?)?
     ));
     content.raw("        } finally {\n");
-    content.raw("          root.exit();\n");
+    content.raw("          exitField(root);\n");
     content.raw("        }\n");
     content.raw("      }\n");
     content.raw("    } finally {\n");
-    content.raw("      root.exit();\n");
+    content.raw("      exitField(root);\n");
     content.raw("    }\n");
+    content.raw("    root.ensureExhausted?.();\n");
     content.raw_fmt(format_args!(
         "    return new {}(rows ?? []);\n",
         names.repository_type_name(&table.name)?

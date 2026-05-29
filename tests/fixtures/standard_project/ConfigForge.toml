@@ -21,18 +21,22 @@ input = "data"
 output = "out/client_data"
 format = "json"
 
+[[targets.data]]
+name = "bin"
+input = "data"
+output = "out/client_binary_data"
+format = "bin"
+
 [[targets.code]]
 language = "typescript"
 output = "out/client_code/typescript"
 module_name = "referenceGameConfig"
-data = "json"
 
 [[targets.code]]
 language = "cpp"
 output = "out/client_code/cpp"
 module_name = "ReferenceGameConfig"
 namespace = "reference::game::config"
-data = "json"
 
 [[targets]]
 name = "server"
@@ -44,37 +48,13 @@ input = "data"
 output = "out/server_data"
 format = "messagepack"
 
-[[targets.code]]
-language = "rust"
-output = "out/server_code/rust"
-module_name = "reference_game_config"
-data = "messagepack"
-
-[[targets]]
-name = "binary"
-tags = ["client"]
-
 [[targets.data]]
 name = "bin"
 input = "data"
-output = "out/binary_data"
+output = "out/server_binary_data"
 format = "bin"
 
 [[targets.code]]
 language = "rust"
-output = "out/binary_code/rust"
-module_name = "reference_game_config_binary"
-data = "bin"
-
-[[targets.code]]
-language = "typescript"
-output = "out/binary_code/typescript"
-module_name = "referenceGameConfigBinary"
-data = "bin"
-
-[[targets.code]]
-language = "cpp"
-output = "out/binary_code/cpp"
-module_name = "ReferenceGameConfigBinary"
-namespace = "reference::game::config"
-data = "bin"
+output = "out/server_code/rust"
+module_name = "reference_game_config"

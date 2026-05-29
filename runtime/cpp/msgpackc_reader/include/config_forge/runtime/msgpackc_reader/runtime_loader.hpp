@@ -79,6 +79,8 @@ inline std::string SafeJoinPath(const std::string& root, const std::string& logi
 }
 #endif
 
+inline std::string WithExtension(const std::string& logical_path, const std::string& extension);
+
 class MessagePackValueReader final : public CONFIG_FORGE_RUNTIME_CPP_READER {
 public:
     explicit MessagePackValueReader(const std::string& bytes)
@@ -275,7 +277,7 @@ public:
     explicit MessagePackFsRuntimeDataLoader(std::string data_dir) : data_dir_(std::move(data_dir)) {}
 
     std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Open(const std::string& path) override {
-        std::ifstream file(SafeJoinPath(data_dir_, path), std::ios::binary);
+        std::ifstream file(SafeJoinPath(data_dir_, WithExtension(path, ".msgpack")), std::ios::binary);
         if (!file) {
             throw std::runtime_error("failed to open runtime data: " + path);
         }
@@ -286,5 +288,14 @@ public:
 private:
     std::string data_dir_;
 };
+
+inline std::string WithExtension(const std::string& logical_path, const std::string& extension) {
+    const std::size_t slash = logical_path.find_last_of("/\\");
+    const std::size_t dot = logical_path.find_last_of('.');
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
+        return logical_path;
+    }
+    return logical_path + extension;
+}
 
 } // namespace config_forge_runtime

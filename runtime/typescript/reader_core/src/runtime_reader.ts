@@ -85,6 +85,10 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
     throw new Error("reader value is not array/object");
   }
 
+  readRowCount(): number {
+    return this.length();
+  }
+
   asNumber(): number {
     let parsed: number;
     const value = this.currentValue();

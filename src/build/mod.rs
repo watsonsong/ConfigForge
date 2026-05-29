@@ -22,7 +22,6 @@ use crate::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, GeneratedFile,
         builtin_generators,
     },
-    exporter::RuntimeDataFile,
     meta::TargetTags,
     project::ProjectConfig,
 };
@@ -79,7 +78,7 @@ fn collect_generated_code_artifacts(
     target: &NormalizedTargetConfig,
     target_tags: &TargetTags,
     linked_meta: &crate::meta::LinkedMetaModel<'_>,
-    runtime_data_results: Vec<RuntimeConfigForgeResult>,
+    _runtime_data_results: Vec<RuntimeConfigForgeResult>,
     pool: &ThreadPool,
 ) -> Result<Vec<Artifact>> {
     let generated_at = generated_at();
@@ -89,7 +88,6 @@ fn collect_generated_code_artifacts(
         project,
         target_tags,
         linked_meta,
-        runtime_data_results: &runtime_data_results,
         generated_at: &generated_at,
         generators: &generators,
     };
@@ -118,7 +116,6 @@ struct CodegenTaskContext<'a, 'meta> {
     project: &'a CodeExportProject,
     target_tags: &'a TargetTags,
     linked_meta: &'meta crate::meta::LinkedMetaModel<'meta>,
-    runtime_data_results: &'a [RuntimeConfigForgeResult],
     generated_at: &'a str,
     generators: &'a [Box<dyn CodeGenerator>],
 }
@@ -134,7 +131,6 @@ fn generate_code_task(
                 code_task.task.language
             ))
         })?;
-    let runtime_data_files = selected_runtime_data_files(context, code_task)?;
     let mut code_target = CodeExportTarget::from_task(code_task.task.clone(), generator)?;
     code_target.out_dir = context.project_root.join(&code_target.out_dir);
     let input = CodeExportInput {
@@ -142,31 +138,10 @@ fn generate_code_task(
         target_tags: context.target_tags.clone(),
         project: context.project.clone(),
         target: code_target,
-        runtime_data_files,
+        runtime_data_files: Vec::new(),
         generated_at: context.generated_at.to_owned(),
     };
     generator.generate(&input)
-}
-
-fn selected_runtime_data_files(
-    context: &CodegenTaskContext<'_, '_>,
-    code_task: &NormalizedCodegenTaskConfig,
-) -> Result<Vec<RuntimeDataFile>> {
-    if let Some(data_name) = &code_task.selected_data_name {
-        let result = context
-            .runtime_data_results
-            .iter()
-            .find(|result| result.data_name == *data_name)
-            .ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "code task for `{}` selected data task `{data_name}`, but no runtime data was exported for it",
-                    code_task.task.language
-                ))
-            })?;
-        Ok(result.files.clone())
-    } else {
-        Ok(Vec::new())
-    }
 }
 
 fn generated_at() -> String {

@@ -233,20 +233,18 @@ format = "messagepack"
 language = "rust"
 output = "Generated/Code/Rust"
 module_name = "game_config"
-data = "messagepack"
 
 [[targets.code]]
 language = "typescript"
 output = "Generated/Code/TypeScript"
 module_name = "gameConfig"
-data = "json"
 ```
 
 Runtime data 导出任务使用 `[[targets.data]]` 数组形式；每个任务有独立 `name`、`input`、`output` 和 `format`。这样同一个 target 可以同时输出 JSON、MessagePack 等多套 runtime data。Project Config 使用 `[[targets.data]]` 数组表表达 runtime data 导出任务。
 
 一个 target 可以声明 0 个、1 个或多个代码生成任务。代码生成任务放在 `[[targets.code]]` 中；每个任务有独立语言、输出目录和语言专属参数。这样同一个 target 可以同时输出 runtime data、Rust 服务端访问代码、C++ 客户端访问代码和 TypeScript 工具链访问代码。
 
-当同一 target 有多套 runtime data 时，code task 通过 `data = "<targets.data.name>"` 选择自己默认引用的数据产物集合。若 target 只有一个 data task，`data` 可省略并自动使用该任务；若 target 有多个 data task，生成会暴露默认数据文件路径的 code task 必须显式声明 `data`，避免 JSON/MessagePack 默认文件名不确定。code-only target 可以没有 data task，此时仍按 `<table>.json` 推导默认文件名，但正式项目推荐显式配置 data task。
+生成代码是格式无关的：code task 只依赖 Meta 和 target tags，不绑定某个 data task，也不能配置 `data = "..."`。生成代码中的 table data file 常量使用逻辑表名（例如 `items`），实际打开 `items.json`、`items.msgpack` 或 `items.bin` 由接入方选择的 RuntimeDataLoader / RuntimeDataReader 实现负责。
 
 `tags` 是 target 的核心上下文。每个 tag 代表一个导出特性，例如：
 
@@ -294,7 +292,6 @@ format = "json"
 language = "rust"
 output = "Generated/Code/Rust"
 module_name = "game_config"
-data = "json"
 file_header = "// Generated for {{project.name}} at {{datetime}}\n// {{project.copyright}}"
 keyword_conflict = "suffix_underscore"
 
@@ -317,7 +314,6 @@ derive_serde = true
 language = "typescript"
 output = "Generated/Code/TypeScript"
 module_name = "gameConfig"
-data = "json"
 file_header = "// {{project.name}} - {{project.desc}}\n// Generated at {{datetime}}"
 keyword_conflict = "suffix_underscore"
 
@@ -334,7 +330,7 @@ readonly_fields = true
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `name` | 单 data task 可省略，规范化为 `default` | 当前 target 内稳定唯一的 data task 名称，用于 code task 通过 `data` 引用；多 data task 时必填。 |
+| `name` | 单 data task 可省略，规范化为 `default` | 当前 target 内稳定唯一的 data task 名称；多 data task 时必填。 |
 | `input` | 必填 | Source data 根目录。相对路径以 project root 或所在 import 片段目录为基准；Meta source path 以该目录为搜索基础。只有声明 `targets.data` 时才读取 source data。 |
 | `output` | 必填 | Runtime data 输出目录。相对路径以 project root 或所在 import 片段目录为基准。 |
 | `format` | `json` | Runtime data 格式。当前实现支持 `json` 和 `messagepack`。 |
@@ -350,7 +346,7 @@ data task `name` 规范：
 
 多个 data task 可以共享同一个 `input`，实现应复用同一次加载、归一化和校验结果后写出不同格式。不同 `input` 表示同一 target tags 下的不同数据集，必须分别加载、归一化、校验并派生 DataSet-dependent ExportView。不同 data task 的最终输出文件路径不能相互覆盖，也不能与 code task 或未来 special exporter 的输出冲突；冲突检查基于规范化绝对 artifact path。
 
-`RuntimeDataFile.path` 表示相对当前 data artifact root / runtime loader root 的资源路径，例如 `items.json`，不是相对 code output 或 project root 的路径。生成代码只透传该路径常量，具体 runtime loader 决定如何把它映射到文件系统、包内资源或引擎资源。
+`RuntimeDataFile.path` 表示相对当前 data artifact root / runtime loader root 的真实资源路径，例如 `items.json`。生成代码不再透传真实文件路径，而是使用逻辑表名（例如 `items`）；具体 runtime loader 决定如何把逻辑名映射到文件系统、包内资源或引擎资源中的具体格式文件。
 
 Planned / Not implemented：`engine`、`special_exporters`、POT、Asset Manifest、target-level `language` / `data_format` / `output` 属于未来扩展，当前 Project Config 不应使用这些字段。
 
@@ -361,7 +357,7 @@ Planned / Not implemented：`engine`、`special_exporters`、POT、Asset Manifes
 | `language` | 必填 | 代码生成语言，例如 `rust`、`cpp`、`typescript`。 |
 | `output` | 必填 | 当前代码生成任务的输出目录。相对路径以 project root 或所在 import 片段目录为基准。 |
 | `module_name` | language 默认值 | 模块名、包名、namespace 或生成文件前缀。具体语义由语言生成器决定。 |
-| `data` | 自动推导 | 当前 code task 默认引用的 runtime data task 名称。target 只有一个 data task 时可省略；多个 data task 时应显式声明。 |
+| `data` | 不支持 | 禁止设置。生成代码格式无关，只依赖 Meta；格式选择由运行时传入的 loader / reader 实现决定。 |
 | `namespace` | 未设置 | 可选命名空间；C++ 可映射为 namespace，Rust/TS 可作为模块组织提示。 |
 | `file_header` | 生成器默认文件头 | 可选文件头模板。为空字符串表示不生成文件头。 |
 | `keyword_conflict` | `suffix_underscore` | 生成标识符与目标语言关键字冲突时的处理策略。 |

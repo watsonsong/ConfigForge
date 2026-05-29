@@ -30,7 +30,7 @@ fn emits_loader_table_and_index_helpers() {
     assert!(content.contains("RuntimeDataError"));
     assert!(content.contains("RuntimeDataResult"));
     assert!(content.contains("CONFIG_FORGE_READER_CONTRACT_VERSION"));
-    assert!(content.contains("pub const DATA_FILE: &'static str = \"items.json\";"));
+    assert!(content.contains("pub const DATA_FILE: &'static str = \"items\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("RuntimeDataDecoder"));
     assert!(!content.contains("load_bytes"));

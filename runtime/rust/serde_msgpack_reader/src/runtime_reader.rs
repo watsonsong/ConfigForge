@@ -181,7 +181,7 @@ impl FsMessagePackRuntimeDataLoader {
     }
 
     pub fn open_reader(&self, path: &str) -> RuntimeDataResult<MessagePackValueReader> {
-        let full_path = safe_join(&self.data_dir, path)?;
+        let full_path = safe_join(&self.data_dir, &with_extension(path, "msgpack"))?;
         let bytes = fs::read(&full_path)
             .map_err(|error| RuntimeDataError::io(full_path.display().to_string(), error))?;
         let value = rmp_serde::from_slice(&bytes)
@@ -227,6 +227,14 @@ fn safe_join(root: &Path, logical_path: &str) -> RuntimeDataResult<PathBuf> {
     }
 
     Ok(root.join(normalized))
+}
+
+fn with_extension(logical_path: &str, extension: &str) -> String {
+    if Path::new(logical_path).extension().is_some() {
+        logical_path.to_owned()
+    } else {
+        format!("{logical_path}.{extension}")
+    }
 }
 
 #[cfg(test)]

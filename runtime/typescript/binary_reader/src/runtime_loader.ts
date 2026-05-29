@@ -12,6 +12,7 @@ const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
 export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   private offset = 16;
+  private nextRowIndex = 0;
   private readonly revision: bigint;
   private readonly records: Array<{ bitmap: Uint8Array<ArrayBufferLike>; nextOptionalSlot: number }> = [];
 
@@ -38,8 +39,11 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     throw new Error("binary reader does not support named fields");
   }
 
-  enterIndex(_index: number): void {
-    throw new Error("binary reader does not support random index access");
+  enterIndex(index: number): void {
+    if (index !== this.nextRowIndex) {
+      throw new Error(`binary reader rows must be read sequentially: expected index ${this.nextRowIndex}, got ${index}`);
+    }
+    this.nextRowIndex++;
   }
 
   exit(): void {
@@ -89,7 +93,9 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   }
 
   readRowCount(): number {
-    return this.readVaruintAsNumber("row count");
+    const rowCount = this.readVaruintAsNumber("row count");
+    this.nextRowIndex = 0;
+    return rowCount;
   }
 
   beginRecord(optionalSlotCount: number): void {

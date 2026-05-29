@@ -144,9 +144,7 @@ pub trait RuntimeDataReader {
             .ok_or_else(|| RuntimeDataError::decode(format!("unknown enum value `{value}`")))
     }
     fn read_row_count(&self) -> RuntimeDataResult<usize> {
-        Err(RuntimeDataError::unsupported(
-            "positional runtime reader is not supported",
-        ))
+        self.len()
     }
     fn begin_record(&self, _optional_slot_count: usize) -> RuntimeDataResult<()> {
         Ok(())
@@ -185,9 +183,7 @@ pub trait RuntimeDataReader {
         ))
     }
     fn ensure_exhausted(&self) -> RuntimeDataResult<()> {
-        Err(RuntimeDataError::unsupported(
-            "positional runtime reader is not supported",
-        ))
+        Ok(())
     }
 }
 

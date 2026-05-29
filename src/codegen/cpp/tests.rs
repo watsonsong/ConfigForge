@@ -39,7 +39,7 @@ fn emits_loader_and_repository_declarations() {
             "inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";"
         )
     );
-    assert!(content.contains("static constexpr const char* DataFile = \"items.json\";"));
+    assert!(content.contains("static constexpr const char* DataFile = \"items\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("IRuntimeDataDecoder"));
     assert!(!content.contains("IDataFileLoader"));
@@ -127,16 +127,13 @@ fn emits_object_table_as_typed_object_not_repository() {
     assert!(content.contains(
         "virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;"
     ));
-    assert!(content.contains("static constexpr const char* DataFile = \"game_config.json\";"));
+    assert!(content.contains("static constexpr const char* DataFile = \"game_config\";"));
     assert!(content.contains("const GameConfigRow& GameConfig() const"));
     assert!(content.contains("GameConfigRow game_config_;"));
     assert!(!content.contains("class GameConfigTable"));
     assert!(!content.contains("Rows() const"));
-    assert!(
-        source.contains(
-            "data.game_config_ = ReadGameConfigRow(*loader.Open(GameConfigRow::DataFile));"
-        )
-    );
+    assert!(source.contains("auto root_game_config_ = loader.Open(GameConfigRow::DataFile);"));
+    assert!(source.contains("data.game_config_ = ReadGameConfigRow(*root_game_config_);"));
 }
 
 #[test]

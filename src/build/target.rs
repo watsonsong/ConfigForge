@@ -29,7 +29,6 @@ pub(crate) struct NormalizedTargetDataConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NormalizedCodegenTaskConfig {
     pub(crate) task: CodegenTaskConfig,
-    pub(crate) selected_data_name: Option<String>,
 }
 
 impl TargetConfig {
@@ -113,36 +112,19 @@ fn validate_data_task_name(target_name: &str, name: &str) -> Result<()> {
 
 fn normalize_codegen_tasks(
     target_name: &str,
-    data_tasks: &[NormalizedTargetDataConfig],
+    _data_tasks: &[NormalizedTargetDataConfig],
     code_tasks: &[CodegenTaskConfig],
 ) -> Result<Vec<NormalizedCodegenTaskConfig>> {
     code_tasks
         .iter()
         .map(|task| {
-            let selected_data_name = match (&task.data, data_tasks.len()) {
-                (Some(name), _) => {
-                    if data_tasks.iter().any(|data_task| data_task.name == *name) {
-                        Some(name.clone())
-                    } else {
-                        return Err(ConfigForgeError::Validation(format!(
-                            "target `{target_name}` code task for `{}` references unknown data task `{name}`",
-                            task.language
-                        )));
-                    }
-                }
-                (None, 0) => None,
-                (None, 1) => Some(data_tasks[0].name.clone()),
-                (None, _) => {
-                    return Err(ConfigForgeError::Validation(format!(
-                        "target `{target_name}` code task for `{}` must set `data` when multiple data tasks are configured",
-                        task.language
-                    )));
-                }
-            };
-            Ok(NormalizedCodegenTaskConfig {
-                task: task.clone(),
-                selected_data_name,
-            })
+            if task.data.is_some() {
+                return Err(ConfigForgeError::Validation(format!(
+                    "target `{target_name}` code task for `{}` must not set `data`; generated code is format-agnostic and only depends on Meta",
+                    task.language
+                )));
+            }
+            Ok(NormalizedCodegenTaskConfig { task: task.clone() })
         })
         .collect()
 }
@@ -179,14 +161,10 @@ mod tests {
         let normalized = target.normalize().expect("target should normalize");
 
         assert_eq!(normalized.data[0].name, DEFAULT_DATA_TASK_NAME);
-        assert_eq!(
-            normalized.code[0].selected_data_name.as_deref(),
-            Some(DEFAULT_DATA_TASK_NAME)
-        );
     }
 
     #[test]
-    fn explicit_default_data_binding_matches_single_unnamed_data_task() {
+    fn rejects_codegen_data_binding() {
         let target = TargetConfig {
             name: "client".to_owned(),
             tags: Vec::new(),
@@ -210,16 +188,15 @@ mod tests {
             }],
         };
 
-        let normalized = target.normalize().expect("target should normalize");
+        let error = target.normalize().unwrap_err();
 
-        assert_eq!(
-            normalized.code[0].selected_data_name.as_deref(),
-            Some(DEFAULT_DATA_TASK_NAME)
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("must not set `data`"))
         );
     }
 
     #[test]
-    fn rejects_ambiguous_codegen_data_binding() {
+    fn codegen_does_not_require_data_binding_when_multiple_data_tasks_exist() {
         let target = TargetConfig {
             name: "client".to_owned(),
             tags: Vec::new(),
@@ -251,11 +228,7 @@ mod tests {
             }],
         };
 
-        let error = target.normalize().unwrap_err();
-
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("must set `data`"))
-        );
+        target.normalize().expect("target should normalize");
     }
 
     #[test]

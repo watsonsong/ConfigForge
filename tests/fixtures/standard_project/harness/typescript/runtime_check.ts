@@ -18,15 +18,16 @@ if (!dataDir && !binaryDataDir) {
 }
 
 const binaryLoader = binaryDataDir
-  ? new SyncFsRuntimeDataLoader(binaryDataDir, decodeBinaryRuntimeData)
+  ? new SyncFsRuntimeDataLoader(binaryDataDir, decodeBinaryRuntimeData, "bin")
   : undefined;
 const loader: RuntimeDataLoader | undefined = dataDir
-  ? new SyncFsRuntimeDataLoader(dataDir, decodeJsonValue)
+  ? new SyncFsRuntimeDataLoader(dataDir, decodeJsonValue, "json")
   : undefined;
 if (dataDir) {
   const messagePackLoader: RuntimeDataLoader = new SyncFsRuntimeDataLoader(
     dataDir,
     createMessagePackRuntimeDecoder(() => ({ rows: [] })),
+    "msgpack",
   );
   void messagePackLoader;
 }

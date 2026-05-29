@@ -26,12 +26,13 @@ export class FsRuntimeDataLoader implements RuntimeDataLoaderLike {
   constructor(
     dataDir: string,
     private readonly decoder: RuntimeReaderDecoder,
+    private readonly extension?: string,
   ) {
     this.resolvedDataDir = pathModule.resolve(dataDir);
   }
 
   async open(path: string): Promise<RuntimeDataReaderLike> {
-    const fullPath = safeJoin(this.resolvedDataDir, path);
+    const fullPath = safeJoin(this.resolvedDataDir, withExtension(path, this.extension));
     const bytes = await fs.promises.readFile(fullPath);
     return this.decoder(bytes, path);
   }
@@ -43,14 +44,22 @@ export class SyncFsRuntimeDataLoader implements RuntimeDataLoaderLike {
   constructor(
     dataDir: string,
     private readonly decoder: SyncRuntimeReaderDecoder,
+    private readonly extension?: string,
   ) {
     this.resolvedDataDir = pathModule.resolve(dataDir);
   }
 
   open(path: string): RuntimeDataReaderLike {
-    const fullPath = safeJoin(this.resolvedDataDir, path);
+    const fullPath = safeJoin(this.resolvedDataDir, withExtension(path, this.extension));
     return this.decoder(fs.readFileSync(fullPath), path);
   }
+}
+
+function withExtension(logicalPath: string, extension?: string): string {
+  if (!extension || /(^|[/\\])[^/\\]*\.[^/\\]+$/.test(logicalPath)) {
+    return logicalPath;
+  }
+  return `${logicalPath}.${extension.replace(/^\./, "")}`;
 }
 
 function safeJoin(resolvedRoot: string, logicalPath: string): string {

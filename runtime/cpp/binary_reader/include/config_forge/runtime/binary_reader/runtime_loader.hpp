@@ -77,6 +77,8 @@ inline std::string SafeJoinPath(const std::string& root, const std::string& logi
 }
 #endif
 
+inline std::string WithExtension(const std::string& logical_path, const std::string& extension);
+
 class BinaryRuntimeDataReader final : public CONFIG_FORGE_RUNTIME_CPP_READER {
 public:
     explicit BinaryRuntimeDataReader(std::vector<std::uint8_t> bytes)
@@ -91,8 +93,13 @@ public:
         ParseHeader();
     }
 
-    void EnterIndex(std::size_t) override {
-        throw std::runtime_error("binary reader does not support random index access");
+    void EnterIndex(std::size_t index) override {
+        if (index != state_->next_row_index) {
+            throw std::runtime_error(
+                "binary reader rows must be read sequentially: expected index " +
+                std::to_string(state_->next_row_index) + ", got " + std::to_string(index));
+        }
+        ++state_->next_row_index;
     }
 
     std::int64_t AsInt64() const override { return ReadNextInt64Value(); }
@@ -122,7 +129,9 @@ public:
     }
 
     std::size_t ReadRowCount() override {
-        return CheckedSize(ReadVaruint(), "row count");
+        const std::size_t row_count = CheckedSize(ReadVaruint(), "row count");
+        state_->next_row_index = 0;
+        return row_count;
     }
 
     void BeginRecord(std::size_t optional_slot_count) override {
@@ -179,6 +188,7 @@ private:
         std::vector<std::uint8_t> bytes;
         std::size_t offset = 16;
         std::uint64_t schema_revision = 0;
+        std::size_t next_row_index = 0;
         std::vector<RecordState> records;
     };
 
@@ -335,7 +345,7 @@ public:
     explicit BinaryFsRuntimeDataLoader(std::string data_dir) : data_dir_(std::move(data_dir)) {}
 
     std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Open(const std::string& path) override {
-        std::ifstream file(SafeJoinPath(data_dir_, path), std::ios::binary);
+        std::ifstream file(SafeJoinPath(data_dir_, WithExtension(path, ".bin")), std::ios::binary);
         if (!file) {
             throw std::runtime_error("failed to open runtime data: " + path);
         }
@@ -346,5 +356,14 @@ public:
 private:
     std::string data_dir_;
 };
+
+inline std::string WithExtension(const std::string& logical_path, const std::string& extension) {
+    const std::size_t slash = logical_path.find_last_of("/\\");
+    const std::size_t dot = logical_path.find_last_of('.');
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
+        return logical_path;
+    }
+    return logical_path + extension;
+}
 
 } // namespace config_forge_runtime

@@ -37,7 +37,7 @@ pub(super) fn render_runtime_interfaces(content: &mut CodeWriter) {
         "    virtual bool ReadNextBool() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
         "    virtual std::string ReadNextString() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
         "    virtual std::uint64_t ReadEnumOrdinal() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
-        "    virtual void EnsureExhausted() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
+        "    virtual void EnsureExhausted() {}\n",
         "};\n\n",
         "class IRuntimeDataLoader {\n",
         "public:\n",

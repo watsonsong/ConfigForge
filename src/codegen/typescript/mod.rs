@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Result, exporter::BINARY_FORMAT};
+use crate::Result;
 
 use super::{
     CaseStyle, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeTableKind, CodeWriter,
@@ -208,36 +208,32 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                     names.repository_type_name(&table.name)?
                 )),
                 CodeTableKind::Object => {
-                    if table.data_format == BINARY_FORMAT {
+                    content.raw_fmt(format_args!(
+                        "      {}: await Promise.resolve(loader.open({:?})).then(root => {{\n",
+                        names.field_name(&table.name)?,
+                        table.data_file
+                    ));
+                    if let Some(revision) = table.schema_revision {
                         content.raw_fmt(format_args!(
                             concat!(
-                                "      {}: await Promise.resolve(loader.open({:?})).then(root => {{\n",
                                 "        const schemaRevision = root.schemaRevision?.();\n",
-                                "        if (schemaRevision === undefined || BigInt(schemaRevision) !== {}n) {{\n",
+                                "        if (schemaRevision !== undefined && BigInt(schemaRevision) !== {revision}n) {{\n",
                                 "          throw new Error(`schema revision mismatch for {}`);\n",
                                 "        }}\n",
-                                "        if (!root.ensureExhausted) {{\n",
-                                "          throw new Error('binary reader does not support EOF validation');\n",
-                                "        }}\n",
-                                "        const value = {}(root);\n",
-                                "        root.ensureExhausted();\n",
-                                "        return value;\n",
-                                "      }}),\n",
                             ),
-                            names.field_name(&table.name)?,
                             table.data_file,
-                            table.schema_revision.unwrap_or_default(),
-                            table.data_file,
-                            names.reader_function_name(&names.row_type_name(&table.name)?)?
-                        ))
-                    } else {
-                        content.raw_fmt(format_args!(
-                            "      {}: {}(await loader.open({:?})),\n",
-                            names.field_name(&table.name)?,
-                            names.reader_function_name(&names.row_type_name(&table.name)?)?,
-                            table.data_file
-                        ))
+                            revision = revision
+                        ));
                     }
+                    content.raw_fmt(format_args!(
+                        concat!(
+                            "        const value = {}(root);\n",
+                            "        root.ensureExhausted?.();\n",
+                            "        return value;\n",
+                            "      }}),\n",
+                        ),
+                        names.reader_function_name(&names.row_type_name(&table.name)?)?
+                    ));
                 }
             }
         }

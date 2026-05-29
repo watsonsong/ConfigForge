@@ -37,7 +37,7 @@ fn emits_async_loader_and_maps() {
     assert!(
         content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;")
     );
-    assert!(content.contains("static readonly dataFile = \"items.json\";"));
+    assert!(content.contains("static readonly dataFile = \"items\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("RuntimeDataDecoder"));
     assert!(!content.contains("loadBytes"));
@@ -157,8 +157,11 @@ fn emits_object_table_as_typed_object_not_repository() {
     );
     assert!(content.contains("readonly gameConfig: GameConfigRow;"));
     assert!(
-        content.contains("gameConfig: readGameConfigRow(await loader.open(\"game_config.json\"))")
+        content.contains(
+            "gameConfig: await Promise.resolve(loader.open(\"game_config\")).then(root =>"
+        )
     );
+    assert!(content.contains("const value = readGameConfigRow(root);"));
     assert!(!content.contains("export class GameConfigTable"));
     assert!(!content.contains("rows(): readonly GameConfigRow[]"));
 }

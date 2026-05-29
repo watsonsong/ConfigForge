@@ -202,7 +202,7 @@ pub struct CodeExportTarget {
 | `out_dir` | 生成代码输出目录。 |
 | `options` | 从 `targets.code` 解析出的通用和语言专属选项，包括文件头、命名策略、关键字冲突策略、语言扩展参数等。 |
 
-`CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.code]]`。runtime data 的具体格式由 code task 引用的 `[[targets.data]]` 任务选择，并通过 `RuntimeDataFile.format` 显式传递给 CodeModel；code-only target 没有 data artifact 时当前默认推导 `<table>.json` 与 `format = "json"`。
+`CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.code]]`。生成代码必须保持格式无关：CodeModel 只依赖 Meta 和 target tags，table data file 常量使用逻辑表名（例如 `items`），实际解析 JSON / MessagePack / bin 由运行时传入的 loader / reader 实现决定。
 
 ### 9.4.2.1 Runtime data format
 
@@ -260,7 +260,6 @@ pub struct NormalizedTargetDataConfig {
 
 pub struct NormalizedCodegenTaskConfig {
     pub task: CodegenTaskConfig,
-    pub selected_data_name: Option<String>,
 }
 ```
 
@@ -271,8 +270,8 @@ pub struct NormalizedCodegenTaskConfig {
 - target 内 data task 多于 1 个时，每个 data task 必须有非空 `name`，且名称在 target 内唯一。
 - data task name 大小写敏感；只允许 ASCII 字母、数字、`_`、`-`，且必须以字母或数字开头和结尾。
 - normalized model 中 `NormalizedTargetDataConfig.name` 和 `RuntimeConfigForgeResult.data_name` 都使用非空 `String`。
-- code task 的 `data` 为空时：若 target 有 0 个 data task，`selected_data_name = None`，传入空 `runtime_data_files` 并让 CodeModel 默认推导 `.json`；若只有 1 个 data task，自动填入 `selected_data_name`；若有多个 data task，配置校验报错。
-- code task 的 `data` 非空时，必须能在当前 target 的 data task 中找到同名任务。
+- code task 的 `data` 必须为空；若配置 `data = "..."`，归一化阶段报错。生成代码格式无关，不绑定任意 data task。
+- 无论 target 有 0 个、1 个还是多个 data task，code task 都只接收 Meta、target tags 和语言配置。
 - `input`、`output`、`code.output` 相对路径在加载 Project Config 片段时按片段文件所在目录归一化；入口 `ConfigForge.toml` 的相对路径等价于 project root 相对路径。
 - DataLoader 的 `data_root` 使用 `TargetDataConfig.input`，Meta `source` / `sources[].path` 再相对该 data root join。
 
@@ -284,7 +283,7 @@ pub struct NormalizedCodegenTaskConfig {
 | `MessagePack` | `.msgpack` | `rmp-serde` 写出同一 payload envelope 的 MessagePack bytes。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 打开 MessagePack payload 为通用 reader；生成代码读取 rows 并构造 typed rows。 |
 | `Bin` | `.bin` | 写入 `magic = "CFGB"`、format version、header size、`u64 schema_revision` 后，按 target-aware schema 顺序紧密排列 record，不保存 tag/name。 | generated code 携带每张表的 expected revision，binary reader 校验 magic/version/header/revision 后按 positional layout 顺序读取。 |
 
-`RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json`、`items.msgpack` 或 `items.bin`。该路径相对当前 data artifact root / runtime loader root，不相对 code output 或 project root。CodeModel 优先使用 runtime data export 阶段返回的真实路径；当 target 没有 data export artifact 时，才默认推导 `<table>.json` 与 `format = "json"`。`RuntimeDataFile` / CodeModel 必须显式携带 `format`，unknown format 在 build/codegen 阶段报错，不允许仅靠后缀推断 reader layout；`bin` 还会在 CodeModel 中保存 schema revision。
+`RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json`、`items.msgpack` 或 `items.bin`。该路径相对当前 data artifact root / runtime loader root，不相对 code output 或 project root。CodeModel 不使用这些真实 artifact path 生成加载常量；每张表统一使用逻辑表名。`bin` 的 schema revision 由 CodeModel 基于 Meta 和 target tags 计算，用于运行时 reader 暴露 revision 时进行可选校验。
 
 当一个 target 同时导出多套 data task 时，`build_target` 应按 data task 分组返回：
 
@@ -298,7 +297,7 @@ pub struct RuntimeConfigForgeResult {
 }
 ```
 
-`write_generated_code` 在构造每个 `CodeExportInput` 时只传入该 code task 的 `selected_data_name` 对应的 `RuntimeConfigForgeResult.files`，避免同一 table 同时出现 `items.json`、`items.msgpack` 和 `items.bin` 时 CodeModel 无法确定默认文件名和 reader layout。未来 manifest 可以记录所有 data task；codegen 输入只保留当前 code task 所需的视图。
+`write_generated_code` 在构造每个 `CodeExportInput` 时传入空 `runtime_data_files`。同一 table 同时出现 `items.json`、`items.msgpack` 和 `items.bin` 时也不会影响 CodeModel；格式选择由运行时 loader / reader 完成。未来 manifest 可以记录所有 data task 的真实 artifact path，但不进入 codegen 决策。
 
 ### 9.4.2.2 `CodegenOptions`
 
@@ -440,7 +439,7 @@ pub struct CodeExportInput<'meta> {
 }
 ```
 
-`project` 来自 Project Config，用于渲染文件头模板；`target_tags` 来自当前 target 的 `tags`，用于构造目标相关的 CodeModel；`runtime_data_files` 来自数据导出阶段的 Artifact 规划，用于生成加载函数中的默认资源名。例如 JSON target 中 `items.json` 对应 `ItemsTable::DATA_FILE`，MessagePack target 中 `items.msgpack` 对应同一个常量。`generated_at` 由 exporter 注入，用于渲染文件头中的 `{{datetime}}`。
+`project` 来自 Project Config，用于渲染文件头模板；`target_tags` 来自当前 target 的 `tags`，用于构造目标相关的 CodeModel；`runtime_data_files` 当前由 build 传入空列表，保留为未来 manifest / 兼容扩展入口，不参与默认资源名决策。生成代码中的默认资源名始终是逻辑表名，例如 `ItemsTable::DATA_FILE = "items"`。`generated_at` 由 exporter 注入，用于渲染文件头中的 `{{datetime}}`。
 
 ### 9.4.4 `GeneratedFile`
 
@@ -766,7 +765,7 @@ pub struct ItemsTable {
 }
 
 impl ItemsTable {
-    pub const DATA_FILE: &'static str = "items.msgpack";
+    pub const DATA_FILE: &'static str = "items";
 
     pub fn load(loader: &impl RuntimeDataLoader) -> Result<Self, String>;
     fn read_row(reader: &impl RuntimeDataReader) -> Result<ItemRow, String>;
@@ -837,7 +836,7 @@ struct ItemRow {
 
 class ItemsTable {
 public:
-    static constexpr const char* DataFile = "items.msgpack";
+    static constexpr const char* DataFile = "items";
 
     static ItemsTable Load(IRuntimeDataLoader& loader);
     static ItemRow ReadRow(const IRuntimeDataReader& reader);
@@ -910,7 +909,7 @@ export interface ItemRow {
 }
 
 export class ItemsTable {
-  static readonly dataFile = "items.msgpack";
+  static readonly dataFile = "items";
 
   private readonly rows_: ItemRow[];
   private readonly byId: Map<number, ItemRow>;
@@ -1032,7 +1031,7 @@ reader 需要支持两种读取模式：
 加载器实现只负责打开资源并提供通用 reader；生成代码负责解析业务对象：
 
 ```text
-loader.open("items.msgpack")
+loader.open("items")
   -> read bytes/text
   -> decode to generic reader/value/cursor
   -> generated code reads `rows`
@@ -1387,7 +1386,7 @@ loader = "fs"                      # fs / fetch / none / custom
 配置校验规则：
 
 - `adapter` 的 language 必须与 code target language 匹配，例如 TypeScript target 不能选择 `cpp/rapidjson_reader`。
-- `adapter` 的 format 必须与 code task 绑定的 `targets.data.format` 匹配：JSON data task 不能选择 MessagePack-only adapter，MessagePack data task 不能选择 JSON-only adapter。
+- `adapter` 的 format 不与 code task 绑定；同一份生成代码可以配合不同格式 adapter 使用。若未来显式配置 adapter，校验只需确认该 adapter 支持目标语言和 reader contract。
 - `loader` 必须被所选语言和 adapter 支持，例如 `fetch` 只对提供 fetch transport 的 TypeScript/browser adapter 合法。
 - `emit = "reference"` 时，必须能解析到对应 package/crate/CMake target；无法解析时应在 config 阶段报错或生成明确 diagnostic，不应延迟到编译/运行时。
 - `emit = "copy"` 时，应记录 adapter source version 和 supported contract range；默认不覆盖用户已修改文件，除非显式配置 `overwrite = true` 或输出到全新 generated adapter 目录。
@@ -1506,7 +1505,7 @@ pub enum TargetDataFormat {
 
 写出流程：
 
-1. Project Config load 后先构造 `NormalizedTargetConfig`，完成 data task name 规范化、code task `selected_data_name` 自动绑定和引用校验。
+1. Project Config load 后先构造 `NormalizedTargetConfig`，完成 data task name 规范化，并拒绝 code task 的 `data` 字段。
 2. `build_target` 消费当前 target 的 `Vec<NormalizedTargetDataConfig>`。没有 data task 时跳过 runtime data 导出，进入 code-only 流程。
 3. 按 `NormalizedTargetDataConfig.input` 分组。每个不同 input 构造一次 `DataLoadPlan`，使用 `DataLoader::new(data_root)` 加载；Meta 中 source path 继续由 `data_root.join(source.path)` 解析。
 4. 对每个不同 input 的 DataSet 执行 normalize、target validation，并派生 DataSet-dependent ExportView；同 input 的 JSON / MessagePack / Bin 等多个 data task 复用该结果。不同 input 即使属于同一 target，也不能复用另一个 input 的 DataSet / validation view / concrete ExportView。
@@ -1514,7 +1513,7 @@ pub enum TargetDataFormat {
 6. `Json` 使用 `serde_json::to_vec_pretty` 写出 `<table>.json`。
 7. `MessagePack` 使用 `rmp_serde::to_vec_named` 或等价 named-field 编码写出 `<table>.msgpack`。
 8. 每个 data task 返回独立的 `RuntimeConfigForgeResult { data_name, input, output, format, files }`，其中 `RuntimeDataFile { table_name, path, format }` 必须使用真实写出的文件名和规范格式名。
-9. `write_generated_code` 根据每个 `NormalizedCodegenTaskConfig.selected_data_name` 选择对应 `RuntimeConfigForgeResult.files` 传入 `CodeExportInput`，让 CodeModel 使用当前 code task 绑定的数据文件名。
+9. `write_generated_code` 不选择 data task，统一向 `CodeExportInput` 传入空 `runtime_data_files`，让 CodeModel 使用逻辑表名。
 10. Artifact path 规划必须跨所有 data task、code task 和未来 special exporter 统一检查，不能只在 codegen 内检查 generated code 的重复路径。
 
 依赖建议：
@@ -1527,13 +1526,13 @@ rmp-serde = "1"
 
 ## 9.11.2 Codegen 读取实现方案
 
-CodeModel 构建时需要使用 `RuntimeDataFile`：
+CodeModel 构建时使用逻辑 table name 作为 runtime load path：
 
-- 若 `runtime_data_files` 中存在 table 对应 artifact，使用 artifact path。
-- 若不存在，则默认推导 `<table>.json` 和 `format = "json"`。
+- 忽略 runtime data artifact 的真实 path，避免 codegen 绑定具体格式。
+- 每张表默认使用 `<table>` 作为逻辑 data file path。
 - 每个 `CodeTable` 保留 `data_file`，语言生成器用它生成常量。
-- 每个 `CodeTable` 同时保留 data format；支持 `bin` 后，生成代码据此选择 named-field parser 或 positional parser。
-- 同一个 `CodeExportInput.runtime_data_files` 中同一 table 只能出现一个 artifact；多个 data format 的选择在 exporter 编排层通过 `NormalizedCodegenTaskConfig.selected_data_name` 完成，不进入 CodeModel 决策。
+- 生成代码不根据 data format 切换 parser；reader contract 负责把 named-field 或 packed layout 映射到同一组 `EnterRequiredField` / `EnterOptionalField` / `ReadRowCount` / `EnterIndex` / scalar API。
+- 多个 data format 的选择不进入 CodeModel 决策。
 
 生成代码的 load 流程统一为：
 
@@ -1613,10 +1612,10 @@ CodegenTaskConfig.language
 3. Project Config schema：接受 `[[targets.data]]`；旧 `[targets.data]` table 形态不作为兼容目标；空 data task name、多 data task 缺 name、非法字符、重复 name 都应报错；单 data task 省略 name 时规范化为 `default`。
 4. 多 data task：同一 target 同时配置 JSON 与 MessagePack，两个 output 都生成对应文件，且同 input 的数据加载/normalize/validation 可以复用。
 5. 多 input：不同 input 分别加载、normalize、validation 并派生 DataSet-dependent ExportView，不能复用另一个 input 的 ExportView。
-6. code task 绑定：target 只有一个 data task 时 `CodegenTaskConfig.data` 可省略并在 normalized model 中填入 `selected_data_name`；多个 data task 且省略 `data` 时报错；显式 `data = "json"` / `data = "messagepack"` 时 `CodeExportInput.runtime_data_files` 使用对应真实路径；显式引用不存在 data task 时报错。
+6. code task 格式无关：`CodegenTaskConfig.data` 设置时必须报错；target 有多个 data task 时，codegen 仍只生成一份逻辑表名代码。
 7. 路径语义：入口 `ConfigForge.toml` 中 data input/output/code output 相对 project root；import 片段中的相对路径相对片段目录；Meta source path 相对 data input；`RuntimeDataFile.path` 相对 data artifact root。
 8. artifact 冲突：data task 之间、data task 与 code task 之间、多个 code task 之间的输出路径冲突都应报错。执行冲突检查前应做不依赖文件存在性的 lexical path normalization，至少消除 `.` / `..` 造成的字符串差异；对已存在路径可视需要再做 canonicalize，但不能要求输出目录预先存在。
-9. CodeModel 默认文件名：没有 runtime data artifact 时，默认推导 `.json`。
+9. CodeModel 默认文件名：始终使用逻辑表名，不包含 `.json` / `.msgpack` / `.bin` 后缀。
 10. Rust 生成代码包含：
    - 通用 `RuntimeDataLoader` / `RuntimeDataReader`；
    - 每张表的 `DATA_FILE`；
@@ -1629,7 +1628,7 @@ CodegenTaskConfig.language
    - 通用 `RuntimeDataLoader` / `RuntimeDataReader`；
    - 每张表的 `dataFile`；
    - row interface、table parser、table repository 和 index helper。
-13. CLI integration：分别构建 JSON target、MessagePack target，以及同 target 多 data + 多 code 的标准工程，验证 runtime data 文件和 generated code 文件同时生成，并检查代码中引用的默认文件名与绑定 data task 一致。
+13. CLI integration：分别构建 JSON target、MessagePack target，以及同 target 多 data + 多 code 的标准工程，验证 runtime data 文件和 generated code 文件同时生成，并检查代码中引用逻辑表名且不随 data format 改变。
 
 ## 9.14 文件组织策略
 

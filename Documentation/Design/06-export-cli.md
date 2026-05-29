@@ -57,8 +57,8 @@ format = "messagepack"
 - `json` 使用 `.json` 后缀，`messagepack` 使用 `.msgpack` 后缀，`bin` 使用 `.bin` 后缀。
 - JSON / MessagePack 承载同一套 named payload：table meta 摘要和 normalized rows；字段名使用 Meta canonical name。`bin` 使用同一 target-aware export view，但 wire layout 不保存 name/tag，按 generated code 共享的 schema 顺序紧密排列。
 - 同一 target 下多个 data task 如果 `input` 相同，执行层应只加载、归一化、校验一次，再分发给不同格式 exporter。
-- 同一个 target 的 code generation 必须感知它引用的 runtime data task，生成的默认数据文件名必须与对应 data task 的 `format` 和真实 artifact 路径一致。
-- code-only target 可以不声明 `targets.data`，但如果仍生成读取 runtime data 的代码，默认按 `json` 规划文件名；正式项目推荐 data 与 code 在同一个 target 中同时声明，避免格式不一致。
+- 同一个 target 的 code generation 不绑定 runtime data task。生成代码使用逻辑表名作为默认加载路径，具体文件后缀和格式由运行时传入的 loader / reader 实现决定。
+- code-only target 可以不声明 `targets.data`；生成代码仍可通过同一套逻辑表名加载 API 在运行时读取任意受支持格式的数据。
 - Project Config 使用 `[[targets.data]]` 数组表表达 runtime data 导出任务。
 
 ### 6.1.2 Code Generation Task
@@ -70,7 +70,6 @@ format = "messagepack"
 language = "cpp"
 output = "Generated/Cpp"
 module_name = "GameConfig"
-data = "messagepack"
 namespace = "game::config"
 file_header = "// {{project.name}}\n// {{project.copyright}}\n// Generated at {{datetime}}"
 keyword_conflict = "suffix_underscore"
@@ -90,7 +89,7 @@ namespace = "game::config"
 
 - `language` 决定使用哪个代码生成器。
 - `output` 是该代码生成任务的根目录，不与 target runtime data output 混淆。
-- `data` 指向当前 target 内的 runtime data task 名称。只有一个 data task 时可省略；多个 data task 时必须显式指定，避免默认文件名引用不确定。
+- `data` 不支持设置。生成代码格式无关，只依赖 Meta 和 target tags；格式选择由接入方在运行时传入的 loader / reader 决定。
 - `file_header` 是文本模板，支持 `{{project.name}}`、`{{project.desc}}`、`{{project.copyright}}`、`{{datetime}}`。
 - `keyword_conflict` 控制 Meta 名称转换成目标语言标识符后碰到关键字时如何处理。
 - `naming` 控制 type、field、function、constant 等符号的大小写组织。
@@ -196,7 +195,7 @@ reader 的基础语义必须覆盖当前 Meta 类型：int、float、bool、stri
 - 提供一个同时支持多种格式的 reader；
 - 在引擎侧复用已有资源加载和反序列化 cursor。
 
-格式选择由 code task 引用的 `targets.data` 任务决定，并影响导出的 table data file 后缀；生成代码保留 data file path，并按 data task format 生成对应的通用读取路径。若 target 同时导出 JSON 与 MessagePack，可以分别配置 TypeScript code task 引用 `data = "json"`、C++ code task 引用 `data = "messagepack"`。无论 Meta 新增多少表和字段，接入方的 RuntimeDataLoader 接口都不应变化；变化只体现在重新生成的解析代码中。
+格式选择由运行时传入的 loader / reader 实现决定。runtime data task 只负责导出具体格式文件及后缀；生成代码保留逻辑 table name，并通过同一套通用读取路径工作。若 target 同时导出 JSON、MessagePack 与 bin，同一份生成代码可以分别配合 JSON loader、MessagePack loader 或 binary loader 加载对应格式。无论 Meta 新增多少表和字段，接入方的 RuntimeDataLoader 接口都不应变化；变化只体现在重新生成的解析代码中。
 
 ### 6.2.2 标准 RuntimeDataReader 实现包
 
@@ -367,7 +366,7 @@ config-forge --project ConfigForge.toml --target client
 2. 按 `--target` 找到目标 target。
 3. 合并所有配置片段中的 `enums`、`structs`、`tables` 并完成 link/validate。
 4. 如果 target 声明 `[[targets.data]]`，再按 data task 读取 Data source、归一化、校验并写出 runtime data；同 input 的多格式 data task 可复用加载结果，不同 input 必须分别派生 DataSet-dependent ExportView。
-5. 如果 target 声明 `[[targets.code]]`，按每个 code task 的语言、输出目录和绑定 data task 生成代码。
+5. 如果 target 声明 `[[targets.code]]`，按每个 code task 的语言和输出目录生成格式无关代码。
 6. 汇总 runtime data 和 generated code artifacts，统一完成路径归一化、稳定排序和冲突检查。
 7. 按 `--dry-run` / `--write-mode` 写出 artifact，或在 dry-run 模式下只返回写入计划。
 8. 未声明的任务不读取对应输入、不产生对应输出。例如 code-only target 不读取 Data。

@@ -110,6 +110,10 @@ function readEnumIndex(reader: RuntimeDataReader, variants: readonly string[]): 
   return index;
 }
 
+function readRowCount(reader: RuntimeDataReader): number {
+  return reader.readRowCount ? reader.readRowCount() : reader.length();
+}
+
 function readRequiredInt64(reader: RuntimeDataReader, name: string): number {
   return requiredField(reader, name, (value) => value.readNextInt64 ? value.readNextInt64() : value.asNumber());
 }

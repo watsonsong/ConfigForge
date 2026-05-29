@@ -243,19 +243,19 @@ fn builds_target_from_project_config() {
     assert!(rust_code.contains("pub use config_forge_runtime_reader_core"));
     assert!(!rust_code.contains("pub struct GameRulesTable"));
     assert!(rust_code.contains("RuntimeDataLoader"));
-    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.json\""));
-    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"game_rules.json\""));
+    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items\""));
+    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"game_rules\""));
     assert!(!rust_code.contains("RuntimeDataFormat"));
     assert!(rust_code.contains("pub fn get_by_id"));
     assert!(rust_code.contains("Self::read_from_reader(&root)"));
     assert!(cpp_code.contains("class IRuntimeDataLoader"));
     assert!(cpp_code.contains("class IRuntimeDataReader"));
-    assert!(cpp_code.contains("static constexpr const char* DataFile = \"items.json\""));
+    assert!(cpp_code.contains("static constexpr const char* DataFile = \"items\""));
     assert!(
         cpp_code
             .contains("virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path)")
     );
-    assert!(cpp_code.contains("static constexpr const char* DataFile = \"game_rules.json\""));
+    assert!(cpp_code.contains("static constexpr const char* DataFile = \"game_rules\""));
     assert!(!cpp_code.contains("class GameRulesTable"));
     assert!(!cpp_code.contains("RuntimeDataFormat"));
     assert!(cpp_code.contains("const ItemsRow* GetById"));
@@ -264,7 +264,7 @@ fn builds_target_from_project_config() {
     assert!(cpp_source.contains("loader.Open(GameRulesRow::DataFile)"));
     assert!(ts_code.contains("export interface RuntimeDataLoader"));
     assert!(ts_code.contains("export interface RuntimeDataReader"));
-    assert!(ts_code.contains("static readonly dataFile = \"items.json\""));
+    assert!(ts_code.contains("static readonly dataFile = \"items\""));
     assert!(ts_code.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader"));
     assert!(!ts_code.contains("export class GameRulesTable"));
     assert!(!ts_code.contains("RuntimeDataFormat"));
@@ -414,18 +414,6 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
         .assert()
         .success()
         .stdout(predicate::str::contains("target `server` built"));
-
-    let mut binary_cmd = Command::cargo_bin("config-forge").expect("binary should build");
-    binary_cmd.args([
-        "--project",
-        project_path.to_str().expect("path should be utf8"),
-        "--target",
-        "binary",
-    ]);
-    binary_cmd
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("target `binary` built"));
 
     verify_standard_generated_rust_runtime(fixture_root);
     verify_standard_generated_cpp_runtime(fixture_root);
@@ -654,7 +642,7 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
     );
 
     let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
-    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.msgpack\""));
+    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items\""));
     assert!(rust_code.contains("pub use config_forge_runtime_reader_core"));
     assert!(!rust_code.contains("RuntimeDataFormat"));
 
@@ -662,7 +650,7 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
 }
 
 #[test]
-fn binds_code_tasks_to_selected_data_tasks() {
+fn codegen_is_format_agnostic_with_multiple_data_tasks() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let json_data_dir = temp_dir.path().join("out/data/json");
     let messagepack_data_dir = temp_dir.path().join("out/data/messagepack");
@@ -694,12 +682,10 @@ fn binds_code_tasks_to_selected_data_tasks() {
                 [[targets.code]]
                 language = "typescript"
                 output = "{}"
-                data = "json"
 
                 [[targets.code]]
                 language = "rust"
                 output = "{}"
-                data = "messagepack"
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
@@ -728,12 +714,12 @@ fn binds_code_tasks_to_selected_data_tasks() {
     assert!(messagepack_data_dir.join("items.msgpack").exists());
     let ts_code = fs::read_to_string(ts_out_dir.join("generated.ts")).expect("ts code");
     let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
-    assert!(ts_code.contains("static readonly dataFile = \"items.json\""));
-    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items.msgpack\""));
+    assert!(ts_code.contains("static readonly dataFile = \"items\""));
+    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items\""));
 }
 
 #[test]
-fn rejects_code_task_without_data_binding_when_multiple_data_tasks_exist() {
+fn rejects_code_task_data_binding() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let project_path = temp_dir.path().join("ConfigForge.toml");
     fs::write(
@@ -760,6 +746,7 @@ fn rejects_code_task_without_data_binding_when_multiple_data_tasks_exist() {
                 [[targets.code]]
                 language = "rust"
                 output = "{}"
+                data = "json"
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
@@ -781,7 +768,7 @@ fn rejects_code_task_without_data_binding_when_multiple_data_tasks_exist() {
 
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("must set `data`"));
+        .stderr(predicate::str::contains("must not set `data`"));
 }
 
 #[test]
@@ -1381,8 +1368,8 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
 
                     fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {{
                         match path {{
-                            "items.json" | "items.msgpack" => Ok(MockReader::root("items")),
-                            "game_rules.json" | "game_rules.msgpack" => Ok(MockReader::root("game_rules")),
+                            "items" => Ok(MockReader::root("items")),
+                            "game_rules" => Ok(MockReader::root("game_rules")),
                             other => Err(RuntimeDataError::not_found(format!("unexpected path: {{other}}"))),
                         }}
                     }}
@@ -1433,7 +1420,7 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 explicit MockReader(std::string path) : path_(std::move(path)) {}
 
                 void EnterIndex(std::size_t index) override {
-                    if (path_ == "items.json" && CurrentField() == "rows" && index == 0) {
+                    if (path_ == "items" && CurrentField() == "rows" && index == 0) {
                         fields_.push_back("");
                         return;
                     }
@@ -1446,31 +1433,31 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 }
 
                 std::size_t ReadRowCount() override {
-                    if (path_ == "items.json" && CurrentField() == "rows") {
+                    if (path_ == "items" && CurrentField() == "rows") {
                         return 1;
                     }
                     throw std::runtime_error("unexpected row count");
                 }
 
                 std::int64_t AsInt64() const override {
-                    if (path_ == "items.json" && CurrentField() == "id") { return 1; }
-                    if (path_ == "items.json" && CurrentField() == "price") { return 10; }
-                    if (path_ == "game_rules.json" && CurrentField() == "max_player_level") { return 60; }
-                    if (path_ == "game_rules.json" && CurrentField() == "starter_gold") { return 500; }
-                    if (path_ == "game_rules.json" && CurrentField() == "stamina_cap") { return 120; }
-                    if (path_ == "game_rules.json" && CurrentField() == "daily_reset_hour") { return 5; }
+                    if (path_ == "items" && CurrentField() == "id") { return 1; }
+                    if (path_ == "items" && CurrentField() == "price") { return 10; }
+                    if (path_ == "game_rules" && CurrentField() == "max_player_level") { return 60; }
+                    if (path_ == "game_rules" && CurrentField() == "starter_gold") { return 500; }
+                    if (path_ == "game_rules" && CurrentField() == "stamina_cap") { return 120; }
+                    if (path_ == "game_rules" && CurrentField() == "daily_reset_hour") { return 5; }
                     throw std::runtime_error("unexpected int64");
                 }
 
                 double AsDouble() const override { return static_cast<double>(AsInt64()); }
 
                 bool AsBool() const override {
-                    if (path_ == "game_rules.json" && CurrentField() == "pvp_enabled") { return true; }
+                    if (path_ == "game_rules" && CurrentField() == "pvp_enabled") { return true; }
                     throw std::runtime_error("unexpected bool");
                 }
 
                 std::string AsString() const override {
-                    if (path_ == "items.json" && CurrentField() == "name") { return "Potion"; }
+                    if (path_ == "items" && CurrentField() == "name") { return "Potion"; }
                     throw std::runtime_error("unexpected string");
                 }
 
@@ -1504,7 +1491,7 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
             class MockLoader final : public IRuntimeDataLoader {
             public:
                 std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) override {
-                    if (path == "items.json" || path == "game_rules.json") {
+                    if (path == "items" || path == "game_rules") {
                         return std::make_unique<MockReader>(path);
                     }
                     throw std::runtime_error("unexpected path");
@@ -1523,7 +1510,7 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 rules.stamina_cap = 120;
                 rules.daily_reset_hour = 5;
                 rules.pvp_enabled = true;
-                if (std::string(GameRulesRow::DataFile) != "game_rules.json") {
+                if (std::string(GameRulesRow::DataFile) != "game_rules") {
                     return 1;
                 }
                 (void)rules;
@@ -1597,7 +1584,7 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 }
 
                 enterIndex(index: number): void {
-                    if (this.path === "items.json" && this.currentField() === "rows" && index === 0) {
+                    if (this.path === "items" && this.currentField() === "rows" && index === 0) {
                         this.fields.push("");
                         return;
                     }
@@ -1612,29 +1599,29 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 }
 
                 length(): number {
-                    if (this.path === "items.json" && this.currentField() === "rows") {
+                    if (this.path === "items" && this.currentField() === "rows") {
                         return 1;
                     }
                     throw new Error("unexpected length");
                 }
 
                 asNumber(): number {
-                    if (this.path === "items.json" && this.currentField() === "id") { return 1; }
-                    if (this.path === "items.json" && this.currentField() === "price") { return 10; }
-                    if (this.path === "game_rules.json" && this.currentField() === "max_player_level") { return 60; }
-                    if (this.path === "game_rules.json" && this.currentField() === "starter_gold") { return 500; }
-                    if (this.path === "game_rules.json" && this.currentField() === "stamina_cap") { return 120; }
-                    if (this.path === "game_rules.json" && this.currentField() === "daily_reset_hour") { return 5; }
+                    if (this.path === "items" && this.currentField() === "id") { return 1; }
+                    if (this.path === "items" && this.currentField() === "price") { return 10; }
+                    if (this.path === "game_rules" && this.currentField() === "max_player_level") { return 60; }
+                    if (this.path === "game_rules" && this.currentField() === "starter_gold") { return 500; }
+                    if (this.path === "game_rules" && this.currentField() === "stamina_cap") { return 120; }
+                    if (this.path === "game_rules" && this.currentField() === "daily_reset_hour") { return 5; }
                     throw new Error("unexpected number");
                 }
 
                 asBool(): boolean {
-                    if (this.path === "game_rules.json" && this.currentField() === "pvp_enabled") { return true; }
+                    if (this.path === "game_rules" && this.currentField() === "pvp_enabled") { return true; }
                     throw new Error("unexpected bool");
                 }
 
                 asString(): string {
-                    if (this.path === "items.json" && this.currentField() === "name") { return "Potion"; }
+                    if (this.path === "items" && this.currentField() === "name") { return "Potion"; }
                     throw new Error("unexpected string");
                 }
 
@@ -1647,7 +1634,7 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
 
             const loader: RuntimeDataLoader = {
                 open(path: string): RuntimeDataReader {
-                    if (path === "items.json" || path === "game_rules.json") {
+                    if (path === "items" || path === "game_rules") {
                         return new MockReader(path);
                     }
                     throw new Error(`unexpected path: ${path}`);
@@ -1792,10 +1779,10 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
         );
 
         fs::copy(
-            fixture_root.join("out/binary_code/rust/generated.rs"),
+            fixture_root.join("out/server_code/rust/generated.rs"),
             temp_dir.path().join("generated.rs"),
         )
-        .expect("generated Rust binary code should be copied into harness");
+        .expect("generated Rust code should be copied into binary harness");
         let output = StdCommand::new("cargo")
             .args(["test", "--quiet", "--manifest-path"])
             .arg(temp_dir.path().join("Cargo.toml"))
@@ -1804,7 +1791,7 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
                 "CARGO_TARGET_DIR",
                 temp_dir.path().join(format!("target-{edition}-binary")),
             )
-            .env("BIN_DATA_DIR", fixture_root.join("out/binary_data"))
+            .env("BIN_DATA_DIR", fixture_root.join("out/server_binary_data"))
             .output()
             .expect("standard generated Rust binary runtime test should run");
         assert_command_success(
@@ -1929,15 +1916,9 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
             runtime_cpp_dir = runtime_cpp_dir.display().to_string(),
             harness_cpp = harness_cpp.display().to_string(),
             generated_cpp = generated_cpp.display().to_string(),
-            binary_generated_cpp = fixture_root
-                .join("out/binary_code/cpp/generated.cpp")
-                .display()
-                .to_string(),
+            binary_generated_cpp = generated_cpp.display().to_string(),
             generated_cpp_dir = generated_cpp_dir.display().to_string(),
-            binary_generated_cpp_dir = fixture_root
-                .join("out/binary_code/cpp")
-                .display()
-                .to_string(),
+            binary_generated_cpp_dir = generated_cpp_dir.display().to_string(),
             temp_dir = temp_dir.path().display().to_string()
         ),
     )
@@ -1967,7 +1948,7 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
     assert_command_success(output, "standard generated C++ runtime test");
 
     let output = StdCommand::new(build_dir.join("standard_binary_runtime_check"))
-        .env("DATA_DIR", fixture_root.join("out/binary_data"))
+        .env("DATA_DIR", fixture_root.join("out/client_binary_data"))
         .output()
         .expect("standard generated C++ binary runtime test should run");
     assert_command_success(output, "standard generated C++ binary runtime test");
@@ -2027,7 +2008,7 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
     )
     .expect("TypeScript tsconfig should be copied");
     fs::copy(
-        fixture_root.join("out/binary_code/typescript/generated.ts"),
+        fixture_root.join("out/client_code/typescript/generated.ts"),
         temp_dir.path().join("generated.ts"),
     )
     .expect("generated TypeScript code should be copied into harness");
@@ -2074,7 +2055,7 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
     let output = StdCommand::new("node")
         .arg(temp_dir.path().join("dist/runtime_check.js"))
         .env("DATA_DIR", fixture_root.join("out/client_data"))
-        .env("BIN_DATA_DIR", fixture_root.join("out/binary_data"))
+        .env("BIN_DATA_DIR", fixture_root.join("out/client_binary_data"))
         .output()
         .expect("standard generated TypeScript runtime test should run");
     assert_command_success(output, "standard generated TypeScript runtime test");
