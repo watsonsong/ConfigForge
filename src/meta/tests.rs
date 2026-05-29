@@ -1147,7 +1147,89 @@ fn source_path_reads_single_source_form_and_reports_missing_source() {
         meta.table("items").unwrap().source_path(),
         Some("primary.csv")
     );
+    assert_eq!(
+        meta.table("items")
+            .unwrap()
+            .source_paths()
+            .collect::<Vec<_>>(),
+        vec!["primary.csv"]
+    );
     assert_eq!(meta.table("generated").unwrap().source_path(), None);
+    assert!(meta
+        .table("generated")
+        .unwrap()
+        .source_paths()
+        .next()
+        .is_none());
+}
+
+#[test]
+fn exposes_all_declared_source_paths_for_variant_sources() {
+    let model: MetaModel = toml::from_str(
+        r#"
+            [[structs]]
+            name = "Stats"
+
+            [[structs.fields]]
+            name = "attack"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            polymorphic = true
+            sources = [
+                { provider = "csv", path = "weapons.csv", fragments = ["stats"] },
+                { provider = "csv", path = "armors.csv", fragments = ["stats"] },
+            ]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fragments]]
+            name = "stats"
+            type = "Stats"
+        "#,
+    )
+    .expect("raw meta should parse");
+
+    let table = model.table("items").unwrap();
+    assert_eq!(table.source_path(), Some("weapons.csv"));
+    assert_eq!(
+        table.source_paths().collect::<Vec<_>>(),
+        vec!["weapons.csv", "armors.csv"]
+    );
+}
+
+#[test]
+fn rejects_target_state_fields_without_runtime_semantics() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            preserve_source_order = true
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            field_number = 1
+        "#,
+    );
+    let messages = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        messages.contains("`field_number`") && messages.contains("not implemented yet"),
+        "missing field_number unsupported diagnostic in\n{messages}"
+    );
+    assert!(
+        messages.contains("`preserve_source_order`") && messages.contains("not implemented yet"),
+        "missing preserve_source_order unsupported diagnostic in\n{messages}"
+    );
 }
 
 #[test]

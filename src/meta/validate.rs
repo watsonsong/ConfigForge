@@ -55,6 +55,7 @@ fn validate_struct_meta(
             ));
         }
         validate_deprecated_field_export_flags(&owner, field, diagnostics);
+        validate_unsupported_field_options(&owner, field, diagnostics);
         validate_field_layout(model, &owner, field, diagnostics);
         validate_default_value(model, &owner, field, diagnostics);
     }
@@ -164,6 +165,7 @@ fn validate_table_meta(
 ) {
     validate_source_declaration(table, diagnostics);
     validate_object_table_restrictions(table, diagnostics);
+    validate_table_unsupported_options(table, diagnostics);
     validate_export_condition_tags(
         &format!("table `{}`", table.name),
         &table.export_when,
@@ -199,6 +201,11 @@ fn validate_table_meta(
             diagnostics,
         );
         validate_deprecated_field_export_flags(
+            &format!("table `{}`", table.name),
+            field,
+            diagnostics,
+        );
+        validate_unsupported_field_options(
             &format!("table `{}`", table.name),
             field,
             diagnostics,
@@ -736,6 +743,7 @@ fn validate_fragment_meta(
             diagnostics,
         );
         validate_deprecated_field_export_flags(&owner, field, diagnostics);
+        validate_unsupported_field_options(&owner, field, diagnostics);
         validate_field_layout(model, &owner, field, diagnostics);
         validate_default_value(model, &owner, field, diagnostics);
     }
@@ -797,6 +805,34 @@ fn validate_deprecated_field_export_flags(
                 ),
             ));
         }
+    }
+}
+
+fn validate_table_unsupported_options(table: &TableMeta, diagnostics: &mut Vec<MetaDiagnostic>) {
+    if table.kind != TableKind::Object && table.preserve_source_order {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "table `{}` uses `preserve_source_order`, but preserving source order is not implemented yet",
+                table.name
+            ),
+        ));
+    }
+}
+
+fn validate_unsupported_field_options(
+    owner: &str,
+    field: &FieldMeta,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    if field.field_number.is_some() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "{owner} field `{}` uses `field_number`, but field numbers are reserved for future schema/codegen formats and are not implemented yet",
+                field.name
+            ),
+        ));
     }
 }
 

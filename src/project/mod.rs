@@ -72,6 +72,11 @@ impl ProjectConfig {
             })
     }
 
+    /// Extracts the project-embedded Meta declarations as an unvalidated raw model.
+    ///
+    /// Project config loading validates project-level shape and paths, but build orchestration
+    /// must still call `MetaModel::link()` on this value before passing it to data, validation,
+    /// exporter, or codegen modules.
     pub(crate) fn raw_meta_model(&self) -> MetaModel {
         MetaModel {
             enums: self.enums.clone(),

@@ -7,8 +7,7 @@ use crate::Result;
 
 use super::{
     build_code_model, ir::require_non_empty_index_fields, CaseStyle, CodeExportInput,
-    CodeFragmentPayload, CodeGenerator, CodeTableKind, CodeWriter, CodeWriterConfig, GeneratedFile,
-    NamingConfig,
+    CodeFragmentPayload, CodeGenerator, CodeWriter, CodeWriterConfig, GeneratedFile, NamingConfig,
 };
 
 mod reader;

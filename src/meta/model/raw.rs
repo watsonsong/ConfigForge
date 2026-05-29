@@ -352,11 +352,23 @@ impl TableMeta {
         resolved
     }
 
+    /// Returns the primary source path for legacy callers that only handle one source.
+    ///
+    /// Multi-source tables should use [`TableMeta::source_paths`] or, in production data
+    /// loading, go through `DataLoadPlan` so fragment activation and provider checks are
+    /// preserved. When `sources` is present this returns the first declared source path.
     pub fn source_path(&self) -> Option<&str> {
         self.sources
             .first()
             .map(|source| source.path.as_str())
             .or(self.source.as_deref())
+    }
+
+    pub fn source_paths(&self) -> impl Iterator<Item = &str> {
+        self.source
+            .iter()
+            .map(String::as_str)
+            .chain(self.sources.iter().map(|source| source.path.as_str()))
     }
 
     pub fn is_variant_source_mode(&self) -> bool {
