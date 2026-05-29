@@ -20,6 +20,8 @@ const MAGIC: &[u8; 4] = b"CFGB";
 const FORMAT_VERSION: u16 = 1;
 const HEADER_SIZE: u16 = 16;
 const CONTRACT_TOKEN: &str = "config-forge-bin-v1";
+const JAVASCRIPT_SAFE_INT_MIN: i64 = -(1_i64 << 53) + 1;
+const JAVASCRIPT_SAFE_INT_MAX: i64 = (1_i64 << 53) - 1;
 
 pub struct BinaryDataExporter;
 
@@ -337,6 +339,7 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
         };
         match (primitive, scalar) {
             (PrimitiveFieldType::Int, ScalarValue::Int(value)) => {
+                ensure_javascript_safe_int(field, *value)?;
                 write_varuint(&mut self.bytes, zigzag(*value));
                 Ok(())
             }
@@ -431,6 +434,16 @@ fn expected_scalar(field: &LinkedFieldMeta<'_>) -> ConfigForgeError {
         "binary export field `{}` expected scalar value",
         field.meta.name
     ))
+}
+
+fn ensure_javascript_safe_int(field: &LinkedFieldMeta<'_>, value: i64) -> Result<()> {
+    if (JAVASCRIPT_SAFE_INT_MIN..=JAVASCRIPT_SAFE_INT_MAX).contains(&value) {
+        return Ok(());
+    }
+    Err(ConfigForgeError::Validation(format!(
+        "binary export field `{}` int value `{}` exceeds JavaScript safe integer range [{}, {}]",
+        field.meta.name, value, JAVASCRIPT_SAFE_INT_MIN, JAVASCRIPT_SAFE_INT_MAX
+    )))
 }
 
 fn set_bit(bitmap: &mut [u8], index: usize) {

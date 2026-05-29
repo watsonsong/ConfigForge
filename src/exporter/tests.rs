@@ -231,6 +231,42 @@ fn binary_exporter_writes_header_row_count_bitmap_and_values() {
 }
 
 #[test]
+fn binary_exporter_rejects_int_outside_javascript_safe_range() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+            "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table_meta = linked.table("items").expect("items table should exist");
+    let data_table = DataTable::new(
+        "items",
+        vec![BTreeMap::from([(
+            "id".to_owned(),
+            "9007199254740992".to_owned(),
+        )])],
+    );
+
+    let error = BinaryDataExporter
+        .serialize_table(table_meta, &data_table, &TargetTags::empty())
+        .expect_err("unsafe JavaScript int should be rejected for bin export");
+
+    assert!(matches!(
+        error,
+        ConfigForgeError::Validation(message)
+            if message.contains("JavaScript safe integer range") && message.contains("id")
+    ));
+}
+
+#[test]
 fn binary_exporter_omits_absent_optional_fields() {
     let meta = MetaModel::from_toml_str(
         r#"

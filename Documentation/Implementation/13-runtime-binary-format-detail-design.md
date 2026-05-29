@@ -137,6 +137,8 @@ write varuint(zigzag)
 
 理由：配置表中小整数和少量负数常见，varint 比固定 `i64` 更紧凑；ZigZag 避免负数总是占满 10 字节。
 
+跨语言 runtime contract：Meta `int` 在 Rust / C++ 中分别映射为 64-bit signed integer，在 TypeScript 中映射为 `number`，不使用 `bigint`。因此 `bin` v1 要求所有导出的 `int` 值都必须位于 JavaScript safe integer 范围 `[-(2^53 - 1), 2^53 - 1]` 内；binary exporter 必须在写入前拒绝超出范围的值，TypeScript binary reader 也必须在 decode 时校验并报错。若未来需要超过 safe integer 的整数，应新增显式 primitive type（例如大整数专用类型）及独立 codegen/runtime contract，而不是改变现有 `int` 的 TypeScript 表达。
+
 ### 13.4.3 Float
 
 Meta `float` v1 使用 IEEE-754 `f64` little-endian 固定 8 字节。
@@ -241,7 +243,7 @@ Fragment 在 binary layout 中表现为 table record 的一个 direct slot：fra
 JSON / MessagePack v1 保持现有 named、string-compatible runtime payload contract；`bin` 是 schema-aware typed binary encoding。二者共享 target-aware export 语义，但 wire scalar contract 分层：
 
 1. JSON / MessagePack 继续输出现有 named payload shape，scalar 可保持 string-compatible 表达，由 generated parser/helper 做字符串到 int/bool/float/enum 的转换。
-2. `bin` exporter 必须依据 Meta type 将 resolved value 编码为 typed bytes：int 使用 ZigZag varuint，float 使用有限 `f64`，bool 使用 0/1 byte，enum 使用 ordinal。
+2. `bin` exporter 必须依据 Meta type 将 resolved value 编码为 typed bytes：int 使用 ZigZag varuint 且必须在 JavaScript safe integer 范围内，float 使用有限 `f64`，bool 使用 0/1 byte，enum 使用 ordinal。
 3. int / float / bool / enum 的接受范围和 parse 规则必须复用 validation / generated parser helper 的同一套语义，避免三种格式对同一 cell 接受范围不同。
 4. validation 应保证 binary exporter 不会遇到非法 typed value；如果仍遇到，应作为 exporter diagnostic 或 internal invariant violation 明确报错，不能生成部分 `.bin`。
 

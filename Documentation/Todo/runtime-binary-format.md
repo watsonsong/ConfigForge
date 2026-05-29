@@ -17,9 +17,10 @@
 
 ## P1：首版发布前建议完成
 
-- [ ] 明确 TypeScript `int` contract。
-  - 选择一：TypeScript codegen 将 Meta `int` 生成为 `bigint`，binary reader 返回 `bigint`。
-  - 选择二：面向 TypeScript 的 validation/export 阶段限制 int 必须在 JavaScript safe integer 范围内，并补充文档和测试。
+- [x] 明确 TypeScript `int` contract。
+  - 已选择方案二：TypeScript codegen 继续将 Meta `int` 生成为 `number`，不生成 `bigint`。
+  - `bin` exporter 会拒绝超出 JavaScript safe integer 范围的 `int` 值，避免 TypeScript binary reader 产生不可精确表达的 number。
+  - 如果未来确实需要超过 safe integer 的整数，会额外定义特殊 primitive type，而不是改变现有 `int` contract。
 - [ ] 为 binary reader 增加可配置 decode limits。
   - 建议覆盖 `max_file_bytes`、`max_rows`、`max_string_bytes`、`max_nesting_depth`、`max_reserve`。
   - 目前已避免 C++ binary collection loader 直接对不可信 `row_count` 执行 `reserve`，但还没有完整 limits API。
