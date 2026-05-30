@@ -146,7 +146,7 @@ public:
         throw std::runtime_error("reader value is not an array");
     }
 
-    std::size_t ReadArrayLength() override {
+    std::size_t ReadArrayLength() {
         const rapidjson::Value& value = Current();
         if (value.IsArray()) {
             const std::size_t length = value.Size();
@@ -167,11 +167,11 @@ public:
                 return static_cast<std::int64_t>(parsed);
             }
         }
-        const std::string value = ScalarText();
+        const std::string text = ScalarText();
         std::size_t consumed = 0;
-        const std::int64_t parsed = std::stoll(value, &consumed);
-        if (consumed != value.size()) {
-            throw std::runtime_error("expected int64-like value, got `" + value + "`");
+        const std::int64_t parsed = std::stoll(text, &consumed);
+        if (consumed != text.size()) {
+            throw std::runtime_error("expected int64-like value, got `" + text + "`");
         }
         return parsed;
     }
@@ -181,11 +181,11 @@ public:
         if (value.IsNumber()) {
             return value.GetDouble();
         }
-        const std::string value = ScalarText();
+        const std::string text = ScalarText();
         std::size_t consumed = 0;
-        const double parsed = std::stod(value, &consumed);
-        if (consumed != value.size() || !std::isfinite(parsed)) {
-            throw std::runtime_error("expected finite double-like value, got `" + value + "`");
+        const double parsed = std::stod(text, &consumed);
+        if (consumed != text.size() || !std::isfinite(parsed)) {
+            throw std::runtime_error("expected finite double-like value, got `" + text + "`");
         }
         return parsed;
     }
@@ -203,14 +203,14 @@ public:
                 return false;
             }
         }
-        const std::string value = ScalarText();
-        if (value == "true" || value == "1") {
+        const std::string text = ScalarText();
+        if (text == "true" || text == "1") {
             return true;
         }
-        if (value == "false" || value == "0") {
+        if (text == "false" || text == "0") {
             return false;
         }
-        throw std::runtime_error("expected bool-like value, got `" + value + "`");
+        throw std::runtime_error("expected bool-like value, got `" + text + "`");
     }
 
     std::string AsString() const override {

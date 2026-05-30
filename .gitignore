@@ -1,5 +1,7 @@
 target/
 **/target/
+/runtime/cpp/build/
+/runtime/rust/*/Cargo.lock
 tests/fixtures/**/out/
 tarpaulin-report.html
 cobertura.xml

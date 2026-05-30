@@ -13,6 +13,13 @@ option(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER "Enable RapidJSON reader adapt
 option(CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER "Enable msgpack-cxx MessagePack reader adapter" OFF)
 option(CONFIG_FORGE_RUNTIME_FETCH_DEPS "Allow FetchContent for missing third-party deps" OFF)
 
+if(CONFIG_FORGE_RUNTIME_FETCH_DEPS AND NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
+    # Some pinned header-only dependencies still declare very old CMake minimum
+    # versions. Newer CMake releases require an explicit compatibility floor for
+    # those subprojects when they are fetched as part of the runtime smoke tests.
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum CMake policy version for fetched runtime dependencies")
+endif()
+
 add_library(config_forge_runtime_binary_reader INTERFACE)
 add_library(config_forge_runtime::binary_reader ALIAS config_forge_runtime_binary_reader)
 set_target_properties(config_forge_runtime_binary_reader PROPERTIES EXPORT_NAME binary_reader)
@@ -45,7 +52,17 @@ if(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER)
                 GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
                 GIT_TAG        v1.1.0
                 GIT_SHALLOW    TRUE)
-            FetchContent_MakeAvailable(rapidjson)
+            FetchContent_GetProperties(rapidjson)
+            if(NOT rapidjson_POPULATED)
+                if(POLICY CMP0169)
+                    cmake_policy(PUSH)
+                    cmake_policy(SET CMP0169 OLD)
+                endif()
+                FetchContent_Populate(rapidjson)
+                if(POLICY CMP0169)
+                    cmake_policy(POP)
+                endif()
+            endif()
             set(RAPIDJSON_INCLUDE_DIR "${rapidjson_SOURCE_DIR}/include")
         else()
             message(FATAL_ERROR "RapidJSON was not found. Install it with vcpkg/Conan/system packages, set RAPIDJSON_INCLUDE_DIR, or enable CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON.")
@@ -61,7 +78,8 @@ if(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER)
     if(TARGET RapidJSON::RapidJSON)
         target_link_libraries(config_forge_runtime_rapidjson_reader INTERFACE RapidJSON::RapidJSON)
     elseif(RAPIDJSON_INCLUDE_DIR)
-        target_include_directories(config_forge_runtime_rapidjson_reader INTERFACE ${RAPIDJSON_INCLUDE_DIR})
+        target_include_directories(config_forge_runtime_rapidjson_reader INTERFACE
+            $<BUILD_INTERFACE:${RAPIDJSON_INCLUDE_DIR}>)
     endif()
 endif()
 
@@ -86,7 +104,17 @@ if(CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER)
                 GIT_REPOSITORY https://github.com/msgpack/msgpack-c.git
                 GIT_TAG        cpp-6.1.1
                 GIT_SHALLOW    TRUE)
-            FetchContent_MakeAvailable(msgpack_cxx)
+            FetchContent_GetProperties(msgpack_cxx)
+            if(NOT msgpack_cxx_POPULATED)
+                if(POLICY CMP0169)
+                    cmake_policy(PUSH)
+                    cmake_policy(SET CMP0169 OLD)
+                endif()
+                FetchContent_Populate(msgpack_cxx)
+                if(POLICY CMP0169)
+                    cmake_policy(POP)
+                endif()
+            endif()
             set(MSGPACK_CXX_INCLUDE_DIR "${msgpack_cxx_SOURCE_DIR}/include")
         else()
             message(FATAL_ERROR "msgpack-cxx/msgpack was not found. Install it with vcpkg/Conan/system packages, set MSGPACK_CXX_INCLUDE_DIR, or enable CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON.")
@@ -106,7 +134,9 @@ if(CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER)
     elseif(TARGET msgpack::msgpack)
         target_link_libraries(config_forge_runtime_msgpackc_reader INTERFACE msgpack::msgpack)
     elseif(MSGPACK_CXX_INCLUDE_DIR)
-        target_include_directories(config_forge_runtime_msgpackc_reader INTERFACE ${MSGPACK_CXX_INCLUDE_DIR})
+        target_include_directories(config_forge_runtime_msgpackc_reader INTERFACE
+            $<BUILD_INTERFACE:${MSGPACK_CXX_INCLUDE_DIR}>)
+        target_compile_definitions(config_forge_runtime_msgpackc_reader INTERFACE MSGPACK_NO_BOOST)
     endif()
 endif()
 

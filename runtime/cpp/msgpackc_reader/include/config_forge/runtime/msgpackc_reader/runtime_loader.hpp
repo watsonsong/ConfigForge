@@ -152,7 +152,7 @@ public:
         throw std::runtime_error("reader value is not an array");
     }
 
-    std::size_t ReadArrayLength() override {
+    std::size_t ReadArrayLength() {
         const msgpack::object& value = Current();
         if (value.type == msgpack::type::ARRAY) {
             const std::size_t length = value.via.array.size;
@@ -173,11 +173,11 @@ public:
             }
             throw std::runtime_error("MessagePack positive integer exceeds int64 range");
         }
-        const std::string value = ScalarText();
+        const std::string text = ScalarText();
         std::size_t consumed = 0;
-        const std::int64_t parsed = std::stoll(value, &consumed);
-        if (consumed != value.size()) {
-            throw std::runtime_error("expected int64-like value, got `" + value + "`");
+        const std::int64_t parsed = std::stoll(text, &consumed);
+        if (consumed != text.size()) {
+            throw std::runtime_error("expected int64-like value, got `" + text + "`");
         }
         return parsed;
     }
@@ -196,11 +196,11 @@ public:
         if (value.type == msgpack::type::POSITIVE_INTEGER) {
             return static_cast<double>(value.via.u64);
         }
-        const std::string value = ScalarText();
+        const std::string text = ScalarText();
         std::size_t consumed = 0;
-        const double parsed = std::stod(value, &consumed);
-        if (consumed != value.size() || !std::isfinite(parsed)) {
-            throw std::runtime_error("expected finite double-like value, got `" + value + "`");
+        const double parsed = std::stod(text, &consumed);
+        if (consumed != text.size() || !std::isfinite(parsed)) {
+            throw std::runtime_error("expected finite double-like value, got `" + text + "`");
         }
         return parsed;
     }
@@ -221,14 +221,14 @@ public:
         if (value.type == msgpack::type::NEGATIVE_INTEGER && value.via.i64 == 0) {
             return false;
         }
-        const std::string value = ScalarText();
-        if (value == "true" || value == "1") {
+        const std::string text = ScalarText();
+        if (text == "true" || text == "1") {
             return true;
         }
-        if (value == "false" || value == "0") {
+        if (text == "false" || text == "0") {
             return false;
         }
-        throw std::runtime_error("expected bool-like value, got `" + value + "`");
+        throw std::runtime_error("expected bool-like value, got `" + text + "`");
     }
 
     std::string AsString() const override {
