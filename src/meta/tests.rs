@@ -708,6 +708,35 @@ fn target_tags_are_trimmed_and_empty_tags_are_ignored() {
 }
 
 #[test]
+fn source_ref_deserializes_export_condition() {
+    let meta = parse(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            override_sources = [
+                { provider = "csv", path = "items_s1.csv", export_when = { any = ["s1"], none = ["s2"] } },
+            ]
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+        "#,
+    );
+
+    let source = &meta.table("items").unwrap().override_sources[0];
+    assert_eq!(source.export_when.any, vec!["s1".to_owned()]);
+    assert_eq!(source.export_when.none, vec!["s2".to_owned()]);
+}
+
+#[test]
 fn rejects_invalid_export_condition_tags() {
     let diagnostics = diagnostics(
         r#"
@@ -1283,8 +1312,9 @@ fn rejects_unsupported_source_declarations() {
             && diagnostic.message.contains("multiple sources")
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+        diagnostic.code == MetaDiagnosticCode::InvalidSourceDeclaration
             && diagnostic.message.contains("override_sources")
+            && diagnostic.message.contains("primary index")
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic.code == MetaDiagnosticCode::UnsupportedFeature

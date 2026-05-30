@@ -29,6 +29,31 @@ pub struct RowSourceInfo {
     pub source_path: PathBuf,
     pub source_row_number: usize,
     pub fragments: Vec<String>,
+    pub source_role: SourceRole,
+    pub replaces: Option<RowSourceTrace>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceRole {
+    Base,
+    Override,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowSourceTrace {
+    pub source_index: usize,
+    pub source_path: PathBuf,
+    pub source_row_number: usize,
+}
+
+impl RowSourceInfo {
+    pub fn trace(&self) -> RowSourceTrace {
+        RowSourceTrace {
+            source_index: self.source_index,
+            source_path: self.source_path.clone(),
+            source_row_number: self.source_row_number,
+        }
+    }
 }
 
 impl DataSet {
@@ -123,6 +148,8 @@ fn default_row_sources(row_count: usize) -> Vec<RowSourceInfo> {
             source_path: PathBuf::from("<memory>"),
             source_row_number: row_index + 1,
             fragments: Vec::new(),
+            source_role: SourceRole::Base,
+            replaces: None,
         })
         .collect()
 }

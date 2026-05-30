@@ -20,6 +20,9 @@ struct Cli {
     /// Target name to build from the project config.
     #[arg(long)]
     target: String,
+    /// Additional target tag for this build. Can be provided multiple times.
+    #[arg(long = "tag")]
+    extra_tags: Vec<String>,
     /// CPU worker count for parsing, validation, codegen and serialization.
     #[arg(long)]
     jobs: Option<usize>,
@@ -74,6 +77,7 @@ fn run_with_args(cli: Cli) -> anyhow::Result<()> {
     let output = build_target(BuildOptions {
         project_path: &cli.project,
         target_name: &cli.target,
+        extra_tags: &cli.extra_tags,
         execution,
         artifact_write_mode,
     })?;

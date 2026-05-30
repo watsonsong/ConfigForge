@@ -881,11 +881,14 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
         ));
     }
 
-    if !table.override_sources.is_empty() {
+    if !table.override_sources.is_empty()
+        && table.kind == TableKind::Collection
+        && table.primary_index().is_none()
+    {
         diagnostics.push(MetaDiagnostic::new(
-            MetaDiagnosticCode::UnsupportedFeature,
+            MetaDiagnosticCode::InvalidSourceDeclaration,
             format!(
-                "table `{}` declares override_sources, but source override is not implemented yet",
+                "table `{}` declares override_sources, but collection table overrides require a primary index",
                 table.name
             ),
         ));
@@ -901,6 +904,14 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
                 ),
             ));
         }
+    }
+
+    for source in &table.override_sources {
+        validate_export_condition_tags(
+            &format!("table `{}` override source `{}`", table.name, source.path),
+            &source.export_when,
+            diagnostics,
+        );
     }
 }
 

@@ -3,7 +3,7 @@
 
 use std::{collections::BTreeMap, path::PathBuf};
 
-use crate::data::RowSourceInfo;
+use crate::data::{RowSourceInfo, SourceRole};
 
 use crate::meta::{
     EnumMeta, EnumValueMeta, ExportCondition, FieldMeta, LinkedField, LinkedFieldMeta,
@@ -30,6 +30,8 @@ fn fragment_row_source(source_row_number: usize, fragments: &[&str]) -> RowSourc
             .iter()
             .map(|fragment| (*fragment).to_owned())
             .collect(),
+        source_role: SourceRole::Base,
+        replaces: None,
     }
 }
 
@@ -298,12 +300,16 @@ fn validates_fragment_scoped_fields_and_defaults() {
                 source_path: PathBuf::from("weapons.csv"),
                 source_row_number: 1,
                 fragments: vec!["weapon".to_owned()],
+                source_role: SourceRole::Base,
+                replaces: None,
             },
             RowSourceInfo {
                 source_index: 1,
                 source_path: PathBuf::from("armors.csv"),
                 source_row_number: 1,
                 fragments: vec!["armor".to_owned()],
+                source_role: SourceRole::Base,
+                replaces: None,
             },
         ],
     )
@@ -327,6 +333,8 @@ fn validates_fragment_scoped_fields_and_defaults() {
             source_path: PathBuf::from("weapons.csv"),
             source_row_number: 1,
             fragments: vec!["weapon".to_owned()],
+            source_role: SourceRole::Base,
+            replaces: None,
         }],
     )
     .expect("table should build");

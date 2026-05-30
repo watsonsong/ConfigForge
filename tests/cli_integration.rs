@@ -380,6 +380,62 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
 }
 
 #[test]
+fn cli_extra_tag_enables_s1_material_override_source() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_out_dir = temp_dir.path().join("out/data");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [[targets.data]]
+                input = "{}"
+                output = "{}"
+                format = "json"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            data_out_dir.display(),
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+        "--tag",
+        "s1",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `client` built"));
+
+    let items_json =
+        fs::read_to_string(data_out_dir.join("items.json")).expect("items json should exist");
+    let items: serde_json::Value =
+        serde_json::from_str(&items_json).expect("items json should parse");
+    let oak = items["rows"]
+        .as_array()
+        .expect("rows should be array")
+        .iter()
+        .find(|row| row["id"] == "2002")
+        .expect("Oak Wood row should exist");
+    assert_eq!(oak["name"], "Oak Wood");
+    assert_eq!(oak["price"], "5");
+    assert_eq!(oak["stack"]["max_stack"], "999");
+}
+
+#[test]
 fn standard_project_generated_code_loads_exported_runtime_data() {
     let project_path = std::env::current_dir()
         .expect("current dir")

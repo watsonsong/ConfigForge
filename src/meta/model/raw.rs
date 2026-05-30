@@ -103,6 +103,8 @@ pub struct SourceRef {
     pub path: String,
     #[serde(default)]
     pub fragments: Vec<String>,
+    #[serde(default)]
+    pub export_when: ExportCondition,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]

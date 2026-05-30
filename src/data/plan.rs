@@ -5,8 +5,10 @@ use std::path::PathBuf;
 
 use crate::{
     ConfigForgeError, Result,
-    meta::{MetaModel, SourceRef, TableKind, TableMeta},
+    meta::{MetaModel, SourceRef, TableKind, TableMeta, TargetTags},
 };
+
+use super::SourceRole;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataProvider {
@@ -21,6 +23,8 @@ pub struct DataSourcePlan {
     pub fragments: Vec<String>,
     pub layout: DataSourceLayout,
     pub fields: Vec<String>,
+    pub role: SourceRole,
+    pub primary_key_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,13 +55,16 @@ impl DataProvider {
 
 impl DataLoadPlan {
     pub fn from_meta_model(model: &MetaModel) -> Result<Self> {
-        Self::from_tables(&model.tables)
+        Self::from_tables(&model.tables, None)
     }
 
-    pub fn from_tables<'a>(tables: impl IntoIterator<Item = &'a TableMeta>) -> Result<Self> {
+    pub fn from_tables<'a>(
+        tables: impl IntoIterator<Item = &'a TableMeta>,
+        target_tags: Option<&TargetTags>,
+    ) -> Result<Self> {
         let mut sources = Vec::new();
         for table in tables {
-            sources.extend(DataSourcePlan::from_table(table)?);
+            sources.extend(DataSourcePlan::from_table(table, target_tags)?);
         }
         Ok(Self { sources })
     }
@@ -68,7 +75,7 @@ impl DataLoadPlan {
 }
 
 impl DataSourcePlan {
-    pub fn from_table(table: &TableMeta) -> Result<Vec<Self>> {
+    pub fn from_table(table: &TableMeta, target_tags: Option<&TargetTags>) -> Result<Vec<Self>> {
         if table.source.is_some() && !table.sources.is_empty() {
             return Err(ConfigForgeError::Validation(format!(
                 "table `{}` declares both legacy `source` and `sources`",
@@ -83,13 +90,6 @@ impl DataSourcePlan {
             )));
         }
 
-        if !table.override_sources.is_empty() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` declares override_sources, but source override is not implemented yet",
-                table.name
-            )));
-        }
-
         // Meta validation is the primary source-shape check; keep this defensive
         // guard so callers that build a DataLoadPlan from an unvalidated model do
         // not silently load an unsupported ObjectTable source form.
@@ -100,38 +100,68 @@ impl DataSourcePlan {
             )));
         }
 
-        if !table.sources.is_empty() {
-            return table
+        let primary_key_fields = primary_key_fields_for_overrides(table)?;
+
+        let mut plans = if !table.sources.is_empty() {
+            table
                 .sources
                 .iter()
-                .map(|source| Self::from_source_ref(&table.name, source))
-                .collect();
-        }
-
-        let path = if let Some(path) = &table.source {
-            path
+                .map(|source| {
+                    Self::from_source_ref(
+                        &table.name,
+                        source,
+                        SourceRole::Base,
+                        primary_key_fields.clone(),
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?
         } else {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` does not declare a source",
-                table.name
-            )));
+            let path = if let Some(path) = &table.source {
+                path
+            } else {
+                return Err(ConfigForgeError::Validation(format!(
+                    "table `{}` does not declare a source",
+                    table.name
+                )));
+            };
+
+            vec![Self {
+                table_name: table.name.clone(),
+                provider: DataProvider::Csv,
+                path: PathBuf::from(path),
+                fragments: Vec::new(),
+                layout: layout_for_table(table),
+                fields: table
+                    .fields
+                    .iter()
+                    .map(|field| field.name.clone())
+                    .collect(),
+                role: SourceRole::Base,
+                primary_key_fields: primary_key_fields.clone(),
+            }]
         };
 
-        Ok(vec![Self {
-            table_name: table.name.clone(),
-            provider: DataProvider::Csv,
-            path: PathBuf::from(path),
-            fragments: Vec::new(),
-            layout: layout_for_table(table),
-            fields: table
-                .fields
-                .iter()
-                .map(|field| field.name.clone())
-                .collect(),
-        }])
+        for source in &table.override_sources {
+            if target_tags.is_some_and(|target_tags| !source.export_when.matches(target_tags)) {
+                continue;
+            }
+            plans.push(Self::from_source_ref(
+                &table.name,
+                source,
+                SourceRole::Override,
+                primary_key_fields.clone(),
+            )?);
+        }
+
+        Ok(plans)
     }
 
-    fn from_source_ref(table_name: &str, source: &SourceRef) -> Result<Self> {
+    fn from_source_ref(
+        table_name: &str,
+        source: &SourceRef,
+        role: SourceRole,
+        primary_key_fields: Vec<String>,
+    ) -> Result<Self> {
         let provider = DataProvider::parse(&source.provider).ok_or_else(|| {
             ConfigForgeError::Validation(format!(
                 "table `{table_name}` source `{}` uses unsupported provider `{}`; only `csv` is supported",
@@ -146,8 +176,35 @@ impl DataSourcePlan {
             fragments: source.fragments.clone(),
             layout: DataSourceLayout::CollectionRecords,
             fields: Vec::new(),
+            role,
+            primary_key_fields,
         })
     }
+}
+
+fn primary_key_fields_for_overrides(table: &TableMeta) -> Result<Vec<String>> {
+    if table.override_sources.is_empty() {
+        return Ok(Vec::new());
+    }
+    if table.kind == TableKind::Object {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` is an ObjectTable, but ObjectTable Step 1 does not support `override_sources`",
+            table.name
+        )));
+    }
+    let primary_index = table.primary_index().ok_or_else(|| {
+        ConfigForgeError::Validation(format!(
+            "table `{}` declares override_sources, but collection table overrides require a primary index",
+            table.name
+        ))
+    })?;
+    if primary_index.fields.is_empty() {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` declares override_sources, but primary index `{}` has no fields",
+            table.name, primary_index.name
+        )));
+    }
+    Ok(primary_index.fields.clone())
 }
 
 fn layout_for_table(table: &TableMeta) -> DataSourceLayout {

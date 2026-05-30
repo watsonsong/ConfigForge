@@ -46,7 +46,7 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
     let target = target.normalize()?;
     let meta_set = project.raw_meta_model();
     let linked_meta = meta_set.link().map_err(ConfigForgeError::MetaValidation)?;
-    let target_tags = target.target_tags();
+    let target_tags = target.effective_target_tags(options.extra_tags);
 
     // Runtime data is exported before codegen so generated APIs can reference logical
     // runtime data file paths relative to the loader root.

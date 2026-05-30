@@ -49,8 +49,8 @@ impl TargetConfig {
 }
 
 impl NormalizedTargetConfig {
-    pub(crate) fn target_tags(&self) -> TargetTags {
-        TargetTags::new(self.tags.clone())
+    pub(crate) fn effective_target_tags(&self, extra_tags: &[String]) -> TargetTags {
+        TargetTags::new(self.tags.iter().chain(extra_tags.iter()).cloned())
     }
 }
 

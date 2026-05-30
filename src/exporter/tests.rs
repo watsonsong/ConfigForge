@@ -8,7 +8,7 @@ use tempfile::tempdir;
 use crate::{
     ConfigForgeError, Result,
     artifact::{ArtifactWriteMode, ArtifactWriter},
-    data::DataTable,
+    data::{DataTable, SourceRole},
     meta::{LinkedTableMeta, MetaModel, TargetTags},
 };
 
@@ -854,12 +854,16 @@ fn fragment_export_uses_nested_objects_and_presence() {
                 source_path: PathBuf::from("weapons.csv"),
                 source_row_number: 1,
                 fragments: vec!["weapon".to_owned()],
+                source_role: SourceRole::Base,
+                replaces: None,
             },
             crate::data::RowSourceInfo {
                 source_index: 1,
                 source_path: PathBuf::from("armors.csv"),
                 source_row_number: 1,
                 fragments: vec!["armor".to_owned()],
+                source_role: SourceRole::Base,
+                replaces: None,
             },
         ],
     )
@@ -940,6 +944,8 @@ fn fragment_export_locks_empty_and_hidden_fragment_presence() {
                 "server_marker".to_owned(),
                 "typed_marker".to_owned(),
             ],
+            source_role: SourceRole::Base,
+            replaces: None,
         }],
     )
     .expect("table should build");

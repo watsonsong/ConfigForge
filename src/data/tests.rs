@@ -18,6 +18,21 @@ fn fragment_row_source(source_row_number: usize, fragments: &[&str]) -> RowSourc
             .iter()
             .map(|fragment| (*fragment).to_owned())
             .collect(),
+        source_role: SourceRole::Base,
+        replaces: None,
+    }
+}
+
+fn plan_source(table_name: &str, path: &str) -> DataSourcePlan {
+    DataSourcePlan {
+        table_name: table_name.to_owned(),
+        provider: DataProvider::Csv,
+        path: PathBuf::from(path),
+        fragments: Vec::new(),
+        layout: DataSourceLayout::CollectionRecords,
+        fields: Vec::new(),
+        role: SourceRole::Base,
+        primary_key_fields: Vec::new(),
     }
 }
 
@@ -558,6 +573,8 @@ fn data_resolver_full_mode_includes_active_fragments() {
             source_path: PathBuf::from("weapons.csv"),
             source_row_number: 1,
             fragments: vec!["weapon".to_owned()],
+            source_role: SourceRole::Base,
+            replaces: None,
         }],
     )
     .expect("table should build");
@@ -619,6 +636,8 @@ fn data_resolver_resolves_typed_fragment_payload_as_struct_occurrence() {
             source_path: PathBuf::from("weapons.csv"),
             source_row_number: 1,
             fragments: vec!["attributes".to_owned()],
+            source_role: SourceRole::Base,
+            replaces: None,
         }],
     )
     .expect("table should build");
@@ -676,6 +695,8 @@ fn data_resolver_preserves_empty_active_typed_fragment_presence() {
             source_path: PathBuf::from("weapons.csv"),
             source_row_number: 1,
             fragments: vec!["attributes".to_owned()],
+            source_role: SourceRole::Base,
+            replaces: None,
         }],
     )
     .expect("table should build");
@@ -821,6 +842,52 @@ fn data_load_plan_reads_polymorphic_source_fragments() {
     assert_eq!(plan.sources()[0].fragments, vec!["weapon".to_owned()]);
     assert_eq!(plan.sources()[1].path, PathBuf::from("armors.csv"));
     assert_eq!(plan.sources()[1].fragments, vec!["armor".to_owned()]);
+}
+
+#[test]
+fn data_load_plan_filters_override_sources_by_target_tags() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "materials.csv"
+            override_sources = [
+                { provider = "csv", path = "materials_s1.csv", export_when = { any = ["s1"] } },
+                { provider = "csv", path = "materials_base_patch.csv", export_when = { none = ["s1"] } },
+            ]
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+        "#,
+    )
+    .expect("meta should load");
+
+    let s1_tags = crate::meta::TargetTags::new(["s1"]);
+    let s1_plan =
+        DataLoadPlan::from_tables(&meta.tables, Some(&s1_tags)).expect("s1 plan should build");
+    assert_eq!(s1_plan.sources().len(), 2);
+    assert_eq!(s1_plan.sources()[0].path, PathBuf::from("materials.csv"));
+    assert_eq!(s1_plan.sources()[0].role, SourceRole::Base);
+    assert_eq!(s1_plan.sources()[1].path, PathBuf::from("materials_s1.csv"));
+    assert_eq!(s1_plan.sources()[1].role, SourceRole::Override);
+    assert_eq!(s1_plan.sources()[1].primary_key_fields, vec!["id"]);
+
+    let base_tags = crate::meta::TargetTags::empty();
+    let base_plan =
+        DataLoadPlan::from_tables(&meta.tables, Some(&base_tags)).expect("base plan should build");
+    assert_eq!(base_plan.sources().len(), 2);
+    assert_eq!(
+        base_plan.sources()[1].path,
+        PathBuf::from("materials_base_patch.csv")
+    );
 }
 
 #[test]
@@ -975,22 +1042,8 @@ fn data_loader_loads_multiple_tables_into_data_set() {
     fs::write(dir.path().join("levels.csv"), "id,name\n1,Forest\n").expect("levels csv");
     let plan = DataLoadPlan {
         sources: vec![
-            DataSourcePlan {
-                table_name: "items".to_owned(),
-                provider: DataProvider::Csv,
-                path: PathBuf::from("items.csv"),
-                fragments: vec![],
-                layout: DataSourceLayout::CollectionRecords,
-                fields: vec![],
-            },
-            DataSourcePlan {
-                table_name: "levels".to_owned(),
-                provider: DataProvider::Csv,
-                path: PathBuf::from("levels.csv"),
-                fragments: vec![],
-                layout: DataSourceLayout::CollectionRecords,
-                fields: vec![],
-            },
+            plan_source("items", "items.csv"),
+            plan_source("levels", "levels.csv"),
         ],
     };
 
@@ -1017,22 +1070,8 @@ fn data_loader_load_with_pool_preserves_plan_order() {
     fs::write(dir.path().join("levels.csv"), "id,name\n1,Forest\n").expect("levels csv");
     let plan = DataLoadPlan {
         sources: vec![
-            DataSourcePlan {
-                table_name: "items".to_owned(),
-                provider: DataProvider::Csv,
-                path: PathBuf::from("items.csv"),
-                fragments: vec![],
-                layout: DataSourceLayout::CollectionRecords,
-                fields: vec![],
-            },
-            DataSourcePlan {
-                table_name: "levels".to_owned(),
-                provider: DataProvider::Csv,
-                path: PathBuf::from("levels.csv"),
-                fragments: vec![],
-                layout: DataSourceLayout::CollectionRecords,
-                fields: vec![],
-            },
+            plan_source("items", "items.csv"),
+            plan_source("levels", "levels.csv"),
         ],
     };
     let pool = rayon::ThreadPoolBuilder::new()
@@ -1071,20 +1110,12 @@ fn data_loader_merges_multiple_sources_for_one_table() {
     let plan = DataLoadPlan {
         sources: vec![
             DataSourcePlan {
-                table_name: "items".to_owned(),
-                provider: DataProvider::Csv,
-                path: PathBuf::from("weapons.csv"),
                 fragments: vec!["weapon".to_owned()],
-                layout: DataSourceLayout::CollectionRecords,
-                fields: vec![],
+                ..plan_source("items", "weapons.csv")
             },
             DataSourcePlan {
-                table_name: "items".to_owned(),
-                provider: DataProvider::Csv,
-                path: PathBuf::from("armors.csv"),
                 fragments: vec!["armor".to_owned()],
-                layout: DataSourceLayout::CollectionRecords,
-                fields: vec![],
+                ..plan_source("items", "armors.csv")
             },
         ],
     };
@@ -1111,4 +1142,113 @@ fn data_loader_merges_multiple_sources_for_one_table() {
         PathBuf::from("armors.csv")
     );
     assert_eq!(table.row_sources[1].fragments, vec!["armor".to_owned()]);
+}
+
+#[test]
+fn data_loader_applies_override_rows_by_primary_key() {
+    let dir = tempdir().expect("temp dir should exist");
+    fs::write(
+        dir.path().join("materials.csv"),
+        "id,name,price,stack.max_stack\n2001,Iron Ore,5,999\n2002,Oak Wood,3,999\n",
+    )
+    .expect("materials csv");
+    fs::write(
+        dir.path().join("materials_s1.csv"),
+        "id,name,price,stack.max_stack\n2002,Oak Wood,5,999\n",
+    )
+    .expect("override csv");
+    let primary_key_fields = vec!["id".to_owned()];
+    let plan = DataLoadPlan {
+        sources: vec![
+            DataSourcePlan {
+                fragments: vec!["stack".to_owned()],
+                primary_key_fields: primary_key_fields.clone(),
+                ..plan_source("items", "materials.csv")
+            },
+            DataSourcePlan {
+                fragments: vec!["stack".to_owned()],
+                role: SourceRole::Override,
+                primary_key_fields,
+                ..plan_source("items", "materials_s1.csv")
+            },
+        ],
+    };
+
+    let data_set = DataLoader::new(dir.path())
+        .load(&plan)
+        .expect("data should load");
+    let table = data_set.table("items").expect("items table should exist");
+
+    assert_eq!(table.rows.len(), 2);
+    assert_eq!(
+        table.rows[1].get("name").map(String::as_str),
+        Some("Oak Wood")
+    );
+    assert_eq!(table.rows[1].get("price").map(String::as_str), Some("5"));
+    assert_eq!(table.row_sources[1].source_role, SourceRole::Override);
+    assert_eq!(table.row_sources[1].source_index, 1);
+    assert_eq!(
+        table.row_sources[1].source_path,
+        PathBuf::from("materials_s1.csv")
+    );
+    let replaced = table.row_sources[1]
+        .replaces
+        .as_ref()
+        .expect("override should record replaced base row");
+    assert_eq!(replaced.source_index, 0);
+    assert_eq!(replaced.source_path, PathBuf::from("materials.csv"));
+    assert_eq!(replaced.source_row_number, 2);
+}
+
+#[test]
+fn data_loader_rejects_invalid_override_rows() {
+    let cases = [
+        (
+            "base.csv",
+            "id,name\n1,Sword\n1,Shield\n",
+            "override.csv",
+            "id,name\n1,Axe\n",
+            "duplicates primary key",
+        ),
+        (
+            "base.csv",
+            "id,name\n1,Sword\n",
+            "override.csv",
+            "id,name\n2,Axe\n",
+            "references missing base primary key",
+        ),
+        (
+            "base.csv",
+            "id,name\n1,Sword\n",
+            "override.csv",
+            "id,name\n,Axe\n",
+            "empty primary index field",
+        ),
+    ];
+
+    for (base_path, base_content, override_path, override_content, expected_message) in cases {
+        let dir = tempdir().expect("temp dir should exist");
+        fs::write(dir.path().join(base_path), base_content).expect("base csv");
+        fs::write(dir.path().join(override_path), override_content).expect("override csv");
+        let primary_key_fields = vec!["id".to_owned()];
+        let plan = DataLoadPlan {
+            sources: vec![
+                DataSourcePlan {
+                    primary_key_fields: primary_key_fields.clone(),
+                    ..plan_source("items", base_path)
+                },
+                DataSourcePlan {
+                    role: SourceRole::Override,
+                    primary_key_fields,
+                    ..plan_source("items", override_path)
+                },
+            ],
+        };
+
+        let error = DataLoader::new(dir.path()).load(&plan).unwrap_err();
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains(expected_message)),
+            "expected message containing `{expected_message}`"
+        );
+    }
 }

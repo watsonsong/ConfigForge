@@ -53,6 +53,7 @@ pub(super) fn export_runtime_data_tasks(
             .iter()
             .filter(|table| table.meta.is_exported_for(target_tags))
             .map(|table| table.meta),
+        Some(target_tags),
     )?;
     let mut normalized_data_sets: BTreeMap<PathBuf, crate::data::DataSet> = BTreeMap::new();
     let mut warnings = Vec::new();

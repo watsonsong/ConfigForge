@@ -35,6 +35,9 @@ sources = [
     { provider = "csv", path = "weapons.csv", fragments = ["attributes", "skill"] },
     { provider = "csv", path = "armors.csv", fragments = ["attributes"] },
 ]
+override_sources = [
+    { provider = "csv", path = "materials_s1.csv", fragments = ["stack"], export_when = { any = ["s1"] } },
+]
 desc = "统一道具运行时表。materials/weapons/armors 是同一 items 表的不同 source variant，共享 id/name/price，并通过 active fragments 表达各自差异。"
 
 [[tables.fields]]
