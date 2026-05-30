@@ -48,6 +48,7 @@ Build 会把 project-level `TargetConfig` 归一化为内部结构：
 pub(crate) struct NormalizedTargetConfig {
     pub(crate) name: String,
     pub(crate) tags: Vec<String>,
+    pub(crate) extra_tags: Vec<String>,
     pub(crate) data: Vec<NormalizedTargetDataConfig>,
     pub(crate) code: Vec<NormalizedCodegenTaskConfig>,
 }
@@ -62,6 +63,8 @@ pub(crate) struct NormalizedTargetConfig {
 - code task 禁止显式指定 `data`；若设置则配置校验失败。
 - 无论 target 有 0 个、1 个还是多个 data task，code task 都只依赖 Meta 和 target tags。
 - 生成代码使用逻辑 table name，由运行时 loader / reader 决定实际加载 `.json`、`.msgpack` 或 `.bin` 等具体格式文件。
+- BuildOptions 可以携带 CLI extra tags。normalize 时应将 `target.tags` 与 `extra_tags` 合并为 effective target tags：去重、保持稳定顺序，并用于 DataLoadPlan、Validation、Exporter 和 Codegen。`NormalizedTargetConfig.tags` 推荐保存合并后的 effective tags；如需诊断可单独保留原始 target tags 与 extra tags。
+- CLI extra tags 只能追加，不能删除 Project Config 中声明的 target tags。
 
 ## 10.4 Build 主流程
 
@@ -70,11 +73,11 @@ build_target(options)
   -> create rayon CPU worker pool
   -> ProjectConfig::from_path
   -> select target
-  -> target.normalize()
+  -> target.normalize(options.extra_tags)
   -> project.raw_meta_model()
   -> MetaModel::link()
   -> export_runtime_data_tasks(...)
-      -> DataLoadPlan::from_tables(target-visible tables)
+      -> DataLoadPlan::from_tables(target-visible tables, effective target tags)
       -> DataLoader::load_with_pool(data input)
       -> normalize_data_set
       -> validate_normalized_data_set_for_target_with_report
@@ -94,10 +97,13 @@ Build 当前仍先执行 runtime data 再执行 codegen，以保持统一 artifa
 `runtime.rs` 负责 target 内 data task 编排：
 
 - 为当前 target 可见 tables 构造 `DataLoadPlan`。
+- 构造 `DataLoadPlan` 时传入 effective target tags，用于过滤 `override_sources[].export_when`。例如 Project target 只有 `client, shipping`，CLI 传入 `--tag s1` 后，`materials_s1.csv` 才会进入 plan 并覆盖 Oak row。
 - 同一个 `input` 目录的多个 data task 复用同一个 normalized `DataSet`，避免重复读取和重复 validation。
 - 每个 data task 可使用不同 `format` 和 `output`，例如 JSON + MessagePack。
 - 每个 data task 调用 `exporter::export_runtime_data()` 生成 runtime artifacts，并保留 `RuntimeDataFile` 列表供未来 manifest 或诊断使用；codegen 不绑定该列表。
 - validation warning 被收集到 `BuildOutput.warnings`，error 直接阻断 build。
+
+注意：DataSet reuse 的 cache key 必须包含 `(input, effective target tags)`，不能只按 `input` 复用。原因是 source-level `override_sources[].export_when` 会改变 materialized DataSet；同一个 data root 在普通 shipping 构建与 `--tag s1` 构建中可能加载不同 override sources，得到不同数据。
 
 路径冲突分层：
 
@@ -111,6 +117,7 @@ Build 当前仍先执行 runtime data 再执行 codegen，以保持统一 artifa
 - 内置生成器由 `codegen::builtin_generators()` 提供。
 - code task 不选择 data task，也不消费 `RuntimeDataFile`。
 - 每个 code task 构造 `CodeExportInput`，包含 linked meta、target tags、project 信息、target language config、空 runtime data file list、generated_at。
+- 传给 CodeModel 的 target tags 必须是 effective target tags，而不是仅 Project Config 中的 target tags；否则 CLI `--tag s1` 影响了 runtime data override，却没有同步影响 table/field/index codegen 过滤，会造成 schema 与数据不一致。
 - code task 可以并行生成，但交给 Artifact Writer 前必须恢复 task 声明顺序；全局路径冲突由 artifact 模块统一检查。
 
 ## 10.7 依赖边界
@@ -137,6 +144,8 @@ Build 模块测试应覆盖：
 - 多 data task / code task / runtime-code 之间输出路径冲突在写文件前失败。
 - CLI dry-run 完整执行但不写输出文件。
 - runtime data task warning 不阻断 build，但 error 阻断 build。
+- CLI extra tags 与 target tags 合并，并驱动 table/field/export_when、override source selection、runtime export 和 codegen。
+- 同一 input 在不同 effective target tags 下不能复用 DataSet；同一 effective target tags 下多个格式 data task 可以复用 DataSet。
 - code-only target 不加载数据。
 - JSON + MessagePack + bin 多 data task 不影响同一份格式无关 codegen 输出。
 - CLI integration 覆盖完整 build target 流程。

@@ -14,17 +14,18 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 4. 在 Meta Link 完成后，由 Data Resolver 使用 `LinkedMetaModel<'meta>` + raw `DataSet` 解析 JSON cell / expanded path / default / target visibility，得到结构化 `ResolvedDataSet` 或 target-specific resolved view；runtime export 主路径已消费 resolved value。
 5. Validation 仍处于迁移中：source schema 与 value resolve 已通过 resolver 统一，required/type/index/FK 等主流程仍保留部分 raw `DataRow` 逻辑，后续应迁移到 `validate_resolved_*`。
 
-当前阶段已实现 CSV source、DataSet、target-aware validation/export 的基础流程，并已按 **variant source mode** 支持 polymorphic fragments：polymorphic CollectionTable 可声明多个 CSV sources，每个 source 追加完整 records 并声明 active fragments。
+当前阶段已实现 CSV source、DataSet、target-aware validation/export 的基础流程，并已按 **variant source mode** 支持 polymorphic fragments：polymorphic CollectionTable 可声明多个 CSV sources，每个 source 追加完整 records 并声明 active fragments。下一阶段 `override_sources` 的最小落地范围限定为 CollectionTable CSV 整行覆盖：按 primary index 匹配 base row，在匹配 effective target tags 时替换该 row，服务赛季/热修类临时覆盖。
 
 仍不实现：
 
 - fragment join mode；
-- `override_sources`；
+- ObjectTable `override_sources`；
+- override insert 策略；
 - 非 CSV provider；
 - array / map 的 typed parse；
 - source location 精确到单元格的诊断。
 
-这些能力在 Meta validate 阶段应显式报 unsupported，避免 Data 阶段静默忽略。
+这些能力在 Meta validate 阶段应显式报 unsupported，避免 Data 阶段静默忽略。CollectionTable CSV `override_sources` 不再属于 unsupported，但必须要求目标表拥有 primary index，且 override row 必须能匹配已存在 base row。
 
 设计判断：不建议把 Meta-aware 解析下沉到 `CsvDataReader`。CSV / Xlsx / Lark 等 reader 只负责语法读取、raw string 和 source location；struct source layout、default、target visibility、fragment active set 和 typed scalar parsing 都需要 linked meta 与 target context，更适合放在 Data Load 之后的 resolver 阶段。Validation / Exporter 应收敛为共享 resolver，避免两边重复解释 JSON 字符串和 dotted path。
 
@@ -146,6 +147,19 @@ pub struct RowSourceInfo {
     pub source_path: PathBuf,
     pub source_row_number: usize,
     pub fragments: Vec<String>,
+    pub source_role: SourceRole,
+    pub replaces: Option<RowSourceTrace>,
+}
+
+pub enum SourceRole {
+    Base,
+    Override,
+}
+
+pub struct RowSourceTrace {
+    pub source_index: usize,
+    pub source_path: PathBuf,
+    pub source_row_number: usize,
 }
 ```
 
@@ -155,6 +169,8 @@ pub struct RowSourceInfo {
 - `source_path` 用于错误信息，例如 `items/weapons.csv`。
 - `source_row_number` 固定为 record number，从 1 开始，不包含 CSV header；这与当前 validation 中 `row_index + 1` 的错误信息语义保持一致。未来如果需要显示真实文件行号，应新增 `source_line_number: Option<usize>`，不要复用 `source_row_number`。
 - `fragments` 来自 `SourceRef.fragments`。Data 模块只保留名称；是否存在、字段 schema、target 过滤由 Meta Link / Validation 处理。
+- `source_role` 区分 base source 与 override source。最终 `DataTable.rows` 中保留的是 materialized 后的有效 row；被 override 替换掉的 base row 不再作为独立 row 参与 validation/export。
+- `replaces` 用于保留被覆盖 base row 的来源。推荐：最终 row 的 `source_path/source_row_number/fragments/source_role` 指向实际生效的 override row，`replaces` 记录原 base row trace，便于诊断“该 S1 行来自 materials_s1.csv，并替换了 materials.csv 的 row N”。
 
 如果短期不想修改 `DataTable` public shape，也可以先引入：
 
@@ -300,6 +316,9 @@ pub struct DataSourcePlan {
     pub provider: DataProvider,
     pub path: PathBuf,
     pub fragments: Vec<String>,
+    pub role: SourceRole,
+    pub export_when: ExportCondition,
+    pub primary_key_fields: Vec<String>,
 }
 ```
 
@@ -308,6 +327,9 @@ pub struct DataSourcePlan {
 - `table_name` 是目标逻辑表名。
 - `path` 是相对 data root 的路径，来自 `SourceRef.path` 或 legacy `TableMeta.source`。
 - `fragments` 是该 source 声明的 polymorphic fragment 名称；普通表和 legacy `source` 为空。
+- `role` 区分 base `source` / `sources` 与 `override_sources`。
+- `export_when` 是 source-level target 条件。base source 第一阶段通常为 match-all；override source 可声明 `{ all = ["s1"] }` 等条件。
+- `primary_key_fields` 是当前 table primary index 的字段列表快照，仅在 `role = Override` 时用于 DataLoader 定位被覆盖 row；base source 可为空或携带同一份信息以便统一构造 per-table key map。字段路径保持 raw source header 使用的 field path 字符串，例如 `id` 或未来复合 key `region,id` 对应 `Vec<["region", "id"]>`。
 - variant source mode 下，polymorphic collection table 可以拥有多个 `DataSourcePlan`；非 polymorphic table 仍只允许一个 source。为了避免把普通 append mode 与未来通用 multi-source merge 混淆，多 source 必须由至少一个 source 的非空 `fragments` 声明驱动。
 
 ### 5.5.3 `DataLoadPlan`
@@ -323,7 +345,7 @@ pub struct DataLoadPlan {
 ```rust
 impl DataLoadPlan {
     pub fn from_meta_model(model: &MetaModel) -> Result<Self>;
-    pub fn from_tables<'a>(tables: impl IntoIterator<Item = &'a TableMeta>) -> Result<Self>;
+    pub fn from_tables<'a>(tables: impl IntoIterator<Item = &'a TableMeta>, target_tags: Option<&TargetTags>) -> Result<Self>;
     pub fn sources(&self) -> &[DataSourcePlan];
 }
 ```
@@ -333,7 +355,10 @@ impl DataLoadPlan {
 - `DataLoadPlan` 从 raw `MetaModel` / `TableMeta` 中提取 source 信息，不需要 `LinkedMetaModel<'meta>`。
 - 一旦 `DataLoadPlan` 构造完成，就拥有 table name、provider、path，后续 Data Load 不再借用 Meta。
 - variant source mode 下，`DataLoadPlan` 需要展开 table 的每个 `SourceRef`，为同一 `table_name` 生成多个 `DataSourcePlan`，并保留 source 声明顺序。
+- `override_sources` 展开为 `role = Override` 的 `DataSourcePlan`，并排在该 table 的 base sources 之后；多个 override source 保持声明顺序。`target_tags` 存在时，`export_when` 不匹配的 override source 不进入 plan，因此不会被读取。
 - `DataLoadPlan::from_tables` 只做 source declaration 的轻量契约检查和搬运：provider 必须支持；多个 sources 只允许 `TableMeta::is_variant_source_mode()` 为 true 的表。fragment 是否存在、字段是否属于 fragment 等 schema 合法性由 Meta validation/link 负责。
+- CollectionTable override source 必须有可用于匹配的 primary index。由于 `DataLoadPlan` 只持有 raw `TableMeta`，它需要根据 `primary_index` 在 `TableMeta.indexes` 中找到对应 index 并复制 `fields` 到 `primary_key_fields`；primary index 是否唯一、字段是否存在由 Meta link/validation 负责，但 DataLoadPlan 找不到 index 声明时也应 fail-fast。
+- ObjectTable override source、非 CSV override source、以及缺 primary index 的 CollectionTable override source 必须 fail-fast，不能静默忽略。
 - provider 是否支持属于 source declaration 的基础结构检查，可以由 Meta validation fail-fast，也可以由 DataLoadPlan parse 时返回错误；除 provider parse 以外，DataLoadPlan 不应理解 fragment schema 语义。
 - 因此流程上可以在 raw Meta load/merge 完成后：
   - 一边做 `MetaModel::link()` / Meta validate；
@@ -446,16 +471,23 @@ impl DataLoader {
 - 对同一 `table_name` 的多个 `DataSourcePlan`，DataLoader 需要把 rows append 到同一个 `DataTable`，并同步 append 对应 `RowSourceInfo`。
 - `DataSet::try_new()` 仍应拒绝重复 table name；多 source 合并必须发生在 DataLoader 内部，而不是先生成多个同名 DataTable 再交给 DataSet。
 
-### 5.7.1 Variant source merge 流程
+### 5.7.1 Variant source merge 与 override 流程
 
 variant source mode 的 DataLoader 组装流程：
 
 ```text
 for source in DataLoadPlan.sources() in declaration order:
   table = read source.path as DataTable(source.table_name)
-  for each row in table.rows:
-    append row to pending_tables[source.table_name].rows
-    append RowSourceInfo { source_index, source_path, source_row_number, fragments } to row_sources
+  if source.role == Base:
+    for each row in table.rows:
+      append row to pending_tables[source.table_name].rows
+      append RowSourceInfo { source_index, source_path, source_row_number, fragments, source_role: Base } to row_sources
+  if source.role == Override:
+    for each row in table.rows:
+      key = primary index key extracted from override row by source.primary_key_fields
+      target_row = pending_tables[source.table_name].primary_key_index[key]
+      replace pending_tables[source.table_name].rows[target_row] with override row
+      replace row_sources[target_row] with RowSourceInfo { source_index, source_path, source_row_number, fragments, source_role: Override, replaces: previous row trace }
 
 DataSet::try_new(pending_tables in first-seen table order)
 ```
@@ -463,8 +495,18 @@ DataSet::try_new(pending_tables in first-seen table order)
 注意：
 
 - DataLoader 不做 primary key 去重；unique/primary index 冲突仍在 Validation 阶段基于 normalized DataTable 检查。
+- 例外：为了应用 CollectionTable override，DataLoader 需要按 `primary_key_fields` 构造临时 key map。该 map 只用于定位 override 目标，不替代 Validation 的 unique/primary index 检查。base sources 中 duplicate primary key 仍应在 Validation 阶段报错；如果 duplicate key 导致 override 匹配到多个 base row，DataLoader 应报 ambiguous override 或依赖后续 validation fail-fast，推荐直接报错以避免覆盖不确定。
+- Override row 必须提供 primary index 字段且字段值非空；缺失时报 Data/Validation error，错误包含 table、override source path、row number 和 index name。
+- Override row 找不到 base key 时报错，不 append 新 row。未来如果要允许 insert，必须新增显式策略，例如 `on_missing = "insert"`，不能改变默认语义。
 - DataLoader 不做 fragment field required/default；Validation 阶段根据 `row_sources[row_index].fragments` 决定应用哪些 fragment schemas。
 - 如果某个 source 读取失败，错误需要包含 source path；如果后续引入 source ordinal，可在 Data diagnostic 中补充。
+
+S1 Oak 覆盖示例在 DataLoader 中的 materialization 结果：
+
+1. `materials.csv` 先 append `id = 2002, name = Oak Wood, price = 3, max_stack = 999`，fragments 为 `["stack"]`。
+2. 构建 effective target tags 不包含 `s1` 时，`materials_s1.csv` 不进入 `DataLoadPlan`，最终 row 保持 price 3。
+3. 构建 effective target tags 包含 `s1` 时，`materials_s1.csv` 进入 plan；其唯一 row 用 primary index `by_id(id=2002)` 匹配 base row，并整行替换为 price 5。
+4. 替换后的 row 再进入后续 normalize / validation / exporter；因此 unique index、FK、row_export 都只看到 S1 的最终视图。
 
 ## 5.8 与 Meta / Validation / Exporter 的流程关系
 

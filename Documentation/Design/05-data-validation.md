@@ -24,6 +24,7 @@ ExportView 是针对某个 target tags 派生的视图。
 它会应用：
 
 - table `export_when`；
+- source-level `override_sources[].export_when`；
 - field `export_when`；
 - collection `row_export`；
 - fragment filters；
@@ -34,7 +35,7 @@ ExportView 是针对某个 target tags 派生的视图。
 
 ## 5.2 ExportView 过滤规则
 
-表和字段使用 `export_when` 匹配 target tags；collection 行使用 `row_export` 匹配数据行中的 tags。
+表、字段和 override source 使用 `export_when` 匹配 effective target tags；collection 行使用 `row_export` 匹配数据行中的 tags。
 
 ```toml
 [[tables]]
@@ -52,6 +53,7 @@ match = "any"
 - `export_when.any` 非空时至少命中一个 tag。
 - `export_when.all` 非空时必须命中全部 tag。
 - `export_when.none` 非空时不能命中任一 tag。
+- `override_sources[].export_when` 不匹配时，该 override source 不读取、不应用，也不参与后续校验。
 - `export = false` 优先级最高，永不进入 runtime ExportView。
 - `row_export` 引用的字段必须存在；这些字段可以 `export = false`，仍可参与行级过滤。
 - 被 `row_export` 排除的数据默认不参与该 target 的 runtime data、special exporter 和集合级校验。
@@ -115,6 +117,8 @@ Struct expanded value 与 polymorphic fragment validation 共享 dotted key 形�
 - required 不要求每个单独 source 或 override source 都满足。
 - ObjectTable override 可只覆盖指定 field path。
 - CollectionTable override 是整行替换。
+- CollectionTable override 在 target-specific source materialization 阶段应用：只加载并应用匹配 effective target tags 的 override source；覆盖后的最终行再进入 required/default/type、row_export、index、foreign key 等校验。
+- override row 找不到 base primary index 时默认报错；后续若支持 insert 必须显式配置策略。
 - 集合级检查默认对过滤后的 ExportView 执行。
 - validate 命令若未指定 target，可默认检查 Full DataSet；如果指定 target，则检查对应 ExportView。
 

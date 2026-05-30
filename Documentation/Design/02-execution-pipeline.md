@@ -128,6 +128,7 @@ Source Provider 负责把 CSV、XLSX、Lark Sheet、Google Sheet 等外部数据
 - 校验面向所有 source 读取并组合后的最终数据视图，不要求每个 source 或 override source 单独满足 required。
 - ObjectTable 的 override 以字段或 field path 为单位覆盖。
 - CollectionTable 的 override 以整行 record 为单位覆盖，匹配依据是 `primary_index`。
+- `override_sources` 可以声明 `export_when`；只有匹配当前 effective target tags 的 override source 才会被读取和应用。被过滤掉的 override source 不参与 source schema、required/default/type 或 index 校验。
 - `override_sources` 后声明的 source 覆盖先声明的 override 结果。
 - override row 默认必须匹配已有 base row；是否允许 insert 是未来策略，当前默认报错。
 - Source sheet 允许存在空行和空列。
@@ -150,13 +151,14 @@ Source Provider 负责把 CSV、XLSX、Lark Sheet、Google Sheet 等外部数据
 
 ## 2.7 Target Tags 与 ExportView 阶段
 
-Target 定义一组 `tags`，例如 `client`、`server`、`debug`、`shipping`、平台、地区或渠道。ConfigForge 根据 target tags 生成导出视图；tags 本身只是能力标签，工具不硬编码具体业务含义。
+Target 定义一组 `tags`，例如 `client`、`server`、`debug`、`shipping`、平台、地区、渠道或赛季。CLI 可以额外传入一次性 tags。ConfigForge 以 `target.tags ∪ CLI extra tags` 得到 effective target tags，并据此生成导出视图；tags 本身只是能力标签，工具不硬编码具体业务含义。
 
 流程：
 
 ```text
 Full DataSet
   -> apply table export_when
+  -> select override_sources by export_when
   -> apply field export_when
   -> apply row_export filters
   -> apply fragment filters
@@ -166,7 +168,9 @@ Full DataSet
 明确规则：
 
 - ExportView 是目标实际导出的数据视图。
+- 所有 target-aware 条件都使用 effective target tags，而不是仅使用 Project Config 中静态声明的 `target.tags`。
 - 表、字段通过统一的 `export_when = { any = [...], all = [...], none = [...] }` 匹配 target tags。
+- override source 通过同样的 `export_when` 匹配 effective target tags；例如 `materials_s1.csv` 可以只在 CLI 传入 `--tag s1` 时覆盖基础 `materials.csv` 中的 Oak 售价。
 - `export = false` 是强制不导出；不再设计 `tool_only`、`validator_only`、`filter_field` 作为导出机制。
 - collection 表可通过 `row_export` 指定数据列控制行级导出，常用于 `debug` / `shipping` 行裁剪。
 - 被排除记录对应的 text、asset 等也默认不进入 special exporter 产物。

@@ -73,6 +73,8 @@ pub struct TargetConfig {
 
 这是一种配置层聚合依赖，不代表 Project 模块执行 exporter 或 codegen。
 
+Target 本身只保存 Project Config 中声明的静态 `tags`。CLI 传入的额外 tags 不写回 `ProjectConfig`，而是在 Build 归一化阶段与 target tags 合并成 effective target tags。这样同一个 `ProjectConfig` 可以被不同 CLI 上下文复用，例如常规 shipping 构建与 `--tag s1` 赛季构建不会互相污染。
+
 ## 3.4 Imports 与合并规则
 
 加载流程：

@@ -205,6 +205,24 @@ pub struct TableMeta {
 - `foreign_keys` 已在当前 `TableMeta` 中落地。外键不是普通 validator，而是一等关系数据：当前 MVP 会完成 link、Meta 结构校验和数据引用完整性校验；进入 CodeModel 生成关联查询 API 属于后续扩展。
 - `fragments` 是 polymorphic variant source mode 的 table-local fragment schema。当前代码已落地该字段，并要求多 source variant source mode 至少由一个 source 声明非空 `fragments` 驱动；`SourceRef.fragments` 的合法性由 Meta validation 检查。
 
+`SourceRef` 用于 `sources` 与 `override_sources`：
+
+```rust
+pub struct SourceRef {
+    pub provider: String,
+    pub path: String,
+    pub fragments: Vec<String>,
+    pub export_when: ExportCondition,
+}
+```
+
+说明：
+
+- `provider` / `path` 描述物理 source；当前只支持 `csv`。
+- `fragments` 表示该 source 中每行激活的 polymorphic fragments；override source 覆盖一条 variant row 时也必须声明与覆盖行语义一致的 fragments，例如 S1 的 `materials_s1.csv` 覆盖材料行时继续声明 `fragments = ["stack"]`。
+- `export_when` 是 source-level target 条件，默认匹配所有 target。该字段主要用于 `override_sources`，也允许后续扩展到 base `sources` 的 target-specific source selection；实现第一阶段可以只在 override source 上启用，base source 若声明 `export_when` 可先报 unsupported 或按同一规则处理，但不能静默忽略。
+- `export_when` 匹配 Build 传入的 effective target tags，即 Project target tags 与 CLI extra tags 的并集。
+
 ### 4.5.5 `FragmentMeta`
 
 ```rust

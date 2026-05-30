@@ -93,6 +93,8 @@ namespace = "game::config"
 - `data` 不支持设置。生成代码格式无关，只依赖 Meta 和 target tags；格式选择由接入方在运行时传入的 loader / reader 决定。
 - `file_header` 是文本模板，支持 `{{project.name}}`、`{{project.desc}}`、`{{project.copyright}}`、`{{datetime}}`。
 - `keyword_conflict` 控制 Meta 名称转换成目标语言标识符后碰到关键字时如何处理。
+
+CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 table/field/index `export_when`、`row_export`、`override_sources[].export_when`、runtime export 和 codegen 的是 effective target tags：`target.tags ∪ CLI extra tags`。例如 `config-forge build --target client_shipping --tag s1` 会在 `client_shipping` 原有 tags 上追加 `s1`，从而启用只在 S1 赛季生效的 `materials_s1.csv` override source。
 - `naming` 控制 type、field、function、constant 等符号的大小写组织。
 - 语言生成器可以声明额外配置，但必须放在该 code task 内对应语言子表中，不能污染其他语言任务；实现层应按语言使用 tagged enum / 多态配置承载这些差异。
 - 生成代码必须暴露 runtime data 加载抽象接口，不直接绑定本地文件系统、引擎资源系统、网络或包内资源。

@@ -753,7 +753,7 @@ target_index = "by_id_region"
 
 ## 4.13 Multi-source 与 Override
 
-> 实现状态：Partial。当前版本已支持 fragment variant source mode 这一受限多源能力：polymorphic CollectionTable 可声明多个 CSV `sources`，但至少一个 source 必须声明 `fragments`。通用 split merge、ObjectTable 多源合并、`override_sources` 与非 `csv` provider 仍会在 Meta 校验或 DataLoadPlan 构造阶段报错，避免静默忽略。
+> 实现状态：Partial。当前版本已支持 fragment variant source mode 这一受限多源能力：polymorphic CollectionTable 可声明多个 CSV `sources`，但至少一个 source 必须声明 `fragments`。下一阶段优先实现 CollectionTable CSV `override_sources`：按 primary index 匹配整行覆盖，并支持 source-level `export_when`。ObjectTable 多源/override、通用 split merge 与非 `csv` provider 仍会在 Meta 校验或 DataLoadPlan 构造阶段报错，避免静默忽略。
 
 本节的 multi-source split merge / override 是通用多源能力，仍为 Reserved。下一节的 polymorphic variant source mode 是多源能力的受限子集：仅允许 `polymorphic = true` 的 CollectionTable 声明多个 variant sources，且每个 source 追加完整 records，不提供通用 split merge、ObjectTable 多源合并或 override 语义。
 
@@ -768,6 +768,8 @@ Base `sources` 用于 split merge：
 - ObjectTable：按 field path 覆盖。
 - CollectionTable：按 primary index 匹配整条 record 并替换。
 - 按列表顺序应用，不使用 priority。
+- `override_sources[].export_when` 使用 effective target tags 匹配，未匹配的 override source 视为不存在。该能力用于赛季、热修、地区灰度等临时覆盖；例如 `materials_s1.csv` 只在包含 `s1` tag 的构建中覆盖 Oak 材料售价。
+- CollectionTable override source 必须提供 primary index 所需字段，并且默认只能覆盖已存在的 base row；找不到 base row 应报错，避免把覆盖表误用为追加表。
 
 ## 4.14 Polymorphic Fragment
 

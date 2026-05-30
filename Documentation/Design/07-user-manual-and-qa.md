@@ -231,7 +231,8 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 - CLI 参数错误退出码 2。
 - `--diagnostic-format json` 输出可解析 JSON。
 - `--target` 多 target 选择。
-- `--tag` 与 target 默认 tags 合并。
+- `--tag` 与 target 默认 tags 合并为 effective target tags，并驱动 table/field/index `export_when`、`row_export`、`override_sources[].export_when`、runtime export 和 codegen。
+- 对 S1 赛季覆盖用例，未传 `--tag s1` 时 Oak 材料保持 base 售价 3；传入 `--tag s1` 时 `materials_s1.csv` 覆盖 Oak row，售价变为 5。
 
 ### Desc / Code Comments
 

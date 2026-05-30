@@ -162,7 +162,7 @@ Source declaration 描述 provider 和定位信息。
 | `lark_sheet` | Planned / Not implemented，Lark/飞书表格 | `uri` 或 provider-specific id，通常需要 `auth_ref` |
 | `google_sheet` | Planned / Not implemented，Google Sheet | `uri` 或 sheet id，通常需要 `auth_ref` |
 
-当前实现状态以 `Documentation/Design/README.md` 的状态矩阵为准：CSV provider 已稳定支持；同一逻辑表的多 CSV source 追加 records 已形成 MVP，主要服务 polymorphic variant source mode；`override_sources` 与非 CSV provider 仍属于目标态设计，当前会显式拒绝或不提供入口。
+当前实现状态以 `Documentation/Design/README.md` 的状态矩阵为准：CSV provider 已稳定支持；同一逻辑表的多 CSV source 追加 records 已形成 MVP，主要服务 polymorphic variant source mode；`override_sources` 与非 CSV provider 仍属于目标态设计，当前会显式拒绝或不提供入口。下一阶段 `override_sources` 优先支持 collection table 的 CSV 整行覆盖，并允许通过 source-level `export_when` 绑定到 target tags，用于赛季、热修或灰度包的临时覆盖。
 
 Source sheet 允许出现空行和空列。未映射到 field path 的行/列不会进入导出结果，可用于策划注释、公式中间结果或视觉分隔。
 
@@ -194,11 +194,40 @@ Override sources（Planned / Not implemented）：
 ```toml
 override_sources = [
   { provider = "csv", path = "Data/items_hotfix.csv" },
-  { provider = "csv", path = "Data/items_shipping.csv" },
+  { provider = "csv", path = "Data/items_shipping.csv", export_when = { all = ["shipping"] } },
 ]
 ```
 
 覆盖顺序：列表越靠后越晚应用，晚应用的覆盖早应用的结果。
+
+`override_sources[].export_when` 与 table / field 的 `export_when` 使用同一套 `{ any, all, none }` 结构，匹配当前构建的 **effective target tags**。不声明时表示对所有 target 生效。被 `export_when` 过滤掉的 override source 不读取、不参与覆盖、不产生 required/default/type/index 等校验诊断。
+
+示例：S1 赛季临时把 Oak 材料售价从 3 调整为 5。基础材料仍在 `materials.csv` 中维护；赛季临时表 `materials_s1.csv` 与 `materials.csv` 使用相同 header，但只包含待覆盖的一行：
+
+```csv
+id,name,price,max_stack
+2002,Oak Wood,5,999
+```
+
+`items.toml` 中的 `items` 表可以声明：
+
+```toml
+[[tables]]
+name = "items"
+kind = "collection"
+polymorphic = true
+primary_index = "by_id"
+sources = [
+  { provider = "csv", path = "materials.csv", fragments = ["stack"] },
+  { provider = "csv", path = "weapons.csv", fragments = ["attributes", "skill"] },
+  { provider = "csv", path = "armors.csv", fragments = ["attributes"] },
+]
+override_sources = [
+  { provider = "csv", path = "materials_s1.csv", fragments = ["stack"], export_when = { all = ["s1"] } },
+]
+```
+
+当 effective target tags 包含 `s1` 时，`materials_s1.csv` 中 `id = 2002` 的完整 row 覆盖 base `materials.csv` 中相同 primary index 的 row；未包含 `s1` 时该 override source 完全不生效，Oak 仍使用 base 售价 3。
 
 ## 3.5 Target Config
 
@@ -255,7 +284,25 @@ Runtime data 导出任务使用 `[[targets.data]]` 数组形式；每个任务�
 | `debug` | 开发、调试或内部验证目标。 |
 | `shipping` | 正式发布目标。 |
 
-这些名称只是推荐约定，机制本身允许项目继续扩展平台、地区、渠道或业务线 tag，例如 `ios`、`android`、`cn`、`global`、`playtest`。表、字段和 collection 行根据这些 tags 生成 target 专属 ExportView。
+这些名称只是推荐约定，机制本身允许项目继续扩展平台、地区、渠道、赛季或业务线 tag，例如 `ios`、`android`、`cn`、`global`、`playtest`、`s1`。表、字段、override source 和 collection 行根据这些 tags 生成 target 专属数据视图。
+
+构建时实际使用的是 **effective target tags**：
+
+```text
+effective_target_tags = target.tags ∪ CLI extra tags
+```
+
+CLI extra tags 用于一次性构建上下文，例如 `--tag s1` 生成 S1 赛季包，而无需新增一个只多了 `s1` 的 target。重复 tag 去重；顺序只用于稳定诊断和 manifest，语义上按集合匹配。CLI extra tags 只能追加，不能移除 target 已声明的 tag。
+
+示例：
+
+```toml
+[[targets]]
+name = "client_shipping"
+tags = ["client", "shipping"]
+```
+
+执行 `config-forge build --target client_shipping --tag s1` 时，effective target tags 为 `{ client, shipping, s1 }`。因此 `export_when = { all = ["s1"] }` 的 `override_sources` 会生效，`export_when = { none = ["s1"] }` 的表、字段或行级策略则不会生效。
 
 ```toml
 [[targets]]
@@ -335,7 +382,7 @@ readonly_fields = true
 | `output` | 必填 | Runtime data 输出目录。相对路径以 project root 或所在 import 片段目录为基准。 |
 | `format` | `json` | Runtime data 格式。当前实现支持 `json` 和 `messagepack`。 |
 
-Data task 继承所在 target 的 `tags`；当前没有 `[[targets.data]].tags` 字段。
+Data task 继承所在 target 的 effective target tags；当前没有 `[[targets.data]].tags` 字段。CLI extra tags 对同一 target 下所有 data/code task 一致生效，因此同一个构建里的 JSON / MessagePack / bin 输出和格式无关 codegen 必须基于同一组 effective target tags。
 
 data task `name` 规范：
 
