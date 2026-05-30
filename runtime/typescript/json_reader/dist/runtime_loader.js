@@ -8,7 +8,14 @@ const runtime_reader_core_1 = require("@config-forge/runtime-reader-core");
 Object.defineProperty(exports, "SUPPORTED_CONFIG_FORGE_READER_CONTRACT", { enumerable: true, get: function () { return runtime_reader_core_1.SUPPORTED_CONFIG_FORGE_READER_CONTRACT; } });
 exports.JsonValueReader = runtime_reader_core_1.RuntimeValueReader;
 const utf8Decoder = new TextDecoder();
-function decodeJsonValue(bytes) {
+function decodeJsonValue(bytes, pathOrLimits = {}) {
+    const limits = typeof pathOrLimits === "string" ? {} : pathOrLimits;
+    const normalizedLimits = (0, runtime_reader_core_1.normalizeRuntimeDecodeLimits)(limits);
+    const byteLength = typeof bytes === "string" ? utf8ByteLength(bytes) : bytes.byteLength;
+    (0, runtime_reader_core_1.checkRuntimeDecodeLimit)("runtime file bytes", byteLength, normalizedLimits.maxFileBytes);
     const text = typeof bytes === "string" ? bytes : utf8Decoder.decode(bytes);
-    return new exports.JsonValueReader(JSON.parse(text));
+    return new exports.JsonValueReader(JSON.parse(text), normalizedLimits);
+}
+function utf8ByteLength(value) {
+    return new TextEncoder().encode(value).length;
 }

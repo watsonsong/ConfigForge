@@ -12,13 +12,14 @@ use serde_json::Value;
 
 pub use config_forge_runtime_reader_core::SUPPORTED_CONFIG_FORGE_READER_CONTRACT;
 use config_forge_runtime_reader_core::{
-    RuntimeDataError, RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult,
+    RuntimeDataError, RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult, RuntimeDecodeLimits,
 };
 
 #[derive(Debug)]
 pub struct MessagePackValueReader {
     value: Rc<Value>,
     path: Rc<RefCell<Vec<MessagePackPathSegment>>>,
+    limits: RuntimeDecodeLimits,
 }
 
 #[derive(Debug)]
@@ -29,9 +30,14 @@ enum MessagePackPathSegment {
 
 impl MessagePackValueReader {
     pub fn new(value: Value) -> Self {
+        Self::with_limits(value, RuntimeDecodeLimits::default())
+    }
+
+    pub fn with_limits(value: Value, limits: RuntimeDecodeLimits) -> Self {
         Self {
             value: Rc::new(value),
             path: Rc::new(RefCell::new(Vec::with_capacity(8))),
+            limits,
         }
     }
 
@@ -63,9 +69,9 @@ impl RuntimeDataReader for MessagePackValueReader {
                 .is_some_and(|value| !value.is_null())
         };
         if found {
-            self.path
-                .borrow_mut()
-                .push(MessagePackPathSegment::Field(name));
+            let mut path = self.path.borrow_mut();
+            self.limits.check_nesting_depth(path.len() + 1)?;
+            path.push(MessagePackPathSegment::Field(name));
         }
         Ok(found)
     }
@@ -81,9 +87,9 @@ impl RuntimeDataReader for MessagePackValueReader {
         if !found {
             return Err(RuntimeDataError::not_found(format!("missing array index {index}")));
         }
-        self.path
-            .borrow_mut()
-            .push(MessagePackPathSegment::Index(index));
+        let mut path = self.path.borrow_mut();
+        self.limits.check_nesting_depth(path.len() + 1)?;
+        path.push(MessagePackPathSegment::Index(index));
         Ok(())
     }
 
@@ -103,6 +109,22 @@ impl RuntimeDataReader for MessagePackValueReader {
                 .or_else(|| value.as_object().map(|object| object.len()))
                 .ok_or_else(|| RuntimeDataError::type_mismatch("reader value is not array/object"))
         })
+    }
+
+    fn decode_limits(&self) -> RuntimeDecodeLimits {
+        self.limits
+    }
+
+    fn read_row_count(&self) -> RuntimeDataResult<usize> {
+        let rows = self.len()?;
+        self.limits.check_rows(rows)?;
+        Ok(rows)
+    }
+
+    fn read_array_len(&self) -> RuntimeDataResult<usize> {
+        let length = self.len()?;
+        self.limits.check_array_length(length)?;
+        Ok(length)
     }
 
     fn as_i64(&self) -> RuntimeDataResult<i64> {
@@ -156,7 +178,10 @@ impl RuntimeDataReader for MessagePackValueReader {
 
     fn as_string(&self) -> RuntimeDataResult<String> {
         self.with_current(|value| match value {
-            Value::String(text) => Ok(text.clone()),
+            Value::String(text) => {
+                self.limits.check_string_bytes(text.len())?;
+                Ok(text.clone())
+            }
             other => Err(RuntimeDataError::type_mismatch(format!(
                 "expected string value, got {other:?}"
             ))),
@@ -168,23 +193,42 @@ impl RuntimeDataReader for MessagePackValueReader {
 #[derive(Debug, Clone)]
 pub struct FsMessagePackRuntimeDataLoader {
     data_dir: PathBuf,
+    limits: RuntimeDecodeLimits,
 }
 
 impl FsMessagePackRuntimeDataLoader {
     pub fn new(data_dir: impl Into<PathBuf>) -> Self {
         Self {
             data_dir: data_dir.into(),
+            limits: RuntimeDecodeLimits::default(),
+        }
+    }
+
+    pub fn with_limits(data_dir: impl Into<PathBuf>, limits: RuntimeDecodeLimits) -> Self {
+        Self {
+            data_dir: data_dir.into(),
+            limits,
         }
     }
 
     pub fn open_reader(&self, path: &str) -> RuntimeDataResult<MessagePackValueReader> {
         let full_path = safe_join(&self.data_dir, &with_extension(path, "msgpack"))?;
+        check_file_size(&full_path, self.limits)?;
         let bytes = fs::read(&full_path)
             .map_err(|error| RuntimeDataError::io(full_path.display().to_string(), error))?;
+        self.limits.check_file_bytes(bytes.len())?;
         let value = rmp_serde::from_slice(&bytes)
             .map_err(|error| RuntimeDataError::decode(error.to_string()))?;
-        Ok(MessagePackValueReader::new(value))
+        Ok(MessagePackValueReader::with_limits(value, self.limits))
     }
+}
+
+fn check_file_size(path: &Path, limits: RuntimeDecodeLimits) -> RuntimeDataResult<()> {
+    let metadata = fs::metadata(path)
+        .map_err(|source| RuntimeDataError::io(path.display().to_string(), source))?;
+    let size = usize::try_from(metadata.len())
+        .map_err(|_| RuntimeDataError::decode("runtime file bytes exceed usize"))?;
+    limits.check_file_bytes(size)
 }
 
 impl RuntimeDataLoader for FsMessagePackRuntimeDataLoader {
@@ -300,5 +344,87 @@ mod tests {
         reader.exit().unwrap();
         reader.exit().unwrap();
         reader.exit().unwrap();
+    }
+
+    #[test]
+    fn messagepack_reader_enforces_decode_limits() {
+        let reader = MessagePackValueReader::with_limits(
+            serde_json::json!([{}, {}]),
+            RuntimeDecodeLimits {
+                max_rows: 1,
+                ..RuntimeDecodeLimits::default()
+            },
+        );
+        assert!(reader.read_row_count().unwrap_err().message.contains("row count"));
+
+        let reader = MessagePackValueReader::with_limits(
+            serde_json::json!([1, 2]),
+            RuntimeDecodeLimits {
+                max_array_length: 1,
+                ..RuntimeDecodeLimits::default()
+            },
+        );
+        assert!(reader
+            .read_array_len()
+            .unwrap_err()
+            .message
+            .contains("array length"));
+
+        let reader = MessagePackValueReader::with_limits(
+            Value::String("abcd".to_owned()),
+            RuntimeDecodeLimits {
+                max_string_bytes: 3,
+                ..RuntimeDecodeLimits::default()
+            },
+        );
+        assert!(reader
+            .as_string()
+            .unwrap_err()
+            .message
+            .contains("string byte length"));
+
+        let reader = MessagePackValueReader::with_limits(
+            serde_json::json!({ "a": { "b": 1 } }),
+            RuntimeDecodeLimits {
+                max_nesting_depth: 1,
+                ..RuntimeDecodeLimits::default()
+            },
+        );
+        assert!(reader.enter_field("a").unwrap());
+        assert!(reader
+            .enter_field("b")
+            .unwrap_err()
+            .message
+            .contains("nesting depth"));
+    }
+
+    #[test]
+    fn fs_messagepack_loader_rejects_oversized_file_before_decoding_payload() {
+        let dir = env::temp_dir().join(format!(
+            "config_forge_msgpack_limit_loader_test_{}",
+            process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp runtime data dir should be created");
+
+        fs::write(
+            dir.join("items.msgpack"),
+            rmp_serde::to_vec_named(&serde_json::json!([])).unwrap(),
+        )
+        .unwrap();
+        let loader = FsMessagePackRuntimeDataLoader::with_limits(
+            &dir,
+            RuntimeDecodeLimits {
+                max_file_bytes: 1,
+                ..RuntimeDecodeLimits::default()
+            },
+        );
+        assert!(loader
+            .open_reader("items.msgpack")
+            .unwrap_err()
+            .message
+            .contains("runtime file bytes"));
+
+        fs::remove_dir_all(&dir).expect("temp runtime data dir should be removed");
     }
 }

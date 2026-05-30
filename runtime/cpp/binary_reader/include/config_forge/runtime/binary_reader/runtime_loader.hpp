@@ -33,6 +33,24 @@ namespace config_forge_runtime {
 inline constexpr const char* SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0";
 #endif
 
+#ifndef CONFIG_FORGE_RUNTIME_CPP_DECODE_LIMITS_DEFINED
+#define CONFIG_FORGE_RUNTIME_CPP_DECODE_LIMITS_DEFINED
+struct RuntimeDecodeLimits {
+    std::size_t max_file_bytes = 64u * 1024u * 1024u;
+    std::size_t max_rows = 1000000u;
+    std::size_t max_array_length = 1000000u;
+    std::size_t max_string_bytes = 16u * 1024u * 1024u;
+    std::size_t max_nesting_depth = 128u;
+};
+
+inline void CheckRuntimeDecodeLimit(const char* label, std::size_t actual, std::size_t limit) {
+    if (actual > limit) {
+        throw std::runtime_error(std::string(label) + " " + std::to_string(actual) +
+                                 " exceeds decode limit " + std::to_string(limit));
+    }
+}
+#endif
+
 #ifndef CONFIG_FORGE_RUNTIME_CPP_SAFE_JOIN_PATH_DEFINED
 #define CONFIG_FORGE_RUNTIME_CPP_SAFE_JOIN_PATH_DEFINED
 inline std::string SafeJoinPath(const std::string& root, const std::string& logical_path) {
@@ -81,15 +99,23 @@ inline std::string WithExtension(const std::string& logical_path, const std::str
 
 class BinaryRuntimeDataReader final : public CONFIG_FORGE_RUNTIME_CPP_READER {
 public:
-    explicit BinaryRuntimeDataReader(std::vector<std::uint8_t> bytes)
-        : state_(std::make_shared<State>(std::move(bytes))) {
+    explicit BinaryRuntimeDataReader(
+        std::vector<std::uint8_t> bytes,
+        RuntimeDecodeLimits limits = RuntimeDecodeLimits())
+        : state_(std::make_shared<State>(std::move(bytes), limits)) {
+        CheckRuntimeDecodeLimit("runtime file bytes", state_->bytes.size(), state_->limits.max_file_bytes);
         ParseHeader();
     }
 
-    BinaryRuntimeDataReader(const char* bytes, std::size_t size)
+    BinaryRuntimeDataReader(
+        const char* bytes,
+        std::size_t size,
+        RuntimeDecodeLimits limits = RuntimeDecodeLimits())
         : state_(std::make_shared<State>(std::vector<std::uint8_t>(
               reinterpret_cast<const std::uint8_t*>(bytes),
-              reinterpret_cast<const std::uint8_t*>(bytes) + size))) {
+              reinterpret_cast<const std::uint8_t*>(bytes) + size),
+              limits)) {
+        CheckRuntimeDecodeLimit("runtime file bytes", state_->bytes.size(), state_->limits.max_file_bytes);
         ParseHeader();
     }
 
@@ -128,17 +154,21 @@ public:
 
     std::size_t ReadRowCount() override {
         const std::size_t row_count = CheckedSize(ReadVaruint(), "row count");
+        CheckRuntimeDecodeLimit("row count", row_count, state_->limits.max_rows);
         state_->next_row_index = 0;
         return row_count;
     }
 
     std::size_t ReadArrayLength() override {
-        return CheckedSize(ReadVaruint(), "array length");
+        const std::size_t length = CheckedSize(ReadVaruint(), "array length");
+        CheckRuntimeDecodeLimit("array length", length, state_->limits.max_array_length);
+        return length;
     }
 
     bool ArrayElementsArePositional() const override { return true; }
 
     void BeginRecord(std::size_t optional_slot_count) override {
+        CheckRuntimeDecodeLimit("nesting depth", state_->records.size() + 1, state_->limits.max_nesting_depth);
         const std::size_t byte_count = (optional_slot_count + 7) / 8;
         const std::uint8_t* bytes = ReadExact(byte_count);
         state_->records.push_back(RecordState{std::vector<std::uint8_t>(bytes, bytes + byte_count), 0});
@@ -187,9 +217,11 @@ private:
     };
 
     struct State {
-        explicit State(std::vector<std::uint8_t> input) : bytes(std::move(input)) {}
+        State(std::vector<std::uint8_t> input, RuntimeDecodeLimits input_limits)
+            : bytes(std::move(input)), limits(input_limits) {}
 
         std::vector<std::uint8_t> bytes;
+        RuntimeDecodeLimits limits;
         std::size_t offset = 16;
         std::uint64_t schema_revision = 0;
         std::size_t next_row_index = 0;
@@ -224,6 +256,7 @@ private:
 
     std::string ReadNextStringValue() const {
         const std::size_t len = CheckedSize(ReadVaruint(), "string length");
+        CheckRuntimeDecodeLimit("string byte length", len, state_->limits.max_string_bytes);
         const std::uint8_t* bytes = ReadExact(len);
         if (!IsValidUtf8(bytes, len)) {
             throw std::runtime_error("invalid UTF-8 string in binary runtime data");
@@ -346,19 +379,30 @@ private:
 
 class BinaryFsRuntimeDataLoader final : public CONFIG_FORGE_RUNTIME_CPP_LOADER {
 public:
-    explicit BinaryFsRuntimeDataLoader(std::string data_dir) : data_dir_(std::move(data_dir)) {}
+    explicit BinaryFsRuntimeDataLoader(
+        std::string data_dir,
+        RuntimeDecodeLimits limits = RuntimeDecodeLimits())
+        : data_dir_(std::move(data_dir)), limits_(limits) {}
 
     std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Open(const std::string& path) override {
-        std::ifstream file(SafeJoinPath(data_dir_, WithExtension(path, ".bin")), std::ios::binary);
+        std::ifstream file(SafeJoinPath(data_dir_, WithExtension(path, ".bin")), std::ios::binary | std::ios::ate);
         if (!file) {
             throw std::runtime_error("failed to open runtime data: " + path);
         }
+        const std::streamoff size = file.tellg();
+        if (size < 0) {
+            throw std::runtime_error("failed to read runtime data size: " + path);
+        }
+        CheckRuntimeDecodeLimit("runtime file bytes", static_cast<std::size_t>(size), limits_.max_file_bytes);
+        file.seekg(0, std::ios::beg);
         std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        return std::make_unique<BinaryRuntimeDataReader>(std::move(bytes));
+        CheckRuntimeDecodeLimit("runtime file bytes", bytes.size(), limits_.max_file_bytes);
+        return std::make_unique<BinaryRuntimeDataReader>(std::move(bytes), limits_);
     }
 
 private:
     std::string data_dir_;
+    RuntimeDecodeLimits limits_;
 };
 
 inline std::string WithExtension(const std::string& logical_path, const std::string& extension) {

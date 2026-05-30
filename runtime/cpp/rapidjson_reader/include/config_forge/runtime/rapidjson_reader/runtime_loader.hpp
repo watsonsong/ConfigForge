@@ -33,6 +33,24 @@ namespace config_forge_runtime {
 inline constexpr const char* SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0";
 #endif
 
+#ifndef CONFIG_FORGE_RUNTIME_CPP_DECODE_LIMITS_DEFINED
+#define CONFIG_FORGE_RUNTIME_CPP_DECODE_LIMITS_DEFINED
+struct RuntimeDecodeLimits {
+    std::size_t max_file_bytes = 64u * 1024u * 1024u;
+    std::size_t max_rows = 1000000u;
+    std::size_t max_array_length = 1000000u;
+    std::size_t max_string_bytes = 16u * 1024u * 1024u;
+    std::size_t max_nesting_depth = 128u;
+};
+
+inline void CheckRuntimeDecodeLimit(const char* label, std::size_t actual, std::size_t limit) {
+    if (actual > limit) {
+        throw std::runtime_error(std::string(label) + " " + std::to_string(actual) +
+                                 " exceeds decode limit " + std::to_string(limit));
+    }
+}
+#endif
+
 #ifndef CONFIG_FORGE_RUNTIME_CPP_SAFE_JOIN_PATH_DEFINED
 #define CONFIG_FORGE_RUNTIME_CPP_SAFE_JOIN_PATH_DEFINED
 inline std::string SafeJoinPath(const std::string& root, const std::string& logical_path) {
@@ -81,7 +99,11 @@ inline std::string WithExtension(const std::string& logical_path, const std::str
 
 class JsonValueReader final : public CONFIG_FORGE_RUNTIME_CPP_READER {
 public:
-    explicit JsonValueReader(std::string json) : document_(std::make_shared<rapidjson::Document>()) {
+    explicit JsonValueReader(
+        std::string json,
+        RuntimeDecodeLimits limits = RuntimeDecodeLimits())
+        : document_(std::make_shared<rapidjson::Document>()), limits_(limits) {
+        CheckRuntimeDecodeLimit("runtime file bytes", json.size(), limits_.max_file_bytes);
         document_->Parse(json.c_str(), json.size());
         if (document_->HasParseError()) {
             throw std::runtime_error("failed to parse JSON runtime data");
@@ -90,8 +112,10 @@ public:
         stack_.push_back(document_.get());
     }
 
-    explicit JsonValueReader(std::shared_ptr<rapidjson::Document> document)
-        : document_(std::move(document)) {
+    explicit JsonValueReader(
+        std::shared_ptr<rapidjson::Document> document,
+        RuntimeDecodeLimits limits = RuntimeDecodeLimits())
+        : document_(std::move(document)), limits_(limits) {
         stack_.reserve(8);
         stack_.push_back(document_.get());
     }
@@ -101,6 +125,7 @@ public:
         if (!value.IsArray() || index >= value.Size()) {
             throw std::runtime_error("missing array index " + std::to_string(index));
         }
+        CheckRuntimeDecodeLimit("nesting depth", stack_.size(), limits_.max_nesting_depth);
         stack_.push_back(&value[static_cast<rapidjson::SizeType>(index)]);
     }
 
@@ -114,7 +139,19 @@ public:
     std::size_t ReadRowCount() override {
         const rapidjson::Value& value = Current();
         if (value.IsArray()) {
-            return value.Size();
+            const std::size_t rows = value.Size();
+            CheckRuntimeDecodeLimit("row count", rows, limits_.max_rows);
+            return rows;
+        }
+        throw std::runtime_error("reader value is not an array");
+    }
+
+    std::size_t ReadArrayLength() override {
+        const rapidjson::Value& value = Current();
+        if (value.IsArray()) {
+            const std::size_t length = value.Size();
+            CheckRuntimeDecodeLimit("array length", length, limits_.max_array_length);
+            return length;
         }
         throw std::runtime_error("reader value is not an array");
     }
@@ -181,6 +218,7 @@ public:
         if (!value.IsString()) {
             throw std::runtime_error("expected string value");
         }
+        CheckRuntimeDecodeLimit("string byte length", value.GetStringLength(), limits_.max_string_bytes);
         return std::string(value.GetString(), value.GetStringLength());
     }
 
@@ -215,6 +253,7 @@ private:
         if (member == value.MemberEnd()) {
             return false;
         }
+        CheckRuntimeDecodeLimit("nesting depth", stack_.size(), limits_.max_nesting_depth);
         stack_.push_back(&member->value);
         return true;
     }
@@ -245,29 +284,40 @@ private:
     const rapidjson::Value& Current() const { return *stack_.back(); }
 
     std::shared_ptr<rapidjson::Document> document_;
+    RuntimeDecodeLimits limits_;
     std::vector<const rapidjson::Value*> stack_;
 };
 
 class JsonFsRuntimeDataLoader final : public CONFIG_FORGE_RUNTIME_CPP_LOADER {
 public:
-    explicit JsonFsRuntimeDataLoader(std::string data_dir) : data_dir_(std::move(data_dir)) {}
+    explicit JsonFsRuntimeDataLoader(
+        std::string data_dir,
+        RuntimeDecodeLimits limits = RuntimeDecodeLimits())
+        : data_dir_(std::move(data_dir)), limits_(limits) {}
 
     std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Open(const std::string& path) override {
-        std::ifstream file(SafeJoinPath(data_dir_, WithExtension(path, ".json")));
+        std::ifstream file(SafeJoinPath(data_dir_, WithExtension(path, ".json")), std::ios::binary | std::ios::ate);
         if (!file) {
             throw std::runtime_error("failed to open runtime data: " + path);
         }
+        const std::streamoff size = file.tellg();
+        if (size < 0) {
+            throw std::runtime_error("failed to read runtime data size: " + path);
+        }
+        CheckRuntimeDecodeLimit("runtime file bytes", static_cast<std::size_t>(size), limits_.max_file_bytes);
+        file.seekg(0, std::ios::beg);
         rapidjson::IStreamWrapper stream(file);
         auto document = std::make_shared<rapidjson::Document>();
         document->ParseStream(stream);
         if (document->HasParseError()) {
             throw std::runtime_error("failed to parse runtime data: " + path);
         }
-        return std::make_unique<JsonValueReader>(std::move(document));
+        return std::make_unique<JsonValueReader>(std::move(document), limits_);
     }
 
 private:
     std::string data_dir_;
+    RuntimeDecodeLimits limits_;
 };
 
 inline std::string WithExtension(const std::string& logical_path, const std::string& extension) {

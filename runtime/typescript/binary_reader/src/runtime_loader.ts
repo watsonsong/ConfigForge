@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  checkRuntimeDecodeLimit,
+  RuntimeDecodeLimits,
+  RuntimeDecodeLimitsInput,
   RuntimeDataReaderLike,
+  normalizeRuntimeDecodeLimits,
   SUPPORTED_CONFIG_FORGE_READER_CONTRACT,
 } from "@config-forge/runtime-reader-core";
 
@@ -15,9 +19,12 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   private nextRowIndex = 0;
   private readonly view: DataView;
   private readonly revision: bigint;
+  private readonly limits: RuntimeDecodeLimits;
   private readonly records: Array<{ bitmap: Uint8Array<ArrayBufferLike>; nextOptionalSlot: number }> = [];
 
-  constructor(private readonly bytes: Uint8Array) {
+  constructor(private readonly bytes: Uint8Array, limits: RuntimeDecodeLimitsInput = {}) {
+    this.limits = normalizeRuntimeDecodeLimits(limits);
+    checkRuntimeDecodeLimit("runtime file bytes", bytes.byteLength, this.limits.maxFileBytes);
     this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     if (bytes.length < 16) {
       throw new Error("truncated binary runtime data header");
@@ -71,6 +78,10 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     return this.revision;
   }
 
+  decodeLimits(): RuntimeDecodeLimits {
+    return this.limits;
+  }
+
   enterRequiredField(_name: string): void {
   }
 
@@ -91,12 +102,15 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
 
   readRowCount(): number {
     const rowCount = this.readVaruintAsNumber("row count");
+    checkRuntimeDecodeLimit("row count", rowCount, this.limits.maxRows);
     this.nextRowIndex = 0;
     return rowCount;
   }
 
   readArrayLength(): number {
-    return this.readVaruintAsNumber("array length");
+    const length = this.readVaruintAsNumber("array length");
+    checkRuntimeDecodeLimit("array length", length, this.limits.maxArrayLength);
+    return length;
   }
 
   arrayElementsArePositional(): boolean {
@@ -104,6 +118,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   }
 
   beginRecord(optionalSlotCount: number): void {
+    checkRuntimeDecodeLimit("nesting depth", this.records.length + 1, this.limits.maxNestingDepth);
     const byteCount = Math.ceil(optionalSlotCount / 8);
     this.records.push({ bitmap: this.readExact(byteCount), nextOptionalSlot: 0 });
   }
@@ -167,6 +182,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
 
   readNextString(): string {
     const len = this.readVaruintAsNumber("string length");
+    checkRuntimeDecodeLimit("string byte length", len, this.limits.maxStringBytes);
     return textDecoder.decode(this.readExact(len));
   }
 
@@ -222,6 +238,10 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   }
 }
 
-export function decodeBinaryRuntimeData(bytes: Uint8Array): BinaryRuntimeDataReader {
-  return new BinaryRuntimeDataReader(bytes);
+export function decodeBinaryRuntimeData(
+  bytes: Uint8Array,
+  pathOrLimits: string | RuntimeDecodeLimitsInput = {},
+): BinaryRuntimeDataReader {
+  const limits = typeof pathOrLimits === "string" ? {} : pathOrLimits;
+  return new BinaryRuntimeDataReader(bytes, limits);
 }

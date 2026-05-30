@@ -9,11 +9,12 @@ use std::{
 };
 
 use config_forge_runtime_reader_core::{
-    RuntimeDataError, RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult,
+    RuntimeDataError, RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult, RuntimeDecodeLimits,
 };
 
 pub struct BinaryRuntimeDataReader {
     state: Rc<RefCell<BinaryState>>,
+    limits: RuntimeDecodeLimits,
 }
 
 struct BinaryState {
@@ -31,10 +32,19 @@ struct RecordState {
 
 pub struct FsBinaryRuntimeDataLoader {
     root: PathBuf,
+    limits: RuntimeDecodeLimits,
 }
 
 impl BinaryRuntimeDataReader {
     pub fn from_bytes(bytes: Vec<u8>) -> RuntimeDataResult<Self> {
+        Self::from_bytes_with_limits(bytes, RuntimeDecodeLimits::default())
+    }
+
+    pub fn from_bytes_with_limits(
+        bytes: Vec<u8>,
+        limits: RuntimeDecodeLimits,
+    ) -> RuntimeDataResult<Self> {
+        limits.check_file_bytes(bytes.len())?;
         if bytes.len() < 16 {
             return Err(RuntimeDataError::decode(
                 "truncated binary runtime data header",
@@ -64,6 +74,7 @@ impl BinaryRuntimeDataReader {
                 next_row_index: 0,
                 records: Vec::new(),
             })),
+            limits,
         })
     }
 }
@@ -119,6 +130,10 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         Some(self.state.borrow().schema_revision)
     }
 
+    fn decode_limits(&self) -> RuntimeDecodeLimits {
+        self.limits
+    }
+
     fn enter_required_field(&self, _name: &'static str) -> RuntimeDataResult<()> {
         Ok(())
     }
@@ -147,13 +162,16 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         let value = read_varuint(&mut self.state.borrow_mut())?;
         let row_count = usize::try_from(value)
             .map_err(|_| RuntimeDataError::decode("row count exceeds usize"))?;
+        self.limits.check_rows(row_count)?;
         self.state.borrow_mut().next_row_index = 0;
         Ok(row_count)
     }
 
     fn read_array_len(&self) -> RuntimeDataResult<usize> {
-        usize::try_from(read_varuint(&mut self.state.borrow_mut())?)
-            .map_err(|_| RuntimeDataError::decode("array length exceeds usize"))
+        let length = usize::try_from(read_varuint(&mut self.state.borrow_mut())?)
+            .map_err(|_| RuntimeDataError::decode("array length exceeds usize"))?;
+        self.limits.check_array_length(length)?;
+        Ok(length)
     }
 
     fn array_elements_are_positional(&self) -> bool {
@@ -163,6 +181,7 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
     fn begin_record(&self, optional_slot_count: usize) -> RuntimeDataResult<()> {
         let byte_count = optional_slot_count.div_ceil(8);
         let mut state = self.state.borrow_mut();
+        self.limits.check_nesting_depth(state.records.len() + 1)?;
         let bytes = read_exact(&mut state, byte_count)?.to_vec();
         state.records.push(RecordState {
             bitmap: bytes,
@@ -235,6 +254,7 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         let mut state = self.state.borrow_mut();
         let len = usize::try_from(read_varuint(&mut state)?)
             .map_err(|_| RuntimeDataError::decode("string length exceeds usize"))?;
+        self.limits.check_string_bytes(len)?;
         let bytes = read_exact(&mut state, len)?.to_vec();
         String::from_utf8(bytes)
             .map_err(|source| RuntimeDataError::decode(format!("invalid UTF-8 string: {source}")))
@@ -259,7 +279,17 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
 
 impl FsBinaryRuntimeDataLoader {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            limits: RuntimeDecodeLimits::default(),
+        }
+    }
+
+    pub fn with_limits(root: impl Into<PathBuf>, limits: RuntimeDecodeLimits) -> Self {
+        Self {
+            root: root.into(),
+            limits,
+        }
     }
 }
 
@@ -268,10 +298,19 @@ impl RuntimeDataLoader for FsBinaryRuntimeDataLoader {
 
     fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {
         let full_path = safe_join(&self.root, &with_extension(path, "bin"))?;
+        check_file_size(&full_path, self.limits)?;
         let bytes = fs::read(&full_path)
             .map_err(|source| RuntimeDataError::io(full_path.display().to_string(), source))?;
-        BinaryRuntimeDataReader::from_bytes(bytes)
+        BinaryRuntimeDataReader::from_bytes_with_limits(bytes, self.limits)
     }
+}
+
+fn check_file_size(path: &Path, limits: RuntimeDecodeLimits) -> RuntimeDataResult<()> {
+    let metadata = fs::metadata(path)
+        .map_err(|source| RuntimeDataError::io(path.display().to_string(), source))?;
+    let size = usize::try_from(metadata.len())
+        .map_err(|_| RuntimeDataError::decode("runtime file bytes exceed usize"))?;
+    limits.check_file_bytes(size)
 }
 
 fn read_varuint(state: &mut BinaryState) -> RuntimeDataResult<u64> {
@@ -442,6 +481,95 @@ mod tests {
         fs::remove_dir_all(&dir).expect("temp runtime data dir should be removed");
     }
 
+    #[test]
+    fn binary_reader_enforces_decode_limits() {
+        let limits = RuntimeDecodeLimits {
+            max_file_bytes: 16,
+            ..RuntimeDecodeLimits::default()
+        };
+        assert!(BinaryRuntimeDataReader::from_bytes_with_limits(binary_bytes_with_row_count(0), limits)
+            .err()
+            .expect("oversized bytes should be rejected")
+            .message
+            .contains("runtime file bytes"));
+
+        let limits = RuntimeDecodeLimits {
+            max_rows: 1,
+            ..RuntimeDecodeLimits::default()
+        };
+        let reader = BinaryRuntimeDataReader::from_bytes_with_limits(binary_bytes_with_row_count(2), limits)
+            .unwrap();
+        assert!(reader.read_row_count().unwrap_err().message.contains("row count"));
+
+        let limits = RuntimeDecodeLimits {
+            max_array_length: 1,
+            ..RuntimeDecodeLimits::default()
+        };
+        let reader = BinaryRuntimeDataReader::from_bytes_with_limits(binary_bytes_with_row_count(0), limits)
+            .unwrap();
+        let _ = reader.read_row_count().unwrap();
+        write_varuint_for_test(&mut reader.state.borrow_mut().bytes, 2);
+        assert!(reader
+            .read_array_len()
+            .unwrap_err()
+            .message
+            .contains("array length"));
+
+        let limits = RuntimeDecodeLimits {
+            max_string_bytes: 3,
+            ..RuntimeDecodeLimits::default()
+        };
+        let mut bytes = binary_bytes_with_row_count(0);
+        write_string_for_test(&mut bytes, "abcd");
+        let reader = BinaryRuntimeDataReader::from_bytes_with_limits(bytes, limits).unwrap();
+        let _ = reader.read_row_count().unwrap();
+        assert!(reader
+            .read_next_string()
+            .unwrap_err()
+            .message
+            .contains("string byte length"));
+
+        let limits = RuntimeDecodeLimits {
+            max_nesting_depth: 1,
+            ..RuntimeDecodeLimits::default()
+        };
+        let reader = BinaryRuntimeDataReader::from_bytes_with_limits(binary_bytes_with_row_count(0), limits)
+            .unwrap();
+        reader.begin_record(0).unwrap();
+        assert!(reader
+            .begin_record(0)
+            .unwrap_err()
+            .message
+            .contains("nesting depth"));
+    }
+
+    #[test]
+    fn fs_binary_loader_rejects_oversized_file_before_reading_payload() {
+        let dir = env::temp_dir().join(format!(
+            "config_forge_binary_limit_loader_test_{}",
+            process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp runtime data dir should be created");
+
+        fs::write(dir.join("items.bin"), binary_bytes_with_row_count(0)).unwrap();
+        let loader = FsBinaryRuntimeDataLoader::with_limits(
+            &dir,
+            RuntimeDecodeLimits {
+                max_file_bytes: 16,
+                ..RuntimeDecodeLimits::default()
+            },
+        );
+        assert!(loader
+            .open("items.bin")
+            .err()
+            .expect("oversized file should be rejected")
+            .message
+            .contains("runtime file bytes"));
+
+        fs::remove_dir_all(&dir).expect("temp runtime data dir should be removed");
+    }
+
     fn write_string_for_test(bytes: &mut Vec<u8>, value: &str) {
         write_varuint_for_test(bytes, value.len() as u64);
         bytes.extend_from_slice(value.as_bytes());
@@ -463,5 +591,15 @@ mod tests {
                 break;
             }
         }
+    }
+
+    fn binary_bytes_with_row_count(row_count: u64) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"CFGB");
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        write_varuint_for_test(&mut bytes, row_count);
+        bytes
     }
 }

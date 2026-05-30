@@ -18,6 +18,7 @@ public:
     virtual bool EnterOptionalField(const std::string& name) = 0;
     virtual void ExitField() = 0;
     virtual std::size_t ReadRowCount() = 0;
+    virtual std::size_t ReadArrayLength() { return ReadRowCount(); }
 };
 
 class IRuntimeDataLoader {
@@ -48,6 +49,37 @@ int main() {
         config_forge_runtime::JsonFsRuntimeDataLoader loader(".");
         (void)loader.Open("../secret.json");
         return 4;
+    } catch (const std::runtime_error&) {
+    }
+    try {
+        config_forge_runtime::RuntimeDecodeLimits limits;
+        limits.max_rows = 1;
+        config_forge_runtime::JsonValueReader limited("[{},{}]", limits);
+        (void)limited.ReadRowCount();
+        return 5;
+    } catch (const std::runtime_error&) {
+    }
+    try {
+        config_forge_runtime::RuntimeDecodeLimits limits;
+        limits.max_array_length = 1;
+        config_forge_runtime::JsonValueReader limited("[1,2]", limits);
+        (void)limited.ReadArrayLength();
+        return 6;
+    } catch (const std::runtime_error&) {
+    }
+    try {
+        config_forge_runtime::RuntimeDecodeLimits limits;
+        limits.max_string_bytes = 3;
+        config_forge_runtime::JsonValueReader limited("\"test\"", limits);
+        (void)limited.AsString();
+        return 7;
+    } catch (const std::runtime_error&) {
+    }
+    try {
+        config_forge_runtime::RuntimeDecodeLimits limits;
+        limits.max_file_bytes = 1;
+        config_forge_runtime::JsonValueReader limited("[]", limits);
+        return 8;
     } catch (const std::runtime_error&) {
     }
     return 0;

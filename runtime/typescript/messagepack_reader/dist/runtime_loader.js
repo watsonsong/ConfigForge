@@ -8,9 +8,11 @@ exports.createMessagePackRuntimeDecoder = createMessagePackRuntimeDecoder;
 const runtime_reader_core_1 = require("@config-forge/runtime-reader-core");
 Object.defineProperty(exports, "SUPPORTED_CONFIG_FORGE_READER_CONTRACT", { enumerable: true, get: function () { return runtime_reader_core_1.SUPPORTED_CONFIG_FORGE_READER_CONTRACT; } });
 exports.MessagePackValueReader = runtime_reader_core_1.RuntimeValueReader;
-function decodeMessagePackValue(bytes, decode) {
-    return new exports.MessagePackValueReader(decode(bytes));
+function decodeMessagePackValue(bytes, decode, limits = {}) {
+    const normalizedLimits = (0, runtime_reader_core_1.normalizeRuntimeDecodeLimits)(limits);
+    (0, runtime_reader_core_1.checkRuntimeDecodeLimit)("runtime file bytes", bytes.byteLength, normalizedLimits.maxFileBytes);
+    return new exports.MessagePackValueReader(decode(bytes), normalizedLimits);
 }
-function createMessagePackRuntimeDecoder(decode) {
-    return (bytes) => decodeMessagePackValue(bytes, decode);
+function createMessagePackRuntimeDecoder(decode, limits = {}) {
+    return (bytes) => decodeMessagePackValue(bytes, decode, limits);
 }

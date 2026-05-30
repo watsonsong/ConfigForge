@@ -383,7 +383,17 @@ binary reader 应共享 compliance fixtures：
 
 ### 13.9.1 Decode limits 与资源上限
 
-标准 binary reader/helper 必须提供默认 decode limits，并允许业务覆盖。reader 不能在验证前按 untrusted count 直接预分配巨大数组。
+标准 binary reader/helper 必须提供默认 decode limits，并允许业务覆盖。reader 不能在验证前按 untrusted count 直接预分配巨大数组。当前 Rust、TypeScript、C++ 标准 runtime reader 使用一致的 limit 维度：
+
+| Limit | 默认值 | 检查位置 |
+| --- | ---: | --- |
+| `max_file_bytes` | 64 MiB | loader 打开文件后、读取 payload 前；直接从 bytes 构造 reader 时也检查。 |
+| `max_rows` | 1,000,000 | CollectionTable `row_count` / named payload 顶层 rows array。 |
+| `max_array_length` | 1,000,000 | Meta `List` 对应 runtime array/list length。 |
+| `max_string_bytes` | 16 MiB | binary string length 前缀或 JSON / MessagePack string byte length，返回/分配字符串前检查。 |
+| `max_nesting_depth` | 128 | named reader cursor 进入字段/元素前，binary reader 进入 nested record 前。 |
+
+JSON / MessagePack adapter 复用同一套 limits，而不仅限于 `.bin`，因为这些 adapter 同样会消费不可信 runtime payload。默认值面向普通项目的安全上界；业务若有更严格或更宽松需求，应通过 reader / loader constructor 显式覆盖。
 
 建议默认规则：
 

@@ -29,6 +29,8 @@ public:
         throw std::runtime_error("unknown enum value");
     }
     virtual std::size_t ReadRowCount() { return 0; }
+    virtual std::size_t ReadArrayLength() { return ReadRowCount(); }
+    virtual bool ArrayElementsArePositional() const { return false; }
     virtual void BeginRecord(std::size_t) {}
     virtual void EndRecord() {}
     virtual bool ReadOptionalPresent() { return false; }
@@ -67,6 +69,13 @@ void WriteLe64(std::vector<std::uint8_t>& bytes, std::uint64_t value) {
         bytes.push_back(static_cast<std::uint8_t>((value >> (index * 8)) & 0xff));
     }
 }
+
+std::vector<std::uint8_t> HeaderWithRowCount(std::uint64_t row_count) {
+    std::vector<std::uint8_t> bytes{'C', 'F', 'G', 'B', 1, 0, 16, 0};
+    WriteLe64(bytes, 7);
+    WriteVaruint(bytes, row_count);
+    return bytes;
+}
 } // namespace
 
 int main() {
@@ -93,6 +102,52 @@ int main() {
         config_forge_runtime::BinaryFsRuntimeDataLoader loader(".");
         (void)loader.Open("../secret.bin");
         return 3;
+    } catch (const std::runtime_error&) {
+    }
+
+    try {
+        auto limited = HeaderWithRowCount(2);
+        config_forge_runtime::RuntimeDecodeLimits limits;
+        limits.max_rows = 1;
+        config_forge_runtime::BinaryRuntimeDataReader row_limited(std::move(limited), limits);
+        (void)row_limited.ReadRowCount();
+        return 4;
+    } catch (const std::runtime_error&) {
+    }
+
+    try {
+        auto limited = HeaderWithRowCount(0);
+        WriteVaruint(limited, 2);
+        config_forge_runtime::RuntimeDecodeLimits limits;
+        limits.max_array_length = 1;
+        config_forge_runtime::BinaryRuntimeDataReader array_limited(std::move(limited), limits);
+        (void)array_limited.ReadRowCount();
+        (void)array_limited.ReadArrayLength();
+        return 5;
+    } catch (const std::runtime_error&) {
+    }
+
+    try {
+        auto limited = HeaderWithRowCount(0);
+        WriteVaruint(limited, 4);
+        limited.push_back('t');
+        limited.push_back('e');
+        limited.push_back('s');
+        limited.push_back('t');
+        config_forge_runtime::RuntimeDecodeLimits limits;
+        limits.max_string_bytes = 3;
+        config_forge_runtime::BinaryRuntimeDataReader string_limited(std::move(limited), limits);
+        (void)string_limited.ReadRowCount();
+        (void)string_limited.ReadNextString();
+        return 6;
+    } catch (const std::runtime_error&) {
+    }
+
+    try {
+        config_forge_runtime::RuntimeDecodeLimits limits;
+        limits.max_file_bytes = 16;
+        config_forge_runtime::BinaryRuntimeDataReader file_limited(HeaderWithRowCount(0), limits);
+        return 7;
     } catch (const std::runtime_error&) {
     }
     return 0;

@@ -12,6 +12,7 @@ export interface RuntimeDataReaderLike {
   asBool(): boolean;
   asString(): string;
   schemaRevision?(): bigint | number | undefined;
+  decodeLimits?(): RuntimeDecodeLimits;
   enterRequiredField?(name: string): void;
   enterOptionalField?(name: string): boolean;
   exitField?(): void;
@@ -31,6 +32,45 @@ export interface RuntimeDataReaderLike {
   ensureExhausted?(): void;
 }
 
+export interface RuntimeDecodeLimits {
+  maxFileBytes: number;
+  maxRows: number;
+  maxArrayLength: number;
+  maxStringBytes: number;
+  maxNestingDepth: number;
+}
+
+export const DEFAULT_RUNTIME_DECODE_LIMITS: RuntimeDecodeLimits = Object.freeze({
+  maxFileBytes: 64 * 1024 * 1024,
+  maxRows: 1_000_000,
+  maxArrayLength: 1_000_000,
+  maxStringBytes: 16 * 1024 * 1024,
+  maxNestingDepth: 128,
+});
+
+export type RuntimeDecodeLimitsInput = Partial<RuntimeDecodeLimits>;
+
+export function normalizeRuntimeDecodeLimits(
+  limits: RuntimeDecodeLimitsInput = {},
+): RuntimeDecodeLimits {
+  return {
+    maxFileBytes: normalizeLimit("maxFileBytes", limits.maxFileBytes, DEFAULT_RUNTIME_DECODE_LIMITS.maxFileBytes),
+    maxRows: normalizeLimit("maxRows", limits.maxRows, DEFAULT_RUNTIME_DECODE_LIMITS.maxRows),
+    maxArrayLength: normalizeLimit("maxArrayLength", limits.maxArrayLength, DEFAULT_RUNTIME_DECODE_LIMITS.maxArrayLength),
+    maxStringBytes: normalizeLimit("maxStringBytes", limits.maxStringBytes, DEFAULT_RUNTIME_DECODE_LIMITS.maxStringBytes),
+    maxNestingDepth: normalizeLimit("maxNestingDepth", limits.maxNestingDepth, DEFAULT_RUNTIME_DECODE_LIMITS.maxNestingDepth),
+  };
+}
+
+export function checkRuntimeDecodeLimit(label: string, actual: number, limit: number): void {
+  if (!Number.isSafeInteger(actual) || actual < 0) {
+    throw new Error(`${label} must be a non-negative safe integer`);
+  }
+  if (actual > limit) {
+    throw new Error(`${label} ${actual} exceeds decode limit ${limit}`);
+  }
+}
+
 export interface RuntimeDataLoaderLike {
   open(path: string): RuntimeDataReaderLike | Promise<RuntimeDataReaderLike>;
 }
@@ -42,9 +82,11 @@ export type RuntimeReaderDecoder = (
 
 export class RuntimeValueReader implements RuntimeDataReaderLike {
   private readonly stack: unknown[];
+  private readonly limits: RuntimeDecodeLimits;
 
-  constructor(value: unknown) {
+  constructor(value: unknown, limits: RuntimeDecodeLimitsInput = {}) {
     this.stack = [value];
+    this.limits = normalizeRuntimeDecodeLimits(limits);
   }
 
   enterField(name: string): boolean {
@@ -60,6 +102,7 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
     if (fieldValue === null || fieldValue === undefined) {
       return false;
     }
+    this.checkNestingDepth(this.stack.length);
     this.stack.push(fieldValue);
     return true;
   }
@@ -69,6 +112,7 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
     if (!Array.isArray(value) || index < 0 || index >= value.length) {
       throw new Error(`missing array index ${index}`);
     }
+    this.checkNestingDepth(this.stack.length);
     this.stack.push(value[index]);
   }
 
@@ -91,7 +135,19 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
   }
 
   readRowCount(): number {
-    return this.length();
+    const length = this.length();
+    checkRuntimeDecodeLimit("row count", length, this.limits.maxRows);
+    return length;
+  }
+
+  readArrayLength(): number {
+    const length = this.length();
+    checkRuntimeDecodeLimit("array length", length, this.limits.maxArrayLength);
+    return length;
+  }
+
+  decodeLimits(): RuntimeDecodeLimits {
+    return this.limits;
   }
 
   asNumber(): number {
@@ -132,6 +188,7 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
   asString(): string {
     const value = this.currentValue();
     if (typeof value === "string") {
+      checkRuntimeDecodeLimit("string byte length", utf8ByteLength(value), this.limits.maxStringBytes);
       return value;
     }
     throw new Error(`expected string value, got ${String(value)}`);
@@ -140,4 +197,42 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
   private currentValue(): unknown {
     return this.stack[this.stack.length - 1];
   }
+
+  private checkNestingDepth(depth: number): void {
+    checkRuntimeDecodeLimit("nesting depth", depth, this.limits.maxNestingDepth);
+  }
+}
+
+function normalizeLimit(label: string, value: number | undefined, fallback: number): number {
+  const resolved = value ?? fallback;
+  if (!Number.isSafeInteger(resolved) || resolved < 0) {
+    throw new Error(`${label} must be a non-negative safe integer`);
+  }
+  return resolved;
+}
+
+function utf8ByteLength(value: string): number {
+  if (typeof TextEncoder !== "undefined") {
+    return new TextEncoder().encode(value).length;
+  }
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
 }

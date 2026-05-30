@@ -21,10 +21,10 @@
   - 目标：文档明确分层命名：schema 类型层使用 `List`，runtime value/wire 容器若使用 `Array` 必须解释为 payload shape；row count 与 list length 必须是不同语义。
   - 验收：`Documentation/glossary.md`、reader contract 文档、Rust/TS/C++ runtime 接口和 generated helper 命名保持一致；如需破坏性改名，按 reader contract minor/major 版本规划兼容 alias。
 
-- [ ] 为 runtime readers 增加可配置 decode limits。
-  - 当前 list/array length、row count、string bytes、nesting depth 等来自外部 payload，缺少统一 limits API。
-  - 目标：覆盖 `max_file_bytes`、`max_rows`、`max_array_length`、`max_string_bytes`、`max_nesting_depth`，并在 binary/json/messagepack adapter 中保持一致诊断。
-  - 验收：不可信 payload 在 reserve/分配前完成上界检查，并有跨语言 compliance fixtures。
+- [x] 为 runtime readers 增加可配置 decode limits。
+  - 已完成：Rust `RuntimeDecodeLimits`、TypeScript `RuntimeDecodeLimits` / `normalizeRuntimeDecodeLimits`、C++ `RuntimeDecodeLimits` 均提供默认上限和业务覆盖入口。
+  - 已完成：binary / JSON / MessagePack adapter 在文件读取、`row_count`、array length、string bytes、nesting depth 入口统一做上界检查。
+  - 验收：不可信 payload 在 reserve/分配前完成上界检查；Rust unit tests 覆盖 file / rows / array / string / nesting，C++ smoke tests 覆盖主要 limit 分支。
 
 ## P2：内部模型和 exporter 复用
 

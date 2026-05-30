@@ -4,9 +4,13 @@
 declare function require(name: string): any;
 
 import {
+  checkRuntimeDecodeLimit,
+  RuntimeDecodeLimits,
+  RuntimeDecodeLimitsInput,
   RuntimeDataLoaderLike,
   RuntimeDataReaderLike,
   RuntimeReaderDecoder,
+  normalizeRuntimeDecodeLimits,
   SUPPORTED_CONFIG_FORGE_READER_CONTRACT,
 } from "@config-forge/runtime-reader-core";
 
@@ -22,36 +26,49 @@ export type SyncRuntimeReaderDecoder = (
 
 export class FsRuntimeDataLoader implements RuntimeDataLoaderLike {
   private readonly resolvedDataDir: string;
+  private readonly limits: RuntimeDecodeLimits;
 
   constructor(
     dataDir: string,
     private readonly decoder: RuntimeReaderDecoder,
     private readonly extension?: string,
+    limits: RuntimeDecodeLimitsInput = {},
   ) {
     this.resolvedDataDir = pathModule.resolve(dataDir);
+    this.limits = normalizeRuntimeDecodeLimits(limits);
   }
 
   async open(path: string): Promise<RuntimeDataReaderLike> {
     const fullPath = safeJoin(this.resolvedDataDir, withExtension(path, this.extension));
+    const stat = await fs.promises.stat(fullPath);
+    checkRuntimeDecodeLimit("runtime file bytes", stat.size, this.limits.maxFileBytes);
     const bytes = await fs.promises.readFile(fullPath);
+    checkRuntimeDecodeLimit("runtime file bytes", bytes.byteLength, this.limits.maxFileBytes);
     return this.decoder(bytes, path);
   }
 }
 
 export class SyncFsRuntimeDataLoader implements RuntimeDataLoaderLike {
   private readonly resolvedDataDir: string;
+  private readonly limits: RuntimeDecodeLimits;
 
   constructor(
     dataDir: string,
     private readonly decoder: SyncRuntimeReaderDecoder,
     private readonly extension?: string,
+    limits: RuntimeDecodeLimitsInput = {},
   ) {
     this.resolvedDataDir = pathModule.resolve(dataDir);
+    this.limits = normalizeRuntimeDecodeLimits(limits);
   }
 
   open(path: string): RuntimeDataReaderLike {
     const fullPath = safeJoin(this.resolvedDataDir, withExtension(path, this.extension));
-    return this.decoder(fs.readFileSync(fullPath), path);
+    const stat = fs.statSync(fullPath);
+    checkRuntimeDecodeLimit("runtime file bytes", stat.size, this.limits.maxFileBytes);
+    const bytes = fs.readFileSync(fullPath);
+    checkRuntimeDecodeLimit("runtime file bytes", bytes.byteLength, this.limits.maxFileBytes);
+    return this.decoder(bytes, path);
   }
 }
 

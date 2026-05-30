@@ -35,6 +35,24 @@ namespace config_forge_runtime {
 inline constexpr const char* SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0";
 #endif
 
+#ifndef CONFIG_FORGE_RUNTIME_CPP_DECODE_LIMITS_DEFINED
+#define CONFIG_FORGE_RUNTIME_CPP_DECODE_LIMITS_DEFINED
+struct RuntimeDecodeLimits {
+    std::size_t max_file_bytes = 64u * 1024u * 1024u;
+    std::size_t max_rows = 1000000u;
+    std::size_t max_array_length = 1000000u;
+    std::size_t max_string_bytes = 16u * 1024u * 1024u;
+    std::size_t max_nesting_depth = 128u;
+};
+
+inline void CheckRuntimeDecodeLimit(const char* label, std::size_t actual, std::size_t limit) {
+    if (actual > limit) {
+        throw std::runtime_error(std::string(label) + " " + std::to_string(actual) +
+                                 " exceeds decode limit " + std::to_string(limit));
+    }
+}
+#endif
+
 #ifndef CONFIG_FORGE_RUNTIME_CPP_SAFE_JOIN_PATH_DEFINED
 #define CONFIG_FORGE_RUNTIME_CPP_SAFE_JOIN_PATH_DEFINED
 inline std::string SafeJoinPath(const std::string& root, const std::string& logical_path) {
@@ -83,20 +101,27 @@ inline std::string WithExtension(const std::string& logical_path, const std::str
 
 class MessagePackValueReader final : public CONFIG_FORGE_RUNTIME_CPP_READER {
 public:
-    explicit MessagePackValueReader(const std::string& bytes)
-        : handle_(std::make_shared<msgpack::object_handle>(msgpack::unpack(bytes.data(), bytes.size()))) {
+    explicit MessagePackValueReader(
+        const std::string& bytes,
+        RuntimeDecodeLimits limits = RuntimeDecodeLimits())
+        : handle_(UnpackChecked(bytes.data(), bytes.size(), limits)), limits_(limits) {
         stack_.reserve(8);
         stack_.push_back(&handle_->get());
     }
 
-    MessagePackValueReader(const char* bytes, std::size_t size)
-        : handle_(std::make_shared<msgpack::object_handle>(msgpack::unpack(bytes, size))) {
+    MessagePackValueReader(
+        const char* bytes,
+        std::size_t size,
+        RuntimeDecodeLimits limits = RuntimeDecodeLimits())
+        : handle_(UnpackChecked(bytes, size, limits)), limits_(limits) {
         stack_.reserve(8);
         stack_.push_back(&handle_->get());
     }
 
-    explicit MessagePackValueReader(std::shared_ptr<msgpack::object_handle> handle)
-        : handle_(std::move(handle)) {
+    explicit MessagePackValueReader(
+        std::shared_ptr<msgpack::object_handle> handle,
+        RuntimeDecodeLimits limits = RuntimeDecodeLimits())
+        : handle_(std::move(handle)), limits_(limits) {
         stack_.reserve(8);
         stack_.push_back(&handle_->get());
     }
@@ -106,6 +131,7 @@ public:
         if (value.type != msgpack::type::ARRAY || index >= value.via.array.size) {
             throw std::runtime_error("missing array index " + std::to_string(index));
         }
+        CheckRuntimeDecodeLimit("nesting depth", stack_.size(), limits_.max_nesting_depth);
         stack_.push_back(&value.via.array.ptr[index]);
     }
 
@@ -119,7 +145,19 @@ public:
     std::size_t ReadRowCount() override {
         const msgpack::object& value = Current();
         if (value.type == msgpack::type::ARRAY) {
-            return value.via.array.size;
+            const std::size_t rows = value.via.array.size;
+            CheckRuntimeDecodeLimit("row count", rows, limits_.max_rows);
+            return rows;
+        }
+        throw std::runtime_error("reader value is not an array");
+    }
+
+    std::size_t ReadArrayLength() override {
+        const msgpack::object& value = Current();
+        if (value.type == msgpack::type::ARRAY) {
+            const std::size_t length = value.via.array.size;
+            CheckRuntimeDecodeLimit("array length", length, limits_.max_array_length);
+            return length;
         }
         throw std::runtime_error("reader value is not an array");
     }
@@ -198,6 +236,7 @@ public:
         if (value.type != msgpack::type::STR) {
             throw std::runtime_error("expected string value");
         }
+        CheckRuntimeDecodeLimit("string byte length", value.via.str.size, limits_.max_string_bytes);
         return std::string(value.via.str.ptr, value.via.str.size);
     }
 
@@ -223,6 +262,14 @@ public:
     }
 
 private:
+    static std::shared_ptr<msgpack::object_handle> UnpackChecked(
+        const char* bytes,
+        std::size_t size,
+        RuntimeDecodeLimits limits) {
+        CheckRuntimeDecodeLimit("runtime file bytes", size, limits.max_file_bytes);
+        return std::make_shared<msgpack::object_handle>(msgpack::unpack(bytes, size));
+    }
+
     bool EnterNamedField(const std::string& name) {
         const msgpack::object& value = Current();
         if (value.type != msgpack::type::MAP) {
@@ -236,6 +283,7 @@ private:
             }
             if (key.via.str.size == name.size() &&
                 std::memcmp(key.via.str.ptr, name.data(), name.size()) == 0) {
+                CheckRuntimeDecodeLimit("nesting depth", stack_.size(), limits_.max_nesting_depth);
                 stack_.push_back(&map.ptr[index].val);
                 return true;
             }
@@ -267,24 +315,36 @@ private:
     const msgpack::object& Current() const { return *stack_.back(); }
 
     std::shared_ptr<msgpack::object_handle> handle_;
+    RuntimeDecodeLimits limits_;
     std::vector<const msgpack::object*> stack_;
 };
 
 class MessagePackFsRuntimeDataLoader final : public CONFIG_FORGE_RUNTIME_CPP_LOADER {
 public:
-    explicit MessagePackFsRuntimeDataLoader(std::string data_dir) : data_dir_(std::move(data_dir)) {}
+    explicit MessagePackFsRuntimeDataLoader(
+        std::string data_dir,
+        RuntimeDecodeLimits limits = RuntimeDecodeLimits())
+        : data_dir_(std::move(data_dir)), limits_(limits) {}
 
     std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Open(const std::string& path) override {
-        std::ifstream file(SafeJoinPath(data_dir_, WithExtension(path, ".msgpack")), std::ios::binary);
+        std::ifstream file(SafeJoinPath(data_dir_, WithExtension(path, ".msgpack")), std::ios::binary | std::ios::ate);
         if (!file) {
             throw std::runtime_error("failed to open runtime data: " + path);
         }
+        const std::streamoff size = file.tellg();
+        if (size < 0) {
+            throw std::runtime_error("failed to read runtime data size: " + path);
+        }
+        CheckRuntimeDecodeLimit("runtime file bytes", static_cast<std::size_t>(size), limits_.max_file_bytes);
+        file.seekg(0, std::ios::beg);
         const std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        return std::make_unique<MessagePackValueReader>(bytes);
+        CheckRuntimeDecodeLimit("runtime file bytes", bytes.size(), limits_.max_file_bytes);
+        return std::make_unique<MessagePackValueReader>(bytes, limits_);
     }
 
 private:
     std::string data_dir_;
+    RuntimeDecodeLimits limits_;
 };
 
 inline std::string WithExtension(const std::string& logical_path, const std::string& extension) {
