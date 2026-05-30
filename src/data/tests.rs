@@ -1023,6 +1023,18 @@ fn data_load_plan_rejects_unsupported_source_features() {
             "#,
             "unsupported provider",
         ),
+        (
+            r#"
+                [[tables]]
+                name = "items"
+                sources = [{ provider = "csv", path = "items.csv", export_when = { any = ["s1"] } }]
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+            "#,
+            "base source",
+        ),
     ];
 
     for (input, expected_message) in cases {

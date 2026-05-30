@@ -90,6 +90,15 @@ impl DataSourcePlan {
             )));
         }
 
+        for source in &table.sources {
+            if source.export_when != crate::meta::ExportCondition::default() {
+                return Err(ConfigForgeError::Validation(format!(
+                    "table `{}` base source `{}` declares `export_when`, but source-level target filtering is currently supported only for `override_sources`",
+                    table.name, source.path
+                )));
+            }
+        }
+
         // Meta validation is the primary source-shape check; keep this defensive
         // guard so callers that build a DataLoadPlan from an unvalidated model do
         // not silently load an unsupported ObjectTable source form.

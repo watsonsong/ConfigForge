@@ -12,7 +12,7 @@
 | enum | Partial | 当前支持 enum 类型链接、default 校验与数据值校验。 |
 | struct | Implemented MVP | 当前支持 named struct 链接、struct JSON cell 数据校验与 nested object 导出；支持由 CSV/source 形态自动决定同一个 struct field occurrence 使用 JSON cell 或 field path 展开，并支持 recursive nested struct、JSON/expanded 混用错误、target-aware child filtering 与 child default；array/map、struct child validators 与 ObjectTable key-level source location 暂未实现。 |
 | default | Partial | 当前支持 primitive / enum scalar default。 |
-| multi-source / override / fragments | Partial | 当前已支持 polymorphic CollectionTable 的 fragment variant source mode：多个 CSV source 可追加完整 records，并由 source `fragments` 声明激活 fragment set；通用 multi-source split merge、ObjectTable 多源合并、`override_sources` 与 fragment join mode 仍未实现。 |
+| multi-source / override / fragments | Partial | 当前已支持 polymorphic CollectionTable 的 fragment variant source mode：多个 CSV source 可追加完整 records，并由 source `fragments` 声明激活 fragment set；也已支持 CollectionTable CSV `override_sources` 按 primary index 整行覆盖并由 `export_when` 按 effective target tags 启用。通用 multi-source split merge、ObjectTable 多源/override、base source `export_when` 与 fragment join mode 仍未实现。 |
 | builtin value types | Planned | `vector3` 等 builtin value types 仍为目标态，当前尚未实现。 |
 | foreign key | Implemented MVP | 当前支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；Phase 1 仅支持 CollectionTable 到 CollectionTable。 |
 | shared table schema / typed fragments | Partial | 当前没有 table inheritance / base fields / reusable field group；field group 仍是方向性目标，不进入近期实现。typed fragment payload 已支持 `[[tables.fragments]] type = "StructName"` 复用标准 struct，并把该 struct 的字段按 fragment object 展开；inline fragment fields 仍继续支持。标准参考项目通过同一 `items` polymorphic table 的多个 variant sources 解决道具公共字段复用，并通过 typed `attributes -> AttributeSet` 避免重复声明属性字段。 |
@@ -753,7 +753,7 @@ target_index = "by_id_region"
 
 ## 4.13 Multi-source 与 Override
 
-> 实现状态：Partial。当前版本已支持 fragment variant source mode 这一受限多源能力：polymorphic CollectionTable 可声明多个 CSV `sources`，但至少一个 source 必须声明 `fragments`。下一阶段优先实现 CollectionTable CSV `override_sources`：按 primary index 匹配整行覆盖，并支持 source-level `export_when`。ObjectTable 多源/override、通用 split merge 与非 `csv` provider 仍会在 Meta 校验或 DataLoadPlan 构造阶段报错，避免静默忽略。
+> 实现状态：Partial。当前版本已支持 fragment variant source mode 这一受限多源能力：polymorphic CollectionTable 可声明多个 CSV `sources`，但至少一个 source 必须声明 `fragments`；同时已支持 CollectionTable CSV `override_sources` 按 primary index 匹配整行覆盖，并支持 source-level `export_when` 按 effective target tags 启用。ObjectTable 多源/override、base source `export_when`、通用 split merge 与非 `csv` provider 仍会在 Meta 校验或 DataLoadPlan 构造阶段报错，避免静默忽略。
 
 本节的 multi-source split merge / override 是通用多源能力，仍为 Reserved。下一节的 polymorphic variant source mode 是多源能力的受限子集：仅允许 `polymorphic = true` 的 CollectionTable 声明多个 variant sources，且每个 source 追加完整 records，不提供通用 split merge、ObjectTable 多源合并或 override 语义。
 

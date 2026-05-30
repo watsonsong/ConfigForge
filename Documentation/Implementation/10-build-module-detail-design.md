@@ -63,7 +63,7 @@ pub(crate) struct NormalizedTargetConfig {
 - code task 禁止显式指定 `data`；若设置则配置校验失败。
 - 无论 target 有 0 个、1 个还是多个 data task，code task 都只依赖 Meta 和 target tags。
 - 生成代码使用逻辑 table name，由运行时 loader / reader 决定实际加载 `.json`、`.msgpack` 或 `.bin` 等具体格式文件。
-- BuildOptions 可以携带 CLI extra tags。normalize 时应将 `target.tags` 与 `extra_tags` 合并为 effective target tags：去重、保持稳定顺序，并用于 DataLoadPlan、Validation、Exporter 和 Codegen。`NormalizedTargetConfig.tags` 推荐保存合并后的 effective tags；如需诊断可单独保留原始 target tags 与 extra tags。
+- BuildOptions 可以携带 CLI extra tags。`TargetConfig::normalize()` 保留 Project Config 中声明的原始 `target.tags`；Build 主流程通过 `NormalizedTargetConfig::effective_target_tags(extra_tags)` 将 `target.tags` 与 `extra_tags` 合并为 effective target tags：去重、保持稳定顺序，并用于 DataLoadPlan、Validation、Exporter 和 Codegen。
 - CLI extra tags 只能追加，不能删除 Project Config 中声明的 target tags。
 
 ## 10.4 Build 主流程
@@ -73,7 +73,8 @@ build_target(options)
   -> create rayon CPU worker pool
   -> ProjectConfig::from_path
   -> select target
-  -> target.normalize(options.extra_tags)
+  -> target.normalize()
+  -> target.effective_target_tags(options.extra_tags)
   -> project.raw_meta_model()
   -> MetaModel::link()
   -> export_runtime_data_tasks(...)
@@ -103,7 +104,7 @@ Build 当前仍先执行 runtime data 再执行 codegen，以保持统一 artifa
 - 每个 data task 调用 `exporter::export_runtime_data()` 生成 runtime artifacts，并保留 `RuntimeDataFile` 列表供未来 manifest 或诊断使用；codegen 不绑定该列表。
 - validation warning 被收集到 `BuildOutput.warnings`，error 直接阻断 build。
 
-注意：DataSet reuse 的 cache key 必须包含 `(input, effective target tags)`，不能只按 `input` 复用。原因是 source-level `override_sources[].export_when` 会改变 materialized DataSet；同一个 data root 在普通 shipping 构建与 `--tag s1` 构建中可能加载不同 override sources，得到不同数据。
+注意：当前 `build_target` 一次只构建一个 target，且同一 target 内所有 data/code task 共享同一组 effective target tags，所以 runtime task 内部可以只按 `input` 复用 normalized `DataSet`。如果未来同一次 build 支持多个 target 或同一 target 内 task-specific tags，DataSet reuse 的 cache key 必须扩展为 `(input, effective target tags)`，不能只按 `input` 复用；否则 source-level `override_sources[].export_when` 可能让普通 shipping 构建与 `--tag s1` 构建错误共享不同 materialized DataSet。
 
 路径冲突分层：
 

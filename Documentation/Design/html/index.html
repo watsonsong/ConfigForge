@@ -304,7 +304,7 @@
         <h2>2. 预期解决的问题</h2>
         <div class="grid grid-2">
           <div class="card"><h3>表结构与运行时代码脱节</h3><p>Meta 描述逻辑结构，工具生成 runtime data 和类型感知代码，避免多处重复维护 schema。</p></div>
-          <div class="card"><h3>多人协作和多源拆分</h3><p>一个逻辑表可以读取多个 <code>sources</code>。当前已支持 polymorphic variant source mode；<code>override_sources</code> 是目标态保留，当前不静默执行。</p></div>
+          <div class="card"><h3>多人协作和多源拆分</h3><p>一个逻辑表可以读取多个 <code>sources</code>。当前已支持 polymorphic variant source mode；CollectionTable CSV <code>override_sources</code> 已支持按 primary index 整行覆盖。</p></div>
           <div class="card"><h3>发布包数据裁剪</h3><p>Target tags 通过 <code>export_when</code> 和 <code>row_export</code> 派生 ExportView，使 client/server、shipping/debug、地区、渠道等目标只导出需要的数据。</p></div>
           <div class="card"><h3>表内表间一致性</h3><p>统一检查字段类型、默认值、唯一索引、外键、资源引用和集合级业务规则。</p></div>
         </div>
@@ -489,7 +489,7 @@ match = "any"
         <h2>8. 多源与覆盖</h2>
         <div class="grid grid-2">
           <div class="card"><h3>Base sources：variant source mode</h3><p>当前支持 polymorphic CollectionTable 多个 CSV source 追加 records；每个 source 可声明 active fragments，且必须贡献完整 record。</p></div>
-          <div class="card"><h3>Override sources：目标态保留</h3><p>设计上不使用 priority，列表越靠后越晚应用；当前实现会拒绝未落地的 override source，避免静默误导。</p></div>
+          <div class="card"><h3>Override sources：CollectionTable CSV</h3><p>设计上不使用 priority，列表越靠后越晚应用；当前支持 CollectionTable CSV 按 primary index 整行覆盖，ObjectTable override 仍显式拒绝。</p></div>
         </div>
         <pre><code>sources = [
   { provider = "csv", path = "Data/items_base.csv" },
@@ -533,7 +533,7 @@ override_sources = [
           <div class="card"><h3>配置解析</h3><p>Project/Meta 路径不存在、import 循环、TOML/XML 语法、等价语义。</p></div>
           <div class="card"><h3>Source Provider</h3><p>CSV 正常读取、header 缺失/重复、ObjectTable <code>key,value</code>、variant source fragments；XLSX/远程 provider 作为未实现能力应显式失败。</p></div>
           <div class="card"><h3>Field Type</h3><p>required、default、color channel、vector3、datetime timezone。</p></div>
-          <div class="card"><h3>Multi-source</h3><p>variant source append、fragment presence、跨 source unique 冲突；override 当前应断言为未实现/拒绝。</p></div>
+          <div class="card"><h3>Multi-source</h3><p>variant source append、fragment presence、跨 source unique 冲突；CollectionTable override 应断言 primary-index 覆盖、missing base row 和 tag-gated 生效。</p></div>
           <div class="card"><h3>Export Filtering</h3><p>target tags、<code>export_when</code>、<code>row_export</code>、<code>export = false</code> 和过滤后集合级校验。</p></div>
           <div class="card"><h3>Desc / 注释</h3><p>desc 进入 inspect、生成代码注释和 translator comments，多行与特殊字符正确转义。</p></div>
           <div class="card"><h3>Artifact Writer</h3><p><code>temp_commit</code> 失败不提交最终产物，<code>direct</code> 按配置直接写入，manifest 稳定排序。</p></div>
@@ -547,7 +547,7 @@ override_sources = [
         <div class="grid grid-2">
           <div class="card"><h3>Project imports</h3><p>Project Config 支持顶层 <code>imports</code> 递归导入配置片段；Meta 文件本身不再声明 imports。</p></div>
           <div class="card"><h3>Source provider</h3><p><code>csv</code> 是当前稳定 provider；<code>xlsx</code>、<code>lark_sheet</code>、<code>google_sheet</code> 是明确 planned provider，不再设计 <code>local_file</code>。</p></div>
-          <div class="card"><h3>Override 顺序</h3><p><code>override_sources</code> 目标态不定义 priority，按列表顺序应用；当前尚未实现，必须显式拒绝。</p></div>
+          <div class="card"><h3>Override 顺序</h3><p><code>override_sources</code> 不定义 priority，按列表顺序应用；当前已支持 CollectionTable CSV 整行覆盖，后声明的 override 覆盖先声明的结果。</p></div>
           <div class="card"><h3>Primary Index</h3><p>取消 primary_key，仅保留 primary_index 或 <code>primary = true</code>。</p></div>
           <div class="card"><h3>Default / Required</h3><p>缺值时先用 default；required 且无值、无 default 才报错。</p></div>
           <div class="card"><h3>Target Tags</h3><p>Target 使用 <code>tags</code> 描述导出上下文；表、字段、索引用 <code>export_when</code> 匹配，collection 行用 <code>row_export</code> 控制。</p></div>

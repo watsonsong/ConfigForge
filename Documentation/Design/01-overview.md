@@ -31,7 +31,7 @@ ConfigForge 是面向游戏配置生产流程的命令行工具。它把策划�
 
 ### 表格拆分与多人协作冲突
 
-大型配置表往往需要按功能、活动、版本拆分。ConfigForge 的目标态支持一个逻辑表读取多个 `sources`，按声明顺序组合为最终逻辑表；同时通过 `override_sources` 对已有行或对象字段进行覆盖，便于版本分支和热修。当前实现状态以 `Design/README.md` 中的状态矩阵为准：已支持 CSV 多 source 追加 records，通用 override 合并仍未实现。
+大型配置表往往需要按功能、活动、版本拆分。ConfigForge 的目标态支持一个逻辑表读取多个 `sources`，按声明顺序组合为最终逻辑表；同时通过 `override_sources` 对已有行或对象字段进行覆盖，便于版本分支和热修。当前实现状态以 `Design/README.md` 中的状态矩阵为准：已支持 CSV 多 source 追加 records，并已支持 CollectionTable CSV `override_sources` 按 primary index 整行覆盖；通用 split merge、ObjectTable override 与非 CSV provider 仍未实现。
 
 ### 发布包按上下文裁剪数据
 

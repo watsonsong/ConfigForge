@@ -881,6 +881,18 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
         ));
     }
 
+    for source in &table.sources {
+        if source.export_when != super::ExportCondition::default() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "table `{}` base source `{}` declares `export_when`, but source-level target filtering is currently supported only for `override_sources`",
+                    table.name, source.path
+                ),
+            ));
+        }
+    }
+
     if !table.override_sources.is_empty()
         && table.kind == TableKind::Collection
         && table.primary_index().is_none()

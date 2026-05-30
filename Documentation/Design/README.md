@@ -59,7 +59,7 @@
 | TOML Project / Meta loading | Stable | 支持 Project imports、多个 Meta 文件 merge、link + validate。XML 仅为历史/目标态示例，当前未实现。 |
 | CSV source provider | Stable | 当前唯一可执行 provider。`xlsx`、`lark_sheet`、`google_sheet` 为 planned / not implemented。 |
 | `sources` 多源 | Implemented MVP | 当前支持同一逻辑表多个 CSV source 追加 records，主要服务 polymorphic variant source mode。 |
-| `override_sources` | Planned / Next | 下一阶段优先实现 CollectionTable CSV override：按 primary index 整行覆盖，支持 `export_when` 绑定赛季/热修 tag；ObjectTable override 和非 CSV provider 仍未实现。 |
+| `override_sources` | Implemented MVP | 当前支持 CollectionTable CSV override：按 primary index 整行覆盖，支持 `export_when` 绑定赛季/热修 tag；ObjectTable override、base source `export_when` 和非 CSV provider 仍未实现并会显式拒绝。 |
 | ObjectTable | Implemented MVP | 当前支持 CSV `key,value` 行式常量表：每行一个 top-level field key，导出单个 object；多源/override、FK、field path 展开、后续格子 expand 暂不实现。 |
 | primitive / enum fields | Stable | 支持 primitive、enum link、default 校验和数据值校验。 |
 | struct fields | Implemented MVP | 支持 named struct、JSON cell 校验和 nested object 导出；支持 CollectionTable/ObjectTable 中由 source path 自动判定的 struct expanded value、recursive nested struct、JSON/expanded 混用错误、target-aware child filtering 与 child default。array/map、struct child validators、ObjectTable key-level source location 暂未实现。 |

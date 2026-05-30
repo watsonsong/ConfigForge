@@ -14,7 +14,7 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 4. 在 Meta Link 完成后，由 Data Resolver 使用 `LinkedMetaModel<'meta>` + raw `DataSet` 解析 JSON cell / expanded path / default / target visibility，得到结构化 `ResolvedDataSet` 或 target-specific resolved view；runtime export 主路径已消费 resolved value。
 5. Validation 仍处于迁移中：source schema 与 value resolve 已通过 resolver 统一，required/type/index/FK 等主流程仍保留部分 raw `DataRow` 逻辑，后续应迁移到 `validate_resolved_*`。
 
-当前阶段已实现 CSV source、DataSet、target-aware validation/export 的基础流程，并已按 **variant source mode** 支持 polymorphic fragments：polymorphic CollectionTable 可声明多个 CSV sources，每个 source 追加完整 records 并声明 active fragments。下一阶段 `override_sources` 的最小落地范围限定为 CollectionTable CSV 整行覆盖：按 primary index 匹配 base row，在匹配 effective target tags 时替换该 row，服务赛季/热修类临时覆盖。
+当前阶段已实现 CSV source、DataSet、target-aware validation/export 的基础流程，并已按 **variant source mode** 支持 polymorphic fragments：polymorphic CollectionTable 可声明多个 CSV sources，每个 source 追加完整 records 并声明 active fragments。`override_sources` 的最小落地范围已实现为 CollectionTable CSV 整行覆盖：按 primary index 匹配 base row，在匹配 effective target tags 时替换该 row，服务赛季/热修类临时覆盖。
 
 仍不实现：
 
@@ -328,7 +328,7 @@ pub struct DataSourcePlan {
 - `path` 是相对 data root 的路径，来自 `SourceRef.path` 或 legacy `TableMeta.source`。
 - `fragments` 是该 source 声明的 polymorphic fragment 名称；普通表和 legacy `source` 为空。
 - `role` 区分 base `source` / `sources` 与 `override_sources`。
-- `export_when` 是 source-level target 条件。base source 第一阶段通常为 match-all；override source 可声明 `{ all = ["s1"] }` 等条件。
+- `export_when` 是 source-level target 条件。当前只对 `override_sources` 生效；base source 必须保持 match-all，声明 `export_when` 会被 Meta validation / DataLoadPlan 显式拒绝，避免把未来的 target-specific base source selection 静默忽略。override source 可声明 `{ all = ["s1"] }` 等条件。
 - `primary_key_fields` 是当前 table primary index 的字段列表快照，仅在 `role = Override` 时用于 DataLoader 定位被覆盖 row；base source 可为空或携带同一份信息以便统一构造 per-table key map。字段路径保持 raw source header 使用的 field path 字符串，例如 `id` 或未来复合 key `region,id` 对应 `Vec<["region", "id"]>`。
 - variant source mode 下，polymorphic collection table 可以拥有多个 `DataSourcePlan`；非 polymorphic table 仍只允许一个 source。为了避免把普通 append mode 与未来通用 multi-source merge 混淆，多 source 必须由至少一个 source 的非空 `fragments` 声明驱动。
 
@@ -356,7 +356,7 @@ impl DataLoadPlan {
 - 一旦 `DataLoadPlan` 构造完成，就拥有 table name、provider、path，后续 Data Load 不再借用 Meta。
 - variant source mode 下，`DataLoadPlan` 需要展开 table 的每个 `SourceRef`，为同一 `table_name` 生成多个 `DataSourcePlan`，并保留 source 声明顺序。
 - `override_sources` 展开为 `role = Override` 的 `DataSourcePlan`，并排在该 table 的 base sources 之后；多个 override source 保持声明顺序。`target_tags` 存在时，`export_when` 不匹配的 override source 不进入 plan，因此不会被读取。
-- `DataLoadPlan::from_tables` 只做 source declaration 的轻量契约检查和搬运：provider 必须支持；多个 sources 只允许 `TableMeta::is_variant_source_mode()` 为 true 的表。fragment 是否存在、字段是否属于 fragment 等 schema 合法性由 Meta validation/link 负责。
+- `DataLoadPlan::from_tables` 只做 source declaration 的轻量契约检查和搬运：provider 必须支持；多个 sources 只允许 `TableMeta::is_variant_source_mode()` 为 true 的表；base source 不允许声明 `export_when`。fragment 是否存在、字段是否属于 fragment 等 schema 合法性由 Meta validation/link 负责。
 - CollectionTable override source 必须有可用于匹配的 primary index。由于 `DataLoadPlan` 只持有 raw `TableMeta`，它需要根据 `primary_index` 在 `TableMeta.indexes` 中找到对应 index 并复制 `fields` 到 `primary_key_fields`；primary index 是否唯一、字段是否存在由 Meta link/validation 负责，但 DataLoadPlan 找不到 index 声明时也应 fail-fast。
 - ObjectTable override source、非 CSV override source、以及缺 primary index 的 CollectionTable override source 必须 fail-fast，不能静默忽略。
 - provider 是否支持属于 source declaration 的基础结构检查，可以由 Meta validation fail-fast，也可以由 DataLoadPlan parse 时返回错误；除 provider parse 以外，DataLoadPlan 不应理解 fragment schema 语义。

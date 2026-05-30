@@ -1323,6 +1323,28 @@ fn rejects_unsupported_source_declarations() {
 }
 
 #[test]
+fn rejects_base_source_export_when_until_target_specific_base_sources_are_supported() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            sources = [{ provider = "csv", path = "items.csv", export_when = { any = ["s1"] } }]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::UnsupportedFeature
+            && diagnostic.message.contains("base source")
+            && diagnostic.message.contains("export_when")
+            && diagnostic.message.contains("override_sources")
+    }));
+}
+
+#[test]
 fn rejects_multi_source_outside_variant_source_mode() {
     let cases = [
         r#"
