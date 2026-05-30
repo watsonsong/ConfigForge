@@ -201,13 +201,11 @@ public:
         return std::string(value.via.str.ptr, value.via.str.size);
     }
 
-    bool IsNull() const override { return Current().type == msgpack::type::NIL; }
-
     void EnterRequiredField(const std::string& name) override {
         if (!EnterNamedField(name)) {
             throw std::runtime_error("missing required field `" + name + "`");
         }
-        if (IsNull()) {
+        if (Current().type == msgpack::type::NIL) {
             ExitField();
             throw std::runtime_error("missing required field `" + name + "`");
         }
@@ -217,7 +215,7 @@ public:
         if (!EnterNamedField(name)) {
             return false;
         }
-        if (IsNull()) {
+        if (Current().type == msgpack::type::NIL) {
             ExitField();
             return false;
         }

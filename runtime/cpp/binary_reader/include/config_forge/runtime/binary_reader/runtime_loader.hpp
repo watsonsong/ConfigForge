@@ -110,8 +110,6 @@ public:
 
     std::string AsString() const override { return ReadNextStringValue(); }
 
-    bool IsNull() const override { return false; }
-
     std::optional<std::uint64_t> SchemaRevision() const override { return state_->schema_revision; }
 
     void EnterRequiredField(const std::string&) override {}

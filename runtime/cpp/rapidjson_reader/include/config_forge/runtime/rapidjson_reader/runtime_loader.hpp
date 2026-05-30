@@ -184,13 +184,11 @@ public:
         return std::string(value.GetString(), value.GetStringLength());
     }
 
-    bool IsNull() const override { return Current().IsNull(); }
-
     void EnterRequiredField(const std::string& name) override {
         if (!EnterNamedField(name)) {
             throw std::runtime_error("missing required field `" + name + "`");
         }
-        if (IsNull()) {
+        if (Current().IsNull()) {
             ExitField();
             throw std::runtime_error("missing required field `" + name + "`");
         }
@@ -200,7 +198,7 @@ public:
         if (!EnterNamedField(name)) {
             return false;
         }
-        if (IsNull()) {
+        if (Current().IsNull()) {
             ExitField();
             return false;
         }

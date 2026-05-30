@@ -11,7 +11,6 @@ export interface RuntimeDataReaderLike {
   asNumber(): number;
   asBool(): boolean;
   asString(): string;
-  isNull(): boolean;
   schemaRevision?(): bigint | number | undefined;
   enterRequiredField?(name: string): void;
   enterOptionalField?(name: string): boolean;
@@ -55,7 +54,11 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
     if (!Object.prototype.hasOwnProperty.call(object, name)) {
       return false;
     }
-    this.stack.push(object[name]);
+    const fieldValue = object[name];
+    if (fieldValue === null || fieldValue === undefined) {
+      return false;
+    }
+    this.stack.push(fieldValue);
     return true;
   }
 
@@ -130,11 +133,6 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
       return value;
     }
     throw new Error(`expected string value, got ${String(value)}`);
-  }
-
-  isNull(): boolean {
-    const value = this.currentValue();
-    return value === null || value === undefined;
   }
 
   private currentValue(): unknown {

@@ -185,9 +185,10 @@ pub fn find_generator<'a>(
 ```rust
 pub struct CodeExportTarget {
     pub language: String,
+    pub out_dir: PathBuf,
+    pub file_name: Option<String>,
     pub module_name: String,
     pub namespace: Option<String>,
-    pub out_dir: PathBuf,
     pub options: CodegenOptions,
 }
 ```
@@ -197,9 +198,10 @@ pub struct CodeExportTarget {
 | 字段 | 说明 |
 | --- | --- |
 | `language` | 目标语言字符串标识，保存 registry 中 generator 的规范语言名。 |
+| `out_dir` | 生成代码输出目录。 |
+| `file_name` | 可选生成代码文件名。Rust / TypeScript 使用该名称补齐默认扩展（`.rs` / `.ts`）；C++ 使用该名称或默认 `generated.hpp` 作为头文件名，并用同一 stem 生成 `.cpp` 源文件。该字段只能是单个文件名，不能包含路径分隔符。 |
 | `module_name` | 生成模块名，例如 Rust module、TS namespace/package、C++ 文件前缀。 |
 | `namespace` | C++ namespace / Rust module path / TS namespace 的可选覆盖。 |
-| `out_dir` | 生成代码输出目录。 |
 | `options` | 从 `targets.code` 解析出的通用和语言专属选项，包括文件头、命名策略、关键字冲突策略、语言扩展参数等。 |
 
 `CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.code]]`。生成代码必须保持格式无关：CodeModel 只依赖 Meta 和 target tags，table data file 常量使用逻辑表名（例如 `items`），实际解析 JSON / MessagePack / bin 由运行时传入的 loader / reader 实现决定。
@@ -234,6 +236,7 @@ pub struct TargetDataConfig {
 pub struct CodegenTaskConfig {
     pub language: String,
     pub output: PathBuf,
+    pub file_name: Option<String>,
     pub module_name: Option<String>,
     pub data: Option<String>,
     pub language_options: HashMap<String, toml::Value>,
@@ -739,7 +742,6 @@ pub trait RuntimeDataReader {
     fn as_f64(&self) -> Result<f64, String>;
     fn as_bool(&self) -> Result<bool, String>;
     fn as_string(&self) -> Result<String, String>;
-    fn is_null(&self) -> bool;
     fn enter_required_field(&self, name: &'static str) -> RuntimeDataResult<()>;
     fn enter_optional_field(&self, name: &'static str) -> RuntimeDataResult<bool>;
     fn exit_field(&self) -> RuntimeDataResult<()>;
@@ -814,7 +816,6 @@ public:
     virtual double AsDouble() const = 0;
     virtual bool AsBool() const = 0;
     virtual std::string AsString() const = 0;
-    virtual bool IsNull() const = 0;
     virtual void EnterRequiredField(const std::string& name) = 0;
     virtual bool EnterOptionalField(const std::string& name) = 0;
     virtual void ExitField() = 0;
@@ -889,7 +890,6 @@ export interface RuntimeDataReader {
   asNumber(): number;
   asBool(): boolean;
   asString(): string;
-  isNull(): boolean;
   enterRequiredField?(name: string): void;
   enterOptionalField?(name: string): boolean;
   exitField?(): void;
@@ -1119,7 +1119,7 @@ Contract 层定义的是 **ConfigForge Runtime Value**，不是 JSON Value。当
 | float | finite number 或 numeric string | finite float / integer 或 numeric string | 非 finite 值必须报错。 |
 | bool | bool 或 string | bool 或 string | string 仅接受大小写敏感的 `"true"` / `"false"` / `"1"` / `"0"`。 |
 | string | string | string | 不做 number-to-string / bool-to-string 自动转换。 |
-| null | null | nil | explicit null 返回 reader，`is_null()` 为 true。 |
+| null | null | nil | explicit null 在字段入口处按 missing 处理；scalar conversion 不接受 null。 |
 | binary/ext | 不适用 | bin/ext | 当前 contract 不支持，adapter 必须明确报错，不能隐式转 string。 |
 
 统一 scalar conversion policy：
@@ -1133,8 +1133,8 @@ Contract 层定义的是 **ConfigForge Runtime Value**，不是 JSON Value。当
 
 missing/null 语义：
 
-- `field(name)` 找不到字段表示 missing：Rust/TS 返回 `None` / `undefined`，C++ 返回 `nullptr`。
-- 字段存在且值为 null/nil 表示 explicit null：必须返回 non-null reader，且 `is_null()` / `IsNull()` 为 true。
+- `field(name)` 找不到字段或字段值为 null/nil 表示 missing：Rust/TS 返回 `None` / `undefined`，C++ 返回 `nullptr`。
+- explicit null 不再依赖独立 reader null-check API；由 `EnterOptionalField` / `enter_optional_field` / `enterOptionalField` 的 bool 返回值统一表达 optional presence。
 - `index(i)` 越界必须报错，不返回 null reader。
 - `length()` / `len()` 对 array 返回元素数；对 object/map 返回字段数；对 scalar/null 报错。C++ adapter 不再暴露通用 `Size()`，generated collection 读取使用 `ReadRowCount()`。
 
@@ -1301,7 +1301,7 @@ Phase 1.5 优先评估拆出稳定 `config_forge_runtime.hpp`：generated C++ �
 
 - JSON string escape / Unicode / number parse error 的完整库语义，不手写简化 parser；
 - MessagePack map / array / integer / float / bool / string / nil；
-- `field` 区分 missing 与 explicit null：missing 返回 `nullptr` / `std::nullopt`，null reader 的 `IsNull()` 返回 true；
+- `field` 将 missing 与 explicit null 都映射为字段不存在，由 `EnterOptionalField` 的 bool 返回值表达 optional presence；
 - reader cursor 必须 owning 或共享持有 root document/value，不能返回指向临时 DOM 节点的悬垂指针；RapidJSON cursor 通常应通过 `std::shared_ptr<Document>` 或等价 owner 维持 root 生命周期；
 - field / index cursor 都必须满足同样 ownership 规则；
 - `Index` 越界应抛出 `std::runtime_error` 或 ConfigForge runtime 定义的派生异常；C++ `ReadRowCount()` 对 array 返回元素数，对非 array 抛错；
@@ -1362,7 +1362,7 @@ const loader = new FsRuntimeDataLoader(dataDir, bytes => new MessagePackValueRea
 const data = await GameData.load(loader);
 ```
 
-MessagePack adapter 的 value 语义应与 JSON adapter 对齐：object/map 支持 `field(name)`，array 支持 `index/length`，scalar 支持 string-to-number / string-to-bool 兼容策略，`null/undefined` 映射到 `isNull()`。
+MessagePack adapter 的 value 语义应与 JSON adapter 对齐：object/map 支持 `field(name)`，array 支持 `index/length`，scalar 支持 string-to-number / string-to-bool 兼容策略，`null/undefined` 在字段入口处按 missing 处理。
 
 #### 4.10.5.8 各语言 contract 约束
 

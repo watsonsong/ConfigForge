@@ -147,6 +147,7 @@ mod tests {
             code: vec![CodegenTaskConfig {
                 language: "typescript".to_owned(),
                 output: PathBuf::from("Generated/TypeScript"),
+                file_name: None,
                 data: None,
                 module_name: None,
                 namespace: None,
@@ -177,6 +178,7 @@ mod tests {
             code: vec![CodegenTaskConfig {
                 language: "rust".to_owned(),
                 output: PathBuf::from("Generated/Rust"),
+                file_name: None,
                 data: Some(DEFAULT_DATA_TASK_NAME.to_owned()),
                 module_name: None,
                 namespace: None,
@@ -217,6 +219,7 @@ mod tests {
             code: vec![CodegenTaskConfig {
                 language: "cpp".to_owned(),
                 output: PathBuf::from("Generated/Cpp"),
+                file_name: None,
                 data: None,
                 module_name: None,
                 namespace: None,

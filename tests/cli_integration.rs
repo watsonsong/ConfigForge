@@ -415,9 +415,112 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
         .success()
         .stdout(predicate::str::contains("target `server` built"));
 
+    assert!(
+        fixture_root
+            .join("out/client_data/json/items.json")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/client_data/binary/items.bin")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/server_data/msgpack/items.msgpack")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/server_data/binary/items.bin")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/client_code/typescript/reference_game_config.ts")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/client_code/cpp/reference_game_config.hpp")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/client_code/cpp/reference_game_config.cpp")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/server_code/rust/reference_game_config.rs")
+            .exists()
+    );
+
     verify_standard_generated_rust_runtime(fixture_root);
     verify_standard_generated_cpp_runtime(fixture_root);
     verify_standard_generated_typescript_runtime(fixture_root);
+}
+
+#[test]
+fn codegen_task_can_override_generated_file_name() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let rust_out_dir = temp_dir.path().join("out/rust");
+    let ts_out_dir = temp_dir.path().join("out/typescript");
+    let cpp_out_dir = temp_dir.path().join("out/cpp");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [[targets]]
+                name = "custom_file_names"
+
+                [[targets.code]]
+                language = "rust"
+                output = "{}"
+                file_name = "game_config"
+
+                [[targets.code]]
+                language = "typescript"
+                output = "{}"
+                file_name = "game_config.ts"
+
+                [[targets.code]]
+                language = "cpp"
+                output = "{}"
+                file_name = "game_config.hpp"
+            "#,
+            standard_core_meta_imports(),
+            rust_out_dir.display(),
+            ts_out_dir.display(),
+            cpp_out_dir.display(),
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "custom_file_names",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `custom_file_names` built"));
+
+    assert!(rust_out_dir.join("game_config.rs").exists());
+    assert!(!rust_out_dir.join("generated.rs").exists());
+    assert!(ts_out_dir.join("game_config.ts").exists());
+    assert!(!ts_out_dir.join("generated.ts").exists());
+    assert!(cpp_out_dir.join("game_config.hpp").exists());
+    assert!(cpp_out_dir.join("game_config.cpp").exists());
+    assert!(!cpp_out_dir.join("generated.hpp").exists());
+    let cpp_source = fs::read_to_string(cpp_out_dir.join("game_config.cpp")).expect("cpp source");
+    assert!(cpp_source.contains("#include \"game_config.hpp\""));
 }
 
 #[test]
@@ -1358,7 +1461,6 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                         if self.path == "items" && self.current_field() == Some("name") {{ Ok("Potion".to_owned()) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected string")) }}
                     }}
 
-                    fn is_null(&self) -> bool {{ false }}
                 }}
 
                 struct MockLoader;
@@ -1460,8 +1562,6 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                     if (path_ == "items" && CurrentField() == "name") { return "Potion"; }
                     throw std::runtime_error("unexpected string");
                 }
-
-                bool IsNull() const override { return false; }
 
                 void EnterRequiredField(const std::string& name) override {
                     if (!EnterNamedField(name)) { throw std::runtime_error("missing required field"); }
@@ -1625,8 +1725,6 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     throw new Error("unexpected string");
                 }
 
-                isNull(): boolean { return false; }
-
                 private currentField(): string {
                     return this.fields[this.fields.length - 1] ?? "";
                 }
@@ -1739,7 +1837,7 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
         .expect("rust harness Cargo.toml should be written");
 
         fs::copy(
-            fixture_root.join("out/server_code/rust/generated.rs"),
+            fixture_root.join("out/server_code/rust/reference_game_config.rs"),
             temp_dir.path().join("generated.rs"),
         )
         .expect("generated Rust MessagePack code should be copied into harness");
@@ -1751,8 +1849,11 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
                 "CARGO_TARGET_DIR",
                 temp_dir.path().join(format!("target-{edition}-json")),
             )
-            .env("JSON_DATA_DIR", fixture_root.join("out/client_data"))
-            .env("MSGPACK_DATA_DIR", fixture_root.join("out/server_data"))
+            .env("JSON_DATA_DIR", fixture_root.join("out/client_data/json"))
+            .env(
+                "MSGPACK_DATA_DIR",
+                fixture_root.join("out/server_data/msgpack"),
+            )
             .output()
             .expect("standard generated Rust JSON runtime test should run");
         assert_command_success(
@@ -1769,8 +1870,11 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
                     .path()
                     .join(format!("target-{edition}-messagepack")),
             )
-            .env("JSON_DATA_DIR", fixture_root.join("out/client_data"))
-            .env("MSGPACK_DATA_DIR", fixture_root.join("out/server_data"))
+            .env("JSON_DATA_DIR", fixture_root.join("out/client_data/json"))
+            .env(
+                "MSGPACK_DATA_DIR",
+                fixture_root.join("out/server_data/msgpack"),
+            )
             .output()
             .expect("standard generated Rust MessagePack runtime test should run");
         assert_command_success(
@@ -1779,7 +1883,7 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
         );
 
         fs::copy(
-            fixture_root.join("out/server_code/rust/generated.rs"),
+            fixture_root.join("out/server_code/rust/reference_game_config.rs"),
             temp_dir.path().join("generated.rs"),
         )
         .expect("generated Rust code should be copied into binary harness");
@@ -1791,7 +1895,7 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
                 "CARGO_TARGET_DIR",
                 temp_dir.path().join(format!("target-{edition}-binary")),
             )
-            .env("BIN_DATA_DIR", fixture_root.join("out/server_binary_data"))
+            .env("BIN_DATA_DIR", fixture_root.join("out/server_data/binary"))
             .output()
             .expect("standard generated Rust binary runtime test should run");
         assert_command_success(
@@ -1811,7 +1915,7 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
     let runtime_cpp_dir = fixture_root.join("../../../runtime/cpp");
     let generated_cpp_dir = fixture_root.join("out/client_code/cpp");
     let harness_cpp = fixture_root.join("harness/cpp/runtime_check.cpp");
-    let generated_cpp = generated_cpp_dir.join("generated.cpp");
+    let generated_cpp = generated_cpp_dir.join("reference_game_config.cpp");
 
     fs::write(
         temp_dir.path().join("generated.hpp"),
@@ -1830,7 +1934,6 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
                 virtual double AsDouble() const = 0;
                 virtual bool AsBool() const = 0;
                 virtual std::string AsString() const = 0;
-                virtual bool IsNull() const = 0;
                 virtual void EnterRequiredField(const std::string& name) = 0;
                 virtual bool EnterOptionalField(const std::string& name) = 0;
                 virtual void ExitField() = 0;
@@ -1942,13 +2045,13 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
     assert_command_success(output, "standard generated C++ CMake build");
 
     let output = StdCommand::new(build_dir.join("standard_runtime_check"))
-        .env("DATA_DIR", fixture_root.join("out/client_data"))
+        .env("DATA_DIR", fixture_root.join("out/client_data/json"))
         .output()
         .expect("standard generated C++ runtime test should run");
     assert_command_success(output, "standard generated C++ runtime test");
 
     let output = StdCommand::new(build_dir.join("standard_binary_runtime_check"))
-        .env("DATA_DIR", fixture_root.join("out/client_binary_data"))
+        .env("DATA_DIR", fixture_root.join("out/client_data/binary"))
         .output()
         .expect("standard generated C++ binary runtime test should run");
     assert_command_success(output, "standard generated C++ binary runtime test");
@@ -2008,7 +2111,7 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
     )
     .expect("TypeScript tsconfig should be copied");
     fs::copy(
-        fixture_root.join("out/client_code/typescript/generated.ts"),
+        fixture_root.join("out/client_code/typescript/reference_game_config.ts"),
         temp_dir.path().join("generated.ts"),
     )
     .expect("generated TypeScript code should be copied into harness");
@@ -2054,8 +2157,8 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
 
     let output = StdCommand::new("node")
         .arg(temp_dir.path().join("dist/runtime_check.js"))
-        .env("DATA_DIR", fixture_root.join("out/client_data"))
-        .env("BIN_DATA_DIR", fixture_root.join("out/client_binary_data"))
+        .env("DATA_DIR", fixture_root.join("out/client_data/json"))
+        .env("BIN_DATA_DIR", fixture_root.join("out/client_data/binary"))
         .output()
         .expect("standard generated TypeScript runtime test should run");
     assert_command_success(output, "standard generated TypeScript runtime test");

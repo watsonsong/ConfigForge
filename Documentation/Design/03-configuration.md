@@ -356,6 +356,7 @@ Planned / Not implemented：`engine`、`special_exporters`、POT、Asset Manifes
 | --- | --- | --- |
 | `language` | 必填 | 代码生成语言，例如 `rust`、`cpp`、`typescript`。 |
 | `output` | 必填 | 当前代码生成任务的输出目录。相对路径以 project root 或所在 import 片段目录为基准。 |
+| `file_name` | language 默认值 | 可选生成代码文件名。Rust / TypeScript 会补齐默认扩展；C++ 以该名称生成头文件，并用同一 stem 生成 `.cpp`。只能是文件名，不能包含路径分隔符。 |
 | `module_name` | language 默认值 | 模块名、包名、namespace 或生成文件前缀。具体语义由语言生成器决定。 |
 | `data` | 不支持 | 禁止设置。生成代码格式无关，只依赖 Meta；格式选择由运行时传入的 loader / reader 实现决定。 |
 | `namespace` | 未设置 | 可选命名空间；C++ 可映射为 namespace，Rust/TS 可作为模块组织提示。 |

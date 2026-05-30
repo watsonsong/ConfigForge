@@ -105,7 +105,6 @@ pub trait RuntimeDataReader {
     fn as_f64(&self) -> RuntimeDataResult<f64>;
     fn as_bool(&self) -> RuntimeDataResult<bool>;
     fn as_string(&self) -> RuntimeDataResult<String>;
-    fn is_null(&self) -> bool;
     fn schema_revision(&self) -> Option<u64> {
         None
     }
@@ -115,20 +114,10 @@ pub trait RuntimeDataReader {
                 "missing required field `{name}`"
             )));
         }
-        if self.is_null() {
-            self.exit()?;
-            return Err(RuntimeDataError::not_found(format!(
-                "missing required field `{name}`"
-            )));
-        }
         Ok(())
     }
     fn enter_optional_field(&self, name: &'static str) -> RuntimeDataResult<bool> {
         if !self.enter_field(name)? {
-            return Ok(false);
-        }
-        if self.is_null() {
-            self.exit()?;
             return Ok(false);
         }
         Ok(true)

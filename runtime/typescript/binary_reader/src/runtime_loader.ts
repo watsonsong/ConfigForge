@@ -66,10 +66,6 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     return this.readNextString();
   }
 
-  isNull(): boolean {
-    return false;
-  }
-
   schemaRevision(): bigint {
     return this.revision;
   }

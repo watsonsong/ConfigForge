@@ -13,7 +13,6 @@ pub(super) fn render_runtime_reader_interfaces(content: &mut CodeWriter) {
   asNumber(): number;
   asBool(): boolean;
   asString(): string;
-  isNull(): boolean;
   schemaRevision?(): bigint | number | undefined;
   enterRequiredField?(name: string): void;
   enterOptionalField?(name: string): boolean;
@@ -70,10 +69,6 @@ function enterRequiredField(reader: RuntimeDataReader, name: string): void {
   if (!reader.enterField(name)) {
     throw new Error(`missing required field ${name}`);
   }
-  if (reader.isNull()) {
-    reader.exit();
-    throw new Error(`missing required field ${name}`);
-  }
 }
 
 function enterOptionalField(reader: RuntimeDataReader, name: string): boolean {
@@ -81,10 +76,6 @@ function enterOptionalField(reader: RuntimeDataReader, name: string): boolean {
     return reader.enterOptionalField(name);
   }
   if (!reader.enterField(name)) {
-    return false;
-  }
-  if (reader.isNull()) {
-    reader.exit();
     return false;
   }
   return true;

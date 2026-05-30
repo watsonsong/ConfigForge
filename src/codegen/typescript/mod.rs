@@ -242,7 +242,10 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         content.raw("}\n");
 
         Ok(vec![GeneratedFile {
-            path: input.target.out_dir.join("generated.ts"),
+            path: input
+                .target
+                .out_dir
+                .join(input.target.single_file_name("generated", "ts")),
             content: content.finish(),
         }])
     }

@@ -219,15 +219,17 @@ impl CodeGenerator for CppCodeGenerator {
             header.raw_fmt(format_args!("\n}} // namespace {namespace}\n"));
         }
 
-        let source = render_source_file(self, input, &model, namespace, &names)?;
+        let header_file_name = input.target.single_file_name("generated", "hpp");
+        let source_file_name = format!("{}.cpp", input.target.file_stem("generated"));
+        let source = render_source_file(self, input, &model, namespace, &names, &header_file_name)?;
 
         Ok(vec![
             GeneratedFile {
-                path: input.target.out_dir.join("generated.hpp"),
+                path: input.target.out_dir.join(header_file_name),
                 content: header.finish(),
             },
             GeneratedFile {
-                path: input.target.out_dir.join("generated.cpp"),
+                path: input.target.out_dir.join(source_file_name),
                 content: source,
             },
         ])
@@ -240,10 +242,11 @@ fn render_source_file(
     model: &CodeModel,
     namespace: Option<&str>,
     names: &CppNames<'_>,
+    header_file_name: &str,
 ) -> Result<String> {
     let mut content = CodeWriter::new(input.target.options.formatting);
     generator.write_file_header(&mut content, input);
-    content.raw("#include \"generated.hpp\"\n\n");
+    content.raw_fmt(format_args!("#include {:?}\n\n", header_file_name));
     content.raw("#include <stdexcept>\n\n");
     if let Some(namespace) = namespace {
         content.raw_fmt(format_args!("namespace {namespace} {{\n\n"));

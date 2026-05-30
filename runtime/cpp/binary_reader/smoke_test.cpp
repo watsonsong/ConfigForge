@@ -17,7 +17,6 @@ public:
     virtual double AsDouble() const = 0;
     virtual bool AsBool() const = 0;
     virtual std::string AsString() const = 0;
-    virtual bool IsNull() const = 0;
     virtual std::optional<std::uint64_t> SchemaRevision() const { return std::nullopt; }
     virtual void EnterRequiredField(const std::string& name) = 0;
     virtual bool EnterOptionalField(const std::string& name) = 0;

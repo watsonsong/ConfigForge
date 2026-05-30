@@ -32,6 +32,7 @@ use crate::{
 pub struct CodeExportTarget {
     pub language: String,
     pub out_dir: PathBuf,
+    pub file_name: Option<String>,
     pub module_name: String,
     pub namespace: Option<String>,
     pub options: CodegenOptions,
@@ -85,6 +86,8 @@ pub struct CodegenTaskConfig {
     pub language: String,
     pub output: PathBuf,
     #[serde(default)]
+    pub file_name: Option<String>,
+    #[serde(default)]
     pub data: Option<String>,
     #[serde(default)]
     pub module_name: Option<String>,
@@ -107,6 +110,7 @@ impl CodegenTaskConfig {
         Self {
             language: language.to_owned(),
             output: PathBuf::new(),
+            file_name: None,
             data: None,
             module_name: None,
             namespace: None,
@@ -136,9 +140,14 @@ pub struct PartialNamingConfig {
 impl CodeExportTarget {
     pub fn from_task(task: CodegenTaskConfig, generator: &dyn CodeGenerator) -> Result<Self> {
         let language = generator.language().to_owned();
+        let file_name = match task.file_name {
+            Some(file_name) => Some(validate_generated_file_name(&file_name)?),
+            None => None,
+        };
         Ok(Self {
             language,
             out_dir: task.output,
+            file_name,
             module_name: task
                 .module_name
                 .unwrap_or_else(|| generator.default_module_name().to_owned()),
@@ -153,6 +162,48 @@ impl CodeExportTarget {
                 language_options: task.language_options,
             },
         })
+    }
+}
+
+impl CodeExportTarget {
+    pub(crate) fn single_file_name(&self, default_stem: &str, extension: &str) -> String {
+        match &self.file_name {
+            Some(file_name) if std::path::Path::new(file_name).extension().is_some() => {
+                file_name.clone()
+            }
+            Some(file_name) => format!("{file_name}.{extension}"),
+            None => format!("{default_stem}.{extension}"),
+        }
+    }
+
+    pub(crate) fn file_stem(&self, default_stem: &str) -> String {
+        match &self.file_name {
+            Some(file_name) => std::path::Path::new(file_name)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or(file_name)
+                .to_owned(),
+            None => default_stem.to_owned(),
+        }
+    }
+}
+
+fn validate_generated_file_name(file_name: &str) -> Result<String> {
+    let is_valid = !file_name.is_empty()
+        && file_name != "."
+        && file_name != ".."
+        && !file_name.contains('/')
+        && !file_name.contains('\\')
+        && std::path::Path::new(file_name)
+            .file_name()
+            .and_then(|name| name.to_str())
+            == Some(file_name);
+    if is_valid {
+        Ok(file_name.to_owned())
+    } else {
+        Err(ConfigForgeError::Validation(format!(
+            "invalid generated code file name `{file_name}`; file_name must be a single file name without path separators"
+        )))
     }
 }
 

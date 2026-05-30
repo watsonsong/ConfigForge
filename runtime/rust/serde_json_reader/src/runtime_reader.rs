@@ -58,7 +58,9 @@ impl RuntimeDataReader for JsonValueReader {
     fn enter_field(&self, name: &'static str) -> RuntimeDataResult<bool> {
         let found = {
             let path = self.path.borrow();
-            Self::value_at(&self.value, &path).and_then(|value| value.get(name)).is_some()
+            Self::value_at(&self.value, &path)
+                .and_then(|value| value.get(name))
+                .is_some_and(|value| !value.is_null())
         };
         if found {
             self.path.borrow_mut().push(JsonPathSegment::Field(name));
@@ -157,9 +159,6 @@ impl RuntimeDataReader for JsonValueReader {
         })
     }
 
-    fn is_null(&self) -> bool {
-        self.with_current(|value| Ok(value.is_null())).unwrap_or(false)
-    }
 }
 
 #[derive(Debug, Clone)]

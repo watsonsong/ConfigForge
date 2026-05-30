@@ -7,7 +7,6 @@ export interface RuntimeDataReaderLike {
     asNumber(): number;
     asBool(): boolean;
     asString(): string;
-    isNull(): boolean;
     schemaRevision?(): bigint | number | undefined;
     enterRequiredField?(name: string): void;
     enterOptionalField?(name: string): boolean;
@@ -39,6 +38,5 @@ export declare class RuntimeValueReader implements RuntimeDataReaderLike {
     asNumber(): number;
     asBool(): boolean;
     asString(): string;
-    isNull(): boolean;
     private currentValue;
 }

@@ -14,7 +14,6 @@ pub(super) fn render_runtime_interfaces(content: &mut CodeWriter) {
         "    virtual double AsDouble() const = 0;\n",
         "    virtual bool AsBool() const = 0;\n",
         "    virtual std::string AsString() const = 0;\n",
-        "    virtual bool IsNull() const = 0;\n",
         "    virtual std::optional<std::uint64_t> SchemaRevision() const { return std::nullopt; }\n",
         "    virtual void EnterRequiredField(const std::string& name) = 0;\n",
         "    virtual bool EnterOptionalField(const std::string& name) = 0;\n",

@@ -17,7 +17,11 @@ class RuntimeValueReader {
         if (!Object.prototype.hasOwnProperty.call(object, name)) {
             return false;
         }
-        this.stack.push(object[name]);
+        const fieldValue = object[name];
+        if (fieldValue === null || fieldValue === undefined) {
+            return false;
+        }
+        this.stack.push(fieldValue);
         return true;
     }
     enterIndex(index) {
@@ -84,10 +88,6 @@ class RuntimeValueReader {
             return value;
         }
         throw new Error(`expected string value, got ${String(value)}`);
-    }
-    isNull() {
-        const value = this.currentValue();
-        return value === null || value === undefined;
     }
     currentValue() {
         return this.stack[this.stack.length - 1];

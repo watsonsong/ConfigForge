@@ -60,7 +60,7 @@ impl RuntimeDataReader for MessagePackValueReader {
             let path = self.path.borrow();
             Self::value_at(&self.value, &path)
                 .and_then(|value| value.get(name))
-                .is_some()
+                .is_some_and(|value| !value.is_null())
         };
         if found {
             self.path
@@ -163,9 +163,6 @@ impl RuntimeDataReader for MessagePackValueReader {
         })
     }
 
-    fn is_null(&self) -> bool {
-        self.with_current(|value| Ok(value.is_null())).unwrap_or(false)
-    }
 }
 
 #[derive(Debug, Clone)]

@@ -91,6 +91,7 @@ pub(in crate::codegen) fn input_for<'a>(
         target: CodeExportTarget {
             language: language.to_owned(),
             out_dir: PathBuf::from("out"),
+            file_name: None,
             module_name: "generated".to_owned(),
             namespace: None,
             options: CodegenOptions::for_language(language).expect("built-in language options"),
@@ -628,6 +629,7 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
         r#"
             language = "typescript"
             output = "Generated/TS"
+            file_name = "game_data"
             file_header = "// {{project.name}} {{datetime}}"
             keyword_conflict = "error"
 
@@ -649,6 +651,8 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
 
     assert_eq!(target.language, TypeScriptCodeGenerator.language());
     assert_eq!(target.out_dir, PathBuf::from("Generated/TS"));
+    assert_eq!(target.file_name.as_deref(), Some("game_data"));
+    assert_eq!(target.single_file_name("generated", "ts"), "game_data.ts");
     assert_eq!(
         target.options.keyword_conflict,
         KeywordConflictPolicy::Error
@@ -668,6 +672,24 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
         TypeScriptCodegenOptions {
             readonly_fields: true,
         }
+    );
+}
+
+#[test]
+fn rejects_codegen_file_name_with_path_separator() {
+    let config: CodegenTaskConfig = toml::from_str(
+        r#"
+            language = "rust"
+            output = "Generated/Rust"
+            file_name = "nested/generated.rs"
+        "#,
+    )
+    .expect("config should parse");
+
+    let error = CodeExportTarget::from_task(config, &RustCodeGenerator).unwrap_err();
+
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("invalid generated code file name"))
     );
 }
 

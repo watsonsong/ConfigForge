@@ -234,7 +234,10 @@ impl CodeGenerator for RustCodeGenerator {
         content.raw("}\n");
 
         Ok(vec![GeneratedFile {
-            path: input.target.out_dir.join("generated.rs"),
+            path: input
+                .target
+                .out_dir
+                .join(input.target.single_file_name("generated", "rs")),
             content: content.finish(),
         }])
     }

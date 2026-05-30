@@ -1,6 +1,11 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+#include "reference_game_config.hpp"
+
+#define CONFIG_FORGE_RUNTIME_CPP_READER reference::game::config::IRuntimeDataReader
+#define CONFIG_FORGE_RUNTIME_CPP_LOADER reference::game::config::IRuntimeDataLoader
+
 #if defined(CONFIG_FORGE_USE_BINARY_RUNTIME_READER)
 #include "config_forge/runtime/binary_reader/runtime_loader.hpp"
 #else

@@ -18,23 +18,25 @@ tags = ["client"]
 [[targets.data]]
 name = "json"
 input = "data"
-output = "out/client_data"
+output = "out/client_data/json"
 format = "json"
 
 [[targets.data]]
 name = "bin"
 input = "data"
-output = "out/client_binary_data"
+output = "out/client_data/binary"
 format = "bin"
 
 [[targets.code]]
 language = "typescript"
 output = "out/client_code/typescript"
+file_name = "reference_game_config"
 module_name = "referenceGameConfig"
 
 [[targets.code]]
 language = "cpp"
 output = "out/client_code/cpp"
+file_name = "reference_game_config"
 module_name = "ReferenceGameConfig"
 namespace = "reference::game::config"
 
@@ -45,16 +47,17 @@ tags = ["server"]
 [[targets.data]]
 name = "messagepack"
 input = "data"
-output = "out/server_data"
+output = "out/server_data/msgpack"
 format = "messagepack"
 
 [[targets.data]]
 name = "bin"
 input = "data"
-output = "out/server_binary_data"
+output = "out/server_data/binary"
 format = "bin"
 
 [[targets.code]]
 language = "rust"
 output = "out/server_code/rust"
+file_name = "reference_game_config"
 module_name = "reference_game_config"

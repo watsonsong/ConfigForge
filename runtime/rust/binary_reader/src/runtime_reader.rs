@@ -115,10 +115,6 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         self.read_next_string()
     }
 
-    fn is_null(&self) -> bool {
-        false
-    }
-
     fn schema_revision(&self) -> Option<u64> {
         Some(self.state.borrow().schema_revision)
     }

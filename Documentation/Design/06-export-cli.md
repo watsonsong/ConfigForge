@@ -89,6 +89,7 @@ namespace = "game::config"
 
 - `language` 决定使用哪个代码生成器。
 - `output` 是该代码生成任务的根目录，不与 target runtime data output 混淆。
+- `file_name` 可覆盖生成代码文件名；Rust / TypeScript 单文件输出会自动补齐默认扩展，C++ 会用同一 stem 生成 `.hpp` / `.cpp`。
 - `data` 不支持设置。生成代码格式无关，只依赖 Meta 和 target tags；格式选择由接入方在运行时传入的 loader / reader 决定。
 - `file_header` 是文本模板，支持 `{{project.name}}`、`{{project.desc}}`、`{{project.copyright}}`、`{{datetime}}`。
 - `keyword_conflict` 控制 Meta 名称转换成目标语言标识符后碰到关键字时如何处理。
