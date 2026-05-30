@@ -9,10 +9,10 @@
   - 已完成：struct expanded child default、struct JSON child default、list default、list FK 元素转换统一走 shared helper，避免 default、empty、JSON array、enum/list element conversion 规则漂移。
   - 后续：range 等 validator 仍运行在 raw/normalized `DataRow` 上；迁移到 `validate_resolved_*` 后可让更多 validator 直接消费 `ResolvedValue/DataValue`。
 
-- [ ] 将 FK target key set 建模为 single/composite 两条路径并缓存构建结果。
-  - 当前每个 FK 都会重建 target key set，且单字段/list FK 仍使用 `HashSet<Vec<String>>`。
-  - 目标：按 `(target_table, target_index, target_view_scope)` 缓存 target key set；单字段 key 使用 `HashSet<String>` 快路径，复合 key 保留 `HashSet<Vec<String>>`。
-  - 验收：多个 FK 指向同一 target index 时只扫描一次 target table；list FK 元素 lookup 不再为每个元素构造临时 `Vec<String>`。
+- [x] 将 FK target key set 建模为 single/composite 两条路径并缓存构建结果。
+  - 已完成：`src/validation/foreign_key.rs` 引入 `ForeignKeyTargetKeyCache`，按 `(target_table, target_index, target_view_scope)` 缓存 target key set，full / target-aware validation 分别使用独立 scope。
+  - 已完成：单字段 key 使用 `HashSet<String>`，复合 key 使用 `HashSet<Vec<String>>`；list FK 元素 lookup 直接走 single-key set，不再为每个元素构造临时 `Vec<String>`。
+  - 验收：单元测试覆盖同一 target index 缓存复用、single/composite 分流和 target view visible rows 作用域。
 
 ## P1：runtime/codegen contract 与安全边界
 

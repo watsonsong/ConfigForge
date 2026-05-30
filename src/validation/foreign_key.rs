@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     ConfigForgeError, Result,
@@ -22,6 +22,7 @@ pub(super) fn validate_foreign_keys_full(
     meta: &LinkedMetaModel<'_>,
     data_set: &DataSet,
 ) -> Result<()> {
+    let mut target_key_cache = ForeignKeyTargetKeyCache::new(ForeignKeyTargetViewScope::Full);
     for source_table_meta in &meta.tables {
         let Some(source_table) = data_set.table(&source_table_meta.meta.name) else {
             continue;
@@ -52,12 +53,17 @@ pub(super) fn validate_foreign_keys_full(
                         target_table_meta.meta.name
                     ))
                 })?;
-            let target_keys = build_foreign_key_target_keys(target_table, target_index, None);
+            let target_keys = target_key_cache.get_or_build(
+                &target_table_meta.meta.name,
+                target_table,
+                target_index,
+                None,
+            );
             validate_foreign_key_source_rows(
                 source_table_meta,
                 source_table,
                 foreign_key,
-                &target_keys,
+                target_keys,
                 None,
             )?;
         }
@@ -70,6 +76,7 @@ pub(super) fn validate_foreign_keys_for_target(
     export_view: &ExportValidationView<'_, '_>,
     target_tags: &TargetTags,
 ) -> Result<()> {
+    let mut target_key_cache = ForeignKeyTargetKeyCache::new(ForeignKeyTargetViewScope::Target);
     for source_table_view in &export_view.tables {
         for foreign_key in &source_table_view.meta.foreign_keys {
             if !foreign_key.is_exported_for(target_tags) {
@@ -118,7 +125,8 @@ pub(super) fn validate_foreign_keys_for_target(
                 target_table_view,
                 target_index,
             )?;
-            let target_keys = build_foreign_key_target_keys(
+            let target_keys = target_key_cache.get_or_build(
+                &target_table_meta.meta.name,
                 target_table_view.table,
                 target_index,
                 Some(target_table_view),
@@ -127,7 +135,7 @@ pub(super) fn validate_foreign_keys_for_target(
                 source_table_view.meta,
                 source_table_view.table,
                 foreign_key,
-                &target_keys,
+                target_keys,
                 Some(source_table_view),
             )?;
         }
@@ -170,36 +178,137 @@ fn validate_foreign_key_target_field_visibility(
     Ok(())
 }
 
-fn build_foreign_key_target_keys(
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ForeignKeyTargetViewScope {
+    Full,
+    Target,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ForeignKeyTargetKeyCacheKey {
+    target_table_name: String,
+    target_index_name: String,
+    view_scope: ForeignKeyTargetViewScope,
+}
+
+struct ForeignKeyTargetKeyCache {
+    view_scope: ForeignKeyTargetViewScope,
+    keys_by_target: HashMap<ForeignKeyTargetKeyCacheKey, ForeignKeyTargetKeySet>,
+    #[cfg(test)]
+    build_count: usize,
+}
+
+impl ForeignKeyTargetKeyCache {
+    fn new(view_scope: ForeignKeyTargetViewScope) -> Self {
+        Self {
+            view_scope,
+            keys_by_target: HashMap::new(),
+            #[cfg(test)]
+            build_count: 0,
+        }
+    }
+
+    fn get_or_build(
+        &mut self,
+        target_table_name: &str,
+        target_table: &DataTable,
+        target_index: &LinkedIndexMeta<'_>,
+        target_table_view: Option<&ExportTableView<'_, '_>>,
+    ) -> &ForeignKeyTargetKeySet {
+        let cache_key = ForeignKeyTargetKeyCacheKey {
+            target_table_name: target_table_name.to_owned(),
+            target_index_name: target_index.meta.name.clone(),
+            view_scope: self.view_scope,
+        };
+        if !self.keys_by_target.contains_key(&cache_key) {
+            let target_keys =
+                ForeignKeyTargetKeySet::build(target_table, target_index, target_table_view);
+            self.keys_by_target.insert(cache_key.clone(), target_keys);
+            #[cfg(test)]
+            {
+                self.build_count += 1;
+            }
+        }
+        self.keys_by_target
+            .get(&cache_key)
+            .expect("target key cache entry should exist")
+    }
+
+    #[cfg(test)]
+    fn build_count(&self) -> usize {
+        self.build_count
+    }
+}
+
+enum ForeignKeyTargetKeySet {
+    Single(HashSet<String>),
+    Composite(HashSet<Vec<String>>),
+}
+
+impl ForeignKeyTargetKeySet {
+    fn build(
+        target_table: &DataTable,
+        target_index: &LinkedIndexMeta<'_>,
+        target_table_view: Option<&ExportTableView<'_, '_>>,
+    ) -> Self {
+        if target_index.fields.len() == 1 {
+            let field = &target_index.fields[0];
+            let mut keys = HashSet::new();
+            for_each_target_row(target_table, target_table_view, |row| {
+                keys.insert(foreign_key_field_value(row, field));
+            });
+            return Self::Single(keys);
+        }
+
+        let mut keys = HashSet::new();
+        for_each_target_row(target_table, target_table_view, |row| {
+            keys.insert(foreign_key_row_key(row, &target_index.fields));
+        });
+        Self::Composite(keys)
+    }
+
+    fn contains_single(&self, key: &str) -> bool {
+        match self {
+            Self::Single(keys) => keys.contains(key),
+            Self::Composite(_) => false,
+        }
+    }
+
+    fn contains_composite(&self, key: &[String]) -> bool {
+        match self {
+            Self::Single(_) => false,
+            Self::Composite(keys) => keys.contains(key),
+        }
+    }
+}
+
+fn for_each_target_row(
     target_table: &DataTable,
-    target_index: &LinkedIndexMeta<'_>,
     target_table_view: Option<&ExportTableView<'_, '_>>,
-) -> HashSet<Vec<String>> {
-    let mut keys = HashSet::new();
+    mut visit: impl FnMut(&DataRow),
+) {
     match target_table_view {
         Some(view) => {
             // Target-specific validation must reject references to rows filtered out for that target.
             for visible_row in &view.visible_rows {
-                let Some(row) = target_table.rows.get(visible_row.row_index) else {
-                    continue;
-                };
-                keys.insert(foreign_key_row_key(row, &target_index.fields));
+                if let Some(row) = target_table.rows.get(visible_row.row_index) {
+                    visit(row);
+                }
             }
         }
         None => {
             for row in &target_table.rows {
-                keys.insert(foreign_key_row_key(row, &target_index.fields));
+                visit(row);
             }
         }
     }
-    keys
 }
 
 fn validate_foreign_key_source_rows(
     source_table_meta: &LinkedTableMeta<'_>,
     source_table: &DataTable,
     foreign_key: &LinkedForeignKeyMeta<'_>,
-    target_keys: &HashSet<Vec<String>>,
+    target_keys: &ForeignKeyTargetKeySet,
     source_table_view: Option<&ExportTableView<'_, '_>>,
 ) -> Result<()> {
     match source_table_view {
@@ -244,7 +353,7 @@ fn validate_foreign_key_row(
     row: &DataRow,
     row_number: usize,
     foreign_key: &LinkedForeignKeyMeta<'_>,
-    target_keys: &HashSet<Vec<String>>,
+    target_keys: &ForeignKeyTargetKeySet,
 ) -> Result<()> {
     if let Some(list_field) = foreign_key_list_source_field(foreign_key) {
         return validate_list_foreign_key_row(
@@ -257,6 +366,57 @@ fn validate_foreign_key_row(
         );
     }
 
+    if foreign_key.fields.len() == 1 {
+        return validate_single_foreign_key_row(
+            source_table_meta,
+            row,
+            row_number,
+            foreign_key,
+            target_keys,
+        );
+    }
+
+    validate_composite_foreign_key_row(source_table_meta, row, row_number, foreign_key, target_keys)
+}
+
+fn validate_single_foreign_key_row(
+    source_table_meta: &LinkedTableMeta<'_>,
+    row: &DataRow,
+    row_number: usize,
+    foreign_key: &LinkedForeignKeyMeta<'_>,
+    target_keys: &ForeignKeyTargetKeySet,
+) -> Result<()> {
+    let key = foreign_key_field_value(row, &foreign_key.fields[0]);
+    if key.trim().is_empty() {
+        if foreign_key.allow_empty {
+            return Ok(());
+        }
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} foreign key `{}` is empty but `allow_empty = false`",
+            source_table_meta.meta.name, row_number, foreign_key.name
+        )));
+    }
+    if !target_keys.contains_single(&key) {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} foreign key `{}` references missing `{}.{}` key `{:?}`",
+            source_table_meta.meta.name,
+            row_number,
+            foreign_key.name,
+            foreign_key.target_table_name,
+            foreign_key.target_index_name,
+            vec![key]
+        )));
+    }
+    Ok(())
+}
+
+fn validate_composite_foreign_key_row(
+    source_table_meta: &LinkedTableMeta<'_>,
+    row: &DataRow,
+    row_number: usize,
+    foreign_key: &LinkedForeignKeyMeta<'_>,
+    target_keys: &ForeignKeyTargetKeySet,
+) -> Result<()> {
     let key = foreign_key_row_key(row, &foreign_key.fields);
     let empty_count = key.iter().filter(|value| value.trim().is_empty()).count();
     // All-empty keys can mean "no relationship"; partial composite keys are always ambiguous.
@@ -275,7 +435,7 @@ fn validate_foreign_key_row(
             source_table_meta.meta.name, row_number, foreign_key.name, key
         )));
     }
-    if !target_keys.contains(&key) {
+    if !target_keys.contains_composite(&key) {
         return Err(ConfigForgeError::Validation(format!(
             "table `{}` row {} foreign key `{}` references missing `{}.{}` key `{:?}`",
             source_table_meta.meta.name,
@@ -295,7 +455,7 @@ fn validate_list_foreign_key_row(
     row_number: usize,
     foreign_key: &LinkedForeignKeyMeta<'_>,
     list_field: &LinkedFieldMeta<'_>,
-    target_keys: &HashSet<Vec<String>>,
+    target_keys: &ForeignKeyTargetKeySet,
 ) -> Result<()> {
     let raw_cell = row
         .get(&list_field.meta.name)
@@ -367,8 +527,7 @@ fn validate_list_foreign_key_row(
                 source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name, index
             ))
         })?;
-        let key = vec![key_value];
-        if !target_keys.contains(&key) {
+        if !target_keys.contains_single(&key_value) {
             return Err(ConfigForgeError::Validation(format!(
                 "table `{}` row {} foreign key `{}` source field `{}[{}]` references missing `{}.{}` key `{:?}`",
                 source_table_meta.meta.name,
@@ -378,7 +537,7 @@ fn validate_list_foreign_key_row(
                 index,
                 foreign_key.target_table_name,
                 foreign_key.target_index_name,
-                key
+                vec![key_value]
             )));
         }
     }
@@ -394,15 +553,129 @@ fn foreign_key_list_source_field<'a, 'meta>(
         .find(|field| matches!(field.linked_field, LinkedField::List(_)))
 }
 
+fn foreign_key_field_value(row: &DataRow, field: &LinkedFieldMeta<'_>) -> String {
+    row.get(&field.meta.name)
+        .map(String::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
 fn foreign_key_row_key(row: &DataRow, fields: &[LinkedFieldMeta<'_>]) -> Vec<String> {
     // FK keys preserve raw cell strings to avoid target-dependent typed canonicalization surprises.
     fields
         .iter()
-        .map(|field| {
-            row.get(&field.meta.name)
-                .map(String::as_str)
-                .unwrap_or_default()
-                .to_owned()
-        })
+        .map(|field| foreign_key_field_value(row, field))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use crate::{data::DataTable, meta::MetaModel};
+
+    use super::*;
+    use crate::validation::{ExportTableView, VisibleRow};
+
+    fn linked_items_meta() -> MetaModel {
+        MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.fields]]
+                name = "region"
+                type = "string"
+
+                [[tables.indexes]]
+                name = "by_id"
+                fields = ["id"]
+                unique = true
+
+                [[tables.indexes]]
+                name = "by_id_region"
+                fields = ["id", "region"]
+                unique = true
+            "#,
+        )
+        .expect("meta should load")
+    }
+
+    fn items_table() -> DataTable {
+        DataTable::new(
+            "items",
+            vec![
+                BTreeMap::from([
+                    ("id".to_owned(), "1".to_owned()),
+                    ("region".to_owned(), "cn".to_owned()),
+                ]),
+                BTreeMap::from([
+                    ("id".to_owned(), "2".to_owned()),
+                    ("region".to_owned(), "us".to_owned()),
+                ]),
+            ],
+        )
+    }
+
+    #[test]
+    fn target_key_cache_reuses_single_index_builds_and_keeps_composite_separate() {
+        let meta = linked_items_meta();
+        let linked_meta = meta.link().expect("meta should link");
+        let table_meta = linked_meta.table("items").expect("table should link");
+        let by_id = table_meta.index("by_id").expect("single index should link");
+        let by_id_region = table_meta
+            .index("by_id_region")
+            .expect("composite index should link");
+        let table = items_table();
+        let mut cache = ForeignKeyTargetKeyCache::new(ForeignKeyTargetViewScope::Full);
+
+        {
+            let keys = cache.get_or_build("items", &table, by_id, None);
+            assert!(keys.contains_single("1"));
+            assert!(keys.contains_single("2"));
+            assert!(!keys.contains_composite(&["1".to_owned()]));
+        }
+        assert_eq!(cache.build_count(), 1);
+
+        {
+            let keys = cache.get_or_build("items", &table, by_id, None);
+            assert!(keys.contains_single("1"));
+        }
+        assert_eq!(cache.build_count(), 1);
+
+        {
+            let keys = cache.get_or_build("items", &table, by_id_region, None);
+            assert!(keys.contains_composite(&["1".to_owned(), "cn".to_owned()]));
+            assert!(keys.contains_composite(&["2".to_owned(), "us".to_owned()]));
+            assert!(!keys.contains_single("1"));
+        }
+        assert_eq!(cache.build_count(), 2);
+    }
+
+    #[test]
+    fn target_key_cache_respects_target_view_scope_rows() {
+        let meta = linked_items_meta();
+        let linked_meta = meta.link().expect("meta should link");
+        let table_meta = linked_meta.table("items").expect("table should link");
+        let by_id = table_meta.index("by_id").expect("single index should link");
+        let table = items_table();
+        let visible_fields = BTreeSet::from(["id", "region"]);
+        let visible_rows = vec![VisibleRow {
+            row_index: 0,
+            source_row_number: Some(1),
+        }];
+        let table_view = ExportTableView::new(table_meta, &table, visible_fields, visible_rows);
+        let mut cache = ForeignKeyTargetKeyCache::new(ForeignKeyTargetViewScope::Target);
+
+        let keys = cache.get_or_build("items", &table, by_id, Some(&table_view));
+
+        assert!(keys.contains_single("1"));
+        assert!(!keys.contains_single("2"));
+        assert_eq!(cache.build_count(), 1);
+    }
 }

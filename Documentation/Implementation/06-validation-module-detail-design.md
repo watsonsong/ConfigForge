@@ -669,7 +669,8 @@ pub struct ReferentialIntegrityValidatorConfig<'meta> {
 
 执行规则：
 
-- 先从 target ExportView rows 构建 target key set。
+- 先从 target ExportView rows 构建 target key set，并按 `(target_table, target_index, target_view_scope)` 缓存；full validation 与 target-aware validation 使用不同 scope，避免错误复用被 target `row_export` 过滤前后的 key set。
+- target key set 按 key 形态拆分：单字段 FK 使用 `HashSet<String>`，复合 FK 使用 `HashSet<Vec<String>>`；list FK 只允许指向单字段 target index，元素 lookup 直接查 single-key set。
 - 遍历 source ExportView rows。
 - source fields 全空且 `allow_empty = true` 时跳过。
 - source fields 全空且 `allow_empty = false` 时报错。
