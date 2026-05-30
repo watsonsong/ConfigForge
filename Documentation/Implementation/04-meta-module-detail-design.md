@@ -351,6 +351,7 @@ pub struct ForeignKeyMeta {
 - `export` / `export_when` 控制该关系是否进入当前 target 的 CodeModel；validation 也默认只检查当前 target 可见关系。
 - Link 阶段解析为 `LinkedForeignKeyMeta<'meta>`，供 validation 执行引用完整性检查；codegen 关联查询 helper 属于后续扩展。
 - 当前 MVP 支持 CollectionTable 或 ObjectTable 作为 FK source；FK target 必须是 CollectionTable unique / primary index，ObjectTable 作为 target 暂不支持。
+- 标量 list field 可作为 FK source，link 阶段会把 `LinkedField::List(Primitive/Enum)` 的元素类型作为 FK key 类型参与兼容性检查；该能力只允许单个 list source field 引用单字段 unique / primary index，不支持复合数组外键。
 
 ### 4.5.10 Target Tags 与导出条件
 
@@ -439,6 +440,7 @@ pub enum LinkedField<'meta> {
     Primitive(PrimitiveFieldType),
     Enum(&'meta EnumMeta),
     Struct(&'meta StructMeta),
+    List(Box<LinkedField<'meta>>),
 }
 ```
 
@@ -446,6 +448,7 @@ pub enum LinkedField<'meta> {
 
 - primitive 保存 copyable enum。
 - enum / struct 保存对 `MetaModel` 内部 owned meta 的借用引用。
+- list 保存递归 linked element type；当前稳定输入只使用 primitive / enum element，未来可扩展 struct element 与 expanded path。
 - 未解析成功时产生 `UnknownFieldType`，该字段不会进入 linked fields。
 
 ### 4.6.2 `LinkedFieldMeta<'meta>`
@@ -575,8 +578,11 @@ impl MetaModel {
 PrimitiveFieldType::parse(field.field_type)
   -> enum_index.get(field.field_type)
   -> struct_index.get(field.field_type)
+  -> list_element_type_name(field.field_type) recursive resolve
   -> UnknownFieldType
 ```
+
+实现中先识别 `T[]` / `list<T>` 并递归解析 element type，形成 `LinkedField::List(Box<...>)`；非 list 再按 primitive / enum / struct 解析。
 
 ## 4.8 Loader 与配置片段边界
 
@@ -654,7 +660,7 @@ pub enum MetaDiagnosticCode {
 
 `link_meta_model` 当前覆盖：
 
-- field type 不是 primitive、enum、struct 时产生 `UnknownFieldType`。
+- field type 不是 primitive、enum、struct、list 时产生 `UnknownFieldType`。
 
 ## 4.10 已 Link 与后续可 Link 的部分
 
@@ -662,7 +668,7 @@ pub enum MetaDiagnosticCode {
 
 | 原始配置位置 | Raw 表达 | Linked 表达 | 当前收益 |
 | --- | --- | --- | --- |
-| table field `type` | `FieldMeta.field_type: String` | `LinkedFieldMeta.linked_field` | 支持 primitive / enum / struct，发现未知类型。 |
+| table field `type` | `FieldMeta.field_type: String` | `LinkedFieldMeta.linked_field` | 支持 primitive / enum / struct / list，发现未知类型。 |
 | struct field `type` | `FieldMeta.field_type: String` | `LinkedFieldMeta.linked_field` | struct 字段与 table 字段共享解析逻辑。 |
 | table index fields | `IndexMeta.fields: Vec<String>` | `LinkedIndexMeta.fields: Vec<&FieldMeta>` | 索引字段引用不再需要下游重复查找。 |
 | table primary index | `TableMeta.primary_index: Option<String>` + `IndexMeta.primary` | `LinkedTableMeta::primary_index() -> Option<&LinkedIndexMeta>` | 直接取得当前 table 选中的主索引。 |

@@ -53,7 +53,7 @@ Rust 不使用传统 OO class。本文档中的“类”对应 Rust 的 `struct`
 | CsvDataReader | `struct CsvDataReader` | CSV provider 的具体读取器。 |
 | DataResolver | `struct DataResolver` | 使用 linked meta 将 raw DataSet 解析为 ResolvedDataSet / target resolved view。 |
 | ResolvedDataSet | `struct ResolvedDataSet` | Meta-aware 的结构化数据快照，隐藏 JSON cell / expanded path 的 source 差异。 |
-| DataValue | `enum DataValue` | 结构化值，表达 typed scalar、nested struct，未来扩展 array/map。 |
+| DataValue | `enum DataValue` | 结构化值，表达 typed scalar、nested struct 与 JSON cell array，未来扩展 map/path array。 |
 
 ## 5.3 建议模块结构
 
@@ -221,11 +221,9 @@ pub struct ResolvedValue {
 }
 
 pub enum DataValue {
-    Null,
     Scalar(ScalarValue),
     Struct(BTreeMap<String, ResolvedValue>),
-    Array(Vec<ResolvedValue>),             // future
-    Map(BTreeMap<String, ResolvedValue>),  // future
+    Array(Vec<ResolvedValue>),
 }
 
 pub enum ScalarValue {
@@ -272,18 +270,18 @@ Validation / Exporter 都看到统一结构：
 
 Resolver 职责：
 
-1. 使用 linked meta 解析 primitive / enum / struct；
+1. 使用 linked meta 解析 primitive / enum / struct / list；
 2. 判定 struct occurrence 是 JSON cell、expanded value 还是 missing；
 3. 检查 JSON/expanded 混用、unknown dotted path、inactive fragment；
-4. 应用 scalar / enum / struct child default；
+4. 应用 scalar / enum / list / struct child default；
 5. 按 target tags 生成 target-specific resolved view，或在 `ResolvedValue` 中保留 visibility 信息供 ExportView 裁剪；
 6. 保留 raw string 和 source trace 以生成精确诊断。
 
 当前实现状态与差距：
 
-- 已实现 `ResolvedDataSet` / `DataResolver` 基础类型、typed scalar parse、struct JSON cell / expanded value 统一解析、source schema 校验、target-aware row resolve、active fragment resolve、runtime export 主路径消费 resolved value。
+- 已实现 `ResolvedDataSet` / `DataResolver` 基础类型、typed scalar parse、list JSON cell parse、struct JSON cell / expanded value 统一解析、source schema 校验、target-aware row resolve、active fragment resolve、runtime export 主路径消费 resolved value。
 - 过渡中：Validation 仍保留 raw `DataRow` 上的 required/type/enum/index/FK 主流程，resolver 作为 source schema 与 value resolve 的预校验入口；后续应迁移到 `validate_resolved_*`。
-- 未实现：typed fragment payload（例如 `attributes` fragment 直接复用 `AttributeSet`）、field group/base table schema 复用、asset existence/text POT special export、ObjectTable key-level source trace、array/map path。
+- 未实现：typed fragment payload（例如 `attributes` fragment 直接复用 `AttributeSet`）、field group/base table schema 复用、asset existence/text POT special export、ObjectTable key-level source trace、expanded array/map path。
 
 注意：是否在 resolver 阶段把 scalar parse 成 `Int/Float/Bool` 需要结合现有 runtime scalar string contract 决定。短期可以先在 resolver 内保留 typed parse 结果与 raw string，runtime export 仍输出 string；长期如果 runtime artifact 改为 typed scalar，可直接复用 `ScalarValue`。
 

@@ -13,6 +13,7 @@ pub enum LinkedField<'meta> {
     Primitive(PrimitiveFieldType),
     Enum(&'meta EnumMeta),
     Struct(LinkedStructType<'meta>),
+    List(Box<LinkedField<'meta>>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -289,6 +290,17 @@ impl<'meta> LinkedFieldMeta<'meta> {
         match &self.linked_field {
             LinkedField::Primitive(primitive) => Some(*primitive),
             _ => None,
+        }
+    }
+
+    pub fn foreign_key_scalar_field(&self) -> Option<&LinkedField<'meta>> {
+        match &self.linked_field {
+            LinkedField::Primitive(_) | LinkedField::Enum(_) => Some(&self.linked_field),
+            LinkedField::List(element) => match element.as_ref() {
+                LinkedField::Primitive(_) | LinkedField::Enum(_) => Some(element.as_ref()),
+                _ => None,
+            },
+            LinkedField::Struct(_) => None,
         }
     }
 }

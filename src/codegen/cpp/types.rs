@@ -116,6 +116,7 @@ impl<'a> CppNames<'a> {
                 "std::string".to_owned()
             }
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
+            CodeTypeRef::List(element) => format!("std::vector<{}>", self.cpp_type(element)?),
         })
     }
 
@@ -151,6 +152,18 @@ impl<'a> CppNames<'a> {
                         source_name = source_name,
                     )
                 }
+                CodeTypeRef::List(element) => {
+                    let read_element = self.cpp_read_current_expr(element)?;
+                    format!(
+                        concat!(
+                            "ReadRequiredList(reader, {source_name}, [](IRuntimeDataReader& value) {{\n",
+                            "            return {read_element};\n",
+                            "        }})",
+                        ),
+                        read_element = read_element,
+                        source_name = source_name,
+                    )
+                }
             });
         }
 
@@ -172,6 +185,46 @@ impl<'a> CppNames<'a> {
                     ),
                     reader_function = reader_function,
                     source_name = source_name,
+                )
+            }
+            CodeTypeRef::List(element) => {
+                let read_element = self.cpp_read_current_expr(element)?;
+                format!(
+                    concat!(
+                        "ReadOptionalList(reader, {source_name}, [](IRuntimeDataReader& value) {{\n",
+                        "            return {read_element};\n",
+                        "        }})",
+                    ),
+                    read_element = read_element,
+                    source_name = source_name,
+                )
+            }
+        })
+    }
+
+    fn cpp_read_current_expr(&self, code_type: &CodeTypeRef) -> Result<String> {
+        Ok(match code_type {
+            CodeTypeRef::Int => "value.AsInt64()".to_owned(),
+            CodeTypeRef::Float => "value.AsDouble()".to_owned(),
+            CodeTypeRef::Bool => "value.AsBool()".to_owned(),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                "value.AsString()".to_owned()
+            }
+            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
+                format!(
+                    "{}(value)",
+                    self.reader_function_name(&self.type_name(name)?)?
+                )
+            }
+            CodeTypeRef::List(element) => {
+                let nested = self.cpp_read_current_expr(element)?;
+                format!(
+                    concat!(
+                        "ReadList(value, [](IRuntimeDataReader& value) {{\n",
+                        "                return {nested};\n",
+                        "            }})",
+                    ),
+                    nested = nested,
                 )
             }
         })

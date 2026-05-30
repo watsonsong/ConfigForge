@@ -325,7 +325,38 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
             LinkedField::Primitive(primitive) => self.write_primitive(*primitive, field, value),
             LinkedField::Enum(enum_meta) => self.write_enum(enum_meta, field, value),
             LinkedField::Struct(struct_type) => self.write_struct(struct_type, value),
+            LinkedField::List(element_type) => self.write_list(element_type, value),
         }
+    }
+
+    fn write_value_for_type(
+        &mut self,
+        field_type: &LinkedField<'meta>,
+        value: &ResolvedValue,
+    ) -> Result<()> {
+        match field_type {
+            LinkedField::Primitive(primitive) => self.write_primitive_for_type(*primitive, value),
+            LinkedField::Enum(enum_meta) => self.write_enum_for_type(enum_meta, value),
+            LinkedField::Struct(struct_type) => self.write_struct(struct_type, value),
+            LinkedField::List(element_type) => self.write_list(element_type, value),
+        }
+    }
+
+    fn write_list(
+        &mut self,
+        element_type: &LinkedField<'meta>,
+        value: &ResolvedValue,
+    ) -> Result<()> {
+        let DataValue::Array(elements) = &value.value else {
+            return Err(ConfigForgeError::Validation(
+                "binary export expected list value".to_owned(),
+            ));
+        };
+        write_varuint(&mut self.bytes, elements.len() as u64);
+        for element in elements {
+            self.write_value_for_type(element_type, element)?;
+        }
+        Ok(())
     }
 
     fn write_primitive(
@@ -337,9 +368,31 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
         let DataValue::Scalar(scalar) = &value.value else {
             return Err(expected_scalar(field));
         };
+        self.write_scalar(primitive, scalar, field.meta.name.as_str())
+    }
+
+    fn write_primitive_for_type(
+        &mut self,
+        primitive: PrimitiveFieldType,
+        value: &ResolvedValue,
+    ) -> Result<()> {
+        let DataValue::Scalar(scalar) = &value.value else {
+            return Err(ConfigForgeError::Validation(
+                "binary export expected scalar list element".to_owned(),
+            ));
+        };
+        self.write_scalar(primitive, scalar, "<list element>")
+    }
+
+    fn write_scalar(
+        &mut self,
+        primitive: PrimitiveFieldType,
+        scalar: &ScalarValue,
+        field_name: &str,
+    ) -> Result<()> {
         match (primitive, scalar) {
             (PrimitiveFieldType::Int, ScalarValue::Int(value)) => {
-                ensure_javascript_safe_int(field, *value)?;
+                ensure_javascript_safe_int(field_name, *value)?;
                 write_varuint(&mut self.bytes, zigzag(*value));
                 Ok(())
             }
@@ -347,7 +400,7 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
                 if !value.is_finite() {
                     return Err(ConfigForgeError::Validation(format!(
                         "binary export field `{}` contains non-finite float `{}`",
-                        field.meta.name, value
+                        field_name, value
                     )));
                 }
                 self.bytes.extend_from_slice(&value.to_le_bytes());
@@ -366,7 +419,7 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
             }
             _ => Err(ConfigForgeError::Validation(format!(
                 "binary export field `{}` has scalar incompatible with `{}`",
-                field.meta.name,
+                field_name,
                 primitive.as_str()
             ))),
         }
@@ -381,14 +434,36 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
         let DataValue::Scalar(ScalarValue::Enum(value)) = &value.value else {
             return Err(expected_scalar(field));
         };
+        self.write_enum_value(enum_meta, value, field.meta.name.as_str())
+    }
+
+    fn write_enum_for_type(
+        &mut self,
+        enum_meta: &crate::meta::EnumMeta,
+        value: &ResolvedValue,
+    ) -> Result<()> {
+        let DataValue::Scalar(ScalarValue::Enum(value)) = &value.value else {
+            return Err(ConfigForgeError::Validation(
+                "binary export expected enum list element".to_owned(),
+            ));
+        };
+        self.write_enum_value(enum_meta, value, "<list element>")
+    }
+
+    fn write_enum_value(
+        &mut self,
+        enum_meta: &crate::meta::EnumMeta,
+        value: &str,
+        field_name: &str,
+    ) -> Result<()> {
         let ordinal = enum_meta
             .values
             .iter()
-            .position(|enum_value| enum_value.name == *value)
+            .position(|enum_value| enum_value.name == value)
             .ok_or_else(|| {
                 ConfigForgeError::Validation(format!(
                     "binary export field `{}` value `{}` is not a member of enum `{}`",
-                    field.meta.name, value, enum_meta.name
+                    field_name, value, enum_meta.name
                 ))
             })?;
         write_varuint(&mut self.bytes, ordinal as u64);
@@ -436,13 +511,13 @@ fn expected_scalar(field: &LinkedFieldMeta<'_>) -> ConfigForgeError {
     ))
 }
 
-fn ensure_javascript_safe_int(field: &LinkedFieldMeta<'_>, value: i64) -> Result<()> {
+fn ensure_javascript_safe_int(field_name: &str, value: i64) -> Result<()> {
     if (JAVASCRIPT_SAFE_INT_MIN..=JAVASCRIPT_SAFE_INT_MAX).contains(&value) {
         return Ok(());
     }
     Err(ConfigForgeError::Validation(format!(
         "binary export field `{}` int value `{}` exceeds JavaScript safe integer range [{}, {}]",
-        field.meta.name, value, JAVASCRIPT_SAFE_INT_MIN, JAVASCRIPT_SAFE_INT_MAX
+        field_name, value, JAVASCRIPT_SAFE_INT_MIN, JAVASCRIPT_SAFE_INT_MAX
     )))
 }
 
@@ -548,6 +623,10 @@ fn write_type_signature(out: &mut Vec<u8>, field: &LinkedField<'_>, target_tags:
         LinkedField::Struct(struct_type) => {
             out.push(0x03);
             write_struct_signature(out, struct_type, target_tags);
+        }
+        LinkedField::List(element_type) => {
+            out.push(0x04);
+            write_type_signature(out, element_type, target_tags);
         }
     }
 }

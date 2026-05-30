@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use super::{
     FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
-    TableKind, TableMeta, ValidatorMeta, ValueLayout, model::normalize_tag,
+    TableKind, TableMeta, ValidatorMeta, ValueLayout, list_element_type_name, model::normalize_tag,
 };
 
 pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
@@ -534,20 +534,17 @@ fn foreign_key_field_types_compatible(
     source: &FieldMeta,
     target: &FieldMeta,
 ) -> bool {
-    match (
-        PrimitiveFieldType::parse(&source.field_type),
-        PrimitiveFieldType::parse(&target.field_type),
-    ) {
+    match (source.primitive_type(), target.primitive_type()) {
         (Some(source), Some(target)) => return source == target,
         (Some(_), None) | (None, Some(_)) => return false,
         (None, None) => {}
     }
-    if model.enum_meta(&source.field_type).is_some()
-        || model.enum_meta(&target.field_type).is_some()
-    {
-        return source.field_type == target.field_type
-            && model.enum_meta(&source.field_type).is_some()
-            && model.enum_meta(&target.field_type).is_some();
+    let source_type = list_element_type_name(&source.field_type).unwrap_or(&source.field_type);
+    let target_type = list_element_type_name(&target.field_type).unwrap_or(&target.field_type);
+    if model.enum_meta(source_type).is_some() || model.enum_meta(target_type).is_some() {
+        return source_type == target_type
+            && model.enum_meta(source_type).is_some()
+            && model.enum_meta(target_type).is_some();
     }
     false
 }
@@ -559,16 +556,27 @@ fn validate_field_layout(
     diagnostics: &mut Vec<MetaDiagnostic>,
 ) {
     let is_struct = model.struct_meta(&field.field_type).is_some();
-    match (is_struct, field.layout) {
-        (true, None) => {}
-        (true, Some(_)) => diagnostics.push(MetaDiagnostic::new(
+    let is_list = list_element_type_name(&field.field_type).is_some();
+    match (is_struct, is_list, field.layout) {
+        (true, _, None) => {}
+        (true, _, Some(_)) => diagnostics.push(MetaDiagnostic::new(
             MetaDiagnosticCode::UnsupportedFeature,
             format!(
                 "{} field `{}` uses struct type `{}` with explicit layout; struct source layout is decided by CSV headers or object keys, so remove `layout`",
                 owner, field.name, field.field_type
             ),
         )),
-        (false, Some(ValueLayout::JsonCell | ValueLayout::ExpandedValue)) => {
+        (false, true, None | Some(ValueLayout::JsonCell)) => {}
+        (false, true, Some(ValueLayout::ScalarCell | ValueLayout::ExpandedValue)) => {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "{} field `{}` uses unsupported layout; list fields must use JSON cell values in this phase",
+                    owner, field.name
+                ),
+            ));
+        }
+        (false, false, Some(ValueLayout::JsonCell | ValueLayout::ExpandedValue)) => {
             diagnostics.push(MetaDiagnostic::new(
                 MetaDiagnosticCode::UnsupportedFeature,
                 format!(
@@ -579,7 +587,7 @@ fn validate_field_layout(
                 ),
             ));
         }
-        (false, None | Some(ValueLayout::ScalarCell)) => {}
+        (false, false, None | Some(ValueLayout::ScalarCell)) => {}
     }
 
     if is_struct && field.default.is_some() {
@@ -917,30 +925,38 @@ fn validate_default_value(
         return;
     };
 
-    let valid = match PrimitiveFieldType::parse(&field.field_type) {
-        Some(PrimitiveFieldType::Int) => default.as_integer().is_some(),
-        Some(PrimitiveFieldType::Float) => {
-            default.as_integer().is_some() || default.as_float().is_some_and(f64::is_finite)
-        }
-        Some(PrimitiveFieldType::Bool) => default.as_bool().is_some(),
-        Some(PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset) => {
-            default.as_str().is_some()
-        }
-        None => {
-            if model.struct_meta(&field.field_type).is_some() {
-                return;
+    let valid = if let Some(element_type) = list_element_type_name(&field.field_type) {
+        default.as_array().is_some_and(|values| {
+            values
+                .iter()
+                .all(|value| default_value_matches_type(model, element_type, value))
+        })
+    } else {
+        match PrimitiveFieldType::parse(&field.field_type) {
+            Some(PrimitiveFieldType::Int) => default.as_integer().is_some(),
+            Some(PrimitiveFieldType::Float) => {
+                default.as_integer().is_some() || default.as_float().is_some_and(f64::is_finite)
             }
-            model
-                .enum_meta(&field.field_type)
-                .and_then(|enum_meta| {
-                    default.as_str().map(|default_value| {
-                        enum_meta
-                            .values
-                            .iter()
-                            .any(|enum_value| enum_value.name == default_value)
+            Some(PrimitiveFieldType::Bool) => default.as_bool().is_some(),
+            Some(
+                PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset,
+            ) => default.as_str().is_some(),
+            None => {
+                if model.struct_meta(&field.field_type).is_some() {
+                    return;
+                }
+                model
+                    .enum_meta(&field.field_type)
+                    .and_then(|enum_meta| {
+                        default.as_str().map(|default_value| {
+                            enum_meta
+                                .values
+                                .iter()
+                                .any(|enum_value| enum_value.name == default_value)
+                        })
                     })
-                })
-                .unwrap_or(false)
+                    .unwrap_or(false)
+            }
         }
     };
 
@@ -952,6 +968,27 @@ fn validate_default_value(
                 owner, field.name, field.field_type
             ),
         ));
+    }
+}
+
+fn default_value_matches_type(model: &MetaModel, field_type: &str, default: &toml::Value) -> bool {
+    match PrimitiveFieldType::parse(field_type) {
+        Some(PrimitiveFieldType::Int) => default.as_integer().is_some(),
+        Some(PrimitiveFieldType::Float) => {
+            default.as_integer().is_some() || default.as_float().is_some_and(f64::is_finite)
+        }
+        Some(PrimitiveFieldType::Bool) => default.as_bool().is_some(),
+        Some(PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset) => {
+            default.as_str().is_some()
+        }
+        None => model.enum_meta(field_type).is_some_and(|enum_meta| {
+            default.as_str().is_some_and(|default_value| {
+                enum_meta
+                    .values
+                    .iter()
+                    .any(|enum_value| enum_value.name == default_value)
+            })
+        }),
     }
 }
 

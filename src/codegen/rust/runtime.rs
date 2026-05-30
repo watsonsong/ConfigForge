@@ -78,6 +78,42 @@ fn read_optional_string<R: RuntimeDataReader>(reader: &R, name: &'static str) ->
     with_optional_field(reader, name, |value| value.as_string())
 }
 
+fn read_list<R: RuntimeDataReader, T>(reader: &R, read: impl Fn(&R) -> RuntimeDataResult<T>) -> RuntimeDataResult<Vec<T>> {
+    let len = reader.read_array_len()?;
+    let mut values = Vec::with_capacity(len);
+    for index in 0..len {
+        if reader.array_elements_are_positional() {
+            values.push(read(reader)?);
+        } else {
+            reader.enter_index(index)?;
+            let value = read(reader);
+            let exit = reader.exit();
+            match (value, exit) {
+                (Ok(value), Ok(())) => values.push(value),
+                (Err(error), _) => return Err(error),
+                (Ok(_), Err(error)) => return Err(error),
+            }
+        }
+    }
+    Ok(values)
+}
+
+fn read_required_list<R: RuntimeDataReader, T>(
+    reader: &R,
+    name: &'static str,
+    read: impl Fn(&R) -> RuntimeDataResult<T>,
+) -> RuntimeDataResult<Vec<T>> {
+    with_required_field(reader, name, |value| read_list(value, read))
+}
+
+fn read_optional_list<R: RuntimeDataReader, T>(
+    reader: &R,
+    name: &'static str,
+    read: impl Fn(&R) -> RuntimeDataResult<T>,
+) -> RuntimeDataResult<Option<Vec<T>>> {
+    with_optional_field(reader, name, |value| read_list(value, read))
+}
+
 "#,
     );
 }

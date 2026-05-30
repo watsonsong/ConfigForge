@@ -95,7 +95,7 @@ fn dry_run_builds_plan_without_writing_artifacts() {
 
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("artifact plan (3 entries):"))
+        .stdout(predicate::str::contains("artifact plan (5 entries):"))
         .stdout(predicate::str::contains("items.json"))
         .stdout(predicate::str::contains("game_rules.json"))
         .stdout(predicate::str::contains("generated.rs"))
@@ -230,7 +230,11 @@ fn builds_target_from_project_config() {
         serde_json::from_str(&game_rules_json).expect("game rules json should parse");
     assert_eq!(game_rules["max_player_level"], "60");
     assert_eq!(game_rules["starter_gold"], "500");
-    assert_eq!(game_rules["starter_item_id"], "2001");
+    assert_eq!(game_rules["default_class"], "1");
+    assert_eq!(
+        game_rules["starter_item_ids"],
+        serde_json::json!(["2001", "2002"])
+    );
     assert_eq!(game_rules["stamina_cap"], "120");
     assert_eq!(game_rules["daily_reset_hour"], "5");
     assert_eq!(game_rules["pvp_enabled"], "true");
@@ -1388,7 +1392,7 @@ fn absolute_fixture_path(relative_path: &str) -> String {
 }
 
 fn standard_core_meta_imports() -> String {
-    ["meta/items.toml", "meta/misc.toml"]
+    ["meta/items.toml", "meta/characters.toml", "meta/misc.toml"]
         .into_iter()
         .map(|path| format!("\"{}\"", absolute_fixture_path(path)))
         .collect::<Vec<_>>()
@@ -1465,7 +1469,8 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             "price" => "price",
                             "max_player_level" => "max_player_level",
                             "starter_gold" => "starter_gold",
-                            "starter_item_id" => "starter_item_id",
+                            "default_class" => "default_class",
+                            "starter_item_ids" => "starter_item_ids",
                             "stamina_cap" => "stamina_cap",
                             "daily_reset_hour" => "daily_reset_hour",
                             "pvp_enabled" => "pvp_enabled",
@@ -1478,6 +1483,9 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
 
                     fn enter_index(&self, index: usize) -> RuntimeDataResult<()> {{
                         if self.path == "items" && self.current_field() == Some("rows") && index == 0 {{
+                            self.fields.borrow_mut().push("");
+                            Ok(())
+                        }} else if self.path == "game_rules" && self.current_field() == Some("starter_item_ids") && index < 2 {{
                             self.fields.borrow_mut().push("");
                             Ok(())
                         }} else {{
@@ -1494,7 +1502,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                     }}
 
                     fn len(&self) -> RuntimeDataResult<usize> {{
-                        if self.path == "items" && self.current_field() == Some("rows") {{ Ok(1) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
+                        if self.path == "items" && self.current_field() == Some("rows") {{ Ok(1) }} else if matches!(self.path, "classes" | "class_levels") && self.current_field() == Some("rows") {{ Ok(0) }} else if self.path == "game_rules" && self.current_field() == Some("starter_item_ids") {{ Ok(2) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
                     }}
 
                     fn as_i64(&self) -> RuntimeDataResult<i64> {{
@@ -1503,7 +1511,8 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             ("items", Some("price")) => Ok(10),
                             ("game_rules", Some("max_player_level")) => Ok(60),
                             ("game_rules", Some("starter_gold")) => Ok(500),
-                            ("game_rules", Some("starter_item_id")) => Ok(2001),
+                            ("game_rules", Some("default_class")) => Ok(1),
+                            ("game_rules", Some("")) => Ok(2001),
                             ("game_rules", Some("stamina_cap")) => Ok(120),
                             ("game_rules", Some("daily_reset_hour")) => Ok(5),
                             _ => Err(RuntimeDataError::type_mismatch("unexpected i64")),
@@ -1530,6 +1539,8 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                     fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {{
                         match path {{
                             "items" => Ok(MockReader::root("items")),
+                            "classes" => Ok(MockReader::root("classes")),
+                            "class_levels" => Ok(MockReader::root("class_levels")),
                             "game_rules" => Ok(MockReader::root("game_rules")),
                             other => Err(RuntimeDataError::not_found(format!("unexpected path: {{other}}"))),
                         }}
@@ -1543,13 +1554,15 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                     assert_eq!(item.name, "Potion");
                     assert_eq!(data.items.rows().len(), 1);
                     assert_eq!(data.game_rules.max_player_level, 60);
+                    assert_eq!(data.game_rules.default_class, 1);
+                    assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2001]);
                     assert!(data.game_rules.pvp_enabled);
                 }}
 
                 {serde_assertion}
             "#,
             serde_assertion = if derive_serde {
-                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, stack: None, attributes: None, skill: None }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, starter_item_id: 2001, stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true }).unwrap();\n}"
+                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, stack: None, attributes: None, skill: None }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, default_class: 1, starter_item_ids: vec![2001], stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true }).unwrap();\n}"
             } else {
                 ""
             }
@@ -1585,6 +1598,10 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                         fields_.push_back("");
                         return;
                     }
+                    if (path_ == "game_rules" && CurrentField() == "starter_item_ids" && index < 2) {
+                        fields_.push_back("");
+                        return;
+                    }
                     throw std::runtime_error("unexpected index");
                 }
 
@@ -1597,6 +1614,12 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                     if (path_ == "items" && CurrentField() == "rows") {
                         return 1;
                     }
+                    if ((path_ == "classes" || path_ == "class_levels") && CurrentField() == "rows") {
+                        return 0;
+                    }
+                    if (path_ == "game_rules" && CurrentField() == "starter_item_ids") {
+                        return 2;
+                    }
                     throw std::runtime_error("unexpected row count");
                 }
 
@@ -1605,7 +1628,8 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                     if (path_ == "items" && CurrentField() == "price") { return 10; }
                     if (path_ == "game_rules" && CurrentField() == "max_player_level") { return 60; }
                     if (path_ == "game_rules" && CurrentField() == "starter_gold") { return 500; }
-                    if (path_ == "game_rules" && CurrentField() == "starter_item_id") { return 2001; }
+                    if (path_ == "game_rules" && CurrentField() == "default_class") { return 1; }
+                    if (path_ == "game_rules" && CurrentField() == "") { return 2001; }
                     if (path_ == "game_rules" && CurrentField() == "stamina_cap") { return 120; }
                     if (path_ == "game_rules" && CurrentField() == "daily_reset_hour") { return 5; }
                     throw std::runtime_error("unexpected int64");
@@ -1651,7 +1675,7 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
             class MockLoader final : public IRuntimeDataLoader {
             public:
                 std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) override {
-                    if (path == "items" || path == "game_rules") {
+                    if (path == "items" || path == "classes" || path == "class_levels" || path == "game_rules") {
                         return std::make_unique<MockReader>(path);
                     }
                     throw std::runtime_error("unexpected path");
@@ -1667,7 +1691,8 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 GameRulesRow rules{};
                 rules.max_player_level = 60;
                 rules.starter_gold = 500;
-                rules.starter_item_id = 2001;
+                rules.default_class = 1;
+                rules.starter_item_ids = {2001, 2002};
                 rules.stamina_cap = 120;
                 rules.daily_reset_hour = 5;
                 rules.pvp_enabled = true;
@@ -1686,6 +1711,9 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 }
                 if (data.GameRules().max_player_level != 60) {
                     return 4;
+                }
+                if (data.GameRules().default_class != 1 || data.GameRules().starter_item_ids.size() != 2) {
+                    return 5;
                 }
                 return 0;
             }
@@ -1749,6 +1777,10 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                         this.fields.push("");
                         return;
                     }
+                    if (this.path === "game_rules" && this.currentField() === "starter_item_ids" && index < 2) {
+                        this.fields.push("");
+                        return;
+                    }
                     throw new Error(`unexpected index: ${index}`);
                 }
 
@@ -1763,6 +1795,12 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     if (this.path === "items" && this.currentField() === "rows") {
                         return 1;
                     }
+                    if ((this.path === "classes" || this.path === "class_levels") && this.currentField() === "rows") {
+                        return 0;
+                    }
+                    if (this.path === "game_rules" && this.currentField() === "starter_item_ids") {
+                        return 2;
+                    }
                     throw new Error("unexpected length");
                 }
 
@@ -1771,7 +1809,8 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     if (this.path === "items" && this.currentField() === "price") { return 10; }
                     if (this.path === "game_rules" && this.currentField() === "max_player_level") { return 60; }
                     if (this.path === "game_rules" && this.currentField() === "starter_gold") { return 500; }
-                    if (this.path === "game_rules" && this.currentField() === "starter_item_id") { return 2001; }
+                    if (this.path === "game_rules" && this.currentField() === "default_class") { return 1; }
+                    if (this.path === "game_rules" && this.currentField() === "") { return 2001; }
                     if (this.path === "game_rules" && this.currentField() === "stamina_cap") { return 120; }
                     if (this.path === "game_rules" && this.currentField() === "daily_reset_hour") { return 5; }
                     throw new Error("unexpected number");
@@ -1794,7 +1833,7 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
 
             const loader: RuntimeDataLoader = {
                 open(path: string): RuntimeDataReader {
-                    if (path === "items" || path === "game_rules") {
+                    if (path === "items" || path === "classes" || path === "class_levels" || path === "game_rules") {
                         return new MockReader(path);
                     }
                     throw new Error(`unexpected path: ${path}`);
@@ -1809,6 +1848,9 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 }
                 if (data.gameRules.maxPlayerLevel !== 60 || !data.gameRules.pvpEnabled) {
                     throw new Error("generated TypeScript object table failed");
+                }
+                if (data.gameRules.defaultClass !== 1 || data.gameRules.starterItemIds.length !== 2) {
+                    throw new Error("generated TypeScript list field failed");
                 }
             }
 

@@ -17,6 +17,8 @@ export interface RuntimeDataReaderLike {
   exitField?(): void;
   readEnumIndex?(variants: readonly string[]): number;
   readRowCount?(): number;
+  readArrayLength?(): number;
+  arrayElementsArePositional?(): boolean;
   beginRecord?(optionalSlotCount: number): void;
   endRecord?(): void;
   readOptionalPresent?(): boolean;

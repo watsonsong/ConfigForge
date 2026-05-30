@@ -93,6 +93,7 @@ impl<'a> TypeScriptNames<'a> {
             CodeTypeRef::Bool => "boolean".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "string".to_owned(),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
+            CodeTypeRef::List(element) => format!("{}[]", self.ts_type(element)?),
         })
     }
 
@@ -141,6 +142,10 @@ impl<'a> TypeScriptNames<'a> {
                         "requiredField(reader, {source_name}, (value) => {reader_function}(value))"
                     )
                 }
+                CodeTypeRef::List(element) => {
+                    let read_element = self.ts_read_current_expr(element)?;
+                    format!("readRequiredList(reader, {source_name}, (value) => {read_element})")
+                }
             });
         }
 
@@ -155,6 +160,34 @@ impl<'a> TypeScriptNames<'a> {
                 let type_name = self.type_name(name)?;
                 let reader_function = self.reader_function_name(&type_name)?;
                 format!("optionalField(reader, {source_name}, (value) => {reader_function}(value))")
+            }
+            CodeTypeRef::List(element) => {
+                let read_element = self.ts_read_current_expr(element)?;
+                format!("readOptionalList(reader, {source_name}, (value) => {read_element})")
+            }
+        })
+    }
+
+    fn ts_read_current_expr(&self, code_type: &CodeTypeRef) -> Result<String> {
+        Ok(match code_type {
+            CodeTypeRef::Int => {
+                "value.readNextInt64 ? value.readNextInt64() : value.asNumber()".to_owned()
+            }
+            CodeTypeRef::Float => {
+                "value.readNextFloat64 ? value.readNextFloat64() : value.asNumber()".to_owned()
+            }
+            CodeTypeRef::Bool => "value.asBool()".to_owned(),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                "value.asString()".to_owned()
+            }
+            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
+                let type_name = self.type_name(name)?;
+                let reader_function = self.reader_function_name(&type_name)?;
+                format!("{reader_function}(value)")
+            }
+            CodeTypeRef::List(element) => {
+                let nested = self.ts_read_current_expr(element)?;
+                format!("readList(value, (value) => {nested})")
             }
         })
     }

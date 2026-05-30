@@ -11,6 +11,9 @@ pub(crate) fn toml_default_to_json_value(value: &toml::Value) -> serde_json::Val
             .map(serde_json::Value::Number)
             .unwrap_or(serde_json::Value::Null),
         toml::Value::Boolean(value) => serde_json::Value::Bool(*value),
+        toml::Value::Array(values) => {
+            serde_json::Value::Array(values.iter().map(toml_default_to_json_value).collect())
+        }
         _ => serde_json::Value::Null,
     }
 }
@@ -42,6 +45,18 @@ pub(crate) fn json_value_to_scalar_cell_for_field(
             "table `{table_name}` row {row_number} field `{field_path}` must be a scalar value"
         ))
     })
+}
+
+pub(crate) fn json_value_to_cell(value: &serde_json::Value) -> Result<String> {
+    match value {
+        serde_json::Value::String(value) => Ok(value.clone()),
+        serde_json::Value::Number(value) => Ok(value.to_string()),
+        serde_json::Value::Bool(value) => Ok(value.to_string()),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => Ok(value.to_string()),
+        serde_json::Value::Null => Err(ConfigForgeError::Validation(
+            "field value must not be null".to_owned(),
+        )),
+    }
 }
 
 pub(crate) fn default_value_to_cell(

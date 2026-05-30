@@ -135,6 +135,12 @@ pub trait RuntimeDataReader {
     fn read_row_count(&self) -> RuntimeDataResult<usize> {
         self.len()
     }
+    fn read_array_len(&self) -> RuntimeDataResult<usize> {
+        self.len()
+    }
+    fn array_elements_are_positional(&self) -> bool {
+        false
+    }
     fn begin_record(&self, _optional_slot_count: usize) -> RuntimeDataResult<()> {
         Ok(())
     }

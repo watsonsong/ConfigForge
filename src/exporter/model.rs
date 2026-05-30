@@ -28,4 +28,5 @@ pub struct ExportedTableMeta {
 pub enum ExportedValue {
     Scalar(String),
     Struct(BTreeMap<String, ExportedValue>),
+    Array(Vec<ExportedValue>),
 }

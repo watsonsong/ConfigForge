@@ -91,6 +91,7 @@ impl<'a> RustNames<'a> {
             CodeTypeRef::Bool => "bool".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
+            CodeTypeRef::List(element) => format!("Vec<{}>", self.rust_type(element)?),
         })
     }
 
@@ -119,6 +120,10 @@ impl<'a> RustNames<'a> {
                         "with_required_field(reader, {source_name}, {type_name}::read_from_reader)?"
                     )
                 }
+                CodeTypeRef::List(element) => {
+                    let read_element = self.rust_read_current_expr(element)?;
+                    format!("read_required_list(reader, {source_name}, |value| {read_element})?")
+                }
             });
         }
 
@@ -134,6 +139,28 @@ impl<'a> RustNames<'a> {
                 format!(
                     "with_optional_field(reader, {source_name}, {type_name}::read_from_reader)?"
                 )
+            }
+            CodeTypeRef::List(element) => {
+                let read_element = self.rust_read_current_expr(element)?;
+                format!("read_optional_list(reader, {source_name}, |value| {read_element})?")
+            }
+        })
+    }
+
+    fn rust_read_current_expr(&self, code_type: &CodeTypeRef) -> Result<String> {
+        Ok(match code_type {
+            CodeTypeRef::Int => "value.as_i64()".to_owned(),
+            CodeTypeRef::Float => "value.as_f64()".to_owned(),
+            CodeTypeRef::Bool => "value.as_bool()".to_owned(),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                "value.as_string()".to_owned()
+            }
+            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
+                format!("{}::read_from_reader(value)", self.type_name(name)?)
+            }
+            CodeTypeRef::List(element) => {
+                let nested = self.rust_read_current_expr(element)?;
+                format!("read_list(value, |value| {nested})")
             }
         })
     }

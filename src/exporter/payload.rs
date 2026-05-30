@@ -155,5 +155,10 @@ fn exported_value_from_resolved(value: &ResolvedValue) -> Result<ExportedValue> 
             })
             .collect::<Result<BTreeMap<_, _>>>()
             .map(ExportedValue::Struct),
+        DataValue::Array(elements) => elements
+            .iter()
+            .map(exported_value_from_resolved)
+            .collect::<Result<Vec<_>>>()
+            .map(ExportedValue::Array),
     }
 }

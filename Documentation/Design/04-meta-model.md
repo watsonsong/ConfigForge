@@ -446,7 +446,7 @@ Meta 导出机制使用 `export`、`export_when` 与 `row_export`；以下字段
 
 ## 4.8 Missing、Default、Required
 
-> 实现状态：Partial。当前实现已支持 primitive / enum 字段的 scalar `default` 校验，并会在数据验证/导出前把 Missing 或 Empty 值替换为 default；struct、array、table 等复合 default 暂未实现。
+> 实现状态：Partial。当前实现已支持 primitive / enum 字段的 scalar `default` 校验，并会在数据验证/导出前把 Missing 或 Empty 值替换为 default；同时支持 primitive / enum list 字段的 TOML array default。struct、table 等复合 default 暂未实现。
 
 字段值状态：
 
@@ -548,6 +548,31 @@ desc = "奖励数量。"
 ```
 
 Named struct 不能形成直接或间接循环引用，除非未来引入显式 indirection 类型。
+
+### List / Array
+
+当前支持标量数组字段，语法为 `T[]` 或 `list<T>`，其中 `T` 可为 primitive 或 enum。CSV / ObjectTable cell 使用 JSON array 写法：
+
+```toml
+[[tables.fields]]
+name = "starter_item_ids"
+type = "int[]"
+required = true
+foreign_key = { target_table = "items", target_index = "by_id" }
+```
+
+```csv
+key,value
+starter_item_ids,"[2001,2002]"
+```
+
+规则：
+
+- JSON / MessagePack runtime payload 中数组元素仍遵循当前 scalar string-compatible contract，例如 `int[]` 输出为 `["2001", "2002"]`；`bin` 使用 schema-aware typed layout，写入 length prefix 后按元素类型写入。
+- 代码生成映射为 Rust `Vec<T>`、TypeScript `T[]`、C++ `std::vector<T>`；optional list 为对应语言的 optional 容器。
+- list default 必须是 TOML array，且每个元素都必须匹配元素类型。
+- 当前只支持 list 作为 JSON cell，不支持 `items[0]` / `items[0].field` 形式的 expanded array path；array field path 仍是后续能力。
+- 当前只支持标量/enum元素数组；`list<Struct>`、嵌套 list、map 暂不作为稳定能力。
 
 ## 4.10 复合值书写方式
 
@@ -662,7 +687,7 @@ Layout 归属规则：
 
 ### Array FieldPath
 
-如果复合值使用 `expanded_value`，固定槽 array 可用数组 slot：
+当前 list 字段以 JSON cell 解析。以下 `expanded_value` 固定槽 array path 是后续设计，尚未作为当前实现能力；如果未来复合值使用 `expanded_value`，固定槽 array 可用数组 slot：
 
 ```text
 rewards[0].item_id
@@ -742,6 +767,8 @@ target_index = "by_id_region"
 
 - 单字段外键优先使用字段级 `foreign_key` 语法糖；table-level `[[tables.foreign_keys]]` 主要用于复合外键。
 - 字段级外键只允许引用目标表的一字段 unique / primary index；如果要引用复合 unique index，必须使用 table-level 配置。
+- 标量数组字段可声明外键，语义是数组中的每个元素独立引用目标表的一个 key；数组外键只支持一个 source list field 引用一个单字段 unique / primary index。
+- 数组字段不能参与复合 FK，例如 `fields = ["item_ids", "region"]` 或多个数组字段组成 tuple 都不支持。若需要复合 key 数组，后续设计应使用 `list<StructRef>` 及元素级 field path FK（例如 `level_refs[].class_id + level_refs[].level`），当前不实现。
 - 字段级外键是否可为空默认由字段 `required` 决定：`required = true` 时不允许空，`required = false` 时允许空；也可以通过 `allow_empty` 显式覆盖。
 - table-level 外键省略 `allow_empty` 时，默认按 source fields 的 `required` 派生：所有 source fields 都是 optional 时允许全空，否则不允许全空；也可以通过 `allow_empty` 显式覆盖。
 - required foreign key 缺值时报 required error。

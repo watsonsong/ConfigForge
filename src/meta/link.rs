@@ -7,7 +7,7 @@ use super::{
     FieldMeta, LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedFragmentMeta,
     LinkedFragmentPayload, LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType,
     LinkedTableMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
-    validate::validate_meta_model,
+    list_element_type_name, validate::validate_meta_model,
 };
 
 /// Builds a borrowed linked view of a validated raw model.
@@ -323,6 +323,19 @@ fn link_foreign_keys<'meta>(
                 ));
                 continue;
             }
+            let contains_list_source = fields
+                .iter()
+                .any(|field| matches!(field.linked_field, LinkedField::List(_)));
+            if contains_list_source && (fields.len() != 1 || target_index.fields.len() != 1) {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!(
+                        "table `{}` foreign key `{}` uses list source field; list foreign keys only support a single source field referencing a single-field target index",
+                        table.name, foreign_key.name
+                    ),
+                ));
+                continue;
+            }
             if fields.len() != target_index.fields.len() {
                 diagnostics.push(MetaDiagnostic::new(
                     MetaDiagnosticCode::InvalidForeignKeyDeclaration,
@@ -378,19 +391,34 @@ fn linked_foreign_key_types_compatible(
             let Some(target_field) = target_table.field(target_field_name) else {
                 return false;
             };
-            let source_type = source_field.meta.primitive_type();
+            let source_type = linked_scalar_primitive_type(source_field.foreign_key_scalar_field());
             let target_type = target_field.primitive_type();
             match (source_type, target_type) {
                 (Some(source), Some(target)) => source == target,
                 (Some(_), None) | (None, Some(_)) => false,
                 // Enums intentionally match by declared type, not by their underlying value representation.
-                (None, None) => {
-                    source_field.meta.field_type == target_field.field_type
-                        && enum_index.contains_key(source_field.meta.field_type.as_str())
-                        && enum_index.contains_key(target_field.field_type.as_str())
-                }
+                (None, None) => linked_scalar_enum_name(source_field.foreign_key_scalar_field())
+                    .is_some_and(|source_name| {
+                        source_name == target_field.field_type
+                            && enum_index.contains_key(source_name)
+                            && enum_index.contains_key(target_field.field_type.as_str())
+                    }),
             }
         })
+}
+
+fn linked_scalar_primitive_type(field: Option<&LinkedField<'_>>) -> Option<PrimitiveFieldType> {
+    match field {
+        Some(LinkedField::Primitive(primitive)) => Some(*primitive),
+        _ => None,
+    }
+}
+
+fn linked_scalar_enum_name<'meta>(field: Option<&LinkedField<'meta>>) -> Option<&'meta str> {
+    match field {
+        Some(LinkedField::Enum(enum_meta)) => Some(enum_meta.name.as_str()),
+        _ => None,
+    }
 }
 
 fn link_field_type<'meta>(
@@ -400,11 +428,46 @@ fn link_field_type<'meta>(
     struct_stack: &mut Vec<&'meta str>,
     diagnostics: &mut Vec<MetaDiagnostic>,
 ) -> Option<LinkedFieldMeta<'meta>> {
-    let linked_field = if let Some(primitive) = PrimitiveFieldType::parse(&field.field_type) {
+    let linked_field = resolve_linked_field_type(
+        enum_index,
+        struct_index,
+        field.field_type.as_str(),
+        &field.name,
+        struct_stack,
+        diagnostics,
+    )?;
+
+    Some(LinkedFieldMeta {
+        meta: field,
+        linked_field,
+    })
+}
+
+fn resolve_linked_field_type<'meta>(
+    enum_index: &HashMap<&'meta str, &'meta super::EnumMeta>,
+    struct_index: &HashMap<&'meta str, &'meta super::StructMeta>,
+    field_type: &str,
+    field_name: &str,
+    struct_stack: &mut Vec<&'meta str>,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) -> Option<LinkedField<'meta>> {
+    if let Some(element_type) = list_element_type_name(field_type) {
+        let element = resolve_linked_field_type(
+            enum_index,
+            struct_index,
+            element_type,
+            field_name,
+            struct_stack,
+            diagnostics,
+        )?;
+        return Some(LinkedField::List(Box::new(element)));
+    }
+
+    let linked_field = if let Some(primitive) = PrimitiveFieldType::parse(field_type) {
         LinkedField::Primitive(primitive)
-    } else if let Some(enum_meta) = enum_index.get(field.field_type.as_str()) {
+    } else if let Some(enum_meta) = enum_index.get(field_type) {
         LinkedField::Enum(enum_meta)
-    } else if let Some(struct_meta) = struct_index.get(field.field_type.as_str()) {
+    } else if let Some(struct_meta) = struct_index.get(field_type) {
         let linked_struct = link_struct_type(
             enum_index,
             struct_index,
@@ -418,16 +481,12 @@ fn link_field_type<'meta>(
             MetaDiagnosticCode::UnknownFieldType,
             format!(
                 "field `{}` references unknown type `{}`",
-                field.name, field.field_type
+                field_name, field_type
             ),
         ));
         return None;
     };
-
-    Some(LinkedFieldMeta {
-        meta: field,
-        linked_field,
-    })
+    Some(linked_field)
 }
 
 fn link_struct_type<'meta>(

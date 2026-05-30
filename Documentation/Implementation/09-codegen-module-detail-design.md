@@ -1137,7 +1137,7 @@ missing/null 语义：
 - `field(name)` 找不到字段或字段值为 null/nil 表示 missing：Rust/TS 返回 `None` / `undefined`，C++ 返回 `nullptr`。
 - explicit null 不再依赖独立 reader null-check API；由 `EnterOptionalField` / `enter_optional_field` / `enterOptionalField` 的 bool 返回值统一表达 optional presence。
 - `index(i)` 越界必须报错，不返回 null reader。
-- `length()` / `len()` 对 array 返回元素数；对 object/map 返回字段数；对 scalar/null 报错。C++ adapter 不再暴露通用 `Size()`，generated collection 读取使用 `ReadRowCount()`。
+- `length()` / `len()` 对 array 返回元素数；对 object/map 返回字段数；对 scalar/null 报错。C++ adapter 不再暴露通用 `Size()`，generated collection 读取使用 `ReadRowCount()`。schema-aware binary reader 额外提供 array length / positional array element 读取能力，使生成代码能在 `bin` 中读取 length prefix 后顺序读取元素；named JSON / MessagePack reader 仍使用 `length + index(i)`。
 
 错误上下文要求：adapter 抛出的错误应包含 logical data path、reader path（field/index 链）、expected type、actual type/value。transport loader 还应包含 resolved resource path 或 URL。
 

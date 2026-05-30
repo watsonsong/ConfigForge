@@ -94,6 +94,14 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     return rowCount;
   }
 
+  readArrayLength(): number {
+    return this.readVaruintAsNumber("array length");
+  }
+
+  arrayElementsArePositional(): boolean {
+    return true;
+  }
+
   beginRecord(optionalSlotCount: number): void {
     const byteCount = Math.ceil(optionalSlotCount / 8);
     this.records.push({ bitmap: this.readExact(byteCount), nextOptionalSlot: 0 });

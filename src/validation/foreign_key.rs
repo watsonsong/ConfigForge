@@ -7,8 +7,8 @@ use crate::{
     ConfigForgeError, Result,
     data::{DataRow, DataSet, DataTable},
     meta::{
-        LinkedFieldMeta, LinkedForeignKeyMeta, LinkedIndexMeta, LinkedMetaModel, LinkedTableMeta,
-        TargetTags,
+        LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedIndexMeta, LinkedMetaModel,
+        LinkedTableMeta, TargetTags,
     },
 };
 
@@ -242,6 +242,17 @@ fn validate_foreign_key_row(
     foreign_key: &LinkedForeignKeyMeta<'_>,
     target_keys: &HashSet<Vec<String>>,
 ) -> Result<()> {
+    if let Some(list_field) = foreign_key_list_source_field(foreign_key) {
+        return validate_list_foreign_key_row(
+            source_table_meta,
+            row,
+            row_number,
+            foreign_key,
+            list_field,
+            target_keys,
+        );
+    }
+
     let key = foreign_key_row_key(row, &foreign_key.fields);
     let empty_count = key.iter().filter(|value| value.trim().is_empty()).count();
     // All-empty keys can mean "no relationship"; partial composite keys are always ambiguous.
@@ -272,6 +283,90 @@ fn validate_foreign_key_row(
         )));
     }
     Ok(())
+}
+
+fn validate_list_foreign_key_row(
+    source_table_meta: &LinkedTableMeta<'_>,
+    row: &DataRow,
+    row_number: usize,
+    foreign_key: &LinkedForeignKeyMeta<'_>,
+    list_field: &LinkedFieldMeta<'_>,
+    target_keys: &HashSet<Vec<String>>,
+) -> Result<()> {
+    let raw = row
+        .get(&list_field.meta.name)
+        .map(String::as_str)
+        .unwrap_or_default();
+    if raw.trim().is_empty() {
+        if foreign_key.allow_empty {
+            return Ok(());
+        }
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} foreign key `{}` is empty but `allow_empty = false`",
+            source_table_meta.meta.name, row_number, foreign_key.name
+        )));
+    }
+    let value: serde_json::Value = serde_json::from_str(raw).map_err(|source| {
+        ConfigForgeError::Validation(format!(
+            "table `{}` row {} foreign key `{}` source field `{}` has invalid list JSON: {}",
+            source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name, source
+        ))
+    })?;
+    let array = value.as_array().ok_or_else(|| {
+        ConfigForgeError::Validation(format!(
+            "table `{}` row {} foreign key `{}` source field `{}` must be a JSON array",
+            source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name
+        ))
+    })?;
+    if array.is_empty() && !foreign_key.allow_empty {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` row {} foreign key `{}` is empty but `allow_empty = false`",
+            source_table_meta.meta.name, row_number, foreign_key.name
+        )));
+    }
+    for (index, element) in array.iter().enumerate() {
+        let key_value = element_key_string(element).ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "table `{}` row {} foreign key `{}` source field `{}[{}]` must be a scalar key value",
+                source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name, index
+            ))
+        })?;
+        let key = vec![key_value];
+        if !target_keys.contains(&key) {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} foreign key `{}` source field `{}[{}]` references missing `{}.{}` key `{:?}`",
+                source_table_meta.meta.name,
+                row_number,
+                foreign_key.name,
+                list_field.meta.name,
+                index,
+                foreign_key.target_table_name,
+                foreign_key.target_index_name,
+                key
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn foreign_key_list_source_field<'a, 'meta>(
+    foreign_key: &'a LinkedForeignKeyMeta<'meta>,
+) -> Option<&'a LinkedFieldMeta<'meta>> {
+    foreign_key
+        .fields
+        .iter()
+        .find(|field| matches!(field.linked_field, LinkedField::List(_)))
+}
+
+fn element_key_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        serde_json::Value::Null | serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            None
+        }
+    }
 }
 
 fn foreign_key_row_key(row: &DataRow, fields: &[LinkedFieldMeta<'_>]) -> Vec<String> {

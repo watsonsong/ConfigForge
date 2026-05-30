@@ -19,6 +19,8 @@ pub(super) fn render_runtime_reader_interfaces(content: &mut CodeWriter) {
   exitField?(): void;
   readEnumIndex?(variants: readonly string[]): number;
   readRowCount?(): number;
+  readArrayLength?(): number;
+  arrayElementsArePositional?(): boolean;
   beginRecord?(optionalSlotCount: number): void;
   endRecord?(): void;
   readOptionalPresent?(): boolean;
@@ -105,6 +107,10 @@ function readRowCount(reader: RuntimeDataReader): number {
   return reader.readRowCount ? reader.readRowCount() : reader.length();
 }
 
+function readArrayLength(reader: RuntimeDataReader): number {
+  return reader.readArrayLength ? reader.readArrayLength() : reader.length();
+}
+
 function readRequiredInt64(reader: RuntimeDataReader, name: string): number {
   return requiredField(reader, name, (value) => value.readNextInt64 ? value.readNextInt64() : value.asNumber());
 }
@@ -135,6 +141,32 @@ function readOptionalBool(reader: RuntimeDataReader, name: string): boolean | un
 
 function readOptionalString(reader: RuntimeDataReader, name: string): string | undefined {
   return optionalField(reader, name, (value) => value.asString());
+}
+
+function readList<T>(reader: RuntimeDataReader, convert: (value: RuntimeDataReader) => T): T[] {
+  const length = readArrayLength(reader);
+  const values: T[] = [];
+  for (let index = 0; index < length; index += 1) {
+    if (reader.arrayElementsArePositional && reader.arrayElementsArePositional()) {
+      values.push(convert(reader));
+      continue;
+    }
+    reader.enterIndex(index);
+    try {
+      values.push(convert(reader));
+    } finally {
+      reader.exit();
+    }
+  }
+  return values;
+}
+
+function readRequiredList<T>(reader: RuntimeDataReader, name: string, convert: (value: RuntimeDataReader) => T): T[] {
+  return requiredField(reader, name, (value) => readList(value, convert));
+}
+
+function readOptionalList<T>(reader: RuntimeDataReader, name: string, convert: (value: RuntimeDataReader) => T): T[] | undefined {
+  return optionalField(reader, name, (value) => readList(value, convert));
 }
 
 "#,

@@ -36,6 +36,7 @@ pub struct ResolvedValue {
 pub enum DataValue {
     Scalar(ScalarValue),
     Struct(BTreeMap<String, ResolvedValue>),
+    Array(Vec<ResolvedValue>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -292,6 +292,13 @@ pub(super) fn validate_supported_field_type(
             "table `{}` field `{}` uses struct type `{}` with unsupported layout; struct source layout is decided by source headers or keys",
             meta.meta.name, field.meta.name, field.meta.field_type
         ))),
+        (LinkedField::List(_), None | Some(ValueLayout::JsonCell)) => Ok(()),
+        (LinkedField::List(_), Some(ValueLayout::ScalarCell | ValueLayout::ExpandedValue)) => {
+            Err(ConfigForgeError::Validation(format!(
+                "table `{}` field `{}` uses unsupported layout; list fields must use JSON cell values in this phase",
+                meta.meta.name, field.meta.name
+            )))
+        }
         (_, None | Some(ValueLayout::ScalarCell)) => Ok(()),
         (_, Some(ValueLayout::JsonCell | ValueLayout::ExpandedValue)) => {
             Err(ConfigForgeError::Validation(format!(
@@ -318,15 +325,27 @@ pub(super) fn validate_value_type_at_row_number(
     row_number: usize,
     target_tags: Option<&TargetTags>,
 ) -> Result<()> {
-    if let LinkedField::Struct(struct_type) = &field.linked_field {
-        return validate_struct_json_cell(
-            meta.meta.name.as_str(),
-            row_number,
-            field.meta.name.as_str(),
-            struct_type,
-            value,
-            target_tags,
-        );
+    match &field.linked_field {
+        LinkedField::Struct(struct_type) => {
+            return validate_struct_json_cell(
+                meta.meta.name.as_str(),
+                row_number,
+                field.meta.name.as_str(),
+                struct_type,
+                value,
+                target_tags,
+            );
+        }
+        LinkedField::List(element_type) => {
+            return validate_list_json_cell(
+                meta.meta.name.as_str(),
+                row_number,
+                field.meta.name.as_str(),
+                element_type,
+                value,
+            );
+        }
+        _ => {}
     }
 
     if !validate_scalar_value(field, value) {
@@ -353,7 +372,41 @@ fn validate_scalar_value(field: &LinkedFieldMeta<'_>, value: &str) -> bool {
             .values
             .iter()
             .any(|enum_value| enum_value.name == value),
-        LinkedField::Struct(_) => false,
+        LinkedField::Struct(_) | LinkedField::List(_) => false,
+    }
+}
+
+fn validate_list_json_cell(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    element_type: &LinkedField<'_>,
+    raw: &str,
+) -> Result<()> {
+    let value: serde_json::Value = serde_json::from_str(raw).map_err(|source| {
+        ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` has invalid list JSON: {}",
+            table_name, row_number, field_path, source
+        ))
+    })?;
+    validate_list_json_value(table_name, row_number, field_path, element_type, &value)
+}
+
+fn validate_scalar_value_for_type(field: &LinkedField<'_>, value: &str) -> bool {
+    match field {
+        LinkedField::Primitive(PrimitiveFieldType::Int) => value.parse::<i64>().is_ok(),
+        LinkedField::Primitive(PrimitiveFieldType::Float) => parse_finite_float(value).is_some(),
+        LinkedField::Primitive(PrimitiveFieldType::Bool) => {
+            matches!(value, "true" | "false" | "1" | "0")
+        }
+        LinkedField::Primitive(
+            PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset,
+        ) => true,
+        LinkedField::Enum(enum_meta) => enum_meta
+            .values
+            .iter()
+            .any(|enum_value| enum_value.name == value),
+        LinkedField::Struct(_) | LinkedField::List(_) => false,
     }
 }
 
@@ -429,6 +482,15 @@ fn validate_struct_json_cell(
                     target_tags,
                 )?;
             }
+            LinkedField::List(element_type) => {
+                validate_list_json_value(
+                    table_name,
+                    row_number,
+                    &child_path,
+                    element_type,
+                    effective_value.expect("checked non-empty"),
+                )?;
+            }
             _ => {
                 let scalar = json_value_to_scalar_cell_for_field(
                     effective_value.expect("checked non-empty"),
@@ -446,5 +508,32 @@ fn validate_struct_json_cell(
         }
     }
 
+    Ok(())
+}
+
+fn validate_list_json_value(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    element_type: &LinkedField<'_>,
+    value: &serde_json::Value,
+) -> Result<()> {
+    let array = value.as_array().ok_or_else(|| {
+        ConfigForgeError::Validation(format!(
+            "table `{}` row {} field `{}` must be a JSON array",
+            table_name, row_number, field_path
+        ))
+    })?;
+    for (index, element) in array.iter().enumerate() {
+        let element_path = format!("{field_path}[{index}]");
+        let scalar =
+            json_value_to_scalar_cell_for_field(element, table_name, row_number, &element_path)?;
+        if !validate_scalar_value_for_type(element_type, &scalar) {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` value `{}` does not match list element type",
+                table_name, row_number, element_path, scalar
+            )));
+        }
+    }
     Ok(())
 }

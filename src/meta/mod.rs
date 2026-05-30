@@ -15,6 +15,7 @@ pub use model::{
     LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType, LinkedTableMeta,
     MetaModel, PrimitiveFieldType, ResolvedForeignKeyMeta, RowExportPolicy, SourceRef, StructMeta,
     TableKind, TableMeta, TagMatchMode, TargetTags, ValidationSeverity, ValidatorMeta, ValueLayout,
+    list_element_type_name,
 };
 
 #[cfg(test)]

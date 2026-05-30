@@ -401,12 +401,26 @@ impl TableMeta {
 
 impl FieldMeta {
     pub fn primitive_type(&self) -> Option<PrimitiveFieldType> {
-        PrimitiveFieldType::parse(&self.field_type)
+        scalar_field_type_name(&self.field_type).and_then(PrimitiveFieldType::parse)
     }
 
     pub fn is_exported_for(&self, target: &TargetTags) -> bool {
         self.export && self.export_when.matches(target)
     }
+}
+
+pub fn list_element_type_name(field_type: &str) -> Option<&str> {
+    field_type
+        .strip_suffix("[]")
+        .or_else(|| field_type.strip_prefix("list<")?.strip_suffix('>'))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+pub fn scalar_field_type_name(field_type: &str) -> Option<&str> {
+    list_element_type_name(field_type)
+        .unwrap_or(field_type)
+        .into()
 }
 
 impl FragmentMeta {

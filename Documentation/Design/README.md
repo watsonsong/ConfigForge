@@ -62,12 +62,12 @@
 | `override_sources` | Implemented MVP | 当前支持 CollectionTable CSV override：按 primary index 整行覆盖，支持 `export_when` 绑定赛季/热修 tag；ObjectTable override、base source `export_when` 和非 CSV provider 仍未实现并会显式拒绝。 |
 | ObjectTable | Implemented MVP | 当前支持 CSV `key,value` 行式常量表：每行一个 top-level field key，导出单个 object；支持 ObjectTable 作为 FK source 引用 CollectionTable unique/primary index；多源/override、作为 FK target、后续格子 expand 暂不实现。 |
 | primitive / enum fields | Stable | 支持 primitive、enum link、default 校验和数据值校验。 |
-| struct fields | Implemented MVP | 支持 named struct、JSON cell 校验和 nested object 导出；支持 CollectionTable/ObjectTable 中由 source path 自动判定的 struct expanded value、recursive nested struct、JSON/expanded 混用错误、target-aware child filtering 与 child default。array/map、struct child validators、ObjectTable key-level source location 暂未实现。 |
-| scalar default | Stable | 支持 primitive / enum scalar default。复杂 struct/list/table default 当前不支持。 |
+| struct/list fields | Implemented MVP | 支持 named struct、JSON cell 校验和 nested object 导出；支持 CollectionTable/ObjectTable 中由 source path 自动判定的 struct expanded value、recursive nested struct、JSON/expanded 混用错误、target-aware child filtering 与 child default；支持 `T[]` / `list<T>` JSON cell 标量数组、数组导出和代码生成。map、struct/list expanded path、struct child validators、ObjectTable key-level source location 暂未实现。 |
+| scalar/list default | Stable | 支持 primitive / enum scalar default；支持 primitive / enum list default。复杂 struct/table default 当前不支持。 |
 | target tags / export_when / row_export | Stable | 已接入 validation、runtime export 和 codegen target-aware 视图。 |
 | validators | Implemented MVP | 已有 validator registry 和 `range` field validator；后续可扩展更多 built-in/plugin validators。 |
 | fragments | Implemented MVP | 已支持 polymorphic variant source mode；fragment join mode 不实现。 |
-| foreign keys | Implemented MVP | 支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique/primary index。 |
+| foreign keys | Implemented MVP | 支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique/primary index；标量数组字段可作为单字段 FK，逐元素引用单字段 unique/primary index。 |
 | runtime data export | Implemented MVP | 支持 JSON、MessagePack 与 `bin` registry；`bin` 私有紧密二进制格式已实现 CFGB header、schema revision 与 positional typed payload；大表 streaming writer 仍为中期优化。 |
 | codegen backends | Implemented MVP | 已有 Rust / TypeScript / C++ 基础生成、loader/repository helper 和 target-aware IR；更丰富 FK helper/API 契约待后续确认。 |
 | generated runtime loader contract | Implemented MVP | 当前 Rust / C++ / TypeScript 生成代码使用 Meta-agnostic `open + RuntimeDataReader + generated parser` 契约；用户 loader 新增表/字段时不变。 |

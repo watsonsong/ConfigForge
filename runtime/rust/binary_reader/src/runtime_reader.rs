@@ -151,6 +151,15 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         Ok(row_count)
     }
 
+    fn read_array_len(&self) -> RuntimeDataResult<usize> {
+        usize::try_from(read_varuint(&mut self.state.borrow_mut())?)
+            .map_err(|_| RuntimeDataError::decode("array length exceeds usize"))
+    }
+
+    fn array_elements_are_positional(&self) -> bool {
+        true
+    }
+
     fn begin_record(&self, optional_slot_count: usize) -> RuntimeDataResult<()> {
         let byte_count = optional_slot_count.div_ceil(8);
         let mut state = self.state.borrow_mut();

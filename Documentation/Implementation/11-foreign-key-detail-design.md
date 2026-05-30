@@ -58,12 +58,13 @@ Phase 1 支持：
 - target-aware validation；
 - source table 为 CollectionTable 或 ObjectTable 的常规关系校验；
 - target table 为 CollectionTable unique / primary index。
+- 标量数组字段作为 FK source，逐元素引用单字段 target key。
 
 Phase 1 不支持：
 
 - fragment field 作为 FK source field 或 target index field；
 - struct child path，例如 `reward.item_id`；
-- array / map 内元素 FK；
+- array / map 内复合元素 FK 或 path FK，例如 `rewards[].item_id`、`level_refs[].{class_id,level}`；
 - 指向非 unique index 的一对多关系；
 - cross-target full-dataset FK 模式；
 - ObjectTable 作为 FK target table；
@@ -110,6 +111,7 @@ foreign_key = {
 - 只表达**单 source field** 外键，source field 固定为当前字段。
 - `target_index` 可省略；省略时引用 target table primary index。
 - 目标 index 必须是一字段 unique / primary index；如果目标 index 是复合 index，应报 Meta validation error，并提示改用 table-level `[[tables.foreign_keys]]`。
+- 如果当前字段是标量数组（例如 `int[]` / `list<int>`），该外键表示数组中每个元素独立引用目标一字段 key；同样只允许目标 index 为一字段 unique / primary index。
 - `name` 可省略；省略时使用当前字段名作为 FK name，例如字段 `item_id` 生成关系名 `item_id`。如果该名称与 table-level FK 或其他字段级 FK 冲突，应报重复 FK name。
 - `allow_empty` 可省略；省略时按当前字段 `required` 派生：`required = true` 等价 `allow_empty = false`，`required = false` 等价 `allow_empty = true`。
 - `desc`、`export`、`export_when` 与 table-level FK 语义一致。
@@ -146,6 +148,7 @@ table-level 配置也可用于单字段 FK，但不推荐作为常规写法。�
 
 - 单字段 FK：优先写在 `[[tables.fields]]` 下，配置更贴近字段定义。
 - 多字段 FK：使用 `[[tables.foreign_keys]]`，因为它天然属于整张表的关系约束。
+- 数组 FK：只允许 `fields = ["list_field"]` 引用单字段 target index；不允许与其他字段组成复合 FK。复合 key 数组未来应以 `list<StructRef>` + 元素级 path FK 单独设计。
 
 如果 `target_index` 省略，则默认引用 target table 的 primary index：
 

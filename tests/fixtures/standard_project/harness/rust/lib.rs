@@ -87,6 +87,8 @@ fn assert_standard_data(data: &GameData) {
     assert_eq!(class_level.attributes.attack, Some(16));
 
     assert_eq!(data.game_rules.max_player_level, 60);
+    assert_eq!(data.game_rules.default_class, 1);
+    assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2002]);
     assert!(data.game_rules.pvp_enabled);
 }
 

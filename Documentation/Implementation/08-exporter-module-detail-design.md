@@ -103,6 +103,7 @@ CollectionTable 输出包含 table meta envelope 和 rows：
 - 按 `row_export` 过滤 rows。
 - variant source row 只导出该 source 激活的 fragments。
 - struct value 输出为 nested object。
+- list value 输出为 array；JSON / MessagePack 中 scalar list element 仍输出 string-compatible value，`bin` 中按元素类型写入 typed value。
 
 ### 8.4.2 ObjectTable
 
@@ -122,6 +123,7 @@ ObjectTable Step 1 已并入 Exporter 模块语义：ObjectTable 不输出 rows 
 - table 可见但所有字段被 target 过滤时输出 `{}`。
 - JSON 与 MessagePack 必须通过同一 payload builder，确保逻辑 shape 一致；`bin` 复用同一份 resolved export view，但 wire layout 按 schema 顺序紧密排列，不保存字段名。
 - JSON / MessagePack 的 scalar runtime contract 当前仍为 string-compatible；如果未来改为 typed scalar，必须作为 named payload 的全局 runtime data contract change 同时影响 CollectionTable。`bin` 是 schema-aware typed binary encoding，按 Meta type 写 int/float/bool/enum bytes，不改变 JSON / MessagePack 的 named payload contract。
+- ObjectTable 中的 list 字段输出为 array，例如 `"starter_item_ids": ["2001", "2002"]`。
 
 ObjectTable source layout、校验限制和 codegen 表达分别记录在 Data / Validation / Codegen 模块文档，不再保留单独的 Step 1 过程文档。
 
@@ -139,7 +141,7 @@ DataResolver::resolve_table_rows / resolve_table
 
 - validation 和 exporter 对 struct JSON cell / expanded value 的理解逐步收敛。
 - default、target-hidden child、empty struct occurrence 等语义不分叉。
-- 后续 array/map 支持只需要扩展 `DataValue -> ExportedValue` 转换。
+- array JSON cell 支持已通过 `DataValue::Array -> ExportedValue::Array` 转换接入；后续 map 或 expanded array path 仍应继续复用该转换边界。
 
 ## 8.6 Artifact path 约束
 

@@ -17,8 +17,14 @@ type = "int"
 required = true
 
 [[tables.fields]]
-name = "starter_item_id"
+name = "default_class"
 type = "int"
+required = true
+foreign_key = { name = "default_class", target_table = "classes", target_index = "by_id" }
+
+[[tables.fields]]
+name = "starter_item_ids"
+type = "int[]"
 required = true
 foreign_key = { name = "starter_item", target_table = "items", target_index = "by_id" }
 

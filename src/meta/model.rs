@@ -15,6 +15,6 @@ pub use linked::{
 pub use raw::{
     EnumMeta, EnumValueMeta, FieldForeignKeyMeta, FieldMeta, ForeignKeyDeclarationSite,
     ForeignKeyMeta, FragmentMeta, IndexMeta, MetaModel, ResolvedForeignKeyMeta, SourceRef,
-    StructMeta, TableMeta, ValidatorMeta,
+    StructMeta, TableMeta, ValidatorMeta, list_element_type_name,
 };
 pub use types::{PrimitiveFieldType, TableKind, ValidationSeverity, ValueLayout};

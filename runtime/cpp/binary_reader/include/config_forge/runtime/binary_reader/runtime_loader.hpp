@@ -132,6 +132,12 @@ public:
         return row_count;
     }
 
+    std::size_t ReadArrayLength() override {
+        return CheckedSize(ReadVaruint(), "array length");
+    }
+
+    bool ArrayElementsArePositional() const override { return true; }
+
     void BeginRecord(std::size_t optional_slot_count) override {
         const std::size_t byte_count = (optional_slot_count + 7) / 8;
         const std::uint8_t* bytes = ReadExact(byte_count);
