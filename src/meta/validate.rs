@@ -305,13 +305,6 @@ fn validate_foreign_keys(
         }
         validate_export_condition_tags(&owner, foreign_key.export_when, diagnostics);
 
-        if table.kind != TableKind::Collection {
-            diagnostics.push(MetaDiagnostic::new(
-                MetaDiagnosticCode::UnsupportedFeature,
-                format!("{owner} uses ObjectTable as source, but foreign keys only support CollectionTable in Phase 1"),
-            ));
-        }
-
         if foreign_key.fields.is_empty() {
             diagnostics.push(MetaDiagnostic::new(
                 MetaDiagnosticCode::InvalidForeignKeyDeclaration,
@@ -363,7 +356,7 @@ fn validate_foreign_keys(
         if target_table.kind != TableKind::Collection {
             diagnostics.push(MetaDiagnostic::new(
                 MetaDiagnosticCode::UnsupportedFeature,
-                format!("{owner} uses ObjectTable `{}` as target, but foreign keys only support CollectionTable in Phase 1", target_table.name),
+                format!("{owner} uses ObjectTable `{}` as target, but foreign key targets must be CollectionTable indexes", target_table.name),
             ));
         }
 
@@ -508,12 +501,6 @@ fn validate_object_table_restrictions(table: &TableMeta, diagnostics: &mut Vec<M
             ),
         ));
     }
-    if !table.foreign_keys.is_empty() {
-        diagnostics.push(MetaDiagnostic::new(
-            MetaDiagnosticCode::UnsupportedFeature,
-            format!("{owner} is an ObjectTable, but ObjectTable Step 1 does not support table-level foreign keys"),
-        ));
-    }
     if table.preserve_source_order {
         diagnostics.push(MetaDiagnostic::new(
             MetaDiagnosticCode::UnsupportedFeature,
@@ -530,15 +517,6 @@ fn validate_object_table_restrictions(table: &TableMeta, diagnostics: &mut Vec<M
     }
 
     for field in &table.fields {
-        if field.foreign_key.is_some() {
-            diagnostics.push(MetaDiagnostic::new(
-                MetaDiagnosticCode::UnsupportedFeature,
-                format!(
-                    "{owner} field `{}` is in an ObjectTable, but ObjectTable Step 1 does not support field-level foreign keys",
-                    field.name
-                ),
-            ));
-        }
         if field.unique {
             diagnostics.push(MetaDiagnostic::new(
                 MetaDiagnosticCode::UnsupportedFeature,

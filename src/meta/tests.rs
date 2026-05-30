@@ -131,7 +131,7 @@ fn parses_basic_object_table_without_index() {
 }
 
 #[test]
-fn rejects_object_table_step1_unsupported_features() {
+fn rejects_object_table_step1_unsupported_features_except_foreign_keys() {
     let diagnostics = diagnostics(
         r#"
             [[tables]]
@@ -192,10 +192,8 @@ fn rejects_object_table_step1_unsupported_features() {
         "does not support fragments",
         "does not support indexes",
         "does not support `primary_index`",
-        "does not support table-level foreign keys",
         "does not support `preserve_source_order`",
         "does not support `polymorphic`",
-        "does not support field-level foreign keys",
         "does not support unique field indexes",
     ] {
         assert!(
@@ -203,6 +201,82 @@ fn rejects_object_table_step1_unsupported_features() {
             "missing diagnostic `{expected}` in\n{messages}"
         );
     }
+}
+
+#[test]
+fn accepts_object_table_foreign_keys_as_source() {
+    let meta = parse(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "region"
+            type = "string"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables.indexes]]
+            name = "by_id_region"
+            fields = ["id", "region"]
+            unique = true
+
+            [[tables]]
+            name = "game_rules"
+            kind = "object"
+            source = "game_rules.csv"
+
+            [[tables.fields]]
+            name = "starter_item_id"
+            type = "int"
+            required = true
+            foreign_key = { name = "starter_item", target_table = "items" }
+
+            [[tables.fields]]
+            name = "starter_region_item_id"
+            type = "int"
+            required = false
+
+            [[tables.fields]]
+            name = "starter_region"
+            type = "string"
+            required = false
+
+            [[tables.foreign_keys]]
+            name = "starter_region_item"
+            fields = ["starter_region_item_id", "starter_region"]
+            target_table = "items"
+            target_index = "by_id_region"
+        "#,
+    );
+
+    let rules = meta.table("game_rules").expect("object table should exist");
+    let resolved = rules.resolved_foreign_keys();
+    assert_eq!(resolved.len(), 2);
+    assert_eq!(resolved[0].name, "starter_region_item");
+    assert!(resolved[0].allow_empty);
+    assert_eq!(resolved[1].name, "starter_item");
+    assert!(!resolved[1].allow_empty);
+
+    let linked = meta.link().expect("object foreign keys should link");
+    let linked_rules = linked
+        .table("game_rules")
+        .expect("linked object table should exist");
+    assert_eq!(linked_rules.foreign_keys.len(), 2);
+    assert!(linked_rules.foreign_key("starter_item").is_some());
+    assert!(linked_rules.foreign_key("starter_region_item").is_some());
 }
 
 #[test]
@@ -530,7 +604,6 @@ fn rejects_invalid_foreign_key_declarations() {
         .map(|diagnostic| diagnostic.message.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(messages.contains("ObjectTable as source"));
     assert!(messages.contains("field-level foreign key only supports single-field index"));
     assert!(messages.contains("defined more than once"));
     assert!(messages.contains("unknown source field `missing`"));

@@ -139,6 +139,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 - `CodeTable.kind` 区分 `Object` / `Collection`。
 - ObjectTable 生成目标语言中的 singleton object 类型和访问入口。
 - ObjectTable 不生成 collection repository，不生成 index lookup helpers。
+- ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于后续生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前语言生成器仍不渲染 FK helper。
 - Rust / TypeScript / C++ 都应避免把 ObjectTable 误表达为 rows collection。
 - Runtime data file path 仍由 build 传入的 `RuntimeDataFile` 决定；codegen 不关心 ObjectTable 的 CSV `key,value` 物理布局。
 
@@ -566,7 +567,7 @@ pub enum CodeTypeRef {
 Foreign key 对 CodeModel 的要求：
 
 - 外键不是普通 validator，而是 Meta 关系数据。validation 负责保证关系完整性；CodeModel 已读取同一份 `LinkedForeignKeyMeta` 并暴露 `CodeForeignKey`，为后续语言生成器生成关联查询 API 提供输入。
-- 只有当前 target 可导出的 foreign key 进入 `CodeForeignKey`。
+- 只有当前 target 可导出的 foreign key 进入 `CodeForeignKey`；CollectionTable 与 ObjectTable source 使用同一套 IR，target table 仍必须是 CollectionTable index。
 - source table、target table、target index、source fields、target index fields 都必须在当前 target CodeModel 可见。
 - target index 必须 unique，当前 IR 仅表达 many-to-one 关系；语言级 helper 和一对多反向索引可在后续 relation 设计中扩展。
 

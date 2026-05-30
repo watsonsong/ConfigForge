@@ -29,7 +29,7 @@
 - `override_sources` 不再定义 `priority`；覆盖顺序由列表顺序决定，后声明的 override source 覆盖先声明的结果；source-level `export_when` 用 effective target tags 决定某个 override source 是否参与本次构建。
 - 取消 `primary_key` 概念，仅保留 `primary_index`；也允许在某个 index 上声明 `primary = true` 作为等价写法。
 - 字段可声明 `default`。当数据未提供值且存在 default 时使用 default；`required = true` 且无值、无 default 时为错误。
-- Meta 各层级定义可声明 `desc`，作为结构化描述进入 MetaModel，并用于 inspect 输出、生成代码注释和辅助文档。
+- Meta 各层级定义可声明 `desc`，作为结构化描述进入 MetaModel，并用于生成代码注释和辅助文档。
 - 禁止 `color_channel = "auto"`。颜色通道必须显式声明为 `byte` 或 `normalized`。
 - `vector3` 等常见数学类型优先作为 builtin value type，而不是 named struct。
 - 第一阶段不支持 fragment join mode；多态表只支持 variant source mode。
@@ -60,14 +60,14 @@
 | CSV source provider | Stable | 当前唯一可执行 provider。`xlsx`、`lark_sheet`、`google_sheet` 为 planned / not implemented。 |
 | `sources` 多源 | Implemented MVP | 当前支持同一逻辑表多个 CSV source 追加 records，主要服务 polymorphic variant source mode。 |
 | `override_sources` | Implemented MVP | 当前支持 CollectionTable CSV override：按 primary index 整行覆盖，支持 `export_when` 绑定赛季/热修 tag；ObjectTable override、base source `export_when` 和非 CSV provider 仍未实现并会显式拒绝。 |
-| ObjectTable | Implemented MVP | 当前支持 CSV `key,value` 行式常量表：每行一个 top-level field key，导出单个 object；多源/override、FK、field path 展开、后续格子 expand 暂不实现。 |
+| ObjectTable | Implemented MVP | 当前支持 CSV `key,value` 行式常量表：每行一个 top-level field key，导出单个 object；支持 ObjectTable 作为 FK source 引用 CollectionTable unique/primary index；多源/override、作为 FK target、后续格子 expand 暂不实现。 |
 | primitive / enum fields | Stable | 支持 primitive、enum link、default 校验和数据值校验。 |
 | struct fields | Implemented MVP | 支持 named struct、JSON cell 校验和 nested object 导出；支持 CollectionTable/ObjectTable 中由 source path 自动判定的 struct expanded value、recursive nested struct、JSON/expanded 混用错误、target-aware child filtering 与 child default。array/map、struct child validators、ObjectTable key-level source location 暂未实现。 |
 | scalar default | Stable | 支持 primitive / enum scalar default。复杂 struct/list/table default 当前不支持。 |
 | target tags / export_when / row_export | Stable | 已接入 validation、runtime export 和 codegen target-aware 视图。 |
 | validators | Implemented MVP | 已有 validator registry 和 `range` field validator；后续可扩展更多 built-in/plugin validators。 |
 | fragments | Implemented MVP | 已支持 polymorphic variant source mode；fragment join mode 不实现。 |
-| foreign keys | Implemented MVP | 支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；Phase 1 仅支持 CollectionTable 到 CollectionTable。 |
+| foreign keys | Implemented MVP | 支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique/primary index。 |
 | runtime data export | Implemented MVP | 支持 JSON、MessagePack 与 `bin` registry；`bin` 私有紧密二进制格式已实现 CFGB header、schema revision 与 positional typed payload；大表 streaming writer 仍为中期优化。 |
 | codegen backends | Implemented MVP | 已有 Rust / TypeScript / C++ 基础生成、loader/repository helper 和 target-aware IR；更丰富 FK helper/API 契约待后续确认。 |
 | generated runtime loader contract | Implemented MVP | 当前 Rust / C++ / TypeScript 生成代码使用 Meta-agnostic `open + RuntimeDataReader + generated parser` 契约；用户 loader 新增表/字段时不变。 |

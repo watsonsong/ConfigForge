@@ -17,6 +17,12 @@ type = "int"
 required = true
 
 [[tables.fields]]
+name = "starter_item_id"
+type = "int"
+required = true
+foreign_key = { name = "starter_item", target_table = "items", target_index = "by_id" }
+
+[[tables.fields]]
 name = "stamina_cap"
 type = "int"
 required = true

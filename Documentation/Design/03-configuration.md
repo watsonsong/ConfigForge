@@ -146,7 +146,7 @@ XML 示例：
 描述约定：
 
 - Meta 中各层级定义可声明 `desc`，用于说明业务含义。
-- `desc` 会进入 canonical MetaModel，可被 inspect 命令、代码生成器和辅助文档生成器使用。
+- `desc` 会进入 canonical MetaModel，可被代码生成器和辅助文档生成器使用。
 - 普通 TOML/XML 注释不会进入 MetaModel；需要生成代码注释时应使用 `desc`。
 
 ## 3.4 Source Declaration

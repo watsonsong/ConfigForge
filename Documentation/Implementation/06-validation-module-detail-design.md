@@ -46,9 +46,8 @@ Meta validation 阶段限制：
 - ObjectTable 不能声明 indexes / primary_index。
 - ObjectTable 不能声明 `row_export`。
 - ObjectTable 不能声明 fragments。
-- ObjectTable 不能声明 table-level `foreign_keys`。
-- ObjectTable field 不能声明 field-level `foreign_key`。
-- CollectionTable 的 FK target 不能指向 ObjectTable。
+- ObjectTable 可以声明 table-level `foreign_keys` 或 field-level `foreign_key` 作为 FK source。
+- FK target 不能指向 ObjectTable。
 - ObjectTable Step 1 只支持 legacy/simple `source = "...csv"`，不能声明 `sources` 或 `override_sources`。
 
 Data validation 阶段规则：
@@ -56,7 +55,7 @@ Data validation 阶段规则：
 - ObjectTable 必须归一化为一个 logical row。
 - required/default/type/enum/field validator 复用现有字段规则。
 - struct JSON cell 与 expanded value 由 DataResolver 统一解析。
-- index / unique / FK / row_export / fragment validation 对 ObjectTable 跳过或在 Meta 阶段禁止。
+- index / unique / row_export / fragment validation 对 ObjectTable 跳过或在 Meta 阶段禁止；FK source validation 对 ObjectTable singleton logical row 生效。
 - table-level `export/export_when` 生效；field-level `export/export_when` 生效。
 - table 可见但所有字段被过滤时，后续 exporter 输出 `{}`。
 
@@ -337,7 +336,7 @@ foreign_key = { name = "item", target_table = "items", target_index = "by_id" }
 - target index 是 unique；
 - source fields 数量与 target index fields 数量一致；
 - source/target key 类型兼容。
-- source/target table 都是 CollectionTable；ObjectTable 参与 FK 时 Phase 1 报 unsupported。
+- source table 可以是 CollectionTable 或 ObjectTable；target table 必须是 CollectionTable，ObjectTable 作为 target 报 unsupported。
 
 validation 执行期检查：
 

@@ -230,6 +230,7 @@ fn builds_target_from_project_config() {
         serde_json::from_str(&game_rules_json).expect("game rules json should parse");
     assert_eq!(game_rules["max_player_level"], "60");
     assert_eq!(game_rules["starter_gold"], "500");
+    assert_eq!(game_rules["starter_item_id"], "2001");
     assert_eq!(game_rules["stamina_cap"], "120");
     assert_eq!(game_rules["daily_reset_hour"], "5");
     assert_eq!(game_rules["pvp_enabled"], "true");
@@ -1464,6 +1465,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             "price" => "price",
                             "max_player_level" => "max_player_level",
                             "starter_gold" => "starter_gold",
+                            "starter_item_id" => "starter_item_id",
                             "stamina_cap" => "stamina_cap",
                             "daily_reset_hour" => "daily_reset_hour",
                             "pvp_enabled" => "pvp_enabled",
@@ -1501,6 +1503,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             ("items", Some("price")) => Ok(10),
                             ("game_rules", Some("max_player_level")) => Ok(60),
                             ("game_rules", Some("starter_gold")) => Ok(500),
+                            ("game_rules", Some("starter_item_id")) => Ok(2001),
                             ("game_rules", Some("stamina_cap")) => Ok(120),
                             ("game_rules", Some("daily_reset_hour")) => Ok(5),
                             _ => Err(RuntimeDataError::type_mismatch("unexpected i64")),
@@ -1546,7 +1549,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                 {serde_assertion}
             "#,
             serde_assertion = if derive_serde {
-                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, stack: None, attributes: None, skill: None }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true }).unwrap();\n}"
+                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, stack: None, attributes: None, skill: None }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, starter_item_id: 2001, stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true }).unwrap();\n}"
             } else {
                 ""
             }
@@ -1602,6 +1605,7 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                     if (path_ == "items" && CurrentField() == "price") { return 10; }
                     if (path_ == "game_rules" && CurrentField() == "max_player_level") { return 60; }
                     if (path_ == "game_rules" && CurrentField() == "starter_gold") { return 500; }
+                    if (path_ == "game_rules" && CurrentField() == "starter_item_id") { return 2001; }
                     if (path_ == "game_rules" && CurrentField() == "stamina_cap") { return 120; }
                     if (path_ == "game_rules" && CurrentField() == "daily_reset_hour") { return 5; }
                     throw std::runtime_error("unexpected int64");
@@ -1663,6 +1667,7 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 GameRulesRow rules{};
                 rules.max_player_level = 60;
                 rules.starter_gold = 500;
+                rules.starter_item_id = 2001;
                 rules.stamina_cap = 120;
                 rules.daily_reset_hour = 5;
                 rules.pvp_enabled = true;
@@ -1766,6 +1771,7 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     if (this.path === "items" && this.currentField() === "price") { return 10; }
                     if (this.path === "game_rules" && this.currentField() === "max_player_level") { return 60; }
                     if (this.path === "game_rules" && this.currentField() === "starter_gold") { return 500; }
+                    if (this.path === "game_rules" && this.currentField() === "starter_item_id") { return 2001; }
                     if (this.path === "game_rules" && this.currentField() === "stamina_cap") { return 120; }
                     if (this.path === "game_rules" && this.currentField() === "daily_reset_hour") { return 5; }
                     throw new Error("unexpected number");

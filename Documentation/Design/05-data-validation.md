@@ -91,7 +91,7 @@ fragment presence 的 target 判断顺序固定为：
 | Multi-Collection | foreign key、跨表一致性 | 当前验证视图中的多个 collection |
 | Export | target mapping、输出路径、artifact 能力 | Export plan |
 
-ObjectTable Step 1 的输入视图不是多行 records，而是由 CSV `key,value` rows 归一化出的单个 object row。即使 source 只有 header、没有数据行，也必须归一化为一个 empty logical row `{}`，使 required/default/type/enum/struct JSON cell 等字段级规则复用现有 field validation；但 index、row_export、foreign key、fragment-scoped validation 不适用于 ObjectTable Step 1。ObjectTable 的 table-level `export/export_when` 与 field-level `export/export_when` 仍生效；table 可见但字段都被过滤时，导出 empty object。
+ObjectTable Step 1 的输入视图不是多行 records，而是由 CSV `key,value` rows 归一化出的单个 object row。即使 source 只有 header、没有数据行，也必须归一化为一个 empty logical row `{}`，使 required/default/type/enum/struct JSON cell 等字段级规则复用现有 field validation；index、row_export、fragment-scoped validation 不适用于 ObjectTable Step 1。ObjectTable 可以作为 foreign key source：其 singleton logical row 中的 FK source fields 按普通 raw cell key 引用 CollectionTable unique / primary index；ObjectTable 仍不能作为 FK target。ObjectTable 的 table-level `export/export_when` 与 field-level `export/export_when` 仍生效；table 可见但字段都被过滤时，导出 empty object。
 
 Struct source layout 自动判定落地后，Full DataSet 与 ExportView 中的 logical row 仍保持 row-oriented map，但 source key 可以是 nested field path。CollectionTable 的 CSV header 使用 `field.child` 多列表达；ObjectTable 的 `key,value` source 使用多行 `field.child` 表达。Validation 需要按当前 row/source 的 key 集合扫描每个 struct field occurrence：只出现 parent path 时按 JSON cell 解析；只出现 child paths 时按 expanded value 解析；两者同时出现应视为同一 occurrence 混用 JSON cell 与 expanded cells 并报错。该规则递归作用于 nested struct：如果某一级 occurrence 选择 JSON cell，则该级以下不能再出现展开子项；如果某一级选择 expanded value，则其内部 struct child 可以继续独立选择 JSON cell 或 expanded value。Meta `layout` 不参与 named struct 的 source layout 判定。
 
@@ -243,6 +243,8 @@ runtime payload 应固定 fragment 表达方式。第一阶段推荐直接用 fr
 - target table 存在；
 - target index 存在或 target 有 primary index；
 - target index 是 unique；
+- source table 可为 CollectionTable 或 ObjectTable；ObjectTable source 只有一个 singleton logical row 参与校验；
+- target table 必须是 CollectionTable，ObjectTable 不能作为 FK target；
 - source value 与 target key 类型兼容；
 - optional FK 全空时跳过；
 - composite FK 部分为空时报错；

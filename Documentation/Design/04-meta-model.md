@@ -14,9 +14,9 @@
 | default | Partial | 当前支持 primitive / enum scalar default。 |
 | multi-source / override / fragments | Partial | 当前已支持 polymorphic CollectionTable 的 fragment variant source mode：多个 CSV source 可追加完整 records，并由 source `fragments` 声明激活 fragment set；也已支持 CollectionTable CSV `override_sources` 按 primary index 整行覆盖并由 `export_when` 按 effective target tags 启用。通用 multi-source split merge、ObjectTable 多源/override、base source `export_when` 与 fragment join mode 仍未实现。 |
 | builtin value types | Planned | `vector3` 等 builtin value types 仍为目标态，当前尚未实现。 |
-| foreign key | Implemented MVP | 当前支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；Phase 1 仅支持 CollectionTable 到 CollectionTable。 |
+| foreign key | Implemented MVP | 当前支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique/primary index。 |
 | shared table schema / typed fragments | Partial | 当前没有 table inheritance / base fields / reusable field group；field group 仍是方向性目标，不进入近期实现。typed fragment payload 已支持 `[[tables.fragments]] type = "StructName"` 复用标准 struct，并把该 struct 的字段按 fragment object 展开；inline fragment fields 仍继续支持。标准参考项目通过同一 `items` polymorphic table 的多个 variant sources 解决道具公共字段复用，并通过 typed `attributes -> AttributeSet` 避免重复声明属性字段。 |
-| ObjectTable 特化语义 | Implemented MVP | 当前已支持 CSV `key,value` 行式 singleton ObjectTable：每行一个 top-level field key，导出单个 object，并支持 struct JSON/expanded value。ObjectTable 多源/override、FK、key-level source row 精确诊断、后续格子 expand 暂不实现。 |
+| ObjectTable 特化语义 | Implemented MVP | 当前已支持 CSV `key,value` 行式 singleton ObjectTable：每行一个 top-level field key，导出单个 object，并支持 struct JSON/expanded value 与作为 FK source 引用 CollectionTable。ObjectTable 多源/override、作为 FK target、key-level source row 精确诊断、后续格子 expand 暂不实现。 |
 | target tags / export_when / row_export | Implemented | 当前 Project target 支持 `tags`；Meta 中 table / field / index 支持 `export` 与 `export_when`；collection table 支持 `row_export`，并已接入 validation、runtime data export 与 codegen 的 target-aware 视图。旧字段 `tool_only` / `filter_field` / `validator_only` 仅用于报 deprecated/unsupported 诊断，不再参与导出判断。 |
 
 ## 4.1 MetaModel
@@ -43,9 +43,8 @@ Meta 支持在各个定义层级声明 `desc`，用于描述该定义的业务�
 `desc` 的用途：
 
 1. 作为 Meta 配置中的原生文档说明，替代只能依赖 TOML/XML 注释的做法。
-2. 被 inspect/debug 命令展示，帮助用户理解合并后的 MetaModel。
-3. 被代码生成器转换为目标语言中的文档注释，例如 TypeScript `/** ... */`、C# XML doc、Lua annotation 注释等。
-4. 被特殊导出器或辅助文档生成器用作 translator comment、字段说明或配置文档内容。
+2. 被代码生成器转换为目标语言中的文档注释，例如 TypeScript `/** ... */`、C# XML doc、Lua annotation 注释等。
+3. 被特殊导出器或辅助文档生成器用作 translator comment、字段说明或配置文档内容。
 
 支持 `desc` 的推荐层级：
 
@@ -144,7 +143,7 @@ Step 1 语义：
 - 同一个 ObjectTable source 归一化为一个逻辑 object row，runtime data 导出为单个 object，而不是 records array。
 - 即使 source 只有 header、没有数据行，也必须归一化为一个 empty logical row `{}`，确保 required/default 在单对象上执行。
 - table-level `export/export_when` 和 field-level `export/export_when` 对 ObjectTable 生效；table 可见但所有字段被过滤时导出 `{}`。
-- ObjectTable Step 1 不支持 index、primary index、row_export、foreign key source/target、variant source fragments。
+- ObjectTable Step 1 不支持 index、primary index、row_export、作为 foreign key target、variant source fragments；可以作为 foreign key source，字段值引用 CollectionTable 的 unique / primary index。
 - ObjectTable Step 1 只支持 `source = "...csv"`，不支持 `sources` / `override_sources`；后续应以 field path 为覆盖粒度扩展。
 - ObjectTable Step 1 不支持 field path 展开或“后续格子自动 expand 为数组元素”；复杂对象先使用 named struct JSON cell。后续 struct `expanded_value` 应支持 `field.child` 形式的 field path rows；array/map 和数组自动扩展另行设计。
 
@@ -749,7 +748,8 @@ target_index = "by_id_region"
 - optional foreign key 全空时跳过 FK resolution。
 - composite foreign key 仅在 `allow_empty = true` 或默认派生为允许空时，全空可跳过；部分为空始终报 partial key error。
 - foreign key target 必须是 unique index 或 primary index。
-- Phase 1 仅支持 CollectionTable 到 CollectionTable 的 FK；ObjectTable 作为 source/target 暂不支持。
+- FK source table 可为 CollectionTable 或 ObjectTable；ObjectTable source 按其 singleton logical row 执行引用完整性校验。
+- FK target table 必须是 CollectionTable，且 target index 必须是 unique 或 primary；ObjectTable 仍不能作为 FK target，因为它没有 index / primary index 语义。
 
 ## 4.13 Multi-source 与 Override
 

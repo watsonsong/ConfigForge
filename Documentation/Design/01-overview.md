@@ -74,7 +74,7 @@ ConfigForge 支持 required/default、类型解析、枚举、索引唯一性、
 - 多态 fragment 的 variant source mode。
 - 导出上下文 tag、记录/字段/fragment 过滤。
 - 常规 runtime data export 和 special export。
-- CLI validate/export/inspect/debug 等命令的用户级参数。
+- CLI validate/build/export 等命令的用户级参数。
 - 结构化诊断、确定性输出、可用于 CI 的报告格式。
 
 ## 1.6 暂不纳入当前范围

@@ -124,7 +124,7 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 ### 添加描述
 
 1. 在 enum、enum value、struct、struct field、table、field、fragment、index 等定义上添加 `desc`。
-2. 运行 `inspect` 检查合并后的 MetaModel 是否保留描述。
+2. 生成目标语言代码或辅助文档，检查合并后的 MetaModel 描述是否被保留。
 3. 运行 `export` 检查生成代码中的注释是否符合目标语言风格。
 
 ### 添加索引
@@ -243,7 +243,7 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 - named struct / struct field `desc` 出现在生成结构体和成员注释中。
 - 多行 `desc` 被正确拆分和转义。
 - 包含目标语言注释结束符的 `desc` 不应生成非法代码。
-- 修改 `desc` 不应改变 runtime data 内容，只影响注释、inspect 输出或辅助文档。
+- 修改 `desc` 不应改变 runtime data 内容，只影响生成代码注释或辅助文档。
 
 ## 7.4 QA 断言建议
 

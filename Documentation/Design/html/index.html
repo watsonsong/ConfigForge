@@ -363,9 +363,9 @@
           <tbody>
             <tr><td>Project / Meta loading</td><td><span class="tag green">Stable</span></td><td>支持 Project imports、Meta merge、link + validate；XML 仅为历史/目标态示例，当前未实现。</td></tr>
             <tr><td>CSV source provider</td><td><span class="tag green">Stable</span></td><td>当前唯一可执行 provider；XLSX、Lark Sheet、Google Sheet 是 planned。</td></tr>
-            <tr><td>ObjectTable</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 CSV <code>key,value</code> 常量表、单 object runtime payload；多源、override、FK 暂不支持。</td></tr>
+            <tr><td>ObjectTable</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 CSV <code>key,value</code> 常量表、单 object runtime payload，并可作为 FK source 引用 CollectionTable unique / primary index；多源、override、作为 FK target 暂不支持。</td></tr>
             <tr><td>Struct fields / expanded value</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 named struct、JSON cell、source-driven expanded value、recursive nested struct、target-aware child filtering 和 child default；array/map 与 struct child validators 待后续。</td></tr>
-            <tr><td>Foreign keys</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 field/table-level FK、link、Meta validate、target-aware referential integrity 和 CodeModel IR；Phase 1 限定 CollectionTable 到 CollectionTable。</td></tr>
+            <tr><td>Foreign keys</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 field/table-level FK、link、Meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique / primary index。</td></tr>
             <tr><td>Runtime data export</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 JSON、MessagePack 与 bin registry；streaming writer 和更多格式是后续扩展。</td></tr>
             <tr><td>Codegen backends</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 Rust / TypeScript / C++ 基础生成、loader/repository helpers 和 target-aware IR。</td></tr>
             <tr><td>Diagnostics</td><td><span class="tag orange">Implemented MVP</span></td><td><code>src/diagnostic/</code> 已提供 severity、location、formatting、report aggregation 和 crate error facade；Data/Exporter/Codegen 领域 code 与完整 source trace 仍可增强。</td></tr>
@@ -421,7 +421,7 @@ output = "Generated/Code/TypeScript"</code></pre>
       <section id="meta">
         <h2>6. Meta 模型</h2>
         <div class="grid grid-3">
-          <div class="card"><h3>ObjectTable</h3><p>导出一个常量对象，常用于全局配置。当前实现使用 CSV <code>key,value</code> 行式 source 并输出单 object。</p></div>
+          <div class="card"><h3>ObjectTable</h3><p>导出一个常量对象，常用于全局配置。当前实现使用 CSV <code>key,value</code> 行式 source 并输出单 object；可作为 FK source，但不能作为 FK target。</p></div>
           <div class="card"><h3>CollectionTable</h3><p>导出多条记录。可定义 index、primary index、<code>row_export</code>，并支持 source order 数组访问。</p></div>
           <div class="card"><h3>Polymorphic Fragment</h3><p>使用 composition 表达多态记录；当前只支持 variant source mode，不支持按 ID 拼接 fragment。</p></div>
         </div>
@@ -429,7 +429,7 @@ output = "Generated/Code/TypeScript"</code></pre>
         <table>
           <thead><tr><th>属性</th><th>作用</th><th>说明</th></tr></thead>
           <tbody>
-            <tr><td><code>desc</code></td><td>结构化说明</td><td>进入 MetaModel，可用于 inspect、代码注释和辅助文档。</td></tr>
+            <tr><td><code>desc</code></td><td>结构化说明</td><td>进入 MetaModel，可用于代码注释和辅助文档。</td></tr>
             <tr><td><code>required</code></td><td>必填规则</td><td>当前验证视图中无值且无 default 时报错。</td></tr>
             <tr><td><code>default</code></td><td>默认值</td><td>源数据未提供时补齐，且必须能按字段类型解析。</td></tr>
             <tr><td><code>layout</code></td><td>复合值书写方式</td><td>named struct 字段推荐由 source 中 parent path / child paths 自动判定 JSON cell 或 expanded value；显式 layout 主要保留为历史/兼容语义。</td></tr>
@@ -505,10 +505,9 @@ override_sources = [
 
       <section id="export">
         <h2>9. 导出与 CLI</h2>
-        <div class="grid grid-3">
+        <div class="grid grid-2">
           <div class="card"><span class="tag blue">validate</span><h3>只校验</h3><p>读取、组合、过滤和校验，不写正式产物。</p><pre><code>config-forge validate --project ConfigForge.toml --target client_json_shipping</code></pre></div>
           <div class="card"><span class="tag green">build/export</span><h3>校验并导出</h3><p>校验通过后生成 runtime data 和目标语言代码；special exporters 仍是目标态。</p><pre><code>config-forge build --project ConfigForge.toml --target client_json_shipping</code></pre></div>
-          <div class="card"><span class="tag purple">inspect</span><h3>查看合并结果</h3><p>展示 MetaModel、source resolution、target、desc 和过滤统计。</p><pre><code>config-forge inspect table items --project ConfigForge.toml</code></pre></div>
         </div>
         <h3>Runtime Data Format</h3>
         <table>
@@ -535,7 +534,7 @@ override_sources = [
           <div class="card"><h3>Field Type</h3><p>required、default、color channel、vector3、datetime timezone。</p></div>
           <div class="card"><h3>Multi-source</h3><p>variant source append、fragment presence、跨 source unique 冲突；CollectionTable override 应断言 primary-index 覆盖、missing base row 和 tag-gated 生效。</p></div>
           <div class="card"><h3>Export Filtering</h3><p>target tags、<code>export_when</code>、<code>row_export</code>、<code>export = false</code> 和过滤后集合级校验。</p></div>
-          <div class="card"><h3>Desc / 注释</h3><p>desc 进入 inspect、生成代码注释和 translator comments，多行与特殊字符正确转义。</p></div>
+          <div class="card"><h3>Desc / 注释</h3><p>desc 进入生成代码注释、translator comments 或辅助文档，多行与特殊字符正确转义。</p></div>
           <div class="card"><h3>Artifact Writer</h3><p><code>temp_commit</code> 失败不提交最终产物，<code>direct</code> 按配置直接写入，manifest 稳定排序。</p></div>
         </div>
         <h3>推荐断言字段</h3>

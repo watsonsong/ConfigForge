@@ -418,6 +418,90 @@ fn uses_raw_string_foreign_key_semantics() {
     assert!(message.contains("references missing `items.by_id` key `[\"01\"]`"));
 }
 
+fn object_foreign_key_meta(required: bool, allow_empty: Option<bool>) -> MetaModel {
+    let allow_empty = allow_empty
+        .map(|value| format!(", allow_empty = {value}"))
+        .unwrap_or_default();
+    MetaModel::from_toml_str(&format!(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "game_rules"
+            kind = "object"
+            source = "game_rules.csv"
+
+            [[tables.fields]]
+            name = "starter_item_id"
+            type = "int"
+            required = {required}
+            foreign_key = {{ name = "starter_item", target_table = "items"{allow_empty} }}
+        "#
+    ))
+    .expect("meta should load")
+}
+
+fn object_foreign_key_data(starter_item_id: &str) -> DataSet {
+    DataSet::new(vec![
+        DataTable::new(
+            "items",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+        DataTable::new(
+            "game_rules",
+            vec![BTreeMap::from([(
+                "starter_item_id".to_owned(),
+                starter_item_id.to_owned(),
+            )])],
+        ),
+    ])
+}
+
+#[test]
+fn validates_object_table_foreign_key_reference_integrity() {
+    let meta = object_foreign_key_meta(true, None);
+    let linked_meta = meta.link().expect("meta should link");
+
+    assert!(validate_data_set(&linked_meta, &object_foreign_key_data("1")).is_ok());
+
+    let message = validate_error(validate_data_set(
+        &linked_meta,
+        &object_foreign_key_data("2"),
+    ));
+    assert!(message.contains(
+        "table `game_rules` row 1 foreign key `starter_item` references missing `items.by_id` key"
+    ));
+}
+
+#[test]
+fn validates_object_table_foreign_key_allow_empty() {
+    let optional_meta = object_foreign_key_meta(false, None);
+    let linked_optional = optional_meta.link().expect("meta should link");
+    assert!(validate_data_set(&linked_optional, &object_foreign_key_data("")).is_ok());
+
+    let required_meta = object_foreign_key_meta(false, Some(false));
+    let linked_required = required_meta.link().expect("meta should link");
+    let message = validate_error(validate_data_set(
+        &linked_required,
+        &object_foreign_key_data(""),
+    ));
+    assert!(message.contains("foreign key `starter_item` is empty but `allow_empty = false`"));
+}
+
 #[test]
 fn handles_foreign_key_empty_and_partial_keys() {
     let meta = MetaModel::from_toml_str(

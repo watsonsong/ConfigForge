@@ -56,7 +56,8 @@ Phase 1 支持：
 - `allow_empty`；
 - `export` / `export_when`；
 - target-aware validation；
-- source / target table 均为 collection table 的常规关系校验。
+- source table 为 CollectionTable 或 ObjectTable 的常规关系校验；
+- target table 为 CollectionTable unique / primary index。
 
 Phase 1 不支持：
 
@@ -65,7 +66,7 @@ Phase 1 不支持：
 - array / map 内元素 FK；
 - 指向非 unique index 的一对多关系；
 - cross-target full-dataset FK 模式；
-- ObjectTable 作为 FK source table 或 target table；
+- ObjectTable 作为 FK target table；
 - 自动 codegen helper；
 - reverse relation / back reference；
 - cascade、override、join 等数据库式关系操作。
@@ -363,7 +364,7 @@ pub fn foreign_key(&self, name: &str) -> Option<&LinkedForeignKeyMeta<'meta>>;
 5. source fields 必须存在于当前 table common fields。
 6. source fields 不允许使用 dotted fragment path；Phase 1 不支持 fragment field FK。
 7. `target_table` 非空且存在。
-8. source table 和 target table 都必须是 CollectionTable；ObjectTable 作为 source/target 一律报 unsupported。
+8. source table 可以是 CollectionTable 或 ObjectTable；target table 必须是 CollectionTable，ObjectTable 作为 target 报 unsupported。
 9. `target_index`：
    - 为空时，target table 必须存在 primary index；若不存在，应提示“请在 target table 配置 primary index，或显式指定 target_index”；
    - 非空时，target table 必须存在该 index。
@@ -424,6 +425,7 @@ Full validation：
 
 - 使用全量 `DataSet`；
 - source table 所有 rows 参与；
+- ObjectTable source 以归一化后的 singleton logical row 参与；
 - target table 所有 rows 参与；
 - FK `export` / `export_when` 不过滤，除非未来定义 full validation 也按 target 执行。
 
@@ -432,6 +434,7 @@ Target validation：
 - 使用 `ExportValidationView::for_target(...)`；
 - FK 本身 `is_exported_for(target_tags)` 为 false 时跳过；
 - source table 当前 target 不可见时，该 table 不在 view 中，因此无需执行其 FK；
+- ObjectTable source 当前 target 可见时，以 ExportView 中的 singleton logical row 参与；
 - FK 自身可见但 target table 当前 target 不可见时，返回 validation error；
 - FK 自身可见但 target index 当前 target 不可见时，返回 validation error；
 - FK 自身可见但 source fields 或 target index fields 当前 target 不可见时，返回 validation error；
@@ -560,10 +563,11 @@ pub struct CodeForeignKey {
 
 ## 11.9 与 Fragment 的关系
 
-Phase 1 FK 只允许 common fields：
+Phase 1 FK 只允许 common fields / ObjectTable top-level fields：
 
 - source `fields` 不能写 `fragment.field`；
 - target index 不能引用 fragment fields；
+- ObjectTable source 只能引用 top-level field name，不支持 struct child path；
 - fragment field 作为 FK key 的能力留到 `FieldPath` / nested validation scope 成熟后实现。
 
 原因：
@@ -596,7 +600,7 @@ Phase 1 FK 只允许 common fields：
 
 - 新增 `validate_foreign_keys()`。
 - 新增或复用 diagnostic code。
-- 测试：重复 FK name、字段级派生 name 与 table-level name 冲突、空 fields、未知 source field、unknown target table/index、target index 非 unique、target table 无 primary index 但省略 `target_index`、字段数量不一致、字段级 FK 指向复合 index、类型不兼容、fragment path 被拒绝、ObjectTable 作为 source/target 被拒绝。
+- 测试：重复 FK name、字段级派生 name 与 table-level name 冲突、空 fields、未知 source field、unknown target table/index、target index 非 unique、target table 无 primary index 但省略 `target_index`、字段数量不一致、字段级 FK 指向复合 index、类型不兼容、fragment path 被拒绝、ObjectTable 作为 source 通过、ObjectTable 作为 target 被拒绝。
 
 ### Step 3：Link
 
@@ -609,7 +613,7 @@ Phase 1 FK 只允许 common fields：
 
 - 在 full dataset validation 中执行 FK。
 - 在 target validation 中基于 `ExportValidationView` 执行 FK。
-- 测试：有效引用、缺引用、allow_empty、部分空复合 key、target row 被 `row_export` 排除、FK `export_when` 跳过、FK 可见但 target table/index 不可见时报错。
+- 测试：有效引用、缺引用、allow_empty、部分空复合 key、ObjectTable source 有效引用/缺引用/allow_empty、target row 被 `row_export` 排除、FK `export_when` 跳过、FK 可见但 target table/index 不可见时报错。
 
 ### Step 5：文档与 fixture
 
@@ -630,7 +634,7 @@ Phase 1 FK 只允许 common fields：
 7. 重复 FK name 报错，包括字段级派生 name 与 table-level name 冲突。
 8. source field 不存在报错。
 9. source field 写 `stats.item_id` 报错。
-10. source/target table 为 ObjectTable 报 unsupported。
+10. source table 为 ObjectTable 可通过；target table 为 ObjectTable 报 unsupported。
 11. target table 不存在报错。
 12. 省略 `target_index` 但 target table 无 primary index 时报错。
 13. target index 不存在报错。
@@ -661,6 +665,9 @@ Phase 1 FK 只允许 common fields：
 18. FK 可见但 target table `export_when` 不匹配，报 validation error。
 19. FK 可见但 target index `export_when` 不匹配，报 validation error。
 20. FK `export_when` 不匹配时，即使 target table/index 不可见也跳过。
+21. ObjectTable source 单字段 FK 引用存在，通过。
+22. ObjectTable source 单字段 FK 引用缺失，失败。
+23. ObjectTable source optional FK 空值跳过；显式 `allow_empty = false` 时空值失败。
 
 ### Integration tests
 
@@ -674,7 +681,7 @@ Phase 1 FK 只允许 common fields：
    建议 full validation 检查全部 FK；target validation 才按 target 过滤。若 CLI 的默认 validate 已经绑定 target，则以 target 语义为准。
 
 2. **ObjectTable 外键语义**  
-   Phase 1 明确禁止 ObjectTable 参与 FK：source table 与 target table 都必须是 CollectionTable。等 ObjectTable 的 index / singleton access / runtime payload 语义稳定后，再单独设计 ObjectTable FK。
+   ObjectTable 已可作为 FK source：其 `key,value` source 会归一化为 singleton logical row，外键 source fields 与 CollectionTable rows 使用同一套 raw string key 语义。ObjectTable 仍不能作为 FK target，因为 target 需要 unique / primary index，而 ObjectTable 当前不支持 index / primary index；若未来需要 singleton target 关系，需要单独设计“引用对象字段”或 ObjectTable virtual index 语义。
 
 3. **Codegen helper 的 ownership / lifetime**  
    不在 Phase 1 解决，避免阻塞 validation 能力落地。

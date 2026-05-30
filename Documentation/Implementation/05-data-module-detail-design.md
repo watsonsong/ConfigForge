@@ -437,7 +437,7 @@ DataTable rows:
 当前限制：
 
 - ObjectTable Step 1 只支持 legacy/simple `source = "...csv"`，不支持 `sources` / `override_sources`。
-- ObjectTable 不支持 fragments / row_export / indexes / foreign keys；这些限制由 Meta / Validation 模块维护。
+- ObjectTable 不支持 fragments / row_export / indexes；ObjectTable 可作为 foreign key source，归一化后的 singleton logical row 会进入 FK 校验，但不能作为 foreign key target。相关限制由 Meta / Validation 模块维护。
 - ObjectTable key-level source trace 仍需后续增强；当前 singleton logical row 会损失真实 key 行定位的一部分精度。
 
 错误映射：

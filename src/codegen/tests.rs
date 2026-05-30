@@ -176,6 +176,57 @@ fn code_model_marks_object_tables_and_skips_indexes() {
 }
 
 #[test]
+fn code_model_includes_object_table_foreign_keys() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "starter_item_id"
+            type = "int"
+            required = false
+            foreign_key = { name = "starter_item", target_table = "items" }
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+
+    let model = build_code_model(&linked, &TargetTags::empty(), &[]).expect("model");
+    let game_config = model
+        .tables
+        .iter()
+        .find(|table| table.name == "game_config")
+        .expect("object table should exist");
+
+    assert_eq!(game_config.kind, CodeTableKind::Object);
+    assert!(game_config.indexes.is_empty());
+    assert_eq!(game_config.foreign_keys.len(), 1);
+    assert_eq!(game_config.foreign_keys[0].name, "starter_item");
+    assert_eq!(game_config.foreign_keys[0].target_table, "items");
+    assert_eq!(game_config.foreign_keys[0].target_index, "by_id");
+    assert!(game_config.foreign_keys[0].allow_empty);
+}
+
+#[test]
 fn code_model_includes_fragment_structs_and_optional_row_members() {
     let meta = MetaModel::from_toml_str(
         r#"

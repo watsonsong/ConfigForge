@@ -262,7 +262,7 @@ pub enum TableKind {
 
 - `Object`：可以没有 index。
 - `Collection`：可以定义 index；override 等后续逻辑会依赖 primary index。
-- ObjectTable Step 1 的过程文档已并入模块文档。当前 Meta 层限制 ObjectTable 不能声明 indexes / primary_index / row_export / fragments / foreign_keys，也不能使用 `sources` / `override_sources`；ObjectTable source layout 详见 `05-data-module-detail-design.md`。
+- ObjectTable Step 1 的过程文档已并入模块文档。当前 Meta 层限制 ObjectTable 不能声明 indexes / primary_index / row_export / fragments，也不能使用 `sources` / `override_sources`；ObjectTable 可以声明 field-level/table-level foreign keys 作为 source，但 FK target 必须是 CollectionTable unique / primary index。ObjectTable source layout 详见 `05-data-module-detail-design.md`。
 
 ### 4.5.7 `FieldMeta`
 
@@ -350,7 +350,7 @@ pub struct ForeignKeyMeta {
 - `allow_empty` 允许 optional FK 全空时跳过引用完整性检查；省略时按 source fields 的 `required` 派生，所有 source fields 都是 optional 时允许全空，否则不允许全空。
 - `export` / `export_when` 控制该关系是否进入当前 target 的 CodeModel；validation 也默认只检查当前 target 可见关系。
 - Link 阶段解析为 `LinkedForeignKeyMeta<'meta>`，供 validation 执行引用完整性检查；codegen 关联查询 helper 属于后续扩展。
-- 当前 MVP 仅支持 CollectionTable 到 CollectionTable 的 FK；ObjectTable 作为 source/target 暂不支持。
+- 当前 MVP 支持 CollectionTable 或 ObjectTable 作为 FK source；FK target 必须是 CollectionTable unique / primary index，ObjectTable 作为 target 暂不支持。
 
 ### 4.5.10 Target Tags 与导出条件
 
@@ -649,8 +649,8 @@ pub enum MetaDiagnosticCode {
 - table `primary_index` 必须引用存在的 index。
 - table `primary_index` 指向的 index 必须 unique。
 - 多个 `primary = true` 或 `primary_index` 与 `primary = true` 冲突时产生 `PrimaryIndexMismatch`。
-- ObjectTable Step 1 不支持 indexes / primary_index / row_export / fragments / table-level foreign_keys / field-level foreign_key / multi-source declarations。
-- CollectionTable 的 foreign key target 不能指向 ObjectTable。
+- ObjectTable Step 1 不支持 indexes / primary_index / row_export / fragments / multi-source declarations；ObjectTable 可以声明 table-level `foreign_keys` 或 field-level `foreign_key` 作为 FK source。
+- 任意 table 的 foreign key target 不能指向 ObjectTable。
 
 `link_meta_model` 当前覆盖：
 

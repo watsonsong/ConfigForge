@@ -293,11 +293,7 @@ pub(crate) fn build_code_model(
                 &format!("table `{}` indexes", table_meta.meta.name),
             )?;
 
-            let foreign_keys = if kind == CodeTableKind::Collection {
-                build_code_foreign_keys(meta, table_meta, &field_index, target_tags)?
-            } else {
-                Vec::new()
-            };
+            let foreign_keys = build_code_foreign_keys(meta, table_meta, &field_index, target_tags)?;
 
             let data_file = table_meta.meta.name.clone();
             let data_format = JSON_FORMAT.to_owned();
