@@ -23,7 +23,7 @@
   - 如果未来确实需要超过 safe integer 的整数，会额外定义特殊 primitive type，而不是改变现有 `int` contract。
 - [x] 为 binary reader 增加可配置 decode limits。
   - 已完成：Rust / TypeScript / C++ binary reader 均支持默认 limits 与业务覆盖，覆盖 `max_file_bytes`、`max_rows`、`max_array_length`、`max_string_bytes`、`max_nesting_depth`。
-  - 已完成：文件大小在读取 payload 前预检查，`row_count`、array length、string length、record nesting 在消费/分配前检查。
+  - 已完成：文件大小在读取 payload 前预检查，`row_count`、list length、string length、record nesting 在消费/分配前检查。
 - [ ] 改进 C++ adapter 与 generated namespace/include 的集成方式。
   - 当前 adapter 仍默认 include `generated.hpp` 并假设 `reference::game::config` namespace。
   - 后续应提供稳定 alias / macro header，或要求用户显式定义 reader/loader 类型宏，并用真实 generated integration test 覆盖。

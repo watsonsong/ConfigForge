@@ -39,6 +39,7 @@ fn emits_loader_and_repository_declarations() {
             "inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";"
         )
     );
+    assert!(content.contains("#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH 1"));
     assert!(content.contains("static constexpr const char* DataFile = \"items\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("IRuntimeDataDecoder"));
@@ -54,6 +55,9 @@ fn emits_loader_and_repository_declarations() {
     assert!(source.contains("ItemsTable ItemsTable::Load(IRuntimeDataLoader& loader)"));
     assert!(source.contains("auto root = loader.Open(DataFile);"));
     assert!(source.contains("const std::size_t row_count = root->ReadRowCount();"));
+    assert!(content.contains("virtual std::size_t ReadListLength()"));
+    assert!(source.contains("const std::size_t length = reader.ReadListLength();"));
+    assert!(!source.contains("reader.ReadArrayLength()"));
     assert!(source.contains("root->EnterIndex(row_index);"));
     assert!(source.contains("rows.push_back(ReadItemsRow(*root));"));
     assert!(source.contains("ItemsTable ItemsTable::FromRows(std::vector<ItemsRow> rows)"));

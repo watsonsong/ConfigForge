@@ -146,14 +146,26 @@ public:
         throw std::runtime_error("reader value is not an array");
     }
 
-    std::size_t ReadArrayLength() {
+    std::size_t ReadListLength()
+#if defined(CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH)
+        override
+#endif
+    {
         const rapidjson::Value& value = Current();
         if (value.IsArray()) {
             const std::size_t length = value.Size();
-            CheckRuntimeDecodeLimit("array length", length, limits_.max_array_length);
+            CheckRuntimeDecodeLimit("list length", length, limits_.max_array_length);
             return length;
         }
         throw std::runtime_error("reader value is not an array");
+    }
+
+    std::size_t ReadArrayLength()
+#if defined(CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_ARRAY_LENGTH)
+        override
+#endif
+    {
+        return ReadListLength();
     }
 
     std::int64_t AsInt64() const override {

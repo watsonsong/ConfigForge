@@ -14,6 +14,7 @@ export interface RuntimeDataReaderLike {
     exitField?(): void;
     readEnumIndex?(variants: readonly string[]): number;
     readRowCount?(): number;
+    readListLength?(): number;
     readArrayLength?(): number;
     arrayElementsArePositional?(): boolean;
     beginRecord?(optionalSlotCount: number): void;
@@ -51,6 +52,7 @@ export declare class RuntimeValueReader implements RuntimeDataReaderLike {
     exit(): void;
     length(): number;
     readRowCount(): number;
+    readListLength(): number;
     readArrayLength(): number;
     decodeLimits(): RuntimeDecodeLimits;
     asNumber(): number;
@@ -59,3 +61,5 @@ export declare class RuntimeValueReader implements RuntimeDataReaderLike {
     private currentValue;
     private checkNestingDepth;
 }
+export declare function readRuntimeRowCount(reader: RuntimeDataReaderLike): number;
+export declare function readRuntimeListLength(reader: RuntimeDataReaderLike): number;

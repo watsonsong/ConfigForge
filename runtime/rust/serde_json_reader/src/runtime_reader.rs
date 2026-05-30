@@ -121,9 +121,9 @@ impl RuntimeDataReader for JsonValueReader {
         Ok(rows)
     }
 
-    fn read_array_len(&self) -> RuntimeDataResult<usize> {
+    fn read_list_len(&self) -> RuntimeDataResult<usize> {
         let length = self.len()?;
-        self.limits.check_array_length(length)?;
+        self.limits.check_list_length(length)?;
         Ok(length)
     }
 
@@ -376,10 +376,10 @@ mod tests {
             },
         );
         assert!(reader
-            .read_array_len()
+            .read_list_len()
             .unwrap_err()
             .message
-            .contains("array length"));
+            .contains("list length"));
 
         let reader = JsonValueReader::with_limits(
             Value::String("abcd".to_owned()),

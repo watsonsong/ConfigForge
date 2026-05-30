@@ -124,7 +124,7 @@ for byte in canonical_signature:
 
 ### 13.4.1 Unsigned varint
 
-`varuint` 使用 ULEB128：低 7 bit 为 payload，最高 bit 表示后续字节。用于 row_count、array length、string byte length、enum ordinal 等非负整数。
+`varuint` 使用 ULEB128：低 7 bit 为 payload，最高 bit 表示后续字节。用于 row_count、list length、string byte length、enum ordinal 等非负整数。这里的 list length 是 Meta list 字段元素数；二进制 wire 中虽然表现为长度前缀加顺序元素，但不与 CollectionTable 的 row_count 混用。
 
 ### 13.4.2 Signed int
 
@@ -389,7 +389,7 @@ binary reader 应共享 compliance fixtures：
 | --- | ---: | --- |
 | `max_file_bytes` | 64 MiB | loader 打开文件后、读取 payload 前；直接从 bytes 构造 reader 时也检查。 |
 | `max_rows` | 1,000,000 | CollectionTable `row_count` / named payload 顶层 rows array。 |
-| `max_array_length` | 1,000,000 | Meta `List` 对应 runtime array/list length。 |
+| `max_array_length` | 1,000,000 | Meta `List` 对应 runtime list length；字段名保留 array 是 reader contract 1.x 兼容命名。 |
 | `max_string_bytes` | 16 MiB | binary string length 前缀或 JSON / MessagePack string byte length，返回/分配字符串前检查。 |
 | `max_nesting_depth` | 128 | named reader cursor 进入字段/元素前，binary reader 进入 nested record 前。 |
 
@@ -399,7 +399,7 @@ JSON / MessagePack adapter 复用同一套 limits，而不仅限于 `.bin`，因
 
 - `varuint` 最多 10 字节，超过目标整数范围时报 malformed varuint。
 - string byte length 必须 `<= remaining_bytes`，且 `<= max_string_bytes`。
-- `row_count` / array length 必须 `<= remaining_bytes` 推导出的理论最大元素数；对固定宽度或最小 1 字节元素可做保守上界检查。
+- `row_count` / list length 必须 `<= remaining_bytes` 推导出的理论最大元素数；对固定宽度或最小 1 字节元素可做保守上界检查。
 - collection rows / arrays 应按 streaming 或渐进扩容读取；不得在上限校验前一次性 reserve untrusted count。
 - nested record / array depth 应受 `max_nesting_depth` 限制，避免恶意数据触发深递归。
 

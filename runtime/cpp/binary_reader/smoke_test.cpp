@@ -29,7 +29,8 @@ public:
         throw std::runtime_error("unknown enum value");
     }
     virtual std::size_t ReadRowCount() { return 0; }
-    virtual std::size_t ReadArrayLength() { return ReadRowCount(); }
+    virtual std::size_t ReadListLength() { throw std::runtime_error("runtime reader does not support list length"); }
+    virtual std::size_t ReadArrayLength() { return ReadListLength(); }
     virtual bool ArrayElementsArePositional() const { return false; }
     virtual void BeginRecord(std::size_t) {}
     virtual void EndRecord() {}
@@ -48,6 +49,8 @@ public:
     virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;
 };
 
+#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH 1
+#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_ARRAY_LENGTH 1
 #define CONFIG_FORGE_RUNTIME_CPP_READER IRuntimeDataReader
 #define CONFIG_FORGE_RUNTIME_CPP_LOADER IRuntimeDataLoader
 #include "config_forge/runtime/binary_reader/runtime_loader.hpp"
@@ -122,7 +125,7 @@ int main() {
         limits.max_array_length = 1;
         config_forge_runtime::BinaryRuntimeDataReader array_limited(std::move(limited), limits);
         (void)array_limited.ReadRowCount();
-        (void)array_limited.ReadArrayLength();
+        (void)array_limited.ReadListLength();
         return 5;
     } catch (const std::runtime_error&) {
     }

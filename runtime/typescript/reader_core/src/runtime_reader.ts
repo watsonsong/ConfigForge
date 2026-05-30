@@ -18,6 +18,7 @@ export interface RuntimeDataReaderLike {
   exitField?(): void;
   readEnumIndex?(variants: readonly string[]): number;
   readRowCount?(): number;
+  readListLength?(): number;
   readArrayLength?(): number;
   arrayElementsArePositional?(): boolean;
   beginRecord?(optionalSlotCount: number): void;
@@ -140,10 +141,14 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
     return length;
   }
 
-  readArrayLength(): number {
+  readListLength(): number {
     const length = this.length();
-    checkRuntimeDecodeLimit("array length", length, this.limits.maxArrayLength);
+    checkRuntimeDecodeLimit("list length", length, this.limits.maxArrayLength);
     return length;
+  }
+
+  readArrayLength(): number {
+    return this.readListLength();
   }
 
   decodeLimits(): RuntimeDecodeLimits {
@@ -201,6 +206,23 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
   private checkNestingDepth(depth: number): void {
     checkRuntimeDecodeLimit("nesting depth", depth, this.limits.maxNestingDepth);
   }
+}
+
+export function readRuntimeRowCount(reader: RuntimeDataReaderLike): number {
+  if (!reader.readRowCount) {
+    throw new Error("runtime reader does not support row count");
+  }
+  return reader.readRowCount();
+}
+
+export function readRuntimeListLength(reader: RuntimeDataReaderLike): number {
+  if (reader.readListLength) {
+    return reader.readListLength();
+  }
+  if (reader.readArrayLength) {
+    return reader.readArrayLength();
+  }
+  throw new Error("runtime reader does not support list length");
 }
 
 function normalizeLimit(label: string, value: number | undefined, fallback: number): number {

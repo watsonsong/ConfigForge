@@ -43,6 +43,8 @@ fn emits_loader_table_and_index_helpers() {
     assert!(content.contains(
         "fn read_from_reader<R: RuntimeDataReader>(reader: &R) -> RuntimeDataResult<Self>"
     ));
+    assert!(content.contains("reader.read_list_len()?"));
+    assert!(!content.contains("reader.read_array_len()?"));
     assert!(content.contains("pub fn get_by_id"));
     assert!(content.contains("pub fn find_by_rarity"));
     assert!(content.contains("pub struct GameData"));

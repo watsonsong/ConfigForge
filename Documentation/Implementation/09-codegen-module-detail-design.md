@@ -822,6 +822,7 @@ public:
     virtual void ExitField() = 0;
     virtual std::size_t ReadEnumIndex(const std::vector<std::string>& variants);
     virtual std::size_t ReadRowCount() = 0;
+    virtual std::size_t ReadListLength();
 };
 
 class IRuntimeDataLoader {
@@ -895,6 +896,8 @@ export interface RuntimeDataReader {
   enterOptionalField?(name: string): boolean;
   exitField?(): void;
   readEnumIndex?(variants: readonly string[]): number;
+  readRowCount?(): number;
+  readListLength?(): number;
 }
 
 export interface RuntimeDataLoader {
@@ -942,9 +945,10 @@ Reader 基础语义：
 - `enter_required_field(name)` / `EnterRequiredField(name)` / `enterRequiredField(name)` 是 generated parser 优先使用的 schema-driven 字段入口。Named reader 按字段名进入并执行 required/null 校验；binary reader 对 required 字段执行 no-op，因为字段由 generated schema 顺序隐式定位。
 - `enter_optional_field(name)` / `EnterOptionalField(name)` / `enterOptionalField(name)` 返回字段是否 present。Named reader 默认按字段 missing/null 判断；binary reader 消费当前 record 的下一个 optional presence bit。present 后 generated parser 读取字段 payload，并通过 `exit_field` / `ExitField` / `exitField` 结束字段；binary reader 的 exit field 是 no-op。
 - `read_enum_index(variants)` / `ReadEnumIndex(variants)` / `readEnumIndex(variants)` 统一 enum 读取。Named reader 将 string enum value 映射为 variants 下标；binary reader 读取 ordinal 并校验范围。Generated enum parser 只根据 index 构造目标语言 enum，不再分支判断 reader layout。
-- `enter_index(i)` / `EnterIndex(i)` / `enterIndex(i)` 用于 array 或 positional record。越界是读取错误，应带上 index 上下文。进入成功后通过 `exit` / `ExitField` / `exitField` 返回上一层；C++ 使用 `ExitField` 作为统一回退 API。
+- `enter_index(i)` / `EnterIndex(i)` / `enterIndex(i)` 用于 payload array 或 positional record。越界是读取错误，应带上 index 上下文。进入成功后通过 `exit` / `ExitField` / `exitField` 返回上一层；C++ 使用 `ExitField` 作为统一回退 API。
 - reader contract 采用可回退 cursor，而不是每次字段/数组访问返回新的 reader 对象。C++ adapter 因此避免 `std::make_unique` 子 reader 堆分配；TypeScript adapter 避免频繁临时对象；Rust adapter 避免 cloning `serde_json::Value` / MessagePack `Value` 子树。
-- `len` / `length` 只对 array / object / map 有意义；对 scalar 调用应报错。C++ runtime contract 已用 `ReadRowCount()` 覆盖 generated collection row 数量读取，不再暴露通用 `Size()`。
+- 分层命名约定：Meta / IR / generated helper 层使用 `List` 表示 schema 字段类型；runtime value / wire payload 中的 `Array` 只表示 JSON / MessagePack / binary 的物理容器 shape。`row_count` / `ReadRowCount()` / `readRowCount()` / `read_row_count()` 只表示 CollectionTable 顶层记录数；`list length` / `ReadListLength()` / `readListLength()` / `read_list_len()` 只表示 Meta list 字段元素数。二者必须是不同语义，互不 fallback。
+- `len` / `length` 只对 payload array / object / map 有意义；对 scalar 调用应报错。Rust / TypeScript named reader 可在 `read_list_len` / `readListLength` 中复用底层 `len` / `length`，但 generated parser 不直接用通用长度 API 读取 list；C++ runtime contract 不暴露通用 `Size()`。兼容别名 `read_array_len` / `readArrayLength` / `ReadArrayLength` 仅保留给旧 adapter，语义委托给 list length，不得 fallback 到 row count。
 - 最小 scalar API 包含 int、float/number、bool、string。`text`、`asset` 按 string 读取；enum 先按 string 读取，再由 generated parser 校验枚举值。
 - 当 exporter 输出字符串 cell 时，推荐 generated parser helper 兼容 string-to-int、string-to-float、string-to-bool；reader 也可以直接在 `as_*` 中兼容字符串，但跨语言一致性以 generated parser 规则为准。
 - missing 与 null 必须区分：missing 表示字段不存在；null 表示字段存在但值为空。required 字段 missing 或 null 都应由 generated parser 报错；optional field / optional fragment missing 时得到 `None` / `undefined`；null 是否允许作为 optional empty value 由生成器策略统一决定，第一阶段建议将 null 等价为 optional empty，但对 required 字段仍报错。
@@ -1137,7 +1141,7 @@ missing/null 语义：
 - `field(name)` 找不到字段或字段值为 null/nil 表示 missing：Rust/TS 返回 `None` / `undefined`，C++ 返回 `nullptr`。
 - explicit null 不再依赖独立 reader null-check API；由 `EnterOptionalField` / `enter_optional_field` / `enterOptionalField` 的 bool 返回值统一表达 optional presence。
 - `index(i)` 越界必须报错，不返回 null reader。
-- `length()` / `len()` 对 array 返回元素数；对 object/map 返回字段数；对 scalar/null 报错。C++ adapter 不再暴露通用 `Size()`，generated collection 读取使用 `ReadRowCount()`。schema-aware binary reader 额外提供 array length / positional array element 读取能力，使生成代码能在 `bin` 中读取 length prefix 后顺序读取元素；named JSON / MessagePack reader 仍使用 `length + index(i)`。
+- `length()` / `len()` 对 payload array 返回元素数；对 object/map 返回字段数；对 scalar/null 报错。C++ adapter 不再暴露通用 `Size()`，generated collection 读取使用 `ReadRowCount()`；generated list 读取使用 `ReadListLength()` / `readListLength()` / `read_list_len()`。schema-aware binary reader 额外提供 list length / positional list element 读取能力，使生成代码能在 `bin` 中读取 length prefix 后顺序读取元素；named JSON / MessagePack reader 可在 list length API 内部复用 `length + index(i)`。
 
 错误上下文要求：adapter 抛出的错误应包含 logical data path、reader path（field/index 链）、expected type、actual type/value。transport loader 还应包含 resolved resource path 或 URL。
 

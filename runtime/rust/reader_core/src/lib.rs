@@ -38,8 +38,11 @@ impl RuntimeDecodeLimits {
         check_limit("row count", rows, self.max_rows)
     }
 
+    pub fn check_list_length(&self, length: usize) -> RuntimeDataResult<()> {
+        check_limit("list length", length, self.max_array_length)
+    }
     pub fn check_array_length(&self, length: usize) -> RuntimeDataResult<()> {
-        check_limit("array length", length, self.max_array_length)
+        self.check_list_length(length)
     }
 
     pub fn check_string_bytes(&self, bytes: usize) -> RuntimeDataResult<()> {
@@ -202,10 +205,13 @@ pub trait RuntimeDataReader {
         self.decode_limits().check_rows(rows)?;
         Ok(rows)
     }
-    fn read_array_len(&self) -> RuntimeDataResult<usize> {
+    fn read_list_len(&self) -> RuntimeDataResult<usize> {
         let length = self.len()?;
-        self.decode_limits().check_array_length(length)?;
+        self.decode_limits().check_list_length(length)?;
         Ok(length)
+    }
+    fn read_array_len(&self) -> RuntimeDataResult<usize> {
+        self.read_list_len()
     }
     fn array_elements_are_positional(&self) -> bool {
         false
@@ -255,4 +261,89 @@ pub trait RuntimeDataLoader {
     type Reader: RuntimeDataReader;
 
     fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct LenOnlyReader {
+        len: usize,
+        limits: RuntimeDecodeLimits,
+    }
+
+    impl LenOnlyReader {
+        fn new(len: usize, max_rows: usize, max_array_length: usize) -> Self {
+            Self {
+                len,
+                limits: RuntimeDecodeLimits {
+                    max_rows,
+                    max_array_length,
+                    ..RuntimeDecodeLimits::default()
+                },
+            }
+        }
+    }
+
+    impl RuntimeDataReader for LenOnlyReader {
+        fn enter_field(&self, _name: &'static str) -> RuntimeDataResult<bool> {
+            Ok(false)
+        }
+
+        fn enter_index(&self, _index: usize) -> RuntimeDataResult<()> {
+            Ok(())
+        }
+
+        fn exit(&self) -> RuntimeDataResult<()> {
+            Ok(())
+        }
+
+        fn len(&self) -> RuntimeDataResult<usize> {
+            Ok(self.len)
+        }
+
+        fn as_i64(&self) -> RuntimeDataResult<i64> {
+            Err(RuntimeDataError::unsupported("not used in test"))
+        }
+
+        fn as_f64(&self) -> RuntimeDataResult<f64> {
+            Err(RuntimeDataError::unsupported("not used in test"))
+        }
+
+        fn as_bool(&self) -> RuntimeDataResult<bool> {
+            Err(RuntimeDataError::unsupported("not used in test"))
+        }
+
+        fn as_string(&self) -> RuntimeDataResult<String> {
+            Err(RuntimeDataError::unsupported("not used in test"))
+        }
+
+        fn decode_limits(&self) -> RuntimeDecodeLimits {
+            self.limits
+        }
+    }
+
+    #[test]
+    fn row_count_and_list_length_have_distinct_limits() {
+        let reader = LenOnlyReader::new(3, 2, 4);
+
+        let row_error = reader.read_row_count().expect_err("row count should be limited");
+        assert!(row_error.message.contains("row count"));
+        assert_eq!(reader.read_list_len().expect("list length should pass"), 3);
+    }
+
+    #[test]
+    fn legacy_array_len_alias_uses_list_length_contract() {
+        let reader = LenOnlyReader::new(3, 4, 2);
+
+        let list_error = reader
+            .read_list_len()
+            .expect_err("list length should be limited");
+        assert!(list_error.message.contains("list length"));
+
+        let alias_error = reader
+            .read_array_len()
+            .expect_err("array len alias should share list limit");
+        assert!(alias_error.message.contains("list length"));
+    }
 }

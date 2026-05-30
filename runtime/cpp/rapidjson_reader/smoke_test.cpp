@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 class IRuntimeDataReader {
@@ -18,7 +19,8 @@ public:
     virtual bool EnterOptionalField(const std::string& name) = 0;
     virtual void ExitField() = 0;
     virtual std::size_t ReadRowCount() = 0;
-    virtual std::size_t ReadArrayLength() { return ReadRowCount(); }
+    virtual std::size_t ReadListLength() { throw std::runtime_error("runtime reader does not support list length"); }
+    virtual std::size_t ReadArrayLength() { return ReadListLength(); }
 };
 
 class IRuntimeDataLoader {
@@ -27,6 +29,8 @@ public:
     virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;
 };
 
+#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH 1
+#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_ARRAY_LENGTH 1
 #define CONFIG_FORGE_RUNTIME_CPP_READER IRuntimeDataReader
 #define CONFIG_FORGE_RUNTIME_CPP_LOADER IRuntimeDataLoader
 #include "config_forge/runtime/rapidjson_reader/runtime_loader.hpp"
@@ -63,7 +67,7 @@ int main() {
         config_forge_runtime::RuntimeDecodeLimits limits;
         limits.max_array_length = 1;
         config_forge_runtime::JsonValueReader limited("[1,2]", limits);
-        (void)limited.ReadArrayLength();
+        (void)limited.ReadListLength();
         return 6;
     } catch (const std::runtime_error&) {
     }

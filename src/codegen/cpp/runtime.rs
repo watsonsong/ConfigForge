@@ -5,6 +5,8 @@ use crate::codegen::CodeWriter;
 
 pub(super) fn render_runtime_interfaces(content: &mut CodeWriter) {
     content.raw("inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";\n\n");
+    content.raw("#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH 1\n");
+    content.raw("#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_ARRAY_LENGTH 1\n\n");
     content.raw(concat!(
         "class IRuntimeDataReader {\n",
         "public:\n",
@@ -26,7 +28,8 @@ pub(super) fn render_runtime_interfaces(content: &mut CodeWriter) {
         "        throw std::runtime_error(\"unknown enum value `\" + value + \"`\");\n",
         "    }\n",
         "    virtual std::size_t ReadRowCount() = 0;\n",
-        "    virtual std::size_t ReadArrayLength() { return ReadRowCount(); }\n",
+        "    virtual std::size_t ReadListLength() { throw std::runtime_error(\"runtime reader does not support list length\"); }\n",
+        "    virtual std::size_t ReadArrayLength() { return ReadListLength(); }\n",
         "    virtual bool ArrayElementsArePositional() const { return false; }\n",
         "    virtual void BeginRecord(std::size_t) {}\n",
         "    virtual void EndRecord() {}\n",
@@ -109,7 +112,7 @@ pub(super) fn render_reader_helpers_source(content: &mut CodeWriter) {
         "template <typename F>\n",
         "auto ReadList(IRuntimeDataReader& reader, F convert) -> std::vector<decltype(convert(std::declval<IRuntimeDataReader&>()))> {\n",
         "    using Value = decltype(convert(std::declval<IRuntimeDataReader&>()));\n",
-        "    const std::size_t length = reader.ReadArrayLength();\n",
+        "    const std::size_t length = reader.ReadListLength();\n",
         "    const bool positional = reader.ArrayElementsArePositional();\n",
         "    std::vector<Value> values;\n",
         "    for (std::size_t index = 0; index < length; ++index) {\n",

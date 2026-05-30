@@ -44,6 +44,13 @@ fn emits_async_loader_and_maps() {
     assert!(content.contains("export type ItemRarity"));
     assert!(content.contains("export interface ItemsRow"));
     assert!(content.contains("function readItemsRow(reader: RuntimeDataReader): ItemsRow"));
+    assert!(content.contains("readListLength?(): number;"));
+    assert!(content.contains("runtime reader does not support row count"));
+    assert!(content.contains("runtime reader does not support list length"));
+    assert!(content.contains("return reader.readRowCount();"));
+    assert!(content.contains("return reader.readListLength();"));
+    assert!(!content.contains("reader.length();"));
+    assert!(content.contains("const length = readListLength(reader);"));
     assert!(content.contains("readonly displayName: string;"));
     assert!(content.contains("static async load"));
     assert!(content.contains("getById(id: number): ItemsRow | undefined"));

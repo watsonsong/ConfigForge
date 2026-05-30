@@ -19,6 +19,7 @@ pub(super) fn render_runtime_reader_interfaces(content: &mut CodeWriter) {
   exitField?(): void;
   readEnumIndex?(variants: readonly string[]): number;
   readRowCount?(): number;
+  readListLength?(): number;
   readArrayLength?(): number;
   arrayElementsArePositional?(): boolean;
   beginRecord?(optionalSlotCount: number): void;
@@ -104,11 +105,20 @@ function readEnumIndex(reader: RuntimeDataReader, variants: readonly string[]): 
 }
 
 function readRowCount(reader: RuntimeDataReader): number {
-  return reader.readRowCount ? reader.readRowCount() : reader.length();
+  if (!reader.readRowCount) {
+    throw new Error("runtime reader does not support row count");
+  }
+  return reader.readRowCount();
 }
 
-function readArrayLength(reader: RuntimeDataReader): number {
-  return reader.readArrayLength ? reader.readArrayLength() : reader.length();
+function readListLength(reader: RuntimeDataReader): number {
+  if (reader.readListLength) {
+    return reader.readListLength();
+  }
+  if (reader.readArrayLength) {
+    return reader.readArrayLength();
+  }
+  throw new Error("runtime reader does not support list length");
 }
 
 function readRequiredInt64(reader: RuntimeDataReader, name: string): number {
@@ -144,7 +154,7 @@ function readOptionalString(reader: RuntimeDataReader, name: string): string | u
 }
 
 function readList<T>(reader: RuntimeDataReader, convert: (value: RuntimeDataReader) => T): T[] {
-  const length = readArrayLength(reader);
+  const length = readListLength(reader);
   const positional = reader.arrayElementsArePositional?.() === true;
   const values: T[] = [];
   for (let index = 0; index < length; index += 1) {

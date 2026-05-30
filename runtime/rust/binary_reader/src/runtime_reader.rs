@@ -106,7 +106,7 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
 
     fn len(&self) -> RuntimeDataResult<usize> {
         Err(RuntimeDataError::unsupported(
-            "binary reader does not support named array length",
+            "binary reader does not support named list length",
         ))
     }
 
@@ -167,10 +167,10 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         Ok(row_count)
     }
 
-    fn read_array_len(&self) -> RuntimeDataResult<usize> {
+    fn read_list_len(&self) -> RuntimeDataResult<usize> {
         let length = usize::try_from(read_varuint(&mut self.state.borrow_mut())?)
-            .map_err(|_| RuntimeDataError::decode("array length exceeds usize"))?;
-        self.limits.check_array_length(length)?;
+            .map_err(|_| RuntimeDataError::decode("list length exceeds usize"))?;
+        self.limits.check_list_length(length)?;
         Ok(length)
     }
 
@@ -510,10 +510,10 @@ mod tests {
         let _ = reader.read_row_count().unwrap();
         write_varuint_for_test(&mut reader.state.borrow_mut().bytes, 2);
         assert!(reader
-            .read_array_len()
+            .read_list_len()
             .unwrap_err()
             .message
-            .contains("array length"));
+            .contains("list length"));
 
         let limits = RuntimeDecodeLimits {
             max_string_bytes: 3,

@@ -91,8 +91,9 @@
 | 命名结构体 | Named Struct | `NamedStruct`, `StructDef` | 可复用结构体定义。 |
 | 内联结构体 | Inline Struct | `InlineStruct` | 字段内部直接定义的一次性结构。 |
 | 结构体字段 | Struct Field | `StructField`, `FieldMeta` | struct 内部字段。 |
-| 数组 | Array | `ArrayMeta`, `FieldType::Array` | 重复值集合。 |
-| 结构体数组 | Struct Array | `Array<Struct>` | 元素为 struct 的数组。 |
+| 列表 | List | `LinkedField::List`, `read_list_len`, `readListLength`, `ReadListLength` | Schema / Meta / IR / generated helper 层的重复值集合 canonical 术语。`T[]` 是输入语法别名；生成代码读取字段列表长度时必须使用 list length 契约，不使用 row count。 |
+| 数组 / payload array | Array / Payload Array | `enter_index`, `enterIndex`, `EnterIndex`, `max_array_length` | Runtime value 或 wire payload 中的物理容器形态。JSON / MessagePack 中 list 通常表现为 array；binary 中 list 表现为 length prefix 后跟 positional elements。`Array` 在 runtime 层只描述 payload shape，不代表 Meta 类型名。 |
+| 结构体列表 | Struct List | `list<Struct>` | 元素为 struct 的列表；当前还不是稳定能力。 |
 | 结构体依赖图 | Struct Dependency Graph | `StructDependencyGraph` | 用于检测 named struct 循环引用。 |
 
 ## Source 与数据读取术语

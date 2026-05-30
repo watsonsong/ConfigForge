@@ -79,7 +79,7 @@ fn read_optional_string<R: RuntimeDataReader>(reader: &R, name: &'static str) ->
 }
 
 fn read_list<R: RuntimeDataReader, T>(reader: &R, read: impl Fn(&R) -> RuntimeDataResult<T>) -> RuntimeDataResult<Vec<T>> {
-    let len = reader.read_array_len()?;
+    let len = reader.read_list_len()?;
     let positional = reader.array_elements_are_positional();
     let mut values = Vec::new();
     for index in 0..len {

@@ -5,6 +5,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RuntimeValueReader = exports.DEFAULT_RUNTIME_DECODE_LIMITS = exports.SUPPORTED_CONFIG_FORGE_READER_CONTRACT = void 0;
 exports.normalizeRuntimeDecodeLimits = normalizeRuntimeDecodeLimits;
 exports.checkRuntimeDecodeLimit = checkRuntimeDecodeLimit;
+exports.readRuntimeRowCount = readRuntimeRowCount;
+exports.readRuntimeListLength = readRuntimeListLength;
 exports.SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0";
 exports.DEFAULT_RUNTIME_DECODE_LIMITS = Object.freeze({
     maxFileBytes: 64 * 1024 * 1024,
@@ -81,10 +83,13 @@ class RuntimeValueReader {
         checkRuntimeDecodeLimit("row count", length, this.limits.maxRows);
         return length;
     }
-    readArrayLength() {
+    readListLength() {
         const length = this.length();
-        checkRuntimeDecodeLimit("array length", length, this.limits.maxArrayLength);
+        checkRuntimeDecodeLimit("list length", length, this.limits.maxArrayLength);
         return length;
+    }
+    readArrayLength() {
+        return this.readListLength();
     }
     decodeLimits() {
         return this.limits;
@@ -140,6 +145,21 @@ class RuntimeValueReader {
     }
 }
 exports.RuntimeValueReader = RuntimeValueReader;
+function readRuntimeRowCount(reader) {
+    if (!reader.readRowCount) {
+        throw new Error("runtime reader does not support row count");
+    }
+    return reader.readRowCount();
+}
+function readRuntimeListLength(reader) {
+    if (reader.readListLength) {
+        return reader.readListLength();
+    }
+    if (reader.readArrayLength) {
+        return reader.readArrayLength();
+    }
+    throw new Error("runtime reader does not support list length");
+}
 function normalizeLimit(label, value, fallback) {
     const resolved = value ?? fallback;
     if (!Number.isSafeInteger(resolved) || resolved < 0) {

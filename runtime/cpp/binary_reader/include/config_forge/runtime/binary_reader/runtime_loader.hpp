@@ -159,10 +159,22 @@ public:
         return row_count;
     }
 
-    std::size_t ReadArrayLength() override {
-        const std::size_t length = CheckedSize(ReadVaruint(), "array length");
-        CheckRuntimeDecodeLimit("array length", length, state_->limits.max_array_length);
+    std::size_t ReadListLength()
+#if defined(CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH)
+        override
+#endif
+    {
+        const std::size_t length = CheckedSize(ReadVaruint(), "list length");
+        CheckRuntimeDecodeLimit("list length", length, state_->limits.max_array_length);
         return length;
+    }
+
+    std::size_t ReadArrayLength()
+#if defined(CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_ARRAY_LENGTH)
+        override
+#endif
+    {
+        return ReadListLength();
     }
 
     bool ArrayElementsArePositional() const override { return true; }

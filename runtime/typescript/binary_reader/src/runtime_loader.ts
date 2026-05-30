@@ -59,7 +59,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   }
 
   length(): number {
-    throw new Error("binary reader does not support named array length");
+    throw new Error("binary reader does not support named list length");
   }
 
   asNumber(): number {
@@ -107,10 +107,14 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     return rowCount;
   }
 
-  readArrayLength(): number {
-    const length = this.readVaruintAsNumber("array length");
-    checkRuntimeDecodeLimit("array length", length, this.limits.maxArrayLength);
+  readListLength(): number {
+    const length = this.readVaruintAsNumber("list length");
+    checkRuntimeDecodeLimit("list length", length, this.limits.maxArrayLength);
     return length;
+  }
+
+  readArrayLength(): number {
+    return this.readListLength();
   }
 
   arrayElementsArePositional(): boolean {

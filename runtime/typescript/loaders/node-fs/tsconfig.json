@@ -4,7 +4,6 @@
     "target": "ES2020",
     "module": "Node16",
     "moduleResolution": "Node16",
-    "ignoreDeprecations": "6.0",
     "paths": {
       "@config-forge/runtime-reader-core": [
         "../../reader_core/src/runtime_reader.ts"
