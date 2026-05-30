@@ -277,10 +277,16 @@ Resolver 职责：
 5. 按 target tags 生成 target-specific resolved view，或在 `ResolvedValue` 中保留 visibility 信息供 ExportView 裁剪；
 6. 保留 raw string 和 source trace 以生成精确诊断。
 
+Typed value 解析规则集中在 `src/data/typed_value.rs`：
+
+- `parse_scalar_field_value()` / `parse_scalar_for_type()` 负责 primitive 与 enum 的字符串单元格到 `ScalarValue` 转换；bool、finite float、enum value membership 等规则只在这里定义。
+- `parse_list_cell_value()` 负责把 list JSON cell 解析为 JSON array 后委托 `parse_list_json_value()`；后者逐元素复用 scalar 转换规则并生成 `field[index]` 形式的 element path。
+- `DataResolver`、struct value validation 和 list foreign-key validation 共用这些 helper。默认值是否生效、空值是否跳过由调用方基于字段语义决定；一旦需要解析 typed scalar/list element，必须进入该共享路径。
+
 当前实现状态与差距：
 
-- 已实现 `ResolvedDataSet` / `DataResolver` 基础类型、typed scalar parse、list JSON cell parse、struct JSON cell / expanded value 统一解析、source schema 校验、target-aware row resolve、active fragment resolve、runtime export 主路径消费 resolved value。
-- 过渡中：Validation 仍保留 raw `DataRow` 上的 required/type/enum/index/FK 主流程，resolver 作为 source schema 与 value resolve 的预校验入口；后续应迁移到 `validate_resolved_*`。
+- 已实现 `ResolvedDataSet` / `DataResolver` 基础类型、shared typed scalar parse、shared list JSON cell parse、struct JSON cell / expanded value 统一解析、source schema 校验、target-aware row resolve、active fragment resolve、runtime export 主路径消费 resolved value。
+- 过渡中：Validation 仍保留 raw `DataRow` 上的 required/type/enum/index/FK 主流程，但 type/enum/list element/FK list element conversion 已复用 data typed value helper；后续应迁移到 `validate_resolved_*` 让更多规则直接消费 `ResolvedValue/DataValue`。
 - 未实现：typed fragment payload（例如 `attributes` fragment 直接复用 `AttributeSet`）、field group/base table schema 复用、asset existence/text POT special export、ObjectTable key-level source trace、expanded array/map path。
 
 注意：是否在 resolver 阶段把 scalar parse 成 `Int/Float/Bool` 需要结合现有 runtime scalar string contract 决定。短期可以先在 resolver 内保留 typed parse 结果与 raw string，runtime export 仍输出 string；长期如果 runtime artifact 改为 typed scalar，可直接复用 `ScalarValue`。

@@ -4,14 +4,15 @@
 use crate::{
     ConfigForgeError, Result,
     data::{
-        DataRow,
+        DataRow, ValueSourceKind,
+        typed_value::{parse_list_cell_value, parse_list_json_value, parse_scalar_field_value},
         value_conversion::{
-            json_value_is_empty, json_value_to_scalar_cell_for_field, toml_default_to_json_value,
+            json_value_is_empty, json_value_to_cell, json_value_to_scalar_cell_for_field,
+            toml_default_to_json_value,
         },
     },
     meta::{
-        LinkedField, LinkedFieldMeta, LinkedStructType, LinkedTableMeta, PrimitiveFieldType,
-        TargetTags, ValueLayout,
+        LinkedField, LinkedFieldMeta, LinkedStructType, LinkedTableMeta, TargetTags, ValueLayout,
     },
 };
 
@@ -110,22 +111,9 @@ pub(super) fn validate_struct_occurrence_value(
                 }
                 has_effective_value |= child_effective;
             }
-            _ => {
-                let raw = non_empty_row_value(row, &child_path);
-                let default_value = child.meta.default.as_ref().map(toml_default_to_json_value);
-                let default_scalar = default_value
-                    .as_ref()
-                    .filter(|value| !json_value_is_empty(value))
-                    .map(|value| {
-                        json_value_to_scalar_cell_for_field(
-                            value,
-                            table_name,
-                            row_number,
-                            &child_path,
-                        )
-                    })
-                    .transpose()?;
-                let effective_value = raw.or(default_scalar.as_deref());
+            LinkedField::List(element_type) => {
+                let effective_value =
+                    effective_list_cell_value(table_name, row_number, &child_path, child, row)?;
                 if child.meta.required && effective_value.is_none() {
                     return Err(ConfigForgeError::Validation(format!(
                         "table `{}` row {} field `{}` is required",
@@ -133,12 +121,29 @@ pub(super) fn validate_struct_occurrence_value(
                     )));
                 }
                 if let Some(value) = effective_value {
-                    if !validate_scalar_value(child, value) {
-                        return Err(ConfigForgeError::Validation(format!(
-                            "table `{}` row {} field `{}` value `{}` does not match type `{:?}`",
-                            table_name, row_number, child_path, value, child.meta.field_type
-                        )));
-                    }
+                    parse_list_cell_value(
+                        table_name,
+                        row_number,
+                        &child_path,
+                        element_type,
+                        &value,
+                        None,
+                        ValueSourceKind::ExplicitCell,
+                    )?;
+                    has_effective_value = true;
+                }
+            }
+            _ => {
+                let effective_value =
+                    effective_scalar_cell_value(table_name, row_number, &child_path, child, row)?;
+                if child.meta.required && effective_value.is_none() {
+                    return Err(ConfigForgeError::Validation(format!(
+                        "table `{}` row {} field `{}` is required",
+                        table_name, row_number, child_path
+                    )));
+                }
+                if let Some(value) = effective_value {
+                    parse_scalar_field_value(table_name, row_number, &child_path, child, &value)?;
                     has_effective_value = true;
                 }
             }
@@ -179,24 +184,17 @@ fn struct_occurrence_has_effective_value(
                     return Ok(true);
                 }
             }
-            _ => {
-                if non_empty_row_value(row, &child_path).is_some() {
+            LinkedField::List(_) => {
+                if effective_list_cell_value(table_name, row_number, &child_path, child, row)?
+                    .is_some()
+                {
                     return Ok(true);
                 }
-                let default_value = child.meta.default.as_ref().map(toml_default_to_json_value);
-                let default_scalar = default_value
-                    .as_ref()
-                    .filter(|value| !json_value_is_empty(value))
-                    .map(|value| {
-                        json_value_to_scalar_cell_for_field(
-                            value,
-                            table_name,
-                            row_number,
-                            &child_path,
-                        )
-                    })
-                    .transpose()?;
-                if default_scalar.is_some() {
+            }
+            _ => {
+                if effective_scalar_cell_value(table_name, row_number, &child_path, child, row)?
+                    .is_some()
+                {
                     return Ok(true);
                 }
             }
@@ -337,81 +335,28 @@ pub(super) fn validate_value_type_at_row_number(
             );
         }
         LinkedField::List(element_type) => {
-            return validate_list_json_cell(
+            return parse_list_cell_value(
                 meta.meta.name.as_str(),
                 row_number,
                 field.meta.name.as_str(),
                 element_type,
                 value,
-            );
+                None,
+                ValueSourceKind::ExplicitCell,
+            )
+            .map(|_| ());
         }
         _ => {}
     }
 
-    if !validate_scalar_value(field, value) {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` value `{}` does not match type `{:?}`",
-            meta.meta.name, row_number, field.meta.name, value, field.meta.field_type
-        )));
-    }
-
-    Ok(())
-}
-
-fn validate_scalar_value(field: &LinkedFieldMeta<'_>, value: &str) -> bool {
-    match &field.linked_field {
-        LinkedField::Primitive(PrimitiveFieldType::Int) => value.parse::<i64>().is_ok(),
-        LinkedField::Primitive(PrimitiveFieldType::Float) => parse_finite_float(value).is_some(),
-        LinkedField::Primitive(PrimitiveFieldType::Bool) => {
-            matches!(value, "true" | "false" | "1" | "0")
-        }
-        LinkedField::Primitive(
-            PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset,
-        ) => true,
-        LinkedField::Enum(enum_meta) => enum_meta
-            .values
-            .iter()
-            .any(|enum_value| enum_value.name == value),
-        LinkedField::Struct(_) | LinkedField::List(_) => false,
-    }
-}
-
-fn validate_list_json_cell(
-    table_name: &str,
-    row_number: usize,
-    field_path: &str,
-    element_type: &LinkedField<'_>,
-    raw: &str,
-) -> Result<()> {
-    let value: serde_json::Value = serde_json::from_str(raw).map_err(|source| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` has invalid list JSON: {}",
-            table_name, row_number, field_path, source
-        ))
-    })?;
-    validate_list_json_value(table_name, row_number, field_path, element_type, &value)
-}
-
-fn validate_scalar_value_for_type(field: &LinkedField<'_>, value: &str) -> bool {
-    match field {
-        LinkedField::Primitive(PrimitiveFieldType::Int) => value.parse::<i64>().is_ok(),
-        LinkedField::Primitive(PrimitiveFieldType::Float) => parse_finite_float(value).is_some(),
-        LinkedField::Primitive(PrimitiveFieldType::Bool) => {
-            matches!(value, "true" | "false" | "1" | "0")
-        }
-        LinkedField::Primitive(
-            PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset,
-        ) => true,
-        LinkedField::Enum(enum_meta) => enum_meta
-            .values
-            .iter()
-            .any(|enum_value| enum_value.name == value),
-        LinkedField::Struct(_) | LinkedField::List(_) => false,
-    }
-}
-
-fn parse_finite_float(value: &str) -> Option<f64> {
-    value.parse::<f64>().ok().filter(|value| value.is_finite())
+    parse_scalar_field_value(
+        meta.meta.name.as_str(),
+        row_number,
+        field.meta.name.as_str(),
+        field,
+        value,
+    )
+    .map(|_| ())
 }
 
 fn validate_struct_json_cell(
@@ -483,12 +428,14 @@ fn validate_struct_json_cell(
                 )?;
             }
             LinkedField::List(element_type) => {
-                validate_list_json_value(
+                parse_list_json_value(
                     table_name,
                     row_number,
                     &child_path,
                     element_type,
                     effective_value.expect("checked non-empty"),
+                    None,
+                    ValueSourceKind::ExplicitCell,
                 )?;
             }
             _ => {
@@ -498,12 +445,7 @@ fn validate_struct_json_cell(
                     row_number,
                     &child_path,
                 )?;
-                if !validate_scalar_value(child, &scalar) {
-                    return Err(ConfigForgeError::Validation(format!(
-                        "table `{}` row {} field `{}` value `{}` does not match type `{:?}`",
-                        table_name, row_number, child_path, scalar, child.meta.field_type
-                    )));
-                }
+                parse_scalar_field_value(table_name, row_number, &child_path, child, &scalar)?;
             }
         }
     }
@@ -511,29 +453,48 @@ fn validate_struct_json_cell(
     Ok(())
 }
 
-fn validate_list_json_value(
+fn effective_scalar_cell_value(
     table_name: &str,
     row_number: usize,
     field_path: &str,
-    element_type: &LinkedField<'_>,
-    value: &serde_json::Value,
-) -> Result<()> {
-    let array = value.as_array().ok_or_else(|| {
+    field: &LinkedFieldMeta<'_>,
+    row: &DataRow,
+) -> Result<Option<String>> {
+    if let Some(raw) = non_empty_row_value(row, field_path) {
+        return Ok(Some(raw.to_owned()));
+    }
+    let Some(default) = field.meta.default.as_ref() else {
+        return Ok(None);
+    };
+    let default_value = toml_default_to_json_value(default);
+    if json_value_is_empty(&default_value) {
+        return Ok(None);
+    }
+    json_value_to_scalar_cell_for_field(&default_value, table_name, row_number, field_path)
+        .map(Some)
+}
+
+fn effective_list_cell_value(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    field: &LinkedFieldMeta<'_>,
+    row: &DataRow,
+) -> Result<Option<String>> {
+    if let Some(raw) = non_empty_row_value(row, field_path) {
+        return Ok(Some(raw.to_owned()));
+    }
+    let Some(default) = field.meta.default.as_ref() else {
+        return Ok(None);
+    };
+    let default_value = toml_default_to_json_value(default);
+    if json_value_is_empty(&default_value) {
+        return Ok(None);
+    }
+    json_value_to_cell(&default_value).map(Some).map_err(|_| {
         ConfigForgeError::Validation(format!(
             "table `{}` row {} field `{}` must be a JSON array",
             table_name, row_number, field_path
         ))
-    })?;
-    for (index, element) in array.iter().enumerate() {
-        let element_path = format!("{field_path}[{index}]");
-        let scalar =
-            json_value_to_scalar_cell_for_field(element, table_name, row_number, &element_path)?;
-        if !validate_scalar_value_for_type(element_type, &scalar) {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` value `{}` does not match list element type",
-                table_name, row_number, element_path, scalar
-            )));
-        }
-    }
-    Ok(())
+    })
 }

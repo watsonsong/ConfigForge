@@ -418,6 +418,62 @@ fn uses_raw_string_foreign_key_semantics() {
     assert!(message.contains("references missing `items.by_id` key `[\"01\"]`"));
 }
 
+#[test]
+fn validates_list_foreign_key_defaults_through_shared_list_parser() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "drop_item_ids"
+            type = "int[]"
+            default = [1]
+            foreign_key = { name = "drop_items", target_table = "items" }
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let items = DataTable::new(
+        "items",
+        vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+    );
+    let valid_default = DataSet::new(vec![
+        items.clone(),
+        DataTable::new("monsters", vec![BTreeMap::new()]),
+    ]);
+
+    assert!(validate_data_set(&linked_meta, &valid_default).is_ok());
+
+    let missing_default_target = DataSet::new(vec![
+        DataTable::new(
+            "items",
+            vec![BTreeMap::from([("id".to_owned(), "2".to_owned())])],
+        ),
+        DataTable::new("monsters", vec![BTreeMap::new()]),
+    ]);
+    let message = validate_error(validate_data_set(&linked_meta, &missing_default_target));
+    assert!(message.contains("foreign key `drop_items` source field `drop_item_ids[0]`"));
+    assert!(message.contains("references missing `items.by_id` key `[\"1\"]`"));
+}
+
 fn object_foreign_key_meta(required: bool, allow_empty: Option<bool>) -> MetaModel {
     let allow_empty = allow_empty
         .map(|value| format!(", allow_empty = {value}"))

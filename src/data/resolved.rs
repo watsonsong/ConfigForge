@@ -115,6 +115,19 @@ impl ResolvedTable {
 }
 
 impl ResolvedValue {
+    pub fn from_source_kind(
+        raw_field_path: impl Into<String>,
+        value: DataValue,
+        kind: ValueSourceKind,
+        raw_value: Option<String>,
+        row_source: Option<&RowSourceInfo>,
+    ) -> Self {
+        Self {
+            value,
+            source: ValueSourceTrace::new(raw_field_path, kind, raw_value, row_source),
+        }
+    }
+
     pub fn explicit(
         raw_field_path: impl Into<String>,
         value: DataValue,

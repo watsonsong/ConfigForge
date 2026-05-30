@@ -29,6 +29,14 @@ src/validation/
   tests.rs            # validation 单元测试
 ```
 
+Typed value 解析不在 Validation 模块内重复实现。Validation 需要验证 scalar、enum、list JSON cell、struct child default 或 list foreign-key element 时，统一调用 `data::typed_value` 中的共享 helper：
+
+- scalar / enum cell：`parse_scalar_field_value()`；
+- list JSON cell：`parse_list_cell_value()`；
+- struct JSON cell 内已经解析出的 list JSON value：`parse_list_json_value()`。
+
+因此 `validation::struct_value` 只负责 required / occurrence / JSON object boundary / unknown child 等结构性判断，`validation::foreign_key` 只负责 referential-integrity 判断；具体 element scalar conversion、finite float、bool、enum membership 与 list element path 诊断保持与 `DataResolver` 一致。
+
 核心入口：
 
 - `validate_data_set()`：完整数据集校验，返回 `Result<()>`。

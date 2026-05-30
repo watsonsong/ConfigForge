@@ -6,11 +6,9 @@ use std::collections::HashSet;
 use crate::{
     ConfigForgeError, Result,
     data::{
-        DataRow, DataSet, DataTable,
-        value_conversion::{
-            json_value_is_empty, json_value_to_cell, json_value_to_scalar_cell_for_field,
-            toml_default_to_json_value,
-        },
+        DataRow, DataSet, DataTable, ValueSourceKind,
+        typed_value::parse_list_cell_value,
+        value_conversion::{json_value_is_empty, json_value_to_cell, toml_default_to_json_value},
     },
     meta::{
         LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedIndexMeta, LinkedMetaModel,
@@ -334,32 +332,41 @@ fn validate_list_foreign_key_row(
             source_table_meta.meta.name, row_number, foreign_key.name
         )));
     }
-    let value: serde_json::Value = serde_json::from_str(raw).map_err(|source| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} foreign key `{}` source field `{}` has invalid list JSON: {}",
-            source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name, source
-        ))
+    let LinkedField::List(element_type) = &list_field.linked_field else {
+        return Err(ConfigForgeError::Validation(format!(
+            "table `{}` foreign key `{}` expected list source field `{}`",
+            source_table_meta.meta.name, foreign_key.name, list_field.meta.name
+        )));
+    };
+    let elements = parse_list_cell_value(
+        &source_table_meta.meta.name,
+        row_number,
+        &list_field.meta.name,
+        element_type,
+        raw,
+        None,
+        ValueSourceKind::ExplicitCell,
+    )
+    .map_err(|error| match error {
+        ConfigForgeError::Validation(message) => ConfigForgeError::Validation(message.replace(
+            " field `",
+            &format!(" foreign key `{}` source field `", foreign_key.name),
+        )),
+        other => other,
     })?;
-    let array = value.as_array().ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} foreign key `{}` source field `{}` must be a JSON array",
-            source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name
-        ))
-    })?;
-    if array.is_empty() && !foreign_key.allow_empty {
+    if elements.is_empty() && !foreign_key.allow_empty {
         return Err(ConfigForgeError::Validation(format!(
             "table `{}` row {} foreign key `{}` is empty but `allow_empty = false`",
             source_table_meta.meta.name, row_number, foreign_key.name
         )));
     }
-    for (index, element) in array.iter().enumerate() {
-        let field_path = format!("{}[{}]", list_field.meta.name, index);
-        let key_value = json_value_to_scalar_cell_for_field(
-            element,
-            &source_table_meta.meta.name,
-            row_number,
-            &field_path,
-        )?;
+    for (index, element) in elements.iter().enumerate() {
+        let key_value = element.scalar_export_string().ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "table `{}` row {} foreign key `{}` source field `{}[{}]` must be a scalar key value",
+                source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name, index
+            ))
+        })?;
         let key = vec![key_value];
         if !target_keys.contains(&key) {
             return Err(ConfigForgeError::Validation(format!(

@@ -5,19 +5,20 @@ use std::collections::BTreeMap;
 
 use crate::{
     ConfigForgeError, Result,
+    data::typed_value::{parse_list_cell_value, parse_scalar_field_value},
     data::value_conversion::{
         json_value_is_empty, json_value_to_cell, json_value_to_scalar_cell_for_field,
         toml_default_to_json_value,
     },
     meta::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, LinkedTableMeta,
-        PrimitiveFieldType, TableKind, TargetTags,
+        TableKind, TargetTags,
     },
 };
 
 use super::{
     DataRow, DataTable, DataValue, ResolvedRow, ResolvedTable, ResolvedValue, RowSourceInfo,
-    ScalarValue,
+    ValueSourceKind,
 };
 
 #[cfg(test)]
@@ -266,13 +267,14 @@ fn resolve_list_cell_value(
     field: &LinkedFieldMeta<'_>,
 ) -> Result<Option<ResolvedValue>> {
     if let Some(raw) = non_empty_row_value(row, field_path) {
-        let array = parse_list_value(
+        let array = parse_list_cell_value(
             table_name,
             row_number,
             field_path,
             element_type,
             raw,
             row_source,
+            ValueSourceKind::ExplicitCell,
         )?;
         return Ok(Some(ResolvedValue::explicit(
             field_path,
@@ -295,13 +297,14 @@ fn resolve_list_cell_value(
             table_name, row_number, field_path
         ))
     })?;
-    let array = parse_list_value(
+    let array = parse_list_cell_value(
         table_name,
         row_number,
         field_path,
         element_type,
         &raw,
         row_source,
+        ValueSourceKind::DefaultValue,
     )?;
     Ok(Some(ResolvedValue::defaulted(
         field_path,
@@ -320,7 +323,7 @@ fn resolve_scalar_cell_value(
     field: &LinkedFieldMeta<'_>,
 ) -> Result<Option<ResolvedValue>> {
     if let Some(raw) = non_empty_row_value(row, field_path) {
-        let scalar = parse_scalar_value(table_name, row_number, field_path, field, raw)?;
+        let scalar = parse_scalar_field_value(table_name, row_number, field_path, field, raw)?;
         return Ok(Some(ResolvedValue::explicit(
             field_path,
             DataValue::Scalar(scalar),
@@ -338,7 +341,7 @@ fn resolve_scalar_cell_value(
     }
     let raw =
         json_value_to_scalar_cell_for_field(&default_value, table_name, row_number, field_path)?;
-    let scalar = parse_scalar_value(table_name, row_number, field_path, field, &raw)?;
+    let scalar = parse_scalar_field_value(table_name, row_number, field_path, field, &raw)?;
     Ok(Some(ResolvedValue::defaulted(
         field_path,
         DataValue::Scalar(scalar),
@@ -487,13 +490,18 @@ fn resolve_struct_json_value(
                         table_name, row_number, child_path
                     ))
                 })?;
-                let array = parse_list_value(
+                let array = parse_list_cell_value(
                     table_name,
                     row_number,
                     &child_path,
                     element_type,
                     &raw,
                     row_source,
+                    if source_is_default {
+                        ValueSourceKind::DefaultValue
+                    } else {
+                        ValueSourceKind::ExplicitCell
+                    },
                 )?;
                 if source_is_default {
                     ResolvedValue::defaulted(&child_path, DataValue::Array(array), raw, row_source)
@@ -508,7 +516,8 @@ fn resolve_struct_json_value(
                     row_number,
                     &child_path,
                 )?;
-                let scalar = parse_scalar_value(table_name, row_number, &child_path, child, &raw)?;
+                let scalar =
+                    parse_scalar_field_value(table_name, row_number, &child_path, child, &raw)?;
                 if source_is_default {
                     ResolvedValue::defaulted(
                         &child_path,
@@ -574,13 +583,14 @@ fn struct_occurrence_has_effective_value(
                         table_name, row_number, child_path
                     ))
                 })?;
-                parse_list_value(
+                parse_list_cell_value(
                     table_name,
                     row_number,
                     &child_path,
                     element_type,
                     &raw,
                     None,
+                    ValueSourceKind::DefaultValue,
                 )?;
                 return Ok(true);
             }
@@ -601,7 +611,7 @@ fn struct_occurrence_has_effective_value(
                     row_number,
                     &child_path,
                 )?;
-                parse_scalar_value(table_name, row_number, &child_path, child, &raw)?;
+                parse_scalar_field_value(table_name, row_number, &child_path, child, &raw)?;
                 return Ok(true);
             }
         }
@@ -782,154 +792,6 @@ fn validate_struct_layout_mixing_for_row(
     }
 
     Ok(())
-}
-
-fn parse_scalar_value(
-    table_name: &str,
-    row_number: usize,
-    field_path: &str,
-    field: &LinkedFieldMeta<'_>,
-    value: &str,
-) -> Result<ScalarValue> {
-    parse_scalar_for_type(
-        table_name,
-        row_number,
-        field_path,
-        &field.linked_field,
-        value,
-    )
-    .map_err(|_| scalar_type_error(table_name, row_number, field_path, field, value))
-}
-
-fn parse_list_value(
-    table_name: &str,
-    row_number: usize,
-    field_path: &str,
-    element_type: &LinkedField<'_>,
-    value: &str,
-    row_source: Option<&RowSourceInfo>,
-) -> Result<Vec<ResolvedValue>> {
-    let json: serde_json::Value = serde_json::from_str(value).map_err(|source| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` has invalid list JSON: {}",
-            table_name, row_number, field_path, source
-        ))
-    })?;
-    let array = json.as_array().ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` must be a JSON array",
-            table_name, row_number, field_path
-        ))
-    })?;
-    array
-        .iter()
-        .enumerate()
-        .map(|(index, element)| {
-            let element_path = format!("{field_path}[{index}]");
-            let raw = json_value_to_scalar_cell_for_field(
-                element,
-                table_name,
-                row_number,
-                &element_path,
-            )?;
-            let scalar = parse_scalar_for_type(
-                table_name,
-                row_number,
-                &element_path,
-                element_type,
-                &raw,
-            )
-            .map_err(|_| {
-                ConfigForgeError::Validation(format!(
-                    "table `{}` row {} field `{}` value `{}` does not match list element type",
-                    table_name, row_number, element_path, raw
-                ))
-            })?;
-            Ok(ResolvedValue::explicit(
-                element_path,
-                DataValue::Scalar(scalar),
-                raw,
-                row_source,
-            ))
-        })
-        .collect()
-}
-
-fn parse_scalar_for_type(
-    table_name: &str,
-    row_number: usize,
-    field_path: &str,
-    linked_field: &LinkedField<'_>,
-    value: &str,
-) -> Result<ScalarValue> {
-    match linked_field {
-        LinkedField::Primitive(PrimitiveFieldType::Int) => value
-            .parse::<i64>()
-            .map(ScalarValue::Int)
-            .map_err(|_| scalar_value_parse_error(table_name, row_number, field_path, value)),
-        LinkedField::Primitive(PrimitiveFieldType::Float) => value
-            .parse::<f64>()
-            .ok()
-            .filter(|value| value.is_finite())
-            .map(ScalarValue::Float)
-            .ok_or_else(|| scalar_value_parse_error(table_name, row_number, field_path, value)),
-        LinkedField::Primitive(PrimitiveFieldType::Bool) => match value {
-            "true" | "1" => Ok(ScalarValue::Bool(true)),
-            "false" | "0" => Ok(ScalarValue::Bool(false)),
-            _ => Err(scalar_value_parse_error(
-                table_name, row_number, field_path, value,
-            )),
-        },
-        LinkedField::Primitive(
-            PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset,
-        ) => Ok(ScalarValue::String(value.to_owned())),
-        LinkedField::Enum(enum_meta) => {
-            if enum_meta
-                .values
-                .iter()
-                .any(|enum_value| enum_value.name == value)
-            {
-                Ok(ScalarValue::Enum(value.to_owned()))
-            } else {
-                Err(scalar_value_parse_error(
-                    table_name, row_number, field_path, value,
-                ))
-            }
-        }
-        LinkedField::Struct(_) => Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` expected scalar field, got struct type",
-            table_name, row_number, field_path
-        ))),
-        LinkedField::List(_) => Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` expected scalar field, got list type",
-            table_name, row_number, field_path
-        ))),
-    }
-}
-
-fn scalar_value_parse_error(
-    table_name: &str,
-    row_number: usize,
-    field_path: &str,
-    value: &str,
-) -> ConfigForgeError {
-    ConfigForgeError::Validation(format!(
-        "table `{}` row {} field `{}` value `{}` does not match scalar type",
-        table_name, row_number, field_path, value
-    ))
-}
-
-fn scalar_type_error(
-    table_name: &str,
-    row_number: usize,
-    field_path: &str,
-    field: &LinkedFieldMeta<'_>,
-    value: &str,
-) -> ConfigForgeError {
-    ConfigForgeError::Validation(format!(
-        "table `{}` row {} field `{}` value `{}` does not match type `{:?}`",
-        table_name, row_number, field_path, value, field.meta.field_type
-    ))
 }
 
 fn field_is_visible(field: &LinkedFieldMeta<'_>, target_tags: Option<&TargetTags>) -> bool {

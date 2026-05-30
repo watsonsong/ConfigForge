@@ -4,10 +4,10 @@
 
 ## P0：语义一致性与重复逻辑收敛
 
-- [ ] 统一 validation / resolver / FK 的 typed value 解析主路径。
-  - 当前 `DataResolver`、`validation::struct_value`、`validation::foreign_key` 分别解析 scalar/list JSON cell，导致 default、empty、JSON array、element scalar conversion 等规则容易漂移。
-  - 目标：先抽出共享 `LinkedField -> ScalarValue` 与 `JSON array -> Vec<ScalarValue>` helper；中期让 FK、required/type/enum/range validation 消费同一份 `ResolvedValue/DataValue`。
-  - 验收：list default、list FK、struct child default 和 scalar conversion 在 validation/export/codegen runtime fixture 中只有一套规则来源。
+- [x] 统一 validation / resolver / FK 的 typed value 解析主路径。
+  - 已完成：抽出 `src/data/typed_value.rs`，集中提供 `LinkedField -> ScalarValue`、list JSON cell / JSON array 到 `Vec<ResolvedValue>` 的转换；`DataResolver`、`validation::struct_value`、`validation::foreign_key` 已改为复用这条路径。
+  - 已完成：struct expanded child default、struct JSON child default、list default、list FK 元素转换统一走 shared helper，避免 default、empty、JSON array、enum/list element conversion 规则漂移。
+  - 后续：range 等 validator 仍运行在 raw/normalized `DataRow` 上；迁移到 `validate_resolved_*` 后可让更多 validator 直接消费 `ResolvedValue/DataValue`。
 
 - [ ] 将 FK target key set 建模为 single/composite 两条路径并缓存构建结果。
   - 当前每个 FK 都会重建 target key set，且单字段/list FK 仍使用 `HashSet<Vec<String>>`。

@@ -64,7 +64,7 @@ pub(crate) fn default_value_to_cell(
     field_name: &str,
     default: &toml::Value,
 ) -> Result<String> {
-    json_value_to_scalar_cell(&toml_default_to_json_value(default)).map_err(|_| {
+    json_value_to_cell(&toml_default_to_json_value(default)).map_err(|_| {
         ConfigForgeError::Validation(format!(
             "table `{table_name}` field `{field_name}` has unsupported default value `{default}`"
         ))
@@ -125,11 +125,23 @@ mod tests {
     }
 
     #[test]
-    fn default_value_to_cell_reports_context_for_non_scalar_defaults() {
+    fn default_value_to_cell_converts_list_defaults_to_json_cells() {
+        let cell = default_value_to_cell(
+            "items",
+            "ids",
+            &toml::Value::Array(vec![toml::Value::Integer(1), toml::Value::Integer(2)]),
+        )
+        .unwrap();
+
+        assert_eq!(cell, "[1,2]");
+    }
+
+    #[test]
+    fn default_value_to_cell_reports_context_for_unsupported_defaults() {
         let error = default_value_to_cell(
             "items",
             "stats",
-            &toml::Value::Array(vec![toml::Value::Integer(1)]),
+            &toml::Value::Datetime("2026-01-01".parse().expect("valid datetime")),
         )
         .unwrap_err();
 
