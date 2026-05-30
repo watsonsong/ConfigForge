@@ -293,6 +293,16 @@ impl<'meta> LinkedFieldMeta<'meta> {
         }
     }
 
+    pub fn foreign_key_primitive_type(&self) -> Option<PrimitiveFieldType> {
+        self.foreign_key_scalar_field()
+            .and_then(LinkedField::primitive_type)
+    }
+
+    pub fn foreign_key_enum_name(&self) -> Option<&'meta str> {
+        self.foreign_key_scalar_field()
+            .and_then(LinkedField::enum_name)
+    }
+
     pub fn foreign_key_scalar_field(&self) -> Option<&LinkedField<'meta>> {
         match &self.linked_field {
             LinkedField::Primitive(_) | LinkedField::Enum(_) => Some(&self.linked_field),
@@ -301,6 +311,22 @@ impl<'meta> LinkedFieldMeta<'meta> {
                 _ => None,
             },
             LinkedField::Struct(_) => None,
+        }
+    }
+}
+
+impl<'meta> LinkedField<'meta> {
+    pub fn primitive_type(&self) -> Option<PrimitiveFieldType> {
+        match self {
+            LinkedField::Primitive(primitive) => Some(*primitive),
+            _ => None,
+        }
+    }
+
+    pub fn enum_name(&self) -> Option<&'meta str> {
+        match self {
+            LinkedField::Enum(enum_meta) => Some(enum_meta.name.as_str()),
+            _ => None,
         }
     }
 }

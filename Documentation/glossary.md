@@ -136,7 +136,7 @@
 | 常量对象 | Constant Object | `ObjectData` | ObjectTable 的逻辑输出。 |
 | 缺失 | Missing | `Missing` | source 中没有提供字段或 field path。 |
 | 空值 | Empty | `Empty` | 提供了空字符串、空数组、空对象等。 |
-| Null | Null | `DataValue::Null` | 显式 null，通常出现在 JSON cell 中。 |
+| Null | Null | JSON `null` | 显式 null 通常出现在 JSON cell 中；当前在解析/校验阶段按 missing/empty 语义处理，不进入 `DataValue`。 |
 | 导出视图 | Export View | `ExportView` | 针对 target/context 从 DataSet 派生的过滤后视图。 |
 | 导出上下文 | Export Context | `ExportContext` | 一次导出的 target、tags、variables。 |
 | 导出 Tag | Export Tag | `ExportTag` | `shipping`、`dev`、`global` 等上下文标签。 |

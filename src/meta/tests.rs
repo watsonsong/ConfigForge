@@ -707,6 +707,10 @@ fn accepts_canonical_and_legacy_primitive_field_types() {
             [[tables.fields]]
             name = "asset_value"
             type = "asset"
+
+            [[tables.fields]]
+            name = "int_list"
+            type = "int[]"
         "#,
     );
 
@@ -742,6 +746,14 @@ fn accepts_canonical_and_legacy_primitive_field_types() {
     assert_eq!(
         table.field("asset_value").unwrap().primitive_type(),
         Some(PrimitiveFieldType::Asset)
+    );
+    assert_eq!(table.field("int_list").unwrap().primitive_type(), None);
+    assert_eq!(
+        table
+            .field("int_list")
+            .unwrap()
+            .foreign_key_scalar_type_name(),
+        "int"
     );
 }
 
@@ -960,6 +972,40 @@ fn rejects_unknown_field_type_after_linking() {
             .iter()
             .any(|diagnostic| diagnostic.code == MetaDiagnosticCode::UnknownFieldType)
     );
+}
+
+#[test]
+fn rejects_unsupported_list_element_types() {
+    let diagnostics = diagnostics(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "item_id"
+            type = "int"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "struct_rewards"
+            type = "list<Reward>"
+
+            [[tables.fields]]
+            name = "nested_ids"
+            type = "list<int[]>"
+        "#,
+    );
+
+    let messages = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(messages.contains("unsupported list element type `Reward`"));
+    assert!(messages.contains("unsupported list element type `int[]`"));
 }
 
 #[test]

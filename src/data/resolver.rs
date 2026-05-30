@@ -97,23 +97,6 @@ impl<'meta> DataResolver<'meta> {
 
         ResolvedTable::new(table.name.clone(), rows, row_sources)
     }
-
-    pub fn validate_table_source_schema(
-        table_meta: &LinkedTableMeta<'meta>,
-        table: &DataTable,
-    ) -> Result<()> {
-        for (row_index, row) in table.rows.iter().enumerate() {
-            let row_source = table.row_source(row_index);
-            let row_number = row_source
-                .map(|source| source.source_row_number)
-                .unwrap_or(row_index + 1);
-            let active_fragments = row_source
-                .map(|source| source.fragments.as_slice())
-                .unwrap_or(&[]);
-            validate_source_schema(table_meta, row, row_number, active_fragments)?;
-        }
-        Ok(())
-    }
 }
 
 fn resolve_row(

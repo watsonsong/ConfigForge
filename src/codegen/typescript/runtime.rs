@@ -145,9 +145,10 @@ function readOptionalString(reader: RuntimeDataReader, name: string): string | u
 
 function readList<T>(reader: RuntimeDataReader, convert: (value: RuntimeDataReader) => T): T[] {
   const length = readArrayLength(reader);
+  const positional = reader.arrayElementsArePositional?.() === true;
   const values: T[] = [];
   for (let index = 0; index < length; index += 1) {
-    if (reader.arrayElementsArePositional && reader.arrayElementsArePositional()) {
+    if (positional) {
       values.push(convert(reader));
       continue;
     }

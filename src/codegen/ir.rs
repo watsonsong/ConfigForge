@@ -447,33 +447,13 @@ fn validate_index_key_type(table_name: &str, index_name: &str, field: &CodeField
 fn code_field_from_linked(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<CodeField> {
     Ok(CodeField {
         name: field.meta.name.clone(),
-        code_type: code_type_from_linked(field)?,
+        code_type: code_type_from_linked(&field.linked_field)?,
         desc: field.meta.desc.clone(),
         required: field.meta.required,
     })
 }
 
-fn code_type_from_linked(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<CodeTypeRef> {
-    Ok(match &field.linked_field {
-        LinkedField::Primitive(PrimitiveFieldType::Int) => CodeTypeRef::Int,
-        LinkedField::Primitive(PrimitiveFieldType::Float) => CodeTypeRef::Float,
-        LinkedField::Primitive(PrimitiveFieldType::Bool) => CodeTypeRef::Bool,
-        LinkedField::Primitive(PrimitiveFieldType::String) => CodeTypeRef::String,
-        LinkedField::Primitive(PrimitiveFieldType::Text) => CodeTypeRef::Text,
-        LinkedField::Primitive(PrimitiveFieldType::Asset) => CodeTypeRef::Asset,
-        LinkedField::Enum(enum_meta) => CodeTypeRef::Enum {
-            name: enum_meta.name.clone(),
-        },
-        LinkedField::Struct(struct_type) => CodeTypeRef::Struct {
-            name: struct_type.meta.name.clone(),
-        },
-        LinkedField::List(element_type) => {
-            CodeTypeRef::List(Box::new(code_type_from_linked_type(element_type)?))
-        }
-    })
-}
-
-fn code_type_from_linked_type(field: &LinkedField<'_>) -> Result<CodeTypeRef> {
+fn code_type_from_linked(field: &LinkedField<'_>) -> Result<CodeTypeRef> {
     Ok(match field {
         LinkedField::Primitive(PrimitiveFieldType::Int) => CodeTypeRef::Int,
         LinkedField::Primitive(PrimitiveFieldType::Float) => CodeTypeRef::Float,
@@ -488,7 +468,7 @@ fn code_type_from_linked_type(field: &LinkedField<'_>) -> Result<CodeTypeRef> {
             name: struct_type.meta.name.clone(),
         },
         LinkedField::List(element_type) => {
-            CodeTypeRef::List(Box::new(code_type_from_linked_type(element_type)?))
+            CodeTypeRef::List(Box::new(code_type_from_linked(element_type)?))
         }
     })
 }

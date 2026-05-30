@@ -534,13 +534,14 @@ fn foreign_key_field_types_compatible(
     source: &FieldMeta,
     target: &FieldMeta,
 ) -> bool {
-    match (source.primitive_type(), target.primitive_type()) {
+    let source_primitive = PrimitiveFieldType::parse(source.foreign_key_scalar_type_name());
+    match (source_primitive, target.primitive_type()) {
         (Some(source), Some(target)) => return source == target,
         (Some(_), None) | (None, Some(_)) => return false,
         (None, None) => {}
     }
-    let source_type = list_element_type_name(&source.field_type).unwrap_or(&source.field_type);
-    let target_type = list_element_type_name(&target.field_type).unwrap_or(&target.field_type);
+    let source_type = source.foreign_key_scalar_type_name();
+    let target_type = target.field_type.as_str();
     if model.enum_meta(source_type).is_some() || model.enum_meta(target_type).is_some() {
         return source_type == target_type
             && model.enum_meta(source_type).is_some()
@@ -556,7 +557,21 @@ fn validate_field_layout(
     diagnostics: &mut Vec<MetaDiagnostic>,
 ) {
     let is_struct = model.struct_meta(&field.field_type).is_some();
-    let is_list = list_element_type_name(&field.field_type).is_some();
+    let list_element_type = list_element_type_name(&field.field_type);
+    if let Some(element_type) = list_element_type {
+        if list_element_type_name(element_type).is_some()
+            || model.struct_meta(element_type).is_some()
+        {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "{} field `{}` uses unsupported list element type `{}`; list fields currently support only primitive or enum elements",
+                    owner, field.name, element_type
+                ),
+            ));
+        }
+    }
+    let is_list = list_element_type.is_some();
     match (is_struct, is_list, field.layout) {
         (true, _, None) => {}
         (true, _, Some(_)) => diagnostics.push(MetaDiagnostic::new(

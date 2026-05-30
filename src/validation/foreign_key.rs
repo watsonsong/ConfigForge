@@ -5,7 +5,13 @@ use std::collections::HashSet;
 
 use crate::{
     ConfigForgeError, Result,
-    data::{DataRow, DataSet, DataTable},
+    data::{
+        DataRow, DataSet, DataTable,
+        value_conversion::{
+            json_value_is_empty, json_value_to_cell, json_value_to_scalar_cell_for_field,
+            toml_default_to_json_value,
+        },
+    },
     meta::{
         LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedIndexMeta, LinkedMetaModel,
         LinkedTableMeta, TargetTags,
@@ -293,10 +299,32 @@ fn validate_list_foreign_key_row(
     list_field: &LinkedFieldMeta<'_>,
     target_keys: &HashSet<Vec<String>>,
 ) -> Result<()> {
-    let raw = row
+    let raw_cell = row
         .get(&list_field.meta.name)
         .map(String::as_str)
         .unwrap_or_default();
+    let default_raw;
+    let raw = if raw_cell.trim().is_empty() {
+        match list_field.meta.default.as_ref() {
+            Some(default) => {
+                let default_value = toml_default_to_json_value(default);
+                if json_value_is_empty(&default_value) {
+                    raw_cell
+                } else {
+                    default_raw = json_value_to_cell(&default_value).map_err(|_| {
+                        ConfigForgeError::Validation(format!(
+                            "table `{}` row {} foreign key `{}` source field `{}` default must be a JSON array",
+                            source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name
+                        ))
+                    })?;
+                    default_raw.as_str()
+                }
+            }
+            None => raw_cell,
+        }
+    } else {
+        raw_cell
+    };
     if raw.trim().is_empty() {
         if foreign_key.allow_empty {
             return Ok(());
@@ -325,12 +353,13 @@ fn validate_list_foreign_key_row(
         )));
     }
     for (index, element) in array.iter().enumerate() {
-        let key_value = element_key_string(element).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "table `{}` row {} foreign key `{}` source field `{}[{}]` must be a scalar key value",
-                source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name, index
-            ))
-        })?;
+        let field_path = format!("{}[{}]", list_field.meta.name, index);
+        let key_value = json_value_to_scalar_cell_for_field(
+            element,
+            &source_table_meta.meta.name,
+            row_number,
+            &field_path,
+        )?;
         let key = vec![key_value];
         if !target_keys.contains(&key) {
             return Err(ConfigForgeError::Validation(format!(
@@ -356,17 +385,6 @@ fn foreign_key_list_source_field<'a, 'meta>(
         .fields
         .iter()
         .find(|field| matches!(field.linked_field, LinkedField::List(_)))
-}
-
-fn element_key_string(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(value) => Some(value.clone()),
-        serde_json::Value::Number(value) => Some(value.to_string()),
-        serde_json::Value::Bool(value) => Some(value.to_string()),
-        serde_json::Value::Null | serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-            None
-        }
-    }
 }
 
 fn foreign_key_row_key(row: &DataRow, fields: &[LinkedFieldMeta<'_>]) -> Vec<String> {

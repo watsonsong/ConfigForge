@@ -1486,7 +1486,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             self.fields.borrow_mut().push("");
                             Ok(())
                         }} else if self.path == "game_rules" && self.current_field() == Some("starter_item_ids") && index < 2 {{
-                            self.fields.borrow_mut().push("");
+                            self.fields.borrow_mut().push(if index == 0 {{ "starter_item_ids[0]" }} else {{ "starter_item_ids[1]" }});
                             Ok(())
                         }} else {{
                             Err(RuntimeDataError::not_found(format!("unexpected index: {{index}}")))
@@ -1512,7 +1512,8 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             ("game_rules", Some("max_player_level")) => Ok(60),
                             ("game_rules", Some("starter_gold")) => Ok(500),
                             ("game_rules", Some("default_class")) => Ok(1),
-                            ("game_rules", Some("")) => Ok(2001),
+                            ("game_rules", Some("starter_item_ids[0]")) => Ok(2001),
+                            ("game_rules", Some("starter_item_ids[1]")) => Ok(2002),
                             ("game_rules", Some("stamina_cap")) => Ok(120),
                             ("game_rules", Some("daily_reset_hour")) => Ok(5),
                             _ => Err(RuntimeDataError::type_mismatch("unexpected i64")),
@@ -1555,7 +1556,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                     assert_eq!(data.items.rows().len(), 1);
                     assert_eq!(data.game_rules.max_player_level, 60);
                     assert_eq!(data.game_rules.default_class, 1);
-                    assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2001]);
+                    assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2002]);
                     assert!(data.game_rules.pvp_enabled);
                 }}
 

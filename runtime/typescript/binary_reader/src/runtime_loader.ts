@@ -13,26 +13,27 @@ const textDecoder = new TextDecoder("utf-8", { fatal: true });
 export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   private offset = 16;
   private nextRowIndex = 0;
+  private readonly view: DataView;
   private readonly revision: bigint;
   private readonly records: Array<{ bitmap: Uint8Array<ArrayBufferLike>; nextOptionalSlot: number }> = [];
 
   constructor(private readonly bytes: Uint8Array) {
+    this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     if (bytes.length < 16) {
       throw new Error("truncated binary runtime data header");
     }
     if (bytes[0] !== 0x43 || bytes[1] !== 0x46 || bytes[2] !== 0x47 || bytes[3] !== 0x42) {
       throw new Error("invalid binary runtime data magic");
     }
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const version = view.getUint16(4, true);
+    const version = this.view.getUint16(4, true);
     if (version !== 1) {
       throw new Error(`unsupported binary runtime data version ${version}`);
     }
-    const headerSize = view.getUint16(6, true);
+    const headerSize = this.view.getUint16(6, true);
     if (headerSize !== 16) {
       throw new Error(`unsupported binary runtime data header size ${headerSize}`);
     }
-    this.revision = view.getBigUint64(8, true);
+    this.revision = this.view.getBigUint64(8, true);
   }
 
   enterField(_name: string): boolean {
@@ -144,8 +145,9 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   }
 
   readNextFloat64(): number {
-    const bytes = this.readExact(8);
-    const value = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat64(0, true);
+    this.ensureAvailable(8);
+    const value = this.view.getFloat64(this.offset, true);
+    this.offset += 8;
     if (!Number.isFinite(value)) {
       throw new Error("non-finite float in binary runtime data");
     }
@@ -205,13 +207,18 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   }
 
   private readExact(len: number): Uint8Array<ArrayBufferLike> {
+    this.ensureAvailable(len);
+    const end = this.offset + len;
+    const value = this.bytes.subarray(this.offset, end);
+    this.offset = end;
+    return value;
+  }
+
+  private ensureAvailable(len: number): void {
     const end = this.offset + len;
     if (end > this.bytes.length) {
       throw new Error("truncated binary runtime data");
     }
-    const value = this.bytes.subarray(this.offset, end);
-    this.offset = end;
-    return value;
   }
 }
 

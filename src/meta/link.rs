@@ -391,13 +391,14 @@ fn linked_foreign_key_types_compatible(
             let Some(target_field) = target_table.field(target_field_name) else {
                 return false;
             };
-            let source_type = linked_scalar_primitive_type(source_field.foreign_key_scalar_field());
+            let source_type = source_field.foreign_key_primitive_type();
             let target_type = target_field.primitive_type();
             match (source_type, target_type) {
                 (Some(source), Some(target)) => source == target,
                 (Some(_), None) | (None, Some(_)) => false,
                 // Enums intentionally match by declared type, not by their underlying value representation.
-                (None, None) => linked_scalar_enum_name(source_field.foreign_key_scalar_field())
+                (None, None) => source_field
+                    .foreign_key_enum_name()
                     .is_some_and(|source_name| {
                         source_name == target_field.field_type
                             && enum_index.contains_key(source_name)
@@ -405,20 +406,6 @@ fn linked_foreign_key_types_compatible(
                     }),
             }
         })
-}
-
-fn linked_scalar_primitive_type(field: Option<&LinkedField<'_>>) -> Option<PrimitiveFieldType> {
-    match field {
-        Some(LinkedField::Primitive(primitive)) => Some(*primitive),
-        _ => None,
-    }
-}
-
-fn linked_scalar_enum_name<'meta>(field: Option<&LinkedField<'meta>>) -> Option<&'meta str> {
-    match field {
-        Some(LinkedField::Enum(enum_meta)) => Some(enum_meta.name.as_str()),
-        _ => None,
-    }
 }
 
 fn link_field_type<'meta>(

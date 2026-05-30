@@ -45,8 +45,6 @@ pub fn validate_normalized_table_for_target(
     target_tags: &TargetTags,
     table: &DataTable,
 ) -> Result<()> {
-    DataResolver::validate_table_source_schema(meta, table)?;
-
     let visible_fields = meta
         .fields
         .iter()

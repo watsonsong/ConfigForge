@@ -401,7 +401,11 @@ impl TableMeta {
 
 impl FieldMeta {
     pub fn primitive_type(&self) -> Option<PrimitiveFieldType> {
-        scalar_field_type_name(&self.field_type).and_then(PrimitiveFieldType::parse)
+        PrimitiveFieldType::parse(&self.field_type)
+    }
+
+    pub fn foreign_key_scalar_type_name(&self) -> &str {
+        scalar_field_type_name(&self.field_type)
     }
 
     pub fn is_exported_for(&self, target: &TargetTags) -> bool {
@@ -417,10 +421,8 @@ pub fn list_element_type_name(field_type: &str) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-pub fn scalar_field_type_name(field_type: &str) -> Option<&str> {
-    list_element_type_name(field_type)
-        .unwrap_or(field_type)
-        .into()
+pub fn scalar_field_type_name(field_type: &str) -> &str {
+    list_element_type_name(field_type).unwrap_or(field_type)
 }
 
 impl FragmentMeta {
