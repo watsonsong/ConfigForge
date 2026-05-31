@@ -842,21 +842,23 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 
 目标：在改调度前锁定当前行为，避免后续并发化改变语义。
 
-- TODO：补充 code-only target 测试，断言只有 MetaOnly export task 时不会调用 DataLoader / provider。
-- TODO：补充多 export task declaration order 测试，覆盖 data-backed export 与 codegen 混排后的 artifact order。
-- TODO：补充 validation diagnostics 稳定排序基线测试，至少覆盖 table-local error、FK error、target-aware error。
-- TODO：补充 `--serial` / `--jobs 1` 与默认执行输出一致的 CLI integration。
+- DONE（6e91753）：补充 code-only target 测试，断言只有 MetaOnly export task 时不会调用 DataLoader / provider。
+- DONE（6e91753）：补充多 export task declaration order 测试，覆盖 data-backed export 与 codegen 混排后的 artifact order。
+- DONE（6e91753）：补充 validation diagnostics 稳定排序基线测试，覆盖多个 range validator issue 的稳定顺序；FK / target-aware 场景在后续 validation 并行阶段继续扩展。
+- DONE（6e91753）：补充 `--serial` / `--jobs 1` 与默认执行输出一致的 CLI integration。
 - 验证：`cargo test`；如引入测试辅助 provider，必须能精确记录调用次数和调用顺序。
 
 ### Phase 1：DependencyPlan / TargetBuildPlan
 
 目标：先实现“从 target/export tasks 倒推依赖”，但执行仍可沿用当前 branch executor。
 
-- TODO：新增内部 `BuildDependencyPlan` / `TargetBuildPlan`，由 normalized target exports 生成 `requires_meta`、`requires_data`、`meta_only_exports`、`meta_and_data_exports`。
-- TODO：让 code-only target 显式 `requires_data = false`，并在 build 主流程中跳过 DataLoadPlan / DataLoader / normalize / validation。
-- TODO：记录 cache key 约定：`LinkedMeta` 可按 project/raw meta 共享；Data / normalized data / validation result 至少按 `(project.input, effective_tags)` 区分。
-- TODO：将当前 `BuildDagNodeKey` skeleton 与 `TargetBuildPlan` 对齐，避免 node key 表达伪依赖。
+- DONE：新增内部 `BuildDependencyPlan` / `TargetBuildPlan`，由 normalized target exports 生成 `requires_meta`、`requires_data`、`meta_only_exports`、`meta_and_data_exports`。
+- DONE：让 code-only target 显式 `requires_data = false`，并在 build 主流程中跳过 DataLoadPlan / DataLoader / normalize / validation。
+- DONE：记录 cache key 约定：`LinkedMeta` 可按 project/raw meta 共享；Data / normalized data / validation result 至少按 `(project.input, effective_tags)` 区分，当前内部表达为 `DataDependencyKey { input, effective_tags }`。
+- DONE：将当前 `BuildDagNodeKey` skeleton 与 `TargetBuildPlan` 对齐，避免 node key 表达伪依赖。
 - 验证：build 单元测试覆盖 `rust only`、`json only`、`json + rust`、`json + lua + rust`；CLI integration 覆盖 code-only target 不要求 `project.input`。
+
+Phase 1 实现复核：后续 Phase 2-12 的阶段顺序仍然成立；本阶段仅把“target/export task 需要哪些依赖”收敛为内部 plan，尚未改变 DataLoad / normalize / validation 的执行边界。后续开发应复用 `TargetBuildPlan.data_dependency` / `DataDependencyKey` 作为 data-backed 分支的最小启动条件，避免再次从 exporter 类型反推是否需要 Data。
 
 ### Phase 2：拆分 DataLoadPlan 为 source discovery 与 typed normalize
 

@@ -79,6 +79,27 @@ struct TargetDagExecutionContext<'a, 'meta> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct BuildDependencyPlan {
+    targets: Vec<TargetBuildPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TargetBuildPlan {
+    target_name: String,
+    effective_tags: Vec<String>,
+    requires_meta: bool,
+    data_dependency: Option<DataDependencyKey>,
+    meta_only_exports: Vec<usize>,
+    meta_and_data_exports: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DataDependencyKey {
+    input: Option<PathBuf>,
+    effective_tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum BuildDagNodeKey {
     LinkMeta,
     EffectiveTargetTags {
@@ -118,25 +139,16 @@ struct DagBranchOutput {
 }
 
 fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<TargetDagOutput> {
+    let dependency_plan =
+        BuildDependencyPlan::for_target(context.target, context.data_root, context.target_tags);
+    let target_plan = dependency_plan.single_target_plan()?;
     // This node list is an execution-view skeleton for tests and future tracing/executor work.
     // The current MVP below still executes two dependency branches directly instead of scheduling
     // these node keys through a generic DAG executor.
-    let _execution_view_nodes =
-        build_target_local_dag(context.target, context.data_root, context.target_tags);
-    let meta_and_data_exports = context
-        .target
-        .exports
-        .iter()
-        .enumerate()
-        .filter(|(_, task)| task.dependency == ExportDependency::MetaAndData)
-        .collect::<Vec<_>>();
-    let meta_only_exports = context
-        .target
-        .exports
-        .iter()
-        .enumerate()
-        .filter(|(_, task)| task.dependency == ExportDependency::MetaOnly)
-        .collect::<Vec<_>>();
+    let _execution_view_nodes = build_target_local_dag(context.target, target_plan);
+    let meta_and_data_exports =
+        target_plan.export_tasks(context.target, ExportDependency::MetaAndData);
+    let meta_only_exports = target_plan.export_tasks(context.target, ExportDependency::MetaOnly);
 
     let generated_at = generated_at();
     let generators = builtin_generators();
@@ -181,43 +193,120 @@ fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<Targ
 
 fn build_target_local_dag(
     target: &NormalizedTargetConfig,
-    data_root: Option<&Path>,
-    target_tags: &TargetTags,
+    plan: &TargetBuildPlan,
 ) -> Vec<BuildDagNodeKey> {
-    let effective_tags = target_tags.iter().map(str::to_owned).collect::<Vec<_>>();
-    let mut nodes = vec![
-        BuildDagNodeKey::LinkMeta,
-        BuildDagNodeKey::EffectiveTargetTags {
-            target_name: target.name.clone(),
-            effective_tags: effective_tags.clone(),
-        },
-    ];
-    if target
-        .exports
-        .iter()
-        .any(|task| task.dependency == ExportDependency::MetaAndData)
-    {
-        let input = data_root.map(Path::to_path_buf);
+    let mut nodes = Vec::new();
+    if plan.requires_meta {
+        nodes.push(BuildDagNodeKey::LinkMeta);
+    }
+    nodes.push(BuildDagNodeKey::EffectiveTargetTags {
+        target_name: plan.target_name.clone(),
+        effective_tags: plan.effective_tags.clone(),
+    });
+    if plan.requires_data() {
+        let data_dependency = plan
+            .data_dependency
+            .as_ref()
+            .expect("requires_data implies a data dependency key");
         nodes.push(BuildDagNodeKey::DataLoadPlan {
-            input: input.clone(),
-            effective_tags: effective_tags.clone(),
+            input: data_dependency.input.clone(),
+            effective_tags: data_dependency.effective_tags.clone(),
         });
         nodes.push(BuildDagNodeKey::NormalizeAndValidate {
-            input,
-            effective_tags,
+            input: data_dependency.input.clone(),
+            effective_tags: data_dependency.effective_tags.clone(),
         });
     }
     nodes.extend(
-        target
-            .exports
+        plan.export_indices_in_declaration_order()
             .iter()
-            .map(|task| BuildDagNodeKey::RunExporter {
-                target_name: target.name.clone(),
-                export_name: task.name.clone(),
+            .map(|index| BuildDagNodeKey::RunExporter {
+                target_name: plan.target_name.clone(),
+                export_name: target.exports[*index].name.clone(),
             }),
     );
     nodes.push(BuildDagNodeKey::WriteArtifacts);
     nodes
+}
+
+impl BuildDependencyPlan {
+    fn for_target(
+        target: &NormalizedTargetConfig,
+        data_root: Option<&Path>,
+        target_tags: &TargetTags,
+    ) -> Self {
+        Self {
+            targets: vec![TargetBuildPlan::new(target, data_root, target_tags)],
+        }
+    }
+
+    fn single_target_plan(&self) -> Result<&TargetBuildPlan> {
+        match self.targets.as_slice() {
+            [target] => Ok(target),
+            _ => Err(ConfigForgeError::Validation(
+                "expected exactly one target in build dependency plan".to_owned(),
+            )),
+        }
+    }
+}
+
+impl TargetBuildPlan {
+    fn new(
+        target: &NormalizedTargetConfig,
+        data_root: Option<&Path>,
+        target_tags: &TargetTags,
+    ) -> Self {
+        let effective_tags = target_tags.iter().map(str::to_owned).collect::<Vec<_>>();
+        let mut meta_only_exports = Vec::new();
+        let mut meta_and_data_exports = Vec::new();
+        for (index, task) in target.exports.iter().enumerate() {
+            match task.dependency {
+                ExportDependency::MetaOnly => meta_only_exports.push(index),
+                ExportDependency::MetaAndData => meta_and_data_exports.push(index),
+            }
+        }
+        let requires_meta = !target.exports.is_empty();
+        let data_dependency = (!meta_and_data_exports.is_empty()).then(|| DataDependencyKey {
+            input: data_root.map(Path::to_path_buf),
+            effective_tags: effective_tags.clone(),
+        });
+        Self {
+            target_name: target.name.clone(),
+            effective_tags,
+            requires_meta,
+            data_dependency,
+            meta_only_exports,
+            meta_and_data_exports,
+        }
+    }
+
+    fn requires_data(&self) -> bool {
+        self.data_dependency.is_some()
+    }
+
+    fn export_tasks<'a>(
+        &'a self,
+        target: &'a NormalizedTargetConfig,
+        dependency: ExportDependency,
+    ) -> Vec<(usize, &'a NormalizedExportTask)> {
+        let indices = match dependency {
+            ExportDependency::MetaOnly => &self.meta_only_exports,
+            ExportDependency::MetaAndData => &self.meta_and_data_exports,
+        };
+        indices
+            .iter()
+            .map(|index| (*index, &target.exports[*index]))
+            .collect()
+    }
+
+    fn export_indices_in_declaration_order(&self) -> Vec<usize> {
+        let mut indices =
+            Vec::with_capacity(self.meta_only_exports.len() + self.meta_and_data_exports.len());
+        indices.extend(self.meta_only_exports.iter().copied());
+        indices.extend(self.meta_and_data_exports.iter().copied());
+        indices.sort_unstable();
+        indices
+    }
 }
 
 fn execute_runtime_export_nodes(
@@ -486,12 +575,13 @@ mod tests {
                 },
             ],
         };
-
-        let nodes = build_target_local_dag(
+        let plan = TargetBuildPlan::new(
             &target,
             Some(Path::new("Data")),
             &TargetTags::new(["client", "shipping"]),
         );
+
+        let nodes = build_target_local_dag(&target, &plan);
 
         assert_eq!(
             nodes
@@ -529,8 +619,9 @@ mod tests {
                 options: BTreeMap::new(),
             }],
         };
+        let plan = TargetBuildPlan::new(&target, None, &TargetTags::new(["client"]));
 
-        let nodes = build_target_local_dag(&target, None, &TargetTags::new(["client"]));
+        let nodes = build_target_local_dag(&target, &plan);
 
         assert!(
             nodes
@@ -541,6 +632,124 @@ mod tests {
             nodes
                 .iter()
                 .all(|node| !matches!(node, BuildDagNodeKey::NormalizeAndValidate { .. }))
+        );
+    }
+
+    #[test]
+    fn target_build_plan_classifies_rust_only_as_meta_only() {
+        let target = NormalizedTargetConfig {
+            name: "code_only".to_owned(),
+            tags: vec!["client".to_owned()],
+            exports: vec![export_task("rust", ExportDependency::MetaOnly)],
+        };
+
+        let plan = TargetBuildPlan::new(
+            &target,
+            Some(Path::new("missing_data")),
+            &TargetTags::new(["client", "shipping"]),
+        );
+
+        assert!(plan.requires_meta);
+        assert!(!plan.requires_data());
+        assert_eq!(plan.effective_tags, vec!["client", "shipping"]);
+        assert_eq!(plan.meta_only_exports, vec![0]);
+        assert!(plan.meta_and_data_exports.is_empty());
+        assert!(plan.data_dependency.is_none());
+        assert_eq!(plan.export_indices_in_declaration_order(), vec![0]);
+    }
+
+    #[test]
+    fn target_build_plan_classifies_json_only_as_data_backed() {
+        let target = NormalizedTargetConfig {
+            name: "data_only".to_owned(),
+            tags: vec!["client".to_owned()],
+            exports: vec![export_task("json", ExportDependency::MetaAndData)],
+        };
+
+        let plan = TargetBuildPlan::new(
+            &target,
+            Some(Path::new("Data")),
+            &TargetTags::new(["client"]),
+        );
+
+        assert!(plan.requires_meta);
+        assert!(plan.requires_data());
+        assert!(plan.meta_only_exports.is_empty());
+        assert_eq!(plan.meta_and_data_exports, vec![0]);
+        assert_eq!(
+            plan.data_dependency,
+            Some(DataDependencyKey {
+                input: Some(PathBuf::from("Data")),
+                effective_tags: vec!["client".to_owned()],
+            })
+        );
+    }
+
+    #[test]
+    fn target_build_plan_preserves_mixed_export_indices() {
+        let target = NormalizedTargetConfig {
+            name: "client".to_owned(),
+            tags: vec!["client".to_owned()],
+            exports: vec![
+                export_task("json", ExportDependency::MetaAndData),
+                export_task("rust", ExportDependency::MetaOnly),
+                export_task("lua", ExportDependency::MetaAndData),
+            ],
+        };
+
+        let plan = TargetBuildPlan::new(
+            &target,
+            Some(Path::new("Data")),
+            &TargetTags::new(["client"]),
+        );
+
+        assert_eq!(plan.meta_only_exports, vec![1]);
+        assert_eq!(plan.meta_and_data_exports, vec![0, 2]);
+        assert_eq!(plan.export_indices_in_declaration_order(), vec![0, 1, 2]);
+        assert_eq!(
+            plan.export_tasks(&target, ExportDependency::MetaOnly)
+                .into_iter()
+                .map(|(index, task)| (index, task.name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(1, "rust")]
+        );
+        assert_eq!(
+            plan.export_tasks(&target, ExportDependency::MetaAndData)
+                .into_iter()
+                .map(|(index, task)| (index, task.name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(0, "json"), (2, "lua")]
+        );
+    }
+
+    #[test]
+    fn target_local_dag_follows_target_build_plan_order() {
+        let target = NormalizedTargetConfig {
+            name: "client".to_owned(),
+            tags: vec!["client".to_owned()],
+            exports: vec![
+                export_task("json", ExportDependency::MetaAndData),
+                export_task("rust", ExportDependency::MetaOnly),
+                export_task("lua", ExportDependency::MetaAndData),
+            ],
+        };
+        let plan = TargetBuildPlan::new(
+            &target,
+            Some(Path::new("Data")),
+            &TargetTags::new(["client"]),
+        );
+
+        let nodes = build_target_local_dag(&target, &plan);
+
+        assert_eq!(
+            nodes
+                .iter()
+                .filter_map(|node| match node {
+                    BuildDagNodeKey::RunExporter { export_name, .. } => Some(export_name.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            vec!["json", "rust", "lua"]
         );
     }
 
@@ -613,5 +822,15 @@ mod tests {
                 Path::new("lua/init.lua"),
             ]
         );
+    }
+
+    fn export_task(name: &str, dependency: ExportDependency) -> NormalizedExportTask {
+        NormalizedExportTask {
+            name: name.to_owned(),
+            type_id: name.to_owned(),
+            dependency,
+            output: PathBuf::from(format!("out/{name}")),
+            options: BTreeMap::new(),
+        }
     }
 }
