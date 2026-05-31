@@ -289,13 +289,14 @@ Exporter 注册表需要声明每个 `type` 的 dependency contract：
 | --- | --- | --- |
 | `MetaOnly` | `rust`、`cpp`、`typescript` | 只需要 linked Meta 和 effective target tags；不加载 Data。 |
 | `MetaAndData` | `json`、`messagepack`、`bin`、`gettext_pot`、`lua_table` | 需要 DataLoadPlan、normalized DataSet、target validation 和 target-aware ExportView。 |
-| `DataOnly` | 暂无 | 机制上可保留，但当前不推荐；没有 Meta 的数据导出通常无法做类型、索引、过滤和校验。 |
 
 这样 Lua 不需要被强行归入 “data” 或 “code”：它只是一个 `type = "lua_table"`、dependency 为 `MetaAndData` 的 exporter。未来 schema manifest、asset manifest、doc generator、engine-specific bundle、binary schema 等都可以按同一套 task 模型接入。
 
 ### 3.5.2 DAG 编排原则
 
-统一 exporter task 后，Build 不再写死 “先 data 后 code” 两段流程，而是构建 target-local DAG：
+统一 exporter task 后，Build 不再写死 “先 data 后 code” 两段流程，而是按 dependency contract 建立 target-local execution view。当前实现已经按 `MetaOnly` / `MetaAndData` 拆成两个可并行分支执行，并构造 `BuildDagNodeKey` 作为测试、tracing 与未来通用 executor 的 skeleton；但尚未把这些 node key 交给完整 DAG 调度器、缓存层或 tracing 系统执行。
+
+目标态 target-local DAG 形态：
 
 ```text
 ProjectConfig
@@ -309,7 +310,7 @@ ProjectConfig
           -> MetaAndData exporter tasks sharing project.input
 ```
 
-DAG key 必须包含 dependency 语义：
+DAG key 必须包含 dependency 语义；当前 skeleton 中涉及 target tags 的节点使用已经合并 CLI extra tags 后的 effective target tags，避免未来接入缓存/tracing 时把不同 CLI tag 构建误判为同一节点：
 
 - `LinkedMeta` key：`(project config, effective target tags)`。
 - `DataLoadPlan` / `DataSet` / `Validation` key：`(project.input, effective target tags)`，不能只按 `project.input` 缓存，因为 `override_sources[].export_when` 会受 CLI extra tags 影响。
@@ -545,13 +546,15 @@ Lua table 必须读取 `project.input` 中的数据，基于 Meta 与 target-awa
 - 若配置中的命名策略导致同一作用域生成名冲突，必须在写文件前报错。
 - 同一 target 下多个 export task 的输出路径不能互相覆盖。
 
-推荐 runtime data exporter type：
+推荐 runtime / aggregate / embedded data exporter type：
 
-| Format | 状态 | 说明 |
+| Type | 状态 | 说明 |
 | --- | --- | --- |
 | `json` | 第一阶段默认 | 易调试，适合 Web/TS 和通用场景。 |
 | `messagepack` | 第一阶段支持 | 紧凑二进制格式，适合包体和加载性能更敏感的 runtime。 |
-| `lua_table` | 允许 | Lua 中代码和数据可能合一，作为特殊 runtime format。 |
+| `bin` | 第一阶段支持 | ConfigForge 私有紧密二进制 runtime data export type。 |
+| `gettext_pot` / `pot` | 第一阶段支持 | 聚合 exporter，从 target 可见 `text` 字段抽取 POT。 |
+| `lua_table` / `lua` | 第一阶段支持 | 内嵌数据 exporter；Lua 中代码和数据合一，作为 MetaAndData export task 生成 root facade 和每表 `.lua` 文件。 |
 | `yaml` | 可扩展 | 可读性高，但运行时解析成本需谨慎。 |
 | `sqlite` | 可扩展 | 适合查询型运行时。 |
 | `protobuf` | 未来设计 | 当前不要求实现；未来需要字段级 `field_number`。 |

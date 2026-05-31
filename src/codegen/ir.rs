@@ -5,8 +5,8 @@ use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
     ConfigForgeError, Result,
-    exporter::{JSON_FORMAT, RuntimeDataFile, binary_schema_revision},
     meta::{LinkedField, LinkedFragmentPayload, LinkedMetaModel, PrimitiveFieldType, TableKind},
+    runtime_contract::{DEFAULT_RUNTIME_DATA_FORMAT, RuntimeDataFile, binary_schema_revision},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -311,7 +311,7 @@ pub(crate) fn build_code_model(
             let foreign_keys = build_code_foreign_keys(meta, table_meta, &field_index, target_tags)?;
 
             let data_file = table_meta.meta.name.clone();
-            let data_format = JSON_FORMAT.to_owned();
+            let data_format = DEFAULT_RUNTIME_DATA_FORMAT.to_owned();
             let schema_revision = Some(binary_schema_revision(table_meta, target_tags));
             let primary_index = indexes
                 .iter()

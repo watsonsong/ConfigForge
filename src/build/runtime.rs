@@ -10,9 +10,10 @@ use crate::{
     ConfigForgeError, Result,
     artifact::Artifact,
     data::{DataLoadPlan, DataLoader},
-    exporter::{DataExporterRef, DataFormatRegistry, RuntimeDataFile, export_runtime_data},
+    exporter::{DataExporterRef, DataFormatRegistry, export_runtime_data},
     meta::{LinkedMetaModel, TargetTags},
     project::lexical_normalize_path,
+    runtime_contract::RuntimeDataFile,
     validation::{normalize_data_set, validate_normalized_data_set_for_target_with_report},
 };
 

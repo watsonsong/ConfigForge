@@ -6,9 +6,10 @@ use std::{collections::BTreeMap, path::PathBuf};
 use crate::{
     ConfigForgeError, Result,
     codegen::{CodegenTaskConfig, builtin_generators, find_generator},
-    exporter::{DataFormatRegistry, ExportDependency, TargetDataConfig},
+    exporter::{DataFormatRegistry, TargetDataConfig},
     meta::TargetTags,
     project::{TargetConfig, TargetExportConfig},
+    runtime_contract::ExportDependency,
 };
 
 pub(crate) const DEFAULT_EXPORT_TASK_NAME: &str = "default";
@@ -165,7 +166,6 @@ fn validate_export_dependency(
             }
         }
         ExportDependency::MetaAndData => validate_no_export_input_option(target_name, export_task)?,
-        ExportDependency::DataOnly => {}
     }
     Ok(())
 }
@@ -438,6 +438,5 @@ mod tests {
         assert!(
             matches!(registry.dependency("client", "unknown"), Err(ConfigForgeError::Validation(message)) if message.contains("unknown export type `unknown`"))
         );
-        let _ = ExportDependency::DataOnly;
     }
 }

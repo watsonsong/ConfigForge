@@ -1,6 +1,6 @@
 # 09i. Lua Embedded Data Generator
 
-本文档描述计划中的 Lua 导出支持。Lua 目标与 Rust / C++ / TypeScript 的 format-agnostic codegen 不同：Lua 产物把**数据与访问代码合并在同一组 `.lua` 文件**中，直接由 Lua VM `require` 加载，不再通过 JSON / MessagePack / `bin` runtime reader 间接读取。因此它必须同时依赖 target-aware Meta 与已归一化、已校验的数据视图。
+本文档描述当前内置的 Lua 导出支持。Lua 目标与 Rust / C++ / TypeScript 的 format-agnostic codegen 不同：Lua 产物把**数据与访问代码合并在同一组 `.lua` 文件**中，直接由 Lua VM `require` 加载，不再通过 JSON / MessagePack / `bin` runtime reader 间接读取。因此它必须同时依赖 target-aware Meta 与已归一化、已校验的数据视图。
 
 ## Related docs
 
@@ -338,19 +338,19 @@ Lua exporter 需要在写文件前诊断：
 
 Lua 关键字冲突策略应复用 Project Config 的 `keyword_conflict` 概念；`lua_table` options 应提供同名字段，默认 `suffix_underscore`。
 
-## 9i.12 实现步骤
+## 9i.12 当前实现状态
 
-建议分阶段实现：
+当前 `lua_table` / alias `lua` 已作为内置 aggregate / embedded data exporter 落地，主要实现点包括：
 
 1. **配置与注册**
-   - 在 exporter registry 注册 `lua_table` / alias `lua`。
-   - 定义 `LuaTableOptions`，从统一 export task 的 flattened options 解析配置。
+   - 已在 exporter registry 注册 `lua_table` / alias `lua`。
+   - 已定义 `LuaTableOptions`，从统一 export task 的 flattened options 解析配置。
 2. **命名与符号检查**
-   - 在 `src/exporter/lua_table.rs` 内部实现 Lua naming / keyword helper；不要让 exporter 依赖 codegen 模块。
+   - 在 `src/exporter/lua_table.rs` 内部实现 Lua naming / keyword helper；exporter 不依赖 codegen 模块。
    - 检查 table file、field、index helper、method helper 冲突。
 3. **Lua literal writer**
    - 实现字符串、number、bool、nil、list、struct、fragment 的稳定渲染。
-   - 增加单元测试覆盖转义、nil hole、nested struct/list。
+   - 单元测试覆盖转义、nil hole、nested struct/list。
 4. **table file renderer**
    - CollectionTable：rows array + `FIELD` + `ROW_MT` + index maps + repository API。
    - ObjectTable：keyed object + optional helper。
@@ -358,11 +358,11 @@ Lua 关键字冲突策略应复用 Project Config 的 `keyword_conflict` 概念�
    - 生成 `init.lua` / root file，按需 require table modules。
    - 支持 `preload_all()`。
 6. **Build / artifact 集成**
-   - 复用当前 target DAG 中共享的加载、归一化、校验结果。
+   - 复用当前 target branch executor 中共享的加载、归一化、校验结果。
    - 产物走 Artifact Writer，参与路径冲突检查。
 7. **测试**
-   - 单元测试：options parse、literal writer、symbol conflict、index renderer。
-   - 集成测试：标准 fixture 生成 Lua，使用系统 `lua` / `lua5.4` / `luajit`（存在时）执行 require、index lookup、field access。
+   - 单元测试覆盖 options parse、literal writer、symbol conflict、index renderer。
+   - 集成测试使用标准 fixture 生成 Lua，并在系统 `lua` / `lua5.4` / `luajit` 存在时执行 require、index lookup、field access。
 
 ## 9i.13 测试策略
 

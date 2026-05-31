@@ -24,8 +24,8 @@ use serde::{Deserialize, de::DeserializeOwned};
 
 use crate::{
     ConfigForgeError, Result,
-    exporter::{ExportDependency, RuntimeDataFile},
     meta::{LinkedMetaModel, TargetTags},
+    runtime_contract::{ExportDependency, RuntimeDataFile},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,16 +69,18 @@ pub struct I18nOptions {
     pub typescript_import: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum I18nMode {
+    #[default]
     Generic,
     GlobalFunction,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum I18nFunctionReturn {
+    #[default]
     String,
     Optional,
 }
@@ -344,18 +346,6 @@ impl Default for I18nOptions {
             cpp_include: None,
             typescript_import: None,
         }
-    }
-}
-
-impl Default for I18nMode {
-    fn default() -> Self {
-        Self::Generic
-    }
-}
-
-impl Default for I18nFunctionReturn {
-    fn default() -> Self {
-        Self::String
     }
 }
 

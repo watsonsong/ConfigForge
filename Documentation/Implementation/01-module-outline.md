@@ -21,6 +21,7 @@
 | Diagnostic / Error | `src/diagnostic/` | 统一诊断基础类型、严重级别、位置、报告聚合、格式化，以及 crate 级错误桥接。 | 各模块诊断条目、底层错误。 | `DiagnosticSeverity`、`DiagnosticLocation`、`DiagnosticReport<T>`、`ConfigForgeError`。 | `02-diagnostic-module-detail-design.md` |
 | Project | `src/project/` | 加载 `ConfigForge.toml`、解析工程级配置、合并 imports、归一化路径、抽取 Meta。 | Project Config TOML。 | `ProjectConfig`、`TargetConfig`、`MetaModel`。 | `03-project-module-detail-design.md` |
 | Meta | `src/meta/` | Meta schema 加载、纯配置模型、link 借用视图、结构校验；模型定义按 raw / linked / types / conditions 拆分。 | Meta TOML 片段。 | `MetaModel`、`LinkedMetaModel<'meta>`、`MetaDiagnostic`。 | `04-meta-module-detail-design.md` |
+| Runtime Contract | `src/runtime_contract.rs` | exporter / codegen / build 共享的底层运行时契约，包括 export dependency、runtime data file metadata 和 binary schema revision 计算。 | `LinkedTableMeta<'meta>`、`TargetTags`。 | `ExportDependency`、`RuntimeDataFile`、schema revision。 | 本文档总览。 |
 | Data | `src/data/` | 根据加载计划读取 CSV 等数据源，形成 raw `DataSet`，并提供 Meta-aware resolver。 | `DataLoadPlan`、source files、`LinkedMetaModel<'meta>`。 | `DataSet`、`ResolvedDataSet` / resolved view。 | `05-data-module-detail-design.md` |
 | Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、注册式 validator；入口、table、FK、struct value、default 逻辑分文件维护。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
 | Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 列表、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
@@ -58,14 +59,18 @@ main / cli
       │   ├─ meta
       │   ├─ data
       │   ├─ artifact
+      │   ├─ runtime_contract
       │   └─ diagnostic
       ├─ codegen
       │   ├─ meta
-      │   ├─ exporter       # 运行时表数据和聚合数据产物导出
+      │   ├─ runtime_contract
       │   └─ artifact
+      ├─ runtime_contract
+      │   └─ meta
       └─ artifact
 
 diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 错误 facade，用于在边界层聚合各模块诊断。
+`runtime_contract` 是 exporter / codegen / build 的共享底层契约层；`codegen` 与 `exporter` 是被 `build` 编排的平级模块，不能互相依赖。
 ```
 
 强制约束：
@@ -74,12 +79,13 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 - `diagnostic::error` 作为 crate 错误桥接层可以引用稳定诊断类型和各模块诊断集合，但不能承载业务逻辑，也不能让业务模块为了错误格式化反向依赖上层模块。
 - `meta` 不依赖 `project`、`data`、`validation`、`exporter`、`codegen`、`build`。Meta 只描述 schema 与 link/validate 结果。
 - `data` 可以依赖 `meta` 做 resolver，但 source reader 层应保持 source-neutral；CSV reader 不能读取 exporter/codegen/validation 语义。
+- `runtime_contract` 可以依赖 `meta` 表达 target-visible runtime schema，但不能依赖 `data`、`validation`、`exporter`、`codegen`、`project`、`build`。
 - `validation` 可以依赖 `meta`、`data`、`diagnostic`，不能依赖 `exporter`、`codegen`、`build`。
 - `artifact` 可以依赖标准库、`diagnostic::error` 等底层能力，不能依赖 `meta`、`data`、`validation`、`exporter`、`codegen`、`project`、`build`。
-- `exporter` 可以依赖 `meta`、`data`、`artifact`、`diagnostic`，不能依赖 `validation`、`codegen`、`build`；导出前校验由 build 编排层调用 validation。
-- `codegen` 可以依赖 `meta` 和 `artifact`；生成代码使用逻辑 table name 作为 runtime load key，不依赖 exporter 真实写出的 runtime data artifact path / format；不能依赖 `data`、`validation`、`build`。
+- `exporter` 可以依赖 `meta`、`data`、`artifact`、`diagnostic`、`runtime_contract`，不能依赖 `validation`、`codegen`、`build`；导出前校验由 build 编排层调用 validation。
+- `codegen` 可以依赖 `meta`、`artifact` 和 `runtime_contract`；生成代码使用逻辑 table name 作为 runtime load key，不依赖 exporter 真实写出的 runtime data artifact path / format；不能依赖 `exporter`、`data`、`validation`、`build`。
 - `project` 只解析 `TargetExportConfig` 这一统一 Project TOML 结构，不引用 exporter/codegen 内部 task 配置，也不能依赖 `build`。
-- `build` 是顶层业务编排层，可以依赖 `project`、`meta`、`data`、`validation`、`exporter`、`codegen`；这些被编排模块不能反向依赖 `build`。
+- `build` 是顶层业务编排层，可以依赖 `project`、`meta`、`data`、`validation`、`exporter`、`codegen`、`runtime_contract`；这些被编排模块不能反向依赖 `build`。
 - `cli` 只能调用 `build` 和展示错误；不能绕过 build 直接串联底层模块。
 
 如果一个新增能力需要跨模块协作，优先选择：

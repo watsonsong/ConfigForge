@@ -90,7 +90,7 @@ pub trait AggregateDataExporter: Send + Sync {
 }
 ```
 
-`DataFormatRegistry` 保存 table exporter 与 aggregate exporter 列表并按 name / alias 查询，同时暴露 dependency contract 查询。当前所有 data-backed exporter 的 dependency 均为 `MetaAndData`；`DataOnly` 作为未来能力保留但没有内置实现。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行序列化多个 table artifact；aggregate exporter 也不得在实例内保存本次 build 的可变状态。
+`DataFormatRegistry` 保存 table exporter 与 aggregate exporter 列表并按 name / alias 查询，同时暴露 dependency contract 查询。当前 data-backed exporter 的 dependency 均为 `MetaAndData`；没有单独的 `DataOnly` 模式，因为缺少 Meta 时无法可靠完成类型解释、target 过滤、索引语义和 validation。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行序列化多个 table artifact；aggregate exporter 也不得在实例内保存本次 build 的可变状态。
 
 内置格式通过 `builtin_exporters()` / aggregate registry 注册到 `DataFormatRegistry`，当前 table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`；aggregate exporter 包括已实现的 `GettextPotExporter` 与 `LuaTableExporter`。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现对应 exporter trait，格式名、alias、dependency、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
 

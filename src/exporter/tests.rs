@@ -10,6 +10,7 @@ use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
     data::{DataTable, SourceRole},
     meta::{LinkedTableMeta, MetaModel, TargetTags},
+    runtime_contract::{ExportDependency, RuntimeDataFile, binary_schema_revision},
 };
 
 use super::*;

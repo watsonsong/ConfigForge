@@ -10,6 +10,7 @@ use crate::{
     artifact::Artifact,
     data::DataSet,
     meta::{LinkedMetaModel, TargetTags},
+    runtime_contract::RuntimeDataFile,
 };
 
 use super::DataFormatExporter;
@@ -84,13 +85,6 @@ pub(crate) fn export_runtime_data(
         }
     }
     Ok(artifacts)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeDataFile {
-    pub table_name: String,
-    pub path: String,
-    pub format: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

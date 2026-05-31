@@ -25,7 +25,7 @@ Build 模块需要解决：
 
 ```text
 src/build/
-  mod.rs              # build_target 主入口、target-local DAG 执行、codegen task 执行、artifact 收集与写入调用
+  mod.rs              # build_target 主入口、target-local execution view、branch executor、artifact 收集与写入调用
   options.rs          # BuildOptions / ExecutionOptions / BuildOutput
   target.rs           # TargetConfig normalization、export task naming、dependency validation
   runtime.rs          # MetaAndData export task 编排、data load / validation / export
@@ -38,9 +38,9 @@ src/build/
 | `options.rs` | CLI 传入 build 的稳定参数对象；执行资源限制默认值与合法性。 |
 | `target.rs` | target tags、export task 默认命名、export task 名称校验、dependency 与禁止 task-level input/data 的字段校验。 |
 | `runtime.rs` | MetaAndData export task 执行：基于 `project.input` 构造 DataLoadPlan、复用 DataSet、收集 validation warning、调用 exporter。 |
-| `mod.rs` | `build_target()` 主流程、target-local DAG 构造与执行、MetaOnly codegen task 并行执行、artifact 稳定排序与 Artifact Writer 调用。 |
+| `mod.rs` | `build_target()` 主流程、target-local execution view 构造、MetaAndData / MetaOnly branch executor、artifact 稳定排序与 Artifact Writer 调用。 |
 
-当前 `target.rs` 输出 `NormalizedExportTask`；`mod.rs` 以 exporter dependency contract 构造 target-local DAG 执行视图。MVP 中 Project / Meta link / effective tags 仍由 `build_target()` 在 DAG 执行前准备，DAG 覆盖 data load/normalize/validation 与 exporter 运行节点；后续可继续把 Project / Meta 节点也下沉到通用 executor。
+当前 `target.rs` 输出 `NormalizedExportTask`；`mod.rs` 以 exporter dependency contract 构造 target-local execution view，并直接执行 MetaAndData / MetaOnly 两个分支。`BuildDagNodeKey` 当前只是测试、tracing 和未来通用 executor 的 skeleton，不参与调度、缓存、诊断或 tracing。MVP 中 Project / Meta link / effective tags 仍由 `build_target()` 在 branch executor 前准备；后续若引入完整 DAG executor，可把这些节点和分支执行统一下沉到 node-level scheduler。
 
 ## 10.2a 统一 Export Task 与 DAG
 
@@ -64,7 +64,6 @@ pub(crate) struct NormalizedExportTask {
 pub(crate) enum ExportDependency {
     MetaOnly,
     MetaAndData,
-    DataOnly,
 }
 ```
 
@@ -74,20 +73,21 @@ pub(crate) enum ExportDependency {
 - JSON / MessagePack / bin runtime data exporter：`MetaAndData`。
 - gettext POT：`MetaAndData`。
 - Lua table：`MetaAndData`。
-- `DataOnly` 当前保留为类型能力但没有内置实现；大多数配置导出都需要 Meta。
 
-Build DAG 节点：
+不提供 `DataOnly` 模式：当前和可预见的 exporter 都需要 Meta 来完成类型解释、target 可见性、校验和 artifact 规划。若未来出现不需要 Meta 的纯文件搬运类能力，应作为独立 build step 重新设计，而不是复用 target export task dependency contract。
+
+目标态 Build DAG 节点；当前代码只构造这些 node key 作为 execution view skeleton，实际执行仍由 `execute_target_dag()` 内的两个分支完成：
 
 | Node | Key | 产出 | 说明 |
 | --- | --- | --- | --- |
 | `LinkMeta` | `project_path` | `LinkedMetaModel` | 当前由 `build_target()` 在 DAG 前执行；target tags 不改变 link 结构。 |
-| `EffectiveTargetTags` | `(target, cli_extra_tags)` | `TargetTags` | 当前由 `build_target()` 在 DAG 前执行，作为 DAG context 注入。 |
+| `EffectiveTargetTags` | `(target, effective_tags)` | `TargetTags` | 当前由 `build_target()` 在 branch executor 前执行，作为 context 注入；skeleton node key 记录合并后的 effective tags。 |
 | `DataLoadPlan` | `(project.input, effective_tags)` | `DataLoadPlan` | 必须包含 tags，因为 override source 受 tags 影响。 |
 | `NormalizeAndValidate` | `(project.input, effective_tags)` | normalized `DataSet` + warnings | MVP 中合并 data load / normalize / validation execution；error 阻断依赖该数据集的 exporter。 |
 | `RunExporter` | `(target, export_name)` | `Vec<Artifact>` | 根据 dependency 注入 MetaOnly 或 MetaAndData context。 |
 | `WriteArtifacts` | all exporter outputs | `BuildOutput` | 全局路径冲突、dry-run、落盘。 |
 
-DAG 执行约束：
+当前 branch executor 已满足的执行约束：
 
 1. `MetaOnly` exporter 只依赖 `LinkMeta` 和 `EffectiveTargetTags`，可以与 data load 并行。
 2. `MetaAndData` exporter 依赖对应 `(project.input, effective_tags)` 的 validation 成功结果。
@@ -95,11 +95,11 @@ DAG 执行约束：
 4. Artifact 写出必须在所有 exporter 产物收集后统一执行，确保跨 exporter 路径冲突不会产生部分写入。
 5. 输出顺序按 target 中 export task 声明顺序稳定排序；并行执行不得改变 dry-run 和诊断顺序。
 
-迁移步骤建议：
+迁移步骤建议与当前状态：
 
 1. **配置与内部模型统一**：Project Config 使用 `[[targets.exports]]`；normalize 阶段全部转换为 `NormalizedExportTask`。（已完成 MVP）
 2. **注册表补 contract**：为现有 DataFormatExporter / AggregateDataExporter / CodeGenerator 增加 dependency contract，声明 `type_id`、alias、dependency、config parser。（已完成 dependency contract MVP）
-3. **DAG executor MVP**：先实现 target-local DAG，不做跨 target 增量缓存；保留当前 rayon pool，但按节点依赖调度。（已完成 MVP）
+3. **Branch executor MVP**：构造 target-local execution view skeleton；保留当前 rayon pool，按 dependency contract 拆成 MetaAndData / MetaOnly 两个分支并行执行，尚未实现通用 node-level DAG scheduler。（已完成 MVP）
 4. **文档与 fixture 清理**：文档和 standard_project 全部使用 `[[targets.exports]]`，不保留旧 data/code 语法兼容路径。
 
 ## 10.3 Target normalization
@@ -137,7 +137,8 @@ build_target(options)
   -> project.raw_meta_model()
   -> MetaModel::link()
   -> execute_target_dag(...)
-      -> split RunExporter nodes by dependency contract
+      -> build execution view skeleton for tests / future tracing
+      -> split export tasks by dependency contract
       -> MetaAndData branch: DataLoadPlan / DataLoader / normalize / validation / exporter
       -> MetaOnly branch: format-agnostic codegen input / CodeGenerator::generate
       -> run both branches through the rayon pool when both exist
@@ -146,7 +147,7 @@ build_target(options)
   -> BuildOutput { warnings }
 ```
 
-Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。`MetaOnly` exporter 只依赖 linked Meta 与 effective target tags，可与 `MetaAndData` 分支中的 data load / validation 并行。Artifact 收集仍按 `[[targets.exports]]` 声明顺序排序，因此并行执行不会改变 dry-run 条目顺序或跨 exporter 路径冲突检查语义。
+Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。`MetaOnly` codegen export task 只依赖 linked Meta 与 effective target tags，可与 `MetaAndData` 分支中的 data load / validation 并行。Artifact 收集仍按 `[[targets.exports]]` 声明顺序排序，因此并行执行不会改变 dry-run 条目顺序或跨 exporter 路径冲突检查语义。
 
 ## 10.5 MetaAndData export task 编排
 
@@ -186,6 +187,7 @@ Build 是顶层业务编排层，因此可以依赖：
 - `validation`：normalize 和 validation report；
 - `exporter`：runtime data export type 执行；
 - `codegen`：生成器和 generated files；
+- `runtime_contract`：`ExportDependency`、`RuntimeDataFile` 和 binary schema revision 等共享底层契约；
 - `artifact`：统一制品写入、dry-run 和写入结果。
 
 但反向依赖禁止：上述模块不能为了调用方便引用 `build` 中的 normalized target 类型或 runtime export result。若类型需要跨模块共享，应下沉到更合适的模块，或由 build 做转换。

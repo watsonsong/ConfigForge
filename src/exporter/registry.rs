@@ -9,19 +9,12 @@ use crate::{
     data::{DataSet, DataTable},
     exporter::TargetDataConfig,
     meta::{LinkedTableMeta, TargetTags},
+    runtime_contract::ExportDependency,
 };
 
 use super::{RuntimeArtifactPlan, binary, json, messagepack};
 use crate::exporter::gettext_pot::GettextPotExporter;
 use crate::exporter::lua_table::LuaTableExporter;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum ExportDependency {
-    MetaOnly,
-    MetaAndData,
-    DataOnly,
-}
 
 /// Runtime data format exporter.
 ///

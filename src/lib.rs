@@ -10,6 +10,7 @@ mod diagnostic;
 mod exporter;
 mod meta;
 mod project;
+mod runtime_contract;
 mod validation;
 
 pub mod error {
@@ -40,8 +41,7 @@ pub use diagnostic::{
 pub use exporter::{
     BinaryDataExporter, DataFormatExporter, DataFormatRegistry, ExportedTable,
     ExportedTablePayload, ExportedValue, JsonDataExporter, LuaTableExporter,
-    MessagePackDataExporter, RuntimeArtifactPlan, RuntimeDataFile, TargetDataConfig,
-    builtin_exporters,
+    MessagePackDataExporter, RuntimeArtifactPlan, TargetDataConfig, builtin_exporters,
 };
 pub use meta::{
     EnumMeta, EnumValueMeta, ExportCondition, FieldForeignKeyMeta, FieldMeta,
@@ -53,6 +53,7 @@ pub use meta::{
     ValidationSeverity, ValidatorMeta, ValueLayout,
 };
 pub use project::{ProjectConfig, ProjectConfigMeta, TargetConfig};
+pub use runtime_contract::{ExportDependency, RuntimeDataFile};
 pub use validation::{
     CompiledValidationPlan, CompiledValidator, ExportTableView, ExportValidationView,
     ValidationContext, ValidationIssue, ValidationIssueLocation, ValidationReport,

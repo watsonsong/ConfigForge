@@ -24,10 +24,8 @@ pub use model::{ExportedTable, ExportedTablePayload, ExportedValue};
 pub use payload::build_exported_table_payload;
 pub use registry::{
     AggregateDataExporter, DataExporterRef, DataFormatExporter, DataFormatRegistry,
-    ExportDependency, builtin_exporters,
+    builtin_exporters,
 };
-pub use runtime::{RuntimeArtifactPlan, RuntimeDataFile};
+pub use runtime::RuntimeArtifactPlan;
 
-pub(crate) use binary::schema_revision as binary_schema_revision;
-pub(crate) use json::FORMAT as JSON_FORMAT;
 pub(crate) use runtime::export_runtime_data;

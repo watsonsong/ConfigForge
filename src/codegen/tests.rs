@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 use crate::{
     ConfigForgeError,
-    exporter::{ExportDependency, RuntimeDataFile},
     meta::{MetaModel, TargetTags},
+    runtime_contract::{ExportDependency, RuntimeDataFile},
 };
 
 use super::ir::CodeRelationCardinality;

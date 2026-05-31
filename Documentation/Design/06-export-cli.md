@@ -159,11 +159,17 @@ CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 t
 - CLI 诊断使用 export type ID；生成代码不再包含格式枚举。
 - 如需兼容 `msgpack` 简写，可作为解析别名，但文档和生成产物统一输出 `messagepack`。
 
+当前内置聚合 / 内嵌数据 export type：
+
+| Type | 说明 |
+| --- | --- |
+| `gettext_pot` / `pot` | Gettext POT 聚合 exporter；从当前 target 可见 `text` 字段抽取待翻译模板。 |
+| `lua_table` / `lua` | Lua 内嵌数据 exporter；代码和数据合一，作为 MetaAndData export task 读取 source data，并生成 root facade + 每表一个 `.lua` 文件。 |
+
 未来可扩展但当前不实现：
 
 | Type | 说明 |
 | --- | --- |
-| `lua_table` | Lua 特殊模式，代码和数据合一；作为 MetaAndData export task 读取 source data，并生成 root facade + 每表一个 `.lua` 文件。 |
 | `yaml` | 可选文本格式。 |
 | `sqlite` | 可选数据库格式。 |
 | `protobuf` | 未来设计，不作为当前实现要求。 |
@@ -612,7 +618,7 @@ config-forge --project ConfigForge.toml --target client
 1. 解析 Project Config，并递归加载其顶层 `imports` 指向的工程配置片段。
 2. 按 `--target` 找到目标 target。
 3. 合并所有配置片段中的 `enums`、`structs`、`tables` 并完成 link/validate。
-4. 根据 `[[targets.exports]]` 与 exporter dependency contract 构造 target-local DAG；MetaAndData 分支读取 `project.input`、归一化、校验并运行数据相关 exporter，MetaOnly 分支运行格式无关 codegen。
+4. 根据 `[[targets.exports]]` 与 exporter dependency contract 构造 target-local execution view；当前实现按 MetaAndData / MetaOnly 两个分支执行，而不是完整通用 DAG 调度器。MetaAndData 分支读取 `project.input`、归一化、校验并运行数据相关 exporter，MetaOnly 分支运行格式无关 codegen。
 5. 同 `(project.input, effective_tags)` 的 MetaAndData export task 复用加载、归一化和校验结果。
 6. 汇总所有 export artifacts，按 export task 声明顺序稳定排序，并统一完成路径归一化和冲突检查。
 7. 按 `--dry-run` / `--write-mode` 写出 artifact，或在 dry-run 模式下只返回写入计划。

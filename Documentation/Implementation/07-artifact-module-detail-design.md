@@ -122,7 +122,7 @@ pub struct RuntimeDataArtifact {
 
 其中：
 
-- `RuntimeDataFile` 仍是 codegen 需要消费的 runtime loader 路径契约。
+- `RuntimeDataFile` 是 runtime artifact metadata / manifest contract；当前默认 codegen 不消费真实 artifact path，而是使用逻辑 table name。
 - `Artifact.path` 是实际写入路径，由 export task output root + runtime data file path 得到。
 - Exporter 不再调用 `fs::create_dir_all` / `fs::write`，也不选择 `ArtifactWriteMode`。
 

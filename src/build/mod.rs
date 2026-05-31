@@ -23,9 +23,9 @@ use crate::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, GeneratedFile,
         builtin_generators,
     },
-    exporter::ExportDependency,
     meta::TargetTags,
     project::ProjectConfig,
+    runtime_contract::ExportDependency,
 };
 
 use runtime::{RuntimeConfigForgeResult, export_meta_and_data_tasks};
@@ -83,7 +83,7 @@ enum BuildDagNodeKey {
     LinkMeta,
     EffectiveTargetTags {
         target_name: String,
-        extra_tags: Vec<String>,
+        effective_tags: Vec<String>,
     },
     DataLoadPlan {
         input: Option<PathBuf>,
@@ -118,7 +118,11 @@ struct DagBranchOutput {
 }
 
 fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<TargetDagOutput> {
-    let _nodes = build_target_local_dag(context.target, context.data_root, context.target_tags);
+    // This node list is an execution-view skeleton for tests and future tracing/executor work.
+    // The current MVP below still executes two dependency branches directly instead of scheduling
+    // these node keys through a generic DAG executor.
+    let _execution_view_nodes =
+        build_target_local_dag(context.target, context.data_root, context.target_tags);
     let meta_and_data_exports = context
         .target
         .exports
@@ -180,11 +184,12 @@ fn build_target_local_dag(
     data_root: Option<&Path>,
     target_tags: &TargetTags,
 ) -> Vec<BuildDagNodeKey> {
+    let effective_tags = target_tags.iter().map(str::to_owned).collect::<Vec<_>>();
     let mut nodes = vec![
         BuildDagNodeKey::LinkMeta,
         BuildDagNodeKey::EffectiveTargetTags {
             target_name: target.name.clone(),
-            extra_tags: Vec::new(),
+            effective_tags: effective_tags.clone(),
         },
     ];
     if target
@@ -193,7 +198,6 @@ fn build_target_local_dag(
         .any(|task| task.dependency == ExportDependency::MetaAndData)
     {
         let input = data_root.map(Path::to_path_buf);
-        let effective_tags = target_tags.iter().map(str::to_owned).collect::<Vec<_>>();
         nodes.push(BuildDagNodeKey::DataLoadPlan {
             input: input.clone(),
             effective_tags: effective_tags.clone(),
@@ -242,10 +246,8 @@ fn execute_runtime_export_nodes(
 
     let mut runtime_results = Vec::new();
     let mut export_outputs = Vec::new();
-    for ((declaration_index, task), task_output) in export_tasks
-        .iter()
-        .copied()
-        .zip(output.task_outputs.into_iter())
+    for ((declaration_index, task), task_output) in
+        export_tasks.iter().copied().zip(output.task_outputs)
     {
         if task_output.export_name != task.name {
             return Err(ConfigForgeError::Validation(format!(

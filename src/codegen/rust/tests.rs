@@ -6,8 +6,8 @@ use crate::{
         CaseStyle, CodeExportInput, CodeGenerator,
         tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
     },
-    exporter::RuntimeDataFile,
     meta::{MetaModel, TargetTags},
+    runtime_contract::RuntimeDataFile,
 };
 
 use super::{LANGUAGE, RustCodeGenerator, RustCodegenOptions};

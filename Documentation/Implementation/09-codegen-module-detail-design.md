@@ -140,7 +140,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 - ObjectTable 不生成 collection repository，不生成 index lookup helpers。
 - ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前 Rust/C++/TypeScript 生成器已渲染 `linked_field` helper/cache/link。
 - Rust / TypeScript / C++ 都应避免把 ObjectTable 误表达为 rows collection。
-- Runtime data file path 仍由 build 传入的 `RuntimeDataFile` 决定；codegen 不关心 ObjectTable 的 CSV `key,value` 物理布局。
+- Runtime data load key 使用逻辑 table name，不由 exporter 真实写出的 `RuntimeDataFile.path` 决定；codegen 不关心 ObjectTable 的 CSV `key,value` 物理布局。
 
 建议 API 形态：
 
@@ -162,7 +162,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 | Core model / IR / options | [`09f-codegen-core-model-and-options.md`](09f-codegen-core-model-and-options.md) | `CodeExportTarget` / `CodeExportInput` / `GeneratedFile`、CodeModel IR、命名策略、类型映射和通用 writer。 |
 | Index and relation helpers | [`09g-codegen-index-and-relation-helpers.md`](09g-codegen-index-and-relation-helpers.md) | CollectionTable index lookup、`linked_field` relation helper、row-index cache、`link` / `link_all`。 |
 | Generator API and tests | [`09h-codegen-generator-api-and-tests.md`](09h-codegen-generator-api-and-tests.md) | `CodeGenerator` 接口、新语言接入步骤、文件组织、诊断和测试计划。 |
-| Lua embedded data generator | [`09i-lua-embedded-data-generator.md`](09i-lua-embedded-data-generator.md) | 计划中的 Lua data+code 合一导出、每表 `.lua`、lazy require、row array + metatable、索引和实现步骤。 |
+| Lua embedded data generator | [`09i-lua-embedded-data-generator.md`](09i-lua-embedded-data-generator.md) | 已实现的 Lua data+code 合一导出、每表 `.lua`、lazy require、row array + metatable、索引和实现说明。 |
 
 ### 9.4.1 当前实现状态摘要
 

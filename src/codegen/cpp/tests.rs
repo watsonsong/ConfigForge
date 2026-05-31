@@ -6,8 +6,8 @@ use crate::{
         CodeExportInput, CodeGenerator, GeneratedFile,
         tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
     },
-    exporter::RuntimeDataFile,
     meta::{MetaModel, TargetTags},
+    runtime_contract::RuntimeDataFile,
 };
 
 use super::{CppCodeGenerator, CppCodegenOptions, LANGUAGE};

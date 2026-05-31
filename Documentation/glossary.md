@@ -201,7 +201,7 @@
 | 导出 | Export | `Export`, `export` | 生成运行时数据、代码和特殊产物。 |
 | 导出目标 | Export Target | `ExportTarget` | 一个配置化输出目标。 |
 | 数据导出器 | Data Exporter | `DataExporter` | 从 ExportView 写 runtime data 的导出器。 |
-| 运行时数据格式 | Runtime Data Format | `RuntimeDataFormat` | 当前支持 `json`、`messagepack`、`bin`；未来可扩展 `lua_table`、`yaml`、`sqlite`、`protobuf`。 |
+| 运行时数据格式 | Runtime Data Format | `RuntimeDataFormat` | 当前 runtime table data export type 支持 `json`、`messagepack`、`bin`；当前内置聚合 / 内嵌数据 export type 支持 `gettext_pot` / `pot`、`lua_table` / `lua`；未来可扩展 `yaml`、`sqlite`、`protobuf`。 |
 | JSON 导出 | JSON Export | `JsonDataExporter` | 输出 JSON runtime data。 |
 | Lua Table 导出 | Lua Table Export | `LuaTableExporter` | 输出 Lua table；Lua 中代码和数据可合一。 |
 | Lua 内嵌数据生成器 | Lua Embedded Data Generator | `LuaEmbeddedDataExporter` | `type = "lua_table"` 的 MetaAndData export task；消费 Meta + Data，生成 root facade 与每表 `.lua` 文件。 |
