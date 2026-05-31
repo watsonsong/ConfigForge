@@ -135,6 +135,13 @@ pub(super) fn validate_generated_symbols(
             GeneratedSymbol::new("static field", "dataFile", "dataFile"),
             GeneratedSymbol::new("field", "rows_", "rows_"),
         ];
+        if table.schema_revision.is_some() {
+            member_symbols.push(GeneratedSymbol::new(
+                "static field",
+                "expectedSchemaRevision",
+                "expectedSchemaRevision",
+            ));
+        }
         for index in &table.indexes {
             member_symbols.push(GeneratedSymbol::new(
                 "index storage",
@@ -151,6 +158,7 @@ pub(super) fn validate_generated_symbols(
         let mut method_symbols = vec![
             GeneratedSymbol::new("method", "constructor", "constructor"),
             GeneratedSymbol::new("method", "load", "load"),
+            GeneratedSymbol::new("method", "loadSync", "loadSync"),
         ];
         if table.preserve_source_order {
             method_symbols.push(GeneratedSymbol::new("getter", "length", "length"));
@@ -189,6 +197,60 @@ pub(super) fn validate_generated_symbols(
                 names.field_name(&table.name)?,
             ))
         }),
+    )?;
+
+    let mut game_data_members = vec![
+        GeneratedSymbol::new("method", "constructor", "constructor"),
+        GeneratedSymbol::new("method", "load", "load"),
+        GeneratedSymbol::new("method", "loadSync", "loadSync"),
+        GeneratedSymbol::new("method", "loadLazy", "loadLazy"),
+        GeneratedSymbol::new("method", "linkAll", "linkAll"),
+    ];
+    for table in &model.tables {
+        game_data_members.push(GeneratedSymbol::new(
+            "table field",
+            &table.name,
+            names.field_name(&table.name)?,
+        ));
+    }
+    ensure_unique_generated_symbols("typescript", "GameData class members", game_data_members)?;
+
+    let mut lazy_game_data_members = vec![
+        GeneratedSymbol::new("loader field", "loader", "loader"),
+        GeneratedSymbol::new("method", "constructor", "constructor"),
+        GeneratedSymbol::new("method", "loadLazy", "loadLazy"),
+        GeneratedSymbol::new("method", "preloadAll", "preloadAll"),
+        GeneratedSymbol::new("method", "linkAll", "linkAll"),
+        GeneratedSymbol::new("method", "preloadAllSync", "preloadAllSync"),
+        GeneratedSymbol::new("method", "linkAllSync", "linkAllSync"),
+    ];
+    for table in &model.tables {
+        let field_name = names.field_name(&table.name)?;
+        lazy_game_data_members.push(GeneratedSymbol::new(
+            "table promise field",
+            &table.name,
+            format!("{field_name}Promise"),
+        ));
+        lazy_game_data_members.push(GeneratedSymbol::new(
+            "table value field",
+            &table.name,
+            format!("{field_name}Value"),
+        ));
+        lazy_game_data_members.push(GeneratedSymbol::new(
+            "table loader method",
+            &table.name,
+            field_name.clone(),
+        ));
+        lazy_game_data_members.push(GeneratedSymbol::new(
+            "table sync loader method",
+            &table.name,
+            format!("{field_name}Sync"),
+        ));
+    }
+    ensure_unique_generated_symbols(
+        "typescript",
+        "LazyGameData class members",
+        lazy_game_data_members,
     )?;
 
     Ok(())

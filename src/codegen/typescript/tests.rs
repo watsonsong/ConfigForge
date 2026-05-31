@@ -59,6 +59,7 @@ fn emits_async_loader_and_maps() {
     assert!(content.contains("const length = readListLength(reader);"));
     assert!(content.contains("readonly displayName: string;"));
     assert!(content.contains("static async load"));
+    assert!(content.contains("static loadSync(loader: RuntimeDataLoader): ItemsTable"));
     assert!(content.contains("static loadSync(loader: RuntimeDataLoader): GameData"));
     assert!(content.contains("static loadLazy(loader: RuntimeDataLoader): LazyGameData"));
     assert!(content.contains("export class LazyGameData"));
@@ -287,6 +288,52 @@ fn rejects_lazy_game_data_top_level_name_conflicts() {
         "typescript codegen",
         "duplicate generated identifier `LazyGameData`",
         "top-level exports",
+    );
+}
+
+#[test]
+fn rejects_game_data_sync_loader_member_conflicts() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "load_sync"
+            source = "load_sync.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+
+    assert_duplicate_generated_identifier(
+        TypeScriptCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+        LANGUAGE,
+        "duplicate generated identifier `loadSync`",
+        "GameData class members",
+    );
+}
+
+#[test]
+fn rejects_lazy_game_data_preload_all_sync_member_conflicts() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "preload_all_sync"
+            source = "preload_all_sync.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+
+    assert_duplicate_generated_identifier(
+        TypeScriptCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+        LANGUAGE,
+        "duplicate generated identifier `preloadAllSync`",
+        "LazyGameData class members",
     );
 }
 
