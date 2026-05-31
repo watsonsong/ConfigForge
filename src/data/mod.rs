@@ -5,6 +5,7 @@ mod csv;
 mod loader;
 mod model;
 mod plan;
+mod provider;
 mod resolved;
 mod resolver;
 pub(crate) mod typed_value;
@@ -15,6 +16,10 @@ pub use self::loader::DataLoader;
 pub use self::model::{DataRow, DataSet, DataTable, RawSourceData, RowSourceInfo, SourceRole};
 pub use self::plan::SourceReadPlan;
 pub use self::plan::{DataLoadPlan, DataProvider, DataSourceLayout, DataSourcePlan};
+pub use self::provider::{
+    AsyncSourceReadShell, LocalCsvSourceProvider, RemoteProviderPolicy, SourceProvider,
+    SourceProviderConcurrency, SourceProviderResource,
+};
 pub use self::resolved::{
     ArrayElementValue, DataValue, ResolvedRow, ResolvedTable, ResolvedValue, ScalarValue,
     ValueSourceKind,

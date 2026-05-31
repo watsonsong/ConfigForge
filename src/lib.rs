@@ -31,8 +31,10 @@ pub use codegen::{
     default_module_name, find_generator,
 };
 pub use data::{
-    CsvDataReader, DataLoadPlan, DataLoader, DataProvider, DataRow, DataSet, DataSourceLayout,
-    DataSourcePlan, DataTable, RawSourceData, RowSourceInfo, SourceReadPlan,
+    AsyncSourceReadShell, CsvDataReader, DataLoadPlan, DataLoader, DataProvider, DataRow, DataSet,
+    DataSourceLayout, DataSourcePlan, DataTable, LocalCsvSourceProvider, RawSourceData,
+    RemoteProviderPolicy, RowSourceInfo, SourceProvider, SourceProviderConcurrency,
+    SourceProviderResource, SourceReadPlan,
 };
 pub use diagnostic::{
     ConfigForgeError, Diagnostic, DiagnosticEntry, DiagnosticLocation, DiagnosticReport,

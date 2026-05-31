@@ -55,7 +55,7 @@ impl DataLoader {
         for (source_index, source) in plan.sources().iter().enumerate() {
             loaded.push((source_index, source, reader(source)?));
         }
-        Ok(RawSourceData::new(Self::merge_loaded_sources(loaded)?))
+        Ok(RawSourceData::new(merge_loaded_sources(loaded)?))
     }
 
     pub(crate) fn read_sources_with_reader_and_pool(
@@ -77,7 +77,7 @@ impl DataLoader {
         for (source_index, source, table) in loaded {
             resolved.push((source_index, source, table?));
         }
-        Ok(RawSourceData::new(Self::merge_loaded_sources(resolved)?))
+        Ok(RawSourceData::new(merge_loaded_sources(resolved)?))
     }
 
     pub fn load_source(&self, source: &DataSourcePlan) -> Result<DataTable> {
@@ -95,30 +95,32 @@ impl DataLoader {
             },
         }
     }
+}
 
-    fn merge_loaded_sources(loaded: Vec<(usize, &DataSourcePlan, DataTable)>) -> Result<DataSet> {
-        let mut table_order = Vec::new();
-        let mut merged: BTreeMap<String, PendingTable> = BTreeMap::new();
-        for (source_index, source, table) in loaded {
-            if !merged.contains_key(&source.table_name) {
-                table_order.push(source.table_name.clone());
-            }
-            let pending = merged.entry(source.table_name.clone()).or_default();
-            pending.apply_source(source_index, source, table)?;
+pub(crate) fn merge_loaded_sources(
+    loaded: Vec<(usize, &DataSourcePlan, DataTable)>,
+) -> Result<DataSet> {
+    let mut table_order = Vec::new();
+    let mut merged: BTreeMap<String, PendingTable> = BTreeMap::new();
+    for (source_index, source, table) in loaded {
+        if !merged.contains_key(&source.table_name) {
+            table_order.push(source.table_name.clone());
         }
-
-        let mut tables = Vec::with_capacity(table_order.len());
-        for table_name in table_order {
-            if let Some(pending) = merged.remove(&table_name) {
-                tables.push(DataTable::new_with_sources(
-                    table_name,
-                    pending.rows,
-                    pending.row_sources,
-                )?);
-            }
-        }
-        DataSet::try_new(tables)
+        let pending = merged.entry(source.table_name.clone()).or_default();
+        pending.apply_source(source_index, source, table)?;
     }
+
+    let mut tables = Vec::with_capacity(table_order.len());
+    for table_name in table_order {
+        if let Some(pending) = merged.remove(&table_name) {
+            tables.push(DataTable::new_with_sources(
+                table_name,
+                pending.rows,
+                pending.row_sources,
+            )?);
+        }
+    }
+    DataSet::try_new(tables)
 }
 
 #[derive(Default)]

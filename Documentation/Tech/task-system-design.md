@@ -888,11 +888,13 @@ Phase 3 实现复核：后续 Phase 4-12 的阶段顺序仍然成立。Phase 4 �
 
 目标：为远端 source 提供 async I/O 调度能力，但不改变本地 CSV 主路径。
 
-- TODO：引入 owned `BuildOptions` / async build shell 或局部 current-thread runtime，避免借用跨 `await`。
-- TODO：定义 provider resource 类型：`BlockingLocal`、`AsyncIo`、`Network`，并让 Google Sheet / 飞书文档 provider 走 `network_concurrency`。
-- TODO：为远端 provider 设计 retry/backoff、rate-limit、认证错误和 source location diagnostics。
-- TODO：下载 bytes/cells 后再切回 CPU pool 做 parse/normalize，不在 async runtime worker 上做重 CPU 工作。
+- DONE：引入 async provider shell 雏形。当前不引入 Tokio，先用 owned `SourceReadPlan` + scoped worker shell 表达可取消 / 可限流的 provider-independent 调度边界，避免借用跨未来 `await`。
+- DONE：定义 provider resource 类型：`BlockingLocal`、`AsyncIo`、`Network`；Google Sheet / 飞书文档 provider 后续应声明为 `Network` 并走 `network` concurrency lane。
+- DONE：为远端 provider 预留 `RemoteProviderPolicy`，记录 retry/backoff、rate-limit 入口；认证错误和 source location diagnostics 仍在正式远端 provider 落地时细化。
+- DONE：明确下载 bytes/cells 后再切回 CPU pool 做 parse/normalize，不在 async runtime worker 上做重 CPU 工作；当前 shell 只负责 source read，normalize 仍在后续阶段。
 - 验证：使用 fake async provider 的单元测试覆盖 semaphore 限流、失败诊断稳定排序、取消行为；本地 CSV integration 不变。
+
+Phase 4 实现复核：后续 Phase 5-12 的阶段顺序仍然成立。Phase 5 可以基于 `AsyncSourceReadShell` 的 stop-scheduling 语义扩展为 MetaLink failure 触发 cancellation token；正式 Tokio / network provider 可在 Google Sheet / 飞书 provider 进入实现阶段再引入，避免当前本地 CSV 主路径承担 async runtime 复杂度。
 
 ### Phase 5：MetaLink 与 SourceRead 并行
 

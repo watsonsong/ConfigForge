@@ -65,6 +65,8 @@ Rust 不使用传统 OO class。本文档中的“类”对应 Rust 的 `struct`
 | RowSourceInfo | `struct RowSourceInfo` | 行来源元数据，记录 source ordinal/path/fragments/source row number。 |
 | DataProvider | `enum DataProvider` | 当前支持的 provider，第一阶段只有 `Csv`。 |
 | DataLoader | `struct DataLoader` | 根据 `SourceReadPlan` 读取 `RawSourceData`，并通过兼容入口支持 `DataLoadPlan -> DataSet`。 |
+| SourceProviderResource | `enum SourceProviderResource` | provider 调度资源类型：`BlockingLocal` / `AsyncIo` / `Network`。 |
+| AsyncSourceReadShell | `struct AsyncSourceReadShell` | 远端 provider 准备阶段的 source read shell，按 resource lane 限流并稳定合并结果。 |
 | CsvDataReader | `struct CsvDataReader` | CSV provider 的具体读取器。 |
 | DataResolver | `struct DataResolver` | 使用 linked meta 将 raw DataSet 解析为 ResolvedDataSet / target resolved view。 |
 | ResolvedDataSet | `struct ResolvedDataSet` | Meta-aware 的结构化数据快照，隐藏 JSON cell / expanded path 的 source 差异。 |
@@ -82,6 +84,7 @@ src/data/
   resolver.rs     # DataResolver / StructOccurrenceEvaluator
   plan.rs         # SourceReadPlan / DataLoadPlan / DataSourcePlan / DataProvider
   loader.rs       # DataLoader，编排按计划加载各表
+  provider.rs     # SourceProvider / AsyncSourceReadShell / provider resource lane
   csv.rs          # CsvDataReader，CSV 文件读取实现
   tests.rs        # Data 模块单元测试
 ```
@@ -553,6 +556,40 @@ S1 Oak 覆盖示例在 DataLoader 中的 materialization 结果：
 2. 构建 effective target tags 不包含 `s1` 时，`materials_s1.csv` 不进入 `SourceReadPlan`，最终 row 保持 price 3。
 3. 构建 effective target tags 包含 `s1` 时，`materials_s1.csv` 进入 plan；其唯一 row 用 primary index `by_id(id=2002)` 匹配 base row，并整行替换为 price 5。
 4. 替换后的 row 再进入后续 normalize / validation / exporter；因此 unique index、FK、row_export 都只看到 S1 的最终视图。
+
+### 5.7.2 Async provider shell 与 resource lane
+
+Phase 4 引入 `SourceProvider` / `AsyncSourceReadShell` 作为远端 provider 的调度外壳，但不改变本地 CSV 主路径，也不强制引入 Tokio：
+
+```rust
+pub enum SourceProviderResource {
+    BlockingLocal,
+    AsyncIo,
+    Network,
+}
+
+pub struct SourceProviderConcurrency {
+    pub blocking_local: usize,
+    pub async_io: usize,
+    pub network: usize,
+}
+
+pub trait SourceProvider: Sync {
+    fn resource(&self, source: &DataSourcePlan) -> SourceProviderResource;
+    fn read_source(&self, source: &DataSourcePlan) -> Result<DataTable>;
+}
+
+pub struct AsyncSourceReadShell { ... }
+```
+
+设计约束：
+
+- `SourceReadPlan` 仍是 provider-independent 输入；provider 不允许隐式读取 `LinkedMetaModel`。
+- resource lane 用于区分本地阻塞 I/O、未来 async I/O、远端网络 source。Google Sheet / 飞书 provider 应声明为 `Network`，并使用 `network` concurrency lane。
+- shell 按 plan index 稳定合并结果和选择错误；即使后面的 source 更早失败，也应返回最早 plan index 的错误。
+- 当前 shell 在遇到错误后停止调度尚未启动的 source，并等待已启动 source 完成；Phase 5 可在此基础上扩展 cancellation token。
+- 远端 provider 策略由 `RemoteProviderPolicy` 预留，包括 retry、base backoff 与 rate-limit。认证错误、source location diagnostics、cell/bytes 下载后的 CPU parse 切换，应在正式 provider 实现时落地。
+- 本阶段不在 async worker 上做 typed normalize；normalize 仍在 raw source read 完成后进入 CPU 阶段。
 
 ## 5.8 与 Meta / Validation / Exporter 的流程关系
 

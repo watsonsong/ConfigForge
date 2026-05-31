@@ -1318,6 +1318,162 @@ fn data_loader_read_sources_is_serial() {
 }
 
 #[test]
+fn async_source_read_shell_limits_network_concurrency() {
+    let plan = SourceReadPlan::new(vec![
+        plan_source("items", "items.csv"),
+        plan_source("levels", "levels.csv"),
+        plan_source("quests", "quests.csv"),
+    ]);
+    let active = Arc::new(AtomicUsize::new(0));
+    let max_active = Arc::new(AtomicUsize::new(0));
+    let provider = FakeSourceProvider {
+        resource: SourceProviderResource::Network,
+        active: Some(active.clone()),
+        max_active: Some(max_active.clone()),
+        delay: Duration::from_millis(10),
+        ..FakeSourceProvider::default()
+    };
+    let shell = AsyncSourceReadShell::new(
+        SourceProviderConcurrency::new(1, 1, 2).expect("concurrency should be valid"),
+    );
+
+    let data_set = shell
+        .read_sources(&plan, &provider)
+        .expect("async shell should read sources")
+        .into_data_set();
+
+    assert_eq!(max_active.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        data_set
+            .tables()
+            .iter()
+            .map(|table| table.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["items", "levels", "quests"]
+    );
+}
+
+#[test]
+fn async_source_read_shell_reports_first_plan_error_not_completion_order() {
+    let plan = SourceReadPlan::new(vec![
+        plan_source("items", "slow-first.csv"),
+        plan_source("levels", "fast-second.csv"),
+    ]);
+    let provider = FakeSourceProvider {
+        resource: SourceProviderResource::Network,
+        failures: vec![
+            (PathBuf::from("slow-first.csv"), "first failed".to_owned()),
+            (PathBuf::from("fast-second.csv"), "second failed".to_owned()),
+        ],
+        per_path_delay: vec![(PathBuf::from("slow-first.csv"), Duration::from_millis(20))],
+        ..FakeSourceProvider::default()
+    };
+    let shell = AsyncSourceReadShell::new(
+        SourceProviderConcurrency::new(1, 1, 2).expect("concurrency should be valid"),
+    );
+
+    let error = shell.read_sources(&plan, &provider).unwrap_err();
+
+    assert!(matches!(error, ConfigForgeError::Validation(message) if message == "first failed"));
+}
+
+#[test]
+fn async_source_read_shell_stops_scheduling_after_failure() {
+    let plan = SourceReadPlan::new(vec![
+        plan_source("items", "ok.csv"),
+        plan_source("levels", "fail.csv"),
+        plan_source("quests", "not-started.csv"),
+    ]);
+    let started = Arc::new(Mutex::new(Vec::new()));
+    let provider = FakeSourceProvider {
+        resource: SourceProviderResource::Network,
+        started: Some(started.clone()),
+        failures: vec![(PathBuf::from("fail.csv"), "fail requested".to_owned())],
+        ..FakeSourceProvider::default()
+    };
+    let shell = AsyncSourceReadShell::new(
+        SourceProviderConcurrency::new(1, 1, 1).expect("concurrency should be valid"),
+    );
+
+    let error = shell.read_sources(&plan, &provider).unwrap_err();
+
+    assert!(matches!(error, ConfigForgeError::Validation(message) if message == "fail requested"));
+    assert_eq!(
+        *started.lock().expect("started list should be lockable"),
+        vec![PathBuf::from("ok.csv"), PathBuf::from("fail.csv")]
+    );
+}
+
+#[test]
+fn source_provider_concurrency_rejects_zero_limits() {
+    for result in [
+        SourceProviderConcurrency::new(0, 1, 1),
+        SourceProviderConcurrency::new(1, 0, 1),
+        SourceProviderConcurrency::new(1, 1, 0),
+    ] {
+        assert!(
+            matches!(result, Err(ConfigForgeError::Validation(message)) if message.contains("greater than 0"))
+        );
+    }
+}
+
+#[derive(Default)]
+struct FakeSourceProvider {
+    resource: SourceProviderResource,
+    failures: Vec<(PathBuf, String)>,
+    per_path_delay: Vec<(PathBuf, Duration)>,
+    delay: Duration,
+    active: Option<Arc<AtomicUsize>>,
+    max_active: Option<Arc<AtomicUsize>>,
+    started: Option<Arc<Mutex<Vec<PathBuf>>>>,
+}
+
+impl SourceProvider for FakeSourceProvider {
+    fn resource(&self, _source: &DataSourcePlan) -> SourceProviderResource {
+        self.resource
+    }
+
+    fn read_source(&self, source: &DataSourcePlan) -> crate::Result<DataTable> {
+        if let Some(started) = &self.started {
+            started
+                .lock()
+                .expect("started list should be lockable")
+                .push(source.path.clone());
+        }
+        let active_now = if let Some(active) = &self.active {
+            let active_now = active.fetch_add(1, Ordering::SeqCst) + 1;
+            if let Some(max_active) = &self.max_active {
+                max_active.fetch_max(active_now, Ordering::SeqCst);
+            }
+            Some(active_now)
+        } else {
+            None
+        };
+        let delay = self
+            .per_path_delay
+            .iter()
+            .find_map(|(path, delay)| (path == &source.path).then_some(*delay))
+            .unwrap_or(self.delay);
+        if !delay.is_zero() {
+            thread::sleep(delay);
+        }
+        if let (Some(_), Some(active)) = (active_now, &self.active) {
+            active.fetch_sub(1, Ordering::SeqCst);
+        }
+        if let Some((_, message)) = self.failures.iter().find(|(path, _)| path == &source.path) {
+            return Err(ConfigForgeError::Validation(message.clone()));
+        }
+        Ok(DataTable::new(
+            source.table_name.clone(),
+            vec![DataRow::from([(
+                "source".to_owned(),
+                source.path.display().to_string(),
+            )])],
+        ))
+    }
+}
+
+#[test]
 fn data_set_try_new_rejects_duplicate_table_names() {
     let tables = vec![
         DataTable::new("items", Vec::new()),
