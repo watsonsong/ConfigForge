@@ -151,11 +151,11 @@ pub(super) fn validate_generated_symbols(
         let mut method_symbols = vec![
             GeneratedSymbol::new("method", "constructor", "constructor"),
             GeneratedSymbol::new("method", "load", "load"),
-            GeneratedSymbol::new("method", "rowAt", "rowAt"),
         ];
         if table.preserve_source_order {
             method_symbols.push(GeneratedSymbol::new("getter", "length", "length"));
             method_symbols.push(GeneratedSymbol::new("method", "rows", "rows"));
+            method_symbols.push(GeneratedSymbol::new("method", "rowAt", "rowAt"));
         }
         for index in &table.indexes {
             method_symbols.push(GeneratedSymbol::new(
@@ -163,13 +163,6 @@ pub(super) fn validate_generated_symbols(
                 &index.name,
                 names.index_function_name(index)?,
             ));
-            if index.unique {
-                method_symbols.push(GeneratedSymbol::new(
-                    "index-of function",
-                    &index.name,
-                    names.index_of_function_name(index)?,
-                ));
-            }
         }
         if table
             .foreign_keys

@@ -133,16 +133,15 @@ pub(super) fn render_table(
             "    pub fn row_at(&self, row_index: usize) -> Option<&{}> {{ self.rows.get(row_index) }}\n\n",
             names.row_type_name(&table.name)?
         ));
-    } else {
-        content.raw_fmt(format_args!(
-            "    fn row_at(&self, row_index: usize) -> Option<&{}> {{ self.rows.get(row_index) }}\n\n",
-            names.row_type_name(&table.name)?
-        ));
     }
+    content.raw_fmt(format_args!(
+        "    fn row_by_handle(&self, row_handle: usize) -> Option<&{}> {{ self.rows.get(row_handle) }}\n\n",
+        names.row_type_name(&table.name)?
+    ));
     for index in &table.indexes {
         render_index_function(content, table, index, names)?;
         if index.unique {
-            render_index_of_function(content, index, names)?;
+            render_row_handle_function(content, index, names)?;
         }
     }
     render_table_link_function(content, table, names)?;
@@ -250,7 +249,7 @@ fn render_single_relation_method(
     };
     let cache_name = names.relation_cache_field_name(foreign_key)?;
     let target_data_field = names.field_name(&target_table.name)?;
-    let index_of_name = names.index_of_function_name(target_index)?;
+    let row_handle_name = row_handle_function_name(target_index, names)?;
     content.raw_fmt(format_args!(
         "    pub fn {function_name}<'a>(&self, data: &'a impl GameDataAccess) -> RuntimeDataResult<{return_type}> {{\n"
     ));
@@ -269,12 +268,12 @@ fn render_single_relation_method(
     }
     if optional {
         content.raw_fmt(format_args!(
-            "            LinkCache::RowIndex(row_index) => return data.{target_data_field}()?.row_at(row_index).map(Some).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned())),\n",
+            "            LinkCache::RowIndex(row_index) => return data.{target_data_field}()?.row_by_handle(row_index).map(Some).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned())),\n",
             format!("cached relation `{}` row index out of bounds", foreign_key.name)
         ));
     } else {
         content.raw_fmt(format_args!(
-            "            LinkCache::RowIndex(row_index) => return data.{target_data_field}()?.row_at(row_index).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned())),\n",
+            "            LinkCache::RowIndex(row_index) => return data.{target_data_field}()?.row_by_handle(row_index).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned())),\n",
             format!("cached relation `{}` row index out of bounds", foreign_key.name)
         ));
     }
@@ -327,7 +326,7 @@ fn render_single_relation_method(
         .collect::<Result<Vec<_>>>()?;
     let lookup_key = names.rust_relation_lookup_key(foreign_key, target_index, &value_exprs)?;
     content.raw_fmt(format_args!(
-        "        let row_index = data.{target_data_field}()?.{index_of_name}({lookup_key}).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))?;\n",
+        "        let row_index = data.{target_data_field}()?.{row_handle_name}({lookup_key}).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))?;\n",
         format!(
             "foreign key relation `{}.{}` could not resolve target `{}.{}`",
             source_table.name, foreign_key.name, target_table.name, target_index.name
@@ -338,12 +337,12 @@ fn render_single_relation_method(
     ));
     if optional {
         content.raw_fmt(format_args!(
-            "        data.{target_data_field}()?.row_at(row_index).map(Some).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))\n",
+            "        data.{target_data_field}()?.row_by_handle(row_index).map(Some).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))\n",
             format!("resolved relation `{}` row index out of bounds", foreign_key.name)
         ));
     } else {
         content.raw_fmt(format_args!(
-            "        data.{target_data_field}()?.row_at(row_index).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))\n",
+            "        data.{target_data_field}()?.row_by_handle(row_index).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))\n",
             format!("resolved relation `{}` row index out of bounds", foreign_key.name)
         ));
     }
@@ -371,7 +370,7 @@ fn render_many_relation_method(
     })?;
     let source_field_name = names.field_name(&source_field.name)?;
     let target_data_field = names.field_name(&target_table.name)?;
-    let index_of_name = names.index_of_function_name(target_index)?;
+    let row_handle_name = row_handle_function_name(target_index, names)?;
     content.raw_fmt(format_args!(
         "    pub fn {function_name}<'a>(&self, data: &'a impl GameDataAccess) -> RuntimeDataResult<Vec<&'a {target_row_type}>> {{\n"
     ));
@@ -385,7 +384,7 @@ fn render_many_relation_method(
         "            for key in &self.{source_field_name} {{\n"
     ));
     content.raw_fmt(format_args!(
-        "                let row_index = data.{target_data_field}()?.{index_of_name}(key.clone()).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))?;\n",
+        "                let row_index = data.{target_data_field}()?.{row_handle_name}(key.clone()).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))?;\n",
         format!(
             "foreign key relation `{}.{}` could not resolve list target `{}.{}`",
             source_table.name, foreign_key.name, target_table.name, target_index.name
@@ -404,7 +403,7 @@ fn render_many_relation_method(
     content.raw("        let mut rows = Vec::with_capacity(row_indexes.len());\n");
     content.raw("        for &row_index in row_indexes {\n");
     content.raw_fmt(format_args!(
-        "            rows.push(data.{target_data_field}()?.row_at(row_index).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))?);\n",
+        "            rows.push(data.{target_data_field}()?.row_by_handle(row_index).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))?);\n",
         format!("resolved list relation `{}` row index out of bounds", foreign_key.name)
     ));
     content.raw("        }\n");
@@ -489,7 +488,13 @@ fn render_table_link_function(
     Ok(())
 }
 
-fn render_index_of_function(
+fn row_handle_function_name(index: &CodeIndex, names: &RustNames<'_>) -> Result<String> {
+    Ok(names
+        .index_of_function_name(index)?
+        .replacen("index_of_by_", "row_handle_by_", 1))
+}
+
+fn render_row_handle_function(
     content: &mut CodeWriter,
     index: &CodeIndex,
     names: &RustNames<'_>,
@@ -509,7 +514,7 @@ fn render_index_of_function(
     let key = names.rust_lookup_key(index)?;
     content.raw_fmt(format_args!(
         "    fn {}(&self, {}) -> Option<usize> {{\n",
-        names.index_of_function_name(index)?,
+        row_handle_function_name(index, names)?,
         params
     ));
     content.raw_fmt(format_args!(

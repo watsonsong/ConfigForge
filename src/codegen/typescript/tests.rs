@@ -88,7 +88,7 @@ fn source_order_apis_are_opt_in() {
     let content = &files[0].content;
 
     assert!(content.contains("export class ItemsTable"));
-    assert!(content.contains("rowAt(rowIndex: number): ItemsRow | undefined"));
+    assert!(!content.contains("rowAt(rowIndex: number): ItemsRow | undefined"));
     assert!(!content.contains("rows(): readonly ItemsRow[]"));
     assert!(content.contains("export class CharacterSurnamesTable"));
     assert!(content.contains("get length(): number { return this.rows_.length; }"));
@@ -235,7 +235,10 @@ fn emits_linked_field_relation_api() {
     assert!(content.contains("starterItemsLink: LinkListCache;"));
     assert!(content.contains("defaultItem(data: GameData): ItemsRow;"));
     assert!(content.contains("starterItems(data: GameData): readonly ItemsRow[];"));
-    assert!(content.contains("indexOfById(id: number): number | undefined"));
+    assert!(!content.contains("  indexOfById(id: number): number | undefined"));
+    assert!(content.contains(
+        "function __ItemsTableindexOfById(table: ItemsTable, id: number): number | undefined"
+    ));
     assert!(content.contains("link(data: GameData): void;"));
     assert!(content.contains("this.gameConfig.link(this);"));
     assert!(content.contains("async linkAll(): Promise<void>"));

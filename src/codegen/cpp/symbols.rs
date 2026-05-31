@@ -163,11 +163,12 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>
         let mut method_symbols = vec![
             GeneratedSymbol::new("method", "Load", "Load"),
             GeneratedSymbol::new("method", "FromRows", "FromRows"),
-            GeneratedSymbol::new("method", "RowAt", "RowAt"),
+            GeneratedSymbol::new("private method", "RowByHandle", "RowByHandle"),
         ];
         if table.preserve_source_order {
             method_symbols.push(GeneratedSymbol::new("method", "Size", "Size"));
             method_symbols.push(GeneratedSymbol::new("method", "Rows", "Rows"));
+            method_symbols.push(GeneratedSymbol::new("method", "RowAt", "RowAt"));
         }
         for index in &table.indexes {
             method_symbols.push(GeneratedSymbol::new(
@@ -175,13 +176,6 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>
                 &index.name,
                 names.index_function_name(index)?,
             ));
-            if index.unique {
-                method_symbols.push(GeneratedSymbol::new(
-                    "index-of function",
-                    &index.name,
-                    names.index_of_function_name(index)?,
-                ));
-            }
         }
         if table
             .foreign_keys

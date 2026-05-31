@@ -69,7 +69,7 @@ fn source_order_apis_are_opt_in() {
     let content = &files[0].content;
 
     assert!(content.contains("pub struct ItemsTable"));
-    assert!(content.contains("fn row_at(&self, row_index: usize) -> Option<&ItemsRow>"));
+    assert!(!content.contains("pub fn row_at(&self, row_index: usize) -> Option<&ItemsRow>"));
     assert!(!content.contains("pub fn rows(&self) -> &[ItemsRow]"));
     assert!(content.contains("pub struct CharacterSurnamesTable"));
     assert!(content.contains("pub fn len(&self) -> usize { self.rows.len() }"));

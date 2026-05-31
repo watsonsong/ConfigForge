@@ -95,7 +95,7 @@ fn source_order_apis_are_opt_in() {
     let content = generated_content(&files, "generated.hpp");
 
     assert!(content.contains("class ItemsTable"));
-    assert!(content.contains("const ItemsRow* RowAt(std::size_t row_index) const"));
+    assert!(!content.contains("const ItemsRow* RowAt(std::size_t row_index) const"));
     assert!(!content.contains("const std::vector<ItemsRow>& Rows() const"));
     assert!(content.contains("class CharacterSurnamesTable"));
     assert!(content.contains("std::size_t Size() const { return rows_.size(); }"));
@@ -192,7 +192,7 @@ fn emits_linked_field_relation_api() {
     assert!(header.contains(
         "std::vector<const ItemsRow*> GetStarterItems(const GameDataAccess& data) const;"
     ));
-    assert!(header.contains("std::optional<std::size_t> IndexOfById(std::int64_t id) const;"));
+    assert!(!header.contains("IndexOfById"));
     assert!(header.contains("void Link(const GameDataAccess& data) const;"));
     assert!(header.contains("void LinkAll() const;"));
     assert!(source.contains(
@@ -201,10 +201,8 @@ fn emits_linked_field_relation_api() {
     assert!(source.contains(
         "std::vector<const ItemsRow*> GameConfigRow::GetStarterItems(const GameDataAccess& data) const"
     ));
-    assert!(
-        source
-            .contains("std::optional<std::size_t> ItemsTable::IndexOfById(std::int64_t id) const")
-    );
+    assert!(!source.contains("ItemsTable::IndexOfById"));
+    assert!(source.contains("const auto* row = data.Items().GetById(default_item_id);"));
     assert!(source.contains("void GameConfigRow::Link(const GameDataAccess& data) const"));
     assert!(source.contains("void GameData::LinkAll() const"));
     assert!(source.contains("void LazyGameData::LinkAll() const"));

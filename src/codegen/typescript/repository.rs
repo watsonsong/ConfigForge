@@ -183,16 +183,13 @@ pub(super) fn render_table(
             "  rows(): readonly {}[] {{ return this.rows_; }}\n\n",
             names.row_type_name(&table.name)?
         ));
+        content.raw_fmt(format_args!(
+            "  rowAt(rowIndex: number): {} | undefined {{ return this.rows_[rowIndex]; }}\n\n",
+            names.row_type_name(&table.name)?
+        ));
     }
-    content.raw_fmt(format_args!(
-        "  rowAt(rowIndex: number): {} | undefined {{ return this.rows_[rowIndex]; }}\n\n",
-        names.row_type_name(&table.name)?
-    ));
     for index in &table.indexes {
         render_index_function(content, table, index, names)?;
-        if index.unique {
-            render_index_of_function(content, index, names)?;
-        }
     }
     if table
         .foreign_keys
@@ -205,6 +202,48 @@ pub(super) fn render_table(
         content.raw("    }\n");
         content.raw("  }\n\n");
     }
+    content.raw("}\n\n");
+    render_row_at_helper(content, table, names)?;
+    for index in table.indexes.iter().filter(|index| index.unique) {
+        render_index_of_helper(content, table, index, names)?;
+    }
+    Ok(())
+}
+
+fn row_at_helper_name(table: &CodeTable, names: &TypeScriptNames<'_>) -> Result<String> {
+    Ok(format!(
+        "__{}RowAt",
+        names.repository_type_name(&table.name)?
+    ))
+}
+
+fn index_of_helper_name(
+    table: &CodeTable,
+    index: &CodeIndex,
+    names: &TypeScriptNames<'_>,
+) -> Result<String> {
+    Ok(format!(
+        "__{}{}",
+        names.repository_type_name(&table.name)?,
+        names.index_of_function_name(index)?
+    ))
+}
+
+fn render_row_at_helper(
+    content: &mut CodeWriter,
+    table: &CodeTable,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    content.raw_fmt(format_args!(
+        "function {}(table: {}, rowIndex: number): {} | undefined {{\n",
+        row_at_helper_name(table, names)?,
+        names.repository_type_name(&table.name)?,
+        names.row_type_name(&table.name)?
+    ));
+    content.raw_fmt(format_args!(
+        "  return (table as unknown as {{ rows_: {}[] }}).rows_[rowIndex];\n",
+        names.row_type_name(&table.name)?
+    ));
     content.raw("}\n\n");
     Ok(())
 }
@@ -255,8 +294,9 @@ fn render_index_function(
     Ok(())
 }
 
-fn render_index_of_function(
+fn render_index_of_helper(
     content: &mut CodeWriter,
+    table: &CodeTable,
     index: &CodeIndex,
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
@@ -274,15 +314,23 @@ fn render_index_of_function(
         .join(", ");
     let key = names.ts_lookup_key(index)?;
     content.raw_fmt(format_args!(
-        "  {}({}): number | undefined {{\n",
-        names.index_of_function_name(index)?,
+        "function {}(table: {}, {}): number | undefined {{\n",
+        index_of_helper_name(table, index, names)?,
+        names.repository_type_name(&table.name)?,
         params
     ));
-    content.raw("    const rowIndex = this.");
-    content.raw(names.index_storage_name(index)?);
-    content.raw_fmt(format_args!(".get({key});\n"));
-    content.raw("    return rowIndex;\n");
-    content.raw("  }\n\n");
+    content.raw_fmt(format_args!(
+        "  const index = (table as unknown as {{ {}: Map<{}, number> }}).{};\n",
+        names.index_storage_name(index)?,
+        if index.fields.len() == 1 {
+            names.ts_field_type(&index.fields[0])?
+        } else {
+            "string".to_owned()
+        },
+        names.index_storage_name(index)?
+    ));
+    content.raw_fmt(format_args!("  return index.get({key});\n"));
+    content.raw("}\n\n");
     Ok(())
 }
 
@@ -508,7 +556,8 @@ fn render_single_relation_method(
     let source_row_type = names.row_type_name(&source_table.name)?;
     let cache_name = names.relation_cache_field_name(foreign_key)?;
     let target_data_field = names.field_name(&target_table.name)?;
-    let index_of_name = names.index_of_function_name(target_index)?;
+    let row_at_name = row_at_helper_name(target_table, names)?;
+    let index_of_name = index_of_helper_name(target_table, target_index, names)?;
     let return_type = if optional {
         format!("{target_row_type} | undefined")
     } else {
@@ -535,7 +584,7 @@ fn render_single_relation_method(
     content.raw("  }\n");
     content.raw("  if (cached >= 0) {\n");
     content.raw_fmt(format_args!(
-        "    const rowValue = data.{target_data_field}.rowAt(cached);\n"
+        "    const rowValue = {row_at_name}(data.{target_data_field}, cached);\n"
     ));
     content.raw_fmt(format_args!(
         "    if (rowValue === undefined) {{ throw new Error({:?}); }}\n",
@@ -552,7 +601,7 @@ fn render_single_relation_method(
     let value_exprs = relation_value_exprs(foreign_key, names)?;
     let lookup_key = names.ts_relation_lookup_key(target_index, &value_exprs)?;
     content.raw_fmt(format_args!(
-        "  const rowIndex = data.{target_data_field}.{index_of_name}({lookup_key});\n"
+        "  const rowIndex = {index_of_name}(data.{target_data_field}, {lookup_key});\n"
     ));
     content.raw_fmt(format_args!(
         "  if (rowIndex === undefined) {{ throw new Error({:?}); }}\n",
@@ -563,7 +612,7 @@ fn render_single_relation_method(
     ));
     content.raw_fmt(format_args!("  row.{cache_name} = rowIndex;\n"));
     content.raw_fmt(format_args!(
-        "  const rowValue = data.{target_data_field}.rowAt(rowIndex);\n"
+        "  const rowValue = {row_at_name}(data.{target_data_field}, rowIndex);\n"
     ));
     content.raw_fmt(format_args!(
         "  if (rowValue === undefined) {{ throw new Error({:?}); }}\n",
@@ -598,7 +647,8 @@ fn render_many_relation_method(
     })?;
     let source_field_name = names.field_name(&source_field.name)?;
     let target_data_field = names.field_name(&target_table.name)?;
-    let index_of_name = names.index_of_function_name(target_index)?;
+    let row_at_name = row_at_helper_name(target_table, names)?;
+    let index_of_name = index_of_helper_name(target_table, target_index, names)?;
     content.raw_fmt(format_args!(
         "function {}{}(this: {}, data: GameData): readonly {}[] {{\n",
         function_name, source_row_type, source_row_type, target_row_type
@@ -617,7 +667,7 @@ fn render_many_relation_method(
         ));
     }
     content.raw_fmt(format_args!(
-        "      const rowIndex = data.{target_data_field}.{index_of_name}(key);\n"
+        "      const rowIndex = {index_of_name}(data.{target_data_field}, key);\n"
     ));
     content.raw_fmt(format_args!(
         "      if (rowIndex === undefined) {{ throw new Error({:?}); }}\n",
@@ -632,7 +682,7 @@ fn render_many_relation_method(
     content.raw("  }\n");
     content.raw_fmt(format_args!("  return rowIndexes.map((rowIndex) => {{\n"));
     content.raw_fmt(format_args!(
-        "    const rowValue = data.{target_data_field}.rowAt(rowIndex);\n"
+        "    const rowValue = {row_at_name}(data.{target_data_field}, rowIndex);\n"
     ));
     content.raw_fmt(format_args!(
         "    if (rowValue === undefined) {{ throw new Error({:?}); }}\n",

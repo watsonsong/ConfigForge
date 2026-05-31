@@ -92,14 +92,6 @@ impl<'a> CppNames<'a> {
         self.identifier(&format!("{prefix}_{suffix}"), self.options.naming.function)
     }
 
-    pub(super) fn index_of_function_name(&self, index: &CodeIndex) -> Result<String> {
-        let suffix = index.name.trim_start_matches("by_");
-        self.identifier(
-            &format!("index_of_by_{suffix}"),
-            self.options.naming.function,
-        )
-    }
-
     pub(super) fn relation_function_name(&self, foreign_key: &CodeForeignKey) -> Result<String> {
         let name = foreign_key
             .linked_field
@@ -344,23 +336,6 @@ impl<'a> CppNames<'a> {
             self.compound_index_key_type_name(table, index)?,
             values.collect::<Result<Vec<_>>>()?.join(", ")
         ))
-    }
-
-    pub(super) fn cpp_relation_lookup_key(
-        &self,
-        target_table: &CodeTable,
-        target_index: &CodeIndex,
-        values: &[String],
-    ) -> Result<String> {
-        if target_index.fields.len() == 1 {
-            Ok(values.first().cloned().unwrap_or_default())
-        } else {
-            self.cpp_compound_key_expr(
-                target_table,
-                target_index,
-                values.iter().map(|value| Ok(value.clone())),
-            )
-        }
     }
 
     pub(super) fn compound_index_key_type_name(

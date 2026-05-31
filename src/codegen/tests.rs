@@ -456,7 +456,8 @@ fn rust_codegen_emits_linked_field_relation_api() {
     assert!(content.contains("starter_items_link: RefCell<LinkListCache>"));
     assert!(content.contains("pub fn default_item<'a>(&self, data: &'a impl GameDataAccess)"));
     assert!(content.contains("pub fn starter_items<'a>(&self, data: &'a impl GameDataAccess)"));
-    assert!(content.contains("fn index_of_by_id(&self, id: i64) -> Option<usize>"));
+    assert!(content.contains("fn row_handle_by_id(&self, id: i64) -> Option<usize>"));
+    assert!(!content.contains("fn index_of_by_id(&self, id: i64) -> Option<usize>"));
     assert!(
         content.contains("pub fn link(&self, data: &impl GameDataAccess) -> RuntimeDataResult<()>")
     );

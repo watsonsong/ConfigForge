@@ -91,9 +91,6 @@ fn render_from_rows_source(
 
     for index in &table.indexes {
         render_index_function_source(content, table, index, names)?;
-        if index.unique {
-            render_index_of_function_source(content, table, index, names)?;
-        }
     }
     render_table_link_source(content, table, names)?;
     Ok(())
@@ -151,35 +148,6 @@ fn render_index_function_source(
         content.raw("    return result;\n");
         content.raw("}\n\n");
     }
-    Ok(())
-}
-
-fn render_index_of_function_source(
-    content: &mut CodeWriter,
-    table: &CodeTable,
-    index: &CodeIndex,
-    names: &CppNames<'_>,
-) -> Result<()> {
-    let params = names.cpp_index_params(index)?;
-    let repository_type = names.repository_type_name(&table.name)?;
-    let function_name = names.index_of_function_name(index)?;
-    let storage_name = names.index_storage_name(index)?;
-    let key = names.cpp_lookup_key_expr(table, index)?;
-
-    content.raw_fmt(format_args!(
-        "std::optional<std::size_t> {}::{}({}) const {{\n",
-        repository_type, function_name, params
-    ));
-    content.raw_fmt(format_args!(
-        "    auto iter = {}.find({});\n",
-        storage_name, key
-    ));
-    content.raw_fmt(format_args!(
-        "    if (iter == {}.end()) {{ return std::nullopt; }}\n",
-        storage_name
-    ));
-    content.raw("    return iter->second;\n");
-    content.raw("}\n\n");
     Ok(())
 }
 
@@ -440,16 +408,13 @@ pub(super) fn render_table(
             "    const std::vector<{}>& Rows() const {{ return rows_; }}\n",
             names.row_type_name(&table.name)?
         ));
+        content.raw_fmt(format_args!(
+            "    const {}* RowAt(std::size_t row_index) const {{ return RowByHandle(row_index); }}\n",
+            names.row_type_name(&table.name)?
+        ));
     }
-    content.raw_fmt(format_args!(
-        "    const {}* RowAt(std::size_t row_index) const {{ return row_index < rows_.size() ? &rows_[row_index] : nullptr; }}\n",
-        names.row_type_name(&table.name)?
-    ));
     for index in &table.indexes {
         render_index_function(content, table, index, names)?;
-        if index.unique {
-            render_index_of_function(content, index, names)?;
-        }
     }
     if table
         .foreign_keys
@@ -459,6 +424,10 @@ pub(super) fn render_table(
         content.raw("    void Link(const GameDataAccess& data) const;\n");
     }
     content.raw("private:\n");
+    content.raw_fmt(format_args!(
+        "    const {}* RowByHandle(std::size_t row_handle) const {{ return row_handle < rows_.size() ? &rows_[row_handle] : nullptr; }}\n",
+        names.row_type_name(&table.name)?
+    ));
     content.raw_fmt(format_args!(
         "    std::vector<{}> rows_;\n",
         names.row_type_name(&table.name)?
@@ -496,19 +465,6 @@ fn render_index_function(
             params
         ));
     }
-    Ok(())
-}
-
-fn render_index_of_function(
-    content: &mut CodeWriter,
-    index: &CodeIndex,
-    names: &CppNames<'_>,
-) -> Result<()> {
-    content.raw_fmt(format_args!(
-        "    std::optional<std::size_t> {}({}) const;\n",
-        names.index_of_function_name(index)?,
-        names.cpp_index_params(index)?
-    ));
     Ok(())
 }
 
@@ -679,7 +635,7 @@ fn render_single_relation_method(
     let source_row_type = names.row_type_name(&source_table.name)?;
     let cache_name = names.relation_cache_member_name(foreign_key)?;
     let target_accessor = names.type_name(&target_table.name)?;
-    let index_of_name = names.index_of_function_name(target_index)?;
+    let index_function_name = names.index_function_name(target_index)?;
     let return_type = if optional {
         format!("const {target_row_type}*")
     } else {
@@ -705,58 +661,21 @@ fn render_single_relation_method(
         ));
     }
     content.raw("    }\n");
-    content.raw_fmt(format_args!(
-        "    if ({}.state == LinkCache::State::RowIndex) {{\n",
-        cache_name
-    ));
-    content.raw_fmt(format_args!(
-        "        const auto* row = data.{}().RowAt({}.row_index);\n",
-        target_accessor, cache_name
-    ));
-    content.raw_fmt(format_args!(
-        "        if (row == nullptr) {{ throw std::runtime_error({:?}); }}\n",
-        format!(
-            "cached relation `{}` row index out of bounds",
-            foreign_key.name
-        )
-    ));
-    if optional {
-        content.raw("        return row;\n");
-    } else {
-        content.raw("        return *row;\n");
-    }
-    content.raw("    }\n");
-
     if optional {
         render_optional_empty_check(content, foreign_key, names, &cache_name)?;
     }
     let value_exprs = relation_value_exprs(foreign_key, names)?;
-    let lookup_key = names.cpp_relation_lookup_key(target_table, target_index, &value_exprs)?;
     content.raw_fmt(format_args!(
-        "    auto row_index = data.{}().{}({});\n",
-        target_accessor, index_of_name, lookup_key
-    ));
-    content.raw_fmt(format_args!(
-        "    if (!row_index) {{ throw std::runtime_error({:?}); }}\n",
-        format!(
-            "foreign key relation `{}.{}` could not resolve target `{}.{}`",
-            source_table.name, foreign_key.name, target_table.name, target_index.name
-        )
-    ));
-    content.raw_fmt(format_args!(
-        "    {}.state = LinkCache::State::RowIndex;\n",
-        cache_name
-    ));
-    content.raw_fmt(format_args!("    {}.row_index = *row_index;\n", cache_name));
-    content.raw_fmt(format_args!(
-        "    const auto* row = data.{}().RowAt(*row_index);\n",
-        target_accessor
+        "    const auto* row = data.{}().{}({});\n",
+        target_accessor,
+        index_function_name,
+        value_exprs.join(", ")
     ));
     content.raw_fmt(format_args!(
         "    if (row == nullptr) {{ throw std::runtime_error({:?}); }}\n",
         format!(
-            "resolved relation `{}` row index out of bounds",
-            foreign_key.name
+            "foreign key relation `{}.{}` could not resolve target `{}.{}`",
+            source_table.name, foreign_key.name, target_table.name, target_index.name
         )
     ));
     if optional {
@@ -780,9 +699,8 @@ fn render_many_relation_method(
     function_name: &str,
 ) -> Result<()> {
     let source_row_type = names.row_type_name(&source_table.name)?;
-    let cache_name = names.relation_cache_member_name(foreign_key)?;
     let target_accessor = names.type_name(&target_table.name)?;
-    let index_of_name = names.index_of_function_name(target_index)?;
+    let index_function_name = names.index_function_name(target_index)?;
     let source_field = foreign_key.fields.first().ok_or_else(|| {
         ConfigForgeError::Validation(format!(
             "foreign key `{}` has no source fields",
@@ -794,64 +712,42 @@ fn render_many_relation_method(
         "std::vector<const {}*> {}::{}(const GameDataAccess& data) const {{\n",
         target_row_type, source_row_type, function_name
     ));
-    content.raw_fmt(format_args!("    if (!{}.resolved) {{\n", cache_name));
-    if source_field.required {
-        content.raw_fmt(format_args!(
-            "        for (const auto& key : {}) {{\n",
-            source_field_name
-        ));
-    } else {
-        content.raw_fmt(format_args!(
-            "        if (!{}) {{ {}.resolved = true; }} else {{\n",
-            source_field_name, cache_name
-        ));
-        content.raw_fmt(format_args!(
-            "        for (const auto& key : *{}) {{\n",
-            source_field_name
-        ));
-    }
-    content.raw_fmt(format_args!(
-        "            auto row_index = data.{}().{}(key);\n",
-        target_accessor, index_of_name
-    ));
-    content.raw_fmt(format_args!(
-        "            if (!row_index) {{ throw std::runtime_error({:?}); }}\n",
-        format!(
-            "foreign key relation `{}.{}` could not resolve list target `{}.{}`",
-            source_table.name, foreign_key.name, target_table.name, target_index.name
-        )
-    ));
-    content.raw_fmt(format_args!(
-        "            {}.row_indexes.push_back(*row_index);\n",
-        cache_name
-    ));
-    content.raw("        }\n");
-    if !source_field.required {
-        content.raw("        }\n");
-    }
-    content.raw_fmt(format_args!("        {}.resolved = true;\n", cache_name));
-    content.raw("    }\n");
     content.raw_fmt(format_args!(
         "    std::vector<const {}*> rows;\n",
         target_row_type
     ));
+    if source_field.required {
+        content.raw_fmt(format_args!(
+            "    rows.reserve({}.size());\n",
+            source_field_name
+        ));
+        content.raw_fmt(format_args!(
+            "    for (const auto& key : {}) {{\n",
+            source_field_name
+        ));
+    } else {
+        content.raw_fmt(format_args!(
+            "    if (!{}) {{ return rows; }}\n",
+            source_field_name
+        ));
+        content.raw_fmt(format_args!(
+            "    rows.reserve({}->size());\n",
+            source_field_name
+        ));
+        content.raw_fmt(format_args!(
+            "    for (const auto& key : *{}) {{\n",
+            source_field_name
+        ));
+    }
     content.raw_fmt(format_args!(
-        "    rows.reserve({}.row_indexes.size());\n",
-        cache_name
-    ));
-    content.raw_fmt(format_args!(
-        "    for (std::size_t row_index : {}.row_indexes) {{\n",
-        cache_name
-    ));
-    content.raw_fmt(format_args!(
-        "        const auto* row = data.{}().RowAt(row_index);\n",
-        target_accessor
+        "        const auto* row = data.{}().{}(key);\n",
+        target_accessor, index_function_name
     ));
     content.raw_fmt(format_args!(
         "        if (row == nullptr) {{ throw std::runtime_error({:?}); }}\n",
         format!(
-            "resolved list relation `{}` row index out of bounds",
-            foreign_key.name
+            "foreign key relation `{}.{}` could not resolve list target `{}.{}`",
+            source_table.name, foreign_key.name, target_table.name, target_index.name
         )
     ));
     content.raw("        rows.push_back(row);\n");
