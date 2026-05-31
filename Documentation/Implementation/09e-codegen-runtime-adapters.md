@@ -153,11 +153,11 @@ runtime/
     CMakeLists.txt        # options、find_package、adapter targets、tests
 ```
 
-`runtime/` 不是每次 export 的输出目录；它是 ConfigForge 源码仓库中维护的标准 runtime adapter 集合。未来如增加 `yaml`、`sqlite`、自定义二进制等 data format，应按同样结构补充对应语言子目录。
+`runtime/` 不是每次 export 的输出目录；它是 ConfigForge 源码仓库中维护的标准 runtime adapter 集合。未来如增加 `yaml`、`sqlite`、自定义二进制等 export type，应按同样结构补充对应语言子目录。
 
 ### 官方支持矩阵、推荐等级与依赖策略
 
-对 stable runtime data format，应覆盖官方 target language；对 experimental format 可以先只支持部分语言。Transport loader 不进入语言 × 格式矩阵，而是与 format reader 组合。每个 adapter 单元必须明确：
+对 stable runtime data export type，应覆盖官方 target language；对 experimental type 可以先只支持部分语言。Transport loader 不进入语言 × 格式矩阵，而是与 format reader 组合。每个 adapter 单元必须明确：
 
 - 支持的 generated reader contract 版本；
 - 支持的 data payload shape（当前至少 `{ meta, rows }` collection envelope 与 object table root object）；
@@ -323,7 +323,7 @@ MessagePack adapter 的 value 语义应与 JSON adapter 对齐：object/map 支�
 Codegen 后续可增加 runtime adapter 相关选项，但默认仍不强制输出 adapter：
 
 ```toml
-[targets.code.runtime_reader]
+[targets.exports.runtime_reader]
 adapter = "rust/serde_msgpack_reader"   # 或 "typescript/messagepack_reader", "cpp/rapidjson_reader", "cpp/msgpackc_reader"
 emit = "copy"                      # copy / reference / none
 loader = "fs"                      # fs / fetch / none / custom
@@ -332,7 +332,7 @@ loader = "fs"                      # fs / fetch / none / custom
 配置校验规则：
 
 - `adapter` 的 language 必须与 code target language 匹配，例如 TypeScript target 不能选择 `cpp/rapidjson_reader`。
-- `adapter` 的 format 不与 code task 绑定；同一份生成代码可以配合不同格式 adapter 使用。若未来显式配置 adapter，校验只需确认该 adapter 支持目标语言和 reader contract。
+- `adapter` 的 format 不与 codegen export task 绑定；同一份生成代码可以配合不同格式 adapter 使用。若未来显式配置 adapter，校验只需确认该 adapter 支持目标语言和 reader contract。
 - `loader` 必须被所选语言和 adapter 支持，例如 `fetch` 只对提供 fetch transport 的 TypeScript/browser adapter 合法。
 - `emit = "reference"` 时，必须能解析到对应 package/crate/CMake target；无法解析时应在 config 阶段报错或生成明确 diagnostic，不应延迟到编译/运行时。
 - `emit = "copy"` 时，应记录 adapter source version 和 supported contract range；默认不覆盖用户已修改文件，除非显式配置 `overwrite = true` 或输出到全新 generated adapter 目录。

@@ -30,7 +30,7 @@
 
 ## 9i.2 模块归属与依赖边界
 
-推荐把 Lua 支持实现为 `format = "lua_table"` 的 data-backed exporter，而不是普通 codegen backend：
+推荐把 Lua 支持实现为 `type = "lua_table"` 的 MetaAndData exporter，而不是普通 codegen backend：
 
 ```text
 src/exporter/
@@ -40,17 +40,17 @@ src/exporter/
 原因：
 
 - `exporter` 已经允许依赖 `meta`、`data`、`artifact` 和 `diagnostic`，适合消费 target-aware resolved data；
-- 现有 `codegen` 文档明确约束 Rust/C++/TypeScript codegen 只依赖 Meta 和 target tags，不绑定任何 data task；
-- Lua 的输出既是运行时数据，又包含访问 API，因此语义上更接近 runtime data format，而不是纯代码 stub。
+- 现有 `codegen` 文档明确约束 Rust/C++/TypeScript codegen 只依赖 Meta 和 target tags，不绑定任何 MetaAndData export task；
+- Lua 的输出既是运行时数据，又包含访问 API，因此语义上更接近 MetaAndData export type，而不是纯代码 stub。
 
-Build 编排层应按 data task 分发：
+Build 编排层应按 export task dependency contract 分发：
 
 ```text
 ProjectConfig::from_path
   -> MetaModel::link
   -> Target normalize
   -> DataLoadPlan / DataLoader / normalize / validation
-  -> DataFormatRegistry dispatch(format = "lua_table")
+  -> DataFormatRegistry dispatch(type = "lua_table")
   -> LuaEmbeddedDataExporter(meta + export view + resolved data)
   -> ArtifactWriter
 ```
@@ -59,18 +59,17 @@ ProjectConfig::from_path
 
 ## 9i.3 配置模型
 
-Lua 导出作为 data task 配置：
+Lua 导出作为 MetaAndData export task 配置：
 
 ```toml
 [[targets]]
 name = "client_lua"
 tags = ["client"]
 
-[[targets.data]]
+[[targets.exports]]
 name = "lua"
-input = "data"
 output = "Generated/LuaConfig"
-format = "lua_table"
+type = "lua_table"
 module_name = "game.config"
 root_file = "init.lua"
 table_file_naming = "snake_case"
@@ -83,7 +82,7 @@ lazy_require = true
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `format` | 必填 | 规范名 `lua_table`；可接受 alias `lua`，诊断和文档统一使用 `lua_table`。 |
+| `type` | 必填 | 规范名 `lua_table`；可接受 alias `lua`，诊断和文档统一使用 `lua_table`。 |
 | `module_name` | `config` | Lua require 前缀，例如 `game.config`。root 文件与 table 文件内部使用该前缀拼接 require path。 |
 | `root_file` | `init.lua` | root facade 文件名。若项目不使用目录模块，可设为 `config.lua`。 |
 | `table_file_naming` | `snake_case` | table 文件名派生策略，默认使用 canonical table name 的 snake_case。 |
@@ -94,7 +93,7 @@ lazy_require = true
 | `emit_schema` | `false` | 是否在 table 文件中输出 field/index schema debug 信息；默认关闭以节省包体。 |
 | `readonly` | `true` | 是否为 module/table/row metatable 增加只读保护。首版可只保护 API table，不保护 row array。 |
 
-`lua_table` 是 data format，因此必须声明 `input`；若 target 没有 source data，不能生成 Lua data+code 产物。
+`lua_table` 是 MetaAndData export type，因此会使用 project-level `input` 加载 source data；若工程没有 source data，不能生成 Lua data+code 产物。
 
 ## 9i.4 产物布局
 
@@ -337,7 +336,7 @@ Lua exporter 需要在写文件前诊断：
 6. 输出路径与其他 artifact 冲突；
 7. 数据值无法安全表达为 Lua literal，例如非有限浮点数。
 
-Lua 关键字冲突策略应复用 Project Config 的 `keyword_conflict` 概念；如果 Lua 作为 data format，不直接复用 `targets.code.keyword_conflict`，则 `lua_table` options 应提供同名字段，默认 `suffix_underscore`。
+Lua 关键字冲突策略应复用 Project Config 的 `keyword_conflict` 概念；`lua_table` options 应提供同名字段，默认 `suffix_underscore`。
 
 ## 9i.12 实现步骤
 
@@ -345,7 +344,7 @@ Lua 关键字冲突策略应复用 Project Config 的 `keyword_conflict` 概念�
 
 1. **配置与注册**
    - 在 exporter registry 注册 `lua_table` / alias `lua`。
-   - 定义 `LuaTableOptions`，从 `TargetDataConfig.options` 解析 flattened options。
+   - 定义 `LuaTableOptions`，从统一 export task 的 flattened options 解析配置。
 2. **命名与符号检查**
    - 在 `src/exporter/lua_table.rs` 内部实现 Lua naming / keyword helper；不要让 exporter 依赖 codegen 模块。
    - 检查 table file、field、index helper、method helper 冲突。
@@ -359,7 +358,7 @@ Lua 关键字冲突策略应复用 Project Config 的 `keyword_conflict` 概念�
    - 生成 `init.lua` / root file，按需 require table modules。
    - 支持 `preload_all()`。
 6. **Build / artifact 集成**
-   - 复用 data task 当前加载、归一化、校验结果。
+   - 复用当前 target DAG 中共享的加载、归一化、校验结果。
    - 产物走 Artifact Writer，参与路径冲突检查。
 7. **测试**
    - 单元测试：options parse、literal writer、symbol conflict、index renderer。

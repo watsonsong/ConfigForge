@@ -77,18 +77,18 @@ imports = ["Meta/items.toml"]
 
 [project]
 name = "sample"
+input = "Data"
 
 [[targets]]
 name = "client_json_shipping"
 tags = ["client", "shipping"]
 
-[[targets.data]]
-input = "Data"
+[[targets.exports]]
 output = "Generated/Data"
-format = "json"
+type = "json"
 
-[[targets.code]]
-language = "typescript"
+[[targets.exports]]
+type = "typescript"
 output = "Generated/Client"
 
 ```

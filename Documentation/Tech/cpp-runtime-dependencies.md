@@ -2,7 +2,7 @@
 
 ## 目标
 
-`runtime/cpp/` 是 ConfigForge 为 C++ 项目提供 runtime helper 的入口。未来每个 runtime data format 都可能有自己的 reader adapter，例如：
+`runtime/cpp/` 是 ConfigForge 为 C++ 项目提供 runtime helper 的入口。未来每个 runtime data export type 都可能有自己的 reader adapter，例如：
 
 - `rapidjson_reader`：依赖 RapidJSON（header-only）；
 - `msgpackc_reader`：依赖 msgpack-cxx（header-only C++ API，来自 msgpack/msgpack-c 的 cpp release）；

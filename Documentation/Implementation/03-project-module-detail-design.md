@@ -10,7 +10,7 @@ Project 模块解决以下问题：
 2. 支持 Project Config 顶层 `imports`，递归加载配置片段并通过 canonical path 去重。
 3. 将不同配置片段中的 `project`、`enums`、`structs`、`tables`、`targets` 合并成一个 `ProjectConfig`。
 4. 将相对路径按声明文件所在目录归一化，避免 imports 后路径相对根目录漂移。
-5. 保留 target 聚合结构：每个 target 可声明多个 runtime data task 和多个 codegen task。
+5. 保留 target 聚合结构：每个 target 可声明多个统一 export task，由 build 根据 exporter dependency contract 分发到 runtime data exporter、aggregate exporter 或 codegen。
 6. 从工程配置中抽取 raw `MetaModel`；Meta 的 link / validate 生命周期统一由 `src/meta/` 提供，Build 只负责按流程调用。
 
 非目标：
@@ -61,17 +61,15 @@ pub struct ProjectConfig {
 pub struct TargetConfig {
     pub name: String,
     pub tags: Vec<String>,
-    pub data: Vec<TargetDataConfig>,
-    pub code: Vec<CodegenTaskConfig>,
+    pub exports: Vec<TargetExportConfig>,
 }
 ```
 
 `TargetConfig` 是 project-level 聚合结构，可以引用：
 
-- `exporter::TargetDataConfig`：runtime data task 配置；
-- `codegen::CodegenTaskConfig`：code task 配置。
+- `TargetExportConfig`：统一 export task 配置，包含 `name`、`type`、`output` 与 flattened exporter 专属选项。
 
-这是一种配置层聚合依赖，不代表 Project 模块执行 exporter 或 codegen。
+Project 模块只解析和归一化配置，不根据 `type` 判断 task 依赖，也不执行 exporter 或 codegen。`TargetExportConfig` 会在 Build 归一化阶段转换为 `NormalizedExportTask`。
 
 Target 本身只保存 Project Config 中声明的静态 `tags`。CLI 传入的额外 tags 不写回 `ProjectConfig`，而是在 Build 归一化阶段与 target tags 合并成 effective target tags。这样同一个 `ProjectConfig` 可以被不同 CLI 上下文复用，例如常规 shipping 构建与 `--tag s1` 赛季构建不会互相污染。
 
@@ -100,11 +98,10 @@ ProjectConfig::from_path(root)
 
 ## 3.5 路径归一化
 
-Project 模块负责将 target task 中的路径归一化：
+Project 模块负责将 Project Config 中的路径归一化：
 
-- data task `input`；
-- data task `output`；
-- code task `output`。
+- project-level `input`；
+- export task `output`。
 
 路径以声明它的配置片段所在目录为 base，而不是以 root project 文件为 base。这样被 imports 的配置片段可以自包含地声明相对路径。
 
@@ -118,8 +115,6 @@ Project 模块位于 Meta 与 Build 之间：
 build
   -> project
       -> meta       # 复用 Meta 数据结构，不执行 Meta link/validate
-      -> exporter   # 仅引用 TargetDataConfig
-      -> codegen    # 仅引用 CodegenTaskConfig
 ```
 
 关键约束：
@@ -136,5 +131,5 @@ Project 模块测试应覆盖：
 - imports 递归加载和去重。
 - 不同目录配置片段中的相对路径归一化。
 - target name 重复时报错。
-- data format 默认值属于 exporter config serde 行为，但可通过 project 解析测试覆盖。
+- export type alias / 默认值属于 exporter registry 与 build normalization 行为，但可通过 project 解析测试覆盖 TOML shape。
 - path lexical normalize 对 absolute root、leading parent、`.` / `..` 的处理。

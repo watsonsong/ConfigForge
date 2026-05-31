@@ -165,7 +165,7 @@ loader.open("items")
 
 ### Exporter 写出实现方案
 
-runtime data format 由 data export registry、运行时 loader / reader 组合决定；当前默认 codegen 不消费真实 data task 结果，也不通过 `RuntimeDataFile.format` 切换生成逻辑。文件名后缀只描述 artifact path，不作为 reader layout 的唯一来源。当前 codegen 层不再生成 `RuntimeDataFormat` 类型。若未来 manifest 或 adapter 配置需要显式记录格式，可在 build/runtime 层维护枚举，例如：
+runtime data export type 由 exporter registry、运行时 loader / reader 组合决定；当前默认 codegen 不消费真实 runtime data export task 结果，也不通过 `RuntimeDataFile.format` 切换生成逻辑。文件名后缀只描述 artifact path，不作为 reader layout 的唯一来源。当前 codegen 层不再生成 `RuntimeDataFormat` 类型。若未来 manifest 或 adapter 配置需要显式记录格式，可在 build/runtime 层维护枚举，例如：
 
 ```rust
 pub enum RuntimeTableDataFormat {
@@ -177,16 +177,16 @@ pub enum RuntimeTableDataFormat {
 
 写出流程：
 
-1. Project Config load 后先构造 `NormalizedTargetConfig`，完成 data task name 规范化，并拒绝 code task 的 `data` 字段。
-2. `build_target` 消费当前 target 的 `Vec<NormalizedTargetDataConfig>`。没有 data task 时跳过 data export，进入 code-only 流程。
-3. 按 `NormalizedTargetDataConfig.input` 分组。每个不同 input 构造一次 `DataLoadPlan`，使用 `DataLoader::new(data_root)` 加载；Meta 中 source path 继续由 `data_root.join(source.path)` 解析。
-4. 对每个不同 input 的 DataSet 执行 normalize、target validation，并派生 DataSet-dependent ExportView；同 input 的 JSON / MessagePack / Bin / gettext_pot 等多个 data task 复用该结果。不同 input 即使属于同一 target，也不能复用另一个 input 的 DataSet / validation view / concrete ExportView。
-5. 每个 data task 根据自身 `format` 从 `DataFormatRegistry` 选择 exporter，根据自身 `output` 写出一套数据产物。table exporter 写出每表 runtime data artifact；aggregate exporter 写出 POT / manifest 等聚合 artifact。
+1. Project Config load 后先构造 `NormalizedTargetConfig`，完成 export task name 规范化，并拒绝 MetaOnly codegen export task 的 `data` 字段。
+2. `build_target` 消费当前 target 的 `Vec<NormalizedExportTask>`，并按 exporter dependency contract 构造 target-local DAG。没有 MetaAndData export task 时跳过 data load / validation，进入 MetaOnly-only 流程。
+3. 对同一 `(project.input, effective_tags)` 构造一次 `DataLoadPlan`，使用 `DataLoader::new(data_root)` 加载；Meta 中 source path 继续由 `data_root.join(source.path)` 解析。
+4. 对共享 DataSet 执行 normalize、target validation，并派生 DataSet-dependent ExportView；同 target 下 JSON / MessagePack / Bin / gettext_pot / lua_table 等多个 MetaAndData export task 复用该结果。
+5. 每个 MetaAndData export task 根据自身 `type` 从 `DataFormatRegistry` 选择 exporter，根据自身 `output` 写出一套数据产物。table exporter 写出每表 runtime data artifact；aggregate exporter 写出 POT / manifest / Lua 等聚合 artifact。
 6. `Json` 使用 `serde_json::to_vec_pretty` 写出 `<table>.json`。
 7. `MessagePack` 使用 `rmp_serde::to_vec_named` 或等价 named-field 编码写出 `<table>.msgpack`。
-8. Runtime table data task 可返回独立的 artifact manifest 信息，例如 `RuntimeConfigForgeResult { data_name, input, output, format, files }`，其中 file metadata 使用真实写出的文件名和规范格式名；聚合 data task 返回普通 `Artifact` / manifest entry。当前这些真实 artifact metadata 不传入默认 codegen。
-9. `write_generated_code` 不选择 data task，统一向 `CodeExportInput` 传入空 `runtime_data_files`，让 CodeModel 使用逻辑表名。
-10. Artifact path 规划必须跨所有 data task 和 code task 统一检查，不能只在 codegen 内检查 generated code 的重复路径。
+8. Runtime table data export task 可返回独立的 artifact manifest 信息，例如 `RuntimeConfigForgeResult { export_name, files }`，其中 file metadata 使用真实写出的文件名和规范格式名；聚合 export task 返回普通 `Artifact` / manifest entry。当前这些真实 artifact metadata 不传入默认 codegen。
+9. `generate_code_task` 不选择 runtime data export task，统一向 `CodeExportInput` 传入空 `runtime_data_files`，让 CodeModel 使用逻辑表名。
+10. Artifact path 规划必须跨所有 export task 统一检查，不能只在 codegen 内检查 generated code 的重复路径。
 
 依赖建议：
 
@@ -194,7 +194,7 @@ pub enum RuntimeTableDataFormat {
 rmp-serde = "1"
 ```
 
-如果后续引入 manifest，manifest 中也应以 `(target_name, data_name, table_name)` 作为 runtime data artifact key，并记录每个 artifact 的 `format`、相对 data artifact root 的 `path`、最终写入 path 和 `table_name`。
+如果后续引入 manifest，manifest 中也应以 `(target_name, export_name, table_name)` 作为 runtime data artifact key，并记录每个 artifact 的 `type`、相对 data artifact root 的 `path`、最终写入 path 和 `table_name`。
 
 ### Codegen 读取实现方案
 
@@ -203,8 +203,8 @@ CodeModel 构建时使用逻辑 table name 作为 runtime load path：
 - 忽略 runtime data artifact 的真实 path，避免 codegen 绑定具体格式。
 - 每张表默认使用 `<table>` 作为逻辑 data file path。
 - 每个 `CodeTable` 保留 `data_file`，语言生成器用它生成常量。
-- 生成代码不根据 data format 切换 parser；reader contract 负责把 named-field 或 packed layout 映射到同一组 `EnterRequiredField` / `EnterOptionalField` / `ReadRowCount` / `EnterIndex` / scalar API。
-- 多个 data format 的选择不进入 CodeModel 决策。
+- 生成代码不根据 runtime export type 切换 parser；reader contract 负责把 named-field 或 packed layout 映射到同一组 `EnterRequiredField` / `EnterOptionalField` / `ReadRowCount` / `EnterIndex` / scalar API。
+- 多个 runtime export type 的选择不进入 CodeModel 决策。
 
 生成代码的 load 流程统一为：
 
@@ -228,12 +228,12 @@ Table::load(loader)
    - JSON target 生成 `<table>.json`，内容可用 `serde_json` 读取；
    - MessagePack target 生成 `<table>.msgpack`，内容可用 `rmp-serde` 读取为同一 payload；
    - `RuntimeDataFile.path` 与实际文件后缀一致。
-3. Project Config schema：接受 `[[targets.data]]`；旧 `[targets.data]` table 形态不作为兼容目标；空 data task name、多 data task 缺 name、非法字符、重复 name 都应报错；单 data task 省略 name 时规范化为 `default`。
-4. 多 data task：同一 target 同时配置 JSON 与 MessagePack，两个 output 都生成对应文件，且同 input 的数据加载/normalize/validation 可以复用。
-5. 多 input：不同 input 分别加载、normalize、validation 并派生 DataSet-dependent ExportView，不能复用另一个 input 的 ExportView。
-6. code task 格式无关：`CodegenTaskConfig.data` 设置时必须报错；target 有多个 data task 时，codegen 仍只生成一份逻辑表名代码。
-7. 路径语义：入口 `ConfigForge.toml` 中 data input/output/code output 相对 project root；import 片段中的相对路径相对片段目录；Meta source path 相对 data input；`RuntimeDataFile.path` 相对 data artifact root。
-8. artifact 冲突：data task 之间、data task 与 code task 之间、多个 code task 之间的输出路径冲突都应报错。执行冲突检查前应做不依赖文件存在性的 lexical path normalization，至少消除 `.` / `..` 造成的字符串差异；对已存在路径可视需要再做 canonicalize，但不能要求输出目录预先存在。
+3. Project Config schema：接受 `[[targets.exports]]`；旧 `[[targets.data]]` / `[[targets.code]]` 不作为兼容目标；空 export task name、重复 name、非法字符都应报错；单 export task 省略 name 时规范化为 `default`，多 export task 省略 name 时默认使用 `type`。
+4. 多 MetaAndData export task：同一 target 同时配置 JSON 与 MessagePack，两个 output 都生成对应文件，且相同 `(project.input, effective_tags)` 的数据加载/normalize/validation 可以复用。
+5. CLI extra tags：不同 effective tags 分别加载、normalize、validation 并派生 DataSet-dependent ExportView，不能复用另一个 tags 组合的 ExportView。
+6. MetaOnly codegen 格式无关：`data` 设置时必须报错；target 有多个 MetaAndData export task 时，codegen 仍只生成一份逻辑表名代码。
+7. 路径语义：入口 `ConfigForge.toml` 中 `project.input` / export `output` 相对 project root；import 片段中的相对路径相对片段目录；Meta source path 相对 `project.input`；`RuntimeDataFile.path` 相对 data artifact root。
+8. artifact 冲突：所有 export task 之间的输出路径冲突都应报错。执行冲突检查前应做不依赖文件存在性的 lexical path normalization，至少消除 `.` / `..` 造成的字符串差异；对已存在路径可视需要再做 canonicalize，但不能要求输出目录预先存在。
 9. CodeModel 默认文件名：始终使用逻辑表名，不包含 `.json` / `.msgpack` / `.bin` 后缀。
 10. Rust 生成代码包含：
    - 通用 `RuntimeDataLoader` / `RuntimeDataReader`；
@@ -247,4 +247,4 @@ Table::load(loader)
    - 通用 `RuntimeDataLoader` / `RuntimeDataReader`；
    - 每张表的 `dataFile`；
    - row interface、table parser、table repository 和 index helper。
-13. CLI integration：分别构建 JSON target、MessagePack target，以及同 target 多 data + 多 code 的标准工程，验证 runtime data 文件和 generated code 文件同时生成，并检查代码中引用逻辑表名且不随 data format 改变。
+13. CLI integration：分别构建 JSON target、MessagePack target，以及同 target 多 MetaAndData + 多 MetaOnly export task 的标准工程，验证 runtime data 文件和 generated code 文件同时生成，并检查代码中引用逻辑表名且不随 runtime export type 改变。

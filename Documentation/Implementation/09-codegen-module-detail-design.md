@@ -17,7 +17,7 @@
    - table repository / collection type；
    - index key type 和辅助查找函数。
 4. 生成一个统一的 DataSet / Database facade，便于业务侧一次加载后按表访问。
-5. 支持 JSON、MessagePack 与 `bin` 紧密二进制 runtime data format。生成代码使用逻辑 table name（例如 `items`）作为默认加载键；真实 artifact 目录、后缀和格式由运行时 loader / reader 映射。`bin` 额外携带每表 schema revision 供 generated reader 校验。
+5. 支持 JSON、MessagePack 与 `bin` 紧密二进制 runtime data export type。生成代码使用逻辑 table name（例如 `items`）作为默认加载键；真实 artifact 目录、后缀和格式由运行时 loader / reader 映射。`bin` 额外携带每表 schema revision 供 generated reader 校验。
 6. 生成抽象 `RuntimeDataLoader` / `RuntimeDataReader`，由接入方 loader 只负责打开数据文件并提供通用 reader，生成代码负责所有表/字段解析和 typed row/object 构造。
 7. 保持生成代码确定性：同一份 Meta 生成稳定文件名、声明顺序和 API 名称。
 8. 在生成前发现命名冲突、保留字、目标语言类型映射缺失、输出路径冲突等问题。
@@ -169,9 +169,9 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 - Rust / C++ / TypeScript backend 均已实现 MVP。
 - Eager loading 和 table-level `LazyGameData` 均已实现 MVP；lazy facade 保留 loader，首次访问 table/object 时加载并缓存。
 - TypeScript 已生成 `loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`；同步 API 要求 loader 同步返回 reader，遇到 Promise 应报错。
-- 生成代码使用逻辑 table name，不绑定某个 `targets.data` task 的真实 artifact path。
+- 生成代码使用逻辑 table name，不绑定某个 `targets.exports` runtime data export task 的真实 artifact path。
 - `linked_field` relation helper 和 `text` translation helper 已纳入 Rust / C++ / TypeScript 生成器。
-- Lua embedded data generator 仍为 Planned / Not implemented；设计上应作为 `format = "lua_table"` 的 data-backed exporter，而不是现有 format-agnostic `CodeGenerator` backend。
+- Lua embedded data generator 已作为 `type = "lua_table"` 的 MetaAndData exporter 落地，而不是现有 format-agnostic `CodeGenerator` backend。
 
 ## 9.5 总览文档维护规则
 

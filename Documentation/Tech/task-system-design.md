@@ -13,7 +13,7 @@
    - 按文件读取 Project Config / Meta imports；
    - 按 source / table 读取数据；
    - 按 table 做 normalize、validation、runtime payload 构建；
-   - 按 target 和 code task 做 codegen；
+   - 按 target 和 MetaOnly export task 做 codegen；
    - 按 artifact 写出文件。
 3. 区分 I/O 等待任务和 CPU 密集任务：
    - 网络 source、远端表格 API、后续 bounded artifact write 优先使用 async I/O；
@@ -256,7 +256,7 @@ pub enum TaskResource {
 
 - Project Config imports 按 canonical path 或 import 声明顺序稳定合并；
 - tables 按 MetaModel 中顺序输出；
-- code tasks 按 Project Config 中顺序输出；
+- export tasks 按 Project Config 中顺序输出；
 - diagnostics 使用 `(severity, code, path, table, row, field, message)` 或现有稳定 key 排序；
 - artifact 写入前必须先汇总所有计划路径并做冲突检查。
 
@@ -300,7 +300,7 @@ pub struct BuildState {
 | Normalize | 一个 table；小表合并成 chunk | 每个 field、每行 |
 | Validation | 一个 table 或一个 target-table；小表合并成 chunk | 每条规则、每个 row |
 | Runtime data export | 一个 table artifact；小表合并成 chunk；大表可 streaming/chunk | 每行序列化一个 job |
-| Codegen | 一个 code task / language | 每个字段、每个小片段 |
+| Codegen | 一个 MetaOnly export task / language | 每个字段、每个小片段 |
 | Artifact write | 一个 artifact；小文件可批量顺序写 | 每个 buffer slice |
 
 经验阈值：
@@ -472,10 +472,10 @@ JSON pretty 输出可读但体积大、CPU/IO 成本高。后续可增加 `compa
 
 ### 6.7 Code generation
 
-Codegen 可按 `targets.code` task 并行。每个语言生成器内部也可以按 table 渲染局部片段，但第一阶段建议只做到 code task 粒度：
+Codegen 可按 `targets.exports` 中的 MetaOnly export task 并行。每个语言生成器内部也可以按 table 渲染局部片段，但第一阶段建议只做到 export task 粒度：
 
 ```text
-for each CodegenTaskConfig:
+for each MetaOnly NormalizedExportTask:
   GenerateCode(language, target_tags, linked_meta, runtime_data_files)
 ```
 
@@ -692,7 +692,7 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 ### Phase 2：Artifact generation / write 并发
 
 - runtime data 按 table 并行构建 payload。
-- codegen 按 code task 并行。
+- codegen 按 MetaOnly export task 并行。
 - 所有 artifact 先 plan，再统一冲突检查，再并发写。
 
 ### Phase 3：Validation 并发与诊断收集
@@ -719,7 +719,7 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 ### 11.2 集成测试
 
 - `--jobs 1` 与默认并发输出完全一致。
-- 多 table / 多 code task 项目在 `--jobs 2` 下输出稳定。
+- 多 table / 多 codegen export task 项目在 `--jobs 2` 下输出稳定。
 - source 加载失败时诊断顺序稳定。
 - artifact 写出失败时不会产生重复/乱序诊断。
 
@@ -754,7 +754,7 @@ measure source load, validation, runtime serialization, total duration
 1. CLI 增加 `--jobs` / `--io-concurrency` / `--serial`，先只传递不并发。
 2. Data source 按 `DataLoadPlan.sources()` 并行加载，并保持结果顺序。
 3. Runtime data export 按 table 并行序列化，artifact write 前统一检查路径。
-4. Codegen 按 `targets.code` task 并行。
+4. Codegen 按 `targets.exports` 中的 MetaOnly export task 并行。
 
 暂缓：
 

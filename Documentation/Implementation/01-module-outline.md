@@ -24,7 +24,7 @@
 | Data | `src/data/` | 根据加载计划读取 CSV 等数据源，形成 raw `DataSet`，并提供 Meta-aware resolver。 | `DataLoadPlan`、source files、`LinkedMetaModel<'meta>`。 | `DataSet`、`ResolvedDataSet` / resolved view。 | `05-data-module-detail-design.md` |
 | Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、注册式 validator；入口、table、FK、struct value、default 逻辑分文件维护。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
 | Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 列表、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
-| Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack / `bin` exporter、data format registry、`TargetDataConfig`。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`。 | `RuntimeDataFile` / runtime data artifacts。 | `08-exporter-module-detail-design.md` |
+| Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack / `bin` exporter、export type registry、由统一 export task 适配得到的 exporter 内部配置。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`。 | `RuntimeDataFile` / runtime data artifacts。 | `08-exporter-module-detail-design.md` |
 | Codegen | `src/codegen/` | 语言无关 CodeModel IR，Rust / TypeScript / C++ 格式无关代码生成；每种语言按 runtime / types / reader / repository / symbols 拆分。 | `LinkedMetaModel<'meta>`、target tags。 | `GeneratedFile`。 | `09-codegen-module-detail-design.md` |
 | Build | `src/build/` | 工程构建主编排：归一化 target，并按 target 调度 data load、validation、runtime export、format-agnostic codegen、artifact 写入。 | `ProjectConfig`、CLI options。 | `BuildOutput`、文件系统产物。 | `10-build-module-detail-design.md` |
 
@@ -45,7 +45,7 @@ main / cli
       ├─ project
       │   ├─ meta
       │   ├─ codegen        # 仅引用 task config 类型
-      │   └─ exporter       # 仅引用 data task config 类型
+      │   └─ exporter       # build 将统一 export task 适配为 exporter 内部配置
       ├─ meta
       ├─ data
       │   ├─ meta
@@ -78,7 +78,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 - `artifact` 可以依赖标准库、`diagnostic::error` 等底层能力，不能依赖 `meta`、`data`、`validation`、`exporter`、`codegen`、`project`、`build`。
 - `exporter` 可以依赖 `meta`、`data`、`artifact`、`diagnostic`，不能依赖 `validation`、`codegen`、`build`；导出前校验由 build 编排层调用 validation。
 - `codegen` 可以依赖 `meta` 和 `artifact`；生成代码使用逻辑 table name 作为 runtime load key，不依赖 exporter 真实写出的 runtime data artifact path / format；不能依赖 `data`、`validation`、`build`。
-- `project` 可以引用 `codegen::CodegenTaskConfig` 和 `exporter::TargetDataConfig` 来表达 Project TOML 聚合结构，但不能依赖 `build`。
+- `project` 只解析 `TargetExportConfig` 这一统一 Project TOML 结构，不引用 exporter/codegen 内部 task 配置，也不能依赖 `build`。
 - `build` 是顶层业务编排层，可以依赖 `project`、`meta`、`data`、`validation`、`exporter`、`codegen`；这些被编排模块不能反向依赖 `build`。
 - `cli` 只能调用 `build` 和展示错误；不能绕过 build 直接串联底层模块。
 
@@ -95,7 +95,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 1. **CLI / Options**：`cli` 解析命令和参数，转换为 build options。
 2. **Project Load / Merge**：`project` 加载 `ConfigForge.toml`，递归展开 imports，归一化工程路径。
 3. **Meta Extract / Link / Validate**：`project` 抽取 `MetaModel`，`meta` 构造 `LinkedMetaModel<'meta>` 并输出结构诊断。
-4. **Target Normalize**：`build` 归一化 target、data task、code task 和 task binding。
+4. **Target Normalize**：`build` 归一化 target 与统一 export task，并根据 exporter registry dependency contract 构造执行视图。
 5. **Data Load**：`data` 根据 target 可见表和 source declaration 生成加载计划并读取 `DataSet`。
 6. **Data Normalize / Resolve**：`validation` 调用 DataResolver 应用 default、struct JSON / expanded value、fragment 等规则，形成可校验输入。
 7. **Target-aware Validation**：`validation` 派生 `ExportValidationView`，执行 required/type/enum/index/FK/validator 等规则并输出 `ValidationReport`。
@@ -124,7 +124,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `09f-codegen-core-model-and-options.md` | Codegen 专题 | 核心输入输出模型、CodeModel IR、命名策略、类型映射、`CodeWriter` 与文件头模板。 |
 | `09g-codegen-index-and-relation-helpers.md` | Codegen 专题 | CollectionTable index lookup、`linked_field` relation helper、row-index cache 与 `link_all`。 |
 | `09h-codegen-generator-api-and-tests.md` | Codegen 专题 | `CodeGenerator` 接口、新语言接入、文件组织、诊断和测试计划。 |
-| `09i-lua-embedded-data-generator.md` | Codegen / Exporter 专题 | 计划中的 Lua data+code 合一导出；作为 `lua_table` data format 消费 Meta + Data，生成每表 `.lua`、root facade、row array/metatable 和索引。 |
+| `09i-lua-embedded-data-generator.md` | Codegen / Exporter 专题 | Lua data+code 合一导出；作为 `type = "lua_table"` 的 MetaAndData export task 消费 Meta + Data，生成每表 `.lua`、root facade、row array/metatable 和索引。 |
 | `10-build-module-detail-design.md` | 模块 | 构建编排、target/task binding、并行执行边界和 artifact 写入策略。 |
 | `11-foreign-key-detail-design.md` | 专项 | 外键 raw/link model、引用完整性校验、target 语义、codegen staging。 |
 | `12-struct-expanded-value-detail-design.md` | 专项 | Struct source layout 自动判定和 expanded CSV field-path。 |
@@ -135,7 +135,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | 测试层级 | 位置 | 覆盖内容 |
 | --- | --- | --- |
 | 模块单元测试 | `src/<module>/tests.rs` 或模块内 `#[cfg(test)]` | 单模块数据结构、边界条件、错误诊断。 |
-| 跨模块单元测试 | build / exporter / codegen 模块测试 | target normalization、data/code task 分发、runtime data artifact 与 codegen 解耦。 |
+| 跨模块单元测试 | build / exporter / codegen 模块测试 | target normalization、export task dependency 分发、runtime data artifact 与 codegen 解耦。 |
 | 集成测试 | `tests/cli_integration.rs` | CLI 从工程配置到执行结果的跨模块流程。 |
 | fixture 回归测试 | `tests/fixtures/standard_project/` | 标准工程样例稳定输出、runtime reader 编译与读取。 |
 

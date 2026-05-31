@@ -6,12 +6,12 @@
 
 Exporter 模块需要达成：
 
-1. 定义 target data task 配置 `TargetDataConfig`。
-2. 定义 data format exporter trait 和 registry。
-3. 内置 JSON、MessagePack 与 `bin` 三种 runtime data format；`bin` 使用 schema-aware positional typed layout；通过同一 `TargetDataConfig.format` 支持已实现的 gettext POT 聚合 data format；asset manifest 等仍为后续扩展。
+1. 定义 exporter 内部配置 `TargetDataConfig`，由 build 从统一 `NormalizedExportTask` 适配得到。
+2. 定义 export type exporter trait 和 registry。
+3. 内置 JSON、MessagePack 与 `bin` 三种 runtime data export type；`bin` 使用 schema-aware positional typed layout；通过同一统一 export task `type` 支持已实现的 gettext POT 与 Lua 聚合 export type；asset manifest 等仍为后续扩展。
 4. 对 CollectionTable 与 ObjectTable 生成正确 runtime payload shape。
 5. 复用 DataResolver 解释 struct JSON cell / expanded value / target visibility，避免 exporter 自己重复实现 source layout 解析。
-6. 为未来二进制格式、自定义 data format exporter、聚合数据产物和 artifact writer 留出扩展点。
+6. 为未来二进制格式、自定义 export type、聚合数据产物和 artifact writer 留出扩展点。
 
 非目标：
 
@@ -36,14 +36,14 @@ src/exporter/
   messagepack.rs      # MessagePackDataExporter
   binary.rs           # BinaryDataExporter：CFGB header + schema revision + positional typed payload
   aggregate.rs        # 后续可拆出的聚合 data exporter 共享 context / artifact plan helper
-  gettext_pot.rs      # 已实现：format = "gettext_pot" / alias "pot"
+  gettext_pot.rs      # 已实现：type = "gettext_pot" / alias "pot"
   tests.rs            # exporter 核心行为测试
 ```
 
 `mod.rs` 仅保留模块声明和公共 re-export，确保既有消费者仍可通过 `crate::exporter::*`
 访问稳定 API；新增格式应优先落在独立格式模块中，核心 registry / runtime / payload 不内联具体格式逻辑。
 
-`TargetDataConfig.format` 是统一的数据导出格式入口。运行时表数据格式（JSON、MessagePack、`bin`）通常是“一张 table 一个 artifact”；聚合数据格式（POT、asset manifest、summary manifest）可能跨所有 table 汇总成一个或多个文件、读取非 runtime 辅助字段，artifact path 规划也不是 `table -> extension` 的简单映射。因此实现上可以在同一个 data exporter registry 下区分 `TableDataExporter` 与 `AggregateDataExporter` 两类能力，但 TOML 层不再引入 `targets.special_exporters`。
+`TargetDataConfig.format` 是 exporter 内部使用的规范 export type，来自 Project TOML 的 `[[targets.exports]].type`。运行时表数据 export type（JSON、MessagePack、`bin`）通常是“一张 table 一个 artifact”；聚合 export type（POT、Lua、asset manifest、summary manifest）可能跨所有 table 汇总成一个或多个文件、读取非 runtime 辅助字段，artifact path 规划也不是 `table -> extension` 的简单映射。因此实现上可以在同一个 exporter registry 下区分 `TableDataExporter` 与 `AggregateDataExporter` 两类能力，但 TOML 层不再引入 `targets.special_exporters`。
 
 ## 8.3 配置与 registry
 
@@ -60,8 +60,8 @@ pub struct TargetDataConfig {
 
 - `name`：可选 export task 名称。单个未命名 task 由 build 归一化为 `default`；多个未命名 task 默认使用 `type`。
 - `output`：数据产物输出目录。运行时表数据按 table 规划文件；POT / manifest 等聚合格式按格式选项规划文件。
-- `format`：由 `[[targets.exports]].type` 归一化而来；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；当前内置聚合格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`，`asset_manifest_csv` 等仍为后续扩展；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
-- `options`：格式专属配置，由 `[[targets.exports]]` 下除通用字段外的 flattened 字段归一化得到，例如 `type = "gettext_pot"` 下的 `domain`、`file_name`、`source_reference`，或 `type = "lua_table"` 下的 `module_name`、`root_file`、`row_layout`。
+- `format`：exporter 内部字段，由 `[[targets.exports]].type` 归一化而来；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；当前内置聚合 export type 支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`，`asset_manifest_csv` 等仍为后续扩展；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
+- `options`：export type 专属配置，由 `[[targets.exports]]` 下除通用字段外的 flattened 字段归一化得到，例如 `type = "gettext_pot"` 下的 `domain`、`file_name`、`source_reference`，或 `type = "lua_table"` 下的 `module_name`、`root_file`、`row_layout`。
 
 ```rust
 pub trait TableDataExporter: Send + Sync {
@@ -90,7 +90,7 @@ pub trait AggregateDataExporter: Send + Sync {
 }
 ```
 
-`DataFormatRegistry` 保存 table exporter 与 aggregate exporter 列表并按 name / alias 查询，同时暴露 dependency contract 查询。当前所有 data exporter 的 dependency 均为 `MetaAndData`；`DataOnly` 作为未来能力保留但没有内置实现。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行序列化多个 table artifact；aggregate exporter 也不得在实例内保存本次 build 的可变状态。
+`DataFormatRegistry` 保存 table exporter 与 aggregate exporter 列表并按 name / alias 查询，同时暴露 dependency contract 查询。当前所有 data-backed exporter 的 dependency 均为 `MetaAndData`；`DataOnly` 作为未来能力保留但没有内置实现。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行序列化多个 table artifact；aggregate exporter 也不得在实例内保存本次 build 的可变状态。
 
 内置格式通过 `builtin_exporters()` / aggregate registry 注册到 `DataFormatRegistry`，当前 table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`；aggregate exporter 包括已实现的 `GettextPotExporter` 与 `LuaTableExporter`。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现对应 exporter trait，格式名、alias、dependency、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
 
@@ -168,12 +168,12 @@ DataResolver::resolve_table_rows / resolve_table
 
 ## 8.6 Artifact path 约束
 
-Exporter 负责在单个 data task 内检查 artifact path 冲突：
+Exporter 负责在单个 export task 内检查 artifact path 冲突：
 
 - `plan_table_artifact()` 给出每张 table 的相对输出路径。
 - `ensure_unique_runtime_artifact_paths()` 拒绝同一个 exporter 计划出的重复路径。
 - 聚合 exporter 通过 `plan_artifacts()` 给出一个或多个相对输出路径，例如 POT 单文件或多 domain 多文件。
-- 跨 data task 的输出路径冲突由 build 在目标级别提前检查，因为多个 data task 可能写入不同或相同 output root。
+- 跨 export task 的输出路径冲突由 build 在目标级别提前检查，因为多个 export task 可能写入不同或相同 output root。
 
 POT 这类单文件聚合 data exporter 的 artifact key 建议使用 `(target_name, data_name, format)`；未来多 domain POT 可扩展为 `(target_name, data_name, format, domain)`。
 
@@ -197,9 +197,9 @@ pub enum DataExporterKind {
 5. 聚合 exporter 与 runtime data exporter 共享 DataResolver / resolved value 模型，避免再次解释 CSV raw cell。
 6. `ExportProjectInfo` 是 exporter 层自己的轻量 project 描述，最多包含 project name/desc/copyright 等 header 渲染所需字段，不依赖 codegen 模块的 `CodeExportProject`，避免 `exporter -> codegen` 依赖倒置。
 
-### 8.7.1 GettextPotExporter (`format = "gettext_pot"`)
+### 8.7.1 GettextPotExporter (`type = "gettext_pot"`)
 
-`GettextPotExporter` 当前模块为 `src/exporter/gettext_pot.rs`，通过 `[[targets.data]] format = "gettext_pot"` 或 alias `pot` 启用。
+`GettextPotExporter` 当前模块为 `src/exporter/gettext_pot.rs`，通过 `[[targets.exports]] type = "gettext_pot"` 或 alias `pot` 启用。
 
 输入模型建议：
 

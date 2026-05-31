@@ -50,7 +50,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
 | Lua data+code combined export | [`Documentation/Design/06-export-cli.md`](Documentation/Design/06-export-cli.md), [`Documentation/Implementation/09i-lua-embedded-data-generator.md`](Documentation/Implementation/09i-lua-embedded-data-generator.md), [`Documentation/Implementation/08-exporter-module-detail-design.md`](Documentation/Implementation/08-exporter-module-detail-design.md). |
 | Runtime data export / gettext POT | [`Documentation/Implementation/08-exporter-module-detail-design.md`](Documentation/Implementation/08-exporter-module-detail-design.md), [`Documentation/Design/06-export-cli.md`](Documentation/Design/06-export-cli.md). |
 | Code generation or runtime helpers | [`Documentation/Implementation/09-codegen-module-detail-design.md`](Documentation/Implementation/09-codegen-module-detail-design.md), split topics `09a`~`09h`, plus [`Documentation/Design/06-export-cli.md`](Documentation/Design/06-export-cli.md). |
-| Build orchestration, target data/code tasks, parallel execution | [`Documentation/Implementation/10-build-module-detail-design.md`](Documentation/Implementation/10-build-module-detail-design.md), [`Documentation/Tech/task-system-design.md`](Documentation/Tech/task-system-design.md). |
+| Build orchestration, target export task DAG, parallel execution | [`Documentation/Implementation/10-build-module-detail-design.md`](Documentation/Implementation/10-build-module-detail-design.md), [`Documentation/Tech/task-system-design.md`](Documentation/Tech/task-system-design.md). |
 | Testing/coverage quality | [`Documentation/code-style.md`](Documentation/code-style.md), [`Documentation/Tech/unit-test-coverage.md`](Documentation/Tech/unit-test-coverage.md). |
 
 ## Current Source Layout
@@ -62,7 +62,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
 - `src/codegen/` — language-neutral CodeModel IR plus Rust / TypeScript / C++ generators.
 - `src/validation/` — schema, target-aware data validation, diagnostics, and validator registry.
 - `src/project/` — ConfigForge project TOML schema, import merging, path normalization, and Meta extraction.
-- `src/build/` — project build orchestration, target normalization, runtime/code task binding, and artifact generation scheduling.
+- `src/build/` — project build orchestration, target normalization, export task DAG execution, and artifact generation scheduling.
 - `src/exporter/` — runtime data export contracts, JSON / MessagePack exporters, and future data format exporter extension point.
 - `src/diagnostic/` — shared diagnostic foundations and crate error model.
 - `runtime/` — standard runtime helpers/templates and compliance fixtures.

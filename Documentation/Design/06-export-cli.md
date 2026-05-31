@@ -9,43 +9,39 @@
 | 字段 | 说明 |
 | --- | --- |
 | `name` | 稳定 target 名称。 |
-| `data` | 可选数据导出任务列表。存在时才读取 source data，并由每个任务的 `format` 决定写出 runtime data、POT、manifest 等数据产物。 |
-| `code` | 当前 target 下的一个或多个代码生成任务。每个任务有独立语言、输出目录、文件头和命名策略。 |
+| `exports` | 当前 target 下的导出任务列表。每个任务通过 `type` 选择 exporter，由 exporter registry 的 dependency contract 决定只依赖 Meta，还是同时依赖 Meta + Data。 |
 
-Project-level `name` / `desc` / `copyright` 可被 target 的代码生成器、schema exporter 或 manifest exporter 用于生成文件头。Target code task 可以通过 `file_header` 模板覆盖默认文件头。
+Project-level `name` / `desc` / `copyright` 可被 target 的代码生成器、schema exporter 或 manifest exporter 用于生成文件头。Codegen export task 可以通过 `file_header` 模板覆盖默认文件头。
 
 路径解析语义：
 
 - CLI `build --project path/to/ConfigForge.toml` 指定的 Project Config 文件所在目录是 project root。
-- `targets.data.input`、`targets.data.output`、`targets.code.output` 的相对路径均相对声明它们的 Project Config 文件所在目录解析；入口文件中的相对路径因此等价于相对 project root。
+- `project.input` 与 `targets.exports.output` 的相对路径均相对声明它们的 Project Config 文件所在目录解析；入口文件中的相对路径因此等价于相对 project root。
 - `imports` 引入的配置片段先按片段文件目录解析自身相对路径，再合并到总配置，避免片段移动到子目录后路径语义丢失。
-- Meta 中 table `source`、`sources[].path`、`override_sources[].path` 不直接相对 `ConfigForge.toml`，而是相对当前 target data task 的 `input` 目录查找。
+- Meta 中 table `source`、`sources[].path`、`override_sources[].path` 不直接相对 `ConfigForge.toml`，而是相对 project-level `project.input` 目录查找。
 
-### 6.1.1 Data Export Task
+### 6.1.1 Export Task
 
-`[[targets.data]]` 描述当前 target 是否读取 source data、从哪里读取、写到哪里，以及使用哪种 data export format。一个 target 可以声明多套 data task，例如同时导出 JSON 供工具链调试、MessagePack 或 `bin` 供客户端运行时加载，也可以导出 gettext POT、asset manifest 等由同一 ExportView 派生的数据产物：
+`[[targets.exports]]` 描述当前 target 要生成的产物、写到哪里，以及使用哪种 exporter。一个 target 可以声明多套 export task，例如同时导出 JSON 供工具链调试、MessagePack 或 `bin` 供客户端运行时加载，也可以导出 gettext POT、Lua table、Rust/C++/TypeScript 访问代码等产物：
 
 ```toml
 [[targets]]
 name = "client"
 
-[[targets.data]]
+[[targets.exports]]
 name = "json"
-input = "Data"
 output = "Generated/Data/Json"
-format = "json"
+type = "json"
 
-[[targets.data]]
+[[targets.exports]]
 name = "messagepack"
-input = "Data"
 output = "Generated/Data/MessagePack"
-format = "messagepack"
+type = "messagepack"
 
-[[targets.data]]
+[[targets.exports]]
 name = "i18n_pot"
-input = "Data"
 output = "Generated/I18n"
-format = "gettext_pot"
+type = "gettext_pot"
 domain = "game_config"
 file_name = "game_config.pot"
 source_reference = "source_location"
@@ -57,50 +53,49 @@ deduplicate = true
 
 | 字段 | 说明 |
 | --- | --- |
-| `name` | 当前 target 内唯一的 data task 名称。单 data task 可省略并由实现填入默认名；多 data task 必填。 |
-| `input` | Source data 根目录。Meta source path 以该目录为搜索基础；只有声明 `targets.data` 时才读取。 |
-| `output` | 数据产物输出目录。运行时表数据会在该目录下按表名生成文件；POT / manifest 这类聚合格式会在该目录下按格式选项规划一个或多个文件。 |
-| `format` | 数据导出格式。当前第一阶段运行时格式支持 `json`、`messagepack` 和 `bin`，默认 `json`；当前也支持聚合格式 `gettext_pot` / alias `pot`，`asset_manifest_csv` 等仍为后续扩展。 |
-| format 专属字段 | 可选。格式专属选项直接摊平在对应 `[[targets.data]]` 下，例如 `format = "gettext_pot"` 的 `domain`、`file_name`、`source_reference`、`include_translator_comments`、`deduplicate`。 |
+| `name` | 当前 target 内唯一的 export task 名称。单 export task 可省略并由实现填入默认名；多 export task 省略时默认使用 `type`。 |
+| `output` | 产物输出目录。运行时表数据会在该目录下按表名生成文件；POT / manifest 这类聚合格式会在该目录下按格式选项规划一个或多个文件；codegen 会在该目录生成语言文件。 |
+| `type` | exporter 类型 ID。运行时格式支持 `json`、`messagepack` 和 `bin`；聚合/内嵌数据格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`；代码生成支持 `rust`、`cpp`、`typescript` 及其 alias。 |
+| exporter 专属字段 | 可选。格式专属选项直接摊平在对应 `[[targets.exports]]` 下，例如 `type = "gettext_pot"` 的 `domain`、`file_name`、`source_reference`、`include_translator_comments`、`deduplicate`。 |
 
 导出规则：
 
 - 每张 table 输出一个 runtime data 文件。
 - `json` 使用 `.json` 后缀，`messagepack` 使用 `.msgpack` 后缀，`bin` 使用 `.bin` 后缀。
 - JSON / MessagePack 承载同一套 named payload：table meta 摘要和 normalized rows；字段名使用 Meta canonical name。`bin` 使用同一 target-aware export view，但 wire layout 不保存 name/tag，按 generated code 共享的 schema 顺序紧密排列。
-- 同一 target 下多个 data task 如果 `input` 相同，执行层应只加载、归一化、校验一次，再分发给不同格式 exporter。
-- 同一个 target 的 code generation 不绑定 runtime data task。生成代码使用逻辑表名作为默认加载路径，具体文件后缀和格式由运行时传入的 loader / reader 实现决定。
-- code-only target 可以不声明 `targets.data`；生成代码仍可通过同一套逻辑表名加载 API 在运行时读取任意受支持格式的数据。
-- Project Config 使用 `[[targets.data]]` 数组表表达所有基于数据集的导出任务；`format` 决定它是运行时表数据、国际化模板、资源清单还是其他数据产物。
+- 同一 target 下多个 MetaAndData export task 共享同一个 `project.input` 与 effective tags，因此执行层只加载、归一化、校验一次，再分发给不同 exporter。
+- 同一个 target 的 code generation 不绑定 runtime data export task。生成代码使用逻辑表名作为默认加载路径，具体文件后缀和格式由运行时传入的 loader / reader 实现决定。
+- MetaOnly-only target 可以不设置 `project.input`；生成代码仍可通过同一套逻辑表名加载 API 在运行时读取任意受支持格式的数据。
+- Project Config 使用 `[[targets.exports]]` 数组表表达所有导出任务；`type` 与 registry dependency contract 决定它是运行时表数据、国际化模板、资源清单、Lua 内嵌数据还是代码产物。
 
-### 6.1.2 Code Generation Task
+### 6.1.2 Code Generation Export Task
 
 一个 export target 可以生成多个代码产物，例如同一次导出同时生成 Rust、C++ 和 TypeScript 访问代码：
 
 ```toml
-[[targets.code]]
-language = "cpp"
+[[targets.exports]]
+type = "cpp"
 output = "Generated/Cpp"
 module_name = "GameConfig"
 namespace = "game::config"
 file_header = "// {{project.name}}\n// {{project.copyright}}\n// Generated at {{datetime}}"
 keyword_conflict = "suffix_underscore"
 
-[targets.code.naming]
+[targets.exports.naming]
 type = "pascal_case"
 enum_value = "pascal_case"
 field = "snake_case"
 function = "pascal_case"
 constant = "pascal_case"
 
-[targets.code.cpp]
+[targets.exports.cpp]
 namespace = "game::config"
 ```
 
 通用要求：
 
-- `language` 决定使用哪个代码生成器。
-- `output` 是该代码生成任务的根目录，不与 target runtime data output 混淆。
+- `type` 决定使用哪个代码生成器。
+- `output` 是该代码生成 export task 的根目录，不与 runtime data output 混淆。
 - `file_name` 可覆盖生成代码文件名；Rust / TypeScript 单文件输出会自动补齐默认扩展，C++ 会用同一 stem 生成 `.hpp` / `.cpp`。
 - `data` 不支持设置。生成代码格式无关，只依赖 Meta 和 target tags；格式选择由接入方在运行时传入的 loader / reader 决定。
 - `file_header` 是文本模板，支持 `{{project.name}}`、`{{project.desc}}`、`{{project.copyright}}`、`{{datetime}}`。
@@ -108,18 +103,18 @@ namespace = "game::config"
 
 CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 table/field/index `export_when`、`row_export`、`override_sources[].export_when`、runtime export 和 codegen 的是 effective target tags：`target.tags ∪ CLI extra tags`。例如 `config-forge --target client_shipping --tag s1` 会在 `client_shipping` 原有 tags 上追加 `s1`，从而启用只在 S1 赛季生效的 `materials_s1.csv` override source。
 - `naming` 控制 type、field、function、constant 等符号的大小写组织。
-- 语言生成器可以声明额外配置，但必须放在该 code task 内对应语言子表中，不能污染其他语言任务；实现层应按语言使用 tagged enum / 多态配置承载这些差异。
+- 语言生成器可以声明额外配置，但必须放在该 export task 内对应语言子表中，不能污染其他语言任务；实现层应按语言使用 tagged enum / 多态配置承载这些差异。
 - 生成代码必须暴露 runtime data 加载抽象接口，不直接绑定本地文件系统、引擎资源系统、网络或包内资源。
 
 当前内置语言特定配置：
 
 | 子表 | 字段 | 说明 |
 | --- | --- | --- |
-| `[targets.code.rust]` | `derive_serde` | 为生成类型派生 serde 序列化/反序列化 trait。 |
-| `[targets.code.cpp]` | `namespace` | C++ namespace 覆盖；未设置时可使用通用 `namespace`。 |
-| `[targets.code.typescript]` | `readonly_fields` | interface 字段是否生成 `readonly`。 |
+| `[targets.exports.rust]` | `derive_serde` | 为生成类型派生 serde 序列化/反序列化 trait。 |
+| `[targets.exports.cpp]` | `namespace` | C++ namespace 覆盖；未设置时可使用通用 `namespace`。 |
+| `[targets.exports.typescript]` | `readonly_fields` | interface 字段是否生成 `readonly`。 |
 
-`[targets.code.i18n]` 控制 `text` 翻译 helper 的调用形态：默认 `mode = "generic"`，保留显式 translator 参数；`mode = "global_function"` 时必须配置 `function`，生成代码直接调用该全局函数，例如 gettext/libintl 或项目自己的全局 i18n facade。`returns = "string"` 表示函数总是返回最终文案，`returns = "optional"` 表示函数可能 missing，helper 会 fallback 到 raw text。C++ 可用 `cpp_include` 注入 include，TypeScript 可用 `typescript_import` 注入 import。
+`[targets.exports.i18n]` 控制 `text` 翻译 helper 的调用形态：默认 `mode = "generic"`，保留显式 translator 参数；`mode = "global_function"` 时必须配置 `function`，生成代码直接调用该全局函数，例如 gettext/libintl 或项目自己的全局 i18n facade。`returns = "string"` 表示函数总是返回最终文案，`returns = "optional"` 表示函数可能 missing，helper 会 fallback 到 raw text。C++ 可用 `cpp_include` 注入 include，TypeScript 可用 `typescript_import` 注入 import。
 
 `keyword_conflict` 策略：
 
@@ -148,52 +143,51 @@ CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 t
 
 ## 6.2 Data Export Format
 
-当前第一阶段支持以下 runtime data format：
+当前第一阶段支持以下 runtime data export type：
 
-| Format | 说明 |
+| Type | 说明 |
 | --- | --- |
 | `json` | 默认格式，便于调试和通用接入。 |
 | `messagepack` | 紧凑二进制格式，用于包体和加载性能更敏感的 runtime。 |
 | `bin` | ConfigForge 私有紧密二进制格式；使用 positional typed layout、`.bin` 后缀、最小 magic/version header 和 generated code 的 expected schema revision，不改变 JSON / MessagePack named payload contract。 |
 
-格式实现采用注册工厂模式：核心导出流程只根据 `format` 字符串从 `DataFormatRegistry` 中查找 data exporter，不在流程中通过枚举 `match` 分发。新增导出格式应通过注册新的 exporter 实现扩展，避免修改核心导出编排逻辑。当前内置注册器提供 `json`、`messagepack` 与 `bin` 三种 runtime table data exporter，以及 `gettext_pot` / alias `pot` 聚合 data exporter；`asset_manifest_csv` 等聚合格式仍为后续扩展。`bin` 的具体 wire format 见 `../Implementation/13-runtime-binary-format-detail-design.md`。
+格式实现采用注册工厂模式：核心导出流程只根据 `[[targets.exports]].type` 从 `DataFormatRegistry` 中查找 exporter，不在流程中通过枚举 `match` 分发。新增导出格式应通过注册新的 exporter 实现扩展，避免修改核心导出编排逻辑。当前内置注册器提供 `json`、`messagepack` 与 `bin` 三种 runtime table data exporter，以及 `gettext_pot` / alias `pot`、`lua_table` / alias `lua` 聚合 exporter；`asset_manifest_csv` 等聚合格式仍为后续扩展。`bin` 的具体 wire format 见 `../Implementation/13-runtime-binary-format-detail-design.md`。
 
 别名策略：
 
 - 配置中使用规范名 `messagepack`。
-- CLI 诊断使用格式 ID；生成代码不再包含格式枚举。
+- CLI 诊断使用 export type ID；生成代码不再包含格式枚举。
 - 如需兼容 `msgpack` 简写，可作为解析别名，但文档和生成产物统一输出 `messagepack`。
 
 未来可扩展但当前不实现：
 
-| Format | 说明 |
+| Type | 说明 |
 | --- | --- |
-| `lua_table` | Lua 特殊模式，代码和数据合一；作为 data task 读取 source data，并生成 root facade + 每表一个 `.lua` 文件。 |
+| `lua_table` | Lua 特殊模式，代码和数据合一；作为 MetaAndData export task 读取 source data，并生成 root facade + 每表一个 `.lua` 文件。 |
 | `yaml` | 可选文本格式。 |
 | `sqlite` | 可选数据库格式。 |
 | `protobuf` | 未来设计，不作为当前实现要求。 |
 
 不使用 `custom` 作为模糊格式。自定义格式必须声明明确 ID，例如 `studio_binary_v1`。
 
-### Lua Table（Planned / Not implemented）
+### Lua Table
 
-`lua_table` 是计划中的 data-backed export format，而不是普通 `[[targets.code]]` codegen backend。它会同时消费 Meta 与当前 data task 的已归一化、已校验数据，输出可被 Lua VM 直接 `require` 的数据+访问代码：
+`lua_table` 是 MetaAndData export type，而不是普通 codegen backend。它会同时消费 Meta 与当前 target 的已归一化、已校验数据，输出可被 Lua VM 直接 `require` 的数据+访问代码：
 
 - 每张可见 table 生成一个 `.lua` 文件；
 - 生成一个 root facade 文件，按访问情况 lazy `require` 对应 table 文件，也可提供 `preload_all()`；
 - CollectionTable 每行默认以数组存储字段值，并用共享 metatable 支持 `row.field` 访问，以降低每行重复字符串 key 的内存成本；
 - 为 CollectionTable 生成 primary / unique / non-unique index lookup，索引引用 row 对象，不复制 row 数据；
 - ObjectTable 默认输出 keyed Lua table；
-- 该格式必须声明 `input`，不能用于 code-only target。
+- 该格式依赖 `project.input`，不能用于未设置 source data root 的 MetaOnly-only target。
 
 示例配置：
 
 ```toml
-[[targets.data]]
+[[targets.exports]]
 name = "lua"
-input = "data"
 output = "Generated/LuaConfig"
-format = "lua_table"
+type = "lua_table"
 module_name = "game.config"
 root_file = "init.lua"
 row_layout = "array_with_metatable"
@@ -239,7 +233,7 @@ reader 的基础语义必须覆盖当前 Meta 类型：int、float、bool、stri
 - 提供一个同时支持多种格式的 reader；
 - 在引擎侧复用已有资源加载和反序列化 cursor。
 
-格式选择由运行时传入的 loader / reader 实现决定。runtime data task 只负责导出具体格式文件及后缀；生成代码保留逻辑 table name，并通过同一套通用读取路径工作。若 target 同时导出 JSON、MessagePack 与 bin，同一份生成代码可以分别配合 JSON loader、MessagePack loader 或 binary loader 加载对应格式。无论 Meta 新增多少表和字段，接入方的 RuntimeDataLoader 接口都不应变化；变化只体现在重新生成的解析代码中。
+格式选择由运行时传入的 loader / reader 实现决定。runtime data export task 只负责导出具体格式文件及后缀；生成代码保留逻辑 table name，并通过同一套通用读取路径工作。若 target 同时导出 JSON、MessagePack 与 bin，同一份生成代码可以分别配合 JSON loader、MessagePack loader 或 binary loader 加载对应格式。无论 Meta 新增多少表和字段，接入方的 RuntimeDataLoader 接口都不应变化；变化只体现在重新生成的解析代码中。
 
 #### 6.2.1.1 Table-level Lazy Loading
 
@@ -379,12 +373,12 @@ TypeScript generated code 同时支持 async 与 sync loader 场景：
 
 ### 6.2.2 标准 RuntimeDataReader 实现包
 
-ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader adapter，覆盖主流目标语言与 runtime data format 的组合。目标不是让生成代码强依赖这些 adapter，而是提供可直接复用、可拷贝修改、可作为测试 harness 基础实现的标准参考实现。
+ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader adapter，覆盖主流目标语言与 runtime data export type 的组合。目标不是让生成代码强依赖这些 adapter，而是提供可直接复用、可拷贝修改、可作为测试 harness 基础实现的标准参考实现。
 
 设计原则：
 
 1. **生成代码核心仍保持无第三方 runtime 依赖**：Rust / C++ / TypeScript generated code 只声明 reader / loader 契约和 generated parser，不直接依赖 `serde_json`、`rmp-serde`、`RapidJSON`、`msgpack-c`、npm MessagePack 包等。
-2. **标准 adapter 按官方支持矩阵拆分**：stable runtime data format 应覆盖官方 target language；experimental format 可以先只覆盖部分语言。每个 adapter 单元只负责“某语言中把某格式的通用 value/cursor 暴露为 RuntimeDataReader”，transport loader 作为可组合层，不进入语言 × 格式矩阵。
+2. **标准 adapter 按官方支持矩阵拆分**：stable runtime data export type 应覆盖官方 target language；experimental type 可以先只覆盖部分语言。每个 adapter 单元只负责“某语言中把某格式的通用 value/cursor 暴露为 RuntimeDataReader”，transport loader 作为可组合层，不进入语言 × 格式矩阵。
 3. **资源加载与格式解码分层**：`RuntimeDataLoader` 的文件系统、HTTP、引擎资源系统等 transport 逻辑应与 JSON / MessagePack reader 解码逻辑分开。标准包可以提供常用组合（如 Node fs + JSON、Rust fs + MessagePack），但底层 reader 应可被自定义 loader 复用。
 4. **依赖显式可选**：不同语言/格式 adapter 允许依赖不同三方库，但依赖必须限制在对应 adapter 包/模块内，并通过 Cargo feature、npm optional dependency、CMake option / package manager 选项等机制显式启用。
 5. **测试与项目复用同源**：集成测试中的 harness 应优先使用这些标准 adapter 或其 fixture 包装，而不是在 harness 中长期内嵌一份独立 JSON / MessagePack reader 逻辑；这样测试能持续验证真实接入方会使用的 reader contract。
@@ -433,22 +427,21 @@ C++ adapter 需要有独立工程化入口。推荐支持 `add_subdirectory(runt
 
 ## 6.3 非运行时数据导出格式
 
-POT、Asset Manifest 等辅助产物不再引入独立的 `targets.special_exporters` 配置层，而是明确作为 `[[targets.data]]` 的一种 `format`。这样 TOML 结构保持简单：`target.data` 统一表示“基于 source data / ExportView 生成的数据产物”，`target.code` 统一表示“基于 Meta 生成代码”。
+POT、Asset Manifest 等辅助产物不再引入独立的 `targets.special_exporters` 配置层，而是明确作为 `[[targets.exports]]` 的一种 `type`。这样 TOML 结构保持简单：`target.exports` 统一表示“当前 target 要生成的产物”，由 exporter dependency contract 区分 MetaOnly 与 MetaAndData。
 
 非运行时 data exporter 与 runtime data exporter 的定位不同：runtime data 面向游戏运行时加载；POT、资源清单、审计索引等面向本地化、资源打包、工具链或文档流程。它们共享同一个 Meta / Data / ExportView 语义，但非运行时 data exporter 可以读取被 runtime payload 隐藏、同时又被 exporter policy 显式允许的辅助字段，例如 text translator comment 或 asset bundle tag。无论是否读取辅助字段，都必须遵守 target tags、table/field visibility、`row_export` 和 artifact path conflict 规则。
 
-目标态配置继续使用 target 内的 `[[targets.data]]` 数组表。示例：
+目标态配置继续使用 target 内的 `[[targets.exports]]` 数组表。示例：
 
 ```toml
 [[targets]]
 name = "client_i18n"
 tags = ["client"]
 
-[[targets.data]]
+[[targets.exports]]
 name = "pot"
-input = "Data"
 output = "Generated/I18n"
-format = "gettext_pot"
+type = "gettext_pot"
 domain = "game_config"
 file_name = "game_config.pot"
 source_reference = "source_location"
@@ -456,17 +449,16 @@ include_translator_comments = true
 deduplicate = true
 ```
 
-通用字段沿用 `targets.data`：
+通用字段沿用 `targets.exports`：
 
 | 字段 | 说明 |
 | --- | --- |
-| `name` | 当前 target 内唯一的 data task 名称，用于诊断和 artifact key。 |
-| `input` | Source data 根目录；POT、asset manifest 等聚合格式也从同一数据根加载 source data。 |
+| `name` | 当前 target 内唯一的 export task 名称，用于诊断和 artifact key。 |
 | `output` | 数据产物输出目录。聚合格式如果只产生一个文件，应通过格式选项或默认规则确定文件名。 |
-| `format` | exporter 类型 ID，例如 `gettext_pot`、`asset_manifest_csv`。禁止使用模糊 `custom`。 |
-| format 专属字段 | 直接摊平在当前 `[[targets.data]]` 下，例如 `domain`、`file_name`、`source_reference`。 |
+| `type` | exporter 类型 ID，例如 `gettext_pot`、`asset_manifest_csv`。禁止使用模糊 `custom`。 |
+| exporter 专属字段 | 直接摊平在当前 `[[targets.exports]]` 下，例如 `domain`、`file_name`、`source_reference`。 |
 
-所有 data task 产物，无论是 runtime table data 还是 POT / manifest，都必须和 codegen 产物一起进入 artifact plan，最终由 Artifact Writer 统一检查规范化绝对路径冲突并写入。
+所有 export task 产物，无论是 runtime table data、POT / manifest 还是 codegen，都必须一起进入 artifact plan，最终由 Artifact Writer 统一检查规范化绝对路径冲突并写入。
 
 ### gettext POT
 
@@ -491,7 +483,7 @@ deduplicate = true
 - `msgid` 默认使用原文驱动模式，即 source cell 文本本身。未来可配置 key-driven 模式，此时 `text` cell 可表示稳定 key，而默认语言原文来自伴随列/外部 catalog。
 - `msgctxt` 默认可由 `table.field_path` 派生；也可由 Meta 字段参数、target policy 或 source 中显式 context 列覆盖。不同 context 下相同 msgid 必须产生不同 POT entry。
 - translator comments 可来自字段 `desc`、未来 text 字段声明、source 中显式映射的额外注释列/行、以及 exporter 生成的 table/field/record 描述；如果多个来源同时存在，应按 exporter policy 稳定合并并去重。
-- 被 ExportView 过滤掉的 row / field / fragment 不产生 POT 条目，也不产生 translator comments。`export = false` 的字段默认不进入 runtime data；若未来字段策略显式允许 `format = "gettext_pot"` 读取某个辅助字段，POT exporter 可读取它，但仍必须遵守 target tags 与 row filter。
+- 被 ExportView 过滤掉的 row / field / fragment 不产生 POT 条目，也不产生 translator comments。`export = false` 的字段默认不进入 runtime data；若未来字段策略显式允许 `type = "gettext_pot"` 读取某个辅助字段，POT exporter 可读取它，但仍必须遵守 target tags 与 row filter。
 - dedup 规则必须稳定：`deduplicate = true` 时，相同 `(msgctxt, msgid)` 合并为一个 entry，source references 和 translator comments 按 table order、row order、field order 稳定追加；如果相同 `(msgctxt, msgid)` 的 comments 冲突，默认合并而不报错，严格模式可升级为 warning / error。`deduplicate = false` 时按抽取顺序原样输出 entries，调用方需自行处理 gettext 工具对重复 key 的行为。
 - 输出编码固定 UTF-8；字符串必须按 gettext 规范转义双引号、反斜杠、换行和控制字符。多行 msgid 应使用标准多段字符串表示。
 - header entry `msgid ""` 必须稳定生成，包含 `Project-Id-Version`、`Content-Type: text/plain; charset=UTF-8`、`Content-Transfer-Encoding: 8bit` 等基础字段；首版为 deterministic 输出，不写 `POT-Creation-Date`。若未来增加 generated_at/build timestamp，应遵循 deterministic / generated_at 策略。
@@ -530,7 +522,7 @@ msgstr ""
 
 ### Asset Manifest CSV
 
-Asset manifest 同样作为 `[[targets.data]] format = "asset_manifest_csv"` 的聚合数据导出格式，而不是独立配置层。
+Asset manifest 同样作为 `[[targets.exports]] type = "asset_manifest_csv"` 的聚合数据导出格式，而不是独立配置层。
 
 输入：ExportView 中未被过滤的 asset 字段。
 
@@ -582,12 +574,12 @@ Artifact 内容类型：
 要求：
 
 - 导出前发现路径冲突。
-- 路径冲突检查使用规范化绝对 artifact path；两个 data task 如果规划出同 output + 同 format + 同 table 文件名，必须报错。
+- 路径冲突检查使用规范化绝对 artifact path；两个 export task 如果规划出同 output + 同 type + 同 table 文件名，必须报错。
 - 产物写入通过 Artifact Writer。
 - Artifact Writer 支持 `direct` 和 `temp-commit` 写入策略；CLI 默认 `direct`，可通过 `--write-mode temp-commit` 选择临时提交写入。
 - 并行生成不影响 artifact write result 顺序。
 - `temp-commit` 模式先完成所有临时文件写入，再按稳定顺序提交到最终路径；临时文件写入失败时不提交最终产物并清理已创建的临时文件，提交阶段失败可能保留已经 rename 成功的最终文件。
-- 未来 summary manifest 可作为 `targets.data` 的聚合导出格式产物；记录 runtime data artifact 时，应以 `(target_name, data_name, table_name)` 作为稳定 key，并额外记录 `format`、相对 data artifact root 的 `path` 和最终写入 path，避免同一 table 的多格式产物互相覆盖。POT / manifest 这类聚合 data task 应使用 `(target_name, data_name, format, artifact_name)` 作为稳定 key。
+- 未来 summary manifest 可作为 `targets.exports` 的聚合导出格式产物；记录 runtime data artifact 时，应以 `(target_name, export_name, table_name)` 作为稳定 key，并额外记录 `type`、相对 data artifact root 的 `path` 和最终写入 path，避免同一 table 的多格式产物互相覆盖。POT / manifest 这类聚合 export task 应使用 `(target_name, export_name, type, artifact_name)` 作为稳定 key。
 
 写入策略：
 
@@ -620,11 +612,11 @@ config-forge --project ConfigForge.toml --target client
 1. 解析 Project Config，并递归加载其顶层 `imports` 指向的工程配置片段。
 2. 按 `--target` 找到目标 target。
 3. 合并所有配置片段中的 `enums`、`structs`、`tables` 并完成 link/validate。
-4. 如果 target 声明 `[[targets.data]]`，再按 data task 读取 Data source、归一化、校验并写出 runtime data；同 input 的多格式 data task 可复用加载结果，不同 input 必须分别派生 DataSet-dependent ExportView。
-5. 如果 target 声明 `[[targets.code]]`，按每个 code task 的语言和输出目录生成格式无关代码。
-6. 汇总 runtime data 和 generated code artifacts，统一完成路径归一化、稳定排序和冲突检查。
+4. 根据 `[[targets.exports]]` 与 exporter dependency contract 构造 target-local DAG；MetaAndData 分支读取 `project.input`、归一化、校验并运行数据相关 exporter，MetaOnly 分支运行格式无关 codegen。
+5. 同 `(project.input, effective_tags)` 的 MetaAndData export task 复用加载、归一化和校验结果。
+6. 汇总所有 export artifacts，按 export task 声明顺序稳定排序，并统一完成路径归一化和冲突检查。
 7. 按 `--dry-run` / `--write-mode` 写出 artifact，或在 dry-run 模式下只返回写入计划。
-8. 未声明的任务不读取对应输入、不产生对应输出。例如 code-only target 不读取 Data。
+8. 未声明的任务不产生对应输出。例如 MetaOnly-only target 不读取 Data。
 
 ## 6.7 退出码
 

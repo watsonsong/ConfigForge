@@ -98,7 +98,7 @@ C++ `linked_field` 生成规则：
 C++ `text` 翻译 helper 生成规则：
 
 - Row/Object struct 保留 `std::string` raw 字段；对每个 text 字段生成 const helper method。
-- 默认 `targets.code.i18n.mode = "generic"` 时生成抽象 translator interface 或文档化 duck-typed template。若保持 ABI 简单，可使用纯虚接口：
+- 默认 `targets.exports.i18n.mode = "generic"` 时生成抽象 translator interface 或文档化 duck-typed template。若保持 ABI 简单，可使用纯虚接口：
 
 ```cpp
 class ITextTranslator {
@@ -115,11 +115,11 @@ struct ItemRow {
 };
 ```
 
-当 `targets.code.i18n.mode = "global_function"` 时，helper 直接调用配置的全局函数，不再接受 translator 参数；`cpp_include` 可注入声明所在头文件：
+当 `targets.exports.i18n.mode = "global_function"` 时，helper 直接调用配置的全局函数，不再接受 translator 参数；`cpp_include` 可注入声明所在头文件：
 
 ```cpp
 // ConfigForge.toml:
-// [targets.code.i18n]
+// [targets.exports.i18n]
 // mode = "global_function"
 // function = "GlobalTranslate"
 // cpp_include = "\"i18n.hpp\""

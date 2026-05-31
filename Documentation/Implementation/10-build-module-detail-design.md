@@ -18,7 +18,7 @@ Build 模块需要解决：
 非目标：
 
 - 不把 Project Config schema 放在 build 内；schema 属于 `project` / `exporter` / `codegen`。
-- 不把 runtime data format 实现放在 build 内；格式属于 `exporter`。
+- 不把 runtime data export type 实现放在 build 内；格式属于 `exporter`。
 - 不把语言生成器实现放在 build 内；生成器属于 `codegen`。
 
 ## 10.2 模块结构
@@ -184,7 +184,7 @@ Build 是顶层业务编排层，因此可以依赖：
 - `meta`：linked meta 和 target tags；
 - `data`：load plan / loader；
 - `validation`：normalize 和 validation report；
-- `exporter`：runtime data format export；
+- `exporter`：runtime data export type 执行；
 - `codegen`：生成器和 generated files；
 - `artifact`：统一制品写入、dry-run 和写入结果。
 

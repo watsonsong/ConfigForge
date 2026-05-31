@@ -237,7 +237,7 @@ pub struct CodegenDiagnostic {
 1. runtime data 与 generated code 都以 `GeneratedFile`/artifact 形态参与写出。
 2. 已做输出路径冲突检查。
 3. CLI 支持 dry-run、direct write 和 `temp-commit` 写入模式；`--dry-run` 优先于 `--write-mode`。
-4. summary manifest 可作为 `targets.data` 的聚合导出格式独立实现。
+4. summary manifest 可作为 `targets.exports` 的聚合导出格式独立实现。
 
 ## 9.16 第一阶段完成标准
 

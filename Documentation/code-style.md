@@ -40,9 +40,9 @@
 - `meta` owns schema definitions, Load-then-Link, linked views, and Meta structural diagnostics.
 - `data` owns source loading, CSV readers, raw `DataSet`, row source trace, and Meta-aware resolving.
 - `validation` owns correctness checks, target-aware validation views, `ValidationReport`, and validator registry.
-- `exporter` owns runtime data export contracts, data format registry, JSON / MessagePack payloads, and future data format plugins.
+- `exporter` owns runtime data export contracts, export type registry, JSON / MessagePack payloads, and future export type plugins.
 - `codegen` owns language-neutral CodeModel IR and Rust / TypeScript / C++ generated code.
-- `build` owns project build orchestration, target normalization, data/code task binding, and artifact scheduling/writes.
+- `build` owns project build orchestration, target normalization, export task DAG execution, and artifact scheduling/writes.
 - `cli` owns command-line parsing and user-facing messages. It should call `build` rather than orchestrating lower-level modules directly.
 - Future plugin or executor modules should follow the one-way dependency rules in `Documentation/Implementation/01-module-outline.md`.
 - Public module roots should act as narrow facades. Internal files may be split freely for cohesion,

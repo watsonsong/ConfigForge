@@ -401,11 +401,12 @@ mod tests {
             ]),
         };
 
-        let code_task = codegen_task_config_from_export_task(&task).expect("code task");
+        let codegen_task =
+            codegen_task_config_from_export_task(&task).expect("codegen export task");
 
-        assert_eq!(code_task.language, "cpp");
-        assert_eq!(code_task.module_name.as_deref(), Some("GameConfig"));
-        assert_eq!(code_task.namespace.as_deref(), Some("game::config"));
+        assert_eq!(codegen_task.language, "cpp");
+        assert_eq!(codegen_task.module_name.as_deref(), Some("GameConfig"));
+        assert_eq!(codegen_task.namespace.as_deref(), Some("game::config"));
     }
 
     #[test]

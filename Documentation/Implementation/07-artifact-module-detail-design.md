@@ -7,7 +7,7 @@
 Artifact 模块需要解决：
 
 1. 统一 runtime data 与 generated code 的制品模型，避免 exporter / codegen 各自定义写文件流程。
-2. 在写入前集中检查输出路径冲突，覆盖跨 data task、跨 code task、runtime data 与 generated code 之间的冲突。
+2. 在写入前集中检查输出路径冲突，覆盖跨 export task、runtime data 与 generated code 之间的冲突。
 3. 支持 `dry-run`：完整执行配置加载、Meta link、data load、validation、serialization/codegen 和路径规划，但不写入最终文件。
 4. 支持 `direct` 与 `temp-commit` 两种写入策略，并支持 `dry-run` 写入计划。
 5. 生成稳定的写入结果：路径稳定排序、bytes/文本内容统一表达。
@@ -105,7 +105,7 @@ Build collects Vec<Artifact>
   -> if TempCommit: write same-directory temp files, then rename to final paths
 ```
 
-路径冲突检查必须在任何写入前完成，错误信息包含冲突路径，方便用户定位 data/code task 配置问题。
+路径冲突检查必须在任何写入前完成，错误信息包含冲突路径，方便用户定位 export task 配置问题。
 
 ## 7.5 与 Exporter 的关系
 
@@ -123,7 +123,7 @@ pub struct RuntimeDataArtifact {
 其中：
 
 - `RuntimeDataFile` 仍是 codegen 需要消费的 runtime loader 路径契约。
-- `Artifact.path` 是实际写入路径，由 data task output root + runtime data file path 得到。
+- `Artifact.path` 是实际写入路径，由 export task output root + runtime data file path 得到。
 - Exporter 不再调用 `fs::create_dir_all` / `fs::write`，也不选择 `ArtifactWriteMode`。
 
 正式 build 流程统一由 build 收集 exporter/codegen artifacts，再按 `BuildOptions.artifact_write_mode`

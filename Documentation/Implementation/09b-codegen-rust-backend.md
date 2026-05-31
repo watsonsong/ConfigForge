@@ -102,7 +102,7 @@ Rust `linked_field` 生成规则：
 Rust `text` 翻译 helper 生成规则：
 
 - 对每个 `CodeTypeRef::Text` 字段，在 row/object `impl` 中生成 helper；普通字段仍保留 `pub <field>: String`。
-- 默认 `targets.code.i18n.mode = "generic"` 时生成轻量 translator trait，或允许用户类型实现等价 lookup trait：
+- 默认 `targets.exports.i18n.mode = "generic"` 时生成轻量 translator trait，或允许用户类型实现等价 lookup trait：
 
 ```rust
 pub trait TextTranslator {
@@ -118,11 +118,11 @@ impl ItemRow {
 }
 ```
 
-当 `targets.code.i18n.mode = "global_function"` 时，不生成 `TextTranslator` trait，helper 直接调用配置的全局函数，签名不再带 translator 参数：
+当 `targets.exports.i18n.mode = "global_function"` 时，不生成 `TextTranslator` trait，helper 直接调用配置的全局函数，签名不再带 translator 参数：
 
 ```rust
 // ConfigForge.toml:
-// [targets.code.i18n]
+// [targets.exports.i18n]
 // mode = "global_function"
 // function = "crate::i18n::translate"
 

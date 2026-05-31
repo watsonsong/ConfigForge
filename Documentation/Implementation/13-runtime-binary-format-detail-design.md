@@ -8,7 +8,7 @@
 
 目标：
 
-1. 新增 runtime data format：`format = "bin"`，默认输出 `<table>.bin`。
+1. 新增 runtime data export type：`type = "bin"`，默认输出 `<table>.bin`。
 2. `bin` 文件头只写入最小格式识别信息和 schema revision；不写 table name、field name、fragment name、enum name、tag 或其他 payload 自描述元信息。
 3. revision 由 Meta 中影响二进制布局和 typed reader 的关键信息稳定 hash 得到，不由用户手工配置。
 4. Exporter 与 Codegen 使用同一套 target-aware、schema-aware 顺序定义，确保生成代码按相同顺序读取。
@@ -41,7 +41,7 @@ table_payload
 - `magic = "CFGB"` 只用于快速识别 ConfigForge binary artifact 和稳定错误分类，不代表格式自描述；payload 仍完全依赖 generated code 的 schema layout。
 - `format_version = 1` 表示当前 binary wire contract。reader 看到不支持的 version 必须报 unsupported binary format version，而不是继续按 revision 尝试读取。
 - `header_size = 16` 为 v1 固定值。v1 reader 只接受 16；未来若扩展 header，必须通过新的 format version 明确升级 reader contract。
-- 格式选择仍由 `TargetDataConfig.format = "bin"` 和 generated code 中的 data format 视图决定；reader 不应把 magic 当作通用自动 schema 发现机制。
+- 格式选择由 Project TOML `[[targets.exports]].type = "bin"` 经 build 归一化后传入 exporter；reader 不应把 magic 当作通用自动 schema 发现机制。
 
 ### 13.2.1 CollectionTable payload
 
@@ -278,7 +278,7 @@ impl DataFormatExporter for BinaryDataExporter {
 3. 继续复用 `DataResolver::resolve_table_rows / resolve_table` 获取 normalized resolved values。
 4. CollectionTable 写 `row_count` + rows；ObjectTable 只写 object record。
 5. 按 layout 顺序从 `ResolvedValue` 取值并编码；如果 required value 缺失，返回 validation-style error。
-6. Registry 中注册 `BinaryDataExporter`，Project Config 支持 `format = "bin"`。
+6. Registry 中注册 `BinaryDataExporter`，Project Config 支持 `type = "bin"`。
 
 不要复用 `ExportedTablePayload` 直接 serde 序列化，因为 text payload 是 named map/object shape，而 `bin` 需要 typed positional layout。当前实现复用同一套 target-aware resolved export view / resolver 语义，JSON、MessagePack 和 Binary 从同一份可见数据语义构建：
 
@@ -291,7 +291,7 @@ impl DataFormatExporter for BinaryDataExporter {
 
 ### 13.8.1 CodeModel 与 format 解耦
 
-当前默认 codegen 不再消费真实 data task 结果，也不通过 `RuntimeDataFile.path` / `RuntimeDataFile.format` 绑定某个 runtime artifact。生成代码使用逻辑 table name（例如 `items`）作为 load key，实际打开 `items.json`、`items.msgpack` 或 `items.bin` 由运行时 loader / reader 组合决定。若未来 manifest 或 adapter 配置需要显式记录真实 artifact，可在 build/runtime 层维护下列 metadata，但它不是当前 CodeModel validate 的必需输入：
+当前默认 codegen 不再消费真实 runtime data export task 结果，也不通过 `RuntimeDataFile.path` / `RuntimeDataFile.format` 绑定某个 runtime artifact。生成代码使用逻辑 table name（例如 `items`）作为 load key，实际打开 `items.json`、`items.msgpack` 或 `items.bin` 由运行时 loader / reader 组合决定。若未来 manifest 或 adapter 配置需要显式记录真实 artifact，可在 build/runtime 层维护下列 metadata，但它不是当前 CodeModel validate 的必需输入：
 
 ```rust
 pub struct RuntimeDataFile {
@@ -301,7 +301,7 @@ pub struct RuntimeDataFile {
 }
 ```
 
-`format` 是 runtime artifact / manifest metadata，不是当前默认 CodeModel 构建和 codegen validate 的必需输入。unknown data format 应由 data export registry 或显式 adapter 配置校验；生成代码本身保持格式无关。后缀只能作为 artifact path 规划结果，不能作为 reader layout 的隐式来源。
+`format` 是 runtime artifact / manifest metadata，不是当前默认 CodeModel 构建和 codegen validate 的必需输入。unknown export type 应由 exporter registry 或显式 adapter 配置校验；生成代码本身保持格式无关。后缀只能作为 artifact path 规划结果，不能作为 reader layout 的隐式来源。
 
 ### 13.8.2 Generated parser 分层
 
@@ -438,8 +438,8 @@ Codegen / runtime helper 测试：
 
 集成测试：
 
-1. standard project 增加一个 `format = "bin"` target 或独立 fixture。
-2. 构建同时导出 JSON、MessagePack、bin，分别绑定不同 code task。
+1. standard project 增加一个 `type = "bin"` export task 或独立 fixture。
+2. 构建同时导出 JSON、MessagePack、bin，并用同一份格式无关 codegen 产物配合不同 runtime loader。
 3. dry-run / temp-commit / direct artifact writer 都能处理 `.bin` artifacts。
 
 ## 13.11 分阶段实现建议
@@ -453,7 +453,7 @@ Codegen / runtime helper 测试：
 
 ### Phase 2：Runtime metadata + generated parser
 
-- 如未来需要 manifest / adapter 配置，可在 build/runtime metadata 中显式记录 runtime data format；当前默认 CodeModel 不消费真实 data task 结果。
+- 如未来需要 manifest / adapter 配置，可在 build/runtime metadata 中显式记录 runtime data export type；当前默认 CodeModel 不消费真实 runtime data export task 结果。
 - 三个语言生成器通过统一 schema-driven reader API 复用 parser；named / positional 差异由运行时 reader adapter 消化。
 - generated code 写入每张 table 的 `EXPECTED_SCHEMA_REVISION` 常量。
 
@@ -464,7 +464,7 @@ Codegen / runtime helper 测试：
 
 ### Phase 4：端到端与性能验证
 
-- CLI integration 覆盖 `format = "bin"`。
+- CLI integration 覆盖 `type = "bin"`。
 - 与 JSON / MessagePack 比较包体大小与加载耗时。
 - 根据数据决定是否增加 string interning、bool array bitset、block compression 等 v2 优化。
 

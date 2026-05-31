@@ -204,13 +204,13 @@
 | 运行时数据格式 | Runtime Data Format | `RuntimeDataFormat` | 当前支持 `json`、`messagepack`、`bin`；未来可扩展 `lua_table`、`yaml`、`sqlite`、`protobuf`。 |
 | JSON 导出 | JSON Export | `JsonDataExporter` | 输出 JSON runtime data。 |
 | Lua Table 导出 | Lua Table Export | `LuaTableExporter` | 输出 Lua table；Lua 中代码和数据可合一。 |
-| Lua 内嵌数据生成器 | Lua Embedded Data Generator | `LuaEmbeddedDataExporter` | 计划中的 `format = "lua_table"` 实现；消费 Meta + Data，生成 root facade 与每表 `.lua` 文件。 |
+| Lua 内嵌数据生成器 | Lua Embedded Data Generator | `LuaEmbeddedDataExporter` | `type = "lua_table"` 的 MetaAndData export task；消费 Meta + Data，生成 root facade 与每表 `.lua` 文件。 |
 | YAML 导出 | YAML Export | `YamlDataExporter` | 可扩展 runtime data exporter。 |
 | MessagePack 导出 | MessagePack Export | `MessagePackDataExporter` | 第一阶段支持的紧凑二进制 runtime data exporter，配置规范名为 `messagepack`。 |
 | SQLite 导出 | SQLite Export | `SqliteDataExporter` | 可扩展数据库 exporter。 |
 | Protobuf 导出 | Protobuf Export | `ProtobufDataExporter` | 未来扩展；需要显式 `field_number`。 |
 | 聚合数据导出器 | Aggregate Data Exporter | `AggregateDataExporter` | 输出跨表辅助数据产物的 data exporter，例如 POT、asset manifest。 |
-| POT 导出器 | Gettext POT Exporter | `GettextPotExporter` | `format = "gettext_pot"`；从 ExportView 中的 `text` 字段导出 POT。 |
+| POT 导出器 | Gettext POT Exporter | `GettextPotExporter` | `type = "gettext_pot"`；从 ExportView 中的 `text` 字段导出 POT。 |
 | 翻译注释 | Translator Comment | `TranslatorComment` | POT 中给翻译人员的注释，可来自 text 字段、`desc` 或 source 中额外映射的注释列/行。 |
 | 资源清单导出器 | Asset Manifest Exporter | `AssetManifestExporter` | 从 ExportView 中的 `asset` 字段导出资源清单。 |
 | 代码生成器 | Code Generator | `CodeGenerator` | 根据 Meta/ExportView 生成目标语言代码或访问 API。 |
@@ -258,5 +258,5 @@
 | Source `priority` | 取消；`override_sources` 按列表顺序覆盖，后者覆盖前者。 |
 | `expanded_columns` / `expanded_rows` | 不作为 canonical layout；改用 `expanded_value`。 |
 | `color_channel = "auto"` | 禁止；必须显式为 `byte` 或 `normalized`。 |
-| 模糊 `custom` runtime format | 不使用；自定义格式必须注册明确 format/exporter ID。当前 runtime table data format 为 `json`、`messagepack`、`bin`；聚合 data exporter 已支持 `gettext_pot` / `pot`。 |
+| 模糊 `custom` runtime format | 不使用；自定义格式必须注册明确 export type / exporter ID。当前 runtime table data export type 为 `json`、`messagepack`、`bin`；聚合 exporter 已支持 `gettext_pot` / `pot`、`lua_table` / `lua`。 |
 | fragment join mode | 当前不支持；当前只支持 variant source mode。 |

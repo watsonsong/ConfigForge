@@ -495,7 +495,7 @@ Meta 导出机制使用 `export`、`export_when` 与 `row_export`；以下字段
 | `text` | 国际化文本逻辑值。 |
 | `asset` | 资源引用逻辑值。 |
 
-`text` 与 `string` 的 runtime 基础表示第一阶段相同，都是 UTF-8 字符串；差异在语义层：`text` 会被国际化相关 validation、`format = "gettext_pot"` data exporter 和生成代码翻译 helper 识别。默认模型为“原文驱动”：source cell 直接写默认语言原文，POT exporter 使用它作为 `msgid`。未来可通过字段 option 或 target policy 扩展为 key-driven text、富文本、复数文本等，但这些扩展必须显式建模，不应让普通 `string` 隐式参与国际化导出。
+`text` 与 `string` 的 runtime 基础表示第一阶段相同，都是 UTF-8 字符串；差异在语义层：`text` 会被国际化相关 validation、`type = "gettext_pot"` export task 和生成代码翻译 helper 识别。默认模型为“原文驱动”：source cell 直接写默认语言原文，POT exporter 使用它作为 `msgid`。未来可通过字段 option 或 target policy 扩展为 key-driven text、富文本、复数文本等，但这些扩展必须显式建模，不应让普通 `string` 隐式参与国际化导出。
 
 ### Builtin Value Types
 

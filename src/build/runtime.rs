@@ -35,14 +35,14 @@ pub(super) struct RuntimeExportTaskOutput {
     pub(super) artifacts: Vec<Artifact>,
 }
 
-pub(super) fn export_runtime_data_tasks(
+pub(super) fn export_meta_and_data_tasks(
     data_root: Option<&Path>,
-    data_tasks: &[&NormalizedExportTask],
+    export_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
     pool: &ThreadPool,
 ) -> Result<RuntimeExportOutput> {
-    if data_tasks.is_empty() {
+    if export_tasks.is_empty() {
         return Ok(RuntimeExportOutput {
             warnings: Vec::new(),
             task_outputs: Vec::new(),
@@ -56,7 +56,7 @@ pub(super) fn export_runtime_data_tasks(
     })?;
 
     let registry = DataFormatRegistry::with_builtin_exporters();
-    ensure_planned_runtime_output_paths(data_tasks, linked_meta, target_tags, &registry)?;
+    ensure_planned_runtime_output_paths(export_tasks, linked_meta, target_tags, &registry)?;
 
     let data_plan = DataLoadPlan::from_tables(
         linked_meta
@@ -74,12 +74,12 @@ pub(super) fn export_runtime_data_tasks(
     warnings.extend(validation_report.warning_messages());
     let mut task_outputs = Vec::new();
 
-    for data_task in data_tasks {
-        let format_exporter = registry.require_any(&data_task.type_id)?;
+    for export_task in export_tasks {
+        let format_exporter = registry.require_any(&export_task.type_id)?;
         match format_exporter {
             DataExporterRef::Table(exporter) => {
                 let runtime_artifacts = export_runtime_data(
-                    &data_task.output,
+                    &export_task.output,
                     linked_meta,
                     target_tags,
                     &data_set,
@@ -91,9 +91,9 @@ pub(super) fn export_runtime_data_tasks(
                     .map(|artifact| artifact.file.clone())
                     .collect::<Vec<_>>();
                 task_outputs.push(RuntimeExportTaskOutput {
-                    export_name: data_task.name.clone(),
+                    export_name: export_task.name.clone(),
                     result: Some(RuntimeConfigForgeResult {
-                        export_name: data_task.name.clone(),
+                        export_name: export_task.name.clone(),
                         files,
                     }),
                     artifacts: runtime_artifacts
@@ -104,11 +104,11 @@ pub(super) fn export_runtime_data_tasks(
             }
             DataExporterRef::Aggregate(exporter) => {
                 task_outputs.push(RuntimeExportTaskOutput {
-                    export_name: data_task.name.clone(),
+                    export_name: export_task.name.clone(),
                     result: None,
                     artifacts: exporter.export(
-                        &data_task.output,
-                        &target_data_config_from_export_task(data_task),
+                        &export_task.output,
+                        &target_data_config_from_export_task(export_task),
                         linked_meta,
                         target_tags,
                         &data_set,
@@ -125,21 +125,21 @@ pub(super) fn export_runtime_data_tasks(
 }
 
 fn ensure_planned_runtime_output_paths(
-    data_tasks: &[&NormalizedExportTask],
+    export_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
     registry: &DataFormatRegistry,
 ) -> Result<()> {
     let mut paths = BTreeSet::new();
-    for data_task in data_tasks {
-        match registry.require_any(&data_task.type_id)? {
+    for export_task in export_tasks {
+        match registry.require_any(&export_task.type_id)? {
             DataExporterRef::Table(exporter) => {
                 for table_meta in &linked_meta.tables {
                     if !table_meta.meta.is_exported_for(target_tags) {
                         continue;
                     }
                     let plan = exporter.plan_table_artifact(table_meta)?;
-                    let path = lexical_normalize_path(&data_task.output.join(&plan.path));
+                    let path = lexical_normalize_path(&export_task.output.join(&plan.path));
                     if !paths.insert(path.clone()) {
                         return Err(ConfigForgeError::Validation(format!(
                             "multiple data artifacts target `{}`",
@@ -149,9 +149,9 @@ fn ensure_planned_runtime_output_paths(
                 }
             }
             DataExporterRef::Aggregate(exporter) => {
-                let task = target_data_config_from_export_task(data_task);
+                let task = target_data_config_from_export_task(export_task);
                 for path in
-                    exporter.plan_artifacts(&data_task.output, &task, linked_meta, target_tags)?
+                    exporter.plan_artifacts(&export_task.output, &task, linked_meta, target_tags)?
                 {
                     let path = lexical_normalize_path(&path);
                     if !paths.insert(path.clone()) {

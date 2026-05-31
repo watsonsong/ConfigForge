@@ -62,85 +62,68 @@ pub struct CodeExportTarget {
 | `file_name` | 可选生成代码文件名。Rust / TypeScript 使用该名称补齐默认扩展（`.rs` / `.ts`）；C++ 使用该名称或默认 `generated.hpp` 作为头文件名，并用同一 stem 生成 `.cpp` 源文件。该字段只能是单个文件名，不能包含路径分隔符。 |
 | `module_name` | 生成模块名，例如 Rust module、TS namespace/package、C++ 文件前缀。 |
 | `namespace` | C++ namespace / Rust module path / TS namespace 的可选覆盖。 |
-| `options` | 从 `targets.code` 解析出的通用和语言专属选项，包括文件头、命名策略、关键字冲突策略、语言扩展参数等。 |
+| `options` | 从当前 `targets.exports` 任务解析出的通用和语言专属选项，包括文件头、命名策略、关键字冲突策略、语言扩展参数等。 |
 
-`CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.code]]`。生成代码必须保持格式无关：CodeModel 只依赖 Meta 和 target tags，table data file 常量使用逻辑表名（例如 `items`），实际解析 JSON / MessagePack / bin 由运行时传入的 loader / reader 实现决定。
+`CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.exports]] type = "rust" / "cpp" / "typescript"`。生成代码必须保持格式无关：CodeModel 只依赖 Meta 和 target tags，table data file 常量使用逻辑表名（例如 `items`），实际解析 JSON / MessagePack / bin 由运行时传入的 loader / reader 实现决定。
 
 ### 9.4.2.1 Data export format 与 codegen 关系
 
 解析规则：
 
-- Project Config 中 `[[targets.data]].format = "json"` 选择 JSON exporter。
-- Project Config 中 `[[targets.data]].format = "messagepack"` 选择 MessagePack exporter。
-- Project Config 中 `[[targets.data]].format = "bin"` 选择私有紧密二进制 exporter。
-- Project Config 中 `[[targets.data]].format = "gettext_pot"`（已实现）/ `"asset_manifest_csv"`（后续扩展）等聚合格式仍属于 data task，但不产生 generated runtime loader 直接消费的 table data。
-- Project Config 中计划的 `[[targets.data]].format = "lua_table"` 属于特殊 data-backed exporter：它会直接生成 Lua 数据+访问代码合一产物，必须依赖当前 data task 的 resolved data；不要把它接入普通 `CodeGenerator` trait。
+- Project Config 中 `[[targets.exports]] type = "json"` 选择 JSON exporter。
+- Project Config 中 `[[targets.exports]] type = "messagepack"` 选择 MessagePack exporter。
+- Project Config 中 `[[targets.exports]] type = "bin"` 选择私有紧密二进制 exporter。
+- Project Config 中 `[[targets.exports]] type = "gettext_pot"`（已实现）/ `"asset_manifest_csv"`（后续扩展）等聚合格式仍属于 MetaAndData export task，但不产生 generated runtime loader 直接消费的 table data。
+- Project Config 中 `[[targets.exports]] type = "lua_table"` 属于特殊 data-backed exporter：它会直接生成 Lua 数据+访问代码合一产物，必须依赖当前 target 的 resolved data；不要把它接入普通 `CodeGenerator` trait。
 - 可兼容解析 `"msgpack"` 为 MessagePack，但错误信息、文档、生成代码和 manifest 中统一使用规范名 `messagepack`。
-- Project Config 使用 `[[targets.data]]` 数组表表达所有基于 source data / ExportView 的数据导出任务；codegen 只关心 Meta 和 target tags，不绑定任意 data task。
+- Project Config 使用 `[[targets.exports]]` 数组表表达所有导出任务；codegen 只关心 Meta 和 target tags，不绑定任意 MetaAndData export task。
 
-Project Config 层建议模型（`TargetConfig` 是 project-level 聚合结构；`TargetDataConfig` 由 exporter 模块定义，`CodegenTaskConfig` 由 codegen 模块定义）：
+Project Config 层模型（`TargetConfig` 是 project-level 聚合结构；build 会按 exporter contract 把统一 export task 适配为 exporter / codegen 模块内部配置）：
 
 ```rust
 pub struct TargetConfig {
     pub name: String,
     pub tags: Vec<String>,
-    pub data: Vec<TargetDataConfig>,
-    pub code: Vec<CodegenTaskConfig>,
+    pub exports: Vec<TargetExportConfig>,
 }
 
-pub struct TargetDataConfig {
+pub struct TargetExportConfig {
     pub name: Option<String>,
-    pub input: PathBuf,
+    pub type_id: String,
     pub output: PathBuf,
-    pub format: String,
-    pub options: toml::Value,
-}
-
-pub struct CodegenTaskConfig {
-    pub language: String,
-    pub output: PathBuf,
-    pub file_name: Option<String>,
-    pub module_name: Option<String>,
-    pub data: Option<String>,
-    pub language_options: HashMap<String, toml::Value>,
-    // file_header / naming / language-specific options ...
+    pub options: BTreeMap<String, toml::Value>,
 }
 ```
 
-`TargetDataConfig.name` 在 raw config 中允许 `Option<String>`，仅用于支持“单 data task 可省略名称”的用户体验。parse 后应立即构造 normalized model；后续 validate / build / manifest / codegen 不再直接消费 raw target：
+`TargetExportConfig.name` 在 raw config 中允许 `Option<String>`，仅用于支持“单 export task 可省略名称”的用户体验。parse 后应立即构造 normalized model；后续 validate / build / manifest / codegen 不再直接消费 raw target：
 
 ```rust
 pub struct NormalizedTargetConfig {
     pub name: String,
     pub tags: Vec<String>,
-    pub data: Vec<NormalizedTargetDataConfig>,
-    pub code: Vec<NormalizedCodegenTaskConfig>,
+    pub exports: Vec<NormalizedExportTask>,
 }
 
-pub struct NormalizedTargetDataConfig {
+pub struct NormalizedExportTask {
     pub name: String,
-    pub input: PathBuf,
+    pub type_id: String,
+    pub dependency: ExportDependency,
     pub output: PathBuf,
-    pub format: String,
-    pub options: toml::Value,
-}
-
-pub struct NormalizedCodegenTaskConfig {
-    pub task: CodegenTaskConfig,
+    pub options: BTreeMap<String, toml::Value>,
 }
 ```
 
 归一化与校验规则：
 
-- target 内 data task 为 0 个时，code-only target 合法。
-- target 内 data task 为 1 个时，`name` 可省略；省略时规范化名称固定为 `default`。
-- target 内 data task 多于 1 个时，每个 data task 必须有非空 `name`，且名称在 target 内唯一。
-- data task name 大小写敏感；只允许 ASCII 字母、数字、`_`、`-`，且必须以字母或数字开头和结尾。
-- normalized model 中 `NormalizedTargetDataConfig.name` 和 `RuntimeConfigForgeResult.data_name` 都使用非空 `String`。
-- code task 的 `data` 必须为空；若配置 `data = "..."`，归一化阶段报错。生成代码格式无关，不绑定任意 data task。
-- 无论 target 有 0 个、1 个还是多个 data task，code task 都只接收 Meta、target tags 和语言配置。
-- `input`、`output`、`code.output` 相对路径在加载 Project Config 片段时按片段文件所在目录归一化；入口 `ConfigForge.toml` 的相对路径等价于 project root 相对路径。
-- DataLoader 的 `data_root` 使用 `TargetDataConfig.input`，Meta `source` / `sources[].path` 再相对该 data root join。
+- target 内 export task 为 0 个时合法但不会生成产物。
+- target 内 export task 为 1 个时，`name` 可省略；省略时规范化名称固定为 `default`。
+- target 内 export task 多于 1 个时，省略 `name` 时默认使用 `type`，显式或默认名称必须在 target 内唯一。
+- export task name 大小写敏感；只允许 ASCII 字母、数字、`_`、`-`，且必须以字母或数字开头和结尾。
+- normalized model 中 `NormalizedExportTask.name` 和 `RuntimeConfigForgeResult.export_name` 都使用非空 `String`。
+- MetaOnly codegen export task 的 `data` 必须为空；若配置 `data = "..."`，归一化阶段报错。生成代码格式无关，不绑定任意 MetaAndData export task。
+- 无论 target 有 0 个、1 个还是多个 MetaAndData export task，MetaOnly codegen task 都只接收 Meta、target tags 和语言配置。
+- `project.input` 与 `targets.exports.output` 相对路径在加载 Project Config 片段时按片段文件所在目录归一化；入口 `ConfigForge.toml` 的相对路径等价于 project root 相对路径。
+- DataLoader 的 `data_root` 使用 `project.input`，Meta `source` / `sources[].path` 再相对该 data root join。
 
 文件规划规则：
 
@@ -152,19 +135,16 @@ pub struct NormalizedCodegenTaskConfig {
 
 `RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json`、`items.msgpack` 或 `items.bin`。该路径相对当前 data artifact root / runtime loader root，不相对 code output 或 project root。CodeModel 不使用这些真实 artifact path 生成加载常量；每张表统一使用逻辑表名。`bin` 的 schema revision 由 CodeModel 基于 Meta 和 target tags 计算，用于运行时 reader 暴露 revision 时进行可选校验。
 
-当一个 target 同时导出多套 data task 时，`build_target` 应按 data task 分组返回：
+当一个 target 同时导出多套 runtime data export task 时，`build_target` 可按 export task 分组保留 runtime metadata：
 
 ```rust
 pub struct RuntimeConfigForgeResult {
-    pub data_name: String,
-    pub input: PathBuf,
-    pub output: PathBuf,
-    pub format: String,
+    pub export_name: String,
     pub files: Vec<RuntimeDataFile>,
 }
 ```
 
-`write_generated_code` 在构造每个 `CodeExportInput` 时传入空 `runtime_data_files`。同一 table 同时出现 `items.json`、`items.msgpack` 和 `items.bin` 时也不会影响 CodeModel；格式选择由运行时 loader / reader 完成。未来 manifest 可以记录所有 data task 的真实 artifact path，但不进入 codegen 决策。
+`generate_code_task` 在构造每个 `CodeExportInput` 时传入空 `runtime_data_files`。同一 table 同时出现 `items.json`、`items.msgpack` 和 `items.bin` 时也不会影响 CodeModel；格式选择由运行时 loader / reader 完成。未来 manifest 可以记录所有 runtime data export task 的真实 artifact path，但不进入 codegen 决策。
 
 ### 9.4.2.2 `CodegenOptions`
 
@@ -215,27 +195,27 @@ pub enum CaseStyle {
 配置来源：
 
 ```toml
-[[targets.code]]
-language = "rust"
+[[targets.exports]]
+type = "rust"
 output = "Generated/Rust"
 module_name = "game_config"
 file_header = "// {{project.name}}\n// Generated at {{datetime}}"
 keyword_conflict = "suffix_underscore"
 
-[targets.code.naming]
+[targets.exports.naming]
 type = "pascal_case"
 enum_value = "pascal_case"
 field = "snake_case"
 function = "snake_case"
 constant = "screaming_snake_case"
 
-[targets.code.formatting]
+[targets.exports.formatting]
 indent_style = "spaces"
 indent_width = 4
 trailing_newline = true
 trailing_blank_line = false
 
-[targets.code.rust]
+[targets.exports.rust]
 derive_serde = true
 ```
 
@@ -243,7 +223,7 @@ derive_serde = true
 
 - `CodegenOptions` 拆成通用配置和语言特定配置两层：`file_header`、`keyword_conflict`、`naming` 为通用层，`language_options` 保存 TOML 中按语言名展开的扩展配置。
 - `formatting` 是代码生成的跨语言通用格式配置，用于驱动共享 `CodeWriter`：`indent_style = "spaces" | "tab"` 控制缩进 token，`indent_width` 控制 spaces 模式下每级缩进宽度，`trailing_newline` 控制文件末尾是否至少保留一个换行，`trailing_blank_line` 控制文件结束是否保留一个空行（即内容以两个换行结束）。
-- 每个语言生成器通过 `CodeGenerator::default_formatting()` 声明语言默认格式：Rust / C++ 默认为 4 空格，TypeScript 默认为 2 空格；TOML 中 `[targets.code.formatting]` 只覆盖显式声明的字段。
+- 每个语言生成器通过 `CodeGenerator::default_formatting()` 声明语言默认格式：Rust / C++ 默认为 4 空格，TypeScript 默认为 2 空格；TOML 中 `[targets.exports.formatting]` 只覆盖显式声明的字段。
 - 语言配置不使用 tagged enum；`CodegenTaskConfig` 通过 `#[serde(flatten)]` 把 `[rust]`、`[cpp]`、`[typescript]` 等表保存在 `HashMap<String, toml::Value>` 中。
 - 每个语言生成器只能读取自己的扩展配置，例如 `RustCodegenOptions` 定义在 `src/codegen/rust/mod.rs`，并由 Rust generator 通过 `CodegenOptions::language_options::<RustCodegenOptions>(LANGUAGE)` 解析。
 - 新增语言时应新增 generator、语言扩展 option struct 和该语言自己的解析逻辑；不修改 IR，不增加中心化 `LanguageCodegenOptions` enum，也不在核心模块增加语言专属 helper。
@@ -520,7 +500,7 @@ runtime loader 只负责把底层 JSON / MessagePack / 引擎资源暴露为通�
 
 ## 9.6 命名策略与冲突检测
 
-代码生成必须先解决命名合法性问题，不允许直接使用 Meta 名称。命名策略由 `targets.code.naming` 配置，并由每个语言生成器解释。
+代码生成必须先解决命名合法性问题，不允许直接使用 Meta 名称。命名策略由 `targets.exports.naming` 配置，并由每个语言生成器解释。
 
 ### 9.6.1 通用规则
 
@@ -606,12 +586,12 @@ C++ 默认：
 
 ### 9.7.1.1 `text` 与国际化生成策略
 
-`text` 在 runtime 基础表示上仍映射为字符串，与 `string` 使用同一套 reader scalar API 和 runtime payload shape；区别在语义层：`text` 是可被 `format = "gettext_pot"` 聚合 data exporter 抽取、校验并在 generated code 中附加翻译访问 helper 的字段。生成器不得把普通 `string` 隐式视为可翻译文本，也不得因为启用 POT exporter 改变 runtime data 中 `text` 字段的原始值。
+`text` 在 runtime 基础表示上仍映射为字符串，与 `string` 使用同一套 reader scalar API 和 runtime payload shape；区别在语义层：`text` 是可被 `type = "gettext_pot"` 聚合 exporter 抽取、校验并在 generated code 中附加翻译访问 helper 的字段。生成器不得把普通 `string` 隐式视为可翻译文本，也不得因为启用 POT exporter 改变 runtime data 中 `text` 字段的原始值。
 
 第一阶段采用原文驱动模型：source cell 保存默认语言原文，runtime data 保存同一原文，POT exporter 以该原文作为 `msgid`。因此生成代码需要同时支持两类访问：
 
 - **raw text**：原字段访问保持不变，例如 Rust `row.display_name: String`、C++ `row.display_name`、TypeScript `row.displayName: string`。这保证现有业务代码不因开启 i18n 而破坏，并提供翻译缺失时的天然 fallback。
-- **translated text helper**：对 `CodeTypeRef::Text` 字段额外生成可选 helper。默认 `generic` 模式由调用方传入 translator/lookup 对象，把 `(msgctxt, msgid)` 映射为目标语言文本；`global_function` 模式直接调用 `targets.code.i18n.function`，不再要求调用方传 translator。
+- **translated text helper**：对 `CodeTypeRef::Text` 字段额外生成可选 helper。默认 `generic` 模式由调用方传入 translator/lookup 对象，把 `(msgctxt, msgid)` 映射为目标语言文本；`global_function` 模式直接调用 `targets.exports.i18n.function`，不再要求调用方传 translator。
 
 推荐的语言无关 lookup contract：
 

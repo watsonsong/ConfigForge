@@ -1024,7 +1024,7 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
 }
 
 #[test]
-fn codegen_is_format_agnostic_with_multiple_data_tasks() {
+fn codegen_is_format_agnostic_with_multiple_runtime_exports() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let json_data_dir = temp_dir.path().join("out/data/json");
     let messagepack_data_dir = temp_dir.path().join("out/data/messagepack");
@@ -1093,7 +1093,7 @@ fn codegen_is_format_agnostic_with_multiple_data_tasks() {
 }
 
 #[test]
-fn rejects_code_task_data_binding() {
+fn rejects_meta_only_export_data_binding() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let project_path = temp_dir.path().join("ConfigForge.toml");
     fs::write(
@@ -1247,7 +1247,7 @@ fn rejects_lexically_equivalent_runtime_data_path_conflict_before_writing_files(
 }
 
 #[test]
-fn rejects_unknown_second_data_format_before_writing_first_data_task() {
+fn rejects_unknown_second_export_type_before_writing_first_export() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let json_out_dir = temp_dir.path().join("out/json");
     let bad_out_dir = temp_dir.path().join("out/bad");

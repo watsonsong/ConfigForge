@@ -28,7 +28,7 @@ use crate::{
     project::ProjectConfig,
 };
 
-use runtime::{RuntimeConfigForgeResult, export_runtime_data_tasks};
+use runtime::{RuntimeConfigForgeResult, export_meta_and_data_tasks};
 use target::{NormalizedExportTask, NormalizedTargetConfig, codegen_task_config_from_export_task};
 
 pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
@@ -119,14 +119,14 @@ struct DagBranchOutput {
 
 fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<TargetDagOutput> {
     let _nodes = build_target_local_dag(context.target, context.data_root, context.target_tags);
-    let data_exports = context
+    let meta_and_data_exports = context
         .target
         .exports
         .iter()
         .enumerate()
         .filter(|(_, task)| task.dependency == ExportDependency::MetaAndData)
         .collect::<Vec<_>>();
-    let code_exports = context
+    let meta_only_exports = context
         .target
         .exports
         .iter()
@@ -150,13 +150,13 @@ fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<Targ
             || {
                 execute_runtime_export_nodes(
                     context.data_root,
-                    &data_exports,
+                    &meta_and_data_exports,
                     context.linked_meta,
                     context.target_tags,
                     context.pool,
                 )
             },
-            || execute_codegen_export_nodes(&codegen_context, &code_exports, context.pool),
+            || execute_codegen_export_nodes(&codegen_context, &meta_only_exports, context.pool),
         )
     });
 
@@ -218,17 +218,23 @@ fn build_target_local_dag(
 
 fn execute_runtime_export_nodes(
     data_root: Option<&Path>,
-    data_exports: &[(usize, &NormalizedExportTask)],
+    export_tasks: &[(usize, &NormalizedExportTask)],
     linked_meta: &crate::meta::LinkedMetaModel<'_>,
     target_tags: &TargetTags,
     pool: &ThreadPool,
 ) -> Result<DagBranchOutput> {
-    let data_tasks = data_exports
+    let meta_and_data_tasks = export_tasks
         .iter()
         .map(|(_, task)| *task)
         .collect::<Vec<_>>();
-    let output = export_runtime_data_tasks(data_root, &data_tasks, linked_meta, target_tags, pool)?;
-    if output.task_outputs.len() != data_exports.len() {
+    let output = export_meta_and_data_tasks(
+        data_root,
+        &meta_and_data_tasks,
+        linked_meta,
+        target_tags,
+        pool,
+    )?;
+    if output.task_outputs.len() != export_tasks.len() {
         return Err(ConfigForgeError::Validation(
             "runtime exporter returned an unexpected number of task outputs".to_owned(),
         ));
@@ -236,7 +242,7 @@ fn execute_runtime_export_nodes(
 
     let mut runtime_results = Vec::new();
     let mut export_outputs = Vec::new();
-    for ((declaration_index, task), task_output) in data_exports
+    for ((declaration_index, task), task_output) in export_tasks
         .iter()
         .copied()
         .zip(output.task_outputs.into_iter())
@@ -265,13 +271,13 @@ fn execute_runtime_export_nodes(
 
 fn execute_codegen_export_nodes(
     context: &CodegenTaskContext<'_, '_>,
-    code_exports: &[(usize, &NormalizedExportTask)],
+    export_tasks: &[(usize, &NormalizedExportTask)],
     pool: &ThreadPool,
 ) -> Result<DagBranchOutput> {
     let mut generated_by_task = pool.install(|| {
-        code_exports
+        export_tasks
             .par_iter()
-            .map(|(index, code_task)| (*index, generate_code_task(context, code_task)))
+            .map(|(index, export_task)| (*index, generate_code_task(context, export_task)))
             .collect::<Vec<_>>()
     });
     generated_by_task.sort_by_key(|(index, _)| *index);
@@ -315,10 +321,10 @@ struct CodegenTaskContext<'a, 'meta> {
 
 fn generate_code_task(
     context: &CodegenTaskContext<'_, '_>,
-    code_task: &NormalizedExportTask,
+    export_task: &NormalizedExportTask,
 ) -> Result<Vec<GeneratedFile>> {
-    debug_assert_eq!(code_task.dependency, ExportDependency::MetaOnly);
-    let task = codegen_task_config_from_export_task(code_task)?;
+    debug_assert_eq!(export_task.dependency, ExportDependency::MetaOnly);
+    let task = codegen_task_config_from_export_task(export_task)?;
     let generator =
         crate::codegen::find_generator(context.generators, &task.language).ok_or_else(|| {
             ConfigForgeError::Validation(format!(

@@ -44,6 +44,7 @@ pub struct ProjectConfigMeta {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct TargetConfig {
     pub name: String,
     #[serde(default)]
@@ -299,5 +300,32 @@ mod tests {
         assert!(
             matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate target `client`"))
         );
+    }
+
+    #[test]
+    fn target_config_rejects_legacy_data_and_code_fields() {
+        let data_error = toml::from_str::<TargetConfig>(
+            r#"
+                name = "client"
+
+                [[data]]
+                output = "Generated/Data"
+                type = "json"
+            "#,
+        )
+        .unwrap_err();
+        assert!(data_error.to_string().contains("unknown field `data`"));
+
+        let code_error = toml::from_str::<TargetConfig>(
+            r#"
+                name = "client"
+
+                [[code]]
+                output = "Generated/Code"
+                type = "rust"
+            "#,
+        )
+        .unwrap_err();
+        assert!(code_error.to_string().contains("unknown field `code`"));
     }
 }
