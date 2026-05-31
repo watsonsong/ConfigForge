@@ -183,8 +183,8 @@ fn emits_linked_field_relation_api() {
         .expect("typescript code");
     let content = &files[0].content;
 
-    assert!(content.contains("type LinkCache ="));
-    assert!(content.contains("interface LinkListCache"));
+    assert!(content.contains("type LinkCache = number;"));
+    assert!(content.contains("type LinkListCache = number[] | undefined;"));
     assert!(content.contains("defaultItemLink: LinkCache;"));
     assert!(content.contains("starterItemsLink: LinkListCache;"));
     assert!(content.contains("defaultItem(data: GameData): ItemsRow;"));
@@ -193,11 +193,11 @@ fn emits_linked_field_relation_api() {
     assert!(content.contains("link(data: GameData): void;"));
     assert!(content.contains("this.gameConfig.link(this);"));
     assert!(content.contains(
-        "function defaultItemGameConfigRow(row: GameConfigRow, data: GameData): ItemsRow"
+        "function defaultItemGameConfigRow(this: GameConfigRow, data: GameData): ItemsRow"
     ));
-    assert!(content.contains("function starterItemsGameConfigRow(row: GameConfigRow, data: GameData): readonly ItemsRow[]"));
+    assert!(content.contains("function starterItemsGameConfigRow(this: GameConfigRow, data: GameData): readonly ItemsRow[]"));
     assert!(
-        content.contains("function linkGameConfigRow(row: GameConfigRow, data: GameData): void")
+        content.contains("function linkGameConfigRow(this: GameConfigRow, data: GameData): void")
     );
 }
 

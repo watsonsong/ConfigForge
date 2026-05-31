@@ -848,8 +848,8 @@ Rust 约束：
 
 Rust `linked_field` 生成规则：
 
-- Row/Object struct 保留原始 FK 字段，例如 `pub default_class_id: i64`；同时为每个 `linked_field` 生成非序列化 cache 字段。当前实现单值/可空 FK 使用 `RefCell<LinkCache>`，list FK 使用 `RefCell<LinkListCache>`。如果 row derive serde，需要为 cache 提供 `#[serde(skip)]` 或构造时初始化，避免把 runtime cache 写入业务序列化结果。
-- Getter 推荐使用 `&self` + `&GameData`，返回 `Result<&TargetRow, RuntimeDataError>` / `Result<Option<&TargetRow>, RuntimeDataError>`。内部通过 `Cell<LinkCache>` 支持首次访问写 cache；list FK 使用 `RefCell<Option<Vec<usize>>>` 或小型 `LinkListCache`。
+- Row/Object struct 保留原始 FK 字段，例如 `pub default_class_id: i64`；同时为每个 `linked_field` 生成非序列化 cache 字段。当前实现单值/可空 FK 使用 `Cell<LinkCache>`，list FK 使用 `RefCell<LinkListCache>`。`Cell<LinkCache>` 是 row 内 inline 状态，不发生堆分配；list FK 仅在首次解析时为 row-index list 分配 `Vec<usize>`。如果 row derive serde，需要为 cache 提供 `#[serde(skip)]` 或构造时初始化，避免把 runtime cache 写入业务序列化结果。
+- Getter 推荐使用 `&self` + `&GameData`，返回 `Result<&TargetRow, RuntimeDataError>` / `Result<Option<&TargetRow>, RuntimeDataError>`。内部通过 `Cell<LinkCache>` 支持首次访问写 cache；list FK 使用 `RefCell<LinkListCache>`，后续访问借用已缓存 row indexes，不 clone 缓存 vector。
 - Table 生成 `pub fn link(&self, data: &GameData) -> Result<(), RuntimeDataError>`，遍历 `rows` 或 singleton object 调用每个 relation getter 以填充 cache。
 - DataSet facade 生成 `pub fn link_all(&self) -> Result<(), RuntimeDataError>`，按 CodeModel table 顺序调用各 table 的 `link`。只要全部 cache 存 row index，FK 环不会导致 borrow cycle；getter 返回值生命周期仍绑定到 `&GameData`。
 - 如果目标 row 已被缓存为 index，但后续通过 index 取 row 时越界，应返回 data/code mismatch 错误；正常生成代码不提供可变 rows API，因此越界只可能来自版本不一致或内部 bug。
@@ -1011,12 +1011,146 @@ TypeScript `linked_field` 生成规则：
 
 当前实现状态：TypeScript 已生成 relation method、row-index cache、table-level `link(data)` 和 `GameData.linkAll()`，与 Rust/C++ linked helper 语义保持一致。
 
-- Row/Object 仍以 interface + plain object 输出；一旦启用 `linked_field`，该 row/object interface 会额外包含 relation method、cache slot 和 `link(data)` method，reader 在构造 object literal 时初始化 cache 与 method wrapper。
+- Row/Object 仍以 interface + plain object 输出；一旦启用 `linked_field`，该 row/object interface 会额外包含 relation method、cache slot 和 `link(data)` method。reader 在构造 object literal 时初始化 cache，并把 relation/link method 指向模块级函数，避免为每个 row 分配闭包。
 - 原始 FK 字段保持普通属性，例如 `defaultClassId: number`；helper 使用命名后的 method，例如 `defaultClass(data: GameData): ClassesRow`。由于解析需要传入 `GameData`，不生成 ES getter 属性。
-- cache 字段由 `linked_field` 派生，例如 `defaultClassLink`。单值/可空 FK 使用 `LinkCache` union，状态为 `unresolved` / `empty` / `rowIndex`；list FK 使用 `LinkListCache` 保存 `rowIndexes?: number[]`。cache 只保存 row index，不缓存目标 row 对象引用。
+- cache 字段由 `linked_field` 派生，例如 `defaultClassLink`。单值/可空 FK 使用 `number` sentinel：`LINK_UNRESOLVED = -1`、`LINK_EMPTY = -2`、`rowIndex >= 0`；list FK 使用 `number[] | undefined`，仅在首次解析时分配数组。cache 只保存 row index，不缓存目标 row 对象引用。
 - optional FK 返回 `TargetRow | undefined`；list FK 返回 `readonly TargetRow[]`，内部按缓存 row indexes 映射到目标 repository `rowAt` 结果，并返回新数组，不暴露可变内部缓存。
 - 目标 unique index 额外生成私有语义的 `indexOfBy*` helper，relation method 首次访问或 `link(data)` 预解析时用它填充 cache。
 - Table 生成 `link(data: GameData): void` 遍历 rows；ObjectTable row 生成 `link(data)` method；DataSet 生成 `linkAll(): void`。若 lookup 失败，当前生成代码抛出 `Error`，错误信息包含 source relation 与 target index。
+
+### 9.8.4 Table-level lazy load 生成设计（目标态）
+
+当前实现状态：尚未实现。现有 `GameData::load` / `GameData::Load` / `GameData.load` 是 eager load，会立即加载所有当前 target 可见 table/object，并在返回后不再持有 loader。目标态是在保持 eager API 不破坏的前提下，新增 lazy facade；lazy facade 持有 loader 或 reader provider，按 table/object 首次访问加载并缓存 typed repository / object。
+
+#### 9.8.4.1 语言无关状态机
+
+每个 generated table/object member 在 lazy facade 中拥有独立状态：
+
+```text
+Unloaded
+  -> Loading      # 可选，仅多线程或 async Promise coalescing 需要显式表达
+  -> Loaded(T)
+  -> Failed(E)    # 可选；默认可以不缓存失败以允许重试
+```
+
+规则：
+
+1. `Unloaded` 首次访问时调用对应 table 的现有 generated `load(loader)` / `Load(loader)` / `load(loader)`，复用同一套 reader parser、schema revision 校验与 index 构建逻辑。
+2. 成功后缓存 `Loaded(T)`；后续访问直接返回同一 table/object 实例。
+3. 加载过程中若 reader/decode/schema/index 构建失败，不能留下半初始化 table。默认策略是不缓存失败并返回错误；如果语言使用 Promise 共享并发加载，可以让 rejected Promise 只在本轮请求内共享，下一次访问重新创建 Promise。
+4. Lazy facade 保留 `RuntimeDataLoader`，但不保留单次 table reader cursor。`RuntimeDataLoader.open(table.data_file)` 每次 table 首次加载时创建短生命周期 reader；reader 在 table 解析结束后释放。若接入方需要常驻 mmap/package/decode cache，应由 loader 自己管理。
+5. `preload_all` / `PreloadAll` / `preloadAll` 按 CodeModel table 顺序触发所有 table/object accessor。它用于 fail-fast 和预热；执行成功后 lazy facade 的所有 table 都处于 Loaded。
+6. `link_all` 在 lazy facade 上应先 preload 所有当前 target 可见 table，再执行 relation cache 预链接；否则可能因只加载 source table 而遗漏 target table。
+
+#### 9.8.4.2 Rust 生成方案
+
+新增类型建议命名为 `LazyGameData<L>`，与 eager `GameData` 并存：
+
+```rust
+pub struct LazyGameData<L: RuntimeDataLoader> {
+    loader: L,
+    items: std::cell::OnceCell<ItemsTable>,
+    game_rules: std::cell::OnceCell<GameRulesRow>,
+}
+
+impl<L: RuntimeDataLoader> LazyGameData<L> {
+    pub fn new(loader: L) -> Self;
+    pub fn items(&self) -> RuntimeDataResult<&ItemsTable>;
+    pub fn game_rules(&self) -> RuntimeDataResult<&GameRulesRow>;
+    pub fn preload_all(&self) -> RuntimeDataResult<()>;
+    pub fn link_all(&self) -> RuntimeDataResult<()>;
+}
+```
+
+设计细节：
+
+- `L` 可以是具体 loader、`&'a Loader` 或业务自定义 wrapper；为了支持借用 loader，可生成或文档要求为 `&T where T: RuntimeDataLoader` 提供 blanket impl。
+- 单线程默认使用 `std::cell::OnceCell<T>`，避免每次访问都经过 `RefCell<Option<T>>` borrow。若需要多线程共享，后续 codegen option 可切到 `std::sync::OnceLock<T>`，但当前 relation cache 使用 `Cell` / `RefCell`，整体仍默认非 `Sync`。
+- `OnceCell` 不直接缓存 error。accessor 伪代码：若 cell empty，则调用 `T::load(&self.loader)?`，成功后 `set`，再返回 `get().unwrap()`；失败直接返回，不改变 cell。
+- 为了让 `linked_field` relation helper 同时支持 eager 与 lazy，目标态应抽出 generated `GameDataAccess` trait：
+
+```rust
+pub trait GameDataAccess {
+    fn items(&self) -> RuntimeDataResult<&ItemsTable>;
+    fn classes(&self) -> RuntimeDataResult<&ClassesTable>;
+}
+```
+
+  eager `GameData` 的实现只是返回已加载字段；lazy `LazyGameData<L>` 的实现会按需加载。relation getter 后续可从 `fn default_class(&self, data: &GameData)` 演进为 `fn default_class<'a>(&self, data: &'a impl GameDataAccess) -> RuntimeDataResult<&'a ClassesRow>`，从而让 target table 未加载时自动触发加载。
+- `GameData::load(loader)` 保持 eager，不持有 loader。若用户希望先 lazy 构造再全部加载并释放 loader，Rust 可以继续推荐直接调用 eager；也可后续提供 `LazyGameData::into_eager(self) -> RuntimeDataResult<GameData>`，该方法 preload 后移动出所有 table 并丢弃 loader。
+
+#### 9.8.4.3 C++ 生成方案
+
+新增 `LazyGameData`，与现有 `GameData` 并存：
+
+```cpp
+class LazyGameData {
+public:
+    explicit LazyGameData(std::shared_ptr<IRuntimeDataLoader> loader);
+    const ItemsTable& Items() const;
+    const GameRulesRow& GameRules() const;
+    void PreloadAll() const;
+    void LinkAll() const;
+
+private:
+    std::shared_ptr<IRuntimeDataLoader> loader_;
+    mutable std::optional<ItemsTable> items_;
+    mutable std::optional<GameRulesRow> game_rules_;
+};
+```
+
+设计细节：
+
+- 默认推荐 `std::shared_ptr<IRuntimeDataLoader>`，因为 lazy facade 必须延长 loader 生命周期；若业务不希望共享所有权，可后续补充 `LazyGameDataRef` 或构造函数接收 `IRuntimeDataLoader&` 并明确调用方负责生命周期。
+- 每个 accessor 检查 `std::optional<T>`；未加载时调用现有 `T::Load(*loader_)` 并 `emplace`。异常模型沿用当前 C++ generated code：decode/schema/index 失败抛异常；若后续引入 `RuntimeDataResult<T>`，lazy accessor 应返回 `Result<std::reference_wrapper<const T>>`。
+- 多线程第一阶段不承诺；如果需要，后续可为每个 table 加 `std::once_flag` + error propagation 或 mutex。默认文档要求同一个 `LazyGameData` 不并发首次访问同一 table。
+- `GameData::Load(loader)` 保持 eager，不保存 loader。`LazyGameData::PreloadAll()` 加载全部表；可选 `ReleaseLoader()` 只有在所有 table 都已 Loaded 后才允许清空 `loader_`，否则后续访问 unloaded table 应报错。
+- 为了让 linked relation helper 可同时接受 eager 与 lazy，后续可生成轻量 access interface（例如 `IGameDataAccess` 或模板参数），其中 `Items()` / `Classes()` 返回 const table reference 或抛错。eager `GameData` 与 `LazyGameData` 都实现同名 accessor。
+
+#### 9.8.4.4 TypeScript 生成方案
+
+TypeScript 的 loader 是 async-friendly，lazy accessor 必须显式 async，不能伪装成同步 property：
+
+```ts
+export class LazyGameData {
+  private readonly loader: RuntimeDataLoader;
+  private itemsPromise?: Promise<ItemsTable>;
+  private gameRulesPromise?: Promise<GameRulesRow>;
+
+  static loadLazy(loader: RuntimeDataLoader): LazyGameData;
+  items(): Promise<ItemsTable>;
+  gameRules(): Promise<GameRulesRow>;
+  preloadAll(): Promise<void>;
+  linkAll(): Promise<void>;
+}
+```
+
+设计细节：
+
+- 每个 table cache 保存 `Promise<T>` 而不是只保存 `T`，这样并发两次 `await data.items()` 会共享同一次 load。Promise resolve 后自然缓存 loaded table。
+- 如果 Promise reject，默认应清空对应 cache，使下一次访问可以重试：
+
+```ts
+if (!this.itemsPromise) {
+  this.itemsPromise = ItemsTable.load(this.loader).catch((error) => {
+    this.itemsPromise = undefined;
+    throw error;
+  });
+}
+return this.itemsPromise;
+```
+
+- `GameData.load(loader)` 保持 eager，并继续返回字段属性同步可访问的 `GameData`。
+- lazy facade 不生成 `readonly items: ItemsTable` 属性，避免业务误以为访问是同步零成本；使用 `await data.items()` / `await data.gameRules()` 或 `getItems()` 命名。
+- Eager relation helper 当前是同步 `row.defaultClass(data): ClassesRow`。Lazy relation helper 需要 async 形态，推荐生成额外 helper，例如 `row.defaultClassAsync(data: LazyGameData): Promise<ClassesRow>`，或在 `LazyGameData` 上生成 `resolveDefaultClass(row): Promise<ClassesRow>`。不应把现有同步 helper 改成可能返回 Promise 的 union 类型。
+- `preloadAll()` 使用 `Promise.all` 或确定性顺序均可；若需要稳定错误顺序，推荐按 CodeModel table 顺序逐个 await。`linkAll()` 应 `await preloadAll()` 后再调用 eager-style link 逻辑填充 relation cache。
+
+#### 9.8.4.5 与现有生成器模块的落地关系
+
+- `repository.rs` 继续负责 table/object `load`、index 构建和 lazy accessor 渲染；lazy accessor 应复用现有 table `load` 函数，避免生成第二套 parser。
+- `mod.rs` / facade 渲染增加 eager `GameData` 与 lazy `LazyGameData` 两套 facade。默认仍生成 eager；lazy 可无条件生成，也可由 codegen option 控制。为了 API 稳定，建议先无条件生成 lazy facade，除非代码体积成为问题。
+- `symbols.rs` 需要把 lazy facade 类型名、`loadLazy` / `preloadAll` / async relation helper 等纳入冲突检测。
+- 测试需要覆盖：eager load 不持有 loader；lazy 构造不调用 loader；首次访问某 table 只打开该 table；重复访问不重复打开；`preloadAll` 打开全部 table；lazy relation helper 会触发 target table 加载；TypeScript 并发访问共享同一个 Promise。
 
 Reader 基础语义：
 

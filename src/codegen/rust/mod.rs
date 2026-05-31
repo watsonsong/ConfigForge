@@ -68,11 +68,11 @@ impl CodeGenerator for RustCodeGenerator {
         validate_generated_symbols(&model, &names)?;
         let mut content = CodeWriter::new(input.target.options.formatting);
         self.write_file_header(&mut content, input);
-        content.raw("use std::{cell::RefCell, collections::HashMap};\n\n");
+        content.raw("use std::{cell::{Cell, RefCell}, collections::HashMap};\n\n");
         render_runtime_reader_imports(&mut content);
         render_runtime_reader_helpers(&mut content);
         content.raw(concat!(
-            "#[derive(Debug, Clone, PartialEq, Eq)]\n",
+            "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n",
             "enum LinkCache {\n",
             "    Unresolved,\n",
             "    Empty,\n",
@@ -213,7 +213,7 @@ impl CodeGenerator for RustCodeGenerator {
                     .cardinality
                 {
                     super::ir::CodeRelationCardinality::Many => "RefCell<LinkListCache>",
-                    _ => "RefCell<LinkCache>",
+                    _ => "Cell<LinkCache>",
                 };
                 if rust_options.derive_serde {
                     content.raw("    #[serde(skip, default)]\n");

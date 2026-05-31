@@ -200,7 +200,46 @@ reader 的基础语义必须覆盖当前 Meta 类型：int、float、bool、stri
 
 格式选择由运行时传入的 loader / reader 实现决定。runtime data task 只负责导出具体格式文件及后缀；生成代码保留逻辑 table name，并通过同一套通用读取路径工作。若 target 同时导出 JSON、MessagePack 与 bin，同一份生成代码可以分别配合 JSON loader、MessagePack loader 或 binary loader 加载对应格式。无论 Meta 新增多少表和字段，接入方的 RuntimeDataLoader 接口都不应变化；变化只体现在重新生成的解析代码中。
 
-#### 6.2.1.1 生成的 Foreign Key Relation Helper
+#### 6.2.1.1 Table-level Lazy Loading
+
+当前 `GameData.load(loader)` 语义是 **eager load**：一次打开并解析当前 target 可见的所有 table/object，构造完整 repository / object facade 后返回；返回后 generated `GameData` 不再持有 loader，业务可以立即释放文件句柄、资源包 reader 或网络 client。这仍是默认模式，适合服务器启动阶段、编辑器校验、热更包预载等希望确定性发现所有数据/版本错误的场景。
+
+后续需要补充 **table-level lazy load** 模式：生成代码提供一个懒加载 facade，只在业务首次访问某张 table/object 时才调用 `RuntimeDataLoader.open(logical_table_name)` 并执行该 table 的 generated parser / index 构建。为了支持这种模式，懒加载 facade 必须持有 loader 或 reader provider；也就是说接入方传入的 loader 需要在懒加载 facade 生命周期内保持可用。单次 `open()` 返回的 `RuntimeDataReader` / cursor 不建议跨 table 长期持有：它应在该 table 完成解析后释放；如果某 runtime 需要常驻解码上下文或资源包句柄，应把它放在 loader 内部，而不是让 generated table 持有半打开的 cursor。
+
+两种模式必须共存，且 API 语义明确区分：
+
+| 模式 | 入口 | Loader 生命周期 | Table 加载时机 | 适用场景 |
+| --- | --- | --- | --- | --- |
+| Eager | `GameData.load(...)` / `GameData::load(...)` / `GameData::Load(...)` | 只在 load 调用期间借用；返回后可释放 | 所有可见 table/object 立即加载 | 启动预载、测试、校验、希望 fail-fast |
+| Lazy | `GameData.loadLazy(...)` / `LazyGameData::new(...)` / `GameData::LoadLazy(...)` | facade 持有或借用；必须活到 lazy facade 结束或显式 preload 完成 | 首次访问某 table/object 时加载并缓存 | 大型配置、低内存客户端、按玩法模块访问 |
+
+Lazy facade 的核心规则：
+
+1. **按 table 原子加载**：一个 table/object 只会从 unloaded -> loaded 迁移一次。加载成功后缓存 typed table/object；后续访问不再调用 loader。加载失败时默认不缓存半成品，允许调用方修复外部条件后重试；若语言 runtime 更适合缓存失败，也必须记录为 failed state 并在文档中说明。
+2. **索引随 table 构建**：CollectionTable 第一次加载完成时立即构建全部 declared indexes；后续 lookup 与 eager 模式相同，不做 per-query 解析。
+3. **ObjectTable 同样懒加载**：ObjectTable source artifact 虽然只产生 singleton object，但仍是一张逻辑 table；第一次访问该 object 字段时打开对应 data file。
+4. **并发访问策略语言化**：默认生成器可以先提供单线程 / 非线程安全 lazy cache；多线程版本后续通过语言 option 增加 `OnceLock` / mutex / promise coalescing。即使两个线程同时触发同一 table 加载，也不能暴露两个不同 table 实例给同一个 facade。
+5. **生命周期可释放**：eager 模式不保留 loader；lazy 模式保留 loader。若业务希望“先 lazy facade 构造、随后一次性加载全部表并释放 loader”，可提供 `loadAll()` / `preloadAll()` + `releaseLoader()` 或直接调用 eager load。第一阶段推荐保留 eager load 作为释放 loader 的主路径，lazy facade 可选支持 preload 后释放。
+6. **错误发现时机改变**：lazy 模式把 table decode/schema revision/index duplicate 等错误推迟到首次访问该 table；文档和 API 命名必须让业务理解这一点。需要 fail-fast 的场景应调用 eager load 或 lazy facade 的 `preloadAll()`。
+
+Foreign key relation helper 与 lazy load 的交互：
+
+- 若 source row 所在 table 已加载，但 relation target table 尚未加载，relation helper 首次解析时必须先触发 target table 加载，再执行 target index lookup。
+- `link_all` / `LinkAll` / `linkAll` 在 lazy facade 上应等价于 `preloadAll()` 后对所有可见 relation 执行预链接；它会加载所有可见 table，因此不再是按需行为。
+- TypeScript 的 lazy table access 通常是 async，因此 lazy relation helper 也需要 async 形态，例如 `await row.defaultClassLazy(data)` 或由 `LazyGameData.resolveDefaultClass(row)` 承载；现有 eager relation helper 保持同步。
+- Rust / C++ 可以在 accessor 中同步打开并解析 table，因此 lazy relation helper 可以保持同步 `Result` / exception-return 形态；但最好通过 generated data-access trait / facade interface 让 eager 与 lazy 共享 relation resolution 代码。
+
+推荐语言 API 草案：
+
+| 语言 | Lazy facade | Table accessor | Eager 兼容 |
+| --- | --- | --- | --- |
+| Rust | `LazyGameData<L: RuntimeDataLoader>` 持有 `L` 或 `&L`；每个 table 用 `OnceCell<Table>` 缓存 | `fn items(&self) -> RuntimeDataResult<&ItemsTable>`；`fn preload_all(&self) -> RuntimeDataResult<()>` | `GameData::load(&loader)` 保持一次性加载；也可让 `GameData` 与 `LazyGameData` 共同实现 generated `GameDataAccess` trait |
+| C++ | `LazyGameData` 持有 `std::shared_ptr<IRuntimeDataLoader>` 或明确生命周期的引用 wrapper；table cache 用 `std::optional<Table>` | `const ItemsTable& Items() const`，失败时 throw 或返回 `RuntimeDataResult<std::reference_wrapper<const ItemsTable>>`；`PreloadAll()` | `GameData::Load(loader)` 保持 eager；`LazyGameData::PreloadAll()` 后可选 `ReleaseLoader()` |
+| TypeScript | `LazyGameData` 持有 `RuntimeDataLoader`，每个 table cache 保存 `Promise<Table>` 或 loaded table | `items(): Promise<ItemsTable>` / `gameRules(): Promise<GameRulesRow>`；并发访问复用同一个 Promise | `await GameData.load(loader)` 保持 eager；`await LazyGameData.loadAll(loader)` 可返回 eager `GameData` 或加载完的 lazy facade |
+
+命名上应避免让 lazy facade 的 async / fallible accessor 伪装成 eager field。现有 eager `data.items.getById(...)` 可继续保留；lazy TypeScript 不应生成 `data.items` 这种看似同步的属性，而应生成 `await data.items()` 或 `await data.getItems()`。
+
+#### 6.2.1.2 生成的 Foreign Key Relation Helper
 
 当 foreign key 声明了 `linked_field` 时，代码生成器应在不改变 runtime data shape 的前提下生成关联访问 helper。原始 source field 仍作为普通字段暴露，例如 `default_class_id` 仍是整数；`linked_field = "default_class"` 只额外生成一个只读 relation getter，用于从当前 row/object 的 FK key 自动跳转到目标 CollectionTable 的唯一索引行。
 
@@ -228,7 +267,7 @@ reader 的基础语义必须覆盖当前 Meta 类型：int、float、bool、stri
 | C++ | `row.GetDefaultClass(data) -> const ClassRow&` 或 error-return 版本 | `const ClassRow*` / `std::optional<std::reference_wrapper<const ClassRow>>` | `std::vector<const ClassRow*>` |
 | TypeScript | `row.defaultClass(data): ClassRow` 或 `throws` | `ClassRow | undefined` | `readonly ClassRow[]` |
 
-Rust 需要内部可变性才能让 `&self` getter 填充 cache；可使用 `Cell` / `RefCell` 包装小型 cache enum，或者把 getter 设计为接收 `&mut self`。为了业务访问便利，推荐生成只读 getter + 内部 cache，例如：
+Rust 需要内部可变性才能让 `&self` getter 填充 cache；单值 cache 应使用 `Cell<LinkCache>` 这类 inline copy 状态，避免每次访问产生 borrow tracking；list cache 因需要保存 `Vec<usize>`，可使用 `RefCell<LinkListCache>` 延迟分配 row-index vector。为了业务访问便利，推荐生成只读 getter + 内部 cache，例如：
 
 ```rust
 pub struct GameRulesRow {
@@ -257,13 +296,15 @@ TypeScript 可以在 row class 或 row wrapper 中保存私有 cache 字段；�
 ```ts
 export class GameRulesRow {
   readonly defaultClassId: number;
-  private defaultClassLink: LinkCache = LinkCache.unresolved();
+  private defaultClassLink: LinkCache = LINK_UNRESOLVED;
 
   defaultClass(data: GameData): ClassRow {
     // first access resolves by ClassTable index; later access reads cached row index
   }
 }
 ```
+
+TypeScript 若继续使用 plain object row，应避免为每个 row 分配 relation closure 或 cache object：relation method 可以复用模块级函数引用，单值 cache 用 number sentinel（例如 unresolved = -1、empty = -2、row index >= 0），list cache 仅在首次解析时分配 `number[]`。
 
 每个包含 `linked_field` 的 table repository 应生成 `link(data)`，整个 DataSet facade 应生成 `linkAll()` / `link_all()` / `LinkAll()`：
 

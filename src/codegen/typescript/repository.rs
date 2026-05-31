@@ -297,14 +297,10 @@ pub(super) fn render_row_relation_cache_initializers(
             .cardinality
         {
             CodeRelationCardinality::Many => {
-                content.raw_fmt(format_args!(
-                    "    {cache_name}: {{ rowIndexes: undefined }},\n"
-                ));
+                content.raw_fmt(format_args!("    {cache_name}: undefined,\n"));
             }
             _ => {
-                content.raw_fmt(format_args!(
-                    "    {cache_name}: {{ state: 'unresolved' }},\n"
-                ));
+                content.raw_fmt(format_args!("    {cache_name}: LINK_UNRESOLVED,\n"));
             }
         }
     }
@@ -352,7 +348,7 @@ pub(super) fn render_row_relation_method_initializers(
     {
         let function_name = names.relation_function_name(foreign_key)?;
         content.raw_fmt(format_args!(
-            "    {function_name}(data: GameData): ReturnType<typeof {function_name}{row_type}> {{ return {function_name}{row_type}(this, data); }},\n"
+            "    {function_name}: {function_name}{row_type},\n"
         ));
     }
     if table
@@ -360,9 +356,7 @@ pub(super) fn render_row_relation_method_initializers(
         .iter()
         .any(|foreign_key| foreign_key.linked_field.is_some())
     {
-        content.raw_fmt(format_args!(
-            "    link(data: GameData) {{ return link{row_type}(this, data); }},\n"
-        ));
+        content.raw_fmt(format_args!("    link: link{row_type},\n"));
     }
     Ok(())
 }
@@ -429,9 +423,10 @@ pub(super) fn render_row_relation_methods(
     {
         let row_type = names.row_type_name(&table.name)?;
         content.raw_fmt(format_args!(
-            "function link{}(row: {}, data: GameData): void {{\n",
+            "function link{}(this: {}, data: GameData): void {{\n",
             row_type, row_type
         ));
+        content.raw("  const row = this;\n");
         for foreign_key in table
             .foreign_keys
             .iter()
@@ -469,11 +464,12 @@ fn render_single_relation_method(
         target_row_type.to_owned()
     };
     content.raw_fmt(format_args!(
-        "function {}{}(row: {}, data: GameData): {} {{\n",
+        "function {}{}(this: {}, data: GameData): {} {{\n",
         function_name, source_row_type, source_row_type, return_type
     ));
+    content.raw("  const row = this;\n");
     content.raw_fmt(format_args!("  const cached = row.{cache_name};\n"));
-    content.raw("  if (cached.state === 'empty') {\n");
+    content.raw("  if (cached === LINK_EMPTY) {\n");
     if optional {
         content.raw("    return undefined;\n");
     } else {
@@ -486,9 +482,9 @@ fn render_single_relation_method(
         ));
     }
     content.raw("  }\n");
-    content.raw("  if (cached.state === 'rowIndex') {\n");
+    content.raw("  if (cached >= 0) {\n");
     content.raw_fmt(format_args!(
-        "    const rowValue = data.{target_data_field}.rowAt(cached.rowIndex);\n"
+        "    const rowValue = data.{target_data_field}.rowAt(cached);\n"
     ));
     content.raw_fmt(format_args!(
         "    if (rowValue === undefined) {{ throw new Error({:?}); }}\n",
@@ -514,9 +510,7 @@ fn render_single_relation_method(
             source_table.name, foreign_key.name, target_table.name, target_index.name
         )
     ));
-    content.raw_fmt(format_args!(
-        "  row.{cache_name} = {{ state: 'rowIndex', rowIndex }};\n"
-    ));
+    content.raw_fmt(format_args!("  row.{cache_name} = rowIndex;\n"));
     content.raw_fmt(format_args!(
         "  const rowValue = data.{target_data_field}.rowAt(rowIndex);\n"
     ));
@@ -555,12 +549,13 @@ fn render_many_relation_method(
     let target_data_field = names.field_name(&target_table.name)?;
     let index_of_name = names.index_of_function_name(target_index)?;
     content.raw_fmt(format_args!(
-        "function {}{}(row: {}, data: GameData): readonly {}[] {{\n",
+        "function {}{}(this: {}, data: GameData): readonly {}[] {{\n",
         function_name, source_row_type, source_row_type, target_row_type
     ));
-    content.raw_fmt(format_args!("  const cached = row.{cache_name};\n"));
-    content.raw("  if (cached.rowIndexes === undefined) {\n");
-    content.raw("    const rowIndexes: number[] = [];\n");
+    content.raw("  const row = this;\n");
+    content.raw_fmt(format_args!("  let rowIndexes = row.{cache_name};\n"));
+    content.raw("  if (rowIndexes === undefined) {\n");
+    content.raw("    rowIndexes = [];\n");
     if source_field.required {
         content.raw_fmt(format_args!(
             "    for (const key of row.{source_field_name}) {{\n"
@@ -582,11 +577,9 @@ fn render_many_relation_method(
     ));
     content.raw("      rowIndexes.push(rowIndex);\n");
     content.raw("    }\n");
-    content.raw("    cached.rowIndexes = rowIndexes;\n");
+    content.raw_fmt(format_args!("    row.{cache_name} = rowIndexes;\n"));
     content.raw("  }\n");
-    content.raw_fmt(format_args!(
-        "  return cached.rowIndexes.map((rowIndex) => {{\n"
-    ));
+    content.raw_fmt(format_args!("  return rowIndexes.map((rowIndex) => {{\n"));
     content.raw_fmt(format_args!(
         "    const rowValue = data.{target_data_field}.rowAt(rowIndex);\n"
     ));
@@ -628,7 +621,7 @@ fn render_optional_empty_check(
         .collect::<Result<Vec<_>>>()?;
     if optional_fields.len() == foreign_key.fields.len() {
         content.raw_fmt(format_args!(
-            "  if ({}) {{ row.{cache_name} = {{ state: 'empty' }}; return undefined; }}\n",
+            "  if ({}) {{ row.{cache_name} = LINK_EMPTY; return undefined; }}\n",
             empty_conditions.join(" && ")
         ));
         if foreign_key.fields.len() > 1 {

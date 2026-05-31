@@ -350,7 +350,7 @@ fn rust_codegen_emits_linked_field_relation_api() {
 
     assert!(content.contains("enum LinkCache"));
     assert!(content.contains("struct LinkListCache"));
-    assert!(content.contains("default_item_link: RefCell<LinkCache>"));
+    assert!(content.contains("default_item_link: Cell<LinkCache>"));
     assert!(content.contains("starter_items_link: RefCell<LinkListCache>"));
     assert!(content.contains("pub fn default_item<'a>(&self, data: &'a GameData)"));
     assert!(content.contains("pub fn starter_items<'a>(&self, data: &'a GameData)"));

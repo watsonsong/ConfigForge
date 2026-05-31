@@ -136,7 +136,7 @@ fn render_read_from_reader_body(
                 .cardinality
             {
                 CodeRelationCardinality::Many => "RefCell::new(LinkListCache::default())",
-                _ => "RefCell::new(LinkCache::default())",
+                _ => "Cell::new(LinkCache::default())",
             };
             content.raw_fmt(format_args!(
                 "            {}: {},\n",

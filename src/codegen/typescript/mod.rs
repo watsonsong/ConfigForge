@@ -92,13 +92,10 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 .any(|foreign_key| foreign_key.linked_field.is_some())
         }) {
             content.raw(concat!(
-                "type LinkCache =\n",
-                "  | { state: 'unresolved' }\n",
-                "  | { state: 'empty' }\n",
-                "  | { state: 'rowIndex'; rowIndex: number };\n\n",
-                "interface LinkListCache {\n",
-                "  rowIndexes?: number[];\n",
-                "}\n\n",
+                "const LINK_UNRESOLVED = -1;\n",
+                "const LINK_EMPTY = -2;\n",
+                "type LinkCache = number;\n",
+                "type LinkListCache = number[] | undefined;\n\n",
             ));
         }
 

@@ -244,7 +244,7 @@ fn render_single_relation_method(
         "    pub fn {function_name}<'a>(&self, data: &'a GameData) -> RuntimeDataResult<{return_type}> {{\n"
     ));
     content.raw_fmt(format_args!(
-        "        let cached = self.{}.borrow().clone();\n",
+        "        let cached = self.{}.get();\n",
         cache_name
     ));
     content.raw("        match cached {\n");
@@ -323,7 +323,7 @@ fn render_single_relation_method(
         )
     ));
     content.raw_fmt(format_args!(
-        "        *self.{cache_name}.borrow_mut() = LinkCache::RowIndex(row_index);\n"
+        "        self.{cache_name}.set(LinkCache::RowIndex(row_index));\n"
     ));
     if optional {
         content.raw_fmt(format_args!(
@@ -367,7 +367,9 @@ fn render_many_relation_method(
     content.raw_fmt(format_args!(
         "        if self.{cache_name}.borrow().row_indexes.is_none() {{\n"
     ));
-    content.raw("            let mut row_indexes = Vec::new();\n");
+    content.raw_fmt(format_args!(
+        "            let mut row_indexes = Vec::with_capacity(self.{source_field_name}.len());\n"
+    ));
     content.raw_fmt(format_args!(
         "            for key in &self.{source_field_name} {{\n"
     ));
@@ -385,10 +387,11 @@ fn render_many_relation_method(
     ));
     content.raw("        }\n");
     content.raw_fmt(format_args!(
-        "        let row_indexes = self.{cache_name}.borrow().row_indexes.clone().unwrap_or_default();\n"
+        "        let cache = self.{cache_name}.borrow();\n"
     ));
+    content.raw("        let row_indexes = cache.row_indexes.as_deref().unwrap_or(&[]);\n");
     content.raw("        let mut rows = Vec::with_capacity(row_indexes.len());\n");
-    content.raw("        for row_index in row_indexes {\n");
+    content.raw("        for &row_index in row_indexes {\n");
     content.raw_fmt(format_args!(
         "            rows.push(data.{target_data_field}.row_at(row_index).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))?);\n",
         format!("resolved list relation `{}` row index out of bounds", foreign_key.name)
@@ -421,7 +424,7 @@ fn render_optional_empty_check(
     }
     content.raw_fmt(format_args!("{indent}if {} {{\n", conditions.join(" && ")));
     content.raw_fmt(format_args!(
-        "{indent}    *self.{}.borrow_mut() = LinkCache::Empty;\n",
+        "{indent}    self.{}.set(LinkCache::Empty);\n",
         names.relation_cache_field_name(foreign_key)?
     ));
     content.raw_fmt(format_args!("{indent}    return Ok(None);\n"));
