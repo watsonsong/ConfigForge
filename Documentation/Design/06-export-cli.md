@@ -612,6 +612,8 @@ config-forge --project ConfigForge.toml --target client
 | `--target <NAME>` | 要构建的 target 名称。 |
 | `--dry-run` | 执行完整构建计划和 artifact 路径冲突检查，输出 artifact plan，但不创建目录、不写出文件。 |
 | `--write-mode <direct\|temp-commit>` | 非 dry-run 构建使用的 artifact 写入模式；默认 `direct`。如果同时传入 `--dry-run`，以 dry-run 行为为准。 |
+| `--artifact-memory-limit <SIZE>` | artifact 写入 pipeline 的固定内存预算，例如 `512MiB`。与 `--artifact-memory-percent` 互斥。 |
+| `--artifact-memory-percent <PERCENT>` | 按启动时可用内存百分比计算 artifact pipeline 预算；默认 25%，范围 `1..=80`，并 clamp 到 `[64MiB, 2GiB]`。 |
 
 执行行为：
 
@@ -621,7 +623,7 @@ config-forge --project ConfigForge.toml --target client
 4. 根据 `[[targets.exports]]` 与 exporter dependency contract 构造 target-local execution view；当前实现按 MetaAndData / MetaOnly 两个分支执行，而不是完整通用 DAG 调度器。MetaAndData 分支读取 `project.input`、归一化、校验并运行数据相关 exporter，MetaOnly 分支运行格式无关 codegen。
 5. 同 `(project.input, effective_tags)` 的 MetaAndData export task 复用加载、归一化和校验结果。
 6. 汇总所有 export artifacts，按 export task 声明顺序稳定排序，并统一完成路径归一化和冲突检查。
-7. 按 `--dry-run` / `--write-mode` 写出 artifact，或在 dry-run 模式下只返回写入计划。
+7. 按 `--dry-run` / `--write-mode` 写出 artifact，或在 dry-run 模式下只返回写入计划；artifact writer 会按 memory budget 对 writer queue 中“已接收但未写出”的 artifact bytes 做限流。当前实现仍保留 `Vec<Artifact>` 收集边界，后续 streaming generator 会进一步降低生成阶段峰值。
 8. 未声明的任务不产生对应输出。例如 MetaOnly-only target 不读取 Data。
 
 ## 6.7 退出码

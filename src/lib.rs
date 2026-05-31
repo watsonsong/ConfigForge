@@ -18,10 +18,10 @@ pub mod error {
 }
 
 pub use artifact::{
-    Artifact, ArtifactContent, ArtifactWriteEntry, ArtifactWriteMode, ArtifactWriteResult,
-    ArtifactWriter,
+    Artifact, ArtifactContent, ArtifactWriteEntry, ArtifactWriteLimits, ArtifactWriteMode,
+    ArtifactWriteResult, ArtifactWriter,
 };
-pub use build::{BuildOptions, BuildOutput, ExecutionOptions, build_target};
+pub use build::{ArtifactMemoryOptions, BuildOptions, BuildOutput, ExecutionOptions, build_target};
 pub use codegen::{
     CaseStyle, CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator,
     CodeWriterConfig, CodegenOptions, CodegenTaskConfig, CppCodeGenerator, CppCodegenOptions,

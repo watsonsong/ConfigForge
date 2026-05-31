@@ -5,7 +5,7 @@ use std::{num::NonZeroUsize, path::Path};
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{ArtifactWriteMode, ArtifactWriteResult},
+    artifact::{ArtifactWriteLimits, ArtifactWriteMode, ArtifactWriteResult},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -15,6 +15,7 @@ pub struct BuildOptions<'a> {
     pub extra_tags: &'a [String],
     pub execution: ExecutionOptions,
     pub artifact_write_mode: ArtifactWriteMode,
+    pub artifact_write_limits: ArtifactWriteLimits,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +27,12 @@ pub struct ExecutionOptions {
 }
 
 pub(crate) const MAX_JOBS: usize = 128;
+const MIN_ARTIFACT_MEMORY_LIMIT_BYTES: usize = 1024 * 1024;
+const MIN_DEFAULT_ARTIFACT_MEMORY_BYTES: usize = 64 * 1024 * 1024;
+const MAX_DEFAULT_ARTIFACT_MEMORY_BYTES: usize = 2 * 1024 * 1024 * 1024;
+const FALLBACK_ARTIFACT_MEMORY_BYTES: usize = 256 * 1024 * 1024;
+const DEFAULT_ARTIFACT_MEMORY_PERCENT: u8 = 25;
+const MAX_ARTIFACT_MEMORY_PERCENT: u8 = 80;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildOutput {
@@ -101,6 +108,117 @@ impl Default for ExecutionOptions {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArtifactMemoryOptions {
+    pub limit_bytes: Option<usize>,
+    pub percent: Option<u8>,
+}
+
+impl ArtifactMemoryOptions {
+    pub fn from_cli(limit: Option<&str>, percent: Option<u8>) -> Result<Self> {
+        let limit_bytes = limit.map(parse_byte_size).transpose()?;
+        let options = Self {
+            limit_bytes,
+            percent,
+        };
+        options.validate()?;
+        Ok(options)
+    }
+
+    pub fn resolve_limits(self, jobs: usize) -> ArtifactWriteLimits {
+        let max_in_flight_bytes = match self.limit_bytes {
+            Some(bytes) => bytes,
+            None => {
+                let percent = self.percent.unwrap_or(DEFAULT_ARTIFACT_MEMORY_PERCENT);
+                available_memory_bytes()
+                    .map(|available| available.saturating_mul(percent as usize) / 100)
+                    .unwrap_or(FALLBACK_ARTIFACT_MEMORY_BYTES)
+                    .clamp(
+                        MIN_DEFAULT_ARTIFACT_MEMORY_BYTES,
+                        MAX_DEFAULT_ARTIFACT_MEMORY_BYTES,
+                    )
+            }
+        };
+        ArtifactWriteLimits::new(max_in_flight_bytes, (jobs * 4).max(16))
+            .expect("resolved artifact write limits should be valid")
+    }
+
+    fn validate(self) -> Result<()> {
+        if self.limit_bytes.is_some() && self.percent.is_some() {
+            return Err(ConfigForgeError::Validation(
+                "--artifact-memory-limit and --artifact-memory-percent cannot be used together"
+                    .to_owned(),
+            ));
+        }
+        if let Some(limit_bytes) = self.limit_bytes {
+            if limit_bytes < MIN_ARTIFACT_MEMORY_LIMIT_BYTES {
+                return Err(ConfigForgeError::Validation(format!(
+                    "--artifact-memory-limit must be at least {MIN_ARTIFACT_MEMORY_LIMIT_BYTES} bytes"
+                )));
+            }
+        }
+        if let Some(percent) = self.percent {
+            if percent == 0 || percent > MAX_ARTIFACT_MEMORY_PERCENT {
+                return Err(ConfigForgeError::Validation(format!(
+                    "--artifact-memory-percent must be between 1 and {MAX_ARTIFACT_MEMORY_PERCENT}"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Default for ArtifactMemoryOptions {
+    fn default() -> Self {
+        Self {
+            limit_bytes: None,
+            percent: Some(DEFAULT_ARTIFACT_MEMORY_PERCENT),
+        }
+    }
+}
+
+fn parse_byte_size(input: &str) -> Result<usize> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(ConfigForgeError::Validation(
+            "--artifact-memory-limit must not be empty".to_owned(),
+        ));
+    }
+    let digits_len = trimmed
+        .find(|ch: char| !ch.is_ascii_digit())
+        .unwrap_or(trimmed.len());
+    if digits_len == 0 {
+        return Err(ConfigForgeError::Validation(format!(
+            "invalid --artifact-memory-limit `{input}`"
+        )));
+    }
+    let value = trimmed[..digits_len].parse::<usize>().map_err(|_| {
+        ConfigForgeError::Validation(format!("invalid --artifact-memory-limit `{input}`"))
+    })?;
+    let unit = trimmed[digits_len..].trim().to_ascii_lowercase();
+    let multiplier = match unit.as_str() {
+        "" | "b" => 1,
+        "k" | "kb" | "kib" => 1024,
+        "m" | "mb" | "mib" => 1024 * 1024,
+        "g" | "gb" | "gib" => 1024 * 1024 * 1024,
+        _ => {
+            return Err(ConfigForgeError::Validation(format!(
+                "unsupported --artifact-memory-limit unit `{}`",
+                &trimmed[digits_len..]
+            )));
+        }
+    };
+    value.checked_mul(multiplier).ok_or_else(|| {
+        ConfigForgeError::Validation(format!("--artifact-memory-limit `{input}` is too large"))
+    })
+}
+
+fn available_memory_bytes() -> Option<usize> {
+    let mut system = sysinfo::System::new();
+    system.refresh_memory();
+    usize::try_from(system.available_memory()).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,5 +268,49 @@ mod tests {
         assert!(
             matches!(error, ConfigForgeError::Validation(message) if message.contains("--jobs must be no greater than"))
         );
+    }
+
+    #[test]
+    fn artifact_memory_options_parse_fixed_sizes() {
+        let options = ArtifactMemoryOptions::from_cli(Some("128MiB"), None)
+            .expect("fixed artifact memory should parse");
+
+        assert_eq!(options.limit_bytes, Some(128 * 1024 * 1024));
+        assert_eq!(options.percent, None);
+        assert_eq!(
+            options.resolve_limits(2).max_in_flight_bytes,
+            128 * 1024 * 1024
+        );
+        assert_eq!(options.resolve_limits(2).max_in_flight_artifacts, 16);
+        assert_eq!(options.resolve_limits(8).max_in_flight_artifacts, 32);
+    }
+
+    #[test]
+    fn artifact_memory_options_validate_conflicts_and_bounds() {
+        assert!(matches!(
+            ArtifactMemoryOptions::from_cli(Some("64MiB"), Some(25)),
+            Err(ConfigForgeError::Validation(message))
+                if message.contains("cannot be used together")
+        ));
+        assert!(matches!(
+            ArtifactMemoryOptions::from_cli(Some("512KiB"), None),
+            Err(ConfigForgeError::Validation(message))
+                if message.contains("must be at least")
+        ));
+        assert!(matches!(
+            ArtifactMemoryOptions::from_cli(None, Some(0)),
+            Err(ConfigForgeError::Validation(message))
+                if message.contains("between 1")
+        ));
+        assert!(matches!(
+            ArtifactMemoryOptions::from_cli(None, Some(81)),
+            Err(ConfigForgeError::Validation(message))
+                if message.contains("between 1")
+        ));
+        assert!(matches!(
+            ArtifactMemoryOptions::from_cli(Some("10XB"), None),
+            Err(ConfigForgeError::Validation(message))
+                if message.contains("unsupported")
+        ));
     }
 }

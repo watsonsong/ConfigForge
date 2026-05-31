@@ -14,7 +14,7 @@ mod options;
 mod runtime;
 mod target;
 
-pub use options::{BuildOptions, BuildOutput, ExecutionOptions};
+pub use options::{ArtifactMemoryOptions, BuildOptions, BuildOutput, ExecutionOptions};
 
 use crate::{
     ConfigForgeError, Result,
@@ -60,7 +60,9 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
         pool: &cpu_pool,
     })?;
 
-    let artifacts = ArtifactWriter::new(options.artifact_write_mode).write(dag_output.artifacts)?;
+    let artifacts = ArtifactWriter::new(options.artifact_write_mode)
+        .with_limits(options.artifact_write_limits)
+        .write(dag_output.artifacts)?;
 
     Ok(BuildOutput {
         warnings: dag_output.warnings,

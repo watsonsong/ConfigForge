@@ -966,10 +966,14 @@ Phase 10 实现复核：后续 Phase 11/12 的阶段顺序仍然成立。Phase 1
 
 目标：避免所有大 artifact bytes 同时驻留内存，并为 async write 做准备。
 
-- TODO：Artifact Writer 支持 bounded queue / max in-flight artifacts。
-- TODO：Direct / temp-commit / dry-run 保持当前语义；temp-commit commit 顺序稳定。
-- TODO：接入 `platform-filesystem-semantics.md` 中的 path key 策略，保证 write 前完成冲突检查。
-- 验证：dry-run 不创建目录；写入失败测试覆盖 Direct 和 TempCommit；大 artifact benchmark 观察 peak memory。
+- DONE：Artifact Writer 支持 bounded queue / max in-flight artifacts / max in-flight bytes。CLI 已增加固定容量 `--artifact-memory-limit <SIZE>` 与百分比 `--artifact-memory-percent <PERCENT>`；默认使用启动时 available memory 的 25%，并 clamp 到 `[64MiB, 2GiB]`，探测失败 fallback `256MiB`。固定容量与百分比同时指定时报错。
+- DONE：Direct / temp-commit / dry-run 保持当前语义；Direct / temp-commit 通过 dedicated writer thread + byte semaphore / Condvar 限制 writer queue，等待 capacity 的线程会 park 而不是 busy-wait。temp-commit temp write 完成后即可释放 bytes permit，最终 commit/rename 按 planned path 稳定顺序执行。
+- DONE：单 artifact 大于预算时允许独占预算写入，避免单个大文件导致构建不可用；未来如需强制失败可增加 `--artifact-memory-strict`。
+- TODO：Build 增加 streaming generator / generation limiter，避免所有 Rayon worker 同时生成大 artifact 后再进入 writer。当前实现仍保留 `Vec<Artifact>` 收集边界，bounded writer 只能限制 writer queue 中的 in-flight bytes，不能限制生成阶段已经收集的 artifact bytes。
+- TODO：接入 `platform-filesystem-semantics.md` 中的 path key 策略，保证 write 前完成冲突检查；后续 streaming `submit()` 只能提交已规划路径，不能引入未规划 artifact。
+- 验证：dry-run 不创建目录；写入失败测试覆盖 Direct 和 TempCommit；大 artifact benchmark 观察 peak memory；新增 CLI 参数互斥和 bounded writer 小队列测试。
+
+Phase 11 详细设计见 [`../Implementation/07-artifact-module-detail-design.md#741-phase-11bounded-artifact-write-pipeline`](../Implementation/07-artifact-module-detail-design.md#741-phase-11bounded-artifact-write-pipeline)。实现时优先落地同步 bounded writer；不要等 Phase 12 通用 DAG executor 才处理内存峰值问题。
 
 ### Phase 12：通用 DAG executor 与 tracing
 

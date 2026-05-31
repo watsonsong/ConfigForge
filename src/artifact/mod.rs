@@ -5,6 +5,8 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Component, Path, PathBuf},
+    sync::{Arc, Condvar, Mutex, mpsc},
+    thread,
 };
 
 use crate::{ConfigForgeError, Result};
@@ -84,15 +86,34 @@ pub struct ArtifactWriteEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArtifactWriter {
     mode: ArtifactWriteMode,
+    limits: ArtifactWriteLimits,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArtifactWriteLimits {
+    pub max_in_flight_bytes: usize,
+    pub max_in_flight_artifacts: usize,
 }
 
 impl ArtifactWriter {
     pub fn new(mode: ArtifactWriteMode) -> Self {
-        Self { mode }
+        Self {
+            mode,
+            limits: ArtifactWriteLimits::default(),
+        }
     }
 
     pub fn mode(self) -> ArtifactWriteMode {
         self.mode
+    }
+
+    pub fn limits(self) -> ArtifactWriteLimits {
+        self.limits
+    }
+
+    pub fn with_limits(mut self, limits: ArtifactWriteLimits) -> Self {
+        self.limits = limits.normalized();
+        self
     }
 
     pub fn write(self, artifacts: Vec<Artifact>) -> Result<ArtifactWriteResult> {
@@ -108,14 +129,53 @@ impl ArtifactWriter {
 
         match self.mode {
             ArtifactWriteMode::DryRun => {}
-            ArtifactWriteMode::Direct => write_direct(&planned)?,
-            ArtifactWriteMode::TempCommit => write_temp_commit(&planned)?,
+            ArtifactWriteMode::Direct => write_direct_bounded(planned, self.limits)?,
+            ArtifactWriteMode::TempCommit => write_temp_commit_bounded(planned, self.limits)?,
         }
 
         Ok(ArtifactWriteResult {
             mode: self.mode,
             entries,
         })
+    }
+}
+
+impl ArtifactWriteLimits {
+    pub const DEFAULT_MAX_IN_FLIGHT_BYTES: usize = 256 * 1024 * 1024;
+    pub const DEFAULT_MAX_IN_FLIGHT_ARTIFACTS: usize = 16;
+
+    pub fn new(max_in_flight_bytes: usize, max_in_flight_artifacts: usize) -> Result<Self> {
+        let limits = Self {
+            max_in_flight_bytes,
+            max_in_flight_artifacts,
+        };
+        if limits.max_in_flight_bytes == 0 {
+            return Err(ConfigForgeError::Validation(
+                "artifact memory limit must be greater than 0".to_owned(),
+            ));
+        }
+        if limits.max_in_flight_artifacts == 0 {
+            return Err(ConfigForgeError::Validation(
+                "artifact in-flight limit must be greater than 0".to_owned(),
+            ));
+        }
+        Ok(limits)
+    }
+
+    fn normalized(self) -> Self {
+        Self {
+            max_in_flight_bytes: self.max_in_flight_bytes.max(1),
+            max_in_flight_artifacts: self.max_in_flight_artifacts.max(1),
+        }
+    }
+}
+
+impl Default for ArtifactWriteLimits {
+    fn default() -> Self {
+        Self {
+            max_in_flight_bytes: Self::DEFAULT_MAX_IN_FLIGHT_BYTES,
+            max_in_flight_artifacts: Self::DEFAULT_MAX_IN_FLIGHT_ARTIFACTS,
+        }
     }
 }
 
@@ -134,26 +194,28 @@ fn plan_artifacts(artifacts: Vec<Artifact>) -> Result<Vec<Artifact>> {
     Ok(by_path.into_values().collect())
 }
 
-fn write_direct(artifacts: &[Artifact]) -> Result<()> {
-    for artifact in artifacts {
+fn write_direct_bounded(artifacts: Vec<Artifact>, limits: ArtifactWriteLimits) -> Result<()> {
+    write_artifacts_bounded(artifacts, limits, |artifact, _index| {
         write_bytes(&artifact.path, artifact.content.as_bytes())?;
-    }
-    Ok(())
+        Ok(())
+    })
+    .map(|_| ())
 }
 
-fn write_temp_commit(artifacts: &[Artifact]) -> Result<()> {
-    let mut temp_paths = Vec::new();
+fn write_temp_commit_bounded(artifacts: Vec<Artifact>, limits: ArtifactWriteLimits) -> Result<()> {
+    let temp_writes = write_artifacts_bounded(artifacts, limits, |artifact, index| {
+        let temp_path = temp_path_for(&artifact.path, index);
+        write_bytes(&temp_path, artifact.content.as_bytes())?;
+        Ok(TempCommitArtifact {
+            final_path: artifact.path,
+            temp_path,
+        })
+    })?;
     let result = (|| -> Result<()> {
-        for (index, artifact) in artifacts.iter().enumerate() {
-            let temp_path = temp_path_for(&artifact.path, index);
-            write_bytes(&temp_path, artifact.content.as_bytes())?;
-            temp_paths.push(temp_path);
-        }
-
-        for (artifact, temp_path) in artifacts.iter().zip(temp_paths.iter()) {
-            fs::rename(temp_path, &artifact.path).map_err(|source| {
+        for temp_write in &temp_writes {
+            fs::rename(&temp_write.temp_path, &temp_write.final_path).map_err(|source| {
                 ConfigForgeError::WriteFile {
-                    path: artifact.path.clone(),
+                    path: temp_write.final_path.clone(),
                     source,
                 }
             })?;
@@ -162,14 +224,133 @@ fn write_temp_commit(artifacts: &[Artifact]) -> Result<()> {
     })();
 
     if result.is_err() {
-        for temp_path in temp_paths {
-            let _ = fs::remove_file(temp_path);
+        for temp_write in temp_writes {
+            let _ = fs::remove_file(temp_write.temp_path);
         }
     }
 
     result
 }
 
+#[derive(Debug)]
+struct TempCommitArtifact {
+    final_path: PathBuf,
+    temp_path: PathBuf,
+}
+
+fn write_artifacts_bounded<WriteFn, WriteResult>(
+    artifacts: Vec<Artifact>,
+    limits: ArtifactWriteLimits,
+    mut write_artifact: WriteFn,
+) -> Result<Vec<WriteResult>>
+where
+    WriteFn: FnMut(Artifact, usize) -> Result<WriteResult> + Send + 'static,
+    WriteResult: Send + 'static,
+{
+    let limits = limits.normalized();
+    let byte_semaphore = Arc::new(ByteSemaphore::new(limits.max_in_flight_bytes));
+    let (sender, receiver) = mpsc::sync_channel::<QueuedArtifact>(limits.max_in_flight_artifacts);
+    let worker_semaphore = byte_semaphore.clone();
+    let worker = thread::spawn(move || {
+        let mut first_error = None;
+        let mut write_results = BTreeMap::<usize, WriteResult>::new();
+        for queued in receiver {
+            let QueuedArtifact {
+                index,
+                bytes,
+                artifact,
+            } = queued;
+            if first_error.is_none() {
+                match write_artifact(artifact, index) {
+                    Ok(write_result) => {
+                        write_results.insert(index, write_result);
+                    }
+                    Err(error) => {
+                        first_error = Some(error);
+                    }
+                }
+            }
+            worker_semaphore.release(bytes);
+        }
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(write_results.into_values().collect::<Vec<_>>())
+        }
+    });
+
+    for (index, artifact) in artifacts.into_iter().enumerate() {
+        let bytes = artifact.content.len();
+        byte_semaphore.acquire(bytes);
+        if sender
+            .send(QueuedArtifact {
+                index,
+                bytes,
+                artifact,
+            })
+            .is_err()
+        {
+            byte_semaphore.release(bytes);
+            break;
+        }
+    }
+    drop(sender);
+
+    worker
+        .join()
+        .map_err(|_| ConfigForgeError::Validation("artifact writer worker panicked".to_owned()))?
+}
+
+struct QueuedArtifact {
+    index: usize,
+    bytes: usize,
+    artifact: Artifact,
+}
+
+#[derive(Debug)]
+struct ByteSemaphore {
+    capacity: usize,
+    state: Mutex<ByteSemaphoreState>,
+    capacity_available: Condvar,
+}
+
+#[derive(Debug)]
+struct ByteSemaphoreState {
+    in_flight: usize,
+}
+
+impl ByteSemaphore {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            state: Mutex::new(ByteSemaphoreState { in_flight: 0 }),
+            capacity_available: Condvar::new(),
+        }
+    }
+
+    fn acquire(&self, bytes: usize) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("byte semaphore lock should not be poisoned");
+        while state.in_flight != 0 && state.in_flight.saturating_add(bytes) > self.capacity {
+            state = self
+                .capacity_available
+                .wait(state)
+                .expect("byte semaphore lock should not be poisoned");
+        }
+        state.in_flight = state.in_flight.saturating_add(bytes);
+    }
+
+    fn release(&self, bytes: usize) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("byte semaphore lock should not be poisoned");
+        state.in_flight = state.in_flight.saturating_sub(bytes);
+        self.capacity_available.notify_all();
+    }
+}
 fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = parent_dir_to_create(path) {
         fs::create_dir_all(parent).map_err(|source| ConfigForgeError::WriteFile {
@@ -312,6 +493,56 @@ mod tests {
             fs::read_to_string(path).expect("written artifact"),
             "pub struct Generated;"
         );
+    }
+
+    #[test]
+    fn bounded_direct_write_allows_single_artifact_larger_than_byte_limit() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("out/large.bin");
+        let limits = ArtifactWriteLimits::new(1, 1).expect("limits should be valid");
+
+        let result = ArtifactWriter::new(ArtifactWriteMode::Direct)
+            .with_limits(limits)
+            .write(vec![Artifact::binary(&path, vec![1, 2, 3, 4])])
+            .expect("single oversized artifact should write");
+
+        assert_eq!(result.entries[0].bytes, 4);
+        assert_eq!(fs::read(path).expect("written artifact"), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn bounded_temp_commit_writes_multiple_artifacts_with_small_queue() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let first = temp_dir.path().join("out/a.txt");
+        let second = temp_dir.path().join("out/b.txt");
+        let limits = ArtifactWriteLimits::new(1, 1).expect("limits should be valid");
+
+        let result = ArtifactWriter::new(ArtifactWriteMode::TempCommit)
+            .with_limits(limits)
+            .write(vec![
+                Artifact::text(&second, "bb"),
+                Artifact::text(&first, "aa"),
+            ])
+            .expect("bounded temp commit should succeed");
+
+        assert_eq!(result.entries[0].path, first);
+        assert_eq!(result.entries[1].path, second);
+        assert_eq!(fs::read_to_string(first).expect("first artifact"), "aa");
+        assert_eq!(fs::read_to_string(second).expect("second artifact"), "bb");
+    }
+
+    #[test]
+    fn artifact_write_limits_reject_zero_values() {
+        assert!(matches!(
+            ArtifactWriteLimits::new(0, 1),
+            Err(ConfigForgeError::Validation(message))
+                if message.contains("artifact memory limit")
+        ));
+        assert!(matches!(
+            ArtifactWriteLimits::new(1, 0),
+            Err(ConfigForgeError::Validation(message))
+                if message.contains("artifact in-flight limit")
+        ));
     }
 
     #[test]

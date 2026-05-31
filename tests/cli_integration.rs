@@ -220,6 +220,94 @@ fn dry_run_builds_plan_without_writing_artifacts() {
 }
 
 #[test]
+fn artifact_memory_limit_flag_builds_with_bounded_writer() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let out_dir = temp_dir.path().join("generated_code");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                name = "standard_project"
+
+                [[targets]]
+                name = "code_only"
+
+                [[targets.exports]]
+                type = "rust"
+                output = "{}"
+            "#,
+            standard_core_meta_imports(),
+            out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "code_only",
+        "--artifact-memory-limit",
+        "1MiB",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `code_only` built"));
+    assert!(out_dir.join("generated.rs").exists());
+}
+
+#[test]
+fn rejects_conflicting_artifact_memory_options() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let out_dir = temp_dir.path().join("generated_code");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                name = "standard_project"
+
+                [[targets]]
+                name = "code_only"
+
+                [[targets.exports]]
+                type = "rust"
+                output = "{}"
+            "#,
+            standard_core_meta_imports(),
+            out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "code_only",
+        "--artifact-memory-limit",
+        "64MiB",
+        "--artifact-memory-percent",
+        "25",
+    ]);
+
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "--artifact-memory-limit and --artifact-memory-percent cannot be used together",
+    ));
+    assert!(!out_dir.join("generated.rs").exists());
+}
+
+#[test]
 fn temp_commit_write_mode_builds_artifacts() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let data_out_dir = temp_dir.path().join("out/data");
