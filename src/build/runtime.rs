@@ -1,15 +1,13 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeSet;
-use std::path::Path;
-
 use rayon::ThreadPool;
+use std::collections::BTreeSet;
 
 use crate::{
     ConfigForgeError, Result,
     artifact::Artifact,
-    data::{DataLoadPlan, DataLoader, SourceReadPlan},
+    data::RawSourceData,
     exporter::{DataExporterRef, DataFormatRegistry, export_runtime_data},
     meta::{LinkedMetaModel, TargetTags},
     project::lexical_normalize_path,
@@ -37,7 +35,7 @@ pub(super) struct RuntimeExportTaskOutput {
 }
 
 pub(super) fn export_meta_and_data_tasks(
-    data_root: Option<&Path>,
+    raw_sources: Option<&RawSourceData>,
     export_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
@@ -49,9 +47,9 @@ pub(super) fn export_meta_and_data_tasks(
             task_outputs: Vec::new(),
         });
     }
-    let data_root = data_root.ok_or_else(|| {
+    let raw_sources = raw_sources.ok_or_else(|| {
         ConfigForgeError::Validation(
-            "`project.input` must be set when target declares Data-dependent export tasks"
+            "raw source data must be prepared when target declares Data-dependent export tasks"
                 .to_owned(),
         )
     })?;
@@ -59,17 +57,6 @@ pub(super) fn export_meta_and_data_tasks(
     let registry = DataFormatRegistry::with_builtin_exporters();
     ensure_planned_runtime_output_paths(export_tasks, linked_meta, target_tags, &registry)?;
 
-    let source_read_plan = SourceReadPlan::from_tables(
-        linked_meta
-            .tables
-            .iter()
-            .filter(|table| table.meta.is_exported_for(target_tags))
-            .map(|table| table.meta),
-        Some(target_tags),
-    )?;
-    let data_plan = DataLoadPlan::from_source_read_plan(source_read_plan);
-    let raw_sources =
-        DataLoader::new(data_root).read_sources_with_pool(data_plan.source_read_plan(), pool)?;
     let data_set = normalize_data_set(linked_meta, raw_sources.as_data_set())?;
     let validation_report =
         validate_normalized_data_set_for_target_with_report(linked_meta, target_tags, &data_set)?;

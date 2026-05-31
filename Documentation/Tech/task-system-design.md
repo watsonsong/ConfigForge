@@ -900,10 +900,12 @@ Phase 4 实现复核：后续 Phase 5-12 的阶段顺序仍然成立。Phase 5 �
 
 目标：在 Project Config / raw MetaModel 完成后，让 Meta link / validate 与 source I/O 同时启动。
 
-- TODO：重排 build 主流程：`MetaExtract -> MetaLink` 与 `DependencyPlan.requires_data -> SourceRead[*]` 可并行，二者在 Normalize 前 join。
-- TODO：Meta link failure 时取消未开始的 source tasks；已开始的远端请求按 cancellation token 协作退出或等待完成并丢弃结果。
-- TODO：确保 code-only target 不启动 source tasks；data-backed target 等待 MetaLink + RawSources 后再 normalize。
+- DONE：重排 build 主流程：`MetaExtract -> MetaLink` 与 `DependencyPlan.requires_data -> SourceRead[*]` 可并行，二者在 Normalize 前 join。Source discovery 现在基于 raw `MetaModel` + effective target tags 构造 `SourceReadPlan`，不等待 `LinkedMetaModel`。
+- DONE：Meta link failure 与 source failure 并发时稳定优先返回 MetaLink 错误；当前本地 CSV source read 无 cancellation token，已启动任务会等待完成并丢弃结果，未启动远端任务的协作取消保留到正式 async provider runtime。
+- DONE：确保 code-only target 不启动 source tasks；data-backed target 等待 MetaLink + RawSources 后再 normalize。
 - 验证：fake slow MetaLink / fake slow SourceRead 的调度测试，证明可重叠执行；错误场景覆盖 Meta error、source error、双错误稳定输出。
+
+Phase 5 实现复核：后续 Phase 6-12 的阶段顺序仍然成立。Phase 6 可直接消费 Phase 5 join 后的 `LinkedMetaModel + RawSourceData`，把 `normalize_data_set` 拆为 table 粒度任务；完整 cancellation token 仍建议随远端 provider / 通用 DAG executor 阶段落地，而不是在本地 CSV loader 中引入额外复杂度。
 
 ### Phase 6：NormalizeTable 并行与 normalized DataSet merge
 
