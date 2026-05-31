@@ -954,11 +954,13 @@ Phase 9 实现复核：后续 Phase 10-12 的阶段顺序仍然成立。Phase 10
 
 目标：在 validation gate 之后并行生成 data artifacts 和 codegen artifacts，同时保持 path conflict 与输出顺序稳定。
 
-- TODO：拆出 `PlanArtifacts`，在重 CPU 生成前尽可能计算所有输出路径，并做 lexical / future filesystem-aware conflict check。
-- TODO：JSON / MessagePack / bin 按 table artifact 并行；POT / Lua 等 aggregate exporter 按内部安全粒度并行并稳定合并。
-- TODO：MetaOnly codegen 按 export task 并行，不等待 Data 或 TargetView validation。
-- TODO：生成结果按 `(target declaration order, export declaration order, artifact path order)` 稳定收集。
+- DONE：拆出 export-task 级 `PlanArtifacts` 执行路径；`ensure_planned_runtime_output_paths()` 在重 CPU 生成前通过 Rayon 按 MetaAndData export task 并行计算输出路径，并在稳定 merge 阶段做 lexical conflict check。future filesystem-aware key 仍留给 artifact/path key 层统一接入。
+- DONE：JSON / MessagePack / bin 已按 table artifact 并行；Phase 10 后多个 runtime / aggregate exporter 也按 export task 并行执行，并按 declaration order 稳定合并。POT / Lua 等 aggregate exporter 的内部 table 粒度并行仍由各 exporter 自己决定。
+- DONE：MetaOnly codegen 已按 export task 并行，且 target branch 执行时不等待 Data 或 TargetView validation。
+- DONE：生成结果按当前 single-target 的 export declaration order 稳定收集；artifact writer 仍会按 normalized path 排序并做最终冲突检查。多 target 的 target declaration order 维度留给 Phase 12 DAG executor。
 - 验证：多 exporter / 多 codegen 混合项目 `--jobs 1` 与 `--jobs 4` artifact plan 完全一致；路径冲突在任何写入前报错。
+
+Phase 10 实现复核：后续 Phase 11/12 的阶段顺序仍然成立。Phase 11 仍应聚焦 bounded artifact write / temp-file commit 顺序 / filesystem-aware path key，下沉统一 path conflict key，避免 build/runtime/exporter 重复实现。Phase 12 通用 DAG executor 可把当前已稳定的 `PlanArtifacts`、`RunDataExporter`、`RunCodeGenerator` 映射为独立 node，并复用现有 declaration-order merge 作为兼容性 golden。
 
 ### Phase 11：Bounded artifact write pipeline
 

@@ -150,7 +150,7 @@ build_target(options)
   -> BuildOutput { warnings }
 ```
 
-Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。Phase 5 后，data-backed target 会先并行准备 `LinkedMetaModel` 与 `RawSourceData`，再进入 normalize / validation；Phase 6 后，normalize 在 table 粒度通过 CPU pool 并行，并按 raw `DataSet.tables()` 顺序稳定 merge；Phase 7 后，validation 先全量收集 `ValidationReport`，再按 stable key 排序并通过 error gate 阻断 data-backed export。Phase 8 已在 validation 模块提供 full `DataSet` table-local validation 的 CPU pool 入口；当前 single-target runtime path 的 source read 仍按 effective target tags 过滤 raw tables，因此 build 主流程继续对 target-scoped normalized data 执行 target-aware report-backed validation。Phase 9 后，runtime path 调用 `validate_normalized_data_set_for_target_with_report_and_pool()`，并行构建 target `ExportValidationView`、按 visible table 并行执行 target table validation，再稳定合并 report；真正跨 target 共享 full normalized DataSet 的调度仍留给 multi-target DAG。code-only target 不启动 source read，因此缺失 `project.input` 或 data files 不会影响 MetaOnly codegen。`MetaOnly` codegen export task 只依赖 linked Meta 与 effective target tags，可与 `MetaAndData` 分支中的 validation / export 并行。Artifact 收集仍按 `[[targets.exports]]` 声明顺序排序，因此并行执行不会改变 dry-run 条目顺序或跨 exporter 路径冲突检查语义。
+Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。Phase 5 后，data-backed target 会先并行准备 `LinkedMetaModel` 与 `RawSourceData`，再进入 normalize / validation；Phase 6 后，normalize 在 table 粒度通过 CPU pool 并行，并按 raw `DataSet.tables()` 顺序稳定 merge；Phase 7 后，validation 先全量收集 `ValidationReport`，再按 stable key 排序并通过 error gate 阻断 data-backed export。Phase 8 已在 validation 模块提供 full `DataSet` table-local validation 的 CPU pool 入口；当前 single-target runtime path 的 source read 仍按 effective target tags 过滤 raw tables，因此 build 主流程继续对 target-scoped normalized data 执行 target-aware report-backed validation。Phase 9 后，runtime path 调用 `validate_normalized_data_set_for_target_with_report_and_pool()`，并行构建 target `ExportValidationView`、按 visible table 并行执行 target table validation，再稳定合并 report；真正跨 target 共享 full normalized DataSet 的调度仍留给 multi-target DAG。Phase 10 后，MetaAndData branch 在 validation gate 通过前先按 export task 并行执行 artifact planning / path conflict check，gate 通过后再按 export task 并行执行 runtime table exporter 或 aggregate exporter；每个 table exporter 内部仍按 table artifact 并行序列化。code-only target 不启动 source read，因此缺失 `project.input` 或 data files 不会影响 MetaOnly codegen。`MetaOnly` codegen export task 只依赖 linked Meta 与 effective target tags，可与 `MetaAndData` 分支中的 validation / export 并行。Artifact 收集仍按 `[[targets.exports]]` 声明顺序排序，因此并行执行不会改变 dry-run 条目顺序或跨 exporter 路径冲突检查语义。
 
 ## 10.5 MetaAndData export task 编排
 
@@ -162,7 +162,7 @@ Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。Phase 
 - 构造 `SourceReadPlan` 时传入 effective target tags，用于过滤 `override_sources[].export_when`。例如 Project target 只有 `client, shipping`，CLI 传入 `--tag s1` 后，`materials_s1.csv` 才会进入 plan 并覆盖 Oak row。
 - 同一个 target 内多个 MetaAndData export task 基于 `(project.input, effective target tags)` 复用同一个 `RawSourceData` 和 normalized `DataSet`，避免重复读取和重复 validation。
 - 每个 export task 可使用不同 `type` 和 `output`，例如 JSON + MessagePack + Lua。
-- runtime table exporter 调用 `exporter::export_runtime_data()` 生成 runtime artifacts，并保留 `RuntimeDataFile` 列表供未来 manifest 或诊断使用；codegen 不绑定该列表。
+- runtime table exporter 调用 `exporter::export_runtime_data()` 生成 runtime artifacts，并保留 `RuntimeDataFile` 列表供未来 manifest 或诊断使用；codegen 不绑定该列表。Phase 10 后，同一 target 内多个 MetaAndData export task 通过 Rayon `par_iter()` 并行执行，结果按 export task 在 `[[targets.exports]]` 中的顺序稳定恢复。
 - validation 使用 `validate_data_set_for_target()` 的 report-backed error gate：基础 required/type/enum/unique、registry validator、FK 与 target-aware checks 会先尽量收集为 `ValidationReport`，再统一判断 error / warning。warning 被收集到 `BuildOutput.warnings`，error 以 `ConfigForgeError::ValidationReport` 直接阻断依赖该 validated DataSet 的 data-backed export。
 
 Phase 5 错误顺序策略：`MetaLink` 与 `SourceRead` 并行执行，但 join 后优先返回 MetaLink 错误；如果 MetaLink 成功而 SourceRead 失败，则返回 source 错误。当前本地 CSV `DataLoader` 无 cancellation token，MetaLink failure 时已启动的 source read 会等待完成并丢弃结果；未来远端 provider 可在 `AsyncSourceReadShell` 基础上接入协作取消。
@@ -171,7 +171,7 @@ Phase 5 错误顺序策略：`MetaLink` 与 `SourceRead` 并行执行，但 join
 
 路径冲突分层：
 
-- build 在所有 MetaAndData export tasks 维度提前检查 planned runtime output paths，避免第二个 export task 覆盖第一个。
+- build 在所有 MetaAndData export tasks 维度提前检查 planned runtime output paths，避免第二个 export task 覆盖第一个；该 planning 在 export task 粒度并行执行，并在合并阶段按声明顺序报告第一个稳定冲突。
 - exporter 在单个 export task 内检查 table artifact path 冲突。
 - 上述早期检查与 Artifact Writer final check 当前都使用 lexical-normalized path key；它们不会解析 symlink，也不会覆盖 macOS / Windows 常见的大小写不敏感 alias。中期平台文件系统增强应统一下沉到 artifact/path key 层，而不是让 build/runtime/exporter 各自实现一套不同规则。
 
