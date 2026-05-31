@@ -1118,7 +1118,6 @@ mod tests {
     fn lua_task() -> TargetDataConfig {
         TargetDataConfig {
             name: Some("lua".to_owned()),
-            input: PathBuf::from("data"),
             output: PathBuf::from("out"),
             format: FORMAT.to_owned(),
             options: BTreeMap::from([(

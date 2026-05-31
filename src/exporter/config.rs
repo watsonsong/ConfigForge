@@ -9,7 +9,6 @@ use serde::Deserialize;
 pub struct TargetDataConfig {
     #[serde(default)]
     pub name: Option<String>,
-    pub input: PathBuf,
     pub output: PathBuf,
     #[serde(default = "default_data_format")]
     pub format: String,

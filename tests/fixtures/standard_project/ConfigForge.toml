@@ -10,85 +10,76 @@ imports = [
 [project]
 name = "standard_reference_game"
 desc = "Standard reference game fixture used by integration tests."
+input = "data"
 
 [[targets]]
 name = "client"
 tags = ["client"]
 
-[[targets.data]]
-name = "json"
-input = "data"
+[[targets.exports]]
+type = "json"
 output = "out/client_data/json"
-format = "json"
 
-[[targets.data]]
-name = "bin"
-input = "data"
+[[targets.exports]]
+type = "bin"
 output = "out/client_data/binary"
-format = "bin"
 
-[[targets.data]]
-name = "messagepack"
-input = "data"
+[[targets.exports]]
+type = "messagepack"
 output = "out/client_data/msgpack"
-format = "messagepack"
 
-[[targets.data]]
-name = "i18n_pot"
-input = "data"
+[[targets.exports]]
+type = "gettext_pot"
 output = "out/client_i18n"
-format = "gettext_pot"
 domain = "reference_game_config"
 file_name = "reference_game_config.pot"
 context = "table_field"
 source_reference = "both"
 
-[[targets.data]]
-name = "lua"
-input = "data"
+[[targets.exports]]
+type = "lua_table"
 output = "out/client_lua"
-format = "lua_table"
 module_name = "reference_game_config"
 root_file = "init.lua"
 row_layout = "array_with_metatable"
 lazy_require = true
 
-[targets.data.i18n]
+[targets.exports.i18n]
 mode = "global_function"
 function = "globalTranslate"
 returns = "optional"
 
-[[targets.code]]
-language = "rust"
+[[targets.exports]]
+type = "rust"
 output = "out/client_code/rust"
 file_name = "reference_game_config"
 module_name = "reference_game_config"
 
-[targets.code.i18n]
+[targets.exports.i18n]
 mode = "global_function"
 function = "crate::global_translate"
 returns = "optional"
 
-[[targets.code]]
-language = "typescript"
+[[targets.exports]]
+type = "typescript"
 output = "out/client_code/typescript"
 file_name = "reference_game_config"
 module_name = "referenceGameConfig"
 
-[targets.code.i18n]
+[targets.exports.i18n]
 mode = "global_function"
 function = "globalTranslate"
 returns = "optional"
 typescript_import = "import { globalTranslate } from './i18n'"
 
-[[targets.code]]
-language = "cpp"
+[[targets.exports]]
+type = "cpp"
 output = "out/client_code/cpp"
 file_name = "reference_game_config"
 module_name = "ReferenceGameConfig"
 namespace = "reference::game::config"
 
-[targets.code.i18n]
+[targets.exports.i18n]
 mode = "global_function"
 function = "GlobalTranslate"
 returns = "optional"
@@ -98,25 +89,21 @@ cpp_include = "\"reference_game_i18n.hpp\""
 name = "server"
 tags = ["server"]
 
-[[targets.data]]
-name = "messagepack"
-input = "data"
+[[targets.exports]]
+type = "messagepack"
 output = "out/server_data/msgpack"
-format = "messagepack"
 
-[[targets.data]]
-name = "bin"
-input = "data"
+[[targets.exports]]
+type = "bin"
 output = "out/server_data/binary"
-format = "bin"
 
-[[targets.code]]
-language = "rust"
+[[targets.exports]]
+type = "rust"
 output = "out/server_code/rust"
 file_name = "reference_game_config"
 module_name = "reference_game_config"
 
-[targets.code.i18n]
+[targets.exports.i18n]
 mode = "global_function"
 function = "crate::global_translate"
 returns = "optional"

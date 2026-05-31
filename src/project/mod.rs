@@ -11,8 +11,7 @@ use serde::Deserialize;
 
 use crate::{
     ConfigForgeError, Result,
-    codegen::{CodeExportProject, CodegenTaskConfig},
-    exporter::TargetDataConfig,
+    codegen::CodeExportProject,
     meta::{EnumMeta, MetaModel, StructMeta, TableMeta},
 };
 
@@ -37,6 +36,8 @@ pub struct ProjectConfigMeta {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
+    pub input: Option<PathBuf>,
+    #[serde(default)]
     pub desc: Option<String>,
     #[serde(default)]
     pub copyright: Option<String>,
@@ -48,9 +49,18 @@ pub struct TargetConfig {
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
-    pub data: Vec<TargetDataConfig>,
+    pub exports: Vec<TargetExportConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct TargetExportConfig {
     #[serde(default)]
-    pub code: Vec<CodegenTaskConfig>,
+    pub name: Option<String>,
+    #[serde(rename = "type")]
+    pub type_id: String,
+    pub output: PathBuf,
+    #[serde(flatten)]
+    pub options: std::collections::BTreeMap<String, toml::Value>,
 }
 
 impl ProjectConfig {
@@ -119,13 +129,12 @@ fn load_project_config_recursive(
 }
 
 fn normalize_project_config_paths(config: &mut ProjectConfig, base_dir: &Path) {
+    if let Some(input) = &mut config.project.input {
+        *input = normalize_config_path(base_dir, input);
+    }
     for target in &mut config.targets {
-        for data in &mut target.data {
-            data.input = normalize_config_path(base_dir, &data.input);
-            data.output = normalize_config_path(base_dir, &data.output);
-        }
-        for code in &mut target.code {
-            code.output = normalize_config_path(base_dir, &code.output);
+        for export in &mut target.exports {
+            export.output = normalize_config_path(base_dir, &export.output);
         }
     }
 }
@@ -178,6 +187,9 @@ fn merge_project_configs(fragments: Vec<ProjectConfig>) -> ProjectConfig {
         if fragment.project.name.is_some() {
             merged.project.name = fragment.project.name.take();
         }
+        if fragment.project.input.is_some() {
+            merged.project.input = fragment.project.input.take();
+        }
         if fragment.project.desc.is_some() {
             merged.project.desc = fragment.project.desc.take();
         }
@@ -221,8 +233,6 @@ impl From<&ProjectConfigMeta> for CodeExportProject {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use crate::exporter::TargetDataConfig;
-
     use super::*;
 
     #[test]
@@ -250,39 +260,24 @@ mod tests {
     }
 
     #[test]
-    fn parses_messagepack_data_format_and_alias() {
-        let config: TargetDataConfig = toml::from_str(
+    fn parses_messagepack_export_type_and_alias() {
+        let config: TargetExportConfig = toml::from_str(
             r#"
-                input = "Data"
                 output = "Generated/Data"
-                format = "messagepack"
+                type = "messagepack"
             "#,
         )
-        .expect("messagepack format should parse");
-        assert_eq!(config.format, "messagepack");
+        .expect("messagepack export should parse");
+        assert_eq!(config.type_id, "messagepack");
 
-        let alias_config: TargetDataConfig = toml::from_str(
+        let alias_config: TargetExportConfig = toml::from_str(
             r#"
-                input = "Data"
                 output = "Generated/Data"
-                format = "msgpack"
+                type = "msgpack"
             "#,
         )
         .expect("msgpack alias should parse");
-        assert_eq!(alias_config.format, "msgpack");
-    }
-
-    #[test]
-    fn defaults_data_format_to_json() {
-        let config: TargetDataConfig = toml::from_str(
-            r#"
-                input = "Data"
-                output = "Generated/Data"
-            "#,
-        )
-        .expect("data config should parse");
-
-        assert_eq!(config.format, "json");
+        assert_eq!(alias_config.type_id, "msgpack");
     }
 
     #[test]
@@ -291,14 +286,12 @@ mod tests {
             TargetConfig {
                 name: "client".to_owned(),
                 tags: Vec::new(),
-                data: Vec::new(),
-                code: Vec::new(),
+                exports: Vec::new(),
             },
             TargetConfig {
                 name: "client".to_owned(),
                 tags: Vec::new(),
-                data: Vec::new(),
-                code: Vec::new(),
+                exports: Vec::new(),
             },
         ])
         .unwrap_err();

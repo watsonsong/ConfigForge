@@ -51,24 +51,24 @@ imports = [
 
 [project]
 name = "game_config"
+input = "Data"
 desc = "Game config export project."
 copyright = "Copyright 2026 Example Studio. All rights reserved."
 
 [[targets]]
 name = "client"
 
-[[targets.data]]
-input = "Data"
+[[targets.exports]]
 output = "Generated/Data"
-format = "json"
+type = "json"
 
-[[targets.code]]
-language = "cpp"
+[[targets.exports]]
+type = "cpp"
 output = "Generated/Cpp"
 namespace = "game::config"
 
-[[targets.code]]
-language = "typescript"
+[[targets.exports]]
+type = "typescript"
 output = "Generated/TypeScript"
 ```
 
@@ -85,7 +85,7 @@ output = "Generated/TypeScript"
 要求：
 
 - CLI 不提供 `--meta`、`--data`、`--out`、`validate/export` 子命令等重复入口。
-- 构建时根据 target 自动判断是否需要 Data：code-only target 只加载 Meta；声明 `[[targets.data]]` 的 target 才加载 Data。
+- 构建时根据 export task 的 dependency contract 自动判断是否需要 Data：只包含 MetaOnly exporter 的 target 只加载 Meta；包含 MetaAndData exporter 的 target 使用 `project.input` 加载 Data。
 
 ## 3.3 Meta 文件
 
@@ -230,49 +230,132 @@ override_sources = [
 
 ## 3.5 Target Config
 
-Target Config 定义一次可构建的导出目标。一个 target 共享同一组 `TargetTags` 和同一套 Meta-level filtering 规则，并可以挂载 0 个、1 个或多个 data 导出任务，以及 0 个、1 个或多个代码生成任务。具体的 DataSet-dependent ExportView 必须按 `(target tags, data input/DataSet)` 派生；只有 `input` 完全相同的 data task 才能复用同一次 source load、normalize、validation 和 concrete ExportView。
+Target Config 定义一次可构建的导出目标。一个 target 共享同一组 `TargetTags` 和同一套 Meta-level filtering 规则，并挂载一组 exporter task。每个 exporter task 都声明自己的 exporter type、输入依赖、输出目录和专属参数；Build 根据这些依赖构造任务 DAG，先生成可复用的 Meta / Data / Validation 节点，再调度具体 exporter。
+
+### 3.5.1 统一 exporter task 模型
+
+Lua table 导出同时生成 Lua 代码和内嵌数据；gettext POT 依赖 Meta + Data 但不是 runtime data；Rust/C++/TypeScript 生成器只依赖 Meta；JSON/MessagePack/bin 依赖 Meta + Data。因此 target 下所有产物统一使用 `[[targets.exports]]` 建模：
+
+```toml
+[project]
+input = "Data"
+
+[[targets]]
+name = "client"
+tags = ["client", "shipping"]
+
+[[targets.exports]]
+name = "json"
+type = "json"
+output = "Generated/Data/Json"
+
+[[targets.exports]]
+name = "lua"
+type = "lua_table"
+output = "Generated/Lua"
+module_name = "game_config"
+lazy_require = true
+
+[targets.exports.i18n]
+mode = "global_function"
+function = "globalTranslate"
+returns = "optional"
+
+[[targets.exports]]
+name = "cpp"
+type = "cpp"
+output = "Generated/Cpp"
+namespace = "game::config"
+
+[[targets.exports]]
+name = "pot"
+type = "gettext_pot"
+output = "Generated/I18n"
+domain = "game_config"
+```
+
+统一 task 字段：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `name` | 单 export task 可省略，规范化为 `default` | 当前 target 内稳定唯一的 task 名称；用于诊断、DAG 节点 id、artifact manifest 和未来 task 间依赖引用。 |
+| `type` | 必填 | exporter ID，例如 `json`、`messagepack`、`bin`、`gettext_pot`、`lua_table`、`rust`、`cpp`、`typescript`。不再用 `format` / `language` 两套字段区分。 |
+| `output` | 必填 | 该 exporter 的产物输出根目录。所有 artifact 在写入前做全局规范化路径冲突检查。 |
+| exporter 专属字段 | 未设置 | 直接摊平在当前 `[[targets.exports]]` 下；通用子表如 `i18n`、`naming`、`formatting` 可被适用 exporter 复用。 |
+
+Exporter 注册表需要声明每个 `type` 的 dependency contract：
+
+| 依赖类型 | 例子 | 说明 |
+| --- | --- | --- |
+| `MetaOnly` | `rust`、`cpp`、`typescript` | 只需要 linked Meta 和 effective target tags；不加载 Data。 |
+| `MetaAndData` | `json`、`messagepack`、`bin`、`gettext_pot`、`lua_table` | 需要 DataLoadPlan、normalized DataSet、target validation 和 target-aware ExportView。 |
+| `DataOnly` | 暂无 | 机制上可保留，但当前不推荐；没有 Meta 的数据导出通常无法做类型、索引、过滤和校验。 |
+
+这样 Lua 不需要被强行归入 “data” 或 “code”：它只是一个 `type = "lua_table"`、dependency 为 `MetaAndData` 的 exporter。未来 schema manifest、asset manifest、doc generator、engine-specific bundle、binary schema 等都可以按同一套 task 模型接入。
+
+### 3.5.2 DAG 编排原则
+
+统一 exporter task 后，Build 不再写死 “先 data 后 code” 两段流程，而是构建 target-local DAG：
+
+```text
+ProjectConfig
+  -> RawMeta
+  -> LinkedMeta(target tags)
+      -> MetaOnly exporter tasks
+      -> DataLoadPlan(project input, target tags)
+          -> DataSet(project input, target tags)
+          -> NormalizedDataSet(project input, target tags)
+          -> Validation(project input, target tags)
+          -> MetaAndData exporter tasks sharing project.input
+```
+
+DAG key 必须包含 dependency 语义：
+
+- `LinkedMeta` key：`(project config, effective target tags)`。
+- `DataLoadPlan` / `DataSet` / `Validation` key：`(project.input, effective target tags)`，不能只按 `project.input` 缓存，因为 `override_sources[].export_when` 会受 CLI extra tags 影响。
+- `ExporterTask` key：`(target name, task name)`。
+- Artifact path 冲突检查是 DAG 汇总后的全局步骤，不属于单个 exporter 私有逻辑。
+
+DAG 的收益是：只依赖 Meta 的 codegen 可与 data load 并行；同一 target 下的 JSON/MessagePack/bin/Lua/POT 共享同一次 DataLoadPlan、加载、归一化和校验；未来多 target 批量构建、增量缓存、远程执行、artifact manifest 都有稳定节点边界。
 
 路径基准规则：
 
 - `ConfigForge.toml` 是工程入口文件；工程根目录（project root）默认是入口文件所在目录。
-- 写在入口 `ConfigForge.toml` 中的 `targets.data.input`、`targets.data.output`、`targets.code.output` 相对路径都以 project root 为基准。
+- 写在入口 `ConfigForge.toml` 中的 `project.input` 和 `targets.exports.output` 相对路径都以 project root 为基准。
 - 写在被 `imports` 引入的 Project Config 片段中的相对路径，以该片段文件所在目录为基准，并在加载阶段规范化为绝对路径后再合并；这样被复用的配置片段可以携带自己的相对资源目录。
-- `targets.data.input` 是 source data 根目录。Meta 中 table `source`、`sources[].path`、`override_sources[].path` 均相对该 data root 查找，而不是相对 Meta 文件或代码输出目录。
-- `targets.data.output` 和 `targets.code.output` 是产物输出根目录；二者彼此独立，所有 artifact 在写入前必须做路径冲突检查。
+- `project.input` 是 source data 根目录。Meta 中 table `source`、`sources[].path`、`override_sources[].path` 均相对该 data root 查找，而不是相对 Meta 文件、target 或代码输出目录。只依赖 Meta 的 project 可以省略 `project.input`；只要任一 target 包含 MetaAndData exporter，`project.input` 必须存在。
+- `targets.exports.output` 是产物输出根目录；所有 artifact 在写入前必须做路径冲突检查。
 
 ```toml
+[project]
+input = "Data"
+
 [[targets]]
 name = "client_runtime"
 tags = ["client", "shipping"]
 
-[[targets.data]]
+[[targets.exports]]
 name = "json"
-input = "Data"
 output = "Generated/Data/Json"
-format = "json"
+type = "json"
 
-[[targets.data]]
+[[targets.exports]]
 name = "messagepack"
-input = "Data"
 output = "Generated/Data/MessagePack"
-format = "messagepack"
+type = "messagepack"
 
-[[targets.code]]
-language = "rust"
+[[targets.exports]]
+type = "rust"
 output = "Generated/Code/Rust"
 module_name = "game_config"
 
-[[targets.code]]
-language = "typescript"
+[[targets.exports]]
+type = "typescript"
 output = "Generated/Code/TypeScript"
 module_name = "gameConfig"
 ```
 
-Data 导出任务使用 `[[targets.data]]` 数组形式；每个任务有独立 `name`、`input`、`output` 和 `format`。这样同一个 target 可以同时输出 JSON、MessagePack 等多套 runtime data，也可以输出 gettext POT、asset manifest 等聚合数据产物。Project Config 使用 `[[targets.data]]` 数组表表达所有基于 source data / ExportView 的数据导出任务。
-
-一个 target 可以声明 0 个、1 个或多个代码生成任务。代码生成任务放在 `[[targets.code]]` 中；每个任务有独立语言、输出目录和语言专属参数。这样同一个 target 可以同时输出 runtime data、Rust 服务端访问代码、C++ 客户端访问代码和 TypeScript 工具链访问代码。
-
-生成代码是格式无关的：code task 只依赖 Meta 和 target tags，不绑定某个 data task，也不能配置 `data = "..."`。生成代码中的 table data file 常量使用逻辑表名（例如 `items`），实际打开 `items.json`、`items.msgpack` 或 `items.bin` 由接入方选择的 RuntimeDataLoader / RuntimeDataReader 实现负责。
+一个 target 可以声明 0 个、1 个或多个 export task。MetaAndData exporter（如 JSON、MessagePack、bin、gettext POT、Lua table）统一使用 `project.input`；MetaOnly exporter（如 Rust、C++、TypeScript）不读取 Data。生成代码是格式无关的：MetaOnly codegen 不绑定某个数据 exporter，也不能配置 `data = "..."`。生成代码中的 table data file 常量使用逻辑表名（例如 `items`），实际打开 `items.json`、`items.msgpack` 或 `items.bin` 由接入方选择的 RuntimeDataLoader / RuntimeDataReader 实现负责。
 
 `tags` 是 target 的核心上下文。每个 tag 代表一个导出特性，例如：
 
@@ -304,126 +387,100 @@ tags = ["client", "shipping"]
 执行 `config-forge --target client_shipping --tag s1` 时，effective target tags 为 `{ client, shipping, s1 }`。因此 `export_when = { all = ["s1"] }` 的 `override_sources` 会生效，`export_when = { none = ["s1"] }` 的表、字段或行级策略则不会生效。
 
 ```toml
+[project]
+input = "Data"
+
 [[targets]]
 name = "client_debug"
 tags = ["client", "debug"]
 
-[[targets.data]]
+[[targets.exports]]
 name = "json"
-input = "Data"
 output = "Generated/Data/ClientDebug"
-format = "json"
+type = "json"
 
 [[targets]]
 name = "client_shipping"
 tags = ["client", "shipping"]
 
-[[targets.data]]
+[[targets.exports]]
 name = "messagepack"
-input = "Data"
 output = "Generated/Data/ClientShipping"
-format = "messagepack"
+type = "messagepack"
 
 [[targets]]
 name = "server_shipping"
 tags = ["server", "shipping"]
 
-[[targets.data]]
+[[targets.exports]]
 name = "json"
-input = "Data"
 output = "Generated/Data/ServerShipping"
-format = "json"
+type = "json"
 
-[[targets.code]]
-language = "rust"
+[[targets.exports]]
+type = "rust"
 output = "Generated/Code/Rust"
 module_name = "game_config"
 file_header = "// Generated for {{project.name}} at {{datetime}}\n// {{project.copyright}}"
 keyword_conflict = "suffix_underscore"
 
-[targets.code.naming]
+[targets.exports.naming]
 type = "pascal_case"
 enum_value = "pascal_case"
 field = "snake_case"
 function = "snake_case"
 
-[targets.code.formatting]
+[targets.exports.formatting]
 indent_style = "spaces"
 indent_width = 4
 trailing_newline = true
 trailing_blank_line = false
 
-[targets.code.rust]
+[targets.exports.rust]
 derive_serde = true
 
-[[targets.code]]
-language = "typescript"
+[[targets.exports]]
+type = "typescript"
 output = "Generated/Code/TypeScript"
 module_name = "gameConfig"
 file_header = "// {{project.name}} - {{project.desc}}\n// Generated at {{datetime}}"
 keyword_conflict = "suffix_underscore"
 
-[targets.code.naming]
+[targets.exports.naming]
 type = "pascal_case"
 field = "camel_case"
 function = "camel_case"
 
-[targets.code.typescript]
+[targets.exports.typescript]
 readonly_fields = true
 ```
 
-`targets.data` 字段：
+`targets.exports` 字段：
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `name` | 单 data task 可省略，规范化为 `default` | 当前 target 内稳定唯一的 data task 名称；多 data task 时必填。 |
-| `input` | 必填 | Source data 根目录。相对路径以 project root 或所在 import 片段目录为基准；Meta source path 以该目录为搜索基础。只有声明 `targets.data` 时才读取 source data。 |
-| `output` | 必填 | 数据产物输出目录。相对路径以 project root 或所在 import 片段目录为基准。运行时表数据按表规划文件；POT / manifest 等聚合格式按格式规则规划文件。 |
-| `format` | `json` | 数据导出格式。当前实现支持 runtime data 的 `json`、`messagepack`、`bin`，以及聚合数据格式 `gettext_pot` / `pot`；`lua_table`、`asset_manifest_csv` 等仍为未来扩展。 |
-| format 专属字段 | 未设置 | 格式专属配置直接摊平在对应 `[[targets.data]]` 下，例如 `format = "gettext_pot"` 可配置 `domain`、`file_name`、source reference 和 translator comments 策略；计划中的 `format = "lua_table"` 可配置 `module_name`、`root_file`、`row_layout`、`lazy_require` 等。 |
+| `name` | 单 export task 可省略，规范化为 `default`；多 task 省略时默认使用 `type` | 当前 target 内稳定唯一的 export task 名称。 |
+| `type` | 必填 | exporter ID。当前支持 `json`、`messagepack` / `msgpack`、`bin` / `binary`、`gettext_pot` / `pot`、`lua_table` / `lua`、`rust`、`cpp` / `c++`、`typescript` / `ts`。 |
+| `output` | 必填 | 产物输出目录。相对路径以 project root 或所在 import 片段目录为基准。 |
+| exporter 专属字段 | 未设置 | 专属配置直接摊平在对应 `[[targets.exports]]` 下，例如 `type = "gettext_pot"` 可配置 `domain`、`file_name`；`type = "lua_table"` 可配置 `module_name`、`root_file`、`row_layout`、`lazy_require`；codegen 可配置 `file_name`、`module_name`、`namespace`、`i18n`、`naming`、`formatting` 等。 |
 
-Data task 继承所在 target 的 effective target tags；当前没有 `[[targets.data]].tags` 字段。CLI extra tags 对同一 target 下所有 data/code task 一致生效，因此同一个构建里的 JSON / MessagePack / bin 输出和格式无关 codegen 必须基于同一组 effective target tags。
+Export task 继承所在 target 的 effective target tags；当前没有 `[[targets.exports]].tags` 字段。CLI extra tags 对同一 target 下所有 export task 一致生效，因此同一个构建里的 JSON / MessagePack / bin / Lua 输出和格式无关 codegen 必须基于同一组 effective target tags。
 
-data task `name` 规范：
-
-- 如果用户显式写了 `name`，使用用户名称；如果单 data task 省略 `name`，规范化名称固定为 `default`。
-- 多 data task 时每个 task 必须显式写非空 `name`。
-- `name` 大小写敏感；只允许 ASCII 字母、数字、`_`、`-`，且必须以字母或数字开头和结尾。
-- 同一 target 下多个 data task 的规范化 `name` 必须唯一；保留名 `default` 允许作为显式名称，但仍遵守唯一性规则。
-
-多个 data task 可以共享同一个 `input`，实现应复用同一次加载、归一化和校验结果后写出不同格式。不同 `input` 表示同一 target tags 下的不同数据集，必须分别加载、归一化、校验并派生 DataSet-dependent ExportView。不同 data task 的最终输出文件路径不能相互覆盖，也不能与 code task 的输出冲突；冲突检查基于规范化绝对 artifact path。POT、asset manifest 等不再使用独立 `special_exporters` 配置，而是作为 `targets.data.format` 的可注册格式参与同一套冲突检查。
+同一 target 下多个 MetaAndData export task 共享 `project.input`，实现应复用同一次加载、归一化和校验结果后写出不同格式。不同 export task 的最终输出文件路径不能相互覆盖；冲突检查基于规范化绝对 artifact path。
 
 `RuntimeDataFile.path` 表示相对当前 data artifact root / runtime loader root 的真实资源路径，例如 `items.json`。生成代码不再透传真实文件路径，而是使用逻辑表名（例如 `items`）；具体 runtime loader 决定如何把逻辑名映射到文件系统、包内资源或引擎资源中的具体格式文件。
 
-Planned / Not implemented：`engine`、`format = "lua_table"`、`format = "asset_manifest_csv"`、target-level `language` / `data_format` / `output` 属于未来扩展；不再规划 `special_exporters` 字段。`gettext_pot` 已通过 `[[targets.data]] format = "gettext_pot"` 接入，Lua data+code 合一产物和 Asset Manifest 后续也应通过同一机制扩展。
+Lua table 必须读取 `project.input` 中的数据，基于 Meta 与 target-aware ExportView 直接生成 Lua 数据模块。目标产物为一个 root facade 文件和每张表一个 `.lua` 文件；CollectionTable row 默认按数组存储，并通过 metatable 支持字段名访问。Lua 设计详见 [`../Implementation/09i-lua-embedded-data-generator.md`](../Implementation/09i-lua-embedded-data-generator.md)。
 
-计划中的 `lua_table` data format 与普通 code task 不同：它必须读取 `targets.data.input` 中的数据，基于 Meta 与 target-aware ExportView 直接生成 Lua 数据模块。目标产物为一个 root facade 文件和每张表一个 `.lua` 文件；CollectionTable row 默认按数组存储，并通过 metatable 支持字段名访问。Lua 设计详见 [`../Implementation/09i-lua-embedded-data-generator.md`](../Implementation/09i-lua-embedded-data-generator.md)。
-
-`targets.code` 字段：
-
-| 字段 | 默认值 | 说明 |
-| --- | --- | --- |
-| `language` | 必填 | 代码生成语言，例如 `rust`、`cpp`、`typescript`。 |
-| `output` | 必填 | 当前代码生成任务的输出目录。相对路径以 project root 或所在 import 片段目录为基准。 |
-| `file_name` | language 默认值 | 可选生成代码文件名。Rust / TypeScript 会补齐默认扩展；C++ 以该名称生成头文件，并用同一 stem 生成 `.cpp`。只能是文件名，不能包含路径分隔符。 |
-| `module_name` | language 默认值 | 模块名、包名、namespace 或生成文件前缀。具体语义由语言生成器决定。 |
-| `data` | 不支持 | 禁止设置。生成代码格式无关，只依赖 Meta；格式选择由运行时传入的 loader / reader 实现决定。 |
-| `namespace` | 未设置 | 可选命名空间；C++ 可映射为 namespace，Rust/TS 可作为模块组织提示。 |
-| `file_header` | 生成器默认文件头 | 可选文件头模板。为空字符串表示不生成文件头。 |
-| `keyword_conflict` | `suffix_underscore` | 生成标识符与目标语言关键字冲突时的处理策略。 |
-| `i18n` | `mode = "generic"` | `text` helper 的翻译调用策略。`generic` 生成当前的显式 translator 参数；`global_function` 直接调用配置的全局函数，适合 gettext/libintl 或项目已有全局 i18n facade。 |
-| `naming` | 语言默认命名策略 | 当前语言各类符号的大小写组织方式。 |
-| `formatting` | 语言默认格式策略 | 生成源码的缩进与文件尾换行/空行策略。 |
-
-语言特定配置必须放在当前 `[[targets.code]]` 任务下的语言子表中，采用 tagged enum 的语义解析，避免不同语言的配置字段互相污染：
+语言特定配置必须放在当前 `[[targets.exports]]` 任务下的语言子表中，采用 tagged enum 的语义解析，避免不同语言的配置字段互相污染：
 
 | 子表 | 字段 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `[targets.code.rust]` | `derive_serde` | `false` | 为生成的 Rust enum/struct 派生 `serde::Serialize` / `serde::Deserialize`。 |
-| `[targets.code.cpp]` | `namespace` | 继承 `targets.code.namespace` | C++ namespace 覆盖项。 |
-| `[targets.code.typescript]` | `readonly_fields` | `false` | TypeScript interface 字段是否生成 `readonly`。 |
+| `[targets.exports.rust]` | `derive_serde` | `false` | 为生成的 Rust enum/struct 派生 `serde::Serialize` / `serde::Deserialize`。 |
+| `[targets.exports.cpp]` | `namespace` | 继承 `targets.exports.namespace` | C++ namespace 覆盖项。 |
+| `[targets.exports.typescript]` | `readonly_fields` | `false` | TypeScript interface 字段是否生成 `readonly`。 |
 
-`targets.code.i18n` 字段：
+`targets.exports.i18n` 字段：
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -450,7 +507,7 @@ Planned / Not implemented：`engine`、`format = "lua_table"`、`format = "asset
 | `raw_identifier` | 使用目标语言原生转义方式，例如 Rust `r#type`；不支持该能力的语言应报错。 |
 | `error` | 直接报错，要求修改 Meta 名称或显式配置命名覆盖。 |
 
-`targets.code.naming` 是语言生成器的可扩展配置。第一阶段统一支持以下 key：
+`targets.exports.naming` 是语言生成器的可扩展配置。第一阶段统一支持以下 key：
 
 | Key | 适用符号 | 常用值 |
 | --- | --- | --- |
@@ -470,7 +527,7 @@ Planned / Not implemented：`engine`、`format = "lua_table"`、`format = "asset
 | `snake_case` | `item-id` -> `item_id` |
 | `screaming_snake_case` | `item-id` -> `ITEM_ID` |
 
-`targets.code.formatting` 是语言生成器的通用格式配置。第一阶段统一支持以下 key：
+`targets.exports.formatting` 是语言生成器的通用格式配置。第一阶段统一支持以下 key：
 
 | Key | 默认值 | 说明 |
 | --- | --- | --- |
@@ -484,11 +541,11 @@ Planned / Not implemented：`engine`、`format = "lua_table"`、`format = "asset
 原则：
 
 - Project Config 只声明“想要的命名策略”，不应写死生成器内部类型名。
-- 新语言生成器可以扩展自己的 `targets.code.<language_specific>` 配置，但不应要求修改通用 target schema。
+- 新语言生成器可以扩展自己的 `targets.exports.<language_specific>` 配置，但不应要求修改通用 target schema。
 - 若配置中的命名策略导致同一作用域生成名冲突，必须在写文件前报错。
-- 同一 target 下多个 code task 的输出路径不能互相覆盖，也不能与任意 data task 输出冲突。
+- 同一 target 下多个 export task 的输出路径不能互相覆盖。
 
-推荐 runtime data format：
+推荐 runtime data exporter type：
 
 | Format | 状态 | 说明 |
 | --- | --- | --- |
@@ -499,7 +556,7 @@ Planned / Not implemented：`engine`、`format = "lua_table"`、`format = "asset
 | `sqlite` | 可扩展 | 适合查询型运行时。 |
 | `protobuf` | 未来设计 | 当前不要求实现；未来需要字段级 `field_number`。 |
 
-不使用模糊的 `custom`。项目自定义格式必须注册明确的 exporter ID 和 format ID。
+不使用模糊的 `custom`。项目自定义格式必须注册明确的 exporter ID / type ID。
 
 当前不引入通用配置 schema version 或自动兼容机制。表、字段、enum、struct 等定义依赖稳定字符串 `name` 作为长期身份；如果未来启用 Protobuf，则通过显式 `field_number` 和对应 schema evolution 策略处理二进制格式兼容。
 

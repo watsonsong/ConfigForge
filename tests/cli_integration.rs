@@ -23,8 +23,8 @@ fn builds_code_only_target_without_loading_data() {
                 [[targets]]
                 name = "code_only"
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
             "#,
             standard_core_meta_imports(),
@@ -61,17 +61,19 @@ fn dry_run_builds_plan_without_writing_artifacts() {
             r#"
                 imports = [{}]
 
+                [project]
+                input = "{}"
+
                 [[targets]]
                 name = "client"
                 tags = ["client"]
 
-                [[targets.data]]
-                input = "{}"
+                [[targets.exports]]
                 output = "{}"
-                format = "json"
+                type = "json"
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
             "#,
             standard_core_meta_imports(),
@@ -120,17 +122,19 @@ fn temp_commit_write_mode_builds_artifacts() {
             r#"
                 imports = [{}]
 
+                [project]
+                input = "{}"
+
                 [[targets]]
                 name = "client"
                 tags = ["client"]
 
-                [[targets.data]]
-                input = "{}"
+                [[targets.exports]]
                 output = "{}"
-                format = "json"
+                type = "json"
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
             "#,
             standard_core_meta_imports(),
@@ -176,6 +180,7 @@ fn builds_target_from_project_config() {
 
                 [project]
                 name = "standard_project"
+                input = "{}"
                 desc = "Standard fixture"
                 copyright = "Copyright Fixture"
 
@@ -183,21 +188,20 @@ fn builds_target_from_project_config() {
                 name = "client"
                 tags = ["client"]
 
-                [[targets.data]]
-                input = "{}"
+                [[targets.exports]]
                 output = "{}"
-                format = "json"
+                type = "json"
 
-                [[targets.code]]
-                language = "rust"
-                output = "{}"
-
-                [[targets.code]]
-                language = "cpp"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
 
-                [[targets.code]]
-                language = "typescript"
+                [[targets.exports]]
+                type = "cpp"
+                output = "{}"
+
+                [[targets.exports]]
+                type = "typescript"
                 output = "{}"
             "#,
             standard_core_meta_imports(),
@@ -300,29 +304,31 @@ fn gettext_pot_export_and_generated_text_translation_helpers_work() {
             r#"
                 imports = [{}]
 
+                [project]
+                input = "{}"
+
                 [[targets]]
                 name = "client"
                 tags = ["client"]
 
-                [[targets.data]]
-                input = "{}"
+                [[targets.exports]]
                 output = "{}"
-                format = "gettext_pot"
+                type = "gettext_pot"
                 domain = "fixture"
                 file_name = "fixture.pot"
                 context = "table_field"
                 source_reference = "both"
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
 
-                [[targets.code]]
-                language = "cpp"
+                [[targets.exports]]
+                type = "cpp"
                 output = "{}"
 
-                [[targets.code]]
-                language = "typescript"
+                [[targets.exports]]
+                type = "typescript"
                 output = "{}"
             "#,
             standard_core_meta_imports(),
@@ -387,28 +393,28 @@ fn generated_text_helpers_can_call_global_i18n_functions() {
                 name = "client"
                 tags = ["client"]
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
 
-                [targets.code.i18n]
+                [targets.exports.i18n]
                 mode = "global_function"
                 function = "crate::global_translate"
 
-                [[targets.code]]
-                language = "cpp"
+                [[targets.exports]]
+                type = "cpp"
                 output = "{}"
 
-                [targets.code.i18n]
+                [targets.exports.i18n]
                 mode = "global_function"
                 function = "GlobalTranslate"
                 cpp_include = "\"i18n.hpp\""
 
-                [[targets.code]]
-                language = "typescript"
+                [[targets.exports]]
+                type = "typescript"
                 output = "{}"
 
-                [targets.code.i18n]
+                [targets.exports.i18n]
                 mode = "global_function"
                 function = "globalTranslate"
                 typescript_import = "import {{ globalTranslate }} from './i18n'"
@@ -467,29 +473,27 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
 
                 [project]
                 name = "reference_game_fixture"
+                input = "{}"
 
                 [[targets]]
                 name = "client"
                 tags = ["client"]
 
-                [[targets.data]]
-                input = "{}"
+                [[targets.exports]]
                 output = "{}"
-                format = "json"
+                type = "json"
 
                 [[targets]]
                 name = "server"
                 tags = ["server"]
 
-                [[targets.data]]
-                input = "{}"
+                [[targets.exports]]
                 output = "{}"
-                format = "messagepack"
+                type = "messagepack"
             "#,
             standard_reference_game_meta_imports(),
             absolute_fixture_path("data"),
             client_out_dir.display(),
-            absolute_fixture_path("data"),
             server_out_dir.display(),
         ),
     )
@@ -568,14 +572,16 @@ fn cli_extra_tag_enables_s1_material_override_source() {
             r#"
                 imports = [{}]
 
+                [project]
+                input = "{}"
+
                 [[targets]]
                 name = "client"
                 tags = ["client"]
 
-                [[targets.data]]
-                input = "{}"
+                [[targets.exports]]
                 output = "{}"
-                format = "json"
+                type = "json"
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
@@ -742,18 +748,18 @@ fn codegen_task_can_override_generated_file_name() {
                 [[targets]]
                 name = "custom_file_names"
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
                 file_name = "game_config"
 
-                [[targets.code]]
-                language = "typescript"
+                [[targets.exports]]
+                type = "typescript"
                 output = "{}"
                 file_name = "game_config.ts"
 
-                [[targets.code]]
-                language = "cpp"
+                [[targets.exports]]
+                type = "cpp"
                 output = "{}"
                 file_name = "game_config.hpp"
             "#,
@@ -802,8 +808,8 @@ fn builds_target_with_execution_resource_flags() {
                 [[targets]]
                 name = "code_only"
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
             "#,
             standard_core_meta_imports(),
@@ -846,8 +852,8 @@ fn builds_target_with_serial_overriding_resource_flags() {
                 [[targets]]
                 name = "code_only"
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
             "#,
             standard_core_meta_imports(),
@@ -960,18 +966,18 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
 
                 [project]
                 name = "standard_project"
+                input = "{}"
 
                 [[targets]]
                 name = "client_messagepack"
                 tags = ["client"]
 
-                [[targets.data]]
-                input = "{}"
+                [[targets.exports]]
                 output = "{}"
-                format = "messagepack"
+                type = "messagepack"
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
             "#,
             standard_core_meta_imports(),
@@ -1031,34 +1037,34 @@ fn codegen_is_format_agnostic_with_multiple_data_tasks() {
             r#"
                 imports = [{}]
 
+                [project]
+                input = "{}"
+
                 [[targets]]
                 name = "multi_artifact"
                 tags = ["client"]
 
-                [[targets.data]]
+                [[targets.exports]]
                 name = "json"
-                input = "{}"
                 output = "{}"
-                format = "json"
+                type = "json"
 
-                [[targets.data]]
+                [[targets.exports]]
                 name = "messagepack"
-                input = "{}"
                 output = "{}"
-                format = "messagepack"
+                type = "messagepack"
 
-                [[targets.code]]
-                language = "typescript"
+                [[targets.exports]]
+                type = "typescript"
                 output = "{}"
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
             json_data_dir.display(),
-            absolute_fixture_path("data"),
             messagepack_data_dir.display(),
             ts_out_dir.display(),
             rust_out_dir.display()
@@ -1096,30 +1102,30 @@ fn rejects_code_task_data_binding() {
             r#"
                 imports = [{}]
 
+                [project]
+                input = "{}"
+
                 [[targets]]
                 name = "ambiguous"
 
-                [[targets.data]]
+                [[targets.exports]]
                 name = "json"
-                input = "{}"
                 output = "{}"
-                format = "json"
+                type = "json"
 
-                [[targets.data]]
+                [[targets.exports]]
                 name = "messagepack"
-                input = "{}"
                 output = "{}"
-                format = "messagepack"
+                type = "messagepack"
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
                 data = "json"
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
             temp_dir.path().join("out/json").display(),
-            absolute_fixture_path("data"),
             temp_dir.path().join("out/messagepack").display(),
             temp_dir.path().join("out/rust").display()
         ),
@@ -1150,25 +1156,25 @@ fn rejects_runtime_data_path_conflict_before_writing_files() {
             r#"
                 imports = [{}]
 
+                [project]
+                input = "{}"
+
                 [[targets]]
                 name = "conflict"
 
-                [[targets.data]]
+                [[targets.exports]]
                 name = "json_a"
-                input = "{}"
                 output = "{}"
-                format = "json"
+                type = "json"
 
-                [[targets.data]]
+                [[targets.exports]]
                 name = "json_b"
-                input = "{}"
                 output = "{}"
-                format = "json"
+                type = "json"
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
             data_out_dir.display(),
-            absolute_fixture_path("data"),
             data_out_dir.display()
         ),
     )
@@ -1201,25 +1207,25 @@ fn rejects_lexically_equivalent_runtime_data_path_conflict_before_writing_files(
             r#"
                 imports = [{}]
 
+                [project]
+                input = "{}"
+
                 [[targets]]
                 name = "conflict"
 
-                [[targets.data]]
+                [[targets.exports]]
                 name = "json_a"
-                input = "{}"
                 output = "{}"
-                format = "json"
+                type = "json"
 
-                [[targets.data]]
+                [[targets.exports]]
                 name = "json_b"
-                input = "{}"
                 output = "{}"
-                format = "json"
+                type = "json"
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
             data_out_dir.display(),
-            absolute_fixture_path("data"),
             equivalent_data_out_dir.display()
         ),
     )
@@ -1252,25 +1258,25 @@ fn rejects_unknown_second_data_format_before_writing_first_data_task() {
             r#"
                 imports = [{}]
 
+                [project]
+                input = "{}"
+
                 [[targets]]
                 name = "bad_format"
 
-                [[targets.data]]
+                [[targets.exports]]
                 name = "json"
-                input = "{}"
                 output = "{}"
-                format = "json"
+                type = "json"
 
-                [[targets.data]]
+                [[targets.exports]]
                 name = "bad"
-                input = "{}"
                 output = "{}"
-                format = "unknown_binary"
+                type = "unknown_binary"
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
             json_out_dir.display(),
-            absolute_fixture_path("data"),
             bad_out_dir.display()
         ),
     )
@@ -1284,9 +1290,9 @@ fn rejects_unknown_second_data_format_before_writing_first_data_task() {
         "bad_format",
     ]);
 
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("no data exporter registered"));
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "unknown export type `unknown_binary`",
+    ));
     assert!(!json_out_dir.join("items.json").exists());
     assert!(!bad_out_dir.exists());
 }
@@ -1324,8 +1330,8 @@ fn builds_target_from_imported_project_config_fragments() {
                 [[targets]]
                 name = "client_imported"
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
             "#,
             out_dir.display()
@@ -1370,6 +1376,7 @@ fn target_tags_filter_validation_export_and_codegen() {
             r#"
                 [project]
                 name = "target_tags_project"
+                input = "{}"
 
                 [[tables]]
                 name = "items"
@@ -1418,13 +1425,12 @@ fn target_tags_filter_validation_export_and_codegen() {
                 name = "client"
                 tags = ["client"]
 
-                [[targets.data]]
-                input = "{}"
+                [[targets.exports]]
                 output = "{}"
-                format = "json"
+                type = "json"
 
-                [[targets.code]]
-                language = "rust"
+                [[targets.exports]]
+                type = "rust"
                 output = "{}"
             "#,
             data_dir.display(),
@@ -1482,6 +1488,7 @@ fn range_validator_blocks_invalid_data_before_export() {
             r#"
                 [project]
                 name = "validator_project"
+                input = "{}"
 
                 [[tables]]
                 name = "items"
@@ -1500,10 +1507,9 @@ fn range_validator_blocks_invalid_data_before_export() {
                 name = "client"
                 tags = ["client"]
 
-                [[targets.data]]
-                input = "{}"
+                [[targets.exports]]
                 output = "{}"
-                format = "json"
+                type = "json"
             "#,
             data_dir.display(),
             data_out_dir.display()
@@ -1540,6 +1546,7 @@ fn warning_validator_is_visible_but_does_not_block_export() {
             r#"
                 [project]
                 name = "validator_project"
+                input = "{}"
 
                 [[tables]]
                 name = "items"
@@ -1560,10 +1567,9 @@ fn warning_validator_is_visible_but_does_not_block_export() {
                 name = "client"
                 tags = ["client"]
 
-                [[targets.data]]
-                input = "{}"
+                [[targets.exports]]
                 output = "{}"
-                format = "json"
+                type = "json"
             "#,
             data_dir.display(),
             data_out_dir.display()

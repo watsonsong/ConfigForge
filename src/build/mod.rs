@@ -27,7 +27,10 @@ use crate::{
 };
 
 use runtime::{RuntimeConfigForgeResult, export_runtime_data_tasks};
-use target::{NormalizedCodegenTaskConfig, NormalizedTargetConfig};
+use target::{
+    ExportDependency, NormalizedExportTask, NormalizedTargetConfig,
+    codegen_task_config_from_export_task,
+};
 
 pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
     let cpu_pool = rayon::ThreadPoolBuilder::new()
@@ -50,8 +53,14 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
 
     // Runtime data is exported before codegen so generated APIs can reference logical
     // runtime data file paths relative to the loader root.
-    let runtime_export =
-        export_runtime_data_tasks(&target.data, &linked_meta, &target_tags, &cpu_pool)?;
+    let data_exports = target.data_exports().collect::<Vec<_>>();
+    let runtime_export = export_runtime_data_tasks(
+        project.project.input.as_deref(),
+        &data_exports,
+        &linked_meta,
+        &target_tags,
+        &cpu_pool,
+    )?;
 
     let mut artifacts = runtime_export.artifacts;
     artifacts.extend(collect_generated_code_artifacts(
@@ -83,6 +92,7 @@ fn collect_generated_code_artifacts(
 ) -> Result<Vec<Artifact>> {
     let generated_at = generated_at();
     let generators = builtin_generators();
+    let code_exports = target.code_exports().collect::<Vec<_>>();
     let context = CodegenTaskContext {
         project_root,
         project,
@@ -92,8 +102,7 @@ fn collect_generated_code_artifacts(
         generators: &generators,
     };
     let mut generated_by_task = pool.install(|| {
-        target
-            .code
+        code_exports
             .par_iter()
             .enumerate()
             .map(|(index, code_task)| (index, generate_code_task(&context, code_task)))
@@ -122,16 +131,18 @@ struct CodegenTaskContext<'a, 'meta> {
 
 fn generate_code_task(
     context: &CodegenTaskContext<'_, '_>,
-    code_task: &NormalizedCodegenTaskConfig,
+    code_task: &NormalizedExportTask,
 ) -> Result<Vec<GeneratedFile>> {
-    let generator = crate::codegen::find_generator(context.generators, &code_task.task.language)
-        .ok_or_else(|| {
+    debug_assert_eq!(code_task.dependency, ExportDependency::MetaOnly);
+    let task = codegen_task_config_from_export_task(code_task)?;
+    let generator =
+        crate::codegen::find_generator(context.generators, &task.language).ok_or_else(|| {
             ConfigForgeError::Validation(format!(
                 "no code generator registered for `{}`",
-                code_task.task.language
+                task.language
             ))
         })?;
-    let mut code_target = CodeExportTarget::from_task(code_task.task.clone(), generator)?;
+    let mut code_target = CodeExportTarget::from_task(task, generator)?;
     code_target.out_dir = context.project_root.join(&code_target.out_dir);
     let input = CodeExportInput {
         meta: context.linked_meta,

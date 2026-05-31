@@ -50,7 +50,6 @@ src/exporter/
 ```rust
 pub struct TargetDataConfig {
     pub name: Option<String>,
-    pub input: PathBuf,
     pub output: PathBuf,
     pub format: String,
     pub options: toml::Value,
@@ -60,7 +59,6 @@ pub struct TargetDataConfig {
 语义：
 
 - `name`：可选 data task 名称。多个 data task 时必须显式命名；单个未命名 task 由 build 归一化为 `default`。
-- `input`：数据根目录。
 - `output`：数据产物输出目录。运行时表数据按 table 规划文件；POT / manifest 等聚合格式按格式选项规划文件。
 - `format`：格式名称，默认 `json`；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；当前内置聚合格式支持 `gettext_pot` / alias `pot`，`asset_manifest_csv` 等仍为后续扩展；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
 - `options`：格式专属配置，由 `[[targets.data]]` 下除通用字段外的 flattened 字段归一化得到，例如 `format = "gettext_pot"` 下的 `domain`、`file_name`、`source_reference`。运行时 JSON / MessagePack / `bin` 第一阶段可以为空。首版兼容读取 `[targets.data.gettext]` 子表，但推荐使用 flattened 字段，与 code task 的 `module_name` / `namespace` 一致。

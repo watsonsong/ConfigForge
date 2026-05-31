@@ -4,32 +4,37 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::{
-    ConfigForgeError, Result, codegen::CodegenTaskConfig, exporter::TargetDataConfig,
-    meta::TargetTags, project::TargetConfig,
+    ConfigForgeError, Result,
+    codegen::CodegenTaskConfig,
+    exporter::TargetDataConfig,
+    meta::TargetTags,
+    project::{TargetConfig, TargetExportConfig},
 };
 
-pub(crate) const DEFAULT_DATA_TASK_NAME: &str = "default";
+pub(crate) const DEFAULT_EXPORT_TASK_NAME: &str = "default";
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NormalizedTargetConfig {
     pub(crate) name: String,
     pub(crate) tags: Vec<String>,
-    pub(crate) data: Vec<NormalizedTargetDataConfig>,
-    pub(crate) code: Vec<NormalizedCodegenTaskConfig>,
+    pub(crate) exports: Vec<NormalizedExportTask>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct NormalizedTargetDataConfig {
+pub(crate) struct NormalizedExportTask {
     pub(crate) name: String,
-    pub(crate) input: PathBuf,
+    pub(crate) type_id: String,
+    pub(crate) dependency: ExportDependency,
     pub(crate) output: PathBuf,
-    pub(crate) format: String,
     pub(crate) options: BTreeMap<String, toml::Value>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct NormalizedCodegenTaskConfig {
-    pub(crate) task: CodegenTaskConfig,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum ExportDependency {
+    MetaOnly,
+    MetaAndData,
+    DataOnly,
 }
 
 impl TargetConfig {
@@ -38,13 +43,11 @@ impl TargetConfig {
     }
 
     pub(crate) fn normalize(&self) -> Result<NormalizedTargetConfig> {
-        let data = normalize_target_data_tasks(&self.name, &self.data)?;
-        let code = normalize_codegen_tasks(&self.name, &data, &self.code)?;
+        let exports = normalize_export_tasks(&self.name, &self.exports)?;
         Ok(NormalizedTargetConfig {
             name: self.name.clone(),
             tags: self.tags.clone(),
-            data,
-            code,
+            exports,
         })
     }
 }
@@ -53,44 +56,62 @@ impl NormalizedTargetConfig {
     pub(crate) fn effective_target_tags(&self, extra_tags: &[String]) -> TargetTags {
         TargetTags::new(self.tags.iter().chain(extra_tags.iter()).cloned())
     }
+
+    pub(crate) fn data_exports(&self) -> impl Iterator<Item = &NormalizedExportTask> {
+        self.exports
+            .iter()
+            .filter(|task| task.dependency == ExportDependency::MetaAndData)
+    }
+
+    pub(crate) fn code_exports(&self) -> impl Iterator<Item = &NormalizedExportTask> {
+        self.exports
+            .iter()
+            .filter(|task| task.dependency == ExportDependency::MetaOnly)
+    }
 }
 
-pub(crate) fn normalize_target_data_tasks(
+fn normalize_export_tasks(
     target_name: &str,
-    data_tasks: &[TargetDataConfig],
-) -> Result<Vec<NormalizedTargetDataConfig>> {
-    let mut normalized = Vec::with_capacity(data_tasks.len());
+    export_tasks: &[TargetExportConfig],
+) -> Result<Vec<NormalizedExportTask>> {
+    let mut normalized = Vec::with_capacity(export_tasks.len());
     let mut seen = std::collections::BTreeSet::new();
-    for data_task in data_tasks {
-        let name = match (&data_task.name, data_tasks.len()) {
+    for export_task in export_tasks {
+        let name = match (&export_task.name, export_tasks.len()) {
             (Some(name), _) => {
-                validate_data_task_name(target_name, name)?;
+                validate_export_task_name(target_name, name)?;
                 name.clone()
             }
-            (None, 1) => DEFAULT_DATA_TASK_NAME.to_owned(),
+            (None, 1) => DEFAULT_EXPORT_TASK_NAME.to_owned(),
             (None, _) => {
-                return Err(ConfigForgeError::Validation(format!(
-                    "target `{target_name}` declares multiple data tasks, but one is missing `name`"
-                )));
+                validate_export_task_name(target_name, &export_task.type_id)?;
+                export_task.type_id.clone()
             }
         };
         if !seen.insert(name.clone()) {
             return Err(ConfigForgeError::Validation(format!(
-                "target `{target_name}` declares duplicate data task `{name}`"
+                "target `{target_name}` declares duplicate export task `{name}`"
             )));
         }
-        normalized.push(NormalizedTargetDataConfig {
+        let dependency = export_dependency(&export_task.type_id).ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "target `{target_name}` declares unknown export type `{}`",
+                export_task.type_id
+            ))
+        })?;
+        validate_export_dependency(target_name, export_task, dependency)?;
+        normalized.push(NormalizedExportTask {
             name,
-            input: data_task.input.clone(),
-            output: data_task.output.clone(),
-            format: data_task.format.clone(),
-            options: data_task.options.clone(),
+            type_id: export_task.type_id.clone(),
+            dependency,
+            output: export_task.output.clone(),
+            options: export_task.options.clone(),
         });
     }
     Ok(normalized)
 }
 
-fn validate_data_task_name(target_name: &str, name: &str) -> Result<()> {
+fn validate_export_task_name(target_name: &str, name: &str) -> Result<()> {
     let is_valid = !name.is_empty()
         && name
             .bytes()
@@ -107,178 +128,246 @@ fn validate_data_task_name(target_name: &str, name: &str) -> Result<()> {
         Ok(())
     } else {
         Err(ConfigForgeError::Validation(format!(
-            "target `{target_name}` declares invalid data task name `{name}`; data task names must use ASCII letters, digits, `_` or `-`, and start and end with a letter or digit"
+            "target `{target_name}` declares invalid export task name `{name}`; export task names must use ASCII letters, digits, `_` or `-`, and start and end with a letter or digit"
         )))
     }
 }
 
-fn normalize_codegen_tasks(
+fn export_dependency(type_id: &str) -> Option<ExportDependency> {
+    match type_id {
+        "rust" | "cpp" | "c++" | "typescript" | "ts" => Some(ExportDependency::MetaOnly),
+        "json" | "messagepack" | "msgpack" | "bin" | "binary" | "gettext_pot" | "pot"
+        | "lua_table" | "lua" => Some(ExportDependency::MetaAndData),
+        _ => None,
+    }
+}
+
+fn validate_export_dependency(
     target_name: &str,
-    _data_tasks: &[NormalizedTargetDataConfig],
-    code_tasks: &[CodegenTaskConfig],
-) -> Result<Vec<NormalizedCodegenTaskConfig>> {
-    code_tasks
-        .iter()
-        .map(|task| {
-            if task.data.is_some() {
+    export_task: &TargetExportConfig,
+    dependency: ExportDependency,
+) -> Result<()> {
+    match dependency {
+        ExportDependency::MetaOnly => {
+            validate_no_export_input_option(target_name, export_task)?;
+            if export_task.options.contains_key("data") {
                 return Err(ConfigForgeError::Validation(format!(
-                    "target `{target_name}` code task for `{}` must not set `data`; generated code is format-agnostic and only depends on Meta",
-                    task.language
+                    "target `{target_name}` export task `{}` must not set `data`; `{}` only depends on Meta",
+                    export_task
+                        .name
+                        .as_deref()
+                        .unwrap_or(DEFAULT_EXPORT_TASK_NAME),
+                    export_task.type_id
                 )));
             }
-            Ok(NormalizedCodegenTaskConfig { task: task.clone() })
+        }
+        ExportDependency::MetaAndData => validate_no_export_input_option(target_name, export_task)?,
+        ExportDependency::DataOnly => {}
+    }
+    Ok(())
+}
+
+fn validate_no_export_input_option(
+    target_name: &str,
+    export_task: &TargetExportConfig,
+) -> Result<()> {
+    if export_task.options.contains_key("input") {
+        return Err(ConfigForgeError::Validation(format!(
+            "target `{target_name}` export task `{}` must not set `input`; source data root is configured once at `project.input`",
+            export_task
+                .name
+                .as_deref()
+                .unwrap_or(DEFAULT_EXPORT_TASK_NAME)
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn target_data_config_from_export_task(task: &NormalizedExportTask) -> TargetDataConfig {
+    TargetDataConfig {
+        name: Some(task.name.clone()),
+        output: task.output.clone(),
+        format: task.type_id.clone(),
+        options: task.options.clone(),
+    }
+}
+
+pub(crate) fn codegen_task_config_from_export_task(
+    task: &NormalizedExportTask,
+) -> Result<CodegenTaskConfig> {
+    let mut options = task.options.clone();
+    Ok(CodegenTaskConfig {
+        language: task.type_id.clone(),
+        output: task.output.clone(),
+        file_name: take_string(&mut options, "file_name")?,
+        data: take_string(&mut options, "data")?,
+        module_name: take_string(&mut options, "module_name")?,
+        namespace: take_string(&mut options, "namespace")?,
+        file_header: take_string(&mut options, "file_header")?,
+        keyword_conflict: take_optional_value(&mut options, "keyword_conflict")?,
+        i18n: take_value(&mut options, "i18n")?.unwrap_or_default(),
+        naming: take_value(&mut options, "naming")?.unwrap_or_default(),
+        formatting: take_value(&mut options, "formatting")?.unwrap_or_default(),
+        language_options: options.into_iter().collect(),
+    })
+}
+
+fn take_string(options: &mut BTreeMap<String, toml::Value>, key: &str) -> Result<Option<String>> {
+    take_optional_value(options, key)
+}
+
+fn take_optional_value<T>(
+    options: &mut BTreeMap<String, toml::Value>,
+    key: &str,
+) -> Result<Option<T>>
+where
+    T: serde::de::DeserializeOwned,
+{
+    take_value(options, key)
+}
+
+fn take_value<T>(options: &mut BTreeMap<String, toml::Value>, key: &str) -> Result<Option<T>>
+where
+    T: serde::de::DeserializeOwned,
+{
+    options
+        .remove(key)
+        .map(|value| {
+            value.try_into().map_err(|source| {
+                ConfigForgeError::Validation(format!(
+                    "invalid export task option `{key}`: {source}"
+                ))
+            })
         })
-        .collect()
+        .transpose()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn export_task(type_id: &str) -> TargetExportConfig {
+        TargetExportConfig {
+            name: None,
+            type_id: type_id.to_owned(),
+            output: PathBuf::from("Generated/Data"),
+            options: BTreeMap::new(),
+        }
+    }
+
     #[test]
-    fn normalizes_single_unnamed_data_task_to_default() {
+    fn normalizes_single_unnamed_export_task_to_default() {
         let target = TargetConfig {
             name: "client".to_owned(),
             tags: vec!["client".to_owned()],
-            data: vec![TargetDataConfig {
-                name: None,
-                input: PathBuf::from("Data"),
-                output: PathBuf::from("Generated/Data"),
-                format: "json".to_owned(),
-                options: BTreeMap::new(),
-            }],
-            code: vec![CodegenTaskConfig {
-                language: "typescript".to_owned(),
-                output: PathBuf::from("Generated/TypeScript"),
-                file_name: None,
-                data: None,
-                module_name: None,
-                namespace: None,
-                file_header: None,
-                keyword_conflict: None,
-                i18n: Default::default(),
-                naming: Default::default(),
-                formatting: Default::default(),
-                language_options: Default::default(),
-            }],
+            exports: vec![export_task("json")],
         };
 
         let normalized = target.normalize().expect("target should normalize");
 
-        assert_eq!(normalized.data[0].name, DEFAULT_DATA_TASK_NAME);
+        assert_eq!(normalized.exports[0].name, DEFAULT_EXPORT_TASK_NAME);
+        assert_eq!(
+            normalized.exports[0].dependency,
+            ExportDependency::MetaAndData
+        );
     }
 
     #[test]
-    fn rejects_codegen_data_binding() {
+    fn rejects_meta_only_export_input() {
         let target = TargetConfig {
             name: "client".to_owned(),
             tags: Vec::new(),
-            data: vec![TargetDataConfig {
+            exports: vec![TargetExportConfig {
                 name: None,
-                input: PathBuf::from("Data"),
-                output: PathBuf::from("Generated/Data"),
-                format: "json".to_owned(),
-                options: BTreeMap::new(),
-            }],
-            code: vec![CodegenTaskConfig {
-                language: "rust".to_owned(),
+                type_id: "rust".to_owned(),
                 output: PathBuf::from("Generated/Rust"),
-                file_name: None,
-                data: Some(DEFAULT_DATA_TASK_NAME.to_owned()),
-                module_name: None,
-                namespace: None,
-                file_header: None,
-                keyword_conflict: None,
-                i18n: Default::default(),
-                naming: Default::default(),
-                formatting: Default::default(),
-                language_options: Default::default(),
+                options: BTreeMap::from([(
+                    "input".to_owned(),
+                    toml::Value::String("Data".to_owned()),
+                )]),
             }],
         };
 
         let error = target.normalize().unwrap_err();
 
         assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("must not set `data`"))
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("must not set `input`"))
         );
     }
 
     #[test]
-    fn codegen_does_not_require_data_binding_when_multiple_data_tasks_exist() {
+    fn allows_meta_and_data_export_without_task_input() {
         let target = TargetConfig {
             name: "client".to_owned(),
             tags: Vec::new(),
-            data: vec![
-                TargetDataConfig {
-                    name: Some("json".to_owned()),
-                    input: PathBuf::from("Data"),
-                    output: PathBuf::from("Generated/Json"),
-                    format: "json".to_owned(),
-                    options: BTreeMap::new(),
-                },
-                TargetDataConfig {
-                    name: Some("messagepack".to_owned()),
-                    input: PathBuf::from("Data"),
-                    output: PathBuf::from("Generated/MessagePack"),
-                    format: "messagepack".to_owned(),
-                    options: BTreeMap::new(),
-                },
-            ],
-            code: vec![CodegenTaskConfig {
-                language: "cpp".to_owned(),
-                output: PathBuf::from("Generated/Cpp"),
-                file_name: None,
-                data: None,
-                module_name: None,
-                namespace: None,
-                file_header: None,
-                keyword_conflict: None,
-                i18n: Default::default(),
-                naming: Default::default(),
-                formatting: Default::default(),
-                language_options: Default::default(),
+            exports: vec![TargetExportConfig {
+                name: None,
+                type_id: "json".to_owned(),
+                output: PathBuf::from("Generated/Data"),
+                options: BTreeMap::new(),
             }],
         };
 
-        target.normalize().expect("target should normalize");
+        let normalized = target.normalize().expect("target should normalize");
+
+        assert_eq!(
+            normalized.exports[0].dependency,
+            ExportDependency::MetaAndData
+        );
     }
 
     #[test]
-    fn rejects_invalid_data_task_names() {
-        let error = normalize_target_data_tasks(
-            "client",
-            &[TargetDataConfig {
-                name: Some("bad name".to_owned()),
-                input: PathBuf::from("Data"),
+    fn rejects_meta_and_data_export_input() {
+        let target = TargetConfig {
+            name: "client".to_owned(),
+            tags: Vec::new(),
+            exports: vec![TargetExportConfig {
+                name: None,
+                type_id: "json".to_owned(),
                 output: PathBuf::from("Generated/Data"),
-                format: "json".to_owned(),
-                options: BTreeMap::new(),
+                options: BTreeMap::from([(
+                    "input".to_owned(),
+                    toml::Value::String("Data".to_owned()),
+                )]),
+            }],
+        };
+
+        let error = target.normalize().unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("must not set `input`"))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_export_task_names() {
+        let error = normalize_export_tasks(
+            "client",
+            &[TargetExportConfig {
+                name: Some("bad name".to_owned()),
+                ..export_task("json")
             }],
         )
         .unwrap_err();
 
         assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("invalid data task name"))
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("invalid export task name"))
         );
     }
 
     #[test]
-    fn rejects_duplicate_data_task_names() {
-        let error = normalize_target_data_tasks(
+    fn rejects_duplicate_export_task_names() {
+        let error = normalize_export_tasks(
             "client",
             &[
-                TargetDataConfig {
+                TargetExportConfig {
                     name: Some("json".to_owned()),
-                    input: PathBuf::from("Data"),
-                    output: PathBuf::from("Generated/DataA"),
-                    format: "json".to_owned(),
-                    options: BTreeMap::new(),
+                    ..export_task("json")
                 },
-                TargetDataConfig {
+                TargetExportConfig {
                     name: Some("json".to_owned()),
-                    input: PathBuf::from("Data"),
-                    output: PathBuf::from("Generated/DataB"),
-                    format: "messagepack".to_owned(),
+                    type_id: "messagepack".to_owned(),
+                    output: PathBuf::from("Generated/MessagePack"),
                     options: BTreeMap::new(),
                 },
             ],
@@ -286,7 +375,49 @@ mod tests {
         .unwrap_err();
 
         assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate data task `json`"))
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate export task `json`"))
         );
+    }
+
+    #[test]
+    fn converts_export_task_to_codegen_task() {
+        let task = NormalizedExportTask {
+            name: "cpp".to_owned(),
+            type_id: "cpp".to_owned(),
+            dependency: ExportDependency::MetaOnly,
+            output: PathBuf::from("Generated/Cpp"),
+            options: BTreeMap::from([
+                (
+                    "module_name".to_owned(),
+                    toml::Value::String("GameConfig".to_owned()),
+                ),
+                (
+                    "namespace".to_owned(),
+                    toml::Value::String("game::config".to_owned()),
+                ),
+            ]),
+        };
+
+        let code_task = codegen_task_config_from_export_task(&task).expect("code task");
+
+        assert_eq!(code_task.language, "cpp");
+        assert_eq!(code_task.module_name.as_deref(), Some("GameConfig"));
+        assert_eq!(code_task.namespace.as_deref(), Some("game::config"));
+    }
+
+    #[test]
+    fn export_dependency_classifies_known_types() {
+        assert_eq!(export_dependency("rust"), Some(ExportDependency::MetaOnly));
+        assert_eq!(export_dependency("ts"), Some(ExportDependency::MetaOnly));
+        assert_eq!(
+            export_dependency("json"),
+            Some(ExportDependency::MetaAndData)
+        );
+        assert_eq!(
+            export_dependency("lua"),
+            Some(ExportDependency::MetaAndData)
+        );
+        assert_eq!(export_dependency("unknown"), None);
+        let _ = ExportDependency::DataOnly;
     }
 }

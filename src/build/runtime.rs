@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
-use std::path::PathBuf;
+use std::collections::BTreeSet;
+use std::path::Path;
 
 use rayon::ThreadPool;
 
@@ -10,19 +10,17 @@ use crate::{
     ConfigForgeError, Result,
     artifact::Artifact,
     data::{DataLoadPlan, DataLoader},
-    exporter::{
-        DataExporterRef, DataFormatRegistry, RuntimeDataFile, TargetDataConfig, export_runtime_data,
-    },
+    exporter::{DataExporterRef, DataFormatRegistry, RuntimeDataFile, export_runtime_data},
     meta::{LinkedMetaModel, TargetTags},
     project::lexical_normalize_path,
     validation::{normalize_data_set, validate_normalized_data_set_for_target_with_report},
 };
 
-use super::target::NormalizedTargetDataConfig;
+use super::target::{NormalizedExportTask, target_data_config_from_export_task};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RuntimeConfigForgeResult {
-    pub(super) data_name: String,
+    pub(super) export_name: String,
     pub(super) files: Vec<RuntimeDataFile>,
 }
 
@@ -33,7 +31,8 @@ pub(super) struct RuntimeExportOutput {
 }
 
 pub(super) fn export_runtime_data_tasks(
-    data_tasks: &[NormalizedTargetDataConfig],
+    data_root: Option<&Path>,
+    data_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
     pool: &ThreadPool,
@@ -45,6 +44,12 @@ pub(super) fn export_runtime_data_tasks(
             artifacts: Vec::new(),
         });
     }
+    let data_root = data_root.ok_or_else(|| {
+        ConfigForgeError::Validation(
+            "`project.input` must be set when target declares Data-dependent export tasks"
+                .to_owned(),
+        )
+    })?;
 
     let registry = DataFormatRegistry::with_builtin_exporters();
     ensure_planned_runtime_output_paths(data_tasks, linked_meta, target_tags, &registry)?;
@@ -57,35 +62,24 @@ pub(super) fn export_runtime_data_tasks(
             .map(|table| table.meta),
         Some(target_tags),
     )?;
-    let mut normalized_data_sets: BTreeMap<PathBuf, crate::data::DataSet> = BTreeMap::new();
+    let loaded_data_set = DataLoader::new(data_root).load_with_pool(&data_plan, pool)?;
+    let data_set = normalize_data_set(linked_meta, &loaded_data_set)?;
+    let validation_report =
+        validate_normalized_data_set_for_target_with_report(linked_meta, target_tags, &data_set)?;
     let mut warnings = Vec::new();
+    warnings.extend(validation_report.warning_messages());
     let mut results = Vec::new();
     let mut artifacts = Vec::new();
 
     for data_task in data_tasks {
-        let format_exporter = registry.require_any(&data_task.format)?;
-        let data_set = match normalized_data_sets.entry(data_task.input.clone()) {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                let loaded_data_set =
-                    DataLoader::new(&data_task.input).load_with_pool(&data_plan, pool)?;
-                let data_set = normalize_data_set(linked_meta, &loaded_data_set)?;
-                let validation_report = validate_normalized_data_set_for_target_with_report(
-                    linked_meta,
-                    target_tags,
-                    &data_set,
-                )?;
-                warnings.extend(validation_report.warning_messages());
-                entry.insert(data_set)
-            }
-        };
+        let format_exporter = registry.require_any(&data_task.type_id)?;
         match format_exporter {
             DataExporterRef::Table(exporter) => {
                 let runtime_artifacts = export_runtime_data(
                     &data_task.output,
                     linked_meta,
                     target_tags,
-                    data_set,
+                    &data_set,
                     exporter,
                     pool,
                 )?;
@@ -99,17 +93,17 @@ pub(super) fn export_runtime_data_tasks(
                         .map(|artifact| artifact.artifact),
                 );
                 results.push(RuntimeConfigForgeResult {
-                    data_name: data_task.name.clone(),
+                    export_name: data_task.name.clone(),
                     files,
                 });
             }
             DataExporterRef::Aggregate(exporter) => {
                 artifacts.extend(exporter.export(
                     &data_task.output,
-                    &target_data_config_from_normalized(data_task),
+                    &target_data_config_from_export_task(data_task),
                     linked_meta,
                     target_tags,
-                    data_set,
+                    &data_set,
                 )?);
             }
         }
@@ -123,14 +117,14 @@ pub(super) fn export_runtime_data_tasks(
 }
 
 fn ensure_planned_runtime_output_paths(
-    data_tasks: &[NormalizedTargetDataConfig],
+    data_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
     registry: &DataFormatRegistry,
 ) -> Result<()> {
     let mut paths = BTreeSet::new();
     for data_task in data_tasks {
-        match registry.require_any(&data_task.format)? {
+        match registry.require_any(&data_task.type_id)? {
             DataExporterRef::Table(exporter) => {
                 for table_meta in &linked_meta.tables {
                     if !table_meta.meta.is_exported_for(target_tags) {
@@ -147,7 +141,7 @@ fn ensure_planned_runtime_output_paths(
                 }
             }
             DataExporterRef::Aggregate(exporter) => {
-                let task = target_data_config_from_normalized(data_task);
+                let task = target_data_config_from_export_task(data_task);
                 for path in
                     exporter.plan_artifacts(&data_task.output, &task, linked_meta, target_tags)?
                 {
@@ -163,14 +157,4 @@ fn ensure_planned_runtime_output_paths(
         }
     }
     Ok(())
-}
-
-fn target_data_config_from_normalized(data_task: &NormalizedTargetDataConfig) -> TargetDataConfig {
-    TargetDataConfig {
-        name: Some(data_task.name.clone()),
-        input: data_task.input.clone(),
-        output: data_task.output.clone(),
-        format: data_task.format.clone(),
-        options: data_task.options.clone(),
-    }
 }
