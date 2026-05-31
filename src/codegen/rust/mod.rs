@@ -7,8 +7,8 @@ use crate::Result;
 
 use super::{
     CaseStyle, CodeExportInput, CodeField, CodeFragmentPayload, CodeGenerator, CodeWriter,
-    CodeWriterConfig, GeneratedFile, NamingConfig, build_code_model,
-    ir::require_non_empty_index_fields,
+    CodeWriterConfig, GeneratedFile, I18nFunctionReturn, I18nMode, I18nOptions, NamingConfig,
+    build_code_model, ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -72,10 +72,8 @@ impl CodeGenerator for RustCodeGenerator {
         content.raw("use std::{cell::{Cell, OnceCell, RefCell}, collections::HashMap};\n\n");
         render_runtime_reader_imports(&mut content);
         render_runtime_reader_helpers(&mut content);
+        render_rust_i18n_prelude(&mut content, &input.target.options.i18n);
         content.raw(concat!(
-            "pub trait TextTranslator {\n",
-            "    fn translate(&self, msgctxt: Option<&str>, msgid: &str) -> Option<String>;\n",
-            "}\n\n",
             "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n",
             "enum LinkCache {\n",
             "    Unresolved,\n",
@@ -146,6 +144,7 @@ impl CodeGenerator for RustCodeGenerator {
                 &code_struct.name,
                 &code_struct.fields,
                 &names,
+                &input.target.options.i18n,
             )?;
         }
 
@@ -183,6 +182,7 @@ impl CodeGenerator for RustCodeGenerator {
                     &format!("{}.{}", table.name, fragment.name),
                     &fragment.fields,
                     &names,
+                    &input.target.options.i18n,
                 )?;
             }
         }
@@ -248,7 +248,13 @@ impl CodeGenerator for RustCodeGenerator {
                 "impl {} {{\n",
                 names.row_type_name(&table.name)?
             ));
-            render_rust_text_helper_methods(&mut content, &table.name, &table.fields, &names)?;
+            render_rust_text_helper_methods(
+                &mut content,
+                &table.name,
+                &table.fields,
+                &names,
+                &input.target.options.i18n,
+            )?;
             for fragment in &table.fragments {
                 content.raw_fmt(format_args!(
                     "    pub fn has_{}(&self) -> bool {{ self.{}.is_some() }}\n",
@@ -409,6 +415,7 @@ fn render_rust_text_helpers(
     context_prefix: &str,
     fields: &[CodeField],
     names: &RustNames<'_>,
+    i18n: &I18nOptions,
 ) -> Result<()> {
     if !fields
         .iter()
@@ -417,9 +424,20 @@ fn render_rust_text_helpers(
         return Ok(());
     }
     content.raw_fmt(format_args!("impl {type_name} {{\n"));
-    render_rust_text_helper_methods(content, context_prefix, fields, names)?;
+    render_rust_text_helper_methods(content, context_prefix, fields, names, i18n)?;
     content.raw("}\n\n");
     Ok(())
+}
+
+fn render_rust_i18n_prelude(content: &mut CodeWriter, i18n: &I18nOptions) {
+    match i18n.mode {
+        I18nMode::Generic => content.raw(concat!(
+            "pub trait TextTranslator {\n",
+            "    fn translate(&self, msgctxt: Option<&str>, msgid: &str) -> Option<String>;\n",
+            "}\n\n",
+        )),
+        I18nMode::GlobalFunction => {}
+    }
 }
 
 fn render_rust_text_helper_methods(
@@ -427,6 +445,7 @@ fn render_rust_text_helper_methods(
     context_prefix: &str,
     fields: &[CodeField],
     names: &RustNames<'_>,
+    i18n: &I18nOptions,
 ) -> Result<()> {
     for field in fields
         .iter()
@@ -435,31 +454,81 @@ fn render_rust_text_helper_methods(
         let function_name = names.text_function_name(&field.name)?;
         let field_name = names.field_name(&field.name)?;
         let context = format!("{context_prefix}.{}", field.name);
-        if field.required {
-            content.raw_fmt(format_args!(
-                concat!(
-                    "    pub fn {function_name}(&self, translator: &impl TextTranslator) -> String {{\n",
-                    "        translator.translate(Some({context:?}), &self.{field_name}).unwrap_or_else(|| self.{field_name}.clone())\n",
-                    "    }}\n",
-                ),
-                function_name = function_name,
-                context = context,
-                field_name = field_name,
-            ));
-        } else {
-            content.raw_fmt(format_args!(
-                concat!(
-                    "    pub fn {function_name}(&self, translator: &impl TextTranslator) -> Option<String> {{\n",
-                    "        self.{field_name}.as_ref().map(|msgid| translator.translate(Some({context:?}), msgid).unwrap_or_else(|| msgid.clone()))\n",
-                    "    }}\n",
-                ),
-                function_name = function_name,
-                context = context,
-                field_name = field_name,
-            ));
+        match i18n.mode {
+            I18nMode::Generic if field.required => {
+                content.raw_fmt(format_args!(
+                    concat!(
+                        "    pub fn {function_name}(&self, translator: &impl TextTranslator) -> String {{\n",
+                        "        translator.translate(Some({context:?}), &self.{field_name}).unwrap_or_else(|| self.{field_name}.clone())\n",
+                        "    }}\n",
+                    ),
+                    function_name = function_name,
+                    context = context,
+                    field_name = field_name,
+                ));
+            }
+            I18nMode::Generic => {
+                content.raw_fmt(format_args!(
+                    concat!(
+                        "    pub fn {function_name}(&self, translator: &impl TextTranslator) -> Option<String> {{\n",
+                        "        self.{field_name}.as_ref().map(|msgid| translator.translate(Some({context:?}), msgid).unwrap_or_else(|| msgid.clone()))\n",
+                        "    }}\n",
+                    ),
+                    function_name = function_name,
+                    context = context,
+                    field_name = field_name,
+                ));
+            }
+            I18nMode::GlobalFunction if field.required => {
+                content.raw_fmt(format_args!(
+                    concat!(
+                        "    pub fn {function_name}(&self) -> String {{\n",
+                        "        {expr}\n",
+                        "    }}\n",
+                    ),
+                    function_name = function_name,
+                    expr = rust_global_i18n_expr(
+                        i18n,
+                        &context,
+                        &format!("&self.{field_name}"),
+                        &format!("self.{field_name}.clone()")
+                    ),
+                ));
+            }
+            I18nMode::GlobalFunction => {
+                content.raw_fmt(format_args!(
+                    concat!(
+                        "    pub fn {function_name}(&self) -> Option<String> {{\n",
+                        "        self.{field_name}.as_ref().map(|msgid| {expr})\n",
+                        "    }}\n",
+                    ),
+                    function_name = function_name,
+                    field_name = field_name,
+                    expr = rust_global_i18n_expr(i18n, &context, "msgid", "msgid.clone()"),
+                ));
+            }
         }
     }
     Ok(())
+}
+
+fn rust_global_i18n_expr(
+    i18n: &I18nOptions,
+    context: &str,
+    msgid_expr: &str,
+    fallback_expr: &str,
+) -> String {
+    let function = i18n.function.as_deref().expect("global i18n function");
+    match i18n.returns {
+        I18nFunctionReturn::String => {
+            format!("{function}(Some({context:?}), {msgid_expr}).into()")
+        }
+        I18nFunctionReturn::Optional => {
+            format!(
+                "{function}(Some({context:?}), {msgid_expr}).unwrap_or_else(|| {fallback_expr})"
+            )
+        }
+    }
 }
 
 fn push_doc(content: &mut CodeWriter, desc: Option<&str>, prefix: &str) {

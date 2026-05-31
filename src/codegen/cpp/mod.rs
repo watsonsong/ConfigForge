@@ -7,8 +7,8 @@ use crate::Result;
 
 use super::{
     CaseStyle, CodeExportInput, CodeField, CodeFragmentPayload, CodeGenerator, CodeModel,
-    CodeTableKind, CodeWriter, CodeWriterConfig, GeneratedFile, NamingConfig, build_code_model,
-    ir::require_non_empty_index_fields,
+    CodeTableKind, CodeWriter, CodeWriterConfig, GeneratedFile, I18nFunctionReturn, I18nMode,
+    I18nOptions, NamingConfig, build_code_model, ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -93,6 +93,7 @@ impl CodeGenerator for CppCodeGenerator {
             "#include <utility>\n",
             "#include <vector>\n\n",
         ));
+        render_cpp_i18n_include(&mut header, &input.target.options.i18n);
         let namespace = cpp_options
             .namespace
             .as_ref()
@@ -102,7 +103,7 @@ impl CodeGenerator for CppCodeGenerator {
             header.raw_fmt(format_args!("namespace {namespace} {{\n\n"));
         }
         render_runtime_interfaces(&mut header);
-        header.raw("using TextTranslator = std::function<std::optional<std::string>(const char*, const std::string&)>;\n\n");
+        render_cpp_i18n_prelude(&mut header, &input.target.options.i18n);
         header.raw("class GameDataAccess;\nclass GameData;\n\n");
         if model.tables.iter().any(|table| {
             table
@@ -158,6 +159,7 @@ impl CodeGenerator for CppCodeGenerator {
                 &code_struct.name,
                 &code_struct.fields,
                 &names,
+                &input.target.options.i18n,
             )?;
             header.raw("};\n\n");
         }
@@ -187,6 +189,7 @@ impl CodeGenerator for CppCodeGenerator {
                     &format!("{}.{}", table.name, fragment.name),
                     &fragment.fields,
                     &names,
+                    &input.target.options.i18n,
                 )?;
                 header.raw("};\n\n");
             }
@@ -224,7 +227,13 @@ impl CodeGenerator for CppCodeGenerator {
                     names.field_name(&fragment.name)?
                 ));
             }
-            render_cpp_text_helper_declarations(&mut header, &table.name, &table.fields, &names)?;
+            render_cpp_text_helper_declarations(
+                &mut header,
+                &table.name,
+                &table.fields,
+                &names,
+                &input.target.options.i18n,
+            )?;
             render_row_relation_declarations(&mut header, &model, table, &names)?;
             render_row_relation_cache_members(&mut header, table, &names)?;
             header.raw("};\n\n");
@@ -312,6 +321,7 @@ fn render_cpp_text_helper_declarations(
     context_prefix: &str,
     fields: &[CodeField],
     names: &CppNames<'_>,
+    i18n: &I18nOptions,
 ) -> Result<()> {
     for field in fields
         .iter()
@@ -320,34 +330,120 @@ fn render_cpp_text_helper_declarations(
         let function_name = names.text_function_name(&field.name)?;
         let field_name = names.field_name(&field.name)?;
         let context = format!("{context_prefix}.{}", field.name);
-        if field.required {
-            header.raw_fmt(format_args!(
-                concat!(
-                    "    std::string {function_name}(const TextTranslator& translator) const {{\n",
-                    "        auto translated = translator({context:?}, {field_name});\n",
-                    "        return translated.has_value() ? *translated : {field_name};\n",
-                    "    }}\n",
-                ),
-                function_name = function_name,
-                context = context,
-                field_name = field_name,
-            ));
-        } else {
-            header.raw_fmt(format_args!(
-                concat!(
-                    "    std::optional<std::string> {function_name}(const TextTranslator& translator) const {{\n",
-                    "        if (!{field_name}.has_value()) {{ return std::nullopt; }}\n",
-                    "        auto translated = translator({context:?}, *{field_name});\n",
-                    "        return translated.has_value() ? translated : {field_name};\n",
-                    "    }}\n",
-                ),
-                function_name = function_name,
-                context = context,
-                field_name = field_name,
-            ));
+        match i18n.mode {
+            I18nMode::Generic if field.required => {
+                header.raw_fmt(format_args!(
+                    concat!(
+                        "    std::string {function_name}(const TextTranslator& translator) const {{\n",
+                        "        auto translated = translator({context:?}, {field_name});\n",
+                        "        return translated.has_value() ? *translated : {field_name};\n",
+                        "    }}\n",
+                    ),
+                    function_name = function_name,
+                    context = context,
+                    field_name = field_name,
+                ));
+            }
+            I18nMode::Generic => {
+                header.raw_fmt(format_args!(
+                    concat!(
+                        "    std::optional<std::string> {function_name}(const TextTranslator& translator) const {{\n",
+                        "        if (!{field_name}.has_value()) {{ return std::nullopt; }}\n",
+                        "        auto translated = translator({context:?}, *{field_name});\n",
+                        "        return translated.has_value() ? translated : {field_name};\n",
+                        "    }}\n",
+                    ),
+                    function_name = function_name,
+                    context = context,
+                    field_name = field_name,
+                ));
+            }
+            I18nMode::GlobalFunction if field.required => {
+                header.raw_fmt(format_args!(
+                    concat!(
+                        "    std::string {function_name}() const {{\n",
+                        "        {statement}\n",
+                        "    }}\n",
+                    ),
+                    function_name = function_name,
+                    statement = cpp_global_i18n_statement(
+                        i18n,
+                        &context,
+                        &format!("{field_name}.c_str()"),
+                        &field_name,
+                        false
+                    ),
+                ));
+            }
+            I18nMode::GlobalFunction => {
+                header.raw_fmt(format_args!(
+                    concat!(
+                        "    std::optional<std::string> {function_name}() const {{\n",
+                        "        if (!{field_name}.has_value()) {{ return std::nullopt; }}\n",
+                        "        {statement}\n",
+                        "    }}\n",
+                    ),
+                    function_name = function_name,
+                    field_name = field_name,
+                    statement = cpp_global_i18n_statement(
+                        i18n,
+                        &context,
+                        &format!("{field_name}->c_str()"),
+                        &field_name,
+                        true
+                    ),
+                ));
+            }
         }
     }
     Ok(())
+}
+
+fn render_cpp_i18n_include(header: &mut CodeWriter, i18n: &I18nOptions) {
+    if !matches!(i18n.mode, I18nMode::GlobalFunction) {
+        return;
+    }
+    if let Some(include) = i18n.cpp_include.as_deref() {
+        if include.trim_start().starts_with("#include") {
+            header.raw(include);
+            header.newline();
+        } else {
+            header.raw_fmt(format_args!("#include {include}\n"));
+        }
+        header.newline();
+    }
+}
+
+fn render_cpp_i18n_prelude(header: &mut CodeWriter, i18n: &I18nOptions) {
+    if matches!(i18n.mode, I18nMode::Generic) {
+        header.raw("using TextTranslator = std::function<std::optional<std::string>(const char*, const std::string&)>;\n\n");
+    }
+}
+
+fn cpp_global_i18n_statement(
+    i18n: &I18nOptions,
+    context: &str,
+    msgid_expr: &str,
+    fallback_expr: &str,
+    returns_optional_text: bool,
+) -> String {
+    let function = i18n.function.as_deref().expect("global i18n function");
+    match i18n.returns {
+        I18nFunctionReturn::String => {
+            format!("return {function}({context:?}, {msgid_expr});")
+        }
+        I18nFunctionReturn::Optional => {
+            if returns_optional_text {
+                format!(
+                    "auto translated = {function}({context:?}, {msgid_expr}); return translated.has_value() ? translated : {fallback_expr};"
+                )
+            } else {
+                format!(
+                    "auto translated = {function}({context:?}, {msgid_expr}); return translated.has_value() ? *translated : {fallback_expr};"
+                )
+            }
+        }
+    }
 }
 
 fn render_source_file(

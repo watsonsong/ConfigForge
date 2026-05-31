@@ -104,7 +104,7 @@ TypeScript `linked_field` 生成规则：
 TypeScript `text` 翻译 helper 生成规则：
 
 - Interface 中保留 raw 字段，例如 `displayName: string`；helper 可以作为 row object method 生成，也可以生成模块级函数。为了与现有 relation helper 的 plain object 策略一致，推荐在需要 helper 时给 object literal 绑定模块级函数引用，避免每条 row 创建闭包。
-- 推荐生成 translator interface：
+- 默认 `targets.code.i18n.mode = "generic"` 时生成 translator function type：
 
 ```ts
 export interface TextTranslator {
@@ -116,6 +116,22 @@ export interface ItemRow {
   displayNameText(translator: TextTranslator): string;
 }
 ```
+
+当 `targets.code.i18n.mode = "global_function"` 时，helper 直接调用配置的全局函数，不再接受 translator 参数；`typescript_import` 可注入 import：
+
+```ts
+// ConfigForge.toml:
+// [targets.code.i18n]
+// mode = "global_function"
+// function = "globalTranslate"
+// typescript_import = "import { globalTranslate } from './i18n'"
+
+export function itemsDisplayNameText(value: { displayName: string }): string {
+  return globalTranslate("items.display_name", value.displayName);
+}
+```
+
+`returns = "string"` 表示全局函数总是返回最终文案；`returns = "optional"` 表示返回 `string | undefined`，helper 会 fallback 到 raw text。
 
 - helper 默认同步返回 string。异步远程翻译不应混入基础 row helper；业务应在 translator 内预加载 catalog，或未来通过单独 option 生成 `displayNameTextAsync`。
 - helper fallback 到 raw text，不抛出翻译缺失错误；若 translator 抛错，错误按普通业务异常传播。

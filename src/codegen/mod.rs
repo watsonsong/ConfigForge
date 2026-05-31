@@ -49,9 +49,38 @@ pub struct CodeExportProject {
 pub struct CodegenOptions {
     pub file_header: Option<String>,
     pub keyword_conflict: KeywordConflictPolicy,
+    pub i18n: I18nOptions,
     pub naming: NamingConfig,
     pub formatting: CodeWriterConfig,
     pub language_options: HashMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct I18nOptions {
+    #[serde(default)]
+    pub mode: I18nMode,
+    #[serde(default)]
+    pub function: Option<String>,
+    #[serde(default)]
+    pub returns: I18nFunctionReturn,
+    #[serde(default)]
+    pub cpp_include: Option<String>,
+    #[serde(default)]
+    pub typescript_import: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum I18nMode {
+    Generic,
+    GlobalFunction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum I18nFunctionReturn {
+    String,
+    Optional,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -98,6 +127,8 @@ pub struct CodegenTaskConfig {
     #[serde(default)]
     pub keyword_conflict: Option<KeywordConflictPolicy>,
     #[serde(default)]
+    pub i18n: I18nOptions,
+    #[serde(default)]
     pub naming: PartialNamingConfig,
     #[serde(default)]
     pub formatting: PartialCodeWriterConfig,
@@ -116,6 +147,7 @@ impl CodegenTaskConfig {
             namespace: None,
             file_header: None,
             keyword_conflict: None,
+            i18n: I18nOptions::default(),
             naming: PartialNamingConfig::default(),
             formatting: PartialCodeWriterConfig::default(),
             language_options: HashMap::new(),
@@ -157,11 +189,40 @@ impl CodeExportTarget {
                 keyword_conflict: task
                     .keyword_conflict
                     .unwrap_or(KeywordConflictPolicy::SuffixUnderscore),
+                i18n: validate_i18n_options(task.i18n)?,
                 naming: generator.default_naming().merge(task.naming),
                 formatting: generator.default_formatting().merge(task.formatting),
                 language_options: task.language_options,
             },
         })
+    }
+}
+
+fn validate_i18n_options(options: I18nOptions) -> Result<I18nOptions> {
+    fn validate_optional_code_snippet(kind: &str, value: &Option<String>) -> Result<()> {
+        if let Some(value) = value {
+            if value.trim().is_empty() || value.chars().any(char::is_control) {
+                return Err(ConfigForgeError::Validation(format!(
+                    "invalid i18n {kind} `{value}`; value must be non-empty and single-line"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    match options.mode {
+        I18nMode::Generic => Ok(options),
+        I18nMode::GlobalFunction => {
+            validate_optional_code_snippet("function", &options.function)?;
+            validate_optional_code_snippet("cpp_include", &options.cpp_include)?;
+            validate_optional_code_snippet("typescript_import", &options.typescript_import)?;
+            if options.function.is_none() {
+                return Err(ConfigForgeError::Validation(
+                    "i18n mode `global_function` requires `function`".to_owned(),
+                ));
+            }
+            Ok(options)
+        }
     }
 }
 
@@ -213,6 +274,7 @@ impl CodegenOptions {
         Ok(Self {
             file_header: None,
             keyword_conflict: KeywordConflictPolicy::SuffixUnderscore,
+            i18n: I18nOptions::default(),
             naming: generator.default_naming(),
             formatting: generator.default_formatting(),
             language_options: task.language_options,
@@ -259,6 +321,7 @@ impl Default for CodegenOptions {
         Self {
             file_header: None,
             keyword_conflict: KeywordConflictPolicy::SuffixUnderscore,
+            i18n: I18nOptions::default(),
             naming: NamingConfig {
                 type_name: CaseStyle::Preserve,
                 enum_value: CaseStyle::Preserve,
@@ -269,6 +332,30 @@ impl Default for CodegenOptions {
             formatting: CodeWriterConfig::default(),
             language_options: HashMap::new(),
         }
+    }
+}
+
+impl Default for I18nOptions {
+    fn default() -> Self {
+        Self {
+            mode: I18nMode::Generic,
+            function: None,
+            returns: I18nFunctionReturn::String,
+            cpp_include: None,
+            typescript_import: None,
+        }
+    }
+}
+
+impl Default for I18nMode {
+    fn default() -> Self {
+        Self::Generic
+    }
+}
+
+impl Default for I18nFunctionReturn {
+    fn default() -> Self {
+        Self::String
     }
 }
 

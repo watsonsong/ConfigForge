@@ -75,6 +75,40 @@ pub(in crate::codegen) fn linked_fixture() -> MetaModel {
     .expect("fixture meta should parse")
 }
 
+pub(in crate::codegen) fn text_fixture() -> MetaModel {
+    MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+            unique = true
+
+            [[tables.fields]]
+            name = "name"
+            type = "text"
+            required = true
+
+            [[tables.fields]]
+            name = "subtitle"
+            type = "text"
+            required = false
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+        "#,
+    )
+    .expect("text fixture meta should parse")
+}
+
 pub(in crate::codegen) fn input_for<'a>(
     meta: &'a MetaModel,
     language: &str,
@@ -819,6 +853,12 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
             file_header = "// {{project.name}} {{datetime}}"
             keyword_conflict = "error"
 
+            [i18n]
+            mode = "global_function"
+            function = "translateText"
+            returns = "optional"
+            typescript_import = "import { translateText } from './i18n'"
+
             [naming]
             field = "snake_case"
 
@@ -844,6 +884,16 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
         KeywordConflictPolicy::Error
     );
     assert_eq!(target.options.naming.type_name, CaseStyle::PascalCase);
+    assert_eq!(target.options.i18n.mode, I18nMode::GlobalFunction);
+    assert_eq!(
+        target.options.i18n.function.as_deref(),
+        Some("translateText")
+    );
+    assert_eq!(target.options.i18n.returns, I18nFunctionReturn::Optional);
+    assert_eq!(
+        target.options.i18n.typescript_import.as_deref(),
+        Some("import { translateText } from './i18n'")
+    );
     assert_eq!(target.options.naming.field, CaseStyle::SnakeCase);
     assert_eq!(target.options.naming.function, CaseStyle::CamelCase);
     assert_eq!(target.options.formatting.indent_style, IndentStyle::Tab);
@@ -859,6 +909,80 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
             readonly_fields: true,
         }
     );
+}
+
+#[test]
+fn rejects_global_i18n_without_function() {
+    let config: CodegenTaskConfig = toml::from_str(
+        r#"
+            language = "rust"
+            output = "Generated/Rust"
+
+            [i18n]
+            mode = "global_function"
+        "#,
+    )
+    .expect("config should parse");
+
+    let error = CodeExportTarget::from_task(config, &RustCodeGenerator).unwrap_err();
+
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("requires `function`"))
+    );
+}
+
+#[test]
+fn global_i18n_function_changes_text_helper_signatures() {
+    let meta = text_fixture();
+
+    let mut rust_input = input_for(&meta, RustCodeGenerator.language());
+    rust_input.target.options.i18n = I18nOptions {
+        mode: I18nMode::GlobalFunction,
+        function: Some("crate::i18n::translate".to_owned()),
+        returns: I18nFunctionReturn::Optional,
+        ..Default::default()
+    };
+    let rust = RustCodeGenerator.generate(&rust_input).expect("rust code")[0]
+        .content
+        .clone();
+    assert!(!rust.contains("pub trait TextTranslator"));
+    assert!(rust.contains("pub fn name_text(&self) -> String"));
+    assert!(rust.contains("crate::i18n::translate(Some(\"items.name\"), &self.name).unwrap_or_else(|| self.name.clone())"));
+    assert!(rust.contains("pub fn subtitle_text(&self) -> Option<String>"));
+
+    let mut cpp_input = input_for(&meta, CppCodeGenerator.language());
+    cpp_input.target.options.i18n = I18nOptions {
+        mode: I18nMode::GlobalFunction,
+        function: Some("TranslateText".to_owned()),
+        returns: I18nFunctionReturn::Optional,
+        cpp_include: Some("\"i18n.hpp\"".to_owned()),
+        ..Default::default()
+    };
+    let cpp = CppCodeGenerator.generate(&cpp_input).expect("cpp code")[0]
+        .content
+        .clone();
+    assert!(cpp.contains("#include \"i18n.hpp\""));
+    assert!(!cpp.contains("using TextTranslator"));
+    assert!(cpp.contains("std::string NameText() const"));
+    assert!(cpp.contains("auto translated = TranslateText(\"items.name\", name.c_str()); return translated.has_value() ? *translated : name;"));
+
+    let mut ts_input = input_for(&meta, TypeScriptCodeGenerator.language());
+    ts_input.target.options.i18n = I18nOptions {
+        mode: I18nMode::GlobalFunction,
+        function: Some("translateText".to_owned()),
+        returns: I18nFunctionReturn::Optional,
+        typescript_import: Some("import { translateText } from './i18n';".to_owned()),
+        ..Default::default()
+    };
+    let ts = TypeScriptCodeGenerator
+        .generate(&ts_input)
+        .expect("typescript code")[0]
+        .content
+        .clone();
+    assert!(ts.contains("import { translateText } from './i18n';"));
+    assert!(!ts.contains("export type TextTranslator"));
+    assert!(ts.contains("export function itemsNameText(value: { name: string }): string"));
+    assert!(ts.contains("return (translateText(\"items.name\", value.name) ?? value.name);"));
 }
 
 #[test]

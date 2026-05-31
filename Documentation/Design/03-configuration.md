@@ -409,6 +409,7 @@ Planned / Not implemented：`engine`、`format = "asset_manifest_csv"`、target-
 | `namespace` | 未设置 | 可选命名空间；C++ 可映射为 namespace，Rust/TS 可作为模块组织提示。 |
 | `file_header` | 生成器默认文件头 | 可选文件头模板。为空字符串表示不生成文件头。 |
 | `keyword_conflict` | `suffix_underscore` | 生成标识符与目标语言关键字冲突时的处理策略。 |
+| `i18n` | `mode = "generic"` | `text` helper 的翻译调用策略。`generic` 生成当前的显式 translator 参数；`global_function` 直接调用配置的全局函数，适合 gettext/libintl 或项目已有全局 i18n facade。 |
 | `naming` | 语言默认命名策略 | 当前语言各类符号的大小写组织方式。 |
 | `formatting` | 语言默认格式策略 | 生成源码的缩进与文件尾换行/空行策略。 |
 
@@ -419,6 +420,16 @@ Planned / Not implemented：`engine`、`format = "asset_manifest_csv"`、target-
 | `[targets.code.rust]` | `derive_serde` | `false` | 为生成的 Rust enum/struct 派生 `serde::Serialize` / `serde::Deserialize`。 |
 | `[targets.code.cpp]` | `namespace` | 继承 `targets.code.namespace` | C++ namespace 覆盖项。 |
 | `[targets.code.typescript]` | `readonly_fields` | `false` | TypeScript interface 字段是否生成 `readonly`。 |
+
+`targets.code.i18n` 字段：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `mode` | `generic` | `generic` / `global_function`。`generic` helper 形如 `row.name_text(&translator)` / `row.NameText(translator)` / `itemsNameText(row, translator)`；`global_function` helper 不再接受 translator 参数，直接调用 `function(msgctxt, msgid)`。 |
+| `function` | 未设置 | `global_function` 必填。按目标语言原样写入生成代码，例如 Rust `crate::i18n::translate`、C++ `GlobalTranslate`、TypeScript `globalTranslate`。 |
+| `returns` | `string` | `string` 表示全局函数总是返回最终文案；`optional` 表示返回 missing/optional，helper 会 fallback 到 raw text。 |
+| `cpp_include` | 未设置 | C++ `global_function` 可选 include，例如 `"<libintl.h>"` 或 `"\"i18n.hpp\""`。 |
+| `typescript_import` | 未设置 | TypeScript `global_function` 可选 import 语句，例如 `"import { globalTranslate } from './i18n'"`。 |
 
 `file_header` 支持以下模板变量：
 

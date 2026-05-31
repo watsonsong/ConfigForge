@@ -7,8 +7,8 @@ use crate::Result;
 
 use super::{
     CaseStyle, CodeExportInput, CodeField, CodeFragmentPayload, CodeGenerator, CodeTableKind,
-    CodeWriter, CodeWriterConfig, GeneratedFile, NamingConfig, build_code_model,
-    ir::require_non_empty_index_fields,
+    CodeWriter, CodeWriterConfig, GeneratedFile, I18nFunctionReturn, I18nMode, I18nOptions,
+    NamingConfig, build_code_model, ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -82,10 +82,11 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         let mut content = CodeWriter::new(input.target.options.formatting);
         self.write_file_header(&mut content, input);
         content.newline();
+        render_ts_i18n_import(&mut content, &input.target.options.i18n);
         content.raw("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;\n\n");
         render_runtime_reader_interfaces(&mut content);
         render_runtime_reader_helpers(&mut content);
-        content.raw("export type TextTranslator = (msgctxt: string | undefined, msgid: string) => string | undefined;\n\n");
+        render_ts_i18n_prelude(&mut content, &input.target.options.i18n);
         if model.tables.iter().any(|table| {
             table
                 .foreign_keys
@@ -139,6 +140,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 &code_struct.name,
                 &code_struct.fields,
                 &names,
+                &input.target.options.i18n,
             )?;
         }
 
@@ -170,6 +172,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                     &format!("{}.{}", table.name, fragment.name),
                     &fragment.fields,
                     &names,
+                    &input.target.options.i18n,
                 )?;
             }
         }
@@ -208,6 +211,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 &table.name,
                 &table.fields,
                 &names,
+                &input.target.options.i18n,
             )?;
             if table.kind == CodeTableKind::Collection {
                 render_table(&mut content, table, &names)?;
@@ -523,6 +527,7 @@ fn render_ts_text_helpers(
     context_prefix: &str,
     fields: &[CodeField],
     names: &TypeScriptNames<'_>,
+    i18n: &I18nOptions,
 ) -> Result<()> {
     for field in fields
         .iter()
@@ -531,32 +536,94 @@ fn render_ts_text_helpers(
         let function_name = names.text_function_name(owner_name, &field.name)?;
         let field_name = names.field_name(&field.name)?;
         let context = format!("{context_prefix}.{}", field.name);
-        if field.required {
-            content.raw_fmt(format_args!(
-                concat!(
-                    "export function {function_name}(value: {{ {field_name}: string }}, translator: TextTranslator): string {{\n",
-                    "  return translator({context:?}, value.{field_name}) ?? value.{field_name};\n",
-                    "}}\n\n",
-                ),
-                function_name = function_name,
-                context = context,
-                field_name = field_name,
-            ));
-        } else {
-            content.raw_fmt(format_args!(
-                concat!(
-                    "export function {function_name}(value: {{ {field_name}?: string }}, translator: TextTranslator): string | undefined {{\n",
-                    "  const msgid = value.{field_name};\n",
-                    "  return msgid === undefined ? undefined : (translator({context:?}, msgid) ?? msgid);\n",
-                    "}}\n\n",
-                ),
-                function_name = function_name,
-                context = context,
-                field_name = field_name,
-            ));
+        match i18n.mode {
+            I18nMode::Generic if field.required => {
+                content.raw_fmt(format_args!(
+                    concat!(
+                        "export function {function_name}(value: {{ {field_name}: string }}, translator: TextTranslator): string {{\n",
+                        "  return translator({context:?}, value.{field_name}) ?? value.{field_name};\n",
+                        "}}\n\n",
+                    ),
+                    function_name = function_name,
+                    context = context,
+                    field_name = field_name,
+                ));
+            }
+            I18nMode::Generic => {
+                content.raw_fmt(format_args!(
+                    concat!(
+                        "export function {function_name}(value: {{ {field_name}?: string }}, translator: TextTranslator): string | undefined {{\n",
+                        "  const msgid = value.{field_name};\n",
+                        "  return msgid === undefined ? undefined : (translator({context:?}, msgid) ?? msgid);\n",
+                        "}}\n\n",
+                    ),
+                    function_name = function_name,
+                    context = context,
+                    field_name = field_name,
+                ));
+            }
+            I18nMode::GlobalFunction if field.required => {
+                content.raw_fmt(format_args!(
+                    concat!(
+                        "export function {function_name}(value: {{ {field_name}: string }}): string {{\n",
+                        "  return {expr};\n",
+                        "}}\n\n",
+                    ),
+                    function_name = function_name,
+                    field_name = field_name,
+                    expr = ts_global_i18n_expr(i18n, &context, &format!("value.{field_name}"), &format!("value.{field_name}")),
+                ));
+            }
+            I18nMode::GlobalFunction => {
+                content.raw_fmt(format_args!(
+                    concat!(
+                        "export function {function_name}(value: {{ {field_name}?: string }}): string | undefined {{\n",
+                        "  const msgid = value.{field_name};\n",
+                        "  return msgid === undefined ? undefined : {expr};\n",
+                        "}}\n\n",
+                    ),
+                    function_name = function_name,
+                    field_name = field_name,
+                    expr = ts_global_i18n_expr(i18n, &context, "msgid", "msgid"),
+                ));
+            }
         }
     }
     Ok(())
+}
+
+fn render_ts_i18n_import(content: &mut CodeWriter, i18n: &I18nOptions) {
+    if !matches!(i18n.mode, I18nMode::GlobalFunction) {
+        return;
+    }
+    if let Some(import) = i18n.typescript_import.as_deref() {
+        content.raw(import);
+        if !import.ends_with(';') {
+            content.raw(";");
+        }
+        content.raw("\n\n");
+    }
+}
+
+fn render_ts_i18n_prelude(content: &mut CodeWriter, i18n: &I18nOptions) {
+    if matches!(i18n.mode, I18nMode::Generic) {
+        content.raw("export type TextTranslator = (msgctxt: string | undefined, msgid: string) => string | undefined;\n\n");
+    }
+}
+
+fn ts_global_i18n_expr(
+    i18n: &I18nOptions,
+    context: &str,
+    msgid_expr: &str,
+    fallback_expr: &str,
+) -> String {
+    let function = i18n.function.as_deref().expect("global i18n function");
+    match i18n.returns {
+        I18nFunctionReturn::String => format!("{function}({context:?}, {msgid_expr})"),
+        I18nFunctionReturn::Optional => {
+            format!("({function}({context:?}, {msgid_expr}) ?? {fallback_expr})")
+        }
+    }
 }
 
 fn push_doc(content: &mut CodeWriter, desc: Option<&str>) {

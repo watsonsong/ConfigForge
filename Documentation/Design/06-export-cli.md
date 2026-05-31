@@ -119,6 +119,8 @@ CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 t
 | `[targets.code.cpp]` | `namespace` | C++ namespace 覆盖；未设置时可使用通用 `namespace`。 |
 | `[targets.code.typescript]` | `readonly_fields` | interface 字段是否生成 `readonly`。 |
 
+`[targets.code.i18n]` 控制 `text` 翻译 helper 的调用形态：默认 `mode = "generic"`，保留显式 translator 参数；`mode = "global_function"` 时必须配置 `function`，生成代码直接调用该全局函数，例如 gettext/libintl 或项目自己的全局 i18n facade。`returns = "string"` 表示函数总是返回最终文案，`returns = "optional"` 表示函数可能 missing，helper 会 fallback 到 raw text。C++ 可用 `cpp_include` 注入 include，TypeScript 可用 `typescript_import` 注入 import。
+
 `keyword_conflict` 策略：
 
 | 策略 | 说明 |
@@ -494,9 +496,9 @@ msgstr ""
 生成代码影响：
 
 - 第一阶段 `text` 在 runtime payload 中仍按 `string` 输出，生成代码字段类型保持 `String` / `std::string` / `string`，不破坏现有用户。
-- 对 `text` 字段，生成器额外生成翻译 helper，例如 Rust row/struct 方法 `display_name_text(&translator)`、C++ row/struct 方法 `DisplayNameText(translator)`、TypeScript 顶层 helper `itemsDisplayNameText(row, translator)` / `structDisplayNameText(value, translator)`。helper 默认传入原始字符串和 `table.field` / `struct.field` context，由业务侧 translator 返回当前语言文本。
+- 对 `text` 字段，生成器额外生成翻译 helper。默认 `generic` 模式下，例如 Rust row/struct 方法 `display_name_text(&translator)`、C++ row/struct 方法 `DisplayNameText(translator)`、TypeScript 顶层 helper `itemsDisplayNameText(row, translator)` / `structDisplayNameText(value, translator)`。`global_function` 模式下，helper 不再接受 translator 参数，而是直接调用配置的全局函数。helper 默认传入原始字符串和 `table.field` / `struct.field` context，由业务侧 translator 或全局函数返回当前语言文本。
 - helper 不应把翻译结果缓存到 row 中，除非 translator 明确提供语言版本号；否则切换语言后会读到旧文本。推荐 translator 自己缓存。
-- helper 的 translator contract 应保持语言无关并与当前生成代码一致：输入为 `(msgctxt, msgid)`，返回可选 translated string。`msgctxt` 默认来自 `table.field` / `struct.field`，`msgid` 为 raw text；没有 translator 或查不到翻译时，应回退 raw text。table、field path、record key 等 source metadata 可作为未来扩展，不属于当前 helper contract。
+- helper 的 lookup contract 应保持语言无关并与当前生成代码一致：输入为 `(msgctxt, msgid)`，返回 translated string 或可选 translated string。`msgctxt` 默认来自 `table.field` / `struct.field`，`msgid` 为 raw text；generic translator 或 `global_function` 返回 missing 时，应回退 raw text。table、field path、record key 等 source metadata 可作为未来扩展，不属于当前 helper contract。
 - 若未来采用 key-driven text，生成代码可以把 raw field 视作 key，并通过同一 helper 访问 translated text；API 名称保持稳定，减少业务迁移成本。
 
 ### Asset Manifest CSV

@@ -24,9 +24,10 @@ pub use build::{BuildOptions, BuildOutput, ExecutionOptions, build_target};
 pub use codegen::{
     CaseStyle, CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator,
     CodeWriterConfig, CodegenOptions, CodegenTaskConfig, CppCodeGenerator, CppCodegenOptions,
-    GeneratedFile, IndentStyle, KeywordConflictPolicy, NamingConfig, PartialCodeWriterConfig,
-    PartialNamingConfig, RustCodeGenerator, RustCodegenOptions, TypeScriptCodeGenerator,
-    TypeScriptCodegenOptions, builtin_generators, default_module_name, find_generator,
+    GeneratedFile, I18nFunctionReturn, I18nMode, I18nOptions, IndentStyle, KeywordConflictPolicy,
+    NamingConfig, PartialCodeWriterConfig, PartialNamingConfig, RustCodeGenerator,
+    RustCodegenOptions, TypeScriptCodeGenerator, TypeScriptCodegenOptions, builtin_generators,
+    default_module_name, find_generator,
 };
 pub use data::{
     CsvDataReader, DataLoadPlan, DataLoader, DataProvider, DataRow, DataSet, DataSourceLayout,

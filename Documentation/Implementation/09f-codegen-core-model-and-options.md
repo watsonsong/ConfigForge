@@ -610,13 +610,16 @@ C++ 默认：
 第一阶段采用原文驱动模型：source cell 保存默认语言原文，runtime data 保存同一原文，POT exporter 以该原文作为 `msgid`。因此生成代码需要同时支持两类访问：
 
 - **raw text**：原字段访问保持不变，例如 Rust `row.display_name: String`、C++ `row.display_name`、TypeScript `row.displayName: string`。这保证现有业务代码不因开启 i18n 而破坏，并提供翻译缺失时的天然 fallback。
-- **translated text helper**：对 `CodeTypeRef::Text` 字段额外生成可选 helper，由调用方传入 translator/lookup 对象，把 `(msgctxt, msgid)` 映射为目标语言文本。
+- **translated text helper**：对 `CodeTypeRef::Text` 字段额外生成可选 helper。默认 `generic` 模式由调用方传入 translator/lookup 对象，把 `(msgctxt, msgid)` 映射为目标语言文本；`global_function` 模式直接调用 `targets.code.i18n.function`，不再要求调用方传 translator。
 
-推荐的语言无关 translator contract：
+推荐的语言无关 lookup contract：
 
 ```text
 TextTranslator
   translate(msgctxt?, msgid) -> translated string or missing
+
+global_function
+  function(msgctxt?, msgid) -> translated string or missing/final string
 ```
 
 其中：
@@ -624,15 +627,15 @@ TextTranslator
 - `msgid` 来自 raw text 字段值；
 - `msgctxt` 来自字段级配置、POT exporter policy 或未来 key-driven 模型的 text context；当前默认是 `table.field` / `struct.field`；
 - table、field_path、record_key 等 source metadata 可作为未来扩展，当前已实现 helper contract 不传入 `TextSource`；
-- translator 缺失、返回 missing 或返回空 optional 时，generated helper 默认 fallback 到 raw text。若业务希望严格模式，应由 translator 自身抛错 / 返回 error，或由后续 codegen option 控制。
+- `generic` translator 缺失、返回 missing 或返回空 optional 时，generated helper 默认 fallback 到 raw text；`global_function` 可通过 `returns = "string"` 表示函数总是返回最终文案，或通过 `returns = "optional"` 表示 missing 后 fallback。若业务希望严格模式，应由 translator / global function 自身抛错 / 返回 error，或由后续 codegen option 控制。
 
 推荐 API 形态：
 
 | Language | Raw access | Translated helper |
 | --- | --- | --- |
-| Rust | `row.display_name: String` | `row.display_name_text(&translator) -> String` 或 `RuntimeDataResult<String>` |
-| C++ | `row.display_name` | `row.DisplayNameText(translator)` 返回 `std::string` 或 Result |
-| TypeScript | `row.displayName: string` | 顶层 helper `itemsDisplayNameText(row, translator): string` / `structDisplayNameText(value, translator): string` |
+| Rust | `row.display_name: String` | `generic`: `row.display_name_text(&translator) -> String`；`global_function`: `row.display_name_text() -> String` |
+| C++ | `row.display_name` | `generic`: `row.DisplayNameText(translator)`；`global_function`: `row.DisplayNameText()` |
+| TypeScript | `row.displayName: string` | `generic`: `itemsDisplayNameText(row, translator): string`；`global_function`: `itemsDisplayNameText(row): string` |
 
 命名规则：
 

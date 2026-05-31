@@ -98,7 +98,7 @@ C++ `linked_field` 生成规则：
 C++ `text` 翻译 helper 生成规则：
 
 - Row/Object struct 保留 `std::string` raw 字段；对每个 text 字段生成 const helper method。
-- 推荐生成抽象 translator interface 或文档化 duck-typed template。若保持 ABI 简单，可使用纯虚接口：
+- 默认 `targets.code.i18n.mode = "generic"` 时生成抽象 translator interface 或文档化 duck-typed template。若保持 ABI 简单，可使用纯虚接口：
 
 ```cpp
 class ITextTranslator {
@@ -114,6 +114,25 @@ struct ItemRow {
     std::string DisplayNameText(const ITextTranslator& translator) const;
 };
 ```
+
+当 `targets.code.i18n.mode = "global_function"` 时，helper 直接调用配置的全局函数，不再接受 translator 参数；`cpp_include` 可注入声明所在头文件：
+
+```cpp
+// ConfigForge.toml:
+// [targets.code.i18n]
+// mode = "global_function"
+// function = "GlobalTranslate"
+// cpp_include = "\"i18n.hpp\""
+
+struct ItemRow {
+    std::string display_name;
+    std::string DisplayNameText() const {
+        return GlobalTranslate("items.display_name", display_name.c_str());
+    }
+};
+```
+
+`returns = "string"` 表示全局函数总是返回最终文案；`returns = "optional"` 表示返回 `std::optional<std::string>`，helper 会 fallback 到 raw text。
 
 - helper 默认返回 `std::string`，translation missing 时复制 raw 字段作为 fallback。若项目采用异常或 Result 错误模型，translator 可自行抛错；生成器不把翻译缺失视为 runtime data error。
 - 不在 row 内保存 locale 或 translated cache；跨 locale cache 由 `ITextTranslator` 实现维护。

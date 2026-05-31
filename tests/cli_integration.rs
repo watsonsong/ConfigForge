@@ -371,6 +371,89 @@ fn gettext_pot_export_and_generated_text_translation_helpers_work() {
 }
 
 #[test]
+fn generated_text_helpers_can_call_global_i18n_functions() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let rust_out_dir = temp_dir.path().join("out/code/rust");
+    let cpp_out_dir = temp_dir.path().join("out/code/cpp");
+    let ts_out_dir = temp_dir.path().join("out/code/typescript");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [[targets.code]]
+                language = "rust"
+                output = "{}"
+
+                [targets.code.i18n]
+                mode = "global_function"
+                function = "crate::global_translate"
+
+                [[targets.code]]
+                language = "cpp"
+                output = "{}"
+
+                [targets.code.i18n]
+                mode = "global_function"
+                function = "GlobalTranslate"
+                cpp_include = "\"i18n.hpp\""
+
+                [[targets.code]]
+                language = "typescript"
+                output = "{}"
+
+                [targets.code.i18n]
+                mode = "global_function"
+                function = "globalTranslate"
+                typescript_import = "import {{ globalTranslate }} from './i18n'"
+            "#,
+            standard_core_meta_imports(),
+            rust_out_dir.display(),
+            cpp_out_dir.display(),
+            ts_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `client` built"));
+
+    let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
+    let cpp_code = fs::read_to_string(cpp_out_dir.join("generated.hpp")).expect("cpp code");
+    let ts_code = fs::read_to_string(ts_out_dir.join("generated.ts")).expect("ts code");
+    assert!(!rust_code.contains("pub trait TextTranslator"));
+    assert!(rust_code.contains("pub fn name_text(&self) -> String"));
+    assert!(rust_code.contains("crate::global_translate(Some(\"items.name\"), &self.name).into()"));
+    assert!(!cpp_code.contains("using TextTranslator"));
+    assert!(cpp_code.contains("#include \"i18n.hpp\""));
+    assert!(cpp_code.contains("std::string NameText() const"));
+    assert!(cpp_code.contains("return GlobalTranslate(\"items.name\", name.c_str());"));
+    assert!(!ts_code.contains("export type TextTranslator"));
+    assert!(ts_code.contains("import { globalTranslate } from './i18n';"));
+    assert!(ts_code.contains("export function itemsNameText(value: { name: string }): string"));
+    assert!(ts_code.contains("return globalTranslate(\"items.name\", value.name);"));
+
+    verify_generated_rust_global_i18n(&rust_out_dir);
+    verify_generated_cpp_global_i18n(&cpp_out_dir);
+    verify_generated_typescript_global_i18n(&ts_out_dir);
+}
+
+#[test]
 fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let client_out_dir = temp_dir.path().join("out/client_data");
@@ -1692,6 +1775,66 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
     }
 }
 
+fn verify_generated_rust_global_i18n(generated_dir: &std::path::Path) {
+    let reader_core_dependency = format!(
+        "config-forge-runtime-reader-core = {{ path = {:?} }}",
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/rust/reader_core")
+    );
+    fs::write(
+        generated_dir.join("Cargo.toml"),
+        format!(
+            r#"
+                [package]
+                name = "generated_global_i18n_check"
+                version = "0.1.0"
+                edition = "2024"
+
+                [lib]
+                path = "lib.rs"
+
+                [dependencies]
+                {reader_core_dependency}
+            "#
+        ),
+    )
+    .expect("generated global i18n Rust Cargo.toml should be written");
+    fs::write(
+        generated_dir.join("lib.rs"),
+        r#"
+            fn global_translate(context: Option<&str>, msgid: &str) -> String {
+                if context == Some("items.name") && msgid == "Potion" {
+                    "Potion CN".to_owned()
+                } else {
+                    msgid.to_owned()
+                }
+            }
+
+            include!("generated.rs");
+
+            #[test]
+            fn global_i18n_text_helper_does_not_require_translator_arg() {
+                let row = ItemsRow {
+                    id: 1,
+                    name: "Potion".to_owned(),
+                    price: 10,
+                    stack: None,
+                    attributes: None,
+                    skill: None,
+                };
+                assert_eq!(row.name_text(), "Potion CN");
+            }
+        "#,
+    )
+    .expect("generated global i18n Rust lib.rs should be written");
+
+    let output = StdCommand::new("cargo")
+        .args(["test", "--quiet", "--manifest-path"])
+        .arg(generated_dir.join("Cargo.toml"))
+        .output()
+        .expect("generated global i18n Rust cargo test should run");
+    assert_command_success(output, "generated Rust global i18n cargo test");
+}
+
 fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
     fs::write(
         generated_dir.join("compile_check.cpp"),
@@ -1882,6 +2025,59 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
     assert_command_success(output, "generated C++ runtime check");
 }
 
+fn verify_generated_cpp_global_i18n(generated_dir: &std::path::Path) {
+    fs::write(
+        generated_dir.join("i18n.hpp"),
+        r#"
+            #pragma once
+            #include <string>
+
+            inline std::string GlobalTranslate(const char* context, const char* msgid) {
+                if (std::string(context) == "items.name" && std::string(msgid) == "Potion") {
+                    return "Potion CN";
+                }
+                return msgid;
+            }
+        "#,
+    )
+    .expect("generated C++ i18n header should be written");
+    fs::write(
+        generated_dir.join("global_i18n_check.cpp"),
+        r#"
+            #include "generated.hpp"
+
+            int main() {
+                ItemsRow row{};
+                row.id = 1;
+                row.name = "Potion";
+                row.price = 10;
+                return row.NameText() == "Potion CN" ? 0 : 1;
+            }
+        "#,
+    )
+    .expect("generated C++ global i18n check should be written");
+
+    if !command_exists("c++") {
+        eprintln!("skipping generated C++ global i18n check: c++ not found");
+        return;
+    }
+
+    let output = StdCommand::new("c++")
+        .args(["-std=c++17"])
+        .arg(generated_dir.join("global_i18n_check.cpp"))
+        .arg(generated_dir.join("generated.cpp"))
+        .arg("-o")
+        .arg(generated_dir.join("global_i18n_check"))
+        .output()
+        .expect("generated C++ global i18n check should compile");
+    assert_command_success(output, "generated C++ global i18n compile");
+
+    let output = StdCommand::new(generated_dir.join("global_i18n_check"))
+        .output()
+        .expect("generated C++ global i18n check should run");
+    assert_command_success(output, "generated C++ global i18n runtime check");
+}
+
 fn verify_generated_typescript(generated_dir: &std::path::Path) {
     fs::write(
         generated_dir.join("compile_check.ts"),
@@ -2032,6 +2228,69 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
         );
     } else {
         eprintln!("skipping generated TypeScript type check: tsc/npx not found");
+    }
+}
+
+fn verify_generated_typescript_global_i18n(generated_dir: &std::path::Path) {
+    fs::write(
+        generated_dir.join("i18n.ts"),
+        r#"
+            export function globalTranslate(context: string | undefined, msgid: string): string {
+              return context === "items.name" && msgid === "Potion" ? "Potion CN" : msgid;
+            }
+        "#,
+    )
+    .expect("generated TypeScript i18n module should be written");
+    fs::write(
+        generated_dir.join("global_i18n_check.ts"),
+        r#"
+            import { itemsNameText } from "./generated";
+
+            const translated = itemsNameText({ name: "Potion" });
+            if (translated !== "Potion CN") {
+              throw new Error("generated TypeScript global i18n failed");
+            }
+        "#,
+    )
+    .expect("generated TypeScript global i18n check should be written");
+    fs::write(
+        generated_dir.join("tsconfig.json"),
+        r#"
+            {
+                "compilerOptions": {
+                    "strict": true,
+                    "target": "ES2020",
+                    "module": "ESNext",
+                    "moduleResolution": "Bundler",
+                    "noEmit": true,
+                    "skipLibCheck": true
+                },
+                "include": ["generated.ts", "i18n.ts", "global_i18n_check.ts"]
+            }
+        "#,
+    )
+    .expect("generated TypeScript global i18n tsconfig should be written");
+
+    if command_exists("tsc") {
+        assert_command_success(
+            StdCommand::new("tsc")
+                .args(["--project"])
+                .arg(generated_dir.join("tsconfig.json"))
+                .output()
+                .expect("generated TypeScript global i18n type check should run"),
+            "generated TypeScript global i18n tsc",
+        );
+    } else if command_exists("npx") {
+        assert_command_success(
+            StdCommand::new("npx")
+                .args(["--yes", "-p", "typescript", "tsc", "--project"])
+                .arg(generated_dir.join("tsconfig.json"))
+                .output()
+                .expect("generated TypeScript global i18n npx type check should run"),
+            "generated TypeScript global i18n npx tsc",
+        );
+    } else {
+        eprintln!("skipping generated TypeScript global i18n type check: tsc/npx not found");
     }
 }
 

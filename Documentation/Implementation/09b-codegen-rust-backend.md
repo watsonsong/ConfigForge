@@ -102,7 +102,7 @@ Rust `linked_field` 生成规则：
 Rust `text` 翻译 helper 生成规则：
 
 - 对每个 `CodeTypeRef::Text` 字段，在 row/object `impl` 中生成 helper；普通字段仍保留 `pub <field>: String`。
-- 生成轻量 translator trait，或允许用户类型实现等价 lookup trait。推荐第一阶段：
+- 默认 `targets.code.i18n.mode = "generic"` 时生成轻量 translator trait，或允许用户类型实现等价 lookup trait：
 
 ```rust
 pub trait TextTranslator {
@@ -117,6 +117,23 @@ impl ItemRow {
     }
 }
 ```
+
+当 `targets.code.i18n.mode = "global_function"` 时，不生成 `TextTranslator` trait，helper 直接调用配置的全局函数，签名不再带 translator 参数：
+
+```rust
+// ConfigForge.toml:
+// [targets.code.i18n]
+// mode = "global_function"
+// function = "crate::i18n::translate"
+
+impl ItemRow {
+    pub fn display_name_text(&self) -> String {
+        crate::i18n::translate(Some("items.display_name"), &self.display_name).into()
+    }
+}
+```
+
+`returns = "string"` 表示全局函数总是返回最终文案；`returns = "optional"` 表示返回 `Option<String>`，helper 会 fallback 到 raw text。
 
 - 如果未来 translator 需要返回错误，生成器可通过 option 切换为 `RuntimeDataResult<String>`；默认 helper 采用 fallback，不引入新的错误路径。
 - helper 返回 owned `String`，避免翻译值生命周期绑定到 translator 内部缓存实现。若业务要求零拷贝，可后续增加 `Cow<'a, str>` option。
