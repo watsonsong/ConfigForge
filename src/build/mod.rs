@@ -205,7 +205,7 @@ fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<Targ
     };
 
     let (runtime_output, code_output) = context.trace.record("run_exporters", None, || {
-        Ok(context.pool.install(|| {
+        let (runtime_output, code_output) = context.pool.install(|| {
             rayon::join(
                 || {
                     execute_runtime_export_nodes(
@@ -218,11 +218,9 @@ fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<Targ
                 },
                 || execute_codegen_export_nodes(&codegen_context, &meta_only_exports, context.pool),
             )
-        }))
+        });
+        Ok((runtime_output?, code_output?))
     })?;
-
-    let runtime_output = runtime_output?;
-    let code_output = code_output?;
     let (warnings, artifacts) = context.trace.record("collect_artifacts", None, || {
         let mut export_outputs = runtime_output.export_outputs;
         export_outputs.extend(code_output.export_outputs);
@@ -1091,6 +1089,52 @@ mod tests {
         assert_eq!(trace.stages[0].detail.as_deref(), Some("detail"));
         assert_eq!(trace.stages[1].name, "failed_stage");
         assert_eq!(trace.stages[1].status, BuildTraceStageStatus::Failed);
+    }
+
+    #[test]
+    fn run_exporters_trace_marks_nested_branch_error_as_failed() {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .expect("pool should build");
+        let meta = minimal_meta_model();
+        let target = NormalizedTargetConfig {
+            name: "bad_codegen".to_owned(),
+            tags: Vec::new(),
+            exports: vec![NormalizedExportTask {
+                name: "unknown".to_owned(),
+                type_id: "unknown_language".to_owned(),
+                dependency: ExportDependency::MetaOnly,
+                output: PathBuf::from("out/code"),
+                options: BTreeMap::new(),
+            }],
+        };
+        let target_tags = TargetTags::empty();
+        let project = CodeExportProject::default();
+        let mut trace = BuildTraceRecorder::new();
+
+        let result = execute_target_dag(TargetDagExecutionContext {
+            project_root: Path::new("."),
+            project: &project,
+            target: &target,
+            target_tags: &target_tags,
+            raw_meta: &meta,
+            data_root: None,
+            pool: &pool,
+            trace: &mut trace,
+        });
+
+        assert!(matches!(
+            result,
+            Err(ConfigForgeError::Validation(message))
+                if message.contains("no code generator registered")
+        ));
+        let run_exporters_stage = trace
+            .stages
+            .iter()
+            .find(|stage| stage.name == "run_exporters")
+            .expect("run_exporters stage should be recorded");
+        assert_eq!(run_exporters_stage.status, BuildTraceStageStatus::Failed);
     }
 
     fn export_task(name: &str, dependency: ExportDependency) -> NormalizedExportTask {
