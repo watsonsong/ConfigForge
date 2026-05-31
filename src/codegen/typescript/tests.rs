@@ -47,20 +47,29 @@ fn emits_async_loader_and_maps() {
     assert!(content.contains("readListLength?(): number;"));
     assert!(content.contains("runtime reader does not support row count"));
     assert!(content.contains("runtime reader does not support list length"));
+    assert!(content.contains(
+        "function openRuntimeDataSync(loader: RuntimeDataLoader, path: string): RuntimeDataReader"
+    ));
+    assert!(content.contains("runtime loader returned a Promise while synchronously opening"));
     assert!(content.contains("return reader.readRowCount();"));
     assert!(content.contains("return reader.readListLength();"));
     assert!(!content.contains("reader.length();"));
     assert!(content.contains("const length = readListLength(reader);"));
     assert!(content.contains("readonly displayName: string;"));
     assert!(content.contains("static async load"));
+    assert!(content.contains("static loadSync(loader: RuntimeDataLoader): GameData"));
     assert!(content.contains("static loadLazy(loader: RuntimeDataLoader): LazyGameData"));
     assert!(content.contains("export class LazyGameData"));
     assert!(content.contains("private itemsPromise?: Promise<ItemsTable>;"));
+    assert!(content.contains("private itemsValue?: ItemsTable;"));
     assert!(content.contains("constructor(loader: RuntimeDataLoader)"));
     assert!(content.contains("static loadLazy(loader: RuntimeDataLoader): LazyGameData { return new LazyGameData(loader); }"));
     assert!(content.contains("items(): Promise<ItemsTable>"));
-    assert!(content.contains("this.itemsPromise = ItemsTable.load(this.loader).catch((error) =>"));
+    assert!(content.contains("itemsSync(): ItemsTable"));
+    assert!(content.contains("this.itemsPromise = ItemsTable.load(this.loader).then((value) =>"));
+    assert!(content.contains("const value = ItemsTable.loadSync(this.loader);"));
     assert!(content.contains("async preloadAll(): Promise<void>"));
+    assert!(content.contains("preloadAllSync(): void"));
     assert!(content.contains("getById(id: number): ItemsRow | undefined"));
     assert!(content.contains("findByRarity(rarity: ItemRarity): readonly ItemsRow[]"));
     assert!(content.contains("Duplicate unique index key for ItemsTable.by_id"));
@@ -171,9 +180,14 @@ fn emits_object_table_as_typed_object_not_repository() {
         content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;")
     );
     assert!(content.contains("readonly gameConfig: GameConfigRow;"));
+    assert!(content.contains("gameConfig: (() => {"));
+    assert!(content.contains("const root = openRuntimeDataSync(loader, \"game_config\");"));
     assert!(content.contains("private gameConfigPromise?: Promise<GameConfigRow>;"));
+    assert!(content.contains("private gameConfigValue?: GameConfigRow;"));
     assert!(content.contains("gameConfig(): Promise<GameConfigRow>"));
+    assert!(content.contains("gameConfigSync(): GameConfigRow"));
     assert!(content.contains("Promise.resolve(this.loader.open(\"game_config\")).then((root) =>"));
+    assert!(content.contains("const root = openRuntimeDataSync(this.loader, \"game_config\");"));
     assert!(
         content.contains(
             "gameConfig: await Promise.resolve(loader.open(\"game_config\")).then(root =>"
@@ -204,8 +218,10 @@ fn emits_linked_field_relation_api() {
     assert!(content.contains("link(data: GameData): void;"));
     assert!(content.contains("this.gameConfig.link(this);"));
     assert!(content.contains("async linkAll(): Promise<void>"));
+    assert!(content.contains("linkAllSync(): void"));
     assert!(content.contains("await this.preloadAll();"));
     assert!(content.contains("gameConfig: await this.gameConfig(),"));
+    assert!(content.contains("gameConfig: this.gameConfigSync(),"));
     assert!(content.contains("data.gameConfig.link(data);"));
     assert!(content.contains(
         "function defaultItemGameConfigRow(this: GameConfigRow, data: GameData): ItemsRow"

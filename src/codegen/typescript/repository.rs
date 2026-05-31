@@ -135,6 +135,46 @@ pub(super) fn render_table(
     ));
     content.raw("  }\n\n");
     content.raw_fmt(format_args!(
+        "  static loadSync(loader: RuntimeDataLoader): {} {{\n",
+        names.repository_type_name(&table.name)?
+    ));
+    content.raw("    const root = openRuntimeDataSync(loader, this.dataFile);\n");
+    if table.schema_revision.is_some() {
+        content.raw("    const schemaRevision = root.schemaRevision?.();\n");
+        content.raw(concat!(
+            "    if (schemaRevision !== undefined && BigInt(schemaRevision) !== this.expectedSchemaRevision) {\n",
+            "      throw new Error(`schema revision mismatch for ${this.dataFile}`);\n",
+            "    }\n",
+        ));
+    }
+    content.raw("    enterRequiredField(root, \"rows\");\n");
+    content.raw("    const rowCount = readRowCount(root);\n");
+    content.raw_fmt(format_args!(
+        "    const rows: {}[] = [];\n",
+        names.row_type_name(&table.name)?
+    ));
+    content.raw("    try {\n");
+    content.raw("      for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {\n");
+    content.raw("        root.enterIndex(rowIndex);\n");
+    content.raw("        try {\n");
+    content.raw_fmt(format_args!(
+        "          rows.push({}(root));\n",
+        names.reader_function_name(&names.row_type_name(&table.name)?)?
+    ));
+    content.raw("        } finally {\n");
+    content.raw("          exitField(root);\n");
+    content.raw("        }\n");
+    content.raw("      }\n");
+    content.raw("    } finally {\n");
+    content.raw("      exitField(root);\n");
+    content.raw("    }\n");
+    content.raw("    root.ensureExhausted?.();\n");
+    content.raw_fmt(format_args!(
+        "    return new {}(rows ?? []);\n",
+        names.repository_type_name(&table.name)?
+    ));
+    content.raw("  }\n\n");
+    content.raw_fmt(format_args!(
         "  rows(): readonly {}[] {{ return this.rows_; }}\n\n",
         names.row_type_name(&table.name)?
     ));

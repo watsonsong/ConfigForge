@@ -258,6 +258,47 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         }
         content.raw("    });\n");
         content.raw("  }\n");
+        content.raw("\n  static loadSync(loader: RuntimeDataLoader): GameData {\n");
+        content.raw("    return new GameData({\n");
+        for table in &model.tables {
+            match table.kind {
+                CodeTableKind::Collection => content.raw_fmt(format_args!(
+                    "      {}: {}.loadSync(loader),\n",
+                    names.field_name(&table.name)?,
+                    names.repository_type_name(&table.name)?
+                )),
+                CodeTableKind::Object => {
+                    content.raw_fmt(format_args!(
+                        "      {}: (() => {{\n        const root = openRuntimeDataSync(loader, {:?});\n",
+                        names.field_name(&table.name)?,
+                        table.data_file
+                    ));
+                    if let Some(revision) = table.schema_revision {
+                        content.raw_fmt(format_args!(
+                            concat!(
+                                "        const schemaRevision = root.schemaRevision?.();\n",
+                                "        if (schemaRevision !== undefined && BigInt(schemaRevision) !== {revision}n) {{\n",
+                                "          throw new Error(`schema revision mismatch for {}`);\n",
+                                "        }}\n",
+                            ),
+                            table.data_file,
+                            revision = revision
+                        ));
+                    }
+                    content.raw_fmt(format_args!(
+                        concat!(
+                            "        const value = {}(root);\n",
+                            "        root.ensureExhausted?.();\n",
+                            "        return value;\n",
+                            "      }})(),\n",
+                        ),
+                        names.reader_function_name(&names.row_type_name(&table.name)?)?
+                    ));
+                }
+            }
+        }
+        content.raw("    });\n");
+        content.raw("  }\n");
         content.raw("\n  static loadLazy(loader: RuntimeDataLoader): LazyGameData { return new LazyGameData(loader); }\n");
         content.newline();
         render_game_data_link_all(&mut content, &model, &names)?;
@@ -268,6 +309,11 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         for table in &model.tables {
             content.raw_fmt(format_args!(
                 "  private {}Promise?: Promise<{}>;\n",
+                names.field_name(&table.name)?,
+                names.table_data_type_name(table)?
+            ));
+            content.raw_fmt(format_args!(
+                "  private {}Value?: {};\n",
                 names.field_name(&table.name)?,
                 names.table_data_type_name(table)?
             ));
@@ -286,7 +332,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
             content.raw_fmt(format_args!("    if (!this.{field_name}Promise) {{\n"));
             match table.kind {
                 CodeTableKind::Collection => content.raw_fmt(format_args!(
-                    "      this.{field_name}Promise = {}.load(this.loader).catch((error) => {{ this.{field_name}Promise = undefined; throw error; }});\n",
+                    "      this.{field_name}Promise = {}.load(this.loader).then((value) => {{ this.{field_name}Value = value; return value; }}).catch((error) => {{ this.{field_name}Promise = undefined; throw error; }});\n",
                     names.repository_type_name(&table.name)?
                 )),
                 CodeTableKind::Object => {
@@ -310,6 +356,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                         concat!(
                             "        const value = {}(root);\n",
                             "        root.ensureExhausted?.();\n",
+                            "        this.{field_name}Value = value;\n",
                             "        return value;\n",
                             "      }}).catch((error) => {{ this.{field_name}Promise = undefined; throw error; }});\n",
                         ),
@@ -320,6 +367,52 @@ impl CodeGenerator for TypeScriptCodeGenerator {
             }
             content.raw("    }\n");
             content.raw_fmt(format_args!("    return this.{field_name}Promise;\n"));
+            content.raw("  }\n\n");
+            content.raw_fmt(format_args!("  {}Sync(): {} {{\n", field_name, data_type));
+            content.raw_fmt(format_args!(
+                "    if (this.{field_name}Value) {{ return this.{field_name}Value; }}\n"
+            ));
+            content.raw_fmt(format_args!(
+                "    if (this.{field_name}Promise) {{ throw new Error({:?}); }}\n",
+                format!(
+                    "cannot synchronously access lazy table `{}` while async loading is in progress",
+                    table.name
+                )
+            ));
+            match table.kind {
+                CodeTableKind::Collection => content.raw_fmt(format_args!(
+                    "    const value = {}.loadSync(this.loader);\n",
+                    names.repository_type_name(&table.name)?
+                )),
+                CodeTableKind::Object => {
+                    content.raw_fmt(format_args!(
+                        "    const root = openRuntimeDataSync(this.loader, {:?});\n",
+                        table.data_file
+                    ));
+                    if let Some(revision) = table.schema_revision {
+                        content.raw_fmt(format_args!(
+                            concat!(
+                                "    const schemaRevision = root.schemaRevision?.();\n",
+                                "    if (schemaRevision !== undefined && BigInt(schemaRevision) !== {revision}n) {{\n",
+                                "      throw new Error(`schema revision mismatch for {}`);\n",
+                                "    }}\n",
+                            ),
+                            table.data_file,
+                            revision = revision
+                        ));
+                    }
+                    content.raw_fmt(format_args!(
+                        "    const value = {}(root);\n",
+                        names.reader_function_name(&names.row_type_name(&table.name)?)?
+                    ));
+                    content.raw("    root.ensureExhausted?.();\n");
+                }
+            }
+            content.raw_fmt(format_args!("    this.{field_name}Value = value;\n"));
+            content.raw_fmt(format_args!(
+                "    this.{field_name}Promise = Promise.resolve(value);\n"
+            ));
+            content.raw("    return value;\n");
             content.raw("  }\n\n");
         }
         content.raw("  async preloadAll(): Promise<void> {\n");
@@ -336,6 +429,38 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         for table in &model.tables {
             content.raw_fmt(format_args!(
                 "      {}: await this.{}(),\n",
+                names.field_name(&table.name)?,
+                names.field_name(&table.name)?
+            ));
+        }
+        content.raw("    } as GameData;\n");
+        for table in &model.tables {
+            if table
+                .foreign_keys
+                .iter()
+                .any(|foreign_key| foreign_key.linked_field.is_some())
+            {
+                content.raw_fmt(format_args!(
+                    "    data.{}.link(data);\n",
+                    names.field_name(&table.name)?
+                ));
+            }
+        }
+        content.raw("  }\n");
+        content.raw("\n  preloadAllSync(): void {\n");
+        for table in &model.tables {
+            content.raw_fmt(format_args!(
+                "    this.{}Sync();\n",
+                names.field_name(&table.name)?
+            ));
+        }
+        content.raw("  }\n\n");
+        content.raw("  linkAllSync(): void {\n");
+        content.raw("    this.preloadAllSync();\n");
+        content.raw("    const data = {\n");
+        for table in &model.tables {
+            content.raw_fmt(format_args!(
+                "      {}: this.{}Sync(),\n",
                 names.field_name(&table.name)?,
                 names.field_name(&table.name)?
             ));

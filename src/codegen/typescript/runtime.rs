@@ -38,6 +38,18 @@ export interface RuntimeDataLoader {
   open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;
 }
 
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return typeof (value as { then?: unknown }).then === "function";
+}
+
+function openRuntimeDataSync(loader: RuntimeDataLoader, path: string): RuntimeDataReader {
+  const reader = loader.open(path);
+  if (isPromiseLike(reader)) {
+    throw new Error(`runtime loader returned a Promise while synchronously opening ${path}`);
+  }
+  return reader;
+}
+
 "#,
     );
 }

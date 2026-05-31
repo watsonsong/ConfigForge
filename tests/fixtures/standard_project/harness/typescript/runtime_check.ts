@@ -75,6 +75,19 @@ async function main(): Promise<void> {
       throw new Error("binary lazy object table load failed");
     }
     await lazyBinaryData.linkAll();
+
+    const syncBinaryData = GameData.loadSync(binaryLoader);
+    if (syncBinaryData.items.getById(2001)?.id !== 2001) {
+      throw new Error("binary sync eager item table load failed");
+    }
+    const syncLazyBinaryData = GameData.loadLazy(binaryLoader);
+    if (syncLazyBinaryData.itemsSync().getById(2001)?.id !== 2001) {
+      throw new Error("binary sync lazy item table load failed");
+    }
+    if (syncLazyBinaryData.gameRulesSync().defaultClassId !== 1) {
+      throw new Error("binary sync lazy object table load failed");
+    }
+    syncLazyBinaryData.linkAllSync();
     return;
   }
 
@@ -126,6 +139,19 @@ async function main(): Promise<void> {
     throw new Error("lazy object table load failed");
   }
   await lazyData.linkAll();
+
+  const syncData = GameData.loadSync(loader);
+  if (syncData.items.getById(2001)?.name !== "Iron Ore") {
+    throw new Error("sync eager item table load failed");
+  }
+  const syncLazyData = new LazyGameData(loader);
+  if (syncLazyData.itemsSync().getById(2001)?.name !== "Iron Ore") {
+    throw new Error("sync lazy item table load failed");
+  }
+  if (syncLazyData.gameRulesSync().defaultClassId !== 1) {
+    throw new Error("sync lazy object table load failed");
+  }
+  syncLazyData.linkAllSync();
 }
 
 main().catch((error) => {
