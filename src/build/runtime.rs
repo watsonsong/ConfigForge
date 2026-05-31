@@ -13,7 +13,7 @@ use crate::{
     project::lexical_normalize_path,
     runtime_contract::RuntimeDataFile,
     validation::{
-        normalize_data_set_with_pool, validate_normalized_data_set_for_target_with_report,
+        normalize_data_set_with_pool, validate_normalized_data_set_for_target_with_report_and_pool,
     },
 };
 
@@ -60,8 +60,12 @@ pub(super) fn export_meta_and_data_tasks(
     ensure_planned_runtime_output_paths(export_tasks, linked_meta, target_tags, &registry)?;
 
     let data_set = normalize_data_set_with_pool(linked_meta, raw_sources.as_data_set(), pool)?;
-    let validation_report =
-        validate_normalized_data_set_for_target_with_report(linked_meta, target_tags, &data_set)?;
+    let validation_report = validate_normalized_data_set_for_target_with_report_and_pool(
+        linked_meta,
+        target_tags,
+        &data_set,
+        pool,
+    )?;
     let mut warnings = Vec::new();
     warnings.extend(validation_report.warning_messages());
     let mut task_outputs = Vec::new();

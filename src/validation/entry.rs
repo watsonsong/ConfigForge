@@ -187,6 +187,58 @@ pub fn validate_normalized_data_set_for_target_with_report(
         ));
     }
 
+    finish_target_data_set_validation(meta, target_tags, data_set, export_view, report)
+}
+
+pub fn validate_normalized_data_set_for_target_with_report_and_pool(
+    meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    data_set: &DataSet,
+    pool: &rayon::ThreadPool,
+) -> Result<ValidationReport> {
+    validate_normalized_data_set_for_target_with_table_view_validator_and_pool(
+        meta,
+        target_tags,
+        data_set,
+        pool,
+        |table_view| validate_normalized_table_view_with_report(table_view, Some(target_tags)),
+    )
+}
+
+pub(crate) fn validate_normalized_data_set_for_target_with_table_view_validator_and_pool(
+    meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    data_set: &DataSet,
+    pool: &rayon::ThreadPool,
+    table_view_validator: impl Fn(&super::ExportTableView<'_, '_>) -> ValidationReport + Sync,
+) -> Result<ValidationReport> {
+    let export_view =
+        ExportValidationView::for_target_with_pool(meta, data_set, target_tags, pool)?;
+    let mut table_reports = pool.install(|| {
+        export_view
+            .tables
+            .par_iter()
+            .enumerate()
+            .map(|(index, table_view)| (index, table_view_validator(table_view)))
+            .collect::<Vec<_>>()
+    });
+    table_reports.sort_by_key(|(index, _)| *index);
+
+    let mut report = ValidationReport::new();
+    for (_, mut table_report) in table_reports {
+        report.append(&mut table_report);
+    }
+
+    finish_target_data_set_validation(meta, target_tags, data_set, export_view, report)
+}
+
+fn finish_target_data_set_validation(
+    meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    data_set: &DataSet,
+    export_view: ExportValidationView<'_, '_>,
+    mut report: ValidationReport,
+) -> Result<ValidationReport> {
     if let Some(issue) = super::diagnostic::error_issue_from_result(
         "foreign_key.integrity",
         "foreign_key",

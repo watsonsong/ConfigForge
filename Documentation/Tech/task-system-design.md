@@ -941,11 +941,14 @@ Phase 8 实现复核：后续 Phase 9-12 的阶段顺序仍然成立。Phase 9 �
 
 目标：每个 target 在 target-filtered DataSetView / ExportValidationView 上独立验证。
 
-- TODO：显式构建 `TargetDataSetView` / `ExportValidationView` task，key 为 `(target, effective_tags, normalized_data_set_id)`。
-- TODO：target-aware validation 按 target + table / relation group 并行。
-- TODO：某 target validation error 只阻断该 target 的 data-backed exports；不影响其他 target 或 MetaOnly codegen。
-- TODO：多 target 时复用 full normalized DataSet，但不能复用 target view。
+- DONE：显式构建 `ExportValidationView`；`ExportValidationView::for_target_with_pool()` 使用 `(target/effective_tags, normalized_data_set)` 输入在 CPU pool 中并行构建 visible table views，并按 Meta table order 稳定收集。
+- DONE：target-aware table-local validation 按 target visible table 并行；`validate_normalized_data_set_for_target_with_report_and_pool()` 为每个 table view 生成局部 report，再按 target view order 稳定 append。
+- TODO：target-aware FK / relation-group validation 并行。当前 target FK 与 registry validators 仍在 table-local report 合并后串行执行。
+- DONE：某 target validation error 只阻断该 target 的 data-backed exports；当前 single-target build 已使用 target-aware validation gate，MetaOnly codegen 仍不依赖 Data。
+- TODO：多 target 时复用 full normalized DataSet，但不能复用 target view。当前 build 仍是 single-target，跨 target cache key 与 full-source-read 策略留给后续 multi-target DAG。
 - 验证：集成测试覆盖两个 target 使用不同 tags、row_export / field export / override source 结果不同；一个 target validation 失败不影响另一个 target codegen dry-run plan。
+
+Phase 9 实现复核：后续 Phase 10-12 的阶段顺序仍然成立。Phase 10 可以基于当前 target-aware validation gate 之后并行做 artifact planning / generation；但如果未来引入 multi-target build，仍需先完成 full normalized DataSet cache key、每个 target 独立 `ExportValidationView` cache key、以及 target FK/relation-group 并行策略。Phase 11/12 不需要因 target view 并行而调整顺序，但通用 DAG executor 需要把 `BuildTargetView` 与 `ValidateTargetView` 作为独立 node 暴露 tracing 与 cancellation 状态。
 
 ### Phase 10：Artifact planning 与 generator 并行
 

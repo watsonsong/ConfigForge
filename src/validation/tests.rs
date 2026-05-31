@@ -1746,6 +1746,156 @@ fn full_data_set_validation_with_pool_sorts_merged_table_reports_stably() {
 }
 
 #[test]
+fn target_view_validation_with_pool_runs_visible_table_tasks_concurrently() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "client_items"
+            source = "client_items.csv"
+            export_when = { any = ["client"] }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables]]
+            name = "client_levels"
+            source = "client_levels.csv"
+            export_when = { any = ["client"] }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables]]
+            name = "server_only"
+            source = "server_only.csv"
+            export_when = { any = ["server"] }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![
+        DataTable::new(
+            "client_items",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+        DataTable::new(
+            "client_levels",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+        DataTable::new(
+            "server_only",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+    ]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .expect("pool should build");
+    let active = Arc::new(AtomicUsize::new(0));
+    let max_active = Arc::new(AtomicUsize::new(0));
+
+    super::entry::validate_normalized_data_set_for_target_with_table_view_validator_and_pool(
+        &linked_meta,
+        &TargetTags::new(["client"]),
+        &data_set,
+        &pool,
+        |table_view| {
+            assert_ne!(table_view.meta.meta.name, "server_only");
+            let active_now = active.fetch_add(1, Ordering::SeqCst) + 1;
+            max_active.fetch_max(active_now, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(20));
+            active.fetch_sub(1, Ordering::SeqCst);
+            ValidationReport::new()
+        },
+    )
+    .expect("parallel target view validation should succeed");
+
+    assert!(max_active.load(Ordering::SeqCst) > 1);
+}
+
+#[test]
+fn target_view_validation_with_pool_sorts_merged_reports_stably() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "z_slow"
+            source = "z_slow.csv"
+            export_when = { any = ["client"] }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables]]
+            name = "a_fast"
+            source = "a_fast.csv"
+            export_when = { any = ["client"] }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![
+        DataTable::new(
+            "z_slow",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+        DataTable::new(
+            "a_fast",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+    ]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .expect("pool should build");
+
+    let report =
+        super::entry::validate_normalized_data_set_for_target_with_table_view_validator_and_pool(
+            &linked_meta,
+            &TargetTags::new(["client"]),
+            &data_set,
+            &pool,
+            |table_view| {
+                if table_view.meta.meta.name == "z_slow" {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                let mut report = ValidationReport::new();
+                report.push(ValidationIssue::new(
+                    "test.warning",
+                    ValidationSeverity::Warning,
+                    "test",
+                    format!("{} warning", table_view.meta.meta.name),
+                    DiagnosticLocation {
+                        table: Some(table_view.meta.meta.name.clone()),
+                        ..DiagnosticLocation::default()
+                    },
+                ));
+                report
+            },
+        )
+        .expect("warning-only target validation should succeed");
+
+    assert_eq!(
+        report
+            .issues
+            .iter()
+            .map(|issue| issue.location.table.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("a_fast"), Some("z_slow")]
+    );
+}
+
+#[test]
 fn object_table_validation_uses_single_logical_row_and_field_rules() {
     let meta = MetaModel::from_toml_str(
         r#"

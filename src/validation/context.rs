@@ -9,6 +9,8 @@ use crate::{
     meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
 };
 
+use rayon::prelude::*;
+
 pub struct ValidationContext<'meta, 'data> {
     pub linked_meta: &'meta LinkedMetaModel<'meta>,
     pub target_tags: Option<TargetTags>,
@@ -104,11 +106,82 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
         Ok(Self { tables })
     }
 
+    pub fn for_target_with_pool(
+        meta: &'meta LinkedMetaModel<'meta>,
+        data_set: &'data DataSet,
+        target_tags: &TargetTags,
+        pool: &rayon::ThreadPool,
+    ) -> Result<Self> {
+        let mut table_views = pool.install(|| {
+            meta.tables
+                .par_iter()
+                .enumerate()
+                .map(|(index, table_meta)| {
+                    (
+                        index,
+                        target_table_view(meta, table_meta, data_set, target_tags),
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+        table_views.sort_by_key(|(index, _)| *index);
+
+        let mut tables = Vec::new();
+        for (_, table_view) in table_views {
+            if let Some(table_view) = table_view? {
+                tables.push(table_view);
+            }
+        }
+
+        Ok(Self { tables })
+    }
+
     pub fn table(&self, name: &str) -> Option<&ExportTableView<'meta, 'data>> {
         self.tables
             .iter()
             .find(|table| table.meta.meta.name == name)
     }
+}
+
+fn target_table_view<'meta, 'data>(
+    _meta: &'meta LinkedMetaModel<'meta>,
+    table_meta: &'meta LinkedTableMeta<'meta>,
+    data_set: &'data DataSet,
+    target_tags: &TargetTags,
+) -> Result<Option<ExportTableView<'meta, 'data>>> {
+    if !table_meta.meta.is_exported_for(target_tags) {
+        return Ok(None);
+    }
+
+    let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
+        ConfigForgeError::Validation(format!(
+            "data set is missing table `{}`",
+            table_meta.meta.name
+        ))
+    })?;
+    let visible_fields = table_meta
+        .fields
+        .iter()
+        .filter(|field| field.meta.is_exported_for(target_tags))
+        .map(|field| field.meta.name.as_str())
+        .collect();
+    let visible_rows = table
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| {
+            table_meta
+                .meta
+                .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
+        })
+        .map(|(row_index, _)| visible_row_for(table, row_index))
+        .collect();
+    Ok(Some(ExportTableView::new(
+        table_meta,
+        table,
+        visible_fields,
+        visible_rows,
+    )))
 }
 
 pub struct ExportTableView<'meta, 'data> {
