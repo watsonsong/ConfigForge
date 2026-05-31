@@ -174,6 +174,34 @@ fn emits_object_table_as_typed_object_not_repository() {
 }
 
 #[test]
+fn emits_linked_field_relation_api() {
+    let meta = linked_field_fixture();
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = TypeScriptCodeGenerator
+        .generate(&input)
+        .expect("typescript code");
+    let content = &files[0].content;
+
+    assert!(content.contains("type LinkCache ="));
+    assert!(content.contains("interface LinkListCache"));
+    assert!(content.contains("defaultItemLink: LinkCache;"));
+    assert!(content.contains("starterItemsLink: LinkListCache;"));
+    assert!(content.contains("defaultItem(data: GameData): ItemsRow;"));
+    assert!(content.contains("starterItems(data: GameData): readonly ItemsRow[];"));
+    assert!(content.contains("indexOfById(id: number): number | undefined"));
+    assert!(content.contains("link(data: GameData): void;"));
+    assert!(content.contains("this.gameConfig.link(this);"));
+    assert!(content.contains(
+        "function defaultItemGameConfigRow(row: GameConfigRow, data: GameData): ItemsRow"
+    ));
+    assert!(content.contains("function starterItemsGameConfigRow(row: GameConfigRow, data: GameData): readonly ItemsRow[]"));
+    assert!(
+        content.contains("function linkGameConfigRow(row: GameConfigRow, data: GameData): void")
+    );
+}
+
+#[test]
 fn rejects_duplicate_generated_field_names() {
     let meta = duplicate_field_fixture();
 
@@ -183,6 +211,46 @@ fn rejects_duplicate_generated_field_names() {
         "duplicate generated identifier `fooBar`",
         "table `items` row fields",
     );
+}
+
+fn linked_field_fixture() -> MetaModel {
+    MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "default_item_id"
+            type = "int"
+            required = true
+            foreign_key = { name = "default_item", target_table = "items", linked_field = "default_item" }
+
+            [[tables.fields]]
+            name = "starter_item_ids"
+            type = "int[]"
+            required = true
+            foreign_key = { name = "starter_item", target_table = "items", linked_field = "starter_items" }
+        "#,
+    )
+    .expect("meta should load")
 }
 
 #[test]

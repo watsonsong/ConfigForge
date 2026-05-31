@@ -22,6 +22,10 @@ use reader::{
     render_struct_reader_function,
 };
 use repository::render_table;
+use repository::{
+    render_game_data_link_all, render_row_relation_cache_members, render_row_relation_members,
+    render_row_relation_methods,
+};
 use runtime::{render_runtime_reader_helpers, render_runtime_reader_interfaces};
 use symbols::validate_generated_symbols;
 use types::TypeScriptNames;
@@ -81,6 +85,22 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         content.raw("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;\n\n");
         render_runtime_reader_interfaces(&mut content);
         render_runtime_reader_helpers(&mut content);
+        if model.tables.iter().any(|table| {
+            table
+                .foreign_keys
+                .iter()
+                .any(|foreign_key| foreign_key.linked_field.is_some())
+        }) {
+            content.raw(concat!(
+                "type LinkCache =\n",
+                "  | { state: 'unresolved' }\n",
+                "  | { state: 'empty' }\n",
+                "  | { state: 'rowIndex'; rowIndex: number };\n\n",
+                "interface LinkListCache {\n",
+                "  rowIndexes?: number[];\n",
+                "}\n\n",
+            ));
+        }
 
         for code_enum in &model.enums {
             push_doc(&mut content, code_enum.desc.as_deref());
@@ -166,6 +186,8 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                     names.fragment_payload_type_name(table, fragment)?
                 ));
             }
+            render_row_relation_members(&mut content, &model, table, &names)?;
+            render_row_relation_cache_members(&mut content, table, &names)?;
             content.raw("}\n\n");
             render_row_reader_function(&mut content, table, &names)?;
             if table.kind == CodeTableKind::Collection {
@@ -239,12 +261,13 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         }
         content.raw("    });\n");
         content.raw("  }\n");
-        content.raw("\n  linkAll(): void {\n");
-        content.raw(
-            "    // Relation linking is currently emitted by backends with row-index caches.\n",
-        );
-        content.raw("  }\n");
+        content.newline();
+        render_game_data_link_all(&mut content, &model, &names)?;
         content.raw("}\n");
+
+        for table in &model.tables {
+            render_row_relation_methods(&mut content, &model, table, &names)?;
+        }
 
         Ok(vec![GeneratedFile {
             path: input

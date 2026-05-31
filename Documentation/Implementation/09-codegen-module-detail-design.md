@@ -139,7 +139,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 - `CodeTable.kind` 区分 `Object` / `Collection`。
 - ObjectTable 生成目标语言中的 singleton object 类型和访问入口。
 - ObjectTable 不生成 collection repository，不生成 index lookup helpers。
-- ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前 Rust/C++ 生成器已渲染 `linked_field` helper/cache/link，TypeScript 仅保留 `linkAll()` 占位。
+- ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前 Rust/C++/TypeScript 生成器已渲染 `linked_field` helper/cache/link。
 - Rust / TypeScript / C++ 都应避免把 ObjectTable 误表达为 rows collection。
 - Runtime data file path 仍由 build 传入的 `RuntimeDataFile` 决定；codegen 不关心 ObjectTable 的 CSV `key,value` 物理布局。
 
@@ -1009,13 +1009,14 @@ TypeScript 约束：
 
 TypeScript `linked_field` 生成规则：
 
-当前实现状态：TypeScript `GameData` 已生成 `linkAll()` no-op 占位以稳定 API，但尚未生成 relation getter、row-index cache 或 table-level `link(data)`；以下规则仍为目标态设计。
+当前实现状态：TypeScript 已生成 relation method、row-index cache、table-level `link(data)` 和 `GameData.linkAll()`，与 Rust/C++ linked helper 语义保持一致。
 
-- 若 table 没有任何 relation helper，仍可维持 interface/plain object 输出；一旦启用 `linked_field`，该 row/object 需要承载 cache。推荐生成 class，并在 `readRow` 中实例化 class，而不是 plain object。
-- 原始 FK 字段保持只读属性，例如 `readonly defaultClassId: number`；helper 使用命名后的方法或 getter，例如 `defaultClass(data: GameData): ClassRow`。如果使用 ES getter 属性，由于需要传入 `GameData`，仍应优先选择 method 形态。
-- cache 使用 private field（例如 `#defaultClassLink`）或模块私有 symbol，状态为 unresolved / empty / rowIndex。不能缓存 `ClassRow` 对象引用。
-- optional FK 返回 `ClassRow | undefined`；list FK 返回 `readonly ClassRow[]`，内部可每次用缓存 indexes map 到 row，也可构造临时数组，不能把可变内部数组暴露给调用方。
-- Table 生成 `link(data: GameData): void`；DataSet 生成 `linkAll(): void`。若 lookup 失败，方法应 throw `RuntimeDataError` 或生成器统一的 error 类型。
+- Row/Object 仍以 interface + plain object 输出；一旦启用 `linked_field`，该 row/object interface 会额外包含 relation method、cache slot 和 `link(data)` method，reader 在构造 object literal 时初始化 cache 与 method wrapper。
+- 原始 FK 字段保持普通属性，例如 `defaultClassId: number`；helper 使用命名后的 method，例如 `defaultClass(data: GameData): ClassesRow`。由于解析需要传入 `GameData`，不生成 ES getter 属性。
+- cache 字段由 `linked_field` 派生，例如 `defaultClassLink`。单值/可空 FK 使用 `LinkCache` union，状态为 `unresolved` / `empty` / `rowIndex`；list FK 使用 `LinkListCache` 保存 `rowIndexes?: number[]`。cache 只保存 row index，不缓存目标 row 对象引用。
+- optional FK 返回 `TargetRow | undefined`；list FK 返回 `readonly TargetRow[]`，内部按缓存 row indexes 映射到目标 repository `rowAt` 结果，并返回新数组，不暴露可变内部缓存。
+- 目标 unique index 额外生成私有语义的 `indexOfBy*` helper，relation method 首次访问或 `link(data)` 预解析时用它填充 cache。
+- Table 生成 `link(data: GameData): void` 遍历 rows；ObjectTable row 生成 `link(data)` method；DataSet 生成 `linkAll(): void`。若 lookup 失败，当前生成代码抛出 `Error`，错误信息包含 source relation 与 target index。
 
 Reader 基础语义：
 

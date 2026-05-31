@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    Result,
-    codegen::{CodeIndex, CodeTable, CodeWriter},
+    ConfigForgeError, Result,
+    codegen::{
+        CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriter,
+        ir::{CodeForeignKey, CodeRelationCardinality},
+    },
 };
 
 use super::types::TypeScriptNames;
@@ -135,8 +138,26 @@ pub(super) fn render_table(
         "  rows(): readonly {}[] {{ return this.rows_; }}\n\n",
         names.row_type_name(&table.name)?
     ));
+    content.raw_fmt(format_args!(
+        "  rowAt(rowIndex: number): {} | undefined {{ return this.rows_[rowIndex]; }}\n\n",
+        names.row_type_name(&table.name)?
+    ));
     for index in &table.indexes {
         render_index_function(content, table, index, names)?;
+        if index.unique {
+            render_index_of_function(content, index, names)?;
+        }
+    }
+    if table
+        .foreign_keys
+        .iter()
+        .any(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        content.raw("  link(data: GameData): void {\n");
+        content.raw("    for (const row of this.rows_) {\n");
+        content.raw("      row.link(data);\n");
+        content.raw("    }\n");
+        content.raw("  }\n\n");
     }
     content.raw("}\n\n");
     Ok(())
@@ -181,4 +202,525 @@ fn render_index_function(
         ));
     }
     Ok(())
+}
+
+fn render_index_of_function(
+    content: &mut CodeWriter,
+    index: &CodeIndex,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    let params = index
+        .fields
+        .iter()
+        .map(|field| {
+            Ok(format!(
+                "{}: {}",
+                names.field_name(&field.name)?,
+                names.ts_field_type(field)?
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?
+        .join(", ");
+    let key = names.ts_lookup_key(index)?;
+    content.raw_fmt(format_args!(
+        "  {}({}): number | undefined {{\n",
+        names.index_of_function_name(index)?,
+        params
+    ));
+    content.raw("    const row = this.");
+    content.raw(names.index_storage_name(index)?);
+    content.raw_fmt(format_args!(".get({key});\n"));
+    content.raw("    return row === undefined ? undefined : this.rows_.indexOf(row);\n");
+    content.raw("  }\n\n");
+    Ok(())
+}
+
+pub(super) fn render_row_relation_members(
+    content: &mut CodeWriter,
+    model: &CodeModel,
+    table: &CodeTable,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    for foreign_key in table
+        .foreign_keys
+        .iter()
+        .filter(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        let target_table = table_by_name(model, &foreign_key.target_table)?;
+        let target_row_type = names.row_type_name(&target_table.name)?;
+        let function_name = names.relation_function_name(foreign_key)?;
+        match foreign_key
+            .linked_field
+            .as_ref()
+            .expect("linked field")
+            .cardinality
+        {
+            CodeRelationCardinality::One => content.raw_fmt(format_args!(
+                "  {}(data: GameData): {};\n",
+                function_name, target_row_type
+            )),
+            CodeRelationCardinality::OptionalOne => content.raw_fmt(format_args!(
+                "  {}(data: GameData): {} | undefined;\n",
+                function_name, target_row_type
+            )),
+            CodeRelationCardinality::Many => content.raw_fmt(format_args!(
+                "  {}(data: GameData): readonly {}[];\n",
+                function_name, target_row_type
+            )),
+        }
+    }
+    if table
+        .foreign_keys
+        .iter()
+        .any(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        content.raw("  link(data: GameData): void;\n");
+    }
+    Ok(())
+}
+
+pub(super) fn render_row_relation_cache_initializers(
+    content: &mut CodeWriter,
+    table: &CodeTable,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    for foreign_key in table
+        .foreign_keys
+        .iter()
+        .filter(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        let cache_name = names.relation_cache_field_name(foreign_key)?;
+        match foreign_key
+            .linked_field
+            .as_ref()
+            .expect("linked field")
+            .cardinality
+        {
+            CodeRelationCardinality::Many => {
+                content.raw_fmt(format_args!(
+                    "    {cache_name}: {{ rowIndexes: undefined }},\n"
+                ));
+            }
+            _ => {
+                content.raw_fmt(format_args!(
+                    "    {cache_name}: {{ state: 'unresolved' }},\n"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn render_row_relation_cache_members(
+    content: &mut CodeWriter,
+    table: &CodeTable,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    for foreign_key in table
+        .foreign_keys
+        .iter()
+        .filter(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        let cache_name = names.relation_cache_field_name(foreign_key)?;
+        match foreign_key
+            .linked_field
+            .as_ref()
+            .expect("linked field")
+            .cardinality
+        {
+            CodeRelationCardinality::Many => {
+                content.raw_fmt(format_args!("  {cache_name}: LinkListCache;\n"));
+            }
+            _ => {
+                content.raw_fmt(format_args!("  {cache_name}: LinkCache;\n"));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn render_row_relation_method_initializers(
+    content: &mut CodeWriter,
+    table: &CodeTable,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    let row_type = names.row_type_name(&table.name)?;
+    for foreign_key in table
+        .foreign_keys
+        .iter()
+        .filter(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        let function_name = names.relation_function_name(foreign_key)?;
+        content.raw_fmt(format_args!(
+            "    {function_name}(data: GameData): ReturnType<typeof {function_name}{row_type}> {{ return {function_name}{row_type}(this, data); }},\n"
+        ));
+    }
+    if table
+        .foreign_keys
+        .iter()
+        .any(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        content.raw_fmt(format_args!(
+            "    link(data: GameData) {{ return link{row_type}(this, data); }},\n"
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn render_row_relation_methods(
+    content: &mut CodeWriter,
+    model: &CodeModel,
+    table: &CodeTable,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    for foreign_key in table
+        .foreign_keys
+        .iter()
+        .filter(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        let target_table = table_by_name(model, &foreign_key.target_table)?;
+        let target_index = index_by_name(target_table, &foreign_key.target_index)?;
+        let target_row_type = names.row_type_name(&target_table.name)?;
+        let function_name = names.relation_function_name(foreign_key)?;
+        match foreign_key
+            .linked_field
+            .as_ref()
+            .expect("linked field")
+            .cardinality
+        {
+            CodeRelationCardinality::One => render_single_relation_method(
+                content,
+                table,
+                foreign_key,
+                target_table,
+                target_index,
+                names,
+                &target_row_type,
+                &function_name,
+                false,
+            )?,
+            CodeRelationCardinality::OptionalOne => render_single_relation_method(
+                content,
+                table,
+                foreign_key,
+                target_table,
+                target_index,
+                names,
+                &target_row_type,
+                &function_name,
+                true,
+            )?,
+            CodeRelationCardinality::Many => render_many_relation_method(
+                content,
+                table,
+                foreign_key,
+                target_table,
+                target_index,
+                names,
+                &target_row_type,
+                &function_name,
+            )?,
+        }
+    }
+    if table
+        .foreign_keys
+        .iter()
+        .any(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        let row_type = names.row_type_name(&table.name)?;
+        content.raw_fmt(format_args!(
+            "function link{}(row: {}, data: GameData): void {{\n",
+            row_type, row_type
+        ));
+        for foreign_key in table
+            .foreign_keys
+            .iter()
+            .filter(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            content.raw_fmt(format_args!(
+                "  row.{}(data);\n",
+                names.relation_function_name(foreign_key)?
+            ));
+        }
+        content.raw("}\n\n");
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_single_relation_method(
+    content: &mut CodeWriter,
+    source_table: &CodeTable,
+    foreign_key: &CodeForeignKey,
+    target_table: &CodeTable,
+    target_index: &CodeIndex,
+    names: &TypeScriptNames<'_>,
+    target_row_type: &str,
+    function_name: &str,
+    optional: bool,
+) -> Result<()> {
+    let source_row_type = names.row_type_name(&source_table.name)?;
+    let cache_name = names.relation_cache_field_name(foreign_key)?;
+    let target_data_field = names.field_name(&target_table.name)?;
+    let index_of_name = names.index_of_function_name(target_index)?;
+    let return_type = if optional {
+        format!("{target_row_type} | undefined")
+    } else {
+        target_row_type.to_owned()
+    };
+    content.raw_fmt(format_args!(
+        "function {}{}(row: {}, data: GameData): {} {{\n",
+        function_name, source_row_type, source_row_type, return_type
+    ));
+    content.raw_fmt(format_args!("  const cached = row.{cache_name};\n"));
+    content.raw("  if (cached.state === 'empty') {\n");
+    if optional {
+        content.raw("    return undefined;\n");
+    } else {
+        content.raw_fmt(format_args!(
+            "    throw new Error({:?});\n",
+            format!(
+                "required relation `{}` unexpectedly cached empty",
+                foreign_key.name
+            )
+        ));
+    }
+    content.raw("  }\n");
+    content.raw("  if (cached.state === 'rowIndex') {\n");
+    content.raw_fmt(format_args!(
+        "    const rowValue = data.{target_data_field}.rowAt(cached.rowIndex);\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    if (rowValue === undefined) {{ throw new Error({:?}); }}\n",
+        format!(
+            "cached relation `{}` row index out of bounds",
+            foreign_key.name
+        )
+    ));
+    content.raw("    return rowValue;\n");
+    content.raw("  }\n");
+    if optional {
+        render_optional_empty_check(content, foreign_key, names, &cache_name)?;
+    }
+    let value_exprs = relation_value_exprs(foreign_key, names)?;
+    let lookup_key = names.ts_relation_lookup_key(target_index, &value_exprs)?;
+    content.raw_fmt(format_args!(
+        "  const rowIndex = data.{target_data_field}.{index_of_name}({lookup_key});\n"
+    ));
+    content.raw_fmt(format_args!(
+        "  if (rowIndex === undefined) {{ throw new Error({:?}); }}\n",
+        format!(
+            "foreign key relation `{}.{}` could not resolve target `{}.{}`",
+            source_table.name, foreign_key.name, target_table.name, target_index.name
+        )
+    ));
+    content.raw_fmt(format_args!(
+        "  row.{cache_name} = {{ state: 'rowIndex', rowIndex }};\n"
+    ));
+    content.raw_fmt(format_args!(
+        "  const rowValue = data.{target_data_field}.rowAt(rowIndex);\n"
+    ));
+    content.raw_fmt(format_args!(
+        "  if (rowValue === undefined) {{ throw new Error({:?}); }}\n",
+        format!(
+            "resolved relation `{}` row index out of bounds",
+            foreign_key.name
+        )
+    ));
+    content.raw("  return rowValue;\n");
+    content.raw("}\n\n");
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_many_relation_method(
+    content: &mut CodeWriter,
+    source_table: &CodeTable,
+    foreign_key: &CodeForeignKey,
+    target_table: &CodeTable,
+    target_index: &CodeIndex,
+    names: &TypeScriptNames<'_>,
+    target_row_type: &str,
+    function_name: &str,
+) -> Result<()> {
+    let source_row_type = names.row_type_name(&source_table.name)?;
+    let cache_name = names.relation_cache_field_name(foreign_key)?;
+    let source_field = foreign_key.fields.first().ok_or_else(|| {
+        ConfigForgeError::Validation(format!(
+            "foreign key `{}` has no source fields",
+            foreign_key.name
+        ))
+    })?;
+    let source_field_name = names.field_name(&source_field.name)?;
+    let target_data_field = names.field_name(&target_table.name)?;
+    let index_of_name = names.index_of_function_name(target_index)?;
+    content.raw_fmt(format_args!(
+        "function {}{}(row: {}, data: GameData): readonly {}[] {{\n",
+        function_name, source_row_type, source_row_type, target_row_type
+    ));
+    content.raw_fmt(format_args!("  const cached = row.{cache_name};\n"));
+    content.raw("  if (cached.rowIndexes === undefined) {\n");
+    content.raw("    const rowIndexes: number[] = [];\n");
+    if source_field.required {
+        content.raw_fmt(format_args!(
+            "    for (const key of row.{source_field_name}) {{\n"
+        ));
+    } else {
+        content.raw_fmt(format_args!(
+            "    for (const key of row.{source_field_name} ?? []) {{\n"
+        ));
+    }
+    content.raw_fmt(format_args!(
+        "      const rowIndex = data.{target_data_field}.{index_of_name}(key);\n"
+    ));
+    content.raw_fmt(format_args!(
+        "      if (rowIndex === undefined) {{ throw new Error({:?}); }}\n",
+        format!(
+            "foreign key relation `{}.{}` could not resolve list target `{}.{}`",
+            source_table.name, foreign_key.name, target_table.name, target_index.name
+        )
+    ));
+    content.raw("      rowIndexes.push(rowIndex);\n");
+    content.raw("    }\n");
+    content.raw("    cached.rowIndexes = rowIndexes;\n");
+    content.raw("  }\n");
+    content.raw_fmt(format_args!(
+        "  return cached.rowIndexes.map((rowIndex) => {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    const rowValue = data.{target_data_field}.rowAt(rowIndex);\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    if (rowValue === undefined) {{ throw new Error({:?}); }}\n",
+        format!(
+            "resolved list relation `{}` row index out of bounds",
+            foreign_key.name
+        )
+    ));
+    content.raw("    return rowValue;\n");
+    content.raw("  });\n");
+    content.raw("}\n\n");
+    Ok(())
+}
+
+fn render_optional_empty_check(
+    content: &mut CodeWriter,
+    foreign_key: &CodeForeignKey,
+    names: &TypeScriptNames<'_>,
+    cache_name: &str,
+) -> Result<()> {
+    let optional_fields = foreign_key
+        .fields
+        .iter()
+        .filter(|field| !field.required)
+        .collect::<Vec<_>>();
+    if optional_fields.is_empty() {
+        return Ok(());
+    }
+    let empty_conditions = optional_fields
+        .iter()
+        .map(|field| {
+            Ok(format!(
+                "row.{} === undefined",
+                names.field_name(&field.name)?
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if optional_fields.len() == foreign_key.fields.len() {
+        content.raw_fmt(format_args!(
+            "  if ({}) {{ row.{cache_name} = {{ state: 'empty' }}; return undefined; }}\n",
+            empty_conditions.join(" && ")
+        ));
+        if foreign_key.fields.len() > 1 {
+            content.raw_fmt(format_args!(
+                "  if ({}) {{ throw new Error({:?}); }}\n",
+                empty_conditions.join(" || "),
+                format!(
+                    "foreign key relation `{}` has partial empty source key",
+                    foreign_key.name
+                )
+            ));
+        }
+    } else {
+        content.raw_fmt(format_args!(
+            "  if ({}) {{ throw new Error({:?}); }}\n",
+            empty_conditions.join(" || "),
+            format!(
+                "foreign key relation `{}` has partial empty source key",
+                foreign_key.name
+            )
+        ));
+    }
+    Ok(())
+}
+
+fn relation_value_exprs(
+    foreign_key: &CodeForeignKey,
+    names: &TypeScriptNames<'_>,
+) -> Result<Vec<String>> {
+    foreign_key
+        .fields
+        .iter()
+        .map(|field| {
+            let field_name = names.field_name(&field.name)?;
+            if field.required {
+                Ok(format!("row.{field_name}"))
+            } else {
+                Ok(format!("row.{field_name}!"))
+            }
+        })
+        .collect()
+}
+
+pub(super) fn render_game_data_link_all(
+    content: &mut CodeWriter,
+    model: &CodeModel,
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    content.raw("  linkAll(): void {\n");
+    for table in &model.tables {
+        if table
+            .foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            match table.kind {
+                CodeTableKind::Collection => content.raw_fmt(format_args!(
+                    "    this.{}.link(this);\n",
+                    names.field_name(&table.name)?
+                )),
+                CodeTableKind::Object => content.raw_fmt(format_args!(
+                    "    this.{}.link(this);\n",
+                    names.field_name(&table.name)?
+                )),
+            }
+        }
+    }
+    content.raw("  }\n");
+    Ok(())
+}
+
+fn table_by_name<'a>(model: &'a CodeModel, name: &str) -> Result<&'a CodeTable> {
+    model
+        .tables
+        .iter()
+        .find(|table| table.name == name)
+        .ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "typescript codegen foreign key references unknown target table `{name}`"
+            ))
+        })
+}
+
+fn index_by_name<'a>(table: &'a CodeTable, name: &str) -> Result<&'a CodeIndex> {
+    table
+        .indexes
+        .iter()
+        .find(|index| index.name == name)
+        .ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "typescript codegen foreign key references unknown target index `{}.{}`",
+                table.name, name
+            ))
+        })
 }

@@ -6,7 +6,10 @@ use crate::{
     codegen::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriter},
 };
 
-use super::types::TypeScriptNames;
+use super::{
+    repository::{render_row_relation_cache_initializers, render_row_relation_method_initializers},
+    types::TypeScriptNames,
+};
 
 pub(super) fn render_enum_reader_function(
     content: &mut CodeWriter,
@@ -89,7 +92,7 @@ fn render_reader_function_body(
     content.raw_fmt(format_args!(
         "  reader.beginRecord?.({optional_slot_count});\n"
     ));
-    content.raw("  const value = {\n");
+    content.raw_fmt(format_args!("  const value: {type_name} = {{\n"));
     for field in fields {
         content.raw_fmt(format_args!(
             "    {}: {},\n",
@@ -111,6 +114,8 @@ fn render_reader_function_body(
                 reader_function = reader_function,
             ));
         }
+        render_row_relation_cache_initializers(content, table, names)?;
+        render_row_relation_method_initializers(content, table, names)?;
     }
     content.raw("  };\n");
     content.raw("  reader.endRecord?.();\n");

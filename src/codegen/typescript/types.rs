@@ -5,7 +5,7 @@ use crate::{
     ConfigForgeError, Result,
     codegen::{
         CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
-        CodeTableKind, CodeTypeRef, CodegenOptions, naming,
+        CodeTableKind, CodeTypeRef, CodegenOptions, ir::CodeForeignKey, naming,
     },
 };
 
@@ -85,6 +85,32 @@ impl<'a> TypeScriptNames<'a> {
         let prefix = if index.unique { "get_by" } else { "find_by" };
         let suffix = index.name.trim_start_matches("by_");
         self.identifier(&format!("{prefix}_{suffix}"), self.options.naming.function)
+    }
+
+    pub(super) fn index_of_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(
+            &format!("index_of_by_{suffix}"),
+            self.options.naming.function,
+        )
+    }
+
+    pub(super) fn relation_function_name(&self, foreign_key: &CodeForeignKey) -> Result<String> {
+        let name = foreign_key
+            .linked_field
+            .as_ref()
+            .map(|linked_field| linked_field.name.as_str())
+            .unwrap_or(foreign_key.name.as_str());
+        self.identifier(name, self.options.naming.function)
+    }
+
+    pub(super) fn relation_cache_field_name(&self, foreign_key: &CodeForeignKey) -> Result<String> {
+        let name = foreign_key
+            .linked_field
+            .as_ref()
+            .map(|linked_field| linked_field.name.as_str())
+            .unwrap_or(foreign_key.name.as_str());
+        self.field_name(&format!("{name}_link"))
     }
 
     pub(super) fn ts_type(&self, code_type: &CodeTypeRef) -> Result<String> {
@@ -240,6 +266,18 @@ impl<'a> TypeScriptNames<'a> {
                     .collect::<Result<Vec<_>>>()?
                     .join(", ")
             ))
+        }
+    }
+
+    pub(super) fn ts_relation_lookup_key(
+        &self,
+        target_index: &CodeIndex,
+        values: &[String],
+    ) -> Result<String> {
+        if target_index.fields.len() == 1 {
+            Ok(values.first().cloned().unwrap_or_default())
+        } else {
+            Ok(format!("JSON.stringify([{}])", values.join(", ")))
         }
     }
 

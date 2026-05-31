@@ -53,6 +53,17 @@ async function main(): Promise<void> {
     if (binaryData.gameRules.defaultClassId !== 1 || binaryData.gameRules.starterItemIds.join(",") !== "2001,2002") {
       throw new Error("binary object table array field load failed");
     }
+    if (binaryData.gameRules.defaultClass(binaryData).classId !== 1) {
+      throw new Error("binary object table single relation failed");
+    }
+    const binaryStarterItems = binaryData.gameRules.starterItems(binaryData);
+    if (binaryStarterItems.length !== 2 || binaryStarterItems[0]?.id !== 2001 || binaryStarterItems[1]?.id !== 2002) {
+      throw new Error("binary object table list relation failed");
+    }
+    binaryData.linkAll();
+    if (binaryData.gameRules.defaultClass(binaryData).classId !== 1) {
+      throw new Error("binary link all relation cache failed");
+    }
     return;
   }
 
@@ -80,6 +91,17 @@ async function main(): Promise<void> {
   }
   if (data.gameRules.defaultClassId !== 1 || data.gameRules.starterItemIds.join(",") !== "2001,2002") {
     throw new Error("object table array field load failed");
+  }
+  if (data.gameRules.defaultClass(data).classId !== 1) {
+    throw new Error("object table single relation failed");
+  }
+  const starterItems = data.gameRules.starterItems(data);
+  if (starterItems.length !== 2 || starterItems[0]?.id !== 2001 || starterItems[1]?.id !== 2002) {
+    throw new Error("object table list relation failed");
+  }
+  data.linkAll();
+  if (data.gameRules.defaultClass(data).classId !== 1) {
+    throw new Error("link all relation cache failed");
   }
 }
 
