@@ -366,7 +366,7 @@ MetaLink + TargetView/Validation success
 - Project Config imports 按 canonical path 或 import 声明顺序稳定合并；
 - tables 按 MetaModel 中顺序输出；
 - export tasks 按 Project Config 中顺序输出；
-- diagnostics 使用 `(severity, code, path, table, row, field, message)` 或现有稳定 key 排序；
+- diagnostics 使用当前 validation stable key `(severity, target, table, row_index, source_row_number, field, validator, code, message)` 排序；
 - artifact 写入前必须先汇总所有计划路径并做冲突检查。
 
 ### 5.3 所有权与生命周期约束
@@ -564,10 +564,7 @@ NormalizeTable[*]
   -> merge ValidationIssue stable sort
 ```
 
-当前 validator 是 fail-fast 的 `Result<()>` 与 `ValidationReport` 混合模型。并行化前应先明确诊断收集策略：
-
-- 如果继续 fail-fast：并行收益有限，且首个错误会受完成顺序影响；
-- 建议中期迁移到收集所有 table-local issues，再按稳定 key 输出。
+当前 validator 主流程已迁移为 report-backed 模型：`*_with_report()` 先收集 `ValidationReport`，兼容 `Result<()>` 入口再通过 `into_result()` 做 error gate。Phase 8/9 并行化时必须保持这一模型：每个并行 task 返回局部 report，由 coordination 层 `append()` / `extend()` 后按 stable key 排序，不能从 worker 直接写共享 mutable report，也不能回退为“完成最快的错误先返回”。
 
 Full validation 与 target validation 的失败策略应分层：
 
@@ -922,19 +919,23 @@ Phase 6 实现复核：后续 Phase 7-12 的阶段顺序仍然成立。Phase 7 �
 
 目标：先改诊断模型，再并行 validation，避免 fail-fast 与并发冲突。
 
-- TODO：将基础 required/type/enum/unique/FK 与 registry validators 统一到可合并的 `ValidationReport` 输出；保留兼容入口把 error report 转成 `Result<()>`。
-- TODO：定义 validation issue stable sort key，包含 severity、target、table、row、field、validator kind/name、message。
-- TODO：明确 warning / error gate：warning 不阻断 export，error 阻断对应依赖。
+- DONE：将基础 required/type/enum/unique/FK 与 registry validators 统一到可合并的 `ValidationReport` 输出；兼容入口保留 `Result<()>`，但 error gate 返回 `ConfigForgeError::ValidationReport`。
+- DONE：定义 validation issue stable sort key，包含 severity、target、table、row_index、source_row_number、field、validator、code、message。
+- DONE：明确 warning / error gate：warning 不阻断 export，error 阻断对应依赖。
 - 验证：validation 单元测试不只断言失败，还断言多个 issue 的稳定顺序；现有 CLI 错误信息可接受兼容变化时需同步文档。
+
+Phase 7 实现复核：后续 Phase 8-12 的阶段顺序仍然成立。Phase 8/9 可以直接复用 `ValidationReport::append()` / `extend()` / `sort_by_stable_key()` 做并行结果合并；需要补充的是 table-local validation 与 FK/relation-group validation 的任务拆分、局部 report 生命周期，以及 `--jobs 1` / `--jobs N` 下 report 内容和排序完全一致的测试。Phase 10-12 不需要因 report 模型调整顺序，但 data-backed artifact generation 必须继续等待对应 validation report 无 error。
 
 ### Phase 8：FullDataSet validation 并行
 
 目标：在 normalized full DataSet 上并行运行与 target 无关的验证。
 
-- TODO：把 table-local full validation 按 table 并行。
-- TODO：把 FK / cross-table validation 按 relation group 或 target table index cache 并行，同时避免重复构建昂贵索引。
-- TODO：FullDataSet error 阻断所有 data-backed target exports，但继续收集其他 full validation diagnostics。
+- DONE：把 table-local full validation 按 table 并行；`validate_normalized_data_set_with_report_and_pool()` 在 Rayon pool 中为每个 table 生成局部 report，再按 Meta table order 稳定 append。
+- TODO：把 FK / cross-table validation 按 relation group 或 target table index cache 并行，同时避免重复构建昂贵索引。当前 Phase 8 仍在 table-local report 合并后串行执行 full FK 与 registry validators。
+- TODO：FullDataSet error 阻断所有 data-backed target exports，但继续收集其他 full validation diagnostics。当前 single-target build 仍读取 target-scoped raw tables，完整 full DataSet gate 需要 Phase 9 / multi-target DAG 先明确 full normalized DataSet 的 cache key 与 target view 派生关系。
 - 验证：full validation 单元测试覆盖多表多错误稳定排序、FK cache 并发安全、`--jobs 1` / `--jobs 4` 结果一致。
+
+Phase 8 实现复核：后续 Phase 9-12 的阶段顺序仍然成立。Phase 9 需要在目标态 DAG 中区分“full normalized DataSet”与“target-scoped SourceRead/ExportValidationView”：如果继续按 effective tags 读取 source，则不能把该 DataSet 当成跨 target full DataSet 复用；若要启用真正 FullDataSet gate，必须先定义 full source read / target override source 的 cache key 和 TargetView 派生规则。Phase 10-12 不需要调整顺序，但 artifact generation 仍必须等待对应 validation gate 无 error。
 
 ### Phase 9：TargetView build 与 TargetView validation 并行
 

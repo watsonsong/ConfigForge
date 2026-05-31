@@ -56,6 +56,7 @@ Typed value 解析不在 Validation 模块内重复实现。Validation 需要验
 - `validate_data_set_with_report()`：完整数据集校验，保留 warning report。
 - `validate_data_set_for_target()`：target-aware 校验。
 - `validate_data_set_for_target_with_report()`：target-aware 校验并返回 `ValidationReport`。
+- `validate_normalized_data_set_with_report_and_pool()`：在已 normalized 的 full `DataSet` 上把 table-local 基础校验按 table 分发到 Rayon CPU pool，按 Meta table 顺序合并局部 report，再执行 full FK / registry validators 并按 stable key 排序。
 - `normalize_data_set()`：串行应用 default，产出后续校验和导出共享的 normalized data。
 - `normalize_data_set_with_pool()`：按 table 并行执行 `normalize_table()`，再按输入 DataSet table 顺序稳定 merge；用于 build 主流程的 CPU pool。
 
@@ -118,7 +119,7 @@ Data validation 阶段规则：
 ### 6.1.2 非目标
 
 - 第一阶段不实现动态加载外部二进制插件。
-- 第一阶段不要求把所有诊断模型替换成结构化 `DiagnosticReport`；可以继续桥接到 `ConfigForgeError::Validation(String)`。
+- 当前实现已将 validation 内部输出收敛为结构化 `ValidationReport`；兼容 `Result<()>` 入口仍保留，并在 error gate 处桥接为 `ConfigForgeError::ValidationReport`。
 - 第一阶段不实现表达式语言。跨字段/跨表复杂规则先通过注册 validator 的 typed config 表达。
 
 ## 6.2 Meta 配置设计
@@ -751,17 +752,14 @@ CLI 规则：
 
 ## 6.8 诊断模型
 
-短期可以继续输出 `ConfigForgeError::Validation(String)`，但 validator 内部建议先生成结构化 issue：
+当前 validation 主流程以 `ValidationReport` / `ValidationIssue` 作为内部标准输出，public `Result<()>` 入口只在边界层调用 `ValidationReport::into_result()` 做 error gate：
 
 ```rust
 pub struct ValidationIssue {
     pub code: String,
-    pub severity: ValidationSeverity,
+    pub severity: DiagnosticSeverity,
     pub message: String,
-    pub table: Option<String>,
-    pub field: Option<String>,
-    pub row_index: Option<usize>,
-    pub source_row_number: Option<usize>,
+    pub location: DiagnosticLocation,
     pub validator: String,
     pub target: Option<String>,
     pub hint: Option<String>,
@@ -773,14 +771,19 @@ pub struct ValidationReport {
 
 impl ValidationReport {
     pub fn has_error(&self) -> bool;
+    pub fn into_result(self) -> Result<()>;
+    pub fn sort_by_stable_key(&mut self);
 }
 ```
 
 桥接策略：
 
-- 第一阶段内部就使用 `ValidationReport` 收集 error / warning；CLI 根据 `has_error()` 决定退出码，warning 只输出不阻塞构建。
-- 为兼容现有 `Result<()>` API，可在边界层把 report 中的 error issue 转成字符串并复用 `ConfigForgeError::Validation`。
-- 中期引入统一 diagnostics 后，直接输出结构化 report。
+- `validate_data_set()` / `validate_data_set_for_target()` 等兼容入口返回 `Result<()>`，但内部先调用 `*_with_report()` 收集完整 report，再由 `into_result()` 判断是否存在 error。
+- `validate_normalized_table_with_report()`、`validate_normalized_table_for_target_with_report()`、`validate_data_set_with_report()` 与 `validate_data_set_for_target_with_report()` 会尽量收集同一层级内所有 issue，而不是遇到第一条 required/type/enum/unique/FK 错误立即返回。
+- `validate_normalized_data_set_with_report_and_pool()` 让每个 table-local full validation task 返回局部 `ValidationReport`；coordination 层按 Meta table declaration order append，然后继续执行 dataset-level FK 与 registry validators，最后调用 `sort_by_stable_key()`。因此 `--jobs 1` / `--jobs N` 不应改变 report 内容或排序。
+- `ValidationReport::into_result()` 将 error report 桥接为 `ConfigForgeError::ValidationReport`；老的 `ConfigForgeError::Validation(String)` 仍可由更底层单项 helper 产生，但不再作为 validation 汇总模型。
+- warning issue 保留在 report 中，不阻断构建；只要存在 error，依赖对应 data validation 的 export 被阻断。
+- report 合并使用局部 report + `append()` / `extend()`，再调用 `sort_by_stable_key()`，避免未来并行 validation 受任务完成顺序影响。stable key 当前为 `(severity, target, table, row_index, source_row_number, field, validator, code, message)`。
 
 错误码建议：
 
@@ -886,7 +889,7 @@ impl ValidationReport {
 - FK / unique 依赖字段值已完成基础 parse/type 检查。
 - 后续如果支持 fail-fast，可以在前置基础错误过多时跳过昂贵的 dataset-level validator。
 
-第一阶段可以继续发现第一个错误即返回；中期应收集多个 `ValidationIssue`，统一排序后输出。
+当前实现已从 validation 主流程移除 fail-fast 汇总策略：基础 table checks、registry validators、foreign key 与 target-aware checks 都先进入 `ValidationReport`，再统一排序并在边界层做 error gate。后续如果为了性能引入“错误过多后跳过昂贵 dataset-level validator”的策略，必须保持已收集 warning/error 不丢失，并在报告中明确被跳过的检查。
 
 ## 6.11 测试计划
 

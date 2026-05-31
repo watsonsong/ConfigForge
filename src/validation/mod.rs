@@ -22,7 +22,7 @@ pub use entry::{
     validate_data_set, validate_data_set_for_target, validate_data_set_for_target_with_report,
     validate_data_set_with_report, validate_normalized_data_set,
     validate_normalized_data_set_for_target, validate_normalized_data_set_for_target_with_report,
-    validate_table, validate_table_for_target,
+    validate_normalized_data_set_with_report_and_pool, validate_table, validate_table_for_target,
 };
 pub use registry::{
     CompiledValidationPlan, CompiledValidator, ValidatorFactory, ValidatorRegistry,

@@ -6,9 +6,11 @@ use std::collections::{BTreeSet, HashSet};
 use crate::{
     ConfigForgeError, Result,
     data::{DataResolver, DataRow, DataTable},
+    diagnostic::DiagnosticLocation,
     meta::{LinkedField, LinkedFieldMeta, LinkedIndexMeta, LinkedTableMeta, TableKind, TargetTags},
 };
 
+use super::diagnostic::{ValidationReport, error_issue_from_result};
 use super::struct_value::{
     validate_struct_child_path, validate_struct_field_value_for_row,
     validate_struct_occurrence_value, validate_supported_field_type, validate_value_type,
@@ -17,27 +19,98 @@ use super::struct_value::{
 use super::{ExportTableView, fragment_field_key, visible_row_for};
 
 pub fn validate_normalized_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
-    DataResolver::resolve_table(meta, table, None)?;
+    validate_normalized_table_with_report(meta, table).into_result()
+}
+
+pub fn validate_normalized_table_with_report(
+    meta: &LinkedTableMeta<'_>,
+    table: &DataTable,
+) -> ValidationReport {
+    let mut report = ValidationReport::new();
+    collect_table_check(
+        &mut report,
+        "table.resolve",
+        "type",
+        DataResolver::resolve_table(meta, table, None).map(|_| ()),
+        DiagnosticLocation {
+            table: Some(meta.meta.name.clone()),
+            ..DiagnosticLocation::default()
+        },
+    );
 
     for field in &meta.fields {
-        validate_supported_field_type(meta, field)?;
-        validate_field_presence(meta, table, field)?;
-        validate_field_values(meta, table, field)?;
-        validate_field_uniqueness(meta, table, field)?;
+        let location = field_location(meta, field);
+        collect_table_check(
+            &mut report,
+            "field.unsupported_type",
+            "type",
+            validate_supported_field_type(meta, field),
+            location.clone(),
+        );
+        collect_table_check(
+            &mut report,
+            "field.required",
+            "required",
+            validate_field_presence(meta, table, field),
+            location.clone(),
+        );
+        collect_table_check(
+            &mut report,
+            "field.type",
+            "type",
+            validate_field_values(meta, table, field),
+            location.clone(),
+        );
+        collect_table_check(
+            &mut report,
+            "field.unique",
+            "unique",
+            validate_field_uniqueness(meta, table, field),
+            location,
+        );
     }
 
     if meta.meta.kind == TableKind::Object {
-        validate_object_table_row_count(meta, table)?;
-        return Ok(());
+        collect_table_check(
+            &mut report,
+            "object_table.row_count",
+            "object_table",
+            validate_object_table_row_count(meta, table),
+            DiagnosticLocation {
+                table: Some(meta.meta.name.clone()),
+                ..DiagnosticLocation::default()
+            },
+        );
+        report.sort_by_stable_key();
+        return report;
     }
 
-    validate_fragment_values(meta, table, None)?;
+    collect_table_check(
+        &mut report,
+        "fragment.value",
+        "fragment",
+        validate_fragment_values(meta, table, None),
+        DiagnosticLocation {
+            table: Some(meta.meta.name.clone()),
+            ..DiagnosticLocation::default()
+        },
+    );
 
     for index in &meta.indexes {
-        validate_index_uniqueness(meta, table, index)?;
+        collect_table_check(
+            &mut report,
+            "index.unique",
+            "unique",
+            validate_index_uniqueness(meta, table, index),
+            DiagnosticLocation {
+                table: Some(meta.meta.name.clone()),
+                ..DiagnosticLocation::default()
+            },
+        );
     }
 
-    Ok(())
+    report.sort_by_stable_key();
+    report
 }
 
 pub fn validate_normalized_table_for_target(
@@ -45,6 +118,14 @@ pub fn validate_normalized_table_for_target(
     target_tags: &TargetTags,
     table: &DataTable,
 ) -> Result<()> {
+    validate_normalized_table_for_target_with_report(meta, target_tags, table).into_result()
+}
+
+pub fn validate_normalized_table_for_target_with_report(
+    meta: &LinkedTableMeta<'_>,
+    target_tags: &TargetTags,
+    table: &DataTable,
+) -> ValidationReport {
     let visible_fields = meta
         .fields
         .iter()
@@ -61,38 +142,99 @@ pub fn validate_normalized_table_for_target(
         })
         .map(|(row_index, _)| visible_row_for(table, row_index))
         .collect::<Vec<_>>();
-    DataResolver::resolve_table_rows(
-        meta,
-        table,
-        Some(target_tags),
-        visible_rows.iter().map(|row| row.row_index),
-    )?;
+    let mut report = ValidationReport::new();
+    collect_table_check(
+        &mut report,
+        "table.resolve",
+        "type",
+        DataResolver::resolve_table_rows(
+            meta,
+            table,
+            Some(target_tags),
+            visible_rows.iter().map(|row| row.row_index),
+        )
+        .map(|_| ()),
+        DiagnosticLocation {
+            table: Some(meta.meta.name.clone()),
+            ..DiagnosticLocation::default()
+        },
+    );
     let table_view = ExportTableView::new(meta, table, visible_fields, visible_rows);
-    validate_normalized_table_view(&table_view, Some(target_tags))
+    report.append(&mut validate_normalized_table_view_with_report(
+        &table_view,
+        Some(target_tags),
+    ));
+    report.sort_by_stable_key();
+    report
 }
 
-pub(super) fn validate_normalized_table_view(
+pub(super) fn validate_normalized_table_view_with_report(
     table_view: &ExportTableView<'_, '_>,
     target_tags: Option<&TargetTags>,
-) -> Result<()> {
+) -> ValidationReport {
+    let mut report = ValidationReport::new();
     let meta = table_view.meta;
     for field in meta
         .fields
         .iter()
         .filter(|field| table_view.is_field_visible(field.meta.name.as_str()))
     {
-        validate_supported_field_type(meta, field)?;
-        validate_field_presence_view(meta, table_view, field)?;
-        validate_field_values_view(meta, table_view, field, target_tags)?;
-        validate_field_uniqueness_view(meta, table_view, field)?;
+        let location = field_location(meta, field);
+        collect_table_check(
+            &mut report,
+            "field.unsupported_type",
+            "type",
+            validate_supported_field_type(meta, field),
+            location.clone(),
+        );
+        collect_table_check(
+            &mut report,
+            "field.required",
+            "required",
+            validate_field_presence_view(meta, table_view, field),
+            location.clone(),
+        );
+        collect_table_check(
+            &mut report,
+            "field.type",
+            "type",
+            validate_field_values_view(meta, table_view, field, target_tags),
+            location.clone(),
+        );
+        collect_table_check(
+            &mut report,
+            "field.unique",
+            "unique",
+            validate_field_uniqueness_view(meta, table_view, field),
+            location,
+        );
     }
 
     if meta.meta.kind == TableKind::Object {
-        validate_object_table_view_row_count(meta, table_view)?;
-        return Ok(());
+        collect_table_check(
+            &mut report,
+            "object_table.row_count",
+            "object_table",
+            validate_object_table_view_row_count(meta, table_view),
+            DiagnosticLocation {
+                table: Some(meta.meta.name.clone()),
+                ..DiagnosticLocation::default()
+            },
+        );
+        report.sort_by_stable_key();
+        return report;
     }
 
-    validate_fragment_values_view(meta, table_view, target_tags)?;
+    collect_table_check(
+        &mut report,
+        "fragment.value",
+        "fragment",
+        validate_fragment_values_view(meta, table_view, target_tags),
+        DiagnosticLocation {
+            table: Some(meta.meta.name.clone()),
+            ..DiagnosticLocation::default()
+        },
+    );
 
     let primary_index_name = meta.primary_index().map(|index| index.meta.name.as_str());
     for index in &meta.indexes {
@@ -110,17 +252,57 @@ pub(super) fn validate_normalized_table_view(
             .map(|field| field.meta.name.as_str())
         {
             if is_primary_index {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{}` primary index `{}` references non-exported field `{}` for current target",
-                    meta.meta.name, index.meta.name, field_name
-                )));
+                collect_table_check(
+                    &mut report,
+                    "index.visibility",
+                    "unique",
+                    Err(ConfigForgeError::Validation(format!(
+                        "table `{}` primary index `{}` references non-exported field `{}` for current target",
+                        meta.meta.name, index.meta.name, field_name
+                    ))),
+                    DiagnosticLocation {
+                        table: Some(meta.meta.name.clone()),
+                        field: Some(field_name.to_owned()),
+                        ..DiagnosticLocation::default()
+                    },
+                );
             }
             continue;
         }
-        validate_index_uniqueness_view(meta, table_view, index)?;
+        collect_table_check(
+            &mut report,
+            "index.unique",
+            "unique",
+            validate_index_uniqueness_view(meta, table_view, index),
+            DiagnosticLocation {
+                table: Some(meta.meta.name.clone()),
+                ..DiagnosticLocation::default()
+            },
+        );
     }
 
-    Ok(())
+    report.sort_by_stable_key();
+    report
+}
+
+fn collect_table_check(
+    report: &mut ValidationReport,
+    code: &'static str,
+    validator: &'static str,
+    result: Result<()>,
+    location: DiagnosticLocation,
+) {
+    if let Some(issue) = error_issue_from_result(code, validator, result, location) {
+        report.push(issue);
+    }
+}
+
+fn field_location(meta: &LinkedTableMeta<'_>, field: &LinkedFieldMeta<'_>) -> DiagnosticLocation {
+    DiagnosticLocation {
+        table: Some(meta.meta.name.clone()),
+        field: Some(field.meta.name.clone()),
+        ..DiagnosticLocation::default()
+    }
 }
 
 fn validate_object_table_row_count(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {

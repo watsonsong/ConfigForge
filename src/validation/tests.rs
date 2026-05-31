@@ -12,7 +12,10 @@ use std::{
     time::Duration,
 };
 
-use crate::data::{RowSourceInfo, SourceRole};
+use crate::{
+    data::{RowSourceInfo, SourceRole},
+    diagnostic::DiagnosticLocation,
+};
 
 use crate::meta::{
     EnumMeta, EnumValueMeta, ExportCondition, FieldMeta, LinkedField, LinkedFieldMeta,
@@ -28,6 +31,28 @@ fn validate_error(result: Result<()>) -> String {
         ConfigForgeError::Validation(message) => message,
         ConfigForgeError::ValidationReport(report) => report.error_messages().join("; "),
         error => panic!("expected validation error, got {error}"),
+    }
+}
+
+fn validation_report_error<T>(result: Result<T>) -> ValidationReport {
+    match result {
+        Err(ConfigForgeError::ValidationReport(report)) => ValidationReport {
+            issues: report
+                .diagnostics
+                .into_iter()
+                .map(|diagnostic| ValidationIssue {
+                    code: diagnostic.code,
+                    severity: diagnostic.severity,
+                    message: diagnostic.message,
+                    location: diagnostic.location,
+                    validator: diagnostic.source.unwrap_or_default(),
+                    target: diagnostic.target,
+                    hint: diagnostic.hint,
+                })
+                .collect(),
+        },
+        Err(error) => panic!("expected validation report error, got {error}"),
+        Ok(_) => panic!("expected validation report error, got ok"),
     }
 }
 
@@ -348,10 +373,8 @@ fn validates_fragment_scoped_fields_and_defaults() {
         }],
     )
     .expect("table should build");
-    let error = validate_table(table_meta, &inactive_fragment_table).unwrap_err();
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("inactive fragment `armor`"))
-    );
+    let message = validate_error(validate_table(table_meta, &inactive_fragment_table));
+    assert!(message.contains("inactive fragment `armor`"));
 }
 
 fn foreign_key_meta() -> MetaModel {
@@ -1006,12 +1029,12 @@ fn target_fragment_validation_uses_visible_rows() {
         )
         .expect("table should build"),
     ]);
-    let error =
-        validate_data_set_for_target(&linked_meta, &TargetTags::new(["client"]), &visible_invalid)
-            .unwrap_err();
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("weapon.power` is required"))
-    );
+    let message = validate_error(validate_data_set_for_target(
+        &linked_meta,
+        &TargetTags::new(["client"]),
+        &visible_invalid,
+    ));
+    assert!(message.contains("weapon.power` is required"));
 }
 
 #[test]
@@ -1102,10 +1125,10 @@ fn rejects_invalid_struct_json_cell_values() {
             "items",
             vec![BTreeMap::from([("reward".to_owned(), raw.to_owned())])],
         )]);
-        let error = validate_data_set(&linked_meta, &data_set).unwrap_err();
+        let message = validate_error(validate_data_set(&linked_meta, &data_set));
         assert!(
-            matches!(&error, ConfigForgeError::Validation(message) if message.contains(expected)),
-            "expected `{expected}` from `{raw}`, got {error}"
+            message.contains(expected),
+            "expected `{expected}` from `{raw}`, got {message}"
         );
     }
 }
@@ -1468,11 +1491,9 @@ fn rejects_data_set_missing_required_table() {
     .expect("meta should load");
     let linked_meta = meta.link().expect("meta should link");
     let data_set = DataSet::new(vec![]);
-    let error = validate_data_set(&linked_meta, &data_set).unwrap_err();
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
 
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("missing table `items`"))
-    );
+    assert!(message.contains("missing table `items`"));
 }
 
 #[test]
@@ -1581,6 +1602,147 @@ fn normalize_data_set_with_pool_runs_table_tasks_concurrently() {
     .expect("parallel normalize should succeed");
 
     assert!(max_active.load(Ordering::SeqCst) > 1);
+}
+
+#[test]
+fn full_data_set_validation_with_pool_runs_table_tasks_concurrently() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables]]
+            name = "levels"
+            source = "levels.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables]]
+            name = "quests"
+            source = "quests.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![
+        DataTable::new(
+            "items",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+        DataTable::new(
+            "levels",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+        DataTable::new(
+            "quests",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+    ]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(3)
+        .build()
+        .expect("pool should build");
+    let active = Arc::new(AtomicUsize::new(0));
+    let max_active = Arc::new(AtomicUsize::new(0));
+
+    super::entry::validate_normalized_data_set_with_table_validator_and_pool(
+        &linked_meta,
+        &data_set,
+        &pool,
+        |_, _| {
+            let active_now = active.fetch_add(1, Ordering::SeqCst) + 1;
+            max_active.fetch_max(active_now, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(20));
+            active.fetch_sub(1, Ordering::SeqCst);
+            ValidationReport::new()
+        },
+    )
+    .expect("parallel full data set validation should succeed");
+
+    assert!(max_active.load(Ordering::SeqCst) > 1);
+}
+
+#[test]
+fn full_data_set_validation_with_pool_sorts_merged_table_reports_stably() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "z_slow"
+            source = "z_slow.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables]]
+            name = "a_fast"
+            source = "a_fast.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![
+        DataTable::new(
+            "z_slow",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+        DataTable::new(
+            "a_fast",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        ),
+    ]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .expect("pool should build");
+
+    let report = super::entry::validate_normalized_data_set_with_table_validator_and_pool(
+        &linked_meta,
+        &data_set,
+        &pool,
+        |table_meta, _| {
+            if table_meta.meta.name == "z_slow" {
+                thread::sleep(Duration::from_millis(20));
+            }
+            let mut report = ValidationReport::new();
+            report.push(ValidationIssue::new(
+                "test.warning",
+                ValidationSeverity::Warning,
+                "test",
+                format!("{} warning", table_meta.meta.name),
+                DiagnosticLocation {
+                    table: Some(table_meta.meta.name.clone()),
+                    ..DiagnosticLocation::default()
+                },
+            ));
+            report
+        },
+    )
+    .expect("warning-only validation should succeed");
+
+    assert_eq!(
+        report
+            .issues
+            .iter()
+            .map(|issue| issue.location.table.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("a_fast"), Some("z_slow")]
+    );
 }
 
 #[test]
@@ -2009,6 +2171,98 @@ fn validation_report_preserves_diagnostic_order_for_multiple_range_issues() {
         ]
     );
     assert_eq!(report.error_messages().len(), 4);
+}
+
+#[test]
+fn validation_report_collects_multiple_basic_errors_before_failing() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            unique = true
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![
+            BTreeMap::from([
+                ("id".to_owned(), "same".to_owned()),
+                ("level".to_owned(), "bad".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("id".to_owned(), "same".to_owned()),
+                ("level".to_owned(), "also_bad".to_owned()),
+            ]),
+        ],
+    )]);
+
+    let report = validation_report_error(validate_data_set(&linked_meta, &data_set));
+    let messages = report.error_messages().join("; ");
+
+    assert!(messages.contains("field `id`"));
+    assert!(messages.contains("duplicates unique value"));
+    assert!(messages.contains("field `level`"));
+    assert!(report.error_messages().len() >= 3);
+}
+
+#[test]
+fn validation_report_keeps_warnings_but_error_gate_blocks_result() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+
+            [[tables.fields.validators]]
+            kind = "range"
+            name = "recommended_level"
+            severity = "warning"
+            min = 1
+            max = 10
+
+            [[tables.fields]]
+            name = "weight"
+            type = "int"
+
+            [[tables.fields.validators]]
+            kind = "range"
+            name = "weight_limit"
+            min = 1
+            max = 100
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("level".to_owned(), "11".to_owned()),
+            ("weight".to_owned(), "101".to_owned()),
+        ])],
+    )]);
+
+    let report = validation_report_error(validate_data_set(&linked_meta, &data_set));
+
+    assert!(report.has_error());
+    assert_eq!(report.warning_messages().len(), 1);
+    assert_eq!(report.error_messages().len(), 1);
+    assert!(report.warning_messages()[0].contains("recommended_level"));
+    assert!(report.error_messages()[0].contains("weight_limit"));
 }
 
 #[test]

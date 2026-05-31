@@ -150,7 +150,7 @@ build_target(options)
   -> BuildOutput { warnings }
 ```
 
-Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。Phase 5 后，data-backed target 会先并行准备 `LinkedMetaModel` 与 `RawSourceData`，再进入 normalize / validation；Phase 6 后，normalize 在 table 粒度通过 CPU pool 并行，并按 raw `DataSet.tables()` 顺序稳定 merge。code-only target 不启动 source read，因此缺失 `project.input` 或 data files 不会影响 MetaOnly codegen。`MetaOnly` codegen export task 只依赖 linked Meta 与 effective target tags，可与 `MetaAndData` 分支中的 validation / export 并行。Artifact 收集仍按 `[[targets.exports]]` 声明顺序排序，因此并行执行不会改变 dry-run 条目顺序或跨 exporter 路径冲突检查语义。
+Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。Phase 5 后，data-backed target 会先并行准备 `LinkedMetaModel` 与 `RawSourceData`，再进入 normalize / validation；Phase 6 后，normalize 在 table 粒度通过 CPU pool 并行，并按 raw `DataSet.tables()` 顺序稳定 merge；Phase 7 后，validation 先全量收集 `ValidationReport`，再按 stable key 排序并通过 error gate 阻断 data-backed export。Phase 8 已在 validation 模块提供 full `DataSet` table-local validation 的 CPU pool 入口；当前 single-target runtime path 的 source read 仍按 effective target tags 过滤 raw tables，因此 build 主流程继续对 target-scoped normalized data 执行 target-aware report-backed validation，真正跨 target 共享 full normalized DataSet 的调度留给 Phase 9 / multi-target DAG。code-only target 不启动 source read，因此缺失 `project.input` 或 data files 不会影响 MetaOnly codegen。`MetaOnly` codegen export task 只依赖 linked Meta 与 effective target tags，可与 `MetaAndData` 分支中的 validation / export 并行。Artifact 收集仍按 `[[targets.exports]]` 声明顺序排序，因此并行执行不会改变 dry-run 条目顺序或跨 exporter 路径冲突检查语义。
 
 ## 10.5 MetaAndData export task 编排
 
@@ -163,7 +163,7 @@ Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。Phase 
 - 同一个 target 内多个 MetaAndData export task 基于 `(project.input, effective target tags)` 复用同一个 `RawSourceData` 和 normalized `DataSet`，避免重复读取和重复 validation。
 - 每个 export task 可使用不同 `type` 和 `output`，例如 JSON + MessagePack + Lua。
 - runtime table exporter 调用 `exporter::export_runtime_data()` 生成 runtime artifacts，并保留 `RuntimeDataFile` 列表供未来 manifest 或诊断使用；codegen 不绑定该列表。
-- validation warning 被收集到 `BuildOutput.warnings`，error 直接阻断 build。
+- validation 使用 `validate_data_set_for_target()` 的 report-backed error gate：基础 required/type/enum/unique、registry validator、FK 与 target-aware checks 会先尽量收集为 `ValidationReport`，再统一判断 error / warning。warning 被收集到 `BuildOutput.warnings`，error 以 `ConfigForgeError::ValidationReport` 直接阻断依赖该 validated DataSet 的 data-backed export。
 
 Phase 5 错误顺序策略：`MetaLink` 与 `SourceRead` 并行执行，但 join 后优先返回 MetaLink 错误；如果 MetaLink 成功而 SourceRead 失败，则返回 source 错误。当前本地 CSV `DataLoader` 无 cancellation token，MetaLink failure 时已启动的 source read 会等待完成并丢弃结果；未来远端 provider 可在 `AsyncSourceReadShell` 基础上接入协作取消。
 

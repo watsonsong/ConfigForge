@@ -9,6 +9,8 @@ use crate::{
     meta::ValidationSeverity,
 };
 
+use std::cmp::Ordering;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationIssue {
     pub code: String,
@@ -34,6 +36,18 @@ impl ValidationReport {
 
     pub fn push(&mut self, issue: ValidationIssue) {
         self.issues.push(issue);
+    }
+
+    pub fn extend(&mut self, issues: impl IntoIterator<Item = ValidationIssue>) {
+        self.issues.extend(issues);
+    }
+
+    pub fn append(&mut self, other: &mut ValidationReport) {
+        self.issues.append(&mut other.issues);
+    }
+
+    pub fn sort_by_stable_key(&mut self) {
+        self.issues.sort_by(compare_issues_by_stable_key);
     }
 
     pub fn has_error(&self) -> bool {
@@ -75,6 +89,31 @@ impl ValidationReport {
     }
 }
 
+fn compare_issues_by_stable_key(left: &ValidationIssue, right: &ValidationIssue) -> Ordering {
+    (
+        left.severity,
+        left.target.as_deref(),
+        left.location.table.as_deref(),
+        left.location.row_index,
+        left.location.source_row_number,
+        left.location.field.as_deref(),
+        left.validator.as_str(),
+        left.code.as_str(),
+        left.message.as_str(),
+    )
+        .cmp(&(
+            right.severity,
+            right.target.as_deref(),
+            right.location.table.as_deref(),
+            right.location.row_index,
+            right.location.source_row_number,
+            right.location.field.as_deref(),
+            right.validator.as_str(),
+            right.code.as_str(),
+            right.message.as_str(),
+        ))
+}
+
 impl ValidationIssue {
     pub fn new(
         code: impl Into<String>,
@@ -107,6 +146,45 @@ impl ValidationIssue {
             message,
             location,
         )
+    }
+
+    pub fn with_target(mut self, target: impl Into<String>) -> Self {
+        self.target = Some(target.into());
+        self
+    }
+}
+
+pub(super) fn error_issue_from_message(
+    code: impl Into<String>,
+    validator: impl Into<String>,
+    message: impl Into<String>,
+    location: ValidationIssueLocation,
+) -> ValidationIssue {
+    ValidationIssue::error(code, validator, message, location)
+}
+
+pub(super) fn error_issue_from_result(
+    code: impl Into<String>,
+    validator: impl Into<String>,
+    result: Result<()>,
+    location: ValidationIssueLocation,
+) -> Option<ValidationIssue> {
+    let Err(error) = result else {
+        return None;
+    };
+    Some(error_issue_from_message(
+        code,
+        validator,
+        validation_error_message(error),
+        location,
+    ))
+}
+
+pub(super) fn validation_error_message(error: ConfigForgeError) -> String {
+    match error {
+        ConfigForgeError::Validation(message) => message,
+        ConfigForgeError::ValidationReport(report) => report.error_messages().join("; "),
+        other => other.to_string(),
     }
 }
 

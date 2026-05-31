@@ -63,7 +63,8 @@ pub use validation::{
     normalize_data_set_with_pool, normalize_table, validate_data_set, validate_data_set_for_target,
     validate_data_set_for_target_with_report, validate_data_set_with_report,
     validate_normalized_data_set, validate_normalized_data_set_for_target,
-    validate_normalized_data_set_for_target_with_report, validate_normalized_table,
+    validate_normalized_data_set_for_target_with_report,
+    validate_normalized_data_set_with_report_and_pool, validate_normalized_table,
     validate_normalized_table_for_target, validate_table, validate_table_for_target,
 };
 
