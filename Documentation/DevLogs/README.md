@@ -29,6 +29,11 @@ canonical `Design/` and `Implementation/` documents have since changed.
 - `DevLogs/` is historical raw context. Do not treat old logs as the latest
   truth unless they are also reflected in the canonical documents.
 
+
+## Historical Path Warning
+
+历史日志中的文档路径、文件编号和实现状态可能已经迁移或过期。当前导航入口以 [`../README.md`](../README.md)、[`../Design/README.md`](../Design/README.md) 和 [`../Implementation/01-module-outline.md`](../Implementation/01-module-outline.md) 为准；DevLogs 只作为历史证据，不作为当前设计入口。
+
 ## File Naming
 
 Create one file per meaningful development phase:

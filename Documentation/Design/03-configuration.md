@@ -183,8 +183,8 @@ source = "items.csv"
 
 ```toml
 sources = [
-  { provider = "csv", path = "Data/items_base.csv" },
-  { provider = "csv", path = "Data/items_event.csv" },
+  { provider = "csv", path = "items_base.csv" },
+  { provider = "csv", path = "items_event.csv" },
 ]
 ```
 
@@ -192,8 +192,8 @@ Override sources（Implemented MVP，当前限 CollectionTable CSV 整行覆盖�
 
 ```toml
 override_sources = [
-  { provider = "csv", path = "Data/items_hotfix.csv" },
-  { provider = "csv", path = "Data/items_shipping.csv", export_when = { all = ["shipping"] } },
+  { provider = "csv", path = "items_hotfix.csv" },
+  { provider = "csv", path = "items_shipping.csv", export_when = { all = ["shipping"] } },
 ]
 ```
 
@@ -301,7 +301,7 @@ name = "client_shipping"
 tags = ["client", "shipping"]
 ```
 
-执行 `config-forge build --target client_shipping --tag s1` 时，effective target tags 为 `{ client, shipping, s1 }`。因此 `export_when = { all = ["s1"] }` 的 `override_sources` 会生效，`export_when = { none = ["s1"] }` 的表、字段或行级策略则不会生效。
+执行 `config-forge --target client_shipping --tag s1` 时，effective target tags 为 `{ client, shipping, s1 }`。因此 `export_when = { all = ["s1"] }` 的 `override_sources` 会生效，`export_when = { none = ["s1"] }` 的表、字段或行级策略则不会生效。
 
 ```toml
 [[targets]]
@@ -379,7 +379,7 @@ readonly_fields = true
 | `name` | 单 data task 可省略，规范化为 `default` | 当前 target 内稳定唯一的 data task 名称；多 data task 时必填。 |
 | `input` | 必填 | Source data 根目录。相对路径以 project root 或所在 import 片段目录为基准；Meta source path 以该目录为搜索基础。只有声明 `targets.data` 时才读取 source data。 |
 | `output` | 必填 | 数据产物输出目录。相对路径以 project root 或所在 import 片段目录为基准。运行时表数据按表规划文件；POT / manifest 等聚合格式按格式规则规划文件。 |
-| `format` | `json` | 数据导出格式。当前实现支持 runtime data 的 `json`、`messagepack` 和 `bin`；目标态扩展可注册 `gettext_pot`、`asset_manifest_csv` 等聚合数据格式。 |
+| `format` | `json` | 数据导出格式。当前实现支持 runtime data 的 `json`、`messagepack`、`bin`，以及聚合数据格式 `gettext_pot` / `pot`；`asset_manifest_csv` 等仍为未来扩展。 |
 | format 专属字段 | 未设置 | 格式专属配置直接摊平在对应 `[[targets.data]]` 下，例如 `format = "gettext_pot"` 可配置 `domain`、`file_name`、source reference 和 translator comments 策略。 |
 
 Data task 继承所在 target 的 effective target tags；当前没有 `[[targets.data]].tags` 字段。CLI extra tags 对同一 target 下所有 data/code task 一致生效，因此同一个构建里的 JSON / MessagePack / bin 输出和格式无关 codegen 必须基于同一组 effective target tags。
@@ -395,7 +395,7 @@ data task `name` 规范：
 
 `RuntimeDataFile.path` 表示相对当前 data artifact root / runtime loader root 的真实资源路径，例如 `items.json`。生成代码不再透传真实文件路径，而是使用逻辑表名（例如 `items`）；具体 runtime loader 决定如何把逻辑名映射到文件系统、包内资源或引擎资源中的具体格式文件。
 
-Planned / Not implemented：`engine`、`format = "gettext_pot"`、`format = "asset_manifest_csv"`、target-level `language` / `data_format` / `output` 属于未来扩展；不再规划 `special_exporters` 字段，POT 和 Asset Manifest 后续应通过 `[[targets.data]]` 扩展格式接入。
+Planned / Not implemented：`engine`、`format = "asset_manifest_csv"`、target-level `language` / `data_format` / `output` 属于未来扩展；不再规划 `special_exporters` 字段。`gettext_pot` 已通过 `[[targets.data]] format = "gettext_pot"` 接入，Asset Manifest 后续也应通过同一机制扩展。
 
 `targets.code` 字段：
 

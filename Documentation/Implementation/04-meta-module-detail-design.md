@@ -1,5 +1,18 @@
 # 04. Meta 模块详细设计
 
+## 文档导航
+
+Related docs：[`../Design/04-meta-model.md`](../Design/04-meta-model.md)、[`11-foreign-key-detail-design.md`](11-foreign-key-detail-design.md)、[`12-struct-expanded-value-detail-design.md`](12-struct-expanded-value-detail-design.md)。
+
+- [4.1 设计目标](#41-设计目标)
+- [4.3 当前模块结构](#43-当前模块结构)
+- [4.4 Load-Link 架构](#44-loadlink-架构)
+- [4.5 纯配置数据结构](#45-纯配置数据结构)
+- [4.6 Linked 数据结构](#46-linked-数据结构)
+- [4.9 校验与诊断](#49-校验与诊断)
+- [4.11 TOML 输入格式](#411-toml-输入格式)
+
+
 本文档描述当前 Meta 模块的实际实现设计，用于指导后续继续扩展 Meta 能力。产品语义以 `Documentation/Design/04-meta-model.md` 为准；本文档聚焦 Rust 类型边界、生命周期表达、Load-then-Link 策略、主要方法和测试组织。
 
 ## 4.1 设计目标

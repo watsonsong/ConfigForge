@@ -8,7 +8,7 @@ Exporter 模块需要达成：
 
 1. 定义 target data task 配置 `TargetDataConfig`。
 2. 定义 data format exporter trait 和 registry。
-3. 内置 JSON、MessagePack 与 `bin` 三种 runtime data format；`bin` 使用 schema-aware positional typed layout；目标态通过同一 `TargetDataConfig.format` 扩展 gettext POT、asset manifest 等聚合 data format。
+3. 内置 JSON、MessagePack 与 `bin` 三种 runtime data format；`bin` 使用 schema-aware positional typed layout；通过同一 `TargetDataConfig.format` 支持已实现的 gettext POT 聚合 data format；asset manifest 等仍为后续扩展。
 4. 对 CollectionTable 与 ObjectTable 生成正确 runtime payload shape。
 5. 复用 DataResolver 解释 struct JSON cell / expanded value / target visibility，避免 exporter 自己重复实现 source layout 解析。
 6. 为未来二进制格式、自定义 data format exporter、聚合数据产物和 artifact writer 留出扩展点。
@@ -17,7 +17,7 @@ Exporter 模块需要达成：
 
 - 不执行数据加载计划；DataLoader 属于 `data` 模块，由 `build` 编排调用。
 - 不执行 validation；validation 属于 `validation` 模块，由 `build` 在导出前调用。
-- 不生成代码；codegen 只消费 exporter 返回的 `RuntimeDataFile` 描述。
+- 不生成代码；当前 codegen 默认不消费 exporter 真实写出的 runtime data artifact path / format，而是使用逻辑 table name 作为 runtime load key。
 - 不执行翻译或读取外部 `.po` / 文本库；gettext POT exporter 只生成待翻译模板，运行时翻译由业务 translator / localization runtime 处理。
 
 ## 8.2 模块结构
@@ -35,8 +35,8 @@ src/exporter/
   json.rs             # JsonDataExporter
   messagepack.rs      # MessagePackDataExporter
   binary.rs           # BinaryDataExporter：CFGB header + schema revision + positional typed payload
-  aggregate.rs        # 目标态：聚合 data exporter 的共享 context / artifact plan helper
-  gettext_pot.rs      # 目标态：format = "gettext_pot"
+  aggregate.rs        # 后续可拆出的聚合 data exporter 共享 context / artifact plan helper
+  gettext_pot.rs      # 已实现：format = "gettext_pot" / alias "pot"
   tests.rs            # exporter 核心行为测试
 ```
 
@@ -62,7 +62,7 @@ pub struct TargetDataConfig {
 - `name`：可选 data task 名称。多个 data task 时必须显式命名；单个未命名 task 由 build 归一化为 `default`。
 - `input`：数据根目录。
 - `output`：数据产物输出目录。运行时表数据按 table 规划文件；POT / manifest 等聚合格式按格式选项规划文件。
-- `format`：格式名称，默认 `json`；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；目标态可注册 `gettext_pot`、`asset_manifest_csv` 等聚合格式；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
+- `format`：格式名称，默认 `json`；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；当前内置聚合格式支持 `gettext_pot` / alias `pot`，`asset_manifest_csv` 等仍为后续扩展；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
 - `options`：格式专属配置，由 `[[targets.data]]` 下除通用字段外的 flattened 字段归一化得到，例如 `format = "gettext_pot"` 下的 `domain`、`file_name`、`source_reference`。运行时 JSON / MessagePack / `bin` 第一阶段可以为空。首版兼容读取 `[targets.data.gettext]` 子表，但推荐使用 flattened 字段，与 code task 的 `module_name` / `namespace` 一致。
 
 ```rust
@@ -92,7 +92,7 @@ pub trait AggregateDataExporter: Send + Sync {
 
 `DataFormatRegistry` 保存 table exporter 与 aggregate exporter 列表并按 name / alias 查询。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行序列化多个 table artifact；aggregate exporter 也不得在实例内保存本次 build 的可变状态。
 
-内置格式通过 `builtin_exporters()` 注册到 `DataFormatRegistry`，当前 table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`；目标态 aggregate exporter 包括 `GettextPotExporter` 等。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现对应 exporter trait，格式名、alias、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
+内置格式通过 `builtin_exporters()` 注册到 `DataFormatRegistry`，当前 table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`；aggregate exporter 包括已实现的 `GettextPotExporter`。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现对应 exporter trait，格式名、alias、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
 
 ## 8.4 Runtime payload contract
 
@@ -177,9 +177,9 @@ Exporter 负责在单个 data task 内检查 artifact path 冲突：
 
 POT 这类单文件聚合 data exporter 的 artifact key 建议使用 `(target_name, data_name, format)`；未来多 domain POT 可扩展为 `(target_name, data_name, format, domain)`。
 
-## 8.7 聚合 Data Exporter 目标态设计
+## 8.7 聚合 Data Exporter 设计
 
-目标态在 `DataFormatRegistry` 下新增 aggregate exporter 分支，而不是新增 TOML 层的 `special_exporters`：
+当前在 `DataFormatRegistry` 下使用 aggregate exporter 分支，而不是新增 TOML 层的 `special_exporters`：
 
 ```rust
 pub enum DataExporterKind {
@@ -199,7 +199,7 @@ pub enum DataExporterKind {
 
 ### 8.7.1 GettextPotExporter (`format = "gettext_pot"`)
 
-`GettextPotExporter` 目标态模块：`src/exporter/gettext_pot.rs`，通过 `[[targets.data]] format = "gettext_pot"` 启用。
+`GettextPotExporter` 当前模块为 `src/exporter/gettext_pot.rs`，通过 `[[targets.data]] format = "gettext_pot"` 或 alias `pot` 启用。
 
 输入模型建议：
 
@@ -222,9 +222,9 @@ pub struct TextExtractionEntry {
 3. 首版遍历可见 top-level field，筛选 Meta primitive type 为 `text` 的字段；不把 `string` 自动纳入 POT。fragment / struct child text 深度抽取保留为后续扩展。
 4. 从 resolved scalar value 读取 raw text 作为 `msgid`；optional empty text 不产出 entry。
 5. 构造 `msgctxt`：默认 `table.field_path`，如果未来 Meta/source/target policy 提供 context，则使用显式 context。
-6. 构造 source reference：当前优先使用 DataResolver 保留的 source path / row；CSV 列坐标尚未保留时不输出列号。`source_reference = "record_key"` 可仅使用 primary index record key；`both` 合并 source location 和 record metadata。
+6. 构造 source reference：当前优先使用 DataResolver 保留的 source path / row；CSV 列坐标尚未保留时不输出列号。`source_reference = "record_key"` 当前不生成 gettext `#:` 行，而是将 primary index record key 写入 translator comment（例如 `record=id=2001`）；`both` 当前只合并 source location，record key 仍作为 translator comment 输出。
 7. 合并 translator comments：field `desc`、未来 text option、source comment column/row、自动生成的 `table/field/record` 描述。
-8. 以 `(msgctxt, msgid)` 做稳定分组，合并 references/comments。
+8. 当 `deduplicate = true` 时，以 `(msgctxt, msgid)` 做稳定分组，合并 references/comments；当 `deduplicate = false` 时，按抽取顺序原样渲染 entries。
 9. 渲染 gettext `.pot` 文本 artifact。
 
 POT 渲染要求：
@@ -242,9 +242,9 @@ POT 渲染要求：
 | `domain` | `messages` | POT header 的 domain / Project-Id-Version 来源，未设置时使用 `messages`。 |
 | `file_name` | `<domain>.pot` | 单文件 POT 输出文件名，相对 `TargetDataConfig.output`。 |
 | `context` | `table_field` | `none` / `table_field` / `field`。显式 context 列属于未来扩展。 |
-| `source_reference` | `source_location` | `source_location` / `record_key` / `both` / `none`。 |
+| `source_reference` | `source_location` | `source_location` / `record_key` / `both` / `none`。当前 `record_key` 不写 `#:`，record key 始终作为 translator comment 输出；`both` 只合并 source location。 |
 | `include_translator_comments` | `true` | 是否写入 field desc 和显式 comment。 |
-| `deduplicate` | `true` | 是否按 `(msgctxt, msgid)` 合并。关闭时需要生成唯一 context 或报错，避免 gettext key 冲突。 |
+| `deduplicate` | `true` | 是否按 `(msgctxt, msgid)` 合并。关闭时按抽取顺序原样输出，调用方需自行处理 gettext 工具对重复 key 的行为。 |
 | `strict_placeholder` | `false` | 未来启用 placeholder 诊断时，是否将不一致升级为 error。 |
 
 未来扩展：
@@ -265,4 +265,4 @@ Exporter 模块测试应覆盖：
 - JSON 与 MessagePack 对 struct / ObjectTable 使用同一逻辑 payload。
 - `bin` 写出 CFGB header、schema revision 与 target-aware positional payload。
 - struct expanded value 和 JSON cell 都能导出为 nested object。
-- 目标态聚合 data exporter 测试覆盖 POT 抽取、去重、context、source reference、translator comment、target filter、ObjectTable、fragment/struct child text、artifact path conflict。
+- 聚合 data exporter 测试覆盖 POT 抽取、去重、context、source reference、translator comment、target filter、ObjectTable、artifact path conflict；fragment/struct child text 深度抽取仍属于后续扩展测试。

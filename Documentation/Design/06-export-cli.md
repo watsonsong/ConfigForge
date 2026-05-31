@@ -60,7 +60,7 @@ deduplicate = true
 | `name` | 当前 target 内唯一的 data task 名称。单 data task 可省略并由实现填入默认名；多 data task 必填。 |
 | `input` | Source data 根目录。Meta source path 以该目录为搜索基础；只有声明 `targets.data` 时才读取。 |
 | `output` | 数据产物输出目录。运行时表数据会在该目录下按表名生成文件；POT / manifest 这类聚合格式会在该目录下按格式选项规划一个或多个文件。 |
-| `format` | 数据导出格式。当前第一阶段运行时格式支持 `json`、`messagepack` 和 `bin`，默认 `json`；目标态可扩展 `gettext_pot`、`asset_manifest_csv` 等非运行时聚合格式。 |
+| `format` | 数据导出格式。当前第一阶段运行时格式支持 `json`、`messagepack` 和 `bin`，默认 `json`；当前也支持聚合格式 `gettext_pot` / alias `pot`，`asset_manifest_csv` 等仍为后续扩展。 |
 | format 专属字段 | 可选。格式专属选项直接摊平在对应 `[[targets.data]]` 下，例如 `format = "gettext_pot"` 的 `domain`、`file_name`、`source_reference`、`include_translator_comments`、`deduplicate`。 |
 
 导出规则：
@@ -106,7 +106,7 @@ namespace = "game::config"
 - `file_header` 是文本模板，支持 `{{project.name}}`、`{{project.desc}}`、`{{project.copyright}}`、`{{datetime}}`。
 - `keyword_conflict` 控制 Meta 名称转换成目标语言标识符后碰到关键字时如何处理。
 
-CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 table/field/index `export_when`、`row_export`、`override_sources[].export_when`、runtime export 和 codegen 的是 effective target tags：`target.tags ∪ CLI extra tags`。例如 `config-forge build --target client_shipping --tag s1` 会在 `client_shipping` 原有 tags 上追加 `s1`，从而启用只在 S1 赛季生效的 `materials_s1.csv` override source。
+CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 table/field/index `export_when`、`row_export`、`override_sources[].export_when`、runtime export 和 codegen 的是 effective target tags：`target.tags ∪ CLI extra tags`。例如 `config-forge --target client_shipping --tag s1` 会在 `client_shipping` 原有 tags 上追加 `s1`，从而启用只在 S1 赛季生效的 `materials_s1.csv` override source。
 - `naming` 控制 type、field、function、constant 等符号的大小写组织。
 - 语言生成器可以声明额外配置，但必须放在该 code task 内对应语言子表中，不能污染其他语言任务；实现层应按语言使用 tagged enum / 多态配置承载这些差异。
 - 生成代码必须暴露 runtime data 加载抽象接口，不直接绑定本地文件系统、引擎资源系统、网络或包内资源。
@@ -154,7 +154,7 @@ CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 t
 | `messagepack` | 紧凑二进制格式，用于包体和加载性能更敏感的 runtime。 |
 | `bin` | ConfigForge 私有紧密二进制格式；使用 positional typed layout、`.bin` 后缀、最小 magic/version header 和 generated code 的 expected schema revision，不改变 JSON / MessagePack named payload contract。 |
 
-格式实现采用注册工厂模式：核心导出流程只根据 `format` 字符串从 `DataFormatRegistry` 中查找 data exporter，不在流程中通过枚举 `match` 分发。新增导出格式应通过注册新的 exporter 实现扩展，避免修改核心导出编排逻辑。当前内置注册器提供 `json`、`messagepack` 与 `bin` 三种 runtime table data exporter；目标态同一 registry 可继续注册 `gettext_pot`、`asset_manifest_csv` 等聚合 data exporter。`bin` 的具体 wire format 见 `../Implementation/13-runtime-binary-format-detail-design.md`。
+格式实现采用注册工厂模式：核心导出流程只根据 `format` 字符串从 `DataFormatRegistry` 中查找 data exporter，不在流程中通过枚举 `match` 分发。新增导出格式应通过注册新的 exporter 实现扩展，避免修改核心导出编排逻辑。当前内置注册器提供 `json`、`messagepack` 与 `bin` 三种 runtime table data exporter，以及 `gettext_pot` / alias `pot` 聚合 data exporter；`asset_manifest_csv` 等聚合格式仍为后续扩展。`bin` 的具体 wire format 见 `../Implementation/13-runtime-binary-format-detail-design.md`。
 
 别名策略：
 
@@ -199,7 +199,7 @@ Protobuf 未来规则：
 通用 reader 至少需要覆盖两类 layout：
 
 1. **Named-field layout**：例如 JSON object、MessagePack map。生成代码传入字段名，reader 定位并返回字段值；字段顺序不作为语义要求。
-2. **Positional / packed layout**：例如未来紧密排布的数组、二进制 record。生成代码按 Meta 中稳定的字段顺序调用 reader；exporter 与 codegen 必须使用同一字段顺序定义，reader 不需要知道字段名。
+2. **Positional / packed layout**：例如当前 `bin` 使用的紧密二进制 record。生成代码按 Meta 中稳定的字段顺序调用 reader；exporter 与 codegen 必须使用同一字段顺序定义，reader 不需要知道字段名。
 
 reader 的基础语义必须覆盖当前 Meta 类型：int、float、bool、string/text/asset、enum、object/array。enum 按 string 读取后由生成代码校验枚举值；`text` 和 `asset` 按 string 读取。字段缺失和字段存在但为 null 必须区分：required 字段缺失或 null 都由生成代码报错；optional field / optional fragment 缺失时视为 absent；null 是否等价 optional absent 由生成器策略统一定义，第一阶段建议只对 optional 视为 empty。当前 exporter 仍可能输出字符串 cell 时，string-to-int / string-to-bool / string-to-float 的兼容规则应由 generated parser helper 统一处理，避免每个业务 loader 重复实现。
 
@@ -216,7 +216,7 @@ reader 的基础语义必须覆盖当前 Meta 类型：int、float、bool、stri
 
 当前 `GameData.load(loader)` 语义是 **eager load**：一次打开并解析当前 target 可见的所有 table/object，构造完整 repository / object facade 后返回；返回后 generated `GameData` 不再持有 loader，业务可以立即释放文件句柄、资源包 reader 或网络 client。这仍是默认模式，适合服务器启动阶段、编辑器校验、热更包预载等希望确定性发现所有数据/版本错误的场景。
 
-后续需要补充 **table-level lazy load** 模式：生成代码提供一个懒加载 facade，只在业务首次访问某张 table/object 时才调用 `RuntimeDataLoader.open(logical_table_name)` 并执行该 table 的 generated parser / index 构建。为了支持这种模式，懒加载 facade 必须持有 loader 或 reader provider；也就是说接入方传入的 loader 需要在懒加载 facade 生命周期内保持可用。单次 `open()` 返回的 `RuntimeDataReader` / cursor 不建议跨 table 长期持有：它应在该 table 完成解析后释放；如果某 runtime 需要常驻解码上下文或资源包句柄，应把它放在 loader 内部，而不是让 generated table 持有半打开的 cursor。
+当前已实现 **table-level lazy load** 模式：生成代码提供一个懒加载 facade，只在业务首次访问某张 table/object 时才调用 `RuntimeDataLoader.open(logical_table_name)` 并执行该 table 的 generated parser / index 构建。为了支持这种模式，懒加载 facade 必须持有 loader 或 reader provider；也就是说接入方传入的 loader 需要在懒加载 facade 生命周期内保持可用。单次 `open()` 返回的 `RuntimeDataReader` / cursor 不建议跨 table 长期持有：它应在该 table 完成解析后释放；如果某 runtime 需要常驻解码上下文或资源包句柄，应把它放在 loader 内部，而不是让 generated table 持有半打开的 cursor。
 
 两种模式必须共存，且 API 语义明确区分：
 
@@ -230,8 +230,8 @@ Lazy facade 的核心规则：
 1. **按 table 原子加载**：一个 table/object 只会从 unloaded -> loaded 迁移一次。加载成功后缓存 typed table/object；后续访问不再调用 loader。加载失败时默认不缓存半成品，允许调用方修复外部条件后重试；若语言 runtime 更适合缓存失败，也必须记录为 failed state 并在文档中说明。
 2. **索引随 table 构建**：CollectionTable 第一次加载完成时立即构建全部 declared indexes；后续 lookup 与 eager 模式相同，不做 per-query 解析。
 3. **ObjectTable 同样懒加载**：ObjectTable source artifact 虽然只产生 singleton object，但仍是一张逻辑 table；第一次访问该 object 字段时打开对应 data file。
-4. **并发访问策略语言化**：默认生成器可以先提供单线程 / 非线程安全 lazy cache；多线程版本后续通过语言 option 增加 `OnceLock` / mutex / promise coalescing。即使两个线程同时触发同一 table 加载，也不能暴露两个不同 table 实例给同一个 facade。
-5. **生命周期可释放**：eager 模式不保留 loader；lazy 模式保留 loader。若业务希望“先 lazy facade 构造、随后一次性加载全部表并释放 loader”，可提供 `loadAll()` / `preloadAll()` + `releaseLoader()` 或直接调用 eager load。第一阶段推荐保留 eager load 作为释放 loader 的主路径，lazy facade 可选支持 preload 后释放。
+4. **并发访问策略语言化**：当前生成器不承诺统一强线程安全；除 TypeScript Promise coalescing 外，Rust/C++ lazy cache 的并发语义应按生成代码和业务封装确认，后续可通过语言 option 增加更强同步策略。即使两个线程同时触发同一 table 加载，也不能暴露两个不同 table 实例给同一个 facade。
+5. **生命周期可释放**：eager 模式不保留 loader；lazy 模式保留 loader。若业务希望“先 lazy facade 构造、随后一次性加载全部表并释放 loader”，可提供 `loadAll()` / `preloadAll()` + `releaseLoader()` 或直接调用 eager load。当前保留 eager load 作为释放 loader 的主路径；lazy facade 支持 preload all 以便 fail-fast，但仍按语言实现决定是否显式释放 loader。
 6. **错误发现时机改变**：lazy 模式把 table decode/schema revision/index duplicate 等错误推迟到首次访问该 table；文档和 API 命名必须让业务理解这一点。需要 fail-fast 的场景应调用 eager load 或 lazy facade 的 `preloadAll()`。
 
 Foreign key relation helper 与 lazy load 的交互：
@@ -330,6 +330,24 @@ TypeScript 若继续使用 plain object row，应避免为每个 row 分配 rela
 
 可见性规则与 CodeModel 一致：只有当前 target 可见的 FK 才能生成 helper 和 cache 字段。若 FK 不可见、source fields 不可见、target table 不可见或 target index 不可见，当前 target 的生成代码中不得出现该 `linked_field` API。`linked_field` 不进入 JSON / MessagePack / bin payload，也不影响 binary schema revision；它只影响 generated code 的类型、helper、cache 与 link API。
 
+#### 6.2.1.3 TypeScript Sync Loading
+
+TypeScript generated code 同时支持 async 与 sync loader 场景：
+
+- `RuntimeDataLoader.open(path)` 可以返回 `RuntimeDataReader` 或 `Promise<RuntimeDataReader>`。
+- `GameData.load(loader)` 总是 async，适合文件系统、fetch、资源包异步初始化等场景。
+- `GameData.loadSync(loader)` 要求 loader 同步返回 reader；如果返回 Promise，generated helper 必须抛错，避免业务在数据尚未加载完成时继续执行。
+- `LazyGameData` 同时提供 async table accessor 与 `xxxSync()` accessor。
+- `preloadAllSync()` / `linkAllSync()` 是同步 loader 场景的便捷 API；如果业务 loader 可能异步，应使用 async 版本。
+
+#### 6.2.1.4 生成符号冲突范围
+
+用户可见 generated names 都参与冲突检查，包括字段、fragment、index lookup、relation helper、text helper、`GameData`、`LazyGameData`、`GameDataAccess` 等。`linked_field` 不仅不能和原始字段重名，也不能和目标语言生成后的 helper 名称冲突。`keyword_conflict` 只处理保留字或关键字冲突，不保证所有业务语义命名冲突都能自动修复。
+
+#### 6.2.1.5 Binary schema revision
+
+`bin` schema revision 由 exporter 与 codegen 共享 table shape 计算。影响 revision 的是 target-visible table kind、fields、fragments 与 wire layout；`linked_field` relation helper、text helper、注释和输出路径不进入 runtime payload，也不改变 binary schema revision。Reader 提供 revision 时 generated code 必须校验；若某格式不提供 revision，则按对应 reader contract 跳过或由格式 reader 处理。
+
 ### 6.2.2 标准 RuntimeDataReader 实现包
 
 ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader adapter，覆盖主流目标语言与 runtime data format 的组合。目标不是让生成代码强依赖这些 adapter，而是提供可直接复用、可拷贝修改、可作为测试 harness 基础实现的标准参考实现。
@@ -382,7 +400,7 @@ runtime/
 
 `runtime/` 下的实现属于“标准 runtime adapter 源码/模板”，不是每次 codegen 的输出文件。后续可以通过 codegen option 选择是否把某个 adapter 拷贝到目标输出目录，也可以由游戏项目直接依赖该目录对应语言的 package/crate/library。
 
-C++ adapter 需要有独立工程化入口。推荐支持 `add_subdirectory(runtime/cpp)` 和安装后的 `find_package(ConfigForgeRuntime CONFIG)` 两种接入方式，并暴露 `config_forge_runtime::rapidjson_reader`、`config_forge_runtime::msgpackc_reader`、`config_forge_runtime::filesystem_loader` 等 CMake targets。当前短期方案不提供单独的 `core` target，adapter 直接依赖 generated header 中的 `IRuntimeDataReader` / `IRuntimeDataLoader` contract；后续如拆出稳定 runtime interface header，再重新评估 stable interface target。生产项目显式打开 RapidJSON / msgpack-cxx 选项；测试环境如果缺少 RapidJSON 或 msgpack-cxx headers 可跳过对应 adapter smoke。详细 CMake option、target、三方依赖解析、C++ ownership、runtime_reader option 校验、emit 语义和 CI 矩阵见 `Documentation/Implementation/09-codegen-module-detail-design.md` 的“标准 RuntimeDataReader adapter 工程结构”。
+C++ adapter 需要有独立工程化入口。推荐支持 `add_subdirectory(runtime/cpp)` 和安装后的 `find_package(ConfigForgeRuntime CONFIG)` 两种接入方式，并暴露 `config_forge_runtime::rapidjson_reader`、`config_forge_runtime::msgpackc_reader`、`config_forge_runtime::filesystem_loader` 等 CMake targets。当前短期方案不提供单独的 `core` target，adapter 直接依赖 generated header 中的 `IRuntimeDataReader` / `IRuntimeDataLoader` contract；后续如拆出稳定 runtime interface header，再重新评估 stable interface target。生产项目显式打开 RapidJSON / msgpack-cxx 选项；测试环境如果缺少 RapidJSON 或 msgpack-cxx headers 可跳过对应 adapter smoke。详细 CMake option、target、三方依赖解析、C++ ownership、runtime_reader option 校验、emit 语义和 CI 矩阵见 [`../Implementation/09e-codegen-runtime-adapters.md`](../Implementation/09e-codegen-runtime-adapters.md) 与 [`../Tech/cpp-runtime-dependencies.md`](../Tech/cpp-runtime-dependencies.md)。
 
 ## 6.3 非运行时数据导出格式
 
@@ -440,12 +458,12 @@ deduplicate = true
 
 规则：
 
-- source reference 默认来自 source path 和 row 坐标；当前 CSV resolver 保留 source path / row，尚不保留列坐标，因此首版输出形如 `data/items.csv:2`。若 ObjectTable key-value layout 无自然列坐标，则使用 logical field path 或 record key 作为补充定位信息。
+- source reference 默认来自 source path 和 row 坐标；当前 CSV resolver 保留 source path / row，尚不保留列坐标，因此首版输出形如 `data/items.csv:2`。`source_reference = "record_key"` 当前不生成 gettext `#:` 行，而是将 record key 写入 translator comment（例如 `record=id=2001`）；`both` 当前只合并 source location，record key 仍作为 translator comment 输出。若 ObjectTable key-value layout 无自然列坐标，则使用 logical field path 或 record key comment 作为补充定位信息。
 - `msgid` 默认使用原文驱动模式，即 source cell 文本本身。未来可配置 key-driven 模式，此时 `text` cell 可表示稳定 key，而默认语言原文来自伴随列/外部 catalog。
 - `msgctxt` 默认可由 `table.field_path` 派生；也可由 Meta 字段参数、target policy 或 source 中显式 context 列覆盖。不同 context 下相同 msgid 必须产生不同 POT entry。
 - translator comments 可来自字段 `desc`、未来 text 字段声明、source 中显式映射的额外注释列/行、以及 exporter 生成的 table/field/record 描述；如果多个来源同时存在，应按 exporter policy 稳定合并并去重。
 - 被 ExportView 过滤掉的 row / field / fragment 不产生 POT 条目，也不产生 translator comments。`export = false` 的字段默认不进入 runtime data；若未来字段策略显式允许 `format = "gettext_pot"` 读取某个辅助字段，POT exporter 可读取它，但仍必须遵守 target tags 与 row filter。
-- dedup 规则必须稳定：相同 `(msgctxt, msgid)` 合并为一个 entry，source references 和 translator comments 按 table order、row order、field order 稳定追加；如果相同 `(msgctxt, msgid)` 的 comments 冲突，默认合并而不报错，严格模式可升级为 warning / error。
+- dedup 规则必须稳定：`deduplicate = true` 时，相同 `(msgctxt, msgid)` 合并为一个 entry，source references 和 translator comments 按 table order、row order、field order 稳定追加；如果相同 `(msgctxt, msgid)` 的 comments 冲突，默认合并而不报错，严格模式可升级为 warning / error。`deduplicate = false` 时按抽取顺序原样输出 entries，调用方需自行处理 gettext 工具对重复 key 的行为。
 - 输出编码固定 UTF-8；字符串必须按 gettext 规范转义双引号、反斜杠、换行和控制字符。多行 msgid 应使用标准多段字符串表示。
 - header entry `msgid ""` 必须稳定生成，包含 `Project-Id-Version`、`Content-Type: text/plain; charset=UTF-8`、`Content-Transfer-Encoding: 8bit` 等基础字段；首版为 deterministic 输出，不写 `POT-Creation-Date`。若未来增加 generated_at/build timestamp，应遵循 deterministic / generated_at 策略。
 
@@ -478,7 +496,7 @@ msgstr ""
 - 第一阶段 `text` 在 runtime payload 中仍按 `string` 输出，生成代码字段类型保持 `String` / `std::string` / `string`，不破坏现有用户。
 - 对 `text` 字段，生成器额外生成翻译 helper，例如 Rust row/struct 方法 `display_name_text(&translator)`、C++ row/struct 方法 `DisplayNameText(translator)`、TypeScript 顶层 helper `itemsDisplayNameText(row, translator)` / `structDisplayNameText(value, translator)`。helper 默认传入原始字符串和 `table.field` / `struct.field` context，由业务侧 translator 返回当前语言文本。
 - helper 不应把翻译结果缓存到 row 中，除非 translator 明确提供语言版本号；否则切换语言后会读到旧文本。推荐 translator 自己缓存。
-- helper 的 translator contract 应保持语言无关：输入至少包含 raw value、table、field path、record key、optional context；返回 translated string。没有 translator 或查不到翻译时，应回退 raw text。
+- helper 的 translator contract 应保持语言无关并与当前生成代码一致：输入为 `(msgctxt, msgid)`，返回可选 translated string。`msgctxt` 默认来自 `table.field` / `struct.field`，`msgid` 为 raw text；没有 translator 或查不到翻译时，应回退 raw text。table、field path、record key 等 source metadata 可作为未来扩展，不属于当前 helper contract。
 - 若未来采用 key-driven text，生成代码可以把 raw field 视作 key，并通过同一 helper 访问 translated text；API 名称保持稳定，减少业务迁移成本。
 
 ### Asset Manifest CSV

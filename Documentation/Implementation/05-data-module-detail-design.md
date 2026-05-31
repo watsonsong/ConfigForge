@@ -1,5 +1,18 @@
 # 05. Data 模块详细设计
 
+## 文档导航
+
+Related docs：[`../Design/05-data-validation.md`](../Design/05-data-validation.md)、[`12-struct-expanded-value-detail-design.md`](12-struct-expanded-value-detail-design.md)、[`08-exporter-module-detail-design.md`](08-exporter-module-detail-design.md)。
+
+- [5.1 设计目标](#51-设计目标)
+- [5.4 核心数据结构](#54-核心数据结构)
+- [5.5 加载计划结构](#55-加载计划结构)
+- [5.6 CSV 读取器](#56-csv-读取器)
+- [5.7 DataLoader](#57-dataloader)
+- [5.8 与 Meta / Validation / Exporter 的流程关系](#58-与-meta--validation--exporter-的流程关系)
+- [5.10 测试计划](#510-测试计划)
+
+
 本文档描述 Data 模块的实现设计，用于把 Meta 中声明的 source 配置加载为独立的数据快照，并在 Meta 完成 Link 后把 raw source 数据解析为可供 Validation / Export 共享的结构化数据视图。产品语义以 `Documentation/Design/` 为准；本文档聚焦 Rust 模块边界、核心类型、主要方法、流程阶段和测试组织。
 
 ## 5.1 设计目标

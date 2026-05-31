@@ -249,14 +249,14 @@ JSON / MessagePack v1 保持现有 named、string-compatible runtime payload con
 
 ## 13.7 Exporter 实现方案
 
-建议新增：
+当前已新增：
 
 ```text
 src/exporter/
   binary.rs           # BinaryDataExporter / bin revision / encoder
 ```
 
-核心 API：
+核心 API（当前实现使用 table data exporter registry 接口；示意如下）：
 
 ```rust
 pub const FORMAT: &str = "bin";
@@ -271,7 +271,7 @@ impl DataFormatExporter for BinaryDataExporter {
 }
 ```
 
-实现步骤：
+实现步骤（当前已落地为 `BinaryDataExporter`）：
 
 1. 从 `LinkedTableMeta` + `TargetTags` 构造 `BinaryTableLayout`。
 2. 计算 `schema_revision(layout)` 并写入 16 字节 file header。
@@ -280,7 +280,7 @@ impl DataFormatExporter for BinaryDataExporter {
 5. 按 layout 顺序从 `ResolvedValue` 取值并编码；如果 required value 缺失，返回 validation-style error。
 6. Registry 中注册 `BinaryDataExporter`，Project Config 支持 `format = "bin"`。
 
-不要复用 `ExportedTablePayload` 直接 serde 序列化，因为 text payload 是 named map/object shape，而 `bin` 需要 typed positional layout。建议抽出一个共享的 `RuntimeExportView` / `ResolvedExportTable` helper，JSON、MessagePack 和 Binary 都从同一份 target-aware resolved view 构建：
+不要复用 `ExportedTablePayload` 直接 serde 序列化，因为 text payload 是 named map/object shape，而 `bin` 需要 typed positional layout。当前实现复用同一套 target-aware resolved export view / resolver 语义，JSON、MessagePack 和 Binary 从同一份可见数据语义构建：
 
 - JSON / MessagePack：把 view 渲染为现有 named payload。
 - Binary：把 view 按 `BinaryTableLayout` 渲染为 positional bytes。
@@ -289,9 +289,9 @@ impl DataFormatExporter for BinaryDataExporter {
 
 ## 13.8 Codegen 与 RuntimeDataReader 方案
 
-### 13.8.1 CodeModel 需要携带 format 信息
+### 13.8.1 CodeModel 与 format 解耦
 
-当前 codegen 主要通过 `RuntimeDataFile.path` 得到数据文件名。支持 `bin` 前必须显式增加 runtime data format 视图，避免仅靠后缀推断：
+当前默认 codegen 不再消费真实 data task 结果，也不通过 `RuntimeDataFile.path` / `RuntimeDataFile.format` 绑定某个 runtime artifact。生成代码使用逻辑 table name（例如 `items`）作为 load key，实际打开 `items.json`、`items.msgpack` 或 `items.bin` 由运行时 loader / reader 组合决定。若未来 manifest 或 adapter 配置需要显式记录真实 artifact，可在 build/runtime 层维护下列 metadata，但它不是当前 CodeModel validate 的必需输入：
 
 ```rust
 pub struct RuntimeDataFile {
@@ -301,15 +301,15 @@ pub struct RuntimeDataFile {
 }
 ```
 
-`format` 是 CodeModel 构建和 codegen validate 的必需输入；unknown format 应在 build/codegen 阶段报错，不应等到 generated runtime 才失败。后缀只能作为 artifact path 规划结果，不能作为 CodeModel format 的隐式来源。
+`format` 是 runtime artifact / manifest metadata，不是当前默认 CodeModel 构建和 codegen validate 的必需输入。unknown data format 应由 data export registry 或显式 adapter 配置校验；生成代码本身保持格式无关。后缀只能作为 artifact path 规划结果，不能作为 reader layout 的隐式来源。
 
 ### 13.8.2 Generated parser 分层
 
-生成代码应保持一套 typed row/object 构造逻辑，但读取入口按 data format 选择 reader layout：
+生成代码应保持一套 typed row/object 构造逻辑，读取入口由接入方选择的 loader / reader 暴露统一 schema-driven API：
 
 ```text
-load table file
-  -> create RuntimeDataReader adapter for json/messagepack/bin
+loader.open(logical table path)
+  -> runtime selects RuntimeDataReader adapter for json/messagepack/bin
   -> generated parser calls schema-driven field APIs
   -> parse table envelope/record
   -> construct typed rows/object
@@ -349,12 +349,12 @@ ensure_exhausted()
 
 ### 13.8.4 标准 runtime helper 覆盖矩阵
 
-`runtime/` 标准 helper 后续增加：
+`runtime/` 标准 helper 覆盖：
 
 | 语言 | bin reader 形态 |
 | --- | --- |
 | Rust | `binary_reader` / `binary_fs_loader` copyable template；无第三方依赖。 |
-| TypeScript | `@config-forge/runtime-binary` value/cursor reader；支持 `ArrayBuffer` / `Uint8Array`。 |
+| TypeScript | binary reader copyable package template；支持 `ArrayBuffer` / `Uint8Array`。 |
 | C++ | header-only 或小型源文件 `BinaryRuntimeDataReader`；只依赖标准库。 |
 
 binary reader 应共享 compliance fixtures：
@@ -451,10 +451,10 @@ Codegen / runtime helper 测试：
 - 注册 `bin` exporter。
 - 增加 exporter 单元测试和少量 golden bytes fixture。
 
-### Phase 2：CodeModel format 信息 + generated parser
+### Phase 2：Runtime metadata + generated parser
 
-- `RuntimeDataFile` / CodeModel 中显式记录 runtime data format，作为 `bin` generated parser 前置改造。
-- 三个语言生成器按 format 选择 named 或 positional parser。
+- 如未来需要 manifest / adapter 配置，可在 build/runtime metadata 中显式记录 runtime data format；当前默认 CodeModel 不消费真实 data task 结果。
+- 三个语言生成器通过统一 schema-driven reader API 复用 parser；named / positional 差异由运行时 reader adapter 消化。
 - generated code 写入每张 table 的 `EXPECTED_SCHEMA_REVISION` 常量。
 
 ### Phase 3：标准 runtime binary readers
@@ -468,7 +468,40 @@ Codegen / runtime helper 测试：
 - 与 JSON / MessagePack 比较包体大小与加载耗时。
 - 根据数据决定是否增加 string interning、bool array bitset、block compression 等 v2 优化。
 
-## 13.12 待讨论问题
+## 13.12 Open follow-ups
+
+以下事项由原 `Documentation/Todo/runtime-binary-format.md` 合并而来。`Documentation/Todo/` 不再作为 canonical 文档目录；后续跟进项应直接维护在本章节或迁移到 issue/task 系统。
+
+### P0：首版稳定化前必须完成
+
+- [x] 统一 Rust runtime reader contract。
+  - 已选择共享 core crate 模式：`runtime/rust/reader_core` 定义 `RuntimeDataReader` / `RuntimeDataLoader`，generated Rust 通过 `config_forge_runtime_reader_core` 复用同一套 trait。
+  - Rust runtime helper crates 不再各自定义同名 trait，避免名义类型不兼容。
+- [x] 补齐 optional scalar / struct field 的目标语言类型表达。
+  - CodeModel 已传播 optional 字段语义，Rust / TypeScript / C++ 分别生成 `Option<T>`、optional property、`std::optional<T>`。
+  - Binary exporter 现在可通过 presence bitmap 省略缺失 optional scalar / struct field。
+- [x] 增加真实 generated code + binary runtime helper 的端到端测试。
+  - Rust、TypeScript、C++ standard project harness 已覆盖 `.bin` fixture。
+
+### P1：首版发布前建议完成
+
+- [x] 明确 TypeScript `int` contract。
+  - TypeScript codegen 继续将 Meta `int` 生成为 `number`；`bin` exporter 拒绝超出 JavaScript safe integer 范围的值。
+- [x] 为 binary reader 增加可配置 decode limits。
+  - Rust / TypeScript / C++ binary reader 均支持默认 limits 与业务覆盖。
+- [ ] 改进 C++ adapter 与 generated namespace/include 的集成方式。
+  - 当前 adapter 仍默认 include `generated.hpp` 并假设 fixture namespace；后续应提供稳定 alias / macro header，或要求用户显式定义 reader/loader 类型宏。
+- [ ] 建立跨语言 binary compliance fixtures。
+  - 覆盖 trailing bytes、invalid UTF-8、oversized varuint、oversized row count / string length、schema revision mismatch、optional fragment presence 等场景。
+
+### P2：后续重构与体验优化
+
+- [ ] 将 binary schema revision / layout signature 抽成清晰的共享 contract 模块。
+- [ ] 完善 binary reader 错误上下文，包含 table、field path、row index、byte offset、expected / actual 等信息。
+- [ ] 增加 canonical varuint 校验策略。
+- [ ] 补全文档中的 runtime helper 使用示例，覆盖 JSON / MessagePack / bin 三种格式 reader 的组合方式。
+
+## 13.13 待讨论问题
 
 1. `schema_revision` 使用 `u64` 是否足够；若希望更低碰撞概率，可在 bin v2 改为 128-bit revision。
 2. `float` 是否需要在 Meta 中区分 `float32` / `float64`。

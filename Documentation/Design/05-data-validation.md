@@ -225,7 +225,7 @@ runtime payload 应固定 fragment 表达方式。第一阶段推荐直接用 fr
 
 > 编号说明：原 `Index Validation` 章节后续编号可在文档整理时统一顺延；本节先插入 polymorphic fragment validation 语义，避免实现阶段缺少依据。
 
-## 5.6 Index Validation
+## 5.7 Index Validation
 
 检查：
 
@@ -236,7 +236,7 @@ runtime payload 应固定 fragment 表达方式。第一阶段推荐直接用 fr
 - `primary_index` 与 `primary = true` 一致；
 - preserve_source_order 表不把 source order 当成 foreign key target。
 
-## 5.7 Foreign Key Validation
+## 5.8 Foreign Key Validation
 
 检查：
 
@@ -256,7 +256,7 @@ FK 上的 `linked_field` 不引入新的数据校验规则；它只是要求生�
 
 生成代码的 lazy relation getter 可以在运行时做防御性检查，但不替代导出前 validation：如果 validated artifact 中 relation lookup 失败，通常表示 runtime data 与 generated code 版本不匹配、手工篡改了数据文件，或业务跳过了 validation。此时 generated helper 应返回错误 / throw，而不是把缺失目标当成 optional empty。只有 `allow_empty = true` 且 source key 全空时才是合法空关系。
 
-## 5.8 Asset 与 Text 校验
+## 5.9 Asset 与 Text 校验
 
 ### Asset
 
@@ -291,7 +291,7 @@ POT / text 相关校验目标态应补充：
 
 当前实现状态：`text` 仍按 string-like scalar 解析和 runtime data 导出；已实现 `format = "gettext_pot"` 的首版聚合 data exporter，按当前 target 可见 table / row / field 抽取 primitive `text` 原文作为 `msgid`，支持 `table.field` context、source location / record key reference、field `desc` 与自动 table/field/record translator comment、以及 `(msgctxt, msgid)` 去重。国际化 key/context 显式列、placeholder / plural 诊断、fragment / struct child text 深度抽取和外部 catalog 导入仍属于后续扩展。标准参考游戏 fixture 中 item/class name、class description 等字段用于表达目标语义：客户端需要 text，服务器通常不需要；target ExportView 过滤后，server target 不应输出这些字段，也不应把它们送入未来 POT / text validation。
 
-## 5.9 聚合 Data Exporter 输入
+## 5.10 聚合 Data Exporter 输入
 
 POT、asset manifest 等聚合 data exporter 默认读取 target 的 ExportView，而不是 Full DataSet。
 
@@ -301,7 +301,7 @@ POT、asset manifest 等聚合 data exporter 默认读取 target 的 ExportView�
 - shipping 排除的测试行，其资源不进入 asset manifest。
 - `export = false` 字段默认不进入 runtime data；若未来字段策略或 exporter policy 允许某个聚合格式读取辅助字段，可在未被 record filter 排除的前提下被该 data exporter 使用。
 
-## 5.10 诊断要求
+## 5.11 诊断要求
 
 每条诊断应尽量包含：
 

@@ -1,5 +1,18 @@
 # 06. Validation 模块详细设计
 
+## 文档导航
+
+Related docs：[`../Design/05-data-validation.md`](../Design/05-data-validation.md)、[`02-diagnostic-module-detail-design.md`](02-diagnostic-module-detail-design.md)、[`11-foreign-key-detail-design.md`](11-foreign-key-detail-design.md)。
+
+- [6.0 模块职责与当前结构](#60-模块职责与当前结构)
+- [6.2 Meta 配置设计](#62-meta-配置设计)
+- [6.4 核心 trait 与类型](#64-核心-trait-与类型)
+- [6.5 编译流程](#65-编译流程)
+- [6.6 内置 validator 设计](#66-内置-validator-设计)
+- [6.7 与 Target Tags / ExportView 的关系](#67-与-target-tags--exportview-的关系)
+- [6.11 测试计划](#611-测试计划)
+
+
 本文档描述 ConfigForge validator 框架的实现设计。当前已在保留 required / type / enum / unique / target-aware validation 行为的基础上，引入可注册、可扩展、可配置的 validator 机制；已落地 registry、结构化 `ValidationReport` 和内置 `range` validator。required / type / enum / unique 仍作为基础规则保留在 validation 主流程中，后续可继续迁移为 implicit validators。
 
 需要特别区分：**validator 是检查规则，foreign key 是数据关系模型**。外键关系不仅用于导出前校验，还会影响 runtime data/codegen，例如生成自动查找关联记录的 helper。因此外键不应只作为 `kind = "foreign_key"` 的普通 validator 配置存在；它应成为 Meta 中的一等关系数据，再由 validation 阶段从外键关系隐式生成 referential-integrity validator。

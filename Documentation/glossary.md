@@ -257,5 +257,5 @@
 | Source `priority` | 取消；`override_sources` 按列表顺序覆盖，后者覆盖前者。 |
 | `expanded_columns` / `expanded_rows` | 不作为 canonical layout；改用 `expanded_value`。 |
 | `color_channel = "auto"` | 禁止；必须显式为 `byte` 或 `normalized`。 |
-| 模糊 `custom` runtime format | 不使用；自定义格式必须注册明确 format/exporter ID。 |
+| 模糊 `custom` runtime format | 不使用；自定义格式必须注册明确 format/exporter ID。当前 runtime table data format 为 `json`、`messagepack`、`bin`；聚合 data exporter 已支持 `gettext_pot` / `pot`。 |
 | fragment join mode | 当前不支持；当前只支持 variant source mode。 |
