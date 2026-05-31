@@ -1624,6 +1624,13 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                     throw std::runtime_error("unexpected row count");
                 }
 
+                std::size_t ReadListLength() override {
+                    if (path_ == "game_rules" && CurrentField() == "starter_item_ids") {
+                        return 2;
+                    }
+                    throw std::runtime_error("unexpected list length");
+                }
+
                 std::int64_t AsInt64() const override {
                     if (path_ == "items" && CurrentField() == "id") { return 1; }
                     if (path_ == "items" && CurrentField() == "price") { return 10; }

@@ -104,6 +104,7 @@ CollectionTable 输出包含 table meta envelope 和 rows：
 - variant source row 只导出该 source 激活的 fragments。
 - struct value 输出为 nested object。
 - list value 输出为 array；JSON / MessagePack 中 scalar list element 仍输出 string-compatible value，`bin` 中按元素类型写入 typed value。
+- `bin` record 的 optional bitmap 由统一的 `PresenceSlot -> write_optional_bitmap` 路径写入：table record 先按可见字段顺序记录 optional field slots，再按可见 fragment 顺序记录 fragment slots；struct / fragment record 只记录可见 optional field slots。required field 不占用 bitmap bit，presence bit 使用 little-endian bit order（第 0 个 optional slot 对应 byte bit 0）。
 
 ### 8.4.2 ObjectTable
 

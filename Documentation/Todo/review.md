@@ -33,10 +33,10 @@
   - 已完成：list parser 仍在转换失败时按需构造 `field[index]` 诊断路径；payload/binary exporter 与 list FK 校验改为消费轻量元素模型。
   - 验收：单元测试覆盖 `ArrayElementValue` 小于 `ResolvedValue`、raw value/export fallback 与 list element 解析行为。
 
-- [ ] 抽象 binary record optional bitmap 写入逻辑。
-  - 当前 table record、struct record、fragment record 各自处理 optional slot count、bitmap 初始化和 presence bit 写入。
-  - 目标：抽出 `RecordSlot` / `PresenceSlot` 或 `write_optional_bitmap`，统一 target visibility、optional presence 与 slot 顺序。
-  - 验收：新增 optional 规则时只需修改一处 bitmap writer，并保持 binary schema revision/layout signature 稳定。
+- [x] 抽象 binary record optional bitmap 写入逻辑。
+  - 已完成：抽出 `PresenceSlot` 与 `write_optional_bitmap`，统一 optional slot 过滤、bitmap byte 初始化和 presence bit 写入。
+  - 已完成：table record、struct record、fragment record 都复用同一 bitmap writer；table record 仍保持字段 optional slot 在前、fragment slot 在后的既有 layout 顺序。
+  - 验收：单元测试覆盖 required slot 不占 bit、optional slot bit packing 与跨 byte bitmap；既有 binary schema revision/layout 签名逻辑保持不变。
 
 - [ ] 引入 resolver 上下文对象减少参数蔓延。
   - 当前 resolver helper 反复传递 `table_name`、`row_number`、`row_source`、`field_path`、`target_tags`。

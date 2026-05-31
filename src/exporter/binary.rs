@@ -211,25 +211,15 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
             .iter()
             .filter(|fragment| fragment.meta.is_exported_for(self.target_tags))
             .collect::<Vec<_>>();
-        let optional_slot_count =
-            fields.iter().filter(|field| !field.meta.required).count() + fragments.len();
-        let mut bitmap = vec![0u8; optional_slot_count.div_ceil(8)];
-        let mut optional_index = 0usize;
-        for field in &fields {
-            if !field.meta.required {
-                if values.contains_key(&field.meta.name) {
-                    set_bit(&mut bitmap, optional_index);
-                }
-                optional_index += 1;
-            }
-        }
-        for fragment in &fragments {
-            if fragment_present(fragment, values, active_fragments) {
-                set_bit(&mut bitmap, optional_index);
-            }
-            optional_index += 1;
-        }
-        self.bytes.extend_from_slice(&bitmap);
+        let presence_slots = fields
+            .iter()
+            .map(|field| PresenceSlot::field(field, values))
+            .chain(
+                fragments
+                    .iter()
+                    .map(|fragment| PresenceSlot::fragment(fragment, values, active_fragments)),
+            );
+        write_optional_bitmap(&mut self.bytes, presence_slots);
 
         for field in fields {
             match values.get(&field.meta.name) {
@@ -286,21 +276,12 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
             .iter()
             .filter(|field| field.meta.is_exported_for(self.target_tags))
             .collect::<Vec<_>>();
-        let optional_slot_count = visible_fields
-            .iter()
-            .filter(|field| !field.meta.required)
-            .count();
-        let mut bitmap = vec![0u8; optional_slot_count.div_ceil(8)];
-        let mut optional_index = 0usize;
-        for field in &visible_fields {
-            if !field.meta.required {
-                if values.contains_key(&field.meta.name) {
-                    set_bit(&mut bitmap, optional_index);
-                }
-                optional_index += 1;
-            }
-        }
-        self.bytes.extend_from_slice(&bitmap);
+        write_optional_bitmap(
+            &mut self.bytes,
+            visible_fields
+                .iter()
+                .map(|field| PresenceSlot::field(field, values)),
+        );
         for field in visible_fields {
             match values.get(&field.meta.name) {
                 Some(value) => self.write_field_value(field, value)?,
@@ -543,6 +524,46 @@ fn fragment_present(
     source_active && values.contains_key(&fragment.meta.name)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PresenceSlot {
+    optional: bool,
+    present: bool,
+}
+
+impl PresenceSlot {
+    fn field(field: &LinkedFieldMeta<'_>, values: &BTreeMap<String, ResolvedValue>) -> Self {
+        Self {
+            optional: !field.meta.required,
+            present: values.contains_key(&field.meta.name),
+        }
+    }
+
+    fn fragment(
+        fragment: &LinkedFragmentMeta<'_>,
+        values: &BTreeMap<String, ResolvedValue>,
+        active_fragments: Option<&Vec<String>>,
+    ) -> Self {
+        Self {
+            optional: true,
+            present: fragment_present(fragment, values, active_fragments),
+        }
+    }
+}
+
+fn write_optional_bitmap(out: &mut Vec<u8>, slots: impl IntoIterator<Item = PresenceSlot>) {
+    let optional_slots = slots
+        .into_iter()
+        .filter(|slot| slot.optional)
+        .collect::<Vec<_>>();
+    let mut bitmap = vec![0u8; optional_slots.len().div_ceil(8)];
+    for (optional_index, slot) in optional_slots.iter().enumerate() {
+        if slot.present {
+            set_bit(&mut bitmap, optional_index);
+        }
+    }
+    out.extend_from_slice(&bitmap);
+}
+
 fn expected_scalar(field: &LinkedFieldMeta<'_>) -> ConfigForgeError {
     ConfigForgeError::Validation(format!(
         "binary export field `{}` expected scalar value",
@@ -715,7 +736,52 @@ mod tests {
         meta::{MetaModel, TargetTags},
     };
 
-    use super::{BinaryDataExporter, FORMAT_VERSION, HEADER_SIZE, MAGIC, schema_revision};
+    use super::{
+        BinaryDataExporter, FORMAT_VERSION, HEADER_SIZE, MAGIC, PresenceSlot, schema_revision,
+        write_optional_bitmap,
+    };
+
+    #[test]
+    fn optional_bitmap_skips_required_slots_and_packs_optional_presence() {
+        let mut bytes = Vec::new();
+
+        write_optional_bitmap(
+            &mut bytes,
+            [
+                PresenceSlot {
+                    optional: false,
+                    present: true,
+                },
+                PresenceSlot {
+                    optional: true,
+                    present: true,
+                },
+                PresenceSlot {
+                    optional: true,
+                    present: false,
+                },
+                PresenceSlot {
+                    optional: true,
+                    present: true,
+                },
+            ],
+        );
+
+        assert_eq!(bytes, vec![0b0000_0101]);
+    }
+
+    #[test]
+    fn optional_bitmap_extends_to_multiple_bytes() {
+        let mut bytes = Vec::new();
+        let slots = (0..10).map(|index| PresenceSlot {
+            optional: true,
+            present: index == 0 || index == 8 || index == 9,
+        });
+
+        write_optional_bitmap(&mut bytes, slots);
+
+        assert_eq!(bytes, vec![0b0000_0001, 0b0000_0011]);
+    }
 
     #[test]
     fn writes_header_and_collection_rows() {
