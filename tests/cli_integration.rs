@@ -50,6 +50,115 @@ fn builds_code_only_target_without_loading_data() {
 }
 
 #[test]
+fn code_only_target_ignores_missing_project_input_and_sources() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let out_dir = temp_dir.path().join("generated_code");
+    let missing_input_dir = temp_dir.path().join("missing_data_root");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                input = "{}"
+
+                [[targets]]
+                name = "code_only"
+
+                [[targets.exports]]
+                type = "rust"
+                output = "{}"
+            "#,
+            standard_core_meta_imports(),
+            missing_input_dir.display(),
+            out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "code_only",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `code_only` built"));
+
+    assert!(!missing_input_dir.exists());
+    let rust_code = fs::read_to_string(out_dir.join("generated.rs")).expect("rust code");
+    assert!(rust_code.contains("pub struct ItemsRow"));
+}
+
+#[test]
+fn dry_run_serial_and_parallel_outputs_match() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_out_dir = temp_dir.path().join("out/data");
+    let rust_out_dir = temp_dir.path().join("out/code/rust");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                input = "{}"
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [[targets.exports]]
+                output = "{}"
+                type = "json"
+
+                [[targets.exports]]
+                type = "rust"
+                output = "{}"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            data_out_dir.display(),
+            rust_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let serial_stdout = run_config_forge_stdout(&[
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+        "--dry-run",
+        "--serial",
+    ]);
+    let parallel_stdout = run_config_forge_stdout(&[
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+        "--dry-run",
+        "--jobs",
+        "2",
+        "--io-concurrency",
+        "4",
+        "--network-concurrency",
+        "2",
+    ]);
+
+    assert_eq!(serial_stdout, parallel_stdout);
+    assert!(serial_stdout.contains("artifact plan (5 entries):"));
+    assert!(!data_out_dir.join("items.json").exists());
+    assert!(!rust_out_dir.join("generated.rs").exists());
+}
+
+#[test]
 fn dry_run_builds_plan_without_writing_artifacts() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let data_out_dir = temp_dir.path().join("out/data");
@@ -1599,6 +1708,21 @@ fn absolute_fixture_path(relative_path: &str) -> String {
         .join(relative_path)
         .display()
         .to_string()
+}
+
+fn run_config_forge_stdout(args: &[&str]) -> String {
+    let output = Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .args(args)
+        .output()
+        .expect("config-forge should run");
+    assert!(
+        output.status.success(),
+        "config-forge failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("stdout should be utf8")
 }
 
 fn standard_core_meta_imports() -> String {

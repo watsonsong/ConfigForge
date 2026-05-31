@@ -1829,6 +1829,101 @@ fn range_validator_rejects_values_outside_bounds() {
 }
 
 #[test]
+fn validation_report_preserves_diagnostic_order_for_multiple_range_issues() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+
+            [[tables.fields.validators]]
+            kind = "range"
+            name = "level_range"
+            min = 1
+            max = 10
+
+            [[tables.fields]]
+            name = "weight"
+            type = "int"
+
+            [[tables.fields.validators]]
+            kind = "range"
+            name = "weight_range"
+            min = 1
+            max = 100
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![
+            BTreeMap::from([
+                ("level".to_owned(), "11".to_owned()),
+                ("weight".to_owned(), "101".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("level".to_owned(), "0".to_owned()),
+                ("weight".to_owned(), "0".to_owned()),
+            ]),
+        ],
+    )]);
+    let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
+    let registry = ValidatorRegistry::with_builtin_validators();
+    let plan =
+        CompiledValidationPlan::compile(&linked_meta, &registry).expect("plan should compile");
+    let context = ValidationContext::new(
+        &linked_meta,
+        None,
+        &normalized,
+        ExportValidationView::full(&linked_meta, &normalized),
+    );
+
+    let report = plan.run(&context);
+
+    assert_eq!(
+        report
+            .issues
+            .iter()
+            .map(|issue| {
+                (
+                    issue.validator.as_str(),
+                    issue.location.row_index,
+                    issue.message.as_str(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "level_range",
+                Some(0),
+                "table `items` row 1 field `level` value exceeds max `10`",
+            ),
+            (
+                "level_range",
+                Some(1),
+                "table `items` row 2 field `level` value is below min `1`",
+            ),
+            (
+                "weight_range",
+                Some(0),
+                "table `items` row 1 field `weight` value exceeds max `100`",
+            ),
+            (
+                "weight_range",
+                Some(1),
+                "table `items` row 2 field `weight` value is below min `1`",
+            ),
+        ]
+    );
+    assert_eq!(report.error_messages().len(), 4);
+}
+
+#[test]
 fn range_validator_rejects_unknown_parameter() {
     let meta = MetaModel::from_toml_str(
         r#"

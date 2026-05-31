@@ -2,25 +2,32 @@
 
 本文档描述 ConfigForge 后续任务系统的技术实现方案。目标是在不改变现有导出语义、诊断顺序和产物稳定性的前提下，合理利用 CPU 多核与操作系统异步 I/O 能力，支持用户通过 CLI 限制资源消耗，避免默认占满整台机器。
 
-当前实现已引入局部 Rayon CPU worker pool：`build_target` 仍按 Project Config 读取、Meta Link、Data Load、Normalize、Validation、Runtime Data Export、Codegen 与写文件的阶段顺序执行，但 DataLoader、runtime data serialization 和 codegen task 已在受 `jobs` 限制的 worker pool 中并行。远端 provider、async I/O、完整任务 DAG 和独立 artifact writer 仍属于后续演进范围。本文档作为后续重构的工程设计依据。
+当前实现已引入局部 Rayon CPU worker pool：`build_target` 仍按 Project Config 读取、选择 target、Meta Link、Data Load、Normalize、Validation、Runtime Data Export、Codegen 与写文件的阶段顺序执行；`execute_target_dag()` 只构造 execution-view skeleton，并按 `MetaAndData` / `MetaOnly` 两个分支执行，不是完整通用 DAG executor。DataLoader、runtime data serialization 和 codegen task 已在受 `jobs` 限制的 worker pool 中并行。远端 provider、async I/O、从目标产物倒推依赖的完整任务 DAG、full dataset validation / target view validation 分层并行、以及 bounded artifact pipeline 仍属于后续演进范围。本文档作为后续重构的工程设计依据。
 
 ## 1. 设计目标
 
 ### 1.1 功能目标
 
 1. 将一次导出拆成显式任务图，表达阶段依赖和可并行粒度。
-2. 支持以下粒度的并行：
+2. 从“用户请求的 target / export tasks”倒推需要的前置依赖：
+   - code-only target 只需要 Project Config、Meta extract/link 和 MetaOnly codegen，不应读取 Data；
+   - 含 MetaAndData export task 的 target 才需要 DataLoadPlan、SourceRead、Normalize、Validation 和 data-backed exporter；
+   - 多 target 构建时，依赖 key 必须包含 target/effective tags，避免错误复用不同 target view。
+3. 支持以下粒度的并行：
    - 按文件读取 Project Config / Meta imports；
-   - 按 source / table 读取数据；
+   - 在 Project Config 与原始 MetaModel 已加载后，让 Meta link / validate 与 Data source 读取尽可能并行；
+   - 按 source / table 读取数据，本地 CSV、Google Sheet、飞书文档等 provider 使用统一 source task 语义并按资源类型调度；
    - 按 table 做 normalize、validation、runtime payload 构建；
-   - 按 target 和 MetaOnly export task 做 codegen；
+   - 在 full normalized DataSet 上并行运行 full-data validations；
+   - 在每个 target 的 target-filtered DataSetView / ExportValidationView 上并行运行 target-aware validations；
+   - 按 target、export task 和 table artifact 并行执行 data generation / aggregate exporter / MetaOnly codegen；
    - 按 artifact 写出文件。
-3. 区分 I/O 等待任务和 CPU 密集任务：
+4. 区分 I/O 等待任务和 CPU 密集任务：
    - 网络 source、远端表格 API、后续 bounded artifact write 优先使用 async I/O；
    - 本地 CSV 第一阶段可以继续使用同步 reader，并作为受 `jobs` 限制的 blocking/CPU source task 执行，避免为了 async 化而一次性读完整文件增加内存峰值；
    - CSV parse、Meta link、validation、codegen、serialization 使用受限 CPU worker pool。
-4. CLI 可控制 CPU 并行度和 I/O 并发度，避免抢占所有机器资源。
-5. 诊断、manifest、产物路径检查保持稳定排序，不受任务完成顺序影响。
+5. CLI 可控制 CPU 并行度和 I/O 并发度，避免抢占所有机器资源。
+6. 诊断、manifest、产物路径检查保持稳定排序，不受任务完成顺序影响。
 
 ### 1.2 非目标
 
@@ -215,13 +222,22 @@ pub type TaskId = u64;
 
 pub enum TaskKind {
     ConfigRead,
+    ProjectNormalize,
+    TargetSelect,
+    DependencyPlan,
     MetaExtract,
     MetaLink,
+    MetaValidate,
+    DataLoadPlan,
     SourceRead,
+    MergeDataSet,
     NormalizeTable,
-    ValidateTable,
-    ValidateDataSet,
-    GenerateRuntimeData,
+    MergeNormalizedDataSet,
+    ValidateFullDataSet,
+    BuildTargetView,
+    ValidateTargetView,
+    PlanArtifacts,
+    GenerateDataArtifact,
     GenerateCode,
     WriteArtifact,
 }
@@ -249,6 +265,99 @@ pub enum TaskResource {
 ```
 
 第一阶段不一定要暴露通用 DAG executor；可以先在 exporter 流程中按阶段使用 `join_all` / CPU pool parallel iter。但类型设计应向 DAG 收敛，避免后续重构推倒重来。
+
+### 5.1a 从目标产物倒推依赖
+
+完整任务系统不应固定执行 “Meta -> Data -> Validation -> Export” 全流水线，而应先根据用户请求的 target 和 export tasks 构造 dependency plan。依赖倒推的基本规则：
+
+| 请求 / Export task | 必要依赖 | 不应触发 |
+| --- | --- | --- |
+| 只包含 `MetaOnly` codegen（Rust / C++ / TypeScript） | Project Config、Target normalize、effective target tags、Meta extract、Meta link / meta validate、GenerateCode、Artifact plan/write | DataLoadPlan、SourceRead、NormalizeDataSet、Data validation、MetaAndData exporter |
+| 包含 `MetaAndData` runtime / aggregate / embedded data exporter（JSON / MessagePack / bin / POT / Lua） | Project Config、Target normalize、effective target tags、Meta extract、Meta link / meta validate、DataLoadPlan、SourceRead、NormalizeDataSet、FullDataSet validations、TargetView validations、data artifact generation、Artifact plan/write | 与该 target 无关的其他 target export tasks |
+| 多 target 构建（未来） | 每个 target 独立 effective tags / target view；共享 Project Config、raw MetaModel、Meta link；可按 `(project.input, effective_tags)` 复用 DataSet / validation 结果 | 只按 `project.input` 复用 DataSet；把一个 target 的 ExportValidationView 复用到另一个 target |
+
+依赖 plan 的输出至少需要表达：
+
+```rust
+pub struct TargetBuildPlan {
+    pub target_name: String,
+    pub effective_tags: TargetTags,
+    pub requires_data: bool,
+    pub meta_only_exports: Vec<ExportTaskId>,
+    pub meta_and_data_exports: Vec<ExportTaskId>,
+}
+```
+
+当前文档和实现不足之处：
+
+- `execute_target_dag()` 的 node key 只是 execution view skeleton，不是调度权威；文档若只写 “DAG” 容易误导为已有完整 DAG executor。
+- 当前 build 仍先 link Meta，再进入 target-local executor；目标态应在 Project Config / raw MetaModel 加载后，通过 dependency plan 判断哪些 target 需要 Data，避免 code-only target 读取 Data。
+- 当前 `NormalizeAndValidate` 把 source load、normalize、full validation 和 target validation 合并成一个分支步骤；目标态需要拆开，才能表达 source I/O 与 Meta link 并行、full dataset validation 与 target-view validation 分层并行。
+- 当前只支持一次构建一个 target；目标态 multi-target 需要显式 cache key：`LinkedMeta` 可共享，Data / normalized data / validation result 至少按 `(project.input, effective_tags)` 或更细粒度 key 区分。
+
+### 5.1b 目标态 DAG 形态
+
+在完成基础工程加载后，目标态 DAG 应接近下列结构：
+
+```text
+ConfigRead(root/imports)
+  -> ProjectNormalize
+  -> TargetSelect / NormalizeTargets
+  -> DependencyPlan(target exports)
+
+ProjectNormalize
+  -> MetaExtract
+  -> MetaLink / MetaValidate
+
+DependencyPlan(target requires data?)
+  -> if any MetaAndData target:
+       DataLoadPlan(project.input, effective_tags)
+         -> SourceRead(source A)       # local CSV = blocking/CPU or file I/O
+         -> SourceRead(source B)       # Google Sheet = async network I/O
+         -> SourceRead(source C)       # Feishu/Lark doc/sheet = async network I/O
+       SourceRead[*] -> MergeDataSet(plan order)
+
+MetaLink + MergeDataSet
+  -> NormalizeTable(table*) in parallel
+  -> MergeNormalizedDataSet
+  -> ValidateFullDataSet(rule/table*) in parallel
+
+ValidateFullDataSet + TargetSelect(target N)
+  -> BuildTargetView(target N, effective_tags)
+  -> ValidateTargetView(target N, rule/table*) in parallel
+
+MetaLink + TargetView/Validation success
+  -> PlanArtifacts(all requested exports)
+  -> GenerateDataArtifact(export/table*) in parallel
+  -> GenerateCode(target MetaOnly export*) in parallel
+  -> final path conflict check
+  -> WriteArtifact(*) bounded / deterministic
+```
+
+关键并行点：
+
+1. `MetaLink / MetaValidate` 与 `SourceRead[*]` 可以并行：source provider 读取原始表格不应依赖 linked Meta；需要 Meta 的 typed normalize / validation 在二者之后执行。
+2. 多个 `SourceRead` 按 provider 资源类型调度：本地 CSV 可以作为 blocking/CPU source task，Google Sheet / 飞书文档属于 async network I/O task，并受 `network_concurrency` 和 provider-level throttle 限制。
+3. `ValidateFullDataSet` 在 normalized full DataSet 上运行，与具体 target 无关；适合按 table / validator group 并行并稳定合并 diagnostics。
+4. 每个 target 的 `BuildTargetView` / `ValidateTargetView` 依赖 full validation 成功或至少 full validation diagnostics 收集完成；target-aware rules 在 target-filtered DataSetView / ExportValidationView 上运行，不应直接遍历未经 target 过滤的 full DataSet。
+5. 所有生成任务都必须在 artifact path planning 后或生成前可推导 path 时参与统一 conflict check；生成任务之间可并行，但结果按 target / export declaration order 稳定收集。
+
+### 5.1c Validation 分层依赖
+
+为了支撑 full DataSet 与 target view 并行验证，Validation 需要显式拆分规则层级：
+
+| 层级 | 输入 | 示例规则 | 并行粒度 | 依赖 |
+| --- | --- | --- | --- | --- |
+| Normalize | Raw `DataSet` + linked Meta | default、typed struct/list 解析、ObjectTable logical row | table | `MetaLink + MergeDataSet` |
+| FullDataSet validation | normalized full `DataSet` + linked Meta | required/type/enum、struct boundary、full FK、full unique、全局 validator | table / validator group；跨表规则按 relation group | Normalize 完成 |
+| TargetView build | normalized full `DataSet` + target tags | table/field/row visibility、ExportValidationView | target | FullDataSet validation 完成或 no-error gate |
+| TargetView validation | target-filtered view | target-aware required、target-visible unique/FK、validator `export_when` | target + table / validator group | TargetView build |
+
+需要避免的设计：
+
+- 在 target-aware validation 中重新 normalize raw data；normalize 应只做一次，target view 应从 normalized full DataSet 派生。
+- 在 full validation 未完成时启动 data exporter；否则导出可能使用未经过全局一致性验证的数据。
+- 用共享 mutable `ValidationReport` 从多个 worker 直接 push；应让每个 validation task 返回局部 report，再由 coordination 层稳定排序合并。
 
 ### 5.2 稳定性要求
 
@@ -353,7 +462,7 @@ for each config fragment:
 
 也就是说：主文件字段仍在其 imports 之后合并；同一个 import 被多处引用时，只按第一次发现的位置参与合并；读取可以并发，最终 fragment list 不能按任务完成顺序决定。
 
-### 6.2 Meta extract / link / validate
+### 6.2 Meta extract / link / validate 与 Data source read 的并行边界
 
 Meta extract 是从 ProjectConfig clone/移动 `enums`、`structs`、`tables` 到 `MetaModel`。
 
@@ -364,6 +473,23 @@ Meta link 当前依赖完整 `MetaModel`，适合保持单阶段执行。后续�
 - Link 保持串行；
 - Meta validate 中不依赖全局可变状态的 table/field 规则可并行收集 diagnostics；
 - diagnostics 统一排序后返回。
+
+目标态 DAG 中，`MetaLink / MetaValidate` 不应阻塞所有 source read：
+
+```text
+ProjectNormalize
+  -> MetaExtract -> MetaLink / MetaValidate
+DependencyPlan(requires_data)
+  -> DataLoadPlanSourceList -> SourceRead[*]
+MetaLink + SourceRead[*] -> NormalizeTable[*]
+```
+
+这要求 DataLoadPlan 拆成两个层级：
+
+1. **Source discovery / raw source list**：只需要 Project Config 中的 `project.input`、Meta raw source declarations 和 target effective tags，用于决定需要读取哪些 source；该层应尽量不依赖 linked Meta。
+2. **Typed load / normalize plan**：需要 linked Meta，负责把 raw source rows 解释成 typed normalized DataSet。
+
+如果某些 source discovery 规则确实依赖 linked Meta（例如未来按 field type 决定 provider projection），必须在 DAG 中显式声明 `MetaLink -> DataLoadPlan` 依赖；不能隐藏在 SourceRead 内部，否则会破坏 code-only target 不读 Data、以及 source I/O 与 Meta link 并行的目标。
 
 ### 6.3 Source loading
 
@@ -387,12 +513,15 @@ one DataSourcePlan -> one SourceRead task
 - 使用 `network_semaphore` 限制请求；
 - provider 内部可根据 API 限流再细分；
 - retry/backoff 必须记录在 provider 诊断中，不能无限重试。
+- Google Sheet、飞书文档 / 表格等 provider 必须作为 async I/O task，不应占用 CPU worker 等待网络；下载后的 CSV/Sheet cell parse 可再转入 CPU task。
 
 结果合并：
 
 - 按 `DataLoadPlan.sources()` 顺序组装 `DataSet`；
 - duplicate table name 仍稳定报错；
 - 不按完成顺序改变表顺序。
+
+如果一个 target 只有 MetaOnly exports，DependencyPlan 必须跳过本节所有任务，并通过测试证明 `DataLoader` / provider registry 没有被调用。
 
 ### 6.4 Normalize
 
@@ -411,21 +540,27 @@ for each table in DataSet:
 
 ### 6.5 Validation
 
-Validation 分为 table-local 和 dataset-level：
+Validation 分为 full DataSet 层与 target view 层，而不是单一 “validation phase”：
 
 | 规则 | 并行粒度 |
 | --- | --- |
 | required/type/enum/field unique/index unique | table-local，可按 table 并行 |
 | field-level range validator | table-local，可按 table 或 validator 并行 |
-| row_export 后 target view 校验 | target + table 粒度并行 |
-| foreign key / cross-table consistency | dataset-level，需等 table-local 通过或收集完 |
+| full DataSet foreign key / cross-table consistency | dataset-level，可按 FK relation group 并行；需等 table-local 通过或收集完 |
+| row_export / table export / field export 后 target view 校验 | target + table 粒度并行 |
+| target-visible foreign key / unique / custom validator | target + table / relation group 粒度并行 |
 
 建议执行顺序：
 
 ```text
-build ExportValidationView for target
-  -> validate table-local rules in CPU pool
-  -> validate dataset-level rules
+NormalizeTable[*]
+  -> MergeNormalizedDataSet
+  -> ValidateFullDataSet(table-local rules in CPU pool)
+  -> ValidateFullDataSet(dataset-level relation groups)
+  -> for each target:
+       BuildTargetView(target, effective_tags)
+       -> ValidateTargetView(target table-local rules in CPU pool)
+       -> ValidateTargetView(target relation groups)
   -> merge ValidationIssue stable sort
 ```
 
@@ -434,19 +569,25 @@ build ExportValidationView for target
 - 如果继续 fail-fast：并行收益有限，且首个错误会受完成顺序影响；
 - 建议中期迁移到收集所有 table-local issues，再按稳定 key 输出。
 
-### 6.6 Runtime data export
+Full validation 与 target validation 的失败策略应分层：
 
-Runtime data export 可拆成三段：
+- FullDataSet error 默认阻断所有依赖该 DataSet 的 target data export，但仍可继续收集其他 full validation diagnostics。
+- 某个 target 的 TargetView validation error 只阻断该 target 的 data-backed exports；不应影响另一个 target 的 validation 和 MetaOnly codegen。
+- Warning 级 validation issue 汇总到对应 target / build output，不能因为并行执行而丢失归属。
+
+### 6.6 Runtime data / aggregate / embedded data export
+
+Data-backed export 可拆成三段：
 
 1. Coordination task：确定目标 artifact path，并在构建期汇总 artifact。
-2. CPU task：按 table 构建 payload 并序列化为 bytes。
+2. CPU task：按 export task / table / aggregate group 构建 payload 并序列化为 bytes。
 3. I/O task：写出文件。
 
 ```text
 PlanRuntimeData(table)
   -> Artifact { path, content }
 conflict check by path
-bounded GenerateRuntimeData(table)
+bounded GenerateDataArtifact(export, table_or_aggregate)
   -> ArtifactContent::Binary(bytes)
 bounded WriteArtifact(path, bytes)
 ```
@@ -471,6 +612,12 @@ max_in_flight_artifacts = min(jobs, 2)
 后续可以按 bytes 估算做更精确的 bounded channel；再往后才考虑 streaming writer。
 
 JSON pretty 输出可读但体积大、CPU/IO 成本高。后续可增加 `compact_json` 选项，但这属于产物格式策略，应独立评审。
+
+生成任务之间可以并行，但必须满足：
+
+- JSON / MessagePack / bin table artifact 可按 table 并行。
+- gettext POT、Lua table 这类 aggregate / embedded data exporter 可以按 exporter 内部安全粒度并行；若需要全局去重或 root facade 汇总，必须先并行收集局部结果，再在 coordination 层稳定合并。
+- 一个 target 的 data-backed exporter 必须等待该 target 的 TargetView validation 成功；MetaOnly codegen 不等待 Data 或 TargetView validation。
 
 ### 6.7 Code generation
 
@@ -521,28 +668,38 @@ Artifact[]
 
 ## 7. 调度策略
 
-### 7.1 阶段式调度优先于全局 DAG
+### 7.1 从 branch executor 过渡到依赖驱动 DAG
 
-推荐先采用阶段式调度：
+当前代码的 `execute_target_dag()` 是 branch executor：它按 export dependency contract 拆成 `MetaOnly` / `MetaAndData` 两条分支，并构造 node key 供测试和未来 tracing 使用。它尚不具备：
+
+- 从请求的 target/export task 反向裁剪依赖图；
+- node-level readiness scheduling；
+- Meta link 与 SourceRead 的交错并行；
+- full DataSet validation 与 target view validation 的分层调度；
+- multi-target cache key / result reuse；
+- cancellation、tracing、duration 统计等统一 task runtime 能力。
+
+迁移策略不应直接跳到“大而全 DAG executor”，而应采用 **dependency-plan first, executor later**：
+
+1. 先让 build normalization 产出明确的 `TargetBuildPlan` / `BuildDependencyPlan`，准确表达 code-only target 不需要 Data。
+2. 再把当前 `NormalizeAndValidate` 大步骤拆成 source read、merge、normalize、full validation、target view validation 等可测试函数。
+3. 继续用阶段式/局部并行执行这些函数，但每个阶段的输入输出和 cache key 必须已接近 DAG node。
+4. 最后引入通用 DAG executor，替换手写阶段编排。
+
+推荐过渡形态：
 
 ```text
-config read/parse phase
-meta link/validate phase
-source load phase
-normalize phase
-validation phase
-artifact generation phase
-artifact write phase
+BuildDependencyPlan
+  -> execute_meta_side()
+  -> if requires_data: execute_data_side_until_raw_sources()
+  -> join(MetaLink, RawSources) for normalize
+  -> execute_full_validation()
+  -> for each target: execute_target_view_validation()
+  -> execute_generators()
+  -> ArtifactWriter
 ```
 
-优点：
-
-- 容易保持现有语义；
-- 容易定位错误阶段；
-- 不需要一次性实现完整 DAG executor；
-- 与当前 `build_target` 重构路径匹配。
-
-当 source/provider/target 组合变复杂后，再把阶段式调度抽象成 DAG。
+这样每一步都能独立落地、独立测试，并保持现有 CLI 输出与 artifact 稳定性。
 
 ### 7.2 背压与限流
 
@@ -561,7 +718,8 @@ artifact write phase
 
 - Config/Meta link 失败：取消后续全部任务。
 - 某个 source 失败：可以继续等待已启动的 source 任务结束，以收集更多诊断；是否继续 normalize 取决于是否缺少必要表。
-- Validation error：可以继续完成其他 table validation，输出更多错误；默认不进入 artifact write。
+- FullDataSet validation error：可以继续完成其他 full validation task，输出更多错误；阻断依赖该 DataSet 的 data-backed export。
+- TargetView validation error：只阻断对应 target 的 data-backed export；其他 target 和 MetaOnly codegen 不受影响。
 - Artifact write 失败：取消未开始的写任务，等待已开始写任务完成或记录失败。
 
 技术实现：
@@ -676,52 +834,153 @@ pub enum ArtifactContent {
 
 runtime data 和 generated code 都应进入同一写出管线。Artifact writer 只关心最终路径和文本/二进制内容，不承载 runtime data、generated code 或 producer 等业务语义。写出前必须统一完成路径归一化、稳定排序和 path conflict 检查；后续并发阶段应通过 bounded pipeline 生成和写出，避免所有 artifact content 同时驻留内存。
 
-## 10. 迁移计划
+## 10. 渐进式改造 TODO list
 
-### Phase 0：参数和上下文
+每一步都必须保持 `--jobs 1` 与当前串行语义一致，并提供单元或集成测试证明该步骤可独立工作。不要把 async provider、validation 重构、DAG executor 和 artifact streaming 混在一个大改动里。
 
-- 新增 CLI `--jobs`、`--io-concurrency`、`--network-concurrency`、`--serial`。
-- 新增 `ExecutionOptions` / `ExecutionContext`。
-- 保持内部仍串行执行，只验证参数解析、默认值和传递链路。
+### Phase 0：现状标定与测试护栏
 
-### Phase 1：Source loading 并发
+目标：在改调度前锁定当前行为，避免后续并发化改变语义。
 
-- 将 DataLoadPlan 的多个 source 并行加载。
-- 本地 CSV 保持现有同步 reader，作为受 `jobs` 限制的 blocking/CPU source task 执行；远端 provider 落地后再引入 async I/O。
-- 结果按 plan 顺序合并。
-- 补充多 source 并发但稳定排序测试。
+- TODO：补充 code-only target 测试，断言只有 MetaOnly export task 时不会调用 DataLoader / provider。
+- TODO：补充多 export task declaration order 测试，覆盖 data-backed export 与 codegen 混排后的 artifact order。
+- TODO：补充 validation diagnostics 稳定排序基线测试，至少覆盖 table-local error、FK error、target-aware error。
+- TODO：补充 `--serial` / `--jobs 1` 与默认执行输出一致的 CLI integration。
+- 验证：`cargo test`；如引入测试辅助 provider，必须能精确记录调用次数和调用顺序。
 
-### Phase 2：Artifact generation / write 并发
+### Phase 1：DependencyPlan / TargetBuildPlan
 
-- runtime data 按 table 并行构建 payload。
-- codegen 按 MetaOnly export task 并行。
-- 所有 artifact 先 plan，再统一冲突检查，再并发写。
+目标：先实现“从 target/export tasks 倒推依赖”，但执行仍可沿用当前 branch executor。
 
-### Phase 3：Validation 并发与诊断收集
+- TODO：新增内部 `BuildDependencyPlan` / `TargetBuildPlan`，由 normalized target exports 生成 `requires_meta`、`requires_data`、`meta_only_exports`、`meta_and_data_exports`。
+- TODO：让 code-only target 显式 `requires_data = false`，并在 build 主流程中跳过 DataLoadPlan / DataLoader / normalize / validation。
+- TODO：记录 cache key 约定：`LinkedMeta` 可按 project/raw meta 共享；Data / normalized data / validation result 至少按 `(project.input, effective_tags)` 区分。
+- TODO：将当前 `BuildDagNodeKey` skeleton 与 `TargetBuildPlan` 对齐，避免 node key 表达伪依赖。
+- 验证：build 单元测试覆盖 `rust only`、`json only`、`json + rust`、`json + lua + rust`；CLI integration 覆盖 code-only target 不要求 `project.input`。
 
-- table-local validation 改为收集 issues。
-- 按 table/target 并行运行。
-- 统一排序后输出，避免完成顺序影响诊断。
+### Phase 2：拆分 DataLoadPlan 为 source discovery 与 typed normalize
 
-### Phase 4：完整任务图与 tracing
+目标：让 source read 可以与 Meta link 并行，为远端 provider 做准备。
 
-- 抽象 TaskSpec / TaskExecutor。
-- 增加 cancellation token。
-- 增加 task tracing 和耗时统计。
+- TODO：把“需要读取哪些 source”的 raw source discovery 从 typed normalization 中拆出来，明确它只依赖 Project Config / raw Meta source declarations / effective tags。
+- TODO：定义 `SourceReadPlan` / `RawSourceData`，本地 CSV 仍可直接返回现有 `DataTable`，但接口层不要要求 linked Meta。
+- TODO：保留现有 DataLoader 行为作为 compatibility path，先由新 plan 包一层调用旧 reader。
+- TODO：当 source discovery 未来需要 linked Meta 时，必须在 plan 中显式声明依赖，不能在 provider 内隐式访问 MetaLink 结果。
+- 验证：多 source / override source / ObjectTable source fixture 与现有输出一致；source discovery 单元测试覆盖 target tags 对 override source 的影响。
+
+### Phase 3：SourceRead 并发（本地同步 provider）
+
+目标：先并发读取本地 CSV，但不引入 Tokio 和远端 provider。
+
+- TODO：按 `SourceReadPlan` 粒度在局部 Rayon pool 中并行读取 CSV。
+- TODO：结果按 plan order merge，错误按 source stable key 排序，不按完成顺序输出。
+- TODO：限制并发数由 `jobs` 控制；`--serial` 必须退化为串行。
+- TODO：保证 duplicate table / missing source 等错误与现有语义一致。
+- 验证：DataLoader 单元测试覆盖多 source 并发稳定合并；CLI integration 比较 `--jobs 1` / `--jobs 2` 输出；可增加人工延迟测试 provider 验证顺序稳定。
+
+### Phase 4：引入 async provider shell（Google Sheet / 飞书准备）
+
+目标：为远端 source 提供 async I/O 调度能力，但不改变本地 CSV 主路径。
+
+- TODO：引入 owned `BuildOptions` / async build shell 或局部 current-thread runtime，避免借用跨 `await`。
+- TODO：定义 provider resource 类型：`BlockingLocal`、`AsyncIo`、`Network`，并让 Google Sheet / 飞书文档 provider 走 `network_concurrency`。
+- TODO：为远端 provider 设计 retry/backoff、rate-limit、认证错误和 source location diagnostics。
+- TODO：下载 bytes/cells 后再切回 CPU pool 做 parse/normalize，不在 async runtime worker 上做重 CPU 工作。
+- 验证：使用 fake async provider 的单元测试覆盖 semaphore 限流、失败诊断稳定排序、取消行为；本地 CSV integration 不变。
+
+### Phase 5：MetaLink 与 SourceRead 并行
+
+目标：在 Project Config / raw MetaModel 完成后，让 Meta link / validate 与 source I/O 同时启动。
+
+- TODO：重排 build 主流程：`MetaExtract -> MetaLink` 与 `DependencyPlan.requires_data -> SourceRead[*]` 可并行，二者在 Normalize 前 join。
+- TODO：Meta link failure 时取消未开始的 source tasks；已开始的远端请求按 cancellation token 协作退出或等待完成并丢弃结果。
+- TODO：确保 code-only target 不启动 source tasks；data-backed target 等待 MetaLink + RawSources 后再 normalize。
+- 验证：fake slow MetaLink / fake slow SourceRead 的调度测试，证明可重叠执行；错误场景覆盖 Meta error、source error、双错误稳定输出。
+
+### Phase 6：NormalizeTable 并行与 normalized DataSet merge
+
+目标：把 raw source merge 后的 normalize 拆成 table 粒度 CPU task。
+
+- TODO：`normalize_data_set` 拆分为 `normalize_table` task + deterministic merge。
+- TODO：ObjectTable singleton、struct expanded value、defaults、typed fragment payload 等规则保持 table-local。
+- TODO：如果发现跨表 normalize 需求，必须显式新增 DAG 依赖，不能在 table task 中访问可变全局状态。
+- 验证：现有 validation/data resolver tests 全部通过；新增多 table normalize 顺序稳定测试；大表/小表 chunking 可先不实现。
+
+### Phase 7：Validation report 全量收集模型
+
+目标：先改诊断模型，再并行 validation，避免 fail-fast 与并发冲突。
+
+- TODO：将基础 required/type/enum/unique/FK 与 registry validators 统一到可合并的 `ValidationReport` 输出；保留兼容入口把 error report 转成 `Result<()>`。
+- TODO：定义 validation issue stable sort key，包含 severity、target、table、row、field、validator kind/name、message。
+- TODO：明确 warning / error gate：warning 不阻断 export，error 阻断对应依赖。
+- 验证：validation 单元测试不只断言失败，还断言多个 issue 的稳定顺序；现有 CLI 错误信息可接受兼容变化时需同步文档。
+
+### Phase 8：FullDataSet validation 并行
+
+目标：在 normalized full DataSet 上并行运行与 target 无关的验证。
+
+- TODO：把 table-local full validation 按 table 并行。
+- TODO：把 FK / cross-table validation 按 relation group 或 target table index cache 并行，同时避免重复构建昂贵索引。
+- TODO：FullDataSet error 阻断所有 data-backed target exports，但继续收集其他 full validation diagnostics。
+- 验证：full validation 单元测试覆盖多表多错误稳定排序、FK cache 并发安全、`--jobs 1` / `--jobs 4` 结果一致。
+
+### Phase 9：TargetView build 与 TargetView validation 并行
+
+目标：每个 target 在 target-filtered DataSetView / ExportValidationView 上独立验证。
+
+- TODO：显式构建 `TargetDataSetView` / `ExportValidationView` task，key 为 `(target, effective_tags, normalized_data_set_id)`。
+- TODO：target-aware validation 按 target + table / relation group 并行。
+- TODO：某 target validation error 只阻断该 target 的 data-backed exports；不影响其他 target 或 MetaOnly codegen。
+- TODO：多 target 时复用 full normalized DataSet，但不能复用 target view。
+- 验证：集成测试覆盖两个 target 使用不同 tags、row_export / field export / override source 结果不同；一个 target validation 失败不影响另一个 target codegen dry-run plan。
+
+### Phase 10：Artifact planning 与 generator 并行
+
+目标：在 validation gate 之后并行生成 data artifacts 和 codegen artifacts，同时保持 path conflict 与输出顺序稳定。
+
+- TODO：拆出 `PlanArtifacts`，在重 CPU 生成前尽可能计算所有输出路径，并做 lexical / future filesystem-aware conflict check。
+- TODO：JSON / MessagePack / bin 按 table artifact 并行；POT / Lua 等 aggregate exporter 按内部安全粒度并行并稳定合并。
+- TODO：MetaOnly codegen 按 export task 并行，不等待 Data 或 TargetView validation。
+- TODO：生成结果按 `(target declaration order, export declaration order, artifact path order)` 稳定收集。
+- 验证：多 exporter / 多 codegen 混合项目 `--jobs 1` 与 `--jobs 4` artifact plan 完全一致；路径冲突在任何写入前报错。
+
+### Phase 11：Bounded artifact write pipeline
+
+目标：避免所有大 artifact bytes 同时驻留内存，并为 async write 做准备。
+
+- TODO：Artifact Writer 支持 bounded queue / max in-flight artifacts。
+- TODO：Direct / temp-commit / dry-run 保持当前语义；temp-commit commit 顺序稳定。
+- TODO：接入 `platform-filesystem-semantics.md` 中的 path key 策略，保证 write 前完成冲突检查。
+- 验证：dry-run 不创建目录；写入失败测试覆盖 Direct 和 TempCommit；大 artifact benchmark 观察 peak memory。
+
+### Phase 12：通用 DAG executor 与 tracing
+
+目标：在各阶段 node 输入输出稳定后，用统一 executor 替换手写阶段编排。
+
+- TODO：实现 `TaskSpec` / `TaskGraph` / readiness queue / resource-aware scheduler。
+- TODO：支持 `AsyncIo`、`Network`、`Cpu`、`Coordination` resource lane 和 cancellation token。
+- TODO：为每个 task 输出 tracing span、duration、result state；可选 `--trace-tasks <path>`。
+- TODO：保留阶段式 executor 的 golden integration 测试，切换 DAG executor 后输出必须一致。
+- 验证：task graph 单元测试覆盖依赖拓扑、取消传播、资源限流、稳定 result merge；全量 `cargo test`。
 
 ## 11. 测试计划
 
 ### 11.1 单元测试
 
 - `ExecutionOptions` 默认值、非法值、`--serial` 覆盖。
+- `BuildDependencyPlan` 对 code-only / data-backed / mixed export tasks 的依赖裁剪。
 - TaskKey 排序稳定性。
 - `TaskOutput` diagnostics 合并后按稳定 key 排序。
+- SourceRead fake provider 并发完成顺序不影响 DataSet merge 顺序。
+- FullDataSet validation 与 TargetView validation issue 稳定排序。
 - Artifact path conflict 在并发生成后仍稳定报错。
 
 ### 11.2 集成测试
 
 - `--jobs 1` 与默认并发输出完全一致。
+- code-only target 不读取 Data，即使 project 配置了 `input` 或 source 文件缺失也不触发 data source error。
 - 多 table / 多 codegen export task 项目在 `--jobs 2` 下输出稳定。
+- 多 target / 多 effective tags 构建不错误复用 DataSetView；target validation failure 不影响无依赖 target 的 MetaOnly codegen。
 - source 加载失败时诊断顺序稳定。
 - artifact 写出失败时不会产生重复/乱序诊断。
 
@@ -746,23 +1005,21 @@ measure source load, validation, runtime serialization, total duration
 | async runtime 被 CPU 任务阻塞 | CPU 任务统一 `spawn_cpu`。 |
 | 远程 API 限流 | `network_concurrency` + provider-level throttle/backoff。 |
 | 大 artifact 同时驻留内存 | 有界队列、分阶段写出、未来 streaming。 |
+| DAG dependency key 过粗导致错误复用 | Data / validation / target view cache key 必须包含 `project.input`、effective tags、target、source provider 参数等必要维度。 |
+| code-only target 意外读取 Data | DependencyPlan 必须先于 DataLoadPlan，并有测试 provider 断言未调用。 |
 | 生命周期复杂化 | `LinkedMetaModel<'meta>` 继续只读共享；并发任务只借用不可变引用或使用 `Arc` 包装 owned 数据。 |
 | 输出半更新 | 后续引入 temp file + deterministic commit。 |
 
-## 13. 第一阶段推荐落地点
+## 13. 当前文档缺口总结
 
-结合当前代码，最适合优先落地：
+在本轮补充前，设计文档中不足以支撑目标态 DAG 的点主要是：
 
-1. CLI 增加 `--jobs` / `--io-concurrency` / `--serial`，先只传递不并发。
-2. Data source 按 `DataLoadPlan.sources()` 并行加载，并保持结果顺序。
-3. Runtime data export 按 table 并行序列化，artifact write 前统一检查路径。
-4. Codegen 按 `targets.exports` 中的 MetaOnly export task 并行。
+1. 对 “DAG” 的描述偏阶段式，容易让人误以为当前 `BuildDagNodeKey` 已参与调度；实际只是 execution-view skeleton。
+2. 缺少从 target/export task 倒推依赖的规则，尤其是 code-only target 不读 Data 的硬约束。
+3. `NormalizeAndValidate` 被描述为单个节点，无法表达 SourceRead、Normalize、FullDataSet validation、TargetView validation 的并行与 gate。
+4. 没有明确 Meta link / validate 与 source read 可以并行，也没有说明 source discovery 应尽量不依赖 linked Meta。
+5. Validation 只粗分 table-local / dataset-level，缺少 full DataSet 与 target-filtered DataSetView 的分层依赖。
+6. 对 Google Sheet / 飞书文档这类 async network source 的 resource lane、限流和 CPU parse 边界描述不足。
+7. 迁移计划过粗，无法保证每一步独立可工作、可验证、可回滚。
 
-暂缓：
-
-- Meta link 并行化；
-- validation 全量并行化；
-- streaming JSON；
-- 完整 DAG executor。
-
-这些暂缓项需要更多诊断模型、artifact 模型和基准测试支撑。
+后续实现应优先按 Phase 0～Phase 3 建立依赖裁剪与 source 并发基础，再进入 async provider 和 validation 并行；完整 DAG executor 应放在各阶段输入输出稳定之后。

@@ -575,4 +575,43 @@ mod tests {
         );
         assert!(matches!(artifacts[2].content, ArtifactContent::Binary(_)));
     }
+
+    #[test]
+    fn collect_export_artifacts_preserves_mixed_export_declaration_order() {
+        let artifacts = collect_export_artifacts_in_declaration_order(vec![
+            TargetDagExportOutput {
+                declaration_index: 3,
+                artifacts: vec![Artifact::text("lua/init.lua", "return {}")],
+            },
+            TargetDagExportOutput {
+                declaration_index: 1,
+                artifacts: vec![Artifact::text("code/generated.rs", "pub struct GameData;")],
+            },
+            TargetDagExportOutput {
+                declaration_index: 0,
+                artifacts: vec![
+                    Artifact::text("data/items.json", "{}"),
+                    Artifact::text("data/game_rules.json", "{}"),
+                ],
+            },
+            TargetDagExportOutput {
+                declaration_index: 2,
+                artifacts: vec![Artifact::text("i18n/messages.pot", "")],
+            },
+        ]);
+
+        assert_eq!(
+            artifacts
+                .iter()
+                .map(|artifact| artifact.path.as_path())
+                .collect::<Vec<_>>(),
+            vec![
+                Path::new("data/items.json"),
+                Path::new("data/game_rules.json"),
+                Path::new("code/generated.rs"),
+                Path::new("i18n/messages.pot"),
+                Path::new("lua/init.lua"),
+            ]
+        );
+    }
 }
