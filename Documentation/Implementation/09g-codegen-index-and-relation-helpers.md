@@ -32,7 +32,7 @@
 
 ### 9.9.3 索引构建规则
 
-1. Repository 构造时一次性遍历 rows 构建所有索引。
+1. Repository 构造时一次性遍历 loaded rows 构建所有索引。
 2. unique index 如果发现重复，加载阶段返回错误。理论上导出前 validation 已经检查，但 generated runtime 仍应防御。
 3. non-unique index 保存 row index 列表，保持原始数据顺序。
 4. bool/int/float/string/enum 可作为 key。
@@ -40,6 +40,21 @@
 6. struct/text/asset 是否允许作为 key 需要策略。第一阶段建议：
    - `text` / `asset` 作为字符串 key 允许；
    - struct key 不支持。
+
+### 9.9.3a Source-order row access policy（规划）
+
+CollectionTable repository 需要把“内部为构建索引而遍历 rows”和“对业务公开 source-order rows 数组”分开建模：
+
+- `preserve_source_order = true`：生成 public source-order API，例如 Rust `len()` / `row_at(index)` / `rows()`，C++ `Size()` / `RowAt(index)` / `Rows()`，TypeScript `length` / `rowAt(index)` / `rows()`；顺序为当前 target visible rows 的稳定顺序。
+- `preserve_source_order = false` 且存在 index：默认只生成 index lookup API，不生成 public `rows` API，也不承诺 source order。这样普通 keyed 配置表不会因为实现细节暴露可遍历数组。
+- 无 index 的 CollectionTable 若需要 codegen 访问，应显式声明 `preserve_source_order = true`。随机角色姓氏/名字表属于这一类：一列 `string value`，无 index，按 row order 随机访问。
+- `preserve_source_order` 不使 row ordinal 成为外键目标；FK target 仍必须是 explicit unique / primary index。
+
+实现迁移建议：
+
+1. 先收敛 public API：只有 `preserve_source_order = true` 生成 rows/row_at/len；indexed table 的 `rows()` 从文档和新生成 API 中移除或改为 opt-in。
+2. 再优化内部 storage：`preserve_source_order` 不要求或禁止某种 owner storage。对于多索引表，推荐 private row arena / `rows_` / `Vec<Row>` 拥有行数据，各 index 存 row index / row handle，避免每个索引复制行；对于只有单个唯一索引且无 relation cache 的表，生成器未来可以选择 index-owned row storage。无论哪种策略，未 opt-in 时都不暴露 source-order API。
+3. relation cache 当前以 row index 为核心；当 target table 不 preserve source order 时，需要把 cache 从“public source-order ordinal”抽象为 `CodeRowHandle`（ordinal / primary key / internal stable id）。当前实现可以使用 private row index 作为内部 handle，但不得把它作为 public source-order API 暴露。
 
 ### 9.9.4 Primary index
 
@@ -83,7 +98,7 @@ get_relation(source_row, data):
   return data.<target_table>.row_at(index)
 ```
 
-为了避免重复查询，目标 repository 除了现有 `get_by_* -> row` API，还应生成内部 `index_of_by_* -> Option<usize>` / `IndexOfBy*` / `indexOfBy*`。该 API 可以是 private/package-private，只服务 relation cache；公开 API 仍返回 row 引用或对象。对于复合 key，内部 index lookup 使用与公开 lookup 相同的 key 构造逻辑。
+为了避免重复查询，目标 repository 除了现有 `get_by_* -> row` API，还应生成内部 row handle lookup。当前实现可表现为 `index_of_by_* -> Option<usize>` / `IndexOfBy*` / `indexOfBy*`，但规划上不应把该 `usize` 等同于 public source-order ordinal；在 indexed-only table 不保留 source-order rows 后，它应演进为 `CodeRowHandle`。该 API 可以是 private/package-private，只服务 relation cache；公开 API 仍返回 row 引用或对象。对于复合 key，内部 index lookup 使用与公开 lookup 相同的 key 构造逻辑。
 
 ### 9.10.2 `link` / `link_all` 实现
 

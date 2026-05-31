@@ -32,6 +32,7 @@ Related docs：[`11-foreign-key-detail-design.md`](../Implementation/11-foreign-
 | shared table schema / typed fragments | Partial | 当前没有 table inheritance / base fields / reusable field group；field group 仍是方向性目标，不进入近期实现。typed fragment payload 已支持 `[[tables.fragments]] type = "StructName"` 复用标准 struct，并把该 struct 的字段按 fragment object 展开；inline fragment fields 仍继续支持。标准参考项目通过同一 `items` polymorphic table 的多个 variant sources 解决道具公共字段复用，并通过 typed `attributes -> AttributeSet` 避免重复声明属性字段。 |
 | ObjectTable 特化语义 | Implemented MVP | 当前已支持 CSV `key,value` 行式 singleton ObjectTable：每行一个 top-level field key，导出单个 object，并支持 struct JSON/expanded value 与作为 FK source 引用 CollectionTable。ObjectTable 多源/override、作为 FK target、key-level source row 精确诊断、后续格子 expand 暂不实现。 |
 | target tags / export_when / row_export | Implemented | 当前 Project target 支持 `tags`；Meta 中 table / field / index 支持 `export` 与 `export_when`；collection table 支持 `row_export`，并已接入 validation、runtime data export 与 codegen 的 target-aware 视图。旧字段 `tool_only` / `filter_field` / `validator_only` 仅用于报 deprecated/unsupported 诊断，不再参与导出判断。 |
+| source-order collection access | Planned | CollectionTable 可通过 `preserve_source_order = true` 明确要求生成代码保留导出后的行顺序并暴露数组/随机访问 API。默认策略规划为：有 index 的表只生成 index lookup，不再默认暴露或承诺 `rows` 顺序数组；需要顺序访问时必须在 Meta 中显式声明。 |
 
 ## 4.1 MetaModel
 
@@ -195,6 +196,62 @@ CollectionTable 表示多条记录，例如 items、quests、levels。
 - 可定义 `row_export`，按 target tags 裁剪集合记录。
 - override source 以整条 record 为单位覆盖，必须通过 primary index 匹配。
 - 可选择 `preserve_source_order = true` 暴露源顺序数组访问。
+
+#### Source-order collection access（规划）
+
+有些 CollectionTable 并不需要传统意义上的业务索引，而是需要把数据按 source / export 顺序作为一个稳定数组提供给业务逻辑。例如随机角色名可以拆成三张表：姓氏、男性名、女性名；每张表只有一个 `string` 字段（不是 `text`，因为它不参与翻译），业务在运行时用随机数选择数组下标。
+
+推荐 Meta 形态：
+
+```toml
+[[tables]]
+name = "character_surnames"
+kind = "collection"
+source = "character_surnames.csv"
+preserve_source_order = true
+desc = "随机角色姓氏池；按 CSV 顺序导出为数组，由业务随机访问。"
+
+[[tables.fields]]
+name = "value"
+type = "string"
+required = true
+
+[[tables]]
+name = "character_male_given_names"
+kind = "collection"
+source = "character_male_given_names.csv"
+preserve_source_order = true
+
+[[tables.fields]]
+name = "value"
+type = "string"
+required = true
+
+[[tables]]
+name = "character_female_given_names"
+kind = "collection"
+source = "character_female_given_names.csv"
+preserve_source_order = true
+
+[[tables.fields]]
+name = "value"
+type = "string"
+required = true
+```
+
+`preserve_source_order` 的语义：
+
+- 只适用于 CollectionTable；ObjectTable 没有 collection row 顺序。
+- 表示生成代码必须保留当前 target 导出视图中的 row 顺序，并提供 `len` / `row_at(index)` / `rows()` 或目标语言等价 API。
+- 顺序以 DataLoader materialized 后的行顺序为准：base sources 按声明顺序 append；variant source rows 按 source 声明与文件行顺序 append；CollectionTable override 替换已有 row 时保留被替换 base row 的位置，不把 override row 移动到末尾；`row_export` 过滤后，数组顺序为剩余 visible rows 的稳定顺序。
+- `preserve_source_order = true` 不创建 index，也不让 source-order 成为 foreign key target；FK target 仍必须引用显式 unique / primary index。
+- 随机策略不进入 generated code。生成代码只提供稳定数组访问；业务侧负责 RNG、权重、去重或地域/性别等组合逻辑。
+
+默认 codegen 策略规划：
+
+- 如果 CollectionTable 声明了一个或多个 index，默认只生成 index lookup API，不生成 public `rows()` / `Rows()` / `rows()` 顺序数组访问；需要遍历或随机访问时必须显式声明 `preserve_source_order = true`。
+- 如果 CollectionTable 没有 index 且需要被生成代码访问，推荐显式声明 `preserve_source_order = true`。后续实现可在 Meta validate / CodeModel 构造阶段对“无 index 且未 preserve source order，但被 codegen target 导出”的表给出 warning 或 error，避免生成一个业务侧无法查询的 repository。
+- runtime data payload 仍可以保持 `{ meta, rows }` 或 binary row stream；这里的规划只约束 generated code 是否暴露/保留 source-order collection API，不改变 exporter 的 wire shape。
 
 ### Shared table schema / reusable field groups（目标态）
 

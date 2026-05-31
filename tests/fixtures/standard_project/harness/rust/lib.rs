@@ -146,6 +146,15 @@ fn assert_standard_data(data: &GameData) {
     let warrior = data.classes.get_by_id(1).expect("class id should be indexed");
     assert_eq!(warrior.name_text(), "战士");
     assert_eq!(warrior.description_text(), "耐久的近战战士。");
+
+    assert_eq!(data.character_surnames.len(), 4);
+    assert_eq!(data.character_surnames.row_at(0).unwrap().value, "Stone");
+    assert_eq!(data.character_male_given_names.rows()[1].value, "Borin");
+    assert_eq!(
+        data.character_female_given_names.rows()[2].value,
+        "Celeste"
+    );
+
     let default_class = data
         .game_rules
         .default_class(data)
@@ -189,6 +198,28 @@ fn assert_standard_lazy_data(data: &impl GameDataAccess) {
     assert_eq!(default_class.class_id, 1);
     assert_eq!(default_class.name_text(), "战士");
     assert_eq!(default_class.description_text(), "耐久的近战战士。");
+    assert_eq!(
+        data.character_surnames()
+            .expect("surnames should load lazily")
+            .row_at(1)
+            .unwrap()
+            .value,
+        "River"
+    );
+    assert_eq!(
+        data.character_male_given_names()
+            .expect("male given names should load lazily")
+            .rows()[2]
+            .value,
+        "Cedric"
+    );
+    assert_eq!(
+        data.character_female_given_names()
+            .expect("female given names should load lazily")
+            .rows()[3]
+            .value,
+        "Daphne"
+    );
     let starter_items = game_rules
         .starter_items(data)
         .expect("starter item relation should resolve lazily");

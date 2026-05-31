@@ -225,22 +225,16 @@ impl<'a> TypeScriptNames<'a> {
         })
     }
 
-    pub(super) fn ts_index_storage(&self, index: &CodeIndex, table: &CodeTable) -> Result<String> {
+    pub(super) fn ts_index_storage(&self, index: &CodeIndex, _table: &CodeTable) -> Result<String> {
         let key_type = if index.fields.len() == 1 {
             self.ts_field_type(&index.fields[0])?
         } else {
             "string".to_owned()
         };
         if index.unique {
-            Ok(format!(
-                "Map<{key_type}, {}>",
-                self.row_type_name(&table.name)?
-            ))
+            Ok(format!("Map<{key_type}, number>"))
         } else {
-            Ok(format!(
-                "Map<{key_type}, {}[]>",
-                self.row_type_name(&table.name)?
-            ))
+            Ok(format!("Map<{key_type}, number[]>"))
         }
     }
 

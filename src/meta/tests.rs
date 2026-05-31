@@ -1443,7 +1443,6 @@ fn rejects_target_state_fields_without_runtime_semantics() {
             [[tables]]
             name = "items"
             source = "items.csv"
-            preserve_source_order = true
 
             [[tables.fields]]
             name = "id"
@@ -1460,10 +1459,6 @@ fn rejects_target_state_fields_without_runtime_semantics() {
     assert!(
         messages.contains("`field_number`") && messages.contains("not implemented yet"),
         "missing field_number unsupported diagnostic in\n{messages}"
-    );
-    assert!(
-        messages.contains("`preserve_source_order`") && messages.contains("not implemented yet"),
-        "missing preserve_source_order unsupported diagnostic in\n{messages}"
     );
 }
 

@@ -172,6 +172,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 - 生成代码使用逻辑 table name，不绑定某个 `targets.exports` runtime data export task 的真实 artifact path。
 - `linked_field` relation helper 和 `text` translation helper 已纳入 Rust / C++ / TypeScript 生成器。
 - Lua embedded data generator 已作为 `type = "lua_table"` 的 MetaAndData exporter 落地，而不是现有 format-agnostic `CodeGenerator` backend。
+- `preserve_source_order` 的 generated access 语义仍为规划项：目标行为是 indexed CollectionTable 默认不生成 public source-order `rows` API；只有显式声明 `preserve_source_order = true` 的表生成 row count / row_at / rows 访问，服务随机角色名这类按表格顺序随机访问的配置。
 
 ## 9.5 总览文档维护规则
 

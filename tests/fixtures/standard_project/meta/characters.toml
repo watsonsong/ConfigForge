@@ -70,3 +70,39 @@ name = "class"
 fields = ["class_id"]
 target_table = "classes"
 target_index = "by_id"
+
+[[tables]]
+name = "character_surnames"
+kind = "collection"
+source = "character_surnames.csv"
+preserve_source_order = true
+desc = "随机角色姓氏池。没有业务索引，运行时代码按表格顺序暴露稳定序号访问。"
+
+[[tables.fields]]
+name = "value"
+type = "string"
+required = true
+
+[[tables]]
+name = "character_male_given_names"
+kind = "collection"
+source = "character_male_given_names.csv"
+preserve_source_order = true
+desc = "随机男性角色名池。没有业务索引，运行时代码按表格顺序暴露稳定序号访问。"
+
+[[tables.fields]]
+name = "value"
+type = "string"
+required = true
+
+[[tables]]
+name = "character_female_given_names"
+kind = "collection"
+source = "character_female_given_names.csv"
+preserve_source_order = true
+desc = "随机女性角色名池。没有业务索引，运行时代码按表格顺序暴露稳定序号访问。"
+
+[[tables.fields]]
+name = "value"
+type = "string"
+required = true

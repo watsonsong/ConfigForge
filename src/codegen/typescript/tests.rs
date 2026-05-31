@@ -4,7 +4,9 @@
 use crate::{
     codegen::{
         CodeExportInput, CodeGenerator,
-        tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
+        tests::{
+            assert_duplicate_generated_identifier, input_for, linked_fixture, source_order_fixture,
+        },
     },
     meta::{MetaModel, TargetTags},
     runtime_contract::RuntimeDataFile,
@@ -73,6 +75,25 @@ fn emits_async_loader_and_maps() {
     assert!(content.contains("getById(id: number): ItemsRow | undefined"));
     assert!(content.contains("findByRarity(rarity: ItemRarity): readonly ItemsRow[]"));
     assert!(content.contains("Duplicate unique index key for ItemsTable.by_id"));
+}
+
+#[test]
+fn source_order_apis_are_opt_in() {
+    let meta = source_order_fixture();
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = TypeScriptCodeGenerator
+        .generate(&input)
+        .expect("typescript code");
+    let content = &files[0].content;
+
+    assert!(content.contains("export class ItemsTable"));
+    assert!(content.contains("rowAt(rowIndex: number): ItemsRow | undefined"));
+    assert!(!content.contains("rows(): readonly ItemsRow[]"));
+    assert!(content.contains("export class CharacterSurnamesTable"));
+    assert!(content.contains("get length(): number { return this.rows_.length; }"));
+    assert!(content.contains("rows(): readonly CharacterSurnamesRow[]"));
+    assert!(content.contains("rowAt(rowIndex: number): CharacterSurnamesRow | undefined"));
 }
 
 #[test]

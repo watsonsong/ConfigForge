@@ -91,25 +91,27 @@ pub(super) fn render_table(
             names.index_storage_name(index)?
         ));
     }
-    content.raw("        for (row_index, row) in rows.iter().enumerate() {\n");
-    for index in &table.indexes {
-        let key = names.rust_key_expr(index)?;
-        if index.unique {
-            content.raw_fmt(format_args!(
-                "            if {}.insert({}, row_index).is_some() {{ return Err(RuntimeDataError::schema_mismatch(format!(\"duplicate unique index {}\"))); }}\n",
-                names.index_storage_name(index)?,
-                key,
-                index.name
-            ));
-        } else {
-            content.raw_fmt(format_args!(
-                "            {}.entry({}).or_insert_with(Vec::new).push(row_index);\n",
-                names.index_storage_name(index)?,
-                key
-            ));
+    if !table.indexes.is_empty() {
+        content.raw("        for (row_index, row) in rows.iter().enumerate() {\n");
+        for index in &table.indexes {
+            let key = names.rust_key_expr(index)?;
+            if index.unique {
+                content.raw_fmt(format_args!(
+                    "            if {}.insert({}, row_index).is_some() {{ return Err(RuntimeDataError::schema_mismatch(format!(\"duplicate unique index {}\"))); }}\n",
+                    names.index_storage_name(index)?,
+                    key,
+                    index.name
+                ));
+            } else {
+                content.raw_fmt(format_args!(
+                    "            {}.entry({}).or_insert_with(Vec::new).push(row_index);\n",
+                    names.index_storage_name(index)?,
+                    key
+                ));
+            }
         }
+        content.raw("        }\n");
     }
-    content.raw("        }\n");
     content.raw("        Ok(Self {\n");
     content.raw("            rows,\n");
     for index in &table.indexes {
@@ -120,14 +122,23 @@ pub(super) fn render_table(
     }
     content.raw("        })\n");
     content.raw("    }\n\n");
-    content.raw_fmt(format_args!(
-        "    pub fn rows(&self) -> &[{}] {{ &self.rows }}\n\n",
-        names.row_type_name(&table.name)?
-    ));
-    content.raw_fmt(format_args!(
-        "    fn row_at(&self, row_index: usize) -> Option<&{}> {{ self.rows.get(row_index) }}\n\n",
-        names.row_type_name(&table.name)?
-    ));
+    if table.preserve_source_order {
+        content.raw("    pub fn len(&self) -> usize { self.rows.len() }\n\n");
+        content.raw("    pub fn is_empty(&self) -> bool { self.rows.is_empty() }\n\n");
+        content.raw_fmt(format_args!(
+            "    pub fn rows(&self) -> &[{}] {{ &self.rows }}\n\n",
+            names.row_type_name(&table.name)?
+        ));
+        content.raw_fmt(format_args!(
+            "    pub fn row_at(&self, row_index: usize) -> Option<&{}> {{ self.rows.get(row_index) }}\n\n",
+            names.row_type_name(&table.name)?
+        ));
+    } else {
+        content.raw_fmt(format_args!(
+            "    fn row_at(&self, row_index: usize) -> Option<&{}> {{ self.rows.get(row_index) }}\n\n",
+            names.row_type_name(&table.name)?
+        ));
+    }
     for index in &table.indexes {
         render_index_function(content, table, index, names)?;
         if index.unique {

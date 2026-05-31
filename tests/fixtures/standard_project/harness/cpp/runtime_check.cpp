@@ -141,6 +141,12 @@ int main() {
     if (data.GameRules().GetDefaultClass(data).class_id != 1) {
         throw std::runtime_error("link all relation cache failed");
     }
+    if (data.CharacterSurnames().Size() != 4 || data.CharacterSurnames().RowAt(0)->value != "Stone") {
+        throw std::runtime_error("source-order surname table failed");
+    }
+    if (data.CharacterMaleGivenNames().Rows()[1].value != "Borin" || data.CharacterFemaleGivenNames().Rows()[2].value != "Celeste") {
+        throw std::runtime_error("source-order given name table failed");
+    }
     AssertTranslatedText(data);
 
 #if defined(CONFIG_FORGE_USE_BINARY_RUNTIME_READER)

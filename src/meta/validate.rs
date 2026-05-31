@@ -845,15 +845,7 @@ fn validate_deprecated_field_export_flags(
 }
 
 fn validate_table_unsupported_options(table: &TableMeta, diagnostics: &mut Vec<MetaDiagnostic>) {
-    if table.kind != TableKind::Object && table.preserve_source_order {
-        diagnostics.push(MetaDiagnostic::new(
-            MetaDiagnosticCode::UnsupportedFeature,
-            format!(
-                "table `{}` uses `preserve_source_order`, but preserving source order is not implemented yet",
-                table.name
-            ),
-        ));
-    }
+    let _ = (table, diagnostics);
 }
 
 fn validate_unsupported_field_options(

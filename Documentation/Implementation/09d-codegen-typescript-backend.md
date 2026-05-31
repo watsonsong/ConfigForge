@@ -89,6 +89,7 @@ TypeScript 约束：
 - `RuntimeDataLoader.open` 同时允许同步值和 `Promise`，生成代码内部统一 `await`。
 - JSON / MessagePack 底层解码由 `RuntimeDataLoader` / `RuntimeDataReader` 实现负责；生成核心代码不绑定 MessagePack npm 包。
 - runtime data shape `{ meta, rows }` 的导航、字段 runtime type guard、primitive 转换、typed rows 构造由生成代码负责；loader 实现不随 Meta 新增表或字段而变化。
+- public `rows()` / `length` / ordinal `rowAt(index)` 应成为 `preserve_source_order = true` 的 opt-in 行为；indexed table 默认只生成 `getBy*` / `findBy*`。底层可保留 `private readonly rows_: Row[]` 作为 owner storage，并让 `Map` index 保存 row index / row handle，避免多索引复制对象；随机名字表这类顺序表可额外生成 `length` / `rowAt(index)` / `rows()`，业务用外部 RNG 选择 index。
 
 TypeScript `linked_field` 生成规则：
 

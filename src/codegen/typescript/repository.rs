@@ -52,47 +52,50 @@ pub(super) fn render_table(
             names.index_storage_name(index)?
         ));
     }
-    content.raw("    for (const row of rows) {\n");
-    for index in &table.indexes {
-        let key = names.ts_key_expr(index)?;
-        if index.unique {
-            content.raw_fmt(format_args!(
-                "      const key_{} = {};\n",
-                names.index_storage_name(index)?,
-                key
-            ));
-            content.raw_fmt(format_args!(
-                "      if (this.{}.has(key_{})) {{ throw new Error(\"Duplicate unique index key for {}.{}\"); }}\n",
-                names.index_storage_name(index)?,
-                names.index_storage_name(index)?,
-                names.repository_type_name(&table.name)?,
-                index.name
-            ));
-            content.raw_fmt(format_args!(
-                "      this.{}.set(key_{}, row);\n",
-                names.index_storage_name(index)?,
-                names.index_storage_name(index)?
-            ));
-        } else {
-            content.raw_fmt(format_args!(
-                "      const list_{} = this.{}.get({}) ?? [];\n",
-                names.index_storage_name(index)?,
-                names.index_storage_name(index)?,
-                key
-            ));
-            content.raw_fmt(format_args!(
-                "      list_{}.push(row);\n",
-                names.index_storage_name(index)?
-            ));
-            content.raw_fmt(format_args!(
-                "      this.{}.set({}, list_{});\n",
-                names.index_storage_name(index)?,
-                key,
-                names.index_storage_name(index)?
-            ));
+    if !table.indexes.is_empty() {
+        content.raw("    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {\n");
+        content.raw("      const row = rows[rowIndex];\n");
+        for index in &table.indexes {
+            let key = names.ts_key_expr(index)?;
+            if index.unique {
+                content.raw_fmt(format_args!(
+                    "      const key_{} = {};\n",
+                    names.index_storage_name(index)?,
+                    key
+                ));
+                content.raw_fmt(format_args!(
+                    "      if (this.{}.has(key_{})) {{ throw new Error(\"Duplicate unique index key for {}.{}\"); }}\n",
+                    names.index_storage_name(index)?,
+                    names.index_storage_name(index)?,
+                    names.repository_type_name(&table.name)?,
+                    index.name
+                ));
+                content.raw_fmt(format_args!(
+                    "      this.{}.set(key_{}, rowIndex);\n",
+                    names.index_storage_name(index)?,
+                    names.index_storage_name(index)?
+                ));
+            } else {
+                content.raw_fmt(format_args!(
+                    "      const list_{} = this.{}.get({}) ?? [];\n",
+                    names.index_storage_name(index)?,
+                    names.index_storage_name(index)?,
+                    key
+                ));
+                content.raw_fmt(format_args!(
+                    "      list_{}.push(rowIndex);\n",
+                    names.index_storage_name(index)?
+                ));
+                content.raw_fmt(format_args!(
+                    "      this.{}.set({}, list_{});\n",
+                    names.index_storage_name(index)?,
+                    key,
+                    names.index_storage_name(index)?
+                ));
+            }
         }
+        content.raw("    }\n");
     }
-    content.raw("    }\n");
     content.raw("  }\n\n");
     content.raw_fmt(format_args!(
         "  static async load(loader: RuntimeDataLoader): Promise<{}> {{\n",
@@ -174,10 +177,13 @@ pub(super) fn render_table(
         names.repository_type_name(&table.name)?
     ));
     content.raw("  }\n\n");
-    content.raw_fmt(format_args!(
-        "  rows(): readonly {}[] {{ return this.rows_; }}\n\n",
-        names.row_type_name(&table.name)?
-    ));
+    if table.preserve_source_order {
+        content.raw("  get length(): number { return this.rows_.length; }\n\n");
+        content.raw_fmt(format_args!(
+            "  rows(): readonly {}[] {{ return this.rows_; }}\n\n",
+            names.row_type_name(&table.name)?
+        ));
+    }
     content.raw_fmt(format_args!(
         "  rowAt(rowIndex: number): {} | undefined {{ return this.rows_[rowIndex]; }}\n\n",
         names.row_type_name(&table.name)?
@@ -224,16 +230,21 @@ fn render_index_function(
     let key = names.ts_lookup_key(index)?;
     if index.unique {
         content.raw_fmt(format_args!(
-            "  {}({}): {} | undefined {{ return this.{}.get({}); }}\n\n",
+            "  {}({}): {} | undefined {{\n",
             names.index_function_name(index)?,
             params,
-            names.row_type_name(&table.name)?,
+            names.row_type_name(&table.name)?
+        ));
+        content.raw_fmt(format_args!(
+            "    const rowIndex = this.{}.get({});\n",
             names.index_storage_name(index)?,
             key
         ));
+        content.raw("    return rowIndex === undefined ? undefined : this.rows_[rowIndex];\n");
+        content.raw("  }\n\n");
     } else {
         content.raw_fmt(format_args!(
-            "  {}({}): readonly {}[] {{ return this.{}.get({}) ?? []; }}\n\n",
+            "  {}({}): readonly {}[] {{ return (this.{}.get({}) ?? []).map((rowIndex) => this.rows_[rowIndex]); }}\n\n",
             names.index_function_name(index)?,
             params,
             names.row_type_name(&table.name)?,
@@ -267,10 +278,10 @@ fn render_index_of_function(
         names.index_of_function_name(index)?,
         params
     ));
-    content.raw("    const row = this.");
+    content.raw("    const rowIndex = this.");
     content.raw(names.index_storage_name(index)?);
     content.raw_fmt(format_args!(".get({key});\n"));
-    content.raw("    return row === undefined ? undefined : this.rows_.indexOf(row);\n");
+    content.raw("    return rowIndex;\n");
     content.raw("  }\n\n");
     Ok(())
 }

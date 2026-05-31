@@ -163,9 +163,12 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>
         let mut method_symbols = vec![
             GeneratedSymbol::new("method", "Load", "Load"),
             GeneratedSymbol::new("method", "FromRows", "FromRows"),
-            GeneratedSymbol::new("method", "Rows", "Rows"),
             GeneratedSymbol::new("method", "RowAt", "RowAt"),
         ];
+        if table.preserve_source_order {
+            method_symbols.push(GeneratedSymbol::new("method", "Size", "Size"));
+            method_symbols.push(GeneratedSymbol::new("method", "Rows", "Rows"));
+        }
         for index in &table.indexes {
             method_symbols.push(GeneratedSymbol::new(
                 "index function",

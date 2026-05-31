@@ -151,9 +151,12 @@ pub(super) fn validate_generated_symbols(
         let mut method_symbols = vec![
             GeneratedSymbol::new("method", "constructor", "constructor"),
             GeneratedSymbol::new("method", "load", "load"),
-            GeneratedSymbol::new("method", "rows", "rows"),
             GeneratedSymbol::new("method", "rowAt", "rowAt"),
         ];
+        if table.preserve_source_order {
+            method_symbols.push(GeneratedSymbol::new("getter", "length", "length"));
+            method_symbols.push(GeneratedSymbol::new("method", "rows", "rows"));
+        }
         for index in &table.indexes {
             method_symbols.push(GeneratedSymbol::new(
                 "index function",

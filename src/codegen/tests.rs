@@ -75,6 +75,39 @@ pub(in crate::codegen) fn linked_fixture() -> MetaModel {
     .expect("fixture meta should parse")
 }
 
+pub(in crate::codegen) fn source_order_fixture() -> MetaModel {
+    MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "character_surnames"
+            source = "character_surnames.csv"
+            preserve_source_order = true
+
+            [[tables.fields]]
+            name = "value"
+            type = "string"
+            required = true
+        "#,
+    )
+    .expect("source-order fixture meta should parse")
+}
+
 #[test]
 fn builtin_generators_report_meta_only_dependency_contracts() {
     for generator in builtin_generators() {
@@ -189,6 +222,29 @@ fn builds_code_model_with_types_tables_and_indexes() {
             .any(|index| index.name == "by_rarity" && !index.unique)
     );
     assert_eq!(model.tables[0].data_file, "items");
+}
+
+#[test]
+fn code_model_preserves_source_order_opt_in() {
+    let meta = source_order_fixture();
+    let input = input_for(&meta, RustCodeGenerator.language());
+
+    let model =
+        build_code_model(input.meta, &input.target_tags, &input.runtime_data_files).expect("model");
+
+    let items = model
+        .tables
+        .iter()
+        .find(|table| table.name == "items")
+        .expect("indexed table should exist");
+    let surnames = model
+        .tables
+        .iter()
+        .find(|table| table.name == "character_surnames")
+        .expect("source-order table should exist");
+    assert!(!items.preserve_source_order);
+    assert!(surnames.preserve_source_order);
+    assert!(surnames.indexes.is_empty());
 }
 
 #[test]

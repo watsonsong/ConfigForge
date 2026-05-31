@@ -4,7 +4,9 @@
 use crate::{
     codegen::{
         CaseStyle, CodeExportInput, CodeGenerator,
-        tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
+        tests::{
+            assert_duplicate_generated_identifier, input_for, linked_fixture, source_order_fixture,
+        },
     },
     meta::{MetaModel, TargetTags},
     runtime_contract::RuntimeDataFile,
@@ -56,6 +58,25 @@ fn emits_loader_table_and_index_helpers() {
     assert!(content.contains("pub fn preload_all(&self) -> RuntimeDataResult<()>"));
     assert!(content.contains("impl<L: RuntimeDataLoader> GameDataAccess for LazyGameData<L>"));
     assert!(content.contains("let value = ItemsTable::load(&self.loader)?;"));
+}
+
+#[test]
+fn source_order_apis_are_opt_in() {
+    let meta = source_order_fixture();
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = RustCodeGenerator.generate(&input).expect("rust code");
+    let content = &files[0].content;
+
+    assert!(content.contains("pub struct ItemsTable"));
+    assert!(content.contains("fn row_at(&self, row_index: usize) -> Option<&ItemsRow>"));
+    assert!(!content.contains("pub fn rows(&self) -> &[ItemsRow]"));
+    assert!(content.contains("pub struct CharacterSurnamesTable"));
+    assert!(content.contains("pub fn len(&self) -> usize { self.rows.len() }"));
+    assert!(content.contains("pub fn rows(&self) -> &[CharacterSurnamesRow]"));
+    assert!(
+        content.contains("pub fn row_at(&self, row_index: usize) -> Option<&CharacterSurnamesRow>")
+    );
 }
 
 #[test]

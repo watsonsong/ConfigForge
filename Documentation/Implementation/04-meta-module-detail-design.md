@@ -214,6 +214,7 @@ pub struct TableMeta {
 - `export = false` 是整表导出的硬关闭；默认 `true`。
 - `export_when` 根据 target tags 判断整表是否进入 runtime data 与 codegen。
 - `row_export` 只作用于 collection runtime data 行过滤，常用于 `shipping` / `debug` 等 target 差异。
+- `preserve_source_order` 只作用于 CollectionTable generated access 规划：为 `true` 时要求 CodeModel / 语言生成器保留 target visible rows 的稳定顺序并生成数组/下标访问 API；为 `false` 时有 index 的表默认只承诺 index lookup，不应让业务依赖 source order。它不创建 index，不参与 FK target 解析。
 - `validators` 保存 table-level / record-level validator 的 raw 配置；公共字段由 Meta validate 做轻量检查，scope、unknown kind 与专属参数由 validation registry compile 阶段诊断。当前实现已解析 TOML，但内置 validator 仅提供 field-scope `range`，因此 table-level `range` 会被 scope 校验拒绝。
 - `foreign_keys` 已在当前 `TableMeta` 中落地。外键不是普通 validator，而是一等关系数据：当前 MVP 会完成 link、Meta 结构校验和数据引用完整性校验；当 FK 声明 `linked_field` 时，CodeModel 会把该关系暴露给 codegen 生成关联查询 helper、cache slot 和 link/link_all API。
 - `fragments` 是 polymorphic variant source mode 的 table-local fragment schema。当前代码已落地该字段，并要求多 source variant source mode 至少由一个 source 声明非空 `fragments` 驱动；`SourceRef.fragments` 的合法性由 Meta validation 检查。

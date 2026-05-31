@@ -437,6 +437,8 @@ impl CsvDataReader {
 - 普通 collection：`classes.csv`、`class_levels.csv` 使用单 source，`class_levels` 通过 `attributes.max_health` 等 header 表达 expanded struct。
 - variant source collection：`materials.csv` / `weapons.csv` / `armors.csv` 都是同一个 `items` table 的 source variants。DataLoader 按 source 声明顺序把它们 append 到单张 `items` DataTable，并为每行记录 fragment presence；`by_id` unique/primary 校验在合并后的整张 items 表上执行，因此三类道具 ID 必须全局不重复。
 
+规划中的第三种 pattern 是 source-order collection：例如 `character_surnames.csv`、`character_male_given_names.csv`、`character_female_given_names.csv` 作为随机角色名字池，每张表只有一个 `string value` 字段、无 index，并在 Meta 中声明 `preserve_source_order = true`。DataLoader 不需要特殊读取逻辑，仍按 CSV 行顺序形成 `DataTable.rows`；语义差异发生在 codegen：这类表显式生成 row count / row_at / rows 顺序访问，业务用外部 RNG 随机选择下标。普通 indexed table 则默认不再通过 generated public API 暴露 `rows` 顺序数组。
+
 variant source mode 要求每个 source 贡献完整 record：common fields 必须在每个 source 中完整出现，不做跨 source join；fragment fields 只允许出现在声明了对应 active fragment 的 source 中。
 
 ### 5.6.2 ObjectTable `key,value` source layout

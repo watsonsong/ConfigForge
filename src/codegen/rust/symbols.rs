@@ -130,8 +130,13 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &RustNames<'_
         let mut method_symbols = vec![
             GeneratedSymbol::new("method", "load", "load"),
             GeneratedSymbol::new("method", "from_rows", "from_rows"),
-            GeneratedSymbol::new("method", "rows", "rows"),
         ];
+        if table.preserve_source_order {
+            method_symbols.push(GeneratedSymbol::new("method", "len", "len"));
+            method_symbols.push(GeneratedSymbol::new("method", "is_empty", "is_empty"));
+            method_symbols.push(GeneratedSymbol::new("method", "rows", "rows"));
+            method_symbols.push(GeneratedSymbol::new("method", "row_at", "row_at"));
+        }
         for index in &table.indexes {
             method_symbols.push(GeneratedSymbol::new(
                 "index function",

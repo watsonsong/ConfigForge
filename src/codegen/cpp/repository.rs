@@ -62,28 +62,30 @@ fn render_from_rows_source(
     ));
     content.raw_fmt(format_args!("    {} table;\n", repository_type));
     content.raw("    table.rows_ = std::move(rows);\n");
-    content.raw(
-        "    for (std::size_t row_index = 0; row_index < table.rows_.size(); ++row_index) {\n",
-    );
-    content.raw("        const auto& row = table.rows_[row_index];\n");
-    for index in &table.indexes {
-        let storage_name = names.index_storage_name(index)?;
-        let key = names.cpp_row_key_expr(table, index, "row")?;
-        if index.unique {
-            content.raw_fmt(format_args!(
-                "        auto inserted_{storage_name} = table.{storage_name}.emplace({key}, row_index);\n"
-            ));
-            content.raw_fmt(format_args!(
-                "        if (!inserted_{storage_name}.second) {{ throw std::runtime_error(\"Duplicate unique index key for {}.{}\"); }}\n",
-                repository_type, index.name
-            ));
-        } else {
-            content.raw_fmt(format_args!(
-                "        table.{storage_name}[{key}].push_back(row_index);\n"
-            ));
+    if !table.indexes.is_empty() {
+        content.raw(
+            "    for (std::size_t row_index = 0; row_index < table.rows_.size(); ++row_index) {\n",
+        );
+        content.raw("        const auto& row = table.rows_[row_index];\n");
+        for index in &table.indexes {
+            let storage_name = names.index_storage_name(index)?;
+            let key = names.cpp_row_key_expr(table, index, "row")?;
+            if index.unique {
+                content.raw_fmt(format_args!(
+                    "        auto inserted_{storage_name} = table.{storage_name}.emplace({key}, row_index);\n"
+                ));
+                content.raw_fmt(format_args!(
+                    "        if (!inserted_{storage_name}.second) {{ throw std::runtime_error(\"Duplicate unique index key for {}.{}\"); }}\n",
+                    repository_type, index.name
+                ));
+            } else {
+                content.raw_fmt(format_args!(
+                    "        table.{storage_name}[{key}].push_back(row_index);\n"
+                ));
+            }
         }
+        content.raw("    }\n");
     }
-    content.raw("    }\n");
     content.raw("    return table;\n");
     content.raw("}\n\n");
 
@@ -432,10 +434,13 @@ pub(super) fn render_table(
         names.repository_type_name(&table.name)?,
         names.row_type_name(&table.name)?
     ));
-    content.raw_fmt(format_args!(
-        "    const std::vector<{}>& Rows() const {{ return rows_; }}\n",
-        names.row_type_name(&table.name)?
-    ));
+    if table.preserve_source_order {
+        content.raw("    std::size_t Size() const { return rows_.size(); }\n");
+        content.raw_fmt(format_args!(
+            "    const std::vector<{}>& Rows() const {{ return rows_; }}\n",
+            names.row_type_name(&table.name)?
+        ));
+    }
     content.raw_fmt(format_args!(
         "    const {}* RowAt(std::size_t row_index) const {{ return row_index < rows_.size() ? &rows_[row_index] : nullptr; }}\n",
         names.row_type_name(&table.name)?

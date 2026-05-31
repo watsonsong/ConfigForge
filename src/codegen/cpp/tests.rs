@@ -4,7 +4,9 @@
 use crate::{
     codegen::{
         CodeExportInput, CodeGenerator, GeneratedFile,
-        tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
+        tests::{
+            assert_duplicate_generated_identifier, input_for, linked_fixture, source_order_fixture,
+        },
     },
     meta::{MetaModel, TargetTags},
     runtime_contract::RuntimeDataFile,
@@ -82,6 +84,23 @@ fn emits_loader_and_repository_declarations() {
     );
     assert!(source.contains("items_.emplace(ItemsTable::Load(*loader_));"));
     assert!(source.contains("void LazyGameData::PreloadAll() const"));
+}
+
+#[test]
+fn source_order_apis_are_opt_in() {
+    let meta = source_order_fixture();
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = CppCodeGenerator.generate(&input).expect("cpp code");
+    let content = generated_content(&files, "generated.hpp");
+
+    assert!(content.contains("class ItemsTable"));
+    assert!(content.contains("const ItemsRow* RowAt(std::size_t row_index) const"));
+    assert!(!content.contains("const std::vector<ItemsRow>& Rows() const"));
+    assert!(content.contains("class CharacterSurnamesTable"));
+    assert!(content.contains("std::size_t Size() const { return rows_.size(); }"));
+    assert!(content.contains("const std::vector<CharacterSurnamesRow>& Rows() const"));
+    assert!(content.contains("const CharacterSurnamesRow* RowAt(std::size_t row_index) const"));
 }
 
 #[test]

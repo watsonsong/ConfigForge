@@ -32,6 +32,14 @@ local class = assert(class_level:class(config), "row foreign key link should res
 assert(class:name_text() == "战士", "linked row text translation failed")
 assert(class:description_text() == "耐久的近战战士。", "linked row description translation failed")
 
+local surnames = config.character_surnames()
+assert(#surnames.rows == 4, "source-order surname table length failed")
+assert(surnames.rows[1].value == "Stone", "source-order surname first value failed")
+local male_given_names = config.character_male_given_names()
+assert(male_given_names.rows[2].value == "Borin", "source-order male given name failed")
+local female_given_names = config.character_female_given_names()
+assert(female_given_names.rows[3].value == "Celeste", "source-order female given name failed")
+
 local game_rules = config.game_rules()
 assert(game_rules.max_player_level == 60, "object table int field failed")
 assert(game_rules.pvp_enabled == true, "object table bool field failed")

@@ -88,6 +88,7 @@ Rust 约束：
 - `unique = true` 的索引生成 `get_by_* -> Option<&Row>`。
 - 非 unique 索引生成 `find_by_* -> Vec<&Row>` 或迭代器。第一阶段用 `Vec<&Row>` 简单实现。
 - 复合索引生成 key struct 或 tuple。公开 API 推荐展开参数：`get_by_region_id(region: String, id: i64)`。
+- public source-order API（`pub fn rows(&self)`、public `row_at(index)`、`len()` / `is_empty()`）应从“所有 CollectionTable 默认生成”改为 `preserve_source_order = true` 的 opt-in API。indexed table 默认只生成 lookup；随机名字表这类无 index 顺序表声明 `preserve_source_order = true` 后生成 `len()` / `row_at(index)` / `rows()`。底层仍可使用 `rows: Vec<Row>` 作为 private owner storage，并让多个索引保存 `usize` row handle，避免多索引复制行数据。
 - 若生成 serde 代码，需要生成 `serde` feature 说明或由项目配置决定是否带 derive。
 - 生成代码只定义通用 `RuntimeDataLoader` / `RuntimeDataReader` trait，不强制生成 JSON 或 MessagePack 的具体 decoder；业务 runtime 可以用 `serde_json`、`rmp-serde` 或项目自研库实现 reader。`ItemsTable::load` 打开 `DATA_FILE` 后由生成代码读取 `rows` 数组、逐行调用 `read_row` 并构建索引。
 

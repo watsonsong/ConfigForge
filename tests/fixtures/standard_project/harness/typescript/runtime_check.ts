@@ -115,6 +115,12 @@ async function main(): Promise<void> {
     if (binaryData.gameRules.defaultClass(binaryData).classId !== 1) {
       throw new Error("binary link all relation cache failed");
     }
+    if (binaryData.characterSurnames.length !== 4 || binaryData.characterSurnames.rowAt(0)?.value !== "Stone") {
+      throw new Error("binary source-order surname table failed");
+    }
+    if (binaryData.characterMaleGivenNames.rows()[1]?.value !== "Borin" || binaryData.characterFemaleGivenNames.rows()[2]?.value !== "Celeste") {
+      throw new Error("binary source-order given name table failed");
+    }
     assertTranslatedText(binaryData);
 
     const lazyBinaryData = GameData.loadLazy(binaryLoader);
@@ -178,6 +184,12 @@ async function main(): Promise<void> {
   data.linkAll();
   if (data.gameRules.defaultClass(data).classId !== 1) {
     throw new Error("link all relation cache failed");
+  }
+  if (data.characterSurnames.length !== 4 || data.characterSurnames.rowAt(0)?.value !== "Stone") {
+    throw new Error("source-order surname table failed");
+  }
+  if (data.characterMaleGivenNames.rows()[1]?.value !== "Borin" || data.characterFemaleGivenNames.rows()[2]?.value !== "Celeste") {
+    throw new Error("source-order given name table failed");
   }
   assertTranslatedText(data);
 

@@ -280,7 +280,20 @@ Foreign key relation helper 与 lazy load 的交互：
 
 命名上应避免让 lazy facade 的 async / fallible accessor 伪装成 eager field。现有 eager `data.items.getById(...)` 可继续保留；lazy TypeScript 不应生成 `data.items` 这种看似同步的属性，而应生成 `await data.items()` 或 `await data.getItems()`。
 
-#### 6.2.1.2 生成的 Foreign Key Relation Helper
+#### 6.2.1.2 CollectionTable source-order API（规划）
+
+CollectionTable 的 generated repository 需要区分“按 index 查询”和“按导出顺序访问”两类能力。默认规划为：只要表声明了 index，生成代码就只承诺 index lookup；不再默认暴露或语义上承诺 `rows()` / `Rows()` / `rows()` 顺序数组。需要遍历、随机访问或按策划表顺序驱动业务逻辑时，Meta 必须显式声明 `preserve_source_order = true`。
+
+典型 case 是随机角色名：`character_surnames`、`character_male_given_names`、`character_female_given_names` 三张 CollectionTable 每张只有一个 `string value` 字段、没有 index，并声明 `preserve_source_order = true`。生成代码应提供：
+
+- row count：`len()` / `Size()` / `length`；
+- 下标访问：`row_at(index)` / `RowAt(index)` / `rowAt(index)`；
+- 可选的只读切片/视图：`rows()` / `Rows()` / `rows()`，仅在 `preserve_source_order = true` 时生成；
+- 不内置 RNG。业务代码自行生成随机下标并读取 row value。
+
+对 indexed table，若没有 `preserve_source_order = true`，generated code 不应让业务依赖 source order。`preserve_source_order` 约束的是公开能力，而不是强制规定底层 owner storage：当表有多个 index 或 relation cache 需要稳定 handle 时，生成器可以保留 private row storage，并让各 index 存 row index / row handle，避免同一行在多个索引中复制；只有公开 `rows` / ordinal API 必须由 `preserve_source_order = true` 显式开启。
+
+#### 6.2.1.3 生成的 Foreign Key Relation Helper
 
 当 foreign key 声明了 `linked_field` 时，代码生成器应在不改变 runtime data shape 的前提下生成关联访问 helper。原始 source field 仍作为普通字段暴露，例如 `default_class_id` 仍是整数；`linked_field = "default_class"` 只额外生成一个只读 relation getter，用于从当前 row/object 的 FK key 自动跳转到目标 CollectionTable 的唯一索引行。
 
@@ -359,7 +372,7 @@ TypeScript 若继续使用 plain object row，应避免为每个 row 分配 rela
 
 可见性规则与 CodeModel 一致：只有当前 target 可见的 FK 才能生成 helper 和 cache 字段。若 FK 不可见、source fields 不可见、target table 不可见或 target index 不可见，当前 target 的生成代码中不得出现该 `linked_field` API。`linked_field` 不进入 JSON / MessagePack / bin payload，也不影响 binary schema revision；它只影响 generated code 的类型、helper、cache 与 link API。
 
-#### 6.2.1.3 TypeScript Sync Loading
+#### 6.2.1.4 TypeScript Sync Loading
 
 TypeScript generated code 同时支持 async 与 sync loader 场景：
 
@@ -369,11 +382,11 @@ TypeScript generated code 同时支持 async 与 sync loader 场景：
 - `LazyGameData` 同时提供 async table accessor 与 `xxxSync()` accessor。
 - `preloadAllSync()` / `linkAllSync()` 是同步 loader 场景的便捷 API；如果业务 loader 可能异步，应使用 async 版本。
 
-#### 6.2.1.4 生成符号冲突范围
+#### 6.2.1.5 生成符号冲突范围
 
 用户可见 generated names 都参与冲突检查，包括字段、fragment、index lookup、relation helper、text helper、`GameData`、`LazyGameData`、`GameDataAccess` 等。`linked_field` 不仅不能和原始字段重名，也不能和目标语言生成后的 helper 名称冲突。`keyword_conflict` 只处理保留字或关键字冲突，不保证所有业务语义命名冲突都能自动修复。
 
-#### 6.2.1.5 Binary schema revision
+#### 6.2.1.6 Binary schema revision
 
 `bin` schema revision 由 exporter 与 codegen 共享 table shape 计算。影响 revision 的是 target-visible table kind、fields、fragments 与 wire layout；`linked_field` relation helper、text helper、注释和输出路径不进入 runtime payload，也不改变 binary schema revision。Reader 提供 revision 时 generated code 必须校验；若某格式不提供 revision，则按对应 reader contract 跳过或由格式 reader 处理。
 

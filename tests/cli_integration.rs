@@ -153,7 +153,7 @@ fn dry_run_serial_and_parallel_outputs_match() {
     ]);
 
     assert_eq!(serial_stdout, parallel_stdout);
-    assert!(serial_stdout.contains("artifact plan (5 entries):"));
+    assert!(serial_stdout.contains("artifact plan (8 entries):"));
     assert!(!data_out_dir.join("items.json").exists());
     assert!(!rust_out_dir.join("generated.rs").exists());
 }
@@ -206,7 +206,7 @@ fn dry_run_builds_plan_without_writing_artifacts() {
 
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("artifact plan (5 entries):"))
+        .stdout(predicate::str::contains("artifact plan (8 entries):"))
         .stdout(predicate::str::contains("items.json"))
         .stdout(predicate::str::contains("game_rules.json"))
         .stdout(predicate::str::contains("generated.rs"))
@@ -1007,6 +1007,21 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(
         fixture_root
+            .join("out/client_data/json/character_surnames.json")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/client_data/json/character_male_given_names.json")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/client_data/json/character_female_given_names.json")
+            .exists()
+    );
+    assert!(
+        fixture_root
             .join("out/client_i18n/reference_game_config.pot")
             .exists()
     );
@@ -1060,6 +1075,14 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(pot.contains("msgctxt \"items.name\""));
     assert!(pot.contains("msgid \"Iron Ore\""));
     assert!(pot.contains("msgctxt \"classes.description\""));
+
+    let rust_code =
+        fs::read_to_string(fixture_root.join("out/client_code/rust/reference_game_config.rs"))
+            .expect("standard fixture Rust code should be readable");
+    assert!(rust_code.contains("pub fn rows(&self) -> &[CharacterSurnamesRow]"));
+    assert!(rust_code.contains("pub fn rows(&self) -> &[CharacterMaleGivenNamesRow]"));
+    assert!(rust_code.contains("pub fn rows(&self) -> &[CharacterFemaleGivenNamesRow]"));
+    assert!(!rust_code.contains("pub fn rows(&self) -> &[ItemsRow]"));
 
     verify_standard_generated_rust_runtime(fixture_root);
     verify_standard_generated_cpp_runtime(fixture_root);
@@ -2062,7 +2085,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                     }}
 
                     fn len(&self) -> RuntimeDataResult<usize> {{
-                        if self.path == "items" && self.current_field() == Some("rows") {{ Ok(1) }} else if matches!(self.path, "classes" | "class_levels") && self.current_field() == Some("rows") {{ Ok(0) }} else if self.path == "game_rules" && self.current_field() == Some("starter_item_ids") {{ Ok(2) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
+                        if self.path == "items" && self.current_field() == Some("rows") {{ Ok(1) }} else if matches!(self.path, "classes" | "class_levels" | "character_surnames" | "character_male_given_names" | "character_female_given_names") && self.current_field() == Some("rows") {{ Ok(0) }} else if self.path == "game_rules" && self.current_field() == Some("starter_item_ids") {{ Ok(2) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
                     }}
 
                     fn as_i64(&self) -> RuntimeDataResult<i64> {{
@@ -2102,6 +2125,9 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             "items" => Ok(MockReader::root("items")),
                             "classes" => Ok(MockReader::root("classes")),
                             "class_levels" => Ok(MockReader::root("class_levels")),
+                            "character_surnames" => Ok(MockReader::root("character_surnames")),
+                            "character_male_given_names" => Ok(MockReader::root("character_male_given_names")),
+                            "character_female_given_names" => Ok(MockReader::root("character_female_given_names")),
                             "game_rules" => Ok(MockReader::root("game_rules")),
                             other => Err(RuntimeDataError::not_found(format!("unexpected path: {{other}}"))),
                         }}
@@ -2126,7 +2152,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                     assert_eq!(item.name, "Potion");
                     assert_eq!(item.name_text(&MockTranslator), "药水");
                     assert_eq!(data.game_rules.max_player_level, 60);
-                    assert_eq!(data.items.rows().len(), 1);
+                    assert!(data.items.get_by_id(404).is_none());
                     assert_eq!(data.game_rules.default_class_id, 1);
                     assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2002]);
                     assert!(data.game_rules.pvp_enabled);
@@ -2247,7 +2273,7 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                     if (path_ == "items" && CurrentField() == "rows") {
                         return 1;
                     }
-                    if ((path_ == "classes" || path_ == "class_levels") && CurrentField() == "rows") {
+                    if ((path_ == "classes" || path_ == "class_levels" || path_ == "character_surnames" || path_ == "character_male_given_names" || path_ == "character_female_given_names") && CurrentField() == "rows") {
                         return 0;
                     }
                     if (path_ == "game_rules" && CurrentField() == "starter_item_ids") {
@@ -2315,7 +2341,7 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
             class MockLoader final : public IRuntimeDataLoader {
             public:
                 std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) override {
-                    if (path == "items" || path == "classes" || path == "class_levels" || path == "game_rules") {
+                    if (path == "items" || path == "classes" || path == "class_levels" || path == "character_surnames" || path == "character_male_given_names" || path == "character_female_given_names" || path == "game_rules") {
                         return std::make_unique<MockReader>(path);
                     }
                     throw std::runtime_error("unexpected path");

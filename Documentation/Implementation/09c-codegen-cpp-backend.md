@@ -84,6 +84,7 @@ C++ 约束：
 
 - 第一阶段目标 C++17。
 - 运行时 JSON / MessagePack 解析库不强绑定。生成代码只定义通用 `IRuntimeDataLoader` / `IRuntimeDataReader`，由业务实现；标准 runtime support 层可提供基于 RapidJSON、msgpack-c 或引擎序列化系统的可选 adapter。按表读取、字段转换和 typed row 构造由生成的 `Load` / `ReadRow` 实现完成。
+- `Rows()` / `Size()` 等 public source-order API 应成为 `preserve_source_order = true` 的 opt-in 行为；普通 indexed table 默认只生成 `GetBy*` / `FindBy*`。底层 `std::vector<Row> rows_` 可以继续作为 private owner storage，多个 index 保存 `std::size_t` row handle，以避免行数据被每个索引复制；未 opt-in 时不得暴露 source-order API。
 - 复合 key 需要生成 `struct Key`、`operator==` 和 hash。
 - enum class 需要生成 hash 或转换为底层整数用于 unordered_map。
 
