@@ -142,7 +142,7 @@ build_target(options)
           LinkMeta || SourceReadPlan + RawSourceData when target requires data
           LinkMeta only when target is code-only
       -> split export tasks by dependency contract
-      -> MetaAndData branch: RawSourceData / normalize / validation / exporter
+      -> MetaAndData branch: RawSourceData / NormalizeTable[*] + deterministic merge / validation / exporter
       -> MetaOnly branch: format-agnostic codegen input / CodeGenerator::generate
       -> run both branches through the rayon pool when both exist
       -> collect export task outputs by original declaration order
@@ -150,13 +150,14 @@ build_target(options)
   -> BuildOutput { warnings }
 ```
 
-Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。Phase 5 后，data-backed target 会先并行准备 `LinkedMetaModel` 与 `RawSourceData`，再进入 normalize / validation；code-only target 不启动 source read，因此缺失 `project.input` 或 data files 不会影响 MetaOnly codegen。`MetaOnly` codegen export task 只依赖 linked Meta 与 effective target tags，可与 `MetaAndData` 分支中的 validation / export 并行。Artifact 收集仍按 `[[targets.exports]]` 声明顺序排序，因此并行执行不会改变 dry-run 条目顺序或跨 exporter 路径冲突检查语义。
+Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。Phase 5 后，data-backed target 会先并行准备 `LinkedMetaModel` 与 `RawSourceData`，再进入 normalize / validation；Phase 6 后，normalize 在 table 粒度通过 CPU pool 并行，并按 raw `DataSet.tables()` 顺序稳定 merge。code-only target 不启动 source read，因此缺失 `project.input` 或 data files 不会影响 MetaOnly codegen。`MetaOnly` codegen export task 只依赖 linked Meta 与 effective target tags，可与 `MetaAndData` 分支中的 validation / export 并行。Artifact 收集仍按 `[[targets.exports]]` 声明顺序排序，因此并行执行不会改变 dry-run 条目顺序或跨 exporter 路径冲突检查语义。
 
 ## 10.5 MetaAndData export task 编排
 
 `runtime.rs` 负责 target 内 MetaAndData export task 编排：
 
 - 使用 build input preparation 已读取的 `RawSourceData`；`runtime.rs` 不再负责 source I/O，只负责 normalize / validation / export。
+- normalize 使用 `normalize_data_set_with_pool()` 将 `normalize_table()` 拆成 table 粒度 CPU task，并按 `RawSourceData.as_data_set().tables()` 顺序稳定合并。当前 normalize 规则保持 table-local：ObjectTable singleton、struct expanded value、defaults、typed fragment payload 等规则不访问跨表可变状态。
 - build input preparation 为当前 target 可见 raw `TableMeta` 构造 `SourceReadPlan`，再通过 `DataLoader::read_sources_with_pool()` 读取 `RawSourceData`。
 - 构造 `SourceReadPlan` 时传入 effective target tags，用于过滤 `override_sources[].export_when`。例如 Project target 只有 `client, shipping`，CLI 传入 `--tag s1` 后，`materials_s1.csv` 才会进入 plan 并覆盖 Oak row。
 - 同一个 target 内多个 MetaAndData export task 基于 `(project.input, effective target tags)` 复用同一个 `RawSourceData` 和 normalized `DataSet`，避免重复读取和重复 validation。

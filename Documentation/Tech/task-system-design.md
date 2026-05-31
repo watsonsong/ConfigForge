@@ -911,10 +911,12 @@ Phase 5 实现复核：后续 Phase 6-12 的阶段顺序仍然成立。Phase 6 �
 
 目标：把 raw source merge 后的 normalize 拆成 table 粒度 CPU task。
 
-- TODO：`normalize_data_set` 拆分为 `normalize_table` task + deterministic merge。
-- TODO：ObjectTable singleton、struct expanded value、defaults、typed fragment payload 等规则保持 table-local。
-- TODO：如果发现跨表 normalize 需求，必须显式新增 DAG 依赖，不能在 table task 中访问可变全局状态。
+- DONE：`normalize_data_set` 拆分为 `normalize_table` task + deterministic merge；build 主流程通过 `normalize_data_set_with_pool()` 使用 CPU pool 并按输入 table 顺序稳定收集。
+- DONE：ObjectTable singleton、struct expanded value、defaults、typed fragment payload 等规则保持 table-local；当前 normalize task 只读取当前 `LinkedTableMeta` 与当前 `DataTable`。
+- DONE：明确如果发现跨表 normalize 需求，必须显式新增 DAG 依赖，不能在 table task 中访问可变全局状态。
 - 验证：现有 validation/data resolver tests 全部通过；新增多 table normalize 顺序稳定测试；大表/小表 chunking 可先不实现。
+
+Phase 6 实现复核：后续 Phase 7-12 的阶段顺序仍然成立。Phase 7 仍应先把 validation 诊断改为全量可合并模型，再并行 validation；Phase 8/9 可复用 Phase 6 的稳定 merge 策略，但需要自己的 validation issue stable sort key，不能依赖 Rayon 完成顺序。
 
 ### Phase 7：Validation report 全量收集模型
 

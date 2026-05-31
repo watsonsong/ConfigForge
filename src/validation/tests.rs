@@ -1,7 +1,16 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    thread,
+    time::Duration,
+};
 
 use crate::data::{RowSourceInfo, SourceRole};
 
@@ -11,6 +20,7 @@ use crate::meta::{
 };
 use crate::{ConfigForgeError, Result};
 
+use super::defaults::normalize_data_set_with_normalizer_and_pool;
 use super::*;
 
 fn validate_error(result: Result<()>) -> String {
@@ -1493,6 +1503,84 @@ fn normalizes_data_set_before_validation() {
             .map(String::as_str),
         Some("1")
     );
+}
+
+#[test]
+fn normalize_data_set_with_pool_preserves_table_order() {
+    let data_set = DataSet::new(vec![
+        DataTable::new("slow", vec![BTreeMap::new()]),
+        DataTable::new("fast", vec![BTreeMap::new()]),
+    ]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .expect("pool should build");
+
+    let normalized = normalize_data_set_with_normalizer_and_pool(&data_set, &pool, |table| {
+        if table.name == "slow" {
+            thread::sleep(Duration::from_millis(20));
+        }
+        Ok(table.clone())
+    })
+    .expect("parallel normalize should succeed");
+
+    assert_eq!(
+        normalized
+            .tables()
+            .iter()
+            .map(|table| table.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["slow", "fast"]
+    );
+}
+
+#[test]
+fn normalize_data_set_with_pool_reports_first_table_error_by_plan_order() {
+    let data_set = DataSet::new(vec![
+        DataTable::new("first", vec![BTreeMap::new()]),
+        DataTable::new("second", vec![BTreeMap::new()]),
+    ]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .expect("pool should build");
+
+    let error = normalize_data_set_with_normalizer_and_pool(&data_set, &pool, |table| {
+        if table.name == "first" {
+            thread::sleep(Duration::from_millis(20));
+            return Err(ConfigForgeError::Validation("first failed".to_owned()));
+        }
+        Err(ConfigForgeError::Validation("second failed".to_owned()))
+    })
+    .unwrap_err();
+
+    assert!(matches!(error, ConfigForgeError::Validation(message) if message == "first failed"));
+}
+
+#[test]
+fn normalize_data_set_with_pool_runs_table_tasks_concurrently() {
+    let data_set = DataSet::new(vec![
+        DataTable::new("items", vec![BTreeMap::new()]),
+        DataTable::new("levels", vec![BTreeMap::new()]),
+        DataTable::new("quests", vec![BTreeMap::new()]),
+    ]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(3)
+        .build()
+        .expect("pool should build");
+    let active = Arc::new(AtomicUsize::new(0));
+    let max_active = Arc::new(AtomicUsize::new(0));
+
+    normalize_data_set_with_normalizer_and_pool(&data_set, &pool, |table| {
+        let active_now = active.fetch_add(1, Ordering::SeqCst) + 1;
+        max_active.fetch_max(active_now, Ordering::SeqCst);
+        thread::sleep(Duration::from_millis(20));
+        active.fetch_sub(1, Ordering::SeqCst);
+        Ok(table.clone())
+    })
+    .expect("parallel normalize should succeed");
+
+    assert!(max_active.load(Ordering::SeqCst) > 1);
 }
 
 #[test]

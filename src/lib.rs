@@ -60,7 +60,7 @@ pub use validation::{
     CompiledValidationPlan, CompiledValidator, ExportTableView, ExportValidationView,
     ValidationContext, ValidationIssue, ValidationIssueLocation, ValidationReport,
     ValidatorFactory, ValidatorRegistry, VisibleRow, apply_field_defaults, normalize_data_set,
-    normalize_table, validate_data_set, validate_data_set_for_target,
+    normalize_data_set_with_pool, normalize_table, validate_data_set, validate_data_set_for_target,
     validate_data_set_for_target_with_report, validate_data_set_with_report,
     validate_normalized_data_set, validate_normalized_data_set_for_target,
     validate_normalized_data_set_for_target_with_report, validate_normalized_table,

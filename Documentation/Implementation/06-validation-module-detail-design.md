@@ -34,7 +34,7 @@ src/validation/
   table.rs            # table-level 基础规则、unique/index、target-aware table validation
   foreign_key.rs      # full / target-aware foreign key referential integrity validation
   struct_value.rs     # struct JSON cell / expanded value 校验
-  defaults.rs         # default 应用与 normalize_data_set / normalize_table
+  defaults.rs         # default 应用与 normalize_data_set / normalize_data_set_with_pool / normalize_table
   registry.rs         # ValidatorFactory / CompiledValidator / ValidatorRegistry / CompiledValidationPlan
   builtins/
     mod.rs
@@ -56,7 +56,8 @@ Typed value 解析不在 Validation 模块内重复实现。Validation 需要验
 - `validate_data_set_with_report()`：完整数据集校验，保留 warning report。
 - `validate_data_set_for_target()`：target-aware 校验。
 - `validate_data_set_for_target_with_report()`：target-aware 校验并返回 `ValidationReport`。
-- `normalize_data_set()`：应用 default，产出后续校验和导出共享的 normalized data。
+- `normalize_data_set()`：串行应用 default，产出后续校验和导出共享的 normalized data。
+- `normalize_data_set_with_pool()`：按 table 并行执行 `normalize_table()`，再按输入 DataSet table 顺序稳定 merge；用于 build 主流程的 CPU pool。
 
 ## 6.0.1 ObjectTable 校验边界
 
@@ -388,7 +389,7 @@ src/validation/
   table.rs            # required/type/enum/unique/index/object-table 等基础规则
   foreign_key.rs      # FK referential integrity 校验
   struct_value.rs     # struct value 校验
-  defaults.rs         # defaults 与 normalize
+  defaults.rs         # defaults 与串行/并行 normalize
   registry.rs         # ValidatorRegistry、ValidatorFactory 注册与 lookup
   builtins/
     mod.rs
@@ -397,6 +398,8 @@ src/validation/
 ```
 
 `ValidatorMeta`、`ValidationSeverity` 当前由 `src/meta/model/` 下的 raw model 定义并经 `src/meta/model.rs` re-export；raw `ValidatorMeta -> CompiledValidator` 的 compile 流程由 `src/validation/registry.rs` 中的 `CompiledValidationPlan::compile` 负责。required / type / enum / unique 仍在 `src/validation/table.rs` 中作为基础校验执行；foreign key referential integrity 当前在 `src/validation/foreign_key.rs` 中执行，尚未迁移为 registry 内置 validator。后续可按需新增 `builtins/unique.rs`、`builtins/referential_integrity.rs` 等模块继续迁移。
+
+`defaults.rs` 中的 normalize 保持 table-local：`normalize_table()` 只读取当前 `LinkedTableMeta` 与当前 `DataTable`，负责 field default、ObjectTable singleton 后续校验前的数据准备、fragment-scoped default 等规则；`normalize_data_set_with_pool()` 只把不同 table 分发到 Rayon pool 并按原始 `DataSet.tables()` 顺序收集结果。若未来 normalize 需要访问其他 table，必须先在 Build DAG 中显式新增依赖节点，不能在 table task 中隐式读取或修改全局状态。
 
 ## 6.4 核心 trait 与类型
 

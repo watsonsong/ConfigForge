@@ -12,7 +12,9 @@ use crate::{
     meta::{LinkedMetaModel, TargetTags},
     project::lexical_normalize_path,
     runtime_contract::RuntimeDataFile,
-    validation::{normalize_data_set, validate_normalized_data_set_for_target_with_report},
+    validation::{
+        normalize_data_set_with_pool, validate_normalized_data_set_for_target_with_report,
+    },
 };
 
 use super::target::{NormalizedExportTask, target_data_config_from_export_task};
@@ -57,7 +59,7 @@ pub(super) fn export_meta_and_data_tasks(
     let registry = DataFormatRegistry::with_builtin_exporters();
     ensure_planned_runtime_output_paths(export_tasks, linked_meta, target_tags, &registry)?;
 
-    let data_set = normalize_data_set(linked_meta, raw_sources.as_data_set())?;
+    let data_set = normalize_data_set_with_pool(linked_meta, raw_sources.as_data_set(), pool)?;
     let validation_report =
         validate_normalized_data_set_for_target_with_report(linked_meta, target_tags, &data_set)?;
     let mut warnings = Vec::new();

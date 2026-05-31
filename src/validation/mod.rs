@@ -14,7 +14,9 @@ mod table;
 pub use context::{
     ExportTableView, ExportValidationView, ValidationContext, VisibleRow, visible_row_for,
 };
-pub use defaults::{apply_field_defaults, normalize_data_set, normalize_table};
+pub use defaults::{
+    apply_field_defaults, normalize_data_set, normalize_data_set_with_pool, normalize_table,
+};
 pub use diagnostic::{ValidationIssue, ValidationIssueLocation, ValidationReport};
 pub use entry::{
     validate_data_set, validate_data_set_for_target, validate_data_set_for_target_with_report,
