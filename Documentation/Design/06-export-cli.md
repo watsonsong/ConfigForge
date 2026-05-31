@@ -200,6 +200,83 @@ reader 的基础语义必须覆盖当前 Meta 类型：int、float、bool、stri
 
 格式选择由运行时传入的 loader / reader 实现决定。runtime data task 只负责导出具体格式文件及后缀；生成代码保留逻辑 table name，并通过同一套通用读取路径工作。若 target 同时导出 JSON、MessagePack 与 bin，同一份生成代码可以分别配合 JSON loader、MessagePack loader 或 binary loader 加载对应格式。无论 Meta 新增多少表和字段，接入方的 RuntimeDataLoader 接口都不应变化；变化只体现在重新生成的解析代码中。
 
+#### 6.2.1.1 生成的 Foreign Key Relation Helper
+
+当 foreign key 声明了 `linked_field` 时，代码生成器应在不改变 runtime data shape 的前提下生成关联访问 helper。原始 source field 仍作为普通字段暴露，例如 `default_class_id` 仍是整数；`linked_field = "default_class"` 只额外生成一个只读 relation getter，用于从当前 row/object 的 FK key 自动跳转到目标 CollectionTable 的唯一索引行。
+
+生成 API 的核心语义：
+
+1. **懒解析**：首次访问 helper 时，根据 source fields 当前值组装 key，并调用目标 table 的 unique / primary index lookup。
+2. **缓存 row index**：lookup 成功后，只把目标行在 target table rows 中的下标缓存到 source row/object 自身；不缓存目标对象引用、指针或闭包，避免 Rust 生命周期、自引用、C++ 指针失效和 TypeScript 循环引用问题。
+3. **再次访问不查索引**：后续访问 helper 时，直接使用缓存 row index 从 target table rows 中取只读 row/object，不再执行 hash/map lookup。
+4. **空关系可缓存**：`allow_empty = true` 且 source key 全空时，helper 返回空值并缓存“已解析为空”，避免每次访问都重新判断和查找。
+5. **运行时防御**：若非空 key 查不到目标行，说明 data/code 版本不匹配、数据被绕过 validation 或手工篡改；helper 应返回错误 / throw，而不是静默当作 optional empty。
+
+缓存状态必须至少区分三种：
+
+| 状态 | 语义 |
+| --- | --- |
+| unresolved | 尚未访问，也未被 `link` 预解析。 |
+| resolved empty | 合法空关系，例如 optional FK 全空。 |
+| resolved index | 已解析到目标 table row index。 |
+
+推荐语言 API 形态：
+
+| 语言 | 单值 FK relation | 可空 FK relation | list FK relation |
+| --- | --- | --- | --- |
+| Rust | `row.default_class(&data) -> Result<&ClassRow, RuntimeDataError>` | `Result<Option<&ClassRow>, RuntimeDataError>` | `Result<Vec<&ClassRow>, RuntimeDataError>` 或 iterator facade |
+| C++ | `row.GetDefaultClass(data) -> const ClassRow&` 或 error-return 版本 | `const ClassRow*` / `std::optional<std::reference_wrapper<const ClassRow>>` | `std::vector<const ClassRow*>` |
+| TypeScript | `row.defaultClass(data): ClassRow` 或 `throws` | `ClassRow | undefined` | `readonly ClassRow[]` |
+
+Rust 需要内部可变性才能让 `&self` getter 填充 cache；可使用 `Cell` / `RefCell` 包装小型 cache enum，或者把 getter 设计为接收 `&mut self`。为了业务访问便利，推荐生成只读 getter + 内部 cache，例如：
+
+```rust
+pub struct GameRulesRow {
+    pub default_class_id: i64,
+    default_class_link: std::cell::Cell<LinkCache>,
+}
+
+impl GameRulesRow {
+    pub fn default_class<'a>(&self, data: &'a GameData) -> Result<&'a ClassRow, RuntimeDataError>;
+}
+```
+
+C++ row 可以把 cache 字段声明为 `mutable`，保证 relation getter 是 `const` 方法：
+
+```cpp
+struct GameRulesRow {
+    std::int64_t default_class_id;
+    mutable LinkCache default_class_link;
+
+    const ClassRow& GetDefaultClass(const GameData& data) const;
+};
+```
+
+TypeScript 可以在 row class 或 row wrapper 中保存私有 cache 字段；若当前 TS 生成的是 plain interface，应为启用 `linked_field` 的 row 生成 class / wrapper，或把 helper 放在 table facade 中并用 side-table cache。为了让 cache “缓存到自己身上”，推荐 row class：
+
+```ts
+export class GameRulesRow {
+  readonly defaultClassId: number;
+  private defaultClassLink: LinkCache = LinkCache.unresolved();
+
+  defaultClass(data: GameData): ClassRow {
+    // first access resolves by ClassTable index; later access reads cached row index
+  }
+}
+```
+
+每个包含 `linked_field` 的 table repository 应生成 `link(data)`，整个 DataSet facade 应生成 `linkAll()` / `link_all()` / `LinkAll()`：
+
+| 层级 | API 语义 |
+| --- | --- |
+| Row/Object | 可选生成 `link(data)`，只预解析当前 row/object 的所有 `linked_field`。 |
+| Table repository | `link(data)` 遍历本 table 所有 rows 或 singleton object，预解析本 table 可见的所有 `linked_field`。 |
+| DataSet facade | `link_all()` / `LinkAll()` / `linkAll()` 按确定性 table 顺序调用每个 table 的 `link`。 |
+
+`link_all` 面向游戏服务器、长生命周期客户端等“启动时加载全部配置，运行中高频访问”的场景；调用后 relation getter 不应再执行索引查询，只做 cache 状态检查和 row index 取值。`link` / `link_all` 必须幂等，多次调用不能改变结果。若 source table 与 target table 之间存在环状 FK，缓存 row index 而不是引用可以避免对象图循环；`link_all` 只填充 index cache，不需要按拓扑排序构造对象。
+
+可见性规则与 CodeModel 一致：只有当前 target 可见的 FK 才能生成 helper 和 cache 字段。若 FK 不可见、source fields 不可见、target table 不可见或 target index 不可见，当前 target 的生成代码中不得出现该 `linked_field` API。`linked_field` 不进入 JSON / MessagePack / bin payload，也不影响 binary schema revision；它只影响 generated code 的类型、helper、cache 与 link API。
+
 ### 6.2.2 标准 RuntimeDataReader 实现包
 
 ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader adapter，覆盖主流目标语言与 runtime data format 的组合。目标不是让生成代码强依赖这些 adapter，而是提供可直接复用、可拷贝修改、可作为测试 harness 基础实现的标准参考实现。

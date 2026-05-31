@@ -9,6 +9,7 @@ use crate::{
     meta::{MetaModel, TargetTags},
 };
 
+use super::ir::CodeRelationCardinality;
 use super::*;
 
 pub(in crate::codegen) fn linked_fixture() -> MetaModel {
@@ -224,6 +225,138 @@ fn code_model_includes_object_table_foreign_keys() {
     assert_eq!(game_config.foreign_keys[0].target_table, "items");
     assert_eq!(game_config.foreign_keys[0].target_index, "by_id");
     assert!(game_config.foreign_keys[0].allow_empty);
+}
+
+#[test]
+fn code_model_classifies_linked_field_relation_cardinality() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "default_item_id"
+            type = "int"
+            required = true
+            foreign_key = { name = "default_item", target_table = "items", linked_field = "default_item" }
+
+            [[tables.fields]]
+            name = "bonus_item_id"
+            type = "int"
+            required = false
+            foreign_key = { name = "bonus_item", target_table = "items", linked_field = "bonus_item" }
+
+            [[tables.fields]]
+            name = "starter_item_ids"
+            type = "int[]"
+            required = true
+            foreign_key = { name = "starter_item", target_table = "items", linked_field = "starter_items" }
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+
+    let model = build_code_model(&linked, &TargetTags::empty(), &[]).expect("model");
+    let game_config = model
+        .tables
+        .iter()
+        .find(|table| table.name == "game_config")
+        .expect("object table should exist");
+
+    let cardinality = |foreign_key_name: &str| {
+        game_config
+            .foreign_keys
+            .iter()
+            .find(|foreign_key| foreign_key.name == foreign_key_name)
+            .and_then(|foreign_key| foreign_key.linked_field.as_ref())
+            .map(|linked_field| linked_field.cardinality)
+            .expect("linked field should exist")
+    };
+    assert_eq!(cardinality("default_item"), CodeRelationCardinality::One);
+    assert_eq!(
+        cardinality("bonus_item"),
+        CodeRelationCardinality::OptionalOne
+    );
+    assert_eq!(cardinality("starter_item"), CodeRelationCardinality::Many);
+}
+
+#[test]
+fn rust_codegen_emits_linked_field_relation_api() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "default_item_id"
+            type = "int"
+            required = true
+            foreign_key = { name = "default_item", target_table = "items", linked_field = "default_item" }
+
+            [[tables.fields]]
+            name = "starter_item_ids"
+            type = "int[]"
+            required = true
+            foreign_key = { name = "starter_item", target_table = "items", linked_field = "starter_items" }
+        "#,
+    )
+    .expect("meta should load");
+    let input = input_for(&meta, RustCodeGenerator.language());
+
+    let files = RustCodeGenerator
+        .generate(&input)
+        .expect("rust should generate");
+    let content = &files
+        .iter()
+        .find(|file| file.path.ends_with("generated.rs"))
+        .expect("generated rust file should exist")
+        .content;
+
+    assert!(content.contains("enum LinkCache"));
+    assert!(content.contains("struct LinkListCache"));
+    assert!(content.contains("default_item_link: RefCell<LinkCache>"));
+    assert!(content.contains("starter_items_link: RefCell<LinkListCache>"));
+    assert!(content.contains("pub fn default_item<'a>(&self, data: &'a GameData)"));
+    assert!(content.contains("pub fn starter_items<'a>(&self, data: &'a GameData)"));
+    assert!(content.contains("fn index_of_by_id(&self, id: i64) -> Option<usize>"));
+    assert!(content.contains("pub fn link(&self, data: &GameData) -> RuntimeDataResult<()>"));
+    assert!(content.contains("pub fn link_all(&self) -> RuntimeDataResult<()>"));
 }
 
 #[test]

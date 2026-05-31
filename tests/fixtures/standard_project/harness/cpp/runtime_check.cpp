@@ -54,7 +54,7 @@ int main() {
     if (data.GameRules().max_player_level != 60 || !data.GameRules().pvp_enabled) {
         throw std::runtime_error("object table load failed");
     }
-    if (data.GameRules().default_class != 1 || data.GameRules().starter_item_ids.size() != 2 ||
+    if (data.GameRules().default_class_id != 1 || data.GameRules().starter_item_ids.size() != 2 ||
         data.GameRules().starter_item_ids[0] != 2001 || data.GameRules().starter_item_ids[1] != 2002) {
         throw std::runtime_error("object table array field load failed");
     }

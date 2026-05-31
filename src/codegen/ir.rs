@@ -95,6 +95,20 @@ pub(crate) struct CodeForeignKey {
     pub target_table: String,
     pub target_index: String,
     pub allow_empty: bool,
+    pub linked_field: Option<CodeLinkedField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CodeLinkedField {
+    pub name: String,
+    pub cardinality: CodeRelationCardinality,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CodeRelationCardinality {
+    One,
+    OptionalOne,
+    Many,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -403,6 +417,20 @@ fn build_code_foreign_keys(
             };
             fields.push(code_field);
         }
+        let linked_field = foreign_key.linked_field.map(|name| {
+            let cardinality =
+                if fields.len() == 1 && matches!(fields[0].code_type, CodeTypeRef::List(_)) {
+                    CodeRelationCardinality::Many
+                } else if foreign_key.allow_empty {
+                    CodeRelationCardinality::OptionalOne
+                } else {
+                    CodeRelationCardinality::One
+                };
+            CodeLinkedField {
+                name: name.to_owned(),
+                cardinality,
+            }
+        });
         foreign_keys.push(CodeForeignKey {
             name: foreign_key.name.to_owned(),
             desc: foreign_key.desc.map(str::to_owned),
@@ -410,6 +438,7 @@ fn build_code_foreign_keys(
             target_table: foreign_key.target_table_name.to_owned(),
             target_index: foreign_key.target_index_name.to_owned(),
             allow_empty: foreign_key.allow_empty,
+            linked_field,
         });
     }
     ensure_model_unique_names(

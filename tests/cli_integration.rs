@@ -230,7 +230,7 @@ fn builds_target_from_project_config() {
         serde_json::from_str(&game_rules_json).expect("game rules json should parse");
     assert_eq!(game_rules["max_player_level"], "60");
     assert_eq!(game_rules["starter_gold"], "500");
-    assert_eq!(game_rules["default_class"], "1");
+    assert_eq!(game_rules["default_class_id"], "1");
     assert_eq!(
         game_rules["starter_item_ids"],
         serde_json::json!(["2001", "2002"])
@@ -1469,7 +1469,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             "price" => "price",
                             "max_player_level" => "max_player_level",
                             "starter_gold" => "starter_gold",
-                            "default_class" => "default_class",
+                            "default_class_id" => "default_class_id",
                             "starter_item_ids" => "starter_item_ids",
                             "stamina_cap" => "stamina_cap",
                             "daily_reset_hour" => "daily_reset_hour",
@@ -1511,7 +1511,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                             ("items", Some("price")) => Ok(10),
                             ("game_rules", Some("max_player_level")) => Ok(60),
                             ("game_rules", Some("starter_gold")) => Ok(500),
-                            ("game_rules", Some("default_class")) => Ok(1),
+                            ("game_rules", Some("default_class_id")) => Ok(1),
                             ("game_rules", Some("starter_item_ids[0]")) => Ok(2001),
                             ("game_rules", Some("starter_item_ids[1]")) => Ok(2002),
                             ("game_rules", Some("stamina_cap")) => Ok(120),
@@ -1555,7 +1555,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                     assert_eq!(item.name, "Potion");
                     assert_eq!(data.items.rows().len(), 1);
                     assert_eq!(data.game_rules.max_player_level, 60);
-                    assert_eq!(data.game_rules.default_class, 1);
+                    assert_eq!(data.game_rules.default_class_id, 1);
                     assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2002]);
                     assert!(data.game_rules.pvp_enabled);
                 }}
@@ -1563,7 +1563,7 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                 {serde_assertion}
             "#,
             serde_assertion = if derive_serde {
-                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, stack: None, attributes: None, skill: None }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, default_class: 1, starter_item_ids: vec![2001], stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true }).unwrap();\n}"
+                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, stack: None, attributes: None, skill: None }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, default_class_id: 1, starter_item_ids: vec![2001], stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true, default_class_link: RefCell::new(LinkCache::default()), starter_items_link: RefCell::new(LinkListCache::default()) }).unwrap();\n}"
             } else {
                 ""
             }
@@ -1636,7 +1636,7 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                     if (path_ == "items" && CurrentField() == "price") { return 10; }
                     if (path_ == "game_rules" && CurrentField() == "max_player_level") { return 60; }
                     if (path_ == "game_rules" && CurrentField() == "starter_gold") { return 500; }
-                    if (path_ == "game_rules" && CurrentField() == "default_class") { return 1; }
+                    if (path_ == "game_rules" && CurrentField() == "default_class_id") { return 1; }
                     if (path_ == "game_rules" && CurrentField() == "") { return 2001; }
                     if (path_ == "game_rules" && CurrentField() == "stamina_cap") { return 120; }
                     if (path_ == "game_rules" && CurrentField() == "daily_reset_hour") { return 5; }
@@ -1699,7 +1699,7 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 GameRulesRow rules{};
                 rules.max_player_level = 60;
                 rules.starter_gold = 500;
-                rules.default_class = 1;
+                rules.default_class_id = 1;
                 rules.starter_item_ids = {2001, 2002};
                 rules.stamina_cap = 120;
                 rules.daily_reset_hour = 5;
@@ -1720,7 +1720,7 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 if (data.GameRules().max_player_level != 60) {
                     return 4;
                 }
-                if (data.GameRules().default_class != 1 || data.GameRules().starter_item_ids.size() != 2) {
+                if (data.GameRules().default_class_id != 1 || data.GameRules().starter_item_ids.size() != 2) {
                     return 5;
                 }
                 return 0;
@@ -1817,7 +1817,7 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     if (this.path === "items" && this.currentField() === "price") { return 10; }
                     if (this.path === "game_rules" && this.currentField() === "max_player_level") { return 60; }
                     if (this.path === "game_rules" && this.currentField() === "starter_gold") { return 500; }
-                    if (this.path === "game_rules" && this.currentField() === "default_class") { return 1; }
+                    if (this.path === "game_rules" && this.currentField() === "default_class_id") { return 1; }
                     if (this.path === "game_rules" && this.currentField() === "") { return 2001; }
                     if (this.path === "game_rules" && this.currentField() === "stamina_cap") { return 120; }
                     if (this.path === "game_rules" && this.currentField() === "daily_reset_hour") { return 5; }
@@ -1857,7 +1857,7 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 if (data.gameRules.maxPlayerLevel !== 60 || !data.gameRules.pvpEnabled) {
                     throw new Error("generated TypeScript object table failed");
                 }
-                if (data.gameRules.defaultClass !== 1 || data.gameRules.starterItemIds.length !== 2) {
+                if (data.gameRules.defaultClassId !== 1 || data.gameRules.starterItemIds.length !== 2) {
                     throw new Error("generated TypeScript list field failed");
                 }
             }

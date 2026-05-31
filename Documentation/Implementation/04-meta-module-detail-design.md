@@ -202,7 +202,7 @@ pub struct TableMeta {
 - `export_when` 根据 target tags 判断整表是否进入 runtime data 与 codegen。
 - `row_export` 只作用于 collection runtime data 行过滤，常用于 `shipping` / `debug` 等 target 差异。
 - `validators` 保存 table-level / record-level validator 的 raw 配置；公共字段由 Meta validate 做轻量检查，scope、unknown kind 与专属参数由 validation registry compile 阶段诊断。当前实现已解析 TOML，但内置 validator 仅提供 field-scope `range`，因此 table-level `range` 会被 scope 校验拒绝。
-- `foreign_keys` 已在当前 `TableMeta` 中落地。外键不是普通 validator，而是一等关系数据：当前 MVP 会完成 link、Meta 结构校验和数据引用完整性校验；进入 CodeModel 生成关联查询 API 属于后续扩展。
+- `foreign_keys` 已在当前 `TableMeta` 中落地。外键不是普通 validator，而是一等关系数据：当前 MVP 会完成 link、Meta 结构校验和数据引用完整性校验；当 FK 声明 `linked_field` 时，CodeModel 会把该关系暴露给 codegen 生成关联查询 helper、cache slot 和 link/link_all API。
 - `fragments` 是 polymorphic variant source mode 的 table-local fragment schema。当前代码已落地该字段，并要求多 source variant source mode 至少由一个 source 声明非空 `fragments` 驱动；`SourceRef.fragments` 的合法性由 Meta validation 检查。
 
 `SourceRef` 用于 `sources` 与 `override_sources`：
@@ -283,6 +283,7 @@ pub struct FieldMeta {
     pub validator_only: Option<bool>,
     pub field_number: Option<u32>,
     pub unique: bool,
+    pub foreign_key: Option<FieldForeignKeyMeta>,
 }
 ```
 
@@ -295,6 +296,7 @@ pub struct FieldMeta {
 - `validators` 保存 field-level validator 的 raw 配置，例如 range、regex、length、asset ref syntax 等；Meta 模块只做公共字段和轻量结构校验。当前实现已接受 TOML 配置，并通过 validation registry 编译执行；已内置 `range` validator，支持 `min`、`max`、`exclusive_min`、`exclusive_max`、`allow_empty`、`severity`、`message`、`export_when`。
 - `tool_only`、`filter_field`、`validator_only` 已由 target tags 机制替代；当前仅保留为 `Option<bool>` 以便检测用户仍在使用并输出 `UnsupportedFeature` 诊断，不再参与导出判断。
 - `unique` 是内置便捷字段；当前基础 validation 会直接校验 single-field unique，codegen 也会生成对应 single-field unique index。复合唯一性建议优先通过 `IndexMeta { unique = true }` 表达；未来也可迁移为 implicit validator。
+- `foreign_key` 是字段级 FK 语法糖，只适用于单 source field 引用目标表单字段 unique / primary index；加载后会在 link 阶段转换为与 table-level `ForeignKeyMeta` 等价的 linked relation。字段级 FK 可以声明 `linked_field` 以驱动 codegen 生成关联 helper。
 
 ### 4.5.8 `ValidatorMeta`
 
@@ -340,6 +342,14 @@ pub struct ForeignKeyMeta {
     pub target_table: String,
     pub target_index: Option<String>,
     pub allow_empty: Option<bool>,
+    pub linked_field: Option<String>,
+}
+
+pub struct FieldForeignKeyMeta {
+    pub target_table: String,
+    pub target_index: Option<String>,
+    pub allow_empty: Option<bool>,
+    pub linked_field: Option<String>,
 }
 ```
 
@@ -349,9 +359,11 @@ pub struct ForeignKeyMeta {
 - `target_table` / `target_index` 描述被引用的目标表和唯一索引；`target_index` 为空时使用目标表 primary index。
 - `allow_empty` 允许 optional FK 全空时跳过引用完整性检查；省略时按 source fields 的 `required` 派生，所有 source fields 都是 optional 时允许全空，否则不允许全空。
 - `export` / `export_when` 控制该关系是否进入当前 target 的 CodeModel；validation 也默认只检查当前 target 可见关系。
-- Link 阶段解析为 `LinkedForeignKeyMeta<'meta>`，供 validation 执行引用完整性检查；codegen 关联查询 helper 属于后续扩展。
+- `linked_field` 是可选的生成代码 relation helper 语义名。未设置时 FK 只参与 link、validation 和 CodeModel 关系记录；设置后，codegen 为当前 target 可见 FK 生成 lazy getter、cache slot 和 link/link_all 预解析逻辑。
+- Link 阶段解析为 `LinkedForeignKeyMeta<'meta>`，供 validation 执行引用完整性检查，并供 codegen 判断是否生成关联查询 helper。
 - 当前 MVP 支持 CollectionTable 或 ObjectTable 作为 FK source；FK target 必须是 CollectionTable unique / primary index，ObjectTable 作为 target 暂不支持。
 - 标量 list field 可作为 FK source，link 阶段会把 `LinkedField::List(Primitive/Enum)` 的元素类型作为 FK key 类型参与兼容性检查；该能力只允许单个 list source field 引用单字段 unique / primary index，不支持复合数组外键。
+- `linked_field` 的 raw name 在 Meta 层只做轻量结构校验：非空、同一 source table 内不重复、不能与 source field / fragment raw name 直接冲突。目标语言关键字、大小写转换后冲突、与生成 helper 名冲突等由 Codegen naming validate 负责。
 
 ### 4.5.10 Target Tags 与导出条件
 
@@ -480,6 +492,7 @@ pub struct LinkedTableMeta<'meta> {
     pub meta: &'meta TableMeta,
     pub fields: Vec<LinkedFieldMeta<'meta>>,
     pub indexes: Vec<LinkedIndexMeta<'meta>>,
+    pub foreign_keys: Vec<LinkedForeignKeyMeta<'meta>>,
     primary_index: Option<usize>,
     field_index: HashMap<&'meta str, usize>,
     index_index: HashMap<&'meta str, usize>,
@@ -502,7 +515,37 @@ impl<'meta> LinkedTableMeta<'meta> {
 - `primary_index` 保存选中主索引在 `indexes` 中的下标，避免在结构体内保存指向自身 `Vec` 元素的自引用；查询时通过 `primary_index()` 返回 `&LinkedIndexMeta<'meta>`。
 - `fields` 中只包含类型成功解析的字段；加载入口会把 Link diagnostics 和 validate diagnostics 合并后返回错误，避免下游拿到部分错误模型。
 
-### 4.6.5 `LinkedStructMeta<'meta>`
+### 4.6.5 `LinkedForeignKeyMeta<'meta>`
+
+```rust
+pub struct LinkedForeignKeyMeta<'meta> {
+    pub meta: LinkedForeignKeySource<'meta>,
+    pub fields: Vec<&'meta FieldMeta>,
+    pub target_table: &'meta TableMeta,
+    pub target_index: &'meta IndexMeta,
+    pub allow_empty: bool,
+    pub linked_field: Option<&'meta str>,
+}
+
+pub enum LinkedForeignKeySource<'meta> {
+    TableLevel(&'meta ForeignKeyMeta),
+    FieldLevel {
+        field: &'meta FieldMeta,
+        foreign_key: &'meta FieldForeignKeyMeta,
+        synthetic_name: String,
+    },
+}
+```
+
+说明：
+
+- `fields` 是 source table 中真实字段引用，顺序与 raw `fields` 或字段级 source field 一致。
+- `target_table` 必须指向 CollectionTable；`target_index` 是显式 `target_index` 或目标表 primary index 解析后的唯一索引。
+- `allow_empty` 在 Link 阶段完成默认派生，避免 validation / codegen 重复推导。
+- `linked_field` 保留 raw semantic name，供 CodeModel 构造 `CodeLinkedField`。Link 不做目标语言命名转换。
+- 字段级 FK 可以通过 `LinkedForeignKeySource::FieldLevel` 保留原字段和 raw foreign_key 配置，同时生成稳定 synthetic relation name，例如 `field_name` 或 `field_name_fk`，用于诊断和 CodeModel 排序。
+
+### 4.6.6 `LinkedStructMeta<'meta>`
 
 ```rust
 pub struct LinkedStructMeta<'meta> {
@@ -514,7 +557,7 @@ pub struct LinkedStructMeta<'meta> {
 
 struct 的字段 Link 规则与 table 相同。
 
-### 4.6.6 `LinkedMetaModel<'meta>`
+### 4.6.7 `LinkedMetaModel<'meta>`
 
 ```rust
 pub struct LinkedMetaModel<'meta> {
@@ -566,7 +609,7 @@ impl MetaModel {
    - 调用 `link_fields` 解析每个 field 的 `field_type`。
    - 调用 `link_indexes` 将 `IndexMeta.fields` 解析为 `Vec<&FieldMeta>`。
    - link table fragments，解析 inline / typed fragment payload。
-   - link foreign keys，解析 source fields、target table 和 target index。
+   - link foreign keys，解析 source fields、target table、target index、`allow_empty` 默认值和可选 `linked_field`。
    - 根据 `TableMeta.primary_index` 或 `IndexMeta.primary` 解析当前 table 选中的 primary index。
    - 构造 `LinkedTableMeta<'meta>`。
 4. 遍历 structs，按同样方式构造 `LinkedStructMeta<'meta>`。
@@ -583,6 +626,17 @@ PrimitiveFieldType::parse(field.field_type)
 ```
 
 实现中先识别 `T[]` / `list<T>` 并递归解析 element type，形成 `LinkedField::List(Box<...>)`；非 list 再按 primitive / enum / struct 解析。
+
+Foreign key link 规则：
+
+- table-level FK 使用 `ForeignKeyMeta.fields` 查找 source table 字段；字段级 FK 使用所属 `FieldMeta` 作为唯一 source field。
+- 字段级 FK 必须引用目标表单字段 unique / primary index；如果目标 index 是复合索引，应在 link/validate 阶段报错并提示改用 table-level FK。
+- 省略 `target_index` 时，从 target table 的 primary index 解析；如果目标表没有 primary index，报 missing target index / invalid foreign key diagnostic。
+- target table 必须是 CollectionTable；target index 必须 unique 或 primary。
+- source field 类型与 target index field 类型兼容性可在 link 阶段做结构检查，也可在 data validation 编译阶段做；但 CodeModel 构建前必须保证不把不兼容 FK 暴露给 codegen。
+- list FK 只允许单个 list source field 对单字段 target index，link 时使用 list element type 与 target field type 比较；复合 list FK 或多个 list source fields 必须报 unsupported/invalid diagnostic。
+- `allow_empty = None` 时，字段级 FK 按 source field `required` 推导；table-level FK 按 source fields 的 `required` 组合推导，所有 source fields 都 optional 时允许全空，否则不允许全空。
+- `linked_field` 不改变 link 的引用解析结果，只额外保留 helper name。raw name 为空、同表重复、与 source field/fragment raw name 冲突应由 Meta validate 报错；目标语言命名冲突由 Codegen validate 报错。
 
 ## 4.8 Loader 与配置片段边界
 
@@ -657,10 +711,15 @@ pub enum MetaDiagnosticCode {
 - 多个 `primary = true` 或 `primary_index` 与 `primary = true` 冲突时产生 `PrimaryIndexMismatch`。
 - ObjectTable Step 1 不支持 indexes / primary_index / row_export / fragments / multi-source declarations；ObjectTable 可以声明 table-level `foreign_keys` 或 field-level `foreign_key` 作为 FK source。
 - 任意 table 的 foreign key target 不能指向 ObjectTable。
+- `linked_field` raw name 非空、在同一 source table 内唯一、不能与 source table common field name 或 fragment name 直接重复。
+- 字段级 FK 的 `linked_field` 与 table-level FK 的 `linked_field` 使用同一 source table scope 检查重复；同一字段不能同时通过字段级 FK 和 table-level FK 生成同名 relation helper。
+- `linked_field` 只做 Meta raw scope 检查；大小写折叠、case style 转换、目标语言关键字和与生成 runtime helper 冲突仍属于 Codegen validate。
 
 `link_meta_model` 当前覆盖：
 
 - field type 不是 primitive、enum、struct、list 时产生 `UnknownFieldType`。
+- foreign key source field、target table、target index 和 primary-index fallback 的引用解析。
+- foreign key `allow_empty` 默认派生和 list/composite FK 基础结构约束。
 
 ## 4.10 已 Link 与后续可 Link 的部分
 
@@ -673,7 +732,7 @@ pub enum MetaDiagnosticCode {
 | table index fields | `IndexMeta.fields: Vec<String>` | `LinkedIndexMeta.fields: Vec<&FieldMeta>` | 索引字段引用不再需要下游重复查找。 |
 | table primary index | `TableMeta.primary_index: Option<String>` + `IndexMeta.primary` | `LinkedTableMeta::primary_index() -> Option<&LinkedIndexMeta>` | 直接取得当前 table 选中的主索引。 |
 | typed / inline fragment | `FragmentMeta.type_name` / `FragmentMeta.fields` | `LinkedFragmentPayload<'meta>` | fragment payload 可统一表现为 struct typed payload 或 inline fields。 |
-| foreign key | `ForeignKeyMeta { fields, target_table, target_index }` / `FieldForeignKeyMeta` | `LinkedForeignKeyMeta<'meta>` | 外键关系可直接用于引用完整性校验。 |
+| foreign key | `ForeignKeyMeta { fields, target_table, target_index, linked_field }` / `FieldForeignKeyMeta` | `LinkedForeignKeyMeta<'meta>` | 外键关系可直接用于引用完整性校验，并为 CodeModel 生成 `linked_field` relation helper 提供输入。 |
 | table 查询 | `MetaModel.tables: Vec<TableMeta>` | `LinkedMetaModel.table_index` | 按名称快速查 linked table。 |
 | struct 查询 | `MetaModel.structs: Vec<StructMeta>` | `LinkedMetaModel.struct_index` / `struct_meta_index` | 同时支持 linked struct 和 raw struct 查询。 |
 | enum 查询 | `MetaModel.enums: Vec<EnumMeta>` | `LinkedMetaModel.enum_index` | enum 类型解析和查询加速。 |

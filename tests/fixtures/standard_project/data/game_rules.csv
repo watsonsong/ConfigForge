@@ -1,7 +1,7 @@
 key,value
 max_player_level,60
 starter_gold,500
-default_class,1
+default_class_id,1
 starter_item_ids,"[2001,2002]"
 stamina_cap,120
 daily_reset_hour,5

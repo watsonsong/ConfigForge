@@ -155,6 +155,8 @@ pub struct FieldForeignKeyMeta {
     pub target_index: Option<String>,
     #[serde(default)]
     pub allow_empty: Option<bool>,
+    #[serde(default)]
+    pub linked_field: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -173,6 +175,8 @@ pub struct ForeignKeyMeta {
     pub target_index: Option<String>,
     #[serde(default)]
     pub allow_empty: Option<bool>,
+    #[serde(default)]
+    pub linked_field: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -191,6 +195,7 @@ pub struct ResolvedForeignKeyMeta<'meta> {
     pub target_table: &'meta str,
     pub target_index: Option<&'meta str>,
     pub allow_empty: bool,
+    pub linked_field: Option<&'meta str>,
     pub declared_at: ForeignKeyDeclarationSite<'meta>,
 }
 
@@ -331,6 +336,7 @@ impl TableMeta {
                 target_table: foreign_key.target_table.as_str(),
                 target_index: foreign_key.target_index.as_deref(),
                 allow_empty,
+                linked_field: foreign_key.linked_field.as_deref(),
                 declared_at: ForeignKeyDeclarationSite::Table(foreign_key),
             });
         }
@@ -348,6 +354,7 @@ impl TableMeta {
                 target_table: foreign_key.target_table.as_str(),
                 target_index: foreign_key.target_index.as_deref(),
                 allow_empty: foreign_key.allow_empty.unwrap_or(!field.required),
+                linked_field: foreign_key.linked_field.as_deref(),
                 declared_at: ForeignKeyDeclarationSite::Field(field, foreign_key),
             });
         }

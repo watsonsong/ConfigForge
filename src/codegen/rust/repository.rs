@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    Result,
-    codegen::{CodeIndex, CodeTable, CodeTableKind, CodeWriter},
+    ConfigForgeError, Result,
+    codegen::{
+        CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriter,
+        ir::{CodeForeignKey, CodeRelationCardinality},
+    },
 };
 
 use super::types::RustNames;
@@ -121,11 +124,412 @@ pub(super) fn render_table(
         "    pub fn rows(&self) -> &[{}] {{ &self.rows }}\n\n",
         names.row_type_name(&table.name)?
     ));
+    content.raw_fmt(format_args!(
+        "    fn row_at(&self, row_index: usize) -> Option<&{}> {{ self.rows.get(row_index) }}\n\n",
+        names.row_type_name(&table.name)?
+    ));
     for index in &table.indexes {
         render_index_function(content, table, index, names)?;
+        if index.unique {
+            render_index_of_function(content, index, names)?;
+        }
     }
+    render_table_link_function(content, table, names)?;
     content.raw("}\n\n");
     Ok(())
+}
+
+pub(super) fn render_row_relation_methods(
+    content: &mut CodeWriter,
+    model: &CodeModel,
+    table: &CodeTable,
+    names: &RustNames<'_>,
+) -> Result<()> {
+    for foreign_key in table
+        .foreign_keys
+        .iter()
+        .filter(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        let target_table = table_by_name(model, &foreign_key.target_table)?;
+        let target_index = index_by_name(target_table, &foreign_key.target_index)?;
+        let target_row_type = names.row_type_name(&target_table.name)?;
+        let function_name = names.relation_function_name(foreign_key)?;
+        match foreign_key
+            .linked_field
+            .as_ref()
+            .expect("linked field")
+            .cardinality
+        {
+            CodeRelationCardinality::One => render_single_relation_method(
+                content,
+                table,
+                foreign_key,
+                target_table,
+                target_index,
+                names,
+                &target_row_type,
+                &function_name,
+                false,
+            )?,
+            CodeRelationCardinality::OptionalOne => render_single_relation_method(
+                content,
+                table,
+                foreign_key,
+                target_table,
+                target_index,
+                names,
+                &target_row_type,
+                &function_name,
+                true,
+            )?,
+            CodeRelationCardinality::Many => render_many_relation_method(
+                content,
+                table,
+                foreign_key,
+                target_table,
+                target_index,
+                names,
+                &target_row_type,
+                &function_name,
+            )?,
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn render_game_data_link_methods(
+    content: &mut CodeWriter,
+    model: &CodeModel,
+    names: &RustNames<'_>,
+) -> Result<()> {
+    content.raw("\n    pub fn link_all(&self) -> RuntimeDataResult<()> {\n");
+    for table in &model.tables {
+        if table
+            .foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            content.raw_fmt(format_args!(
+                "        self.{}.link(self)?;\n",
+                names.field_name(&table.name)?
+            ));
+        }
+    }
+    content.raw("        Ok(())\n");
+    content.raw("    }\n");
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_single_relation_method(
+    content: &mut CodeWriter,
+    source_table: &CodeTable,
+    foreign_key: &CodeForeignKey,
+    target_table: &CodeTable,
+    target_index: &CodeIndex,
+    names: &RustNames<'_>,
+    target_row_type: &str,
+    function_name: &str,
+    optional: bool,
+) -> Result<()> {
+    let return_type = if optional {
+        format!("Option<&'a {target_row_type}>")
+    } else {
+        format!("&'a {target_row_type}")
+    };
+    let cache_name = names.relation_cache_field_name(foreign_key)?;
+    let target_data_field = names.field_name(&target_table.name)?;
+    let index_of_name = names.index_of_function_name(target_index)?;
+    content.raw_fmt(format_args!(
+        "    pub fn {function_name}<'a>(&self, data: &'a GameData) -> RuntimeDataResult<{return_type}> {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        let cached = self.{}.borrow().clone();\n",
+        cache_name
+    ));
+    content.raw("        match cached {\n");
+    if optional {
+        content.raw("            LinkCache::Empty => return Ok(None),\n");
+    } else {
+        content.raw_fmt(format_args!(
+            "            LinkCache::Empty => return Err(RuntimeDataError::decode({:?}.to_owned())),\n",
+            format!("required relation `{}` unexpectedly cached empty", foreign_key.name)
+        ));
+    }
+    if optional {
+        content.raw_fmt(format_args!(
+            "            LinkCache::RowIndex(row_index) => return data.{target_data_field}.row_at(row_index).map(Some).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned())),\n",
+            format!("cached relation `{}` row index out of bounds", foreign_key.name)
+        ));
+    } else {
+        content.raw_fmt(format_args!(
+            "            LinkCache::RowIndex(row_index) => return data.{target_data_field}.row_at(row_index).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned())),\n",
+            format!("cached relation `{}` row index out of bounds", foreign_key.name)
+        ));
+    }
+    content.raw("            LinkCache::Unresolved => {}\n");
+    content.raw("        }\n");
+    if optional {
+        render_optional_empty_check(content, foreign_key, names, "        ")?;
+    }
+    let raw_value_exprs = foreign_key
+        .fields
+        .iter()
+        .map(|field| Ok(format!("self.{}.clone()", names.field_name(&field.name)?)))
+        .collect::<Result<Vec<_>>>()?;
+    if optional && foreign_key.fields.len() > 1 {
+        let partial_conditions = foreign_key
+            .fields
+            .iter()
+            .map(|field| {
+                if field.required {
+                    Ok("false".to_owned())
+                } else {
+                    Ok(format!("self.{}.is_none()", names.field_name(&field.name)?))
+                }
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let any_empty = partial_conditions.join(" || ");
+        let all_empty = partial_conditions.join(" && ");
+        content.raw_fmt(format_args!(
+            "        if ({any_empty}) && !({all_empty}) {{ return Err(RuntimeDataError::decode({:?}.to_owned())); }}\n",
+            format!("foreign key relation `{}` has partial empty source key", foreign_key.name)
+        ));
+    }
+    let value_exprs = foreign_key
+        .fields
+        .iter()
+        .zip(raw_value_exprs)
+        .map(|(field, expr)| {
+            if field.required {
+                Ok(expr)
+            } else {
+                Ok(format!(
+                    "{expr}.ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))?",
+                    format!(
+                        "foreign key relation `{}` has partial empty source key",
+                        foreign_key.name
+                    )
+                ))
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let lookup_key = names.rust_relation_lookup_key(foreign_key, target_index, &value_exprs)?;
+    content.raw_fmt(format_args!(
+        "        let row_index = data.{target_data_field}.{index_of_name}({lookup_key}).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))?;\n",
+        format!(
+            "foreign key relation `{}.{}` could not resolve target `{}.{}`",
+            source_table.name, foreign_key.name, target_table.name, target_index.name
+        )
+    ));
+    content.raw_fmt(format_args!(
+        "        *self.{cache_name}.borrow_mut() = LinkCache::RowIndex(row_index);\n"
+    ));
+    if optional {
+        content.raw_fmt(format_args!(
+            "        data.{target_data_field}.row_at(row_index).map(Some).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))\n",
+            format!("resolved relation `{}` row index out of bounds", foreign_key.name)
+        ));
+    } else {
+        content.raw_fmt(format_args!(
+            "        data.{target_data_field}.row_at(row_index).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))\n",
+            format!("resolved relation `{}` row index out of bounds", foreign_key.name)
+        ));
+    }
+    content.raw("    }\n");
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_many_relation_method(
+    content: &mut CodeWriter,
+    source_table: &CodeTable,
+    foreign_key: &CodeForeignKey,
+    target_table: &CodeTable,
+    target_index: &CodeIndex,
+    names: &RustNames<'_>,
+    target_row_type: &str,
+    function_name: &str,
+) -> Result<()> {
+    let cache_name = names.relation_cache_field_name(foreign_key)?;
+    let source_field = foreign_key.fields.first().ok_or_else(|| {
+        ConfigForgeError::Validation(format!(
+            "foreign key `{}` has no source fields",
+            foreign_key.name
+        ))
+    })?;
+    let source_field_name = names.field_name(&source_field.name)?;
+    let target_data_field = names.field_name(&target_table.name)?;
+    let index_of_name = names.index_of_function_name(target_index)?;
+    content.raw_fmt(format_args!(
+        "    pub fn {function_name}<'a>(&self, data: &'a GameData) -> RuntimeDataResult<Vec<&'a {target_row_type}>> {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        if self.{cache_name}.borrow().row_indexes.is_none() {{\n"
+    ));
+    content.raw("            let mut row_indexes = Vec::new();\n");
+    content.raw_fmt(format_args!(
+        "            for key in &self.{source_field_name} {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "                let row_index = data.{target_data_field}.{index_of_name}(key.clone()).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))?;\n",
+        format!(
+            "foreign key relation `{}.{}` could not resolve list target `{}.{}`",
+            source_table.name, foreign_key.name, target_table.name, target_index.name
+        )
+    ));
+    content.raw("                row_indexes.push(row_index);\n");
+    content.raw("            }\n");
+    content.raw_fmt(format_args!(
+        "            self.{cache_name}.borrow_mut().row_indexes = Some(row_indexes);\n"
+    ));
+    content.raw("        }\n");
+    content.raw_fmt(format_args!(
+        "        let row_indexes = self.{cache_name}.borrow().row_indexes.clone().unwrap_or_default();\n"
+    ));
+    content.raw("        let mut rows = Vec::with_capacity(row_indexes.len());\n");
+    content.raw("        for row_index in row_indexes {\n");
+    content.raw_fmt(format_args!(
+        "            rows.push(data.{target_data_field}.row_at(row_index).ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))?);\n",
+        format!("resolved list relation `{}` row index out of bounds", foreign_key.name)
+    ));
+    content.raw("        }\n");
+    content.raw("        Ok(rows)\n");
+    content.raw("    }\n");
+    Ok(())
+}
+
+fn render_optional_empty_check(
+    content: &mut CodeWriter,
+    foreign_key: &CodeForeignKey,
+    names: &RustNames<'_>,
+    indent: &str,
+) -> Result<()> {
+    let conditions = foreign_key
+        .fields
+        .iter()
+        .map(|field| {
+            if field.required {
+                Ok("false".to_owned())
+            } else {
+                Ok(format!("self.{}.is_none()", names.field_name(&field.name)?))
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if conditions.is_empty() {
+        return Ok(());
+    }
+    content.raw_fmt(format_args!("{indent}if {} {{\n", conditions.join(" && ")));
+    content.raw_fmt(format_args!(
+        "{indent}    *self.{}.borrow_mut() = LinkCache::Empty;\n",
+        names.relation_cache_field_name(foreign_key)?
+    ));
+    content.raw_fmt(format_args!("{indent}    return Ok(None);\n"));
+    content.raw_fmt(format_args!("{indent}}}\n"));
+    Ok(())
+}
+
+fn render_table_link_function(
+    content: &mut CodeWriter,
+    table: &CodeTable,
+    names: &RustNames<'_>,
+) -> Result<()> {
+    if !table
+        .foreign_keys
+        .iter()
+        .any(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        return Ok(());
+    }
+    content.raw("    pub fn link(&self, data: &GameData) -> RuntimeDataResult<()> {\n");
+    match table.kind {
+        CodeTableKind::Collection => {
+            content.raw("        for row in &self.rows {\n");
+            for foreign_key in table
+                .foreign_keys
+                .iter()
+                .filter(|foreign_key| foreign_key.linked_field.is_some())
+            {
+                content.raw_fmt(format_args!(
+                    "            let _ = row.{}(data)?;\n",
+                    names.relation_function_name(foreign_key)?
+                ));
+            }
+            content.raw("        }\n");
+        }
+        CodeTableKind::Object => {
+            for foreign_key in table
+                .foreign_keys
+                .iter()
+                .filter(|foreign_key| foreign_key.linked_field.is_some())
+            {
+                content.raw_fmt(format_args!(
+                    "        let _ = self.{}(data)?;\n",
+                    names.relation_function_name(foreign_key)?
+                ));
+            }
+        }
+    }
+    content.raw("        Ok(())\n");
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_index_of_function(
+    content: &mut CodeWriter,
+    index: &CodeIndex,
+    names: &RustNames<'_>,
+) -> Result<()> {
+    let params = index
+        .fields
+        .iter()
+        .map(|field| {
+            Ok(format!(
+                "{}: {}",
+                names.field_name(&field.name)?,
+                names.rust_field_type(field)?
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?
+        .join(", ");
+    let key = names.rust_lookup_key(index)?;
+    content.raw_fmt(format_args!(
+        "    fn {}(&self, {}) -> Option<usize> {{\n",
+        names.index_of_function_name(index)?,
+        params
+    ));
+    content.raw_fmt(format_args!(
+        "        self.{}.get(&{}).copied()\n",
+        names.index_storage_name(index)?,
+        key
+    ));
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn table_by_name<'a>(model: &'a CodeModel, name: &str) -> Result<&'a CodeTable> {
+    model
+        .tables
+        .iter()
+        .find(|table| table.name == name)
+        .ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "codegen foreign key references unknown target table `{name}`"
+            ))
+        })
+}
+
+fn index_by_name<'a>(table: &'a CodeTable, name: &str) -> Result<&'a CodeIndex> {
+    table
+        .indexes
+        .iter()
+        .find(|index| index.name == name)
+        .ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "codegen foreign key references unknown target index `{}.{}`",
+                table.name, name
+            ))
+        })
 }
 
 fn render_object_table(
@@ -166,6 +570,7 @@ fn render_object_table(
     content.raw("        root.ensure_exhausted()?;\n");
     content.raw("        Ok(value)\n");
     content.raw("    }\n");
+    render_table_link_function(content, table, names)?;
     content.raw("}\n\n");
     Ok(())
 }

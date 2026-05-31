@@ -252,6 +252,10 @@ runtime payload 应固定 fragment 表达方式。第一阶段推荐直接用 fr
 
 默认 FK 在当前验证视图中解析。因此 shipping target 中被过滤掉的目标记录不会作为 shipping ExportView 中的可引用对象，除非 target policy 明确要求使用 Full DataSet 解析。
 
+FK 上的 `linked_field` 不引入新的数据校验规则；它只是要求生成代码为已校验通过的 FK 关系生成关联访问和缓存 API。Validation 仍只检查 source fields、target table/index、类型兼容、empty/partial key 与 target record 是否存在。若某个 target 中 FK 因 `export_when` 不匹配、source/target 字段不可见或 target row 被 `row_export` 过滤而不进入 ExportView，则对应 `linked_field` helper 也不得进入该 target 的 generated API。换言之，`linked_field` 的可见性完全继承 FK 本身在当前 ExportView 中的可见性，不应让运行时代码访问到当前 target 未导出的表、字段或行。
+
+生成代码的 lazy relation getter 可以在运行时做防御性检查，但不替代导出前 validation：如果 validated artifact 中 relation lookup 失败，通常表示 runtime data 与 generated code 版本不匹配、手工篡改了数据文件，或业务跳过了 validation。此时 generated helper 应返回错误 / throw，而不是把缺失目标当成 optional empty。只有 `allow_empty = true` 且 source key 全空时才是合法空关系。
+
 ## 5.8 Asset 与 Text 校验
 
 ### Asset

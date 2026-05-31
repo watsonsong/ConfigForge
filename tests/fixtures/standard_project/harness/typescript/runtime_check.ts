@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     if (binaryData.gameRules.maxPlayerLevel !== 60 || !binaryData.gameRules.pvpEnabled) {
       throw new Error("binary object table load failed");
     }
-    if (binaryData.gameRules.defaultClass !== 1 || binaryData.gameRules.starterItemIds.join(",") !== "2001,2002") {
+    if (binaryData.gameRules.defaultClassId !== 1 || binaryData.gameRules.starterItemIds.join(",") !== "2001,2002") {
       throw new Error("binary object table array field load failed");
     }
     return;
@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   if (data.gameRules.maxPlayerLevel !== 60 || !data.gameRules.pvpEnabled) {
     throw new Error("object table load failed");
   }
-  if (data.gameRules.defaultClass !== 1 || data.gameRules.starterItemIds.join(",") !== "2001,2002") {
+  if (data.gameRules.defaultClassId !== 1 || data.gameRules.starterItemIds.join(",") !== "2001,2002") {
     throw new Error("object table array field load failed");
   }
 }

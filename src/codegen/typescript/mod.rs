@@ -239,6 +239,11 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         }
         content.raw("    });\n");
         content.raw("  }\n");
+        content.raw("\n  linkAll(): void {\n");
+        content.raw(
+            "    // Relation linking is currently emitted by backends with row-index caches.\n",
+        );
+        content.raw("  }\n");
         content.raw("}\n");
 
         Ok(vec![GeneratedFile {

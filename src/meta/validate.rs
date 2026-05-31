@@ -286,6 +286,7 @@ fn validate_foreign_keys(
     diagnostics: &mut Vec<MetaDiagnostic>,
 ) {
     let mut foreign_key_names = BTreeSet::new();
+    let mut linked_field_names = BTreeSet::new();
     for foreign_key in table.resolved_foreign_keys() {
         let owner = format!("table `{}` foreign key `{}`", table.name, foreign_key.name);
         if foreign_key.name.trim().is_empty() {
@@ -304,6 +305,44 @@ fn validate_foreign_keys(
             ));
         }
         validate_export_condition_tags(&owner, foreign_key.export_when, diagnostics);
+
+        if let Some(linked_field) = foreign_key.linked_field {
+            if linked_field.trim().is_empty() {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!("{owner} linked_field must be non-empty"),
+                ));
+            }
+            if !linked_field_names.insert(linked_field) {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!(
+                        "table `{}` foreign key linked_field `{}` is defined more than once",
+                        table.name, linked_field
+                    ),
+                ));
+            }
+            if field_names.contains(linked_field) {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!(
+                        "{owner} linked_field `{linked_field}` conflicts with source field of the same name"
+                    ),
+                ));
+            }
+            if table
+                .fragments
+                .iter()
+                .any(|fragment| fragment.name == linked_field)
+            {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+                    format!(
+                        "{owner} linked_field `{linked_field}` conflicts with fragment of the same name"
+                    ),
+                ));
+            }
+        }
 
         if foreign_key.fields.is_empty() {
             diagnostics.push(MetaDiagnostic::new(

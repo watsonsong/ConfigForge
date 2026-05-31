@@ -3,7 +3,10 @@
 
 use crate::{
     Result,
-    codegen::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriter},
+    codegen::{
+        CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriter,
+        ir::CodeRelationCardinality,
+    },
 };
 
 use super::types::RustNames;
@@ -119,6 +122,26 @@ fn render_read_from_reader_body(
                 fragment.name,
                 field_name = field_name,
                 payload_type = payload_type
+            ));
+        }
+        for foreign_key in table
+            .foreign_keys
+            .iter()
+            .filter(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            let cache_init = match foreign_key
+                .linked_field
+                .as_ref()
+                .expect("linked field")
+                .cardinality
+            {
+                CodeRelationCardinality::Many => "RefCell::new(LinkListCache::default())",
+                _ => "RefCell::new(LinkCache::default())",
+            };
+            content.raw_fmt(format_args!(
+                "            {}: {},\n",
+                names.relation_cache_field_name(foreign_key)?,
+                cache_init
             ));
         }
     }

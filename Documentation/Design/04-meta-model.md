@@ -14,7 +14,7 @@
 | default | Partial | 当前支持 primitive / enum scalar default 与 primitive / enum list default。 |
 | multi-source / override / fragments | Partial | 当前已支持 polymorphic CollectionTable 的 fragment variant source mode：多个 CSV source 可追加完整 records，并由 source `fragments` 声明激活 fragment set；也已支持 CollectionTable CSV `override_sources` 按 primary index 整行覆盖并由 `export_when` 按 effective target tags 启用。通用 multi-source split merge、ObjectTable 多源/override、base source `export_when` 与 fragment join mode 仍未实现。 |
 | builtin value types | Planned | `vector3` 等 builtin value types 仍为目标态，当前尚未实现。 |
-| foreign key | Implemented MVP | 当前支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique/primary index；标量/enum list source field 支持逐元素引用单字段 target index。 |
+| foreign key | Implemented MVP + Rust linked helpers | 当前支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique/primary index；标量/enum list source field 支持逐元素引用单字段 target index。FK 可声明 `linked_field`；Rust codegen 已生成 lazy cached relation getter、row-index cache、table `link` 与 `GameData::link_all`，TypeScript 目前仅保留 `linkAll()` 空实现，C++ relation helper 仍待实现。 |
 | shared table schema / typed fragments | Partial | 当前没有 table inheritance / base fields / reusable field group；field group 仍是方向性目标，不进入近期实现。typed fragment payload 已支持 `[[tables.fragments]] type = "StructName"` 复用标准 struct，并把该 struct 的字段按 fragment object 展开；inline fragment fields 仍继续支持。标准参考项目通过同一 `items` polymorphic table 的多个 variant sources 解决道具公共字段复用，并通过 typed `attributes -> AttributeSet` 避免重复声明属性字段。 |
 | ObjectTable 特化语义 | Implemented MVP | 当前已支持 CSV `key,value` 行式 singleton ObjectTable：每行一个 top-level field key，导出单个 object，并支持 struct JSON/expanded value 与作为 FK source 引用 CollectionTable。ObjectTable 多源/override、作为 FK target、key-level source row 精确诊断、后续格子 expand 暂不实现。 |
 | target tags / export_when / row_export | Implemented | 当前 Project target 支持 `tags`；Meta 中 table / field / index 支持 `export` 与 `export_when`；collection table 支持 `row_export`，并已接入 validation、runtime data export 与 codegen 的 target-aware 视图。旧字段 `tool_only` / `filter_field` / `validator_only` 仅用于报 deprecated/unsupported 诊断，不再参与导出判断。 |
@@ -744,6 +744,27 @@ required = true
 foreign_key = { target_table = "items", target_index = "by_id" }
 ```
 
+字段级外键可以额外声明 `linked_field`，用于生成不改变 runtime data shape 的关联访问 API。例如标准项目中希望保留原始 ID 字段，同时生成一个指向目标行的辅助 getter：
+
+```toml
+[[tables]]
+name = "game_rules"
+kind = "object"
+source = "game_rules.csv"
+
+[[tables.fields]]
+name = "default_class_id"
+type = "int"
+required = true
+foreign_key = {
+  target_table = "classes",
+  target_index = "by_id",
+  linked_field = "default_class",
+}
+```
+
+生成代码中，`default_class_id` 仍作为普通整数字段存在并参与 runtime data 读写；`default_class` 只是一层 generated relation helper，不进入 runtime data payload，也不改变 CSV/source 字段名。
+
 如果省略 `target_index`，默认引用目标表 primary index：
 
 ```toml
@@ -761,6 +782,7 @@ name = "item_in_region"
 fields = ["item_id", "region"]
 target_table = "items"
 target_index = "by_id_region"
+linked_field = "item"
 ```
 
 规则：
@@ -777,6 +799,28 @@ target_index = "by_id_region"
 - foreign key target 必须是 unique index 或 primary index。
 - FK source table 可为 CollectionTable 或 ObjectTable；ObjectTable source 按其 singleton logical row 执行引用完整性校验。
 - FK target table 必须是 CollectionTable，且 target index 必须是 unique 或 primary；ObjectTable 仍不能作为 FK target，因为它没有 index / primary index 语义。
+
+`linked_field` 规则：
+
+- `linked_field` 是可选的 API 名称。未声明时，外键只参与校验和 CodeModel 关系记录，不生成关联 getter，也不生成 cache slot。
+- `linked_field` 使用 Meta 语义名，进入代码生成时按目标语言命名规则转换。例如 `linked_field = "default_class"` 在 Rust 中生成 `default_class(...)`，在 TypeScript 中生成 `defaultClass(...)`，在 C++ 中生成 `GetDefaultClass(...)`。
+- `linked_field` 必须在 source table 的 row/object API scope 内唯一；不能与已有字段、fragment、索引 lookup、表级 helper 或同一表其他 `linked_field` 经目标语言命名后冲突。Meta validate 可先检查 raw name 为空、重复、与 source field/fragment name 直接重复；语言级最终冲突由 Codegen naming validate 兜底。
+- 字段级 FK 的 `linked_field` 放在 `[tables.fields.foreign_key]` 内；table-level FK 的 `linked_field` 放在 `[[tables.foreign_keys]]` 内。两者语义相同，只是 source fields 来源不同。
+- 单字段 / 复合字段 FK 都可以声明 `linked_field`。生成 getter 的 key 来自 `fields` 中的 source field 当前值，查询目标表的唯一 / primary index。
+- 标量 list 外键如果声明 `linked_field`，生成 getter 返回与 source list 顺序一致的目标 row 列表；元素为空值的处理遵循 list element 类型规则，若 list FK 已通过 validation，则非空元素应都能解析到目标 row。该能力只适用于当前已支持的“单个 list source field -> 单字段 target index”。
+- `allow_empty = true` 或默认推导为允许空时，生成 helper 必须表达 nullable relation：source key 全空返回 `None` / `null` / `std::nullopt`，且 cache 应记录“已解析为空”，避免后续重复查询。部分为空仍是数据错误，应由 validation 阶段阻断；运行时 defensive check 可抛错或返回错误结果。
+- `export = false` 或 `export_when` 不匹配当前 target 的 FK 不生成 `linked_field` helper。若 source fields、target table、target index 或 target index fields 在当前 target 不可见，该 relation 也不得进入当前 target 的 generated API；应在 CodeModel 构建阶段过滤或报清晰诊断。
+- `linked_field` 不参与 runtime data artifact、binary schema revision、row_export 或 index 唯一性计算。它只影响 generated code API 和 generated code 内部 cache/link 逻辑。
+
+生成代码关系语义：
+
+- 关联 helper 是 **many-to-one**：source row/object 通过 FK key 获取 target CollectionTable unique index 对应的一条 target row/object。
+- 第一次访问 helper 时，如果该 relation 尚未 link/cache，则使用所属 `GameData` / repository facade 调用目标表 index lookup；查询成功后把 target row index（不是借用引用）缓存到 source row/object 自身，之后再次访问只通过缓存 index 取目标 row，不再做 hash/map 查询。
+- cache 应区分三种状态：未解析、已解析为空、已解析到 target row index。这样 optional FK 或缺省空值不会在每次访问时重复查询。
+- cache 存储 target row index 而不是直接存储跨表引用，避免 Rust 生命周期、自引用结构、C++ 指针失效和 TypeScript 序列化循环问题。返回 API 可以在调用时用 index 从目标 table rows 中取得只读引用 / 指针 / object。
+- 每个 Table repository 和整个 DataSet facade 都应提供 `link` / `link_all` 能力：预先遍历当前 table 或所有 tables 的 rows/object，填充所有可见 `linked_field` cache。调用后再访问 relation getter 不应执行 index lookup，只做 cache index 读取。
+- `link_all` 应是幂等的；多次调用不得改变语义。若 target row 不存在，理论上表示 runtime data 未经过对应 validation 或数据/代码版本不匹配，生成代码应返回错误 / throw，而不是静默缓存空值。
+- 关系 cache 属于 generated typed object，不写回 runtime data，也不影响 JSON/MessagePack/bin reader。
 
 ## 4.13 Multi-source 与 Override
 

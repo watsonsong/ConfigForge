@@ -30,7 +30,7 @@
 - `bin` v1 之外的复杂二进制数据格式、schema evolution 和随机访问；
 - 跨语言运行时库发布；
 - struct/json cell 的完整解析；
-- foreign key 自动跳转接口；
+   - 未声明 `linked_field` 的 foreign key 自动跳转接口；
 - 增量代码生成。
 
 这些能力应在生成器 API 上预留扩展点，但不阻塞第一阶段落地。
@@ -139,7 +139,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 - `CodeTable.kind` 区分 `Object` / `Collection`。
 - ObjectTable 生成目标语言中的 singleton object 类型和访问入口。
 - ObjectTable 不生成 collection repository，不生成 index lookup helpers。
-- ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于后续生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前语言生成器仍不渲染 FK helper。
+- ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前 Rust 生成器已渲染 `linked_field` helper/cache/link，TypeScript 仅保留 `linkAll()` 占位，C++ helper 待实现。
 - Rust / TypeScript / C++ 都应避免把 ObjectTable 误表达为 rows collection。
 - Runtime data file path 仍由 build 传入的 `RuntimeDataFile` 决定；codegen 不关心 ObjectTable 的 CSV `key,value` 物理布局。
 
@@ -517,6 +517,18 @@ pub struct CodeForeignKey {
     pub target_table: String,
     pub target_index: String,
     pub allow_empty: bool,
+    pub linked_field: Option<CodeLinkedField>,
+}
+
+pub struct CodeLinkedField {
+    pub name: String,
+    pub cardinality: CodeRelationCardinality,
+}
+
+pub enum CodeRelationCardinality {
+    One,
+    OptionalOne,
+    Many,
 }
 ```
 
@@ -528,6 +540,7 @@ IR 职责：
 4. 保留 runtime data file 信息、format 和 `bin` schema revision。
 5. 把 `LinkedField` 转换为目标语言无关的 `CodeTypeRef`。
 6. 对 polymorphic table 保留 fragment 类型、table-fragment 关联和当前 target 可见的 fragment fields。
+7. 对声明了 `linked_field` 的 foreign key 保留生成 relation helper 所需的语言无关信息，包括 helper 语义名、source fields、target table/index、empty 策略和单值/list cardinality。
 
 IR 不负责：
 
@@ -561,17 +574,56 @@ pub enum CodeTypeRef {
 - 把 `CodeTypeRef` 映射为语言类型；
 - 渲染语法；
 - 渲染 loader / repository / index API；
-- 后续可基于 `CodeForeignKey` 渲染 foreign key 关联 helper，例如 Rust `fn item<'a>(&self, data: &'a GameData, row: &QuestRow) -> Option<&'a ItemsRow>`、C++ `GetItem`、TypeScript `getItem`；当前实现已在 IR 中保留 target-aware foreign key 关系，更丰富的语言级 helper API 仍待后续确认；
+- 基于带 `linked_field` 的 `CodeForeignKey` 渲染 foreign key relation helper、cache slot 和 `link` / `link_all` API；未声明 `linked_field` 的 FK 只保留关系元数据，不生成访问 helper；
 - 处理 import/include/use。
 
 Foreign key 对 CodeModel 的要求：
 
-- 外键不是普通 validator，而是 Meta 关系数据。validation 负责保证关系完整性；CodeModel 已读取同一份 `LinkedForeignKeyMeta` 并暴露 `CodeForeignKey`，为后续语言生成器生成关联查询 API 提供输入。
+- 外键不是普通 validator，而是 Meta 关系数据。validation 负责保证关系完整性；CodeModel 读取同一份 `LinkedForeignKeyMeta` 并暴露 `CodeForeignKey`，为语言生成器生成关联查询 API 提供输入。
 - 只有当前 target 可导出的 foreign key 进入 `CodeForeignKey`；CollectionTable 与 ObjectTable source 使用同一套 IR，target table 仍必须是 CollectionTable index。
 - source table、target table、target index、source fields、target index fields 都必须在当前 target CodeModel 可见。
 - target index 必须 unique，当前 IR 仅表达 many-to-one 关系；语言级 helper 和一对多反向索引可在后续 relation 设计中扩展。
+- `linked_field` 在 IR 中保持 raw semantic name，不提前转换为 Rust/C++/TypeScript 标识符；最终 helper 名、cache field 名和冲突检查由各语言 `symbols.rs` / naming 模块处理。
+- `CodeRelationCardinality::One` 表示非 list、非空 FK；`OptionalOne` 表示允许全空的 FK；`Many` 表示当前已支持的单 list source field FK，getter 返回与 source list 顺序一致的 target rows。若 list FK 也允许空 list，空 list 返回空集合，不等价于 optional one 的 empty relation。
+- `CodeForeignKey.fields` 必须按 Meta 中声明的 source field 顺序保存，复合 key helper 按此顺序组装 key；目标 index fields 的顺序由 `target_index` 对应 `CodeIndex.fields` 决定，构建索引和 lookup 必须使用同一 key order。
 
-### 9.5.1 Polymorphic Fragment CodeModel
+### 9.5.1 Foreign Key Relation CodeModel
+
+`linked_field` 功能要求 CodeModel 不只知道“有一个 FK”，还要知道生成 helper 与 cache 的最小必要信息。IR 构建步骤：
+
+1. 从 `LinkedTableMeta.foreign_keys` 遍历当前 table 的 FK。
+2. 应用 target-aware 过滤：FK 自身 `export/export_when`、source table、source fields、target table、target index、target index fields 都必须对当前 target 可见。
+3. 构造 `CodeForeignKey`；`linked_field` 未声明时 `CodeLinkedField = None`。
+4. 若 `linked_field` 存在，按 source field 类型判断 cardinality：
+   - 单个 list source field -> `Many`；
+   - `allow_empty = true` 或默认派生允许全空 -> `OptionalOne`；
+   - 其他非 list FK -> `One`。
+5. CodeModel 层只做目标语言无关的结构表达；helper 是否需要生成 row class、内部可变 cache、mutable 字段或 side table cache，由语言生成器决定。
+
+命名与符号检查：
+
+- IR 允许 `linked_field.name` 与目标语言关键字、helper 前缀或大小写策略暂时无关；语言生成器必须把它纳入 row/object API scope 的符号表。
+- 同一 table 内，field getter、fragment getter、relation getter、row method、index helper、constructor helper 经命名转换后不能冲突。例如 TS 中 `default_class` 和 `defaultClass` 可能映射到同一个 `defaultClass`，必须报错。
+- cache slot 是实现细节，但仍需避免与用户可见字段冲突。推荐使用保留前缀 / 后缀，例如 Rust `__cfg_link_default_class`、C++ `default_class_link_`、TS `#defaultClassLink` 或 private `defaultClassLink_`，并统一进入内部符号检查。
+
+缓存 IR 不需要直接建模为字段，因为它不来自 Meta，也不参与 runtime data 读取、序列化、binary schema revision 或 artifact manifest。语言生成器可在渲染 row/object type 时根据 `CodeForeignKey.linked_field` 派生 cache slot。
+
+推荐共享运行时 cache enum 语义：
+
+```text
+LinkCache
+  Unresolved
+  Empty
+  RowIndex(usize)
+
+LinkListCache
+  Unresolved
+  RowIndexes(Vec<usize>)
+```
+
+`OptionalOne` 使用 `LinkCache::Empty` 表达合法空关系；`One` 不应产生 Empty，若解析不到目标行应返回错误；`Many` 使用 `RowIndexes([])` 表达空列表，元素级缺失仍是错误。
+
+### 9.5.2 Polymorphic Fragment CodeModel
 
 variant source mode 落地后，CodeModel 需要表达三件事：
 
@@ -794,6 +846,14 @@ Rust 约束：
 - 若生成 serde 代码，需要生成 `serde` feature 说明或由项目配置决定是否带 derive。
 - 生成代码只定义通用 `RuntimeDataLoader` / `RuntimeDataReader` trait，不强制生成 JSON 或 MessagePack 的具体 decoder；业务 runtime 可以用 `serde_json`、`rmp-serde` 或项目自研库实现 reader。`ItemsTable::load` 打开 `DATA_FILE` 后由生成代码读取 `rows` 数组、逐行调用 `read_row` 并构建索引。
 
+Rust `linked_field` 生成规则：
+
+- Row/Object struct 保留原始 FK 字段，例如 `pub default_class_id: i64`；同时为每个 `linked_field` 生成非序列化 cache 字段。当前实现单值/可空 FK 使用 `RefCell<LinkCache>`，list FK 使用 `RefCell<LinkListCache>`。如果 row derive serde，需要为 cache 提供 `#[serde(skip)]` 或构造时初始化，避免把 runtime cache 写入业务序列化结果。
+- Getter 推荐使用 `&self` + `&GameData`，返回 `Result<&TargetRow, RuntimeDataError>` / `Result<Option<&TargetRow>, RuntimeDataError>`。内部通过 `Cell<LinkCache>` 支持首次访问写 cache；list FK 使用 `RefCell<Option<Vec<usize>>>` 或小型 `LinkListCache`。
+- Table 生成 `pub fn link(&self, data: &GameData) -> Result<(), RuntimeDataError>`，遍历 `rows` 或 singleton object 调用每个 relation getter 以填充 cache。
+- DataSet facade 生成 `pub fn link_all(&self) -> Result<(), RuntimeDataError>`，按 CodeModel table 顺序调用各 table 的 `link`。只要全部 cache 存 row index，FK 环不会导致 borrow cycle；getter 返回值生命周期仍绑定到 `&GameData`。
+- 如果目标 row 已被缓存为 index，但后续通过 index 取 row 时越界，应返回 data/code mismatch 错误；正常生成代码不提供可变 rows API，因此越界只可能来自版本不一致或内部 bug。
+
 ### 9.8.2 C++ 生成内容
 
 当前实现采用单文件头输出：`generated.hpp`。以下多文件布局仍是后续拆分方向：
@@ -869,6 +929,14 @@ C++ 约束：
 - 复合 key 需要生成 `struct Key`、`operator==` 和 hash。
 - enum class 需要生成 hash 或转换为底层整数用于 unordered_map。
 
+C++ `linked_field` 生成规则：
+
+- Row/Object struct 保留原始 FK 字段，并生成 `mutable LinkCache <name>_link_`，使 relation getter 可以是 `const` 方法。
+- 必填单值 FK 可以生成 `const TargetRow& GetDefaultClass(const GameData& data) const`；为了与运行时错误模型一致，也可生成 error-return 版本，例如 `RuntimeDataResult<std::reference_wrapper<const TargetRow>>`。当前文档不强制异常或 Result 方案，但同一生成器内必须统一。
+- optional FK 推荐返回 `const TargetRow*` 或 `std::optional<std::reference_wrapper<const TargetRow>>`；只有合法全空 key 返回空指针 / nullopt，非空 key lookup 失败必须报错。
+- list FK 返回 `std::vector<const TargetRow*>` 或轻量 relation view；cache 保存 `std::vector<std::size_t>`，不保存 pointers。
+- Table 生成 `void Link(const GameData& data) const` 或 error-return 版本；DataSet 生成 `LinkAll()`，按确定性顺序调用所有 table/object 的 Link。
+
 ### 9.8.3 TypeScript 生成内容
 
 当前实现采用单文件输出：`generated.ts`。以下多文件布局仍是后续拆分方向：
@@ -939,6 +1007,16 @@ TypeScript 约束：
 - JSON / MessagePack 底层解码由 `RuntimeDataLoader` / `RuntimeDataReader` 实现负责；生成核心代码不绑定 MessagePack npm 包。
 - runtime data shape `{ meta, rows }` 的导航、字段 runtime type guard、primitive 转换、typed rows 构造由生成代码负责；loader 实现不随 Meta 新增表或字段而变化。
 
+TypeScript `linked_field` 生成规则：
+
+当前实现状态：TypeScript `GameData` 已生成 `linkAll()` no-op 占位以稳定 API，但尚未生成 relation getter、row-index cache 或 table-level `link(data)`；以下规则仍为目标态设计。
+
+- 若 table 没有任何 relation helper，仍可维持 interface/plain object 输出；一旦启用 `linked_field`，该 row/object 需要承载 cache。推荐生成 class，并在 `readRow` 中实例化 class，而不是 plain object。
+- 原始 FK 字段保持只读属性，例如 `readonly defaultClassId: number`；helper 使用命名后的方法或 getter，例如 `defaultClass(data: GameData): ClassRow`。如果使用 ES getter 属性，由于需要传入 `GameData`，仍应优先选择 method 形态。
+- cache 使用 private field（例如 `#defaultClassLink`）或模块私有 symbol，状态为 unresolved / empty / rowIndex。不能缓存 `ClassRow` 对象引用。
+- optional FK 返回 `ClassRow | undefined`；list FK 返回 `readonly ClassRow[]`，内部可每次用缓存 indexes map 到 row，也可构造临时数组，不能把可变内部数组暴露给调用方。
+- Table 生成 `link(data: GameData): void`；DataSet 生成 `linkAll(): void`。若 lookup 失败，方法应 throw `RuntimeDataError` 或生成器统一的 error 类型。
+
 Reader 基础语义：
 
 - `enter_field(name)` / `enterField(name)` 用于 Rust / TypeScript named-field layout 的底层 cursor API。C++ runtime contract 已收敛为 schema-driven 字段 API，不再暴露 `EnterField`。
@@ -999,9 +1077,79 @@ Reader 基础语义：
 
 第一阶段建议生成 `get_by_<primary_index_name>`，避免主索引字段变化导致 `get(...)` 语义不清。后续可配置是否生成短别名 `get(...)`。
 
-## 9.10 抽象加载器设计
+## 9.10 Foreign Key Relation Helper 与 Link API
 
-### 9.10.1 为什么需要抽象加载器
+### 9.10.1 关系解析流程
+
+带 `linked_field` 的 helper 使用目标 table 现有 unique / primary index，不额外构建专用 relation map。生成器应复用 `CodeForeignKey.target_table` 和 `target_index` 找到目标 repository 的 lookup 方法，并根据 `CodeForeignKey.fields` 读取 source key。
+
+单值 FK helper 伪流程：
+
+```text
+get_relation(source_row, data):
+  cache = source_row.<relation_cache>
+  if cache == Empty:
+    return empty optional result
+  if cache == RowIndex(i):
+    return data.<target_table>.row_at(i) or mismatch error
+
+  key = build_key(source_row.<source_fields>)
+  if key is all-empty and allow_empty:
+    cache = Empty
+    return empty optional result
+  if key is partial-empty:
+    return runtime data error
+
+  index = data.<target_table>.index_of_<target_index>(key)
+  if index not found:
+    return runtime data error
+  cache = RowIndex(index)
+  return data.<target_table>.row_at(index)
+```
+
+为了避免重复查询，目标 repository 除了现有 `get_by_* -> row` API，还应生成内部 `index_of_by_* -> Option<usize>` / `IndexOfBy*` / `indexOfBy*`。该 API 可以是 private/package-private，只服务 relation cache；公开 API 仍返回 row 引用或对象。对于复合 key，内部 index lookup 使用与公开 lookup 相同的 key 构造逻辑。
+
+### 9.10.2 `link` / `link_all` 实现
+
+Table-level `link` 不需要特殊拓扑顺序，因为它只把 key 解析成 row index，不会持有目标 row 引用，也不会递归访问目标 row 的 relation helper。DataSet `link_all` 按 CodeModel table 顺序执行即可，保持生成结果确定性。
+
+```text
+GameData.link_all():
+  for table in model.tables:
+    table.link(self)
+```
+
+ObjectTable source 的 FK 按 singleton object 处理；CollectionTable source 遍历全部 rows。若某 table 没有任何 `linked_field`，可以不生成 table `link`，DataSet `link_all` 跳过它；也可以生成 no-op 方法以稳定 API，具体由语言生成器决定。推荐只有存在 relation helper 时生成 table `link`，DataSet `link_all` 总是生成，便于业务启动阶段统一调用。
+
+`link` / `link_all` 需要满足：
+
+- 幂等：已解析 cache 再次 link 时不重新查索引，或重新查出的结果必须一致；推荐直接复用 getter 的 cache fast path。
+- 错误原子性不强制：若中途失败，部分 earlier rows 可能已缓存。由于失败表示数据/版本问题，调用方应丢弃整个 `GameData`；不要求回滚 cache。
+- 线程安全由生成器语言策略决定。Rust 若使用 `Cell` / `RefCell`，默认不是 `Sync`；如服务器需要多线程共享，可后续提供 `thread_safe_relation_cache` option，把 cache 改为 `OnceCell` / `Mutex` / eager-only link 模式。当前默认优化单线程或启动期预 link 场景。
+
+### 9.10.3 Runtime data 与 schema 影响
+
+`linked_field` 只影响 generated code，不影响 runtime payload：
+
+- JSON / MessagePack 中不输出 `linked_field` 字段。
+- `bin` schema revision 不因为新增、删除或重命名 `linked_field` 而变化；但 generated code API 会变化，因此 code artifact 仍会更新。
+- Reader contract 不需要新增方法；relation helper 使用已加载到内存中的 typed rows 和 indexes，不读取底层 reader。
+- Validation 仍是引用完整性的权威来源；generated helper 的 defensive error 是运行时版本错配保护，不替代 export 前 validation。
+
+### 9.10.4 测试策略
+
+实现阶段应新增语言无关和语言专属测试：
+
+1. IR 测试：`linked_field` 正确进入 `CodeForeignKey.linked_field`，未声明时为 `None`；target filtering 后不可见 FK 不进入 relation helper。
+2. 命名测试：`linked_field` 与字段、fragment、lookup method、关键字发生目标语言命名冲突时报错。
+3. 生成快照/片段测试：Rust/C++/TypeScript 均生成原始 FK 字段、cache slot、relation getter、table link 和 DataSet link_all。
+4. Runtime harness：构造 `game_rules.default_class_id -> classes.by_id`，首次访问返回目标 row；第二次访问命中 cache。可通过 instrumented index lookup counter 或暴露测试 hook 验证第二次不查 map。
+5. Optional/list/composite FK：覆盖 empty optional cache、list 顺序保持、复合 key lookup。
+6. 错误路径：绕过 validation 构造缺失目标 row 的 runtime data，helper/link_all 返回错误 / throw，且不把缺失当作合法 empty。
+
+## 9.11 抽象加载器设计
+
+### 9.11.1 为什么需要抽象加载器
 
 生成代码不应该假设数据来自本地文件系统。不同接入环境可能是：
 
@@ -1011,7 +1159,7 @@ Reader 基础语义：
 
 因此当前生成代码依赖一个通用 loader / reader 抽象：loader 给定逻辑 data file path，负责打开对应 JSON / MessagePack / 引擎资源并返回格式无关的 reader；生成代码再用 reader 读取 payload envelope `{ meta, rows }`、逐字段解析并返回 typed rows。loader 接口不包含按表生成的 typed loader 方法，避免用户每新增表或字段都要修改 loader 实现。
 
-### 9.10.2 语言无关接口
+### 9.11.2 语言无关接口
 
 ```text
 RuntimeDataLoader
@@ -1031,7 +1179,7 @@ reader 需要支持两种读取模式：
 1. named-field：生成代码调用 `field("id")`、`field("name")` 等方法，适合 JSON object、MessagePack map、引擎反射对象。
 2. positional：生成代码按 CodeModel 中稳定字段顺序调用 `index(0)`、`index(1)` 或连续 `read_next_*`，适合未来紧密二进制布局。选择 positional layout 时，exporter 和 codegen 必须共享同一字段顺序；顺序定义应来自 linked Meta 中 target-visible fields、fragment fields 和 object fields 的稳定遍历结果。
 
-### 9.10.3 数据格式适配
+### 9.11.3 数据格式适配
 
 加载器实现只负责打开资源并提供通用 reader；生成代码负责解析业务对象：
 
@@ -1048,7 +1196,7 @@ loader.open("items")
 
 这样让生成代码保持对文件系统和具体解析库无绑定，同时让用户 loader 保持稳定。代价是生成代码需要包含每种语言的 runtime parser helper（字段读取、类型转换、required/default/optional 处理、错误上下文），但这些 helper 可以由生成器稳定输出，不需要用户手写。
 
-### 9.10.4 默认 loader
+### 9.11.4 默认 loader
 
 可以为每种语言生成一个可选的默认 loader / reader adapter 示例，但核心产物只依赖接口，不强制生成默认文件 loader：
 
@@ -1071,11 +1219,11 @@ loader.open("items")
 - 通用 reader/value 到 typed rows 的解析放在生成代码中。
 - MessagePack decoder 不绑定具体 npm / C++ / Rust 包。
 
-### 9.10.5 标准 runtime helper 工程结构
+### 9.11.5 标准 runtime helper 工程结构
 
 生成代码只声明 reader / loader contract，这解决了 Meta-specific 逻辑与业务资源系统耦合的问题，但实际游戏项目仍需要可运行的 JSON / MessagePack 等格式 reader。项目应提供标准 RuntimeDataReader adapter 源码/模板，作为 generated code 之外的 runtime support 层。
 
-#### 4.10.5.1 分层边界
+#### 9.11.5.1 分层边界
 
 标准 adapter 分三层：
 
@@ -1085,7 +1233,7 @@ loader.open("items")
 
 核心 codegen 不 import adapter，也不把 adapter 的第三方依赖写进 generated code。adapter 是可选 runtime support：可以被业务项目直接依赖，也可以由 codegen option 拷贝到目标目录，还可以作为测试 harness 的基础实现。
 
-#### 4.10.5.2 Reader contract 可执行规范
+#### 9.11.5.2 Reader contract 可执行规范
 
 标准 adapter 不能只对齐接口形状，还必须对齐 reader contract 版本、value model、missing/null、scalar conversion 和错误上下文。当前 contract 版本定义为 `1.0`；后续所有 generated code 与 adapter 都应声明支持的 contract version。
 
@@ -1145,7 +1293,7 @@ missing/null 语义：
 
 错误上下文要求：adapter 抛出的错误应包含 logical data path、reader path（field/index 链）、expected type、actual type/value。transport loader 还应包含 resolved resource path 或 URL。
 
-#### 4.10.5.3 工程化目标与当前缺口
+#### 9.11.5.3 工程化目标与当前缺口
 
 `runtime/` 的目标不是只服务 standard_project harness，而是成为游戏项目可直接引用的 runtime support 层。当前仓库已经有首批源码：
 
@@ -1168,7 +1316,7 @@ missing/null 语义：
 - **稳定契约层**：定义 reader/loader contract 版本、payload shape、错误语义、scalar 兼容策略。生成代码只依赖该契约，不依赖具体 adapter。
 - **可选 adapter 层**：每个语言/格式组合是独立工程单元，明确三方依赖、构建方式、测试入口和生产推荐等级。
 
-#### 4.10.5.4 目录布局
+#### 9.11.5.4 目录布局
 
 推荐在仓库顶层维护 `runtime/` 作为标准 adapter 源码/模板目录：
 
@@ -1214,7 +1362,7 @@ runtime/
 
 `runtime/` 不是每次 export 的输出目录；它是 ConfigForge 源码仓库中维护的标准 runtime adapter 集合。未来如增加 `yaml`、`sqlite`、自定义二进制等 data format，应按同样结构补充对应语言子目录。
 
-#### 4.10.5.5 官方支持矩阵、推荐等级与依赖策略
+#### 9.11.5.5 官方支持矩阵、推荐等级与依赖策略
 
 对 stable runtime data format，应覆盖官方 target language；对 experimental format 可以先只支持部分语言。Transport loader 不进入语言 × 格式矩阵，而是与 format reader 组合。每个 adapter 单元必须明确：
 
@@ -1244,7 +1392,7 @@ runtime/
 - C++ 使用 CMake options / package manager `find_package` 控制第三方库启用，不 vendored 到 generated code。允许在 examples/CI 中用 `FetchContent` 或包管理器（vcpkg、Conan、系统包）下载三方库，但必须是显式 opt-in。
 - adapter 版本应与 generated reader contract 版本兼容；当 reader interface 发生 breaking change，adapter 需要同步升级并在包名、feature、manifest 或文档中标明兼容范围。
 
-#### 4.10.5.6 C++ CMake 工程化方案
+#### 9.11.5.6 C++ CMake 工程化方案
 
 C++ runtime helpers 采用 CMake target 管理，目标是让游戏项目能通过 `add_subdirectory(runtime/cpp)` 或安装后的 `find_package(ConfigForgeRuntime CONFIG)` 引入 adapter。
 
@@ -1324,7 +1472,7 @@ Phase 1.5 优先评估拆出稳定 `config_forge_runtime.hpp`：generated C++ �
 - 不对大小写敏感文件系统差异做隐式兼容；
 - 不负责格式选择，格式 decode 由注入的 JSON / MessagePack decoder 或 adapter target 决定。
 
-#### 4.10.5.7 TypeScript MessagePack 工程化方案
+#### 9.11.5.7 TypeScript MessagePack 工程化方案
 
 TypeScript adapter 使用结构化类型，不需要 import generated module。包结构推荐：
 
@@ -1369,7 +1517,7 @@ const data = await GameData.load(loader);
 
 MessagePack adapter 的 value 语义应与 JSON adapter 对齐：object/map 支持 `field(name)`，array 支持 `index/length`，scalar 支持 string-to-number / string-to-bool 兼容策略，`null/undefined` 在字段入口处按 missing 处理。
 
-#### 4.10.5.8 各语言 contract 约束
+#### 9.11.5.8 各语言 contract 约束
 
 不同语言的 reader interface 绑定方式不同，adapter 形态也不同：
 
@@ -1377,7 +1525,7 @@ MessagePack adapter 的 value 语义应与 JSON adapter 对齐：object/map 支�
 - **TypeScript**：接口是结构化类型，adapter package 只要导出同形状 class 即可直接传给 `GameData.load`。因此 TypeScript adapter 可以最早做成标准 npm workspace 包。
 - **C++**：`IRuntimeDataReader` 是 nominal virtual interface，adapter 需要看到 generated header 或稳定 runtime interface header。短期方案是 adapter header/source 通过 include path 引用 generated header；中期方案是拆出稳定 `config_forge_runtime.hpp`，generated code 和 adapter 都依赖该 header，降低每次生成代码对 adapter 编译的耦合。
 
-#### 4.10.5.9 与 codegen / 测试集成
+#### 9.11.5.9 与 codegen / 测试集成
 
 Codegen 后续可增加 runtime adapter 相关选项，但默认仍不强制输出 adapter：
 
@@ -1415,7 +1563,7 @@ loader = "fs"                      # fs / fetch / none / custom
 5. 增加 adapter 自测：每个 adapter 至少用同一份 canonical payload 验证 field/index/len/scalar/null、missing vs null、string-to-number/bool、finite float、escaped string。
 6. 再考虑是否提供 codegen option 自动复制 adapter 到目标工程输出目录。
 
-#### 4.10.5.10 Adapter compliance suite 与 CI / 测试矩阵
+#### 9.11.5.10 Adapter compliance suite 与 CI / 测试矩阵
 
 canonical payload 应升级为正式 compliance suite，而不是只停留在矩阵描述。推荐目录：
 
@@ -1451,7 +1599,7 @@ CI 中三方依赖策略：
 - 完整 CI / nightly 跑 production adapter：TS MessagePack、C++ RapidJSON、C++ msgpack-c。
 - 如果三方包不可用，测试应明确 skip 或 fail-fast 给出安装提示，不能静默退回 builtin parser 造成覆盖误判。
 
-### 9.10.6 reader loader 落地状态
+### 9.11.6 reader loader 落地状态
 
 迁移已完成：
 
@@ -1462,7 +1610,7 @@ CI 中三方依赖策略：
 
 当前验收标准：生成代码不再出现按表的 loader 方法；新增表、字段、fragment 或 object table 字段时，用户侧 loader / reader 接口和 harness loader 实现不需要改动，只需要重新生成代码并更新业务断言。
 
-## 9.11 Runtime data 文件约定
+## 9.12 Runtime data 文件约定
 
 当前 exporter 输出形态是包含 `meta` 和 `rows` 的 payload。JSON 与 MessagePack 使用同一逻辑结构，只是编码方式不同。目标态中业务侧 `RuntimeDataLoader` 只需要把该 payload 暴露为通用 reader；生成代码读取时至少应支持当前 shape：
 
@@ -1496,7 +1644,7 @@ CI 中三方依赖策略：
 1. Codegen 第一阶段先兼容当前 `{ meta, rows }`，由通用 reader 暴露 runtime value，并由生成代码把字段 parse 为目标类型。
 2. Data typed export 落地后，生成代码的 parse helper 可以减少 string parsing；loader / reader 接口仍保持不变。
 
-## 9.11.1 Exporter 写出实现方案
+### 9.12.1 Exporter 写出实现方案
 
 runtime data format 由 data export registry 选择，并通过 `RuntimeDataFile.format` 显式传给 codegen；文件名后缀只描述 artifact path，不作为 reader layout 的唯一来源。当前 codegen 层不再生成 `RuntimeDataFormat` 类型。目标态可用枚举描述如下：
 
@@ -1529,7 +1677,7 @@ rmp-serde = "1"
 
 如果后续引入 manifest，manifest 中也应以 `(target_name, data_name, table_name)` 作为 runtime data artifact key，并记录每个 artifact 的 `format`、相对 data artifact root 的 `path`、最终写入 path 和 `table_name`。
 
-## 9.11.2 Codegen 读取实现方案
+### 9.12.2 Codegen 读取实现方案
 
 CodeModel 构建时使用逻辑 table name 作为 runtime load path：
 
@@ -1552,7 +1700,7 @@ Table::load(loader)
 
 这样 JSON 与 MessagePack 的字节解析差异落在 loader / reader 实现里，表结构、字段名、字段顺序、类型转换、required/default/optional 处理落在生成代码里，repository、index、GameData facade 不需要关心具体解析库。
 
-## 9.12 生成器接口
+## 9.13 生成器接口
 
 ```rust
 pub trait CodeGenerator: Send + Sync {
@@ -1605,7 +1753,7 @@ CodegenTaskConfig.language
 4. 将 generator 加入 `builtin_generators()`；若未来使用外部插件 registry，则由调用方传入扩展后的 registry。
 5. 不修改 `CodeModel`、`src/build/` 的分发逻辑，也不新增中心化语言 enum。
 
-## 9.13 Runtime data 与加载接口测试计划
+## 9.14 Runtime data 与加载接口测试计划
 
 数据格式与生成代码加载接口相关测试应覆盖：
 
@@ -1635,9 +1783,9 @@ CodegenTaskConfig.language
    - row interface、table parser、table repository 和 index helper。
 13. CLI integration：分别构建 JSON target、MessagePack target，以及同 target 多 data + 多 code 的标准工程，验证 runtime data 文件和 generated code 文件同时生成，并检查代码中引用逻辑表名且不随 data format 改变。
 
-## 9.14 文件组织策略
+## 9.15 文件组织策略
 
-### 9.14.1 多文件模式，推荐默认
+### 9.15.1 多文件模式，推荐默认
 
 优点：便于阅读和差异比较。
 
@@ -1648,7 +1796,7 @@ tables.*
 index.*
 ```
 
-### 9.14.2 单文件模式
+### 9.15.2 单文件模式
 
 适合小项目或直接拷贝接入：
 
@@ -1660,7 +1808,7 @@ config_forge_generated.ts
 
 第一阶段可以只实现单文件模式以降低复杂度，但 IR 和 GeneratedFile 应支持多文件。
 
-## 9.15 错误与诊断
+## 9.16 错误与诊断
 
 第一阶段可以继续使用 `ConfigForgeError::Validation(String)`，但建议新增 codegen diagnostic 模型：
 
@@ -1685,9 +1833,9 @@ pub struct CodegenDiagnostic {
 | `OutputPathConflict` | 多个 artifact 指向同一路径。 |
 | `RuntimeDependencyMissing` | 生成代码要求的依赖未配置。 |
 
-## 9.16 测试计划
+## 9.17 测试计划
 
-### 9.16.1 CodeModel 单元测试
+### 9.17.1 CodeModel 单元测试
 
 1. enum / struct / table 都能进入 `CodeModel`。
 2. primitive / enum / struct 字段映射为正确 `CodeTypeRef`。
@@ -1699,7 +1847,7 @@ pub struct CodegenDiagnostic {
 8. 同名 fragment 出现在不同 table 时，生成类型名应包含 table scope，避免冲突。
 9. fragment field 不能作为 index key；Meta/CodeModel 层应给出明确错误或在 Meta validation 阶段提前拒绝。
 
-### 9.16.2 语言生成器 snapshot 测试
+### 9.17.2 语言生成器 snapshot 测试
 
 对同一个小 Meta fixture 生成三种语言代码，断言关键片段：
 
@@ -1717,7 +1865,7 @@ pub struct CodegenDiagnostic {
 
 推荐先使用字符串 contains 测试，后续引入 snapshot 工具。
 
-### 9.16.3 生成代码编译与运行测试
+### 9.17.3 生成代码编译与运行测试
 
 生成代码测试不应只停留在“文件存在”和字符串片段断言。集成测试需要把 runtime data artifact 与 generated code artifact 串起来，验证生成代码能被目标语言工具链接受，并能通过 generated loader interface 读取真实导出的数据。
 
@@ -1741,7 +1889,7 @@ pub struct CodegenDiagnostic {
 
 每种语言的 harness 代码应作为 fixture 的一部分归档进代码仓库，例如 `tests/fixtures/standard_project/harness/{rust,cpp,typescript}/`。集成测试运行时将已归档的 harness 与本次 export 产生的 generated code / runtime data 组合到临时目录或编译命令中：harness 本身稳定纳入 review，generated artifacts 仍位于被忽略的 `out/` 或临时目录中，避免把本次生成结果当作源文件提交。
 
-### 9.16.4 分语言 generated-code runtime test 方案
+### 9.17.4 分语言 generated-code runtime test 方案
 
 标准工程当前按 target 拆分：client 生成 JSON + TypeScript/C++，server 生成 MessagePack + Rust。因此 generated-code runtime test 可以复用标准工程配置，分别验证三种语言。
 
@@ -1759,7 +1907,7 @@ pub struct CodegenDiagnostic {
 - 本地开发环境如果缺少 C++ compiler、Node 或 `tsc`，对应测试可以显式 skip，但测试输出必须说明 skip 原因，不能静默通过。
 - Rust 生成代码测试不应 skip，因为项目本身依赖 Rust toolchain。
 
-### 9.16.5 CLI 集成测试
+### 9.17.5 CLI 集成测试
 
 在 `tests/fixtures/standard_project/` 上运行：
 
@@ -1771,7 +1919,7 @@ pub struct CodegenDiagnostic {
 
 集成测试写出的 artifact 应位于 fixture-local `out/` 目录或临时目录。fixture-local `out/` 必须通过 `.gitignore` 忽略；新增 fixture 如果也写出导出结果，应遵循 `tests/fixtures/**/out/` 约定，避免误提交生成产物。
 
-## 9.17 第一阶段落地状态
+## 9.18 第一阶段落地状态
 
 当前第一阶段主体已落地，历史分阶段计划更新为实现状态：
 
@@ -1813,7 +1961,7 @@ pub struct CodegenDiagnostic {
 3. CLI 支持 dry-run、direct write 和 `temp-commit` 写入模式；`--dry-run` 优先于 `--write-mode`。
 4. summary manifest 可作为 special exporter 产物独立实现。
 
-## 9.18 第一阶段完成标准
+## 9.19 第一阶段完成标准
 
 完成时应满足：
 

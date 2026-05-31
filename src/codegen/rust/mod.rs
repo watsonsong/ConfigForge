@@ -20,7 +20,7 @@ use reader::{
     render_enum_reader_impl, render_fragment_reader_impl, render_row_reader_impl,
     render_struct_reader_impl,
 };
-use repository::render_table;
+use repository::{render_game_data_link_methods, render_row_relation_methods, render_table};
 use runtime::{render_runtime_reader_helpers, render_runtime_reader_imports};
 use symbols::validate_generated_symbols;
 use types::RustNames;
@@ -68,9 +68,24 @@ impl CodeGenerator for RustCodeGenerator {
         validate_generated_symbols(&model, &names)?;
         let mut content = CodeWriter::new(input.target.options.formatting);
         self.write_file_header(&mut content, input);
-        content.raw("use std::collections::HashMap;\n\n");
+        content.raw("use std::{cell::RefCell, collections::HashMap};\n\n");
         render_runtime_reader_imports(&mut content);
         render_runtime_reader_helpers(&mut content);
+        content.raw(concat!(
+            "#[derive(Debug, Clone, PartialEq, Eq)]\n",
+            "enum LinkCache {\n",
+            "    Unresolved,\n",
+            "    Empty,\n",
+            "    RowIndex(usize),\n",
+            "}\n\n",
+            "impl Default for LinkCache {\n",
+            "    fn default() -> Self { Self::Unresolved }\n",
+            "}\n\n",
+            "#[derive(Debug, Clone, PartialEq, Eq, Default)]\n",
+            "struct LinkListCache {\n",
+            "    row_indexes: Option<Vec<usize>>,\n",
+            "}\n\n",
+        ));
 
         for code_enum in &model.enums {
             push_doc(&mut content, code_enum.desc.as_deref(), "/// ");
@@ -186,6 +201,29 @@ impl CodeGenerator for RustCodeGenerator {
                     names.fragment_payload_type_name(table, fragment)?
                 ));
             }
+            for foreign_key in table
+                .foreign_keys
+                .iter()
+                .filter(|foreign_key| foreign_key.linked_field.is_some())
+            {
+                let cache_type = match foreign_key
+                    .linked_field
+                    .as_ref()
+                    .expect("linked field")
+                    .cardinality
+                {
+                    super::ir::CodeRelationCardinality::Many => "RefCell<LinkListCache>",
+                    _ => "RefCell<LinkCache>",
+                };
+                if rust_options.derive_serde {
+                    content.raw("    #[serde(skip, default)]\n");
+                }
+                content.raw_fmt(format_args!(
+                    "    {}: {},\n",
+                    names.relation_cache_field_name(foreign_key)?,
+                    cache_type
+                ));
+            }
             content.raw("}\n\n");
             render_row_reader_impl(&mut content, table, &names)?;
             content.raw_fmt(format_args!(
@@ -205,6 +243,7 @@ impl CodeGenerator for RustCodeGenerator {
                     names.field_name(&fragment.name)?
                 ));
             }
+            render_row_relation_methods(&mut content, &model, table, &names)?;
             content.raw("}\n\n");
             render_table(&mut content, table, &names)?;
         }
@@ -231,6 +270,7 @@ impl CodeGenerator for RustCodeGenerator {
         }
         content.raw("        })\n");
         content.raw("    }\n");
+        render_game_data_link_methods(&mut content, &model, &names)?;
         content.raw("}\n");
 
         Ok(vec![GeneratedFile {

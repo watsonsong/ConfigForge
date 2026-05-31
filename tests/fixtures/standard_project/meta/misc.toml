@@ -17,16 +17,16 @@ type = "int"
 required = true
 
 [[tables.fields]]
-name = "default_class"
+name = "default_class_id"
 type = "int"
 required = true
-foreign_key = { name = "default_class", target_table = "classes", target_index = "by_id" }
+foreign_key = { name = "default_class", target_table = "classes", target_index = "by_id", linked_field = "default_class" }
 
 [[tables.fields]]
 name = "starter_item_ids"
 type = "int[]"
 required = true
-foreign_key = { name = "starter_item", target_table = "items", target_index = "by_id" }
+foreign_key = { name = "starter_item", target_table = "items", target_index = "by_id", linked_field = "starter_items" }
 
 [[tables.fields]]
 name = "stamina_cap"

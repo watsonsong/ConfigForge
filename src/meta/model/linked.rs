@@ -81,6 +81,7 @@ pub struct LinkedForeignKeyMeta<'meta> {
     pub fields: Vec<LinkedFieldMeta<'meta>>,
     pub target_table_name: &'meta str,
     pub target_index_name: &'meta str,
+    pub linked_field: Option<&'meta str>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

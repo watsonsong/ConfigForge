@@ -372,6 +372,7 @@ fn link_foreign_keys<'meta>(
                 fields,
                 target_table_name: target_table.name.as_str(),
                 target_index_name: target_index.name.as_str(),
+                linked_field: foreign_key.linked_field,
             });
         }
     }

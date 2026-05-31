@@ -196,27 +196,6 @@ impl ArrayElementValue {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::mem::size_of;
-
-    use super::*;
-
-    #[test]
-    fn array_element_is_lighter_than_full_resolved_value() {
-        assert!(size_of::<ArrayElementValue>() < size_of::<ResolvedValue>());
-    }
-
-    #[test]
-    fn array_element_keeps_scalar_export_fallback_without_source_trace() {
-        let explicit = ArrayElementValue::scalar(ScalarValue::Int(7), Some("007".to_owned()));
-        assert_eq!(explicit.scalar_export_string().as_deref(), Some("007"));
-
-        let fallback = ArrayElementValue::scalar(ScalarValue::Bool(true), None);
-        assert_eq!(fallback.scalar_export_string().as_deref(), Some("true"));
-    }
-}
-
 impl ScalarValue {
     pub fn to_export_string(&self) -> String {
         match self {
@@ -243,5 +222,26 @@ impl ValueSourceTrace {
             source_row_number: row_source.map(|source| source.source_row_number),
             raw_value,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::mem::size_of;
+
+    use super::*;
+
+    #[test]
+    fn array_element_is_lighter_than_full_resolved_value() {
+        assert!(size_of::<ArrayElementValue>() < size_of::<ResolvedValue>());
+    }
+
+    #[test]
+    fn array_element_keeps_scalar_export_fallback_without_source_trace() {
+        let explicit = ArrayElementValue::scalar(ScalarValue::Int(7), Some("007".to_owned()));
+        assert_eq!(explicit.scalar_export_string().as_deref(), Some("007"));
+
+        let fallback = ArrayElementValue::scalar(ScalarValue::Bool(true), None);
+        assert_eq!(fallback.scalar_export_string().as_deref(), Some("true"));
     }
 }

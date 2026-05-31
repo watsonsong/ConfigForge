@@ -5,7 +5,7 @@ use crate::{
     ConfigForgeError, Result,
     codegen::{
         CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
-        CodeTableKind, CodeTypeRef, CodegenOptions, naming,
+        CodeTableKind, CodeTypeRef, CodegenOptions, ir::CodeForeignKey, naming,
     },
 };
 
@@ -82,6 +82,32 @@ impl<'a> RustNames<'a> {
         let prefix = if index.unique { "get_by" } else { "find_by" };
         let suffix = index.name.trim_start_matches("by_");
         self.identifier(&format!("{prefix}_{suffix}"), self.options.naming.function)
+    }
+
+    pub(super) fn index_of_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(
+            &format!("index_of_by_{suffix}"),
+            self.options.naming.function,
+        )
+    }
+
+    pub(super) fn relation_function_name(&self, foreign_key: &CodeForeignKey) -> Result<String> {
+        self.identifier(
+            foreign_key
+                .linked_field
+                .as_ref()
+                .map(|linked_field| linked_field.name.as_str())
+                .unwrap_or(foreign_key.name.as_str()),
+            self.options.naming.function,
+        )
+    }
+
+    pub(super) fn relation_cache_field_name(&self, foreign_key: &CodeForeignKey) -> Result<String> {
+        self.field_name(&format!(
+            "{}_link",
+            self.relation_function_name(foreign_key)?
+        ))
     }
 
     pub(super) fn rust_type(&self, code_type: &CodeTypeRef) -> Result<String> {
@@ -222,6 +248,24 @@ impl<'a> RustNames<'a> {
                     .collect::<Result<Vec<_>>>()?
                     .join(", ")
             ))
+        }
+    }
+
+    pub(super) fn rust_relation_lookup_key(
+        &self,
+        foreign_key: &CodeForeignKey,
+        target_index: &CodeIndex,
+        value_exprs: &[String],
+    ) -> Result<String> {
+        if target_index.fields.len() == 1 {
+            Ok(value_exprs[0].clone())
+        } else if value_exprs.len() == foreign_key.fields.len() {
+            Ok(format!("({})", value_exprs.join(", ")))
+        } else {
+            Err(ConfigForgeError::Validation(format!(
+                "rust codegen: foreign key `{}` source field count does not match target index `{}`",
+                foreign_key.name, target_index.name
+            )))
         }
     }
 

@@ -610,6 +610,76 @@ fn rejects_invalid_foreign_key_declarations() {
 }
 
 #[test]
+fn rejects_invalid_linked_field_declarations() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "rules"
+            kind = "object"
+            source = "rules.csv"
+
+            [[tables.fields]]
+            name = "item_id"
+            type = "int"
+            foreign_key = { name = "item", target_table = "items", target_index = "by_id", linked_field = "" }
+
+            [[tables.fields]]
+            name = "reward_item_id"
+            type = "int"
+            foreign_key = { name = "reward_item", target_table = "items", target_index = "by_id", linked_field = "item" }
+
+            [[tables.fields]]
+            name = "other_item_id"
+            type = "int"
+            foreign_key = { name = "other_item", target_table = "items", target_index = "by_id", linked_field = "item" }
+
+            [[tables.fields]]
+            name = "conflicting_field"
+            type = "int"
+
+            [[tables.fields]]
+            name = "field_conflict_id"
+            type = "int"
+            foreign_key = { name = "field_conflict", target_table = "items", target_index = "by_id", linked_field = "conflicting_field" }
+
+            [[tables.fragments]]
+            name = "conflicting_fragment"
+            when_field = "item_id"
+            cases = []
+
+            [[tables.fields]]
+            name = "fragment_conflict_id"
+            type = "int"
+            foreign_key = { name = "fragment_conflict", target_table = "items", target_index = "by_id", linked_field = "conflicting_fragment" }
+        "#,
+    );
+    let messages = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(messages.contains("linked_field must be non-empty"));
+    assert!(messages.contains("linked_field `item` is defined more than once"));
+    assert!(messages.contains("linked_field `conflicting_field` conflicts with source field"));
+    assert!(messages.contains("linked_field `conflicting_fragment` conflicts with fragment"));
+}
+
+#[test]
 fn link_rejects_semantically_invalid_foreign_keys() {
     let meta = MetaModel::from_toml_str(
         r#"

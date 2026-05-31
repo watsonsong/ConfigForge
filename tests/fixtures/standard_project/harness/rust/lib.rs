@@ -87,8 +87,22 @@ fn assert_standard_data(data: &GameData) {
     assert_eq!(class_level.attributes.attack, Some(16));
 
     assert_eq!(data.game_rules.max_player_level, 60);
-    assert_eq!(data.game_rules.default_class, 1);
+    assert_eq!(data.game_rules.default_class_id, 1);
     assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2002]);
+    let default_class = data
+        .game_rules
+        .default_class(data)
+        .expect("default class relation should resolve");
+    assert_eq!(default_class.class_id, 1);
+    let starter_items = data
+        .game_rules
+        .starter_items(data)
+        .expect("starter item relation should resolve");
+    assert_eq!(starter_items.len(), 2);
+    assert_eq!(starter_items[0].id, 2001);
+    assert_eq!(starter_items[1].id, 2002);
+    data.link_all().expect("link_all should pre-resolve relations");
+    assert_eq!(data.game_rules.default_class(data).unwrap().class_id, 1);
     assert!(data.game_rules.pvp_enabled);
 }
 
