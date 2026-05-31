@@ -272,7 +272,7 @@ pub enum TaskResource {
 }
 ```
 
-第一阶段不一定要暴露通用 DAG executor；可以先在 exporter 流程中按阶段使用 `join_all` / CPU pool parallel iter。但类型设计应向 DAG 收敛，避免后续重构推倒重来。
+第一阶段不一定要暴露通用 DAG executor；可以先在 exporter 流程中按阶段使用 `join_all` / CPU pool parallel iter。但类型设计应向 DAG 收敛，避免后续重构推倒重来。当前阶段 A 采用“阶段式 pipeline”：不引入 ready queue，只把 `LinkMeta -> GenerateCode` 左支与 `SourceRead` 右支并行起来，待二者 join 后继续 Normalize / Validation / MetaAndData export。
 
 ### 5.1a 从目标产物倒推依赖
 
@@ -296,11 +296,11 @@ pub struct TargetBuildPlan {
 }
 ```
 
-当前文档和实现不足之处：
+阶段 A 已解决 / 保留的边界：
 
-- `execute_target_dag()` 的 node key 只是 execution view skeleton，不是调度权威；文档若只写 “DAG” 容易误导为已有完整 DAG executor。
-- 当前 build 仍先 link Meta，再进入 target-local executor；目标态应在 Project Config / raw MetaModel 加载后，通过 dependency plan 判断哪些 target 需要 Data，避免 code-only target 读取 Data。
-- 当前 `NormalizeAndValidate` 把 source load、normalize、full validation 和 target validation 合并成一个分支步骤；目标态需要拆开，才能表达 source I/O 与 Meta link 并行、full dataset validation 与 target-view validation 分层并行。
+- `execute_target_dag()` 的 node key 仍只是 execution view skeleton，不是调度权威；文档若只写 “DAG” 容易误导为已有完整 DAG executor。
+- build 已通过 dependency plan 判断 target 是否需要 Data，code-only target 不读取 Data；mixed target 中 source read 与 Meta link 并行，且 Meta link 完成后立即启动 codegen。
+- 当前 `NormalizeAndValidate` 仍把 normalize、full validation 和 target validation 合并成一个 runtime 分支步骤；目标态需要继续拆开，才能表达 full dataset validation 与 target-view validation 分层并行。
 - 当前只支持一次构建一个 target；目标态 multi-target 需要显式 cache key：`LinkedMeta` 可共享，Data / normalized data / validation result 至少按 `(project.input, effective_tags)` 或更细粒度 key 区分。
 
 ### 5.1b 目标态 DAG 形态

@@ -136,9 +136,8 @@ struct TargetDagExecutionContext<'a, 'meta> {
     trace: &'a mut BuildTraceRecorder,
 }
 
-struct BuildInputPreparation<'meta> {
-    linked_meta: LinkedMetaModel<'meta>,
-    raw_sources: Option<RawSourceData>,
+struct BuildInputPreparation<'a> {
+    read_sources: Option<Box<dyn FnOnce() -> Result<RawSourceData> + Send + 'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,7 +218,7 @@ fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<Targ
     let meta_and_data_exports =
         target_plan.export_tasks(context.target, ExportDependency::MetaAndData);
     let meta_only_exports = target_plan.export_tasks(context.target, ExportDependency::MetaOnly);
-    let prepared_inputs = context.trace.record("prepare_build_inputs", None, || {
+    let mut prepared_inputs = context.trace.record("prepare_build_inputs", None, || {
         prepare_build_inputs(
             context.raw_meta,
             target_plan,
@@ -231,31 +230,20 @@ fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<Targ
 
     let generated_at = generated_at();
     let generators = builtin_generators();
-    let codegen_context = CodegenTaskContext {
-        project_root: context.project_root,
-        project: context.project,
-        target_tags: context.target_tags,
-        linked_meta: &prepared_inputs.linked_meta,
-        generated_at: &generated_at,
-        generators: &generators,
-    };
 
     let (runtime_output, code_output) = context.trace.record("run_exporters", None, || {
-        let (runtime_output, code_output) = context.pool.install(|| {
-            rayon::join(
-                || {
-                    execute_runtime_export_nodes(
-                        prepared_inputs.raw_sources.as_ref(),
-                        &meta_and_data_exports,
-                        &prepared_inputs.linked_meta,
-                        context.target_tags,
-                        context.pool,
-                    )
-                },
-                || execute_codegen_export_nodes(&codegen_context, &meta_only_exports, context.pool),
-            )
-        });
-        Ok((runtime_output?, code_output?))
+        execute_export_pipeline(ExportPipelineContext {
+            raw_meta: context.raw_meta,
+            read_sources: prepared_inputs.read_sources.take(),
+            runtime_exports: &meta_and_data_exports,
+            codegen_exports: &meta_only_exports,
+            project_root: context.project_root,
+            project: context.project,
+            target_tags: context.target_tags,
+            generated_at: &generated_at,
+            generators: &generators,
+            pool: context.pool,
+        })
     })?;
     let (warnings, artifacts) = context.trace.record("collect_artifacts", None, || {
         let mut export_outputs = runtime_output.export_outputs;
@@ -316,52 +304,106 @@ impl BuildTraceRecorder {
     }
 }
 
-fn prepare_build_inputs<'meta>(
-    raw_meta: &'meta MetaModel,
+fn prepare_build_inputs<'a>(
+    raw_meta: &MetaModel,
     target_plan: &TargetBuildPlan,
     target_tags: &TargetTags,
     data_root: Option<&Path>,
-    pool: &ThreadPool,
-) -> Result<BuildInputPreparation<'meta>> {
+    pool: &'a ThreadPool,
+) -> Result<BuildInputPreparation<'a>> {
     let read_sources = target_plan
         .requires_data()
-        .then_some(|| read_sources_for_target(raw_meta, data_root, target_tags, pool));
-    let (linked_meta, raw_sources) = join_meta_link_and_source_read(
-        || raw_meta.link().map_err(ConfigForgeError::MetaValidation),
+        .then(|| source_reader_for_target(raw_meta, data_root, target_tags, pool))
+        .transpose()?;
+    Ok(BuildInputPreparation { read_sources })
+}
+
+struct ExportPipelineContext<'a, 'meta> {
+    raw_meta: &'meta MetaModel,
+    read_sources: Option<Box<dyn FnOnce() -> Result<RawSourceData> + Send + 'a>>,
+    runtime_exports: &'a [(usize, &'a NormalizedExportTask)],
+    codegen_exports: &'a [(usize, &'a NormalizedExportTask)],
+    project_root: &'a Path,
+    project: &'a CodeExportProject,
+    target_tags: &'a TargetTags,
+    generated_at: &'a str,
+    generators: &'a [Box<dyn CodeGenerator>],
+    pool: &'a ThreadPool,
+}
+
+fn execute_export_pipeline<'meta>(
+    context: ExportPipelineContext<'_, 'meta>,
+) -> Result<(DagBranchOutput, DagBranchOutput)> {
+    let ExportPipelineContext {
+        raw_meta,
+        read_sources,
+        runtime_exports,
+        codegen_exports,
+        project_root,
+        project,
+        target_tags,
+        generated_at,
+        generators,
+        pool,
+    } = context;
+    let ((linked_meta, code_output), raw_sources) = join_link_codegen_and_source_read(
+        || {
+            let linked_meta = raw_meta.link().map_err(ConfigForgeError::MetaValidation)?;
+            let codegen_context = CodegenTaskContext {
+                project_root,
+                project,
+                target_tags,
+                linked_meta: &linked_meta,
+                generated_at,
+                generators,
+            };
+            let code_output =
+                execute_codegen_export_nodes(&codegen_context, codegen_exports, pool)?;
+            Ok((linked_meta, code_output))
+        },
         read_sources,
         pool,
     )?;
-    Ok(BuildInputPreparation {
-        linked_meta,
-        raw_sources,
-    })
+
+    let runtime_output = execute_runtime_export_nodes(
+        raw_sources.as_ref(),
+        runtime_exports,
+        &linked_meta,
+        target_tags,
+        pool,
+    )?;
+    Ok((runtime_output, code_output))
 }
 
-fn join_meta_link_and_source_read<'meta, LinkFn, SourceFn>(
-    link_meta: LinkFn,
+fn join_link_codegen_and_source_read<'meta, LinkCodeFn, SourceFn>(
+    link_and_codegen: LinkCodeFn,
     read_sources: Option<SourceFn>,
     pool: &ThreadPool,
-) -> Result<(LinkedMetaModel<'meta>, Option<RawSourceData>)>
+) -> Result<(
+    (LinkedMetaModel<'meta>, DagBranchOutput),
+    Option<RawSourceData>,
+)>
 where
-    LinkFn: FnOnce() -> Result<LinkedMetaModel<'meta>> + Send,
+    LinkCodeFn: FnOnce() -> Result<(LinkedMetaModel<'meta>, DagBranchOutput)> + Send,
     SourceFn: FnOnce() -> Result<RawSourceData> + Send,
 {
     if let Some(read_sources) = read_sources {
-        let (meta_result, source_result) = pool.install(|| rayon::join(link_meta, read_sources));
-        let linked_meta = meta_result?;
+        let (link_codegen_result, source_result) =
+            pool.install(|| rayon::join(link_and_codegen, read_sources));
+        let link_codegen = link_codegen_result?;
         let raw_sources = source_result?;
-        Ok((linked_meta, Some(raw_sources)))
+        Ok((link_codegen, Some(raw_sources)))
     } else {
-        Ok((link_meta()?, None))
+        Ok((link_and_codegen()?, None))
     }
 }
 
-fn read_sources_for_target(
+fn source_reader_for_target<'a>(
     raw_meta: &MetaModel,
     data_root: Option<&Path>,
     target_tags: &TargetTags,
-    pool: &ThreadPool,
-) -> Result<RawSourceData> {
+    pool: &'a ThreadPool,
+) -> Result<Box<dyn FnOnce() -> Result<RawSourceData> + Send + 'a>> {
     let data_root = data_root.ok_or_else(|| {
         ConfigForgeError::Validation(
             "`project.input` must be set when target declares Data-dependent export tasks"
@@ -375,7 +417,10 @@ fn read_sources_for_target(
             .filter(|table| table.is_exported_for(target_tags)),
         Some(target_tags),
     )?;
-    DataLoader::new(data_root).read_sources_with_pool(&source_read_plan, pool)
+    let data_root = data_root.to_path_buf();
+    Ok(Box::new(move || {
+        DataLoader::new(&data_root).read_sources_with_pool(&source_read_plan, pool)
+    }))
 }
 
 fn build_target_local_dag(
@@ -947,7 +992,7 @@ mod tests {
     }
 
     #[test]
-    fn meta_link_and_source_read_overlap_before_normalize_join() {
+    fn link_codegen_and_source_read_overlap_before_normalize_join() {
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(2)
             .build()
@@ -960,14 +1005,17 @@ mod tests {
         let source_started_for_source = source_started.clone();
         let started_at = Instant::now();
 
-        let (linked_meta, raw_sources) = join_meta_link_and_source_read(
+        let ((linked_meta, code_output), raw_sources) = join_link_codegen_and_source_read(
             || {
                 thread::sleep(Duration::from_millis(40));
                 if source_started_for_link.load(Ordering::SeqCst) {
                     link_observed_source_for_link.store(true, Ordering::SeqCst);
                 }
                 thread::sleep(Duration::from_millis(40));
-                meta.link().map_err(ConfigForgeError::MetaValidation)
+                Ok((
+                    meta.link().map_err(ConfigForgeError::MetaValidation)?,
+                    empty_dag_output(),
+                ))
             },
             Some(|| {
                 source_started_for_source.store(true, Ordering::SeqCst);
@@ -979,9 +1027,48 @@ mod tests {
         .expect("meta link and source read should finish");
 
         assert!(linked_meta.table("items").is_some());
+        assert!(code_output.export_outputs.is_empty());
         assert!(raw_sources.is_some());
         assert!(link_observed_source.load(Ordering::SeqCst));
         assert!(started_at.elapsed() < Duration::from_millis(140));
+    }
+
+    #[test]
+    fn codegen_branch_can_start_before_source_read_finishes() {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .expect("pool should build");
+        let meta = minimal_meta_model();
+        let source_finished = Arc::new(AtomicBool::new(false));
+        let codegen_observed_source_unfinished = Arc::new(AtomicBool::new(false));
+        let source_finished_for_codegen = source_finished.clone();
+        let codegen_observed_source_unfinished_for_codegen =
+            codegen_observed_source_unfinished.clone();
+        let source_finished_for_source = source_finished.clone();
+
+        let ((linked_meta, _code_output), raw_sources) = join_link_codegen_and_source_read(
+            || {
+                thread::sleep(Duration::from_millis(20));
+                let linked_meta = meta.link().map_err(ConfigForgeError::MetaValidation)?;
+                if !source_finished_for_codegen.load(Ordering::SeqCst) {
+                    codegen_observed_source_unfinished_for_codegen.store(true, Ordering::SeqCst);
+                }
+                Ok((linked_meta, empty_dag_output()))
+            },
+            Some(|| {
+                thread::sleep(Duration::from_millis(100));
+                source_finished_for_source.store(true, Ordering::SeqCst);
+                Ok(empty_raw_sources())
+            }),
+            &pool,
+        )
+        .expect("pipeline branches should finish");
+
+        assert!(linked_meta.table("items").is_some());
+        assert!(raw_sources.is_some());
+        assert!(source_finished.load(Ordering::SeqCst));
+        assert!(codegen_observed_source_unfinished.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -990,7 +1077,7 @@ mod tests {
             .num_threads(2)
             .build()
             .expect("pool should build");
-        let result = join_meta_link_and_source_read(
+        let result = join_link_codegen_and_source_read(
             || Err(ConfigForgeError::Validation("meta failed".to_owned())),
             Some(|| Err(ConfigForgeError::Validation("source failed".to_owned()))),
             &pool,
@@ -1021,8 +1108,7 @@ mod tests {
             prepare_build_inputs(&meta, &plan, &TargetTags::new(["client"]), None, &pool)
                 .expect("code-only preparation should not require project.input");
 
-        assert!(prepared.linked_meta.table("items").is_some());
-        assert!(prepared.raw_sources.is_none());
+        assert!(prepared.read_sources.is_none());
     }
 
     #[test]
@@ -1200,5 +1286,13 @@ mod tests {
 
     fn empty_raw_sources() -> RawSourceData {
         RawSourceData::new(DataSet::try_new(Vec::new()).expect("empty data set should build"))
+    }
+
+    fn empty_dag_output() -> DagBranchOutput {
+        DagBranchOutput {
+            warnings: Vec::new(),
+            export_outputs: Vec::new(),
+            runtime_results: Vec::new(),
+        }
     }
 }

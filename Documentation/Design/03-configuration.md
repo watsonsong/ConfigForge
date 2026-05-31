@@ -294,7 +294,7 @@ Exporter 注册表需要声明每个 `type` 的 dependency contract：
 
 ### 3.5.2 DAG 编排原则
 
-统一 exporter task 后，Build 不再写死 “先 data 后 code” 两段流程，而是按 dependency contract 建立 target-local execution view。当前实现已经按 `MetaOnly` / `MetaAndData` 拆成两个可并行分支执行，并构造 `BuildDagNodeKey` 作为测试与未来通用 executor 的 skeleton；阶段式 tracing 已通过 `BuildTrace` / `--trace-tasks` 落地，但这些 node key 尚未交给完整 DAG 调度器或缓存层执行。
+统一 exporter task 后，Build 不再写死 “先 data 后 code” 两段流程，而是按 dependency contract 建立 target-local execution view。当前实现保持阶段式 executor，不引入完整通用 DAG 调度器；它会先构造 `BuildDagNodeKey` 作为测试与未来 executor 的 skeleton，再按依赖执行：`SourceRead` 可与 `LinkMeta` 并行，`LinkMeta` 完成后立即启动 `MetaOnly` codegen，因此 mixed target 中 codegen 不再等待 source read / normalize / validation 完成。阶段式 tracing 已通过 `BuildTrace` / `--trace-tasks` 落地，但这些 node key 尚未交给完整 DAG 调度器或缓存层执行。
 
 目标态 target-local DAG 形态：
 
@@ -317,7 +317,7 @@ DAG key 必须包含 dependency 语义；当前 skeleton 中涉及 target tags �
 - `ExporterTask` key：`(target name, task name)`。
 - Artifact path 冲突检查是 DAG 汇总后的全局步骤，不属于单个 exporter 私有逻辑。
 
-DAG 的收益是：只依赖 Meta 的 codegen 可与 data load 并行；同一 target 下的 JSON/MessagePack/bin/Lua/POT 共享同一次 DataLoadPlan、加载、归一化和校验；未来多 target 批量构建、增量缓存、远程执行、artifact manifest 都有稳定节点边界。
+DAG 的收益是：只依赖 Meta 的 codegen 可与 data load 并行；同一 target 下的 JSON/MessagePack/bin/Lua/POT 共享同一次 DataLoadPlan、加载、归一化和校验；未来多 target 批量构建、增量缓存、远程执行、artifact manifest 都有稳定节点边界。当前阶段 A 的执行范围是“继续阶段式，但把 mixed target 的 codegen 提前”：先保留现有 stage trace 和稳定 artifact 汇总，只调整 branch 启动时机，不引入 node-level ready queue。
 
 路径基准规则：
 
