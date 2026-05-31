@@ -394,6 +394,11 @@ fn data_resolver_resolves_expanded_structs_with_typed_scalars_and_defaults() {
         attributes["attack"].source.kind,
         ValueSourceKind::ExplicitCell
     );
+    assert_eq!(
+        attributes["attack"].source.raw_field_path,
+        "attributes.attack"
+    );
+    assert_eq!(attributes["attack"].source.raw_value.as_deref(), Some("10"));
 
     let DataValue::Struct(attributes_with_default) = &table.rows[1]["attributes"].value else {
         panic!("attributes should resolve as struct");
@@ -405,6 +410,17 @@ fn data_resolver_resolves_expanded_structs_with_typed_scalars_and_defaults() {
     assert_eq!(
         attributes_with_default["attack"].source.kind,
         ValueSourceKind::DefaultValue
+    );
+    assert_eq!(
+        attributes_with_default["attack"].source.raw_field_path,
+        "attributes.attack"
+    );
+    assert_eq!(
+        attributes_with_default["attack"]
+            .source
+            .raw_value
+            .as_deref(),
+        Some("1")
     );
 }
 

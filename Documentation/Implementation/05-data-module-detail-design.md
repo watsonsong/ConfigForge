@@ -282,6 +282,8 @@ Resolver 职责：
 5. 按 target tags 生成 target-specific resolved view，或在 `ResolvedValue` 中保留 visibility 信息供 ExportView 裁剪；
 6. 保留 raw string 和 source trace 以生成精确诊断。
 
+Resolver 内部通过只读 `ResolveContext` / `ValueContext` 传递当前 table、row、row source、source row number、target tags 与 field path。各层 helper 不再反复扩展 `table_name` / `row_number` / `row_source` / `target_tags` 参数列表；当递归进入 struct child、fragment field 或未来 expanded list/map path 时，只需要派生新的 `ValueContext`，诊断上下文、source trace 与 target visibility 会沿用同一入口。
+
 Typed value 解析规则集中在 `src/data/typed_value.rs`：
 
 - `parse_scalar_field_value()` / `parse_scalar_for_type()` 负责 primitive 与 enum 的字符串单元格到 `ScalarValue` 转换；bool、finite float、enum value membership 等规则只在这里定义。

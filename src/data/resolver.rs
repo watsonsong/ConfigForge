@@ -120,75 +120,156 @@ fn resolve_row(
     let active_fragments = row_source
         .map(|source| source.fragments.as_slice())
         .unwrap_or(&[]);
-    validate_source_schema(table_meta, row, row_number, active_fragments)?;
+    let context = ResolveContext {
+        table_name: table_meta.meta.name.as_str(),
+        row,
+        row_source,
+        row_number,
+        target_tags,
+    };
+    validate_source_schema(table_meta, &context, active_fragments)?;
 
     let mut resolved_row = ResolvedRow::new();
     for field in table_meta
         .fields
         .iter()
-        .filter(|field| field_is_visible(field, target_tags))
+        .filter(|field| context.field_is_visible(field))
     {
-        if let Some(value) = resolve_field_value(
-            table_meta.meta.name.as_str(),
-            row,
-            row_source,
-            row_number,
-            field.meta.name.as_str(),
-            field,
-            target_tags,
-        )? {
+        if let Some(value) = resolve_field_value(context.value(field.meta.name.as_str()), field)? {
             resolved_row.insert(field.meta.name.clone(), value);
         }
     }
 
     if table_meta.meta.kind == TableKind::Collection {
-        resolve_active_fragments(
-            table_meta,
-            row,
-            row_source,
-            row_number,
-            active_fragments,
-            target_tags,
-            &mut resolved_row,
-        )?;
+        resolve_active_fragments(table_meta, &context, active_fragments, &mut resolved_row)?;
     }
 
     Ok(resolved_row)
 }
 
+#[derive(Clone, Copy)]
+struct ResolveContext<'a> {
+    table_name: &'a str,
+    row: &'a DataRow,
+    row_source: Option<&'a RowSourceInfo>,
+    row_number: usize,
+    target_tags: Option<&'a TargetTags>,
+}
+
+impl<'a> ResolveContext<'a> {
+    fn value<'path>(&self, field_path: &'path str) -> ValueContext<'a, 'path> {
+        ValueContext {
+            table_name: self.table_name,
+            row: self.row,
+            row_source: self.row_source,
+            row_number: self.row_number,
+            target_tags: self.target_tags,
+            field_path,
+        }
+    }
+
+    fn field_is_visible(&self, field: &LinkedFieldMeta<'_>) -> bool {
+        field_is_visible(field, self.target_tags)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ValueContext<'a, 'path> {
+    table_name: &'a str,
+    row: &'a DataRow,
+    row_source: Option<&'a RowSourceInfo>,
+    row_number: usize,
+    target_tags: Option<&'a TargetTags>,
+    field_path: &'path str,
+}
+
+impl<'a, 'path> ValueContext<'a, 'path> {
+    fn at<'child>(&self, field_path: &'child str) -> ValueContext<'a, 'child> {
+        ValueContext {
+            table_name: self.table_name,
+            row: self.row,
+            row_source: self.row_source,
+            row_number: self.row_number,
+            target_tags: self.target_tags,
+            field_path,
+        }
+    }
+
+    fn parse_scalar_field(
+        &self,
+        field: &LinkedFieldMeta<'_>,
+        raw: &str,
+    ) -> Result<super::ScalarValue> {
+        parse_scalar_field_value(
+            self.table_name,
+            self.row_number,
+            self.field_path,
+            field,
+            raw,
+        )
+    }
+
+    fn parse_list_cell(
+        &self,
+        element_type: &LinkedField<'_>,
+        raw: &str,
+        source_kind: ValueSourceKind,
+    ) -> Result<Vec<super::ArrayElementValue>> {
+        parse_list_cell_value(
+            self.table_name,
+            self.row_number,
+            self.field_path,
+            element_type,
+            raw,
+            self.row_source,
+            source_kind,
+        )
+    }
+
+    fn json_value_to_scalar_cell(&self, value: &serde_json::Value) -> Result<String> {
+        json_value_to_scalar_cell_for_field(
+            value,
+            self.table_name,
+            self.row_number,
+            self.field_path,
+        )
+    }
+
+    fn explicit(&self, value: DataValue, raw: impl Into<String>) -> ResolvedValue {
+        ResolvedValue::explicit(self.field_path, value, raw, self.row_source)
+    }
+
+    fn defaulted(&self, value: DataValue, raw: impl Into<String>) -> ResolvedValue {
+        ResolvedValue::defaulted(self.field_path, value, raw, self.row_source)
+    }
+
+    fn computed_empty_object(&self, value: DataValue) -> ResolvedValue {
+        ResolvedValue::computed_empty_object(self.field_path, value, self.row_source)
+    }
+}
+
 fn resolve_active_fragments(
     table_meta: &LinkedTableMeta<'_>,
-    row: &DataRow,
-    row_source: Option<&RowSourceInfo>,
-    row_number: usize,
+    context: &ResolveContext<'_>,
     active_fragments: &[String],
-    target_tags: Option<&TargetTags>,
     resolved_row: &mut ResolvedRow,
 ) -> Result<()> {
     for fragment_name in active_fragments {
         let Some(fragment) = table_meta.fragment(fragment_name) else {
             continue;
         };
-        if target_tags.is_some_and(|target_tags| !fragment.meta.is_exported_for(target_tags)) {
+        if context
+            .target_tags
+            .is_some_and(|target_tags| !fragment.meta.is_exported_for(target_tags))
+        {
             continue;
         }
         if let Some(struct_type) = fragment.struct_type() {
-            let value = resolve_struct_occurrence_value(
-                table_meta.meta.name.as_str(),
-                row,
-                row_source,
-                row_number,
-                fragment.meta.name.as_str(),
-                struct_type,
-                target_tags,
-            )?
-            .unwrap_or_else(|| {
-                ResolvedValue::computed_empty_object(
-                    fragment.meta.name.clone(),
-                    DataValue::Struct(BTreeMap::new()),
-                    row_source,
-                )
-            });
+            let fragment_context = context.value(fragment.meta.name.as_str());
+            let value = resolve_struct_occurrence_value(fragment_context, struct_type)?
+                .unwrap_or_else(|| {
+                    fragment_context.computed_empty_object(DataValue::Struct(BTreeMap::new()))
+                });
             resolved_row.insert(fragment.meta.name.clone(), value);
             continue;
         }
@@ -197,91 +278,43 @@ fn resolve_active_fragments(
         for field in fragment
             .fields
             .iter()
-            .filter(|field| field_is_visible(field, target_tags))
+            .filter(|field| context.field_is_visible(field))
         {
             let field_path =
                 fragment_field_key(fragment.meta.name.as_str(), field.meta.name.as_str());
-            if let Some(value) = resolve_field_value(
-                table_meta.meta.name.as_str(),
-                row,
-                row_source,
-                row_number,
-                &field_path,
-                field,
-                target_tags,
-            )? {
+            if let Some(value) = resolve_field_value(context.value(&field_path), field)? {
                 fragment_object.insert(field.meta.name.clone(), value);
             }
         }
         resolved_row.insert(
             fragment.meta.name.clone(),
-            ResolvedValue::computed_empty_object(
-                fragment.meta.name.clone(),
-                DataValue::Struct(fragment_object),
-                row_source,
-            ),
+            context
+                .value(fragment.meta.name.as_str())
+                .computed_empty_object(DataValue::Struct(fragment_object)),
         );
     }
     Ok(())
 }
 
 fn resolve_field_value(
-    table_name: &str,
-    row: &DataRow,
-    row_source: Option<&RowSourceInfo>,
-    row_number: usize,
-    field_path: &str,
+    context: ValueContext<'_, '_>,
     field: &LinkedFieldMeta<'_>,
-    target_tags: Option<&TargetTags>,
 ) -> Result<Option<ResolvedValue>> {
     match &field.linked_field {
-        LinkedField::Struct(struct_type) => resolve_struct_occurrence_value(
-            table_name,
-            row,
-            row_source,
-            row_number,
-            field_path,
-            struct_type,
-            target_tags,
-        ),
-        LinkedField::List(element_type) => resolve_list_cell_value(
-            table_name,
-            row,
-            row_source,
-            row_number,
-            field_path,
-            element_type,
-            field,
-        ),
-        _ => resolve_scalar_cell_value(table_name, row, row_source, row_number, field_path, field),
+        LinkedField::Struct(struct_type) => resolve_struct_occurrence_value(context, struct_type),
+        LinkedField::List(element_type) => resolve_list_cell_value(context, element_type, field),
+        _ => resolve_scalar_cell_value(context, field),
     }
 }
 
 fn resolve_list_cell_value(
-    table_name: &str,
-    row: &DataRow,
-    row_source: Option<&RowSourceInfo>,
-    row_number: usize,
-    field_path: &str,
+    context: ValueContext<'_, '_>,
     element_type: &LinkedField<'_>,
     field: &LinkedFieldMeta<'_>,
 ) -> Result<Option<ResolvedValue>> {
-    if let Some(raw) = non_empty_row_value(row, field_path) {
-        let array = parse_list_cell_value(
-            table_name,
-            row_number,
-            field_path,
-            element_type,
-            raw,
-            row_source,
-            ValueSourceKind::ExplicitCell,
-        )?;
-        return Ok(Some(ResolvedValue::explicit(
-            field_path,
-            DataValue::Array(array),
-            raw,
-            row_source,
-        )));
+    if let Some(raw) = non_empty_row_value(context.row, context.field_path) {
+        let array = context.parse_list_cell(element_type, raw, ValueSourceKind::ExplicitCell)?;
+        return Ok(Some(context.explicit(DataValue::Array(array), raw)));
     }
 
     let Some(default) = field.meta.default.as_ref() else {
@@ -294,42 +327,20 @@ fn resolve_list_cell_value(
     let raw = json_value_to_cell(&default_value).map_err(|_| {
         ConfigForgeError::Validation(format!(
             "table `{}` row {} field `{}` must be a JSON array",
-            table_name, row_number, field_path
+            context.table_name, context.row_number, context.field_path
         ))
     })?;
-    let array = parse_list_cell_value(
-        table_name,
-        row_number,
-        field_path,
-        element_type,
-        &raw,
-        row_source,
-        ValueSourceKind::DefaultValue,
-    )?;
-    Ok(Some(ResolvedValue::defaulted(
-        field_path,
-        DataValue::Array(array),
-        raw,
-        row_source,
-    )))
+    let array = context.parse_list_cell(element_type, &raw, ValueSourceKind::DefaultValue)?;
+    Ok(Some(context.defaulted(DataValue::Array(array), raw)))
 }
 
 fn resolve_scalar_cell_value(
-    table_name: &str,
-    row: &DataRow,
-    row_source: Option<&RowSourceInfo>,
-    row_number: usize,
-    field_path: &str,
+    context: ValueContext<'_, '_>,
     field: &LinkedFieldMeta<'_>,
 ) -> Result<Option<ResolvedValue>> {
-    if let Some(raw) = non_empty_row_value(row, field_path) {
-        let scalar = parse_scalar_field_value(table_name, row_number, field_path, field, raw)?;
-        return Ok(Some(ResolvedValue::explicit(
-            field_path,
-            DataValue::Scalar(scalar),
-            raw,
-            row_source,
-        )));
+    if let Some(raw) = non_empty_row_value(context.row, context.field_path) {
+        let scalar = context.parse_scalar_field(field, raw)?;
+        return Ok(Some(context.explicit(DataValue::Scalar(scalar), raw)));
     }
 
     let Some(default) = field.meta.default.as_ref() else {
@@ -339,58 +350,27 @@ fn resolve_scalar_cell_value(
     if json_value_is_empty(&default_value) {
         return Ok(None);
     }
-    let raw =
-        json_value_to_scalar_cell_for_field(&default_value, table_name, row_number, field_path)?;
-    let scalar = parse_scalar_field_value(table_name, row_number, field_path, field, &raw)?;
-    Ok(Some(ResolvedValue::defaulted(
-        field_path,
-        DataValue::Scalar(scalar),
-        raw,
-        row_source,
-    )))
+    let raw = context.json_value_to_scalar_cell(&default_value)?;
+    let scalar = context.parse_scalar_field(field, &raw)?;
+    Ok(Some(context.defaulted(DataValue::Scalar(scalar), raw)))
 }
 
 fn resolve_struct_occurrence_value(
-    table_name: &str,
-    row: &DataRow,
-    row_source: Option<&RowSourceInfo>,
-    row_number: usize,
-    field_path: &str,
+    context: ValueContext<'_, '_>,
     struct_type: &LinkedStructType<'_>,
-    target_tags: Option<&TargetTags>,
 ) -> Result<Option<ResolvedValue>> {
-    if let Some(raw) = non_empty_row_value(row, field_path) {
+    if let Some(raw) = non_empty_row_value(context.row, context.field_path) {
         let value: serde_json::Value = serde_json::from_str(raw).map_err(|source| {
             ConfigForgeError::Validation(format!(
                 "table `{}` row {} field `{}` has invalid struct JSON: {}",
-                table_name, row_number, field_path, source
+                context.table_name, context.row_number, context.field_path, source
             ))
         })?;
-        let children = resolve_struct_json_value(
-            table_name,
-            row_source,
-            row_number,
-            field_path,
-            struct_type,
-            &value,
-            target_tags,
-        )?;
-        return Ok(Some(ResolvedValue::explicit(
-            field_path,
-            DataValue::Struct(children),
-            raw,
-            row_source,
-        )));
+        let children = resolve_struct_json_value(context, struct_type, &value)?;
+        return Ok(Some(context.explicit(DataValue::Struct(children), raw)));
     }
 
-    if !struct_occurrence_has_effective_value(
-        row,
-        field_path,
-        struct_type,
-        target_tags,
-        table_name,
-        row_number,
-    )? {
+    if !struct_occurrence_has_effective_value(context, struct_type)? {
         return Ok(None);
     }
 
@@ -398,49 +378,35 @@ fn resolve_struct_occurrence_value(
     for child in struct_type
         .fields
         .iter()
-        .filter(|child| field_is_visible(child, target_tags))
+        .filter(|child| field_is_visible(child, context.target_tags))
     {
-        let child_path = format!("{field_path}.{}", child.meta.name);
-        if let Some(value) = resolve_field_value(
-            table_name,
-            row,
-            row_source,
-            row_number,
-            &child_path,
-            child,
-            target_tags,
-        )? {
+        let child_path = format!("{}.{}", context.field_path, child.meta.name);
+        if let Some(value) = resolve_field_value(context.at(&child_path), child)? {
             children.insert(child.meta.name.clone(), value);
         }
     }
 
-    Ok(Some(ResolvedValue::computed_empty_object(
-        field_path,
-        DataValue::Struct(children),
-        row_source,
-    )))
+    Ok(Some(
+        context.computed_empty_object(DataValue::Struct(children)),
+    ))
 }
 
 fn resolve_struct_json_value(
-    table_name: &str,
-    row_source: Option<&RowSourceInfo>,
-    row_number: usize,
-    field_path: &str,
+    context: ValueContext<'_, '_>,
     struct_type: &LinkedStructType<'_>,
     value: &serde_json::Value,
-    target_tags: Option<&TargetTags>,
 ) -> Result<BTreeMap<String, ResolvedValue>> {
     let object = value.as_object().ok_or_else(|| {
         ConfigForgeError::Validation(format!(
             "table `{}` row {} field `{}` must be a JSON object for struct `{}`",
-            table_name, row_number, field_path, struct_type.meta.name
+            context.table_name, context.row_number, context.field_path, struct_type.meta.name
         ))
     })?;
     for key in object.keys() {
         if struct_child(struct_type, key).is_none() {
             return Err(ConfigForgeError::Validation(format!(
                 "table `{}` row {} field `{}` contains unknown struct key `{}`",
-                table_name, row_number, field_path, key
+                context.table_name, context.row_number, context.field_path, key
             )));
         }
     }
@@ -449,9 +415,10 @@ fn resolve_struct_json_value(
     for child in struct_type
         .fields
         .iter()
-        .filter(|child| field_is_visible(child, target_tags))
+        .filter(|child| field_is_visible(child, context.target_tags))
     {
-        let child_path = format!("{field_path}.{}", child.meta.name);
+        let child_path = format!("{}.{}", context.field_path, child.meta.name);
+        let child_context = context.at(&child_path);
         let default_value = child.meta.default.as_ref().map(toml_default_to_json_value);
         let Some(child_value) = object.get(&child.meta.name).or(default_value.as_ref()) else {
             continue;
@@ -462,41 +429,25 @@ fn resolve_struct_json_value(
         let source_is_default = !object.contains_key(&child.meta.name) && default_value.is_some();
         let resolved_value = match &child.linked_field {
             LinkedField::Struct(nested_struct) => {
-                let children = resolve_struct_json_value(
-                    table_name,
-                    row_source,
-                    row_number,
-                    &child_path,
-                    nested_struct,
-                    child_value,
-                    target_tags,
-                )?;
+                let children =
+                    resolve_struct_json_value(child_context, nested_struct, child_value)?;
                 let value = DataValue::Struct(children);
                 if source_is_default {
-                    ResolvedValue::defaulted(
-                        &child_path,
-                        value,
-                        child_value.to_string(),
-                        row_source,
-                    )
+                    child_context.defaulted(value, child_value.to_string())
                 } else {
-                    ResolvedValue::explicit(&child_path, value, child_value.to_string(), row_source)
+                    child_context.explicit(value, child_value.to_string())
                 }
             }
             LinkedField::List(element_type) => {
                 let raw = json_value_to_cell(child_value).map_err(|_| {
                     ConfigForgeError::Validation(format!(
                         "table `{}` row {} field `{}` must be a JSON array",
-                        table_name, row_number, child_path
+                        context.table_name, context.row_number, child_path
                     ))
                 })?;
-                let array = parse_list_cell_value(
-                    table_name,
-                    row_number,
-                    &child_path,
+                let array = child_context.parse_list_cell(
                     element_type,
                     &raw,
-                    row_source,
                     if source_is_default {
                         ValueSourceKind::DefaultValue
                     } else {
@@ -504,29 +455,18 @@ fn resolve_struct_json_value(
                     },
                 )?;
                 if source_is_default {
-                    ResolvedValue::defaulted(&child_path, DataValue::Array(array), raw, row_source)
+                    child_context.defaulted(DataValue::Array(array), raw)
                 } else {
-                    ResolvedValue::explicit(&child_path, DataValue::Array(array), raw, row_source)
+                    child_context.explicit(DataValue::Array(array), raw)
                 }
             }
             _ => {
-                let raw = json_value_to_scalar_cell_for_field(
-                    child_value,
-                    table_name,
-                    row_number,
-                    &child_path,
-                )?;
-                let scalar =
-                    parse_scalar_field_value(table_name, row_number, &child_path, child, &raw)?;
+                let raw = child_context.json_value_to_scalar_cell(child_value)?;
+                let scalar = child_context.parse_scalar_field(child, &raw)?;
                 if source_is_default {
-                    ResolvedValue::defaulted(
-                        &child_path,
-                        DataValue::Scalar(scalar),
-                        raw,
-                        row_source,
-                    )
+                    child_context.defaulted(DataValue::Scalar(scalar), raw)
                 } else {
-                    ResolvedValue::explicit(&child_path, DataValue::Scalar(scalar), raw, row_source)
+                    child_context.explicit(DataValue::Scalar(scalar), raw)
                 }
             }
         };
@@ -536,38 +476,28 @@ fn resolve_struct_json_value(
 }
 
 fn struct_occurrence_has_effective_value(
-    row: &DataRow,
-    field_path: &str,
+    context: ValueContext<'_, '_>,
     struct_type: &LinkedStructType<'_>,
-    target_tags: Option<&TargetTags>,
-    table_name: &str,
-    row_number: usize,
 ) -> Result<bool> {
-    if non_empty_row_value(row, field_path).is_some() {
+    if non_empty_row_value(context.row, context.field_path).is_some() {
         return Ok(true);
     }
 
     for child in struct_type
         .fields
         .iter()
-        .filter(|child| field_is_visible(child, target_tags))
+        .filter(|child| field_is_visible(child, context.target_tags))
     {
-        let child_path = format!("{field_path}.{}", child.meta.name);
+        let child_path = format!("{}.{}", context.field_path, child.meta.name);
+        let child_context = context.at(&child_path);
         match &child.linked_field {
             LinkedField::Struct(nested_struct) => {
-                if struct_occurrence_has_effective_value(
-                    row,
-                    &child_path,
-                    nested_struct,
-                    target_tags,
-                    table_name,
-                    row_number,
-                )? {
+                if struct_occurrence_has_effective_value(child_context, nested_struct)? {
                     return Ok(true);
                 }
             }
             LinkedField::List(element_type) => {
-                if non_empty_row_value(row, &child_path).is_some() {
+                if non_empty_row_value(context.row, &child_path).is_some() {
                     return Ok(true);
                 }
                 let Some(default) = child.meta.default.as_ref() else {
@@ -580,22 +510,14 @@ fn struct_occurrence_has_effective_value(
                 let raw = json_value_to_cell(&default_value).map_err(|_| {
                     ConfigForgeError::Validation(format!(
                         "table `{}` row {} field `{}` must be a JSON array",
-                        table_name, row_number, child_path
+                        context.table_name, context.row_number, child_path
                     ))
                 })?;
-                parse_list_cell_value(
-                    table_name,
-                    row_number,
-                    &child_path,
-                    element_type,
-                    &raw,
-                    None,
-                    ValueSourceKind::DefaultValue,
-                )?;
+                child_context.parse_list_cell(element_type, &raw, ValueSourceKind::DefaultValue)?;
                 return Ok(true);
             }
             _ => {
-                if non_empty_row_value(row, &child_path).is_some() {
+                if non_empty_row_value(context.row, &child_path).is_some() {
                     return Ok(true);
                 }
                 let Some(default) = child.meta.default.as_ref() else {
@@ -605,13 +527,8 @@ fn struct_occurrence_has_effective_value(
                 if json_value_is_empty(&default_value) {
                     continue;
                 }
-                let raw = json_value_to_scalar_cell_for_field(
-                    &default_value,
-                    table_name,
-                    row_number,
-                    &child_path,
-                )?;
-                parse_scalar_field_value(table_name, row_number, &child_path, child, &raw)?;
+                let raw = child_context.json_value_to_scalar_cell(&default_value)?;
+                child_context.parse_scalar_field(child, &raw)?;
                 return Ok(true);
             }
         }
@@ -622,19 +539,18 @@ fn struct_occurrence_has_effective_value(
 
 fn validate_source_schema(
     meta: &LinkedTableMeta<'_>,
-    row: &DataRow,
-    row_number: usize,
+    context: &ResolveContext<'_>,
     active_fragments: &[String],
 ) -> Result<()> {
-    for key in row.keys().filter(|key| key.contains('.')) {
-        validate_dotted_source_key(meta, key, row_number, active_fragments)?;
+    for key in context.row.keys().filter(|key| key.contains('.')) {
+        validate_dotted_source_key(meta, key, context.row_number, active_fragments)?;
     }
     if meta.meta.kind == TableKind::Object {
-        for key in row.keys().filter(|key| !key.contains('.')) {
+        for key in context.row.keys().filter(|key| !key.contains('.')) {
             if meta.field(key).is_none() {
                 return Err(ConfigForgeError::Validation(format!(
                     "object table `{}` row {} references unknown field key `{}`",
-                    meta.meta.name, row_number, key
+                    meta.meta.name, context.row_number, key
                 )));
             }
         }
@@ -644,8 +560,8 @@ fn validate_source_schema(
         if let LinkedField::Struct(struct_type) = &field.linked_field {
             validate_struct_layout_mixing_for_row(
                 meta.meta.name.as_str(),
-                row,
-                row_number,
+                context.row,
+                context.row_number,
                 field.meta.name.as_str(),
                 struct_type,
             )?;
@@ -660,8 +576,8 @@ fn validate_source_schema(
         };
         validate_struct_layout_mixing_for_row(
             meta.meta.name.as_str(),
-            row,
-            row_number,
+            context.row,
+            context.row_number,
             fragment.meta.name.as_str(),
             struct_type,
         )?;
