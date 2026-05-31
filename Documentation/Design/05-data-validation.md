@@ -31,7 +31,7 @@ ExportView 是针对某个 target tags 派生的视图。
 - `export = false` 常规运行时裁剪；
 - target-specific type mapping。
 
-常规 runtime exporter、special exporter 和 target-specific validation 默认读取 ExportView。
+常规 runtime data exporter、POT / asset manifest 等聚合 data exporter 和 target-specific validation 默认读取 ExportView。
 
 ## 5.2 ExportView 过滤规则
 
@@ -56,7 +56,7 @@ match = "any"
 - `override_sources[].export_when` 不匹配时，该 override source 不读取、不应用，也不参与后续校验。
 - `export = false` 优先级最高，永不进入 runtime ExportView。
 - `row_export` 引用的字段必须存在；这些字段可以 `export = false`，仍可参与行级过滤。
-- 被 `row_export` 排除的数据默认不参与该 target 的 runtime data、special exporter 和集合级校验。
+- 被 `row_export` 排除的数据默认不参与该 target 的 runtime data、POT / asset manifest 等聚合 data export 和集合级校验。
 
 ### 5.2.1 Polymorphic Fragment ExportView
 
@@ -191,7 +191,7 @@ typed fragment payload 目标态下，Validation 应把 `[[tables.fragments]] ty
 - `fragment.child.grandchild` 按 named struct 的 recursive child path 解析，不受 inline fragment “两段 path” 限制；
 - inactive typed fragment 的 `fragment.*` 仍报 inactive fragment field，而不是当作普通未知注释列；
 - required/default/type/enum/range 等 child value validation 按 target-visible struct child 执行；fragment 自身的 presence 由 source fragments 决定，不另设 fragment-level required；
-- runtime export 与 special exporter 读取 target ExportView，server target 不应因 client-only typed fragment child 缺失而失败。
+- runtime export 与聚合 data exporter 读取 target ExportView，server target 不应因 client-only typed fragment child 缺失而失败。
 
 ### 5.6.2 Data load / merge validation
 
@@ -281,17 +281,25 @@ Text 字段第一阶段推荐使用原文驱动模型：
 - text 字段可以通过额外的映射列或映射行提供 translator comment，用于解释翻译语境、语气、变量含义或 UI 使用场景；
 - 被 filter 排除的记录不进入该 target 的 POT。
 
+POT / text 相关校验目标态应补充：
+
+- `text` 原文非空规则仍遵循 required / optional field 规则；POT exporter 不负责把空文本升级为 required error。
+- 如果启用显式 context / key 列，validation 应检查同一 text field 的 key/context 语法合法、没有非法控制字符，且 optional text 的辅助列不会在主 text 为空时单独产生条目。
+- 如果启用 placeholder schema，validation 应检查 source text、translator comment 和未来外部 catalog 中的占位符集合一致，避免运行时格式化失败。
+- 如果启用 plural / gender / select 等高级国际化类型，应由对应 field type 或 validator 明确承担结构校验，不应把 primitive `text` 的语义无限扩张。
+- target-aware validation 只检查当前 ExportView 中可见 text；被 `row_export`、`export_when` 或 fragment visibility 排除的文本不产生 POT 条目，也不产生 POT 相关错误。
+
 当前实现状态：`text` 仍按 string-like scalar 解析和 runtime data 导出，尚未实现国际化 key/context、POT exporter、translator comment 或文本资源诊断。标准参考游戏 fixture 中 item/class name、class description 等字段用于表达目标语义：客户端需要 text，服务器通常不需要；target ExportView 过滤后，server target 不应输出这些字段，也不应把它们送入未来 POT / text validation。
 
-## 5.9 Special Exporter 输入
+## 5.9 聚合 Data Exporter 输入
 
-Special exporter 默认读取 target 的 ExportView，而不是 Full DataSet。
+POT、asset manifest 等聚合 data exporter 默认读取 target 的 ExportView，而不是 Full DataSet。
 
 影响：
 
 - shipping 排除的测试行，其文本不进入 POT。
 - shipping 排除的测试行，其资源不进入 asset manifest。
-- `export = false` 字段默认不进入 runtime data，但若 `special_exports` 或 exporter policy 允许，可在未被 record filter 排除的前提下被 special exporter 使用。
+- `export = false` 字段默认不进入 runtime data；若未来字段策略或 exporter policy 允许某个聚合格式读取辅助字段，可在未被 record filter 排除的前提下被该 data exporter 使用。
 
 ## 5.10 诊断要求
 

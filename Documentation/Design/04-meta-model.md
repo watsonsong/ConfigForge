@@ -44,7 +44,7 @@ Meta 支持在各个定义层级声明 `desc`，用于描述该定义的业务�
 
 1. 作为 Meta 配置中的原生文档说明，替代只能依赖 TOML/XML 注释的做法。
 2. 被代码生成器转换为目标语言中的文档注释，例如 TypeScript `/** ... */`、C# XML doc、Lua annotation 注释等。
-3. 被特殊导出器或辅助文档生成器用作 translator comment、字段说明或配置文档内容。
+3. 被 POT 等聚合 data exporter 或辅助文档生成器用作 translator comment、字段说明或配置文档内容。
 
 支持 `desc` 的推荐层级：
 
@@ -310,7 +310,7 @@ desc = "商店购买价格。"
 | `layout` | 复合值 source layout 的历史字段；named struct 字段不再通过 Meta 指定 JSON cell 或 expanded value，必须由 CSV/source 中实际出现的是 parent path 还是 child paths 自动决定。 |
 | `export` | 是否允许进入 runtime ExportView；`false` 表示强制不导出。 |
 | `export_when` | 按 target tags 判断是否进入当前 ExportView。 |
-| `special_exports` | 是否允许特殊导出器读取。 |
+| `data_exports` | 是否允许特定聚合 data exporter 读取。 |
 
 字段路径相关命名规则：
 
@@ -480,6 +480,8 @@ Meta 导出机制使用 `export`、`export_when` 与 `row_export`；以下字段
 | `string` | 普通字符串。 |
 | `text` | 国际化文本逻辑值。 |
 | `asset` | 资源引用逻辑值。 |
+
+`text` 与 `string` 的 runtime 基础表示第一阶段相同，都是 UTF-8 字符串；差异在语义层：`text` 会被国际化相关 validation、`format = "gettext_pot"` data exporter 和生成代码翻译 helper 识别。默认模型为“原文驱动”：source cell 直接写默认语言原文，POT exporter 使用它作为 `msgid`。未来可通过字段 option 或 target policy 扩展为 key-driven text、富文本、复数文本等，但这些扩展必须显式建模，不应让普通 `string` 隐式参与国际化导出。
 
 ### Builtin Value Types
 

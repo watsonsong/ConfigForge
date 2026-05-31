@@ -207,15 +207,16 @@ pub struct CodeExportTarget {
 
 `CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.code]]`。生成代码必须保持格式无关：CodeModel 只依赖 Meta 和 target tags，table data file 常量使用逻辑表名（例如 `items`），实际解析 JSON / MessagePack / bin 由运行时传入的 loader / reader 实现决定。
 
-### 9.4.2.1 Runtime data format
+### 9.4.2.1 Data export format 与 codegen 关系
 
 解析规则：
 
 - Project Config 中 `[[targets.data]].format = "json"` 选择 JSON exporter。
 - Project Config 中 `[[targets.data]].format = "messagepack"` 选择 MessagePack exporter。
 - Project Config 中 `[[targets.data]].format = "bin"` 选择私有紧密二进制 exporter。
+- Project Config 中 `[[targets.data]].format = "gettext_pot"` / `"asset_manifest_csv"` 等目标态聚合格式仍属于 data task，但不产生 generated runtime loader 直接消费的 table data。
 - 可兼容解析 `"msgpack"` 为 MessagePack，但错误信息、文档、生成代码和 manifest 中统一使用规范名 `messagepack`。
-- Project Config 使用 `[[targets.data]]` 数组表表达 runtime data 导出任务。
+- Project Config 使用 `[[targets.data]]` 数组表表达所有基于 source data / ExportView 的数据导出任务；codegen 只关心 Meta 和 target tags，不绑定任意 data task。
 
 Project Config 层建议模型（`TargetConfig` 是 project-level 聚合结构；`TargetDataConfig` 由 exporter 模块定义，`CodegenTaskConfig` 由 codegen 模块定义）：
 
@@ -232,6 +233,7 @@ pub struct TargetDataConfig {
     pub input: PathBuf,
     pub output: PathBuf,
     pub format: String,
+    pub options: toml::Value,
 }
 
 pub struct CodegenTaskConfig {
@@ -260,6 +262,7 @@ pub struct NormalizedTargetDataConfig {
     pub input: PathBuf,
     pub output: PathBuf,
     pub format: String,
+    pub options: toml::Value,
 }
 
 pub struct NormalizedCodegenTaskConfig {
@@ -741,6 +744,51 @@ C++ 默认：
 
 第一阶段建议 `asset` 先映射为字符串，后续通过 target type mapping 支持自定义 `AssetRef`。
 
+### 9.7.1.1 `text` 与国际化生成策略
+
+`text` 在 runtime 基础表示上仍映射为字符串，与 `string` 使用同一套 reader scalar API 和 runtime payload shape；区别在语义层：`text` 是可被 `format = "gettext_pot"` 聚合 data exporter 抽取、校验并在 generated code 中附加翻译访问 helper 的字段。生成器不得把普通 `string` 隐式视为可翻译文本，也不得因为启用 POT exporter 改变 runtime data 中 `text` 字段的原始值。
+
+第一阶段采用原文驱动模型：source cell 保存默认语言原文，runtime data 保存同一原文，POT exporter 以该原文作为 `msgid`。因此生成代码需要同时支持两类访问：
+
+- **raw text**：原字段访问保持不变，例如 Rust `row.display_name: String`、C++ `row.display_name`、TypeScript `row.displayName: string`。这保证现有业务代码不因开启 i18n 而破坏，并提供翻译缺失时的天然 fallback。
+- **translated text helper**：对 `CodeTypeRef::Text` 字段额外生成可选 helper，由调用方传入 translator/lookup 对象，把 raw text、上下文和字段来源映射为目标语言文本。
+
+推荐的语言无关 translator contract：
+
+```text
+TextTranslator
+  translate(msgid, context?, source?) -> translated string or missing
+```
+
+其中：
+
+- `msgid` 来自 raw text 字段值；
+- `context` 来自字段级配置、POT exporter policy 或未来 key-driven 模型的 text context；
+- `source` 是可选诊断信息，例如 `table`、`field_path`、`record_key`，便于 translator 选择 domain 或记录缺失翻译；
+- translator 缺失、返回 missing 或返回空 optional 时，generated helper 默认 fallback 到 raw text。若业务希望严格模式，应由 translator 自身抛错 / 返回 error，或由后续 codegen option 控制。
+
+推荐 API 形态：
+
+| Language | Raw access | Translated helper |
+| --- | --- | --- |
+| Rust | `row.display_name: String` | `row.display_name_text(&translator) -> String` 或 `RuntimeDataResult<String>` |
+| C++ | `row.display_name` | `row.DisplayNameText(translator)` 返回 `std::string` 或 Result |
+| TypeScript | `row.displayName: string` | `row.displayNameText(translator): string` |
+
+命名规则：
+
+- helper 名称由字段生成名追加稳定后缀派生，例如 `_text` / `Text` / `Text`；若字段本身已经以 `text` 结尾，仍使用同一后缀策略并进入冲突检测，而不是特殊省略。
+- helper 与普通字段、fragment getter、relation helper、index function、lazy helper 同处一个 row/object API scope，必须纳入 `symbols.rs` 的目标语言冲突检查。
+- translator helper 是 generated code API，不是 runtime payload 字段；它不参与 JSON / MessagePack / `bin` schema revision，不影响 index key、FK、relation cache 或 artifact manifest。
+
+缓存策略：默认不在 row/object 内缓存翻译结果。原因是翻译结果依赖语言、domain、运行时 locale、fallback chain 和 translator 实例，row 级缓存容易跨 locale 污染，也会增加生成代码状态复杂度。需要高性能翻译时，应由业务提供带缓存的 translator，缓存 key 至少包含 `(domain, context, msgid, locale)`；generated helper 只负责传入稳定 lookup 信息。
+
+未来 key-driven / rich text / plural 扩展：
+
+- key-driven 模型中，raw cell 可改为稳定 key，默认文案来自 companion column 或外部 catalog。此时 helper contract 应优先传 key，并可继续把 default text 作为 fallback；POT exporter 的 `msgid` 生成规则同步切换。
+- rich_text 应进入新的 `CodeTypeRef::RichText` 或 struct-like value，不复用 `string`；helper 返回目标语言的 rich text AST、markup string 或由语言 option 指定的类型。
+- format_text / plural / gender / select 应显式建模占位符和变量类型，translator contract 需要接受参数 map，并在 validation 阶段校验 source 与 translation placeholder 一致。普通 `text` helper 不隐式解析 `{name}` 或 `%s`。
+
 ### 9.7.2 Enum 映射
 
 - Rust：`enum ItemRarity { Common, Rare }`，建议 derive `Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize`。
@@ -854,6 +902,35 @@ Rust `linked_field` 生成规则：
 - DataSet facade 生成 `pub fn link_all(&self) -> Result<(), RuntimeDataError>`，按 CodeModel table 顺序调用各 table 的 `link`。只要全部 cache 存 row index，FK 环不会导致 borrow cycle；getter 返回值生命周期仍绑定到 `&GameData`。
 - 如果目标 row 已被缓存为 index，但后续通过 index 取 row 时越界，应返回 data/code mismatch 错误；正常生成代码不提供可变 rows API，因此越界只可能来自版本不一致或内部 bug。
 
+Rust `text` 翻译 helper 生成规则：
+
+- 对每个 `CodeTypeRef::Text` 字段，在 row/object `impl` 中生成 helper；普通字段仍保留 `pub <field>: String`。
+- 生成轻量 translator trait，或允许用户类型实现等价 lookup trait。推荐第一阶段：
+
+```rust
+pub struct TextSource<'a> {
+    pub table: &'static str,
+    pub field_path: &'static str,
+    pub record_key: Option<&'a str>,
+}
+
+pub trait TextTranslator {
+    fn translate(&self, msgid: &str, context: Option<&str>, source: TextSource<'_>) -> Option<String>;
+}
+
+impl ItemRow {
+    pub fn display_name_text(&self, translator: &impl TextTranslator) -> String {
+        translator
+            .translate(&self.display_name, Some("items.display_name"), TextSource { table: "items", field_path: "display_name", record_key: None })
+            .unwrap_or_else(|| self.display_name.clone())
+    }
+}
+```
+
+- 如果未来 translator 需要返回错误，生成器可通过 option 切换为 `RuntimeDataResult<String>`；默认 helper 采用 fallback，不引入新的错误路径。
+- helper 返回 owned `String`，避免翻译值生命周期绑定到 translator 内部缓存实现。若业务要求零拷贝，可后续增加 `Cow<'a, str>` option。
+- `record_key` 第一阶段可为 `None`，后续可由 primary index 或 synthetic row key 填充；该信息只用于诊断/统计，不参与默认 gettext lookup key。
+
 ### 9.8.2 C++ 生成内容
 
 当前实现采用单文件头输出：`generated.hpp`。以下多文件布局仍是后续拆分方向：
@@ -937,6 +1014,36 @@ C++ `linked_field` 生成规则：
 - list FK 返回 `std::vector<const TargetRow*>` 或轻量 relation view；cache 保存 `std::vector<std::size_t>`，不保存 pointers。
 - Table 生成 `void Link(const GameData& data) const` 或 error-return 版本；DataSet 生成 `LinkAll()`，按确定性顺序调用所有 table/object 的 Link。
 
+C++ `text` 翻译 helper 生成规则：
+
+- Row/Object struct 保留 `std::string` raw 字段；对每个 text 字段生成 const helper method。
+- 推荐生成抽象 translator interface 或文档化 duck-typed template。若保持 ABI 简单，可使用纯虚接口：
+
+```cpp
+struct TextSource {
+    std::string_view table;
+    std::string_view field_path;
+    std::optional<std::string_view> record_key;
+};
+
+class ITextTranslator {
+public:
+    virtual ~ITextTranslator() = default;
+    virtual std::optional<std::string> Translate(
+        std::string_view msgid,
+        std::optional<std::string_view> context,
+        TextSource source) const = 0;
+};
+
+struct ItemRow {
+    std::string display_name;
+    std::string DisplayNameText(const ITextTranslator& translator) const;
+};
+```
+
+- helper 默认返回 `std::string`，translation missing 时复制 raw 字段作为 fallback。若项目采用异常或 Result 错误模型，translator 可自行抛错；生成器不把翻译缺失视为 runtime data error。
+- 不在 row 内保存 locale 或 translated cache；跨 locale cache 由 `ITextTranslator` 实现维护。
+
 ### 9.8.3 TypeScript 生成内容
 
 当前实现采用单文件输出：`generated.ts`。以下多文件布局仍是后续拆分方向：
@@ -1017,6 +1124,32 @@ TypeScript `linked_field` 生成规则：
 - optional FK 返回 `TargetRow | undefined`；list FK 返回 `readonly TargetRow[]`，内部按缓存 row indexes 映射到目标 repository `rowAt` 结果，并返回新数组，不暴露可变内部缓存。
 - 目标 unique index 额外生成私有语义的 `indexOfBy*` helper，relation method 首次访问或 `link(data)` 预解析时用它填充 cache。
 - Table 生成 `link(data: GameData): void` 遍历 rows；ObjectTable row 生成 `link(data)` method；DataSet 生成 `linkAll(): void`。若 lookup 失败，当前生成代码抛出 `Error`，错误信息包含 source relation 与 target index。
+
+TypeScript `text` 翻译 helper 生成规则：
+
+- Interface 中保留 raw 字段，例如 `displayName: string`；helper 可以作为 row object method 生成，也可以生成模块级函数。为了与现有 relation helper 的 plain object 策略一致，推荐在需要 helper 时给 object literal 绑定模块级函数引用，避免每条 row 创建闭包。
+- 推荐生成 translator interface：
+
+```ts
+export interface TextSource {
+  readonly table: string;
+  readonly fieldPath: string;
+  readonly recordKey?: string;
+}
+
+export interface TextTranslator {
+  translate(msgid: string, context: string | undefined, source: TextSource): string | undefined;
+}
+
+export interface ItemRow {
+  displayName: string;
+  displayNameText(translator: TextTranslator): string;
+}
+```
+
+- helper 默认同步返回 string。异步远程翻译不应混入基础 row helper；业务应在 translator 内预加载 catalog，或未来通过单独 option 生成 `displayNameTextAsync`。
+- helper fallback 到 raw text，不抛出翻译缺失错误；若 translator 抛错，错误按普通业务异常传播。
+- helper method、relation method、`link(data)` 和 cache slot 同属 row/object object literal scope；命名冲突必须在生成前发现。
 
 ### 9.8.4 Table-level lazy load 生成设计（目标态）
 
@@ -1784,7 +1917,7 @@ CI 中三方依赖策略：
 runtime data format 由 data export registry 选择，并通过 `RuntimeDataFile.format` 显式传给 codegen；文件名后缀只描述 artifact path，不作为 reader layout 的唯一来源。当前 codegen 层不再生成 `RuntimeDataFormat` 类型。目标态可用枚举描述如下：
 
 ```rust
-pub enum TargetDataFormat {
+pub enum RuntimeTableDataFormat {
     Json,
     MessagePack,
     Bin,
@@ -1794,15 +1927,15 @@ pub enum TargetDataFormat {
 写出流程：
 
 1. Project Config load 后先构造 `NormalizedTargetConfig`，完成 data task name 规范化，并拒绝 code task 的 `data` 字段。
-2. `build_target` 消费当前 target 的 `Vec<NormalizedTargetDataConfig>`。没有 data task 时跳过 runtime data 导出，进入 code-only 流程。
+2. `build_target` 消费当前 target 的 `Vec<NormalizedTargetDataConfig>`。没有 data task 时跳过 data export，进入 code-only 流程。
 3. 按 `NormalizedTargetDataConfig.input` 分组。每个不同 input 构造一次 `DataLoadPlan`，使用 `DataLoader::new(data_root)` 加载；Meta 中 source path 继续由 `data_root.join(source.path)` 解析。
-4. 对每个不同 input 的 DataSet 执行 normalize、target validation，并派生 DataSet-dependent ExportView；同 input 的 JSON / MessagePack / Bin 等多个 data task 复用该结果。不同 input 即使属于同一 target，也不能复用另一个 input 的 DataSet / validation view / concrete ExportView。
-5. 每个 data task 根据自身 `format` 从 `DataFormatRegistry` 选择 exporter，根据自身 `output` 写出一套 runtime data artifact。
+4. 对每个不同 input 的 DataSet 执行 normalize、target validation，并派生 DataSet-dependent ExportView；同 input 的 JSON / MessagePack / Bin / gettext_pot 等多个 data task 复用该结果。不同 input 即使属于同一 target，也不能复用另一个 input 的 DataSet / validation view / concrete ExportView。
+5. 每个 data task 根据自身 `format` 从 `DataFormatRegistry` 选择 exporter，根据自身 `output` 写出一套数据产物。table exporter 写出每表 runtime data artifact；aggregate exporter 写出 POT / manifest 等聚合 artifact。
 6. `Json` 使用 `serde_json::to_vec_pretty` 写出 `<table>.json`。
 7. `MessagePack` 使用 `rmp_serde::to_vec_named` 或等价 named-field 编码写出 `<table>.msgpack`。
-8. 每个 data task 返回独立的 `RuntimeConfigForgeResult { data_name, input, output, format, files }`，其中 `RuntimeDataFile { table_name, path, format }` 必须使用真实写出的文件名和规范格式名。
+8. Runtime table data task 返回独立的 `RuntimeConfigForgeResult { data_name, input, output, format, files }`，其中 `RuntimeDataFile { table_name, path, format }` 必须使用真实写出的文件名和规范格式名；聚合 data task 返回普通 `Artifact` / manifest entry，不进入 generated runtime data file 列表。
 9. `write_generated_code` 不选择 data task，统一向 `CodeExportInput` 传入空 `runtime_data_files`，让 CodeModel 使用逻辑表名。
-10. Artifact path 规划必须跨所有 data task、code task 和未来 special exporter 统一检查，不能只在 codegen 内检查 generated code 的重复路径。
+10. Artifact path 规划必须跨所有 data task 和 code task 统一检查，不能只在 codegen 内检查 generated code 的重复路径。
 
 依赖建议：
 
@@ -2018,7 +2151,7 @@ pub struct CodegenDiagnostic {
    - 单字段 unique index 查询；
    - 多字段联合 unique index 查询；
    - 目标语言对默认 data file 常量的引用。
-6. 如果未来标准工程新增 non-unique index、foreign-key helper、special exporter manifest 等生成代码能力，应在同一类 generated-code runtime test 中补充一个代表性断言，而不是为所有表重复写同构断言。
+6. 如果未来标准工程新增 non-unique index、foreign-key helper、聚合 data manifest 等生成代码能力，应在同一类 generated-code runtime test 中补充一个代表性断言，而不是为所有表重复写同构断言。
 
 测试 harness 的 loader 是测试代码，不是产品默认 loader。生成代码仍保持对文件系统、JSON/MessagePack 库和引擎资源系统无依赖；真实项目可以按自己的资源系统实现 loader。目标态下新增表或字段时，harness / 用户侧 loader 接口不应变化。
 
@@ -2094,7 +2227,7 @@ pub struct CodegenDiagnostic {
 1. runtime data 与 generated code 都以 `GeneratedFile`/artifact 形态参与写出。
 2. 已做输出路径冲突检查。
 3. CLI 支持 dry-run、direct write 和 `temp-commit` 写入模式；`--dry-run` 优先于 `--write-mode`。
-4. summary manifest 可作为 special exporter 产物独立实现。
+4. summary manifest 可作为 `targets.data` 的聚合导出格式独立实现。
 
 ## 9.19 第一阶段完成标准
 

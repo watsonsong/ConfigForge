@@ -208,14 +208,14 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 - `row_export` 引用不存在字段时报错。
 - 过滤后 collection validator 只检查剩余记录。
 
-### Special Exporter
+### 聚合 Data Exporter
 
 - POT 只包含 ExportView 中 text。
 - Asset manifest 只包含 ExportView 中 asset。
 - 被 shipping filter 排除的记录不进入 POT / asset manifest。
 - POT source reference 使用 source 表名和行列号。
 - text 字段的额外注释列/行能进入 translator comments。
-- special exporter 输出路径冲突报错。
+- 聚合 data exporter 输出路径冲突报错。
 
 ### Artifact Writer
 

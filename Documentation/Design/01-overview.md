@@ -11,7 +11,7 @@ ConfigForge 是面向游戏配置生产流程的命令行工具。它把策划�
 3. **在导出前发现配置错误**：通过确定性的校验阶段发现缺字段、类型错误、索引冲突、外键缺失、资源缺失等问题。
 4. **生成运行时友好产物**：输出 JSON、Lua table、SQLite 等运行时数据，以及代码、资源清单、国际化模板等辅助产物。
 5. **支持多目标导出**：同一份 Meta 与源数据可按不同 target、tag、平台、地区或构建模式导出不同结果。
-6. **支持长期扩展**：Source Provider、Data Exporter、Code Generator、Validator、Special Exporter 等能力可通过内置模块或插件扩展。
+6. **支持长期扩展**：Source Provider、Data Exporter、Code Generator、Validator 等能力可通过内置模块或插件扩展；POT、asset manifest 等辅助产物作为 Data Exporter 的聚合格式接入。
 
 ## 1.2 目标用户
 
@@ -35,7 +35,7 @@ ConfigForge 是面向游戏配置生产流程的命令行工具。它把策划�
 
 ### 发布包按上下文裁剪数据
 
-例如 shipping 包不应包含测试数据，某地区包不应包含其他地区配置。ConfigForge 支持 target tags，并通过 `export_when` 和 `row_export` 生成目标专属数据视图。过滤后的数据视图同时影响常规运行时数据和 special exporter 产物。
+例如 shipping 包不应包含测试数据，某地区包不应包含其他地区配置。ConfigForge 支持 target tags，并通过 `export_when` 和 `row_export` 生成目标专属数据视图。过滤后的数据视图同时影响常规运行时数据和 POT / asset manifest 等聚合数据产物。
 
 ### 表内、表间一致性缺少自动检查
 
@@ -60,8 +60,8 @@ ConfigForge 支持 required/default、类型解析、枚举、索引唯一性、
 | Primary Index | 表的主索引。用于默认外键目标和 override identity，不是 primary key。 |
 | DataSet | Source 读取、组合后的完整逻辑数据集合。 |
 | ExportView | 针对某个 target tags 过滤后的导出数据视图。 |
-| Target | 一个导出目标，定义 tags、runtime data 输出、代码生成任务、输出目录等。 |
-| Special Exporter | 输出辅助产物的导出器，例如 POT、asset manifest。 |
+| Target | 一个导出目标，定义 tags、data 导出任务、代码生成任务、输出目录等。 |
+| 聚合 Data Exporter | 输出跨表辅助数据产物的 data exporter，例如 POT、asset manifest。 |
 
 ## 1.5 当前范围
 
@@ -73,7 +73,7 @@ ConfigForge 支持 required/default、类型解析、枚举、索引唯一性、
 - 多 source split merge 和 override source 覆盖。
 - 多态 fragment 的 variant source mode。
 - 导出上下文 tag、记录/字段/fragment 过滤。
-- 常规 runtime data export 和 special export。
+- 常规 runtime data export，以及 POT / asset manifest 等聚合 data export。
 - CLI validate/build/export 等命令的用户级参数。
 - 结构化诊断、确定性输出、可用于 CI 的报告格式。
 

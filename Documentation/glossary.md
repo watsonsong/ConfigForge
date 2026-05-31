@@ -52,7 +52,7 @@
 | 工具字段 | Tool-Only Field | `tool_only`, `ToolOnlyField` | 仅用于工具流程，默认不进入 runtime data。 |
 | 过滤字段 | Filter Field | `filter_field`, `FilterField` | 允许被 export filter 引用的字段。 |
 | 仅校验字段 | Validator-Only Field | `validator_only`, `ValidatorOnlyField` | 仅用于 validator，默认不进入 runtime data。 |
-| 特殊导出策略 | Special Export Policy | `special_exports` | 字段是否可被 POT、asset manifest 等 special exporter 使用。 |
+| 聚合数据导出策略 | Aggregate Data Export Policy | `data_exports` | 字段是否可被 POT、asset manifest 等聚合 data exporter 作为辅助字段读取。 |
 
 ## 字段类型术语
 
@@ -208,15 +208,15 @@
 | MessagePack 导出 | MessagePack Export | `MessagePackDataExporter` | 第一阶段支持的紧凑二进制 runtime data exporter，配置规范名为 `messagepack`。 |
 | SQLite 导出 | SQLite Export | `SqliteDataExporter` | 可扩展数据库 exporter。 |
 | Protobuf 导出 | Protobuf Export | `ProtobufDataExporter` | 未来扩展；需要显式 `field_number`。 |
-| 特殊导出器 | Special Exporter | `SpecialExporter` | 输出辅助产物而非常规 runtime data。 |
-| POT 导出器 | Gettext POT Exporter | `GettextPotExporter` | 从 ExportView 中的 `text` 字段导出 POT。 |
+| 聚合数据导出器 | Aggregate Data Exporter | `AggregateDataExporter` | 输出跨表辅助数据产物的 data exporter，例如 POT、asset manifest。 |
+| POT 导出器 | Gettext POT Exporter | `GettextPotExporter` | `format = "gettext_pot"`；从 ExportView 中的 `text` 字段导出 POT。 |
 | 翻译注释 | Translator Comment | `TranslatorComment` | POT 中给翻译人员的注释，可来自 text 字段、`desc` 或 source 中额外映射的注释列/行。 |
 | 资源清单导出器 | Asset Manifest Exporter | `AssetManifestExporter` | 从 ExportView 中的 `asset` 字段导出资源清单。 |
 | 代码生成器 | Code Generator | `CodeGenerator` | 根据 Meta/ExportView 生成目标语言代码或访问 API。 |
 | 类型映射 | Type Mapping | `TypeMapping` | 逻辑类型到目标语言/引擎类型的映射。 |
 | 目标类型 | Target Type | `TargetTypeName` | 目标语言或引擎中的具体类型名。 |
 | 导出产物 | Export Artifact | `ExportArtifact` | 一个生成文件，例如 runtime data、code、POT、asset manifest。 |
-| 产物清单 | Artifact Manifest | `ArtifactManifest` | 可由 special exporter 生成的本次导出产物列表。 |
+| 产物清单 | Artifact Manifest | `ArtifactManifest` | 可由聚合 data exporter 生成的本次导出产物列表。 |
 | 产物写入器 | Artifact Writer | `ArtifactWriter` | 统一写文件、dry-run 和 temp-commit 的组件。 |
 | 产物写入策略 | Artifact Write Mode | `ArtifactWriteMode` | `dry-run`、`direct` 或 `temp-commit`。 |
 | 临时提交写入 | Temp Commit Write | `ArtifactWriteMode::TempCommit`, `temp-commit` | 先写临时文件，成功后统一提交到最终路径。 |
@@ -234,13 +234,12 @@
 | 插件 | Plugin | `Plugin` | 内置或动态加载的能力扩展。 |
 | 动态库插件 | Dynamic Library Plugin | `DynamicPlugin`, `PluginLibrary` | `.dylib`、`.so`、`.dll` 等动态库插件。 |
 | 插件清单 | Plugin Manifest | `PluginManifest` | 插件 ID、版本、API 版本和能力声明。 |
-| 插件能力 | Plugin Capability | `PluginCapability` | SourceProvider、DataExporter、CodeGenerator、Validator、BuiltinType、SpecialExporter 等能力。 |
+| 插件能力 | Plugin Capability | `PluginCapability` | SourceProvider、DataExporter、CodeGenerator、Validator、BuiltinType 等能力。 |
 | Source Provider Registry | Source Provider Registry | `SourceProviderRegistry` | provider ID 到 provider factory 的注册表。 |
-| Data Exporter Registry | Data Exporter Registry | `DataExporterRegistry` | runtime format 到 data exporter 的注册表。 |
+| Data Exporter Registry | Data Exporter Registry | `DataExporterRegistry` | data export format 到 table/aggregate data exporter 的注册表。 |
 | Code Generator Registry | Code Generator Registry | `CodeGeneratorRegistry` | language/target 到 code generator 的注册表。 |
 | Validator Registry | Validator Registry | `ValidatorRegistry` | validator kind 到 validator factory 的注册表。 |
 | Builtin Type Registry | Builtin Type Registry | `BuiltinTypeRegistry` | builtin value type 到 parser/validator 的注册表。 |
-| Special Exporter Registry | Special Exporter Registry | `SpecialExporterRegistry` | special exporter kind 到 exporter 的注册表。 |
 | 任务执行器 | Task Executor | `TaskExecutor` | 执行校验和导出任务，可并行。 |
 | 执行计划 | Execution Plan | `ExecutionPlan` | 并行执行前解析出的确定性任务计划。 |
 | 导出计划 | Export Plan | `ExportPlan` | artifact 生成前的计划，包含路径冲突检查。 |

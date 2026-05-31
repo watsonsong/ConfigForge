@@ -62,8 +62,7 @@ CLI Arguments
 - DataExporterRegistry；
 - CodeGeneratorRegistry；
 - ValidatorRegistry；
-- BuiltinTypeRegistry；
-- SpecialExporterRegistry。
+- BuiltinTypeRegistry。
 
 要求：
 
@@ -173,8 +172,8 @@ Full DataSet
 - override source 通过同样的 `export_when` 匹配 effective target tags；例如 `materials_s1.csv` 可以只在 CLI 传入 `--tag s1` 时覆盖基础 `materials.csv` 中的 Oak 售价。
 - `export = false` 是强制不导出；不再设计 `tool_only`、`validator_only`、`filter_field` 作为导出机制。
 - collection 表可通过 `row_export` 指定数据列控制行级导出，常用于 `debug` / `shipping` 行裁剪。
-- 被排除记录对应的 text、asset 等也默认不进入 special exporter 产物。
-- 若 special exporter 需要额外读取非 runtime 字段，必须由 exporter policy 显式声明，但仍受 target tags 过滤影响。
+- 被排除记录对应的 text、asset 等也默认不进入 POT / asset manifest 等聚合 data export 产物。
+- 若某个聚合 data exporter 需要额外读取非 runtime 字段，必须由字段策略或 exporter policy 显式声明，但仍受 target tags 过滤影响。
 
 ## 2.8 Validation 阶段
 

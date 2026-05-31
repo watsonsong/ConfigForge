@@ -35,8 +35,8 @@ For future technical overview design, detailed design, user manual writing, and 
 - `Design/02-execution-pipeline.md` — execution phases from CLI/config resolution to diagnostics and artifacts.
 - `Design/03-configuration.md` — project, Meta, source, target, plugin, and field policy configuration.
 - `Design/04-meta-model.md` — canonical Meta model for tables, fields, types, indexes, foreign keys, multi-source, and fragments.
-- `Design/05-data-validation.md` — data views, filtering, validation semantics, special exporter inputs, and diagnostics.
-- `Design/06-export-cli.md` — export targets, runtime data formats, special exporters, artifact model, and CLI commands.
+- `Design/05-data-validation.md` — data views, filtering, validation semantics, aggregate data exporter inputs, and diagnostics.
+- `Design/06-export-cli.md` — export targets, data export formats, artifact model, and CLI commands.
 - `Design/07-user-manual-and-qa.md` — user workflows, common operations, QA dimensions, and assertion guidance.
 
 ## Implementation Design Set

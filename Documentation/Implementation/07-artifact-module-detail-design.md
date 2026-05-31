@@ -1,6 +1,6 @@
 # 07. Artifact 模块详细设计
 
-本文档描述 `src/artifact/` 模块的实现边界。Artifact 模块负责统一管理 ConfigForge 的所有文件制品：runtime data、generated code、未来 special exporter 输出等。Exporter 和 Codegen 只负责生成制品内容与相对目标路径；Build 负责收集制品并调用 Artifact Writer 执行路径冲突检查、dry-run、direct 写入或 temp-commit 写入。
+本文档描述 `src/artifact/` 模块的实现边界。Artifact 模块负责统一管理 ConfigForge 的所有文件制品：runtime data、generated code、未来 POT / asset manifest 等聚合 data export 输出。Exporter 和 Codegen 只负责生成制品内容与相对目标路径；Build 负责收集制品并调用 Artifact Writer 执行路径冲突检查、dry-run、direct 写入或 temp-commit 写入。
 
 ## 7.1 设计目标
 

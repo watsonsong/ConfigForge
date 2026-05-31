@@ -10,9 +10,8 @@ Project Config
   -> Meta Files
       -> Tables / Fields / Indexes / Validators
   -> Target Config
-      -> Runtime Data Export
+      -> Data Export
       -> Code Generation
-      -> Special Exporters
   -> Plugin Config
   -> CLI Overrides
 ```
@@ -231,7 +230,7 @@ override_sources = [
 
 ## 3.5 Target Config
 
-Target Config 定义一次可构建的导出目标。一个 target 共享同一组 `TargetTags` 和同一套 Meta-level filtering 规则，并可以挂载 0 个、1 个或多个 runtime data 导出任务，以及 0 个、1 个或多个代码生成任务。具体的 DataSet-dependent ExportView 必须按 `(target tags, data input/DataSet)` 派生；只有 `input` 完全相同的 data task 才能复用同一次 source load、normalize、validation 和 concrete ExportView。
+Target Config 定义一次可构建的导出目标。一个 target 共享同一组 `TargetTags` 和同一套 Meta-level filtering 规则，并可以挂载 0 个、1 个或多个 data 导出任务，以及 0 个、1 个或多个代码生成任务。具体的 DataSet-dependent ExportView 必须按 `(target tags, data input/DataSet)` 派生；只有 `input` 完全相同的 data task 才能复用同一次 source load、normalize、validation 和 concrete ExportView。
 
 路径基准规则：
 
@@ -269,7 +268,7 @@ output = "Generated/Code/TypeScript"
 module_name = "gameConfig"
 ```
 
-Runtime data 导出任务使用 `[[targets.data]]` 数组形式；每个任务有独立 `name`、`input`、`output` 和 `format`。这样同一个 target 可以同时输出 JSON、MessagePack 等多套 runtime data。Project Config 使用 `[[targets.data]]` 数组表表达 runtime data 导出任务。
+Data 导出任务使用 `[[targets.data]]` 数组形式；每个任务有独立 `name`、`input`、`output` 和 `format`。这样同一个 target 可以同时输出 JSON、MessagePack 等多套 runtime data，也可以输出 gettext POT、asset manifest 等聚合数据产物。Project Config 使用 `[[targets.data]]` 数组表表达所有基于 source data / ExportView 的数据导出任务。
 
 一个 target 可以声明 0 个、1 个或多个代码生成任务。代码生成任务放在 `[[targets.code]]` 中；每个任务有独立语言、输出目录和语言专属参数。这样同一个 target 可以同时输出 runtime data、Rust 服务端访问代码、C++ 客户端访问代码和 TypeScript 工具链访问代码。
 
@@ -379,8 +378,9 @@ readonly_fields = true
 | --- | --- | --- |
 | `name` | 单 data task 可省略，规范化为 `default` | 当前 target 内稳定唯一的 data task 名称；多 data task 时必填。 |
 | `input` | 必填 | Source data 根目录。相对路径以 project root 或所在 import 片段目录为基准；Meta source path 以该目录为搜索基础。只有声明 `targets.data` 时才读取 source data。 |
-| `output` | 必填 | Runtime data 输出目录。相对路径以 project root 或所在 import 片段目录为基准。 |
-| `format` | `json` | Runtime data 格式。当前实现支持 `json` 和 `messagepack`。 |
+| `output` | 必填 | 数据产物输出目录。相对路径以 project root 或所在 import 片段目录为基准。运行时表数据按表规划文件；POT / manifest 等聚合格式按格式规则规划文件。 |
+| `format` | `json` | 数据导出格式。当前实现支持 runtime data 的 `json`、`messagepack` 和 `bin`；目标态扩展可注册 `gettext_pot`、`asset_manifest_csv` 等聚合数据格式。 |
+| format 子表 | 未设置 | 格式专属配置，例如 `[targets.data.gettext]` 可配置 `domain`、`file_name`、source reference 和 translator comments 策略。 |
 
 Data task 继承所在 target 的 effective target tags；当前没有 `[[targets.data]].tags` 字段。CLI extra tags 对同一 target 下所有 data/code task 一致生效，因此同一个构建里的 JSON / MessagePack / bin 输出和格式无关 codegen 必须基于同一组 effective target tags。
 
@@ -391,11 +391,11 @@ data task `name` 规范：
 - `name` 大小写敏感；只允许 ASCII 字母、数字、`_`、`-`，且必须以字母或数字开头和结尾。
 - 同一 target 下多个 data task 的规范化 `name` 必须唯一；保留名 `default` 允许作为显式名称，但仍遵守唯一性规则。
 
-多个 data task 可以共享同一个 `input`，实现应复用同一次加载、归一化和校验结果后写出不同格式。不同 `input` 表示同一 target tags 下的不同数据集，必须分别加载、归一化、校验并派生 DataSet-dependent ExportView。不同 data task 的最终输出文件路径不能相互覆盖，也不能与 code task 或未来 special exporter 的输出冲突；冲突检查基于规范化绝对 artifact path。
+多个 data task 可以共享同一个 `input`，实现应复用同一次加载、归一化和校验结果后写出不同格式。不同 `input` 表示同一 target tags 下的不同数据集，必须分别加载、归一化、校验并派生 DataSet-dependent ExportView。不同 data task 的最终输出文件路径不能相互覆盖，也不能与 code task 的输出冲突；冲突检查基于规范化绝对 artifact path。POT、asset manifest 等不再使用独立 `special_exporters` 配置，而是作为 `targets.data.format` 的可注册格式参与同一套冲突检查。
 
 `RuntimeDataFile.path` 表示相对当前 data artifact root / runtime loader root 的真实资源路径，例如 `items.json`。生成代码不再透传真实文件路径，而是使用逻辑表名（例如 `items`）；具体 runtime loader 决定如何把逻辑名映射到文件系统、包内资源或引擎资源中的具体格式文件。
 
-Planned / Not implemented：`engine`、`special_exporters`、POT、Asset Manifest、target-level `language` / `data_format` / `output` 属于未来扩展，当前 Project Config 不应使用这些字段。
+Planned / Not implemented：`engine`、`format = "gettext_pot"`、`format = "asset_manifest_csv"`、target-level `language` / `data_format` / `output` 属于未来扩展；不再规划 `special_exporters` 字段，POT 和 Asset Manifest 后续应通过 `[[targets.data]]` 扩展格式接入。
 
 `targets.code` 字段：
 
@@ -473,7 +473,7 @@ Planned / Not implemented：`engine`、`special_exporters`、POT、Asset Manifes
 - Project Config 只声明“想要的命名策略”，不应写死生成器内部类型名。
 - 新语言生成器可以扩展自己的 `targets.code.<language_specific>` 配置，但不应要求修改通用 target schema。
 - 若配置中的命名策略导致同一作用域生成名冲突，必须在写文件前报错。
-- 同一 target 下多个 code task 的输出路径不能互相覆盖，也不能与 runtime data/special exporter 输出冲突。
+- 同一 target 下多个 code task 的输出路径不能互相覆盖，也不能与任意 data task 输出冲突。
 
 推荐 runtime data format：
 
@@ -610,7 +610,7 @@ id,name,export_tags,exclude_tags
 
 ## 3.8 Field 基础配置
 
-字段可控制类型、缺省值、是否强制不导出以及特殊导出器读取策略。
+字段可控制类型、缺省值、是否强制不导出以及聚合 data exporter 辅助读取策略。
 
 ```toml
 [[tables.fields]]
@@ -628,4 +628,4 @@ export = false
 | `default` | 未设置 | 源数据缺失时使用的默认值。 |
 | `export` | `true` | 是否允许进入 runtime ExportView。`false` 表示强制不导出。 |
 | `export_when` | 未设置 | 按 target tags 判断字段是否进入当前 ExportView。 |
-| `special_exports` | 未设置 | 控制是否可被特殊导出器使用。 |
+| `data_exports` | 未设置 | 控制是否可被特定聚合 data exporter 作为辅助字段读取。 |
