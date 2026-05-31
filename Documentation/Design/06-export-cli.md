@@ -168,12 +168,39 @@ CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 t
 
 | Format | 说明 |
 | --- | --- |
-| `lua_table` | Lua 特殊模式，代码和数据可合一。 |
+| `lua_table` | Lua 特殊模式，代码和数据合一；作为 data task 读取 source data，并生成 root facade + 每表一个 `.lua` 文件。 |
 | `yaml` | 可选文本格式。 |
 | `sqlite` | 可选数据库格式。 |
 | `protobuf` | 未来设计，不作为当前实现要求。 |
 
 不使用 `custom` 作为模糊格式。自定义格式必须声明明确 ID，例如 `studio_binary_v1`。
+
+### Lua Table（Planned / Not implemented）
+
+`lua_table` 是计划中的 data-backed export format，而不是普通 `[[targets.code]]` codegen backend。它会同时消费 Meta 与当前 data task 的已归一化、已校验数据，输出可被 Lua VM 直接 `require` 的数据+访问代码：
+
+- 每张可见 table 生成一个 `.lua` 文件；
+- 生成一个 root facade 文件，按访问情况 lazy `require` 对应 table 文件，也可提供 `preload_all()`；
+- CollectionTable 每行默认以数组存储字段值，并用共享 metatable 支持 `row.field` 访问，以降低每行重复字符串 key 的内存成本；
+- 为 CollectionTable 生成 primary / unique / non-unique index lookup，索引引用 row 对象，不复制 row 数据；
+- ObjectTable 默认输出 keyed Lua table；
+- 该格式必须声明 `input`，不能用于 code-only target。
+
+示例配置：
+
+```toml
+[[targets.data]]
+name = "lua"
+input = "data"
+output = "Generated/LuaConfig"
+format = "lua_table"
+module_name = "game.config"
+root_file = "init.lua"
+row_layout = "array_with_metatable"
+lazy_require = true
+```
+
+详细实现设计见 [`../Implementation/09i-lua-embedded-data-generator.md`](../Implementation/09i-lua-embedded-data-generator.md)。
 
 Protobuf 未来规则：
 

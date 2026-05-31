@@ -201,9 +201,10 @@
 | 导出 | Export | `Export`, `export` | 生成运行时数据、代码和特殊产物。 |
 | 导出目标 | Export Target | `ExportTarget` | 一个配置化输出目标。 |
 | 数据导出器 | Data Exporter | `DataExporter` | 从 ExportView 写 runtime data 的导出器。 |
-| 运行时数据格式 | Runtime Data Format | `RuntimeDataFormat` | 第一阶段支持 `json`、`messagepack`；未来可扩展 `lua_table`、`yaml`、`sqlite`、`protobuf`。 |
+| 运行时数据格式 | Runtime Data Format | `RuntimeDataFormat` | 当前支持 `json`、`messagepack`、`bin`；未来可扩展 `lua_table`、`yaml`、`sqlite`、`protobuf`。 |
 | JSON 导出 | JSON Export | `JsonDataExporter` | 输出 JSON runtime data。 |
 | Lua Table 导出 | Lua Table Export | `LuaTableExporter` | 输出 Lua table；Lua 中代码和数据可合一。 |
+| Lua 内嵌数据生成器 | Lua Embedded Data Generator | `LuaEmbeddedDataExporter` | 计划中的 `format = "lua_table"` 实现；消费 Meta + Data，生成 root facade 与每表 `.lua` 文件。 |
 | YAML 导出 | YAML Export | `YamlDataExporter` | 可扩展 runtime data exporter。 |
 | MessagePack 导出 | MessagePack Export | `MessagePackDataExporter` | 第一阶段支持的紧凑二进制 runtime data exporter，配置规范名为 `messagepack`。 |
 | SQLite 导出 | SQLite Export | `SqliteDataExporter` | 可扩展数据库 exporter。 |

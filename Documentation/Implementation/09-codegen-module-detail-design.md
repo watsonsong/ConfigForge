@@ -162,6 +162,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 | Core model / IR / options | [`09f-codegen-core-model-and-options.md`](09f-codegen-core-model-and-options.md) | `CodeExportTarget` / `CodeExportInput` / `GeneratedFile`、CodeModel IR、命名策略、类型映射和通用 writer。 |
 | Index and relation helpers | [`09g-codegen-index-and-relation-helpers.md`](09g-codegen-index-and-relation-helpers.md) | CollectionTable index lookup、`linked_field` relation helper、row-index cache、`link` / `link_all`。 |
 | Generator API and tests | [`09h-codegen-generator-api-and-tests.md`](09h-codegen-generator-api-and-tests.md) | `CodeGenerator` 接口、新语言接入步骤、文件组织、诊断和测试计划。 |
+| Lua embedded data generator | [`09i-lua-embedded-data-generator.md`](09i-lua-embedded-data-generator.md) | 计划中的 Lua data+code 合一导出、每表 `.lua`、lazy require、row array + metatable、索引和实现步骤。 |
 
 ### 9.4.1 当前实现状态摘要
 
@@ -170,6 +171,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 - TypeScript 已生成 `loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`；同步 API 要求 loader 同步返回 reader，遇到 Promise 应报错。
 - 生成代码使用逻辑 table name，不绑定某个 `targets.data` task 的真实 artifact path。
 - `linked_field` relation helper 和 `text` translation helper 已纳入 Rust / C++ / TypeScript 生成器。
+- Lua embedded data generator 仍为 Planned / Not implemented；设计上应作为 `format = "lua_table"` 的 data-backed exporter，而不是现有 format-agnostic `CodeGenerator` backend。
 
 ## 9.5 总览文档维护规则
 

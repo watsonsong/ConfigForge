@@ -124,6 +124,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `09f-codegen-core-model-and-options.md` | Codegen 专题 | 核心输入输出模型、CodeModel IR、命名策略、类型映射、`CodeWriter` 与文件头模板。 |
 | `09g-codegen-index-and-relation-helpers.md` | Codegen 专题 | CollectionTable index lookup、`linked_field` relation helper、row-index cache 与 `link_all`。 |
 | `09h-codegen-generator-api-and-tests.md` | Codegen 专题 | `CodeGenerator` 接口、新语言接入、文件组织、诊断和测试计划。 |
+| `09i-lua-embedded-data-generator.md` | Codegen / Exporter 专题 | 计划中的 Lua data+code 合一导出；作为 `lua_table` data format 消费 Meta + Data，生成每表 `.lua`、root facade、row array/metatable 和索引。 |
 | `10-build-module-detail-design.md` | 模块 | 构建编排、target/task binding、并行执行边界和 artifact 写入策略。 |
 | `11-foreign-key-detail-design.md` | 专项 | 外键 raw/link model、引用完整性校验、target 语义、codegen staging。 |
 | `12-struct-expanded-value-detail-design.md` | 专项 | Struct source layout 自动判定和 expanded CSV field-path。 |

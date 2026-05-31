@@ -379,8 +379,8 @@ readonly_fields = true
 | `name` | 单 data task 可省略，规范化为 `default` | 当前 target 内稳定唯一的 data task 名称；多 data task 时必填。 |
 | `input` | 必填 | Source data 根目录。相对路径以 project root 或所在 import 片段目录为基准；Meta source path 以该目录为搜索基础。只有声明 `targets.data` 时才读取 source data。 |
 | `output` | 必填 | 数据产物输出目录。相对路径以 project root 或所在 import 片段目录为基准。运行时表数据按表规划文件；POT / manifest 等聚合格式按格式规则规划文件。 |
-| `format` | `json` | 数据导出格式。当前实现支持 runtime data 的 `json`、`messagepack`、`bin`，以及聚合数据格式 `gettext_pot` / `pot`；`asset_manifest_csv` 等仍为未来扩展。 |
-| format 专属字段 | 未设置 | 格式专属配置直接摊平在对应 `[[targets.data]]` 下，例如 `format = "gettext_pot"` 可配置 `domain`、`file_name`、source reference 和 translator comments 策略。 |
+| `format` | `json` | 数据导出格式。当前实现支持 runtime data 的 `json`、`messagepack`、`bin`，以及聚合数据格式 `gettext_pot` / `pot`；`lua_table`、`asset_manifest_csv` 等仍为未来扩展。 |
+| format 专属字段 | 未设置 | 格式专属配置直接摊平在对应 `[[targets.data]]` 下，例如 `format = "gettext_pot"` 可配置 `domain`、`file_name`、source reference 和 translator comments 策略；计划中的 `format = "lua_table"` 可配置 `module_name`、`root_file`、`row_layout`、`lazy_require` 等。 |
 
 Data task 继承所在 target 的 effective target tags；当前没有 `[[targets.data]].tags` 字段。CLI extra tags 对同一 target 下所有 data/code task 一致生效，因此同一个构建里的 JSON / MessagePack / bin 输出和格式无关 codegen 必须基于同一组 effective target tags。
 
@@ -395,7 +395,9 @@ data task `name` 规范：
 
 `RuntimeDataFile.path` 表示相对当前 data artifact root / runtime loader root 的真实资源路径，例如 `items.json`。生成代码不再透传真实文件路径，而是使用逻辑表名（例如 `items`）；具体 runtime loader 决定如何把逻辑名映射到文件系统、包内资源或引擎资源中的具体格式文件。
 
-Planned / Not implemented：`engine`、`format = "asset_manifest_csv"`、target-level `language` / `data_format` / `output` 属于未来扩展；不再规划 `special_exporters` 字段。`gettext_pot` 已通过 `[[targets.data]] format = "gettext_pot"` 接入，Asset Manifest 后续也应通过同一机制扩展。
+Planned / Not implemented：`engine`、`format = "lua_table"`、`format = "asset_manifest_csv"`、target-level `language` / `data_format` / `output` 属于未来扩展；不再规划 `special_exporters` 字段。`gettext_pot` 已通过 `[[targets.data]] format = "gettext_pot"` 接入，Lua data+code 合一产物和 Asset Manifest 后续也应通过同一机制扩展。
+
+计划中的 `lua_table` data format 与普通 code task 不同：它必须读取 `targets.data.input` 中的数据，基于 Meta 与 target-aware ExportView 直接生成 Lua 数据模块。目标产物为一个 root facade 文件和每张表一个 `.lua` 文件；CollectionTable row 默认按数组存储，并通过 metatable 支持字段名访问。Lua 设计详见 [`../Implementation/09i-lua-embedded-data-generator.md`](../Implementation/09i-lua-embedded-data-generator.md)。
 
 `targets.code` 字段：
 

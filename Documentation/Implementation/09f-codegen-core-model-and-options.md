@@ -74,6 +74,7 @@ pub struct CodeExportTarget {
 - Project Config 中 `[[targets.data]].format = "messagepack"` 选择 MessagePack exporter。
 - Project Config 中 `[[targets.data]].format = "bin"` 选择私有紧密二进制 exporter。
 - Project Config 中 `[[targets.data]].format = "gettext_pot"`（已实现）/ `"asset_manifest_csv"`（后续扩展）等聚合格式仍属于 data task，但不产生 generated runtime loader 直接消费的 table data。
+- Project Config 中计划的 `[[targets.data]].format = "lua_table"` 属于特殊 data-backed exporter：它会直接生成 Lua 数据+访问代码合一产物，必须依赖当前 data task 的 resolved data；不要把它接入普通 `CodeGenerator` trait。
 - 可兼容解析 `"msgpack"` 为 MessagePack，但错误信息、文档、生成代码和 manifest 中统一使用规范名 `messagepack`。
 - Project Config 使用 `[[targets.data]]` 数组表表达所有基于 source data / ExportView 的数据导出任务；codegen 只关心 Meta 和 target tags，不绑定任意 data task。
 
