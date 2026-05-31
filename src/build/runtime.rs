@@ -26,7 +26,12 @@ pub(super) struct RuntimeConfigForgeResult {
 
 pub(super) struct RuntimeExportOutput {
     pub(super) warnings: Vec<String>,
-    pub(super) results: Vec<RuntimeConfigForgeResult>,
+    pub(super) task_outputs: Vec<RuntimeExportTaskOutput>,
+}
+
+pub(super) struct RuntimeExportTaskOutput {
+    pub(super) export_name: String,
+    pub(super) result: Option<RuntimeConfigForgeResult>,
     pub(super) artifacts: Vec<Artifact>,
 }
 
@@ -40,8 +45,7 @@ pub(super) fn export_runtime_data_tasks(
     if data_tasks.is_empty() {
         return Ok(RuntimeExportOutput {
             warnings: Vec::new(),
-            results: Vec::new(),
-            artifacts: Vec::new(),
+            task_outputs: Vec::new(),
         });
     }
     let data_root = data_root.ok_or_else(|| {
@@ -68,8 +72,7 @@ pub(super) fn export_runtime_data_tasks(
         validate_normalized_data_set_for_target_with_report(linked_meta, target_tags, &data_set)?;
     let mut warnings = Vec::new();
     warnings.extend(validation_report.warning_messages());
-    let mut results = Vec::new();
-    let mut artifacts = Vec::new();
+    let mut task_outputs = Vec::new();
 
     for data_task in data_tasks {
         let format_exporter = registry.require_any(&data_task.type_id)?;
@@ -87,32 +90,37 @@ pub(super) fn export_runtime_data_tasks(
                     .iter()
                     .map(|artifact| artifact.file.clone())
                     .collect::<Vec<_>>();
-                artifacts.extend(
-                    runtime_artifacts
-                        .into_iter()
-                        .map(|artifact| artifact.artifact),
-                );
-                results.push(RuntimeConfigForgeResult {
+                task_outputs.push(RuntimeExportTaskOutput {
                     export_name: data_task.name.clone(),
-                    files,
+                    result: Some(RuntimeConfigForgeResult {
+                        export_name: data_task.name.clone(),
+                        files,
+                    }),
+                    artifacts: runtime_artifacts
+                        .into_iter()
+                        .map(|artifact| artifact.artifact)
+                        .collect(),
                 });
             }
             DataExporterRef::Aggregate(exporter) => {
-                artifacts.extend(exporter.export(
-                    &data_task.output,
-                    &target_data_config_from_export_task(data_task),
-                    linked_meta,
-                    target_tags,
-                    &data_set,
-                )?);
+                task_outputs.push(RuntimeExportTaskOutput {
+                    export_name: data_task.name.clone(),
+                    result: None,
+                    artifacts: exporter.export(
+                        &data_task.output,
+                        &target_data_config_from_export_task(data_task),
+                        linked_meta,
+                        target_tags,
+                        &data_set,
+                    )?,
+                });
             }
         }
     }
 
     Ok(RuntimeExportOutput {
         warnings,
-        results,
-        artifacts,
+        task_outputs,
     })
 }
 

@@ -48,18 +48,6 @@ impl NormalizedTargetConfig {
     pub(crate) fn effective_target_tags(&self, extra_tags: &[String]) -> TargetTags {
         TargetTags::new(self.tags.iter().chain(extra_tags.iter()).cloned())
     }
-
-    pub(crate) fn data_exports(&self) -> impl Iterator<Item = &NormalizedExportTask> {
-        self.exports
-            .iter()
-            .filter(|task| task.dependency == ExportDependency::MetaAndData)
-    }
-
-    pub(crate) fn code_exports(&self) -> impl Iterator<Item = &NormalizedExportTask> {
-        self.exports
-            .iter()
-            .filter(|task| task.dependency == ExportDependency::MetaOnly)
-    }
 }
 
 fn normalize_export_tasks(
