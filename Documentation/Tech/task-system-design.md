@@ -876,11 +876,13 @@ Phase 2 实现复核：后续 Phase 3-12 的阶段顺序总体仍然成立，但
 
 目标：先并发读取本地 CSV，但不引入 Tokio 和远端 provider。
 
-- PARTIAL（Phase 2 已提供入口）：按 `SourceReadPlan` 粒度在局部 Rayon pool 中并行读取 CSV；Phase 3 需要补齐资源语义和错误稳定性验证。
-- TODO：结果按 plan order merge，错误按 source stable key 排序，不按完成顺序输出。
-- TODO：限制并发数由 `jobs` 控制；`--serial` 必须退化为串行。
-- TODO：保证 duplicate table / missing source 等错误与现有语义一致。
+- DONE：按 `SourceReadPlan` 粒度在局部 Rayon pool 中并行读取 CSV；Phase 2 已提供 `read_sources_with_pool()`，Phase 3 补齐并发稳定性测试入口。
+- DONE：结果按 plan order merge，错误按 source stable key 排序，不按完成顺序输出。
+- DONE：限制并发数由 `jobs` 控制；`--serial` 必须退化为串行。当前 build 通过 `ExecutionOptions.jobs` 创建 CPU pool，serial 已归一化为 `jobs = 1`。
+- DONE：保证 duplicate table / missing source 等错误与现有语义一致。
 - 验证：DataLoader 单元测试覆盖多 source 并发稳定合并；CLI integration 比较 `--jobs 1` / `--jobs 2` 输出；可增加人工延迟测试 provider 验证顺序稳定。
+
+Phase 3 实现复核：后续 Phase 4-12 的阶段顺序仍然成立。Phase 4 引入 async provider shell 时应复用 `SourceReadPlan` 作为 provider-independent 输入，并把当前测试用 reader seam 演进为正式 provider trait / resource lane；不要在 DataLoader 内隐式访问 MetaLink 结果。
 
 ### Phase 4：引入 async provider shell（Google Sheet / 飞书准备）
 

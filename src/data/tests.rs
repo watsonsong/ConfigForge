@@ -1,7 +1,16 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{
+        Arc, Barrier, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    thread,
+    time::Duration,
+};
 
 use tempfile::tempdir;
 
@@ -1177,6 +1186,135 @@ fn data_loader_load_with_pool_preserves_plan_order() {
 
     assert_eq!(data_set.tables()[0].name, "items");
     assert_eq!(data_set.tables()[1].name, "levels");
+}
+
+#[test]
+fn data_loader_read_sources_with_pool_merges_by_plan_order_not_completion_order() {
+    let plan = SourceReadPlan::new(vec![
+        plan_source("items", "slow.csv"),
+        plan_source("levels", "fast.csv"),
+        plan_source("quests", "medium.csv"),
+    ]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(3)
+        .build()
+        .expect("test thread pool should build");
+    let completion_order = Arc::new(Mutex::new(Vec::new()));
+
+    let data_set = DataLoader::new(".")
+        .read_sources_with_reader_and_pool(&plan, &pool, |source| {
+            match source.path.to_string_lossy().as_ref() {
+                "slow.csv" => thread::sleep(Duration::from_millis(30)),
+                "medium.csv" => thread::sleep(Duration::from_millis(10)),
+                _ => {}
+            }
+            completion_order
+                .lock()
+                .expect("completion order should be lockable")
+                .push(source.table_name.clone());
+            Ok(DataTable::new(
+                source.table_name.clone(),
+                vec![DataRow::from([(
+                    "source".to_owned(),
+                    source.path.display().to_string(),
+                )])],
+            ))
+        })
+        .expect("raw sources should load")
+        .into_data_set();
+
+    assert_ne!(
+        *completion_order
+            .lock()
+            .expect("completion order should be lockable"),
+        vec!["items".to_owned(), "levels".to_owned(), "quests".to_owned()]
+    );
+    assert_eq!(
+        data_set
+            .tables()
+            .iter()
+            .map(|table| table.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["items", "levels", "quests"]
+    );
+    assert_eq!(data_set.tables()[0].row_sources[0].source_index, 0);
+    assert_eq!(data_set.tables()[1].row_sources[0].source_index, 1);
+    assert_eq!(data_set.tables()[2].row_sources[0].source_index, 2);
+}
+
+#[test]
+fn data_loader_read_sources_with_pool_reports_first_plan_error() {
+    let plan = SourceReadPlan::new(vec![
+        plan_source("items", "first.csv"),
+        plan_source("levels", "second.csv"),
+    ]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .expect("test thread pool should build");
+
+    let error = DataLoader::new(".")
+        .read_sources_with_reader_and_pool(&plan, &pool, |source| {
+            if source.path == std::path::Path::new("first.csv") {
+                thread::sleep(Duration::from_millis(20));
+                return Err(ConfigForgeError::Validation("first failed".to_owned()));
+            }
+            Err(ConfigForgeError::Validation("second failed".to_owned()))
+        })
+        .unwrap_err();
+
+    assert!(matches!(error, ConfigForgeError::Validation(message) if message == "first failed"));
+}
+
+#[test]
+fn data_loader_read_sources_with_pool_uses_configured_worker_limit() {
+    let plan = SourceReadPlan::new(vec![
+        plan_source("items", "items.csv"),
+        plan_source("levels", "levels.csv"),
+    ]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .expect("test thread pool should build");
+    let barrier = Arc::new(Barrier::new(2));
+    let active = Arc::new(AtomicUsize::new(0));
+    let max_active = Arc::new(AtomicUsize::new(0));
+
+    let data_set = DataLoader::new(".")
+        .read_sources_with_reader_and_pool(&plan, &pool, |source| {
+            let active_now = active.fetch_add(1, Ordering::SeqCst) + 1;
+            max_active.fetch_max(active_now, Ordering::SeqCst);
+            barrier.wait();
+            active.fetch_sub(1, Ordering::SeqCst);
+            Ok(DataTable::new(source.table_name.clone(), Vec::new()))
+        })
+        .expect("raw sources should load")
+        .into_data_set();
+
+    assert_eq!(data_set.tables().len(), 2);
+    assert_eq!(max_active.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn data_loader_read_sources_is_serial() {
+    let plan = SourceReadPlan::new(vec![
+        plan_source("items", "items.csv"),
+        plan_source("levels", "levels.csv"),
+    ]);
+    let active = Arc::new(AtomicUsize::new(0));
+    let max_active = Arc::new(AtomicUsize::new(0));
+
+    DataLoader::new(".")
+        .read_sources_with_reader(&plan, |source| {
+            let active_now = active.fetch_add(1, Ordering::SeqCst) + 1;
+            max_active.fetch_max(active_now, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(1));
+            active.fetch_sub(1, Ordering::SeqCst);
+            Ok(DataTable::new(source.table_name.clone(), Vec::new()))
+        })
+        .expect("raw sources should load");
+
+    assert_eq!(max_active.load(Ordering::SeqCst), 1);
 }
 
 #[test]

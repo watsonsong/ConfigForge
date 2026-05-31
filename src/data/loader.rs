@@ -35,11 +35,7 @@ impl DataLoader {
     }
 
     pub fn read_sources(&self, plan: &SourceReadPlan) -> Result<RawSourceData> {
-        let mut loaded = Vec::new();
-        for (source_index, source) in plan.sources().iter().enumerate() {
-            loaded.push((source_index, source, self.load_source(source)?));
-        }
-        Ok(RawSourceData::new(Self::merge_loaded_sources(loaded)?))
+        self.read_sources_with_reader(plan, |source| self.load_source(source))
     }
 
     pub fn read_sources_with_pool(
@@ -47,11 +43,32 @@ impl DataLoader {
         plan: &SourceReadPlan,
         pool: &rayon::ThreadPool,
     ) -> Result<RawSourceData> {
+        self.read_sources_with_reader_and_pool(plan, pool, |source| self.load_source(source))
+    }
+
+    pub(crate) fn read_sources_with_reader(
+        &self,
+        plan: &SourceReadPlan,
+        reader: impl Fn(&DataSourcePlan) -> Result<DataTable>,
+    ) -> Result<RawSourceData> {
+        let mut loaded = Vec::new();
+        for (source_index, source) in plan.sources().iter().enumerate() {
+            loaded.push((source_index, source, reader(source)?));
+        }
+        Ok(RawSourceData::new(Self::merge_loaded_sources(loaded)?))
+    }
+
+    pub(crate) fn read_sources_with_reader_and_pool(
+        &self,
+        plan: &SourceReadPlan,
+        pool: &rayon::ThreadPool,
+        reader: impl Fn(&DataSourcePlan) -> Result<DataTable> + Sync,
+    ) -> Result<RawSourceData> {
         let mut loaded = pool.install(|| {
             plan.sources()
                 .par_iter()
                 .enumerate()
-                .map(|(index, source)| (index, source, self.load_source(source)))
+                .map(|(index, source)| (index, source, reader(source)))
                 .collect::<Vec<_>>()
         });
         loaded.sort_by_key(|(index, _, _)| *index);
