@@ -39,8 +39,9 @@ pub use diagnostic::{
 };
 pub use exporter::{
     BinaryDataExporter, DataFormatExporter, DataFormatRegistry, ExportedTable,
-    ExportedTablePayload, ExportedValue, JsonDataExporter, MessagePackDataExporter,
-    RuntimeArtifactPlan, RuntimeDataFile, TargetDataConfig, builtin_exporters,
+    ExportedTablePayload, ExportedValue, JsonDataExporter, LuaTableExporter,
+    MessagePackDataExporter, RuntimeArtifactPlan, RuntimeDataFile, TargetDataConfig,
+    builtin_exporters,
 };
 pub use meta::{
     EnumMeta, EnumValueMeta, ExportCondition, FieldForeignKeyMeta, FieldMeta,

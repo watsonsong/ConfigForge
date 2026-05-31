@@ -661,7 +661,22 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(
         fixture_root
+            .join("out/client_data/msgpack/items.msgpack")
+            .exists()
+    );
+    assert!(
+        fixture_root
             .join("out/client_i18n/reference_game_config.pot")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/client_lua/reference_game_config/init.lua")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/client_lua/reference_game_config/items.lua")
             .exists()
     );
     assert!(
@@ -672,6 +687,11 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(
         fixture_root
             .join("out/server_data/binary/items.bin")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/client_code/rust/reference_game_config.rs")
             .exists()
     );
     assert!(
@@ -703,6 +723,7 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     verify_standard_generated_rust_runtime(fixture_root);
     verify_standard_generated_cpp_runtime(fixture_root);
     verify_standard_generated_typescript_runtime(fixture_root);
+    verify_standard_generated_lua_runtime(fixture_root);
 }
 
 #[test]
@@ -2333,10 +2354,10 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
         .expect("rust harness Cargo.toml should be written");
 
         fs::copy(
-            fixture_root.join("out/server_code/rust/reference_game_config.rs"),
+            fixture_root.join("out/client_code/rust/reference_game_config.rs"),
             temp_dir.path().join("generated.rs"),
         )
-        .expect("generated Rust MessagePack code should be copied into harness");
+        .expect("generated Rust JSON code should be copied into harness");
         let output = StdCommand::new("cargo")
             .args(["test", "--quiet", "--manifest-path"])
             .arg(temp_dir.path().join("Cargo.toml"))
@@ -2352,7 +2373,7 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
             )
             .env(
                 "MSGPACK_DATA_DIR",
-                fixture_root.join("out/server_data/msgpack"),
+                fixture_root.join("out/client_data/msgpack"),
             )
             .output()
             .expect("standard generated Rust JSON runtime test should run");
@@ -2360,6 +2381,11 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
             output,
             &format!("standard generated Rust JSON runtime test ({edition})"),
         );
+        fs::copy(
+            fixture_root.join("out/client_code/rust/reference_game_config.rs"),
+            temp_dir.path().join("generated.rs"),
+        )
+        .expect("generated Rust MessagePack code should be copied into harness");
         let output = StdCommand::new("cargo")
             .args(["test", "--quiet", "--manifest-path"])
             .arg(temp_dir.path().join("Cargo.toml"))
@@ -2377,7 +2403,7 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
             )
             .env(
                 "MSGPACK_DATA_DIR",
-                fixture_root.join("out/server_data/msgpack"),
+                fixture_root.join("out/client_data/msgpack"),
             )
             .output()
             .expect("standard generated Rust MessagePack runtime test should run");
@@ -2387,7 +2413,7 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
         );
 
         fs::copy(
-            fixture_root.join("out/server_code/rust/reference_game_config.rs"),
+            fixture_root.join("out/client_code/rust/reference_game_config.rs"),
             temp_dir.path().join("generated.rs"),
         )
         .expect("generated Rust code should be copied into binary harness");
@@ -2399,7 +2425,7 @@ fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
                 "CARGO_TARGET_DIR",
                 temp_dir.path().join(format!("target-{edition}-binary")),
             )
-            .env("BIN_DATA_DIR", fixture_root.join("out/server_data/binary"))
+            .env("BIN_DATA_DIR", fixture_root.join("out/client_data/binary"))
             .env(
                 "I18N_MO",
                 fixture_root.join("i18n/zh_CN/reference_game_config.mo"),
@@ -2707,6 +2733,23 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
         .output()
         .expect("standard generated TypeScript runtime test should run");
     assert_command_success(output, "standard generated TypeScript runtime test");
+}
+
+fn verify_standard_generated_lua_runtime(fixture_root: &std::path::Path) {
+    let Some(lua_command) = ["lua5.4", "lua5.3", "lua", "luajit"]
+        .iter()
+        .find(|command| command_exists(command))
+    else {
+        eprintln!("skipping standard generated Lua runtime test: lua interpreter not found");
+        return;
+    };
+
+    let output = StdCommand::new(lua_command)
+        .arg(fixture_root.join("harness/lua/runtime_check.lua"))
+        .env("LUA_CONFIG_ROOT", fixture_root.join("out/client_lua"))
+        .output()
+        .expect("standard generated Lua runtime test should run");
+    assert_command_success(output, "standard generated Lua runtime test");
 }
 
 fn command_exists(command: &str) -> bool {

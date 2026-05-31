@@ -1,10 +1,9 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
 use std::sync::OnceLock;
 
-static TEXT_CATALOG: OnceLock<HashMap<String, String>> = OnceLock::new();
+static TEXT_CATALOG: OnceLock<std::collections::HashMap<String, String>> = OnceLock::new();
 
 fn global_translate(context: Option<&str>, msgid: &str) -> Option<String> {
     let key = context
@@ -13,7 +12,7 @@ fn global_translate(context: Option<&str>, msgid: &str) -> Option<String> {
     text_catalog().get(&key).cloned()
 }
 
-fn text_catalog() -> &'static HashMap<String, String> {
+fn text_catalog() -> &'static std::collections::HashMap<String, String> {
     TEXT_CATALOG.get_or_init(|| {
         let mo_path = std::env::var("I18N_MO")
             .expect("I18N_MO should point to the compiled gettext MO catalog");
@@ -21,7 +20,7 @@ fn text_catalog() -> &'static HashMap<String, String> {
     })
 }
 
-fn load_mo_catalog(path: &str) -> HashMap<String, String> {
+fn load_mo_catalog(path: &str) -> std::collections::HashMap<String, String> {
     let data = std::fs::read(path).expect("MO catalog should be readable");
     if data.len() < 28 || read_le32(&data, 0) != 0x9504_12de {
         panic!("unsupported MO catalog");
@@ -29,7 +28,7 @@ fn load_mo_catalog(path: &str) -> HashMap<String, String> {
     let count = read_le32(&data, 8) as usize;
     let original_table = read_le32(&data, 12) as usize;
     let translated_table = read_le32(&data, 16) as usize;
-    let mut catalog = HashMap::new();
+    let mut catalog = std::collections::HashMap::new();
     for index in 0..count {
         let original_length = read_le32(&data, original_table + index * 8) as usize;
         let original_offset = read_le32(&data, original_table + index * 8 + 4) as usize;
