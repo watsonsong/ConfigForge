@@ -58,5 +58,18 @@ int main() {
         data.GameRules().starter_item_ids[0] != 2001 || data.GameRules().starter_item_ids[1] != 2002) {
         throw std::runtime_error("object table array field load failed");
     }
+    const cfg::ClassesRow& default_class = data.GameRules().GetDefaultClass(data);
+    if (default_class.class_id != 1) {
+        throw std::runtime_error("object table single relation failed");
+    }
+    const std::vector<const cfg::ItemsRow*> starter_items = data.GameRules().GetStarterItems(data);
+    if (starter_items.size() != 2 || starter_items[0] == nullptr || starter_items[0]->id != 2001 ||
+        starter_items[1] == nullptr || starter_items[1]->id != 2002) {
+        throw std::runtime_error("object table list relation failed");
+    }
+    data.LinkAll();
+    if (data.GameRules().GetDefaultClass(data).class_id != 1) {
+        throw std::runtime_error("link all relation cache failed");
+    }
     return 0;
 }

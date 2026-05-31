@@ -141,6 +141,42 @@ fn emits_object_table_as_typed_object_not_repository() {
 }
 
 #[test]
+fn emits_linked_field_relation_api() {
+    let meta = linked_field_fixture();
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = CppCodeGenerator.generate(&input).expect("cpp code");
+    let header = generated_content(&files, "generated.hpp");
+    let source = generated_content(&files, "generated.cpp");
+
+    assert!(header.contains("struct LinkCache"));
+    assert!(header.contains("struct LinkListCache"));
+    assert!(header.contains("mutable LinkCache default_item_link;"));
+    assert!(header.contains("mutable LinkListCache starter_items_link;"));
+    assert!(header.contains("const ItemsRow& GetDefaultItem(const GameData& data) const;"));
+    assert!(
+        header
+            .contains("std::vector<const ItemsRow*> GetStarterItems(const GameData& data) const;")
+    );
+    assert!(header.contains("std::optional<std::size_t> IndexOfById(std::int64_t id) const;"));
+    assert!(header.contains("void Link(const GameData& data) const;"));
+    assert!(header.contains("void LinkAll() const;"));
+    assert!(
+        source
+            .contains("const ItemsRow& GameConfigRow::GetDefaultItem(const GameData& data) const")
+    );
+    assert!(source.contains(
+        "std::vector<const ItemsRow*> GameConfigRow::GetStarterItems(const GameData& data) const"
+    ));
+    assert!(
+        source
+            .contains("std::optional<std::size_t> ItemsTable::IndexOfById(std::int64_t id) const")
+    );
+    assert!(source.contains("void GameConfigRow::Link(const GameData& data) const"));
+    assert!(source.contains("void GameData::LinkAll() const"));
+}
+
+#[test]
 fn rejects_duplicate_generated_field_names() {
     let meta = duplicate_field_fixture();
 
@@ -171,6 +207,46 @@ fn generated_content<'a>(files: &'a [GeneratedFile], file_name: &str) -> &'a str
         .unwrap_or_else(|| panic!("generated file `{file_name}` should exist"))
         .content
         .as_str()
+}
+
+fn linked_field_fixture() -> MetaModel {
+    MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "default_item_id"
+            type = "int"
+            required = true
+            foreign_key = { name = "default_item", target_table = "items", linked_field = "default_item" }
+
+            [[tables.fields]]
+            name = "starter_item_ids"
+            type = "int[]"
+            required = true
+            foreign_key = { name = "starter_item", target_table = "items", linked_field = "starter_items" }
+        "#,
+    )
+    .expect("meta should load")
 }
 
 fn fragment_fixture() -> MetaModel {

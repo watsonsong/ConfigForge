@@ -22,8 +22,9 @@ use reader::{
     render_struct_reader_source,
 };
 use repository::{
-    render_compound_index_key_structs, render_game_data_load_source, render_table,
-    render_table_source,
+    render_compound_index_key_structs, render_game_data_load_source,
+    render_row_relation_cache_members, render_row_relation_declarations,
+    render_row_relation_methods, render_table, render_table_source,
 };
 use runtime::{render_reader_helpers_source, render_runtime_interfaces};
 use symbols::validate_generated_symbols;
@@ -100,6 +101,25 @@ impl CodeGenerator for CppCodeGenerator {
             header.raw_fmt(format_args!("namespace {namespace} {{\n\n"));
         }
         render_runtime_interfaces(&mut header);
+        header.raw("class GameData;\n\n");
+        if model.tables.iter().any(|table| {
+            table
+                .foreign_keys
+                .iter()
+                .any(|foreign_key| foreign_key.linked_field.is_some())
+        }) {
+            header.raw(concat!(
+                "struct LinkCache {\n",
+                "    enum class State { Unresolved, Empty, RowIndex };\n",
+                "    State state = State::Unresolved;\n",
+                "    std::size_t row_index = 0;\n",
+                "};\n\n",
+                "struct LinkListCache {\n",
+                "    bool resolved = false;\n",
+                "    std::vector<std::size_t> row_indexes;\n",
+                "};\n\n",
+            ));
+        }
 
         for code_enum in &model.enums {
             push_doc(&mut header, code_enum.desc.as_deref());
@@ -190,6 +210,8 @@ impl CodeGenerator for CppCodeGenerator {
                     names.field_name(&fragment.name)?
                 ));
             }
+            render_row_relation_declarations(&mut header, &model, table, &names)?;
+            render_row_relation_cache_members(&mut header, table, &names)?;
             header.raw("};\n\n");
             if table.kind == CodeTableKind::Collection {
                 render_table(&mut header, table, &names)?;
@@ -198,6 +220,7 @@ impl CodeGenerator for CppCodeGenerator {
 
         header.raw("class GameData {\npublic:\n");
         header.raw("    static GameData Load(IRuntimeDataLoader& loader);\n");
+        header.raw("    void LinkAll() const;\n");
         for table in &model.tables {
             header.raw_fmt(format_args!(
                 "    const {}& {}() const {{ return {}; }}\n",
@@ -270,6 +293,10 @@ fn render_source_file(
         render_row_reader_source(&mut content, table, names)?;
     }
     content.raw("} // namespace\n\n");
+
+    for table in &model.tables {
+        render_row_relation_methods(&mut content, model, table, names)?;
+    }
 
     for table in &model.tables {
         if table.kind == CodeTableKind::Collection {

@@ -139,7 +139,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 - `CodeTable.kind` 区分 `Object` / `Collection`。
 - ObjectTable 生成目标语言中的 singleton object 类型和访问入口。
 - ObjectTable 不生成 collection repository，不生成 index lookup helpers。
-- ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前 Rust 生成器已渲染 `linked_field` helper/cache/link，TypeScript 仅保留 `linkAll()` 占位，C++ helper 待实现。
+- ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前 Rust/C++ 生成器已渲染 `linked_field` helper/cache/link，TypeScript 仅保留 `linkAll()` 占位。
 - Rust / TypeScript / C++ 都应避免把 ObjectTable 误表达为 rows collection。
 - Runtime data file path 仍由 build 传入的 `RuntimeDataFile` 决定；codegen 不关心 ObjectTable 的 CSV `key,value` 物理布局。
 

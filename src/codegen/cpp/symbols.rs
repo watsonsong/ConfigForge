@@ -111,7 +111,32 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>
                         &fragment.name,
                         names.field_name(&fragment.name)?,
                     ))
+                }))
+                .chain(table.foreign_keys.iter().filter_map(|foreign_key| {
+                    foreign_key.linked_field.as_ref().map(|linked_field| {
+                        Ok(GeneratedSymbol::new(
+                            "relation function",
+                            &linked_field.name,
+                            names.relation_function_name(foreign_key)?,
+                        ))
+                    })
                 })),
+        )?;
+
+        validate_named_symbols(
+            "cpp",
+            &format!("table `{}` row cache members", table.name),
+            table
+                .foreign_keys
+                .iter()
+                .filter(|foreign_key| foreign_key.linked_field.is_some())
+                .map(|foreign_key| {
+                    Ok(GeneratedSymbol::new(
+                        "relation cache",
+                        &foreign_key.name,
+                        names.relation_cache_member_name(foreign_key)?,
+                    ))
+                }),
         )?;
 
         if table.kind == CodeTableKind::Object {
@@ -136,6 +161,7 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>
             GeneratedSymbol::new("method", "Load", "Load"),
             GeneratedSymbol::new("method", "FromRows", "FromRows"),
             GeneratedSymbol::new("method", "Rows", "Rows"),
+            GeneratedSymbol::new("method", "RowAt", "RowAt"),
         ];
         for index in &table.indexes {
             method_symbols.push(GeneratedSymbol::new(
@@ -143,6 +169,20 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>
                 &index.name,
                 names.index_function_name(index)?,
             ));
+            if index.unique {
+                method_symbols.push(GeneratedSymbol::new(
+                    "index-of function",
+                    &index.name,
+                    names.index_of_function_name(index)?,
+                ));
+            }
+        }
+        if table
+            .foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            method_symbols.push(GeneratedSymbol::new("method", "Link", "Link"));
         }
         ensure_unique_generated_symbols(
             "cpp",
