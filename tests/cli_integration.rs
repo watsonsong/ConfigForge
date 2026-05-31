@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{fs, process::Command as StdCommand};
+use std::{collections::BTreeMap, fs, path::Path, process::Command as StdCommand};
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -156,6 +156,99 @@ fn dry_run_serial_and_parallel_outputs_match() {
     assert!(serial_stdout.contains("artifact plan (8 entries):"));
     assert!(!data_out_dir.join("items.json").exists());
     assert!(!rust_out_dir.join("generated.rs").exists());
+}
+
+#[test]
+fn serial_and_parallel_writes_match_for_mixed_target() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let serial_root = temp_dir.path().join("serial");
+    let parallel_root = temp_dir.path().join("parallel");
+    let serial_project = write_stability_project(temp_dir.path(), "serial", &serial_root);
+    let parallel_project = write_stability_project(temp_dir.path(), "parallel", &parallel_root);
+
+    run_config_forge_success(&[
+        "--project",
+        serial_project.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+        "--serial",
+    ]);
+    run_config_forge_success(&[
+        "--project",
+        parallel_project.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+        "--jobs",
+        "4",
+        "--io-concurrency",
+        "4",
+        "--network-concurrency",
+        "2",
+    ]);
+
+    let serial_files = collect_file_tree(&serial_root);
+    let parallel_files = collect_file_tree(&parallel_root);
+    assert_eq!(serial_files, parallel_files);
+    assert!(serial_files.contains_key("data/items.json"));
+    assert!(serial_files.contains_key("code/rust/generated.rs"));
+}
+
+#[test]
+fn write_modes_share_artifact_plan_and_written_content() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let direct_root = temp_dir.path().join("direct");
+    let temp_commit_root = temp_dir.path().join("temp_commit");
+    let dry_run_root = temp_dir.path().join("dry_run");
+    let direct_project = write_stability_project(temp_dir.path(), "direct", &direct_root);
+    let temp_commit_project =
+        write_stability_project(temp_dir.path(), "temp_commit", &temp_commit_root);
+    let dry_run_project = write_stability_project(temp_dir.path(), "dry_run", &dry_run_root);
+
+    run_config_forge_success(&[
+        "--project",
+        direct_project.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+        "--write-mode",
+        "direct",
+        "--serial",
+    ]);
+    run_config_forge_success(&[
+        "--project",
+        temp_commit_project.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+        "--write-mode",
+        "temp-commit",
+        "--jobs",
+        "4",
+        "--io-concurrency",
+        "4",
+        "--network-concurrency",
+        "2",
+    ]);
+    let dry_run_stdout = run_config_forge_stdout(&[
+        "--project",
+        dry_run_project.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+        "--dry-run",
+        "--jobs",
+        "4",
+        "--io-concurrency",
+        "4",
+        "--network-concurrency",
+        "2",
+    ]);
+
+    let direct_files = collect_file_tree(&direct_root);
+    let temp_commit_files = collect_file_tree(&temp_commit_root);
+    assert_eq!(direct_files, temp_commit_files);
+    assert!(!dry_run_root.exists());
+
+    let dry_run_entries = dry_run_artifact_entries(&dry_run_stdout, &dry_run_root);
+    let direct_entries = file_tree_entries(&direct_files);
+    assert_eq!(dry_run_entries, direct_entries);
 }
 
 #[test]
@@ -1972,6 +2065,125 @@ fn run_config_forge_stdout(args: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).expect("stdout should be utf8")
+}
+
+fn run_config_forge_success(args: &[&str]) {
+    let output = Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .args(args)
+        .output()
+        .expect("config-forge should run");
+    assert!(
+        output.status.success(),
+        "config-forge failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn write_stability_project(temp_root: &Path, name: &str, output_root: &Path) -> std::path::PathBuf {
+    let project_path = temp_root.join(format!("ConfigForge_{name}.toml"));
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                input = "{}"
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [[targets.exports]]
+                output = "{}"
+                type = "json"
+
+                [[targets.exports]]
+                type = "rust"
+                output = "{}"
+                file_header = "// Stable generated fixture\n"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            output_root.join("data").display(),
+            output_root.join("code/rust").display()
+        ),
+    )
+    .expect("project config should be written");
+    project_path
+}
+
+fn collect_file_tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
+    let mut files = BTreeMap::new();
+    collect_file_tree_into(root, root, &mut files);
+    files
+}
+
+fn collect_file_tree_into(root: &Path, current: &Path, files: &mut BTreeMap<String, Vec<u8>>) {
+    if !current.exists() {
+        return;
+    }
+    let mut entries = fs::read_dir(current)
+        .expect("directory should be readable")
+        .map(|entry| entry.expect("directory entry should be readable"))
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_file_tree_into(root, &path, files);
+        } else {
+            let relative_path = path
+                .strip_prefix(root)
+                .expect("file should be under root")
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/");
+            files.insert(
+                relative_path,
+                fs::read(path).expect("file should be readable"),
+            );
+        }
+    }
+}
+
+fn file_tree_entries(files: &BTreeMap<String, Vec<u8>>) -> Vec<(String, usize)> {
+    files
+        .iter()
+        .map(|(path, content)| (path.clone(), content.len()))
+        .collect()
+}
+
+fn dry_run_artifact_entries(stdout: &str, output_root: &Path) -> Vec<(String, usize)> {
+    let mut entries = Vec::new();
+    for line in stdout.lines() {
+        let Some(rest) = line.strip_prefix("  ") else {
+            continue;
+        };
+        let Some((path, metadata)) = rest.rsplit_once(" (") else {
+            continue;
+        };
+        let Some((bytes, written)) = metadata.strip_suffix(')').and_then(|metadata| {
+            let (bytes, written) = metadata.split_once(" bytes, written: ")?;
+            Some((bytes.parse::<usize>().ok()?, written))
+        }) else {
+            continue;
+        };
+        assert_eq!(written, "false");
+        let relative_path = Path::new(path)
+            .strip_prefix(output_root)
+            .expect("artifact path should be under output root")
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        entries.push((relative_path, bytes));
+    }
+    entries.sort();
+    entries
 }
 
 fn standard_core_meta_imports() -> String {

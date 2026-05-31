@@ -216,6 +216,20 @@ pub struct BuildTraceStage {
 - 传给 CodeModel 的 target tags 必须是 effective target tags，而不是仅 Project Config 中的 target tags；否则 CLI `--tag s1` 影响了 runtime data override，却没有同步影响 table/field/index codegen 过滤，会造成 schema 与数据不一致。
 - codegen export task 可以并行生成，但交给 Artifact Writer 前必须恢复 task 声明顺序；全局路径冲突由 artifact 模块统一检查。
 
+## 10.6a 稳定性与回归基线
+
+并行执行、阶段式 pipeline 和不同 artifact write mode 都不能改变用户可见产物语义。Build 稳定性基线按三层覆盖：
+
+1. **执行资源稳定性**：同一 Project / target / effective tags 下，`--serial` 或 `--jobs 1` 与 `--jobs N` 必须生成相同 artifact manifest 和相同文件内容。若代码生成默认文件头包含 `{{datetime}}` 或当前时间，则测试应使用固定 `file_header` 消除时间因素，避免把有意的时间戳差异误判为并发非确定性。
+2. **写入模式稳定性**：`direct` 与 `temp-commit` 应写出相同相对路径、字节数和文件内容；`dry-run` 应返回同一 artifact plan（路径 + bytes），但所有 entry 的 `written` 必须为 `false` 且不得创建输出文件。
+3. **声明顺序稳定性**：不论 exporter/codegen 完成顺序如何，Artifact Writer 前的输出仍按 `[[targets.exports]]` 声明顺序汇总，再由 artifact 模块做统一路径规范化和冲突检查；并行完成顺序不能影响 dry-run stdout、manifest 或第一个稳定冲突。
+
+回归测试建议组合：
+
+- CLI integration 使用混合 target（至少包含一个 MetaAndData exporter 和一个 MetaOnly codegen exporter）比较 `--serial` 与 `--jobs N` 的实际输出树。
+- 使用同一 mixed target 分别运行 `--write-mode direct`、`--write-mode temp-commit` 和 `--dry-run`：direct/temp-commit 比较文件内容；dry-run 比较 plan 中的相对路径与 byte count，并断言未写出文件。
+- 单元测试继续覆盖内部 branch 时序，例如 `LinkMeta -> codegen` 可在 `SourceRead` 完成前开始；CLI 测试覆盖端到端产物稳定性。
+
 ## 10.7 依赖边界
 
 Build 是顶层业务编排层，因此可以依赖：
@@ -245,4 +259,6 @@ Build 模块测试应覆盖：
 - 同一 `project.input` 在不同 effective target tags 下不能复用 DataSet；同一 effective target tags 下多个 MetaAndData export task 可以复用 DataSet。
 - code-only target 不加载数据。
 - JSON + MessagePack + bin + Lua 等多个 MetaAndData export task 不影响同一份格式无关 codegen 输出。
+- `--jobs 1` / `--serial` 与 `--jobs N` 的 artifact manifest 和文件内容一致；并行调度不能改变产物。
+- `dry-run` / `direct` / `temp-commit` 的 artifact plan 一致；direct 与 temp-commit 写出内容一致，dry-run 不写文件。
 - CLI integration 覆盖完整 build target 流程。

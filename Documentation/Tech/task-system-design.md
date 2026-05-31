@@ -377,6 +377,12 @@ MetaLink + TargetView/Validation success
 - diagnostics 使用当前 validation stable key `(severity, target, table, row_index, source_row_number, field, validator, code, message)` 排序；
 - artifact 写入前必须先汇总所有计划路径并做冲突检查。
 
+并行与写入模式的回归基线必须显式测试：
+
+- `--serial` / `--jobs 1` 与 `--jobs N` 对同一 target 生成的 artifact 相对路径、byte count 和内容应一致；测试中若包含 codegen，应使用固定 `file_header` 排除当前时间戳。
+- `dry-run`、`direct`、`temp-commit` 应共享同一 artifact plan；`dry-run` 只报告计划且 `written=false`，`direct` 与 `temp-commit` 必须产生相同文件树。
+- mixed target 的测试应覆盖 MetaOnly codegen 与 MetaAndData data branch 同时存在的情况，防止未来 pipeline 优化重新引入 completion-order 依赖。
+
 ### 5.3 所有权与生命周期约束
 
 当前 ConfigForge 大量使用 borrowed linked view，例如 `LinkedMetaModel<'meta>` 从 `&'meta MetaModel` 派生。该设计非常适合串行和 scoped 并行，但不能直接放入 `tokio::spawn` 这类要求 `'static` future 的任务中。
