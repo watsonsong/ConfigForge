@@ -1012,9 +1012,9 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 
 当前状态：
 
-- `BuildOutput` 已包含 `BuildTrace`。
-- `build_target()` 已记录阶段级 start / duration / success-failure state。
-- CLI 已支持 `--trace-tasks <path>` 并输出 pretty JSON。
+- `BuildOutput` 已包含 `BuildTrace`，`BuildErrorWithTrace` 会在阶段式 build 失败时携带已完成 trace。
+- `build_target_with_trace()` 已记录阶段级 start / duration / success-failure state；兼容入口 `build_target()` 仍返回原有错误类型。
+- CLI 已支持 `--trace-tasks <path>` 并在成功或阶段式 build 失败时输出 pretty JSON。
 
 未来规划：
 
@@ -1032,7 +1032,7 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 - FullDataSet table-local validation 与 TargetView table-local validation issue 稳定排序。
 - Artifact path conflict 在并发规划 / 生成后仍稳定报错。
 - Bounded writer 小队列、单 artifact 超预算、Direct / TempCommit / DryRun 语义。
-- `--trace-tasks` 输出包含关键阶段和成功状态。
+- `--trace-tasks` 输出包含关键阶段和成功 / 失败状态，并覆盖阶段式 build 失败时仍写出 trace 的路径。
 - CLI integration 覆盖 `--jobs 1` / 并发输出一致、code-only target 不读取 Data、多 exporter / 多 codegen 稳定输出、source / validation / artifact conflict 错误路径。
 
 ### 11.2 未来测试规划

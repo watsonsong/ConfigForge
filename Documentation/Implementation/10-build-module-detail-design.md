@@ -149,7 +149,7 @@ Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。data-b
 
 ### 10.4a Build tracing / metrics
 
-当前实现不引入通用 DAG executor，但 `build_target()` 会在阶段式 executor 的稳定边界记录轻量 trace：
+当前实现不引入通用 DAG executor，但 `build_target_with_trace()` 会在阶段式 executor 的稳定边界记录轻量 trace；`build_target()` 仍作为兼容 wrapper 返回原有错误类型：
 
 ```rust
 pub struct BuildTrace {
@@ -173,7 +173,7 @@ pub struct BuildTraceStage {
 }
 ```
 
-已记录的阶段包括：`create_cpu_pool`、`load_project`、`normalize_target`、`plan_dependencies`、`build_execution_view`、`prepare_build_inputs`、`run_exporters`、`collect_artifacts`、`write_artifacts`。CLI 传入 `--trace-tasks <FILE>` 时，`src/cli.rs` 会把 `BuildOutput.trace` 以 pretty JSON 写入指定路径；stdout 仍保持原有成功 / dry-run 输出，避免破坏 integration golden。该 trace 只描述阶段级耗时，不承诺 node-level critical path、resource wait、cancellation propagation 或 per-exporter span；这些能力只有在未来确实需要完整 DAG executor 时再引入。
+已记录的阶段包括：`create_cpu_pool`、`load_project`、`normalize_target`、`plan_dependencies`、`build_execution_view`、`prepare_build_inputs`、`run_exporters`、`collect_artifacts`、`write_artifacts`。CLI 传入 `--trace-tasks <FILE>` 时，`src/cli.rs` 会把成功路径的 `BuildOutput.trace` 或失败路径的 `BuildErrorWithTrace.trace` 以 pretty JSON 写入指定路径；stdout 仍保持原有成功 / dry-run 输出，避免破坏 integration golden。失败阶段记录为 `failed`，未开始的后续阶段不会出现在 trace 中。该 trace 只描述阶段级耗时，不承诺 node-level critical path、resource wait、cancellation propagation 或 per-exporter span；这些能力只有在未来确实需要完整 DAG executor 时再引入。
 
 ## 10.5 MetaAndData export task 编排
 

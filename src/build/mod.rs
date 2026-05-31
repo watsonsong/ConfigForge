@@ -16,8 +16,8 @@ mod runtime;
 mod target;
 
 pub use options::{
-    ArtifactMemoryOptions, BuildOptions, BuildOutput, BuildTrace, BuildTraceStage,
-    BuildTraceStageStatus, ExecutionOptions,
+    ArtifactMemoryOptions, BuildErrorWithTrace, BuildOptions, BuildOutput, BuildTrace,
+    BuildTraceStage, BuildTraceStageStatus, ExecutionOptions,
 };
 
 use crate::{
@@ -37,7 +37,34 @@ use runtime::{RuntimeConfigForgeResult, export_meta_and_data_tasks};
 use target::{NormalizedExportTask, NormalizedTargetConfig, codegen_task_config_from_export_task};
 
 pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
+    build_target_with_trace(options).map_err(|error| error.error)
+}
+
+pub fn build_target_with_trace(
+    options: BuildOptions<'_>,
+) -> std::result::Result<BuildOutput, Box<BuildErrorWithTrace>> {
     let mut trace = BuildTraceRecorder::new();
+    let execution = options.execution;
+    let target_name = options.target_name.to_owned();
+    let artifact_write_limits = options.artifact_write_limits;
+
+    let result = build_target_inner(options, &mut trace);
+    let trace = trace.finish(BuildTrace::new(
+        &target_name,
+        execution,
+        artifact_write_limits,
+    ));
+
+    match result {
+        Ok(output) => Ok(output.with_trace(trace)),
+        Err(error) => Err(Box::new(BuildErrorWithTrace { error, trace })),
+    }
+}
+
+fn build_target_inner(
+    options: BuildOptions<'_>,
+    trace: &mut BuildTraceRecorder,
+) -> Result<BuildOutputWithoutTrace> {
     let cpu_pool = trace.record("create_cpu_pool", None, || {
         rayon::ThreadPoolBuilder::new()
             .num_threads(options.execution.jobs)
@@ -68,7 +95,7 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
         raw_meta: &meta_set,
         data_root: project.project.input.as_deref(),
         pool: &cpu_pool,
-        trace: &mut trace,
+        trace,
     })?;
 
     let artifacts = trace.record("write_artifacts", None, || {
@@ -76,17 +103,26 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
             .with_limits(options.artifact_write_limits)
             .write(dag_output.artifacts)
     })?;
-    let trace = trace.finish(BuildTrace::new(
-        options.target_name,
-        options.execution,
-        options.artifact_write_limits,
-    ));
 
-    Ok(BuildOutput {
+    Ok(BuildOutputWithoutTrace {
         warnings: dag_output.warnings,
         artifacts,
-        trace,
     })
+}
+
+struct BuildOutputWithoutTrace {
+    warnings: Vec<String>,
+    artifacts: crate::artifact::ArtifactWriteResult,
+}
+
+impl BuildOutputWithoutTrace {
+    fn with_trace(self, trace: BuildTrace) -> BuildOutput {
+        BuildOutput {
+            warnings: self.warnings,
+            artifacts: self.artifacts,
+            trace,
+        }
+    }
 }
 
 struct TargetDagExecutionContext<'a, 'meta> {

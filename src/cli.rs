@@ -8,7 +8,7 @@ use clap::{Parser, ValueEnum};
 use crate::{
     ArtifactMemoryOptions,
     artifact::ArtifactWriteMode,
-    build::{BuildOptions, ExecutionOptions, build_target},
+    build::{BuildOptions, ExecutionOptions, build_target_with_trace},
 };
 
 #[derive(Debug, Parser)]
@@ -88,18 +88,22 @@ fn run_with_args(cli: Cli) -> anyhow::Result<()> {
         cli.artifact_memory_limit.as_deref(),
         cli.artifact_memory_percent,
     )?;
-    let output = build_target(BuildOptions {
+    let build_result = build_target_with_trace(BuildOptions {
         project_path: &cli.project,
         target_name: &cli.target,
         extra_tags: &cli.extra_tags,
         execution,
         artifact_write_mode,
         artifact_write_limits: artifact_memory.resolve_limits(execution.jobs),
-    })?;
-    if let Some(trace_path) = &cli.trace_tasks {
-        let trace_json = serde_json::to_string_pretty(&output.trace)?;
-        fs::write(trace_path, trace_json)?;
-    }
+    });
+    let output = match build_result {
+        Ok(output) => output,
+        Err(error) => {
+            write_trace_if_requested(cli.trace_tasks.as_ref(), &error.trace)?;
+            return Err(error.error.into());
+        }
+    };
+    write_trace_if_requested(cli.trace_tasks.as_ref(), &output.trace)?;
     for warning in output.warnings {
         eprintln!("warning: {warning}");
     }
@@ -119,6 +123,17 @@ fn run_with_args(cli: Cli) -> anyhow::Result<()> {
         println!("target `{}` dry-run succeeded", cli.target);
     } else {
         println!("target `{}` built", cli.target);
+    }
+    Ok(())
+}
+
+fn write_trace_if_requested(
+    trace_path: Option<&PathBuf>,
+    trace: &crate::BuildTrace,
+) -> anyhow::Result<()> {
+    if let Some(trace_path) = trace_path {
+        let trace_json = serde_json::to_string_pretty(trace)?;
+        fs::write(trace_path, trace_json)?;
     }
     Ok(())
 }

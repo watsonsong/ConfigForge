@@ -336,6 +336,71 @@ fn trace_tasks_flag_writes_build_metrics_json() {
 }
 
 #[test]
+fn trace_tasks_flag_writes_build_metrics_json_on_build_failure() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let out_dir = temp_dir.path().join("generated_code");
+    let trace_path = temp_dir.path().join("trace.json");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                name = "standard_project"
+
+                [[targets]]
+                name = "code_only"
+
+                [[targets.exports]]
+                type = "rust"
+                output = "{}"
+            "#,
+            standard_core_meta_imports(),
+            out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "missing_target",
+        "--trace-tasks",
+        trace_path.to_str().expect("path should be utf8"),
+    ]);
+
+    cmd.assert().failure();
+
+    let trace: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&trace_path).expect("trace file should be written on failure"),
+    )
+    .expect("trace file should contain json");
+    assert_eq!(trace["target"], "missing_target");
+    let stages = trace["stages"]
+        .as_array()
+        .expect("stages should be an array");
+    assert!(
+        stages
+            .iter()
+            .any(|stage| { stage["name"] == "load_project" && stage["status"] == "succeeded" })
+    );
+    assert!(
+        stages
+            .iter()
+            .any(|stage| { stage["name"] == "normalize_target" && stage["status"] == "failed" })
+    );
+    assert!(
+        stages
+            .iter()
+            .all(|stage| stage["name"] != "write_artifacts")
+    );
+}
+
+#[test]
 fn rejects_conflicting_artifact_memory_options() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let out_dir = temp_dir.path().join("generated_code");

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{num::NonZeroUsize, path::Path};
+use std::{error::Error, fmt, num::NonZeroUsize, path::Path};
 
 use serde::Serialize;
 
@@ -41,6 +41,24 @@ pub struct BuildOutput {
     pub warnings: Vec<String>,
     pub artifacts: ArtifactWriteResult,
     pub trace: BuildTrace,
+}
+
+#[derive(Debug)]
+pub struct BuildErrorWithTrace {
+    pub error: ConfigForgeError,
+    pub trace: BuildTrace,
+}
+
+impl fmt::Display for BuildErrorWithTrace {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl Error for BuildErrorWithTrace {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.error.source()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
