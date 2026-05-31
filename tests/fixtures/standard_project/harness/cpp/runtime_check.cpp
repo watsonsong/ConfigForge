@@ -79,11 +79,19 @@ int main() {
         throw std::runtime_error("DATA_DIR should point to exported runtime data");
     }
     const char* i18n_mo = std::getenv("I18N_MO");
+#if defined(CONFIG_FORGE_USE_LIBINTL)
+    const char* i18n_locale_dir = std::getenv("I18N_LOCALE_DIR");
+    if (i18n_locale_dir == nullptr) {
+        throw std::runtime_error("I18N_LOCALE_DIR should point to the gettext locale directory");
+    }
+    InitializeGlobalTextDomain(i18n_locale_dir);
+#else
     if (i18n_mo == nullptr) {
         throw std::runtime_error("I18N_MO should point to the compiled gettext MO catalog");
     }
     const auto catalog = LoadMoCatalog(i18n_mo);
     SetGlobalTextCatalog(&catalog);
+#endif
 
 #if defined(CONFIG_FORGE_USE_BINARY_RUNTIME_READER)
     config_forge_runtime::BinaryFsRuntimeDataLoader loader(data_dir);

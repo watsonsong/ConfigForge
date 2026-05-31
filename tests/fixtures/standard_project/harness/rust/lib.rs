@@ -1,13 +1,58 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+static TEXT_CATALOG: OnceLock<HashMap<String, String>> = OnceLock::new();
+
 fn global_translate(context: Option<&str>, msgid: &str) -> Option<String> {
-    match (context, msgid) {
-        (Some("items.name"), "Iron Ore") => Some("铁矿石".to_owned()),
-        (Some("classes.name"), "Warrior") => Some("战士".to_owned()),
-        (Some("classes.description"), "Durable melee fighter.") => Some("耐久的近战战士。".to_owned()),
-        _ => None,
+    let key = context
+        .map(|context| format!("{context}\u{4}{msgid}"))
+        .unwrap_or_else(|| msgid.to_owned());
+    text_catalog().get(&key).cloned()
+}
+
+fn text_catalog() -> &'static HashMap<String, String> {
+    TEXT_CATALOG.get_or_init(|| {
+        let mo_path = std::env::var("I18N_MO")
+            .expect("I18N_MO should point to the compiled gettext MO catalog");
+        load_mo_catalog(&mo_path)
+    })
+}
+
+fn load_mo_catalog(path: &str) -> HashMap<String, String> {
+    let data = std::fs::read(path).expect("MO catalog should be readable");
+    if data.len() < 28 || read_le32(&data, 0) != 0x9504_12de {
+        panic!("unsupported MO catalog");
     }
+    let count = read_le32(&data, 8) as usize;
+    let original_table = read_le32(&data, 12) as usize;
+    let translated_table = read_le32(&data, 16) as usize;
+    let mut catalog = HashMap::new();
+    for index in 0..count {
+        let original_length = read_le32(&data, original_table + index * 8) as usize;
+        let original_offset = read_le32(&data, original_table + index * 8 + 4) as usize;
+        let translated_length = read_le32(&data, translated_table + index * 8) as usize;
+        let translated_offset = read_le32(&data, translated_table + index * 8 + 4) as usize;
+        let original = std::str::from_utf8(&data[original_offset..original_offset + original_length])
+            .expect("MO original should be UTF-8")
+            .to_owned();
+        let translated =
+            std::str::from_utf8(&data[translated_offset..translated_offset + translated_length])
+                .expect("MO translation should be UTF-8")
+                .to_owned();
+        catalog.insert(original, translated);
+    }
+    catalog
+}
+
+fn read_le32(data: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(
+        data[offset..offset + 4]
+            .try_into()
+            .expect("MO u32 should be in bounds"),
+    )
 }
 
 include!("generated.rs");
