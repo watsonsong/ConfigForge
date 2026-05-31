@@ -74,6 +74,13 @@ impl<'a> TypeScriptNames<'a> {
         self.identifier(name, self.options.naming.field)
     }
 
+    pub(super) fn text_function_name(&self, owner_name: &str, field_name: &str) -> Result<String> {
+        self.identifier(
+            &format!("{owner_name}_{field_name}_text"),
+            self.options.naming.function,
+        )
+    }
+
     pub(super) fn index_storage_name(&self, index: &CodeIndex) -> Result<String> {
         self.identifier(
             &format!("{}_index", self.index_function_name(index)?),

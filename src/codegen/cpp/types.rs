@@ -74,6 +74,10 @@ impl<'a> CppNames<'a> {
         self.identifier(name, self.options.naming.field)
     }
 
+    pub(super) fn text_function_name(&self, field_name: &str) -> Result<String> {
+        self.identifier(&format!("{field_name}_text"), self.options.naming.function)
+    }
+
     pub(super) fn member_name(&self, name: &str) -> Result<String> {
         Ok(format!("{}_", self.field_name(name)?))
     }

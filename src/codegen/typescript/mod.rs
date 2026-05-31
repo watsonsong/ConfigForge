@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::Result;
 
 use super::{
-    CaseStyle, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeTableKind, CodeWriter,
-    CodeWriterConfig, GeneratedFile, NamingConfig, build_code_model,
+    CaseStyle, CodeExportInput, CodeField, CodeFragmentPayload, CodeGenerator, CodeTableKind,
+    CodeWriter, CodeWriterConfig, GeneratedFile, NamingConfig, build_code_model,
     ir::require_non_empty_index_fields,
 };
 
@@ -85,6 +85,7 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         content.raw("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;\n\n");
         render_runtime_reader_interfaces(&mut content);
         render_runtime_reader_helpers(&mut content);
+        content.raw("export type TextTranslator = (msgctxt: string | undefined, msgid: string) => string | undefined;\n\n");
         if model.tables.iter().any(|table| {
             table
                 .foreign_keys
@@ -132,6 +133,13 @@ impl CodeGenerator for TypeScriptCodeGenerator {
             }
             content.raw("}\n\n");
             render_struct_reader_function(&mut content, code_struct, &names)?;
+            render_ts_text_helpers(
+                &mut content,
+                &code_struct.name,
+                &code_struct.name,
+                &code_struct.fields,
+                &names,
+            )?;
         }
 
         for table in &model.tables {
@@ -156,6 +164,13 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 }
                 content.raw("}\n\n");
                 render_fragment_reader_function(&mut content, table, fragment, &names)?;
+                render_ts_text_helpers(
+                    &mut content,
+                    &format!("{}_{}", table.name, fragment.name),
+                    &format!("{}.{}", table.name, fragment.name),
+                    &fragment.fields,
+                    &names,
+                )?;
             }
         }
 
@@ -187,6 +202,13 @@ impl CodeGenerator for TypeScriptCodeGenerator {
             render_row_relation_cache_members(&mut content, table, &names)?;
             content.raw("}\n\n");
             render_row_reader_function(&mut content, table, &names)?;
+            render_ts_text_helpers(
+                &mut content,
+                &table.name,
+                &table.name,
+                &table.fields,
+                &names,
+            )?;
             if table.kind == CodeTableKind::Collection {
                 render_table(&mut content, table, &names)?;
             }
@@ -493,6 +515,48 @@ impl CodeGenerator for TypeScriptCodeGenerator {
             content: content.finish(),
         }])
     }
+}
+
+fn render_ts_text_helpers(
+    content: &mut CodeWriter,
+    owner_name: &str,
+    context_prefix: &str,
+    fields: &[CodeField],
+    names: &TypeScriptNames<'_>,
+) -> Result<()> {
+    for field in fields
+        .iter()
+        .filter(|field| matches!(field.code_type, super::CodeTypeRef::Text))
+    {
+        let function_name = names.text_function_name(owner_name, &field.name)?;
+        let field_name = names.field_name(&field.name)?;
+        let context = format!("{context_prefix}.{}", field.name);
+        if field.required {
+            content.raw_fmt(format_args!(
+                concat!(
+                    "export function {function_name}(value: {{ {field_name}: string }}, translator: TextTranslator): string {{\n",
+                    "  return translator({context:?}, value.{field_name}) ?? value.{field_name};\n",
+                    "}}\n\n",
+                ),
+                function_name = function_name,
+                context = context,
+                field_name = field_name,
+            ));
+        } else {
+            content.raw_fmt(format_args!(
+                concat!(
+                    "export function {function_name}(value: {{ {field_name}?: string }}, translator: TextTranslator): string | undefined {{\n",
+                    "  const msgid = value.{field_name};\n",
+                    "  return msgid === undefined ? undefined : (translator({context:?}, msgid) ?? msgid);\n",
+                    "}}\n\n",
+                ),
+                function_name = function_name,
+                context = context,
+                field_name = field_name,
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn push_doc(content: &mut CodeWriter, desc: Option<&str>) {

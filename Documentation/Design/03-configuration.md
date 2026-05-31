@@ -380,7 +380,7 @@ readonly_fields = true
 | `input` | 必填 | Source data 根目录。相对路径以 project root 或所在 import 片段目录为基准；Meta source path 以该目录为搜索基础。只有声明 `targets.data` 时才读取 source data。 |
 | `output` | 必填 | 数据产物输出目录。相对路径以 project root 或所在 import 片段目录为基准。运行时表数据按表规划文件；POT / manifest 等聚合格式按格式规则规划文件。 |
 | `format` | `json` | 数据导出格式。当前实现支持 runtime data 的 `json`、`messagepack` 和 `bin`；目标态扩展可注册 `gettext_pot`、`asset_manifest_csv` 等聚合数据格式。 |
-| format 子表 | 未设置 | 格式专属配置，例如 `[targets.data.gettext]` 可配置 `domain`、`file_name`、source reference 和 translator comments 策略。 |
+| format 专属字段 | 未设置 | 格式专属配置直接摊平在对应 `[[targets.data]]` 下，例如 `format = "gettext_pot"` 可配置 `domain`、`file_name`、source reference 和 translator comments 策略。 |
 
 Data task 继承所在 target 的 effective target tags；当前没有 `[[targets.data]].tags` 字段。CLI extra tags 对同一 target 下所有 data/code task 一致生效，因此同一个构建里的 JSON / MessagePack / bin 输出和格式无关 codegen 必须基于同一组 effective target tags。
 

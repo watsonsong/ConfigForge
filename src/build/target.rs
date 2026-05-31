@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::{
     ConfigForgeError, Result, codegen::CodegenTaskConfig, exporter::TargetDataConfig,
@@ -18,12 +18,13 @@ pub(crate) struct NormalizedTargetConfig {
     pub(crate) code: Vec<NormalizedCodegenTaskConfig>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NormalizedTargetDataConfig {
     pub(crate) name: String,
     pub(crate) input: PathBuf,
     pub(crate) output: PathBuf,
     pub(crate) format: String,
+    pub(crate) options: BTreeMap<String, toml::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,6 +84,7 @@ pub(crate) fn normalize_target_data_tasks(
             input: data_task.input.clone(),
             output: data_task.output.clone(),
             format: data_task.format.clone(),
+            options: data_task.options.clone(),
         });
     }
     Ok(normalized)
@@ -143,6 +145,7 @@ mod tests {
                 input: PathBuf::from("Data"),
                 output: PathBuf::from("Generated/Data"),
                 format: "json".to_owned(),
+                options: BTreeMap::new(),
             }],
             code: vec![CodegenTaskConfig {
                 language: "typescript".to_owned(),
@@ -174,6 +177,7 @@ mod tests {
                 input: PathBuf::from("Data"),
                 output: PathBuf::from("Generated/Data"),
                 format: "json".to_owned(),
+                options: BTreeMap::new(),
             }],
             code: vec![CodegenTaskConfig {
                 language: "rust".to_owned(),
@@ -208,12 +212,14 @@ mod tests {
                     input: PathBuf::from("Data"),
                     output: PathBuf::from("Generated/Json"),
                     format: "json".to_owned(),
+                    options: BTreeMap::new(),
                 },
                 TargetDataConfig {
                     name: Some("messagepack".to_owned()),
                     input: PathBuf::from("Data"),
                     output: PathBuf::from("Generated/MessagePack"),
                     format: "messagepack".to_owned(),
+                    options: BTreeMap::new(),
                 },
             ],
             code: vec![CodegenTaskConfig {
@@ -243,6 +249,7 @@ mod tests {
                 input: PathBuf::from("Data"),
                 output: PathBuf::from("Generated/Data"),
                 format: "json".to_owned(),
+                options: BTreeMap::new(),
             }],
         )
         .unwrap_err();
@@ -262,12 +269,14 @@ mod tests {
                     input: PathBuf::from("Data"),
                     output: PathBuf::from("Generated/DataA"),
                     format: "json".to_owned(),
+                    options: BTreeMap::new(),
                 },
                 TargetDataConfig {
                     name: Some("json".to_owned()),
                     input: PathBuf::from("Data"),
                     output: PathBuf::from("Generated/DataB"),
                     format: "messagepack".to_owned(),
+                    options: BTreeMap::new(),
                 },
             ],
         )

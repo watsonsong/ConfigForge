@@ -117,8 +117,10 @@ run_typescript_harness() {
     > "${work_dir}/node_modules/@config-forge/runtime-reader-core/index.js"
 
   DATA_DIR="${FIXTURE_ROOT}/out/client_data/json" \
+    I18N_MO="${FIXTURE_ROOT}/i18n/zh_CN/reference_game_config.mo" \
     node "${work_dir}/dist/runtime_check.js"
   BIN_DATA_DIR="${FIXTURE_ROOT}/out/client_data/binary" \
+    I18N_MO="${FIXTURE_ROOT}/i18n/zh_CN/reference_game_config.mo" \
     node "${work_dir}/dist/runtime_check.js"
 }
 
@@ -156,8 +158,10 @@ EOF
   cmake -S "${work_dir}" -B "${work_dir}/build"
   cmake --build "${work_dir}/build"
   DATA_DIR="${FIXTURE_ROOT}/out/client_data/json" \
+    I18N_MO="${FIXTURE_ROOT}/i18n/zh_CN/reference_game_config.mo" \
     "${work_dir}/build/standard_runtime_check_json"
   DATA_DIR="${FIXTURE_ROOT}/out/client_data/binary" \
+    I18N_MO="${FIXTURE_ROOT}/i18n/zh_CN/reference_game_config.mo" \
     "${work_dir}/build/standard_runtime_check_binary"
 }
 

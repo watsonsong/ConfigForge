@@ -13,16 +13,84 @@
 #endif
 
 #include <cstdlib>
+#include <cstdint>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
+#include <optional>
+#include <string>
 
 namespace cfg = reference::game::config;
+
+namespace {
+
+std::uint32_t ReadLe32(const std::string& data, std::size_t offset) {
+    return static_cast<std::uint32_t>(static_cast<unsigned char>(data[offset])) |
+           (static_cast<std::uint32_t>(static_cast<unsigned char>(data[offset + 1])) << 8U) |
+           (static_cast<std::uint32_t>(static_cast<unsigned char>(data[offset + 2])) << 16U) |
+           (static_cast<std::uint32_t>(static_cast<unsigned char>(data[offset + 3])) << 24U);
+}
+
+std::unordered_map<std::string, std::string> LoadMoCatalog(const char* path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error("failed to open MO catalog");
+    }
+    const std::string data((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    if (data.size() < 28 || ReadLe32(data, 0) != 0x950412deU) {
+        throw std::runtime_error("unsupported MO catalog");
+    }
+    const std::uint32_t count = ReadLe32(data, 8);
+    const std::uint32_t original_table = ReadLe32(data, 12);
+    const std::uint32_t translated_table = ReadLe32(data, 16);
+    std::unordered_map<std::string, std::string> catalog;
+    for (std::uint32_t index = 0; index < count; ++index) {
+        const std::uint32_t original_length = ReadLe32(data, original_table + index * 8);
+        const std::uint32_t original_offset = ReadLe32(data, original_table + index * 8 + 4);
+        const std::uint32_t translated_length = ReadLe32(data, translated_table + index * 8);
+        const std::uint32_t translated_offset = ReadLe32(data, translated_table + index * 8 + 4);
+        catalog.emplace(data.substr(original_offset, original_length),
+                        data.substr(translated_offset, translated_length));
+    }
+    return catalog;
+}
+
+void AssertTranslatedText(const cfg::GameData& data, const cfg::TextTranslator& translator) {
+    const cfg::ItemsRow* item = data.Items().GetById(2001);
+    if (item == nullptr || item->NameText(translator) != "铁矿石") {
+        throw std::runtime_error("item text translation failed");
+    }
+    const cfg::ClassesRow* warrior = data.Classes().GetById(1);
+    if (warrior == nullptr || warrior->NameText(translator) != "战士") {
+        throw std::runtime_error("class name translation failed");
+    }
+    if (warrior->DescriptionText(translator) != "耐久的近战战士。") {
+        throw std::runtime_error("class description translation failed");
+    }
+}
+
+} // namespace
 
 int main() {
     const char* data_dir = std::getenv("DATA_DIR");
     if (data_dir == nullptr) {
         throw std::runtime_error("DATA_DIR should point to exported runtime data");
     }
+    const char* i18n_mo = std::getenv("I18N_MO");
+    if (i18n_mo == nullptr) {
+        throw std::runtime_error("I18N_MO should point to the compiled gettext MO catalog");
+    }
+    const auto catalog = LoadMoCatalog(i18n_mo);
+    const cfg::TextTranslator translator = [&catalog](const char* context, const std::string& msgid) -> std::optional<std::string> {
+        const std::string key = std::string(context) + '\x04' + msgid;
+        const auto iterator = catalog.find(key);
+        if (iterator == catalog.end()) {
+            return std::nullopt;
+        }
+        return iterator->second;
+    };
 
 #if defined(CONFIG_FORGE_USE_BINARY_RUNTIME_READER)
     config_forge_runtime::BinaryFsRuntimeDataLoader loader(data_dir);
@@ -72,6 +140,7 @@ int main() {
     if (data.GameRules().GetDefaultClass(data).class_id != 1) {
         throw std::runtime_error("link all relation cache failed");
     }
+    AssertTranslatedText(data, translator);
 
 #if defined(CONFIG_FORGE_USE_BINARY_RUNTIME_READER)
     auto lazy_loader = std::make_shared<config_forge_runtime::BinaryFsRuntimeDataLoader>(data_dir);

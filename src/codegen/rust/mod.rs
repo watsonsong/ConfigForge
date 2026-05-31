@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::Result;
 
 use super::{
-    CaseStyle, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeWriter, CodeWriterConfig,
-    GeneratedFile, NamingConfig, build_code_model, ir::require_non_empty_index_fields,
+    CaseStyle, CodeExportInput, CodeField, CodeFragmentPayload, CodeGenerator, CodeWriter,
+    CodeWriterConfig, GeneratedFile, NamingConfig, build_code_model,
+    ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -72,6 +73,9 @@ impl CodeGenerator for RustCodeGenerator {
         render_runtime_reader_imports(&mut content);
         render_runtime_reader_helpers(&mut content);
         content.raw(concat!(
+            "pub trait TextTranslator {\n",
+            "    fn translate(&self, msgctxt: Option<&str>, msgid: &str) -> Option<String>;\n",
+            "}\n\n",
             "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n",
             "enum LinkCache {\n",
             "    Unresolved,\n",
@@ -136,6 +140,13 @@ impl CodeGenerator for RustCodeGenerator {
             }
             content.raw("}\n\n");
             render_struct_reader_impl(&mut content, code_struct, &names)?;
+            render_rust_text_helpers(
+                &mut content,
+                &names.type_name(&code_struct.name)?,
+                &code_struct.name,
+                &code_struct.fields,
+                &names,
+            )?;
         }
 
         for table in &model.tables {
@@ -166,6 +177,13 @@ impl CodeGenerator for RustCodeGenerator {
                 }
                 content.raw("}\n\n");
                 render_fragment_reader_impl(&mut content, table, fragment, &names)?;
+                render_rust_text_helpers(
+                    &mut content,
+                    &names.fragment_type_name(&table.name, &fragment.name)?,
+                    &format!("{}.{}", table.name, fragment.name),
+                    &fragment.fields,
+                    &names,
+                )?;
             }
         }
 
@@ -230,6 +248,7 @@ impl CodeGenerator for RustCodeGenerator {
                 "impl {} {{\n",
                 names.row_type_name(&table.name)?
             ));
+            render_rust_text_helper_methods(&mut content, &table.name, &table.fields, &names)?;
             for fragment in &table.fragments {
                 content.raw_fmt(format_args!(
                     "    pub fn has_{}(&self) -> bool {{ self.{}.is_some() }}\n",
@@ -382,6 +401,65 @@ impl CodeGenerator for RustCodeGenerator {
             content: content.finish(),
         }])
     }
+}
+
+fn render_rust_text_helpers(
+    content: &mut CodeWriter,
+    type_name: &str,
+    context_prefix: &str,
+    fields: &[CodeField],
+    names: &RustNames<'_>,
+) -> Result<()> {
+    if !fields
+        .iter()
+        .any(|field| matches!(field.code_type, super::CodeTypeRef::Text))
+    {
+        return Ok(());
+    }
+    content.raw_fmt(format_args!("impl {type_name} {{\n"));
+    render_rust_text_helper_methods(content, context_prefix, fields, names)?;
+    content.raw("}\n\n");
+    Ok(())
+}
+
+fn render_rust_text_helper_methods(
+    content: &mut CodeWriter,
+    context_prefix: &str,
+    fields: &[CodeField],
+    names: &RustNames<'_>,
+) -> Result<()> {
+    for field in fields
+        .iter()
+        .filter(|field| matches!(field.code_type, super::CodeTypeRef::Text))
+    {
+        let function_name = names.text_function_name(&field.name)?;
+        let field_name = names.field_name(&field.name)?;
+        let context = format!("{context_prefix}.{}", field.name);
+        if field.required {
+            content.raw_fmt(format_args!(
+                concat!(
+                    "    pub fn {function_name}(&self, translator: &impl TextTranslator) -> String {{\n",
+                    "        translator.translate(Some({context:?}), &self.{field_name}).unwrap_or_else(|| self.{field_name}.clone())\n",
+                    "    }}\n",
+                ),
+                function_name = function_name,
+                context = context,
+                field_name = field_name,
+            ));
+        } else {
+            content.raw_fmt(format_args!(
+                concat!(
+                    "    pub fn {function_name}(&self, translator: &impl TextTranslator) -> Option<String> {{\n",
+                    "        self.{field_name}.as_ref().map(|msgid| translator.translate(Some({context:?}), msgid).unwrap_or_else(|| msgid.clone()))\n",
+                    "    }}\n",
+                ),
+                function_name = function_name,
+                context = context,
+                field_name = field_name,
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn push_doc(content: &mut CodeWriter, desc: Option<&str>, prefix: &str) {

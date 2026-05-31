@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::Result;
 
 use super::{
-    CaseStyle, CodeExportInput, CodeFragmentPayload, CodeGenerator, CodeModel, CodeTableKind,
-    CodeWriter, CodeWriterConfig, GeneratedFile, NamingConfig, build_code_model,
+    CaseStyle, CodeExportInput, CodeField, CodeFragmentPayload, CodeGenerator, CodeModel,
+    CodeTableKind, CodeWriter, CodeWriterConfig, GeneratedFile, NamingConfig, build_code_model,
     ir::require_non_empty_index_fields,
 };
 
@@ -85,6 +85,7 @@ impl CodeGenerator for CppCodeGenerator {
             "#include <memory>\n",
             "#include <optional>\n",
             "#include <stdexcept>\n",
+            "#include <functional>\n",
             "#include <string>\n",
             "#include <tuple>\n",
             "#include <type_traits>\n",
@@ -101,6 +102,7 @@ impl CodeGenerator for CppCodeGenerator {
             header.raw_fmt(format_args!("namespace {namespace} {{\n\n"));
         }
         render_runtime_interfaces(&mut header);
+        header.raw("using TextTranslator = std::function<std::optional<std::string>(const char*, const std::string&)>;\n\n");
         header.raw("class GameDataAccess;\nclass GameData;\n\n");
         if model.tables.iter().any(|table| {
             table
@@ -151,6 +153,12 @@ impl CodeGenerator for CppCodeGenerator {
                     names.field_name(&field.name)?
                 ));
             }
+            render_cpp_text_helper_declarations(
+                &mut header,
+                &code_struct.name,
+                &code_struct.fields,
+                &names,
+            )?;
             header.raw("};\n\n");
         }
 
@@ -174,6 +182,12 @@ impl CodeGenerator for CppCodeGenerator {
                         names.field_name(&field.name)?
                     ));
                 }
+                render_cpp_text_helper_declarations(
+                    &mut header,
+                    &format!("{}.{}", table.name, fragment.name),
+                    &fragment.fields,
+                    &names,
+                )?;
                 header.raw("};\n\n");
             }
         }
@@ -210,6 +224,7 @@ impl CodeGenerator for CppCodeGenerator {
                     names.field_name(&fragment.name)?
                 ));
             }
+            render_cpp_text_helper_declarations(&mut header, &table.name, &table.fields, &names)?;
             render_row_relation_declarations(&mut header, &model, table, &names)?;
             render_row_relation_cache_members(&mut header, table, &names)?;
             header.raw("};\n\n");
@@ -290,6 +305,49 @@ impl CodeGenerator for CppCodeGenerator {
             },
         ])
     }
+}
+
+fn render_cpp_text_helper_declarations(
+    header: &mut CodeWriter,
+    context_prefix: &str,
+    fields: &[CodeField],
+    names: &CppNames<'_>,
+) -> Result<()> {
+    for field in fields
+        .iter()
+        .filter(|field| matches!(field.code_type, super::CodeTypeRef::Text))
+    {
+        let function_name = names.text_function_name(&field.name)?;
+        let field_name = names.field_name(&field.name)?;
+        let context = format!("{context_prefix}.{}", field.name);
+        if field.required {
+            header.raw_fmt(format_args!(
+                concat!(
+                    "    std::string {function_name}(const TextTranslator& translator) const {{\n",
+                    "        auto translated = translator({context:?}, {field_name});\n",
+                    "        return translated.has_value() ? *translated : {field_name};\n",
+                    "    }}\n",
+                ),
+                function_name = function_name,
+                context = context,
+                field_name = field_name,
+            ));
+        } else {
+            header.raw_fmt(format_args!(
+                concat!(
+                    "    std::optional<std::string> {function_name}(const TextTranslator& translator) const {{\n",
+                    "        if (!{field_name}.has_value()) {{ return std::nullopt; }}\n",
+                    "        auto translated = translator({context:?}, *{field_name});\n",
+                    "        return translated.has_value() ? translated : {field_name};\n",
+                    "    }}\n",
+                ),
+                function_name = function_name,
+                context = context,
+                field_name = field_name,
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn render_source_file(

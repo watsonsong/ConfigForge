@@ -63,7 +63,7 @@ pub struct TargetDataConfig {
 - `input`：数据根目录。
 - `output`：数据产物输出目录。运行时表数据按 table 规划文件；POT / manifest 等聚合格式按格式选项规划文件。
 - `format`：格式名称，默认 `json`；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；目标态可注册 `gettext_pot`、`asset_manifest_csv` 等聚合格式；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
-- `options`：格式专属配置，由 `[[targets.data]]` 下的格式子表归一化得到，例如 `[targets.data.gettext]`。运行时 JSON / MessagePack / `bin` 第一阶段可以为空。
+- `options`：格式专属配置，由 `[[targets.data]]` 下除通用字段外的 flattened 字段归一化得到，例如 `format = "gettext_pot"` 下的 `domain`、`file_name`、`source_reference`。运行时 JSON / MessagePack / `bin` 第一阶段可以为空。首版兼容读取 `[targets.data.gettext]` 子表，但推荐使用 flattened 字段，与 code task 的 `module_name` / `namespace` 一致。
 
 ```rust
 pub trait TableDataExporter: Send + Sync {
@@ -219,10 +219,10 @@ pub struct TextExtractionEntry {
 
 1. 遍历 target ExportView 中所有可见 table。
 2. 对 CollectionTable 按导出后的 row order 遍历；对 ObjectTable 使用 singleton logical row。
-3. 深度遍历可见 field / fragment / struct child，筛选 Meta primitive type 为 `text` 的字段。第一阶段不把 `string` 自动纳入 POT。
+3. 首版遍历可见 top-level field，筛选 Meta primitive type 为 `text` 的字段；不把 `string` 自动纳入 POT。fragment / struct child text 深度抽取保留为后续扩展。
 4. 从 resolved scalar value 读取 raw text 作为 `msgid`；optional empty text 不产出 entry。
 5. 构造 `msgctxt`：默认 `table.field_path`，如果未来 Meta/source/target policy 提供 context，则使用显式 context。
-6. 构造 source reference：优先使用 DataResolver 保留的 source table / row / column；缺少列信息时降级到 row 或 logical field path。
+6. 构造 source reference：当前优先使用 DataResolver 保留的 source path / row；CSV 列坐标尚未保留时不输出列号。`source_reference = "record_key"` 可仅使用 primary index record key；`both` 合并 source location 和 record metadata。
 7. 合并 translator comments：field `desc`、未来 text option、source comment column/row、自动生成的 `table/field/record` 描述。
 8. 以 `(msgctxt, msgid)` 做稳定分组，合并 references/comments。
 9. 渲染 gettext `.pot` 文本 artifact。
@@ -230,7 +230,7 @@ pub struct TextExtractionEntry {
 POT 渲染要求：
 
 - 输出 UTF-8 text artifact。
-- header entry 固定在首位；`POT-Creation-Date` 使用 `generated_at`，保证测试可确定。
+- header entry 固定在首位；首版不写 `POT-Creation-Date`，保证测试可确定。未来若接入 `generated_at`，应继续保证 deterministic 测试路径可控。
 - escape 函数覆盖 `\\`、`"`、`\n`、`\t`、`\r` 与其他控制字符。
 - comments 顺序稳定：translator comments (`#.`) -> extracted metadata comments -> source references (`#:`) -> flags (`#,`) -> `msgctxt` -> `msgid` -> `msgstr ""`。
 - 同一 `(msgctxt, msgid)` 的多个 source reference 按 table order / row order / field order 排序并去重。
@@ -239,9 +239,9 @@ POT 渲染要求：
 
 | 选项 | 默认 | 说明 |
 | --- | --- | --- |
-| `domain` | project name 或 target name | POT header 的 domain / Project-Id-Version 来源。 |
+| `domain` | `messages` | POT header 的 domain / Project-Id-Version 来源，未设置时使用 `messages`。 |
 | `file_name` | `<domain>.pot` | 单文件 POT 输出文件名，相对 `TargetDataConfig.output`。 |
-| `context` | `table_field` | `none` / `table_field` / `field` / `explicit_only`。 |
+| `context` | `table_field` | `none` / `table_field` / `field`。显式 context 列属于未来扩展。 |
 | `source_reference` | `source_location` | `source_location` / `record_key` / `both` / `none`。 |
 | `include_translator_comments` | `true` | 是否写入 field desc 和显式 comment。 |
 | `deduplicate` | `true` | 是否按 `(msgctxt, msgid)` 合并。关闭时需要生成唯一 context 或报错，避免 gettext key 冲突。 |

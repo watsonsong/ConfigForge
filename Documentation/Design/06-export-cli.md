@@ -46,8 +46,6 @@ name = "i18n_pot"
 input = "Data"
 output = "Generated/I18n"
 format = "gettext_pot"
-
-[targets.data.gettext]
 domain = "game_config"
 file_name = "game_config.pot"
 source_reference = "source_location"
@@ -63,7 +61,7 @@ deduplicate = true
 | `input` | Source data 根目录。Meta source path 以该目录为搜索基础；只有声明 `targets.data` 时才读取。 |
 | `output` | 数据产物输出目录。运行时表数据会在该目录下按表名生成文件；POT / manifest 这类聚合格式会在该目录下按格式选项规划一个或多个文件。 |
 | `format` | 数据导出格式。当前第一阶段运行时格式支持 `json`、`messagepack` 和 `bin`，默认 `json`；目标态可扩展 `gettext_pot`、`asset_manifest_csv` 等非运行时聚合格式。 |
-| format 子表 | 可选。格式专属选项，例如 `[targets.data.gettext]`、`[targets.data.asset_manifest]`。 |
+| format 专属字段 | 可选。格式专属选项直接摊平在对应 `[[targets.data]]` 下，例如 `format = "gettext_pot"` 的 `domain`、`file_name`、`source_reference`、`include_translator_comments`、`deduplicate`。 |
 
 导出规则：
 
@@ -404,8 +402,6 @@ name = "pot"
 input = "Data"
 output = "Generated/I18n"
 format = "gettext_pot"
-
-[targets.data.gettext]
 domain = "game_config"
 file_name = "game_config.pot"
 source_reference = "source_location"
@@ -421,7 +417,7 @@ deduplicate = true
 | `input` | Source data 根目录；POT、asset manifest 等聚合格式也从同一数据根加载 source data。 |
 | `output` | 数据产物输出目录。聚合格式如果只产生一个文件，应通过格式选项或默认规则确定文件名。 |
 | `format` | exporter 类型 ID，例如 `gettext_pot`、`asset_manifest_csv`。禁止使用模糊 `custom`。 |
-| format 子表 | 例如 `[targets.data.gettext]`，承载格式专属选项。 |
+| format 专属字段 | 直接摊平在当前 `[[targets.data]]` 下，例如 `domain`、`file_name`、`source_reference`。 |
 
 所有 data task 产物，无论是 runtime table data 还是 POT / manifest，都必须和 codegen 产物一起进入 artifact plan，最终由 Artifact Writer 统一检查规范化绝对路径冲突并写入。
 
@@ -444,14 +440,14 @@ deduplicate = true
 
 规则：
 
-- source reference 默认来自 source 表名和 row/column 坐标。若数据源无法提供列坐标，则降级为 `table:row`；若 ObjectTable key-value layout 无自然列坐标，则使用 logical field path。
+- source reference 默认来自 source path 和 row 坐标；当前 CSV resolver 保留 source path / row，尚不保留列坐标，因此首版输出形如 `data/items.csv:2`。若 ObjectTable key-value layout 无自然列坐标，则使用 logical field path 或 record key 作为补充定位信息。
 - `msgid` 默认使用原文驱动模式，即 source cell 文本本身。未来可配置 key-driven 模式，此时 `text` cell 可表示稳定 key，而默认语言原文来自伴随列/外部 catalog。
 - `msgctxt` 默认可由 `table.field_path` 派生；也可由 Meta 字段参数、target policy 或 source 中显式 context 列覆盖。不同 context 下相同 msgid 必须产生不同 POT entry。
 - translator comments 可来自字段 `desc`、未来 text 字段声明、source 中显式映射的额外注释列/行、以及 exporter 生成的 table/field/record 描述；如果多个来源同时存在，应按 exporter policy 稳定合并并去重。
 - 被 ExportView 过滤掉的 row / field / fragment 不产生 POT 条目，也不产生 translator comments。`export = false` 的字段默认不进入 runtime data；若未来字段策略显式允许 `format = "gettext_pot"` 读取某个辅助字段，POT exporter 可读取它，但仍必须遵守 target tags 与 row filter。
 - dedup 规则必须稳定：相同 `(msgctxt, msgid)` 合并为一个 entry，source references 和 translator comments 按 table order、row order、field order 稳定追加；如果相同 `(msgctxt, msgid)` 的 comments 冲突，默认合并而不报错，严格模式可升级为 warning / error。
 - 输出编码固定 UTF-8；字符串必须按 gettext 规范转义双引号、反斜杠、换行和控制字符。多行 msgid 应使用标准多段字符串表示。
-- header entry `msgid ""` 必须稳定生成，包含 `Project-Id-Version`、`POT-Creation-Date`、`Content-Type: text/plain; charset=UTF-8`、`Content-Transfer-Encoding: 8bit` 等基础字段；时间戳应遵循 build 的 deterministic / generated_at 策略。
+- header entry `msgid ""` 必须稳定生成，包含 `Project-Id-Version`、`Content-Type: text/plain; charset=UTF-8`、`Content-Transfer-Encoding: 8bit` 等基础字段；首版为 deterministic 输出，不写 `POT-Creation-Date`。若未来增加 generated_at/build timestamp，应遵循 deterministic / generated_at 策略。
 
 推荐输出示例：
 
@@ -480,7 +476,7 @@ msgstr ""
 生成代码影响：
 
 - 第一阶段 `text` 在 runtime payload 中仍按 `string` 输出，生成代码字段类型保持 `String` / `std::string` / `string`，不破坏现有用户。
-- 对 `text` 字段，生成器可额外生成翻译 helper，例如 Rust `display_name_text(&translator)`、C++ `DisplayNameText(translator)`、TypeScript `displayNameText(translator)`，默认传入原始字符串或稳定 key/context，由业务侧 translator 返回当前语言文本。
+- 对 `text` 字段，生成器额外生成翻译 helper，例如 Rust row/struct 方法 `display_name_text(&translator)`、C++ row/struct 方法 `DisplayNameText(translator)`、TypeScript 顶层 helper `itemsDisplayNameText(row, translator)` / `structDisplayNameText(value, translator)`。helper 默认传入原始字符串和 `table.field` / `struct.field` context，由业务侧 translator 返回当前语言文本。
 - helper 不应把翻译结果缓存到 row 中，除非 translator 明确提供语言版本号；否则切换语言后会读到旧文本。推荐 translator 自己缓存。
 - helper 的 translator contract 应保持语言无关：输入至少包含 raw value、table、field path、record key、optional context；返回 translated string。没有 translator 或查不到翻译时，应回退 raw text。
 - 若未来采用 key-driven text，生成代码可以把 raw field 视作 key，并通过同一 helper 访问 translated text；API 名称保持稳定，减少业务迁移成本。

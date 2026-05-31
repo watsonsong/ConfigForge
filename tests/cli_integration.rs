@@ -248,6 +248,8 @@ fn builds_target_from_project_config() {
     assert!(rust_code.contains("pub use config_forge_runtime_reader_core"));
     assert!(!rust_code.contains("pub struct GameRulesTable"));
     assert!(rust_code.contains("RuntimeDataLoader"));
+    assert!(rust_code.contains("pub trait TextTranslator"));
+    assert!(rust_code.contains("pub fn name_text"));
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items\""));
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"game_rules\""));
     assert!(!rust_code.contains("RuntimeDataFormat"));
@@ -255,6 +257,8 @@ fn builds_target_from_project_config() {
     assert!(rust_code.contains("Self::read_from_reader(&root)"));
     assert!(cpp_code.contains("class IRuntimeDataLoader"));
     assert!(cpp_code.contains("class IRuntimeDataReader"));
+    assert!(cpp_code.contains("using TextTranslator"));
+    assert!(cpp_code.contains("std::string NameText"));
     assert!(cpp_code.contains("static constexpr const char* DataFile = \"items\""));
     assert!(
         cpp_code
@@ -269,11 +273,97 @@ fn builds_target_from_project_config() {
     assert!(cpp_source.contains("loader.Open(GameRulesRow::DataFile)"));
     assert!(ts_code.contains("export interface RuntimeDataLoader"));
     assert!(ts_code.contains("export interface RuntimeDataReader"));
+    assert!(ts_code.contains("export type TextTranslator"));
+    assert!(ts_code.contains("export function itemsNameText"));
     assert!(ts_code.contains("static readonly dataFile = \"items\""));
     assert!(ts_code.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader"));
     assert!(!ts_code.contains("export class GameRulesTable"));
     assert!(!ts_code.contains("RuntimeDataFormat"));
     assert!(ts_code.contains("getById(id: number): ItemsRow | undefined"));
+
+    verify_generated_rust_crate(&rust_out_dir, false);
+    verify_generated_cpp_runtime(&cpp_out_dir);
+    verify_generated_typescript(&ts_out_dir);
+}
+
+#[test]
+fn gettext_pot_export_and_generated_text_translation_helpers_work() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let pot_out_dir = temp_dir.path().join("out/i18n");
+    let rust_out_dir = temp_dir.path().join("out/code/rust");
+    let cpp_out_dir = temp_dir.path().join("out/code/cpp");
+    let ts_out_dir = temp_dir.path().join("out/code/typescript");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [[targets.data]]
+                input = "{}"
+                output = "{}"
+                format = "gettext_pot"
+                domain = "fixture"
+                file_name = "fixture.pot"
+                context = "table_field"
+                source_reference = "both"
+
+                [[targets.code]]
+                language = "rust"
+                output = "{}"
+
+                [[targets.code]]
+                language = "cpp"
+                output = "{}"
+
+                [[targets.code]]
+                language = "typescript"
+                output = "{}"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            pot_out_dir.display(),
+            rust_out_dir.display(),
+            cpp_out_dir.display(),
+            ts_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `client` built"));
+
+    let pot = fs::read_to_string(pot_out_dir.join("fixture.pot")).expect("POT should be written");
+    assert!(pot.contains("Project-Id-Version: fixture\\n"));
+    assert!(pot.contains("msgctxt \"items.name\""));
+    assert!(pot.contains("msgid \"Iron Ore\""));
+    assert!(pot.contains("msgid \"Iron Sword\""));
+    assert!(pot.contains("#. table=items field=name record=id=2001"));
+    assert!(pot.contains("#: "));
+
+    let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
+    let cpp_code = fs::read_to_string(cpp_out_dir.join("generated.hpp")).expect("cpp code");
+    let ts_code = fs::read_to_string(ts_out_dir.join("generated.ts")).expect("ts code");
+    assert!(rust_code.contains("pub trait TextTranslator"));
+    assert!(rust_code.contains("pub fn name_text"));
+    assert!(cpp_code.contains("using TextTranslator"));
+    assert!(cpp_code.contains("std::string NameText"));
+    assert!(ts_code.contains("export type TextTranslator"));
+    assert!(ts_code.contains("export function itemsNameText"));
 
     verify_generated_rust_crate(&rust_out_dir, false);
     verify_generated_cpp_runtime(&cpp_out_dir);
@@ -488,6 +578,11 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(
         fixture_root
+            .join("out/client_i18n/reference_game_config.pot")
+            .exists()
+    );
+    assert!(
+        fixture_root
             .join("out/server_data/msgpack/items.msgpack")
             .exists()
     );
@@ -516,6 +611,11 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
             .join("out/server_code/rust/reference_game_config.rs")
             .exists()
     );
+    let pot = fs::read_to_string(fixture_root.join("out/client_i18n/reference_game_config.pot"))
+        .expect("standard fixture POT should be readable");
+    assert!(pot.contains("msgctxt \"items.name\""));
+    assert!(pot.contains("msgid \"Iron Ore\""));
+    assert!(pot.contains("msgctxt \"classes.description\""));
 
     verify_standard_generated_rust_runtime(fixture_root);
     verify_standard_generated_cpp_runtime(fixture_root);
@@ -978,9 +1078,9 @@ fn rejects_runtime_data_path_conflict_before_writing_files() {
         "conflict",
     ]);
 
-    cmd.assert().failure().stderr(predicate::str::contains(
-        "multiple runtime data artifacts target",
-    ));
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("multiple data artifacts target"));
     assert!(!data_out_dir.join("items.json").exists());
     assert!(!data_out_dir.join("game_rules.json").exists());
 }
@@ -1029,9 +1129,9 @@ fn rejects_lexically_equivalent_runtime_data_path_conflict_before_writing_files(
         "conflict",
     ]);
 
-    cmd.assert().failure().stderr(predicate::str::contains(
-        "multiple runtime data artifacts target",
-    ));
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("multiple data artifacts target"));
     assert!(!data_out_dir.join("items.json").exists());
     assert!(!data_out_dir.join("game_rules.json").exists());
 }
@@ -1548,13 +1648,25 @@ fn verify_generated_rust_crate(generated_dir: &std::path::Path, derive_serde: bo
                     }}
                 }}
 
+                struct MockTranslator;
+
+                impl TextTranslator for MockTranslator {{
+                    fn translate(&self, msgctxt: Option<&str>, msgid: &str) -> Option<String> {{
+                        match (msgctxt, msgid) {{
+                            (Some("items.name"), "Potion") => Some("药水".to_owned()),
+                            _ => None,
+                        }}
+                    }}
+                }}
+
                 #[test]
                 fn generated_code_loads_and_queries_rows() {{
                     let data = GameData::load(&MockLoader).expect("generated data should load");
                     let item = data.items.get_by_id(1).expect("item should be indexed");
                     assert_eq!(item.name, "Potion");
-                    assert_eq!(data.items.rows().len(), 1);
+                    assert_eq!(item.name_text(&MockTranslator), "药水");
                     assert_eq!(data.game_rules.max_player_level, 60);
+                    assert_eq!(data.items.rows().len(), 1);
                     assert_eq!(data.game_rules.default_class_id, 1);
                     assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2002]);
                     assert!(data.game_rules.pvp_enabled);
@@ -1695,6 +1807,15 @@ fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 row.id = 1;
                 row.name = "Potion";
                 row.price = 10;
+                TextTranslator translator = [](const char* context, const std::string& msgid) -> std::optional<std::string> {
+                    if (std::string(context) == "items.name" && msgid == "Potion") {
+                        return std::string("Potion CN");
+                    }
+                    return std::nullopt;
+                };
+                if (row.NameText(translator) != "Potion CN") {
+                    return 6;
+                }
                 (void)row;
                 GameRulesRow rules{};
                 rules.max_player_level = 60;
@@ -1765,7 +1886,7 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
     fs::write(
         generated_dir.join("compile_check.ts"),
         r#"
-            import { GameData, RuntimeDataLoader, RuntimeDataReader } from "./generated";
+            import { GameData, RuntimeDataLoader, RuntimeDataReader, itemsNameText } from "./generated";
 
             class MockReader implements RuntimeDataReader {
                 private readonly fields: string[] = [];
@@ -1853,6 +1974,10 @@ fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 const item = data.items.getById(1);
                 if (!item || item.name !== "Potion") {
                     throw new Error("generated TypeScript query failed");
+                }
+                const translated = itemsNameText(item, (context, msgid) => context === "items.name" && msgid === "Potion" ? "Potion CN" : undefined);
+                if (translated !== "Potion CN") {
+                    throw new Error("generated TypeScript text translation failed");
                 }
                 if (data.gameRules.maxPlayerLevel !== 60 || !data.gameRules.pvpEnabled) {
                     throw new Error("generated TypeScript object table failed");
@@ -2158,12 +2283,20 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
 
     let output = StdCommand::new(build_dir.join("standard_runtime_check"))
         .env("DATA_DIR", fixture_root.join("out/client_data/json"))
+        .env(
+            "I18N_MO",
+            fixture_root.join("i18n/zh_CN/reference_game_config.mo"),
+        )
         .output()
         .expect("standard generated C++ runtime test should run");
     assert_command_success(output, "standard generated C++ runtime test");
 
     let output = StdCommand::new(build_dir.join("standard_binary_runtime_check"))
         .env("DATA_DIR", fixture_root.join("out/client_data/binary"))
+        .env(
+            "I18N_MO",
+            fixture_root.join("i18n/zh_CN/reference_game_config.mo"),
+        )
         .output()
         .expect("standard generated C++ binary runtime test should run");
     assert_command_success(output, "standard generated C++ binary runtime test");
@@ -2271,6 +2404,10 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
         .arg(temp_dir.path().join("dist/runtime_check.js"))
         .env("DATA_DIR", fixture_root.join("out/client_data/json"))
         .env("BIN_DATA_DIR", fixture_root.join("out/client_data/binary"))
+        .env(
+            "I18N_MO",
+            fixture_root.join("i18n/zh_CN/reference_game_config.mo"),
+        )
         .output()
         .expect("standard generated TypeScript runtime test should run");
     assert_command_success(output, "standard generated TypeScript runtime test");

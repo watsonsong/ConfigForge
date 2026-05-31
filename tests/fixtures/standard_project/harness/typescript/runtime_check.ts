@@ -3,18 +3,69 @@
 
 declare function require(name: string): any;
 
-import { GameData, LazyGameData, RuntimeDataLoader } from "./generated";
+import {
+  classesDescriptionText,
+  classesNameText,
+  GameData,
+  itemsNameText,
+  LazyGameData,
+  RuntimeDataLoader,
+  TextTranslator,
+} from "./generated";
 import { SyncFsRuntimeDataLoader } from "./runtime_loader_node_fs";
 import { decodeBinaryRuntimeData } from "./runtime_loader_binary";
 import { decodeJsonValue, JsonValueReader } from "./runtime_loader_json";
 import { createMessagePackRuntimeDecoder } from "./runtime_loader_messagepack";
 
 const process = require("process");
+const fs = require("fs");
 
 const dataDir = process.env.DATA_DIR;
 const binaryDataDir = process.env.BIN_DATA_DIR;
+const i18nMo = process.env.I18N_MO;
 if (!dataDir && !binaryDataDir) {
   throw new Error("DATA_DIR or BIN_DATA_DIR should point to exported runtime data");
+}
+if (!i18nMo) {
+  throw new Error("I18N_MO should point to the compiled gettext MO catalog");
+}
+
+function loadMoCatalog(path: string): Map<string, string> {
+  const data = fs.readFileSync(path);
+  if (data.readUInt32LE(0) !== 0x950412de) {
+    throw new Error("unsupported MO file magic");
+  }
+  const count = data.readUInt32LE(8);
+  const originalTableOffset = data.readUInt32LE(12);
+  const translatedTableOffset = data.readUInt32LE(16);
+  const catalog = new Map<string, string>();
+  for (let index = 0; index < count; index++) {
+    const originalLength = data.readUInt32LE(originalTableOffset + index * 8);
+    const originalOffset = data.readUInt32LE(originalTableOffset + index * 8 + 4);
+    const translatedLength = data.readUInt32LE(translatedTableOffset + index * 8);
+    const translatedOffset = data.readUInt32LE(translatedTableOffset + index * 8 + 4);
+    const original = data.toString("utf8", originalOffset, originalOffset + originalLength);
+    const translated = data.toString("utf8", translatedOffset, translatedOffset + translatedLength);
+    catalog.set(original, translated);
+  }
+  return catalog;
+}
+
+const moCatalog = loadMoCatalog(i18nMo);
+const translator: TextTranslator = (context, msgid) => moCatalog.get(context ? `${context}\u0004${msgid}` : msgid);
+
+function assertTranslatedText(data: GameData): void {
+  const item = data.items.getById(2001);
+  if (!item || itemsNameText(item, translator) !== "铁矿石") {
+    throw new Error("item text translation failed");
+  }
+  const warrior = data.classes.getById(1);
+  if (!warrior || classesNameText(warrior, translator) !== "战士") {
+    throw new Error("class name translation failed");
+  }
+  if (warrior && classesDescriptionText(warrior, translator) !== "耐久的近战战士。") {
+    throw new Error("class description translation failed");
+  }
 }
 
 const binaryLoader = binaryDataDir
@@ -64,6 +115,7 @@ async function main(): Promise<void> {
     if (binaryData.gameRules.defaultClass(binaryData).classId !== 1) {
       throw new Error("binary link all relation cache failed");
     }
+    assertTranslatedText(binaryData);
 
     const lazyBinaryData = GameData.loadLazy(binaryLoader);
     const lazyBinaryItem = await lazyBinaryData.items().then((items) => items.getById(2001));
@@ -127,6 +179,7 @@ async function main(): Promise<void> {
   if (data.gameRules.defaultClass(data).classId !== 1) {
     throw new Error("link all relation cache failed");
   }
+  assertTranslatedText(data);
 
   const lazyData = new LazyGameData(loader);
   const lazyItems = await lazyData.items();

@@ -10,7 +10,9 @@ use crate::{
     ConfigForgeError, Result,
     artifact::Artifact,
     data::{DataLoadPlan, DataLoader},
-    exporter::{DataFormatRegistry, RuntimeDataFile, export_runtime_data},
+    exporter::{
+        DataExporterRef, DataFormatRegistry, RuntimeDataFile, TargetDataConfig, export_runtime_data,
+    },
     meta::{LinkedMetaModel, TargetTags},
     project::lexical_normalize_path,
     validation::{normalize_data_set, validate_normalized_data_set_for_target_with_report},
@@ -61,7 +63,7 @@ pub(super) fn export_runtime_data_tasks(
     let mut artifacts = Vec::new();
 
     for data_task in data_tasks {
-        let format_exporter = registry.require(&data_task.format)?;
+        let format_exporter = registry.require_any(&data_task.format)?;
         let data_set = match normalized_data_sets.entry(data_task.input.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
@@ -77,27 +79,40 @@ pub(super) fn export_runtime_data_tasks(
                 entry.insert(data_set)
             }
         };
-        let runtime_artifacts = export_runtime_data(
-            &data_task.output,
-            linked_meta,
-            target_tags,
-            data_set,
-            format_exporter,
-            pool,
-        )?;
-        let files = runtime_artifacts
-            .iter()
-            .map(|artifact| artifact.file.clone())
-            .collect::<Vec<_>>();
-        artifacts.extend(
-            runtime_artifacts
-                .into_iter()
-                .map(|artifact| artifact.artifact),
-        );
-        results.push(RuntimeConfigForgeResult {
-            data_name: data_task.name.clone(),
-            files,
-        });
+        match format_exporter {
+            DataExporterRef::Table(exporter) => {
+                let runtime_artifacts = export_runtime_data(
+                    &data_task.output,
+                    linked_meta,
+                    target_tags,
+                    data_set,
+                    exporter,
+                    pool,
+                )?;
+                let files = runtime_artifacts
+                    .iter()
+                    .map(|artifact| artifact.file.clone())
+                    .collect::<Vec<_>>();
+                artifacts.extend(
+                    runtime_artifacts
+                        .into_iter()
+                        .map(|artifact| artifact.artifact),
+                );
+                results.push(RuntimeConfigForgeResult {
+                    data_name: data_task.name.clone(),
+                    files,
+                });
+            }
+            DataExporterRef::Aggregate(exporter) => {
+                artifacts.extend(exporter.export(
+                    &data_task.output,
+                    &target_data_config_from_normalized(data_task),
+                    linked_meta,
+                    target_tags,
+                    data_set,
+                )?);
+            }
+        }
     }
 
     Ok(RuntimeExportOutput {
@@ -115,20 +130,47 @@ fn ensure_planned_runtime_output_paths(
 ) -> Result<()> {
     let mut paths = BTreeSet::new();
     for data_task in data_tasks {
-        let exporter = registry.require(&data_task.format)?;
-        for table_meta in &linked_meta.tables {
-            if !table_meta.meta.is_exported_for(target_tags) {
-                continue;
+        match registry.require_any(&data_task.format)? {
+            DataExporterRef::Table(exporter) => {
+                for table_meta in &linked_meta.tables {
+                    if !table_meta.meta.is_exported_for(target_tags) {
+                        continue;
+                    }
+                    let plan = exporter.plan_table_artifact(table_meta)?;
+                    let path = lexical_normalize_path(&data_task.output.join(&plan.path));
+                    if !paths.insert(path.clone()) {
+                        return Err(ConfigForgeError::Validation(format!(
+                            "multiple data artifacts target `{}`",
+                            path.display()
+                        )));
+                    }
+                }
             }
-            let plan = exporter.plan_table_artifact(table_meta)?;
-            let path = lexical_normalize_path(&data_task.output.join(&plan.path));
-            if !paths.insert(path.clone()) {
-                return Err(ConfigForgeError::Validation(format!(
-                    "multiple runtime data artifacts target `{}`",
-                    path.display()
-                )));
+            DataExporterRef::Aggregate(exporter) => {
+                let task = target_data_config_from_normalized(data_task);
+                for path in
+                    exporter.plan_artifacts(&data_task.output, &task, linked_meta, target_tags)?
+                {
+                    let path = lexical_normalize_path(&path);
+                    if !paths.insert(path.clone()) {
+                        return Err(ConfigForgeError::Validation(format!(
+                            "multiple data artifacts target `{}`",
+                            path.display()
+                        )));
+                    }
+                }
             }
         }
     }
     Ok(())
+}
+
+fn target_data_config_from_normalized(data_task: &NormalizedTargetDataConfig) -> TargetDataConfig {
+    TargetDataConfig {
+        name: Some(data_task.name.clone()),
+        input: data_task.input.clone(),
+        output: data_task.output.clone(),
+        format: data_task.format.clone(),
+        options: data_task.options.clone(),
+    }
 }

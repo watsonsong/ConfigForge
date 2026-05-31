@@ -289,7 +289,7 @@ POT / text 相关校验目标态应补充：
 - 如果启用 plural / gender / select 等高级国际化类型，应由对应 field type 或 validator 明确承担结构校验，不应把 primitive `text` 的语义无限扩张。
 - target-aware validation 只检查当前 ExportView 中可见 text；被 `row_export`、`export_when` 或 fragment visibility 排除的文本不产生 POT 条目，也不产生 POT 相关错误。
 
-当前实现状态：`text` 仍按 string-like scalar 解析和 runtime data 导出，尚未实现国际化 key/context、POT exporter、translator comment 或文本资源诊断。标准参考游戏 fixture 中 item/class name、class description 等字段用于表达目标语义：客户端需要 text，服务器通常不需要；target ExportView 过滤后，server target 不应输出这些字段，也不应把它们送入未来 POT / text validation。
+当前实现状态：`text` 仍按 string-like scalar 解析和 runtime data 导出；已实现 `format = "gettext_pot"` 的首版聚合 data exporter，按当前 target 可见 table / row / field 抽取 primitive `text` 原文作为 `msgid`，支持 `table.field` context、source location / record key reference、field `desc` 与自动 table/field/record translator comment、以及 `(msgctxt, msgid)` 去重。国际化 key/context 显式列、placeholder / plural 诊断、fragment / struct child text 深度抽取和外部 catalog 导入仍属于后续扩展。标准参考游戏 fixture 中 item/class name、class description 等字段用于表达目标语义：客户端需要 text，服务器通常不需要；target ExportView 过滤后，server target 不应输出这些字段，也不应把它们送入未来 POT / text validation。
 
 ## 5.9 聚合 Data Exporter 输入
 

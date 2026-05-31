@@ -3,6 +3,7 @@
 
 mod binary;
 mod config;
+mod gettext_pot;
 mod json;
 mod messagepack;
 mod model;
@@ -19,7 +20,10 @@ pub use json::JsonDataExporter;
 pub use messagepack::MessagePackDataExporter;
 pub use model::{ExportedTable, ExportedTablePayload, ExportedValue};
 pub use payload::build_exported_table_payload;
-pub use registry::{DataFormatExporter, DataFormatRegistry, builtin_exporters};
+pub use registry::{
+    AggregateDataExporter, DataExporterRef, DataFormatExporter, DataFormatRegistry,
+    builtin_exporters,
+};
 pub use runtime::{RuntimeArtifactPlan, RuntimeDataFile};
 
 pub(crate) use binary::schema_revision as binary_schema_revision;

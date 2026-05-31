@@ -1,0 +1,69 @@
+# Copyright (c) 2026 ConfigForge contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: reference_game_config\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: zh_CN\n"
+
+msgctxt "classes.description"
+msgid "A durable melee fighter."
+msgstr "耐久的近战战士。"
+
+msgctxt "classes.description"
+msgid "A nimble ranged attacker."
+msgstr "灵巧的远程攻击者。"
+
+msgctxt "classes.description"
+msgid "A spell caster with high burst damage."
+msgstr "拥有高爆发伤害的施法者。"
+
+msgctxt "classes.name"
+msgid "Warrior"
+msgstr "战士"
+
+msgctxt "classes.name"
+msgid "Ranger"
+msgstr "游侠"
+
+msgctxt "classes.name"
+msgid "Mage"
+msgstr "法师"
+
+msgctxt "items.name"
+msgid "Iron Ore"
+msgstr "铁矿石"
+
+msgctxt "items.name"
+msgid "Oak Wood"
+msgstr "橡木"
+
+msgctxt "items.name"
+msgid "Health Herb"
+msgstr "生命草药"
+
+msgctxt "items.name"
+msgid "Iron Sword"
+msgstr "铁剑"
+
+msgctxt "items.name"
+msgid "Hunter Bow"
+msgstr "猎人弓"
+
+msgctxt "items.name"
+msgid "Apprentice Staff"
+msgstr "学徒法杖"
+
+msgctxt "items.name"
+msgid "Leather Armor"
+msgstr "皮甲"
+
+msgctxt "items.name"
+msgid "Iron Armor"
+msgstr "铁甲"
+
+msgctxt "items.name"
+msgid "Mage Robe"
+msgstr "法师长袍"

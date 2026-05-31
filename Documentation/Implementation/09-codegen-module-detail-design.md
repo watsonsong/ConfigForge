@@ -773,12 +773,12 @@ TextTranslator
 | --- | --- | --- |
 | Rust | `row.display_name: String` | `row.display_name_text(&translator) -> String` 或 `RuntimeDataResult<String>` |
 | C++ | `row.display_name` | `row.DisplayNameText(translator)` 返回 `std::string` 或 Result |
-| TypeScript | `row.displayName: string` | `row.displayNameText(translator): string` |
+| TypeScript | `row.displayName: string` | 顶层 helper `itemsDisplayNameText(row, translator): string` / `structDisplayNameText(value, translator): string` |
 
 命名规则：
 
-- helper 名称由字段生成名追加稳定后缀派生，例如 `_text` / `Text` / `Text`；若字段本身已经以 `text` 结尾，仍使用同一后缀策略并进入冲突检测，而不是特殊省略。
-- helper 与普通字段、fragment getter、relation helper、index function、lazy helper 同处一个 row/object API scope，必须纳入 `symbols.rs` 的目标语言冲突检查。
+- helper 名称由字段生成名追加稳定后缀派生，例如 Rust `_text`、C++ `Text`。TypeScript interface 不能声明方法实现，首版生成顶层函数，名称由 owner + field + `Text` 派生，例如 `itemsNameText`。
+- helper 与普通字段、fragment getter、relation helper、index function、lazy helper 同处一个 row/object API scope（或 TypeScript 顶层 export scope）时，必须纳入 `symbols.rs` 的目标语言冲突检查。首版已生成 helper，后续需继续补齐更严格的 symbol conflict 覆盖。
 - translator helper 是 generated code API，不是 runtime payload 字段；它不参与 JSON / MessagePack / `bin` schema revision，不影响 index key、FK、relation cache 或 artifact manifest。
 
 缓存策略：默认不在 row/object 内缓存翻译结果。原因是翻译结果依赖语言、domain、运行时 locale、fallback chain 和 translator 实例，row 级缓存容易跨 locale 污染，也会增加生成代码状态复杂度。需要高性能翻译时，应由业务提供带缓存的 translator，缓存 key 至少包含 `(domain, context, msgid, locale)`；generated helper 只负责传入稳定 lookup 信息。

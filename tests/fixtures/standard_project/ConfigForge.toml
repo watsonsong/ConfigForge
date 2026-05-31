@@ -27,6 +27,16 @@ input = "data"
 output = "out/client_data/binary"
 format = "bin"
 
+[[targets.data]]
+name = "i18n_pot"
+input = "data"
+output = "out/client_i18n"
+format = "gettext_pot"
+domain = "reference_game_config"
+file_name = "reference_game_config.pot"
+context = "table_field"
+source_reference = "both"
+
 [[targets.code]]
 language = "typescript"
 output = "out/client_code/typescript"
