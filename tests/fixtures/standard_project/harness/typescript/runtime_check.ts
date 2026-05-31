@@ -10,8 +10,8 @@ import {
   itemsNameText,
   LazyGameData,
   RuntimeDataLoader,
-  TextTranslator,
 } from "./generated";
+import { setGlobalTextCatalog } from "./i18n";
 import { SyncFsRuntimeDataLoader } from "./runtime_loader_node_fs";
 import { decodeBinaryRuntimeData } from "./runtime_loader_binary";
 import { decodeJsonValue, JsonValueReader } from "./runtime_loader_json";
@@ -52,18 +52,18 @@ function loadMoCatalog(path: string): Map<string, string> {
 }
 
 const moCatalog = loadMoCatalog(i18nMo);
-const translator: TextTranslator = (context, msgid) => moCatalog.get(context ? `${context}\u0004${msgid}` : msgid);
+setGlobalTextCatalog(moCatalog);
 
 function assertTranslatedText(data: GameData): void {
   const item = data.items.getById(2001);
-  if (!item || itemsNameText(item, translator) !== "铁矿石") {
+  if (!item || itemsNameText(item) !== "铁矿石") {
     throw new Error("item text translation failed");
   }
   const warrior = data.classes.getById(1);
-  if (!warrior || classesNameText(warrior, translator) !== "战士") {
+  if (!warrior || classesNameText(warrior) !== "战士") {
     throw new Error("class name translation failed");
   }
-  if (warrior && classesDescriptionText(warrior, translator) !== "耐久的近战战士。") {
+  if (warrior && classesDescriptionText(warrior) !== "耐久的近战战士。") {
     throw new Error("class description translation failed");
   }
 }

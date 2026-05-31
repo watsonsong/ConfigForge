@@ -43,12 +43,24 @@ output = "out/client_code/typescript"
 file_name = "reference_game_config"
 module_name = "referenceGameConfig"
 
+[targets.code.i18n]
+mode = "global_function"
+function = "globalTranslate"
+returns = "optional"
+typescript_import = "import { globalTranslate } from './i18n'"
+
 [[targets.code]]
 language = "cpp"
 output = "out/client_code/cpp"
 file_name = "reference_game_config"
 module_name = "ReferenceGameConfig"
 namespace = "reference::game::config"
+
+[targets.code.i18n]
+mode = "global_function"
+function = "GlobalTranslate"
+returns = "optional"
+cpp_include = "\"reference_game_i18n.hpp\""
 
 [[targets]]
 name = "server"
@@ -71,3 +83,8 @@ language = "rust"
 output = "out/server_code/rust"
 file_name = "reference_game_config"
 module_name = "reference_game_config"
+
+[targets.code.i18n]
+mode = "global_function"
+function = "crate::global_translate"
+returns = "optional"

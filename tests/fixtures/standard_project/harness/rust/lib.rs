@@ -1,6 +1,15 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+fn global_translate(context: Option<&str>, msgid: &str) -> Option<String> {
+    match (context, msgid) {
+        (Some("items.name"), "Iron Ore") => Some("铁矿石".to_owned()),
+        (Some("classes.name"), "Warrior") => Some("战士".to_owned()),
+        (Some("classes.description"), "Durable melee fighter.") => Some("耐久的近战战士。".to_owned()),
+        _ => None,
+    }
+}
+
 include!("generated.rs");
 
 mod json_runtime_reader;
@@ -76,6 +85,7 @@ fn binary_fixture_loader_from_env() -> FsBinaryRuntimeDataLoader {
 fn assert_standard_data(data: &GameData) {
     let item = data.items.get_by_id(2001).expect("item id should be indexed");
     assert_eq!(item.price, 5);
+    assert_eq!(item.name_text(), "铁矿石");
     assert_eq!(item.stack().expect("stack fragment").max_stack, 999);
     assert!(data.items.get_by_id(404).is_none());
 
@@ -89,6 +99,9 @@ fn assert_standard_data(data: &GameData) {
     assert_eq!(data.game_rules.max_player_level, 60);
     assert_eq!(data.game_rules.default_class_id, 1);
     assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2002]);
+    let warrior = data.classes.get_by_id(1).expect("class id should be indexed");
+    assert_eq!(warrior.name_text(), "战士");
+    assert_eq!(warrior.description_text(), "耐久的近战战士。");
     let default_class = data
         .game_rules
         .default_class(data)
@@ -110,6 +123,7 @@ fn assert_standard_lazy_data(data: &impl GameDataAccess) {
     let items = data.items().expect("items table should load lazily");
     let item = items.get_by_id(2001).expect("item id should be indexed");
     assert_eq!(item.price, 5);
+    assert_eq!(item.name_text(), "铁矿石");
     assert_eq!(item.stack().expect("stack fragment").max_stack, 999);
     assert!(items.get_by_id(404).is_none());
 
@@ -129,6 +143,8 @@ fn assert_standard_lazy_data(data: &impl GameDataAccess) {
         .default_class(data)
         .expect("default class relation should resolve lazily");
     assert_eq!(default_class.class_id, 1);
+    assert_eq!(default_class.name_text(), "战士");
+    assert_eq!(default_class.description_text(), "耐久的近战战士。");
     let starter_items = game_rules
         .starter_items(data)
         .expect("starter item relation should resolve lazily");

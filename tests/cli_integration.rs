@@ -2410,6 +2410,7 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
     let temp_dir = tempfile::tempdir().expect("cpp harness temp dir should be created");
     let runtime_cpp_dir = fixture_root.join("../../../runtime/cpp");
     let generated_cpp_dir = fixture_root.join("out/client_code/cpp");
+    let harness_cpp_dir = fixture_root.join("harness/cpp");
     let harness_cpp = fixture_root.join("harness/cpp/runtime_check.cpp");
     let generated_cpp = generated_cpp_dir.join("reference_game_config.cpp");
 
@@ -2494,13 +2495,13 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
                 add_executable(standard_runtime_check
                     {harness_cpp:?}
                     {generated_cpp:?})
-                target_include_directories(standard_runtime_check PRIVATE {generated_cpp_dir:?})
+                target_include_directories(standard_runtime_check PRIVATE {generated_cpp_dir:?} {harness_cpp_dir:?})
                 target_link_libraries(standard_runtime_check PRIVATE config_forge_runtime::rapidjson_reader)
 
                 add_executable(standard_binary_runtime_check
                     {harness_cpp:?}
                     {binary_generated_cpp:?})
-                target_include_directories(standard_binary_runtime_check PRIVATE {binary_generated_cpp_dir:?})
+                target_include_directories(standard_binary_runtime_check PRIVATE {binary_generated_cpp_dir:?} {harness_cpp_dir:?})
                 target_compile_definitions(standard_binary_runtime_check PRIVATE CONFIG_FORGE_USE_BINARY_RUNTIME_READER)
                 target_link_libraries(standard_binary_runtime_check PRIVATE config_forge_runtime::binary_reader)
 
@@ -2518,6 +2519,7 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
             binary_generated_cpp = generated_cpp.display().to_string(),
             generated_cpp_dir = generated_cpp_dir.display().to_string(),
             binary_generated_cpp_dir = generated_cpp_dir.display().to_string(),
+            harness_cpp_dir = harness_cpp_dir.display().to_string(),
             temp_dir = temp_dir.path().display().to_string()
         ),
     )
@@ -2584,6 +2586,8 @@ fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) 
         temp_dir.path().join("runtime_check.ts"),
     )
     .expect("TypeScript runtime harness should be copied");
+    fs::copy(harness_dir.join("i18n.ts"), temp_dir.path().join("i18n.ts"))
+        .expect("TypeScript i18n harness should be copied");
     fs::copy(
         fixture_root.join("../../../runtime/typescript/reader_core/src/runtime_reader.ts"),
         temp_dir.path().join("runtime_reader_core.ts"),

@@ -57,16 +57,16 @@ std::unordered_map<std::string, std::string> LoadMoCatalog(const char* path) {
     return catalog;
 }
 
-void AssertTranslatedText(const cfg::GameData& data, const cfg::TextTranslator& translator) {
+void AssertTranslatedText(const cfg::GameData& data) {
     const cfg::ItemsRow* item = data.Items().GetById(2001);
-    if (item == nullptr || item->NameText(translator) != "铁矿石") {
+    if (item == nullptr || item->NameText() != "铁矿石") {
         throw std::runtime_error("item text translation failed");
     }
     const cfg::ClassesRow* warrior = data.Classes().GetById(1);
-    if (warrior == nullptr || warrior->NameText(translator) != "战士") {
+    if (warrior == nullptr || warrior->NameText() != "战士") {
         throw std::runtime_error("class name translation failed");
     }
-    if (warrior->DescriptionText(translator) != "耐久的近战战士。") {
+    if (warrior->DescriptionText() != "耐久的近战战士。") {
         throw std::runtime_error("class description translation failed");
     }
 }
@@ -83,14 +83,7 @@ int main() {
         throw std::runtime_error("I18N_MO should point to the compiled gettext MO catalog");
     }
     const auto catalog = LoadMoCatalog(i18n_mo);
-    const cfg::TextTranslator translator = [&catalog](const char* context, const std::string& msgid) -> std::optional<std::string> {
-        const std::string key = std::string(context) + '\x04' + msgid;
-        const auto iterator = catalog.find(key);
-        if (iterator == catalog.end()) {
-            return std::nullopt;
-        }
-        return iterator->second;
-    };
+    SetGlobalTextCatalog(&catalog);
 
 #if defined(CONFIG_FORGE_USE_BINARY_RUNTIME_READER)
     config_forge_runtime::BinaryFsRuntimeDataLoader loader(data_dir);
@@ -140,7 +133,7 @@ int main() {
     if (data.GameRules().GetDefaultClass(data).class_id != 1) {
         throw std::runtime_error("link all relation cache failed");
     }
-    AssertTranslatedText(data, translator);
+    AssertTranslatedText(data);
 
 #if defined(CONFIG_FORGE_USE_BINARY_RUNTIME_READER)
     auto lazy_loader = std::make_shared<config_forge_runtime::BinaryFsRuntimeDataLoader>(data_dir);
