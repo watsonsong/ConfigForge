@@ -33,10 +33,16 @@ pub struct ResolvedValue {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ArrayElementValue {
+    pub value: DataValue,
+    pub raw_value: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum DataValue {
     Scalar(ScalarValue),
     Struct(BTreeMap<String, ResolvedValue>),
-    Array(Vec<ResolvedValue>),
+    Array(Vec<ArrayElementValue>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -115,19 +121,6 @@ impl ResolvedTable {
 }
 
 impl ResolvedValue {
-    pub fn from_source_kind(
-        raw_field_path: impl Into<String>,
-        value: DataValue,
-        kind: ValueSourceKind,
-        raw_value: Option<String>,
-        row_source: Option<&RowSourceInfo>,
-    ) -> Self {
-        Self {
-            value,
-            source: ValueSourceTrace::new(raw_field_path, kind, raw_value, row_source),
-        }
-    }
-
     pub fn explicit(
         raw_field_path: impl Into<String>,
         value: DataValue,
@@ -183,6 +176,44 @@ impl ResolvedValue {
             DataValue::Scalar(value) => Some(value.to_export_string()),
             _ => None,
         })
+    }
+}
+
+impl ArrayElementValue {
+    pub fn new(value: DataValue, raw_value: Option<String>) -> Self {
+        Self { value, raw_value }
+    }
+
+    pub fn scalar(scalar: ScalarValue, raw_value: Option<String>) -> Self {
+        Self::new(DataValue::Scalar(scalar), raw_value)
+    }
+
+    pub fn scalar_export_string(&self) -> Option<String> {
+        self.raw_value.clone().or_else(|| match &self.value {
+            DataValue::Scalar(value) => Some(value.to_export_string()),
+            _ => None,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::mem::size_of;
+
+    use super::*;
+
+    #[test]
+    fn array_element_is_lighter_than_full_resolved_value() {
+        assert!(size_of::<ArrayElementValue>() < size_of::<ResolvedValue>());
+    }
+
+    #[test]
+    fn array_element_keeps_scalar_export_fallback_without_source_trace() {
+        let explicit = ArrayElementValue::scalar(ScalarValue::Int(7), Some("007".to_owned()));
+        assert_eq!(explicit.scalar_export_string().as_deref(), Some("007"));
+
+        let fallback = ArrayElementValue::scalar(ScalarValue::Bool(true), None);
+        assert_eq!(fallback.scalar_export_string().as_deref(), Some("true"));
     }
 }
 

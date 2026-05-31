@@ -157,7 +157,29 @@ fn exported_value_from_resolved(value: &ResolvedValue) -> Result<ExportedValue> 
             .map(ExportedValue::Struct),
         DataValue::Array(elements) => elements
             .iter()
-            .map(exported_value_from_resolved)
+            .map(exported_value_from_array_element)
+            .collect::<Result<Vec<_>>>()
+            .map(ExportedValue::Array),
+    }
+}
+
+fn exported_value_from_array_element(
+    value: &crate::data::ArrayElementValue,
+) -> Result<ExportedValue> {
+    match &value.value {
+        DataValue::Scalar(_) => Ok(ExportedValue::Scalar(
+            value.scalar_export_string().unwrap_or_default(),
+        )),
+        DataValue::Struct(children) => children
+            .iter()
+            .map(|(field_name, child)| {
+                Ok((field_name.clone(), exported_value_from_resolved(child)?))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()
+            .map(ExportedValue::Struct),
+        DataValue::Array(elements) => elements
+            .iter()
+            .map(exported_value_from_array_element)
             .collect::<Result<Vec<_>>>()
             .map(ExportedValue::Array),
     }

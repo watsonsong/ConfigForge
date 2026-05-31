@@ -220,10 +220,15 @@ pub struct ResolvedValue {
     pub source: ValueSourceTrace,
 }
 
+pub struct ArrayElementValue {
+    pub value: DataValue,
+    pub raw_value: Option<String>,
+}
+
 pub enum DataValue {
     Scalar(ScalarValue),
     Struct(BTreeMap<String, ResolvedValue>),
-    Array(Vec<ResolvedValue>),
+    Array(Vec<ArrayElementValue>),
 }
 
 pub enum ScalarValue {
@@ -280,7 +285,7 @@ Resolver 职责：
 Typed value 解析规则集中在 `src/data/typed_value.rs`：
 
 - `parse_scalar_field_value()` / `parse_scalar_for_type()` 负责 primitive 与 enum 的字符串单元格到 `ScalarValue` 转换；bool、finite float、enum value membership 等规则只在这里定义。
-- `parse_list_cell_value()` 负责把 list JSON cell 解析为 JSON array 后委托 `parse_list_json_value()`；后者逐元素复用 scalar 转换规则并生成 `field[index]` 形式的 element path。
+- `parse_list_cell_value()` 负责把 list JSON cell 解析为 JSON array 后委托 `parse_list_json_value()`；后者逐元素复用 scalar 转换规则，并在错误发生时按需生成 `field[index]` 形式的诊断路径。成功解析后的 scalar list element 使用 `ArrayElementValue` 保存 `DataValue + raw_value`，不再为每个元素常驻完整 `ResolvedValue`、source trace 和 duplicated field path string。
 - `DataResolver`、struct value validation 和 list foreign-key validation 共用这些 helper。默认值是否生效、空值是否跳过由调用方基于字段语义决定；一旦需要解析 typed scalar/list element，必须进入该共享路径。
 
 当前实现状态与差距：

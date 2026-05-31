@@ -7,7 +7,7 @@ use crate::{
 };
 
 use super::{
-    DataValue, ResolvedValue, RowSourceInfo, ScalarValue, ValueSourceKind,
+    ArrayElementValue, RowSourceInfo, ScalarValue, ValueSourceKind,
     value_conversion::json_value_to_scalar_cell_for_field,
 };
 
@@ -88,7 +88,7 @@ pub(crate) fn parse_list_cell_value(
     value: &str,
     row_source: Option<&RowSourceInfo>,
     source_kind: ValueSourceKind,
-) -> Result<Vec<ResolvedValue>> {
+) -> Result<Vec<ArrayElementValue>> {
     let json: serde_json::Value = serde_json::from_str(value).map_err(|source| {
         ConfigForgeError::Validation(format!(
             "table `{}` row {} field `{}` has invalid list JSON: {}",
@@ -112,9 +112,9 @@ pub(crate) fn parse_list_json_value(
     field_path: &str,
     element_type: &LinkedField<'_>,
     value: &serde_json::Value,
-    row_source: Option<&RowSourceInfo>,
-    source_kind: ValueSourceKind,
-) -> Result<Vec<ResolvedValue>> {
+    _row_source: Option<&RowSourceInfo>,
+    _source_kind: ValueSourceKind,
+) -> Result<Vec<ArrayElementValue>> {
     let array = value.as_array().ok_or_else(|| {
         ConfigForgeError::Validation(format!(
             "table `{}` row {} field `{}` must be a JSON array",
@@ -145,13 +145,7 @@ pub(crate) fn parse_list_json_value(
                     table_name, row_number, element_path, raw
                 ))
             })?;
-            Ok(ResolvedValue::from_source_kind(
-                element_path,
-                DataValue::Scalar(scalar),
-                source_kind,
-                Some(raw),
-                row_source,
-            ))
+            Ok(ArrayElementValue::scalar(scalar, Some(raw)))
         })
         .collect()
 }
@@ -183,6 +177,7 @@ fn scalar_type_error(
 
 #[cfg(test)]
 mod tests {
+    use crate::data::DataValue;
     use crate::meta::{EnumMeta, EnumValueMeta};
 
     use super::*;
@@ -221,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_json_list_elements_once_with_element_paths() {
+    fn parses_json_list_elements_without_per_element_source_trace() {
         let values = parse_list_cell_value(
             "items",
             7,
@@ -234,10 +229,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(values.len(), 2);
-        assert_eq!(values[0].source.raw_field_path, "starter_item_ids[0]");
         assert_eq!(values[0].value, DataValue::Scalar(ScalarValue::Int(2001)));
-        assert_eq!(values[1].source.raw_field_path, "starter_item_ids[1]");
+        assert_eq!(values[0].raw_value.as_deref(), Some("2001"));
         assert_eq!(values[1].value, DataValue::Scalar(ScalarValue::Int(2002)));
+        assert_eq!(values[1].raw_value.as_deref(), Some("2002"));
     }
 
     #[test]

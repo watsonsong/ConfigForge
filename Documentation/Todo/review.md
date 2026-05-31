@@ -28,10 +28,10 @@
 
 ## P2：内部模型和 exporter 复用
 
-- [ ] 重新评估 `DataValue::Array(Vec<ResolvedValue>)` 的内存模型。
-  - 当前每个 scalar list element 都保存完整 `ResolvedValue`、field path string 与 source trace；大数组会产生较多小对象与字符串。
-  - 目标：考虑 `ScalarArray(Vec<ScalarValue>)` 或 `Array(Vec<DataValue>)` 的轻量表达，诊断路径按需构造。
-  - 验收：大数组导出不为每个元素常驻保存重复 path/source 包装，同时保持元素级诊断能力。
+- [x] 重新评估 `DataValue::Array(Vec<ResolvedValue>)` 的内存模型。
+  - 已完成：`DataValue::Array` 改为 `Vec<ArrayElementValue>`，每个元素只保存 `DataValue` 与可选 raw value，不再常驻完整 `ResolvedValue`、field path string 与 source trace。
+  - 已完成：list parser 仍在转换失败时按需构造 `field[index]` 诊断路径；payload/binary exporter 与 list FK 校验改为消费轻量元素模型。
+  - 验收：单元测试覆盖 `ArrayElementValue` 小于 `ResolvedValue`、raw value/export fallback 与 list element 解析行为。
 
 - [ ] 抽象 binary record optional bitmap 写入逻辑。
   - 当前 table record、struct record、fragment record 各自处理 optional slot count、bitmap 初始化和 presence bit 写入。

@@ -15,7 +15,8 @@ pub use self::loader::DataLoader;
 pub use self::model::{DataRow, DataSet, DataTable, RowSourceInfo, SourceRole};
 pub use self::plan::{DataLoadPlan, DataProvider, DataSourceLayout, DataSourcePlan};
 pub use self::resolved::{
-    DataValue, ResolvedRow, ResolvedTable, ResolvedValue, ScalarValue, ValueSourceKind,
+    ArrayElementValue, DataValue, ResolvedRow, ResolvedTable, ResolvedValue, ScalarValue,
+    ValueSourceKind,
 };
 pub use self::resolver::DataResolver;
 

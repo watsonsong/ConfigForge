@@ -141,7 +141,7 @@ DataResolver::resolve_table_rows / resolve_table
 
 - validation 和 exporter 对 struct JSON cell / expanded value 的理解逐步收敛。
 - default、target-hidden child、empty struct occurrence 等语义不分叉。
-- array JSON cell 支持已通过 `DataValue::Array -> ExportedValue::Array` 转换接入；后续 map 或 expanded array path 仍应继续复用该转换边界。
+- array/list JSON cell 支持已通过 `DataValue::Array(Vec<ArrayElementValue>) -> ExportedValue::Array` 转换接入；scalar list element 只常驻 element value 与 raw value，元素级诊断路径由 parser 按需构造。后续 map 或 expanded array path 仍应继续复用该转换边界。
 
 ## 8.6 Artifact path 约束
 

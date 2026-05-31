@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     ConfigForgeError, Result,
-    data::{DataResolver, DataTable, DataValue, ResolvedValue, ScalarValue},
+    data::{ArrayElementValue, DataResolver, DataTable, DataValue, ResolvedValue, ScalarValue},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedFragmentMeta, LinkedStructType, LinkedTableMeta,
         PrimitiveFieldType, TableKind, TargetTags,
@@ -329,19 +329,6 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
         }
     }
 
-    fn write_value_for_type(
-        &mut self,
-        field_type: &LinkedField<'meta>,
-        value: &ResolvedValue,
-    ) -> Result<()> {
-        match field_type {
-            LinkedField::Primitive(primitive) => self.write_primitive_for_type(*primitive, value),
-            LinkedField::Enum(enum_meta) => self.write_enum_for_type(enum_meta, value),
-            LinkedField::Struct(struct_type) => self.write_struct(struct_type, value),
-            LinkedField::List(element_type) => self.write_list(element_type, value),
-        }
-    }
-
     fn write_list(
         &mut self,
         element_type: &LinkedField<'meta>,
@@ -354,9 +341,26 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
         };
         write_varuint(&mut self.bytes, elements.len() as u64);
         for element in elements {
-            self.write_value_for_type(element_type, element)?;
+            self.write_array_element_for_type(element_type, element)?;
         }
         Ok(())
+    }
+
+    fn write_array_element_for_type(
+        &mut self,
+        field_type: &LinkedField<'meta>,
+        value: &ArrayElementValue,
+    ) -> Result<()> {
+        match field_type {
+            LinkedField::Primitive(primitive) => {
+                self.write_primitive_array_element(*primitive, value)
+            }
+            LinkedField::Enum(enum_meta) => self.write_enum_array_element(enum_meta, value),
+            LinkedField::Struct(struct_type) => self.write_struct_array_element(struct_type, value),
+            LinkedField::List(element_type) => {
+                self.write_nested_list_array_element(element_type, value)
+            }
+        }
     }
 
     fn write_primitive(
@@ -371,10 +375,10 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
         self.write_scalar(primitive, scalar, field.meta.name.as_str())
     }
 
-    fn write_primitive_for_type(
+    fn write_primitive_array_element(
         &mut self,
         primitive: PrimitiveFieldType,
-        value: &ResolvedValue,
+        value: &ArrayElementValue,
     ) -> Result<()> {
         let DataValue::Scalar(scalar) = &value.value else {
             return Err(ConfigForgeError::Validation(
@@ -437,10 +441,10 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
         self.write_enum_value(enum_meta, value, field.meta.name.as_str())
     }
 
-    fn write_enum_for_type(
+    fn write_enum_array_element(
         &mut self,
         enum_meta: &crate::meta::EnumMeta,
-        value: &ResolvedValue,
+        value: &ArrayElementValue,
     ) -> Result<()> {
         let DataValue::Scalar(ScalarValue::Enum(value)) = &value.value else {
             return Err(ConfigForgeError::Validation(
@@ -486,6 +490,41 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
             children,
             &format!("struct `{}`", struct_type.meta.name),
         )
+    }
+
+    fn write_struct_array_element(
+        &mut self,
+        struct_type: &LinkedStructType<'meta>,
+        value: &ArrayElementValue,
+    ) -> Result<()> {
+        let DataValue::Struct(children) = &value.value else {
+            return Err(ConfigForgeError::Validation(format!(
+                "binary export expected struct `{}` list element",
+                struct_type.meta.name
+            )));
+        };
+        self.write_record(
+            &struct_type.fields,
+            children,
+            &format!("struct `{}` list element", struct_type.meta.name),
+        )
+    }
+
+    fn write_nested_list_array_element(
+        &mut self,
+        element_type: &LinkedField<'meta>,
+        value: &ArrayElementValue,
+    ) -> Result<()> {
+        let DataValue::Array(elements) = &value.value else {
+            return Err(ConfigForgeError::Validation(
+                "binary export expected nested list element".to_owned(),
+            ));
+        };
+        write_varuint(&mut self.bytes, elements.len() as u64);
+        for element in elements {
+            self.write_array_element_for_type(element_type, element)?;
+        }
+        Ok(())
     }
 
     fn finish(self) -> Vec<u8> {
