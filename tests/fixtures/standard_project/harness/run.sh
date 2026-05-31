@@ -57,7 +57,7 @@ run_rust_harness() {
     "${work_dir}/json_runtime_reader.rs"
   cp "${REPO_ROOT}/runtime/rust/serde_msgpack_reader/src/runtime_reader.rs" \
     "${work_dir}/msgpack_runtime_reader.rs"
-  cp "${FIXTURE_ROOT}/out/server_code/rust/reference_game_config.rs" \
+  cp "${FIXTURE_ROOT}/out/client_code/rust/reference_game_config.rs" \
     "${work_dir}/generated.rs"
 
   for edition in 2021 2024; do
@@ -66,18 +66,21 @@ run_rust_harness() {
 
     CARGO_TARGET_DIR="${work_dir}/target-${edition}-json" \
     JSON_DATA_DIR="${FIXTURE_ROOT}/out/client_data/json" \
-    MSGPACK_DATA_DIR="${FIXTURE_ROOT}/out/server_data/msgpack" \
+    MSGPACK_DATA_DIR="${FIXTURE_ROOT}/out/client_data/msgpack" \
+    I18N_MO="${FIXTURE_ROOT}/i18n/zh_CN/reference_game_config.mo" \
       cargo test --quiet --manifest-path "${work_dir}/Cargo.toml" \
         generated_rust_loads_exported_json_and_queries_indexes
 
     CARGO_TARGET_DIR="${work_dir}/target-${edition}-messagepack" \
     JSON_DATA_DIR="${FIXTURE_ROOT}/out/client_data/json" \
-    MSGPACK_DATA_DIR="${FIXTURE_ROOT}/out/server_data/msgpack" \
+    MSGPACK_DATA_DIR="${FIXTURE_ROOT}/out/client_data/msgpack" \
+    I18N_MO="${FIXTURE_ROOT}/i18n/zh_CN/reference_game_config.mo" \
       cargo test --quiet --manifest-path "${work_dir}/Cargo.toml" \
         generated_rust_loads_exported_messagepack_and_queries_indexes
 
     CARGO_TARGET_DIR="${work_dir}/target-${edition}-binary" \
-    BIN_DATA_DIR="${FIXTURE_ROOT}/out/server_data/binary" \
+    BIN_DATA_DIR="${FIXTURE_ROOT}/out/client_data/binary" \
+    I18N_MO="${FIXTURE_ROOT}/i18n/zh_CN/reference_game_config.mo" \
       cargo test --quiet --manifest-path "${work_dir}/Cargo.toml" \
         generated_rust_loads_exported_binary_and_queries_indexes
 
@@ -94,6 +97,7 @@ run_typescript_harness() {
 
   log "TypeScript harness: JSON / binary"
   cp "${SCRIPT_DIR}/typescript/runtime_check.ts" "${work_dir}/runtime_check.ts"
+  cp "${SCRIPT_DIR}/typescript/i18n.ts" "${work_dir}/i18n.ts"
   cp "${SCRIPT_DIR}/typescript/tsconfig.json" "${work_dir}/tsconfig.json"
   cp "${FIXTURE_ROOT}/out/client_code/typescript/reference_game_config.ts" \
     "${work_dir}/generated.ts"
@@ -143,14 +147,16 @@ add_executable(standard_runtime_check_json
   "${SCRIPT_DIR}/cpp/runtime_check.cpp"
   "${FIXTURE_ROOT}/out/client_code/cpp/reference_game_config.cpp")
 target_include_directories(standard_runtime_check_json PRIVATE
-  "${FIXTURE_ROOT}/out/client_code/cpp")
+  "${FIXTURE_ROOT}/out/client_code/cpp"
+  "${SCRIPT_DIR}/cpp")
 target_link_libraries(standard_runtime_check_json PRIVATE config_forge_runtime::rapidjson_reader)
 
 add_executable(standard_runtime_check_binary
   "${SCRIPT_DIR}/cpp/runtime_check.cpp"
   "${FIXTURE_ROOT}/out/client_code/cpp/reference_game_config.cpp")
 target_include_directories(standard_runtime_check_binary PRIVATE
-  "${FIXTURE_ROOT}/out/client_code/cpp")
+  "${FIXTURE_ROOT}/out/client_code/cpp"
+  "${SCRIPT_DIR}/cpp")
 target_compile_definitions(standard_runtime_check_binary PRIVATE CONFIG_FORGE_USE_BINARY_RUNTIME_READER)
 target_link_libraries(standard_runtime_check_binary PRIVATE config_forge_runtime::binary_reader)
 EOF

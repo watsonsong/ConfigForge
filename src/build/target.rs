@@ -5,8 +5,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::{
     ConfigForgeError, Result,
-    codegen::CodegenTaskConfig,
-    exporter::TargetDataConfig,
+    codegen::{CodegenTaskConfig, builtin_generators, find_generator},
+    exporter::{DataFormatRegistry, ExportDependency, TargetDataConfig},
     meta::TargetTags,
     project::{TargetConfig, TargetExportConfig},
 };
@@ -27,14 +27,6 @@ pub(crate) struct NormalizedExportTask {
     pub(crate) dependency: ExportDependency,
     pub(crate) output: PathBuf,
     pub(crate) options: BTreeMap<String, toml::Value>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub(crate) enum ExportDependency {
-    MetaOnly,
-    MetaAndData,
-    DataOnly,
 }
 
 impl TargetConfig {
@@ -76,6 +68,7 @@ fn normalize_export_tasks(
 ) -> Result<Vec<NormalizedExportTask>> {
     let mut normalized = Vec::with_capacity(export_tasks.len());
     let mut seen = std::collections::BTreeSet::new();
+    let registry = ExporterRegistry::with_builtin_exporters();
     for export_task in export_tasks {
         let name = match (&export_task.name, export_tasks.len()) {
             (Some(name), _) => {
@@ -93,12 +86,7 @@ fn normalize_export_tasks(
                 "target `{target_name}` declares duplicate export task `{name}`"
             )));
         }
-        let dependency = export_dependency(&export_task.type_id).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "target `{target_name}` declares unknown export type `{}`",
-                export_task.type_id
-            ))
-        })?;
+        let dependency = registry.dependency(target_name, &export_task.type_id)?;
         validate_export_dependency(target_name, export_task, dependency)?;
         normalized.push(NormalizedExportTask {
             name,
@@ -133,12 +121,39 @@ fn validate_export_task_name(target_name: &str, name: &str) -> Result<()> {
     }
 }
 
-fn export_dependency(type_id: &str) -> Option<ExportDependency> {
-    match type_id {
-        "rust" | "cpp" | "c++" | "typescript" | "ts" => Some(ExportDependency::MetaOnly),
-        "json" | "messagepack" | "msgpack" | "bin" | "binary" | "gettext_pot" | "pot"
-        | "lua_table" | "lua" => Some(ExportDependency::MetaAndData),
-        _ => None,
+struct ExporterRegistry {
+    data_registry: DataFormatRegistry,
+    code_generators: Vec<Box<dyn crate::codegen::CodeGenerator>>,
+}
+
+impl ExporterRegistry {
+    fn with_builtin_exporters() -> Self {
+        Self {
+            data_registry: DataFormatRegistry::with_builtin_exporters(),
+            code_generators: builtin_generators(),
+        }
+    }
+
+    fn dependency(&self, target_name: &str, type_id: &str) -> Result<ExportDependency> {
+        let data_dependency = self.data_registry.dependency(type_id);
+        let code_dependency =
+            find_generator(&self.code_generators, type_id).map(|generator| generator.dependency());
+
+        match (data_dependency, code_dependency) {
+            (Some(data_dependency), None) => Ok(data_dependency),
+            (None, Some(code_dependency)) => Ok(code_dependency),
+            (Some(data_dependency), Some(code_dependency))
+                if data_dependency == code_dependency =>
+            {
+                Ok(data_dependency)
+            }
+            (Some(_), Some(_)) => Err(ConfigForgeError::Validation(format!(
+                "target `{target_name}` declares ambiguous export type `{type_id}`; multiple exporter contracts with different dependencies are registered"
+            ))),
+            (None, None) => Err(ConfigForgeError::Validation(format!(
+                "target `{target_name}` declares unknown export type `{type_id}`"
+            ))),
+        }
     }
 }
 
@@ -407,17 +422,33 @@ mod tests {
 
     #[test]
     fn export_dependency_classifies_known_types() {
-        assert_eq!(export_dependency("rust"), Some(ExportDependency::MetaOnly));
-        assert_eq!(export_dependency("ts"), Some(ExportDependency::MetaOnly));
+        let registry = ExporterRegistry::with_builtin_exporters();
+
         assert_eq!(
-            export_dependency("json"),
-            Some(ExportDependency::MetaAndData)
+            registry
+                .dependency("client", "rust")
+                .expect("rust dependency"),
+            ExportDependency::MetaOnly
         );
         assert_eq!(
-            export_dependency("lua"),
-            Some(ExportDependency::MetaAndData)
+            registry.dependency("client", "ts").expect("ts dependency"),
+            ExportDependency::MetaOnly
         );
-        assert_eq!(export_dependency("unknown"), None);
+        assert_eq!(
+            registry
+                .dependency("client", "json")
+                .expect("json dependency"),
+            ExportDependency::MetaAndData
+        );
+        assert_eq!(
+            registry
+                .dependency("client", "lua")
+                .expect("lua dependency"),
+            ExportDependency::MetaAndData
+        );
+        assert!(
+            matches!(registry.dependency("client", "unknown"), Err(ConfigForgeError::Validation(message)) if message.contains("unknown export type `unknown`"))
+        );
         let _ = ExportDependency::DataOnly;
     }
 }

@@ -58,15 +58,16 @@ pub struct TargetDataConfig {
 
 语义：
 
-- `name`：可选 data task 名称。多个 data task 时必须显式命名；单个未命名 task 由 build 归一化为 `default`。
+- `name`：可选 export task 名称。单个未命名 task 由 build 归一化为 `default`；多个未命名 task 默认使用 `type`。
 - `output`：数据产物输出目录。运行时表数据按 table 规划文件；POT / manifest 等聚合格式按格式选项规划文件。
-- `format`：格式名称，默认 `json`；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；当前内置聚合格式支持 `gettext_pot` / alias `pot`，`asset_manifest_csv` 等仍为后续扩展；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
-- `options`：格式专属配置，由 `[[targets.data]]` 下除通用字段外的 flattened 字段归一化得到，例如 `format = "gettext_pot"` 下的 `domain`、`file_name`、`source_reference`。运行时 JSON / MessagePack / `bin` 第一阶段可以为空。首版兼容读取 `[targets.data.gettext]` 子表，但推荐使用 flattened 字段，与 code task 的 `module_name` / `namespace` 一致。
+- `format`：由 `[[targets.exports]].type` 归一化而来；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；当前内置聚合格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`，`asset_manifest_csv` 等仍为后续扩展；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
+- `options`：格式专属配置，由 `[[targets.exports]]` 下除通用字段外的 flattened 字段归一化得到，例如 `type = "gettext_pot"` 下的 `domain`、`file_name`、`source_reference`，或 `type = "lua_table"` 下的 `module_name`、`root_file`、`row_layout`。
 
 ```rust
 pub trait TableDataExporter: Send + Sync {
     fn name(&self) -> &'static str;
     fn aliases(&self) -> &'static [&'static str];
+    fn dependency(&self) -> ExportDependency { ExportDependency::MetaAndData }
     fn extension(&self) -> &'static str;
     fn plan_table_artifact(&self, table_meta: &LinkedTableMeta<'_>) -> Result<RuntimeArtifactPlan>;
     fn serialize_table(...) -> Result<Vec<u8>>;
@@ -83,14 +84,15 @@ pub struct AggregateExportContext<'a> {
 pub trait AggregateDataExporter: Send + Sync {
     fn name(&self) -> &'static str;
     fn aliases(&self) -> &'static [&'static str] { &[] }
+    fn dependency(&self) -> ExportDependency { ExportDependency::MetaAndData }
     fn plan_artifacts(&self, task: &TargetDataConfig, context: &AggregateExportContext<'_>) -> Result<Vec<ArtifactPlan>>;
     fn export(&self, task: &TargetDataConfig, context: &AggregateExportContext<'_>) -> Result<Vec<Artifact>>;
 }
 ```
 
-`DataFormatRegistry` 保存 table exporter 与 aggregate exporter 列表并按 name / alias 查询。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行序列化多个 table artifact；aggregate exporter 也不得在实例内保存本次 build 的可变状态。
+`DataFormatRegistry` 保存 table exporter 与 aggregate exporter 列表并按 name / alias 查询，同时暴露 dependency contract 查询。当前所有 data exporter 的 dependency 均为 `MetaAndData`；`DataOnly` 作为未来能力保留但没有内置实现。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行序列化多个 table artifact；aggregate exporter 也不得在实例内保存本次 build 的可变状态。
 
-内置格式通过 `builtin_exporters()` 注册到 `DataFormatRegistry`，当前 table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`；aggregate exporter 包括已实现的 `GettextPotExporter`。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现对应 exporter trait，格式名、alias、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
+内置格式通过 `builtin_exporters()` / aggregate registry 注册到 `DataFormatRegistry`，当前 table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`；aggregate exporter 包括已实现的 `GettextPotExporter` 与 `LuaTableExporter`。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现对应 exporter trait，格式名、alias、dependency、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
 
 ## 8.4 Runtime payload contract
 

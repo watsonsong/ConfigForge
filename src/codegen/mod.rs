@@ -24,7 +24,7 @@ use serde::{Deserialize, de::DeserializeOwned};
 
 use crate::{
     ConfigForgeError, Result,
-    exporter::RuntimeDataFile,
+    exporter::{ExportDependency, RuntimeDataFile},
     meta::{LinkedMetaModel, TargetTags},
 };
 
@@ -381,6 +381,9 @@ pub struct CodeExportInput<'meta> {
 /// internally or use a future factory-style registry to create per-task instances.
 pub trait CodeGenerator: Send + Sync {
     fn language(&self) -> &'static str;
+    fn dependency(&self) -> ExportDependency {
+        ExportDependency::MetaOnly
+    }
     fn language_aliases(&self) -> &'static [&'static str] {
         &[]
     }

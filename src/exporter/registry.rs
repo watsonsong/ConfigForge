@@ -15,6 +15,14 @@ use super::{RuntimeArtifactPlan, binary, json, messagepack};
 use crate::exporter::gettext_pot::GettextPotExporter;
 use crate::exporter::lua_table::LuaTableExporter;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum ExportDependency {
+    MetaOnly,
+    MetaAndData,
+    DataOnly,
+}
+
 /// Runtime data format exporter.
 ///
 /// Implementations may be shared across worker threads. `plan_table_artifact` and
@@ -23,6 +31,10 @@ use crate::exporter::lua_table::LuaTableExporter;
 /// instances in a future registry model.
 pub trait DataFormatExporter: Send + Sync {
     fn name(&self) -> &'static str;
+
+    fn dependency(&self) -> ExportDependency {
+        ExportDependency::MetaAndData
+    }
 
     fn aliases(&self) -> &'static [&'static str] {
         &[]
@@ -51,6 +63,10 @@ pub trait DataFormatExporter: Send + Sync {
 
 pub trait AggregateDataExporter: Send + Sync {
     fn name(&self) -> &'static str;
+
+    fn dependency(&self) -> ExportDependency {
+        ExportDependency::MetaAndData
+    }
 
     fn aliases(&self) -> &'static [&'static str] {
         &[]
@@ -148,6 +164,21 @@ impl DataFormatRegistry {
         )))
     }
 
+    pub fn dependency(&self, format: &str) -> Option<ExportDependency> {
+        self.get(format)
+            .map(DataFormatExporter::dependency)
+            .or_else(|| {
+                self.get_aggregate(format)
+                    .map(AggregateDataExporter::dependency)
+            })
+    }
+
+    pub fn require_dependency(&self, format: &str) -> Result<ExportDependency> {
+        self.dependency(format).ok_or_else(|| {
+            ConfigForgeError::Validation(format!("no data exporter registered for `{format}`"))
+        })
+    }
+
     pub fn formats(&self) -> impl Iterator<Item = &dyn DataFormatExporter> {
         self.exporters.iter().map(Box::as_ref)
     }
@@ -156,6 +187,15 @@ impl DataFormatRegistry {
 pub enum DataExporterRef<'a> {
     Table(&'a dyn DataFormatExporter),
     Aggregate(&'a dyn AggregateDataExporter),
+}
+
+impl DataExporterRef<'_> {
+    pub fn dependency(&self) -> ExportDependency {
+        match self {
+            Self::Table(exporter) => exporter.dependency(),
+            Self::Aggregate(exporter) => exporter.dependency(),
+        }
+    }
 }
 
 pub fn builtin_exporters() -> Vec<Box<dyn DataFormatExporter>> {

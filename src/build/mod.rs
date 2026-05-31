@@ -22,15 +22,13 @@ use crate::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, GeneratedFile,
         builtin_generators,
     },
+    exporter::ExportDependency,
     meta::TargetTags,
     project::ProjectConfig,
 };
 
 use runtime::{RuntimeConfigForgeResult, export_runtime_data_tasks};
-use target::{
-    ExportDependency, NormalizedExportTask, NormalizedTargetConfig,
-    codegen_task_config_from_export_task,
-};
+use target::{NormalizedExportTask, NormalizedTargetConfig, codegen_task_config_from_export_task};
 
 pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
     let cpu_pool = rayon::ThreadPoolBuilder::new()

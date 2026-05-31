@@ -91,6 +91,40 @@ fn registry_resolves_builtin_exporters_and_aliases() {
 }
 
 #[test]
+fn registry_reports_builtin_dependency_contracts() {
+    let registry = DataFormatRegistry::with_builtin_exporters();
+
+    for format in [
+        "json",
+        "messagepack",
+        "msgpack",
+        "bin",
+        "binary",
+        "gettext_pot",
+        "pot",
+        "lua_table",
+        "lua",
+    ] {
+        assert_eq!(
+            registry
+                .require_dependency(format)
+                .expect("builtin dependency"),
+            ExportDependency::MetaAndData,
+            "{format} should depend on Meta and Data"
+        );
+        assert_eq!(
+            registry
+                .require_any(format)
+                .expect("builtin exporter")
+                .dependency(),
+            ExportDependency::MetaAndData,
+            "{format} exporter ref should report dependency"
+        );
+    }
+    assert!(registry.dependency("unknown").is_none());
+}
+
+#[test]
 fn registry_accepts_custom_exporter_plugins() {
     let mut registry = DataFormatRegistry::new();
     registry.register(CustomDataExporter {

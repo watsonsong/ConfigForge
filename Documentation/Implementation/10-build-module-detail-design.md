@@ -68,7 +68,7 @@ pub(crate) enum ExportDependency {
 }
 ```
 
-`dependency` 不应由用户手写，而应来自 exporter registry：
+`dependency` 不应由用户手写，而应来自 exporter registry。Build normalization 阶段会从 data exporter registry 与 code generator registry 查询 `type_id` / alias 对应的 dependency contract，并写入 `NormalizedExportTask.dependency`：
 
 - Rust / C++ / TypeScript codegen adapter：`MetaOnly`。
 - JSON / MessagePack / bin runtime data exporter：`MetaAndData`。
@@ -100,7 +100,7 @@ DAG 执行约束：
 迁移步骤建议：
 
 1. **配置与内部模型统一**：Project Config 使用 `[[targets.exports]]`；normalize 阶段全部转换为 `NormalizedExportTask`。（已完成 MVP）
-2. **注册表补 contract**：为现有 DataFormatExporter / AggregateDataExporter / CodeGenerator 增加 adapter 层，声明 `type_id`、alias、dependency、config parser。
+2. **注册表补 contract**：为现有 DataFormatExporter / AggregateDataExporter / CodeGenerator 增加 dependency contract，声明 `type_id`、alias、dependency、config parser。（已完成 dependency contract MVP）
 3. **DAG executor MVP**：先实现 target-local DAG，不做跨 target 增量缓存；保留当前 rayon pool，但按节点依赖调度。
 4. **文档与 fixture 清理**：文档和 standard_project 全部使用 `[[targets.exports]]`，不保留旧 data/code 语法兼容路径。
 

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::{
     ConfigForgeError,
-    exporter::RuntimeDataFile,
+    exporter::{ExportDependency, RuntimeDataFile},
     meta::{MetaModel, TargetTags},
 };
 
@@ -73,6 +73,18 @@ pub(in crate::codegen) fn linked_fixture() -> MetaModel {
         "#,
     )
     .expect("fixture meta should parse")
+}
+
+#[test]
+fn builtin_generators_report_meta_only_dependency_contracts() {
+    for generator in builtin_generators() {
+        assert_eq!(
+            generator.dependency(),
+            ExportDependency::MetaOnly,
+            "{} generator should only depend on Meta",
+            generator.language()
+        );
+    }
 }
 
 pub(in crate::codegen) fn text_fixture() -> MetaModel {
