@@ -35,7 +35,12 @@ pub enum DataSourceLayout {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataLoadPlan {
-    pub sources: Vec<DataSourcePlan>,
+    pub source_read_plan: SourceReadPlan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceReadPlan {
+    sources: Vec<DataSourcePlan>,
 }
 
 impl DataProvider {
@@ -54,6 +59,41 @@ impl DataProvider {
 }
 
 impl DataLoadPlan {
+    pub fn new(source_read_plan: SourceReadPlan) -> Self {
+        Self { source_read_plan }
+    }
+
+    pub fn from_meta_model(model: &MetaModel) -> Result<Self> {
+        Self::from_tables(&model.tables, None)
+    }
+
+    pub fn from_tables<'a>(
+        tables: impl IntoIterator<Item = &'a TableMeta>,
+        target_tags: Option<&TargetTags>,
+    ) -> Result<Self> {
+        Ok(Self {
+            source_read_plan: SourceReadPlan::from_tables(tables, target_tags)?,
+        })
+    }
+
+    pub fn from_source_read_plan(source_read_plan: SourceReadPlan) -> Self {
+        Self::new(source_read_plan)
+    }
+
+    pub fn source_read_plan(&self) -> &SourceReadPlan {
+        &self.source_read_plan
+    }
+
+    pub fn sources(&self) -> &[DataSourcePlan] {
+        self.source_read_plan.sources()
+    }
+}
+
+impl SourceReadPlan {
+    pub fn new(sources: Vec<DataSourcePlan>) -> Self {
+        Self { sources }
+    }
+
     pub fn from_meta_model(model: &MetaModel) -> Result<Self> {
         Self::from_tables(&model.tables, None)
     }

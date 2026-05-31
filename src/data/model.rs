@@ -24,6 +24,11 @@ pub struct DataTable {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawSourceData {
+    data_set: DataSet,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowSourceInfo {
     pub source_index: usize,
     pub source_path: PathBuf,
@@ -94,6 +99,20 @@ impl DataSet {
 
     pub fn tables(&self) -> &[DataTable] {
         &self.tables
+    }
+}
+
+impl RawSourceData {
+    pub fn new(data_set: DataSet) -> Self {
+        Self { data_set }
+    }
+
+    pub fn as_data_set(&self) -> &DataSet {
+        &self.data_set
+    }
+
+    pub fn into_data_set(self) -> DataSet {
+        self.data_set
     }
 }
 

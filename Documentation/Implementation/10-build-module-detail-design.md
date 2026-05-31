@@ -139,7 +139,7 @@ build_target(options)
   -> execute_target_dag(...)
       -> build execution view skeleton for tests / future tracing
       -> split export tasks by dependency contract
-      -> MetaAndData branch: DataLoadPlan / DataLoader / normalize / validation / exporter
+      -> MetaAndData branch: SourceReadPlan / RawSourceData / normalize / validation / exporter
       -> MetaOnly branch: format-agnostic codegen input / CodeGenerator::generate
       -> run both branches through the rayon pool when both exist
       -> collect export task outputs by original declaration order
@@ -153,8 +153,8 @@ Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。`MetaO
 
 `runtime.rs` 负责 target 内 MetaAndData export task 编排：
 
-- 为当前 target 可见 tables 构造 `DataLoadPlan`。
-- 构造 `DataLoadPlan` 时传入 effective target tags，用于过滤 `override_sources[].export_when`。例如 Project target 只有 `client, shipping`，CLI 传入 `--tag s1` 后，`materials_s1.csv` 才会进入 plan 并覆盖 Oak row。
+- 为当前 target 可见 tables 构造 `SourceReadPlan`，再通过 `DataLoader::read_sources_with_pool()` 读取 `RawSourceData`。
+- 构造 `SourceReadPlan` 时传入 effective target tags，用于过滤 `override_sources[].export_when`。例如 Project target 只有 `client, shipping`，CLI 传入 `--tag s1` 后，`materials_s1.csv` 才会进入 plan 并覆盖 Oak row。
 - 同一个 target 内多个 MetaAndData export task 基于 `project.input` 复用同一个 normalized `DataSet`，避免重复读取和重复 validation。
 - 每个 export task 可使用不同 `type` 和 `output`，例如 JSON + MessagePack + Lua。
 - runtime table exporter 调用 `exporter::export_runtime_data()` 生成 runtime artifacts，并保留 `RuntimeDataFile` 列表供未来 manifest 或诊断使用；codegen 不绑定该列表。

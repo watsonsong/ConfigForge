@@ -9,7 +9,7 @@ use rayon::ThreadPool;
 use crate::{
     ConfigForgeError, Result,
     artifact::Artifact,
-    data::{DataLoadPlan, DataLoader},
+    data::{DataLoadPlan, DataLoader, SourceReadPlan},
     exporter::{DataExporterRef, DataFormatRegistry, export_runtime_data},
     meta::{LinkedMetaModel, TargetTags},
     project::lexical_normalize_path,
@@ -59,7 +59,7 @@ pub(super) fn export_meta_and_data_tasks(
     let registry = DataFormatRegistry::with_builtin_exporters();
     ensure_planned_runtime_output_paths(export_tasks, linked_meta, target_tags, &registry)?;
 
-    let data_plan = DataLoadPlan::from_tables(
+    let source_read_plan = SourceReadPlan::from_tables(
         linked_meta
             .tables
             .iter()
@@ -67,8 +67,10 @@ pub(super) fn export_meta_and_data_tasks(
             .map(|table| table.meta),
         Some(target_tags),
     )?;
-    let loaded_data_set = DataLoader::new(data_root).load_with_pool(&data_plan, pool)?;
-    let data_set = normalize_data_set(linked_meta, &loaded_data_set)?;
+    let data_plan = DataLoadPlan::from_source_read_plan(source_read_plan);
+    let raw_sources =
+        DataLoader::new(data_root).read_sources_with_pool(data_plan.source_read_plan(), pool)?;
+    let data_set = normalize_data_set(linked_meta, raw_sources.as_data_set())?;
     let validation_report =
         validate_normalized_data_set_for_target_with_report(linked_meta, target_tags, &data_set)?;
     let mut warnings = Vec::new();

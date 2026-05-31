@@ -58,11 +58,13 @@ Rust 不使用传统 OO class。本文档中的“类”对应 Rust 的 `struct`
 | DataTable | `struct DataTable` | 单张逻辑表的行集合。 |
 | DataRow | `type DataRow = BTreeMap<String, String>` | 单行原始 cell 文本，key 为字段/列名。 |
 | DataSourcePlan | `struct DataSourcePlan` | 单张表的数据加载计划，已解析 provider 和相对路径。 |
-| DataLoadPlan | `struct DataLoadPlan` | 多张表的数据加载计划集合。 |
+| SourceReadPlan | `struct SourceReadPlan` | raw source discovery 的 owned 结果，描述需要读取的物理 source 集合。 |
+| RawSourceData | `struct RawSourceData` | source read 的 owned 输出，包装尚未 typed normalize 的 raw `DataSet`。 |
+| DataLoadPlan | `struct DataLoadPlan` | 兼容层计划，当前包装 `SourceReadPlan`，便于旧 `DataLoader::load()` 调用继续返回 `DataSet`。 |
 | SourceFragmentSet | `struct SourceFragmentSet` / `Vec<String>` | 某个 source 声明的 fragment 名称集合。 |
 | RowSourceInfo | `struct RowSourceInfo` | 行来源元数据，记录 source ordinal/path/fragments/source row number。 |
 | DataProvider | `enum DataProvider` | 当前支持的 provider，第一阶段只有 `Csv`。 |
-| DataLoader | `struct DataLoader` | 根据 `DataLoadPlan` 加载 `DataSet`。 |
+| DataLoader | `struct DataLoader` | 根据 `SourceReadPlan` 读取 `RawSourceData`，并通过兼容入口支持 `DataLoadPlan -> DataSet`。 |
 | CsvDataReader | `struct CsvDataReader` | CSV provider 的具体读取器。 |
 | DataResolver | `struct DataResolver` | 使用 linked meta 将 raw DataSet 解析为 ResolvedDataSet / target resolved view。 |
 | ResolvedDataSet | `struct ResolvedDataSet` | Meta-aware 的结构化数据快照，隐藏 JSON cell / expanded path 的 source 差异。 |
@@ -75,10 +77,10 @@ Rust 不使用传统 OO class。本文档中的“类”对应 Rust 的 `struct`
 ```text
 src/data/
   mod.rs          # 对外 API 与 re-export
-  model.rs        # DataSet / DataTable / DataRow / 查询方法
+  model.rs        # DataSet / DataTable / DataRow / RawSourceData / 查询方法
   resolved.rs     # ResolvedDataSet / ResolvedTable / DataValue / SourceTrace
   resolver.rs     # DataResolver / StructOccurrenceEvaluator
-  plan.rs         # DataLoadPlan / DataSourcePlan / DataProvider
+  plan.rs         # SourceReadPlan / DataLoadPlan / DataSourcePlan / DataProvider
   loader.rs       # DataLoader，编排按计划加载各表
   csv.rs          # CsvDataReader，CSV 文件读取实现
   tests.rs        # Data 模块单元测试
@@ -86,7 +88,7 @@ src/data/
 
 迁移状态：
 
-- `DataRow`、`DataTable`、`DataSet`、`DataLoadPlan`、`DataLoader` 等已由 `src/data/mod.rs` 统一 re-export。
+- `DataRow`、`DataTable`、`DataSet`、`SourceReadPlan`、`RawSourceData`、`DataLoadPlan`、`DataLoader` 等已由 `src/data/mod.rs` 统一 re-export。
 
 ## 5.4 核心数据结构
 
@@ -330,7 +332,7 @@ impl DataProvider {
 }
 ```
 
-第一阶段只接受 `csv`。非 `csv` provider 应在 Meta validate 或 DataLoadPlan 构造阶段返回错误，不进入读取器分发。
+第一阶段只接受 `csv`。非 `csv` provider 应在 Meta validate 或 SourceReadPlan 构造阶段返回错误，不进入读取器分发。
 
 ### 5.5.2 `DataSourcePlan`
 
@@ -356,37 +358,51 @@ pub struct DataSourcePlan {
 - `primary_key_fields` 是当前 table primary index 的字段列表快照，仅在 `role = Override` 时用于 DataLoader 定位被覆盖 row；base source 可为空或携带同一份信息以便统一构造 per-table key map。字段路径保持 raw source header 使用的 field path 字符串，例如 `id` 或未来复合 key `region,id` 对应 `Vec<["region", "id"]>`。
 - variant source mode 下，polymorphic collection table 可以拥有多个 `DataSourcePlan`；非 polymorphic table 仍只允许一个 source。为了避免把普通 append mode 与未来通用 multi-source merge 混淆，多 source 必须由至少一个 source 的非空 `fragments` 声明驱动。
 
-### 5.5.3 `DataLoadPlan`
+### 5.5.3 `SourceReadPlan` / `DataLoadPlan`
 
 ```rust
+pub struct SourceReadPlan {
+    sources: Vec<DataSourcePlan>,
+}
+
 pub struct DataLoadPlan {
-    pub sources: Vec<DataSourcePlan>,
+    source_read_plan: SourceReadPlan,
 }
 ```
 
 主要方法：
 
 ```rust
-impl DataLoadPlan {
+impl SourceReadPlan {
+    pub fn new(sources: Vec<DataSourcePlan>) -> Self;
     pub fn from_meta_model(model: &MetaModel) -> Result<Self>;
     pub fn from_tables<'a>(tables: impl IntoIterator<Item = &'a TableMeta>, target_tags: Option<&TargetTags>) -> Result<Self>;
+    pub fn sources(&self) -> &[DataSourcePlan];
+}
+
+impl DataLoadPlan {
+    pub fn new(source_read_plan: SourceReadPlan) -> Self;
+    pub fn from_meta_model(model: &MetaModel) -> Result<Self>;
+    pub fn from_tables<'a>(tables: impl IntoIterator<Item = &'a TableMeta>, target_tags: Option<&TargetTags>) -> Result<Self>;
+    pub fn source_read_plan(&self) -> &SourceReadPlan;
     pub fn sources(&self) -> &[DataSourcePlan];
 }
 ```
 
 设计要点：
 
-- `DataLoadPlan` 从 raw `MetaModel` / `TableMeta` 中提取 source 信息，不需要 `LinkedMetaModel<'meta>`。
-- 一旦 `DataLoadPlan` 构造完成，就拥有 table name、provider、path，后续 Data Load 不再借用 Meta。
-- variant source mode 下，`DataLoadPlan` 需要展开 table 的每个 `SourceRef`，为同一 `table_name` 生成多个 `DataSourcePlan`，并保留 source 声明顺序。
+- `SourceReadPlan` 从 raw `MetaModel` / `TableMeta` 中提取 source 信息，不需要 `LinkedMetaModel<'meta>`。
+- 一旦 `SourceReadPlan` 构造完成，就拥有 table name、provider、path，后续 source read 不再借用 Meta。
+- `DataLoadPlan` 当前作为兼容层包装 `SourceReadPlan`；旧调用可以继续使用 `DataLoadPlan::from_*` 与 `DataLoader::load()`，新调度应优先使用 `SourceReadPlan` + `DataLoader::read_sources*()` 表达 raw source read 节点。
+- variant source mode 下，`SourceReadPlan` 需要展开 table 的每个 `SourceRef`，为同一 `table_name` 生成多个 `DataSourcePlan`，并保留 source 声明顺序。
 - `override_sources` 展开为 `role = Override` 的 `DataSourcePlan`，并排在该 table 的 base sources 之后；多个 override source 保持声明顺序。`target_tags` 存在时，`export_when` 不匹配的 override source 不进入 plan，因此不会被读取。
-- `DataLoadPlan::from_tables` 只做 source declaration 的轻量契约检查和搬运：provider 必须支持；多个 sources 只允许 `TableMeta::is_variant_source_mode()` 为 true 的表；base source 不允许声明 `export_when`。fragment 是否存在、字段是否属于 fragment 等 schema 合法性由 Meta validation/link 负责。
-- CollectionTable override source 必须有可用于匹配的 primary index。由于 `DataLoadPlan` 只持有 raw `TableMeta`，它需要根据 `primary_index` 在 `TableMeta.indexes` 中找到对应 index 并复制 `fields` 到 `primary_key_fields`；primary index 是否唯一、字段是否存在由 Meta link/validation 负责，但 DataLoadPlan 找不到 index 声明时也应 fail-fast。
+- `SourceReadPlan::from_tables` 只做 source declaration 的轻量契约检查和搬运：provider 必须支持；多个 sources 只允许 `TableMeta::is_variant_source_mode()` 为 true 的表；base source 不允许声明 `export_when`。fragment 是否存在、字段是否属于 fragment 等 schema 合法性由 Meta validation/link 负责。
+- CollectionTable override source 必须有可用于匹配的 primary index。由于 `SourceReadPlan` 只持有 raw `TableMeta`，它需要根据 `primary_index` 在 `TableMeta.indexes` 中找到对应 index 并复制 `fields` 到 `primary_key_fields`；primary index 是否唯一、字段是否存在由 Meta link/validation 负责，但 SourceReadPlan 找不到 index 声明时也应 fail-fast。
 - ObjectTable override source、非 CSV override source、以及缺 primary index 的 CollectionTable override source 必须 fail-fast，不能静默忽略。
-- provider 是否支持属于 source declaration 的基础结构检查，可以由 Meta validation fail-fast，也可以由 DataLoadPlan parse 时返回错误；除 provider parse 以外，DataLoadPlan 不应理解 fragment schema 语义。
+- provider 是否支持属于 source declaration 的基础结构检查，可以由 Meta validation fail-fast，也可以由 SourceReadPlan parse 时返回错误；除 provider parse 以外，SourceReadPlan 不应理解 fragment schema 语义。
 - 因此流程上可以在 raw Meta load/merge 完成后：
   - 一边做 `MetaModel::link()` / Meta validate；
-  - 一边执行 `DataLoader::load(&plan)`。
+  - 一边执行 `DataLoader::read_sources(&source_read_plan)`。
 
 ## 5.6 CSV 读取器
 
@@ -482,7 +498,10 @@ pub struct DataLoader {
 ```rust
 impl DataLoader {
     pub fn new(data_root: impl Into<PathBuf>) -> Self;
+    pub fn read_sources(&self, plan: &SourceReadPlan) -> Result<RawSourceData>;
+    pub fn read_sources_with_pool(&self, plan: &SourceReadPlan, pool: &rayon::ThreadPool) -> Result<RawSourceData>;
     pub fn load(&self, plan: &DataLoadPlan) -> Result<DataSet>;
+    pub fn load_with_pool(&self, plan: &DataLoadPlan, pool: &rayon::ThreadPool) -> Result<DataSet>;
     pub fn load_source(&self, source: &DataSourcePlan) -> Result<DataTable>;
 }
 ```
@@ -490,7 +509,9 @@ impl DataLoader {
 设计要点：
 
 - `DataLoader` 不持有 Meta 引用。
-- `load()` 可并行加载多个 source，但组装 DataSet 时必须保持 `DataLoadPlan.sources()` 声明顺序。
+- `read_sources()` / `read_sources_with_pool()` 读取 `SourceReadPlan` 并返回 `RawSourceData`，这是后续 typed normalize 的输入。
+- `load()` / `load_with_pool()` 是兼容入口，内部委托 `read_sources*()` 并解包为旧的 `DataSet` 返回值。
+- `read_sources_with_pool()` 可并行加载多个 source，但组装 DataSet 时必须保持 `SourceReadPlan.sources()` 声明顺序。
 - `load_source()` 根据 `DataProvider` 分发到 `CsvDataReader`。
 - 对同一 `table_name` 的多个 `DataSourcePlan`，DataLoader 需要把 rows append 到同一个 `DataTable`，并同步 append 对应 `RowSourceInfo`。
 - `DataSet::try_new()` 仍应拒绝重复 table name；多 source 合并必须发生在 DataLoader 内部，而不是先生成多个同名 DataTable 再交给 DataSet。
@@ -528,7 +549,7 @@ DataSet::try_new(pending_tables in first-seen table order)
 S1 Oak 覆盖示例在 DataLoader 中的 materialization 结果：
 
 1. `materials.csv` 先 append `id = 2002, name = Oak Wood, price = 3, max_stack = 999`，fragments 为 `["stack"]`。
-2. 构建 effective target tags 不包含 `s1` 时，`materials_s1.csv` 不进入 `DataLoadPlan`，最终 row 保持 price 3。
+2. 构建 effective target tags 不包含 `s1` 时，`materials_s1.csv` 不进入 `SourceReadPlan`，最终 row 保持 price 3。
 3. 构建 effective target tags 包含 `s1` 时，`materials_s1.csv` 进入 plan；其唯一 row 用 primary index `by_id(id=2002)` 匹配 base row，并整行替换为 price 5。
 4. 替换后的 row 再进入后续 normalize / validation / exporter；因此 unique index、FK、row_export 都只看到 S1 的最终视图。
 
@@ -539,16 +560,17 @@ S1 Oak 覆盖示例在 DataLoader 中的 materialization 结果：
 ```text
 MetaModel::from_path(meta_path)
   -> raw MetaModel owns source declarations
-  -> DataLoadPlan::from_meta_model(&meta_model)
+  -> SourceReadPlan::from_meta_model(&meta_model)
 
 阶段 A：Meta link / validate
   MetaModel::link() -> LinkedMetaModel<'meta>
 
 阶段 B：Data load
-  DataLoader::new(data_root).load(&data_load_plan) -> Raw DataSet
+  DataLoader::new(data_root).read_sources(&source_read_plan) -> RawSourceData
 
 阶段 C：Data resolve
-  DataResolver::new(&linked_meta).resolve(&data_set, target_tags?) -> ResolvedDataSet / ResolvedExportView
+  normalize_data_set(&linked_meta, raw_sources.as_data_set()) -> normalized DataSet
+  DataResolver::new(&linked_meta).resolve(normalized_data_set, target_tags?) -> ResolvedDataSet / ResolvedExportView
 
 阶段 D：Data validation
   validate_resolved_data_set(&linked_meta, &resolved_data_set)
@@ -557,20 +579,21 @@ MetaModel::from_path(meta_path)
   exporter consumes ResolvedDataSet / ResolvedExportView
 ```
 
-当前计划是以 `DataLoadPlan -> DataLoader -> raw DataSet -> DataResolver -> ResolvedDataSet` 作为 Data 模块主链路。下一阶段可以先顺序执行：
+当前计划是以 `SourceReadPlan -> DataLoader -> RawSourceData -> normalize_data_set -> DataResolver -> ResolvedDataSet` 作为 Data 模块主链路。`DataLoadPlan` 仍保留为兼容 facade。顺序执行示例：
 
 ```rust
 let meta = MetaModel::from_path(meta_path)?;
-let data_plan = DataLoadPlan::from_meta_model(&meta)?;
+let source_read_plan = SourceReadPlan::from_meta_model(&meta)?;
 let linked_meta = meta.link().map_err(ConfigForgeError::MetaValidation)?;
-let raw_data_set = DataLoader::new(data_root).load(&data_plan)?;
-let resolved = DataResolver::new(&linked_meta).resolve(&raw_data_set, None)?;
+let raw_sources = DataLoader::new(data_root).read_sources(&source_read_plan)?;
+let normalized = normalize_data_set(&linked_meta, raw_sources.as_data_set())?;
+let resolved = DataResolver::new(&linked_meta).resolve(&normalized, None)?;
 validate_resolved_data_set(&linked_meta, &resolved)?;
 ```
 
 未来并行化时，`linked_meta` 和 `data_set` 的构造可以拆成两个任务，因为：
 
-- `DataLoadPlan` 是 owned；
+- `SourceReadPlan` 是 owned；
 - `DataLoader` 不借用 Meta；
 - raw `DataSet` 不保存 Meta 引用；
 - `DataResolver` 才需要同时拿到 `LinkedMetaModel<'meta>` 和 raw `DataSet`。
@@ -654,7 +677,7 @@ pub fn validate_project(meta_path: &Path, data_dir: &Path) -> Result<()> {
 }
 ```
 
-`export_project` 同理，应先得到 raw `DataSet`，再按 target 生成 `ResolvedExportView`。构建 `DataLoadPlan` 时可以先用当前 target 的 `TargetTags` 过滤整表 `export_when`，避免加载不会导出的表；写出 runtime data 时继续按同一组 tags 过滤字段和 `row_export` 行。长期 exporter 只负责 `DataValue -> JSON/MessagePack/future binary`，不再理解 source layout、default、target visibility 或 nested struct boundary。
+`export_project` 同理，应先得到 `RawSourceData`，再按 target 生成 `ResolvedExportView`。构建 `SourceReadPlan` 时可以先用当前 target 的 `TargetTags` 过滤整表 `export_when`，避免加载不会导出的表；写出 runtime data 时继续按同一组 tags 过滤字段和 `row_export` 行。长期 exporter 只负责 `DataValue -> JSON/MessagePack/future binary`，不再理解 source layout、default、target visibility 或 nested struct boundary。
 
 ## 5.9 错误与诊断边界
 
@@ -704,7 +727,7 @@ Resolved 层落地后，诊断模型需要同时支持 raw source 与 resolved v
 6. `DataSet::table` 能按名称查询表。
 7. polymorphic table 的多个 variant sources 会合并成一个 `DataTable`，行顺序保持 source 声明顺序。
 8. `RowSourceInfo` 与 `rows` 等长，并正确记录 source path、source row number 和 fragments。
-9. 非 polymorphic table 声明 fragments 时，Meta validation/link 应失败，不能静默忽略；DataLoadPlan 只搬运 fragments 名称，不负责判断 table 是否 polymorphic。
+9. 非 polymorphic table 声明 fragments 时，Meta validation/link 应失败，不能静默忽略；SourceReadPlan 只搬运 fragments 名称，不负责判断 table 是否 polymorphic。
 
 ### Validation 层测试
 
@@ -743,8 +766,8 @@ Data 模块第一阶段完成时应满足：
 - `src/data/` 目录模块存在，并提供 Data 对外 API。
 - CSV 读取逻辑从 exporter 内部逐表读取迁移到 `DataLoader`。
 - `DataSet` 是 owned 数据，不保存 Meta 引用。
-- `DataLoadPlan` 可从 raw `MetaModel` 提取，构造后不借用 Meta。
-- `validate_project` / `export_project` 使用 `DataLoadPlan -> DataLoader -> DataSet -> validate_data_set` 流程。
+- `SourceReadPlan` 可从 raw `MetaModel` 提取，构造后不借用 Meta。
+- `validate_project` / `export_project` 使用 `SourceReadPlan -> DataLoader -> RawSourceData -> normalize_data_set -> validate_data_set` 流程；旧 `DataLoadPlan -> DataSet` 入口仅作兼容 facade。
 - 当前已支持的 validation 行为不回退：required/default、primitive type、enum value、unique field/index。
 - `cargo fmt`、`cargo lint`、`cargo test` 通过。
 - 修改后按代码规范运行覆盖率评估，确认 Data / Validation 新增分支有合理测试覆盖。

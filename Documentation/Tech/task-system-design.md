@@ -864,17 +864,19 @@ Phase 1 实现复核：后续 Phase 2-12 的阶段顺序仍然成立；本阶段
 
 目标：让 source read 可以与 Meta link 并行，为远端 provider 做准备。
 
-- TODO：把“需要读取哪些 source”的 raw source discovery 从 typed normalization 中拆出来，明确它只依赖 Project Config / raw Meta source declarations / effective tags。
-- TODO：定义 `SourceReadPlan` / `RawSourceData`，本地 CSV 仍可直接返回现有 `DataTable`，但接口层不要要求 linked Meta。
-- TODO：保留现有 DataLoader 行为作为 compatibility path，先由新 plan 包一层调用旧 reader。
-- TODO：当 source discovery 未来需要 linked Meta 时，必须在 plan 中显式声明依赖，不能在 provider 内隐式访问 MetaLink 结果。
+- DONE：把“需要读取哪些 source”的 raw source discovery 从 typed normalization 中拆出来，明确它只依赖 Project Config / raw Meta source declarations / effective tags。
+- DONE：定义 `SourceReadPlan` / `RawSourceData`，本地 CSV 仍可直接返回现有 `DataTable`，但接口层不要要求 linked Meta。
+- DONE：保留现有 DataLoader 行为作为 compatibility path，先由 `DataLoadPlan` 包装 `SourceReadPlan`，`load()` / `load_with_pool()` 继续返回兼容的 `DataSet`。
+- DONE：当 source discovery 未来需要 linked Meta 时，必须在 plan 中显式声明依赖，不能在 provider 内隐式访问 MetaLink 结果；当前实现保持 `SourceReadPlan::from_tables(raw TableMeta, effective tags)`，不借用 `LinkedMetaModel`。
 - 验证：多 source / override source / ObjectTable source fixture 与现有输出一致；source discovery 单元测试覆盖 target tags 对 override source 的影响。
+
+Phase 2 实现复核：后续 Phase 3-12 的阶段顺序总体仍然成立，但 Phase 3 的基础并发读取入口已提前收敛到 `DataLoader::read_sources_with_pool(&SourceReadPlan, pool)`。Phase 3 后续重点应从“创建并发入口”调整为：验证 `SourceReadPlan` 粒度的错误稳定性、jobs/serial 资源限制语义，以及为未来 fake delayed provider 补充完成顺序不影响 merge 顺序的测试。
 
 ### Phase 3：SourceRead 并发（本地同步 provider）
 
 目标：先并发读取本地 CSV，但不引入 Tokio 和远端 provider。
 
-- TODO：按 `SourceReadPlan` 粒度在局部 Rayon pool 中并行读取 CSV。
+- PARTIAL（Phase 2 已提供入口）：按 `SourceReadPlan` 粒度在局部 Rayon pool 中并行读取 CSV；Phase 3 需要补齐资源语义和错误稳定性验证。
 - TODO：结果按 plan order merge，错误按 source stable key 排序，不按完成顺序输出。
 - TODO：限制并发数由 `jobs` 控制；`--serial` 必须退化为串行。
 - TODO：保证 duplicate table / missing source 等错误与现有语义一致。

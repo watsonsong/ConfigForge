@@ -9,7 +9,7 @@ use crate::{ConfigForgeError, Result};
 
 use super::{
     CsvDataReader, DataLoadPlan, DataProvider, DataRow, DataSet, DataSourceLayout, DataSourcePlan,
-    DataTable, RowSourceInfo, SourceRole,
+    DataTable, RawSourceData, RowSourceInfo, SourceReadPlan, SourceRole,
 };
 
 #[derive(Debug, Clone)]
@@ -25,14 +25,28 @@ impl DataLoader {
     }
 
     pub fn load(&self, plan: &DataLoadPlan) -> Result<DataSet> {
+        Ok(self.read_sources(plan.source_read_plan())?.into_data_set())
+    }
+
+    pub fn load_with_pool(&self, plan: &DataLoadPlan, pool: &rayon::ThreadPool) -> Result<DataSet> {
+        Ok(self
+            .read_sources_with_pool(plan.source_read_plan(), pool)?
+            .into_data_set())
+    }
+
+    pub fn read_sources(&self, plan: &SourceReadPlan) -> Result<RawSourceData> {
         let mut loaded = Vec::new();
         for (source_index, source) in plan.sources().iter().enumerate() {
             loaded.push((source_index, source, self.load_source(source)?));
         }
-        Self::merge_loaded_sources(loaded)
+        Ok(RawSourceData::new(Self::merge_loaded_sources(loaded)?))
     }
 
-    pub fn load_with_pool(&self, plan: &DataLoadPlan, pool: &rayon::ThreadPool) -> Result<DataSet> {
+    pub fn read_sources_with_pool(
+        &self,
+        plan: &SourceReadPlan,
+        pool: &rayon::ThreadPool,
+    ) -> Result<RawSourceData> {
         let mut loaded = pool.install(|| {
             plan.sources()
                 .par_iter()
@@ -46,7 +60,7 @@ impl DataLoader {
         for (source_index, source, table) in loaded {
             resolved.push((source_index, source, table?));
         }
-        Self::merge_loaded_sources(resolved)
+        Ok(RawSourceData::new(Self::merge_loaded_sources(resolved)?))
     }
 
     pub fn load_source(&self, source: &DataSourcePlan) -> Result<DataTable> {

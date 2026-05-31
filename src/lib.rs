@@ -32,7 +32,7 @@ pub use codegen::{
 };
 pub use data::{
     CsvDataReader, DataLoadPlan, DataLoader, DataProvider, DataRow, DataSet, DataSourceLayout,
-    DataSourcePlan, DataTable, RowSourceInfo,
+    DataSourcePlan, DataTable, RawSourceData, RowSourceInfo, SourceReadPlan,
 };
 pub use diagnostic::{
     ConfigForgeError, Diagnostic, DiagnosticEntry, DiagnosticLocation, DiagnosticReport,

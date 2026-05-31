@@ -907,6 +907,70 @@ fn data_load_plan_filters_override_sources_by_target_tags() {
 }
 
 #[test]
+fn source_read_plan_filters_override_sources_without_linked_meta() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "materials.csv"
+            override_sources = [
+                { provider = "csv", path = "materials_s1.csv", export_when = { any = ["s1"] } },
+                { provider = "csv", path = "materials_dev.csv", export_when = { any = ["dev"] } },
+            ]
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should still link separately");
+    let s1_tags = crate::meta::TargetTags::new(["s1"]);
+
+    let plan = SourceReadPlan::from_tables(&meta.tables, Some(&s1_tags))
+        .expect("source discovery should build from raw meta");
+
+    assert_eq!(linked.tables.len(), 1);
+    assert_eq!(plan.sources().len(), 2);
+    assert_eq!(plan.sources()[0].path, PathBuf::from("materials.csv"));
+    assert_eq!(plan.sources()[0].role, SourceRole::Base);
+    assert_eq!(plan.sources()[1].path, PathBuf::from("materials_s1.csv"));
+    assert_eq!(plan.sources()[1].role, SourceRole::Override);
+    assert_eq!(plan.sources()[1].primary_key_fields, vec!["id"]);
+}
+
+#[test]
+fn data_loader_read_sources_returns_raw_source_data_before_normalize() {
+    let dir = tempdir().expect("temp dir should exist");
+    fs::write(dir.path().join("items.csv"), "id,name\n1,Sword\n").expect("items csv");
+    let source_read_plan = SourceReadPlan::new(vec![plan_source("items", "items.csv")]);
+
+    let raw_sources = DataLoader::new(dir.path())
+        .read_sources(&source_read_plan)
+        .expect("raw sources should load");
+
+    assert_eq!(raw_sources.as_data_set().tables().len(), 1);
+    assert_eq!(raw_sources.as_data_set().tables()[0].name, "items");
+    assert_eq!(
+        raw_sources.as_data_set().tables()[0].rows[0]
+            .get("name")
+            .map(String::as_str),
+        Some("Sword")
+    );
+    assert_eq!(
+        raw_sources.as_data_set().tables()[0].row_sources[0].source_path,
+        PathBuf::from("items.csv")
+    );
+}
+
+#[test]
 fn data_load_plan_rejects_missing_source() {
     let meta: MetaModel = toml::from_str(
         r#"
@@ -1068,12 +1132,13 @@ fn data_loader_loads_multiple_tables_into_data_set() {
     let dir = tempdir().expect("temp dir should exist");
     fs::write(dir.path().join("items.csv"), "id,name\n1,Sword\n").expect("items csv");
     fs::write(dir.path().join("levels.csv"), "id,name\n1,Forest\n").expect("levels csv");
-    let plan = DataLoadPlan {
-        sources: vec![
-            plan_source("items", "items.csv"),
-            plan_source("levels", "levels.csv"),
-        ],
-    };
+    let source_read_plan = SourceReadPlan::new(vec![
+        plan_source("items", "items.csv"),
+        plan_source("levels", "levels.csv"),
+    ]);
+    let plan = DataLoadPlan::new(source_read_plan.clone());
+
+    assert_eq!(plan.source_read_plan(), &source_read_plan);
 
     let data_set = DataLoader::new(dir.path())
         .load(&plan)
@@ -1096,12 +1161,11 @@ fn data_loader_load_with_pool_preserves_plan_order() {
     let dir = tempdir().expect("temp dir should exist");
     fs::write(dir.path().join("items.csv"), "id,name\n1,Sword\n").expect("items csv");
     fs::write(dir.path().join("levels.csv"), "id,name\n1,Forest\n").expect("levels csv");
-    let plan = DataLoadPlan {
-        sources: vec![
-            plan_source("items", "items.csv"),
-            plan_source("levels", "levels.csv"),
-        ],
-    };
+    let source_read_plan = SourceReadPlan::new(vec![
+        plan_source("items", "items.csv"),
+        plan_source("levels", "levels.csv"),
+    ]);
+    let plan = DataLoadPlan::new(source_read_plan);
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(2)
         .build()
@@ -1135,18 +1199,16 @@ fn data_loader_merges_multiple_sources_for_one_table() {
     let dir = tempdir().expect("temp dir should exist");
     fs::write(dir.path().join("weapons.csv"), "id,name\n1,Sword\n").expect("weapons csv");
     fs::write(dir.path().join("armors.csv"), "id,name\n2,Shield\n").expect("armors csv");
-    let plan = DataLoadPlan {
-        sources: vec![
-            DataSourcePlan {
-                fragments: vec!["weapon".to_owned()],
-                ..plan_source("items", "weapons.csv")
-            },
-            DataSourcePlan {
-                fragments: vec!["armor".to_owned()],
-                ..plan_source("items", "armors.csv")
-            },
-        ],
-    };
+    let plan = DataLoadPlan::new(SourceReadPlan::new(vec![
+        DataSourcePlan {
+            fragments: vec!["weapon".to_owned()],
+            ..plan_source("items", "weapons.csv")
+        },
+        DataSourcePlan {
+            fragments: vec!["armor".to_owned()],
+            ..plan_source("items", "armors.csv")
+        },
+    ]));
 
     let data_set = DataLoader::new(dir.path()).load(&plan).unwrap();
     let table = data_set.table("items").unwrap();
@@ -1186,21 +1248,19 @@ fn data_loader_applies_override_rows_by_primary_key() {
     )
     .expect("override csv");
     let primary_key_fields = vec!["id".to_owned()];
-    let plan = DataLoadPlan {
-        sources: vec![
-            DataSourcePlan {
-                fragments: vec!["stack".to_owned()],
-                primary_key_fields: primary_key_fields.clone(),
-                ..plan_source("items", "materials.csv")
-            },
-            DataSourcePlan {
-                fragments: vec!["stack".to_owned()],
-                role: SourceRole::Override,
-                primary_key_fields,
-                ..plan_source("items", "materials_s1.csv")
-            },
-        ],
-    };
+    let plan = DataLoadPlan::new(SourceReadPlan::new(vec![
+        DataSourcePlan {
+            fragments: vec!["stack".to_owned()],
+            primary_key_fields: primary_key_fields.clone(),
+            ..plan_source("items", "materials.csv")
+        },
+        DataSourcePlan {
+            fragments: vec!["stack".to_owned()],
+            role: SourceRole::Override,
+            primary_key_fields,
+            ..plan_source("items", "materials_s1.csv")
+        },
+    ]));
 
     let data_set = DataLoader::new(dir.path())
         .load(&plan)
@@ -1259,19 +1319,17 @@ fn data_loader_rejects_invalid_override_rows() {
         fs::write(dir.path().join(base_path), base_content).expect("base csv");
         fs::write(dir.path().join(override_path), override_content).expect("override csv");
         let primary_key_fields = vec!["id".to_owned()];
-        let plan = DataLoadPlan {
-            sources: vec![
-                DataSourcePlan {
-                    primary_key_fields: primary_key_fields.clone(),
-                    ..plan_source("items", base_path)
-                },
-                DataSourcePlan {
-                    role: SourceRole::Override,
-                    primary_key_fields,
-                    ..plan_source("items", override_path)
-                },
-            ],
-        };
+        let plan = DataLoadPlan::new(SourceReadPlan::new(vec![
+            DataSourcePlan {
+                primary_key_fields: primary_key_fields.clone(),
+                ..plan_source("items", base_path)
+            },
+            DataSourcePlan {
+                role: SourceRole::Override,
+                primary_key_fields,
+                ..plan_source("items", override_path)
+            },
+        ]));
 
         let error = DataLoader::new(dir.path()).load(&plan).unwrap_err();
         assert!(
