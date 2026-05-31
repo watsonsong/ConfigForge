@@ -233,7 +233,7 @@ Table::load(loader)
 5. CLI extra tags：不同 effective tags 分别加载、normalize、validation 并派生 DataSet-dependent ExportView，不能复用另一个 tags 组合的 ExportView。
 6. MetaOnly codegen 格式无关：`data` 设置时必须报错；target 有多个 MetaAndData export task 时，codegen 仍只生成一份逻辑表名代码。
 7. 路径语义：入口 `ConfigForge.toml` 中 `project.input` / export `output` 相对 project root；import 片段中的相对路径相对片段目录；Meta source path 相对 `project.input`；`RuntimeDataFile.path` 相对 data artifact root。
-8. artifact 冲突：所有 export task 之间的输出路径冲突都应报错。执行冲突检查前应做不依赖文件存在性的 lexical path normalization，至少消除 `.` / `..` 造成的字符串差异；对已存在路径可视需要再做 canonicalize，但不能要求输出目录预先存在。
+8. artifact 冲突：所有 export task 之间的输出路径冲突都应报错。当前实现的冲突 key 是不依赖文件存在性的 lexical path normalization，至少消除 `.` / `..` 造成的字符串差异；它不覆盖大小写不敏感卷上的 case alias，也不解析 symlink alias。中期可对已存在父目录 canonicalize，并在 macOS / Windows 或探测到大小写不敏感卷时引入 case-fold key；不存在路径必须保留 lexical fallback，不能要求输出目录预先存在。
 9. CodeModel 默认文件名：始终使用逻辑表名，不包含 `.json` / `.msgpack` / `.bin` 后缀。
 10. Rust 生成代码包含：
    - 通用 `RuntimeDataLoader` / `RuntimeDataReader`；

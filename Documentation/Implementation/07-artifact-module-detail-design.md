@@ -105,7 +105,7 @@ Build collects Vec<Artifact>
   -> if TempCommit: write same-directory temp files, then rename to final paths
 ```
 
-路径冲突检查必须在任何写入前完成，错误信息包含冲突路径，方便用户定位 export task 配置问题。
+路径冲突检查必须在任何写入前完成，错误信息包含冲突路径，方便用户定位 export task 配置问题。当前 Artifact Writer 的 final authority 使用 lexical-normalized path 作为冲突 key：它能消除 `.` / `..` 造成的字符串差异，但不会解析 symlink，也不会在 macOS / Windows 上做大小写折叠。因此 `Out/items.json` 与 `out/items.json` 在大小写不敏感文件系统上可能实际冲突但当前不会提前报 duplicate path；通过 symlink 指向同一目录的两个输出 root 也可能绕过 lexical check。中期方案是在写入前对已存在的父目录做 canonicalize，并在 macOS / Windows 或探测到大小写不敏感卷时引入可选 case-fold key；不存在的路径继续保留 lexical fallback，避免要求输出目录预先存在。平台细节见 [`../Tech/platform-filesystem-semantics.md`](../Tech/platform-filesystem-semantics.md)。
 
 ## 7.5 与 Exporter 的关系
 

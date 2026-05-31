@@ -71,6 +71,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 - [`Tech/unit-test-coverage.md`](Tech/unit-test-coverage.md) — Rust unit test coverage tooling, commands, evaluation criteria, and current coverage baseline.
 - [`Tech/task-system-design.md`](Tech/task-system-design.md) — Task system, async I/O, CPU worker pool, resource limits, and phased migration design.
 - [`Tech/cpp-runtime-dependencies.md`](Tech/cpp-runtime-dependencies.md) — C++ runtime reader 三方依赖的 CMake 查找、自动下载、target 接入与新增 reader checklist。
+- [`Tech/platform-filesystem-semantics.md`](Tech/platform-filesystem-semantics.md) — macOS / Linux / Windows 文件系统大小写、symlink / junction 与 artifact path conflict key 策略。
 
 ## Developer Logs
 

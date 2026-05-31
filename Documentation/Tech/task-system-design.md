@@ -460,6 +460,8 @@ collect all Artifact
   -> bounded generate/write pipeline
 ```
 
+当前 duplicate path key 是 lexical-normalized path；它不解析 symlink，也不覆盖大小写不敏感文件系统上的 case alias。后续并发写出管线如果引入更强的 filesystem-aware path key，必须保持“写入前完成冲突检查”的边界，并遵循 [`platform-filesystem-semantics.md`](platform-filesystem-semantics.md) 中的 canonicalize + lexical fallback 策略。
+
 不要先把所有大表都序列化成 `Vec<u8>` 后再统一写出。并发序列化大表会显著增加内存峰值。短期建议：
 
 ```text

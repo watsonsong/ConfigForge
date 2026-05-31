@@ -105,7 +105,7 @@ Project 模块负责将 Project Config 中的路径归一化：
 
 路径以声明它的配置片段所在目录为 base，而不是以 root project 文件为 base。这样被 imports 的配置片段可以自包含地声明相对路径。
 
-`lexical_normalize_path()` 只做词法归一化，折叠 `.` 和可安全折叠的 `..`，不要求目标路径已经存在。
+`lexical_normalize_path()` 只做词法归一化，折叠 `.` 和可安全折叠的 `..`，不要求目标路径已经存在；它不访问文件系统，因此不会解析 symlink，也不会按平台文件系统大小写规则折叠路径。当前 Project path normalization、runtime planned output conflict check 与 Artifact Writer final conflict check 都属于 lexical path level。macOS 默认大小写不敏感卷上的 `Out/items.json` 与 `out/items.json`、或指向同一目录的 symlink alias，当前不会被 lexical key 识别为同一路径；中期平台增强策略见 [`../Tech/platform-filesystem-semantics.md`](../Tech/platform-filesystem-semantics.md)。
 
 ## 3.6 与 Meta / Build 的关系
 

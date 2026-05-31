@@ -166,6 +166,7 @@ Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。`MetaO
 
 - build 在所有 MetaAndData export tasks 维度提前检查 planned runtime output paths，避免第二个 export task 覆盖第一个。
 - exporter 在单个 export task 内检查 table artifact path 冲突。
+- 上述早期检查与 Artifact Writer final check 当前都使用 lexical-normalized path key；它们不会解析 symlink，也不会覆盖 macOS / Windows 常见的大小写不敏感 alias。中期平台文件系统增强应统一下沉到 artifact/path key 层，而不是让 build/runtime/exporter 各自实现一套不同规则。
 
 ## 10.6 MetaOnly codegen export 编排
 

@@ -464,7 +464,7 @@ deduplicate = true
 | `type` | exporter 类型 ID，例如 `gettext_pot`、`asset_manifest_csv`。禁止使用模糊 `custom`。 |
 | exporter 专属字段 | 直接摊平在当前 `[[targets.exports]]` 下，例如 `domain`、`file_name`、`source_reference`。 |
 
-所有 export task 产物，无论是 runtime table data、POT / manifest 还是 codegen，都必须一起进入 artifact plan，最终由 Artifact Writer 统一检查规范化绝对路径冲突并写入。
+所有 export task 产物，无论是 runtime table data、POT / manifest 还是 codegen，都必须一起进入 artifact plan，最终由 Artifact Writer 统一检查路径冲突并写入。当前实现的冲突检查是 lexical path level：会折叠 `.` / `..`，但不会解析 symlink，也不会按大小写不敏感文件系统折叠 path key；平台增强策略见 Implementation / Tech 文档。
 
 ### gettext POT
 
@@ -580,7 +580,7 @@ Artifact 内容类型：
 要求：
 
 - 导出前发现路径冲突。
-- 路径冲突检查使用规范化绝对 artifact path；两个 export task 如果规划出同 output + 同 type + 同 table 文件名，必须报错。
+- 路径冲突检查当前使用 lexical-normalized artifact path；两个 export task 如果规划出同 output + 同 type + 同 table 文件名，必须报错。大小写不敏感 alias 与 symlink alias 属于中期平台增强范围。
 - 产物写入通过 Artifact Writer。
 - Artifact Writer 支持 `direct` 和 `temp-commit` 写入策略；CLI 默认 `direct`，可通过 `--write-mode temp-commit` 选择临时提交写入。
 - 并行生成不影响 artifact write result 顺序。
