@@ -48,6 +48,14 @@ fn emits_loader_table_and_index_helpers() {
     assert!(content.contains("pub fn get_by_id"));
     assert!(content.contains("pub fn find_by_rarity"));
     assert!(content.contains("pub struct GameData"));
+    assert!(content.contains("pub trait GameDataAccess"));
+    assert!(content.contains("impl GameDataAccess for GameData"));
+    assert!(content.contains("pub struct LazyGameData<L: RuntimeDataLoader>"));
+    assert!(content.contains("items: OnceCell<ItemsTable>"));
+    assert!(content.contains("pub fn new(loader: L) -> Self"));
+    assert!(content.contains("pub fn preload_all(&self) -> RuntimeDataResult<()>"));
+    assert!(content.contains("impl<L: RuntimeDataLoader> GameDataAccess for LazyGameData<L>"));
+    assert!(content.contains("let value = ItemsTable::load(&self.loader)?;"));
 }
 
 #[test]
@@ -182,6 +190,8 @@ fn emits_object_table_as_typed_object_not_repository() {
 
     assert!(content.contains("pub use config_forge_runtime_reader_core"));
     assert!(content.contains("pub game_config: GameConfigRow,"));
+    assert!(content.contains("game_config: OnceCell<GameConfigRow>"));
+    assert!(content.contains("let value = GameConfigRow::load(&self.loader)?;"));
     assert!(content.contains("impl GameConfigRow"));
     assert!(content.contains("let root = loader.open(Self::DATA_FILE)?;"));
     assert!(content.contains("Self::read_from_reader(&root)"));
@@ -232,6 +242,28 @@ fn rejects_runtime_reader_trait_name_conflicts() {
         RustCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
         "rust codegen",
         "duplicate generated identifier `RuntimeDataReader`",
+        "top-level types",
+    );
+}
+
+#[test]
+fn rejects_lazy_game_data_top_level_name_conflicts() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "LazyGameData"
+
+            [[structs.fields]]
+            name = "value"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+
+    assert_duplicate_generated_identifier(
+        RustCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+        "rust codegen",
+        "duplicate generated identifier `LazyGameData`",
         "top-level types",
     );
 }

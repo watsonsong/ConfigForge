@@ -3,7 +3,7 @@
 
 declare function require(name: string): any;
 
-import { GameData, RuntimeDataLoader } from "./generated";
+import { GameData, LazyGameData, RuntimeDataLoader } from "./generated";
 import { SyncFsRuntimeDataLoader } from "./runtime_loader_node_fs";
 import { decodeBinaryRuntimeData } from "./runtime_loader_binary";
 import { decodeJsonValue, JsonValueReader } from "./runtime_loader_json";
@@ -64,6 +64,17 @@ async function main(): Promise<void> {
     if (binaryData.gameRules.defaultClass(binaryData).classId !== 1) {
       throw new Error("binary link all relation cache failed");
     }
+
+    const lazyBinaryData = GameData.loadLazy(binaryLoader);
+    const lazyBinaryItem = await lazyBinaryData.items().then((items) => items.getById(2001));
+    if (!lazyBinaryItem || lazyBinaryItem.id !== 2001) {
+      throw new Error("binary lazy item table load failed");
+    }
+    const lazyBinaryRules = await lazyBinaryData.gameRules();
+    if (lazyBinaryRules.defaultClassId !== 1) {
+      throw new Error("binary lazy object table load failed");
+    }
+    await lazyBinaryData.linkAll();
     return;
   }
 
@@ -103,6 +114,18 @@ async function main(): Promise<void> {
   if (data.gameRules.defaultClass(data).classId !== 1) {
     throw new Error("link all relation cache failed");
   }
+
+  const lazyData = new LazyGameData(loader);
+  const lazyItems = await lazyData.items();
+  const lazyItem = lazyItems.getById(2001);
+  if (!lazyItem || lazyItem.name !== "Iron Ore") {
+    throw new Error("lazy item table load failed");
+  }
+  const lazyRules = await lazyData.gameRules();
+  if (lazyRules.defaultClassId !== 1 || lazyRules.starterItemIds.join(",") !== "2001,2002") {
+    throw new Error("lazy object table load failed");
+  }
+  await lazyData.linkAll();
 }
 
 main().catch((error) => {

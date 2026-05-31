@@ -13,6 +13,7 @@
 #endif
 
 #include <cstdlib>
+#include <memory>
 #include <stdexcept>
 
 namespace cfg = reference::game::config;
@@ -70,6 +71,24 @@ int main() {
     data.LinkAll();
     if (data.GameRules().GetDefaultClass(data).class_id != 1) {
         throw std::runtime_error("link all relation cache failed");
+    }
+
+#if defined(CONFIG_FORGE_USE_BINARY_RUNTIME_READER)
+    auto lazy_loader = std::make_shared<config_forge_runtime::BinaryFsRuntimeDataLoader>(data_dir);
+#else
+    auto lazy_loader = std::make_shared<config_forge_runtime::JsonFsRuntimeDataLoader>(data_dir);
+#endif
+    cfg::LazyGameData lazy_data(lazy_loader);
+    const cfg::ItemsRow* lazy_item = lazy_data.Items().GetById(2001);
+    if (lazy_item == nullptr || lazy_item->id != 2001) {
+        throw std::runtime_error("lazy item table load failed");
+    }
+    if (lazy_data.GameRules().default_class_id != 1) {
+        throw std::runtime_error("lazy object table load failed");
+    }
+    lazy_data.LinkAll();
+    if (lazy_data.GameRules().GetDefaultClass(lazy_data).class_id != 1) {
+        throw std::runtime_error("lazy link all relation cache failed");
     }
     return 0;
 }

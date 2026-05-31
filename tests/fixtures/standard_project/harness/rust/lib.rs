@@ -106,11 +106,50 @@ fn assert_standard_data(data: &GameData) {
     assert!(data.game_rules.pvp_enabled);
 }
 
+fn assert_standard_lazy_data(data: &impl GameDataAccess) {
+    let items = data.items().expect("items table should load lazily");
+    let item = items.get_by_id(2001).expect("item id should be indexed");
+    assert_eq!(item.price, 5);
+    assert_eq!(item.stack().expect("stack fragment").max_stack, 999);
+    assert!(items.get_by_id(404).is_none());
+
+    let class_level = data
+        .class_levels()
+        .expect("class levels should load lazily")
+        .get_by_class_level(1, 2)
+        .expect("compound class level index should resolve");
+    assert_eq!(class_level.attributes.max_health, Some(145));
+    assert_eq!(class_level.attributes.attack, Some(16));
+
+    let game_rules = data.game_rules().expect("game rules should load lazily");
+    assert_eq!(game_rules.max_player_level, 60);
+    assert_eq!(game_rules.default_class_id, 1);
+    assert_eq!(game_rules.starter_item_ids, vec![2001, 2002]);
+    let default_class = game_rules
+        .default_class(data)
+        .expect("default class relation should resolve lazily");
+    assert_eq!(default_class.class_id, 1);
+    let starter_items = game_rules
+        .starter_items(data)
+        .expect("starter item relation should resolve lazily");
+    assert_eq!(starter_items.len(), 2);
+    assert_eq!(starter_items[0].id, 2001);
+    assert_eq!(starter_items[1].id, 2002);
+    assert!(game_rules.pvp_enabled);
+}
+
 #[test]
 fn generated_rust_loads_exported_json_and_queries_indexes() {
     let data = GameData::load(&json_fixture_loader_from_env())
         .expect("generated data should load from JSON runtime reader");
     assert_standard_data(&data);
+
+    let lazy_data = LazyGameData::new(json_fixture_loader_from_env());
+    assert_standard_lazy_data(&lazy_data);
+    lazy_data
+        .link_all()
+        .expect("lazy link_all should pre-resolve relations");
+    assert_eq!(lazy_data.game_rules().unwrap().default_class(&lazy_data).unwrap().class_id, 1);
 }
 
 #[test]
@@ -118,6 +157,12 @@ fn generated_rust_loads_exported_messagepack_and_queries_indexes() {
     let data = GameData::load(&msgpack_fixture_loader_from_env())
         .expect("generated data should load from MessagePack runtime reader");
     assert_standard_data(&data);
+
+    let lazy_data = LazyGameData::new(msgpack_fixture_loader_from_env());
+    assert_standard_lazy_data(&lazy_data);
+    lazy_data
+        .preload_all()
+        .expect("lazy preload_all should load all tables");
 }
 
 #[test]
@@ -125,4 +170,7 @@ fn generated_rust_loads_exported_binary_and_queries_indexes() {
     let data = GameData::load(&binary_fixture_loader_from_env())
         .expect("generated data should load from binary runtime reader");
     assert_standard_data(&data);
+
+    let lazy_data = LazyGameData::new(binary_fixture_loader_from_env());
+    assert_standard_lazy_data(&lazy_data);
 }

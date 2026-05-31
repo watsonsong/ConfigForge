@@ -68,7 +68,7 @@ impl CodeGenerator for RustCodeGenerator {
         validate_generated_symbols(&model, &names)?;
         let mut content = CodeWriter::new(input.target.options.formatting);
         self.write_file_header(&mut content, input);
-        content.raw("use std::{cell::{Cell, RefCell}, collections::HashMap};\n\n");
+        content.raw("use std::{cell::{Cell, OnceCell, RefCell}, collections::HashMap};\n\n");
         render_runtime_reader_imports(&mut content);
         render_runtime_reader_helpers(&mut content);
         content.raw(concat!(
@@ -248,6 +248,16 @@ impl CodeGenerator for RustCodeGenerator {
             render_table(&mut content, table, &names)?;
         }
 
+        content.raw("pub trait GameDataAccess {\n");
+        for table in &model.tables {
+            content.raw_fmt(format_args!(
+                "    fn {}(&self) -> RuntimeDataResult<&{}>;\n",
+                names.field_name(&table.name)?,
+                names.table_data_type_name(table)?
+            ));
+        }
+        content.raw("}\n\n");
+
         content.raw("pub struct GameData {\n");
         for table in &model.tables {
             content.raw_fmt(format_args!(
@@ -271,6 +281,97 @@ impl CodeGenerator for RustCodeGenerator {
         content.raw("        })\n");
         content.raw("    }\n");
         render_game_data_link_methods(&mut content, &model, &names)?;
+        content.raw("}\n");
+
+        content.raw("\nimpl GameDataAccess for GameData {\n");
+        for table in &model.tables {
+            content.raw_fmt(format_args!(
+                "    fn {}(&self) -> RuntimeDataResult<&{}> {{ Ok(&self.{}) }}\n",
+                names.field_name(&table.name)?,
+                names.table_data_type_name(table)?,
+                names.field_name(&table.name)?
+            ));
+        }
+        content.raw("}\n\n");
+
+        content.raw("pub struct LazyGameData<L: RuntimeDataLoader> {\n");
+        content.raw("    loader: L,\n");
+        for table in &model.tables {
+            content.raw_fmt(format_args!(
+                "    {}: OnceCell<{}>,\n",
+                names.field_name(&table.name)?,
+                names.table_data_type_name(table)?
+            ));
+        }
+        content.raw("}\n\n");
+        content.raw("impl<L: RuntimeDataLoader> LazyGameData<L> {\n");
+        content.raw("    pub fn new(loader: L) -> Self {\n");
+        content.raw("        Self {\n");
+        content.raw("            loader,\n");
+        for table in &model.tables {
+            content.raw_fmt(format_args!(
+                "            {}: OnceCell::new(),\n",
+                names.field_name(&table.name)?
+            ));
+        }
+        content.raw("        }\n");
+        content.raw("    }\n\n");
+        for table in &model.tables {
+            content.raw_fmt(format_args!(
+                "    pub fn {}(&self) -> RuntimeDataResult<&{}> {{ <Self as GameDataAccess>::{}(self) }}\n\n",
+                names.field_name(&table.name)?,
+                names.table_data_type_name(table)?,
+                names.field_name(&table.name)?
+            ));
+        }
+        content.raw("    pub fn preload_all(&self) -> RuntimeDataResult<()> {\n");
+        for table in &model.tables {
+            content.raw_fmt(format_args!(
+                "        let _ = self.{}()?;\n",
+                names.field_name(&table.name)?
+            ));
+        }
+        content.raw("        Ok(())\n");
+        content.raw("    }\n");
+        content.raw("\n    pub fn link_all(&self) -> RuntimeDataResult<()> {\n");
+        content.raw("        self.preload_all()?;\n");
+        for table in &model.tables {
+            if table
+                .foreign_keys
+                .iter()
+                .any(|foreign_key| foreign_key.linked_field.is_some())
+            {
+                content.raw_fmt(format_args!(
+                    "        self.{}()?.link(self)?;\n",
+                    names.field_name(&table.name)?
+                ));
+            }
+        }
+        content.raw("        Ok(())\n");
+        content.raw("    }\n");
+        content.raw("}\n\n");
+
+        content.raw("impl<L: RuntimeDataLoader> GameDataAccess for LazyGameData<L> {\n");
+        for table in &model.tables {
+            content.raw_fmt(format_args!(
+                concat!(
+                    "    fn {}(&self) -> RuntimeDataResult<&{}> {{\n",
+                    "        if self.{}.get().is_none() {{\n",
+                    "            let value = {}::load(&self.loader)?;\n",
+                    "            let _ = self.{}.set(value);\n",
+                    "        }}\n",
+                    "        self.{}.get().ok_or_else(|| RuntimeDataError::decode({:?}.to_owned()))\n",
+                    "    }}\n",
+                ),
+                names.field_name(&table.name)?,
+                names.table_data_type_name(table)?,
+                names.field_name(&table.name)?,
+                names.table_data_type_name(table)?,
+                names.field_name(&table.name)?,
+                names.field_name(&table.name)?,
+                format!("lazy table `{}` was not initialized", table.name)
+            ));
+        }
         content.raw("}\n");
 
         Ok(vec![GeneratedFile {

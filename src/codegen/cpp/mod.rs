@@ -22,7 +22,7 @@ use reader::{
     render_struct_reader_source,
 };
 use repository::{
-    render_compound_index_key_structs, render_game_data_load_source,
+    render_compound_index_key_structs, render_game_data_load_source, render_lazy_game_data_source,
     render_row_relation_cache_members, render_row_relation_declarations,
     render_row_relation_methods, render_table, render_table_source,
 };
@@ -101,7 +101,7 @@ impl CodeGenerator for CppCodeGenerator {
             header.raw_fmt(format_args!("namespace {namespace} {{\n\n"));
         }
         render_runtime_interfaces(&mut header);
-        header.raw("class GameData;\n\n");
+        header.raw("class GameDataAccess;\nclass GameData;\n\n");
         if model.tables.iter().any(|table| {
             table
                 .foreign_keys
@@ -218,12 +218,23 @@ impl CodeGenerator for CppCodeGenerator {
             }
         }
 
-        header.raw("class GameData {\npublic:\n");
+        header.raw("class GameDataAccess {\npublic:\n");
+        header.raw("    virtual ~GameDataAccess() = default;\n");
+        for table in &model.tables {
+            header.raw_fmt(format_args!(
+                "    virtual const {}& {}() const = 0;\n",
+                names.table_data_type_name(table)?,
+                names.type_name(&table.name)?
+            ));
+        }
+        header.raw("};\n\n");
+
+        header.raw("class GameData : public GameDataAccess {\npublic:\n");
         header.raw("    static GameData Load(IRuntimeDataLoader& loader);\n");
         header.raw("    void LinkAll() const;\n");
         for table in &model.tables {
             header.raw_fmt(format_args!(
-                "    const {}& {}() const {{ return {}; }}\n",
+                "    const {}& {}() const override {{ return {}; }}\n",
                 names.table_data_type_name(table)?,
                 names.type_name(&table.name)?,
                 names.member_name(&table.name)?
@@ -233,6 +244,28 @@ impl CodeGenerator for CppCodeGenerator {
         for table in &model.tables {
             header.raw_fmt(format_args!(
                 "    {} {};\n",
+                names.table_data_type_name(table)?,
+                names.member_name(&table.name)?
+            ));
+        }
+        header.raw("};\n");
+
+        header.raw("\nclass LazyGameData : public GameDataAccess {\npublic:\n");
+        header.raw("    explicit LazyGameData(std::shared_ptr<IRuntimeDataLoader> loader);\n");
+        header.raw("    void PreloadAll() const;\n");
+        header.raw("    void LinkAll() const;\n");
+        for table in &model.tables {
+            header.raw_fmt(format_args!(
+                "    const {}& {}() const override;\n",
+                names.table_data_type_name(table)?,
+                names.type_name(&table.name)?
+            ));
+        }
+        header.raw("private:\n");
+        header.raw("    std::shared_ptr<IRuntimeDataLoader> loader_;\n");
+        for table in &model.tables {
+            header.raw_fmt(format_args!(
+                "    mutable std::optional<{}> {};\n",
                 names.table_data_type_name(table)?,
                 names.member_name(&table.name)?
             ));
@@ -304,6 +337,7 @@ fn render_source_file(
         }
     }
     render_game_data_load_source(&mut content, model, names)?;
+    render_lazy_game_data_source(&mut content, model, names)?;
 
     if let Some(namespace) = namespace {
         content.raw_fmt(format_args!("\n}} // namespace {namespace}\n"));

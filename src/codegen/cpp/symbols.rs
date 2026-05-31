@@ -23,6 +23,9 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>
             "IRuntimeDataLoader",
             "IRuntimeDataLoader",
         ),
+        GeneratedSymbol::new("facade interface", "GameDataAccess", "GameDataAccess"),
+        GeneratedSymbol::new("facade", "GameData", "GameData"),
+        GeneratedSymbol::new("facade", "LazyGameData", "LazyGameData"),
     ];
     for code_enum in &model.enums {
         type_symbols.push(GeneratedSymbol::new(
@@ -190,7 +193,6 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>
             method_symbols,
         )?;
     }
-    type_symbols.push(GeneratedSymbol::new("class", "GameData", "GameData"));
     ensure_unique_generated_symbols("cpp", "top-level types", type_symbols)?;
 
     validate_named_symbols(
@@ -203,6 +205,21 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>
                 names.member_name(&table.name)?,
             ))
         }),
+    )?;
+
+    let mut lazy_game_data_members =
+        vec![GeneratedSymbol::new("loader member", "loader", "loader_")];
+    for table in &model.tables {
+        lazy_game_data_members.push(GeneratedSymbol::new(
+            "table cache member",
+            &table.name,
+            names.member_name(&table.name)?,
+        ));
+    }
+    validate_named_symbols(
+        "cpp",
+        "LazyGameData members",
+        lazy_game_data_members.into_iter().map(Ok),
     )?;
 
     Ok(())

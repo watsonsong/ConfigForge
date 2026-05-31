@@ -195,7 +195,7 @@ fn render_table_link_source(
     }
     let repository_type = names.repository_type_name(&table.name)?;
     content.raw_fmt(format_args!(
-        "void {}::Link(const GameData& data) const {{\n",
+        "void {}::Link(const GameDataAccess& data) const {{\n",
         repository_type
     ));
     content.raw("    for (const auto& row : rows_) {\n");
@@ -247,6 +247,80 @@ pub(super) fn render_game_data_load_source(
     content.raw("    return data;\n");
     content.raw("}\n");
     render_game_data_link_all_source(content, model, names)?;
+    Ok(())
+}
+
+pub(super) fn render_lazy_game_data_source(
+    content: &mut CodeWriter,
+    model: &CodeModel,
+    names: &CppNames<'_>,
+) -> Result<()> {
+    content.raw("\nLazyGameData::LazyGameData(std::shared_ptr<IRuntimeDataLoader> loader) : loader_(std::move(loader)) {\n");
+    content.raw("    if (!loader_) { throw std::runtime_error(\"LazyGameData requires a runtime data loader\"); }\n");
+    content.raw("}\n\n");
+    for table in &model.tables {
+        let table_type = names.table_data_type_name(table)?;
+        let accessor_name = names.type_name(&table.name)?;
+        let member_name = names.member_name(&table.name)?;
+        content.raw_fmt(format_args!(
+            "const {table_type}& LazyGameData::{accessor_name}() const {{\n"
+        ));
+        content.raw_fmt(format_args!("    if (!{member_name}) {{\n"));
+        match table.kind {
+            CodeTableKind::Collection => content.raw_fmt(format_args!(
+                "        {member_name}.emplace({}::Load(*loader_));\n",
+                names.repository_type_name(&table.name)?
+            )),
+            CodeTableKind::Object => {
+                let row_type = names.row_type_name(&table.name)?;
+                content.raw_fmt(format_args!(
+                    "        auto root = loader_->Open({row_type}::DataFile);\n"
+                ));
+                if table.schema_revision.is_some() {
+                    content.raw_fmt(format_args!(
+                        concat!(
+                            "        if (root->SchemaRevision() &&\n",
+                            "            *root->SchemaRevision() != {row_type}::ExpectedSchemaRevision) {{\n",
+                            "            throw std::runtime_error(\"schema revision mismatch for runtime data\");\n",
+                            "        }}\n",
+                        ),
+                        row_type = row_type,
+                    ));
+                }
+                content.raw_fmt(format_args!(
+                    "        {member_name}.emplace({}(*root));\n",
+                    names.reader_function_name(&row_type)?
+                ));
+                content.raw("        root->EnsureExhausted();\n");
+            }
+        }
+        content.raw("    }\n");
+        content.raw_fmt(format_args!("    return *{member_name};\n"));
+        content.raw("}\n\n");
+    }
+    content.raw("void LazyGameData::PreloadAll() const {\n");
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "    (void){}();\n",
+            names.type_name(&table.name)?
+        ));
+    }
+    content.raw("}\n");
+    content.raw("\nvoid LazyGameData::LinkAll() const {\n");
+    content.raw("    PreloadAll();\n");
+    for table in &model.tables {
+        if table
+            .foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            content.raw_fmt(format_args!(
+                "    {}().Link(*this);\n",
+                names.type_name(&table.name)?
+            ));
+        }
+    }
+    content.raw("}\n");
     Ok(())
 }
 
@@ -377,7 +451,7 @@ pub(super) fn render_table(
         .iter()
         .any(|foreign_key| foreign_key.linked_field.is_some())
     {
-        content.raw("    void Link(const GameData& data) const;\n");
+        content.raw("    void Link(const GameDataAccess& data) const;\n");
     }
     content.raw("private:\n");
     content.raw_fmt(format_args!(
@@ -454,15 +528,15 @@ pub(super) fn render_row_relation_declarations(
             .cardinality
         {
             CodeRelationCardinality::One => content.raw_fmt(format_args!(
-                "    const {}& {}(const GameData& data) const;\n",
+                "    const {}& {}(const GameDataAccess& data) const;\n",
                 target_row_type, function_name
             )),
             CodeRelationCardinality::OptionalOne => content.raw_fmt(format_args!(
-                "    const {}* {}(const GameData& data) const;\n",
+                "    const {}* {}(const GameDataAccess& data) const;\n",
                 target_row_type, function_name
             )),
             CodeRelationCardinality::Many => content.raw_fmt(format_args!(
-                "    std::vector<const {}*> {}(const GameData& data) const;\n",
+                "    std::vector<const {}*> {}(const GameDataAccess& data) const;\n",
                 target_row_type, function_name
             )),
         }
@@ -472,7 +546,7 @@ pub(super) fn render_row_relation_declarations(
         .iter()
         .any(|foreign_key| foreign_key.linked_field.is_some())
     {
-        content.raw("    void Link(const GameData& data) const;\n");
+        content.raw("    void Link(const GameDataAccess& data) const;\n");
     }
     Ok(())
 }
@@ -567,7 +641,7 @@ pub(super) fn render_row_relation_methods(
     {
         let row_type = names.row_type_name(&table.name)?;
         content.raw_fmt(format_args!(
-            "void {}::Link(const GameData& data) const {{\n",
+            "void {}::Link(const GameDataAccess& data) const {{\n",
             row_type
         ));
         for foreign_key in table
@@ -607,7 +681,7 @@ fn render_single_relation_method(
         format!("const {target_row_type}&")
     };
     content.raw_fmt(format_args!(
-        "{} {}::{}(const GameData& data) const {{\n",
+        "{} {}::{}(const GameDataAccess& data) const {{\n",
         return_type, source_row_type, function_name
     ));
     content.raw_fmt(format_args!(
@@ -712,7 +786,7 @@ fn render_many_relation_method(
     })?;
     let source_field_name = names.field_name(&source_field.name)?;
     content.raw_fmt(format_args!(
-        "std::vector<const {}*> {}::{}(const GameData& data) const {{\n",
+        "std::vector<const {}*> {}::{}(const GameDataAccess& data) const {{\n",
         target_row_type, source_row_type, function_name
     ));
     content.raw_fmt(format_args!("    if (!{}.resolved) {{\n", cache_name));

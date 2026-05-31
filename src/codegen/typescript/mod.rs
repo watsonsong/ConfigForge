@@ -258,8 +258,102 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         }
         content.raw("    });\n");
         content.raw("  }\n");
+        content.raw("\n  static loadLazy(loader: RuntimeDataLoader): LazyGameData { return new LazyGameData(loader); }\n");
         content.newline();
         render_game_data_link_all(&mut content, &model, &names)?;
+        content.raw("}\n");
+
+        content.raw("\nexport class LazyGameData {\n");
+        content.raw("  private readonly loader: RuntimeDataLoader;\n");
+        for table in &model.tables {
+            content.raw_fmt(format_args!(
+                "  private {}Promise?: Promise<{}>;\n",
+                names.field_name(&table.name)?,
+                names.table_data_type_name(table)?
+            ));
+        }
+        content.raw("\n  constructor(loader: RuntimeDataLoader) {\n");
+        content.raw("    this.loader = loader;\n");
+        content.raw("  }\n\n");
+        content.raw("  static loadLazy(loader: RuntimeDataLoader): LazyGameData { return new LazyGameData(loader); }\n\n");
+        for table in &model.tables {
+            let field_name = names.field_name(&table.name)?;
+            let data_type = names.table_data_type_name(table)?;
+            content.raw_fmt(format_args!(
+                "  {}(): Promise<{}> {{\n",
+                field_name, data_type
+            ));
+            content.raw_fmt(format_args!("    if (!this.{field_name}Promise) {{\n"));
+            match table.kind {
+                CodeTableKind::Collection => content.raw_fmt(format_args!(
+                    "      this.{field_name}Promise = {}.load(this.loader).catch((error) => {{ this.{field_name}Promise = undefined; throw error; }});\n",
+                    names.repository_type_name(&table.name)?
+                )),
+                CodeTableKind::Object => {
+                    content.raw_fmt(format_args!(
+                        "      this.{field_name}Promise = Promise.resolve(this.loader.open({:?})).then((root) => {{\n",
+                        table.data_file
+                    ));
+                    if let Some(revision) = table.schema_revision {
+                        content.raw_fmt(format_args!(
+                            concat!(
+                                "        const schemaRevision = root.schemaRevision?.();\n",
+                                "        if (schemaRevision !== undefined && BigInt(schemaRevision) !== {revision}n) {{\n",
+                                "          throw new Error(`schema revision mismatch for {}`);\n",
+                                "        }}\n",
+                            ),
+                            table.data_file,
+                            revision = revision
+                        ));
+                    }
+                    content.raw_fmt(format_args!(
+                        concat!(
+                            "        const value = {}(root);\n",
+                            "        root.ensureExhausted?.();\n",
+                            "        return value;\n",
+                            "      }}).catch((error) => {{ this.{field_name}Promise = undefined; throw error; }});\n",
+                        ),
+                        names.reader_function_name(&names.row_type_name(&table.name)?)?,
+                        field_name = field_name
+                    ));
+                }
+            }
+            content.raw("    }\n");
+            content.raw_fmt(format_args!("    return this.{field_name}Promise;\n"));
+            content.raw("  }\n\n");
+        }
+        content.raw("  async preloadAll(): Promise<void> {\n");
+        for table in &model.tables {
+            content.raw_fmt(format_args!(
+                "    await this.{}();\n",
+                names.field_name(&table.name)?
+            ));
+        }
+        content.raw("  }\n\n");
+        content.raw("  async linkAll(): Promise<void> {\n");
+        content.raw("    await this.preloadAll();\n");
+        content.raw("    const data = {\n");
+        for table in &model.tables {
+            content.raw_fmt(format_args!(
+                "      {}: await this.{}(),\n",
+                names.field_name(&table.name)?,
+                names.field_name(&table.name)?
+            ));
+        }
+        content.raw("    } as GameData;\n");
+        for table in &model.tables {
+            if table
+                .foreign_keys
+                .iter()
+                .any(|foreign_key| foreign_key.linked_field.is_some())
+            {
+                content.raw_fmt(format_args!(
+                    "    data.{}.link(data);\n",
+                    names.field_name(&table.name)?
+                ));
+            }
+        }
+        content.raw("  }\n");
         content.raw("}\n");
 
         for table in &model.tables {

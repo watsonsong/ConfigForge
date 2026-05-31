@@ -19,6 +19,7 @@ pub(super) fn validate_generated_symbols(
         GeneratedSymbol::new("interface", "RuntimeDataLoader", "RuntimeDataLoader"),
         GeneratedSymbol::new("interface", "RuntimeDataReader", "RuntimeDataReader"),
         GeneratedSymbol::new("class", "GameData", "GameData"),
+        GeneratedSymbol::new("class", "LazyGameData", "LazyGameData"),
     ];
     for code_enum in &model.enums {
         type_symbols.push(GeneratedSymbol::new(

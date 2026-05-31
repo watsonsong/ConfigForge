@@ -49,6 +49,14 @@ fn emits_loader_and_repository_declarations() {
     assert!(content.contains("enum class ItemRarity"));
     assert!(content.contains("struct ItemsRow"));
     assert!(content.contains("class ItemsTable"));
+    assert!(content.contains("class GameDataAccess"));
+    assert!(content.contains("class GameData : public GameDataAccess"));
+    assert!(content.contains("class LazyGameData : public GameDataAccess"));
+    assert!(content.contains("explicit LazyGameData(std::shared_ptr<IRuntimeDataLoader> loader);"));
+    assert!(content.contains("void PreloadAll() const;"));
+    assert!(content.contains("void LinkAll() const;"));
+    assert!(content.contains("mutable std::optional<ItemsTable> items_;"));
+    assert!(content.contains("const ItemsTable& Items() const override;"));
     assert!(content.contains("const ItemsRow* GetById"));
     assert!(content.contains("std::vector<const ItemsRow*> FindByRarity"));
     assert!(source.contains("#include \"generated.hpp\""));
@@ -69,6 +77,11 @@ fn emits_loader_and_repository_declarations() {
     ));
     assert!(source.contains("GameData GameData::Load(IRuntimeDataLoader& loader)"));
     assert!(source.contains("data.items_ = ItemsTable::Load(loader);"));
+    assert!(
+        source.contains("LazyGameData::LazyGameData(std::shared_ptr<IRuntimeDataLoader> loader)")
+    );
+    assert!(source.contains("items_.emplace(ItemsTable::Load(*loader_));"));
+    assert!(source.contains("void LazyGameData::PreloadAll() const"));
 }
 
 #[test]
@@ -133,11 +146,14 @@ fn emits_object_table_as_typed_object_not_repository() {
     ));
     assert!(content.contains("static constexpr const char* DataFile = \"game_config\";"));
     assert!(content.contains("const GameConfigRow& GameConfig() const"));
+    assert!(content.contains("mutable std::optional<GameConfigRow> game_config_;"));
     assert!(content.contains("GameConfigRow game_config_;"));
     assert!(!content.contains("class GameConfigTable"));
     assert!(!content.contains("Rows() const"));
     assert!(source.contains("auto root_game_config_ = loader.Open(GameConfigRow::DataFile);"));
     assert!(source.contains("data.game_config_ = ReadGameConfigRow(*root_game_config_);"));
+    assert!(source.contains("auto root = loader_->Open(GameConfigRow::DataFile);"));
+    assert!(source.contains("game_config_.emplace(ReadGameConfigRow(*root));"));
 }
 
 #[test]
@@ -153,27 +169,50 @@ fn emits_linked_field_relation_api() {
     assert!(header.contains("struct LinkListCache"));
     assert!(header.contains("mutable LinkCache default_item_link;"));
     assert!(header.contains("mutable LinkListCache starter_items_link;"));
-    assert!(header.contains("const ItemsRow& GetDefaultItem(const GameData& data) const;"));
-    assert!(
-        header
-            .contains("std::vector<const ItemsRow*> GetStarterItems(const GameData& data) const;")
-    );
+    assert!(header.contains("const ItemsRow& GetDefaultItem(const GameDataAccess& data) const;"));
+    assert!(header.contains(
+        "std::vector<const ItemsRow*> GetStarterItems(const GameDataAccess& data) const;"
+    ));
     assert!(header.contains("std::optional<std::size_t> IndexOfById(std::int64_t id) const;"));
-    assert!(header.contains("void Link(const GameData& data) const;"));
+    assert!(header.contains("void Link(const GameDataAccess& data) const;"));
     assert!(header.contains("void LinkAll() const;"));
-    assert!(
-        source
-            .contains("const ItemsRow& GameConfigRow::GetDefaultItem(const GameData& data) const")
-    );
     assert!(source.contains(
-        "std::vector<const ItemsRow*> GameConfigRow::GetStarterItems(const GameData& data) const"
+        "const ItemsRow& GameConfigRow::GetDefaultItem(const GameDataAccess& data) const"
+    ));
+    assert!(source.contains(
+        "std::vector<const ItemsRow*> GameConfigRow::GetStarterItems(const GameDataAccess& data) const"
     ));
     assert!(
         source
             .contains("std::optional<std::size_t> ItemsTable::IndexOfById(std::int64_t id) const")
     );
-    assert!(source.contains("void GameConfigRow::Link(const GameData& data) const"));
+    assert!(source.contains("void GameConfigRow::Link(const GameDataAccess& data) const"));
     assert!(source.contains("void GameData::LinkAll() const"));
+    assert!(source.contains("void LazyGameData::LinkAll() const"));
+    assert!(source.contains("PreloadAll();"));
+    assert!(source.contains("GameConfig().Link(*this);"));
+}
+
+#[test]
+fn rejects_lazy_game_data_top_level_name_conflicts() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "LazyGameData"
+
+            [[structs.fields]]
+            name = "value"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+
+    assert_duplicate_generated_identifier(
+        CppCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+        LANGUAGE,
+        "duplicate generated identifier `LazyGameData`",
+        "top-level types",
+    );
 }
 
 #[test]

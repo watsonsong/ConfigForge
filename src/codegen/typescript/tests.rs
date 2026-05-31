@@ -53,6 +53,14 @@ fn emits_async_loader_and_maps() {
     assert!(content.contains("const length = readListLength(reader);"));
     assert!(content.contains("readonly displayName: string;"));
     assert!(content.contains("static async load"));
+    assert!(content.contains("static loadLazy(loader: RuntimeDataLoader): LazyGameData"));
+    assert!(content.contains("export class LazyGameData"));
+    assert!(content.contains("private itemsPromise?: Promise<ItemsTable>;"));
+    assert!(content.contains("constructor(loader: RuntimeDataLoader)"));
+    assert!(content.contains("static loadLazy(loader: RuntimeDataLoader): LazyGameData { return new LazyGameData(loader); }"));
+    assert!(content.contains("items(): Promise<ItemsTable>"));
+    assert!(content.contains("this.itemsPromise = ItemsTable.load(this.loader).catch((error) =>"));
+    assert!(content.contains("async preloadAll(): Promise<void>"));
     assert!(content.contains("getById(id: number): ItemsRow | undefined"));
     assert!(content.contains("findByRarity(rarity: ItemRarity): readonly ItemsRow[]"));
     assert!(content.contains("Duplicate unique index key for ItemsTable.by_id"));
@@ -163,6 +171,9 @@ fn emits_object_table_as_typed_object_not_repository() {
         content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;")
     );
     assert!(content.contains("readonly gameConfig: GameConfigRow;"));
+    assert!(content.contains("private gameConfigPromise?: Promise<GameConfigRow>;"));
+    assert!(content.contains("gameConfig(): Promise<GameConfigRow>"));
+    assert!(content.contains("Promise.resolve(this.loader.open(\"game_config\")).then((root) =>"));
     assert!(
         content.contains(
             "gameConfig: await Promise.resolve(loader.open(\"game_config\")).then(root =>"
@@ -192,6 +203,10 @@ fn emits_linked_field_relation_api() {
     assert!(content.contains("indexOfById(id: number): number | undefined"));
     assert!(content.contains("link(data: GameData): void;"));
     assert!(content.contains("this.gameConfig.link(this);"));
+    assert!(content.contains("async linkAll(): Promise<void>"));
+    assert!(content.contains("await this.preloadAll();"));
+    assert!(content.contains("gameConfig: await this.gameConfig(),"));
+    assert!(content.contains("data.gameConfig.link(data);"));
     assert!(content.contains(
         "function defaultItemGameConfigRow(this: GameConfigRow, data: GameData): ItemsRow"
     ));
@@ -210,6 +225,28 @@ fn rejects_duplicate_generated_field_names() {
         "typescript codegen",
         "duplicate generated identifier `fooBar`",
         "table `items` row fields",
+    );
+}
+
+#[test]
+fn rejects_lazy_game_data_top_level_name_conflicts() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "LazyGameData"
+
+            [[structs.fields]]
+            name = "value"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+
+    assert_duplicate_generated_identifier(
+        TypeScriptCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+        "typescript codegen",
+        "duplicate generated identifier `LazyGameData`",
+        "top-level exports",
     );
 }
 

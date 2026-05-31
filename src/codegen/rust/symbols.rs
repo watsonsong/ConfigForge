@@ -23,6 +23,9 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &RustNames<'_
             "RuntimeDataLoader",
             "RuntimeDataLoader",
         ),
+        GeneratedSymbol::new("runtime interface", "GameDataAccess", "GameDataAccess"),
+        GeneratedSymbol::new("facade", "GameData", "GameData"),
+        GeneratedSymbol::new("facade", "LazyGameData", "LazyGameData"),
     ];
     for code_enum in &model.enums {
         type_symbols.push(GeneratedSymbol::new(
@@ -144,16 +147,27 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &RustNames<'_
     }
     ensure_unique_generated_symbols("rust", "top-level types", type_symbols)?;
 
+    let game_data_fields = model.tables.iter().map(|table| {
+        Ok(GeneratedSymbol::new(
+            "table field",
+            &table.name,
+            names.field_name(&table.name)?,
+        ))
+    });
+    validate_named_symbols("rust", "GameData fields", game_data_fields)?;
+
+    let mut lazy_game_data_members = vec![GeneratedSymbol::new("loader field", "loader", "loader")];
+    for table in &model.tables {
+        lazy_game_data_members.push(GeneratedSymbol::new(
+            "table cache field",
+            &table.name,
+            names.field_name(&table.name)?,
+        ));
+    }
     validate_named_symbols(
         "rust",
-        "GameData fields",
-        model.tables.iter().map(|table| {
-            Ok(GeneratedSymbol::new(
-                "table field",
-                &table.name,
-                names.field_name(&table.name)?,
-            ))
-        }),
+        "LazyGameData fields",
+        lazy_game_data_members.into_iter().map(Ok),
     )?;
 
     Ok(())
