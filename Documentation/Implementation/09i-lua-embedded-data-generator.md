@@ -393,7 +393,7 @@ assert(rules.max_player_level == 60)
 - target-hidden field 不进入 row field order；
 - lazy require：访问一个 table 不应 require 全部 table（可通过 package.loaded 断言）。
 
-## 9i.14 Open follow-ups
+## 9i.14 未来规划
 
 - Lua 5.1 / 5.2 / 5.3 / 5.4 / LuaJIT 兼容矩阵；首版应避免使用 5.4-only 语法。
 - 是否为大表生成 chunked files，例如 `items_001.lua` + `items.lua` 聚合，以降低单文件解析峰值。

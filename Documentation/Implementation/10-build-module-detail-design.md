@@ -26,7 +26,7 @@ Build 模块需要解决：
 ```text
 src/build/
   mod.rs              # build_target 主入口、target-local execution view、branch executor、artifact 收集与写入调用
-  options.rs          # BuildOptions / ExecutionOptions / BuildOutput
+  options.rs          # BuildOptions / ExecutionOptions / BuildOutput / BuildTrace
   target.rs           # TargetConfig normalization、export task naming、dependency validation
   runtime.rs          # MetaAndData export task 编排、data load / validation / export
 ```
@@ -35,12 +35,12 @@ src/build/
 
 | 子模块 | 责任 |
 | --- | --- |
-| `options.rs` | CLI 传入 build 的稳定参数对象；执行资源限制默认值与合法性。 |
+| `options.rs` | CLI 传入 build 的稳定参数对象；执行资源限制默认值与合法性；BuildTrace / stage metrics 输出模型。 |
 | `target.rs` | target tags、export task 默认命名、export task 名称校验、dependency 与禁止 task-level input/data 的字段校验。 |
 | `runtime.rs` | MetaAndData export task 执行：消费已准备的 `RawSourceData`、复用 normalized DataSet、收集 validation warning、调用 exporter。 |
 | `mod.rs` | `build_target()` 主流程、target-local execution view 构造、MetaAndData / MetaOnly branch executor、artifact 稳定排序与 Artifact Writer 调用。 |
 
-当前 `target.rs` 输出 `NormalizedExportTask`；`mod.rs` 以 exporter dependency contract 构造 target-local execution view，并直接执行 MetaAndData / MetaOnly 两个分支。`BuildDagNodeKey` 当前只是测试、tracing 和未来通用 executor 的 skeleton，不参与缓存、诊断或 tracing。Phase 5 已将 `MetaModel::link()` 与 `SourceReadPlan -> RawSourceData` 准备下沉到 DAG input preparation，并在 data-backed target 中并行执行；后续若引入完整 DAG executor，可把这些节点和分支执行统一下沉到 node-level scheduler。
+当前 `target.rs` 输出 `NormalizedExportTask`；`mod.rs` 以 exporter dependency contract 构造 target-local execution view，并直接执行 MetaAndData / MetaOnly 两个分支。`BuildDagNodeKey` 当前是测试和未来通用 executor 的 skeleton，不参与缓存或诊断。`BuildTraceRecorder` 在现有阶段式 executor 边界记录 stage name、relative start、duration 和 result state，并通过 `BuildOutput.trace` 暴露给 CLI 的 `--trace-tasks` JSON 输出。`MetaModel::link()` 与 `SourceReadPlan -> RawSourceData` 已下沉到 build input preparation，并在 data-backed target 中并行执行；后续若引入完整 DAG executor，可把这些节点和分支执行统一下沉到 node-level scheduler。
 
 ## 10.2a 统一 Export Task 与 DAG
 
@@ -76,14 +76,14 @@ pub(crate) enum ExportDependency {
 
 不提供 `DataOnly` 模式：当前和可预见的 exporter 都需要 Meta 来完成类型解释、target 可见性、校验和 artifact 规划。若未来出现不需要 Meta 的纯文件搬运类能力，应作为独立 build step 重新设计，而不是复用 target export task dependency contract。
 
-目标态 Build DAG 节点；当前代码只构造这些 node key 作为 execution view skeleton，实际执行仍由 `execute_target_dag()` 内的两个分支完成：
+当前 execution view skeleton 使用下列节点 key；实际执行仍由 `execute_target_dag()` 内的两个分支完成：
 
 | Node | Key | 产出 | 说明 |
 | --- | --- | --- | --- |
 | `LinkMeta` | `project_path` | `LinkedMetaModel` | 由 build input preparation 执行；target tags 不改变 link 结构。 |
 | `EffectiveTargetTags` | `(target, effective_tags)` | `TargetTags` | 当前由 `build_target()` 在 branch executor 前执行，作为 context 注入；skeleton node key 记录合并后的 effective tags。 |
 | `DataLoadPlan` | `(project.input, effective tags)` | `SourceReadPlan` / `RawSourceData` | Source discovery 基于 raw `MetaModel` 执行，必须包含 tags，因为 override source 受 tags 影响；可与 `LinkMeta` 并行。 |
-| `NormalizeAndValidate` | `(project.input, effective_tags)` | normalized `DataSet` + warnings | MVP 中合并 data load / normalize / validation execution；error 阻断依赖该数据集的 exporter。 |
+| `NormalizeAndValidate` | `(project.input, effective_tags)` | normalized `DataSet` + warnings | 当前分支 executor 中合并 data load / normalize / validation execution；error 阻断依赖该数据集的 exporter。 |
 | `RunExporter` | `(target, export_name)` | `Vec<Artifact>` | 根据 dependency 注入 MetaOnly 或 MetaAndData context。 |
 | `WriteArtifacts` | all exporter outputs | `BuildOutput` | 全局路径冲突、dry-run、落盘。 |
 
@@ -96,12 +96,7 @@ pub(crate) enum ExportDependency {
 5. Artifact 写出必须在所有 exporter 产物收集后统一执行，确保跨 exporter 路径冲突不会产生部分写入。
 6. 输出顺序按 target 中 export task 声明顺序稳定排序；并行执行不得改变 dry-run 和诊断顺序。
 
-迁移步骤建议与当前状态：
-
-1. **配置与内部模型统一**：Project Config 使用 `[[targets.exports]]`；normalize 阶段全部转换为 `NormalizedExportTask`。（已完成 MVP）
-2. **注册表补 contract**：为现有 DataFormatExporter / AggregateDataExporter / CodeGenerator 增加 dependency contract，声明 `type_id`、alias、dependency、config parser。（已完成 dependency contract MVP）
-3. **Branch executor MVP**：构造 target-local execution view skeleton；保留当前 rayon pool，按 dependency contract 拆成 MetaAndData / MetaOnly 两个分支并行执行，尚未实现通用 node-level DAG scheduler。（已完成 MVP）
-4. **文档与 fixture 清理**：文档和 standard_project 全部使用 `[[targets.exports]]`，不保留旧 data/code 语法兼容路径。
+当前状态：Project Config 使用 `[[targets.exports]]`；normalize 阶段全部转换为 `NormalizedExportTask`；data exporter registry 与 code generator registry 均提供 dependency contract；branch executor 按 dependency contract 拆成 MetaAndData / MetaOnly 两个分支并行执行。通用 node-level DAG scheduler 不是当前默认执行模型。
 
 ## 10.3 Target normalization
 
@@ -137,7 +132,7 @@ build_target(options)
   -> target.effective_target_tags(options.extra_tags)
   -> project.raw_meta_model()
   -> execute_target_dag(...)
-      -> build execution view skeleton for tests / future tracing
+      -> build execution view skeleton for tests / future executor
       -> prepare build inputs:
           LinkMeta || SourceReadPlan + RawSourceData when target requires data
           LinkMeta only when target is code-only
@@ -147,10 +142,38 @@ build_target(options)
       -> run both branches through the rayon pool when both exist
       -> collect export task outputs by original declaration order
   -> ArtifactWriter::write(all artifacts)
-  -> BuildOutput { warnings }
+  -> BuildOutput { warnings, artifacts, trace }
 ```
 
-Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。Phase 5 后，data-backed target 会先并行准备 `LinkedMetaModel` 与 `RawSourceData`，再进入 normalize / validation；Phase 6 后，normalize 在 table 粒度通过 CPU pool 并行，并按 raw `DataSet.tables()` 顺序稳定 merge；Phase 7 后，validation 先全量收集 `ValidationReport`，再按 stable key 排序并通过 error gate 阻断 data-backed export。Phase 8 已在 validation 模块提供 full `DataSet` table-local validation 的 CPU pool 入口；当前 single-target runtime path 的 source read 仍按 effective target tags 过滤 raw tables，因此 build 主流程继续对 target-scoped normalized data 执行 target-aware report-backed validation。Phase 9 后，runtime path 调用 `validate_normalized_data_set_for_target_with_report_and_pool()`，并行构建 target `ExportValidationView`、按 visible table 并行执行 target table validation，再稳定合并 report；真正跨 target 共享 full normalized DataSet 的调度仍留给 multi-target DAG。Phase 10 后，MetaAndData branch 在 validation gate 通过前先按 export task 并行执行 artifact planning / path conflict check，gate 通过后再按 export task 并行执行 runtime table exporter 或 aggregate exporter；每个 table exporter 内部仍按 table artifact 并行序列化。code-only target 不启动 source read，因此缺失 `project.input` 或 data files 不会影响 MetaOnly codegen。`MetaOnly` codegen export task 只依赖 linked Meta 与 effective target tags，可与 `MetaAndData` 分支中的 validation / export 并行。Artifact 收集仍按 `[[targets.exports]]` 声明顺序排序，因此并行执行不会改变 dry-run 条目顺序或跨 exporter 路径冲突检查语义。
+Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。data-backed target 会先并行准备 `LinkedMetaModel` 与 `RawSourceData`，再进入 normalize / validation；normalize 在 table 粒度通过 CPU pool 并行，并按 raw `DataSet.tables()` 顺序稳定 merge；validation 先全量收集 `ValidationReport`，再按 stable key 排序并通过 error gate 阻断 data-backed export。validation 模块已提供 full `DataSet` table-local validation 的 CPU pool 入口；当前 single-target runtime path 的 source read 仍按 effective target tags 过滤 raw tables，因此 build 主流程继续对 target-scoped normalized data 执行 target-aware report-backed validation。runtime path 调用 `validate_normalized_data_set_for_target_with_report_and_pool()`，并行构建 target `ExportValidationView`、按 visible table 并行执行 target table validation，再稳定合并 report；真正跨 target 共享 full normalized DataSet 的调度仍留给 multi-target build。MetaAndData branch 在 validation gate 通过前先按 export task 并行执行 artifact planning / path conflict check，gate 通过后再按 export task 并行执行 runtime table exporter 或 aggregate exporter；每个 table exporter 内部仍按 table artifact 并行序列化。code-only target 不启动 source read，因此缺失 `project.input` 或 data files 不会影响 MetaOnly codegen。`MetaOnly` codegen export task 只依赖 linked Meta 与 effective target tags，可与 `MetaAndData` 分支中的 validation / export 并行。Artifact 收集仍按 `[[targets.exports]]` 声明顺序排序，因此并行执行不会改变 dry-run 条目顺序或跨 exporter 路径冲突检查语义。
+
+### 10.4a Build tracing / metrics
+
+当前实现不引入通用 DAG executor，但 `build_target()` 会在阶段式 executor 的稳定边界记录轻量 trace：
+
+```rust
+pub struct BuildTrace {
+    pub target: String,
+    pub jobs: usize,
+    pub io_concurrency: usize,
+    pub network_concurrency: usize,
+    pub serial: bool,
+    pub artifact_memory_bytes: usize,
+    pub artifact_queue_capacity: usize,
+    pub total_duration_ms: u128,
+    pub stages: Vec<BuildTraceStage>,
+}
+
+pub struct BuildTraceStage {
+    pub name: String,
+    pub started_at_ms: u128,
+    pub duration_ms: u128,
+    pub status: BuildTraceStageStatus,
+    pub detail: Option<String>,
+}
+```
+
+已记录的阶段包括：`create_cpu_pool`、`load_project`、`normalize_target`、`plan_dependencies`、`build_execution_view`、`prepare_build_inputs`、`run_exporters`、`collect_artifacts`、`write_artifacts`。CLI 传入 `--trace-tasks <FILE>` 时，`src/cli.rs` 会把 `BuildOutput.trace` 以 pretty JSON 写入指定路径；stdout 仍保持原有成功 / dry-run 输出，避免破坏 integration golden。该 trace 只描述阶段级耗时，不承诺 node-level critical path、resource wait、cancellation propagation 或 per-exporter span；这些能力只有在未来确实需要完整 DAG executor 时再引入。
 
 ## 10.5 MetaAndData export task 编排
 
@@ -162,10 +185,10 @@ Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。Phase 
 - 构造 `SourceReadPlan` 时传入 effective target tags，用于过滤 `override_sources[].export_when`。例如 Project target 只有 `client, shipping`，CLI 传入 `--tag s1` 后，`materials_s1.csv` 才会进入 plan 并覆盖 Oak row。
 - 同一个 target 内多个 MetaAndData export task 基于 `(project.input, effective target tags)` 复用同一个 `RawSourceData` 和 normalized `DataSet`，避免重复读取和重复 validation。
 - 每个 export task 可使用不同 `type` 和 `output`，例如 JSON + MessagePack + Lua。
-- runtime table exporter 调用 `exporter::export_runtime_data()` 生成 runtime artifacts，并保留 `RuntimeDataFile` 列表供未来 manifest 或诊断使用；codegen 不绑定该列表。Phase 10 后，同一 target 内多个 MetaAndData export task 通过 Rayon `par_iter()` 并行执行，结果按 export task 在 `[[targets.exports]]` 中的顺序稳定恢复。
+- runtime table exporter 调用 `exporter::export_runtime_data()` 生成 runtime artifacts，并保留 `RuntimeDataFile` 列表供未来 manifest 或诊断使用；codegen 不绑定该列表。同一 target 内多个 MetaAndData export task 通过 Rayon `par_iter()` 并行执行，结果按 export task 在 `[[targets.exports]]` 中的顺序稳定恢复。
 - validation 使用 `validate_data_set_for_target()` 的 report-backed error gate：基础 required/type/enum/unique、registry validator、FK 与 target-aware checks 会先尽量收集为 `ValidationReport`，再统一判断 error / warning。warning 被收集到 `BuildOutput.warnings`，error 以 `ConfigForgeError::ValidationReport` 直接阻断依赖该 validated DataSet 的 data-backed export。
 
-Phase 5 错误顺序策略：`MetaLink` 与 `SourceRead` 并行执行，但 join 后优先返回 MetaLink 错误；如果 MetaLink 成功而 SourceRead 失败，则返回 source 错误。当前本地 CSV `DataLoader` 无 cancellation token，MetaLink failure 时已启动的 source read 会等待完成并丢弃结果；未来远端 provider 可在 `AsyncSourceReadShell` 基础上接入协作取消。
+错误顺序策略：`MetaLink` 与 `SourceRead` 并行执行，但 join 后优先返回 MetaLink 错误；如果 MetaLink 成功而 SourceRead 失败，则返回 source 错误。当前本地 CSV `DataLoader` 无 cancellation token，MetaLink failure 时已启动的 source read 会等待完成并丢弃结果；未来远端 provider 可在 `AsyncSourceReadShell` 基础上接入协作取消。
 
 注意：当前 `build_target` 一次只构建一个 target，且同一 target 内所有 export task 共享同一组 effective target tags，所以 runtime task 内部只需加载一次 `project.input`。如果未来同一次 build 支持多个 target 或同一 target 内 task-specific tags，DataSet reuse 的 cache key 必须扩展为 `(project.input, effective target tags)`，不能只按 `project.input` 复用；否则 source-level `override_sources[].export_when` 可能让普通 shipping 构建与 `--tag s1` 构建错误共享不同 materialized DataSet。
 

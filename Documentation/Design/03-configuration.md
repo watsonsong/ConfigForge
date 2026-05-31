@@ -294,7 +294,7 @@ Exporter 注册表需要声明每个 `type` 的 dependency contract：
 
 ### 3.5.2 DAG 编排原则
 
-统一 exporter task 后，Build 不再写死 “先 data 后 code” 两段流程，而是按 dependency contract 建立 target-local execution view。当前实现已经按 `MetaOnly` / `MetaAndData` 拆成两个可并行分支执行，并构造 `BuildDagNodeKey` 作为测试、tracing 与未来通用 executor 的 skeleton；但尚未把这些 node key 交给完整 DAG 调度器、缓存层或 tracing 系统执行。
+统一 exporter task 后，Build 不再写死 “先 data 后 code” 两段流程，而是按 dependency contract 建立 target-local execution view。当前实现已经按 `MetaOnly` / `MetaAndData` 拆成两个可并行分支执行，并构造 `BuildDagNodeKey` 作为测试与未来通用 executor 的 skeleton；阶段式 tracing 已通过 `BuildTrace` / `--trace-tasks` 落地，但这些 node key 尚未交给完整 DAG 调度器或缓存层执行。
 
 目标态 target-local DAG 形态：
 

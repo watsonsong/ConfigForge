@@ -173,7 +173,7 @@ Exporter 负责在单个 export task 内检查 artifact path 冲突：
 - `plan_table_artifact()` 给出每张 table 的相对输出路径。
 - `ensure_unique_runtime_artifact_paths()` 拒绝同一个 exporter 计划出的重复路径。
 - 聚合 exporter 通过 `plan_artifacts()` 给出一个或多个相对输出路径，例如 POT 单文件或多 domain 多文件。
-- 跨 export task 的输出路径冲突由 build 在目标级别提前检查，因为多个 export task 可能写入不同或相同 output root；Phase 10 后该 planning step 会在 CPU pool 中按 export task 并行执行，再按 export task 声明顺序稳定合并 path key。
+- 跨 export task 的输出路径冲突由 build 在目标级别提前检查，因为多个 export task 可能写入不同或相同 output root；该 planning step 会在 CPU pool 中按 export task 并行执行，再按 export task 声明顺序稳定合并 path key。
 
 POT 这类单文件聚合 data exporter 的 artifact key 建议使用 `(target_name, data_name, format)`；未来多 domain POT 可扩展为 `(target_name, data_name, format, domain)`。
 

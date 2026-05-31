@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use clap::{Parser, ValueEnum};
 
@@ -48,6 +48,9 @@ struct Cli {
     /// Percentage of currently available memory for the artifact write pipeline.
     #[arg(long)]
     artifact_memory_percent: Option<u8>,
+    /// Write build tracing / metrics as JSON to this path.
+    #[arg(long)]
+    trace_tasks: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -93,6 +96,10 @@ fn run_with_args(cli: Cli) -> anyhow::Result<()> {
         artifact_write_mode,
         artifact_write_limits: artifact_memory.resolve_limits(execution.jobs),
     })?;
+    if let Some(trace_path) = &cli.trace_tasks {
+        let trace_json = serde_json::to_string_pretty(&output.trace)?;
+        fs::write(trace_path, trace_json)?;
+    }
     for warning in output.warnings {
         eprintln!("warning: {warning}");
     }

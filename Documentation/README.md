@@ -81,7 +81,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 
 ## Retired / Merged Areas
 
-- `Documentation/Todo/` is intentionally not a canonical documentation area. The previous runtime binary TODO has been merged into [`Implementation/13-runtime-binary-format-detail-design.md`](Implementation/13-runtime-binary-format-detail-design.md#1312-open-follow-ups). Future TODO notes should either be promoted into their target canonical document as “Open follow-ups” or tracked outside `Documentation/`.
+- `Documentation/Todo/` is intentionally not a canonical documentation area. Runtime binary follow-ups have been merged into [`Implementation/13-runtime-binary-format-detail-design.md`](Implementation/13-runtime-binary-format-detail-design.md#1311-当前状态与未来规划). Future planning should either be promoted into the target canonical document as a current-state / future-planning section or tracked outside `Documentation/`.
 
 ## Documentation Writing Standards
 
@@ -94,7 +94,7 @@ Use these rules when creating or updating documents in this directory:
 5. **Keep examples executable against the current CLI and config schema.** TOML examples must match the current flattened / nested option rules, path resolution rules, and supported fields. CLI examples must match the current binary interface.
 6. **Separate current contract from future extensions.** Use headings or tables such as “Current behavior”, “Current limitations”, and “Future extensions” when a topic includes both implemented behavior and planned design.
 7. **Control document size.** When a document grows beyond roughly 600 lines, add a table of contents and “Related docs”; when it grows beyond roughly 900 lines, prefer splitting it into focused topic files with an index document.
-8. **Avoid hidden canonical areas.** Do not add new long-lived canonical directories under `Documentation/` without listing them in this README. Short-lived TODOs should be merged into their target canonical document as “Open follow-ups” or tracked outside `Documentation/`.
+8. **Avoid hidden canonical areas.** Do not add new long-lived canonical directories under `Documentation/` without listing them in this README. Short-lived task lists should be merged into their target canonical document as current-state / future-planning sections or tracked outside `Documentation/`.
 9. **Update indexes together with topic changes.** When adding, renaming, splitting, or retiring a document, update [`../AGENTS.md`](../AGENTS.md), this README, and any affected directory index in the same change.
 10. **Treat DevLogs as evidence, not authority.** Phase logs may contain old paths, old names, or superseded decisions. Always resolve current behavior through `Design/`, `Implementation/`, `Tech/`, and source code.
 

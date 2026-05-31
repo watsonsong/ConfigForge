@@ -442,66 +442,28 @@ Codegen / runtime helper 测试：
 2. 构建同时导出 JSON、MessagePack、bin，并用同一份格式无关 codegen 产物配合不同 runtime loader。
 3. dry-run / temp-commit / direct artifact writer 都能处理 `.bin` artifacts。
 
-## 13.11 分阶段实现建议
+## 13.11 当前状态与未来规划
 
-### Phase 1：Exporter + revision + bytes fixtures
+当前状态：
 
-- 新增 `src/exporter/binary.rs`。
-- 实现 16 字节 header、layout、revision hash、primitive/struct/collection/object 编码。
-- 注册 `bin` exporter。
-- 增加 exporter 单元测试和少量 golden bytes fixture。
+- `src/exporter/binary.rs` 已实现 `bin` exporter，包含 16 字节 header、layout、revision hash、primitive / struct / collection / object 编码。
+- Binary exporter 已注册为 runtime data export type，可与 JSON / MessagePack 并存。
+- CodeModel 已传播 optional 字段语义，Rust / TypeScript / C++ 分别生成 `Option<T>`、optional property、`std::optional<T>`。
+- TypeScript `int` contract 固定为 `number`，`bin` exporter 会拒绝超出 JavaScript safe integer 范围的值。
+- Rust runtime reader contract 使用共享 core crate：`runtime/rust/reader_core` 定义 `RuntimeDataReader` / `RuntimeDataLoader`，generated Rust 通过 `config_forge_runtime_reader_core` 复用同一套 trait。
+- Rust / TypeScript / C++ binary reader 均支持默认 decode limits 与业务覆盖。
+- Rust、TypeScript、C++ standard project harness 已覆盖 `.bin` runtime helper 的端到端加载。
 
-### Phase 2：Runtime metadata + generated parser
+未来规划：
 
-- 如未来需要 manifest / adapter 配置，可在 build/runtime metadata 中显式记录 runtime data export type；当前默认 CodeModel 不消费真实 runtime data export task 结果。
-- 三个语言生成器通过统一 schema-driven reader API 复用 parser；named / positional 差异由运行时 reader adapter 消化。
-- generated code 写入每张 table 的 `EXPECTED_SCHEMA_REVISION` 常量。
+- 改进 C++ adapter 与 generated namespace / include 的集成方式，提供更稳定的 alias / macro header 或显式 reader/loader 类型配置。
+- 建立跨语言 binary compliance fixtures，覆盖 trailing bytes、invalid UTF-8、oversized varuint、oversized row count / string length、schema revision mismatch、optional fragment presence 等场景。
+- 将 binary schema revision / layout signature 抽成更清晰的共享 contract 模块。
+- 完善 binary reader 错误上下文，包含 table、field path、row index、byte offset、expected / actual 等信息。
+- 增加 canonical varuint 校验策略。
+- 补全文档中的 runtime helper 使用示例，覆盖 JSON / MessagePack / bin 三种格式 reader 的组合方式。
 
-### Phase 3：标准 runtime binary readers
-
-- Rust / TypeScript / C++ runtime helper 增加 binary reader。
-- compliance fixtures 复用同一批 `.bin` bytes。
-
-### Phase 4：端到端与性能验证
-
-- CLI integration 覆盖 `type = "bin"`。
-- 与 JSON / MessagePack 比较包体大小与加载耗时。
-- 根据数据决定是否增加 string interning、bool array bitset、block compression 等 v2 优化。
-
-## 13.12 Open follow-ups
-
-以下事项由原 `Documentation/Todo/runtime-binary-format.md` 合并而来。`Documentation/Todo/` 不再作为 canonical 文档目录；后续跟进项应直接维护在本章节或迁移到 issue/task 系统。
-
-### P0：首版稳定化前必须完成
-
-- [x] 统一 Rust runtime reader contract。
-  - 已选择共享 core crate 模式：`runtime/rust/reader_core` 定义 `RuntimeDataReader` / `RuntimeDataLoader`，generated Rust 通过 `config_forge_runtime_reader_core` 复用同一套 trait。
-  - Rust runtime helper crates 不再各自定义同名 trait，避免名义类型不兼容。
-- [x] 补齐 optional scalar / struct field 的目标语言类型表达。
-  - CodeModel 已传播 optional 字段语义，Rust / TypeScript / C++ 分别生成 `Option<T>`、optional property、`std::optional<T>`。
-  - Binary exporter 现在可通过 presence bitmap 省略缺失 optional scalar / struct field。
-- [x] 增加真实 generated code + binary runtime helper 的端到端测试。
-  - Rust、TypeScript、C++ standard project harness 已覆盖 `.bin` fixture。
-
-### P1：首版发布前建议完成
-
-- [x] 明确 TypeScript `int` contract。
-  - TypeScript codegen 继续将 Meta `int` 生成为 `number`；`bin` exporter 拒绝超出 JavaScript safe integer 范围的值。
-- [x] 为 binary reader 增加可配置 decode limits。
-  - Rust / TypeScript / C++ binary reader 均支持默认 limits 与业务覆盖。
-- [ ] 改进 C++ adapter 与 generated namespace/include 的集成方式。
-  - 当前 adapter 仍默认 include `generated.hpp` 并假设 fixture namespace；后续应提供稳定 alias / macro header，或要求用户显式定义 reader/loader 类型宏。
-- [ ] 建立跨语言 binary compliance fixtures。
-  - 覆盖 trailing bytes、invalid UTF-8、oversized varuint、oversized row count / string length、schema revision mismatch、optional fragment presence 等场景。
-
-### P2：后续重构与体验优化
-
-- [ ] 将 binary schema revision / layout signature 抽成清晰的共享 contract 模块。
-- [ ] 完善 binary reader 错误上下文，包含 table、field path、row index、byte offset、expected / actual 等信息。
-- [ ] 增加 canonical varuint 校验策略。
-- [ ] 补全文档中的 runtime helper 使用示例，覆盖 JSON / MessagePack / bin 三种格式 reader 的组合方式。
-
-## 13.13 待讨论问题
+## 13.12 待讨论问题
 
 1. `schema_revision` 使用 `u64` 是否足够；若希望更低碰撞概率，可在 bin v2 改为 128-bit revision。
 2. `float` 是否需要在 Meta 中区分 `float32` / `float64`。

@@ -614,6 +614,7 @@ config-forge --project ConfigForge.toml --target client
 | `--write-mode <direct\|temp-commit>` | 非 dry-run 构建使用的 artifact 写入模式；默认 `direct`。如果同时传入 `--dry-run`，以 dry-run 行为为准。 |
 | `--artifact-memory-limit <SIZE>` | artifact 写入 pipeline 的固定内存预算，例如 `512MiB`。与 `--artifact-memory-percent` 互斥。 |
 | `--artifact-memory-percent <PERCENT>` | 按启动时可用内存百分比计算 artifact pipeline 预算；默认 25%，范围 `1..=80`，并 clamp 到 `[64MiB, 2GiB]`。 |
+| `--trace-tasks <FILE>` | 将本次 build 的轻量 tracing / metrics 以 JSON 写入指定文件，包含阶段名、开始时间、耗时、状态和执行资源参数；不改变 stdout 的稳定构建输出。 |
 
 执行行为：
 
@@ -624,7 +625,8 @@ config-forge --project ConfigForge.toml --target client
 5. 同 `(project.input, effective_tags)` 的 MetaAndData export task 复用加载、归一化和校验结果。
 6. 汇总所有 export artifacts，按 export task 声明顺序稳定排序，并统一完成路径归一化和冲突检查。
 7. 按 `--dry-run` / `--write-mode` 写出 artifact，或在 dry-run 模式下只返回写入计划；artifact writer 会按 memory budget 对 writer queue 中“已接收但未写出”的 artifact bytes 做限流。当前实现仍保留 `Vec<Artifact>` 收集边界，后续 streaming generator 会进一步降低生成阶段峰值。
-8. 未声明的任务不产生对应输出。例如 MetaOnly-only target 不读取 Data。
+8. 如果传入 `--trace-tasks`，在构建完成后写出 trace JSON，用于分析 Project load、input preparation、exporter、artifact write 等阶段耗时。
+9. 未声明的任务不产生对应输出。例如 MetaOnly-only target 不读取 Data。
 
 ## 6.7 退出码
 

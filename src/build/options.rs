@@ -3,6 +3,8 @@
 
 use std::{num::NonZeroUsize, path::Path};
 
+use serde::Serialize;
+
 use crate::{
     ConfigForgeError, Result,
     artifact::{ArtifactWriteLimits, ArtifactWriteMode, ArtifactWriteResult},
@@ -38,6 +40,57 @@ const MAX_ARTIFACT_MEMORY_PERCENT: u8 = 80;
 pub struct BuildOutput {
     pub warnings: Vec<String>,
     pub artifacts: ArtifactWriteResult,
+    pub trace: BuildTrace,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BuildTrace {
+    pub target: String,
+    pub jobs: usize,
+    pub io_concurrency: usize,
+    pub network_concurrency: usize,
+    pub serial: bool,
+    pub artifact_memory_bytes: usize,
+    pub artifact_queue_capacity: usize,
+    pub total_duration_ms: u128,
+    pub stages: Vec<BuildTraceStage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BuildTraceStage {
+    pub name: String,
+    pub started_at_ms: u128,
+    pub duration_ms: u128,
+    pub status: BuildTraceStageStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BuildTraceStageStatus {
+    Succeeded,
+    Failed,
+}
+
+impl BuildTrace {
+    pub(crate) fn new(
+        target: &str,
+        execution: ExecutionOptions,
+        artifact_write_limits: ArtifactWriteLimits,
+    ) -> Self {
+        Self {
+            target: target.to_owned(),
+            jobs: execution.jobs,
+            io_concurrency: execution.io_concurrency,
+            network_concurrency: execution.network_concurrency,
+            serial: execution.serial,
+            artifact_memory_bytes: artifact_write_limits.max_in_flight_bytes,
+            artifact_queue_capacity: artifact_write_limits.max_in_flight_artifacts,
+            total_duration_ms: 0,
+            stages: Vec::new(),
+        }
+    }
 }
 
 impl ExecutionOptions {

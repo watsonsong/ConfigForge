@@ -4,6 +4,7 @@
 use std::{
     path::Path,
     path::PathBuf,
+    time::Instant,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -14,7 +15,10 @@ mod options;
 mod runtime;
 mod target;
 
-pub use options::{ArtifactMemoryOptions, BuildOptions, BuildOutput, ExecutionOptions};
+pub use options::{
+    ArtifactMemoryOptions, BuildOptions, BuildOutput, BuildTrace, BuildTraceStage,
+    BuildTraceStageStatus, ExecutionOptions,
+};
 
 use crate::{
     ConfigForgeError, Result,
@@ -33,20 +37,26 @@ use runtime::{RuntimeConfigForgeResult, export_meta_and_data_tasks};
 use target::{NormalizedExportTask, NormalizedTargetConfig, codegen_task_config_from_export_task};
 
 pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
-    let cpu_pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(options.execution.jobs)
-        .thread_name(|index| format!("config-forge-cpu-{index}"))
-        .build()
-        .map_err(|source| {
-            ConfigForgeError::Validation(format!("failed to create CPU worker pool: {source}"))
-        })?;
-    let project = ProjectConfig::from_path(options.project_path)?;
+    let mut trace = BuildTraceRecorder::new();
+    let cpu_pool = trace.record("create_cpu_pool", None, || {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(options.execution.jobs)
+            .thread_name(|index| format!("config-forge-cpu-{index}"))
+            .build()
+            .map_err(|source| {
+                ConfigForgeError::Validation(format!("failed to create CPU worker pool: {source}"))
+            })
+    })?;
+    let project = trace.record("load_project", None, || {
+        ProjectConfig::from_path(options.project_path)
+    })?;
     let project_root = options
         .project_path
         .parent()
         .unwrap_or_else(|| Path::new("."));
-    let target = project.target(options.target_name)?;
-    let target = target.normalize()?;
+    let target = trace.record("normalize_target", None, || {
+        project.target(options.target_name)?.normalize()
+    })?;
     let meta_set = project.raw_meta_model();
     let target_tags = target.effective_target_tags(options.extra_tags);
 
@@ -58,15 +68,24 @@ pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
         raw_meta: &meta_set,
         data_root: project.project.input.as_deref(),
         pool: &cpu_pool,
+        trace: &mut trace,
     })?;
 
-    let artifacts = ArtifactWriter::new(options.artifact_write_mode)
-        .with_limits(options.artifact_write_limits)
-        .write(dag_output.artifacts)?;
+    let artifacts = trace.record("write_artifacts", None, || {
+        ArtifactWriter::new(options.artifact_write_mode)
+            .with_limits(options.artifact_write_limits)
+            .write(dag_output.artifacts)
+    })?;
+    let trace = trace.finish(BuildTrace::new(
+        options.target_name,
+        options.execution,
+        options.artifact_write_limits,
+    ));
 
     Ok(BuildOutput {
         warnings: dag_output.warnings,
         artifacts,
+        trace,
     })
 }
 
@@ -78,6 +97,7 @@ struct TargetDagExecutionContext<'a, 'meta> {
     raw_meta: &'meta MetaModel,
     data_root: Option<&'a Path>,
     pool: &'a ThreadPool,
+    trace: &'a mut BuildTraceRecorder,
 }
 
 struct BuildInputPreparation<'meta> {
@@ -146,23 +166,32 @@ struct DagBranchOutput {
 }
 
 fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<TargetDagOutput> {
-    let dependency_plan =
-        BuildDependencyPlan::for_target(context.target, context.data_root, context.target_tags);
+    let dependency_plan = context.trace.record("plan_dependencies", None, || {
+        Ok(BuildDependencyPlan::for_target(
+            context.target,
+            context.data_root,
+            context.target_tags,
+        ))
+    })?;
     let target_plan = dependency_plan.single_target_plan()?;
     // This node list is an execution-view skeleton for tests and future tracing/executor work.
     // The current MVP below still executes two dependency branches directly instead of scheduling
     // these node keys through a generic DAG executor.
-    let _execution_view_nodes = build_target_local_dag(context.target, target_plan);
+    let _execution_view_nodes = context.trace.record("build_execution_view", None, || {
+        Ok(build_target_local_dag(context.target, target_plan))
+    })?;
     let meta_and_data_exports =
         target_plan.export_tasks(context.target, ExportDependency::MetaAndData);
     let meta_only_exports = target_plan.export_tasks(context.target, ExportDependency::MetaOnly);
-    let prepared_inputs = prepare_build_inputs(
-        context.raw_meta,
-        target_plan,
-        context.target_tags,
-        context.data_root,
-        context.pool,
-    )?;
+    let prepared_inputs = context.trace.record("prepare_build_inputs", None, || {
+        prepare_build_inputs(
+            context.raw_meta,
+            target_plan,
+            context.target_tags,
+            context.data_root,
+            context.pool,
+        )
+    })?;
 
     let generated_at = generated_at();
     let generators = builtin_generators();
@@ -175,34 +204,82 @@ fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<Targ
         generators: &generators,
     };
 
-    let (runtime_output, code_output) = context.pool.install(|| {
-        rayon::join(
-            || {
-                execute_runtime_export_nodes(
-                    prepared_inputs.raw_sources.as_ref(),
-                    &meta_and_data_exports,
-                    &prepared_inputs.linked_meta,
-                    context.target_tags,
-                    context.pool,
-                )
-            },
-            || execute_codegen_export_nodes(&codegen_context, &meta_only_exports, context.pool),
-        )
-    });
+    let (runtime_output, code_output) = context.trace.record("run_exporters", None, || {
+        Ok(context.pool.install(|| {
+            rayon::join(
+                || {
+                    execute_runtime_export_nodes(
+                        prepared_inputs.raw_sources.as_ref(),
+                        &meta_and_data_exports,
+                        &prepared_inputs.linked_meta,
+                        context.target_tags,
+                        context.pool,
+                    )
+                },
+                || execute_codegen_export_nodes(&codegen_context, &meta_only_exports, context.pool),
+            )
+        }))
+    })?;
 
     let runtime_output = runtime_output?;
     let code_output = code_output?;
-    let mut export_outputs = runtime_output.export_outputs;
-    export_outputs.extend(code_output.export_outputs);
-    let artifacts = collect_export_artifacts_in_declaration_order(export_outputs);
+    let (warnings, artifacts) = context.trace.record("collect_artifacts", None, || {
+        let mut export_outputs = runtime_output.export_outputs;
+        export_outputs.extend(code_output.export_outputs);
+        let artifacts = collect_export_artifacts_in_declaration_order(export_outputs);
 
-    let mut warnings = runtime_output.warnings;
-    warnings.extend(code_output.warnings);
+        let mut warnings = runtime_output.warnings;
+        warnings.extend(code_output.warnings);
+        Ok((warnings, artifacts))
+    })?;
 
     Ok(TargetDagOutput {
         warnings,
         artifacts,
     })
+}
+
+struct BuildTraceRecorder {
+    started_at: Instant,
+    stages: Vec<BuildTraceStage>,
+}
+
+impl BuildTraceRecorder {
+    fn new() -> Self {
+        Self {
+            started_at: Instant::now(),
+            stages: Vec::new(),
+        }
+    }
+
+    fn record<T, F>(&mut self, name: &str, detail: Option<String>, operation: F) -> Result<T>
+    where
+        F: FnOnce() -> Result<T>,
+    {
+        let started_at_ms = self.started_at.elapsed().as_millis();
+        let stage_started = Instant::now();
+        let result = operation();
+        let duration_ms = stage_started.elapsed().as_millis();
+        let status = if result.is_ok() {
+            BuildTraceStageStatus::Succeeded
+        } else {
+            BuildTraceStageStatus::Failed
+        };
+        self.stages.push(BuildTraceStage {
+            name: name.to_owned(),
+            started_at_ms,
+            duration_ms,
+            status,
+            detail,
+        });
+        result
+    }
+
+    fn finish(self, mut trace: BuildTrace) -> BuildTrace {
+        trace.total_duration_ms = self.started_at.elapsed().as_millis();
+        trace.stages = self.stages;
+        trace
+    }
 }
 
 fn prepare_build_inputs<'meta>(
@@ -983,6 +1060,37 @@ mod tests {
                 Path::new("lua/init.lua"),
             ]
         );
+    }
+
+    #[test]
+    fn build_trace_recorder_collects_stage_timing_and_failure_status() {
+        let mut recorder = BuildTraceRecorder::new();
+
+        let ok_value = recorder
+            .record("successful_stage", Some("detail".to_owned()), || Ok(7))
+            .expect("successful stage should return value");
+        let failed = recorder.record::<(), _>("failed_stage", None, || {
+            Err(ConfigForgeError::Validation("boom".to_owned()))
+        });
+        let trace = recorder.finish(BuildTrace::new(
+            "client",
+            ExecutionOptions::from_cli(Some(2), Some(4), Some(2), false)
+                .expect("execution options"),
+            crate::artifact::ArtifactWriteLimits::new(64 * 1024 * 1024, 16)
+                .expect("artifact limits"),
+        ));
+
+        assert_eq!(ok_value, 7);
+        assert!(failed.is_err());
+        assert_eq!(trace.target, "client");
+        assert_eq!(trace.jobs, 2);
+        assert_eq!(trace.artifact_memory_bytes, 64 * 1024 * 1024);
+        assert_eq!(trace.stages.len(), 2);
+        assert_eq!(trace.stages[0].name, "successful_stage");
+        assert_eq!(trace.stages[0].status, BuildTraceStageStatus::Succeeded);
+        assert_eq!(trace.stages[0].detail.as_deref(), Some("detail"));
+        assert_eq!(trace.stages[1].name, "failed_stage");
+        assert_eq!(trace.stages[1].status, BuildTraceStageStatus::Failed);
     }
 
     fn export_task(name: &str, dependency: ExportDependency) -> NormalizedExportTask {

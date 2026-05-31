@@ -197,58 +197,20 @@ pub struct CodegenDiagnostic {
 
 集成测试写出的 artifact 应位于 fixture-local `out/` 目录或临时目录。fixture-local `out/` 必须通过 `.gitignore` 忽略；新增 fixture 如果也写出导出结果，应遵循 `tests/fixtures/**/out/` 约定，避免误提交生成产物。
 
-## 9.15 第一阶段落地状态
+## 9.15 当前实现状态
 
-当前第一阶段主体已落地，历史分阶段计划更新为实现状态：
+当前 codegen 主体能力：
 
-### Phase 1：CodeModel 与 Rust 生成器
+- `src/codegen/` 提供 CodeModel IR、naming / type mapping、生成符号冲突检测和内置 generator registry。
+- Rust backend 输出 `generated.rs`，包含 enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`link_all` 与 `text` translation helper。
+- TypeScript backend 输出 `generated.ts`，包含 interface/class、repository、`GameData`、`LazyGameData`、Map-based index lookup、`linked_field` relation helper、`linkAll`、`text` translation helper、`loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`。
+- C++ backend 输出 `generated.hpp`，包含 enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`LinkAll` 与 `text` translation helper。
+- 三种语言都使用 Meta-agnostic reader loader contract，不直接绑定 JSON / MessagePack / bin exporter 结果。
+- runtime data 与 generated code 都以 artifact 形态参与统一写出；Artifact Writer 负责路径冲突检查、dry-run、direct write、`temp-commit` 与 bounded write queue。
+- 标准工程 fixture 覆盖 runtime data + generated code 的端到端输出和代表性运行时加载。
 
-状态：已完成。
+未来规划：
 
-1. 已新增 `src/codegen/`。
-2. 已实现 CodeModel IR。
-3. 已实现 naming / type mapping 和生成符号冲突检测。
-4. 已移除临时 Rust stub 路径，改由 `CodeGeneratorRegistry` 分发。
-5. 已生成 Rust enum / struct / row / table / index helper / `RuntimeDataReader` / `RuntimeDataLoader::open` 和 generated parser helper。
-6. 已增加单元测试和标准 fixture 回归。
-
-### Phase 2：TypeScript 生成器
-
-状态：已完成核心单文件生成。
-
-1. 当前输出 `generated.ts`，包含 type / table / loader / GameData facade。
-2. 已支持 async `RuntimeDataLoader.open` 和 generated reader parser。
-3. 已支持 Map-based indexes，并为 unique index 增加重复 key 防御。
-4. 当前测试以语义 contains 断言为主，snapshot/golden file 可后续补充。
-
-### Phase 3：C++ 生成器
-
-状态：已完成核心 header-only 生成。
-
-1. 当前输出 `generated.hpp`。
-2. 已生成 `IRuntimeDataReader` / `IRuntimeDataLoader::Open` 和 generated reader parser。
-3. 已生成 enum、row、repository 和 index helper。
-4. 后续可再拆 `.hpp` / `.cpp` 或补充更完整 enum conversion。
-
-### Phase 4：Artifact Writer
-
-状态：已完成当前阶段。
-
-1. runtime data 与 generated code 都以 `GeneratedFile`/artifact 形态参与写出。
-2. 已做输出路径冲突检查。
-3. CLI 支持 dry-run、direct write 和 `temp-commit` 写入模式；`--dry-run` 优先于 `--write-mode`。
-4. summary manifest 可作为 `targets.exports` 的聚合导出格式独立实现。
-
-## 9.16 第一阶段完成标准
-
-完成时应满足：
-
-- Rust、C++、TypeScript 三种语言至少能生成类型和表访问代码。（已满足）
-- 所有 enum、struct、table row type 都有生成结果。（已满足；struct 数据值 validation 仍 reserved）
-- 当前 target 可见的 table index 都有对应辅助查找函数。（已满足）
-- 每种语言都有 Meta-agnostic 通用 reader loader 接口。（已满足）
-- 生成代码不直接依赖 ConfigForge CLI 内部类型。
-- 命名冲突和非法标识符不会静默生成错误代码。
-- exporter 不再使用临时 Rust stub。
-- `cargo fmt`、`cargo clippy --all-targets --all-features`、`cargo test` 通过。
-- 标准工程 fixture 覆盖 runtime data + code export 输出。
+- 如需降低单文件体量，可为 Rust / TypeScript / C++ 增加多文件输出模式。
+- 如需发布稳定 runtime adapter，可为 C++ 优先拆出 external stable interface header。
+- summary manifest 可作为 `targets.exports` 的聚合导出格式独立实现，不进入默认 codegen 决策。

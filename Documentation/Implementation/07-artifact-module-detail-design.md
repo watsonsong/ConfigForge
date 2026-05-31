@@ -107,9 +107,9 @@ Build collects Vec<Artifact>
 
 路径冲突检查必须在任何写入前完成，错误信息包含冲突路径，方便用户定位 export task 配置问题。当前 Artifact Writer 的 final authority 使用 lexical-normalized path 作为冲突 key：它能消除 `.` / `..` 造成的字符串差异，但不会解析 symlink，也不会在 macOS / Windows 上做大小写折叠。因此 `Out/items.json` 与 `out/items.json` 在大小写不敏感文件系统上可能实际冲突但当前不会提前报 duplicate path；通过 symlink 指向同一目录的两个输出 root 也可能绕过 lexical check。中期方案是在写入前对已存在的父目录做 canonicalize，并在 macOS / Windows 或探测到大小写不敏感卷时引入可选 case-fold key；不存在的路径继续保留 lexical fallback，避免要求输出目录预先存在。平台细节见 [`../Tech/platform-filesystem-semantics.md`](../Tech/platform-filesystem-semantics.md)。
 
-### 7.4.1 Phase 11：bounded artifact write pipeline
+### 7.4.1 Bounded artifact write pipeline
 
-Phase 10 后，runtime table exporter、aggregate exporter 和 codegen 可以并行生成 artifact；如果继续让所有 generator 先返回 `Vec<Artifact>`，再一次性交给 `ArtifactWriter::write(Vec<Artifact>)`，大项目会在写入前同时持有大量 `Vec<u8>` / `String`，内存峰值接近“所有待写 artifact 内容之和 + 正在生成的 artifact 内容”。Phase 11 的目标是把“生成完成但尚未写入”的 artifact bytes 限制在可配置预算内，并让 generator 与 writer 形成 back-pressure。
+runtime table exporter、aggregate exporter 和 codegen 可以并行生成 artifact；如果继续让所有 generator 先返回 `Vec<Artifact>`，再一次性交给 `ArtifactWriter::write(Vec<Artifact>)`，大项目会在写入前同时持有大量 `Vec<u8>` / `String`，内存峰值接近“所有待写 artifact 内容之和 + 正在生成的 artifact 内容”。bounded artifact write pipeline 的目标是把“生成完成但尚未写入”的 artifact bytes 限制在可配置预算内，并让 generator 与 writer 形成 back-pressure。
 
 设计目标：
 
@@ -121,7 +121,7 @@ Phase 10 后，runtime table exporter、aggregate exporter 和 codegen 可以并
 
 #### CLI / BuildOptions 内存预算
 
-Phase 11 建议新增 artifact pipeline 预算选项：
+当前 artifact pipeline 预算选项：
 
 | CLI 参数 | BuildOptions 字段 | 说明 |
 | --- | --- | --- |
@@ -140,7 +140,7 @@ Phase 11 建议新增 artifact pipeline 预算选项：
 
 #### Pipeline 模型
 
-Phase 11 当前落地为 `ArtifactWriter::write(Vec<Artifact>)` 的 bounded writer queue：Build 仍先按声明顺序收集 `Vec<Artifact>` 并完成最终 path conflict check，然后 writer 在消费该 Vec 时使用 bounded queue、byte semaphore 和 dedicated writer thread 限制“已提交给 writer 但尚未写出”的 bytes。该实现保持现有 API 与测试兼容，并为后续 streaming generator 入口保留扩展空间。
+当前实现落地为 `ArtifactWriter::write(Vec<Artifact>)` 的 bounded writer queue：Build 仍先按声明顺序收集 `Vec<Artifact>` 并完成最终 path conflict check，然后 writer 在消费该 Vec 时使用 bounded queue、byte semaphore 和 dedicated writer thread 限制“已提交给 writer 但尚未写出”的 bytes。该实现保持现有 API 与测试兼容，并为后续 streaming generator 入口保留扩展空间。
 
 当前 API：
 
@@ -229,7 +229,7 @@ Build / exporters / codegen
 1. CPU worker 被阻塞等待 writer 释放内存 permit，无法继续执行其它 ready tasks。
 2. 如果所有 writer 或 coordinator 工作也依赖同一个 Rayon pool，可能出现 worker starvation。
 
-因此 Phase 11 推荐采用“双层限流”：
+因此未来 streaming generator 推荐采用“双层限流”：
 
 1. **生成并发限流**：Build 在调度 artifact-producing tasks 时，为“可能生成大 artifact”的任务使用 `ArtifactGenerationLimiter`。默认并发可取 `min(jobs, max(1, max_in_flight_bytes / 64MiB))`，并至少保留 1 个生成槽。table exporter 已知每张表会产出一个 artifact，可以按 table task 粒度申请生成槽；aggregate exporter 若只能一次性产出多个 artifact，则视为一个大生成任务。
 2. **写入队列限流**：`BoundedArtifactSink::submit()` 使用 byte semaphore + bounded queue。如果 queue 满或 byte permit 不足，submitter 不应在 Rayon worker 上长期 busy-wait；实现应优先使用 `std::sync::Condvar` / channel parking，让线程睡眠并释放 CPU 时间片。更进一步，Build 可以把 submit 操作交给 dedicated coordinator thread：Rayon worker 只把生成结果移交给 coordinator 的小容量 channel；当 channel 满时，生成端的 limiter 会阻止继续启动新任务，而不是让所有 CPU worker 堵在提交点。
@@ -340,29 +340,18 @@ Artifact 模块单元测试应覆盖：
 3. data output 与 code output 指向同一路径时报统一 artifact conflict。
 4. CLI `--write-mode temp-commit` 产生与 direct 模式等价的最终 artifact。
 
-## 7.10 分阶段落地
+## 7.10 当前状态与未来规划
 
-### Phase 1：文档与边界
+当前状态：
 
-- 新增本文档。
-- 调整 Implementation 目录，把 Artifact 作为模块文档插入 Exporter / Codegen / Build 之前。
-- 修正模块依赖图和文档索引。
-
-### Phase 2：最小 Artifact 模块
-
-- 新增 `src/artifact/`。
-- 实现 `Artifact`、`ArtifactContent`、`ArtifactWriter`、`ArtifactWriteMode::DryRun/Direct`。
-- Build generated code 写入改走 Artifact Writer。
-
-### Phase 3：Runtime data 迁移
-
-- Exporter 返回 runtime data artifacts，不再直接写文件。
-- Build 统一收集 runtime data + generated code，再一次性调用 Artifact Writer。
-- 删除 build/exporter 中重复路径冲突检查或迁移到 artifact writer。
-
-### Phase 4：CLI dry-run 与 temp-commit
-
-- CLI 增加 `--dry-run`。
-- `BuildOptions` 增加 artifact write mode / dry-run 标志。
-- 实现 direct、dry-run 与 temp-commit 集成测试。
+- `src/artifact/` 已提供 `Artifact`、`ArtifactContent`、`ArtifactWriter`、`ArtifactWriteMode`、`ArtifactWriteLimits` 和 `ArtifactWriteResult`。
+- runtime data 与 generated code 都以 artifact 形态进入统一 writer。
+- Artifact Writer 负责 final path normalization、稳定排序、path conflict check、dry-run、direct write、temp-commit 和 bounded writer queue。
+- CLI 支持 `--dry-run`、`--write-mode direct|temp-commit`、`--artifact-memory-limit`、`--artifact-memory-percent`。
 - temp-commit 当前提供临时文件阶段保护；提交阶段失败按 `ConfigForgeError::WriteFile` 报错，并可能保留已提交的最终文件。
+
+未来规划：
+
+- 如果真实大 artifact benchmark 证明生成阶段内存峰值仍不可接受，再把 Build 侧 `Vec<Artifact>` 收集边界演进为 streaming generator / bounded sink。
+- filesystem-aware path key 可在跨平台大小写不敏感冲突或 symlink alias 成为实际问题时接入，当前 lexical-normalized key 继续作为默认 authority。
+- summary manifest、远端上传、增量缓存或分布式 artifact store 应作为独立 writer / exporter 扩展，不改变当前 Artifact Writer 的基础语义。

@@ -1,8 +1,16 @@
 # 任务系统与并发执行技术设计
 
-本文档描述 ConfigForge 后续任务系统的技术实现方案。目标是在不改变现有导出语义、诊断顺序和产物稳定性的前提下，合理利用 CPU 多核与操作系统异步 I/O 能力，支持用户通过 CLI 限制资源消耗，避免默认占满整台机器。
+本文档描述 ConfigForge 当前的任务系统状态与后续技术规划。目标是在不改变现有导出语义、诊断顺序和产物稳定性的前提下，合理利用 CPU 多核与操作系统异步 I/O 能力，支持用户通过 CLI 限制资源消耗，避免默认占满整台机器。
 
-当前实现已引入局部 Rayon CPU worker pool：`build_target` 仍按 Project Config 读取、选择 target、Meta Link、Data Load、Normalize、Validation、Runtime Data Export、Codegen 与写文件的阶段顺序执行；`execute_target_dag()` 只构造 execution-view skeleton，并按 `MetaAndData` / `MetaOnly` 两个分支执行，不是完整通用 DAG executor。DataLoader、runtime data serialization 和 codegen task 已在受 `jobs` 限制的 worker pool 中并行。远端 provider、async I/O、从目标产物倒推依赖的完整任务 DAG、full dataset validation / target view validation 分层并行、以及 bounded artifact pipeline 仍属于后续演进范围。本文档作为后续重构的工程设计依据。
+当前实现已具备以下能力：
+
+- `build_target()` 使用局部 Rayon CPU worker pool 控制 `jobs`；
+- `execute_target_dag()` 维护 target-local execution view skeleton，并按 `MetaAndData` / `MetaOnly` 两个分支执行；
+- DataLoader、table normalize、target-aware validation、runtime data export task、MetaOnly codegen task 已在受限 worker pool 中并行；
+- Artifact writer 已支持 bounded queue、memory budget 与 `--artifact-memory-limit` / `--artifact-memory-percent`；
+- 阶段式 build 已支持 `BuildTrace` 与 `--trace-tasks <path>` JSON metrics 输出。
+
+当前仍未实现、但保留为未来规划的方向包括：远端 provider 的正式 async runtime、multi-target build、streaming generator / generation limiter、filesystem-aware path key，以及仅在明确收益出现后再推进的通用 DAG executor。
 
 ## 1. 设计目标
 
@@ -831,184 +839,212 @@ pub enum ArtifactContent {
 
 runtime data 和 generated code 都应进入同一写出管线。Artifact writer 只关心最终路径和文本/二进制内容，不承载 runtime data、generated code 或 producer 等业务语义。写出前必须统一完成路径归一化、稳定排序和 path conflict 检查；后续并发阶段应通过 bounded pipeline 生成和写出，避免所有 artifact content 同时驻留内存。
 
-## 10. 渐进式改造 TODO list
+## 10. 渐进式改造状态
 
-每一步都必须保持 `--jobs 1` 与当前串行语义一致，并提供单元或集成测试证明该步骤可独立工作。不要把 async provider、validation 重构、DAG executor 和 artifact streaming 混在一个大改动里。
+本节只记录当前状态与后续规划，不保留阶段性实现过程或历史复盘。所有并行化与调度演进都必须保持 `--jobs 1` 与稳定输出语义一致。
 
 ### Phase 0：现状标定与测试护栏
 
-目标：在改调度前锁定当前行为，避免后续并发化改变语义。
+状态：已完成。
 
-- DONE（6e91753）：补充 code-only target 测试，断言只有 MetaOnly export task 时不会调用 DataLoader / provider。
-- DONE（6e91753）：补充多 export task declaration order 测试，覆盖 data-backed export 与 codegen 混排后的 artifact order。
-- DONE（6e91753）：补充 validation diagnostics 稳定排序基线测试，覆盖多个 range validator issue 的稳定顺序；FK / target-aware 场景在后续 validation 并行阶段继续扩展。
-- DONE（6e91753）：补充 `--serial` / `--jobs 1` 与默认执行输出一致的 CLI integration。
-- 验证：`cargo test`；如引入测试辅助 provider，必须能精确记录调用次数和调用顺序。
+当前状态：
+
+- 已有 code-only target、mixed export order、validation diagnostics 稳定排序、`--serial` / `--jobs 1` 等测试护栏。
+- 当前并行优化继续以这些 golden 行为为边界，避免改变 dry-run、warning、error 和 artifact plan 顺序。
+
+未来规划：
+
+- 新增并发能力时继续优先补 golden integration，而不是依赖人工观察输出。
 
 ### Phase 1：DependencyPlan / TargetBuildPlan
 
-目标：先实现“从 target/export tasks 倒推依赖”，但执行仍可沿用当前 branch executor。
+状态：已完成。
 
-- DONE：新增内部 `BuildDependencyPlan` / `TargetBuildPlan`，由 normalized target exports 生成 `requires_meta`、`requires_data`、`meta_only_exports`、`meta_and_data_exports`。
-- DONE：让 code-only target 显式 `requires_data = false`，并在 build 主流程中跳过 DataLoadPlan / DataLoader / normalize / validation。
-- DONE：记录 cache key 约定：`LinkedMeta` 可按 project/raw meta 共享；Data / normalized data / validation result 至少按 `(project.input, effective_tags)` 区分，当前内部表达为 `DataDependencyKey { input, effective_tags }`。
-- DONE：将当前 `BuildDagNodeKey` skeleton 与 `TargetBuildPlan` 对齐，避免 node key 表达伪依赖。
-- 验证：build 单元测试覆盖 `rust only`、`json only`、`json + rust`、`json + lua + rust`；CLI integration 覆盖 code-only target 不要求 `project.input`。
+当前状态：
 
-Phase 1 实现复核：后续 Phase 2-12 的阶段顺序仍然成立；本阶段仅把“target/export task 需要哪些依赖”收敛为内部 plan，尚未改变 DataLoad / normalize / validation 的执行边界。后续开发应复用 `TargetBuildPlan.data_dependency` / `DataDependencyKey` 作为 data-backed 分支的最小启动条件，避免再次从 exporter 类型反推是否需要 Data。
+- Build 内部已通过 `BuildDependencyPlan` / `TargetBuildPlan` 从 `[[targets.exports]]` 倒推依赖。
+- code-only target 不会启动 DataLoadPlan / DataLoader / normalize / validation。
+- data-backed 分支最小 cache key 已明确为 `(project.input, effective_tags)`。
 
-### Phase 2：拆分 DataLoadPlan 为 source discovery 与 typed normalize
+未来规划：
 
-目标：让 source read 可以与 Meta link 并行，为远端 provider 做准备。
+- 如果进入 multi-target build，继续沿用当前 dependency key 规则扩展共享边界，而不是重新回到“按 exporter 类型反推依赖”的分支写法。
 
-- DONE：把“需要读取哪些 source”的 raw source discovery 从 typed normalization 中拆出来，明确它只依赖 Project Config / raw Meta source declarations / effective tags。
-- DONE：定义 `SourceReadPlan` / `RawSourceData`，本地 CSV 仍可直接返回现有 `DataTable`，但接口层不要要求 linked Meta。
-- DONE：保留现有 DataLoader 行为作为 compatibility path，先由 `DataLoadPlan` 包装 `SourceReadPlan`，`load()` / `load_with_pool()` 继续返回兼容的 `DataSet`。
-- DONE：当 source discovery 未来需要 linked Meta 时，必须在 plan 中显式声明依赖，不能在 provider 内隐式访问 MetaLink 结果；当前实现保持 `SourceReadPlan::from_tables(raw TableMeta, effective tags)`，不借用 `LinkedMetaModel`。
-- 验证：多 source / override source / ObjectTable source fixture 与现有输出一致；source discovery 单元测试覆盖 target tags 对 override source 的影响。
+### Phase 2：Source discovery 与 RawSourceData
 
-Phase 2 实现复核：后续 Phase 3-12 的阶段顺序总体仍然成立，但 Phase 3 的基础并发读取入口已提前收敛到 `DataLoader::read_sources_with_pool(&SourceReadPlan, pool)`。Phase 3 后续重点应从“创建并发入口”调整为：验证 `SourceReadPlan` 粒度的错误稳定性、jobs/serial 资源限制语义，以及为未来 fake delayed provider 补充完成顺序不影响 merge 顺序的测试。
+状态：已完成。
+
+当前状态：
+
+- source discovery 已独立为 `SourceReadPlan`，只依赖 raw Meta 与 effective tags。
+- `RawSourceData` 已成为 source read 与 normalize 之间的明确边界。
+
+未来规划：
+
+- 正式远端 provider 继续消费 `SourceReadPlan`，不要在 provider 层隐式依赖 `LinkedMetaModel`。
 
 ### Phase 3：SourceRead 并发（本地同步 provider）
 
-目标：先并发读取本地 CSV，但不引入 Tokio 和远端 provider。
+状态：已完成。
 
-- DONE：按 `SourceReadPlan` 粒度在局部 Rayon pool 中并行读取 CSV；Phase 2 已提供 `read_sources_with_pool()`，Phase 3 补齐并发稳定性测试入口。
-- DONE：结果按 plan order merge，错误按 source stable key 排序，不按完成顺序输出。
-- DONE：限制并发数由 `jobs` 控制；`--serial` 必须退化为串行。当前 build 通过 `ExecutionOptions.jobs` 创建 CPU pool，serial 已归一化为 `jobs = 1`。
-- DONE：保证 duplicate table / missing source 等错误与现有语义一致。
-- 验证：DataLoader 单元测试覆盖多 source 并发稳定合并；CLI integration 比较 `--jobs 1` / `--jobs 2` 输出；可增加人工延迟测试 provider 验证顺序稳定。
+当前状态：
 
-Phase 3 实现复核：后续 Phase 4-12 的阶段顺序仍然成立。Phase 4 引入 async provider shell 时应复用 `SourceReadPlan` 作为 provider-independent 输入，并把当前测试用 reader seam 演进为正式 provider trait / resource lane；不要在 DataLoader 内隐式访问 MetaLink 结果。
+- 本地 CSV 已按 `SourceReadPlan` 在受 `jobs` 限制的 worker pool 中并行读取。
+- merge 顺序、错误顺序和 `--serial` 语义均保持稳定。
 
-### Phase 4：引入 async provider shell（Google Sheet / 飞书准备）
+未来规划：
 
-目标：为远端 source 提供 async I/O 调度能力，但不改变本地 CSV 主路径。
+- 如需扩展更细 source 粒度或新 provider，继续保持“按 plan order 合并，不按完成顺序合并”的规则。
 
-- DONE：引入 async provider shell 雏形。当前不引入 Tokio，先用 owned `SourceReadPlan` + scoped worker shell 表达可取消 / 可限流的 provider-independent 调度边界，避免借用跨未来 `await`。
-- DONE：定义 provider resource 类型：`BlockingLocal`、`AsyncIo`、`Network`；Google Sheet / 飞书文档 provider 后续应声明为 `Network` 并走 `network` concurrency lane。
-- DONE：为远端 provider 预留 `RemoteProviderPolicy`，记录 retry/backoff、rate-limit 入口；认证错误和 source location diagnostics 仍在正式远端 provider 落地时细化。
-- DONE：明确下载 bytes/cells 后再切回 CPU pool 做 parse/normalize，不在 async runtime worker 上做重 CPU 工作；当前 shell 只负责 source read，normalize 仍在后续阶段。
-- 验证：使用 fake async provider 的单元测试覆盖 semaphore 限流、失败诊断稳定排序、取消行为；本地 CSV integration 不变。
+### Phase 4：async provider shell
 
-Phase 4 实现复核：后续 Phase 5-12 的阶段顺序仍然成立。Phase 5 可以基于 `AsyncSourceReadShell` 的 stop-scheduling 语义扩展为 MetaLink failure 触发 cancellation token；正式 Tokio / network provider 可在 Google Sheet / 飞书 provider 进入实现阶段再引入，避免当前本地 CSV 主路径承担 async runtime 复杂度。
+状态：已完成基础壳层。
+
+当前状态：
+
+- 已有 provider-independent 的 async shell / resource lane 抽象，可表达 `BlockingLocal`、`AsyncIo`、`Network`。
+- 当前主路径仍以本地 CSV 为主，不引入 Tokio runtime 到默认构建流程。
+
+未来规划：
+
+- 真正接入 Google Sheet / 飞书等远端 provider 时，再把当前 shell 落到正式 async runtime、认证、retry/backoff 和协作取消。
 
 ### Phase 5：MetaLink 与 SourceRead 并行
 
-目标：在 Project Config / raw MetaModel 完成后，让 Meta link / validate 与 source I/O 同时启动。
+状态：已完成。
 
-- DONE：重排 build 主流程：`MetaExtract -> MetaLink` 与 `DependencyPlan.requires_data -> SourceRead[*]` 可并行，二者在 Normalize 前 join。Source discovery 现在基于 raw `MetaModel` + effective target tags 构造 `SourceReadPlan`，不等待 `LinkedMetaModel`。
-- DONE：Meta link failure 与 source failure 并发时稳定优先返回 MetaLink 错误；当前本地 CSV source read 无 cancellation token，已启动任务会等待完成并丢弃结果，未启动远端任务的协作取消保留到正式 async provider runtime。
-- DONE：确保 code-only target 不启动 source tasks；data-backed target 等待 MetaLink + RawSources 后再 normalize。
-- 验证：fake slow MetaLink / fake slow SourceRead 的调度测试，证明可重叠执行；错误场景覆盖 Meta error、source error、双错误稳定输出。
+当前状态：
 
-Phase 5 实现复核：后续 Phase 6-12 的阶段顺序仍然成立。Phase 6 可直接消费 Phase 5 join 后的 `LinkedMetaModel + RawSourceData`，把 `normalize_data_set` 拆为 table 粒度任务；完整 cancellation token 仍建议随远端 provider / 通用 DAG executor 阶段落地，而不是在本地 CSV loader 中引入额外复杂度。
+- `MetaModel::link()` 与 source read 已可并行启动，并在 normalize 前 join。
+- MetaLink error 仍稳定优先于并发的 source error。
 
-### Phase 6：NormalizeTable 并行与 normalized DataSet merge
+未来规划：
 
-目标：把 raw source merge 后的 normalize 拆成 table 粒度 CPU task。
+- 远端 provider 落地后，可在现有 join 规则上增加 cancellation token，但不改变错误优先级语义。
 
-- DONE：`normalize_data_set` 拆分为 `normalize_table` task + deterministic merge；build 主流程通过 `normalize_data_set_with_pool()` 使用 CPU pool 并按输入 table 顺序稳定收集。
-- DONE：ObjectTable singleton、struct expanded value、defaults、typed fragment payload 等规则保持 table-local；当前 normalize task 只读取当前 `LinkedTableMeta` 与当前 `DataTable`。
-- DONE：明确如果发现跨表 normalize 需求，必须显式新增 DAG 依赖，不能在 table task 中访问可变全局状态。
-- 验证：现有 validation/data resolver tests 全部通过；新增多 table normalize 顺序稳定测试；大表/小表 chunking 可先不实现。
+### Phase 6：NormalizeTable 并行
 
-Phase 6 实现复核：后续 Phase 7-12 的阶段顺序仍然成立。Phase 7 仍应先把 validation 诊断改为全量可合并模型，再并行 validation；Phase 8/9 可复用 Phase 6 的稳定 merge 策略，但需要自己的 validation issue stable sort key，不能依赖 Rayon 完成顺序。
+状态：已完成。
 
-### Phase 7：Validation report 全量收集模型
+当前状态：
 
-目标：先改诊断模型，再并行 validation，避免 fail-fast 与并发冲突。
+- normalize 已按 table 粒度并行，并按输入 table 顺序稳定 merge。
+- 现有 normalize 规则保持 table-local，不允许任务内访问可变全局状态。
 
-- DONE：将基础 required/type/enum/unique/FK 与 registry validators 统一到可合并的 `ValidationReport` 输出；兼容入口保留 `Result<()>`，但 error gate 返回 `ConfigForgeError::ValidationReport`。
-- DONE：定义 validation issue stable sort key，包含 severity、target、table、row_index、source_row_number、field、validator、code、message。
-- DONE：明确 warning / error gate：warning 不阻断 export，error 阻断对应依赖。
-- 验证：validation 单元测试不只断言失败，还断言多个 issue 的稳定顺序；现有 CLI 错误信息可接受兼容变化时需同步文档。
+未来规划：
 
-Phase 7 实现复核：后续 Phase 8-12 的阶段顺序仍然成立。Phase 8/9 可以直接复用 `ValidationReport::append()` / `extend()` / `sort_by_stable_key()` 做并行结果合并；需要补充的是 table-local validation 与 FK/relation-group validation 的任务拆分、局部 report 生命周期，以及 `--jobs 1` / `--jobs N` 下 report 内容和排序完全一致的测试。Phase 10-12 不需要因 report 模型调整顺序，但 data-backed artifact generation 必须继续等待对应 validation report 无 error。
+- 如果未来出现跨表 normalize 需求，必须显式提升为新的依赖节点，而不是向当前 table task 塞入隐式共享状态。
+
+### Phase 7：ValidationReport 全量收集模型
+
+状态：已完成。
+
+当前状态：
+
+- Validation 已统一收敛到 `ValidationReport`。
+- warning / error gate 与稳定排序 key 已固定。
+
+未来规划：
+
+- 新 validator 或新的 dataset-level 校验继续接入 `ValidationReport`，不恢复 fail-fast 聚合模型。
 
 ### Phase 8：FullDataSet validation 并行
 
-目标：在 normalized full DataSet 上并行运行与 target 无关的验证。
+状态：部分完成。
 
-- DONE：把 table-local full validation 按 table 并行；`validate_normalized_data_set_with_report_and_pool()` 在 Rayon pool 中为每个 table 生成局部 report，再按 Meta table order 稳定 append。
-- TODO：把 FK / cross-table validation 按 relation group 或 target table index cache 并行，同时避免重复构建昂贵索引。当前 Phase 8 仍在 table-local report 合并后串行执行 full FK 与 registry validators。
-- TODO：FullDataSet error 阻断所有 data-backed target exports，但继续收集其他 full validation diagnostics。当前 single-target build 仍读取 target-scoped raw tables，完整 full DataSet gate 需要 Phase 9 / multi-target DAG 先明确 full normalized DataSet 的 cache key 与 target view 派生关系。
-- 验证：full validation 单元测试覆盖多表多错误稳定排序、FK cache 并发安全、`--jobs 1` / `--jobs 4` 结果一致。
+当前状态：
 
-Phase 8 实现复核：后续 Phase 9-12 的阶段顺序仍然成立。Phase 9 需要在目标态 DAG 中区分“full normalized DataSet”与“target-scoped SourceRead/ExportValidationView”：如果继续按 effective tags 读取 source，则不能把该 DataSet 当成跨 target full DataSet 复用；若要启用真正 FullDataSet gate，必须先定义 full source read / target override source 的 cache key 和 TargetView 派生规则。Phase 10-12 不需要调整顺序，但 artifact generation 仍必须等待对应 validation gate 无 error。
+- table-local full validation 已并行。
+- full FK / cross-table validation 仍保持串行执行，以维持当前复杂度和稳定性。
+
+未来规划：
+
+- 当 multi-target build 或 relation-heavy benchmark 证明 full FK 成为瓶颈时，再把 FK / cross-table validation 提升为 relation-group 级并行节点。
+- 真正的 FullDataSet error gate 需要与 multi-target build、full normalized DataSet cache key 一起设计。
 
 ### Phase 9：TargetView build 与 TargetView validation 并行
 
-目标：每个 target 在 target-filtered DataSetView / ExportValidationView 上独立验证。
+状态：部分完成。
 
-- DONE：显式构建 `ExportValidationView`；`ExportValidationView::for_target_with_pool()` 使用 `(target/effective_tags, normalized_data_set)` 输入在 CPU pool 中并行构建 visible table views，并按 Meta table order 稳定收集。
-- DONE：target-aware table-local validation 按 target visible table 并行；`validate_normalized_data_set_for_target_with_report_and_pool()` 为每个 table view 生成局部 report，再按 target view order 稳定 append。
-- TODO：target-aware FK / relation-group validation 并行。当前 target FK 与 registry validators 仍在 table-local report 合并后串行执行。
-- DONE：某 target validation error 只阻断该 target 的 data-backed exports；当前 single-target build 已使用 target-aware validation gate，MetaOnly codegen 仍不依赖 Data。
-- TODO：多 target 时复用 full normalized DataSet，但不能复用 target view。当前 build 仍是 single-target，跨 target cache key 与 full-source-read 策略留给后续 multi-target DAG。
-- 验证：集成测试覆盖两个 target 使用不同 tags、row_export / field export / override source 结果不同；一个 target validation 失败不影响另一个 target codegen dry-run plan。
+当前状态：
 
-Phase 9 实现复核：后续 Phase 10-12 的阶段顺序仍然成立。Phase 10 可以基于当前 target-aware validation gate 之后并行做 artifact planning / generation；但如果未来引入 multi-target build，仍需先完成 full normalized DataSet cache key、每个 target 独立 `ExportValidationView` cache key、以及 target FK/relation-group 并行策略。Phase 11/12 不需要因 target view 并行而调整顺序，但通用 DAG executor 需要把 `BuildTargetView` 与 `ValidateTargetView` 作为独立 node 暴露 tracing 与 cancellation 状态。
+- `ExportValidationView` 已显式建模。
+- target-aware table-local validation 已并行。
+- target-aware FK / relation-group validation 仍保持串行。
+- 当前 build 仍是 single-target。
+
+未来规划：
+
+- 只有在 multi-target build 或 relation-heavy target validation 成为明确痛点时，再推进 target-aware FK 并行与跨 target 数据复用。
 
 ### Phase 10：Artifact planning 与 generator 并行
 
-目标：在 validation gate 之后并行生成 data artifacts 和 codegen artifacts，同时保持 path conflict 与输出顺序稳定。
+状态：已完成。
 
-- DONE：拆出 export-task 级 `PlanArtifacts` 执行路径；`ensure_planned_runtime_output_paths()` 在重 CPU 生成前通过 Rayon 按 MetaAndData export task 并行计算输出路径，并在稳定 merge 阶段做 lexical conflict check。future filesystem-aware key 仍留给 artifact/path key 层统一接入。
-- DONE：JSON / MessagePack / bin 已按 table artifact 并行；Phase 10 后多个 runtime / aggregate exporter 也按 export task 并行执行，并按 declaration order 稳定合并。POT / Lua 等 aggregate exporter 的内部 table 粒度并行仍由各 exporter 自己决定。
-- DONE：MetaOnly codegen 已按 export task 并行，且 target branch 执行时不等待 Data 或 TargetView validation。
-- DONE：生成结果按当前 single-target 的 export declaration order 稳定收集；artifact writer 仍会按 normalized path 排序并做最终冲突检查。多 target 的 target declaration order 维度留给 Phase 12 DAG executor。
-- 验证：多 exporter / 多 codegen 混合项目 `--jobs 1` 与 `--jobs 4` artifact plan 完全一致；路径冲突在任何写入前报错。
+当前状态：
 
-Phase 10 实现复核：后续 Phase 11/12 的阶段顺序仍然成立。Phase 11 仍应聚焦 bounded artifact write / temp-file commit 顺序 / filesystem-aware path key，下沉统一 path conflict key，避免 build/runtime/exporter 重复实现。Phase 12 通用 DAG executor 可把当前已稳定的 `PlanArtifacts`、`RunDataExporter`、`RunCodeGenerator` 映射为独立 node，并复用现有 declaration-order merge 作为兼容性 golden。
+- export-task 级 artifact planning 已并行。
+- runtime / aggregate exporter 与 MetaOnly codegen 已按 export task 并行。
+- artifact 仍按 export declaration order 稳定收集，并在写入前统一做冲突检查。
+
+未来规划：
+
+- multi-target build 若落地，再补 target declaration order 维度的稳定 merge 规则。
 
 ### Phase 11：Bounded artifact write pipeline
 
-目标：避免所有大 artifact bytes 同时驻留内存，并为 async write 做准备。
+状态：已完成当前同步 bounded writer 方案。
 
-- DONE：Artifact Writer 支持 bounded queue / max in-flight artifacts / max in-flight bytes。CLI 已增加固定容量 `--artifact-memory-limit <SIZE>` 与百分比 `--artifact-memory-percent <PERCENT>`；默认使用启动时 available memory 的 25%，并 clamp 到 `[64MiB, 2GiB]`，探测失败 fallback `256MiB`。固定容量与百分比同时指定时报错。
-- DONE：Direct / temp-commit / dry-run 保持当前语义；Direct / temp-commit 通过 dedicated writer thread + byte semaphore / Condvar 限制 writer queue，等待 capacity 的线程会 park 而不是 busy-wait。temp-commit temp write 完成后即可释放 bytes permit，最终 commit/rename 按 planned path 稳定顺序执行。
-- DONE：单 artifact 大于预算时允许独占预算写入，避免单个大文件导致构建不可用；未来如需强制失败可增加 `--artifact-memory-strict`。
-- TODO：Build 增加 streaming generator / generation limiter，避免所有 Rayon worker 同时生成大 artifact 后再进入 writer。当前实现仍保留 `Vec<Artifact>` 收集边界，bounded writer 只能限制 writer queue 中的 in-flight bytes，不能限制生成阶段已经收集的 artifact bytes。
-- TODO：接入 `platform-filesystem-semantics.md` 中的 path key 策略，保证 write 前完成冲突检查；后续 streaming `submit()` 只能提交已规划路径，不能引入未规划 artifact。
-- 验证：dry-run 不创建目录；写入失败测试覆盖 Direct 和 TempCommit；大 artifact benchmark 观察 peak memory；新增 CLI 参数互斥和 bounded writer 小队列测试。
+当前状态：
 
-Phase 11 详细设计见 [`../Implementation/07-artifact-module-detail-design.md#741-phase-11bounded-artifact-write-pipeline`](../Implementation/07-artifact-module-detail-design.md#741-phase-11bounded-artifact-write-pipeline)。实现时优先落地同步 bounded writer；不要等 Phase 12 通用 DAG executor 才处理内存峰值问题。
+- Artifact writer 已支持 bounded queue、memory budget 和稳定的 Direct / TempCommit / DryRun 语义。
+- CLI 已支持 `--artifact-memory-limit` 与 `--artifact-memory-percent`。
+- 当前 memory budget 只覆盖 writer queue 内的 in-flight artifact bytes。
 
-### Phase 12：通用 DAG executor 与 tracing
+未来规划：
 
-目标：在各阶段 node 输入输出稳定后，用统一 executor 替换手写阶段编排。
+- 如果真实 benchmark 仍显示生成阶段内存峰值过高，再推进 streaming generator / generation limiter。
+- filesystem-aware path key 仍保留为后续跨平台增强，不在当前 lexical-normalized key 基础上提前复杂化。
 
-- TODO：实现 `TaskSpec` / `TaskGraph` / readiness queue / resource-aware scheduler。
-- TODO：支持 `AsyncIo`、`Network`、`Cpu`、`Coordination` resource lane 和 cancellation token。
-- TODO：为每个 task 输出 tracing span、duration、result state；可选 `--trace-tasks <path>`。
-- TODO：保留阶段式 executor 的 golden integration 测试，切换 DAG executor 后输出必须一致。
-- 验证：task graph 单元测试覆盖依赖拓扑、取消传播、资源限流、稳定 result merge；全量 `cargo test`。
+### Phase 12：阶段式 tracing / metrics
 
-## 11. 测试计划
+状态：已完成。
 
-### 11.1 单元测试
+当前状态：
+
+- `BuildOutput` 已包含 `BuildTrace`。
+- `build_target()` 已记录阶段级 start / duration / success-failure state。
+- CLI 已支持 `--trace-tasks <path>` 并输出 pretty JSON。
+
+未来规划：
+
+- 仅当 streaming generator、远程 source provider、多 target build、resource wait 或 cancellation 成为明确工程痛点时，再评估是否值得引入通用 `TaskSpec` / `TaskGraph` / readiness queue / resource-aware scheduler。
+
+## 11. 测试状态与规划
+
+### 11.1 当前已覆盖
 
 - `ExecutionOptions` 默认值、非法值、`--serial` 覆盖。
+- `ArtifactMemoryOptions` 固定容量、百分比、互斥和边界校验。
 - `BuildDependencyPlan` 对 code-only / data-backed / mixed export tasks 的依赖裁剪。
-- TaskKey 排序稳定性。
-- `TaskOutput` diagnostics 合并后按稳定 key 排序。
-- SourceRead fake provider 并发完成顺序不影响 DataSet merge 顺序。
-- FullDataSet validation 与 TargetView validation issue 稳定排序。
-- Artifact path conflict 在并发生成后仍稳定报错。
+- SourceRead 并发完成顺序不影响 DataSet merge 顺序。
+- MetaLink 与 SourceRead 并发时错误优先级稳定。
+- FullDataSet table-local validation 与 TargetView table-local validation issue 稳定排序。
+- Artifact path conflict 在并发规划 / 生成后仍稳定报错。
+- Bounded writer 小队列、单 artifact 超预算、Direct / TempCommit / DryRun 语义。
+- `--trace-tasks` 输出包含关键阶段和成功状态。
+- CLI integration 覆盖 `--jobs 1` / 并发输出一致、code-only target 不读取 Data、多 exporter / 多 codegen 稳定输出、source / validation / artifact conflict 错误路径。
 
-### 11.2 集成测试
+### 11.2 未来测试规划
 
-- `--jobs 1` 与默认并发输出完全一致。
-- code-only target 不读取 Data，即使 project 配置了 `input` 或 source 文件缺失也不触发 data source error。
-- 多 table / 多 codegen export task 项目在 `--jobs 2` 下输出稳定。
-- 多 target / 多 effective tags 构建不错误复用 DataSetView；target validation failure 不影响无依赖 target 的 MetaOnly codegen。
-- source 加载失败时诊断顺序稳定。
-- artifact 写出失败时不会产生重复/乱序诊断。
+- multi-target build 落地时，补充多 target / 多 effective tags 不错误复用 DataSetView 的 integration。
+- 远端 provider 落地时，补充 network concurrency、retry/backoff、cancellation 和 source diagnostics 稳定排序。
+- streaming generator 落地时，补充 generation limiter 与 writer budget 的端到端内存峰值测试。
+- 通用 DAG executor 若落地，补充 readiness queue、resource wait、cancellation propagation、node-level trace 和 result merge golden。
 
-### 11.3 性能测试
+### 11.3 性能测试规划
 
-增加 ignored large test 或 benchmark：
+可增加 ignored large test 或 benchmark：
 
 ```text
 100 tables x 10k rows
@@ -1024,24 +1060,10 @@ measure source load, validation, runtime serialization, total duration
 | --- | --- |
 | 并发改变诊断顺序 | 所有结果按稳定 key 汇总排序。 |
 | 线程过多导致机器抢占 | 默认 `jobs <= 4`，所有 CPU 任务走固定 pool。 |
-| async runtime 被 CPU 任务阻塞 | CPU 任务统一 `spawn_cpu`。 |
+| async runtime 被 CPU 任务阻塞 | 当前默认路径不引入 async runtime；未来远端 provider 落地时，CPU parse / normalize / validation 仍必须切回 CPU pool。 |
 | 远程 API 限流 | `network_concurrency` + provider-level throttle/backoff。 |
 | 大 artifact 同时驻留内存 | 有界队列、分阶段写出、未来 streaming。 |
 | DAG dependency key 过粗导致错误复用 | Data / validation / target view cache key 必须包含 `project.input`、effective tags、target、source provider 参数等必要维度。 |
 | code-only target 意外读取 Data | DependencyPlan 必须先于 DataLoadPlan，并有测试 provider 断言未调用。 |
 | 生命周期复杂化 | `LinkedMetaModel<'meta>` 继续只读共享；并发任务只借用不可变引用或使用 `Arc` 包装 owned 数据。 |
-| 输出半更新 | 后续引入 temp file + deterministic commit。 |
-
-## 13. 当前文档缺口总结
-
-在本轮补充前，设计文档中不足以支撑目标态 DAG 的点主要是：
-
-1. 对 “DAG” 的描述偏阶段式，容易让人误以为当前 `BuildDagNodeKey` 已参与调度；实际只是 execution-view skeleton。
-2. 缺少从 target/export task 倒推依赖的规则，尤其是 code-only target 不读 Data 的硬约束。
-3. `NormalizeAndValidate` 被描述为单个节点，无法表达 SourceRead、Normalize、FullDataSet validation、TargetView validation 的并行与 gate。
-4. 没有明确 Meta link / validate 与 source read 可以并行，也没有说明 source discovery 应尽量不依赖 linked Meta。
-5. Validation 只粗分 table-local / dataset-level，缺少 full DataSet 与 target-filtered DataSetView 的分层依赖。
-6. 对 Google Sheet / 飞书文档这类 async network source 的 resource lane、限流和 CPU parse 边界描述不足。
-7. 迁移计划过粗，无法保证每一步独立可工作、可验证、可回滚。
-
-后续实现应优先按 Phase 0～Phase 3 建立依赖裁剪与 source 并发基础，再进入 async provider 和 validation 并行；完整 DAG executor 应放在各阶段输入输出稳定之后。
+| 输出半更新 | 当前支持 `temp-commit`；需要更强事务语义时再设计 rollback / manifest commit。 |

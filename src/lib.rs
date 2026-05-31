@@ -21,7 +21,10 @@ pub use artifact::{
     Artifact, ArtifactContent, ArtifactWriteEntry, ArtifactWriteLimits, ArtifactWriteMode,
     ArtifactWriteResult, ArtifactWriter,
 };
-pub use build::{ArtifactMemoryOptions, BuildOptions, BuildOutput, ExecutionOptions, build_target};
+pub use build::{
+    ArtifactMemoryOptions, BuildOptions, BuildOutput, BuildTrace, BuildTraceStage,
+    BuildTraceStageStatus, ExecutionOptions, build_target,
+};
 pub use codegen::{
     CaseStyle, CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator,
     CodeWriterConfig, CodegenOptions, CodegenTaskConfig, CppCodeGenerator, CppCodegenOptions,
