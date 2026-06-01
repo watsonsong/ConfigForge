@@ -3,6 +3,7 @@
 
 use crate::{
     ConfigForgeError, Result,
+    artifact::ArtifactWriteStream,
     data::DataTable,
     meta::{LinkedTableMeta, TargetTags},
 };
@@ -34,6 +35,18 @@ impl DataFormatExporter for MessagePackDataExporter {
     ) -> Result<Vec<u8>> {
         let payload = build_exported_table_payload(table_meta, table, target_tags)?;
         rmp_serde::to_vec_named(&payload)
+            .map_err(|source| ConfigForgeError::SerializeMessagePack { source })
+    }
+
+    fn serialize_table_to_stream(
+        &self,
+        table_meta: &LinkedTableMeta<'_>,
+        table: &DataTable,
+        target_tags: &TargetTags,
+        stream: &mut ArtifactWriteStream,
+    ) -> Result<()> {
+        let payload = build_exported_table_payload(table_meta, table, target_tags)?;
+        rmp_serde::encode::write_named(stream, &payload)
             .map_err(|source| ConfigForgeError::SerializeMessagePack { source })
     }
 }

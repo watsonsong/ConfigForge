@@ -95,6 +95,29 @@ pub struct ArtifactWriteLimits {
     pub max_in_flight_artifacts: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactPlan {
+    pub path: PathBuf,
+    pub estimated_generation_bytes: usize,
+}
+
+impl ArtifactPlan {
+    pub fn new(path: impl Into<PathBuf>, estimated_generation_bytes: usize) -> Self {
+        Self {
+            path: path.into(),
+            estimated_generation_bytes,
+        }
+    }
+}
+
+pub trait ArtifactProducer {
+    fn plan(&self) -> &ArtifactPlan;
+
+    fn produce(self, stream: &mut ArtifactWriteStream) -> Result<()>
+    where
+        Self: Sized;
+}
+
 impl ArtifactWriter {
     pub fn new(mode: ArtifactWriteMode) -> Self {
         Self {
@@ -249,6 +272,16 @@ impl ArtifactSink {
         stream.finish().map(|_| ())
     }
 
+    pub fn write_producer<P>(&self, producer: P) -> Result<ArtifactWriteEntry>
+    where
+        P: ArtifactProducer,
+    {
+        let path = producer.plan().path.clone();
+        let mut stream = self.create(path)?;
+        producer.produce(&mut stream)?;
+        stream.finish()
+    }
+
     pub fn finish(self) -> Result<ArtifactWriteResult> {
         let (entries, temp_files, first_error) = {
             let mut state = self.inner.lock_state();
@@ -304,6 +337,90 @@ impl ArtifactSink {
             entries,
         })
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ArtifactGenerationLimiter {
+    inner: Arc<ArtifactGenerationLimiterInner>,
+}
+
+impl ArtifactGenerationLimiter {
+    pub fn new(max_in_flight_bytes: usize, unknown_generation_bytes: usize) -> Self {
+        Self {
+            inner: Arc::new(ArtifactGenerationLimiterInner {
+                byte_semaphore: ByteSemaphore::new(max_in_flight_bytes.max(1)),
+                unknown_generation_bytes: unknown_generation_bytes.max(1),
+            }),
+        }
+    }
+
+    pub fn from_limits(limits: ArtifactWriteLimits) -> Self {
+        let limits = limits.normalized();
+        Self::new(
+            limits.max_in_flight_bytes,
+            limits
+                .max_in_flight_bytes
+                .checked_div(limits.max_in_flight_artifacts)
+                .unwrap_or(1)
+                .max(1),
+        )
+    }
+
+    pub fn acquire(&self, estimated_bytes: usize) -> ArtifactGenerationPermit {
+        let bytes = estimated_bytes.max(1);
+        self.inner.byte_semaphore.acquire(bytes);
+        ArtifactGenerationPermit {
+            limiter: self.inner.clone(),
+            bytes,
+            released: false,
+        }
+    }
+
+    pub fn acquire_unknown(&self) -> ArtifactGenerationPermit {
+        self.acquire(self.inner.unknown_generation_bytes)
+    }
+
+    pub fn run<T>(
+        &self,
+        estimated_bytes: usize,
+        operation: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        let _permit = self.acquire(estimated_bytes);
+        operation()
+    }
+
+    pub fn run_unknown<T>(&self, operation: impl FnOnce() -> Result<T>) -> Result<T> {
+        let _permit = self.acquire_unknown();
+        operation()
+    }
+}
+
+#[derive(Debug)]
+pub struct ArtifactGenerationPermit {
+    limiter: Arc<ArtifactGenerationLimiterInner>,
+    bytes: usize,
+    released: bool,
+}
+
+impl ArtifactGenerationPermit {
+    fn release_once(&mut self) {
+        if !self.released {
+            self.limiter.byte_semaphore.release(self.bytes);
+            self.released = true;
+        }
+    }
+}
+
+impl Drop for ArtifactGenerationPermit {
+    fn drop(&mut self) {
+        self.release_once();
+    }
+}
+
+#[derive(Debug)]
+struct ArtifactGenerationLimiterInner {
+    byte_semaphore: ByteSemaphore,
+    unknown_generation_bytes: usize,
 }
 
 #[derive(Debug)]
@@ -704,6 +821,12 @@ fn lexical_normalize_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use std::thread;
+    use std::time::Duration;
     use std::{env, io::Write as _, sync::Mutex};
 
     use super::*;
@@ -831,6 +954,70 @@ mod tests {
         assert_eq!(result.entries[0].bytes, 5);
         assert!(!result.entries[0].written);
         assert!(!temp_dir.path().join("out").exists());
+    }
+
+    struct TestProducer {
+        plan: ArtifactPlan,
+        content: &'static [u8],
+    }
+
+    impl ArtifactProducer for TestProducer {
+        fn plan(&self) -> &ArtifactPlan {
+            &self.plan
+        }
+
+        fn produce(self, stream: &mut ArtifactWriteStream) -> Result<()> {
+            stream.write_all_artifact(self.content)
+        }
+    }
+
+    #[test]
+    fn sink_writes_artifact_producer() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("out/producer.bin");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+        let producer = TestProducer {
+            plan: ArtifactPlan::new(&path, 4),
+            content: &[1, 2, 3, 4],
+        };
+
+        let entry = sink.write_producer(producer).expect("producer write");
+        let result = sink.finish().expect("finish sink");
+
+        assert_eq!(entry.bytes, 4);
+        assert_eq!(result.entries[0].path, path);
+        assert_eq!(fs::read(path).expect("producer content"), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn generation_limiter_blocks_until_generation_permit_is_released() {
+        let limiter = ArtifactGenerationLimiter::new(4, 4);
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+
+        for _ in 0..2 {
+            let limiter = limiter.clone();
+            let active = active.clone();
+            let max_active = max_active.clone();
+            handles.push(thread::spawn(move || {
+                limiter
+                    .run(4, || {
+                        let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        max_active.fetch_max(now, Ordering::SeqCst);
+                        thread::sleep(Duration::from_millis(20));
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        Ok(())
+                    })
+                    .expect("limited generation should succeed");
+            }));
+        }
+
+        for handle in handles {
+            handle.join().expect("thread should join");
+        }
+
+        assert_eq!(max_active.load(Ordering::SeqCst), 1);
     }
 
     #[test]

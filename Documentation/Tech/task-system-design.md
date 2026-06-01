@@ -79,7 +79,7 @@ ConfigForge 的任务可按资源类型分为三类。
 - `Semaphore` 可限制同时打开文件、HTTP 请求、远端 API 请求数；
 - `JoinSet` / `FuturesUnordered` 可收集同类 I/O 任务。
 
-ArtifactSink 当前使用同步 `std::io::Write` 与内部 semaphore，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 并传入 runtime/codegen 分支。runtime table exporter 与 codegen 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，但 table serializer / codegen 仍会短期 materialize 单文件 `Vec<u8>` / `String` 后立即写入 sink，aggregate exporter trait 也仍保留兼容 `Vec<Artifact>`。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
+ArtifactSink 当前使用同步 `std::io::Write` 与内部 semaphore，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 和 `ArtifactGenerationLimiter` 并传入 runtime/codegen 分支。runtime table exporter 与 codegen 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack 已使用 writer-style serializer；binary serializer / codegen 仍会短期 materialize 单文件 `Vec<u8>` / `String` 后立即写入 sink，aggregate exporter trait 也仍保留兼容 `Vec<Artifact>`，但这些 fallback generation 会受 generation limiter 控制。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
 
 建议配置：
 
@@ -1001,22 +1001,23 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 
 ### Phase 11：ArtifactSink coordinator 与 streaming pipeline
 
-状态：ArtifactSink coordinator 与 Build shared sink 接入已完成；端到端 streaming serializer / generation limiter 未完成。
+状态：ArtifactSink coordinator、Build shared sink 接入、runtime table producer API 与 generation limiter 已完成；remaining binary/codegen/aggregate writer-style streaming 未完成。
 
 当前状态：
 
 - Artifact 模块已提供 `ArtifactSink` / `ArtifactWriteStream`，并作为唯一写入协调器处理 path reservation、Direct / TempCommit / DryRun 与 result entries。
+- Artifact 模块已提供 `ArtifactPlan` / `ArtifactProducer` 与 `ArtifactGenerationLimiter`；limiter 复用 artifact memory budget 作为 generation 阶段预算，独立于 sink 的 write-time byte semaphore。
 - `ArtifactWriter::write(Vec<Artifact>)` 已转为 sink compatibility wrapper；旧 dedicated bounded writer queue 已移除。
 - CLI 已支持 `--artifact-memory-limit` 与 `--artifact-memory-percent`。
 - 当前 byte budget 覆盖 `ArtifactWriteStream::write()` 过程中的 in-flight bytes；artifact 数量预算限制打开但未 finish 的 stream 数量。
-- Build 主流程已创建 shared `ArtifactSink` 并传入 exporter/codegen 分支；runtime table exporter 调用 sink 写入并只返回 metadata，codegen 短期仍生成 `String` 后立即 `sink.write_text()`，aggregate exporter trait 暂时仍返回 `Vec<Artifact>` 并由 runtime wrapper 立即写入 sink。
+- Build 主流程已创建 shared `ArtifactSink` 和 `ArtifactGenerationLimiter` 并传入 exporter/codegen 分支；runtime table exporter 通过 producer API 调用 sink 写入并只返回 metadata，codegen 短期仍生成 `String` 后在 limiter permit 内立即 `sink.write_text()`，aggregate exporter trait 暂时仍返回 `Vec<Artifact>` 并由 runtime wrapper 在 limiter permit 内立即写入 sink。
 
 未来规划：
 
-- 将 aggregate exporter、codegen trait 与 runtime table serializer 继续从 materialized `Vec<Artifact>` / `Vec<u8>` / `String` 迁移为通过 `sink.create(path)` 打开 `std::io::Write` stream 并直接写入，path 冲突在 create 时动态发现，不要求 build 预先规划所有路径。
+- 将 aggregate exporter、codegen trait 与 remaining binary serializer 继续从 materialized `Vec<Artifact>` / `Vec<u8>` / `String` 迁移为通过 `sink.create(path)` 打开 `std::io::Write` stream 并直接写入，path 冲突在 create 时动态发现，不要求 build 预先规划所有路径。
 - `TempCommit` 的最终 rename 仍集中在 `sink.finish()`，保证失败时可以清理 temp files；`Direct` 模式保留可能产生 partial output 的弱语义。
 - 对大 payload exporter 优先迁移 streaming writer；codegen 和小文件路径可暂时继续 materialized 后调用 `sink.write_text()`。
-- generation limiter 独立于 ArtifactSink coordinator，后续用于限制“正在生成但尚未写出”的大 artifact 数量，避免多个大 payload 同时 materialize 或同时占用 writer buffer。
+- generation limiter 独立于 ArtifactSink coordinator：limiter 控制“正在生成但尚未交给 sink stream 的 materialized payload”，sink byte semaphore 控制 `Write::write()` 调用期间进入 writer 的 in-flight bytes。两者共享同一个 artifact memory budget 派生值，但作用阶段不同。
 - filesystem-aware path key 仍保留为后续跨平台增强，不在当前 lexical-normalized key 基础上提前复杂化。
 
 ### Phase 12：阶段式 tracing / metrics

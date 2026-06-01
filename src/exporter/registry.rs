@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::Artifact,
+    artifact::{Artifact, ArtifactSink, ArtifactWriteStream},
     data::{DataSet, DataTable},
     exporter::TargetDataConfig,
     meta::{LinkedTableMeta, TargetTags},
@@ -49,6 +49,17 @@ pub trait DataFormatExporter: Send + Sync {
         target_tags: &TargetTags,
     ) -> Result<Vec<u8>>;
 
+    fn serialize_table_to_stream(
+        &self,
+        table_meta: &LinkedTableMeta<'_>,
+        table: &DataTable,
+        target_tags: &TargetTags,
+        stream: &mut ArtifactWriteStream,
+    ) -> Result<()> {
+        let bytes = self.serialize_table(table_meta, table, target_tags)?;
+        stream.write_all_artifact(&bytes)
+    }
+
     fn matches(&self, format: &str) -> bool {
         self.name() == format || self.aliases().contains(&format)
     }
@@ -81,6 +92,28 @@ pub trait AggregateDataExporter: Send + Sync {
         target_tags: &TargetTags,
         data_set: &DataSet,
     ) -> Result<Vec<Artifact>>;
+
+    fn export_to_sink(
+        &self,
+        out_dir: &std::path::Path,
+        task: &TargetDataConfig,
+        linked_meta: &crate::meta::LinkedMetaModel<'_>,
+        target_tags: &TargetTags,
+        data_set: &DataSet,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        for artifact in self.export(out_dir, task, linked_meta, target_tags, data_set)? {
+            match artifact.content {
+                crate::artifact::ArtifactContent::Text(content) => {
+                    sink.write_text(artifact.path, &content)?;
+                }
+                crate::artifact::ArtifactContent::Binary(content) => {
+                    sink.write_binary(artifact.path, &content)?;
+                }
+            }
+        }
+        Ok(())
+    }
 
     fn matches(&self, format: &str) -> bool {
         self.name() == format || self.aliases().contains(&format)

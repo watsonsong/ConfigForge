@@ -22,7 +22,7 @@ pub use options::{
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{ArtifactSink, ArtifactWriter},
+    artifact::{ArtifactGenerationLimiter, ArtifactSink, ArtifactWriter},
     codegen::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, GeneratedFile,
         builtin_generators,
@@ -90,6 +90,7 @@ fn build_target_inner(
     let sink = ArtifactWriter::new(options.artifact_write_mode)
         .with_limits(options.artifact_write_limits)
         .open_sink();
+    let generation_limiter = ArtifactGenerationLimiter::from_limits(options.artifact_write_limits);
 
     let dag_output = execute_target_dag(TargetDagExecutionContext {
         project_root,
@@ -100,6 +101,7 @@ fn build_target_inner(
         data_root: project.project.input.as_deref(),
         pool: &cpu_pool,
         sink: &sink,
+        generation_limiter: &generation_limiter,
         trace,
     })?;
 
@@ -135,6 +137,7 @@ struct TargetDagExecutionContext<'a, 'meta> {
     data_root: Option<&'a Path>,
     pool: &'a ThreadPool,
     sink: &'a ArtifactSink,
+    generation_limiter: &'a ArtifactGenerationLimiter,
     trace: &'a mut BuildTraceRecorder,
 }
 
@@ -244,6 +247,7 @@ fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<Targ
             generators: &generators,
             pool: context.pool,
             sink: context.sink,
+            generation_limiter: context.generation_limiter,
         })
     })?;
     let warnings = context
@@ -330,6 +334,7 @@ struct ExportPipelineContext<'a, 'meta> {
     generators: &'a [Box<dyn CodeGenerator>],
     pool: &'a ThreadPool,
     sink: &'a ArtifactSink,
+    generation_limiter: &'a ArtifactGenerationLimiter,
 }
 
 fn execute_export_pipeline<'meta>(
@@ -347,6 +352,7 @@ fn execute_export_pipeline<'meta>(
         generators,
         pool,
         sink,
+        generation_limiter,
     } = context;
     let ((linked_meta, code_output), raw_sources) = join_link_codegen_and_source_read(
         || {
@@ -359,6 +365,7 @@ fn execute_export_pipeline<'meta>(
                 generated_at,
                 generators,
                 sink,
+                generation_limiter,
             };
             let code_output =
                 execute_codegen_export_nodes(&codegen_context, codegen_exports, pool)?;
@@ -375,6 +382,7 @@ fn execute_export_pipeline<'meta>(
         target_tags,
         pool,
         sink,
+        generation_limiter,
     )?;
     Ok((runtime_output, code_output))
 }
@@ -552,6 +560,7 @@ fn execute_runtime_export_nodes(
     target_tags: &TargetTags,
     pool: &ThreadPool,
     sink: &ArtifactSink,
+    generation_limiter: &ArtifactGenerationLimiter,
 ) -> Result<DagBranchOutput> {
     let meta_and_data_tasks = export_tasks
         .iter()
@@ -564,6 +573,7 @@ fn execute_runtime_export_nodes(
         target_tags,
         pool,
         sink,
+        generation_limiter,
     )?;
     if output.task_outputs.len() != export_tasks.len() {
         return Err(ConfigForgeError::Validation(
@@ -610,7 +620,9 @@ fn execute_codegen_export_nodes(
     let mut export_outputs = Vec::new();
     for (declaration_index, result) in generated_by_task {
         for file in result? {
-            context.sink.write_text(file.path, &file.content)?;
+            context.generation_limiter.run(file.content.len(), || {
+                context.sink.write_text(file.path, &file.content)
+            })?;
         }
         export_outputs.push(TargetDagExportOutput { declaration_index });
     }
@@ -640,6 +652,7 @@ struct CodegenTaskContext<'a, 'meta> {
     generated_at: &'a str,
     generators: &'a [Box<dyn CodeGenerator>],
     sink: &'a ArtifactSink,
+    generation_limiter: &'a ArtifactGenerationLimiter,
 }
 
 fn generate_code_task(
@@ -1200,6 +1213,7 @@ mod tests {
         let target_tags = TargetTags::empty();
         let project = CodeExportProject::default();
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+        let generation_limiter = ArtifactGenerationLimiter::new(1024 * 1024, 1024);
         let mut trace = BuildTraceRecorder::new();
 
         let result = execute_target_dag(TargetDagExecutionContext {
@@ -1211,6 +1225,7 @@ mod tests {
             data_root: None,
             pool: &pool,
             sink: &sink,
+            generation_limiter: &generation_limiter,
             trace: &mut trace,
         });
 

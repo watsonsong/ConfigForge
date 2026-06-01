@@ -3,6 +3,7 @@
 
 use crate::{
     Result,
+    artifact::ArtifactWriteStream,
     data::DataTable,
     meta::{LinkedTableMeta, TargetTags},
 };
@@ -30,6 +31,18 @@ impl DataFormatExporter for JsonDataExporter {
     ) -> Result<Vec<u8>> {
         let payload = build_exported_table_payload(table_meta, table, target_tags)?;
         Ok(serde_json::to_vec_pretty(&payload)?)
+    }
+
+    fn serialize_table_to_stream(
+        &self,
+        table_meta: &LinkedTableMeta<'_>,
+        table: &DataTable,
+        target_tags: &TargetTags,
+        stream: &mut ArtifactWriteStream,
+    ) -> Result<()> {
+        let payload = build_exported_table_payload(table_meta, table, target_tags)?;
+        serde_json::to_writer_pretty(stream, &payload)?;
+        Ok(())
     }
 }
 

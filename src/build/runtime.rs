@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::ArtifactSink,
+    artifact::{ArtifactGenerationLimiter, ArtifactSink},
     data::RawSourceData,
     exporter::{DataExporterRef, DataFormatRegistry, export_runtime_data_to_sink},
     meta::{LinkedMetaModel, TargetTags},
@@ -44,6 +44,7 @@ pub(super) fn export_meta_and_data_tasks(
     target_tags: &TargetTags,
     pool: &ThreadPool,
     sink: &ArtifactSink,
+    generation_limiter: &ArtifactGenerationLimiter,
 ) -> Result<RuntimeExportOutput> {
     let registry = DataFormatRegistry::with_builtin_exporters();
     export_meta_and_data_tasks_with_registry(
@@ -53,6 +54,7 @@ pub(super) fn export_meta_and_data_tasks(
         target_tags,
         pool,
         sink,
+        generation_limiter,
         &registry,
     )
 }
@@ -64,6 +66,7 @@ fn export_meta_and_data_tasks_with_registry(
     target_tags: &TargetTags,
     pool: &ThreadPool,
     sink: &ArtifactSink,
+    generation_limiter: &ArtifactGenerationLimiter,
     registry: &DataFormatRegistry,
 ) -> Result<RuntimeExportOutput> {
     if export_tasks.is_empty() {
@@ -104,6 +107,7 @@ fn export_meta_and_data_tasks_with_registry(
                         &data_set,
                         pool,
                         sink,
+                        generation_limiter,
                         registry,
                     ),
                 )
@@ -130,6 +134,7 @@ fn export_meta_and_data_task(
     data_set: &crate::data::DataSet,
     pool: &ThreadPool,
     sink: &ArtifactSink,
+    generation_limiter: &ArtifactGenerationLimiter,
     registry: &DataFormatRegistry,
 ) -> Result<RuntimeExportTaskOutput> {
     let format_exporter = registry.require_any(&export_task.type_id)?;
@@ -143,6 +148,7 @@ fn export_meta_and_data_task(
                 exporter,
                 pool,
                 sink,
+                generation_limiter,
             )?;
             Ok(RuntimeExportTaskOutput {
                 export_name: export_task.name.clone(),
@@ -153,22 +159,16 @@ fn export_meta_and_data_task(
             })
         }
         DataExporterRef::Aggregate(exporter) => {
-            for artifact in exporter.export(
-                &export_task.output,
-                &target_data_config_from_export_task(export_task),
-                linked_meta,
-                target_tags,
-                data_set,
-            )? {
-                match artifact.content {
-                    crate::artifact::ArtifactContent::Text(content) => {
-                        sink.write_text(artifact.path, &content)?;
-                    }
-                    crate::artifact::ArtifactContent::Binary(content) => {
-                        sink.write_binary(artifact.path, &content)?;
-                    }
-                }
-            }
+            generation_limiter.run_unknown(|| {
+                exporter.export_to_sink(
+                    &export_task.output,
+                    &target_data_config_from_export_task(export_task),
+                    linked_meta,
+                    target_tags,
+                    data_set,
+                    sink,
+                )
+            })?;
             Ok(RuntimeExportTaskOutput {
                 export_name: export_task.name.clone(),
                 result: None,
@@ -347,6 +347,7 @@ mod tests {
             .build()
             .expect("pool should build");
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+        let generation_limiter = ArtifactGenerationLimiter::new(1024 * 1024, 1024);
 
         let output = export_meta_and_data_tasks_with_registry(
             Some(&raw_sources),
@@ -355,6 +356,7 @@ mod tests {
             &TargetTags::empty(),
             &pool,
             &sink,
+            &generation_limiter,
             &registry,
         )
         .expect("runtime export should succeed");
@@ -460,6 +462,7 @@ mod tests {
             .build()
             .expect("pool should build");
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+        let generation_limiter = ArtifactGenerationLimiter::new(1024 * 1024, 1024);
 
         let error = export_meta_and_data_tasks_with_registry(
             Some(&raw_sources),
@@ -468,6 +471,7 @@ mod tests {
             &TargetTags::empty(),
             &pool,
             &sink,
+            &generation_limiter,
             &registry,
         )
         .expect_err("duplicate path should fail during planning");

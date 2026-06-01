@@ -7,9 +7,12 @@ use rayon::prelude::*;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{Artifact, ArtifactSink},
+    artifact::{
+        Artifact, ArtifactGenerationLimiter, ArtifactPlan, ArtifactProducer, ArtifactSink,
+        ArtifactWriteStream,
+    },
     data::DataSet,
-    meta::{LinkedMetaModel, TargetTags},
+    meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
     runtime_contract::RuntimeDataFile,
 };
 
@@ -96,6 +99,7 @@ pub(crate) fn export_runtime_data_to_sink(
     exporter: &dyn DataFormatExporter,
     pool: &rayon::ThreadPool,
     sink: &ArtifactSink,
+    generation_limiter: &ArtifactGenerationLimiter,
 ) -> Result<Vec<RuntimeDataFile>> {
     let mut plans = Vec::new();
     for table_meta in &linked_meta.tables {
@@ -116,7 +120,7 @@ pub(crate) fn export_runtime_data_to_sink(
                 .par_iter()
                 .enumerate()
                 .map(|(index, plan)| {
-                    let result: Result<GeneratedRuntimeArtifact> = (|| {
+                    let result: Result<RuntimeDataFile> = (|| {
                         let table_meta = linked_meta.table(&plan.table_name).ok_or_else(|| {
                             ConfigForgeError::Validation(format!(
                                 "linked meta is missing table `{}`",
@@ -129,11 +133,20 @@ pub(crate) fn export_runtime_data_to_sink(
                                 plan.table_name
                             ))
                         })?;
-                        let content = exporter.serialize_table(table_meta, table, target_tags)?;
-                        Ok(GeneratedRuntimeArtifact {
-                            plan: plan.clone(),
-                            content,
-                        })
+                        let file = RuntimeDataFile {
+                            table_name: plan.table_name.clone(),
+                            path: plan.path.to_string_lossy().into_owned(),
+                            format: exporter.name().to_owned(),
+                        };
+                        let producer = RuntimeTableArtifactProducer {
+                            artifact_plan: ArtifactPlan::new(out_dir.join(&plan.path), 1),
+                            table_meta,
+                            table,
+                            target_tags,
+                            exporter,
+                        };
+                        generation_limiter.run_unknown(|| sink.write_producer(producer))?;
+                        Ok(file)
                     })();
                     (index, result)
                 })
@@ -142,15 +155,7 @@ pub(crate) fn export_runtime_data_to_sink(
         generated_results.sort_by_key(|(index, _)| *index);
 
         for (_, artifact) in generated_results {
-            let artifact = artifact?;
-            let path = out_dir.join(&artifact.plan.path);
-            let file = RuntimeDataFile {
-                table_name: artifact.plan.table_name,
-                path: artifact.plan.path.to_string_lossy().into_owned(),
-                format: exporter.name().to_owned(),
-            };
-            sink.write_binary(path, &artifact.content)?;
-            files.push(file);
+            files.push(artifact?);
         }
     }
     Ok(files)
@@ -172,6 +177,29 @@ pub struct RuntimeArtifactPlan {
 struct GeneratedRuntimeArtifact {
     plan: RuntimeArtifactPlan,
     content: Vec<u8>,
+}
+
+struct RuntimeTableArtifactProducer<'a, 'meta> {
+    artifact_plan: ArtifactPlan,
+    table_meta: &'a LinkedTableMeta<'meta>,
+    table: &'a crate::data::DataTable,
+    target_tags: &'a TargetTags,
+    exporter: &'a dyn DataFormatExporter,
+}
+
+impl ArtifactProducer for RuntimeTableArtifactProducer<'_, '_> {
+    fn plan(&self) -> &ArtifactPlan {
+        &self.artifact_plan
+    }
+
+    fn produce(self, stream: &mut ArtifactWriteStream) -> Result<()> {
+        self.exporter.serialize_table_to_stream(
+            self.table_meta,
+            self.table,
+            self.target_tags,
+            stream,
+        )
+    }
 }
 
 fn ensure_unique_runtime_artifact_paths(plans: &[RuntimeArtifactPlan]) -> Result<()> {
