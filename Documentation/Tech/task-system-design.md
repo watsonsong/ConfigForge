@@ -7,10 +7,10 @@
 - `build_target()` 使用局部 Rayon CPU worker pool 控制 `jobs`；
 - `execute_target_dag()` 维护 target-local execution view skeleton，并按 `MetaAndData` / `MetaOnly` 两个分支执行；
 - DataLoader、table normalize、target-aware validation、runtime data export task、MetaOnly codegen task 已在受限 worker pool 中并行；
-- Artifact writer 已支持 bounded queue、memory budget 与 `--artifact-memory-limit` / `--artifact-memory-percent`；
+- Artifact writer 已支持 bounded queue、memory budget 与 `--artifact-memory-limit` / `--artifact-memory-percent`，下一阶段将收敛为中心协调式 `ArtifactSink`；
 - 阶段式 build 已支持 `BuildTrace` 与 `--trace-tasks <path>` JSON metrics 输出。
 
-当前仍未实现、但保留为未来规划的方向包括：远端 provider 的正式 async runtime、multi-target build、streaming generator / generation limiter、filesystem-aware path key，以及仅在明确收益出现后再推进的通用 DAG executor。
+当前仍未实现、但保留为未来规划的方向包括：远端 provider 的正式 async runtime、multi-target build、中心协调式 ArtifactSink / generation limiter、filesystem-aware path key，以及仅在明确收益出现后再推进的通用 DAG executor。
 
 ## 1. 设计目标
 
@@ -56,7 +56,7 @@ ConfigForge 的任务可按资源类型分为三类。
 | 类型 | 示例 | 执行方式 | 资源限制 |
 | --- | --- | --- | --- |
 | Async I/O task | 远端 Sheet/API 请求、后续 async artifact write、可选 async file read | async runtime | `io_concurrency` / provider semaphore |
-| CPU/blocking task | 本地 CSV reader、TOML/CSV parse、Meta link、normalize、validation、codegen、JSON/MessagePack serialization | CPU worker pool / blocking source pool | `jobs` |
+| CPU/blocking task | 本地 CSV reader、TOML/CSV parse、Meta link、normalize、validation、codegen、JSON/MessagePack serialization、短期同步 ArtifactSink 文件写入 | CPU worker pool / blocking source pool / dedicated writer threads | `jobs` / `io_concurrency` / artifact byte budget |
 | Coordination task | 建 DAG、排序诊断、合并结果、路径冲突检查 | 当前 async task 或主线程 | 通常串行 |
 
 原则：
@@ -78,6 +78,8 @@ ConfigForge 的任务可按资源类型分为三类。
 - 网络 source provider 可复用 async HTTP client；
 - `Semaphore` 可限制同时打开文件、HTTP 请求、远端 API 请求数；
 - `JoinSet` / `FuturesUnordered` 可收集同类 I/O 任务。
+
+ArtifactSink 的短期落地不要求立刻引入 Tokio。本地文件写入可以先使用同步 `std::io::Write`、dedicated writer thread 或略高于 CPU 核心数的 blocking I/O 配置承载等待；这能先解决“artifact 内容不必全部常驻内存”和“所有写入统一经过中心协调器”的问题。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
 
 建议配置：
 
@@ -991,25 +993,29 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 
 - export-task 级 artifact planning 已并行。
 - runtime / aggregate exporter 与 MetaOnly codegen 已按 export task 并行。
-- artifact 仍按 export declaration order 稳定收集，并在写入前统一做冲突检查。
+- 当前 artifact 仍按 export declaration order 稳定收集，并在写入前统一做冲突检查；下一阶段将改为通过 `ArtifactSink::create()` 动态占用路径。
 
 未来规划：
 
 - multi-target build 若落地，再补 target declaration order 维度的稳定 merge 规则。
 
-### Phase 11：Bounded artifact write pipeline
+### Phase 11：中心协调式 ArtifactSink pipeline
 
-状态：已完成当前同步 bounded writer 方案。
+状态：已完成当前同步 bounded writer 方案；下一阶段实现中心协调式 `ArtifactSink`。
 
 当前状态：
 
 - Artifact writer 已支持 bounded queue、memory budget 和稳定的 Direct / TempCommit / DryRun 语义。
 - CLI 已支持 `--artifact-memory-limit` 与 `--artifact-memory-percent`。
 - 当前 memory budget 只覆盖 writer queue 内的 in-flight artifact bytes。
+- 当前 Build 仍收集 `Vec<Artifact>`，因此无法限制 artifact 生成阶段已经 materialized 的内容。
 
 未来规划：
 
-- 如果真实 benchmark 仍显示生成阶段内存峰值过高，再推进 streaming generator / generation limiter。
+- 引入同步 `ArtifactSink` 作为 artifact 模块唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 转为兼容 wrapper。
+- exporter/codegen 通过 `sink.create(path)` 打开 `std::io::Write` stream 并直接写入，path 冲突在 create 时动态发现，不要求 build 预先规划所有路径。
+- `TempCommit` 的最终 rename 仍集中在 `sink.finish()`，保证失败时可以清理 temp files；`Direct` 模式保留可能产生 partial output 的弱语义。
+- 对大 payload exporter 优先迁移 streaming writer；codegen 和小文件路径可暂时继续 materialized 后调用 `sink.write_text()`。
 - filesystem-aware path key 仍保留为后续跨平台增强，不在当前 lexical-normalized key 基础上提前复杂化。
 
 ### Phase 12：阶段式 tracing / metrics
@@ -1045,7 +1051,7 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 
 - multi-target build 落地时，补充多 target / 多 effective tags 不错误复用 DataSetView 的 integration。
 - 远端 provider 落地时，补充 network concurrency、retry/backoff、cancellation 和 source diagnostics 稳定排序。
-- streaming generator 落地时，补充 generation limiter 与 writer budget 的端到端内存峰值测试。
+- ArtifactSink / streaming generator 落地时，补充动态 path reservation、stream drop without finish、generation limiter 与 writer budget 的端到端内存峰值测试。
 - 通用 DAG executor 若落地，补充 readiness queue、resource wait、cancellation propagation、node-level trace 和 result merge golden。
 
 ### 11.3 性能测试规划

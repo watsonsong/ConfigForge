@@ -3,10 +3,10 @@
 
 use std::{
     collections::BTreeMap,
-    fs,
+    fs::{self, File},
+    io::{self, Write},
     path::{Component, Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, mpsc},
-    thread,
+    sync::{Arc, Condvar, Mutex},
 };
 
 use crate::{ConfigForgeError, Result};
@@ -116,21 +116,167 @@ impl ArtifactWriter {
         self
     }
 
+    pub fn open_sink(self) -> ArtifactSink {
+        ArtifactSink::new(self.mode, self.limits)
+    }
+
     pub fn write(self, artifacts: Vec<Artifact>) -> Result<ArtifactWriteResult> {
         let planned = plan_artifacts(artifacts)?;
-        let entries = planned
-            .iter()
-            .map(|artifact| ArtifactWriteEntry {
-                path: artifact.path.clone(),
-                bytes: artifact.content.len(),
-                written: self.mode != ArtifactWriteMode::DryRun,
-            })
-            .collect::<Vec<_>>();
+        let sink = self.open_sink();
+        for artifact in planned {
+            match artifact.content {
+                ArtifactContent::Text(content) => sink.write_text(artifact.path, &content)?,
+                ArtifactContent::Binary(content) => sink.write_binary(artifact.path, &content)?,
+            }
+        }
+        sink.finish()
+    }
+}
 
-        match self.mode {
-            ArtifactWriteMode::DryRun => {}
-            ArtifactWriteMode::Direct => write_direct_bounded(planned, self.limits)?,
-            ArtifactWriteMode::TempCommit => write_temp_commit_bounded(planned, self.limits)?,
+#[derive(Debug, Clone)]
+pub struct ArtifactSink {
+    mode: ArtifactWriteMode,
+    inner: Arc<ArtifactSinkInner>,
+}
+
+impl ArtifactSink {
+    fn new(mode: ArtifactWriteMode, limits: ArtifactWriteLimits) -> Self {
+        let limits = limits.normalized();
+        Self {
+            mode,
+            inner: Arc::new(ArtifactSinkInner {
+                state: Mutex::new(ArtifactSinkState::default()),
+                byte_semaphore: ByteSemaphore::new(limits.max_in_flight_bytes),
+                artifact_semaphore: ArtifactSemaphore::new(limits.max_in_flight_artifacts),
+            }),
+        }
+    }
+
+    pub fn create(&self, path: impl Into<PathBuf>) -> Result<ArtifactWriteStream> {
+        self.inner.artifact_semaphore.acquire();
+        match self.create_after_acquire(path.into()) {
+            Ok(stream) => Ok(stream),
+            Err(error) => {
+                self.inner.artifact_semaphore.release();
+                Err(error)
+            }
+        }
+    }
+
+    fn create_after_acquire(&self, path: PathBuf) -> Result<ArtifactWriteStream> {
+        let normalized_path = lexical_normalize_path(&path);
+        let (index, temp_path) = {
+            let mut state = self.inner.lock_state();
+            if state.closed {
+                return Err(ConfigForgeError::Validation(
+                    "artifact sink is already closed".to_owned(),
+                ));
+            }
+            if state.paths.contains_key(&normalized_path) {
+                return Err(ConfigForgeError::Validation(format!(
+                    "multiple artifacts target `{}`",
+                    normalized_path.display()
+                )));
+            }
+            if state.first_error.is_some() {
+                return Err(ConfigForgeError::Validation(
+                    "artifact sink is already failed".to_owned(),
+                ));
+            }
+
+            let index = state.next_index;
+            state.next_index += 1;
+            state
+                .paths
+                .insert(normalized_path.clone(), ArtifactPathState::Open);
+            let temp_path = (self.mode == ArtifactWriteMode::TempCommit)
+                .then(|| temp_path_for(&normalized_path, index));
+            (index, temp_path)
+        };
+
+        let target = match self.mode {
+            ArtifactWriteMode::DryRun => ArtifactWriteTarget::Count,
+            ArtifactWriteMode::Direct => match open_file_for_write(&normalized_path) {
+                Ok(file) => ArtifactWriteTarget::File(file),
+                Err(error) => {
+                    self.inner.mark_path_failed(&normalized_path);
+                    return Err(error);
+                }
+            },
+            ArtifactWriteMode::TempCommit => {
+                let temp_path = temp_path
+                    .clone()
+                    .expect("temp path should exist in temp-commit mode");
+                match open_file_for_write(&temp_path) {
+                    Ok(file) => ArtifactWriteTarget::File(file),
+                    Err(error) => {
+                        self.inner.mark_path_failed(&normalized_path);
+                        return Err(error);
+                    }
+                }
+            }
+        };
+
+        Ok(ArtifactWriteStream {
+            sink: self.inner.clone(),
+            mode: self.mode,
+            path: normalized_path,
+            temp_path,
+            target,
+            bytes: 0,
+            finished: false,
+            artifact_permit_held: true,
+            _index: index,
+        })
+    }
+
+    pub fn write_text(&self, path: impl Into<PathBuf>, content: impl AsRef<str>) -> Result<()> {
+        let mut stream = self.create(path)?;
+        stream.write_all_artifact(content.as_ref().as_bytes())?;
+        stream.finish().map(|_| ())
+    }
+
+    pub fn write_binary(&self, path: impl Into<PathBuf>, content: impl AsRef<[u8]>) -> Result<()> {
+        let mut stream = self.create(path)?;
+        stream.write_all_artifact(content.as_ref())?;
+        stream.finish().map(|_| ())
+    }
+
+    pub fn finish(self) -> Result<ArtifactWriteResult> {
+        let (entries, temp_files, first_error) = {
+            let mut state = self.inner.lock_state();
+            state.closed = true;
+            let open_paths = state
+                .paths
+                .iter()
+                .filter_map(|(path, status)| {
+                    (*status == ArtifactPathState::Open).then(|| path.display().to_string())
+                })
+                .collect::<Vec<_>>();
+            if !open_paths.is_empty() && state.first_error.is_none() {
+                state.first_error = Some(ConfigForgeError::Validation(format!(
+                    "artifact stream `{}` was not finished",
+                    open_paths[0]
+                )));
+            }
+            (
+                state.entries.values().cloned().collect::<Vec<_>>(),
+                state.temp_files.clone(),
+                state.first_error.take(),
+            )
+        };
+
+        if let Some(error) = first_error {
+            cleanup_temp_files(temp_files.values());
+            return Err(error);
+        }
+
+        if self.mode == ArtifactWriteMode::TempCommit {
+            let result = commit_temp_files(&temp_files);
+            if result.is_err() {
+                cleanup_temp_files(temp_files.values());
+            }
+            result?;
         }
 
         Ok(ArtifactWriteResult {
@@ -138,6 +284,184 @@ impl ArtifactWriter {
             entries,
         })
     }
+}
+
+#[derive(Debug)]
+pub struct ArtifactWriteStream {
+    sink: Arc<ArtifactSinkInner>,
+    mode: ArtifactWriteMode,
+    path: PathBuf,
+    temp_path: Option<PathBuf>,
+    target: ArtifactWriteTarget,
+    bytes: usize,
+    finished: bool,
+    artifact_permit_held: bool,
+    _index: usize,
+}
+
+impl ArtifactWriteStream {
+    pub fn write_all_artifact(&mut self, bytes: &[u8]) -> Result<()> {
+        self.write_all(bytes)
+            .map_err(|source| ConfigForgeError::WriteFile {
+                path: self.write_error_path(),
+                source,
+            })
+    }
+
+    pub fn finish(mut self) -> Result<ArtifactWriteEntry> {
+        if let ArtifactWriteTarget::File(file) = &mut self.target {
+            file.flush().map_err(|source| ConfigForgeError::WriteFile {
+                path: self.write_error_path(),
+                source,
+            })?;
+        }
+
+        let entry = ArtifactWriteEntry {
+            path: self.path.clone(),
+            bytes: self.bytes,
+            written: self.mode != ArtifactWriteMode::DryRun,
+        };
+        self.sink
+            .mark_path_finished(self.path.clone(), self.temp_path.clone(), entry.clone());
+        self.finished = true;
+        self.release_artifact_permit();
+        Ok(entry)
+    }
+
+    fn write_error_path(&self) -> PathBuf {
+        self.temp_path.clone().unwrap_or_else(|| self.path.clone())
+    }
+
+    fn release_artifact_permit(&mut self) {
+        if self.artifact_permit_held {
+            self.sink.artifact_semaphore.release();
+            self.artifact_permit_held = false;
+        }
+    }
+}
+
+impl Write for ArtifactWriteStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.sink.byte_semaphore.acquire(buf.len());
+        let result = match &mut self.target {
+            ArtifactWriteTarget::Count => Ok(buf.len()),
+            ArtifactWriteTarget::File(file) => file.write(buf),
+        };
+        self.sink.byte_semaphore.release(buf.len());
+
+        match result {
+            Ok(written) => {
+                self.bytes = self.bytes.saturating_add(written);
+                Ok(written)
+            }
+            Err(error) => {
+                self.sink.fail_path_with_message(
+                    &self.path,
+                    format!(
+                        "failed to write `{}`: {error}",
+                        self.write_error_path().display()
+                    ),
+                );
+                Err(error)
+            }
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match &mut self.target {
+            ArtifactWriteTarget::Count => Ok(()),
+            ArtifactWriteTarget::File(file) => file.flush(),
+        }
+    }
+}
+
+impl Drop for ArtifactWriteStream {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.sink.fail_path_with_message(
+                &self.path,
+                format!(
+                    "artifact stream `{}` was dropped before finish",
+                    self.path.display()
+                ),
+            );
+            if let Some(temp_path) = &self.temp_path {
+                let _ = fs::remove_file(temp_path);
+            }
+        }
+        self.release_artifact_permit();
+    }
+}
+
+#[derive(Debug)]
+enum ArtifactWriteTarget {
+    Count,
+    File(File),
+}
+
+#[derive(Debug)]
+struct ArtifactSinkInner {
+    state: Mutex<ArtifactSinkState>,
+    byte_semaphore: ByteSemaphore,
+    artifact_semaphore: ArtifactSemaphore,
+}
+
+impl ArtifactSinkInner {
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, ArtifactSinkState> {
+        self.state
+            .lock()
+            .expect("artifact sink state lock should not be poisoned")
+    }
+
+    fn mark_path_finished(
+        &self,
+        path: PathBuf,
+        temp_path: Option<PathBuf>,
+        entry: ArtifactWriteEntry,
+    ) {
+        let mut state = self.lock_state();
+        state
+            .paths
+            .insert(path.clone(), ArtifactPathState::Finished);
+        if let Some(temp_path) = temp_path {
+            state.temp_files.insert(path.clone(), temp_path);
+        }
+        state.entries.insert(path, entry);
+    }
+
+    fn mark_path_failed(&self, path: &Path) {
+        let mut state = self.lock_state();
+        state
+            .paths
+            .insert(path.to_path_buf(), ArtifactPathState::Failed);
+    }
+
+    fn fail_path_with_message(&self, path: &Path, message: String) {
+        let mut state = self.lock_state();
+        state
+            .paths
+            .insert(path.to_path_buf(), ArtifactPathState::Failed);
+        if state.first_error.is_none() {
+            state.first_error = Some(ConfigForgeError::Validation(message));
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct ArtifactSinkState {
+    next_index: usize,
+    closed: bool,
+    paths: BTreeMap<PathBuf, ArtifactPathState>,
+    entries: BTreeMap<PathBuf, ArtifactWriteEntry>,
+    temp_files: BTreeMap<PathBuf, PathBuf>,
+    first_error: Option<ConfigForgeError>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArtifactPathState {
+    Open,
+    Finished,
+    Failed,
 }
 
 impl ArtifactWriteLimits {
@@ -194,119 +518,6 @@ fn plan_artifacts(artifacts: Vec<Artifact>) -> Result<Vec<Artifact>> {
     Ok(by_path.into_values().collect())
 }
 
-fn write_direct_bounded(artifacts: Vec<Artifact>, limits: ArtifactWriteLimits) -> Result<()> {
-    write_artifacts_bounded(artifacts, limits, |artifact, _index| {
-        write_bytes(&artifact.path, artifact.content.as_bytes())?;
-        Ok(())
-    })
-    .map(|_| ())
-}
-
-fn write_temp_commit_bounded(artifacts: Vec<Artifact>, limits: ArtifactWriteLimits) -> Result<()> {
-    let temp_writes = write_artifacts_bounded(artifacts, limits, |artifact, index| {
-        let temp_path = temp_path_for(&artifact.path, index);
-        write_bytes(&temp_path, artifact.content.as_bytes())?;
-        Ok(TempCommitArtifact {
-            final_path: artifact.path,
-            temp_path,
-        })
-    })?;
-    let result = (|| -> Result<()> {
-        for temp_write in &temp_writes {
-            fs::rename(&temp_write.temp_path, &temp_write.final_path).map_err(|source| {
-                ConfigForgeError::WriteFile {
-                    path: temp_write.final_path.clone(),
-                    source,
-                }
-            })?;
-        }
-        Ok(())
-    })();
-
-    if result.is_err() {
-        for temp_write in temp_writes {
-            let _ = fs::remove_file(temp_write.temp_path);
-        }
-    }
-
-    result
-}
-
-#[derive(Debug)]
-struct TempCommitArtifact {
-    final_path: PathBuf,
-    temp_path: PathBuf,
-}
-
-fn write_artifacts_bounded<WriteFn, WriteResult>(
-    artifacts: Vec<Artifact>,
-    limits: ArtifactWriteLimits,
-    mut write_artifact: WriteFn,
-) -> Result<Vec<WriteResult>>
-where
-    WriteFn: FnMut(Artifact, usize) -> Result<WriteResult> + Send + 'static,
-    WriteResult: Send + 'static,
-{
-    let limits = limits.normalized();
-    let byte_semaphore = Arc::new(ByteSemaphore::new(limits.max_in_flight_bytes));
-    let (sender, receiver) = mpsc::sync_channel::<QueuedArtifact>(limits.max_in_flight_artifacts);
-    let worker_semaphore = byte_semaphore.clone();
-    let worker = thread::spawn(move || {
-        let mut first_error = None;
-        let mut write_results = BTreeMap::<usize, WriteResult>::new();
-        for queued in receiver {
-            let QueuedArtifact {
-                index,
-                bytes,
-                artifact,
-            } = queued;
-            if first_error.is_none() {
-                match write_artifact(artifact, index) {
-                    Ok(write_result) => {
-                        write_results.insert(index, write_result);
-                    }
-                    Err(error) => {
-                        first_error = Some(error);
-                    }
-                }
-            }
-            worker_semaphore.release(bytes);
-        }
-        if let Some(error) = first_error {
-            Err(error)
-        } else {
-            Ok(write_results.into_values().collect::<Vec<_>>())
-        }
-    });
-
-    for (index, artifact) in artifacts.into_iter().enumerate() {
-        let bytes = artifact.content.len();
-        byte_semaphore.acquire(bytes);
-        if sender
-            .send(QueuedArtifact {
-                index,
-                bytes,
-                artifact,
-            })
-            .is_err()
-        {
-            byte_semaphore.release(bytes);
-            break;
-        }
-    }
-    drop(sender);
-
-    worker
-        .join()
-        .map_err(|_| ConfigForgeError::Validation("artifact writer worker panicked".to_owned()))?
-}
-
-struct QueuedArtifact {
-    index: usize,
-    bytes: usize,
-    artifact: Artifact,
-}
-
 #[derive(Debug)]
 struct ByteSemaphore {
     capacity: usize,
@@ -351,17 +562,79 @@ impl ByteSemaphore {
         self.capacity_available.notify_all();
     }
 }
-fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+
+#[derive(Debug)]
+struct ArtifactSemaphore {
+    capacity: usize,
+    state: Mutex<ArtifactSemaphoreState>,
+    capacity_available: Condvar,
+}
+
+#[derive(Debug)]
+struct ArtifactSemaphoreState {
+    in_flight: usize,
+}
+
+impl ArtifactSemaphore {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            state: Mutex::new(ArtifactSemaphoreState { in_flight: 0 }),
+            capacity_available: Condvar::new(),
+        }
+    }
+
+    fn acquire(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("artifact semaphore lock should not be poisoned");
+        while state.in_flight >= self.capacity {
+            state = self
+                .capacity_available
+                .wait(state)
+                .expect("artifact semaphore lock should not be poisoned");
+        }
+        state.in_flight += 1;
+    }
+
+    fn release(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("artifact semaphore lock should not be poisoned");
+        state.in_flight = state.in_flight.saturating_sub(1);
+        self.capacity_available.notify_all();
+    }
+}
+
+fn open_file_for_write(path: &Path) -> Result<File> {
     if let Some(parent) = parent_dir_to_create(path) {
         fs::create_dir_all(parent).map_err(|source| ConfigForgeError::WriteFile {
             path: parent.to_path_buf(),
             source,
         })?;
     }
-    fs::write(path, bytes).map_err(|source| ConfigForgeError::WriteFile {
+    File::create(path).map_err(|source| ConfigForgeError::WriteFile {
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn commit_temp_files(temp_files: &BTreeMap<PathBuf, PathBuf>) -> Result<()> {
+    for (final_path, temp_path) in temp_files {
+        fs::rename(temp_path, final_path).map_err(|source| ConfigForgeError::WriteFile {
+            path: final_path.clone(),
+            source,
+        })?;
+    }
+    Ok(())
+}
+
+fn cleanup_temp_files<'a>(temp_files: impl IntoIterator<Item = &'a PathBuf>) {
+    for temp_path in temp_files {
+        let _ = fs::remove_file(temp_path);
+    }
 }
 
 fn parent_dir_to_create(path: &Path) -> Option<&Path> {
@@ -408,7 +681,7 @@ fn lexical_normalize_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, sync::Mutex};
+    use std::{env, io::Write as _, sync::Mutex};
 
     use super::*;
 
@@ -493,6 +766,138 @@ mod tests {
             fs::read_to_string(path).expect("written artifact"),
             "pub struct Generated;"
         );
+    }
+
+    #[test]
+    fn sink_direct_stream_writes_content_and_entries() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let first = temp_dir.path().join("out/b.txt");
+        let second = temp_dir.path().join("out/a.txt");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+
+        let mut stream = sink.create(&first).expect("create first stream");
+        stream.write_all(b"b").expect("write first");
+        let first_entry = stream.finish().expect("finish first");
+        assert_eq!(first_entry.bytes, 1);
+        sink.write_text(&second, "aa").expect("write second");
+
+        let result = sink.finish().expect("finish sink");
+
+        assert_eq!(result.mode, ArtifactWriteMode::Direct);
+        assert_eq!(result.entries[0].path, second);
+        assert_eq!(result.entries[0].bytes, 2);
+        assert_eq!(result.entries[1].path, first);
+        assert_eq!(fs::read_to_string(first).expect("first artifact"), "b");
+        assert_eq!(fs::read_to_string(second).expect("second artifact"), "aa");
+    }
+
+    #[test]
+    fn sink_dry_run_counts_stream_bytes_without_writing() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("out/generated.rs");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+
+        let mut stream = sink.create(&path).expect("create dry-run stream");
+        stream.write_all(b"abc").expect("write dry-run stream");
+        stream.write_all(b"de").expect("write dry-run stream");
+        stream.finish().expect("finish dry-run stream");
+        let result = sink.finish().expect("finish sink");
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].path, path);
+        assert_eq!(result.entries[0].bytes, 5);
+        assert!(!result.entries[0].written);
+        assert!(!temp_dir.path().join("out").exists());
+    }
+
+    #[test]
+    fn sink_rejects_duplicate_path_when_stream_is_open() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let first = temp_dir.path().join("out/data/items.json");
+        let duplicate = temp_dir.path().join("out/data/./nested/../items.json");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+
+        let stream = sink.create(&first).expect("create first stream");
+        let error = sink.create(&duplicate).unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
+        );
+        stream.finish().expect("finish first stream");
+        sink.finish().expect("finish sink");
+    }
+
+    #[test]
+    fn sink_temp_commit_defers_visibility_until_finish() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("out/generated.rs");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::TempCommit).open_sink();
+
+        let mut stream = sink.create(&path).expect("create temp stream");
+        stream
+            .write_all(b"pub struct Generated;")
+            .expect("write temp");
+        stream.finish().expect("finish temp stream");
+        assert!(!path.exists());
+
+        let result = sink.finish().expect("finish temp sink");
+
+        assert_eq!(result.entries[0].path, path);
+        assert_eq!(
+            fs::read_to_string(path).expect("written artifact"),
+            "pub struct Generated;"
+        );
+    }
+
+    #[test]
+    fn sink_temp_commit_fails_when_stream_is_dropped_without_finish() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("out/generated.rs");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::TempCommit).open_sink();
+
+        {
+            let mut stream = sink.create(&path).expect("create temp stream");
+            stream.write_all(b"partial").expect("write temp stream");
+        }
+
+        let error = sink.finish().unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("dropped before finish"))
+        );
+        assert!(!path.exists());
+        let out_dir = temp_dir.path().join("out");
+        let temp_files = fs::read_dir(out_dir)
+            .expect("out dir")
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .expect("read temp dir");
+        assert!(temp_files.is_empty());
+    }
+
+    #[test]
+    fn writer_vec_api_uses_sink_and_matches_manual_sink_result() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let writer_path = temp_dir.path().join("writer/out.txt");
+        let sink_path = temp_dir.path().join("sink/out.txt");
+
+        let writer_result = ArtifactWriter::new(ArtifactWriteMode::Direct)
+            .write(vec![Artifact::text(&writer_path, "same")])
+            .expect("writer api");
+
+        let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+        sink.write_text(&sink_path, "same").expect("sink write");
+        let sink_result = sink.finish().expect("sink finish");
+
+        assert_eq!(writer_result.entries[0].bytes, sink_result.entries[0].bytes);
+        assert_eq!(
+            writer_result.entries[0].written,
+            sink_result.entries[0].written
+        );
+        assert_eq!(
+            fs::read_to_string(writer_path).expect("writer file"),
+            "same"
+        );
+        assert_eq!(fs::read_to_string(sink_path).expect("sink file"), "same");
     }
 
     #[test]
