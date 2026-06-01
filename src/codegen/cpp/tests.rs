@@ -5,7 +5,8 @@ use crate::{
     codegen::{
         CodeExportInput, CodeGenerator, GeneratedFile,
         tests::{
-            assert_duplicate_generated_identifier, input_for, linked_fixture, source_order_fixture,
+            assert_duplicate_generated_identifier, indexed_source_order_fixture, input_for,
+            linked_fixture, source_order_fixture,
         },
     },
     meta::{MetaModel, TargetTags},
@@ -101,6 +102,38 @@ fn source_order_apis_are_opt_in() {
     assert!(content.contains("std::size_t Size() const { return rows_.size(); }"));
     assert!(content.contains("const std::vector<CharacterSurnamesRow>& Rows() const"));
     assert!(content.contains("const CharacterSurnamesRow* RowAt(std::size_t row_index) const"));
+}
+
+#[test]
+fn indexed_source_order_table_emits_indexes_and_ordinal_apis() {
+    let meta = indexed_source_order_fixture();
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = CppCodeGenerator.generate(&input).expect("cpp code");
+    let header = generated_content(&files, "generated.hpp");
+    let source = generated_content(&files, "generated.cpp");
+
+    assert!(header.contains("std::size_t Size() const { return rows_.size(); }"));
+    assert!(header.contains("const std::vector<ItemsRow>& Rows() const"));
+    assert!(header.contains("const ItemsRow* RowAt(std::size_t row_index) const"));
+    assert!(header.contains("const ItemsRow* GetById(std::int64_t id) const"));
+    assert!(header.contains("std::vector<const ItemsRow*> FindByRarity(std::string rarity) const"));
+    assert!(source.contains("const ItemsRow* ItemsTable::GetById(std::int64_t id) const"));
+    assert!(source.contains(
+        "std::vector<const ItemsRow*> ItemsTable::FindByRarity(std::string rarity) const"
+    ));
+}
+
+#[test]
+fn rejects_source_order_method_collisions() {
+    let meta = source_order_index_conflict_fixture("rows");
+
+    assert_duplicate_generated_identifier(
+        CppCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+        LANGUAGE,
+        "duplicate generated identifier `rows_`",
+        "table `items` private members",
+    );
 }
 
 #[test]
@@ -413,6 +446,27 @@ fn optional_field_fixture() -> MetaModel {
             primary = true
         "#,
     )
+    .expect("meta should load")
+}
+
+fn source_order_index_conflict_fixture(index_name: &str) -> MetaModel {
+    MetaModel::from_toml_str(&format!(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            preserve_source_order = true
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "{index_name}"
+            fields = ["id"]
+            unique = true
+        "#
+    ))
     .expect("meta should load")
 }
 

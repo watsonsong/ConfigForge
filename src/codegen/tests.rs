@@ -108,6 +108,40 @@ pub(in crate::codegen) fn source_order_fixture() -> MetaModel {
     .expect("source-order fixture meta should parse")
 }
 
+pub(in crate::codegen) fn indexed_source_order_fixture() -> MetaModel {
+    MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+            preserve_source_order = true
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "rarity"
+            type = "string"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables.indexes]]
+            name = "by_rarity"
+            fields = ["rarity"]
+            unique = false
+        "#,
+    )
+    .expect("indexed source-order fixture meta should parse")
+}
+
 #[test]
 fn builtin_generators_report_meta_only_dependency_contracts() {
     for generator in builtin_generators() {

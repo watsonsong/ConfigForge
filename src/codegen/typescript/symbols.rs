@@ -58,6 +58,22 @@ pub(super) fn validate_generated_symbols(
                 format!("{}_table", table.name),
                 names.repository_type_name(&table.name)?,
             ));
+            type_symbols.push(GeneratedSymbol::new(
+                "row helper",
+                format!("{}_row_at_helper", table.name),
+                format!("__{}RowAt", names.repository_type_name(&table.name)?),
+            ));
+            for index in table.indexes.iter().filter(|index| index.unique) {
+                type_symbols.push(GeneratedSymbol::new(
+                    "index helper",
+                    format!("{}_{}_index_helper", table.name, index.name),
+                    format!(
+                        "__{}{}",
+                        names.repository_type_name(&table.name)?,
+                        names.index_of_function_name(index)?
+                    ),
+                ));
+            }
         }
         for fragment in &table.fragments {
             if matches!(fragment.payload, CodeFragmentPayload::InlineFields) {

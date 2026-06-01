@@ -1048,6 +1048,120 @@ fn cli_extra_tag_enables_s1_material_override_source() {
 }
 
 #[test]
+fn source_order_ordinals_follow_target_visible_rows() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_dir = temp_dir.path().join("data");
+    let client_out_dir = temp_dir.path().join("out/client_data");
+    let server_out_dir = temp_dir.path().join("out/server_data");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::create_dir_all(&data_dir).expect("data dir should be created");
+    fs::write(
+        data_dir.join("names.csv"),
+        "id,value,required_tags,excluded_tags\n1,Always,,\n2,ClientOnly,client,\n3,ServerOnly,server,\n4,Hidden,qa,\n",
+    )
+    .expect("source-order data should be written");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                [project]
+                input = "{}"
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [[targets.exports]]
+                output = "{}"
+                type = "json"
+
+                [[targets]]
+                name = "server"
+                tags = ["server"]
+
+                [[targets.exports]]
+                output = "{}"
+                type = "json"
+
+                [[tables]]
+                name = "names"
+                source = "names.csv"
+                preserve_source_order = true
+                row_export = {{ required_tags_field = "required_tags", excluded_tags_field = "excluded_tags" }}
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.fields]]
+                name = "value"
+                type = "string"
+
+                [[tables.fields]]
+                name = "required_tags"
+                type = "string"
+                export = false
+
+                [[tables.fields]]
+                name = "excluded_tags"
+                type = "string"
+                export = false
+            "#,
+            data_dir.display(),
+            client_out_dir.display(),
+            server_out_dir.display(),
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut client_cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    client_cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client",
+    ]);
+    client_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target `client` built"));
+
+    let mut server_cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    server_cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "server",
+    ]);
+    server_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target `server` built"));
+
+    let client_json =
+        fs::read_to_string(client_out_dir.join("names.json")).expect("client names json");
+    let client_names: serde_json::Value =
+        serde_json::from_str(&client_json).expect("client names json should parse");
+    assert_eq!(
+        client_names["rows"].as_array().expect("client rows").len(),
+        2
+    );
+    assert_eq!(client_names["rows"][0]["value"], "Always");
+    assert_eq!(client_names["rows"][1]["value"], "ClientOnly");
+
+    let server_json =
+        fs::read_to_string(server_out_dir.join("names.json")).expect("server names json");
+    let server_names: serde_json::Value =
+        serde_json::from_str(&server_json).expect("server names json should parse");
+    assert_eq!(
+        server_names["rows"].as_array().expect("server rows").len(),
+        2
+    );
+    assert_eq!(server_names["rows"][0]["value"], "Always");
+    assert_eq!(server_names["rows"][1]["value"], "ServerOnly");
+}
+
+#[test]
 fn standard_project_generated_code_loads_exported_runtime_data() {
     let project_path = std::env::current_dir()
         .expect("current dir")

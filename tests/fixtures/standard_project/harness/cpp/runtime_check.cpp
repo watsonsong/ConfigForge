@@ -144,6 +144,10 @@ int main() {
     if (data.CharacterSurnames().Size() != 4 || data.CharacterSurnames().RowAt(0)->value != "Stone") {
         throw std::runtime_error("source-order surname table failed");
     }
+    const cfg::CharacterSurnamesRow* surname = data.CharacterSurnames().GetByValue("Frost");
+    if (surname == nullptr || surname->value != "Frost") {
+        throw std::runtime_error("indexed source-order surname table failed");
+    }
     if (data.CharacterMaleGivenNames().Rows()[1].value != "Borin" || data.CharacterFemaleGivenNames().Rows()[2].value != "Celeste") {
         throw std::runtime_error("source-order given name table failed");
     }

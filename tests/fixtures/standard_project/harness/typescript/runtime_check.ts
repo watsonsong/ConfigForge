@@ -118,6 +118,9 @@ async function main(): Promise<void> {
     if (binaryData.characterSurnames.length !== 4 || binaryData.characterSurnames.rowAt(0)?.value !== "Stone") {
       throw new Error("binary source-order surname table failed");
     }
+    if (binaryData.characterSurnames.getByValue("Frost")?.value !== "Frost") {
+      throw new Error("binary indexed source-order surname table failed");
+    }
     if (binaryData.characterMaleGivenNames.rows()[1]?.value !== "Borin" || binaryData.characterFemaleGivenNames.rows()[2]?.value !== "Celeste") {
       throw new Error("binary source-order given name table failed");
     }
@@ -187,6 +190,9 @@ async function main(): Promise<void> {
   }
   if (data.characterSurnames.length !== 4 || data.characterSurnames.rowAt(0)?.value !== "Stone") {
     throw new Error("source-order surname table failed");
+  }
+  if (data.characterSurnames.getByValue("Frost")?.value !== "Frost") {
+    throw new Error("indexed source-order surname table failed");
   }
   if (data.characterMaleGivenNames.rows()[1]?.value !== "Borin" || data.characterFemaleGivenNames.rows()[2]?.value !== "Celeste") {
     throw new Error("source-order given name table failed");

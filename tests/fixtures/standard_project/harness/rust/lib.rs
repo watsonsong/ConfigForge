@@ -149,6 +149,13 @@ fn assert_standard_data(data: &GameData) {
 
     assert_eq!(data.character_surnames.len(), 4);
     assert_eq!(data.character_surnames.row_at(0).unwrap().value, "Stone");
+    assert_eq!(
+        data.character_surnames
+            .get_by_value("Frost".to_owned())
+            .unwrap()
+            .value,
+        "Frost"
+    );
     assert_eq!(data.character_male_given_names.rows()[1].value, "Borin");
     assert_eq!(
         data.character_female_given_names.rows()[2].value,

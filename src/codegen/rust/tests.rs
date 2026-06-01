@@ -5,7 +5,8 @@ use crate::{
     codegen::{
         CaseStyle, CodeExportInput, CodeGenerator,
         tests::{
-            assert_duplicate_generated_identifier, input_for, linked_fixture, source_order_fixture,
+            assert_duplicate_generated_identifier, indexed_source_order_fixture, input_for,
+            linked_fixture, source_order_fixture,
         },
     },
     meta::{MetaModel, TargetTags},
@@ -76,6 +77,46 @@ fn source_order_apis_are_opt_in() {
     assert!(content.contains("pub fn rows(&self) -> &[CharacterSurnamesRow]"));
     assert!(
         content.contains("pub fn row_at(&self, row_index: usize) -> Option<&CharacterSurnamesRow>")
+    );
+}
+
+#[test]
+fn indexed_source_order_table_emits_indexes_and_ordinal_apis() {
+    let meta = indexed_source_order_fixture();
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = RustCodeGenerator.generate(&input).expect("rust code");
+    let content = &files[0].content;
+
+    assert!(content.contains("pub fn len(&self) -> usize { self.rows.len() }"));
+    assert!(content.contains("pub fn is_empty(&self) -> bool { self.rows.is_empty() }"));
+    assert!(content.contains("pub fn rows(&self) -> &[ItemsRow]"));
+    assert!(content.contains("pub fn row_at(&self, row_index: usize) -> Option<&ItemsRow>"));
+    assert!(content.contains("pub fn get_by_id(&self, id: i64) -> Option<&ItemsRow>"));
+    assert!(content.contains("pub fn find_by_rarity(&self, rarity: String) -> Vec<&ItemsRow>"));
+}
+
+#[test]
+fn rejects_source_order_index_collisions() {
+    let meta = source_order_index_conflict_fixture("rows");
+
+    assert_duplicate_generated_identifier(
+        RustCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+        LANGUAGE,
+        "duplicate generated identifier `rows`",
+        "table `items` repository fields",
+    );
+}
+
+#[test]
+fn rejects_source_order_relation_and_helper_collisions() {
+    let meta = source_order_relation_conflict_fixture("rows_link", "rows");
+
+    assert_duplicate_generated_identifier(
+        RustCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+        LANGUAGE,
+        "duplicate generated identifier `rows_link`",
+        "table `items` row fields",
     );
 }
 
@@ -348,6 +389,56 @@ fn object_table_fixture() -> MetaModel {
             type = "int"
         "#,
     )
+    .expect("meta should load")
+}
+
+fn source_order_index_conflict_fixture(index_name: &str) -> MetaModel {
+    MetaModel::from_toml_str(&format!(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            preserve_source_order = true
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.indexes]]
+            name = "{index_name}"
+            fields = ["id"]
+            unique = true
+        "#
+    ))
+    .expect("meta should load")
+}
+
+fn source_order_relation_conflict_fixture(field_name: &str, linked_field_name: &str) -> MetaModel {
+    MetaModel::from_toml_str(&format!(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            preserve_source_order = true
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "{field_name}"
+            type = "int"
+            foreign_key = {{ name = "item", target_table = "items", linked_field = "{linked_field_name}" }}
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+        "#
+    ))
     .expect("meta should load")
 }
 

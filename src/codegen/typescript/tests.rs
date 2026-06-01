@@ -5,7 +5,8 @@ use crate::{
     codegen::{
         CodeExportInput, CodeGenerator,
         tests::{
-            assert_duplicate_generated_identifier, input_for, linked_fixture, source_order_fixture,
+            assert_duplicate_generated_identifier, indexed_source_order_fixture, input_for,
+            linked_fixture, source_order_fixture,
         },
     },
     meta::{MetaModel, TargetTags},
@@ -95,6 +96,41 @@ fn source_order_apis_are_opt_in() {
     assert!(content.contains("get length(): number { return this.rows_.length; }"));
     assert!(content.contains("rows(): readonly CharacterSurnamesRow[]"));
     assert!(content.contains("rowAt(rowIndex: number): CharacterSurnamesRow | undefined"));
+}
+
+#[test]
+fn indexed_source_order_table_emits_indexes_and_ordinal_apis() {
+    let meta = indexed_source_order_fixture();
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = TypeScriptCodeGenerator
+        .generate(&input)
+        .expect("typescript code");
+    let content = &files[0].content;
+
+    assert!(content.contains("get length(): number { return this.rows_.length; }"));
+    assert!(content.contains("rows(): readonly ItemsRow[]"));
+    assert!(content.contains("rowAt(rowIndex: number): ItemsRow | undefined"));
+    assert!(content.contains("getById(id: number): ItemsRow | undefined"));
+    assert!(content.contains("findByRarity(rarity: string): readonly ItemsRow[]"));
+}
+
+#[test]
+fn rejects_source_order_member_collisions() {
+    for (field_name, linked_field_name, identifier) in [
+        ("Rows", "rows", "rows"),
+        ("row_at", "row-at", "rowAt"),
+        ("Length", "length", "length"),
+    ] {
+        let meta = source_order_relation_conflict_fixture(field_name, linked_field_name);
+
+        assert_duplicate_generated_identifier(
+            TypeScriptCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+            LANGUAGE,
+            &format!("duplicate generated identifier `{identifier}`"),
+            "table `items` row fields",
+        );
+    }
 }
 
 #[test]
@@ -497,6 +533,35 @@ fn optional_field_fixture() -> MetaModel {
             primary = true
         "#,
     )
+    .expect("meta should load")
+}
+
+fn source_order_relation_conflict_fixture(field_name: &str, linked_field_name: &str) -> MetaModel {
+    MetaModel::from_toml_str(&format!(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            preserve_source_order = true
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "{field_name}"
+            type = "int"
+            foreign_key = {{ name = "item", target_table = "items", linked_field = "{linked_field_name}" }}
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+        "#
+    ))
     .expect("meta should load")
 }
 

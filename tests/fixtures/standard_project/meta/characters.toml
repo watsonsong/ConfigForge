@@ -74,14 +74,21 @@ target_index = "by_id"
 [[tables]]
 name = "character_surnames"
 kind = "collection"
+primary_index = "by_value"
 source = "character_surnames.csv"
 preserve_source_order = true
-desc = "随机角色姓氏池。没有业务索引，运行时代码按表格顺序暴露稳定序号访问。"
+desc = "随机角色姓氏池。运行时代码同时暴露值索引与稳定序号访问。"
 
 [[tables.fields]]
 name = "value"
 type = "string"
 required = true
+
+[[tables.indexes]]
+name = "by_value"
+fields = ["value"]
+unique = true
+primary = true
 
 [[tables]]
 name = "character_male_given_names"
