@@ -173,10 +173,11 @@ impl ArtifactSink {
                 ));
             }
             if state.paths.contains_key(&normalized_path) {
-                return Err(ConfigForgeError::Validation(format!(
-                    "multiple artifacts target `{}`",
-                    normalized_path.display()
-                )));
+                let message = format!("multiple artifacts target `{}`", normalized_path.display());
+                if state.first_error.is_none() {
+                    state.first_error = Some(ConfigForgeError::Validation(message.clone()));
+                }
+                return Err(ConfigForgeError::Validation(message));
             }
             if state.first_error.is_some() {
                 return Err(ConfigForgeError::Validation(
@@ -199,7 +200,10 @@ impl ArtifactSink {
             ArtifactWriteMode::Direct => match open_file_for_write(&normalized_path) {
                 Ok(file) => ArtifactWriteTarget::File(file),
                 Err(error) => {
-                    self.inner.mark_path_failed(&normalized_path);
+                    self.inner.record_path_error(
+                        &normalized_path,
+                        format!("failed to open artifact `{}`", normalized_path.display()),
+                    );
                     return Err(error);
                 }
             },
@@ -210,7 +214,10 @@ impl ArtifactSink {
                 match open_file_for_write(&temp_path) {
                     Ok(file) => ArtifactWriteTarget::File(file),
                     Err(error) => {
-                        self.inner.mark_path_failed(&normalized_path);
+                        self.inner.record_path_error(
+                            &normalized_path,
+                            format!("failed to open artifact `{}`", temp_path.display()),
+                        );
                         return Err(error);
                     }
                 }
@@ -257,6 +264,19 @@ impl ArtifactSink {
                 state.first_error = Some(ConfigForgeError::Validation(format!(
                     "artifact stream `{}` was not finished",
                     open_paths[0]
+                )));
+            }
+            let failed_paths = state
+                .paths
+                .iter()
+                .filter_map(|(path, status)| {
+                    (*status == ArtifactPathState::Failed).then(|| path.display().to_string())
+                })
+                .collect::<Vec<_>>();
+            if !failed_paths.is_empty() && state.first_error.is_none() {
+                state.first_error = Some(ConfigForgeError::Validation(format!(
+                    "artifact `{}` failed before finish",
+                    failed_paths[0]
                 )));
             }
             (
@@ -429,11 +449,14 @@ impl ArtifactSinkInner {
         state.entries.insert(path, entry);
     }
 
-    fn mark_path_failed(&self, path: &Path) {
+    fn record_path_error(&self, path: &Path, message: String) {
         let mut state = self.lock_state();
         state
             .paths
             .insert(path.to_path_buf(), ArtifactPathState::Failed);
+        if state.first_error.is_none() {
+            state.first_error = Some(ConfigForgeError::Validation(message));
+        }
     }
 
     fn fail_path_with_message(&self, path: &Path, message: String) {
@@ -824,7 +847,45 @@ mod tests {
             matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
         );
         stream.finish().expect("finish first stream");
-        sink.finish().expect("finish sink");
+        let error = sink.finish().unwrap_err();
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
+        );
+    }
+
+    #[test]
+    fn sink_finish_fails_after_ignored_duplicate_create_error() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("out/data/items.json");
+        let duplicate = temp_dir.path().join("out/data/./items.json");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+
+        let stream = sink.create(&path).expect("create first stream");
+        let _ignored = sink.create(&duplicate).unwrap_err();
+        stream.finish().expect("finish first stream");
+
+        let error = sink.finish().unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
+        );
+    }
+
+    #[test]
+    fn sink_finish_fails_after_ignored_open_file_error() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let blocked_parent = temp_dir.path().join("out-as-file");
+        fs::write(&blocked_parent, "not a directory").expect("blocked parent file");
+        let path = blocked_parent.join("generated.rs");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+
+        let _ignored = sink.create(&path).unwrap_err();
+
+        let error = sink.finish().unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("failed to open artifact"))
+        );
     }
 
     #[test]

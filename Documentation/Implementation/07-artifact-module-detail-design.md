@@ -95,7 +95,7 @@ pub struct ArtifactWriteResult {
 
 ### 7.3.5 `ArtifactSink`
 
-后续 streaming 化的主入口是中心协调器 `ArtifactSink`，而不是让 exporter / codegen 自行持有文件句柄或绕过 artifact 模块写文件：
+streaming 化的主入口是中心协调器 `ArtifactSink`，而不是让 exporter / codegen 自行持有文件句柄或绕过 artifact 模块写文件：
 
 ```rust
 pub struct ArtifactSink { /* private */ }
@@ -195,9 +195,9 @@ runtime table exporter、aggregate exporter 和 codegen 可以并行生成 artif
 
 #### Pipeline 模型
 
-当前实现仍是 `ArtifactWriter::write(Vec<Artifact>)` 的 bounded writer queue。目标实现应把它收敛为 `ArtifactSink` 的兼容调用：`write(Vec<Artifact>)` 只负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。这样旧 API、单元测试和小型 codegen 仍可保留，但正式写入路径只有中心协调器一套。
+当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。旧的 dedicated bounded writer queue 已移除；byte / artifact 限流现在由 `ArtifactWriteStream` 与 sink 内部 semaphore 承担。Build / exporter / codegen 目前仍主要走 `Vec<Artifact>` 兼容路径，因此 artifact 生成阶段仍会 materialize 每个文件内容。
 
-当前 API：
+已实现 API：
 
 ```rust
 pub struct ArtifactWriteLimits {
@@ -207,19 +207,6 @@ pub struct ArtifactWriteLimits {
 
 impl ArtifactWriter {
     pub fn with_limits(self, limits: ArtifactWriteLimits) -> Self;
-}
-```
-
-目标 API：
-
-```rust
-pub struct ArtifactWriteLimits {
-    pub max_in_flight_bytes: usize,
-    pub max_in_flight_artifacts: usize,
-    pub writer_threads: usize,
-}
-
-impl ArtifactWriter {
     pub fn open_sink(self) -> ArtifactSink;
     pub fn write(self, artifacts: Vec<Artifact>) -> Result<ArtifactWriteResult>; // compatibility wrapper
 }
@@ -292,6 +279,7 @@ Build / exporters / codegen
 - `Direct`：`ArtifactSink::create()` 创建父目录并打开最终路径文件；`write()` 同步写入最终文件并按 chunk 参与 byte budget。Direct 模式失败时可能已经留下部分最终文件，这是该模式的既有弱语义；需要“全部成功后再可见”时应使用 `TempCommit`。
 - `TempCommit`：`ArtifactSink::create()` 创建同目录 temp file，stream 写入 temp file；所有 stream 都 `finish()` 且无错误后，`ArtifactSink::finish()` 按 normalized final path 稳定顺序 rename。commit 阶段不再持有 artifact content bytes，因此内存峰值只与打开 stream 的 buffer / temp file writer 有关。
 - `TempCommit` 清理：任一 stream 写 temp 阶段失败时，`ArtifactSink::finish()` 清理已创建 temp files；commit 阶段失败时沿用当前语义，可能已有部分最终文件被 rename 成功，但错误路径必须稳定。
+- `create()` 失败持久化：duplicate path、final/temp file open 失败都会记录 `first_error`；即使调用方忽略 `create()` 返回的错误，后续 `ArtifactSink::finish()` 仍必须失败。若存在 `Failed` path 但没有 `first_error`，`finish()` 会返回 fallback validation error。
 
 #### Stream 生命周期与并发安全
 
@@ -410,6 +398,7 @@ Artifact 模块单元测试应覆盖：
 6. temp-commit 模式先写临时文件再提交最终路径，写临时文件失败时清理临时文件。
 7. stream drop without finish 会让 sink finish 失败，并清理 temp file。
 8. `ArtifactWriter::write(Vec<Artifact>)` 与手动 sink 写入产生相同 `ArtifactWriteResult` 和文件内容。
+9. `create()` duplicate / open file 失败即使被调用方忽略，`finish()` 仍失败。
 
 集成测试应覆盖：
 
@@ -422,16 +411,15 @@ Artifact 模块单元测试应覆盖：
 
 当前状态：
 
-- `src/artifact/` 已提供 `Artifact`、`ArtifactContent`、`ArtifactWriter`、`ArtifactWriteMode`、`ArtifactWriteLimits` 和 `ArtifactWriteResult`。
-- runtime data 与 generated code 都以 artifact 形态进入统一 writer。
-- Artifact Writer 负责 final path normalization、稳定排序、path conflict check、dry-run、direct write、temp-commit 和 bounded writer queue。
+- `src/artifact/` 已提供 `Artifact`、`ArtifactContent`、`ArtifactWriter`、`ArtifactSink`、`ArtifactWriteStream`、`ArtifactWriteMode`、`ArtifactWriteLimits` 和 `ArtifactWriteResult`。
+- Artifact 模块内的写入 authority 已收敛到 `ArtifactSink`；`ArtifactWriter::write(Vec<Artifact>)` 是兼容 wrapper，并通过 sink 写入。
+- 旧 dedicated bounded queue 已被 sink wrapper 替代；当前 byte budget 通过 `ArtifactWriteStream` 写入时的 byte semaphore 生效，artifact 数量预算通过 sink 的 artifact semaphore 生效。
+- runtime data 与 generated code 在 Build 主流程中仍以 `Vec<Artifact>` 形态进入兼容入口，尚未端到端迁移为 exporter/codegen 直接拿 sink stream 写入。
 - CLI 支持 `--dry-run`、`--write-mode direct|temp-commit`、`--artifact-memory-limit`、`--artifact-memory-percent`。
 - temp-commit 当前提供临时文件阶段保护；提交阶段失败按 `ConfigForgeError::WriteFile` 报错，并可能保留已提交的最终文件。
 
 下一阶段规划：
 
-- 引入同步 `ArtifactSink` 作为唯一写入协调器，`ArtifactWriter::write(Vec<Artifact>)` 改为兼容层。
-- `ArtifactSink::create()` 动态占用 normalized final path，不要求 build 预先收集所有 artifact path。
 - exporter/codegen 逐步从“返回 materialized artifact”迁移到“接收 sink 并向 stream 写入”。优先迁移 runtime binary / MessagePack / JSON / Lua 等可能产生大 payload 的 exporter；codegen 可较晚迁移。
 - 短期使用同步 file writer、`Mutex/Condvar`、bounded stream buffer 和略高于 CPU 核心数的 I/O/worker 配置承载本地文件写入等待；远端 source provider 落地时再引入 async runtime。
 - filesystem-aware path key 可在跨平台大小写不敏感冲突或 symlink alias 成为实际问题时接入，当前 lexical-normalized key 继续作为默认 authority。
