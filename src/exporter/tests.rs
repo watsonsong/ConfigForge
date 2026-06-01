@@ -7,7 +7,7 @@ use tempfile::tempdir;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{ArtifactWriteMode, ArtifactWriter},
+    artifact::{ArtifactGenerationLimiter, ArtifactWriteMode, ArtifactWriter},
     data::{DataTable, SourceRole},
     meta::{LinkedTableMeta, MetaModel, TargetTags},
     runtime_contract::{ExportDependency, RuntimeDataFile, binary_schema_revision},
@@ -27,18 +27,19 @@ fn export_runtime_data_to_disk(
     exporter: &dyn DataFormatExporter,
     pool: &rayon::ThreadPool,
 ) -> Result<Vec<RuntimeDataFile>> {
-    let artifacts =
-        export_runtime_data(out_dir, linked_meta, target_tags, data_set, exporter, pool)?;
-    let files = artifacts
-        .iter()
-        .map(|artifact| artifact.file.clone())
-        .collect::<Vec<_>>();
-    ArtifactWriter::new(ArtifactWriteMode::Direct).write(
-        artifacts
-            .into_iter()
-            .map(|artifact| artifact.artifact)
-            .collect(),
+    let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+    let generation_limiter = ArtifactGenerationLimiter::new(1024 * 1024, 1024);
+    let files = export_runtime_data_to_sink(
+        out_dir,
+        linked_meta,
+        target_tags,
+        data_set,
+        exporter,
+        pool,
+        &sink,
+        &generation_limiter,
     )?;
+    sink.finish()?;
     Ok(files)
 }
 
@@ -466,13 +467,18 @@ fn export_runtime_data_rejects_duplicate_artifact_paths_before_writing() {
         .build()
         .expect("test thread pool should build");
 
-    let error = export_runtime_data(
+    let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+    let generation_limiter = ArtifactGenerationLimiter::new(1024 * 1024, 1024);
+
+    let error = export_runtime_data_to_sink(
         out_dir.path(),
         &linked,
         &TargetTags::empty(),
         &data_set,
         &ConflictDataExporter,
         &pool,
+        &sink,
+        &generation_limiter,
     )
     .unwrap_err();
 

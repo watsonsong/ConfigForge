@@ -33,7 +33,7 @@ use crate::{
     runtime_contract::ExportDependency,
 };
 
-use runtime::{RuntimeConfigForgeResult, export_meta_and_data_tasks};
+use runtime::export_meta_and_data_tasks;
 use target::{NormalizedExportTask, NormalizedTargetConfig, codegen_task_config_from_export_task};
 
 pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
@@ -192,15 +192,8 @@ struct TargetDagOutput {
     warnings: Vec<String>,
 }
 
-struct TargetDagExportOutput {
-    declaration_index: usize,
-}
-
 struct DagBranchOutput {
     warnings: Vec<String>,
-    export_outputs: Vec<TargetDagExportOutput>,
-    #[allow(dead_code)]
-    runtime_results: Vec<RuntimeConfigForgeResult>,
 }
 
 fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<TargetDagOutput> {
@@ -253,10 +246,6 @@ fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<Targ
     let warnings = context
         .trace
         .record("collect_export_diagnostics", None, || {
-            let mut export_outputs = runtime_output.export_outputs;
-            export_outputs.extend(code_output.export_outputs);
-            let _declaration_indices = collect_export_declaration_indices_in_order(export_outputs);
-
             let mut warnings = runtime_output.warnings;
             warnings.extend(code_output.warnings);
             Ok(warnings)
@@ -581,27 +570,17 @@ fn execute_runtime_export_nodes(
         ));
     }
 
-    let mut runtime_results = Vec::new();
-    let mut export_outputs = Vec::new();
-    for ((declaration_index, task), task_output) in
-        export_tasks.iter().copied().zip(output.task_outputs)
-    {
+    for ((_, task), task_output) in export_tasks.iter().copied().zip(output.task_outputs) {
         if task_output.export_name != task.name {
             return Err(ConfigForgeError::Validation(format!(
                 "runtime exporter returned output for `{}` while `{}` was expected",
                 task_output.export_name, task.name
             )));
         }
-        if let Some(result) = task_output.result {
-            runtime_results.push(result);
-        }
-        export_outputs.push(TargetDagExportOutput { declaration_index });
     }
 
     Ok(DagBranchOutput {
         warnings: output.warnings,
-        export_outputs,
-        runtime_results,
     })
 }
 
@@ -613,35 +592,19 @@ fn execute_codegen_export_nodes(
     let mut generated_by_task = pool.install(|| {
         export_tasks
             .par_iter()
-            .map(|(index, export_task)| (*index, generate_code_task(context, export_task)))
+            .map(|(index, export_task)| {
+                (*index, generate_and_write_code_task(context, export_task))
+            })
             .collect::<Vec<_>>()
     });
     generated_by_task.sort_by_key(|(index, _)| *index);
-    let mut export_outputs = Vec::new();
-    for (declaration_index, result) in generated_by_task {
-        for file in result? {
-            context.generation_limiter.run(file.content.len(), || {
-                context.sink.write_text(file.path, &file.content)
-            })?;
-        }
-        export_outputs.push(TargetDagExportOutput { declaration_index });
+    for (_, result) in generated_by_task {
+        result?;
     }
 
     Ok(DagBranchOutput {
         warnings: Vec::new(),
-        export_outputs,
-        runtime_results: Vec::new(),
     })
-}
-
-fn collect_export_declaration_indices_in_order(
-    mut export_outputs: Vec<TargetDagExportOutput>,
-) -> Vec<usize> {
-    export_outputs.sort_by_key(|output| output.declaration_index);
-    export_outputs
-        .into_iter()
-        .map(|output| output.declaration_index)
-        .collect()
 }
 
 struct CodegenTaskContext<'a, 'meta> {
@@ -653,6 +616,18 @@ struct CodegenTaskContext<'a, 'meta> {
     generators: &'a [Box<dyn CodeGenerator>],
     sink: &'a ArtifactSink,
     generation_limiter: &'a ArtifactGenerationLimiter,
+}
+
+fn generate_and_write_code_task(
+    context: &CodegenTaskContext<'_, '_>,
+    export_task: &NormalizedExportTask,
+) -> Result<()> {
+    context.generation_limiter.run_unknown(|| {
+        for file in generate_code_task(context, export_task)? {
+            context.sink.write_text(file.path, &file.content)?;
+        }
+        Ok(())
+    })
 }
 
 fn generate_code_task(
@@ -1040,7 +1015,7 @@ mod tests {
         .expect("meta link and source read should finish");
 
         assert!(linked_meta.table("items").is_some());
-        assert!(code_output.export_outputs.is_empty());
+        assert!(code_output.warnings.is_empty());
         assert!(raw_sources.is_some());
         assert!(link_observed_source.load(Ordering::SeqCst));
         assert!(started_at.elapsed() < Duration::from_millis(140));
@@ -1122,43 +1097,6 @@ mod tests {
                 .expect("code-only preparation should not require project.input");
 
         assert!(prepared.read_sources.is_none());
-    }
-
-    #[test]
-    fn collect_export_declaration_indices_preserves_declaration_order() {
-        let indices = collect_export_declaration_indices_in_order(vec![
-            TargetDagExportOutput {
-                declaration_index: 2,
-            },
-            TargetDagExportOutput {
-                declaration_index: 0,
-            },
-            TargetDagExportOutput {
-                declaration_index: 1,
-            },
-        ]);
-
-        assert_eq!(indices, vec![0, 1, 2]);
-    }
-
-    #[test]
-    fn collect_export_declaration_indices_preserves_mixed_export_declaration_order() {
-        let indices = collect_export_declaration_indices_in_order(vec![
-            TargetDagExportOutput {
-                declaration_index: 3,
-            },
-            TargetDagExportOutput {
-                declaration_index: 1,
-            },
-            TargetDagExportOutput {
-                declaration_index: 0,
-            },
-            TargetDagExportOutput {
-                declaration_index: 2,
-            },
-        ]);
-
-        assert_eq!(indices, vec![0, 1, 2, 3]);
     }
 
     #[test]
@@ -1274,8 +1212,6 @@ mod tests {
     fn empty_dag_output() -> DagBranchOutput {
         DagBranchOutput {
             warnings: Vec::new(),
-            export_outputs: Vec::new(),
-            runtime_results: Vec::new(),
         }
     }
 }

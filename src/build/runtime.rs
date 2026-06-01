@@ -11,19 +11,12 @@ use crate::{
     exporter::{DataExporterRef, DataFormatRegistry, export_runtime_data_to_sink},
     meta::{LinkedMetaModel, TargetTags},
     project::lexical_normalize_path,
-    runtime_contract::RuntimeDataFile,
     validation::{
         normalize_data_set_with_pool, validate_normalized_data_set_for_target_with_report_and_pool,
     },
 };
 
 use super::target::{NormalizedExportTask, target_data_config_from_export_task};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct RuntimeConfigForgeResult {
-    pub(super) export_name: String,
-    pub(super) files: Vec<RuntimeDataFile>,
-}
 
 #[derive(Debug)]
 pub(super) struct RuntimeExportOutput {
@@ -34,7 +27,6 @@ pub(super) struct RuntimeExportOutput {
 #[derive(Debug)]
 pub(super) struct RuntimeExportTaskOutput {
     pub(super) export_name: String,
-    pub(super) result: Option<RuntimeConfigForgeResult>,
 }
 
 pub(super) fn export_meta_and_data_tasks(
@@ -140,7 +132,7 @@ fn export_meta_and_data_task(
     let format_exporter = registry.require_any(&export_task.type_id)?;
     match format_exporter {
         DataExporterRef::Table(exporter) => {
-            let files = export_runtime_data_to_sink(
+            export_runtime_data_to_sink(
                 &export_task.output,
                 linked_meta,
                 target_tags,
@@ -152,10 +144,6 @@ fn export_meta_and_data_task(
             )?;
             Ok(RuntimeExportTaskOutput {
                 export_name: export_task.name.clone(),
-                result: Some(RuntimeConfigForgeResult {
-                    export_name: export_task.name.clone(),
-                    files,
-                }),
             })
         }
         DataExporterRef::Aggregate(exporter) => {
@@ -171,7 +159,6 @@ fn export_meta_and_data_task(
             })?;
             Ok(RuntimeExportTaskOutput {
                 export_name: export_task.name.clone(),
-                result: None,
             })
         }
     }

@@ -1010,7 +1010,7 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 - `ArtifactWriter::write(Vec<Artifact>)` 已转为 sink compatibility wrapper；旧 dedicated bounded writer queue 已移除。
 - CLI 已支持 `--artifact-memory-limit` 与 `--artifact-memory-percent`。
 - 当前 byte budget 覆盖 `ArtifactWriteStream::write()` 过程中的 in-flight bytes；artifact 数量预算限制打开但未 finish 的 stream 数量。
-- Build 主流程已创建 shared `ArtifactSink` 和 `ArtifactGenerationLimiter` 并传入 exporter/codegen 分支；runtime table exporter 通过 producer API 调用 sink 写入并只返回 metadata，codegen 短期仍生成 `String` 后在 limiter permit 内立即 `sink.write_text()`，aggregate exporter trait 暂时仍返回 `Vec<Artifact>` 并由 runtime wrapper 在 limiter permit 内立即写入 sink。
+- Build 主流程已创建 shared `ArtifactSink` 和 `ArtifactGenerationLimiter` 并传入 exporter/codegen 分支；runtime table exporter 通过 producer API 调用 sink 写入，codegen 短期仍生成 `String` 后在 limiter permit 内立即 `sink.write_text()`，aggregate exporter trait 暂时仍返回 `Vec<Artifact>` 并由 runtime wrapper 在 limiter permit 内立即写入 sink。
 
 未来规划：
 

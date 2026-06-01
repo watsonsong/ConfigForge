@@ -380,15 +380,6 @@ impl ArtifactGenerationLimiter {
         self.acquire(self.inner.unknown_generation_bytes)
     }
 
-    pub fn run<T>(
-        &self,
-        estimated_bytes: usize,
-        operation: impl FnOnce() -> Result<T>,
-    ) -> Result<T> {
-        let _permit = self.acquire(estimated_bytes);
-        operation()
-    }
-
     pub fn run_unknown<T>(&self, operation: impl FnOnce() -> Result<T>) -> Result<T> {
         let _permit = self.acquire_unknown();
         operation()
@@ -1001,15 +992,11 @@ mod tests {
             let active = active.clone();
             let max_active = max_active.clone();
             handles.push(thread::spawn(move || {
-                limiter
-                    .run(4, || {
-                        let now = active.fetch_add(1, Ordering::SeqCst) + 1;
-                        max_active.fetch_max(now, Ordering::SeqCst);
-                        thread::sleep(Duration::from_millis(20));
-                        active.fetch_sub(1, Ordering::SeqCst);
-                        Ok(())
-                    })
-                    .expect("limited generation should succeed");
+                let _permit = limiter.acquire(4);
+                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                max_active.fetch_max(now, Ordering::SeqCst);
+                thread::sleep(Duration::from_millis(20));
+                active.fetch_sub(1, Ordering::SeqCst);
             }));
         }
 

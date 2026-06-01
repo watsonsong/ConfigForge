@@ -84,7 +84,7 @@ pub(crate) enum ExportDependency {
 | `EffectiveTargetTags` | `(target, effective_tags)` | `TargetTags` | 当前由 `build_target()` 在 branch executor 前执行，作为 context 注入；skeleton node key 记录合并后的 effective tags。 |
 | `DataLoadPlan` | `(project.input, effective tags)` | `SourceReadPlan` / `RawSourceData` | Source discovery 基于 raw `MetaModel` 执行，必须包含 tags，因为 override source 受 tags 影响；可与 `LinkMeta` 并行。 |
 | `NormalizeAndValidate` | `(project.input, effective_tags)` | normalized `DataSet` + warnings | 当前分支 executor 中合并 data load / normalize / validation execution；error 阻断依赖该数据集的 exporter。 |
-| `RunExporter` | `(target, export_name)` | warnings / runtime file metadata / sink entries | 根据 dependency 注入 MetaOnly 或 MetaAndData context；Build 传入共享 `ArtifactSink` 与 `ArtifactGenerationLimiter`，runtime table exporter 与 codegen 分支直接写 sink，aggregate exporter 仍经兼容 wrapper 在 limiter permit 内立即写入 sink。 |
+| `RunExporter` | `(target, export_name)` | warnings / sink entries | 根据 dependency 注入 MetaOnly 或 MetaAndData context；Build 传入共享 `ArtifactSink` 与 `ArtifactGenerationLimiter`，runtime table exporter 与 codegen 分支直接写 sink，aggregate exporter 仍经兼容 wrapper 在 limiter permit 内立即写入 sink。 |
 | `FinishArtifacts` | shared `ArtifactSink` | `BuildOutput` | 当前通过 `ArtifactSink::finish()` 完成 dry-run / direct / temp-commit；不再收集全局 `Vec<Artifact>` 后调用 `ArtifactWriter::write()`。 |
 
 当前 branch executor 已满足的执行约束：
@@ -93,7 +93,7 @@ pub(crate) enum ExportDependency {
 2. `MetaAndData` exporter 依赖对应 `(project.input, effective_tags)` 的 validation 成功结果。
 3. 同一 target 下的 JSON / MessagePack / bin / gettext / Lua 等 exporter 共享一次 DataLoadPlan、DataSet、normalize 和 validation。
 4. data-backed target 在 raw `MetaModel` 和 effective tags 可用后即可构造 `SourceReadPlan` 并读取 `RawSourceData`，不等待 `LinkedMetaModel`；normalize 必须等待 `LinkMeta + RawSourceData` join。
-5. 当前 Build 在 `build_target()` 创建共享 `ArtifactSink` 与 `ArtifactGenerationLimiter` 并传入 exporter/codegen 分支；runtime table exporter 通过 producer API 写 sink 并返回 metadata，codegen 短期仍生成 `String` 后在 limiter permit 内立即 `sink.write_text()`，aggregate exporter 返回的兼容 `Vec<Artifact>` 也会在 limiter permit 内立即写入同一个 sink。
+5. 当前 Build 在 `build_target()` 创建共享 `ArtifactSink` 与 `ArtifactGenerationLimiter` 并传入 exporter/codegen 分支；runtime table exporter 通过 producer API 写 sink，codegen 短期仍生成 `String` 后在 limiter permit 内立即 `sink.write_text()`，aggregate exporter 返回的兼容 `Vec<Artifact>` 也会在 limiter permit 内立即写入同一个 sink。
 6. dry-run artifact plan 由 `ArtifactSink::finish()` 返回的 entries 按 normalized path 稳定排序；诊断仍按稳定阶段边界合并。
 
 当前状态：Project Config 使用 `[[targets.exports]]`；normalize 阶段全部转换为 `NormalizedExportTask`；data exporter registry 与 code generator registry 均提供 dependency contract；branch executor 按 dependency contract 拆成 MetaAndData / MetaOnly 两类分支，并在阶段式执行器中提前启动只依赖 Meta 的 codegen。通用 node-level DAG scheduler 不是当前默认执行模型。

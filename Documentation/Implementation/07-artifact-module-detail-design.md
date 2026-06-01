@@ -195,7 +195,7 @@ runtime table exporter、aggregate exporter 和 codegen 可以并行生成 artif
 
 #### Pipeline 模型
 
-当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。旧的 dedicated bounded writer queue 已移除；byte / artifact 限流现在由 `ArtifactWriteStream` 与 sink 内部 semaphore 承担。Build 主流程已创建共享 `ArtifactSink` 并传入 runtime/codegen 分支，同时创建 `ArtifactGenerationLimiter` 限制 generation 阶段 materialized payload 的并发预算。runtime table exporter 写入 sink 并只返回 `RuntimeDataFile` metadata，JSON / MessagePack 已覆盖 writer-style serializer；codegen 短期仍生成 `String`，随后在 generation limiter permit 内调用 `sink.write_text()`。aggregate exporter trait 仍保留 `Vec<Artifact>` 兼容边界，由 build runtime wrapper 在 generation limiter permit 内立即写入 sink。
+当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。旧的 dedicated bounded writer queue 已移除；byte / artifact 限流现在由 `ArtifactWriteStream` 与 sink 内部 semaphore 承担。Build 主流程已创建共享 `ArtifactSink` 并传入 runtime/codegen 分支，同时创建 `ArtifactGenerationLimiter` 限制 generation 阶段 materialized payload 的并发预算。runtime table exporter 写入 sink，JSON / MessagePack 已覆盖 writer-style serializer；codegen 短期仍生成 `String`，随后在 generation limiter permit 内调用 `sink.write_text()`。aggregate exporter trait 仍保留 `Vec<Artifact>` 兼容边界，由 build runtime wrapper 在 generation limiter permit 内立即写入 sink。
 
 已实现 API：
 
@@ -335,9 +335,10 @@ create(path) -> Open
 Exporter 的职责从“序列化并写文件”收敛为“向 Build 提供 artifact 写入逻辑”。目标模型中 exporter 不再返回完整 `Vec<u8>` / `String` 内容，而是接收 `ArtifactSink` 或 `ArtifactWriteContext`，为每个输出 path 打开 stream 并直接写入：
 
 ```rust
-pub(crate) fn export_runtime_data(
-    input: RuntimeExportInput<'_>,
+pub(crate) fn export_runtime_data_to_sink(
+    ...,
     sink: &ArtifactSink,
+    generation_limiter: &ArtifactGenerationLimiter,
 ) -> Result<Vec<RuntimeDataFile>>;
 ```
 
@@ -348,18 +349,7 @@ pub(crate) fn export_runtime_data(
 - Exporter 不再调用 `fs::create_dir_all` / `fs::write`，也不选择 `ArtifactWriteMode`。
 - Serializer 应优先支持 `std::io::Write` 输出，避免先构造完整 `Vec<u8>`；暂时只能产出内存 buffer 的格式可以通过 `sink.write_binary()` 兼容。
 
-兼容期可以继续保留旧返回值：
-
-```rust
-pub(crate) fn export_runtime_data(...) -> Result<Vec<RuntimeDataArtifact>>;
-
-pub struct RuntimeDataArtifact {
-    pub file: RuntimeDataFile,
-    pub artifact: Artifact,
-}
-```
-
-旧 API 的实现可由 Build adapter 转调 `sink.write_binary()`；但新 exporter 不应新增依赖 `ArtifactContent` 的返回路径。测试若需要落盘断言，应使用 `ArtifactSink` / `ArtifactWriter` 辅助函数，不应让 exporter 自己暴露 filesystem API。
+旧 `RuntimeDataArtifact` / `Vec<Artifact>` table exporter 兼容入口已移除；测试若需要落盘断言，应使用 `ArtifactSink` / `ArtifactWriter` 辅助函数，不应让 exporter 自己暴露 filesystem API。aggregate exporter trait 暂时仍保留 `Vec<Artifact>` fallback，但 Build adapter 会在 limiter permit 内立即写入 shared sink。
 
 ## 7.6 与 Codegen 的关系
 

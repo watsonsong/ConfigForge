@@ -119,7 +119,7 @@ pub struct NormalizedExportTask {
 - target 内 export task 为 1 个时，`name` 可省略；省略时规范化名称固定为 `default`。
 - target 内 export task 多于 1 个时，省略 `name` 时默认使用 `type`，显式或默认名称必须在 target 内唯一。
 - export task name 大小写敏感；只允许 ASCII 字母、数字、`_`、`-`，且必须以字母或数字开头和结尾。
-- normalized model 中 `NormalizedExportTask.name` 和 `RuntimeConfigForgeResult.export_name` 都使用非空 `String`。
+- normalized model 中 `NormalizedExportTask.name` 使用非空 `String`；runtime export branch output 也以 export task name 作为稳定校验键。
 - MetaOnly codegen export task 的 `data` 必须为空；若配置 `data = "..."`，归一化阶段报错。生成代码格式无关，不绑定任意 MetaAndData export task。
 - 无论 target 有 0 个、1 个还是多个 MetaAndData export task，MetaOnly codegen task 都只接收 Meta、target tags 和语言配置。
 - `project.input` 与 `targets.exports.output` 相对路径在加载 Project Config 片段时按片段文件所在目录归一化；入口 `ConfigForge.toml` 的相对路径等价于 project root 相对路径。
@@ -129,22 +129,13 @@ pub struct NormalizedExportTask {
 
 | Format | 文件后缀 | exporter 写出方式 | 生成代码读取方式 |
 | --- | --- | --- | --- |
-| `Json` | `.json` | `serde_json::to_vec_pretty` 写出 payload envelope。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 打开 JSON payload 为通用 reader；生成代码读取 rows 并构造 typed rows。 |
-| `MessagePack` | `.msgpack` | `rmp-serde` 写出同一 payload envelope 的 MessagePack bytes。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 打开 MessagePack payload 为通用 reader；生成代码读取 rows 并构造 typed rows。 |
+| `Json` | `.json` | `serde_json::to_writer_pretty` 通过 shared sink 写出 payload envelope。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 打开 JSON payload 为通用 reader；生成代码读取 rows 并构造 typed rows。 |
+| `MessagePack` | `.msgpack` | `rmp-serde` writer API 通过 shared sink 写出同一 payload envelope 的 MessagePack bytes。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 打开 MessagePack payload 为通用 reader；生成代码读取 rows 并构造 typed rows。 |
 | `Bin` | `.bin` | 写入 `magic = "CFGB"`、format version、header size、`u64 schema_revision` 后，按 target-aware schema 顺序紧密排列 record，不保存 tag/name。 | generated code 携带每张表的 expected revision，binary reader 校验 magic/version/header/revision 后按 positional layout 顺序读取。 |
 
 `RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json`、`items.msgpack` 或 `items.bin`。该路径相对当前 data artifact root / runtime loader root，不相对 code output 或 project root。CodeModel 不使用这些真实 artifact path 生成加载常量；每张表统一使用逻辑表名。`bin` 的 schema revision 由 CodeModel 基于 Meta 和 target tags 计算，用于运行时 reader 暴露 revision 时进行可选校验。
 
-当一个 target 同时导出多套 runtime data export task 时，`build_target` 可按 export task 分组保留 runtime metadata：
-
-```rust
-pub struct RuntimeConfigForgeResult {
-    pub export_name: String,
-    pub files: Vec<RuntimeDataFile>,
-}
-```
-
-`generate_code_task` 在构造每个 `CodeExportInput` 时传入空 `runtime_data_files`。同一 table 同时出现 `items.json`、`items.msgpack` 和 `items.bin` 时也不会影响 CodeModel；格式选择由运行时 loader / reader 完成。未来 manifest 可以记录所有 runtime data export task 的真实 artifact path，但不进入 codegen 决策。
+当一个 target 同时导出多套 runtime data export task 时，Build DAG 只校验每个 task output 的 `export_name` 与声明顺序匹配，不再向 codegen 聚合 runtime metadata。`generate_code_task` 在构造每个 `CodeExportInput` 时传入空 `runtime_data_files`。同一 table 同时出现 `items.json`、`items.msgpack` 和 `items.bin` 时也不会影响 CodeModel；格式选择由运行时 loader / reader 完成。未来 manifest 可以记录所有 runtime data export task 的真实 artifact path，但不进入 codegen 决策。
 
 ### 9.4.2.2 `CodegenOptions`
 
