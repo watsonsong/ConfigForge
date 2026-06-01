@@ -22,7 +22,7 @@ pub use options::{
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{Artifact, ArtifactWriter},
+    artifact::{ArtifactSink, ArtifactWriter},
     codegen::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, GeneratedFile,
         builtin_generators,
@@ -87,6 +87,10 @@ fn build_target_inner(
     let meta_set = project.raw_meta_model();
     let target_tags = target.effective_target_tags(options.extra_tags);
 
+    let sink = ArtifactWriter::new(options.artifact_write_mode)
+        .with_limits(options.artifact_write_limits)
+        .open_sink();
+
     let dag_output = execute_target_dag(TargetDagExecutionContext {
         project_root,
         project: &CodeExportProject::from(&project.project),
@@ -95,14 +99,11 @@ fn build_target_inner(
         raw_meta: &meta_set,
         data_root: project.project.input.as_deref(),
         pool: &cpu_pool,
+        sink: &sink,
         trace,
     })?;
 
-    let artifacts = trace.record("write_artifacts", None, || {
-        ArtifactWriter::new(options.artifact_write_mode)
-            .with_limits(options.artifact_write_limits)
-            .write(dag_output.artifacts)
-    })?;
+    let artifacts = trace.record("finish_artifacts", None, || sink.finish())?;
 
     Ok(BuildOutputWithoutTrace {
         warnings: dag_output.warnings,
@@ -133,6 +134,7 @@ struct TargetDagExecutionContext<'a, 'meta> {
     raw_meta: &'meta MetaModel,
     data_root: Option<&'a Path>,
     pool: &'a ThreadPool,
+    sink: &'a ArtifactSink,
     trace: &'a mut BuildTraceRecorder,
 }
 
@@ -180,17 +182,15 @@ enum BuildDagNodeKey {
         target_name: String,
         export_name: String,
     },
-    WriteArtifacts,
+    FinishArtifacts,
 }
 
 struct TargetDagOutput {
     warnings: Vec<String>,
-    artifacts: Vec<Artifact>,
 }
 
 struct TargetDagExportOutput {
     declaration_index: usize,
-    artifacts: Vec<Artifact>,
 }
 
 struct DagBranchOutput {
@@ -243,22 +243,22 @@ fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<Targ
             generated_at: &generated_at,
             generators: &generators,
             pool: context.pool,
+            sink: context.sink,
         })
     })?;
-    let (warnings, artifacts) = context.trace.record("collect_artifacts", None, || {
-        let mut export_outputs = runtime_output.export_outputs;
-        export_outputs.extend(code_output.export_outputs);
-        let artifacts = collect_export_artifacts_in_declaration_order(export_outputs);
+    let warnings = context
+        .trace
+        .record("collect_export_diagnostics", None, || {
+            let mut export_outputs = runtime_output.export_outputs;
+            export_outputs.extend(code_output.export_outputs);
+            let _declaration_indices = collect_export_declaration_indices_in_order(export_outputs);
 
-        let mut warnings = runtime_output.warnings;
-        warnings.extend(code_output.warnings);
-        Ok((warnings, artifacts))
-    })?;
+            let mut warnings = runtime_output.warnings;
+            warnings.extend(code_output.warnings);
+            Ok(warnings)
+        })?;
 
-    Ok(TargetDagOutput {
-        warnings,
-        artifacts,
-    })
+    Ok(TargetDagOutput { warnings })
 }
 
 struct BuildTraceRecorder {
@@ -329,6 +329,7 @@ struct ExportPipelineContext<'a, 'meta> {
     generated_at: &'a str,
     generators: &'a [Box<dyn CodeGenerator>],
     pool: &'a ThreadPool,
+    sink: &'a ArtifactSink,
 }
 
 fn execute_export_pipeline<'meta>(
@@ -345,6 +346,7 @@ fn execute_export_pipeline<'meta>(
         generated_at,
         generators,
         pool,
+        sink,
     } = context;
     let ((linked_meta, code_output), raw_sources) = join_link_codegen_and_source_read(
         || {
@@ -356,6 +358,7 @@ fn execute_export_pipeline<'meta>(
                 linked_meta: &linked_meta,
                 generated_at,
                 generators,
+                sink,
             };
             let code_output =
                 execute_codegen_export_nodes(&codegen_context, codegen_exports, pool)?;
@@ -371,6 +374,7 @@ fn execute_export_pipeline<'meta>(
         &linked_meta,
         target_tags,
         pool,
+        sink,
     )?;
     Ok((runtime_output, code_output))
 }
@@ -457,7 +461,7 @@ fn build_target_local_dag(
                 export_name: target.exports[*index].name.clone(),
             }),
     );
-    nodes.push(BuildDagNodeKey::WriteArtifacts);
+    nodes.push(BuildDagNodeKey::FinishArtifacts);
     nodes
 }
 
@@ -547,6 +551,7 @@ fn execute_runtime_export_nodes(
     linked_meta: &crate::meta::LinkedMetaModel<'_>,
     target_tags: &TargetTags,
     pool: &ThreadPool,
+    sink: &ArtifactSink,
 ) -> Result<DagBranchOutput> {
     let meta_and_data_tasks = export_tasks
         .iter()
@@ -558,6 +563,7 @@ fn execute_runtime_export_nodes(
         linked_meta,
         target_tags,
         pool,
+        sink,
     )?;
     if output.task_outputs.len() != export_tasks.len() {
         return Err(ConfigForgeError::Validation(
@@ -579,10 +585,7 @@ fn execute_runtime_export_nodes(
         if let Some(result) = task_output.result {
             runtime_results.push(result);
         }
-        export_outputs.push(TargetDagExportOutput {
-            declaration_index,
-            artifacts: task_output.artifacts,
-        });
+        export_outputs.push(TargetDagExportOutput { declaration_index });
     }
 
     Ok(DagBranchOutput {
@@ -606,14 +609,10 @@ fn execute_codegen_export_nodes(
     generated_by_task.sort_by_key(|(index, _)| *index);
     let mut export_outputs = Vec::new();
     for (declaration_index, result) in generated_by_task {
-        let artifacts = result?
-            .into_iter()
-            .map(|file| Artifact::text(file.path, file.content))
-            .collect();
-        export_outputs.push(TargetDagExportOutput {
-            declaration_index,
-            artifacts,
-        });
+        for file in result? {
+            context.sink.write_text(file.path, &file.content)?;
+        }
+        export_outputs.push(TargetDagExportOutput { declaration_index });
     }
 
     Ok(DagBranchOutput {
@@ -623,13 +622,13 @@ fn execute_codegen_export_nodes(
     })
 }
 
-fn collect_export_artifacts_in_declaration_order(
+fn collect_export_declaration_indices_in_order(
     mut export_outputs: Vec<TargetDagExportOutput>,
-) -> Vec<Artifact> {
+) -> Vec<usize> {
     export_outputs.sort_by_key(|output| output.declaration_index);
     export_outputs
         .into_iter()
-        .flat_map(|output| output.artifacts)
+        .map(|output| output.declaration_index)
         .collect()
 }
 
@@ -640,6 +639,7 @@ struct CodegenTaskContext<'a, 'meta> {
     linked_meta: &'meta crate::meta::LinkedMetaModel<'meta>,
     generated_at: &'a str,
     generators: &'a [Box<dyn CodeGenerator>],
+    sink: &'a ArtifactSink,
 }
 
 fn generate_code_task(
@@ -707,7 +707,7 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use crate::artifact::ArtifactContent;
+    use crate::artifact::{ArtifactWriteMode, ArtifactWriter};
     use crate::codegen::default_module_name;
     use crate::data::{DataSet, DataTable, RawSourceData};
     use crate::exporter::build_exported_table_payload;
@@ -1112,74 +1112,40 @@ mod tests {
     }
 
     #[test]
-    fn collect_export_artifacts_preserves_declaration_order() {
-        let artifacts = collect_export_artifacts_in_declaration_order(vec![
+    fn collect_export_declaration_indices_preserves_declaration_order() {
+        let indices = collect_export_declaration_indices_in_order(vec![
             TargetDagExportOutput {
                 declaration_index: 2,
-                artifacts: vec![Artifact::text("c.txt", "c")],
             },
             TargetDagExportOutput {
                 declaration_index: 0,
-                artifacts: vec![Artifact::text("a.txt", "a1"), Artifact::text("b.txt", "a2")],
             },
             TargetDagExportOutput {
                 declaration_index: 1,
-                artifacts: vec![Artifact::binary("bin.dat", [1_u8, 2])],
             },
         ]);
 
-        assert_eq!(
-            artifacts
-                .iter()
-                .map(|artifact| artifact.path.as_path())
-                .collect::<Vec<_>>(),
-            vec![
-                Path::new("a.txt"),
-                Path::new("b.txt"),
-                Path::new("bin.dat"),
-                Path::new("c.txt"),
-            ]
-        );
-        assert!(matches!(artifacts[2].content, ArtifactContent::Binary(_)));
+        assert_eq!(indices, vec![0, 1, 2]);
     }
 
     #[test]
-    fn collect_export_artifacts_preserves_mixed_export_declaration_order() {
-        let artifacts = collect_export_artifacts_in_declaration_order(vec![
+    fn collect_export_declaration_indices_preserves_mixed_export_declaration_order() {
+        let indices = collect_export_declaration_indices_in_order(vec![
             TargetDagExportOutput {
                 declaration_index: 3,
-                artifacts: vec![Artifact::text("lua/init.lua", "return {}")],
             },
             TargetDagExportOutput {
                 declaration_index: 1,
-                artifacts: vec![Artifact::text("code/generated.rs", "pub struct GameData;")],
             },
             TargetDagExportOutput {
                 declaration_index: 0,
-                artifacts: vec![
-                    Artifact::text("data/items.json", "{}"),
-                    Artifact::text("data/game_rules.json", "{}"),
-                ],
             },
             TargetDagExportOutput {
                 declaration_index: 2,
-                artifacts: vec![Artifact::text("i18n/messages.pot", "")],
             },
         ]);
 
-        assert_eq!(
-            artifacts
-                .iter()
-                .map(|artifact| artifact.path.as_path())
-                .collect::<Vec<_>>(),
-            vec![
-                Path::new("data/items.json"),
-                Path::new("data/game_rules.json"),
-                Path::new("code/generated.rs"),
-                Path::new("i18n/messages.pot"),
-                Path::new("lua/init.lua"),
-            ]
-        );
+        assert_eq!(indices, vec![0, 1, 2, 3]);
     }
 
     #[test]
@@ -1233,6 +1199,7 @@ mod tests {
         };
         let target_tags = TargetTags::empty();
         let project = CodeExportProject::default();
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
         let mut trace = BuildTraceRecorder::new();
 
         let result = execute_target_dag(TargetDagExecutionContext {
@@ -1243,6 +1210,7 @@ mod tests {
             raw_meta: &meta,
             data_root: None,
             pool: &pool,
+            sink: &sink,
             trace: &mut trace,
         });
 

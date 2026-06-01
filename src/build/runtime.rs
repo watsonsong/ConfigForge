@@ -6,9 +6,9 @@ use std::collections::BTreeSet;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::Artifact,
+    artifact::ArtifactSink,
     data::RawSourceData,
-    exporter::{DataExporterRef, DataFormatRegistry, export_runtime_data},
+    exporter::{DataExporterRef, DataFormatRegistry, export_runtime_data_to_sink},
     meta::{LinkedMetaModel, TargetTags},
     project::lexical_normalize_path,
     runtime_contract::RuntimeDataFile,
@@ -35,7 +35,6 @@ pub(super) struct RuntimeExportOutput {
 pub(super) struct RuntimeExportTaskOutput {
     pub(super) export_name: String,
     pub(super) result: Option<RuntimeConfigForgeResult>,
-    pub(super) artifacts: Vec<Artifact>,
 }
 
 pub(super) fn export_meta_and_data_tasks(
@@ -44,6 +43,7 @@ pub(super) fn export_meta_and_data_tasks(
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
     pool: &ThreadPool,
+    sink: &ArtifactSink,
 ) -> Result<RuntimeExportOutput> {
     let registry = DataFormatRegistry::with_builtin_exporters();
     export_meta_and_data_tasks_with_registry(
@@ -52,6 +52,7 @@ pub(super) fn export_meta_and_data_tasks(
         linked_meta,
         target_tags,
         pool,
+        sink,
         &registry,
     )
 }
@@ -62,6 +63,7 @@ fn export_meta_and_data_tasks_with_registry(
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
     pool: &ThreadPool,
+    sink: &ArtifactSink,
     registry: &DataFormatRegistry,
 ) -> Result<RuntimeExportOutput> {
     if export_tasks.is_empty() {
@@ -101,6 +103,7 @@ fn export_meta_and_data_tasks_with_registry(
                         target_tags,
                         &data_set,
                         pool,
+                        sink,
                         registry,
                     ),
                 )
@@ -126,46 +129,51 @@ fn export_meta_and_data_task(
     target_tags: &TargetTags,
     data_set: &crate::data::DataSet,
     pool: &ThreadPool,
+    sink: &ArtifactSink,
     registry: &DataFormatRegistry,
 ) -> Result<RuntimeExportTaskOutput> {
     let format_exporter = registry.require_any(&export_task.type_id)?;
     match format_exporter {
         DataExporterRef::Table(exporter) => {
-            let runtime_artifacts = export_runtime_data(
+            let files = export_runtime_data_to_sink(
                 &export_task.output,
                 linked_meta,
                 target_tags,
                 data_set,
                 exporter,
                 pool,
+                sink,
             )?;
-            let files = runtime_artifacts
-                .iter()
-                .map(|artifact| artifact.file.clone())
-                .collect::<Vec<_>>();
             Ok(RuntimeExportTaskOutput {
                 export_name: export_task.name.clone(),
                 result: Some(RuntimeConfigForgeResult {
                     export_name: export_task.name.clone(),
                     files,
                 }),
-                artifacts: runtime_artifacts
-                    .into_iter()
-                    .map(|artifact| artifact.artifact)
-                    .collect(),
             })
         }
-        DataExporterRef::Aggregate(exporter) => Ok(RuntimeExportTaskOutput {
-            export_name: export_task.name.clone(),
-            result: None,
-            artifacts: exporter.export(
+        DataExporterRef::Aggregate(exporter) => {
+            for artifact in exporter.export(
                 &export_task.output,
                 &target_data_config_from_export_task(export_task),
                 linked_meta,
                 target_tags,
                 data_set,
-            )?,
-        }),
+            )? {
+                match artifact.content {
+                    crate::artifact::ArtifactContent::Text(content) => {
+                        sink.write_text(artifact.path, &content)?;
+                    }
+                    crate::artifact::ArtifactContent::Binary(content) => {
+                        sink.write_binary(artifact.path, &content)?;
+                    }
+                }
+            }
+            Ok(RuntimeExportTaskOutput {
+                export_name: export_task.name.clone(),
+                result: None,
+            })
+        }
     }
 }
 
@@ -251,7 +259,7 @@ mod tests {
     };
 
     use crate::{
-        artifact::Artifact,
+        artifact::{Artifact, ArtifactWriteMode, ArtifactWriter},
         data::{DataSet, DataTable, RawSourceData},
         exporter::{AggregateDataExporter, DataFormatExporter, RuntimeArtifactPlan},
         meta::{LinkedTableMeta, MetaModel, TargetTags},
@@ -338,6 +346,7 @@ mod tests {
             .num_threads(2)
             .build()
             .expect("pool should build");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
 
         let output = export_meta_and_data_tasks_with_registry(
             Some(&raw_sources),
@@ -345,6 +354,7 @@ mod tests {
             &linked_meta,
             &TargetTags::empty(),
             &pool,
+            &sink,
             &registry,
         )
         .expect("runtime export should succeed");
@@ -359,16 +369,16 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["slow", "fast"]
         );
+        let artifact_result = sink.finish().expect("sink should finish");
         assert_eq!(
-            output
-                .task_outputs
+            artifact_result
+                .entries
                 .into_iter()
-                .flat_map(|output| output.artifacts)
-                .map(|artifact| artifact.path)
+                .map(|entry| entry.path)
                 .collect::<Vec<_>>(),
             vec![
-                PathBuf::from("out/slow/slow.txt"),
-                PathBuf::from("out/fast/fast.txt")
+                PathBuf::from("out/fast/fast.txt"),
+                PathBuf::from("out/slow/slow.txt")
             ]
         );
     }
@@ -449,6 +459,7 @@ mod tests {
             .num_threads(2)
             .build()
             .expect("pool should build");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
 
         let error = export_meta_and_data_tasks_with_registry(
             Some(&raw_sources),
@@ -456,6 +467,7 @@ mod tests {
             &linked_meta,
             &TargetTags::empty(),
             &pool,
+            &sink,
             &registry,
         )
         .expect_err("duplicate path should fail during planning");

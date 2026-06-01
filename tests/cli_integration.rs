@@ -418,7 +418,7 @@ fn trace_tasks_flag_writes_build_metrics_json() {
     assert!(stage_names.contains(&"load_project"));
     assert!(stage_names.contains(&"prepare_build_inputs"));
     assert!(stage_names.contains(&"run_exporters"));
-    assert!(stage_names.contains(&"write_artifacts"));
+    assert!(stage_names.contains(&"finish_artifacts"));
     assert!(
         trace["stages"]
             .as_array()
@@ -489,7 +489,7 @@ fn trace_tasks_flag_writes_build_metrics_json_on_build_failure() {
     assert!(
         stages
             .iter()
-            .all(|stage| stage["name"] != "write_artifacts")
+            .all(|stage| stage["name"] != "finish_artifacts")
     );
 }
 

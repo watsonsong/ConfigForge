@@ -28,4 +28,6 @@ pub use registry::{
 };
 pub use runtime::RuntimeArtifactPlan;
 
+#[cfg(test)]
 pub(crate) use runtime::export_runtime_data;
+pub(crate) use runtime::export_runtime_data_to_sink;
