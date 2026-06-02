@@ -70,7 +70,8 @@ pub trait TableDataExporter: Send + Sync {
     fn dependency(&self) -> ExportDependency { ExportDependency::MetaAndData }
     fn extension(&self) -> &'static str;
     fn plan_table_artifact(&self, table_meta: &LinkedTableMeta<'_>) -> Result<RuntimeArtifactPlan>;
-    fn serialize_table(...) -> Result<Vec<u8>>;
+    fn serialize_table_to_stream(..., stream: &mut ArtifactWriteStream) -> Result<()>;
+    fn serialize_table(...) -> Result<Vec<u8>>; // legacy fallback only
 }
 
 pub struct AggregateExportContext<'a> {
@@ -90,9 +91,9 @@ pub trait AggregateDataExporter: Send + Sync {
 }
 ```
 
-`DataFormatRegistry` 保存 table exporter 与 aggregate exporter 列表并按 name / alias 查询，同时暴露 dependency contract 查询。当前 data-backed exporter 的 dependency 均为 `MetaAndData`；没有单独的 `DataOnly` 模式，因为缺少 Meta 时无法可靠完成类型解释、target 过滤、索引语义和 validation。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行规划多个 export task、并行序列化多个 table artifact，并在 validation gate 通过后并行执行多个 data-backed exporter；aggregate exporter 也不得在实例内保存本次 build 的可变状态。
+`DataFormatRegistry` 保存 table exporter 与 aggregate exporter 列表并按 name / alias 查询，同时暴露 dependency contract 查询。当前 data-backed exporter 的 dependency 均为 `MetaAndData`；没有单独的 `DataOnly` 模式，因为缺少 Meta 时无法可靠完成类型解释、target 过滤、索引语义和 validation。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行规划多个 export task、并行序列化多个 table artifact，并在 validation gate 通过后并行执行多个 data-backed exporter；aggregate exporter 也不得在实例内保存本次 build 的可变状态。table exporter 的主路径是 `serialize_table_to_stream()`；`serialize_table() -> Vec<u8>` 只作为少量测试和兼容调用的 legacy fallback，新增 exporter 应优先实现 streaming writer。
 
-内置格式通过 `builtin_exporters()` / aggregate registry 注册到 `DataFormatRegistry`，当前 table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`；aggregate exporter 包括已实现的 `GettextPotExporter` 与 `LuaTableExporter`。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现对应 exporter trait，格式名、alias、dependency、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
+内置格式通过 `builtin_exporters()` / aggregate registry 注册到 `DataFormatRegistry`，当前 table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`；aggregate exporter 包括已实现的 `GettextPotExporter` 与 `LuaTableExporter`。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现对应 exporter trait，格式名、alias、dependency、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。JSON 使用 `serde_json::to_writer_pretty()`，MessagePack 使用 `rmp_serde::encode::write_named()`，`bin` 的 encoder 可直接写 `ArtifactWriteStream`，不再为最终 artifact 先构建完整 `Vec<u8>`。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
 
 ## 8.4 Runtime payload contract
 
@@ -264,5 +265,6 @@ Exporter 模块测试应覆盖：
 - ObjectTable 输出单 object shape，包括 only-header、default、target field filtering、all fields filtered。
 - JSON 与 MessagePack 对 struct / ObjectTable 使用同一逻辑 payload。
 - `bin` 写出 CFGB header、schema revision 与 target-aware positional payload。
+- runtime table export 直接通过 `sink.create(path)` + `serialize_table_to_stream()` + `stream.finish()` 写出；custom exporter 测试覆盖 legacy `serialize_table()` fallback 不参与主路径。
 - struct expanded value 和 JSON cell 都能导出为 nested object。
 - 聚合 data exporter 测试覆盖 POT 抽取、去重、context、source reference、translator comment、target filter、ObjectTable、artifact path conflict；fragment/struct child text 深度抽取仍属于后续扩展测试。

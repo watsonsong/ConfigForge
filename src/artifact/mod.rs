@@ -252,9 +252,8 @@ impl ArtifactSink {
             let open_paths = state
                 .paths
                 .iter()
-                .filter_map(|(path, status)| {
-                    (*status == ArtifactPathState::Open).then(|| path.display().to_string())
-                })
+                .filter(|(_, status)| **status == ArtifactPathState::Open)
+                .map(|(path, _)| path.display().to_string())
                 .collect::<Vec<_>>();
             if !open_paths.is_empty() && state.first_error.is_none() {
                 state.first_error = Some(ConfigForgeError::Validation(format!(
@@ -265,9 +264,8 @@ impl ArtifactSink {
             let failed_paths = state
                 .paths
                 .iter()
-                .filter_map(|(path, status)| {
-                    (*status == ArtifactPathState::Failed).then(|| path.display().to_string())
-                })
+                .filter(|(_, status)| **status == ArtifactPathState::Failed)
+                .map(|(path, _)| path.display().to_string())
                 .collect::<Vec<_>>();
             if !failed_paths.is_empty() && state.first_error.is_none() {
                 state.first_error = Some(ConfigForgeError::Validation(format!(

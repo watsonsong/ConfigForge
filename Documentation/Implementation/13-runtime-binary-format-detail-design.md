@@ -267,7 +267,8 @@ impl DataFormatExporter for BinaryDataExporter {
     fn name(&self) -> &'static str { FORMAT }
     fn aliases(&self) -> &'static [&'static str] { &["binary"] }
     fn extension(&self) -> &'static str { "bin" }
-    fn serialize_table(...) -> Result<Vec<u8>>;
+    fn serialize_table_to_stream(..., stream: &mut ArtifactWriteStream) -> Result<()>;
+    fn serialize_table(...) -> Result<Vec<u8>>; // legacy fallback for materialized callers
 }
 ```
 
@@ -277,7 +278,7 @@ impl DataFormatExporter for BinaryDataExporter {
 2. 计算 `schema_revision(layout)` 并写入 16 字节 file header。
 3. 继续复用 `DataResolver::resolve_table_rows / resolve_table` 获取 normalized resolved values。
 4. CollectionTable 写 `row_count` + rows；ObjectTable 只写 object record。
-5. 按 layout 顺序从 `ResolvedValue` 取值并编码；如果 required value 缺失，返回 validation-style error。
+5. 按 layout 顺序从 `ResolvedValue` 取值并编码到 writer；如果 required value 缺失，返回 validation-style error。
 6. Registry 中注册 `BinaryDataExporter`，Project Config 支持 `type = "bin"`。
 
 不要复用 `ExportedTablePayload` 直接 serde 序列化，因为 text payload 是 named map/object shape，而 `bin` 需要 typed positional layout。当前实现复用同一套 target-aware resolved export view / resolver 语义，JSON、MessagePack 和 Binary 从同一份可见数据语义构建：

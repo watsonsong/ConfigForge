@@ -384,7 +384,7 @@ Artifact 模块单元测试应覆盖：
 
 下一阶段规划：
 
-- aggregate exporter trait、codegen trait 与 remaining binary serializer 继续从“返回 materialized artifact / String / Vec<u8>”迁移到“接收 sink 或 writer context 并向 stream 写入”。runtime table exporter 已先接入 shared sink 和 producer API，后续可继续降低单文件内存峰值。
+- aggregate exporter trait 与 codegen trait 继续从“返回 materialized artifact / String”迁移到“接收 sink 或 writer context 并向 stream 写入”。runtime table exporter 已直接使用 shared sink stream 主路径，JSON / MessagePack / binary 均通过 writer-style serializer 写出，后续重点是 aggregate 与 codegen 的 materialized fallback。
 - 短期使用同步 file writer 与标准 `std::io::Write` 接口；远端 source provider 落地时再评估是否引入 async runtime。
 - filesystem-aware path key 可在跨平台大小写不敏感冲突或 symlink alias 成为实际问题时接入，当前 lexical-normalized key 继续作为默认 authority。
 - summary manifest、远端上传、增量缓存或分布式 artifact store 应作为独立 writer / exporter 扩展，不改变当前 Artifact Writer 的基础语义。

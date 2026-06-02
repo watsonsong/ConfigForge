@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     ConfigForgeError, Result,
+    artifact::ArtifactWriteStream,
     data::{ArrayElementValue, DataResolver, DataTable, DataValue, ResolvedValue, ScalarValue},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedFragmentMeta, LinkedStructType, LinkedTableMeta,
@@ -44,38 +45,74 @@ impl DataFormatExporter for BinaryDataExporter {
         table: &DataTable,
         target_tags: &TargetTags,
     ) -> Result<Vec<u8>> {
-        let mut encoder = BinaryEncoder::new(table_meta, target_tags);
-        encoder.write_header();
-        match table_meta.meta.kind {
-            TableKind::Collection => encoder.write_collection(table)?,
-            TableKind::Object => encoder.write_object(table)?,
-        }
-        Ok(encoder.finish())
+        let mut bytes = Vec::new();
+        let mut encoder = BinaryEncoder::new(table_meta, target_tags, &mut bytes);
+        encoder.write_table(table)?;
+        Ok(bytes)
+    }
+
+    fn serialize_table_to_stream(
+        &self,
+        table_meta: &LinkedTableMeta<'_>,
+        table: &DataTable,
+        target_tags: &TargetTags,
+        stream: &mut ArtifactWriteStream,
+    ) -> Result<()> {
+        BinaryEncoder::new(table_meta, target_tags, stream).write_table(table)
     }
 }
 
-struct BinaryEncoder<'a, 'meta> {
-    table_meta: &'a LinkedTableMeta<'meta>,
-    target_tags: &'a TargetTags,
-    bytes: Vec<u8>,
+trait BinaryWriteTarget {
+    fn write_binary_bytes(&mut self, bytes: &[u8]) -> Result<()>;
 }
 
-impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
-    fn new(table_meta: &'a LinkedTableMeta<'meta>, target_tags: &'a TargetTags) -> Self {
+impl BinaryWriteTarget for Vec<u8> {
+    fn write_binary_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        self.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+
+impl BinaryWriteTarget for ArtifactWriteStream {
+    fn write_binary_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        self.write_all_artifact(bytes)
+    }
+}
+
+struct BinaryEncoder<'a, 'meta, W: BinaryWriteTarget> {
+    table_meta: &'a LinkedTableMeta<'meta>,
+    target_tags: &'a TargetTags,
+    out: &'a mut W,
+}
+
+impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
+    fn new(
+        table_meta: &'a LinkedTableMeta<'meta>,
+        target_tags: &'a TargetTags,
+        out: &'a mut W,
+    ) -> Self {
         Self {
             table_meta,
             target_tags,
-            bytes: Vec::new(),
+            out,
         }
     }
 
-    fn write_header(&mut self) {
-        self.bytes.extend_from_slice(MAGIC);
-        self.bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
-        self.bytes.extend_from_slice(&HEADER_SIZE.to_le_bytes());
-        self.bytes.extend_from_slice(
+    fn write_table(&mut self, table: &DataTable) -> Result<()> {
+        self.write_header()?;
+        match self.table_meta.meta.kind {
+            TableKind::Collection => self.write_collection(table),
+            TableKind::Object => self.write_object(table),
+        }
+    }
+
+    fn write_header(&mut self) -> Result<()> {
+        self.out.write_binary_bytes(MAGIC)?;
+        self.out.write_binary_bytes(&FORMAT_VERSION.to_le_bytes())?;
+        self.out.write_binary_bytes(&HEADER_SIZE.to_le_bytes())?;
+        self.out.write_binary_bytes(
             &binary_schema_revision(self.table_meta, self.target_tags).to_le_bytes(),
-        );
+        )
     }
 
     fn write_collection(&mut self, table: &DataTable) -> Result<()> {
@@ -98,7 +135,7 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
             Some(self.target_tags),
             visible_row_indices.iter().copied(),
         )?;
-        write_varuint(&mut self.bytes, visible_row_indices.len() as u64);
+        write_varuint(self.out, visible_row_indices.len() as u64)?;
         for (resolved_row_index, row_index) in visible_row_indices.iter().enumerate() {
             let resolved_row = resolved_table.rows.get(resolved_row_index).ok_or_else(|| {
                 ConfigForgeError::Validation(format!(
@@ -191,7 +228,7 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
                     .iter()
                     .map(|fragment| PresenceSlot::fragment(fragment, values, active_fragments)),
             );
-        write_optional_bitmap(&mut self.bytes, presence_slots);
+        write_optional_bitmap(self.out, presence_slots)?;
 
         for field in fields {
             match values.get(&field.meta.name) {
@@ -249,11 +286,11 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
             .filter(|field| field.meta.is_exported_for(self.target_tags))
             .collect::<Vec<_>>();
         write_optional_bitmap(
-            &mut self.bytes,
+            self.out,
             visible_fields
                 .iter()
                 .map(|field| PresenceSlot::field(field, values)),
-        );
+        )?;
         for field in visible_fields {
             match values.get(&field.meta.name) {
                 Some(value) => self.write_field_value(field, value)?,
@@ -292,7 +329,7 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
                 "binary export expected list value".to_owned(),
             ));
         };
-        write_varuint(&mut self.bytes, elements.len() as u64);
+        write_varuint(self.out, elements.len() as u64)?;
         for element in elements {
             self.write_array_element_for_type(element_type, element)?;
         }
@@ -350,7 +387,7 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
         match (primitive, scalar) {
             (PrimitiveFieldType::Int, ScalarValue::Int(value)) => {
                 ensure_javascript_safe_int(field_name, *value)?;
-                write_varuint(&mut self.bytes, zigzag(*value));
+                write_varuint(self.out, zigzag(*value))?;
                 Ok(())
             }
             (PrimitiveFieldType::Float, ScalarValue::Float(value)) => {
@@ -360,18 +397,18 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
                         field_name, value
                     )));
                 }
-                self.bytes.extend_from_slice(&value.to_le_bytes());
+                self.out.write_binary_bytes(&value.to_le_bytes())?;
                 Ok(())
             }
             (PrimitiveFieldType::Bool, ScalarValue::Bool(value)) => {
-                self.bytes.push(u8::from(*value));
+                self.out.write_binary_bytes(&[u8::from(*value)])?;
                 Ok(())
             }
             (
                 PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset,
                 ScalarValue::String(value),
             ) => {
-                write_bytes(&mut self.bytes, value.as_bytes());
+                write_bytes(self.out, value.as_bytes())?;
                 Ok(())
             }
             _ => Err(ConfigForgeError::Validation(format!(
@@ -423,7 +460,7 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
                     field_name, value, enum_meta.name
                 ))
             })?;
-        write_varuint(&mut self.bytes, ordinal as u64);
+        write_varuint(self.out, ordinal as u64)?;
         Ok(())
     }
 
@@ -473,15 +510,11 @@ impl<'a, 'meta> BinaryEncoder<'a, 'meta> {
                 "binary export expected nested list element".to_owned(),
             ));
         };
-        write_varuint(&mut self.bytes, elements.len() as u64);
+        write_varuint(self.out, elements.len() as u64)?;
         for element in elements {
             self.write_array_element_for_type(element_type, element)?;
         }
         Ok(())
-    }
-
-    fn finish(self) -> Vec<u8> {
-        self.bytes
     }
 }
 
@@ -522,7 +555,10 @@ impl PresenceSlot {
     }
 }
 
-fn write_optional_bitmap(out: &mut Vec<u8>, slots: impl IntoIterator<Item = PresenceSlot>) {
+fn write_optional_bitmap<W: BinaryWriteTarget>(
+    out: &mut W,
+    slots: impl IntoIterator<Item = PresenceSlot>,
+) -> Result<()> {
     let optional_slots = slots
         .into_iter()
         .filter(|slot| slot.optional)
@@ -533,7 +569,7 @@ fn write_optional_bitmap(out: &mut Vec<u8>, slots: impl IntoIterator<Item = Pres
             set_bit(&mut bitmap, optional_index);
         }
     }
-    out.extend_from_slice(&bitmap);
+    out.write_binary_bytes(&bitmap)
 }
 
 fn expected_scalar(field: &LinkedFieldMeta<'_>) -> ConfigForgeError {
@@ -561,23 +597,23 @@ fn zigzag(value: i64) -> u64 {
     ((value << 1) ^ (value >> 63)) as u64
 }
 
-fn write_varuint(out: &mut Vec<u8>, mut value: u64) {
+fn write_varuint<W: BinaryWriteTarget>(out: &mut W, mut value: u64) -> Result<()> {
     loop {
         let mut byte = (value & 0x7f) as u8;
         value >>= 7;
         if value != 0 {
             byte |= 0x80;
         }
-        out.push(byte);
+        out.write_binary_bytes(&[byte])?;
         if value == 0 {
-            break;
+            break Ok(());
         }
     }
 }
 
-fn write_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
-    write_varuint(out, bytes.len() as u64);
-    out.extend_from_slice(bytes);
+fn write_bytes<W: BinaryWriteTarget>(out: &mut W, bytes: &[u8]) -> Result<()> {
+    write_varuint(out, bytes.len() as u64)?;
+    out.write_binary_bytes(bytes)
 }
 
 #[cfg(test)]
@@ -619,7 +655,8 @@ mod tests {
                     present: true,
                 },
             ],
-        );
+        )
+        .expect("bitmap should write");
 
         assert_eq!(bytes, vec![0b0000_0101]);
     }
@@ -632,7 +669,7 @@ mod tests {
             present: index == 0 || index == 8 || index == 9,
         });
 
-        write_optional_bitmap(&mut bytes, slots);
+        write_optional_bitmap(&mut bytes, slots).expect("bitmap should write");
 
         assert_eq!(bytes, vec![0b0000_0001, 0b0000_0011]);
     }

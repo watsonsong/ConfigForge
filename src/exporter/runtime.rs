@@ -7,9 +7,9 @@ use rayon::prelude::*;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{ArtifactPlan, ArtifactProducer, ArtifactSink, ArtifactWriteStream},
+    artifact::ArtifactSink,
     data::DataSet,
-    meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
+    meta::{LinkedMetaModel, TargetTags},
     runtime_contract::RuntimeDataFile,
 };
 
@@ -55,14 +55,14 @@ pub(crate) fn export_runtime_data_to_sink(
                         path: plan.path.to_string_lossy().into_owned(),
                         format: exporter.name().to_owned(),
                     };
-                    let producer = RuntimeTableArtifactProducer {
-                        artifact_plan: ArtifactPlan::new(out_dir.join(&plan.path)),
+                    let mut stream = sink.create(out_dir.join(&plan.path))?;
+                    exporter.serialize_table_to_stream(
                         table_meta,
                         table,
                         target_tags,
-                        exporter,
-                    };
-                    sink.write_producer(producer)?;
+                        &mut stream,
+                    )?;
+                    stream.finish()?;
                     Ok(file)
                 })();
                 (index, result)
@@ -82,29 +82,6 @@ pub(crate) fn export_runtime_data_to_sink(
 pub struct RuntimeArtifactPlan {
     pub table_name: String,
     pub path: std::path::PathBuf,
-}
-
-struct RuntimeTableArtifactProducer<'a, 'meta> {
-    artifact_plan: ArtifactPlan,
-    table_meta: &'a LinkedTableMeta<'meta>,
-    table: &'a crate::data::DataTable,
-    target_tags: &'a TargetTags,
-    exporter: &'a dyn DataFormatExporter,
-}
-
-impl ArtifactProducer for RuntimeTableArtifactProducer<'_, '_> {
-    fn plan(&self) -> &ArtifactPlan {
-        &self.artifact_plan
-    }
-
-    fn produce(self, stream: &mut ArtifactWriteStream) -> Result<()> {
-        self.exporter.serialize_table_to_stream(
-            self.table_meta,
-            self.table,
-            self.target_tags,
-            stream,
-        )
-    }
 }
 
 fn ensure_unique_runtime_artifact_paths(plans: &[RuntimeArtifactPlan]) -> Result<()> {

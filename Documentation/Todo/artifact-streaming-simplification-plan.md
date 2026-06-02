@@ -216,7 +216,7 @@ cargo check
 refactor(cli): remove artifact memory limit options
 ```
 
-### Step 4：将 DataFormatExporter 的 stream API 设为主路径 `[ ]`
+### Step 4：将 DataFormatExporter 的 stream API 设为主路径 `[x]`
 
 目标：runtime data table exporter 不再依赖 `serialize_table() -> Vec<u8>` fallback 作为主设计。
 

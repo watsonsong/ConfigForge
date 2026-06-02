@@ -79,7 +79,7 @@ ConfigForge 的任务可按资源类型分为三类。
 - `Semaphore` 可限制同时打开文件、HTTP 请求、远端 API 请求数；
 - `JoinSet` / `FuturesUnordered` 可收集同类 I/O 任务。
 
-ArtifactSink 当前使用同步 `std::io::Write`，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 并传入 runtime/codegen 分支。runtime table exporter 与 codegen 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack 已使用 writer-style serializer；binary serializer / codegen 仍会短期 materialize 单文件 `Vec<u8>` / `String` 后立即写入 sink，aggregate exporter trait 也仍保留 compatibility fallback。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
+ArtifactSink 当前使用同步 `std::io::Write`，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 并传入 runtime/codegen 分支。runtime table exporter 与 codegen 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack / binary 均已使用 writer-style serializer；codegen 仍会短期 materialize 单文件 `String` 后立即写入 sink，aggregate exporter trait 也仍保留 compatibility fallback。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
 
 建议配置：
 
@@ -1008,13 +1008,13 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 - Artifact 模块已提供 `ArtifactSink` / `ArtifactWriteStream`，并作为唯一写入协调器处理 path reservation、Direct / TempCommit / DryRun 与 result entries。
 - Artifact 模块已提供 `ArtifactPlan` / `ArtifactProducer`；`ArtifactWriter::write(Vec<Artifact>)` 已转为 sink compatibility wrapper；旧 dedicated bounded writer queue、byte semaphore、artifact semaphore、ArtifactWriteLimits 与 generation limiter 已移除。
 - CLI 不再支持 artifact memory limit 参数；`--jobs` / `--serial` 仍控制 CPU 执行并行度。
-- Build 主流程已创建 shared `ArtifactSink` 并传入 exporter/codegen 分支；runtime table exporter 通过 producer API 调用 sink 写入，codegen 短期仍生成 `String` 后立即 `sink.write_text()`，aggregate exporter trait 暂时仍保留 compatibility fallback 并由 runtime wrapper 立即写入 sink。
+- Build 主流程已创建 shared `ArtifactSink` 并传入 exporter/codegen 分支；runtime table exporter 直接通过 `sink.create(path)` 打开 stream 并调用 `serialize_table_to_stream()` 写入，codegen 短期仍生成 `String` 后立即 `sink.write_text()`，aggregate exporter trait 暂时仍保留 compatibility fallback 并由 runtime wrapper 立即写入 sink。
 
 未来规划：
 
-- 将 aggregate exporter、codegen trait 与 remaining binary serializer 继续从 materialized `Vec<Artifact>` / `Vec<u8>` / `String` 迁移为通过 `sink.create(path)` 打开 `std::io::Write` stream 并直接写入，path 冲突在 create 时动态发现，不要求 build 预先规划所有路径。
+- 将 aggregate exporter 与 codegen trait 继续从 materialized `Vec<Artifact>` / `String` 迁移为通过 `sink.create(path)` 打开 `std::io::Write` stream 并直接写入，path 冲突在 create 时动态发现，不要求 build 预先规划所有路径。
 - `TempCommit` 的最终 rename 仍集中在 `sink.finish()`，保证失败时可以清理 temp files；`Direct` 模式保留可能产生 partial output 的弱语义。
-- 对大 payload exporter 优先迁移 streaming writer；codegen 和小文件路径可暂时继续 materialized 后调用 `sink.write_text()`。
+- 后续对 aggregate exporter 与 codegen 优先迁移 streaming writer；小文件路径可暂时继续 materialized 后调用 `sink.write_text()`。
 - ArtifactSink 不再承担 memory scheduler 职责；降低 RSS 峰值应优先通过 exporter/codegen streaming 化，避免生成端构建完整 `String` / `Vec<u8>`。
 - filesystem-aware path key 仍保留为后续跨平台增强，不在当前 lexical-normalized key 基础上提前复杂化。
 

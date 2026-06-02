@@ -19,9 +19,9 @@ use crate::exporter::lua_table::LuaTableExporter;
 /// Runtime data format exporter.
 ///
 /// Implementations may be shared across worker threads. `plan_table_artifact` and
-/// `serialize_table` must therefore be thread-safe and reentrant; plugins with
-/// internal mutable state must synchronize it themselves or use per-task factory
-/// instances in a future registry model.
+/// `serialize_table_to_stream` must therefore be thread-safe and reentrant;
+/// plugins with internal mutable state must synchronize it themselves or use
+/// per-task factory instances in a future registry model.
 pub trait DataFormatExporter: Send + Sync {
     fn name(&self) -> &'static str;
 
@@ -42,13 +42,23 @@ pub trait DataFormatExporter: Send + Sync {
         })
     }
 
+    /// Legacy compatibility API for callers that still need a materialized
+    /// payload. New exporters should implement `serialize_table_to_stream` and
+    /// avoid building a full `Vec<u8>` when writing final artifacts.
     fn serialize_table(
         &self,
-        table_meta: &LinkedTableMeta<'_>,
-        table: &DataTable,
-        target_tags: &TargetTags,
-    ) -> Result<Vec<u8>>;
+        _table_meta: &LinkedTableMeta<'_>,
+        _table: &DataTable,
+        _target_tags: &TargetTags,
+    ) -> Result<Vec<u8>> {
+        Err(ConfigForgeError::Validation(format!(
+            "exporter `{}` does not implement legacy serialize_table fallback",
+            self.name()
+        )))
+    }
 
+    /// Primary artifact serialization API. Runtime table export uses this path
+    /// directly after reserving the output path in `ArtifactSink`.
     fn serialize_table_to_stream(
         &self,
         table_meta: &LinkedTableMeta<'_>,

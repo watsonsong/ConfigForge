@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::BTreeMap, path::PathBuf, sync::Mutex};
+use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
 
 use tempfile::tempdir;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{ArtifactWriteMode, ArtifactWriter},
+    artifact::{ArtifactWriteMode, ArtifactWriteStream, ArtifactWriter},
     data::{DataTable, SourceRole},
     meta::{LinkedTableMeta, MetaModel, TargetTags},
     runtime_contract::{ExportDependency, RuntimeDataFile, binary_schema_revision},
@@ -63,15 +63,27 @@ impl DataFormatExporter for CustomDataExporter {
 
     fn serialize_table(
         &self,
-        table_meta: &LinkedTableMeta<'_>,
+        _table_meta: &LinkedTableMeta<'_>,
         _table: &DataTable,
         _target_tags: &TargetTags,
     ) -> Result<Vec<u8>> {
+        Err(ConfigForgeError::Validation(
+            "legacy serialize_table should not be used by runtime sink export".to_owned(),
+        ))
+    }
+
+    fn serialize_table_to_stream(
+        &self,
+        table_meta: &LinkedTableMeta<'_>,
+        _table: &DataTable,
+        _target_tags: &TargetTags,
+        stream: &mut ArtifactWriteStream,
+    ) -> Result<()> {
         self.seen_tables
             .lock()
             .expect("seen tables lock should not be poisoned")
             .push(table_meta.meta.name.clone());
-        Ok(table_meta.meta.name.as_bytes().to_vec())
+        stream.write_all_artifact(table_meta.meta.name.as_bytes())
     }
 }
 
@@ -185,6 +197,77 @@ fn export_runtime_data_uses_registered_exporter() {
         vec!["items"]
     );
     assert!(out_dir.path().join("custom/items.custom").exists());
+}
+
+#[test]
+fn export_runtime_data_reports_same_bytes_for_dry_run_and_direct_streams() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+            "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let data_set = crate::data::DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+    )]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .expect("test thread pool should build");
+
+    let dry_run_dir = tempdir().expect("dry-run dir should exist");
+    let dry_run_sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+    export_runtime_data_to_sink(
+        dry_run_dir.path(),
+        &linked,
+        &TargetTags::empty(),
+        &data_set,
+        &CustomDataExporter {
+            seen_tables: Mutex::new(Vec::new()),
+        },
+        &pool,
+        &dry_run_sink,
+    )
+    .expect("dry-run runtime data should export");
+    let dry_run_result = dry_run_sink.finish().expect("dry-run sink should finish");
+
+    let direct_dir = tempdir().expect("direct dir should exist");
+    let direct_sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+    export_runtime_data_to_sink(
+        direct_dir.path(),
+        &linked,
+        &TargetTags::empty(),
+        &data_set,
+        &CustomDataExporter {
+            seen_tables: Mutex::new(Vec::new()),
+        },
+        &pool,
+        &direct_sink,
+    )
+    .expect("direct runtime data should export");
+    let direct_result = direct_sink.finish().expect("direct sink should finish");
+
+    assert_eq!(dry_run_result.entries.len(), 1);
+    assert_eq!(direct_result.entries.len(), 1);
+    assert_eq!(
+        dry_run_result.entries[0].bytes,
+        direct_result.entries[0].bytes
+    );
+    assert_eq!(dry_run_result.entries[0].bytes, "items".len());
+    assert!(!dry_run_dir.path().join("custom/items.custom").exists());
+    assert_eq!(
+        fs::read(direct_dir.path().join("custom/items.custom"))
+            .expect("direct artifact should be written"),
+        b"items"
+    );
 }
 
 #[test]

@@ -214,5 +214,4 @@ mod tests {
             matches!(error, ConfigForgeError::Validation(message) if message.contains("--jobs must be no greater than"))
         );
     }
-
 }
