@@ -534,6 +534,17 @@ struct ArtifactSinkInner {
     artifact_semaphore: ArtifactSemaphore,
 }
 
+impl Drop for ArtifactSinkInner {
+    fn drop(&mut self) {
+        let state = self
+            .state
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cleanup_temp_files(state.temp_files.values());
+        state.temp_files.clear();
+    }
+}
+
 impl ArtifactSinkInner {
     fn lock_state(&self) -> std::sync::MutexGuard<'_, ArtifactSinkState> {
         self.state
@@ -1082,6 +1093,32 @@ mod tests {
             fs::read_to_string(path).expect("written artifact"),
             "pub struct Generated;"
         );
+    }
+
+    #[test]
+    fn sink_temp_commit_drop_cleans_finished_temp_files_without_finish() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("out/generated.rs");
+
+        {
+            let sink = ArtifactWriter::new(ArtifactWriteMode::TempCommit).open_sink();
+            sink.write_text(&path, "pub struct Generated;")
+                .expect("temp artifact should write");
+            assert!(!path.exists());
+
+            let temp_files = fs::read_dir(path.parent().expect("out dir"))
+                .expect("out dir should exist")
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .expect("read temp dir");
+            assert_eq!(temp_files.len(), 1);
+        }
+
+        assert!(!path.exists());
+        let temp_files = fs::read_dir(path.parent().expect("out dir"))
+            .expect("out dir should exist")
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .expect("read temp dir");
+        assert!(temp_files.is_empty());
     }
 
     #[test]

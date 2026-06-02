@@ -301,7 +301,7 @@ Build / exporters / codegen
 - `DryRun`：仍执行 full build、validation 和内容生成，以获得准确 bytes；`ArtifactSink::create()` 返回 `CountingWriter`，`write()` 只累计 bytes，不创建目录、不写文件。若后续需要纯 path-only dry-run，可另加 `--dry-run=plan-only`，不能改变现有 dry-run 语义。
 - `Direct`：`ArtifactSink::create()` 创建父目录并打开最终路径文件；`write()` 同步写入最终文件并按 chunk 参与 byte budget。Direct 模式失败时可能已经留下部分最终文件，这是该模式的既有弱语义；需要“全部成功后再可见”时应使用 `TempCommit`。
 - `TempCommit`：`ArtifactSink::create()` 创建同目录 temp file，stream 写入 temp file；所有 stream 都 `finish()` 且无错误后，`ArtifactSink::finish()` 按 normalized final path 稳定顺序 rename。commit 阶段不再持有 artifact content bytes，因此内存峰值只与打开 stream 的 buffer / temp file writer 有关。
-- `TempCommit` 清理：任一 stream 写 temp 阶段失败时，`ArtifactSink::finish()` 清理已创建 temp files；commit 阶段失败时沿用当前语义，可能已有部分最终文件被 rename 成功，但错误路径必须稳定。
+- `TempCommit` 清理：任一 stream 写 temp 阶段失败时，`ArtifactSink::finish()` 清理已创建 temp files；如果 build / 调用方在 `finish()` 前因其它错误提前返回，sink drop 也会兜底删除已记录的 temp files；commit 阶段失败时沿用当前语义，可能已有部分最终文件被 rename 成功，但错误路径必须稳定。
 - `create()` 失败持久化：duplicate path、final/temp file open 失败都会记录 `first_error`；即使调用方忽略 `create()` 返回的错误，后续 `ArtifactSink::finish()` 仍必须失败。若存在 `Failed` path 但没有 `first_error`，`finish()` 会返回 fallback validation error。
 
 #### Stream 生命周期与并发安全
