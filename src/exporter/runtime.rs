@@ -7,10 +7,7 @@ use rayon::prelude::*;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{
-        ArtifactGenerationLimiter, ArtifactPlan, ArtifactProducer, ArtifactSink,
-        ArtifactWriteStream,
-    },
+    artifact::{ArtifactPlan, ArtifactProducer, ArtifactSink, ArtifactWriteStream},
     data::DataSet,
     meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
     runtime_contract::RuntimeDataFile,
@@ -26,7 +23,6 @@ pub(crate) fn export_runtime_data_to_sink(
     exporter: &dyn DataFormatExporter,
     pool: &rayon::ThreadPool,
     sink: &ArtifactSink,
-    generation_limiter: &ArtifactGenerationLimiter,
 ) -> Result<Vec<RuntimeDataFile>> {
     let mut plans = Vec::new();
     for table_meta in &linked_meta.tables {
@@ -60,13 +56,13 @@ pub(crate) fn export_runtime_data_to_sink(
                         format: exporter.name().to_owned(),
                     };
                     let producer = RuntimeTableArtifactProducer {
-                        artifact_plan: ArtifactPlan::new(out_dir.join(&plan.path), 1),
+                        artifact_plan: ArtifactPlan::new(out_dir.join(&plan.path)),
                         table_meta,
                         table,
                         target_tags,
                         exporter,
                     };
-                    generation_limiter.run_unknown(|| sink.write_producer(producer))?;
+                    sink.write_producer(producer)?;
                     Ok(file)
                 })();
                 (index, result)

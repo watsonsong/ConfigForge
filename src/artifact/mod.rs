@@ -6,7 +6,7 @@ use std::{
     fs::{self, File},
     io::{self, Write},
     path::{Component, Path, PathBuf},
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Mutex},
 };
 
 use crate::{ConfigForgeError, Result};
@@ -86,27 +86,16 @@ pub struct ArtifactWriteEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArtifactWriter {
     mode: ArtifactWriteMode,
-    limits: ArtifactWriteLimits,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ArtifactWriteLimits {
-    pub max_in_flight_bytes: usize,
-    pub max_in_flight_artifacts: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactPlan {
     pub path: PathBuf,
-    pub estimated_generation_bytes: usize,
 }
 
 impl ArtifactPlan {
-    pub fn new(path: impl Into<PathBuf>, estimated_generation_bytes: usize) -> Self {
-        Self {
-            path: path.into(),
-            estimated_generation_bytes,
-        }
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
     }
 }
 
@@ -120,27 +109,15 @@ pub trait ArtifactProducer {
 
 impl ArtifactWriter {
     pub fn new(mode: ArtifactWriteMode) -> Self {
-        Self {
-            mode,
-            limits: ArtifactWriteLimits::default(),
-        }
+        Self { mode }
     }
 
     pub fn mode(self) -> ArtifactWriteMode {
         self.mode
     }
 
-    pub fn limits(self) -> ArtifactWriteLimits {
-        self.limits
-    }
-
-    pub fn with_limits(mut self, limits: ArtifactWriteLimits) -> Self {
-        self.limits = limits.normalized();
-        self
-    }
-
     pub fn open_sink(self) -> ArtifactSink {
-        ArtifactSink::new(self.mode, self.limits)
+        ArtifactSink::new(self.mode)
     }
 
     pub fn write(self, artifacts: Vec<Artifact>) -> Result<ArtifactWriteResult> {
@@ -163,7 +140,7 @@ pub struct ArtifactSink {
 }
 
 impl ArtifactSink {
-    fn new(mode: ArtifactWriteMode, _limits: ArtifactWriteLimits) -> Self {
+    fn new(mode: ArtifactWriteMode) -> Self {
         Self {
             mode,
             inner: Arc::new(ArtifactSinkInner {
@@ -323,81 +300,6 @@ impl ArtifactSink {
             entries,
         })
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct ArtifactGenerationLimiter {
-    inner: Arc<ArtifactGenerationLimiterInner>,
-}
-
-impl ArtifactGenerationLimiter {
-    pub fn new(max_in_flight_bytes: usize, unknown_generation_bytes: usize) -> Self {
-        Self {
-            inner: Arc::new(ArtifactGenerationLimiterInner {
-                byte_semaphore: ByteSemaphore::new(max_in_flight_bytes.max(1)),
-                unknown_generation_bytes: unknown_generation_bytes.max(1),
-            }),
-        }
-    }
-
-    pub fn from_limits(limits: ArtifactWriteLimits) -> Self {
-        let limits = limits.normalized();
-        Self::new(
-            limits.max_in_flight_bytes,
-            limits
-                .max_in_flight_bytes
-                .checked_div(limits.max_in_flight_artifacts)
-                .unwrap_or(1)
-                .max(1),
-        )
-    }
-
-    pub fn acquire(&self, estimated_bytes: usize) -> ArtifactGenerationPermit {
-        let bytes = estimated_bytes.max(1);
-        self.inner.byte_semaphore.acquire(bytes);
-        ArtifactGenerationPermit {
-            limiter: self.inner.clone(),
-            bytes,
-            released: false,
-        }
-    }
-
-    pub fn acquire_unknown(&self) -> ArtifactGenerationPermit {
-        self.acquire(self.inner.unknown_generation_bytes)
-    }
-
-    pub fn run_unknown<T>(&self, operation: impl FnOnce() -> Result<T>) -> Result<T> {
-        let _permit = self.acquire_unknown();
-        operation()
-    }
-}
-
-#[derive(Debug)]
-pub struct ArtifactGenerationPermit {
-    limiter: Arc<ArtifactGenerationLimiterInner>,
-    bytes: usize,
-    released: bool,
-}
-
-impl ArtifactGenerationPermit {
-    fn release_once(&mut self) {
-        if !self.released {
-            self.limiter.byte_semaphore.release(self.bytes);
-            self.released = true;
-        }
-    }
-}
-
-impl Drop for ArtifactGenerationPermit {
-    fn drop(&mut self) {
-        self.release_once();
-    }
-}
-
-#[derive(Debug)]
-struct ArtifactGenerationLimiterInner {
-    byte_semaphore: ByteSemaphore,
-    unknown_generation_bytes: usize,
 }
 
 #[derive(Debug)]
@@ -578,45 +480,6 @@ enum ArtifactPathState {
     Failed,
 }
 
-impl ArtifactWriteLimits {
-    pub const DEFAULT_MAX_IN_FLIGHT_BYTES: usize = 256 * 1024 * 1024;
-    pub const DEFAULT_MAX_IN_FLIGHT_ARTIFACTS: usize = 16;
-
-    pub fn new(max_in_flight_bytes: usize, max_in_flight_artifacts: usize) -> Result<Self> {
-        let limits = Self {
-            max_in_flight_bytes,
-            max_in_flight_artifacts,
-        };
-        if limits.max_in_flight_bytes == 0 {
-            return Err(ConfigForgeError::Validation(
-                "artifact memory limit must be greater than 0".to_owned(),
-            ));
-        }
-        if limits.max_in_flight_artifacts == 0 {
-            return Err(ConfigForgeError::Validation(
-                "artifact in-flight limit must be greater than 0".to_owned(),
-            ));
-        }
-        Ok(limits)
-    }
-
-    fn normalized(self) -> Self {
-        Self {
-            max_in_flight_bytes: self.max_in_flight_bytes.max(1),
-            max_in_flight_artifacts: self.max_in_flight_artifacts.max(1),
-        }
-    }
-}
-
-impl Default for ArtifactWriteLimits {
-    fn default() -> Self {
-        Self {
-            max_in_flight_bytes: Self::DEFAULT_MAX_IN_FLIGHT_BYTES,
-            max_in_flight_artifacts: Self::DEFAULT_MAX_IN_FLIGHT_ARTIFACTS,
-        }
-    }
-}
-
 fn plan_artifacts(artifacts: Vec<Artifact>) -> Result<Vec<Artifact>> {
     let mut by_path = BTreeMap::<PathBuf, Artifact>::new();
     for mut artifact in artifacts {
@@ -630,51 +493,6 @@ fn plan_artifacts(artifacts: Vec<Artifact>) -> Result<Vec<Artifact>> {
         by_path.insert(artifact.path.clone(), artifact);
     }
     Ok(by_path.into_values().collect())
-}
-
-#[derive(Debug)]
-struct ByteSemaphore {
-    capacity: usize,
-    state: Mutex<ByteSemaphoreState>,
-    capacity_available: Condvar,
-}
-
-#[derive(Debug)]
-struct ByteSemaphoreState {
-    in_flight: usize,
-}
-
-impl ByteSemaphore {
-    fn new(capacity: usize) -> Self {
-        Self {
-            capacity: capacity.max(1),
-            state: Mutex::new(ByteSemaphoreState { in_flight: 0 }),
-            capacity_available: Condvar::new(),
-        }
-    }
-
-    fn acquire(&self, bytes: usize) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("byte semaphore lock should not be poisoned");
-        while state.in_flight != 0 && state.in_flight.saturating_add(bytes) > self.capacity {
-            state = self
-                .capacity_available
-                .wait(state)
-                .expect("byte semaphore lock should not be poisoned");
-        }
-        state.in_flight = state.in_flight.saturating_add(bytes);
-    }
-
-    fn release(&self, bytes: usize) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("byte semaphore lock should not be poisoned");
-        state.in_flight = state.in_flight.saturating_sub(bytes);
-        self.capacity_available.notify_all();
-    }
 }
 
 fn open_file_for_write(path: &Path) -> Result<File> {
@@ -750,12 +568,6 @@ fn lexical_normalize_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-    use std::thread;
-    use std::time::Duration;
     use std::{env, io::Write as _, sync::Mutex};
 
     use super::*;
@@ -906,7 +718,7 @@ mod tests {
         let path = temp_dir.path().join("out/producer.bin");
         let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
         let producer = TestProducer {
-            plan: ArtifactPlan::new(&path, 4),
+            plan: ArtifactPlan::new(&path),
             content: &[1, 2, 3, 4],
         };
 
@@ -916,33 +728,6 @@ mod tests {
         assert_eq!(entry.bytes, 4);
         assert_eq!(result.entries[0].path, path);
         assert_eq!(fs::read(path).expect("producer content"), vec![1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn generation_limiter_blocks_until_generation_permit_is_released() {
-        let limiter = ArtifactGenerationLimiter::new(4, 4);
-        let active = Arc::new(AtomicUsize::new(0));
-        let max_active = Arc::new(AtomicUsize::new(0));
-        let mut handles = Vec::new();
-
-        for _ in 0..2 {
-            let limiter = limiter.clone();
-            let active = active.clone();
-            let max_active = max_active.clone();
-            handles.push(thread::spawn(move || {
-                let _permit = limiter.acquire(4);
-                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
-                max_active.fetch_max(now, Ordering::SeqCst);
-                thread::sleep(Duration::from_millis(20));
-                active.fetch_sub(1, Ordering::SeqCst);
-            }));
-        }
-
-        for handle in handles {
-            handle.join().expect("thread should join");
-        }
-
-        assert_eq!(max_active.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -1100,29 +885,25 @@ mod tests {
     }
 
     #[test]
-    fn bounded_direct_write_allows_single_artifact_larger_than_byte_limit() {
+    fn direct_stream_writes_large_artifact_through_standard_writer() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let path = temp_dir.path().join("out/large.bin");
-        let limits = ArtifactWriteLimits::new(1, 1).expect("limits should be valid");
 
         let result = ArtifactWriter::new(ArtifactWriteMode::Direct)
-            .with_limits(limits)
             .write(vec![Artifact::binary(&path, vec![1, 2, 3, 4])])
-            .expect("single oversized artifact should write");
+            .expect("large artifact should write");
 
         assert_eq!(result.entries[0].bytes, 4);
         assert_eq!(fs::read(path).expect("written artifact"), vec![1, 2, 3, 4]);
     }
 
     #[test]
-    fn bounded_temp_commit_writes_multiple_artifacts_with_small_queue() {
+    fn temp_commit_writes_multiple_artifacts_through_standard_writer() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let first = temp_dir.path().join("out/a.txt");
         let second = temp_dir.path().join("out/b.txt");
-        let limits = ArtifactWriteLimits::new(1, 1).expect("limits should be valid");
 
         let result = ArtifactWriter::new(ArtifactWriteMode::TempCommit)
-            .with_limits(limits)
             .write(vec![
                 Artifact::text(&second, "bb"),
                 Artifact::text(&first, "aa"),
@@ -1133,20 +914,6 @@ mod tests {
         assert_eq!(result.entries[1].path, second);
         assert_eq!(fs::read_to_string(first).expect("first artifact"), "aa");
         assert_eq!(fs::read_to_string(second).expect("second artifact"), "bb");
-    }
-
-    #[test]
-    fn artifact_write_limits_reject_zero_values() {
-        assert!(matches!(
-            ArtifactWriteLimits::new(0, 1),
-            Err(ConfigForgeError::Validation(message))
-                if message.contains("artifact memory limit")
-        ));
-        assert!(matches!(
-            ArtifactWriteLimits::new(1, 0),
-            Err(ConfigForgeError::Validation(message))
-                if message.contains("artifact in-flight limit")
-        ));
     }
 
     #[test]

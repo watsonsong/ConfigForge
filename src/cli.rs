@@ -94,7 +94,7 @@ fn run_with_args(cli: Cli) -> anyhow::Result<()> {
         extra_tags: &cli.extra_tags,
         execution,
         artifact_write_mode,
-        artifact_write_limits: artifact_memory.resolve_limits(execution.jobs),
+        artifact_memory,
     });
     let output = match build_result {
         Ok(output) => output,

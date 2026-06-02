@@ -7,7 +7,7 @@ use tempfile::tempdir;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{ArtifactGenerationLimiter, ArtifactWriteMode, ArtifactWriter},
+    artifact::{ArtifactWriteMode, ArtifactWriter},
     data::{DataTable, SourceRole},
     meta::{LinkedTableMeta, MetaModel, TargetTags},
     runtime_contract::{ExportDependency, RuntimeDataFile, binary_schema_revision},
@@ -28,7 +28,6 @@ fn export_runtime_data_to_disk(
     pool: &rayon::ThreadPool,
 ) -> Result<Vec<RuntimeDataFile>> {
     let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
-    let generation_limiter = ArtifactGenerationLimiter::new(1024 * 1024, 1024);
     let files = export_runtime_data_to_sink(
         out_dir,
         linked_meta,
@@ -37,7 +36,6 @@ fn export_runtime_data_to_disk(
         exporter,
         pool,
         &sink,
-        &generation_limiter,
     )?;
     sink.finish()?;
     Ok(files)
@@ -468,7 +466,6 @@ fn export_runtime_data_rejects_duplicate_artifact_paths_before_writing() {
         .expect("test thread pool should build");
 
     let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
-    let generation_limiter = ArtifactGenerationLimiter::new(1024 * 1024, 1024);
 
     let error = export_runtime_data_to_sink(
         out_dir.path(),
@@ -478,7 +475,6 @@ fn export_runtime_data_rejects_duplicate_artifact_paths_before_writing() {
         &ConflictDataExporter,
         &pool,
         &sink,
-        &generation_limiter,
     )
     .unwrap_err();
 

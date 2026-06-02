@@ -18,8 +18,8 @@ pub mod error {
 }
 
 pub use artifact::{
-    Artifact, ArtifactContent, ArtifactWriteEntry, ArtifactWriteLimits, ArtifactWriteMode,
-    ArtifactWriteResult, ArtifactWriter,
+    Artifact, ArtifactContent, ArtifactWriteEntry, ArtifactWriteMode, ArtifactWriteResult,
+    ArtifactWriter,
 };
 pub use build::{
     ArtifactMemoryOptions, BuildOptions, BuildOutput, BuildTrace, BuildTraceStage,

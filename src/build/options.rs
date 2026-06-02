@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{ArtifactWriteLimits, ArtifactWriteMode, ArtifactWriteResult},
+    artifact::{ArtifactWriteMode, ArtifactWriteResult},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -17,7 +17,7 @@ pub struct BuildOptions<'a> {
     pub extra_tags: &'a [String],
     pub execution: ExecutionOptions,
     pub artifact_write_mode: ArtifactWriteMode,
-    pub artifact_write_limits: ArtifactWriteLimits,
+    pub artifact_memory: ArtifactMemoryOptions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,16 +95,17 @@ impl BuildTrace {
     pub(crate) fn new(
         target: &str,
         execution: ExecutionOptions,
-        artifact_write_limits: ArtifactWriteLimits,
+        artifact_memory: ArtifactMemoryOptions,
     ) -> Self {
+        let artifact_memory_bytes = artifact_memory.trace_memory_bytes();
         Self {
             target: target.to_owned(),
             jobs: execution.jobs,
             io_concurrency: execution.io_concurrency,
             network_concurrency: execution.network_concurrency,
             serial: execution.serial,
-            artifact_memory_bytes: artifact_write_limits.max_in_flight_bytes,
-            artifact_queue_capacity: artifact_write_limits.max_in_flight_artifacts,
+            artifact_memory_bytes,
+            artifact_queue_capacity: (execution.jobs * 4).max(16),
             total_duration_ms: 0,
             stages: Vec::new(),
         }
@@ -196,24 +197,6 @@ impl ArtifactMemoryOptions {
         Ok(options)
     }
 
-    pub fn resolve_limits(self, jobs: usize) -> ArtifactWriteLimits {
-        let max_in_flight_bytes = match self.limit_bytes {
-            Some(bytes) => bytes,
-            None => {
-                let percent = self.percent.unwrap_or(DEFAULT_ARTIFACT_MEMORY_PERCENT);
-                available_memory_bytes()
-                    .map(|available| available.saturating_mul(percent as usize) / 100)
-                    .unwrap_or(FALLBACK_ARTIFACT_MEMORY_BYTES)
-                    .clamp(
-                        MIN_DEFAULT_ARTIFACT_MEMORY_BYTES,
-                        MAX_DEFAULT_ARTIFACT_MEMORY_BYTES,
-                    )
-            }
-        };
-        ArtifactWriteLimits::new(max_in_flight_bytes, (jobs * 4).max(16))
-            .expect("resolved artifact write limits should be valid")
-    }
-
     fn validate(self) -> Result<()> {
         if self.limit_bytes.is_some() && self.percent.is_some() {
             return Err(ConfigForgeError::Validation(
@@ -236,6 +219,22 @@ impl ArtifactMemoryOptions {
             }
         }
         Ok(())
+    }
+
+    fn trace_memory_bytes(self) -> usize {
+        match self.limit_bytes {
+            Some(bytes) => bytes,
+            None => {
+                let percent = self.percent.unwrap_or(DEFAULT_ARTIFACT_MEMORY_PERCENT);
+                available_memory_bytes()
+                    .map(|available| available.saturating_mul(percent as usize) / 100)
+                    .unwrap_or(FALLBACK_ARTIFACT_MEMORY_BYTES)
+                    .clamp(
+                        MIN_DEFAULT_ARTIFACT_MEMORY_BYTES,
+                        MAX_DEFAULT_ARTIFACT_MEMORY_BYTES,
+                    )
+            }
+        }
     }
 }
 
@@ -348,12 +347,6 @@ mod tests {
 
         assert_eq!(options.limit_bytes, Some(128 * 1024 * 1024));
         assert_eq!(options.percent, None);
-        assert_eq!(
-            options.resolve_limits(2).max_in_flight_bytes,
-            128 * 1024 * 1024
-        );
-        assert_eq!(options.resolve_limits(2).max_in_flight_artifacts, 16);
-        assert_eq!(options.resolve_limits(8).max_in_flight_artifacts, 32);
     }
 
     #[test]

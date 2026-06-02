@@ -150,7 +150,7 @@ cargo check
 refactor(artifact): simplify sink streams to standard writers
 ```
 
-### Step 2：删除 ArtifactWriteLimits 与 ArtifactGenerationLimiter `[ ]`
+### Step 2：删除 ArtifactWriteLimits 与 ArtifactGenerationLimiter `[x]`
 
 目标：彻底移除 artifact memory limit 的核心类型和内部调用。
 
