@@ -313,49 +313,6 @@ fn dry_run_builds_plan_without_writing_artifacts() {
 }
 
 #[test]
-fn artifact_memory_limit_flag_builds_with_bounded_writer() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let out_dir = temp_dir.path().join("generated_code");
-    let project_path = temp_dir.path().join("ConfigForge.toml");
-    fs::write(
-        &project_path,
-        format!(
-            r#"
-                imports = [{}]
-
-                [project]
-                name = "standard_project"
-
-                [[targets]]
-                name = "code_only"
-
-                [[targets.exports]]
-                type = "rust"
-                output = "{}"
-            "#,
-            standard_core_meta_imports(),
-            out_dir.display()
-        ),
-    )
-    .expect("project config should be written");
-
-    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
-    cmd.args([
-        "--project",
-        project_path.to_str().expect("path should be utf8"),
-        "--target",
-        "code_only",
-        "--artifact-memory-limit",
-        "1MiB",
-    ]);
-
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("target `code_only` built"));
-    assert!(out_dir.join("generated.rs").exists());
-}
-
-#[test]
 fn trace_tasks_flag_writes_build_metrics_json() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let out_dir = temp_dir.path().join("generated_code");
@@ -403,12 +360,6 @@ fn trace_tasks_flag_writes_build_metrics_json() {
     .expect("trace file should contain json");
     assert_eq!(trace["target"], "code_only");
     assert!(trace["jobs"].as_u64().expect("jobs should be numeric") >= 1);
-    assert!(
-        trace["artifact_memory_bytes"]
-            .as_u64()
-            .expect("artifact memory should be numeric")
-            >= 64 * 1024 * 1024
-    );
     let stage_names = trace["stages"]
         .as_array()
         .expect("stages should be an array")
@@ -491,51 +442,6 @@ fn trace_tasks_flag_writes_build_metrics_json_on_build_failure() {
             .iter()
             .all(|stage| stage["name"] != "finish_artifacts")
     );
-}
-
-#[test]
-fn rejects_conflicting_artifact_memory_options() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let out_dir = temp_dir.path().join("generated_code");
-    let project_path = temp_dir.path().join("ConfigForge.toml");
-    fs::write(
-        &project_path,
-        format!(
-            r#"
-                imports = [{}]
-
-                [project]
-                name = "standard_project"
-
-                [[targets]]
-                name = "code_only"
-
-                [[targets.exports]]
-                type = "rust"
-                output = "{}"
-            "#,
-            standard_core_meta_imports(),
-            out_dir.display()
-        ),
-    )
-    .expect("project config should be written");
-
-    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
-    cmd.args([
-        "--project",
-        project_path.to_str().expect("path should be utf8"),
-        "--target",
-        "code_only",
-        "--artifact-memory-limit",
-        "64MiB",
-        "--artifact-memory-percent",
-        "25",
-    ]);
-
-    cmd.assert().failure().stderr(predicate::str::contains(
-        "--artifact-memory-limit and --artifact-memory-percent cannot be used together",
-    ));
-    assert!(!out_dir.join("generated.rs").exists());
 }
 
 #[test]

@@ -16,8 +16,8 @@ mod runtime;
 mod target;
 
 pub use options::{
-    ArtifactMemoryOptions, BuildErrorWithTrace, BuildOptions, BuildOutput, BuildTrace,
-    BuildTraceStage, BuildTraceStageStatus, ExecutionOptions,
+    BuildErrorWithTrace, BuildOptions, BuildOutput, BuildTrace, BuildTraceStage,
+    BuildTraceStageStatus, ExecutionOptions,
 };
 
 use crate::{
@@ -46,10 +46,9 @@ pub fn build_target_with_trace(
     let mut trace = BuildTraceRecorder::new();
     let execution = options.execution;
     let target_name = options.target_name.to_owned();
-    let artifact_memory = options.artifact_memory;
 
     let result = build_target_inner(options, &mut trace);
-    let trace = trace.finish(BuildTrace::new(&target_name, execution, artifact_memory));
+    let trace = trace.finish(BuildTrace::new(&target_name, execution));
 
     match result {
         Ok(output) => Ok(output.with_trace(trace)),
@@ -1094,14 +1093,12 @@ mod tests {
             "client",
             ExecutionOptions::from_cli(Some(2), Some(4), Some(2), false)
                 .expect("execution options"),
-            ArtifactMemoryOptions::from_cli(Some("64MiB"), None).expect("artifact memory"),
         ));
 
         assert_eq!(ok_value, 7);
         assert!(failed.is_err());
         assert_eq!(trace.target, "client");
         assert_eq!(trace.jobs, 2);
-        assert_eq!(trace.artifact_memory_bytes, 64 * 1024 * 1024);
         assert_eq!(trace.stages.len(), 2);
         assert_eq!(trace.stages[0].name, "successful_stage");
         assert_eq!(trace.stages[0].status, BuildTraceStageStatus::Succeeded);

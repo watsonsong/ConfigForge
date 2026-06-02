@@ -6,7 +6,6 @@ use std::{fs, path::PathBuf};
 use clap::{Parser, ValueEnum};
 
 use crate::{
-    ArtifactMemoryOptions,
     artifact::ArtifactWriteMode,
     build::{BuildOptions, ExecutionOptions, build_target_with_trace},
 };
@@ -42,12 +41,6 @@ struct Cli {
     /// Artifact write mode to use when not running with --dry-run.
     #[arg(long, value_enum)]
     write_mode: Option<CliWriteMode>,
-    /// Maximum generated artifact bytes allowed in the bounded write pipeline.
-    #[arg(long)]
-    artifact_memory_limit: Option<String>,
-    /// Percentage of currently available memory for the artifact write pipeline.
-    #[arg(long)]
-    artifact_memory_percent: Option<u8>,
     /// Write build tracing / metrics as JSON to this path.
     #[arg(long)]
     trace_tasks: Option<PathBuf>,
@@ -84,17 +77,12 @@ fn run_with_args(cli: Cli) -> anyhow::Result<()> {
     } else {
         cli.write_mode.unwrap_or(CliWriteMode::Direct).into()
     };
-    let artifact_memory = ArtifactMemoryOptions::from_cli(
-        cli.artifact_memory_limit.as_deref(),
-        cli.artifact_memory_percent,
-    )?;
     let build_result = build_target_with_trace(BuildOptions {
         project_path: &cli.project,
         target_name: &cli.target,
         extra_tags: &cli.extra_tags,
         execution,
         artifact_write_mode,
-        artifact_memory,
     });
     let output = match build_result {
         Ok(output) => output,

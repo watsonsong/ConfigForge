@@ -7,10 +7,10 @@
 - `build_target()` 使用局部 Rayon CPU worker pool 控制 `jobs`；
 - `execute_target_dag()` 维护 target-local execution view skeleton，并按 `MetaAndData` / `MetaOnly` 两个分支执行；
 - DataLoader、table normalize、target-aware validation、runtime data export task、MetaOnly codegen task 已在受限 worker pool 中并行；
-- Artifact writer 已收敛为中心协调式 `ArtifactSink` 兼容入口，并支持 memory budget 与 `--artifact-memory-limit` / `--artifact-memory-percent`；
+- Artifact writer 已收敛为中心协调式 `ArtifactSink` 兼容入口，支持标准同步 `std::io::Write` 流、dry-run、direct 与 temp-commit；
 - 阶段式 build 已支持 `BuildTrace` 与 `--trace-tasks <path>` JSON metrics 输出。
 
-当前仍未实现、但保留为未来规划的方向包括：远端 provider 的正式 async runtime、multi-target build、exporter/codegen 端到端 streaming、generation limiter、filesystem-aware path key，以及仅在明确收益出现后再推进的通用 DAG executor。
+当前仍未实现、但保留为未来规划的方向包括：远端 provider 的正式 async runtime、multi-target build、exporter/codegen 端到端 streaming、filesystem-aware path key，以及仅在明确收益出现后再推进的通用 DAG executor。
 
 ## 1. 设计目标
 
@@ -56,7 +56,7 @@ ConfigForge 的任务可按资源类型分为三类。
 | 类型 | 示例 | 执行方式 | 资源限制 |
 | --- | --- | --- | --- |
 | Async I/O task | 远端 Sheet/API 请求、后续 async artifact write、可选 async file read | async runtime | `io_concurrency` / provider semaphore |
-| CPU/blocking task | 本地 CSV reader、TOML/CSV parse、Meta link、normalize、validation、codegen、JSON/MessagePack serialization、短期同步 ArtifactSink 文件写入 | CPU worker pool / blocking source pool / dedicated writer threads | `jobs` / `io_concurrency` / artifact byte budget |
+| CPU/blocking task | 本地 CSV reader、TOML/CSV parse、Meta link、normalize、validation、codegen、JSON/MessagePack serialization、短期同步 ArtifactSink 文件写入 | CPU worker pool / blocking source pool / direct file streams | `jobs` / `io_concurrency` |
 | Coordination task | 建 DAG、排序诊断、合并结果、路径冲突检查 | 当前 async task 或主线程 | 通常串行 |
 
 原则：
@@ -79,7 +79,7 @@ ConfigForge 的任务可按资源类型分为三类。
 - `Semaphore` 可限制同时打开文件、HTTP 请求、远端 API 请求数；
 - `JoinSet` / `FuturesUnordered` 可收集同类 I/O 任务。
 
-ArtifactSink 当前使用同步 `std::io::Write` 与内部 semaphore，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 和 `ArtifactGenerationLimiter` 并传入 runtime/codegen 分支。runtime table exporter 与 codegen 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack 已使用 writer-style serializer；binary serializer / codegen 仍会短期 materialize 单文件 `Vec<u8>` / `String` 后立即写入 sink，aggregate exporter trait 也仍保留兼容 `Vec<Artifact>`，但这些 fallback generation 会受 generation limiter 控制。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
+ArtifactSink 当前使用同步 `std::io::Write`，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 并传入 runtime/codegen 分支。runtime table exporter 与 codegen 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack 已使用 writer-style serializer；binary serializer / codegen 仍会短期 materialize 单文件 `Vec<u8>` / `String` 后立即写入 sink，aggregate exporter trait 也仍保留 compatibility fallback。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
 
 建议配置：
 
@@ -1001,23 +1001,21 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 
 ### Phase 11：ArtifactSink coordinator 与 streaming pipeline
 
-状态：ArtifactSink coordinator、Build shared sink 接入、runtime table producer API 与 generation limiter 已完成；remaining binary/codegen/aggregate writer-style streaming 未完成。
+状态：ArtifactSink coordinator、Build shared sink 接入、runtime table producer API 已完成；remaining binary/codegen/aggregate writer-style streaming 未完成。
 
 当前状态：
 
 - Artifact 模块已提供 `ArtifactSink` / `ArtifactWriteStream`，并作为唯一写入协调器处理 path reservation、Direct / TempCommit / DryRun 与 result entries。
-- Artifact 模块已提供 `ArtifactPlan` / `ArtifactProducer` 与 `ArtifactGenerationLimiter`；limiter 复用 artifact memory budget 作为 generation 阶段预算，独立于 sink 的 write-time byte semaphore。
-- `ArtifactWriter::write(Vec<Artifact>)` 已转为 sink compatibility wrapper；旧 dedicated bounded writer queue 已移除。
-- CLI 已支持 `--artifact-memory-limit` 与 `--artifact-memory-percent`。
-- 当前 byte budget 覆盖 `ArtifactWriteStream::write()` 过程中的 in-flight bytes；artifact 数量预算限制打开但未 finish 的 stream 数量。
-- Build 主流程已创建 shared `ArtifactSink` 和 `ArtifactGenerationLimiter` 并传入 exporter/codegen 分支；runtime table exporter 通过 producer API 调用 sink 写入，codegen 短期仍生成 `String` 后在 limiter permit 内立即 `sink.write_text()`，aggregate exporter trait 暂时仍返回 `Vec<Artifact>` 并由 runtime wrapper 在 limiter permit 内立即写入 sink。
+- Artifact 模块已提供 `ArtifactPlan` / `ArtifactProducer`；`ArtifactWriter::write(Vec<Artifact>)` 已转为 sink compatibility wrapper；旧 dedicated bounded writer queue、byte semaphore、artifact semaphore、ArtifactWriteLimits 与 generation limiter 已移除。
+- CLI 不再支持 artifact memory limit 参数；`--jobs` / `--serial` 仍控制 CPU 执行并行度。
+- Build 主流程已创建 shared `ArtifactSink` 并传入 exporter/codegen 分支；runtime table exporter 通过 producer API 调用 sink 写入，codegen 短期仍生成 `String` 后立即 `sink.write_text()`，aggregate exporter trait 暂时仍保留 compatibility fallback 并由 runtime wrapper 立即写入 sink。
 
 未来规划：
 
 - 将 aggregate exporter、codegen trait 与 remaining binary serializer 继续从 materialized `Vec<Artifact>` / `Vec<u8>` / `String` 迁移为通过 `sink.create(path)` 打开 `std::io::Write` stream 并直接写入，path 冲突在 create 时动态发现，不要求 build 预先规划所有路径。
 - `TempCommit` 的最终 rename 仍集中在 `sink.finish()`，保证失败时可以清理 temp files；`Direct` 模式保留可能产生 partial output 的弱语义。
 - 对大 payload exporter 优先迁移 streaming writer；codegen 和小文件路径可暂时继续 materialized 后调用 `sink.write_text()`。
-- generation limiter 独立于 ArtifactSink coordinator：limiter 控制“正在生成但尚未交给 sink stream 的 materialized payload”，sink byte semaphore 控制 `Write::write()` 调用期间进入 writer 的 in-flight bytes。两者共享同一个 artifact memory budget 派生值，但作用阶段不同。
+- ArtifactSink 不再承担 memory scheduler 职责；降低 RSS 峰值应优先通过 exporter/codegen streaming 化，避免生成端构建完整 `String` / `Vec<u8>`。
 - filesystem-aware path key 仍保留为后续跨平台增强，不在当前 lexical-normalized key 基础上提前复杂化。
 
 ### Phase 12：阶段式 tracing / metrics
@@ -1039,13 +1037,12 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 ### 11.1 当前已覆盖
 
 - `ExecutionOptions` 默认值、非法值、`--serial` 覆盖。
-- `ArtifactMemoryOptions` 固定容量、百分比、互斥和边界校验。
 - `BuildDependencyPlan` 对 code-only / data-backed / mixed export tasks 的依赖裁剪。
 - SourceRead 并发完成顺序不影响 DataSet merge 顺序。
 - MetaLink 与 SourceRead 并发时错误优先级稳定。
 - FullDataSet table-local validation 与 TargetView table-local validation issue 稳定排序。
 - Artifact path conflict 在并发规划 / 生成后仍稳定报错。
-- Bounded writer 小队列、单 artifact 超预算、Direct / TempCommit / DryRun 语义。
+- ArtifactSink Direct / TempCommit / DryRun、动态 path reservation、stream drop without finish 与 sink drop temp cleanup 语义。
 - `--trace-tasks` 输出包含关键阶段和成功 / 失败状态，并覆盖阶段式 build 失败时仍写出 trace 的路径。
 - CLI integration 覆盖 `--jobs 1` / 并发输出一致、code-only target 不读取 Data、多 exporter / 多 codegen 稳定输出、source / validation / artifact conflict 错误路径。
 
@@ -1053,7 +1050,7 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 
 - multi-target build 落地时，补充多 target / 多 effective tags 不错误复用 DataSetView 的 integration。
 - 远端 provider 落地时，补充 network concurrency、retry/backoff、cancellation 和 source diagnostics 稳定排序。
-- exporter/codegen streaming generator 落地时，补充 generation limiter 与 writer budget 的端到端内存峰值测试；ArtifactSink coordinator 当前已覆盖动态 path reservation、stream drop without finish 等单元测试。
+- exporter/codegen streaming generator 落地时，补充端到端内存峰值测试；ArtifactSink coordinator 当前已覆盖动态 path reservation、stream drop without finish 等单元测试。
 - 通用 DAG executor 若落地，补充 readiness queue、resource wait、cancellation propagation、node-level trace 和 result merge golden。
 
 ### 11.3 性能测试规划

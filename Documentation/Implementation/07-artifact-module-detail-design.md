@@ -169,44 +169,22 @@ runtime table exporter、aggregate exporter 和 codegen 可以并行生成 artif
 
 1. 用一个中心协调器统一 path reservation、dry-run、direct、temp-commit、byte accounting 和 result entry 生成，避免 `Vec<Artifact>` writer 与 streaming writer 长期并存。
 2. 不强制 build 一开始预判所有 artifact path；path 冲突可以在 `ArtifactSink::create(path)` 时动态发现，但发现冲突后必须阻断当前 stream，并使最终 `finish()` 返回稳定错误。
-3. 支持 CLI 指定固定内存容量或按当前可用内存百分比指定 artifact pipeline 预算；预算限制“已经写入 sink 但尚未被底层文件系统/计数器消费”的 bytes。
-4. 避免 CPU worker 在等待写入容量时 busy-wait；短期允许同步阻塞/parking，线程数量可略高于 CPU 核心数以覆盖本地文件 I/O 等待；中长期在 DAG executor 中把 writer lane 与 CPU lane 分离。
-5. 保持 `DryRun`、`Direct`、`TempCommit` 语义稳定；dry-run 不创建目录、不写临时文件，但仍执行内容生成并通过 counting writer 获得准确 bytes。
-6. 保持 result entries、commit 顺序与错误优先级稳定。
+3. ArtifactSink 只负责返回标准同步 `std::io::Write` 流和管理文件生命周期，不承担全局 memory budget / byte semaphore / artifact semaphore。
+4. 保持 `DryRun`、`Direct`、`TempCommit` 语义稳定；dry-run 不创建目录、不写临时文件，但仍执行内容生成并通过 counting writer 获得准确 bytes。
+5. 保持 result entries、commit 顺序与错误优先级稳定。
 
-#### CLI / BuildOptions 内存预算
+#### CLI / BuildOptions 边界
 
-当前 artifact pipeline 预算选项：
-
-| CLI 参数 | BuildOptions 字段 | 说明 |
-| --- | --- | --- |
-| `--artifact-memory-limit <SIZE>` | `artifact_memory_limit: Option<ByteSize>` | 固定容量预算，支持 `B`/`KiB`/`MiB`/`GiB` 与常见简写 `kb`/`mb`/`gb`。示例：`--artifact-memory-limit 512MiB`。 |
-| `--artifact-memory-percent <PERCENT>` | `artifact_memory_percent: Option<u8>` | 按进程启动时探测到的“当前可用内存”计算预算，范围 `1..=80`，示例：`--artifact-memory-percent 20`。 |
-| 未指定 | 默认 `artifact_memory_percent = 25` | 默认允许 artifact pipeline 使用启动时可用内存的 25%，并应用下方 min/max clamp。 |
-
-参数优先级：
-
-1. 如果同时指定 `--artifact-memory-limit` 与 `--artifact-memory-percent`，应报 CLI validation error，避免用户误以为两者会叠加。
-2. 指定固定容量时直接使用该容量，但仍需要 `>= 1MiB` 的最小值校验；过小预算会让单个大 artifact 无法进入队列。
-3. 指定百分比或使用默认百分比时，预算 = `available_memory_at_startup * percent / 100`，再 clamp 到 `[64MiB, 2GiB]`。如果平台无法探测可用内存，则 fallback 为 `256MiB`。
-4. `--serial` 只影响 CPU / I/O 并发数量，不改变 artifact memory budget；用户仍可用固定容量参数获得可复现的内存上限。
-
-选择“当前可用内存”而不是“总物理内存”的原因：CI、容器和开发机后台任务会让总内存百分比过于乐观；可用内存更接近本次 build 可安全占用的空间。实现上可以先使用跨平台系统信息库读取 available memory；读不到时不要失败，使用 fallback 并输出 warning。
+当前 CLI 只暴露 artifact 写入模式，不再提供 artifact memory limit 参数。`BuildOptions` 只接收 `artifact_write_mode`；`--serial` / `--jobs` 仍控制 CPU 执行并行度，但不再派生 artifact memory budget。原因是 ArtifactSink 返回标准文件流后，sink 自身不持有完整 artifact 内容；真实内存峰值应通过生成端 streaming 化（避免构建完整 `String` / `Vec<u8>`）降低，而不是在 sink 内维护无法覆盖总 RSS 的预算。
 
 #### Pipeline 模型
 
-当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。旧的 dedicated bounded writer queue 已移除；byte / artifact 限流现在由 `ArtifactWriteStream` 与 sink 内部 semaphore 承担。Build 主流程已创建共享 `ArtifactSink` 并传入 runtime/codegen 分支，同时创建 `ArtifactGenerationLimiter` 限制 generation 阶段 materialized payload 的并发预算。runtime table exporter 写入 sink，JSON / MessagePack 已覆盖 writer-style serializer；codegen 短期仍生成 `String`，随后在 generation limiter permit 内调用 `sink.write_text()`。aggregate exporter trait 仍保留 `Vec<Artifact>` 兼容边界，由 build runtime wrapper 在 generation limiter permit 内立即写入 sink。
+当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。Build 主流程已创建共享 `ArtifactSink` 并传入 runtime/codegen 分支。runtime table exporter 写入 sink，JSON / MessagePack 已覆盖 writer-style serializer；codegen 短期仍生成 `String`，随后调用 `sink.write_text()`。aggregate exporter trait 仍保留兼容边界，但 build runtime wrapper 已直接写入 sink。
 
 已实现 API：
 
 ```rust
-pub struct ArtifactWriteLimits {
-    pub max_in_flight_bytes: usize,
-    pub max_in_flight_artifacts: usize,
-}
-
 impl ArtifactWriter {
-    pub fn with_limits(self, limits: ArtifactWriteLimits) -> Self;
     pub fn open_sink(self) -> ArtifactSink;
     pub fn write(self, artifacts: Vec<Artifact>) -> Result<ArtifactWriteResult>; // compatibility wrapper
 }
@@ -219,7 +197,6 @@ impl ArtifactSink {
 
 pub struct ArtifactPlan {
     pub path: PathBuf,
-    pub estimated_generation_bytes: usize,
 }
 
 pub trait ArtifactProducer {
@@ -227,7 +204,6 @@ pub trait ArtifactProducer {
     fn produce(self, stream: &mut ArtifactWriteStream) -> Result<()>;
 }
 
-pub struct ArtifactGenerationLimiter;
 ```
 
 兼容入口流程：
@@ -235,7 +211,7 @@ pub struct ArtifactGenerationLimiter;
 ```text
 Build / exporters / codegen
   -> generate and collect Vec<Artifact> in declaration order
-  -> ArtifactWriter::new(mode).with_limits(limits).write(artifacts)
+  -> ArtifactWriter::new(mode).write(artifacts)
      -> create ArtifactSink
      -> for artifact in artifacts: sink.write_text/write_binary(...)
      -> sink.finish()
@@ -245,8 +221,7 @@ Build 主流程：
 
 ```text
 build_target()
-  -> ArtifactWriter::new(mode).with_limits(limits).open_sink()
-  -> ArtifactGenerationLimiter::from_limits(limits)
+  -> ArtifactWriter::new(mode).open_sink()
   -> run exporter/codegen branches with shared sink
   -> sink.finish()
 ```
@@ -255,13 +230,13 @@ streaming generator 流程：
 
 ```text
 Build / exporters / codegen
-  -> ArtifactWriter::new(mode).with_limits(limits).open_sink()
+  -> ArtifactWriter::new(mode).open_sink()
   -> tasks run in parallel
      -> stream = sink.create(path)
         -> normalize final path and reserve it in registry atomically
         -> create CountingWriter / final file / temp file stream
      -> serializer.write_to(&mut stream) or stream.write_all(bytes)
-        -> stream acquires/releases byte permits around buffered chunks
+        -> stream writes directly to counting writer / final file / temp file
      -> stream.finish()
         -> record bytes, mark path Finished, store temp path if needed
   -> sink.finish()
@@ -274,27 +249,8 @@ Build / exporters / codegen
 
 - `ArtifactSink::create(path)` 是 path authority；它必须在返回 stream 前完成 normalized path 占用。重复 path 即使发生在另一个 stream 失败之后，也应报 duplicate path，避免失败任务留下的路径状态被第二个任务复用。
 - `ArtifactWriteStream::finish()` 成功只表示该 artifact 的内容已经被当前写入策略消费完；`TempCommit` 的最终可见性仍由 `ArtifactSink::finish()` 统一决定。
-- 若任一 stream 写入失败，sink 记录第一个稳定错误并进入 cancellation 状态；后续 `create()` 应尽快失败，已打开 stream 的 `write()` 可以继续 drain 到错误或在下一次 write/finish 返回 cancellation 错误。
-- `max_in_flight_bytes` 在 streaming 模型中统计“stream 内部已经接收、尚未写入底层 writer 或 counting writer 的 bytes”。如果第一阶段直接对 `File` 做同步 `write_all()`，可以用小块 buffer + byte semaphore 实现；后续 dedicated writer thread / async writer 可以把同一套 permit 边界迁移到 channel buffer。
-- `max_in_flight_artifacts` 防止大量打开但未 finish 的 stream 占满文件句柄、临时文件和 registry 状态；默认可取 `max(16, jobs * 4)`，但 bytes budget 是主限流。
-
-#### 生成端限流与线程行为
-
-仅在 `ArtifactWriteStream::write()` / `finish()` 内阻塞 Rayon worker 会产生两个问题：
-
-1. CPU worker 被阻塞等待 writer 释放内存 permit，无法继续执行其它 ready tasks。
-2. 如果所有 writer 或 coordinator 工作也依赖同一个 Rayon pool，可能出现 worker starvation。
-
-因此未来 streaming generator 推荐采用“双层限流”：
-
-1. **生成并发限流**：Build 在调度 artifact-producing tasks 时，为“可能生成大 artifact”的任务使用 `ArtifactGenerationLimiter`。默认并发可取 `min(jobs, max(1, max_in_flight_bytes / 64MiB))`，并至少保留 1 个生成槽。table exporter 已知每张表会产出一个 artifact，可以按 table task 粒度申请生成槽；aggregate exporter 若只能一次性产出多个 artifact，则视为一个大生成任务。
-2. **写入流限流**：`ArtifactWriteStream::write()` 使用 byte semaphore、小块 buffer 或 dedicated writer queue。如果 stream buffer 满或 byte permit 不足，写入方不应在 Rayon worker 上 busy-wait；短期实现应使用 `std::sync::Condvar` / channel parking，让线程睡眠并释放 CPU 时间片。更进一步，Build 可以把实际文件写入交给 dedicated writer thread：Rayon worker 只把 serializer 产生的 chunk 移交给 writer lane；当 writer lane 容量不足时，生成端 limiter 会阻止继续启动新任务，而不是让所有 CPU worker 堵在写入点。
-
-线程所有权策略：
-
-- **短期实现（无 async runtime）**：使用 dedicated writer thread(s) + `Mutex/Condvar` byte semaphore。等待 permit 的线程会 park，不消耗 CPU；为了避免占满 Rayon worker，生成任务数量由 `ArtifactGenerationLimiter` 控制在较小范围。此方案简单、跨平台、与当前同步文件写入模型一致。
-- **中期 DAG executor**：把 `RunGenerator` 与 `WriteArtifact` 拆成不同 resource lane。`RunGenerator` 在 CPU lane；`WriteArtifact` 在 I/O lane；当 byte budget 不足时，node 保持 `PendingCapacity` 状态并交还 worker，等待 writer 释放 permit 后由 readiness queue 重新唤醒。此时不需要阻塞 Rayon worker。
-- **不推荐**：在 CPU pool 内无限制 `par_iter()` 生成 artifact，然后在 `write()` 上长期阻塞等待 byte permit。这只能限制 writer buffer，不能限制“正在生成”的内存峰值。
+- 若任一 stream 写入失败，sink 记录第一个稳定错误；后续 `create()` 应尽快失败，最终 `finish()` 必须返回该错误并清理 temp files。
+- ArtifactSink 不限制 in-flight bytes 或打开 stream 数量；资源控制依赖生成端 streaming 化与 Rayon jobs 的自然并行度。
 
 #### Direct / TempCommit / DryRun 细节
 
@@ -324,11 +280,7 @@ create(path) -> Open
 
 #### 超大单文件策略
 
-如果单个 stream 写入的 artifact 总大小大于 `max_in_flight_bytes`：
-
-1. streaming path 不应要求一次性持有完整 artifact bytes；`write()` 按 chunk 申请 byte permit，写入底层 writer 后释放 permit。因此单文件大小可以超过总 byte budget，只要单个 chunk / internal buffer 不超过预算。
-2. 兼容入口 `ArtifactWriter::write(Vec<Artifact>)` 仍可能遇到单个 materialized artifact 大于 `max_in_flight_bytes`；默认允许“单 artifact 例外”：独占 byte budget，等所有其它 in-flight artifact 写完后提交该 artifact，并在 warning 中提示该文件超过预算。
-3. 如果用户显式设置 `--artifact-memory-limit` 且该值小于单个 materialized artifact，仍允许单 artifact 例外；否则构建会因为任何单个大文件无法写入而不可用。需要严格失败时可在未来增加 `--artifact-memory-strict`。
+streaming path 不应要求一次性持有完整 artifact bytes；`write()` 直接转发到底层 counting writer / file writer，因此单文件大小不受 sink 内部预算限制。兼容入口 `ArtifactWriter::write(Vec<Artifact>)` 仍会先持有调用方传入的 materialized content；后续优化应迁移生成端，避免先构建完整 `Vec<u8>` / `String`。
 
 ## 7.5 与 Exporter 的关系
 
@@ -338,7 +290,6 @@ Exporter 的职责从“序列化并写文件”收敛为“向 Build 提供 art
 pub(crate) fn export_runtime_data_to_sink(
     ...,
     sink: &ArtifactSink,
-    generation_limiter: &ArtifactGenerationLimiter,
 ) -> Result<Vec<RuntimeDataFile>>;
 ```
 
@@ -349,7 +300,7 @@ pub(crate) fn export_runtime_data_to_sink(
 - Exporter 不再调用 `fs::create_dir_all` / `fs::write`，也不选择 `ArtifactWriteMode`。
 - Serializer 应优先支持 `std::io::Write` 输出，避免先构造完整 `Vec<u8>`；暂时只能产出内存 buffer 的格式可以通过 `sink.write_binary()` 兼容。
 
-旧 `RuntimeDataArtifact` / `Vec<Artifact>` table exporter 兼容入口已移除；测试若需要落盘断言，应使用 `ArtifactSink` / `ArtifactWriter` 辅助函数，不应让 exporter 自己暴露 filesystem API。aggregate exporter trait 暂时仍保留 `Vec<Artifact>` fallback，但 Build adapter 会在 limiter permit 内立即写入 shared sink。
+旧 `RuntimeDataArtifact` / `Vec<Artifact>` table exporter 兼容入口已移除；测试若需要落盘断言，应使用 `ArtifactSink` / `ArtifactWriter` 辅助函数，不应让 exporter 自己暴露 filesystem API。aggregate exporter trait 暂时仍保留 compatibility fallback，但 Build adapter 会直接写入 shared sink。
 
 ## 7.6 与 Codegen 的关系
 
@@ -424,16 +375,16 @@ Artifact 模块单元测试应覆盖：
 
 当前状态：
 
-- `src/artifact/` 已提供 `Artifact`、`ArtifactContent`、`ArtifactWriter`、`ArtifactSink`、`ArtifactWriteStream`、`ArtifactWriteMode`、`ArtifactWriteLimits` 和 `ArtifactWriteResult`。
+- `src/artifact/` 已提供 `Artifact`、`ArtifactContent`、`ArtifactWriter`、`ArtifactSink`、`ArtifactWriteStream`、`ArtifactWriteMode` 和 `ArtifactWriteResult`。
 - Artifact 模块内的写入 authority 已收敛到 `ArtifactSink`；`ArtifactWriter::write(Vec<Artifact>)` 是兼容 wrapper，并通过 sink 写入。
-- 旧 dedicated bounded queue 已被 sink wrapper 替代；当前 byte budget 通过 `ArtifactWriteStream` 写入时的 byte semaphore 生效，artifact 数量预算通过 sink 的 artifact semaphore 生效。
-- runtime table exporter 与 generated code 在 Build 主流程中已接入共享 `ArtifactSink`；runtime table exporter 通过 `ArtifactProducer` / `ArtifactPlan` 写入 sink，JSON / MessagePack 使用 writer-style serializer，binary 暂时仍复用 `Vec<u8>` fallback。codegen 短期仍先生成 `String`，再在 generation limiter permit 内立即 `sink.write_text()`。aggregate exporter trait 仍返回 `Vec<Artifact>`，由 Build runtime wrapper 在 generation limiter permit 内立刻写入 sink，后续可继续改造为显式 writer context / stream API。
-- CLI 支持 `--dry-run`、`--write-mode direct|temp-commit`、`--artifact-memory-limit`、`--artifact-memory-percent`。
+- 旧 dedicated bounded queue、sink byte / artifact semaphore、`ArtifactWriteLimits` 和 `ArtifactGenerationLimiter` 已移除；ArtifactSink 只负责标准写入流与生命周期。
+- runtime table exporter 与 generated code 在 Build 主流程中已接入共享 `ArtifactSink`；runtime table exporter 通过 `ArtifactProducer` / `ArtifactPlan` 写入 sink，JSON / MessagePack 使用 writer-style serializer，binary 暂时仍复用 `Vec<u8>` fallback。codegen 短期仍先生成 `String`，再立即 `sink.write_text()`。aggregate exporter trait 仍有 compatibility fallback，由 Build runtime wrapper 直接写入 sink，后续可继续改造为显式 writer context / stream API。
+- CLI 支持 `--dry-run`、`--write-mode direct|temp-commit`；artifact memory limit 参数已移除。
 - temp-commit 当前提供临时文件阶段保护；提交阶段失败按 `ConfigForgeError::WriteFile` 报错，并可能保留已提交的最终文件。
 
 下一阶段规划：
 
-- aggregate exporter trait、codegen trait 与 remaining binary serializer 继续从“返回 materialized artifact / String / Vec<u8>”迁移到“接收 sink 或受限 writer context 并向 stream 写入”。runtime table exporter 已先接入 shared sink 和 producer API；generation limiter 已限制这些 fallback materialized payload 的并发数量，后续可继续降低单文件内存峰值。
-- 短期使用同步 file writer、`Mutex/Condvar`、bounded stream buffer 和略高于 CPU 核心数的 I/O/worker 配置承载本地文件写入等待；远端 source provider 落地时再引入 async runtime。
+- aggregate exporter trait、codegen trait 与 remaining binary serializer 继续从“返回 materialized artifact / String / Vec<u8>”迁移到“接收 sink 或 writer context 并向 stream 写入”。runtime table exporter 已先接入 shared sink 和 producer API，后续可继续降低单文件内存峰值。
+- 短期使用同步 file writer 与标准 `std::io::Write` 接口；远端 source provider 落地时再评估是否引入 async runtime。
 - filesystem-aware path key 可在跨平台大小写不敏感冲突或 symlink alias 成为实际问题时接入，当前 lexical-normalized key 继续作为默认 authority。
 - summary manifest、远端上传、增量缓存或分布式 artifact store 应作为独立 writer / exporter 扩展，不改变当前 Artifact Writer 的基础语义。

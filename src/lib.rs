@@ -22,8 +22,8 @@ pub use artifact::{
     ArtifactWriter,
 };
 pub use build::{
-    ArtifactMemoryOptions, BuildOptions, BuildOutput, BuildTrace, BuildTraceStage,
-    BuildTraceStageStatus, ExecutionOptions, build_target,
+    BuildOptions, BuildOutput, BuildTrace, BuildTraceStage, BuildTraceStageStatus,
+    ExecutionOptions, build_target,
 };
 pub use codegen::{
     CaseStyle, CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator,
