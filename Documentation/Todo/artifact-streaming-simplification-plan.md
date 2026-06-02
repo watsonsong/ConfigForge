@@ -115,7 +115,7 @@ cargo test artifact::tests::
 test(artifact): lock sink stream lifecycle behavior
 ```
 
-### Step 1：简化 ArtifactSink 内部流实现，移除 sink 级 semaphore `[ ]`
+### Step 1：简化 ArtifactSink 内部流实现，移除 sink 级 semaphore `[x]`
 
 目标：ArtifactSink 内部只保留 path registry、mode dispatch 和 file/count writer，不再做 byte / artifact in-flight 控制。
 

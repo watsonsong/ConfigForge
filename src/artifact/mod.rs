@@ -163,30 +163,17 @@ pub struct ArtifactSink {
 }
 
 impl ArtifactSink {
-    fn new(mode: ArtifactWriteMode, limits: ArtifactWriteLimits) -> Self {
-        let limits = limits.normalized();
+    fn new(mode: ArtifactWriteMode, _limits: ArtifactWriteLimits) -> Self {
         Self {
             mode,
             inner: Arc::new(ArtifactSinkInner {
                 state: Mutex::new(ArtifactSinkState::default()),
-                byte_semaphore: ByteSemaphore::new(limits.max_in_flight_bytes),
-                artifact_semaphore: ArtifactSemaphore::new(limits.max_in_flight_artifacts),
             }),
         }
     }
 
     pub fn create(&self, path: impl Into<PathBuf>) -> Result<ArtifactWriteStream> {
-        self.inner.artifact_semaphore.acquire();
-        match self.create_after_acquire(path.into()) {
-            Ok(stream) => Ok(stream),
-            Err(error) => {
-                self.inner.artifact_semaphore.release();
-                Err(error)
-            }
-        }
-    }
-
-    fn create_after_acquire(&self, path: PathBuf) -> Result<ArtifactWriteStream> {
+        let path = path.into();
         let normalized_path = lexical_normalize_path(&path);
         let (index, temp_path) = {
             let mut state = self.inner.lock_state();
@@ -255,7 +242,6 @@ impl ArtifactSink {
             target,
             bytes: 0,
             finished: false,
-            artifact_permit_held: true,
             _index: index,
         })
     }
@@ -423,7 +409,6 @@ pub struct ArtifactWriteStream {
     target: ArtifactWriteTarget,
     bytes: usize,
     finished: bool,
-    artifact_permit_held: bool,
     _index: usize,
 }
 
@@ -452,30 +437,20 @@ impl ArtifactWriteStream {
         self.sink
             .mark_path_finished(self.path.clone(), self.temp_path.clone(), entry.clone());
         self.finished = true;
-        self.release_artifact_permit();
         Ok(entry)
     }
 
     fn write_error_path(&self) -> PathBuf {
         self.temp_path.clone().unwrap_or_else(|| self.path.clone())
     }
-
-    fn release_artifact_permit(&mut self) {
-        if self.artifact_permit_held {
-            self.sink.artifact_semaphore.release();
-            self.artifact_permit_held = false;
-        }
-    }
 }
 
 impl Write for ArtifactWriteStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.sink.byte_semaphore.acquire(buf.len());
         let result = match &mut self.target {
             ArtifactWriteTarget::Count => Ok(buf.len()),
             ArtifactWriteTarget::File(file) => file.write(buf),
         };
-        self.sink.byte_semaphore.release(buf.len());
 
         match result {
             Ok(written) => {
@@ -517,7 +492,6 @@ impl Drop for ArtifactWriteStream {
                 let _ = fs::remove_file(temp_path);
             }
         }
-        self.release_artifact_permit();
     }
 }
 
@@ -530,8 +504,6 @@ enum ArtifactWriteTarget {
 #[derive(Debug)]
 struct ArtifactSinkInner {
     state: Mutex<ArtifactSinkState>,
-    byte_semaphore: ByteSemaphore,
-    artifact_semaphore: ArtifactSemaphore,
 }
 
 impl Drop for ArtifactSinkInner {
@@ -701,51 +673,6 @@ impl ByteSemaphore {
             .lock()
             .expect("byte semaphore lock should not be poisoned");
         state.in_flight = state.in_flight.saturating_sub(bytes);
-        self.capacity_available.notify_all();
-    }
-}
-
-#[derive(Debug)]
-struct ArtifactSemaphore {
-    capacity: usize,
-    state: Mutex<ArtifactSemaphoreState>,
-    capacity_available: Condvar,
-}
-
-#[derive(Debug)]
-struct ArtifactSemaphoreState {
-    in_flight: usize,
-}
-
-impl ArtifactSemaphore {
-    fn new(capacity: usize) -> Self {
-        Self {
-            capacity: capacity.max(1),
-            state: Mutex::new(ArtifactSemaphoreState { in_flight: 0 }),
-            capacity_available: Condvar::new(),
-        }
-    }
-
-    fn acquire(&self) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("artifact semaphore lock should not be poisoned");
-        while state.in_flight >= self.capacity {
-            state = self
-                .capacity_available
-                .wait(state)
-                .expect("artifact semaphore lock should not be poisoned");
-        }
-        state.in_flight += 1;
-    }
-
-    fn release(&self) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("artifact semaphore lock should not be poisoned");
-        state.in_flight = state.in_flight.saturating_sub(1);
         self.capacity_available.notify_all();
     }
 }
