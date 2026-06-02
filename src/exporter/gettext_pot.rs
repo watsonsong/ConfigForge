@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::Artifact,
+    artifact::{Artifact, ArtifactSink},
     data::{DataResolver, DataSet, DataTable, DataValue, ResolvedValue, ScalarValue},
     meta::{LinkedFieldMeta, LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags},
 };
@@ -98,31 +98,55 @@ impl AggregateDataExporter for GettextPotExporter {
         target_tags: &TargetTags,
         data_set: &DataSet,
     ) -> Result<Vec<Artifact>> {
-        let options = options_from_task(task)?;
-        let mut entries = Vec::new();
-        for table_meta in &linked_meta.tables {
-            if !table_meta.meta.is_exported_for(target_tags) {
-                continue;
-            }
-            let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "data set is missing table `{}`",
-                    table_meta.meta.name
-                ))
-            })?;
-            entries.extend(extract_table_entries(
-                table_meta,
-                table,
-                target_tags,
-                &options,
-            )?);
-        }
-        let content = render_pot(&entries, &options);
-        Ok(vec![Artifact::text(
-            out_dir.join(options.file_name()),
-            content,
-        )])
+        let (file_name, content) = render_pot_export(task, linked_meta, target_tags, data_set)?;
+        Ok(vec![Artifact::text(out_dir.join(file_name), content)])
     }
+
+    fn export_to_sink(
+        &self,
+        out_dir: &std::path::Path,
+        task: &TargetDataConfig,
+        linked_meta: &crate::meta::LinkedMetaModel<'_>,
+        target_tags: &TargetTags,
+        data_set: &DataSet,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let (file_name, content) = render_pot_export(task, linked_meta, target_tags, data_set)?;
+        let mut stream = sink.create(out_dir.join(file_name))?;
+        stream.write_all_artifact(content.as_bytes())?;
+        stream.finish()?;
+        Ok(())
+    }
+}
+
+fn render_pot_export(
+    task: &TargetDataConfig,
+    linked_meta: &crate::meta::LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    data_set: &DataSet,
+) -> Result<(String, String)> {
+    let options = options_from_task(task)?;
+    let mut entries = Vec::new();
+    for table_meta in &linked_meta.tables {
+        if !table_meta.meta.is_exported_for(target_tags) {
+            continue;
+        }
+        let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "data set is missing table `{}`",
+                table_meta.meta.name
+            ))
+        })?;
+        entries.extend(extract_table_entries(
+            table_meta,
+            table,
+            target_tags,
+            &options,
+        )?);
+    }
+    let file_name = options.file_name();
+    let content = render_pot(&entries, &options);
+    Ok((file_name, content))
 }
 
 impl GettextPotOptions {
@@ -440,6 +464,17 @@ fn escape_po(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::BTreeMap, fs, path::PathBuf};
+
+    use tempfile::tempdir;
+
+    use crate::{
+        artifact::{ArtifactWriteMode, ArtifactWriter},
+        data::{DataSet, DataTable},
+        exporter::TargetDataConfig,
+        meta::{MetaModel, TargetTags},
+    };
+
     use super::*;
 
     #[test]
@@ -478,5 +513,58 @@ mod tests {
             deduped[0].source_reference.as_deref(),
             Some("items.csv:2 items.csv:3")
         );
+    }
+
+    #[test]
+    fn export_to_sink_writes_pot_content_directly() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.fields]]
+                name = "name"
+                type = "text"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let data_set = DataSet::new(vec![DataTable::new(
+            "items",
+            vec![BTreeMap::from([
+                ("id".to_owned(), "2001".to_owned()),
+                ("name".to_owned(), "Iron Ore".to_owned()),
+            ])],
+        )]);
+        let task = TargetDataConfig {
+            name: Some("pot".to_owned()),
+            output: PathBuf::from("out"),
+            format: FORMAT.to_owned(),
+            options: BTreeMap::new(),
+        };
+        let temp_dir = tempdir().expect("temp dir");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+
+        GettextPotExporter
+            .export_to_sink(
+                temp_dir.path(),
+                &task,
+                &linked,
+                &TargetTags::empty(),
+                &data_set,
+                &sink,
+            )
+            .expect("POT should export to sink");
+        sink.finish().expect("sink should finish");
+
+        let content = fs::read_to_string(temp_dir.path().join("messages.pot"))
+            .expect("POT artifact should be written");
+        assert!(content.contains("msgctxt \"items.name\""));
+        assert!(content.contains("msgid \"Iron Ore\""));
     }
 }

@@ -7,7 +7,7 @@ use tempfile::tempdir;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{ArtifactWriteMode, ArtifactWriteStream, ArtifactWriter},
+    artifact::{ArtifactSink, ArtifactWriteMode, ArtifactWriteStream, ArtifactWriter},
     data::{DataTable, SourceRole},
     meta::{LinkedTableMeta, MetaModel, TargetTags},
     runtime_contract::{ExportDependency, RuntimeDataFile, binary_schema_revision},
@@ -18,6 +18,8 @@ use super::*;
 struct CustomDataExporter {
     seen_tables: Mutex<Vec<String>>,
 }
+
+struct CustomAggregateExporter;
 
 fn export_runtime_data_to_disk(
     out_dir: &std::path::Path,
@@ -84,6 +86,37 @@ impl DataFormatExporter for CustomDataExporter {
             .expect("seen tables lock should not be poisoned")
             .push(table_meta.meta.name.clone());
         stream.write_all_artifact(table_meta.meta.name.as_bytes())
+    }
+}
+
+impl AggregateDataExporter for CustomAggregateExporter {
+    fn name(&self) -> &'static str {
+        "custom_aggregate"
+    }
+
+    fn plan_artifacts(
+        &self,
+        out_dir: &std::path::Path,
+        _task: &TargetDataConfig,
+        _linked_meta: &crate::meta::LinkedMetaModel<'_>,
+        _target_tags: &TargetTags,
+    ) -> Result<Vec<PathBuf>> {
+        Ok(vec![out_dir.join("aggregate/custom.txt")])
+    }
+
+    fn export_to_sink(
+        &self,
+        out_dir: &std::path::Path,
+        _task: &TargetDataConfig,
+        _linked_meta: &crate::meta::LinkedMetaModel<'_>,
+        _target_tags: &TargetTags,
+        _data_set: &crate::data::DataSet,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let mut stream = sink.create(out_dir.join("aggregate/custom.txt"))?;
+        stream.write_all_artifact(b"aggregate-stream")?;
+        stream.finish()?;
+        Ok(())
     }
 }
 
@@ -267,6 +300,88 @@ fn export_runtime_data_reports_same_bytes_for_dry_run_and_direct_streams() {
         fs::read(direct_dir.path().join("custom/items.custom"))
             .expect("direct artifact should be written"),
         b"items"
+    );
+}
+
+#[test]
+fn aggregate_exporter_uses_sink_without_legacy_artifact_fallback() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+            "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let data_set = crate::data::DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+    )]);
+    let task = TargetDataConfig {
+        name: Some("aggregate".to_owned()),
+        output: PathBuf::from("out"),
+        format: "custom_aggregate".to_owned(),
+        options: BTreeMap::new(),
+    };
+    let exporter = CustomAggregateExporter;
+
+    assert!(matches!(
+        exporter.export(
+            std::path::Path::new("out"),
+            &task,
+            &linked,
+            &TargetTags::empty(),
+            &data_set,
+        ),
+        Err(ConfigForgeError::Validation(message))
+            if message.contains("legacy aggregate export fallback")
+    ));
+
+    let dry_run_dir = tempdir().expect("dry-run dir should exist");
+    let dry_run_sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+    exporter
+        .export_to_sink(
+            dry_run_dir.path(),
+            &task,
+            &linked,
+            &TargetTags::empty(),
+            &data_set,
+            &dry_run_sink,
+        )
+        .expect("dry-run aggregate should export");
+    let dry_run_result = dry_run_sink.finish().expect("dry-run sink should finish");
+
+    let direct_dir = tempdir().expect("direct dir should exist");
+    let direct_sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+    exporter
+        .export_to_sink(
+            direct_dir.path(),
+            &task,
+            &linked,
+            &TargetTags::empty(),
+            &data_set,
+            &direct_sink,
+        )
+        .expect("direct aggregate should export");
+    let direct_result = direct_sink.finish().expect("direct sink should finish");
+
+    assert_eq!(dry_run_result.entries.len(), 1);
+    assert_eq!(direct_result.entries.len(), 1);
+    assert_eq!(dry_run_result.entries[0].bytes, b"aggregate-stream".len());
+    assert_eq!(
+        dry_run_result.entries[0].bytes,
+        direct_result.entries[0].bytes
+    );
+    assert!(!dry_run_dir.path().join("aggregate/custom.txt").exists());
+    assert_eq!(
+        fs::read(direct_dir.path().join("aggregate/custom.txt"))
+            .expect("direct aggregate artifact should be written"),
+        b"aggregate-stream"
     );
 }
 

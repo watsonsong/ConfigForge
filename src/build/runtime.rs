@@ -238,7 +238,7 @@ mod tests {
     };
 
     use crate::{
-        artifact::{Artifact, ArtifactWriteMode, ArtifactWriter},
+        artifact::{ArtifactWriteMode, ArtifactWriter},
         data::{DataSet, DataTable, RawSourceData},
         exporter::{AggregateDataExporter, DataFormatExporter, RuntimeArtifactPlan},
         meta::{LinkedTableMeta, MetaModel, TargetTags},
@@ -277,14 +277,15 @@ mod tests {
             ))])
         }
 
-        fn export(
+        fn export_to_sink(
             &self,
             out_dir: &Path,
             task: &crate::exporter::TargetDataConfig,
             _linked_meta: &LinkedMetaModel<'_>,
             _target_tags: &TargetTags,
             _data_set: &DataSet,
-        ) -> Result<Vec<Artifact>> {
+            sink: &ArtifactSink,
+        ) -> Result<()> {
             let active_now = self.active_exports.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_active_exports
                 .fetch_max(active_now, Ordering::SeqCst);
@@ -295,10 +296,7 @@ mod tests {
             }
             self.active_exports.fetch_sub(1, Ordering::SeqCst);
             let task_name = task.name.as_deref().unwrap_or("default");
-            Ok(vec![Artifact::text(
-                out_dir.join(format!("{task_name}.txt")),
-                task_name,
-            )])
+            sink.write_text(out_dir.join(format!("{task_name}.txt")), task_name)
         }
     }
 

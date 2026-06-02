@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::Artifact,
+    artifact::{Artifact, ArtifactSink},
     data::DataSet,
     exporter::{
         ExportedTablePayload, ExportedValue, TargetDataConfig, build_exported_table_payload,
@@ -189,6 +189,42 @@ impl AggregateDataExporter for LuaTableExporter {
             ));
         }
         Ok(artifacts)
+    }
+
+    fn export_to_sink(
+        &self,
+        out_dir: &std::path::Path,
+        task: &TargetDataConfig,
+        linked_meta: &LinkedMetaModel<'_>,
+        target_tags: &TargetTags,
+        data_set: &DataSet,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let options = options_from_task(task)?;
+        validate_options(&options)?;
+        let tables = visible_tables(linked_meta, target_tags).collect::<Vec<_>>();
+        validate_table_symbols(&tables, &options, target_tags)?;
+
+        let root_content = render_root(&options, &tables);
+        let mut root_stream = sink.create(out_dir.join(root_path(&options)))?;
+        root_stream.write_all_artifact(root_content.as_bytes())?;
+        root_stream.finish()?;
+
+        for table_meta in tables {
+            let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
+                ConfigForgeError::Validation(format!(
+                    "data set is missing table `{}`",
+                    table_meta.meta.name
+                ))
+            })?;
+            let payload = build_exported_table_payload(table_meta, table, target_tags)?;
+            let content =
+                render_table_file(table_meta, &payload, &options, linked_meta, target_tags)?;
+            let mut table_stream = sink.create(out_dir.join(table_path(&options, table_meta)))?;
+            table_stream.write_all_artifact(content.as_bytes())?;
+            table_stream.finish()?;
+        }
+        Ok(())
     }
 }
 
@@ -1104,10 +1140,12 @@ fn lua_keywords() -> &'static [&'static str] {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, path::PathBuf};
+    use std::{collections::BTreeMap, fs, path::PathBuf};
+
+    use tempfile::tempdir;
 
     use crate::{
-        artifact::ArtifactContent,
+        artifact::{ArtifactContent, ArtifactWriteMode, ArtifactWriter},
         data::{DataSet, DataTable},
         exporter::{AggregateDataExporter, TargetDataConfig},
         meta::{MetaModel, TargetTags},
@@ -1242,6 +1280,55 @@ mod tests {
         ));
         assert!(content.contains("function T.get_by_id(id)"));
         assert!(content.contains("return by_id[id]"));
+    }
+
+    #[test]
+    fn export_to_sink_writes_root_and_table_files() {
+        let meta = MetaModel::from_toml_str(
+            r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.fields]]
+                name = "name"
+                type = "text"
+            "#,
+        )
+        .expect("meta should load");
+        let linked = meta.link().expect("meta should link");
+        let data_set = DataSet::new(vec![DataTable::new(
+            "items",
+            vec![BTreeMap::from([
+                ("id".to_owned(), "2001".to_owned()),
+                ("name".to_owned(), "Iron Ore".to_owned()),
+            ])],
+        )]);
+        let temp_dir = tempdir().expect("temp dir");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+
+        LuaTableExporter
+            .export_to_sink(
+                temp_dir.path(),
+                &lua_task(),
+                &linked,
+                &TargetTags::empty(),
+                &data_set,
+                &sink,
+            )
+            .expect("Lua should export to sink");
+        sink.finish().expect("sink should finish");
+
+        let root = fs::read_to_string(temp_dir.path().join("game/config/init.lua"))
+            .expect("root Lua file should be written");
+        let items = fs::read_to_string(temp_dir.path().join("game/config/items.lua"))
+            .expect("table Lua file should be written");
+        assert!(root.contains("require(\"game.config.items\")"));
+        assert!(items.contains("[2] = \"Iron Ore\""));
     }
 
     #[test]

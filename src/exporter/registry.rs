@@ -101,7 +101,13 @@ pub trait AggregateDataExporter: Send + Sync {
         linked_meta: &crate::meta::LinkedMetaModel<'_>,
         target_tags: &TargetTags,
         data_set: &DataSet,
-    ) -> Result<Vec<Artifact>>;
+    ) -> Result<Vec<Artifact>> {
+        let _ = (out_dir, task, linked_meta, target_tags, data_set);
+        Err(ConfigForgeError::Validation(format!(
+            "exporter `{}` does not implement legacy aggregate export fallback",
+            self.name()
+        )))
+    }
 
     fn export_to_sink(
         &self,
@@ -111,19 +117,7 @@ pub trait AggregateDataExporter: Send + Sync {
         target_tags: &TargetTags,
         data_set: &DataSet,
         sink: &ArtifactSink,
-    ) -> Result<()> {
-        for artifact in self.export(out_dir, task, linked_meta, target_tags, data_set)? {
-            match artifact.content {
-                crate::artifact::ArtifactContent::Text(content) => {
-                    sink.write_text(artifact.path, &content)?;
-                }
-                crate::artifact::ArtifactContent::Binary(content) => {
-                    sink.write_binary(artifact.path, &content)?;
-                }
-            }
-        }
-        Ok(())
-    }
+    ) -> Result<()>;
 
     fn matches(&self, format: &str) -> bool {
         self.name() == format || self.aliases().contains(&format)

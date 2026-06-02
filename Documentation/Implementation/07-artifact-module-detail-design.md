@@ -179,7 +179,7 @@ runtime table exporter、aggregate exporter 和 codegen 可以并行生成 artif
 
 #### Pipeline 模型
 
-当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。Build 主流程已创建共享 `ArtifactSink` 并传入 runtime/codegen 分支。runtime table exporter 写入 sink，JSON / MessagePack 已覆盖 writer-style serializer；codegen 短期仍生成 `String`，随后调用 `sink.write_text()`。aggregate exporter trait 仍保留兼容边界，但 build runtime wrapper 已直接写入 sink。
+当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。Build 主流程已创建共享 `ArtifactSink` 并传入 runtime/codegen 分支。runtime table exporter 与 aggregate exporter 均直接写入 sink，JSON / MessagePack / binary 已覆盖 writer-style serializer；codegen 短期仍生成 `String`，随后调用 `sink.write_text()`。
 
 已实现 API：
 
@@ -300,7 +300,7 @@ pub(crate) fn export_runtime_data_to_sink(
 - Exporter 不再调用 `fs::create_dir_all` / `fs::write`，也不选择 `ArtifactWriteMode`。
 - Serializer 应优先支持 `std::io::Write` 输出，避免先构造完整 `Vec<u8>`；暂时只能产出内存 buffer 的格式可以通过 `sink.write_binary()` 兼容。
 
-旧 `RuntimeDataArtifact` / `Vec<Artifact>` table exporter 兼容入口已移除；测试若需要落盘断言，应使用 `ArtifactSink` / `ArtifactWriter` 辅助函数，不应让 exporter 自己暴露 filesystem API。aggregate exporter trait 暂时仍保留 compatibility fallback，但 Build adapter 会直接写入 shared sink。
+旧 `RuntimeDataArtifact` / `Vec<Artifact>` table exporter 兼容入口已移除；测试若需要落盘断言，应使用 `ArtifactSink` / `ArtifactWriter` 辅助函数，不应让 exporter 自己暴露 filesystem API。aggregate exporter 主路径已改为 required `export_to_sink()`；`export() -> Vec<Artifact>` 仅作为 legacy fallback。
 
 ## 7.6 与 Codegen 的关系
 
@@ -378,13 +378,13 @@ Artifact 模块单元测试应覆盖：
 - `src/artifact/` 已提供 `Artifact`、`ArtifactContent`、`ArtifactWriter`、`ArtifactSink`、`ArtifactWriteStream`、`ArtifactWriteMode` 和 `ArtifactWriteResult`。
 - Artifact 模块内的写入 authority 已收敛到 `ArtifactSink`；`ArtifactWriter::write(Vec<Artifact>)` 是兼容 wrapper，并通过 sink 写入。
 - 旧 dedicated bounded queue、sink byte / artifact semaphore、`ArtifactWriteLimits` 和 `ArtifactGenerationLimiter` 已移除；ArtifactSink 只负责标准写入流与生命周期。
-- runtime table exporter 与 generated code 在 Build 主流程中已接入共享 `ArtifactSink`；runtime table exporter 通过 `ArtifactProducer` / `ArtifactPlan` 写入 sink，JSON / MessagePack 使用 writer-style serializer，binary 暂时仍复用 `Vec<u8>` fallback。codegen 短期仍先生成 `String`，再立即 `sink.write_text()`。aggregate exporter trait 仍有 compatibility fallback，由 Build runtime wrapper 直接写入 sink，后续可继续改造为显式 writer context / stream API。
+- runtime table exporter、aggregate exporter 与 generated code 在 Build 主流程中已接入共享 `ArtifactSink`；runtime table exporter 通过 stream API 写入 sink，JSON / MessagePack / binary 使用 writer-style serializer。aggregate exporter 通过 required `export_to_sink()` 写入 sink。codegen 短期仍先生成 `String`，再立即 `sink.write_text()`。
 - CLI 支持 `--dry-run`、`--write-mode direct|temp-commit`；artifact memory limit 参数已移除。
 - temp-commit 当前提供临时文件阶段保护；提交阶段失败按 `ConfigForgeError::WriteFile` 报错，并可能保留已提交的最终文件。
 
 下一阶段规划：
 
-- aggregate exporter trait 与 codegen trait 继续从“返回 materialized artifact / String”迁移到“接收 sink 或 writer context 并向 stream 写入”。runtime table exporter 已直接使用 shared sink stream 主路径，JSON / MessagePack / binary 均通过 writer-style serializer 写出，后续重点是 aggregate 与 codegen 的 materialized fallback。
+- codegen trait 继续从“返回 materialized String”迁移到“接收 sink 或 writer context 并向 stream 写入”。runtime table exporter 与 aggregate exporter 已直接使用 shared sink 主路径，JSON / MessagePack / binary 均通过 writer-style serializer 写出，后续重点是 codegen 的 materialized fallback。
 - 短期使用同步 file writer 与标准 `std::io::Write` 接口；远端 source provider 落地时再评估是否引入 async runtime。
 - filesystem-aware path key 可在跨平台大小写不敏感冲突或 symlink alias 成为实际问题时接入，当前 lexical-normalized key 继续作为默认 authority。
 - summary manifest、远端上传、增量缓存或分布式 artifact store 应作为独立 writer / exporter 扩展，不改变当前 Artifact Writer 的基础语义。

@@ -247,7 +247,7 @@ cargo test exporter::tests:: exporter::json::tests:: exporter::messagepack::test
 refactor(exporter): prefer streaming table serialization
 ```
 
-### Step 5：将 AggregateDataExporter 改为 sink-first `[ ]`
+### Step 5：将 AggregateDataExporter 改为 sink-first `[x]`
 
 目标：gettext POT、Lua、manifest 等 aggregate exporter 不再返回 `Vec<Artifact>` 作为主路径。
 

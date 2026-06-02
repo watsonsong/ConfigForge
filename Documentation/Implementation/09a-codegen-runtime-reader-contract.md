@@ -184,7 +184,7 @@ pub enum RuntimeTableDataFormat {
 5. 每个 MetaAndData export task 根据自身 `type` 从 `DataFormatRegistry` 选择 exporter，根据自身 `output` 写出一套数据产物。table exporter 写出每表 runtime data artifact；aggregate exporter 写出 POT / manifest / Lua 等聚合 artifact。
 6. `Json` 使用 `serde_json::to_writer_pretty` 通过 shared `ArtifactSink` 写出 `<table>.json`。
 7. `MessagePack` 使用 `rmp_serde::encode::write_named` 或等价 named-field 编码通过 shared `ArtifactSink` 写出 `<table>.msgpack`。
-8. Runtime table data export task 在 exporter 内部生成 `RuntimeDataFile` metadata 用于保持规划顺序和未来 manifest 扩展；Build DAG 当前只保留 task 名称用于稳定校验，不再向上聚合 runtime result struct。聚合 exporter 仍可通过兼容 `Vec<Artifact>` fallback 立即写入 shared sink。
+8. Runtime table data export task 在 exporter 内部生成 `RuntimeDataFile` metadata 用于保持规划顺序和未来 manifest 扩展；Build DAG 当前只保留 task 名称用于稳定校验，不再向上聚合 runtime result struct。聚合 exporter 通过 `export_to_sink()` 直接写入 shared sink。
 9. `generate_code_task` 不选择 runtime data export task，统一向 `CodeExportInput` 传入空 `runtime_data_files`，让 CodeModel 使用逻辑表名。
 10. Artifact path 规划必须跨所有 export task 统一检查，不能只在 codegen 内检查 generated code 的重复路径。
 
