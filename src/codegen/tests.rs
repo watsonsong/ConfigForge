@@ -1186,6 +1186,14 @@ fn default_file_header_uses_generator_comment_prefix() {
         fn generate(&self, _input: &CodeExportInput<'_>) -> crate::Result<Vec<GeneratedFile>> {
             Ok(Vec::new())
         }
+
+        fn generate_to_sink(
+            &self,
+            _input: &CodeExportInput<'_>,
+            _sink: &crate::artifact::ArtifactSink,
+        ) -> crate::Result<()> {
+            Ok(())
+        }
     }
 
     let meta = MetaModel::from_toml_str("").expect("meta should parse");

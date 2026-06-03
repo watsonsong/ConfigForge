@@ -7,9 +7,8 @@ use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField, CodeFragmentPayload,
-    CodeGenerator, CodeModel, CodeTableKind, CodeWriter, CodeWriterConfig, CodeWriterLike,
-    GeneratedFile, I18nFunctionReturn, I18nMode, I18nOptions, NamingConfig, build_code_model,
-    ir::require_non_empty_index_fields,
+    CodeGenerator, CodeModel, CodeTableKind, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn,
+    I18nMode, I18nOptions, NamingConfig, build_code_model, ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -67,7 +66,8 @@ impl CodeGenerator for CppCodeGenerator {
         CodeWriterConfig::default().with_indent_width(4)
     }
 
-    fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>> {
+    #[cfg(test)]
+    fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<super::GeneratedFile>> {
         let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
         require_non_empty_index_fields(&model)?;
         let cpp_options = input
@@ -76,7 +76,7 @@ impl CodeGenerator for CppCodeGenerator {
             .language_options::<CppCodegenOptions>(LANGUAGE)?;
         let names = CppNames::new(&input.target.options);
         validate_generated_symbols(&model, &names)?;
-        let mut header = CodeWriter::new(input.target.options.formatting);
+        let mut header = super::CodeWriter::new(input.target.options.formatting);
         let namespace = cpp_options
             .namespace
             .as_ref()
@@ -85,7 +85,7 @@ impl CodeGenerator for CppCodeGenerator {
         let header_file_name = input.target.single_file_name("generated", "hpp");
         let source_file_name = format!("{}.cpp", input.target.file_stem("generated"));
         render_header_file(self, &mut header, input, &model, namespace, &names)?;
-        let mut source = CodeWriter::new(input.target.options.formatting);
+        let mut source = super::CodeWriter::new(input.target.options.formatting);
         render_source_file(
             self,
             &mut source,
@@ -97,11 +97,11 @@ impl CodeGenerator for CppCodeGenerator {
         )?;
 
         Ok(vec![
-            GeneratedFile {
+            super::GeneratedFile {
                 path: input.target.out_dir.join(header_file_name),
                 content: header.finish(),
             },
-            GeneratedFile {
+            super::GeneratedFile {
                 path: input.target.out_dir.join(source_file_name),
                 content: source.finish(),
             },

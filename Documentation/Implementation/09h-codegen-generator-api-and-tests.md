@@ -17,15 +17,13 @@ pub trait CodeGenerator: Send + Sync {
     fn supports_language(&self, language: &str) -> bool;
     fn default_module_name(&self) -> &'static str;
     fn default_naming(&self) -> NamingConfig;
+    #[cfg(test)]
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>>;
     fn generate_to_sink(&self, input: &CodeExportInput<'_>, sink: &ArtifactSink) -> Result<()>;
 }
 ```
 
-`generate_to_sink()` 是 build 调用的 sink-first 标准入口。默认实现调用 legacy
-`generate(input)?`，再逐个 `sink.write_text(file.path, &file.content)`，因此现有 backend
-可以在迁移期间保持 `Vec<GeneratedFile>` 行为不变；新 backend 或已迁移 backend 应覆盖该方法，
-直接通过 `ArtifactSink` 写出 artifact，避免 build 层依赖具体的 generated content 表示。
+`generate_to_sink()` 是 build 调用的 sink-first 标准入口，也是生产代码必须实现的写出接口。Build 只传入 shared `ArtifactSink`，由 generator 负责 `sink.create(path)`、通过 streaming writer 渲染内容并 `finish()` stream；trait 不再提供 `generate()` fallback，避免 production path materialize 完整 `String` / `Vec<GeneratedFile>`。`generate()` 与 `GeneratedFile` 仅在 `#[cfg(test)]` 下保留，用于单元测试中的 String-backed snapshot 和 streaming equivalence 校验。
 
 内置生成器：
 
@@ -90,7 +88,7 @@ config_forge_generated.hpp
 config_forge_generated.ts
 ```
 
-第一阶段可以只实现单文件模式以降低复杂度，但 IR 和 GeneratedFile 应支持多文件。
+第一阶段可以只实现单文件模式以降低复杂度；生产写出通过 `ArtifactSink` 支持单文件或多文件，测试专用 `GeneratedFile` helper 也可表示多文件快照。
 
 ## 9.13 错误与诊断
 
@@ -213,6 +211,7 @@ pub struct CodegenDiagnostic {
 - C++ backend 输出 `generated.hpp`，包含 enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`LinkAll` 与 `text` translation helper。
 - 三种语言都使用 Meta-agnostic reader loader contract，不直接绑定 JSON / MessagePack / bin exporter 结果。
 - runtime data 与 generated code 都以 artifact 形态参与统一写出；Artifact Writer 负责路径冲突检查、dry-run、direct write、`temp-commit` 与 bounded write queue。
+- `CodeGenerator::generate_to_sink()` 是 codegen 的唯一 production 写出入口；`GeneratedFile` / `generate()` 只在测试构建中存在，用于快照与 streaming equivalence 测试。
 - 标准工程 fixture 覆盖 runtime data + generated code 的端到端输出和代表性运行时加载。
 
 未来规划：

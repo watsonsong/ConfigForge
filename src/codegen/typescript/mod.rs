@@ -7,9 +7,8 @@ use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField, CodeFragmentPayload,
-    CodeGenerator, CodeTableKind, CodeWriter, CodeWriterConfig, CodeWriterLike, GeneratedFile,
-    I18nFunctionReturn, I18nMode, I18nOptions, NamingConfig, build_code_model,
-    ir::require_non_empty_index_fields,
+    CodeGenerator, CodeTableKind, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn, I18nMode,
+    I18nOptions, NamingConfig, build_code_model, ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -71,10 +70,11 @@ impl CodeGenerator for TypeScriptCodeGenerator {
         CodeWriterConfig::default().with_indent_width(2)
     }
 
-    fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>> {
-        let mut content = CodeWriter::new(input.target.options.formatting);
+    #[cfg(test)]
+    fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<super::GeneratedFile>> {
+        let mut content = super::CodeWriter::new(input.target.options.formatting);
         render_typescript_code(self, &mut content, input)?;
-        Ok(vec![GeneratedFile {
+        Ok(vec![super::GeneratedFile {
             path: typescript_output_path(input),
             content: content.finish(),
         }])

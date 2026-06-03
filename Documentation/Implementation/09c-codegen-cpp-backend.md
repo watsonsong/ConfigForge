@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-C++ backend 已实现 MVP：生成 header/source、enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`LinkAll` 与 `text` translation helper。当前 backend 已覆盖 `generate_to_sink()`，production build 分别通过 `ArtifactSink` 打开 `generated.hpp` 和 `generated.cpp` 并使用 streaming writer 写出；legacy `generate()` 仍保留给单元测试做 String-backed 快照和 header/source streaming equivalence 校验。
+C++ backend 已实现 MVP：生成 header/source、enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`LinkAll` 与 `text` translation helper。当前 backend 已覆盖 `generate_to_sink()`，production build 分别通过 `ArtifactSink` 打开 `generated.hpp` 和 `generated.cpp` 并使用 streaming writer 写出；`generate()` 仅在 `#[cfg(test)]` 下保留给单元测试做 String-backed 快照和 header/source streaming equivalence 校验。
 
 ## C++ 生成内容
 

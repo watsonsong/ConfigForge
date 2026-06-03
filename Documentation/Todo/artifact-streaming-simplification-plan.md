@@ -379,7 +379,7 @@ refactor(codegen): stream typescript generation to sink
 refactor(codegen): stream cpp generation to sink
 ```
 
-### Step 9：删除 legacy generated content path `[ ]`
+### Step 9：删除 legacy generated content path `[x]`
 
 目标：内置生成器全部 sink-first 后，删除 production path 中的 full String / Vec materialization。
 

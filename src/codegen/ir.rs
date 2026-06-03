@@ -1,7 +1,9 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
+#[cfg(test)]
+use std::path::PathBuf;
 
 use crate::{
     ConfigForgeError, Result,
@@ -125,6 +127,7 @@ pub(crate) enum CodeTypeRef {
     List(Box<CodeTypeRef>),
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedFile {
     pub path: PathBuf,

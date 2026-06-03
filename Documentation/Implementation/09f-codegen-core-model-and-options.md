@@ -1,6 +1,6 @@
 # 09f. Codegen Core Model and Options
 
-本文从 Codegen 模块详细设计中拆出，专门描述核心输入输出模型、`CodeExportTarget` / `CodeExportInput` / `GeneratedFile`、CodeModel IR、命名策略、类型映射和通用 writer。
+本文从 Codegen 模块详细设计中拆出，专门描述核心输入输出模型、`CodeExportTarget` / `CodeExportInput`、测试专用 `GeneratedFile`、CodeModel IR、命名策略、类型映射和通用 writer。
 
 ## Related docs
 
@@ -21,7 +21,9 @@ pub trait CodeGenerator: Send + Sync {
     fn supports_language(&self, language: &str) -> bool;
     fn default_module_name(&self) -> &'static str;
     fn default_naming(&self) -> NamingConfig;
+    #[cfg(test)]
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>>;
+    fn generate_to_sink(&self, input: &CodeExportInput<'_>, sink: &ArtifactSink) -> Result<()>;
 }
 
 pub fn builtin_generators() -> Vec<Box<dyn CodeGenerator>>;
@@ -265,7 +267,7 @@ impl<W: std::io::Write> StreamingCodeWriter<W> {
 - `finish()` 是唯一做文件尾规范化的位置：当 `trailing_blank_line = true` 时文件内容以 `\n\n` 结束；否则当 `trailing_newline = true` 时以单个 `\n` 结束；当 `trailing_newline = false` 且未要求 trailing blank line 时移除末尾换行。
 - `StreamingCodeWriter` 的方法返回 `std::io::Result<()>` 并把错误原样交给调用方；当底层 writer 是 `ArtifactWriteStream` 时，由 artifact 边界统一映射为 `ConfigForgeError::WriteFile`。streaming writer 只缓存尾部换行数量，用于在 `finish()` 时实现 `trailing_newline = false` / `trailing_blank_line = true`，不缓存完整文件内容。
 - 表达式层仍可返回 `String`，例如目标语言类型表达式、reader helper 表达式和 index key 表达式；语句/块/文件层应使用 `CodeWriter`，避免在高层继续扩散 `push_str(&format!(...))`。
-- 迁移允许分阶段进行：legacy `generate()` 可继续使用 `CodeWriter::with_content(...).finish()` 统一文件尾策略和配置解析；sink-first `generate_to_sink()` 应逐步使用 `StreamingCodeWriter<ArtifactWriteStream>`，再将 TypeScript、Rust、C++ 的 statement/block 生成函数逐步改为可复用的 writer 渲染路径。
+- 生产生成入口是 sink-first `generate_to_sink()`，应使用 `StreamingCodeWriter<ArtifactWriteStream>` / `CheckedStreamingCodeWriter` 直接写入 shared `ArtifactSink`；`generate()` 仅在 `#[cfg(test)]` 下保留，可继续使用 `CodeWriter` 做 String-backed snapshot，并与 sink-backed 输出做等价性校验。
 
 ### 9.4.2.4 文件头模板
 
@@ -278,7 +280,7 @@ impl<W: std::io::Write> StreamingCodeWriter<W> {
 | `{{project.copyright}}` | `ProjectConfig.project.copyright`，未配置为空。 |
 | `{{datetime}}` | 当前生成时间，由 exporter 注入。 |
 
-文件头渲染应发生在语言生成器写入每个 `GeneratedFile` 内容前。语言生成器可以决定是否为每行追加注释前缀，但模板本身应允许用户完整控制文本。
+文件头渲染应发生在语言生成器写入每个 artifact 内容前。语言生成器可以决定是否为每行追加注释前缀，但模板本身应允许用户完整控制文本。
 
 ### 9.4.3 `CodeExportInput`
 
@@ -295,7 +297,7 @@ pub struct CodeExportInput<'meta> {
 
 `project` 来自 Project Config，用于渲染文件头模板；`target_tags` 来自 Build 归一化后的 effective target tags（Project target tags 与 CLI extra tags 的并集），用于构造目标相关的 CodeModel；`runtime_data_files` 当前由 build 传入空列表，保留为未来 manifest / 兼容扩展入口，不参与默认资源名决策。生成代码中的默认资源名始终是逻辑表名，例如 `ItemsTable::DATA_FILE = "items"`。`generated_at` 由 exporter 注入，用于渲染文件头中的 `{{datetime}}`。
 
-### 9.4.4 `GeneratedFile`
+### 9.4.4 `GeneratedFile`（测试专用）
 
 ```rust
 pub struct GeneratedFile {
@@ -304,7 +306,7 @@ pub struct GeneratedFile {
 }
 ```
 
-第一阶段只生成文本代码文件。后续如果生成二进制 schema 或 manifest，可扩展为 `GeneratedContent::Text | Bytes`。
+`GeneratedFile` 只在 `#[cfg(test)]` 下导出，用于 generator 单元测试中的 String-backed snapshot 和 `generate_to_sink()` 等价性校验。生产 codegen 不再返回该结构，也不通过 `Vec<GeneratedFile>` materialize 完整生成内容；所有实际 artifact 统一由 `generate_to_sink()` 写入 `ArtifactSink`。
 
 ## 9.5 语言无关 CodeModel IR
 
