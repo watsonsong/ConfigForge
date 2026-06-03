@@ -339,7 +339,7 @@ cargo test codegen::writer::tests::
 feat(codegen): add streaming code writer
 ```
 
-### Step 8：逐个迁移内置 Codegen backend 到 streaming `[ ]`
+### Step 8：逐个迁移内置 Codegen backend 到 streaming `[x]`
 
 目标：Rust / TypeScript / C++ generator 覆盖 `generate_to_sink()`，不再在 production build 中构建完整 generated file `String`。
 
