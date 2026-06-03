@@ -207,13 +207,13 @@ pub struct BuildTraceStage {
 
 ## 10.6 MetaOnly codegen export 编排
 
-`write_generated_code()` 负责 MetaOnly codegen export task：
+`generate_and_write_code_task()` 负责 MetaOnly codegen export task：
 
 - 内置生成器由 `codegen::builtin_generators()` 提供。
 - codegen export task 不选择数据 export task，也不消费 `RuntimeDataFile`。
 - 每个 codegen export task 构造 `CodeExportInput`，包含 linked meta、target tags、project 信息、target language config、空 runtime data file list、generated_at。
 - 传给 CodeModel 的 target tags 必须是 effective target tags，而不是仅 Project Config 中的 target tags；否则 CLI `--tag s1` 影响了 runtime data override，却没有同步影响 table/field/index codegen 过滤，会造成 schema 与数据不一致。
-- codegen export task 可以并行生成，并直接写入 shared `ArtifactSink`；全局路径冲突由 artifact 模块在 `create()` / convenience write API 中统一检查，dry-run / finish entries 由 sink 按 normalized path 稳定输出。
+- codegen export task 可以并行生成，并通过 `CodeGenerator::generate_to_sink()` 直接写入 shared `ArtifactSink`；全局路径冲突由 artifact 模块在 `create()` / convenience write API 中统一检查，dry-run / finish entries 由 sink 按 normalized path 稳定输出。
 
 ## 10.6a 稳定性与回归基线
 
@@ -221,7 +221,7 @@ pub struct BuildTraceStage {
 
 1. **执行资源稳定性**：同一 Project / target / effective tags 下，`--serial` 或 `--jobs 1` 与 `--jobs N` 必须生成相同 artifact manifest 和相同文件内容。若代码生成默认文件头包含 `{{datetime}}` 或当前时间，则测试应使用固定 `file_header` 消除时间因素，避免把有意的时间戳差异误判为并发非确定性。
 2. **写入模式稳定性**：`direct` 与 `temp-commit` 应写出相同相对路径、字节数和文件内容；`dry-run` 应返回同一 artifact plan（路径 + bytes），但所有 entry 的 `written` 必须为 `false` 且不得创建输出文件。
-3. **声明顺序稳定性**：不论 exporter/codegen 完成顺序如何，Artifact Writer 前的输出仍按 `[[targets.exports]]` 声明顺序汇总，再由 artifact 模块做统一路径规范化和冲突检查；并行完成顺序不能影响 dry-run stdout、manifest 或第一个稳定冲突。
+3. **Artifact result 顺序稳定性**：不论 exporter/codegen 完成顺序如何，build 不再在 Artifact Writer 前汇总 artifact 内容；所有任务直接写入 shared `ArtifactSink`，由 artifact 模块完成路径规范化、冲突检查，并在 `finish()` 中按 normalized path 稳定输出 `ArtifactWriteResult.entries`。并行完成顺序不能影响 dry-run stdout、manifest 或第一个稳定冲突。
 
 回归测试建议组合：
 

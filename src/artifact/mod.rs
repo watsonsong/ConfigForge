@@ -282,6 +282,7 @@ impl ArtifactSink {
 
         if let Some(error) = first_error {
             cleanup_temp_files(temp_files.values());
+            self.inner.clear_temp_files();
             return Err(error);
         }
 
@@ -289,8 +290,10 @@ impl ArtifactSink {
             let result = commit_temp_files(&temp_files);
             if result.is_err() {
                 cleanup_temp_files(temp_files.values());
+                self.inner.clear_temp_files();
             }
             result?;
+            self.inner.clear_temp_files();
         }
 
         Ok(ArtifactWriteResult {
@@ -472,6 +475,10 @@ impl ArtifactSinkInner {
         if state.first_error.is_none() {
             state.first_error = Some(ConfigForgeError::Validation(message));
         }
+    }
+
+    fn clear_temp_files(&self) {
+        self.lock_state().temp_files.clear();
     }
 }
 
@@ -915,6 +922,41 @@ mod tests {
             .collect::<std::result::Result<Vec<_>, _>>()
             .expect("read temp dir");
         assert!(temp_files.is_empty());
+    }
+
+    #[test]
+    fn sink_temp_commit_finish_clears_temp_registry_before_late_clone_drop() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("out/generated.rs");
+        let temp_path = temp_path_for(&path, 0);
+
+        let retained_sink_clone = {
+            let sink = ArtifactWriter::new(ArtifactWriteMode::TempCommit).open_sink();
+            let retained_sink_clone = sink.clone();
+            sink.write_text(&path, "first")
+                .expect("first temp artifact should write");
+            sink.finish().expect("first sink should commit");
+            retained_sink_clone
+        };
+        assert_eq!(fs::read_to_string(&path).expect("first artifact"), "first");
+
+        let second_sink = ArtifactWriter::new(ArtifactWriteMode::TempCommit).open_sink();
+        let mut second_stream = second_sink.create(&path).expect("create second stream");
+        second_stream.write_all(b"second").expect("write second");
+        second_stream.finish().expect("finish second stream");
+        assert!(temp_path.exists());
+
+        drop(retained_sink_clone);
+
+        assert!(
+            temp_path.exists(),
+            "late drop of a previously finished sink clone must not remove a new sink temp file"
+        );
+        second_sink.finish().expect("second sink should commit");
+        assert_eq!(
+            fs::read_to_string(&path).expect("second artifact"),
+            "second"
+        );
     }
 
     #[test]
