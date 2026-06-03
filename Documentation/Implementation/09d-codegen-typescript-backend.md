@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-TypeScript backend 已实现 MVP：生成 interface/class、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`linkAll`、`text` translation helper，并提供 `loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`。
+TypeScript backend 已实现 MVP：生成 interface/class、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`linkAll`、`text` translation helper，并提供 `loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`。当前 backend 已覆盖 `generate_to_sink()`，production build 通过 `ArtifactSink` 打开 `generated.ts` 并使用 streaming writer 写出；legacy `generate()` 仍保留给单元测试做 String-backed 快照和 streaming equivalence 校验。
 
 ## TypeScript sync loading contract
 

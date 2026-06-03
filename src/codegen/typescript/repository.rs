@@ -4,7 +4,7 @@
 use crate::{
     ConfigForgeError, Result,
     codegen::{
-        CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriter,
+        CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriterLike,
         ir::{CodeForeignKey, CodeRelationCardinality},
     },
 };
@@ -12,7 +12,7 @@ use crate::{
 use super::types::TypeScriptNames;
 
 pub(super) fn render_table(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
@@ -230,7 +230,7 @@ fn index_of_helper_name(
 }
 
 fn render_row_at_helper(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
@@ -249,7 +249,7 @@ fn render_row_at_helper(
 }
 
 fn render_index_function(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     index: &CodeIndex,
     names: &TypeScriptNames<'_>,
@@ -295,7 +295,7 @@ fn render_index_function(
 }
 
 fn render_index_of_helper(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     index: &CodeIndex,
     names: &TypeScriptNames<'_>,
@@ -335,7 +335,7 @@ fn render_index_of_helper(
 }
 
 pub(super) fn render_row_relation_members(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     model: &CodeModel,
     table: &CodeTable,
     names: &TypeScriptNames<'_>,
@@ -379,7 +379,7 @@ pub(super) fn render_row_relation_members(
 }
 
 pub(super) fn render_row_relation_cache_initializers(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
@@ -407,7 +407,7 @@ pub(super) fn render_row_relation_cache_initializers(
 }
 
 pub(super) fn render_row_relation_cache_members(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
@@ -435,7 +435,7 @@ pub(super) fn render_row_relation_cache_members(
 }
 
 pub(super) fn render_row_relation_method_initializers(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
@@ -461,7 +461,7 @@ pub(super) fn render_row_relation_method_initializers(
 }
 
 pub(super) fn render_row_relation_methods(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     model: &CodeModel,
     table: &CodeTable,
     names: &TypeScriptNames<'_>,
@@ -543,7 +543,7 @@ pub(super) fn render_row_relation_methods(
 
 #[allow(clippy::too_many_arguments)]
 fn render_single_relation_method(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     source_table: &CodeTable,
     foreign_key: &CodeForeignKey,
     target_table: &CodeTable,
@@ -628,7 +628,7 @@ fn render_single_relation_method(
 
 #[allow(clippy::too_many_arguments)]
 fn render_many_relation_method(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     source_table: &CodeTable,
     foreign_key: &CodeForeignKey,
     target_table: &CodeTable,
@@ -698,7 +698,7 @@ fn render_many_relation_method(
 }
 
 fn render_optional_empty_check(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     foreign_key: &CodeForeignKey,
     names: &TypeScriptNames<'_>,
     cache_name: &str,
@@ -767,7 +767,7 @@ fn relation_value_exprs(
 }
 
 pub(super) fn render_game_data_link_all(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     model: &CodeModel,
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {

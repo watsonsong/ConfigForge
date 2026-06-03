@@ -1,9 +1,9 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::codegen::CodeWriter;
+use crate::codegen::CodeWriterLike;
 
-pub(super) fn render_runtime_reader_interfaces(content: &mut CodeWriter) {
+pub(super) fn render_runtime_reader_interfaces(content: &mut impl CodeWriterLike) {
     content.raw(
         r#"export interface RuntimeDataReader {
   enterField(name: string): boolean;
@@ -54,7 +54,7 @@ function openRuntimeDataSync(loader: RuntimeDataLoader, path: string): RuntimeDa
     );
 }
 
-pub(super) fn render_runtime_reader_helpers(content: &mut CodeWriter) {
+pub(super) fn render_runtime_reader_helpers(content: &mut impl CodeWriterLike) {
     content.raw(
         r#"function requiredField<T>(reader: RuntimeDataReader, name: string, convert: (value: RuntimeDataReader) => T): T {
   enterRequiredField(reader, name);

@@ -345,8 +345,8 @@ feat(codegen): add streaming code writer
 
 推荐顺序：
 
-1. Rust backend：单文件，最适合作为样板。
-2. TypeScript backend：单文件或较少文件，跟随 Rust 模式。
+1. Rust backend：单文件，最适合作为样板。`[x]`
+2. TypeScript backend：单文件或较少文件，跟随 Rust 模式。`[x]`
 3. C++ backend：多文件，需要 header/source 分别打开 stream。
 
 每个 backend 的开发内容：

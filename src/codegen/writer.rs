@@ -268,6 +268,36 @@ impl CodeWriterLike for CodeWriter {
     }
 }
 
+impl<T: CodeWriterLike + ?Sized> CodeWriterLike for &mut T {
+    fn raw(&mut self, text: impl AsRef<str>) {
+        (**self).raw(text);
+    }
+
+    fn raw_fmt(&mut self, args: fmt::Arguments<'_>) {
+        (**self).raw_fmt(args);
+    }
+
+    fn write(&mut self, text: impl AsRef<str>) {
+        (**self).write(text);
+    }
+
+    fn line(&mut self, text: impl AsRef<str>) {
+        (**self).line(text);
+    }
+
+    fn line_fmt(&mut self, args: fmt::Arguments<'_>) {
+        (**self).line_fmt(args);
+    }
+
+    fn blank_line(&mut self) {
+        (**self).blank_line();
+    }
+
+    fn newline(&mut self) {
+        (**self).newline();
+    }
+}
+
 #[derive(Debug)]
 pub struct CheckedStreamingCodeWriter<W> {
     inner: StreamingCodeWriter<W>,
