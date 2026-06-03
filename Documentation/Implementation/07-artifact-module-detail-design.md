@@ -258,7 +258,7 @@ Build / exporters / codegen
 - `Direct`：`ArtifactSink::create()` 创建父目录并打开最终路径文件；`write()` 同步写入最终文件并统计 bytes。Direct 模式失败时可能已经留下部分最终文件，这是该模式的既有弱语义；需要“全部成功后再可见”时应使用 `TempCommit`。
 - `TempCommit`：`ArtifactSink::create()` 创建同目录 temp file，stream 写入 temp file；所有 stream 都 `finish()` 且无错误后，`ArtifactSink::finish()` 按 normalized final path 稳定顺序 replace 到最终路径。commit 阶段不再持有 artifact content bytes，因此内存峰值只与打开 stream 的 buffer / temp file writer 有关。replace 语义必须跨平台保持一致：Unix/macOS 可以直接 `rename` 覆盖已有最终文件；Windows 下因 `fs::rename` 不能替换已有文件，需要先删除已有最终文件再 rename 临时文件。
 - `TempCommit` 清理：任一 stream 写 temp 阶段失败时，`ArtifactSink::finish()` 清理已创建 temp files；如果 build / 调用方在 `finish()` 前因其它错误提前返回，sink drop 也会兜底删除已记录的 temp files；commit 阶段失败时沿用当前语义，可能已有部分最终文件被 rename 成功，但错误路径必须稳定。
-- `create()` 失败持久化：duplicate path、final/temp file open 失败都会记录 `first_error`；即使调用方忽略 `create()` 返回的错误，后续 `ArtifactSink::finish()` 仍必须失败。若存在 `Failed` path 但没有 `first_error`，`finish()` 会返回 fallback validation error。
+- 失败持久化：duplicate path、final/temp file open 失败、stream write/flush 失败、stream drop 未 finish 都会记录 `first_error`；即使调用方忽略即时返回的错误，后续 `ArtifactSink::finish()` 仍必须失败，并优先保留最早的真实根因。若存在 `Failed` path 但没有 `first_error`，`finish()` 会返回 fallback validation error。
 
 #### Stream 生命周期与并发安全
 

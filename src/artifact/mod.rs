@@ -322,11 +322,13 @@ impl ArtifactWriteStream {
     }
 
     pub fn finish(mut self) -> Result<ArtifactWriteEntry> {
-        if let ArtifactWriteTarget::File(file) = &mut self.target {
-            file.flush().map_err(|source| ConfigForgeError::WriteFile {
-                path: self.write_error_path(),
-                source,
-            })?;
+        if let Err(source) = self.target.flush() {
+            let path = self.write_error_path();
+            self.sink.fail_path_with_message(
+                &self.path,
+                format!("failed to flush `{}`: {source}", path.display()),
+            );
+            return Err(ConfigForgeError::WriteFile { path, source });
         }
 
         let entry = ArtifactWriteEntry {
@@ -350,6 +352,8 @@ impl Write for ArtifactWriteStream {
         let result = match &mut self.target {
             ArtifactWriteTarget::Count => Ok(buf.len()),
             ArtifactWriteTarget::File(file) => file.write(buf),
+            #[cfg(test)]
+            ArtifactWriteTarget::FailFlush => Ok(buf.len()),
         };
 
         match result {
@@ -371,10 +375,7 @@ impl Write for ArtifactWriteStream {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        match &mut self.target {
-            ArtifactWriteTarget::Count => Ok(()),
-            ArtifactWriteTarget::File(file) => file.flush(),
-        }
+        self.target.flush()
     }
 }
 
@@ -399,6 +400,19 @@ impl Drop for ArtifactWriteStream {
 enum ArtifactWriteTarget {
     Count,
     File(File),
+    #[cfg(test)]
+    FailFlush,
+}
+
+impl ArtifactWriteTarget {
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Count => Ok(()),
+            Self::File(file) => file.flush(),
+            #[cfg(test)]
+            Self::FailFlush => Err(io::Error::other("injected flush failure")),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -825,6 +839,34 @@ mod tests {
         assert!(
             matches!(error, ConfigForgeError::Validation(message) if message.contains("failed to open artifact"))
         );
+    }
+
+    #[test]
+    fn sink_finish_preserves_flush_error_after_ignored_stream_finish_error() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("out/generated.rs");
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+
+        let mut stream = sink.create(&path).expect("create stream");
+        stream.target = ArtifactWriteTarget::FailFlush;
+        stream.write_all(b"content").expect("write content");
+
+        let immediate_error = stream.finish().unwrap_err();
+        assert!(matches!(
+            immediate_error,
+            ConfigForgeError::WriteFile { path: error_path, source }
+                if error_path == path && source.to_string().contains("injected flush failure")
+        ));
+
+        let finish_error = sink.finish().unwrap_err();
+
+        assert!(matches!(
+            finish_error,
+            ConfigForgeError::Validation(message)
+                if message.contains("failed to flush")
+                    && message.contains("injected flush failure")
+                    && !message.contains("dropped before finish")
+        ));
     }
 
     #[test]
