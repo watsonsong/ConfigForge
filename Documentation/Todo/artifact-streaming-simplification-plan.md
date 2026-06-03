@@ -278,7 +278,7 @@ cargo test exporter::gettext_pot::tests:: exporter::lua_table::tests:: build::ru
 refactor(exporter): make aggregate exports sink-first
 ```
 
-### Step 6：为 Codegen 增加 sink-first API，但先使用 fallback `[ ]`
+### Step 6：为 Codegen 增加 sink-first API，但先使用 fallback `[x]`
 
 目标：让 build 层不再直接依赖 `Vec<GeneratedFile>`，为后续 streaming codegen 铺路。
 

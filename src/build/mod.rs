@@ -24,8 +24,7 @@ use crate::{
     ConfigForgeError, Result,
     artifact::{ArtifactSink, ArtifactWriter},
     codegen::{
-        CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, GeneratedFile,
-        builtin_generators,
+        CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, builtin_generators,
     },
     data::{DataLoader, RawSourceData, SourceReadPlan},
     meta::{LinkedMetaModel, MetaModel, TargetTags},
@@ -604,16 +603,6 @@ fn generate_and_write_code_task(
     context: &CodegenTaskContext<'_, '_>,
     export_task: &NormalizedExportTask,
 ) -> Result<()> {
-    for file in generate_code_task(context, export_task)? {
-        context.sink.write_text(file.path, &file.content)?;
-    }
-    Ok(())
-}
-
-fn generate_code_task(
-    context: &CodegenTaskContext<'_, '_>,
-    export_task: &NormalizedExportTask,
-) -> Result<Vec<GeneratedFile>> {
     debug_assert_eq!(export_task.dependency, ExportDependency::MetaOnly);
     let task = codegen_task_config_from_export_task(export_task)?;
     let generator =
@@ -623,17 +612,25 @@ fn generate_code_task(
                 task.language
             ))
         })?;
+    let input = build_code_export_input(context, task, generator)?;
+    generator.generate_to_sink(&input, context.sink)
+}
+
+fn build_code_export_input<'meta>(
+    context: &CodegenTaskContext<'_, 'meta>,
+    task: crate::codegen::CodegenTaskConfig,
+    generator: &dyn CodeGenerator,
+) -> Result<CodeExportInput<'meta>> {
     let mut code_target = CodeExportTarget::from_task(task, generator)?;
     code_target.out_dir = context.project_root.join(&code_target.out_dir);
-    let input = CodeExportInput {
+    Ok(CodeExportInput {
         meta: context.linked_meta,
         target_tags: context.target_tags.clone(),
         project: context.project.clone(),
         target: code_target,
         runtime_data_files: Vec::new(),
         generated_at: context.generated_at.to_owned(),
-    };
-    generator.generate(&input)
+    })
 }
 
 fn generated_at() -> String {
@@ -1153,6 +1150,83 @@ mod tests {
             .find(|stage| stage.name == "run_exporters")
             .expect("run_exporters stage should be recorded");
         assert_eq!(run_exporters_stage.status, BuildTraceStageStatus::Failed);
+    }
+
+    #[test]
+    fn codegen_task_writes_via_sink_first_override() {
+        struct SinkOnlyGenerator {
+            called: Arc<AtomicBool>,
+        }
+
+        impl CodeGenerator for SinkOnlyGenerator {
+            fn language(&self) -> &'static str {
+                "sink_only"
+            }
+
+            fn default_naming(&self) -> crate::codegen::NamingConfig {
+                crate::codegen::NamingConfig {
+                    type_name: crate::codegen::CaseStyle::PascalCase,
+                    enum_value: crate::codegen::CaseStyle::ScreamingSnakeCase,
+                    field: crate::codegen::CaseStyle::SnakeCase,
+                    function: crate::codegen::CaseStyle::SnakeCase,
+                    constant: crate::codegen::CaseStyle::ScreamingSnakeCase,
+                }
+            }
+
+            fn generate(
+                &self,
+                _input: &CodeExportInput<'_>,
+            ) -> Result<Vec<crate::codegen::GeneratedFile>> {
+                panic!("build must call generate_to_sink instead of legacy generate fallback")
+            }
+
+            fn generate_to_sink(
+                &self,
+                input: &CodeExportInput<'_>,
+                sink: &ArtifactSink,
+            ) -> Result<()> {
+                self.called.store(true, Ordering::SeqCst);
+                sink.write_text(input.target.out_dir.join("generated.txt"), "sink-first")
+            }
+        }
+
+        let meta = minimal_meta_model();
+        let linked_meta = meta.link().expect("minimal meta should link");
+        let target_tags = TargetTags::empty();
+        let project = CodeExportProject::default();
+        let called = Arc::new(AtomicBool::new(false));
+        let generators = vec![Box::new(SinkOnlyGenerator {
+            called: called.clone(),
+        }) as Box<dyn CodeGenerator>];
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+        let context = CodegenTaskContext {
+            project_root: Path::new("."),
+            project: &project,
+            target_tags: &target_tags,
+            linked_meta: &linked_meta,
+            generated_at: "2026-06-03T00:00:00Z",
+            generators: &generators,
+            sink: &sink,
+        };
+        let export_task = NormalizedExportTask {
+            name: "code".to_owned(),
+            type_id: "sink_only".to_owned(),
+            dependency: ExportDependency::MetaOnly,
+            output: PathBuf::from("out/sink_only"),
+            options: BTreeMap::new(),
+        };
+
+        generate_and_write_code_task(&context, &export_task)
+            .expect("sink-first generator should write successfully");
+        let result = sink.finish().expect("sink should finish");
+
+        assert!(called.load(Ordering::SeqCst));
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(
+            result.entries[0].path,
+            PathBuf::from("out/sink_only/generated.txt")
+        );
+        assert_eq!(result.entries[0].bytes, "sink-first".len());
     }
 
     fn export_task(name: &str, dependency: ExportDependency) -> NormalizedExportTask {

@@ -18,8 +18,14 @@ pub trait CodeGenerator: Send + Sync {
     fn default_module_name(&self) -> &'static str;
     fn default_naming(&self) -> NamingConfig;
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>>;
+    fn generate_to_sink(&self, input: &CodeExportInput<'_>, sink: &ArtifactSink) -> Result<()>;
 }
 ```
+
+`generate_to_sink()` 是 build 调用的 sink-first 标准入口。默认实现调用 legacy
+`generate(input)?`，再逐个 `sink.write_text(file.path, &file.content)`，因此现有 backend
+可以在迁移期间保持 `Vec<GeneratedFile>` 行为不变；新 backend 或已迁移 backend 应覆盖该方法，
+直接通过 `ArtifactSink` 写出 artifact，避免 build 层依赖具体的 generated content 表示。
 
 内置生成器：
 
@@ -40,7 +46,7 @@ CodegenTaskConfig.language
   -> validate CodeModel
   -> render language files
   -> validate file paths
-  -> Vec<GeneratedFile>
+  -> ArtifactSink entries via generate_to_sink()
 ```
 
 `validate CodeModel` 应检查：
