@@ -4,7 +4,7 @@
 use crate::{
     Result,
     codegen::{
-        CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriter,
+        CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriterLike,
         ir::CodeRelationCardinality,
     },
 };
@@ -12,7 +12,7 @@ use crate::{
 use super::types::RustNames;
 
 pub(super) fn render_enum_reader_impl(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     code_enum: &CodeEnum,
     names: &RustNames<'_>,
 ) -> Result<()> {
@@ -45,7 +45,7 @@ pub(super) fn render_enum_reader_impl(
 }
 
 pub(super) fn render_struct_reader_impl(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     code_struct: &CodeStruct,
     names: &RustNames<'_>,
 ) -> Result<()> {
@@ -59,7 +59,7 @@ pub(super) fn render_struct_reader_impl(
 }
 
 pub(super) fn render_fragment_reader_impl(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     fragment: &CodeFragment,
     names: &RustNames<'_>,
@@ -74,7 +74,7 @@ pub(super) fn render_fragment_reader_impl(
 }
 
 pub(super) fn render_row_reader_impl(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &RustNames<'_>,
 ) -> Result<()> {
@@ -88,7 +88,7 @@ pub(super) fn render_row_reader_impl(
 }
 
 fn render_read_from_reader_body(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     fields: &[CodeField],
     table: Option<&CodeTable>,
     type_name: &str,

@@ -17,7 +17,8 @@ pub use cpp::{CppCodeGenerator, CppCodegenOptions};
 pub use rust::{RustCodeGenerator, RustCodegenOptions};
 pub use typescript::{TypeScriptCodeGenerator, TypeScriptCodegenOptions};
 pub use writer::{
-    CodeWriter, CodeWriterConfig, IndentStyle, PartialCodeWriterConfig, StreamingCodeWriter,
+    CheckedStreamingCodeWriter, CodeWriter, CodeWriterConfig, CodeWriterLike, IndentStyle,
+    PartialCodeWriterConfig, StreamingCodeWriter,
 };
 
 use std::{collections::HashMap, path::PathBuf};

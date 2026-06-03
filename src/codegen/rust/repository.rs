@@ -4,7 +4,7 @@
 use crate::{
     ConfigForgeError, Result,
     codegen::{
-        CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriter,
+        CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriterLike,
         ir::{CodeForeignKey, CodeRelationCardinality},
     },
 };
@@ -12,7 +12,7 @@ use crate::{
 use super::types::RustNames;
 
 pub(super) fn render_table(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &RustNames<'_>,
 ) -> Result<()> {
@@ -150,7 +150,7 @@ pub(super) fn render_table(
 }
 
 pub(super) fn render_row_relation_methods(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     model: &CodeModel,
     table: &CodeTable,
     names: &RustNames<'_>,
@@ -208,7 +208,7 @@ pub(super) fn render_row_relation_methods(
 }
 
 pub(super) fn render_game_data_link_methods(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     model: &CodeModel,
     names: &RustNames<'_>,
 ) -> Result<()> {
@@ -232,7 +232,7 @@ pub(super) fn render_game_data_link_methods(
 
 #[allow(clippy::too_many_arguments)]
 fn render_single_relation_method(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     source_table: &CodeTable,
     foreign_key: &CodeForeignKey,
     target_table: &CodeTable,
@@ -352,7 +352,7 @@ fn render_single_relation_method(
 
 #[allow(clippy::too_many_arguments)]
 fn render_many_relation_method(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     source_table: &CodeTable,
     foreign_key: &CodeForeignKey,
     target_table: &CodeTable,
@@ -413,7 +413,7 @@ fn render_many_relation_method(
 }
 
 fn render_optional_empty_check(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     foreign_key: &CodeForeignKey,
     names: &RustNames<'_>,
     indent: &str,
@@ -443,7 +443,7 @@ fn render_optional_empty_check(
 }
 
 fn render_table_link_function(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &RustNames<'_>,
 ) -> Result<()> {
@@ -495,7 +495,7 @@ fn row_handle_function_name(index: &CodeIndex, names: &RustNames<'_>) -> Result<
 }
 
 fn render_row_handle_function(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     index: &CodeIndex,
     names: &RustNames<'_>,
 ) -> Result<()> {
@@ -552,7 +552,7 @@ fn index_by_name<'a>(table: &'a CodeTable, name: &str) -> Result<&'a CodeIndex> 
 }
 
 fn render_object_table(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &RustNames<'_>,
 ) -> Result<()> {
@@ -595,7 +595,7 @@ fn render_object_table(
 }
 
 fn render_index_function(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     index: &CodeIndex,
     names: &RustNames<'_>,

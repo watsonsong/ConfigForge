@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-Rust backend 已实现 MVP：生成 enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`link_all` 与 `text` translation helper。
+Rust backend 已实现 MVP：生成 enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`link_all` 与 `text` translation helper。Build-facing `generate_to_sink()` 已使用 `StreamingCodeWriter<ArtifactWriteStream>` 直接写入 shared `ArtifactSink`；legacy `generate()` 仍保留并复用同一渲染路径生成 `GeneratedFile`，用于兼容测试和过渡期 API。
 
 ## Rust 生成内容
 

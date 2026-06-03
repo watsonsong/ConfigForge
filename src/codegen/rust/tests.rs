@@ -1,7 +1,12 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use std::fs;
+
+use tempfile::tempdir;
+
 use crate::{
+    artifact::{ArtifactWriteMode, ArtifactWriter},
     codegen::{
         CaseStyle, CodeExportInput, CodeGenerator,
         tests::{
@@ -59,6 +64,32 @@ fn emits_loader_table_and_index_helpers() {
     assert!(content.contains("pub fn preload_all(&self) -> RuntimeDataResult<()>"));
     assert!(content.contains("impl<L: RuntimeDataLoader> GameDataAccess for LazyGameData<L>"));
     assert!(content.contains("let value = ItemsTable::load(&self.loader)?;"));
+}
+
+#[test]
+fn generate_to_sink_matches_legacy_generate_output() {
+    let meta = linked_fixture();
+    let temp_dir = tempdir().expect("temp dir");
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.out_dir = temp_dir.path().join("rust_out");
+
+    let legacy = RustCodeGenerator
+        .generate(&input)
+        .expect("legacy rust code");
+    let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+    RustCodeGenerator
+        .generate_to_sink(&input, &sink)
+        .expect("streamed rust code");
+    let result = sink.finish().expect("sink should finish");
+
+    assert_eq!(legacy.len(), 1);
+    assert_eq!(result.entries.len(), 1);
+    assert_eq!(result.entries[0].path, legacy[0].path);
+    assert_eq!(result.entries[0].bytes, legacy[0].content.len());
+    assert_eq!(
+        fs::read_to_string(&legacy[0].path).expect("streamed rust file"),
+        legacy[0].content
+    );
 }
 
 #[test]

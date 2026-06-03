@@ -1,9 +1,9 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::codegen::CodeWriter;
+use crate::codegen::CodeWriterLike;
 
-pub(super) fn render_runtime_reader_imports(content: &mut CodeWriter) {
+pub(super) fn render_runtime_reader_imports(content: &mut impl CodeWriterLike) {
     content.raw(
         r#"pub use config_forge_runtime_reader_core::{
     CONFIG_FORGE_READER_CONTRACT_VERSION, RuntimeDataError, RuntimeDataLoader, RuntimeDataReader,
@@ -14,7 +14,7 @@ pub(super) fn render_runtime_reader_imports(content: &mut CodeWriter) {
     );
 }
 
-pub(super) fn render_runtime_reader_helpers(content: &mut CodeWriter) {
+pub(super) fn render_runtime_reader_helpers(content: &mut impl CodeWriterLike) {
     content.raw(
         r#"fn with_required_field<R: RuntimeDataReader, T>(
     reader: &R,

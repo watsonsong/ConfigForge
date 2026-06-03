@@ -228,6 +228,127 @@ pub struct StreamingCodeWriter<W> {
     has_content: bool,
 }
 
+pub trait CodeWriterLike {
+    fn raw(&mut self, text: impl AsRef<str>);
+    fn raw_fmt(&mut self, args: fmt::Arguments<'_>);
+    fn write(&mut self, text: impl AsRef<str>);
+    fn line(&mut self, text: impl AsRef<str>);
+    fn line_fmt(&mut self, args: fmt::Arguments<'_>);
+    fn blank_line(&mut self);
+    fn newline(&mut self);
+}
+
+impl CodeWriterLike for CodeWriter {
+    fn raw(&mut self, text: impl AsRef<str>) {
+        self.raw(text);
+    }
+
+    fn raw_fmt(&mut self, args: fmt::Arguments<'_>) {
+        self.raw_fmt(args);
+    }
+
+    fn write(&mut self, text: impl AsRef<str>) {
+        self.write(text);
+    }
+
+    fn line(&mut self, text: impl AsRef<str>) {
+        self.line(text);
+    }
+
+    fn line_fmt(&mut self, args: fmt::Arguments<'_>) {
+        self.line_fmt(args);
+    }
+
+    fn blank_line(&mut self) {
+        self.blank_line();
+    }
+
+    fn newline(&mut self) {
+        self.newline();
+    }
+}
+
+#[derive(Debug)]
+pub struct CheckedStreamingCodeWriter<W> {
+    inner: StreamingCodeWriter<W>,
+    error: Option<io::Error>,
+}
+
+impl<W: Write> CheckedStreamingCodeWriter<W> {
+    pub fn new(output: W, config: CodeWriterConfig) -> Self {
+        Self {
+            inner: StreamingCodeWriter::new(output, config),
+            error: None,
+        }
+    }
+
+    pub fn finish(self) -> io::Result<W> {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
+        self.inner.finish()
+    }
+
+    fn record(&mut self, result: io::Result<()>) {
+        if let Err(error) = result
+            && self.error.is_none()
+        {
+            self.error = Some(error);
+        }
+    }
+}
+
+impl<W: Write> CodeWriterLike for CheckedStreamingCodeWriter<W> {
+    fn raw(&mut self, text: impl AsRef<str>) {
+        if self.error.is_none() {
+            let result = self.inner.raw(text);
+            self.record(result);
+        }
+    }
+
+    fn raw_fmt(&mut self, args: fmt::Arguments<'_>) {
+        if self.error.is_none() {
+            let result = self.inner.raw_fmt(args);
+            self.record(result);
+        }
+    }
+
+    fn write(&mut self, text: impl AsRef<str>) {
+        if self.error.is_none() {
+            let result = self.inner.write(text);
+            self.record(result);
+        }
+    }
+
+    fn line(&mut self, text: impl AsRef<str>) {
+        if self.error.is_none() {
+            let result = self.inner.line(text);
+            self.record(result);
+        }
+    }
+
+    fn line_fmt(&mut self, args: fmt::Arguments<'_>) {
+        if self.error.is_none() {
+            let result = self.inner.line_fmt(args);
+            self.record(result);
+        }
+    }
+
+    fn blank_line(&mut self) {
+        if self.error.is_none() {
+            let result = self.inner.blank_line();
+            self.record(result);
+        }
+    }
+
+    fn newline(&mut self) {
+        if self.error.is_none() {
+            let result = self.inner.newline();
+            self.record(result);
+        }
+    }
+}
+
 impl<W: Write> StreamingCodeWriter<W> {
     pub fn new(output: W, config: CodeWriterConfig) -> Self {
         Self {

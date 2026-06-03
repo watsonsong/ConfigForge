@@ -26,12 +26,12 @@ pub use build::{
     ExecutionOptions, build_target,
 };
 pub use codegen::{
-    CaseStyle, CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator,
-    CodeWriterConfig, CodegenOptions, CodegenTaskConfig, CppCodeGenerator, CppCodegenOptions,
-    GeneratedFile, I18nFunctionReturn, I18nMode, I18nOptions, IndentStyle, KeywordConflictPolicy,
-    NamingConfig, PartialCodeWriterConfig, PartialNamingConfig, RustCodeGenerator,
-    RustCodegenOptions, StreamingCodeWriter, TypeScriptCodeGenerator, TypeScriptCodegenOptions,
-    builtin_generators, default_module_name, find_generator,
+    CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeExportProject, CodeExportTarget,
+    CodeGenerator, CodeWriterConfig, CodeWriterLike, CodegenOptions, CodegenTaskConfig,
+    CppCodeGenerator, CppCodegenOptions, GeneratedFile, I18nFunctionReturn, I18nMode, I18nOptions,
+    IndentStyle, KeywordConflictPolicy, NamingConfig, PartialCodeWriterConfig, PartialNamingConfig,
+    RustCodeGenerator, RustCodegenOptions, StreamingCodeWriter, TypeScriptCodeGenerator,
+    TypeScriptCodegenOptions, builtin_generators, default_module_name, find_generator,
 };
 pub use data::{
     AsyncSourceReadShell, CsvDataReader, DataLoadPlan, DataLoader, DataProvider, DataRow, DataSet,
