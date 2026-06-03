@@ -41,7 +41,7 @@ pub struct TypeScriptCodegenOptions {
     pub readonly_fields: bool,
 }
 
-pub struct TypeScriptCodeGenerator;
+pub(crate) struct TypeScriptCodeGenerator;
 
 impl CodeGenerator for TypeScriptCodeGenerator {
     fn language(&self) -> &'static str {

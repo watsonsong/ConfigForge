@@ -14,11 +14,16 @@ pub(crate) use self::ir::{
     CodeEnum, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel, CodeStruct,
     CodeTable, CodeTableKind, CodeTypeRef, build_code_model,
 };
-pub use cpp::{CppCodeGenerator, CppCodegenOptions};
-pub use rust::{RustCodeGenerator, RustCodegenOptions};
-pub use typescript::{TypeScriptCodeGenerator, TypeScriptCodegenOptions};
+pub(crate) use cpp::CppCodeGenerator;
+pub use cpp::CppCodegenOptions;
+pub(crate) use rust::RustCodeGenerator;
+pub use rust::RustCodegenOptions;
+pub(crate) use typescript::TypeScriptCodeGenerator;
+pub use typescript::TypeScriptCodegenOptions;
+#[cfg(test)]
+pub(crate) use writer::CodeWriter;
 pub use writer::{
-    CheckedStreamingCodeWriter, CodeWriter, CodeWriterConfig, CodeWriterLike, IndentStyle,
+    CheckedStreamingCodeWriter, CodeWriterConfig, CodeWriterLike, IndentStyle,
     PartialCodeWriterConfig, StreamingCodeWriter,
 };
 
@@ -177,7 +182,10 @@ pub struct PartialNamingConfig {
 }
 
 impl CodeExportTarget {
-    pub fn from_task(task: CodegenTaskConfig, generator: &dyn CodeGenerator) -> Result<Self> {
+    pub(crate) fn from_task(
+        task: CodegenTaskConfig,
+        generator: &dyn CodeGenerator,
+    ) -> Result<Self> {
         let language = generator.language().to_owned();
         let file_name = match task.file_name {
             Some(file_name) => Some(validate_generated_file_name(&file_name)?),
@@ -276,7 +284,7 @@ fn validate_generated_file_name(file_name: &str) -> Result<String> {
 }
 
 impl CodegenOptions {
-    pub fn for_generator(generator: &dyn CodeGenerator) -> Result<Self> {
+    pub(crate) fn for_generator(generator: &dyn CodeGenerator) -> Result<Self> {
         let task = CodegenTaskConfig::for_language(generator.language());
         Ok(Self {
             file_header: None,
@@ -374,7 +382,7 @@ pub struct CodeExportInput<'meta> {
 /// concurrently for different codegen tasks. Implementations must therefore be
 /// thread-safe and reentrant; plugins with mutable caches must synchronize them
 /// internally or use a future factory-style registry to create per-task instances.
-pub trait CodeGenerator: Send + Sync {
+pub(crate) trait CodeGenerator: Send + Sync {
     fn language(&self) -> &'static str;
     fn dependency(&self) -> ExportDependency {
         ExportDependency::MetaOnly
@@ -395,6 +403,7 @@ pub trait CodeGenerator: Send + Sync {
     fn line_comment_prefix(&self) -> &'static str {
         "//"
     }
+    #[cfg(test)]
     fn write_file_header(&self, writer: &mut CodeWriter, input: &CodeExportInput<'_>) {
         if let Some(template) = &input.target.options.file_header {
             let mut output = render_file_header_template(input, template);
@@ -419,6 +428,7 @@ pub trait CodeGenerator: Send + Sync {
     fn generate_to_sink(&self, input: &CodeExportInput<'_>, sink: &ArtifactSink) -> Result<()>;
 }
 
+#[cfg(test)]
 fn render_file_header_template(input: &CodeExportInput<'_>, template: &str) -> String {
     let project = &input.project;
     let mut output = template.to_owned();
@@ -470,7 +480,7 @@ pub(crate) fn ensure_unique_generated_symbols(
     Ok(())
 }
 
-pub fn builtin_generators() -> Vec<Box<dyn CodeGenerator>> {
+pub(crate) fn builtin_generators() -> Vec<Box<dyn CodeGenerator>> {
     vec![
         Box::new(RustCodeGenerator),
         Box::new(CppCodeGenerator),
@@ -478,7 +488,7 @@ pub fn builtin_generators() -> Vec<Box<dyn CodeGenerator>> {
     ]
 }
 
-pub fn find_generator<'a>(
+pub(crate) fn find_generator<'a>(
     generators: &'a [Box<dyn CodeGenerator>],
     language: &str,
 ) -> Option<&'a dyn CodeGenerator> {

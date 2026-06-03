@@ -37,7 +37,7 @@ pub struct RustCodegenOptions {
     pub derive_serde: bool,
 }
 
-pub struct RustCodeGenerator;
+pub(crate) struct RustCodeGenerator;
 
 impl CodeGenerator for RustCodeGenerator {
     fn language(&self) -> &'static str {

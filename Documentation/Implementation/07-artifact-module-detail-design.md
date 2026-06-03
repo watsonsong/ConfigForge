@@ -307,10 +307,12 @@ pub(crate) fn export_runtime_data_to_sink(
 Codegen production path 已迁移到 `ArtifactSink`，避免 codegen 与 exporter 走两套写入路径。Build-facing generator API 是：
 
 ```rust
-pub trait CodeGenerator {
+pub(crate) trait CodeGenerator {
     fn generate_to_sink(&self, input: &CodeExportInput<'_>, sink: &ArtifactSink) -> Result<()>;
 }
 ```
+
+`CodeGenerator` 当前是 crate 内部扩展点，不作为稳定外部 generator plugin API 暴露；因此它可以直接依赖内部 `ArtifactSink` 类型，而不要求 crate root 同步 re-export sink/stream 细节。外部用户应通过 Project Config 的内置 `type` / `language` 选择 codegen backend，而不是自行实现该 trait。
 
 典型 codegen 写出流程：
 

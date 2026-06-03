@@ -65,6 +65,7 @@ pub struct PartialCodeWriterConfig {
 }
 
 /// Streaming helper for deterministic source generation.
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct CodeWriter {
     output: String,
@@ -73,6 +74,8 @@ pub struct CodeWriter {
     line_start: bool,
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 impl CodeWriter {
     pub fn new(config: CodeWriterConfig) -> Self {
         Self {
@@ -238,6 +241,7 @@ pub trait CodeWriterLike {
     fn newline(&mut self);
 }
 
+#[cfg(test)]
 impl CodeWriterLike for CodeWriter {
     fn raw(&mut self, text: impl AsRef<str>) {
         self.raw(text);

@@ -15,7 +15,7 @@
 目标语言使用字符串标识，不使用中心化枚举。这样新增一种语言时不需要修改 `CodeExportLanguage` 一类的核心 enum，也不需要在 build 层增加新的 match 分支。
 
 ```rust
-pub trait CodeGenerator: Send + Sync {
+pub(crate) trait CodeGenerator: Send + Sync {
     fn language(&self) -> &'static str;
     fn language_aliases(&self) -> &'static [&'static str] { &[] }
     fn supports_language(&self, language: &str) -> bool;
@@ -26,8 +26,8 @@ pub trait CodeGenerator: Send + Sync {
     fn generate_to_sink(&self, input: &CodeExportInput<'_>, sink: &ArtifactSink) -> Result<()>;
 }
 
-pub fn builtin_generators() -> Vec<Box<dyn CodeGenerator>>;
-pub fn find_generator<'a>(
+pub(crate) fn builtin_generators() -> Vec<Box<dyn CodeGenerator>>;
+pub(crate) fn find_generator<'a>(
     generators: &'a [Box<dyn CodeGenerator>],
     language: &str,
 ) -> Option<&'a dyn CodeGenerator>;
@@ -40,7 +40,7 @@ pub fn find_generator<'a>(
 - 每个语言模块维护自己的 `LANGUAGE` 常量，例如 `src/codegen/rust/mod.rs` 中的 `LANGUAGE = "rust"`。核心 `src/codegen/mod.rs` 不定义 `pub mod languages`，避免新增语言时回到核心模块增加常量。
 - `CodeExportTarget::from_task` 接收已查找到的 `&dyn CodeGenerator`，由 generator 提供默认模块名和默认命名规则。
 - `src/build/` 只通过 `find_generator(context.generators, task.language)` 查找生成器；找不到时报告“未注册生成器”，不感知具体语言集合。
-- 内置语言的唯一集中注册点是 `builtin_generators()`。未来插件式生成器可以替换或扩展传入 build 上下文的 registry，而不改 IR。
+- 内置语言的唯一集中注册点是 `builtin_generators()`。当前 `CodeGenerator` / builtin registry 是 crate 内部扩展点，不作为稳定外部 generator plugin API 暴露；外部用户通过 Project Config 选择内置语言，而不是实现该 trait。
 
 ### 9.4.2 `CodeExportTarget`
 

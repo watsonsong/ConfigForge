@@ -652,10 +652,10 @@ for each MetaOnly NormalizedExportTask:
 跨线程执行 codegen 前，需要补充 trait 线程安全契约：
 
 ```rust
-pub trait CodeGenerator: Send + Sync { ... }
+pub(crate) trait CodeGenerator: Send + Sync { ... }
 ```
 
-同理，若并行 runtime data export 共享 `DataFormatExporter` trait object，也需要 `Send + Sync`；或者每个任务重新构造 stateless exporter。未来外部插件也必须声明线程安全边界。
+同理，若并行 runtime data export 共享 `DataFormatExporter` trait object，也需要 `Send + Sync`；或者每个任务重新构造 stateless exporter。当前 `CodeGenerator` 是 crate 内部扩展点；如果未来引入外部插件，也必须在新的稳定 public API 中声明线程安全边界。
 
 ### 6.8 Artifact write
 

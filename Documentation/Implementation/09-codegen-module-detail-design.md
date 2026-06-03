@@ -108,7 +108,7 @@ src/codegen/
   tests.rs            # IR、配置、命名等语言无关公共测试
 ```
 
-Codegen 模块遵循开闭原则：核心模块只定义语言无关模型、生成器 trait、注册表查找和公共配置结构；每种目标语言作为一等公民独立放在自己的目录中，语言标识常量、语言专属 options、类型映射、运行时 reader contract 渲染、命名默认值和测试都在该目录内维护。新增语言时应优先通过新增 `src/codegen/<language>/`、实现 `CodeGenerator` 并注册到 builtin registry 完成，不回到 IR 或 build 编排层增加语言分支，也不在核心 `mod.rs` 中新增语言常量或语言 options。
+Codegen 模块遵循开闭原则：核心模块只定义语言无关模型、crate 内部生成器 trait、注册表查找和公共配置结构；每种目标语言作为一等公民独立放在自己的目录中，语言标识常量、语言专属 options、类型映射、运行时 reader contract 渲染、命名默认值和测试都在该目录内维护。新增内置语言时应优先通过新增 `src/codegen/<language>/`、实现 crate 内部 `CodeGenerator` 并注册到 builtin registry 完成，不回到 IR 或 build 编排层增加语言分支，也不在核心 `mod.rs` 中新增语言常量或语言 options。
 
 每个语言目录的 `mod.rs` 只负责实现 `CodeGenerator`、构造 `CodeModel`、调用语言内各渲染模块并写出生成文件；实际渲染逻辑按 runtime contract、类型声明、reader、repository 和符号解析拆分。当前 `generate_to_sink()` 是 build 调用的标准入口，内置 backend 均通过 `ArtifactSink` 和 streaming writer 直接写出 artifact；legacy `generate() -> Vec<GeneratedFile>` 已降级为 `#[cfg(test)]` 快照 / 等价性测试 helper，不参与 production build。类型映射当前随 `types.rs` / `reader.rs` 保持在语言目录内；若单一语言继续膨胀，可继续在该语言目录内拆出 `type_mapping.rs`、`index.rs` 等，不应把语言专属逻辑回流到核心 `src/codegen/mod.rs`。
 
@@ -129,7 +129,7 @@ src/artifact/
   writer.rs           # dry-run / direct / temp-commit 写入策略
 ```
 
-`CodeGenerator` 的 build-facing API 是 `generate_to_sink(input, sink)`：Build 只负责构造 `CodeExportInput` 并传入 shared `ArtifactSink`，不再遍历 `Vec<GeneratedFile>` 或了解生成文件的 materialization 方式。`generate()` / `GeneratedFile` 仅在测试构建中存在，用于 String-backed snapshot 与 sink-backed streaming 输出等价性校验。
+`CodeGenerator` 的 crate-internal build-facing API 是 `generate_to_sink(input, sink)`：Build 只负责构造 `CodeExportInput` 并传入 shared `ArtifactSink`，不再遍历 `Vec<GeneratedFile>` 或了解生成文件的 materialization 方式。该 trait 不是稳定外部 generator plugin API，因此可以依赖内部 `ArtifactSink`；crate root 不 re-export `CodeGenerator`、builtin registry 或具体 generator 类型。`generate()` / `GeneratedFile` 仅在测试构建中存在，用于 String-backed snapshot 与 sink-backed streaming 输出等价性校验。
 
 ### 9.3.1 ObjectTable codegen 边界
 

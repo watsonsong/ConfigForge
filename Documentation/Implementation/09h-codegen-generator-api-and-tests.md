@@ -11,7 +11,7 @@
 ## 9.11 生成器接口
 
 ```rust
-pub trait CodeGenerator: Send + Sync {
+pub(crate) trait CodeGenerator: Send + Sync {
     fn language(&self) -> &'static str;
     fn language_aliases(&self) -> &'static [&'static str] { &[] }
     fn supports_language(&self, language: &str) -> bool;
@@ -23,14 +23,14 @@ pub trait CodeGenerator: Send + Sync {
 }
 ```
 
-`generate_to_sink()` 是 build 调用的 sink-first 标准入口，也是生产代码必须实现的写出接口。Build 只传入 shared `ArtifactSink`，由 generator 负责 `sink.create(path)`、通过 streaming writer 渲染内容并 `finish()` stream；trait 不再提供 `generate()` fallback，避免 production path materialize 完整 `String` / `Vec<GeneratedFile>`。`generate()` 与 `GeneratedFile` 仅在 `#[cfg(test)]` 下保留，用于单元测试中的 String-backed snapshot 和 streaming equivalence 校验。
+`generate_to_sink()` 是 build 调用的 sink-first 标准入口，也是生产代码必须实现的写出接口。Build 只传入 shared `ArtifactSink`，由 generator 负责 `sink.create(path)`、通过 streaming writer 渲染内容并 `finish()` stream；trait 不再提供 `generate()` fallback，避免 production path materialize 完整 `String` / `Vec<GeneratedFile>`。`CodeGenerator` 当前是 crate 内部扩展点，不作为稳定外部 generator plugin API 暴露，因此 crate root 不 re-export trait、builtin registry 或具体 generator 类型。`generate()` 与 `GeneratedFile` 仅在 `#[cfg(test)]` 下保留，用于单元测试中的 String-backed snapshot 和 streaming equivalence 校验。
 
 内置生成器：
 
 ```rust
-pub struct RustCodeGenerator;
-pub struct CppCodeGenerator;
-pub struct TypeScriptCodeGenerator;
+pub(crate) struct RustCodeGenerator;
+pub(crate) struct CppCodeGenerator;
+pub(crate) struct TypeScriptCodeGenerator;
 ```
 
 生成过程：
@@ -62,7 +62,7 @@ CodegenTaskConfig.language
 1. 新增 `src/codegen/<language>/mod.rs`，在模块内定义 `LANGUAGE`、语言专属 options、实现 `CodeGenerator`，返回规范语言名、可选 alias、默认命名规则和生成逻辑。
 2. 新增 `src/codegen/<language>/tests.rs`，覆盖该语言的 loader/reader contract、row/object/parser、index 和命名冲突行为。
 3. 如有语言专属配置，新增 option struct，并通过 `CodegenOptions::language_options<T>("<language>")` 解析。
-4. 将 generator 加入 `builtin_generators()`；若未来使用外部插件 registry，则由调用方传入扩展后的 registry。
+4. 将 generator 加入 crate 内部 `builtin_generators()`；如果未来要支持外部插件 registry，应另行设计不暴露 concrete `ArtifactSink` 的稳定 public writer context trait，而不是直接公开当前内部 `CodeGenerator`。
 5. 不修改 `CodeModel`、`src/build/` 的分发逻辑，也不新增中心化语言 enum。
 
 ## 9.12 文件组织策略

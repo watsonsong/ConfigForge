@@ -41,7 +41,7 @@ pub struct CppCodegenOptions {
     pub namespace: Option<String>,
 }
 
-pub struct CppCodeGenerator;
+pub(crate) struct CppCodeGenerator;
 
 impl CodeGenerator for CppCodeGenerator {
     fn language(&self) -> &'static str {
