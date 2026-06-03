@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use serde::Deserialize;
-use std::fmt::{self, Write as _};
+use std::{
+    fmt::{self, Write as _},
+    io::{self, Write},
+};
 
 /// Shared configuration for generated source formatting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -210,8 +213,185 @@ impl CodeWriter {
     }
 }
 
+/// Streaming source writer with the same formatting rules as [`CodeWriter`].
+///
+/// The writer forwards completed bytes to the wrapped `std::io::Write` immediately, keeping only a
+/// small count of trailing newline bytes so `finish()` can apply the same trailing newline / blank
+/// line policy as the string-backed writer without retaining the whole generated file in memory.
+#[derive(Debug)]
+pub struct StreamingCodeWriter<W> {
+    output: W,
+    config: CodeWriterConfig,
+    indent_level: usize,
+    line_start: bool,
+    pending_newlines: usize,
+    has_content: bool,
+}
+
+impl<W: Write> StreamingCodeWriter<W> {
+    pub fn new(output: W, config: CodeWriterConfig) -> Self {
+        Self {
+            output,
+            config,
+            indent_level: 0,
+            line_start: true,
+            pending_newlines: 0,
+            has_content: false,
+        }
+    }
+
+    pub fn config(&self) -> CodeWriterConfig {
+        self.config
+    }
+
+    pub fn indent_level(&self) -> usize {
+        self.indent_level
+    }
+
+    pub fn indent(&mut self) {
+        self.indent_level += 1;
+    }
+
+    pub fn dedent(&mut self) {
+        self.indent_level = self
+            .indent_level
+            .checked_sub(1)
+            .expect("StreamingCodeWriter dedent called at indentation level 0");
+    }
+
+    pub fn indented<R>(&mut self, write_body: impl FnOnce(&mut Self) -> R) -> R {
+        self.indent();
+        let result = write_body(self);
+        self.dedent();
+        result
+    }
+
+    pub fn raw(&mut self, text: impl AsRef<str>) -> io::Result<()> {
+        let text = text.as_ref();
+        if text.is_empty() {
+            return Ok(());
+        }
+
+        let trailing_newlines = text
+            .as_bytes()
+            .iter()
+            .rev()
+            .take_while(|byte| **byte == b'\n')
+            .count();
+        let body_len = text.len() - trailing_newlines;
+        if body_len > 0 {
+            self.flush_pending_newlines()?;
+            self.output.write_all(&text.as_bytes()[..body_len])?;
+            self.has_content = true;
+            self.line_start = false;
+        }
+        if trailing_newlines > 0 {
+            self.pending_newlines = self.pending_newlines.saturating_add(trailing_newlines);
+            self.has_content = true;
+            self.line_start = true;
+        }
+        Ok(())
+    }
+
+    pub fn raw_fmt(&mut self, args: fmt::Arguments<'_>) -> io::Result<()> {
+        let mut text = String::new();
+        text.write_fmt(args)
+            .expect("writing fmt::Arguments to String should not fail");
+        self.raw(text)
+    }
+
+    pub fn write(&mut self, text: impl AsRef<str>) -> io::Result<()> {
+        for segment in text.as_ref().split_inclusive('\n') {
+            if self.line_start && segment != "\n" {
+                self.write_indent()?;
+            }
+            self.raw(segment)?;
+        }
+        Ok(())
+    }
+
+    pub fn line(&mut self, text: impl AsRef<str>) -> io::Result<()> {
+        self.write(text)?;
+        self.newline()
+    }
+
+    pub fn line_fmt(&mut self, args: fmt::Arguments<'_>) -> io::Result<()> {
+        if self.line_start {
+            self.write_indent()?;
+        }
+        self.raw_fmt(args)?;
+        self.newline()
+    }
+
+    pub fn blank_line(&mut self) -> io::Result<()> {
+        self.newline()
+    }
+
+    pub fn newline(&mut self) -> io::Result<()> {
+        self.pending_newlines = self.pending_newlines.saturating_add(1);
+        self.has_content = true;
+        self.line_start = true;
+        Ok(())
+    }
+
+    pub fn finish(mut self) -> io::Result<W> {
+        if self.config.trailing_blank_line {
+            self.ensure_trailing_blank_line();
+        } else if self.config.trailing_newline {
+            self.ensure_trailing_newline();
+        } else {
+            self.pending_newlines = 0;
+        }
+        self.flush_pending_newlines()?;
+        self.output.flush()?;
+        Ok(self.output)
+    }
+
+    fn write_indent(&mut self) -> io::Result<()> {
+        self.flush_pending_newlines()?;
+        match self.config.indent_style {
+            IndentStyle::Spaces => {
+                for _ in 0..self.indent_level * self.config.indent_width {
+                    self.output.write_all(b" ")?;
+                    self.has_content = true;
+                }
+            }
+            IndentStyle::Tab => {
+                for _ in 0..self.indent_level {
+                    self.output.write_all(b"\t")?;
+                    self.has_content = true;
+                }
+            }
+        }
+        self.line_start = false;
+        Ok(())
+    }
+
+    fn ensure_trailing_newline(&mut self) {
+        if self.has_content && self.pending_newlines == 0 {
+            self.pending_newlines = 1;
+        }
+    }
+
+    fn ensure_trailing_blank_line(&mut self) {
+        if self.has_content && self.pending_newlines < 2 {
+            self.pending_newlines = 2;
+        }
+    }
+
+    fn flush_pending_newlines(&mut self) -> io::Result<()> {
+        for _ in 0..self.pending_newlines {
+            self.output.write_all(b"\n")?;
+        }
+        self.pending_newlines = 0;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::io;
+
     use super::*;
 
     #[test]
@@ -293,5 +473,130 @@ mod tests {
         assert_eq!(config.indent_width, 8);
         assert!(!config.trailing_newline);
         assert!(config.trailing_blank_line);
+    }
+
+    #[test]
+    fn streaming_writer_matches_string_writer_for_common_formatting() {
+        let config = CodeWriterConfig::default().with_indent_width(2);
+        let mut string_writer = CodeWriter::new(config);
+        let mut stream_writer = StreamingCodeWriter::new(Vec::new(), config);
+
+        string_writer.line("export interface Item {");
+        stream_writer
+            .line("export interface Item {")
+            .expect("line should write");
+        string_writer.indented(|writer| {
+            writer.line("id: number;");
+            writer.line_fmt(format_args!("name: {};", "string"));
+            writer.blank_line();
+            writer.write("readonly tags: string[];");
+        });
+        stream_writer
+            .indented(|writer| -> io::Result<()> {
+                writer.line("id: number;")?;
+                writer.line_fmt(format_args!("name: {};", "string"))?;
+                writer.blank_line()?;
+                writer.write("readonly tags: string[];")?;
+                Ok(())
+            })
+            .expect("indented body should write");
+        string_writer.newline();
+        stream_writer.newline().expect("newline should write");
+        string_writer.line("}");
+        stream_writer.line("}").expect("line should write");
+
+        let stream_output = String::from_utf8(
+            stream_writer
+                .finish()
+                .expect("streaming writer should finish"),
+        )
+        .expect("generated output should be utf8");
+
+        assert_eq!(stream_output, string_writer.finish());
+    }
+
+    #[test]
+    fn streaming_writer_matches_tab_indent_and_raw_behavior() {
+        let config = CodeWriterConfig {
+            indent_style: IndentStyle::Tab,
+            ..CodeWriterConfig::default()
+        };
+        let mut string_writer = CodeWriter::new(config);
+        let mut stream_writer = StreamingCodeWriter::new(Vec::new(), config);
+
+        string_writer.indent();
+        stream_writer.indent();
+        string_writer.raw("already formatted\n");
+        stream_writer
+            .raw("already formatted\n")
+            .expect("raw should write");
+        string_writer.line("auto formatted");
+        stream_writer
+            .line("auto formatted")
+            .expect("line should write");
+
+        let stream_output = String::from_utf8(
+            stream_writer
+                .finish()
+                .expect("streaming writer should finish"),
+        )
+        .expect("generated output should be utf8");
+
+        assert_eq!(stream_output, string_writer.finish());
+    }
+
+    #[test]
+    fn streaming_writer_can_omit_trailing_newline_without_buffering_full_output() {
+        let config = CodeWriterConfig {
+            trailing_newline: false,
+            ..CodeWriterConfig::default()
+        };
+        let mut writer = StreamingCodeWriter::new(Vec::new(), config);
+
+        writer.line("let value = 1;").expect("line should write");
+        writer.blank_line().expect("blank line should write");
+
+        let output = String::from_utf8(writer.finish().expect("writer should finish"))
+            .expect("generated output should be utf8");
+        assert_eq!(output, "let value = 1;");
+    }
+
+    #[test]
+    fn streaming_writer_can_ensure_trailing_blank_line() {
+        let config = CodeWriterConfig {
+            trailing_blank_line: true,
+            ..CodeWriterConfig::default()
+        };
+        let mut writer = StreamingCodeWriter::new(Vec::new(), config);
+
+        writer.line("let value = 1;").expect("line should write");
+
+        let output = String::from_utf8(writer.finish().expect("writer should finish"))
+            .expect("generated output should be utf8");
+        assert_eq!(output, "let value = 1;\n\n");
+    }
+
+    #[test]
+    fn streaming_writer_propagates_write_errors() {
+        #[derive(Debug)]
+        struct FailingWriter;
+
+        impl io::Write for FailingWriter {
+            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+                Err(io::Error::other("forced failure"))
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut writer = StreamingCodeWriter::new(FailingWriter, CodeWriterConfig::default());
+
+        let error = writer
+            .line("will fail")
+            .expect_err("writer should propagate io errors");
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
     }
 }

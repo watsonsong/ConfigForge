@@ -104,7 +104,7 @@ src/codegen/
     repository.rs     # TypeScript repository、index、database facade 渲染
     symbols.rs        # TypeScriptNames 与符号冲突检查
     tests.rs          # TypeScript 生成器测试
-  writer.rs           # CodeWriter / indentation / trailing newline helper
+  writer.rs           # CodeWriter / StreamingCodeWriter / indentation / trailing newline helper
   tests.rs            # IR、配置、命名等语言无关公共测试
 ```
 
@@ -159,7 +159,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 | C++ backend | [`09c-codegen-cpp-backend.md`](09c-codegen-cpp-backend.md) | C++ header/source、namespace、ownership、`GameData` / `LazyGameData`、relation helper 与 text helper。 |
 | TypeScript backend | [`09d-codegen-typescript-backend.md`](09d-codegen-typescript-backend.md) | TypeScript interface/class、async/sync loading、`LazyGameData`、relation helper 与 text helper。 |
 | Runtime adapters | [`09e-codegen-runtime-adapters.md`](09e-codegen-runtime-adapters.md) | `runtime/` 标准 adapters、C++ CMake、TS packages、Rust templates、compliance fixtures。 |
-| Core model / IR / options | [`09f-codegen-core-model-and-options.md`](09f-codegen-core-model-and-options.md) | `CodeExportTarget` / `CodeExportInput` / `GeneratedFile`、CodeModel IR、命名策略、类型映射和通用 writer。 |
+| Core model / IR / options | [`09f-codegen-core-model-and-options.md`](09f-codegen-core-model-and-options.md) | `CodeExportTarget` / `CodeExportInput` / `GeneratedFile`、CodeModel IR、命名策略、类型映射和 string-backed / streaming 通用 writer。 |
 | Index and relation helpers | [`09g-codegen-index-and-relation-helpers.md`](09g-codegen-index-and-relation-helpers.md) | CollectionTable index lookup、`linked_field` relation helper、row-index cache、`link` / `link_all`。 |
 | Generator API and tests | [`09h-codegen-generator-api-and-tests.md`](09h-codegen-generator-api-and-tests.md) | `CodeGenerator` 接口、新语言接入步骤、文件组织、诊断和测试计划。 |
 | Lua embedded data generator | [`09i-lua-embedded-data-generator.md`](09i-lua-embedded-data-generator.md) | 已实现的 Lua data+code 合一导出、每表 `.lua`、lazy require、row array + metatable、索引和实现说明。 |

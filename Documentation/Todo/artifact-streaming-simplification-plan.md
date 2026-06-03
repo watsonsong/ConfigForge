@@ -309,7 +309,7 @@ CARGO_NET_OFFLINE=true cargo test --test cli_integration codegen
 refactor(codegen): add sink-first generation API
 ```
 
-### Step 7：新增 streaming text writer `[ ]`
+### Step 7：新增 streaming text writer `[x]`
 
 目标：为 codegen 消除 full `String` materialization 提供文本写入工具。
 

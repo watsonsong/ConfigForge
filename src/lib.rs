@@ -30,8 +30,8 @@ pub use codegen::{
     CodeWriterConfig, CodegenOptions, CodegenTaskConfig, CppCodeGenerator, CppCodegenOptions,
     GeneratedFile, I18nFunctionReturn, I18nMode, I18nOptions, IndentStyle, KeywordConflictPolicy,
     NamingConfig, PartialCodeWriterConfig, PartialNamingConfig, RustCodeGenerator,
-    RustCodegenOptions, TypeScriptCodeGenerator, TypeScriptCodegenOptions, builtin_generators,
-    default_module_name, find_generator,
+    RustCodegenOptions, StreamingCodeWriter, TypeScriptCodeGenerator, TypeScriptCodegenOptions,
+    builtin_generators, default_module_name, find_generator,
 };
 pub use data::{
     AsyncSourceReadShell, CsvDataReader, DataLoadPlan, DataLoader, DataProvider, DataRow, DataSet,

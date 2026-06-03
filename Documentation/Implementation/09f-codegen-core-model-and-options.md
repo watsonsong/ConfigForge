@@ -220,14 +220,15 @@ derive_serde = true
 - 新增语言时应新增 generator、语言扩展 option struct 和该语言自己的解析逻辑；不修改 IR，不增加中心化 `LanguageCodegenOptions` enum，也不在核心模块增加语言专属 helper。
 - 如果配置中出现当前语言不支持的 `CaseStyle` 或 `KeywordConflictPolicy`，应在 codegen validate 阶段报错。
 
-### 9.4.2.3 `CodeWriter`
+### 9.4.2.3 `CodeWriter` / `StreamingCodeWriter`
 
-代码生成器应逐步从直接 `String::push_str(&format!(...))` 迁移到共享 `CodeWriter`。`CodeWriter` 位于 `src/codegen/writer.rs`，属于语言无关基础设施，只负责文本组织和格式策略，不感知 Meta、IR、目标语言 AST 或 artifact 写入。
+代码生成器应逐步从直接 `String::push_str(&format!(...))` 迁移到共享 writer。`CodeWriter` 和 `StreamingCodeWriter` 位于 `src/codegen/writer.rs`，属于语言无关基础设施，只负责文本组织和格式策略，不感知 Meta、IR、目标语言 AST 或 artifact 写入。
 
 目标 API：
 
 ```rust
 pub struct CodeWriter { /* ... */ }
+pub struct StreamingCodeWriter<W: std::io::Write> { /* ... */ }
 
 impl CodeWriter {
     pub fn new(config: CodeWriterConfig) -> Self;
@@ -241,6 +242,20 @@ impl CodeWriter {
     pub fn indented<R>(&mut self, write_body: impl FnOnce(&mut Self) -> R) -> R;
     pub fn finish(self) -> String;
 }
+
+impl<W: std::io::Write> StreamingCodeWriter<W> {
+    pub fn new(output: W, config: CodeWriterConfig) -> Self;
+    pub fn raw(&mut self, text: impl AsRef<str>) -> std::io::Result<()>;
+    pub fn raw_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()>;
+    pub fn write(&mut self, text: impl AsRef<str>) -> std::io::Result<()>;
+    pub fn line(&mut self, text: impl AsRef<str>) -> std::io::Result<()>;
+    pub fn line_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()>;
+    pub fn blank_line(&mut self) -> std::io::Result<()>;
+    pub fn indent(&mut self);
+    pub fn dedent(&mut self);
+    pub fn indented<R>(&mut self, write_body: impl FnOnce(&mut Self) -> R) -> R;
+    pub fn finish(self) -> std::io::Result<W>;
+}
 ```
 
 职责边界：
@@ -248,8 +263,9 @@ impl CodeWriter {
 - `line(...)` 在当前缩进层级写入一行并追加换行；`write(...)` 支持写入多行文本并在每个非空新行开始处补齐当前缩进；`raw(...)` 仅追加已有文本，不自动缩进，用于迁移阶段包裹既有生成片段或写入已格式化的大块 runtime helper。
 - `indent()` / `dedent()` 管理块级缩进；`indented(...)` 用于保证局部块结束后恢复缩进层级。
 - `finish()` 是唯一做文件尾规范化的位置：当 `trailing_blank_line = true` 时文件内容以 `\n\n` 结束；否则当 `trailing_newline = true` 时以单个 `\n` 结束；当 `trailing_newline = false` 且未要求 trailing blank line 时移除末尾换行。
+- `StreamingCodeWriter` 的方法返回 `std::io::Result<()>` 并把错误原样交给调用方；当底层 writer 是 `ArtifactWriteStream` 时，由 artifact 边界统一映射为 `ConfigForgeError::WriteFile`。streaming writer 只缓存尾部换行数量，用于在 `finish()` 时实现 `trailing_newline = false` / `trailing_blank_line = true`，不缓存完整文件内容。
 - 表达式层仍可返回 `String`，例如目标语言类型表达式、reader helper 表达式和 index key 表达式；语句/块/文件层应使用 `CodeWriter`，避免在高层继续扩散 `push_str(&format!(...))`。
-- 迁移允许分阶段进行：先使用 `CodeWriter::with_content(...).finish()` 统一文件尾策略和配置解析，再将 TypeScript、Rust、C++ 的 statement/block 生成函数逐步改为接收 `&mut CodeWriter`。
+- 迁移允许分阶段进行：legacy `generate()` 可继续使用 `CodeWriter::with_content(...).finish()` 统一文件尾策略和配置解析；sink-first `generate_to_sink()` 应逐步使用 `StreamingCodeWriter<ArtifactWriteStream>`，再将 TypeScript、Rust、C++ 的 statement/block 生成函数逐步改为可复用的 writer 渲染路径。
 
 ### 9.4.2.4 文件头模板
 

@@ -16,7 +16,9 @@ pub(crate) use self::ir::{
 pub use cpp::{CppCodeGenerator, CppCodegenOptions};
 pub use rust::{RustCodeGenerator, RustCodegenOptions};
 pub use typescript::{TypeScriptCodeGenerator, TypeScriptCodegenOptions};
-pub use writer::{CodeWriter, CodeWriterConfig, IndentStyle, PartialCodeWriterConfig};
+pub use writer::{
+    CodeWriter, CodeWriterConfig, IndentStyle, PartialCodeWriterConfig, StreamingCodeWriter,
+};
 
 use std::{collections::HashMap, path::PathBuf};
 
