@@ -4,7 +4,7 @@
 use crate::{
     ConfigForgeError, Result,
     codegen::{
-        CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriter,
+        CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriterLike,
         ir::{CodeForeignKey, CodeRelationCardinality},
     },
 };
@@ -12,7 +12,7 @@ use crate::{
 use super::types::CppNames;
 
 pub(super) fn render_table_source(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &CppNames<'_>,
 ) -> Result<()> {
@@ -50,7 +50,7 @@ pub(super) fn render_table_source(
 }
 
 fn render_from_rows_source(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &CppNames<'_>,
     repository_type: &str,
@@ -97,7 +97,7 @@ fn render_from_rows_source(
 }
 
 fn render_index_function_source(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     index: &CodeIndex,
     names: &CppNames<'_>,
@@ -152,7 +152,7 @@ fn render_index_function_source(
 }
 
 fn render_table_link_source(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &CppNames<'_>,
 ) -> Result<()> {
@@ -176,7 +176,7 @@ fn render_table_link_source(
 }
 
 pub(super) fn render_game_data_load_source(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     model: &CodeModel,
     names: &CppNames<'_>,
 ) -> Result<()> {
@@ -221,7 +221,7 @@ pub(super) fn render_game_data_load_source(
 }
 
 pub(super) fn render_lazy_game_data_source(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     model: &CodeModel,
     names: &CppNames<'_>,
 ) -> Result<()> {
@@ -295,7 +295,7 @@ pub(super) fn render_lazy_game_data_source(
 }
 
 fn render_game_data_link_all_source(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     model: &CodeModel,
     names: &CppNames<'_>,
 ) -> Result<()> {
@@ -323,7 +323,7 @@ fn render_game_data_link_all_source(
 }
 
 pub(super) fn render_compound_index_key_structs(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     model: &CodeModel,
     names: &CppNames<'_>,
 ) -> Result<()> {
@@ -376,7 +376,7 @@ pub(super) fn render_compound_index_key_structs(
 }
 
 pub(super) fn render_table(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &CppNames<'_>,
 ) -> Result<()> {
@@ -444,7 +444,7 @@ pub(super) fn render_table(
 }
 
 fn render_index_function(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     index: &CodeIndex,
     names: &CppNames<'_>,
@@ -469,7 +469,7 @@ fn render_index_function(
 }
 
 pub(super) fn render_row_relation_declarations(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     model: &CodeModel,
     table: &CodeTable,
     names: &CppNames<'_>,
@@ -513,7 +513,7 @@ pub(super) fn render_row_relation_declarations(
 }
 
 pub(super) fn render_row_relation_cache_members(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &CppNames<'_>,
 ) -> Result<()> {
@@ -541,7 +541,7 @@ pub(super) fn render_row_relation_cache_members(
 }
 
 pub(super) fn render_row_relation_methods(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     model: &CodeModel,
     table: &CodeTable,
     names: &CppNames<'_>,
@@ -622,7 +622,7 @@ pub(super) fn render_row_relation_methods(
 
 #[allow(clippy::too_many_arguments)]
 fn render_single_relation_method(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     source_table: &CodeTable,
     foreign_key: &CodeForeignKey,
     target_table: &CodeTable,
@@ -689,7 +689,7 @@ fn render_single_relation_method(
 
 #[allow(clippy::too_many_arguments)]
 fn render_many_relation_method(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     source_table: &CodeTable,
     foreign_key: &CodeForeignKey,
     target_table: &CodeTable,
@@ -758,7 +758,7 @@ fn render_many_relation_method(
 }
 
 fn render_optional_empty_check(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     foreign_key: &CodeForeignKey,
     names: &CppNames<'_>,
     cache_name: &str,

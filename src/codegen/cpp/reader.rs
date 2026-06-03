@@ -3,13 +3,13 @@
 
 use crate::{
     Result,
-    codegen::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriter},
+    codegen::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriterLike},
 };
 
 use super::types::CppNames;
 
 pub(super) fn render_enum_reader_source(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     code_enum: &CodeEnum,
     names: &CppNames<'_>,
 ) -> Result<()> {
@@ -41,7 +41,7 @@ pub(super) fn render_enum_reader_source(
 }
 
 pub(super) fn render_struct_reader_source(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     code_struct: &CodeStruct,
     names: &CppNames<'_>,
 ) -> Result<()> {
@@ -50,7 +50,7 @@ pub(super) fn render_struct_reader_source(
 }
 
 pub(super) fn render_fragment_reader_source(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     fragment: &CodeFragment,
     names: &CppNames<'_>,
@@ -60,7 +60,7 @@ pub(super) fn render_fragment_reader_source(
 }
 
 pub(super) fn render_row_reader_source(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &CppNames<'_>,
 ) -> Result<()> {
@@ -69,7 +69,7 @@ pub(super) fn render_row_reader_source(
 }
 
 fn render_reader_function_source(
-    content: &mut CodeWriter,
+    content: &mut impl CodeWriterLike,
     type_name: &str,
     fields: &[CodeField],
     table: Option<&CodeTable>,

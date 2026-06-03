@@ -3,12 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::Result;
+use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
-    CaseStyle, CodeExportInput, CodeField, CodeFragmentPayload, CodeGenerator, CodeModel,
-    CodeTableKind, CodeWriter, CodeWriterConfig, GeneratedFile, I18nFunctionReturn, I18nMode,
-    I18nOptions, NamingConfig, build_code_model, ir::require_non_empty_index_fields,
+    CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField, CodeFragmentPayload,
+    CodeGenerator, CodeModel, CodeTableKind, CodeWriter, CodeWriterConfig, CodeWriterLike,
+    GeneratedFile, I18nFunctionReturn, I18nMode, I18nOptions, NamingConfig, build_code_model,
+    ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -76,232 +77,24 @@ impl CodeGenerator for CppCodeGenerator {
         let names = CppNames::new(&input.target.options);
         validate_generated_symbols(&model, &names)?;
         let mut header = CodeWriter::new(input.target.options.formatting);
-        self.write_file_header(&mut header, input);
-        header.raw("#pragma once\n\n");
-        header.raw(concat!(
-            "#include <cstdint>\n",
-            "#include <cstddef>\n",
-            "#include <map>\n",
-            "#include <memory>\n",
-            "#include <optional>\n",
-            "#include <stdexcept>\n",
-            "#include <functional>\n",
-            "#include <string>\n",
-            "#include <tuple>\n",
-            "#include <type_traits>\n",
-            "#include <unordered_map>\n",
-            "#include <utility>\n",
-            "#include <vector>\n\n",
-        ));
-        render_cpp_i18n_include(&mut header, &input.target.options.i18n);
         let namespace = cpp_options
             .namespace
             .as_ref()
             .or(input.target.namespace.as_ref());
         let namespace = namespace.map(String::as_str);
-        if let Some(namespace) = namespace {
-            header.raw_fmt(format_args!("namespace {namespace} {{\n\n"));
-        }
-        render_runtime_interfaces(&mut header);
-        render_cpp_i18n_prelude(&mut header, &input.target.options.i18n);
-        header.raw("class GameDataAccess;\nclass GameData;\n\n");
-        if model.tables.iter().any(|table| {
-            table
-                .foreign_keys
-                .iter()
-                .any(|foreign_key| foreign_key.linked_field.is_some())
-        }) {
-            header.raw(concat!(
-                "struct LinkCache {\n",
-                "    enum class State { Unresolved, Empty, RowIndex };\n",
-                "    State state = State::Unresolved;\n",
-                "    std::size_t row_index = 0;\n",
-                "};\n\n",
-                "struct LinkListCache {\n",
-                "    bool resolved = false;\n",
-                "    std::vector<std::size_t> row_indexes;\n",
-                "};\n\n",
-            ));
-        }
-
-        for code_enum in &model.enums {
-            push_doc(&mut header, code_enum.desc.as_deref());
-            header.raw_fmt(format_args!(
-                "enum class {} {{\n",
-                names.type_name(&code_enum.name)?
-            ));
-            for value in &code_enum.values {
-                push_doc_indented(&mut header, value.desc.as_deref(), "    ");
-                header.raw_fmt(format_args!(
-                    "    {},\n",
-                    names.enum_variant_name(&value.name)?
-                ));
-            }
-            header.raw("};\n\n");
-        }
-
-        for code_struct in &model.structs {
-            push_doc(&mut header, code_struct.desc.as_deref());
-            header.raw_fmt(format_args!(
-                "struct {} {{\n",
-                names.type_name(&code_struct.name)?
-            ));
-            for field in &code_struct.fields {
-                push_doc_indented(&mut header, field.desc.as_deref(), "    ");
-                header.raw_fmt(format_args!(
-                    "    {} {};\n",
-                    names.cpp_field_type(field)?,
-                    names.field_name(&field.name)?
-                ));
-            }
-            render_cpp_text_helper_declarations(
-                &mut header,
-                &code_struct.name,
-                &code_struct.fields,
-                &names,
-                &input.target.options.i18n,
-            )?;
-            header.raw("};\n\n");
-        }
-
-        render_compound_index_key_structs(&mut header, &model, &names)?;
-
-        for table in &model.tables {
-            for fragment in &table.fragments {
-                if matches!(fragment.payload, CodeFragmentPayload::Struct { .. }) {
-                    continue;
-                }
-                push_doc(&mut header, fragment.desc.as_deref());
-                header.raw_fmt(format_args!(
-                    "struct {} {{\n",
-                    names.fragment_type_name(&table.name, &fragment.name)?
-                ));
-                for field in &fragment.fields {
-                    push_doc_indented(&mut header, field.desc.as_deref(), "    ");
-                    header.raw_fmt(format_args!(
-                        "    {} {};\n",
-                        names.cpp_field_type(field)?,
-                        names.field_name(&field.name)?
-                    ));
-                }
-                render_cpp_text_helper_declarations(
-                    &mut header,
-                    &format!("{}.{}", table.name, fragment.name),
-                    &fragment.fields,
-                    &names,
-                    &input.target.options.i18n,
-                )?;
-                header.raw("};\n\n");
-            }
-        }
-
-        for table in &model.tables {
-            push_doc(&mut header, table.desc.as_deref());
-            header.raw_fmt(format_args!(
-                "struct {} {{\n",
-                names.row_type_name(&table.name)?
-            ));
-            if table.kind == CodeTableKind::Object {
-                header.raw_fmt(format_args!(
-                    "    static constexpr const char* DataFile = {:?};\n",
-                    table.data_file
-                ));
-                if let Some(revision) = table.schema_revision {
-                    header.raw_fmt(format_args!(
-                        "    static constexpr std::uint64_t ExpectedSchemaRevision = {revision}ULL;\n"
-                    ));
-                }
-            }
-            for field in &table.fields {
-                push_doc_indented(&mut header, field.desc.as_deref(), "    ");
-                header.raw_fmt(format_args!(
-                    "    {} {};\n",
-                    names.cpp_field_type(field)?,
-                    names.field_name(&field.name)?
-                ));
-            }
-            for fragment in &table.fragments {
-                header.raw_fmt(format_args!(
-                    "    std::optional<{}> {};\n",
-                    names.fragment_payload_type_name(table, fragment)?,
-                    names.field_name(&fragment.name)?
-                ));
-            }
-            render_cpp_text_helper_declarations(
-                &mut header,
-                &table.name,
-                &table.fields,
-                &names,
-                &input.target.options.i18n,
-            )?;
-            render_row_relation_declarations(&mut header, &model, table, &names)?;
-            render_row_relation_cache_members(&mut header, table, &names)?;
-            header.raw("};\n\n");
-            if table.kind == CodeTableKind::Collection {
-                render_table(&mut header, table, &names)?;
-            }
-        }
-
-        header.raw("class GameDataAccess {\npublic:\n");
-        header.raw("    virtual ~GameDataAccess() = default;\n");
-        for table in &model.tables {
-            header.raw_fmt(format_args!(
-                "    virtual const {}& {}() const = 0;\n",
-                names.table_data_type_name(table)?,
-                names.type_name(&table.name)?
-            ));
-        }
-        header.raw("};\n\n");
-
-        header.raw("class GameData : public GameDataAccess {\npublic:\n");
-        header.raw("    static GameData Load(IRuntimeDataLoader& loader);\n");
-        header.raw("    void LinkAll() const;\n");
-        for table in &model.tables {
-            header.raw_fmt(format_args!(
-                "    const {}& {}() const override {{ return {}; }}\n",
-                names.table_data_type_name(table)?,
-                names.type_name(&table.name)?,
-                names.member_name(&table.name)?
-            ));
-        }
-        header.raw("private:\n");
-        for table in &model.tables {
-            header.raw_fmt(format_args!(
-                "    {} {};\n",
-                names.table_data_type_name(table)?,
-                names.member_name(&table.name)?
-            ));
-        }
-        header.raw("};\n");
-
-        header.raw("\nclass LazyGameData : public GameDataAccess {\npublic:\n");
-        header.raw("    explicit LazyGameData(std::shared_ptr<IRuntimeDataLoader> loader);\n");
-        header.raw("    void PreloadAll() const;\n");
-        header.raw("    void LinkAll() const;\n");
-        for table in &model.tables {
-            header.raw_fmt(format_args!(
-                "    const {}& {}() const override;\n",
-                names.table_data_type_name(table)?,
-                names.type_name(&table.name)?
-            ));
-        }
-        header.raw("private:\n");
-        header.raw("    std::shared_ptr<IRuntimeDataLoader> loader_;\n");
-        for table in &model.tables {
-            header.raw_fmt(format_args!(
-                "    mutable std::optional<{}> {};\n",
-                names.table_data_type_name(table)?,
-                names.member_name(&table.name)?
-            ));
-        }
-        header.raw("};\n");
-        if let Some(namespace) = namespace {
-            header.raw_fmt(format_args!("\n}} // namespace {namespace}\n"));
-        }
-
         let header_file_name = input.target.single_file_name("generated", "hpp");
         let source_file_name = format!("{}.cpp", input.target.file_stem("generated"));
-        let source = render_source_file(self, input, &model, namespace, &names, &header_file_name)?;
+        render_header_file(self, &mut header, input, &model, namespace, &names)?;
+        let mut source = CodeWriter::new(input.target.options.formatting);
+        render_source_file(
+            self,
+            &mut source,
+            input,
+            &model,
+            namespace,
+            &names,
+            &header_file_name,
+        )?;
 
         Ok(vec![
             GeneratedFile {
@@ -310,14 +103,325 @@ impl CodeGenerator for CppCodeGenerator {
             },
             GeneratedFile {
                 path: input.target.out_dir.join(source_file_name),
-                content: source,
+                content: source.finish(),
             },
         ])
     }
+
+    fn generate_to_sink(&self, input: &CodeExportInput<'_>, sink: &ArtifactSink) -> Result<()> {
+        let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
+        require_non_empty_index_fields(&model)?;
+        let cpp_options = input
+            .target
+            .options
+            .language_options::<CppCodegenOptions>(LANGUAGE)?;
+        let names = CppNames::new(&input.target.options);
+        validate_generated_symbols(&model, &names)?;
+        let namespace = cpp_options
+            .namespace
+            .as_ref()
+            .or(input.target.namespace.as_ref());
+        let namespace = namespace.map(String::as_str);
+        let header_file_name = input.target.single_file_name("generated", "hpp");
+        let source_file_name = format!("{}.cpp", input.target.file_stem("generated"));
+        let header_path = input.target.out_dir.join(&header_file_name);
+        let source_path = input.target.out_dir.join(source_file_name);
+
+        let header_stream = sink.create(header_path.clone())?;
+        let mut header =
+            CheckedStreamingCodeWriter::new(header_stream, input.target.options.formatting);
+        render_header_file(self, &mut header, input, &model, namespace, &names)?;
+        let header_stream = header
+            .finish()
+            .map_err(|source| ConfigForgeError::WriteFile {
+                path: header_path,
+                source,
+            })?;
+        header_stream.finish()?;
+
+        let source_stream = sink.create(source_path.clone())?;
+        let mut source =
+            CheckedStreamingCodeWriter::new(source_stream, input.target.options.formatting);
+        render_source_file(
+            self,
+            &mut source,
+            input,
+            &model,
+            namespace,
+            &names,
+            &header_file_name,
+        )?;
+        let source_stream = source
+            .finish()
+            .map_err(|source| ConfigForgeError::WriteFile {
+                path: source_path,
+                source,
+            })?;
+        source_stream.finish().map(|_| ())
+    }
+}
+
+fn render_header_file(
+    generator: &dyn CodeGenerator,
+    mut header: &mut impl CodeWriterLike,
+    input: &CodeExportInput<'_>,
+    model: &CodeModel,
+    namespace: Option<&str>,
+    names: &CppNames<'_>,
+) -> Result<()> {
+    write_file_header(generator, header, input);
+    header.raw("#pragma once\n\n");
+    header.raw(concat!(
+        "#include <cstdint>\n",
+        "#include <cstddef>\n",
+        "#include <map>\n",
+        "#include <memory>\n",
+        "#include <optional>\n",
+        "#include <stdexcept>\n",
+        "#include <functional>\n",
+        "#include <string>\n",
+        "#include <tuple>\n",
+        "#include <type_traits>\n",
+        "#include <unordered_map>\n",
+        "#include <utility>\n",
+        "#include <vector>\n\n",
+    ));
+    render_cpp_i18n_include(&mut header, &input.target.options.i18n);
+    if let Some(namespace) = namespace {
+        header.raw_fmt(format_args!("namespace {namespace} {{\n\n"));
+    }
+    render_runtime_interfaces(&mut header);
+    render_cpp_i18n_prelude(&mut header, &input.target.options.i18n);
+    header.raw("class GameDataAccess;\nclass GameData;\n\n");
+    if model.tables.iter().any(|table| {
+        table
+            .foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.linked_field.is_some())
+    }) {
+        header.raw(concat!(
+            "struct LinkCache {\n",
+            "    enum class State { Unresolved, Empty, RowIndex };\n",
+            "    State state = State::Unresolved;\n",
+            "    std::size_t row_index = 0;\n",
+            "};\n\n",
+            "struct LinkListCache {\n",
+            "    bool resolved = false;\n",
+            "    std::vector<std::size_t> row_indexes;\n",
+            "};\n\n",
+        ));
+    }
+
+    for code_enum in &model.enums {
+        push_doc(&mut header, code_enum.desc.as_deref());
+        header.raw_fmt(format_args!(
+            "enum class {} {{\n",
+            names.type_name(&code_enum.name)?
+        ));
+        for value in &code_enum.values {
+            push_doc_indented(&mut header, value.desc.as_deref(), "    ");
+            header.raw_fmt(format_args!(
+                "    {},\n",
+                names.enum_variant_name(&value.name)?
+            ));
+        }
+        header.raw("};\n\n");
+    }
+
+    for code_struct in &model.structs {
+        push_doc(&mut header, code_struct.desc.as_deref());
+        header.raw_fmt(format_args!(
+            "struct {} {{\n",
+            names.type_name(&code_struct.name)?
+        ));
+        for field in &code_struct.fields {
+            push_doc_indented(&mut header, field.desc.as_deref(), "    ");
+            header.raw_fmt(format_args!(
+                "    {} {};\n",
+                names.cpp_field_type(field)?,
+                names.field_name(&field.name)?
+            ));
+        }
+        render_cpp_text_helper_declarations(
+            &mut header,
+            &code_struct.name,
+            &code_struct.fields,
+            names,
+            &input.target.options.i18n,
+        )?;
+        header.raw("};\n\n");
+    }
+
+    render_compound_index_key_structs(&mut header, model, names)?;
+
+    for table in &model.tables {
+        for fragment in &table.fragments {
+            if matches!(fragment.payload, CodeFragmentPayload::Struct { .. }) {
+                continue;
+            }
+            push_doc(&mut header, fragment.desc.as_deref());
+            header.raw_fmt(format_args!(
+                "struct {} {{\n",
+                names.fragment_type_name(&table.name, &fragment.name)?
+            ));
+            for field in &fragment.fields {
+                push_doc_indented(&mut header, field.desc.as_deref(), "    ");
+                header.raw_fmt(format_args!(
+                    "    {} {};\n",
+                    names.cpp_field_type(field)?,
+                    names.field_name(&field.name)?
+                ));
+            }
+            render_cpp_text_helper_declarations(
+                &mut header,
+                &format!("{}.{}", table.name, fragment.name),
+                &fragment.fields,
+                names,
+                &input.target.options.i18n,
+            )?;
+            header.raw("};\n\n");
+        }
+    }
+
+    for table in &model.tables {
+        push_doc(&mut header, table.desc.as_deref());
+        header.raw_fmt(format_args!(
+            "struct {} {{\n",
+            names.row_type_name(&table.name)?
+        ));
+        if table.kind == CodeTableKind::Object {
+            header.raw_fmt(format_args!(
+                "    static constexpr const char* DataFile = {:?};\n",
+                table.data_file
+            ));
+            if let Some(revision) = table.schema_revision {
+                header.raw_fmt(format_args!(
+                    "    static constexpr std::uint64_t ExpectedSchemaRevision = {revision}ULL;\n"
+                ));
+            }
+        }
+        for field in &table.fields {
+            push_doc_indented(&mut header, field.desc.as_deref(), "    ");
+            header.raw_fmt(format_args!(
+                "    {} {};\n",
+                names.cpp_field_type(field)?,
+                names.field_name(&field.name)?
+            ));
+        }
+        for fragment in &table.fragments {
+            header.raw_fmt(format_args!(
+                "    std::optional<{}> {};\n",
+                names.fragment_payload_type_name(table, fragment)?,
+                names.field_name(&fragment.name)?
+            ));
+        }
+        render_cpp_text_helper_declarations(
+            &mut header,
+            &table.name,
+            &table.fields,
+            names,
+            &input.target.options.i18n,
+        )?;
+        render_row_relation_declarations(&mut header, model, table, names)?;
+        render_row_relation_cache_members(&mut header, table, names)?;
+        header.raw("};\n\n");
+        if table.kind == CodeTableKind::Collection {
+            render_table(&mut header, table, names)?;
+        }
+    }
+
+    header.raw("class GameDataAccess {\npublic:\n");
+    header.raw("    virtual ~GameDataAccess() = default;\n");
+    for table in &model.tables {
+        header.raw_fmt(format_args!(
+            "    virtual const {}& {}() const = 0;\n",
+            names.table_data_type_name(table)?,
+            names.type_name(&table.name)?
+        ));
+    }
+    header.raw("};\n\n");
+
+    header.raw("class GameData : public GameDataAccess {\npublic:\n");
+    header.raw("    static GameData Load(IRuntimeDataLoader& loader);\n");
+    header.raw("    void LinkAll() const;\n");
+    for table in &model.tables {
+        header.raw_fmt(format_args!(
+            "    const {}& {}() const override {{ return {}; }}\n",
+            names.table_data_type_name(table)?,
+            names.type_name(&table.name)?,
+            names.member_name(&table.name)?
+        ));
+    }
+    header.raw("private:\n");
+    for table in &model.tables {
+        header.raw_fmt(format_args!(
+            "    {} {};\n",
+            names.table_data_type_name(table)?,
+            names.member_name(&table.name)?
+        ));
+    }
+    header.raw("};\n");
+
+    header.raw("\nclass LazyGameData : public GameDataAccess {\npublic:\n");
+    header.raw("    explicit LazyGameData(std::shared_ptr<IRuntimeDataLoader> loader);\n");
+    header.raw("    void PreloadAll() const;\n");
+    header.raw("    void LinkAll() const;\n");
+    for table in &model.tables {
+        header.raw_fmt(format_args!(
+            "    const {}& {}() const override;\n",
+            names.table_data_type_name(table)?,
+            names.type_name(&table.name)?
+        ));
+    }
+    header.raw("private:\n");
+    header.raw("    std::shared_ptr<IRuntimeDataLoader> loader_;\n");
+    for table in &model.tables {
+        header.raw_fmt(format_args!(
+            "    mutable std::optional<{}> {};\n",
+            names.table_data_type_name(table)?,
+            names.member_name(&table.name)?
+        ));
+    }
+    header.raw("};\n");
+    if let Some(namespace) = namespace {
+        header.raw_fmt(format_args!("\n}} // namespace {namespace}\n"));
+    }
+    Ok(())
+}
+
+fn write_file_header(
+    generator: &dyn CodeGenerator,
+    content: &mut impl CodeWriterLike,
+    input: &CodeExportInput<'_>,
+) {
+    if let Some(template) = &input.target.options.file_header {
+        let project = &input.project;
+        let mut output = template.to_owned();
+        output = output.replace("{{project.name}}", project.name.as_deref().unwrap_or(""));
+        output = output.replace("{{project.desc}}", project.desc.as_deref().unwrap_or(""));
+        output = output.replace(
+            "{{project.copyright}}",
+            project.copyright.as_deref().unwrap_or(""),
+        );
+        output = output.replace("{{datetime}}", &input.generated_at);
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+        content.raw(output);
+        return;
+    }
+
+    let prefix = generator.line_comment_prefix();
+    content.line(format!(
+        "{prefix} Copyright (c) 2026 ConfigForge contributors"
+    ));
+    content.line(format!("{prefix} SPDX-License-Identifier: Apache-2.0"));
+    content.blank_line();
+    content.line(format!("{prefix} Generated by config-forge. Do not edit."));
 }
 
 fn render_cpp_text_helper_declarations(
-    header: &mut CodeWriter,
+    header: &mut impl CodeWriterLike,
     context_prefix: &str,
     fields: &[CodeField],
     names: &CppNames<'_>,
@@ -399,7 +503,7 @@ fn render_cpp_text_helper_declarations(
     Ok(())
 }
 
-fn render_cpp_i18n_include(header: &mut CodeWriter, i18n: &I18nOptions) {
+fn render_cpp_i18n_include(header: &mut impl CodeWriterLike, i18n: &I18nOptions) {
     if !matches!(i18n.mode, I18nMode::GlobalFunction) {
         return;
     }
@@ -414,7 +518,7 @@ fn render_cpp_i18n_include(header: &mut CodeWriter, i18n: &I18nOptions) {
     }
 }
 
-fn render_cpp_i18n_prelude(header: &mut CodeWriter, i18n: &I18nOptions) {
+fn render_cpp_i18n_prelude(header: &mut impl CodeWriterLike, i18n: &I18nOptions) {
     if matches!(i18n.mode, I18nMode::Generic) {
         header.raw("using TextTranslator = std::function<std::optional<std::string>(const char*, const std::string&)>;\n\n");
     }
@@ -448,14 +552,14 @@ fn cpp_global_i18n_statement(
 
 fn render_source_file(
     generator: &dyn CodeGenerator,
+    mut content: &mut impl CodeWriterLike,
     input: &CodeExportInput<'_>,
     model: &CodeModel,
     namespace: Option<&str>,
     names: &CppNames<'_>,
     header_file_name: &str,
-) -> Result<String> {
-    let mut content = CodeWriter::new(input.target.options.formatting);
-    generator.write_file_header(&mut content, input);
+) -> Result<()> {
+    write_file_header(generator, content, input);
     content.raw_fmt(format_args!("#include {:?}\n\n", header_file_name));
     content.raw("#include <stdexcept>\n\n");
     if let Some(namespace) = namespace {
@@ -496,14 +600,14 @@ fn render_source_file(
     if let Some(namespace) = namespace {
         content.raw_fmt(format_args!("\n}} // namespace {namespace}\n"));
     }
-    Ok(content.finish())
+    Ok(())
 }
 
-fn push_doc(content: &mut CodeWriter, desc: Option<&str>) {
+fn push_doc(content: &mut impl CodeWriterLike, desc: Option<&str>) {
     push_doc_indented(content, desc, "");
 }
 
-fn push_doc_indented(content: &mut CodeWriter, desc: Option<&str>, indent: &str) {
+fn push_doc_indented(content: &mut impl CodeWriterLike, desc: Option<&str>, indent: &str) {
     if let Some(desc) = desc {
         for line in desc.lines() {
             content.raw(indent);

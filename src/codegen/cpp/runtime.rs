@@ -1,9 +1,9 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::codegen::CodeWriter;
+use crate::codegen::CodeWriterLike;
 
-pub(super) fn render_runtime_interfaces(content: &mut CodeWriter) {
+pub(super) fn render_runtime_interfaces(content: &mut impl CodeWriterLike) {
     content.raw("inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";\n\n");
     content.raw("#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH 1\n");
     content.raw("#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_ARRAY_LENGTH 1\n\n");
@@ -51,7 +51,7 @@ pub(super) fn render_runtime_interfaces(content: &mut CodeWriter) {
     ));
 }
 
-pub(super) fn render_reader_helpers_source(content: &mut CodeWriter) {
+pub(super) fn render_reader_helpers_source(content: &mut impl CodeWriterLike) {
     content.raw(concat!(
         "namespace {\n\n",
         "class ReaderScope {\n",

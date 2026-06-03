@@ -1,7 +1,12 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use std::fs;
+
+use tempfile::tempdir;
+
 use crate::{
+    artifact::{ArtifactWriteMode, ArtifactWriter},
     codegen::{
         CodeExportInput, CodeGenerator, GeneratedFile,
         tests::{
@@ -85,6 +90,36 @@ fn emits_loader_and_repository_declarations() {
     );
     assert!(source.contains("items_.emplace(ItemsTable::Load(*loader_));"));
     assert!(source.contains("void LazyGameData::PreloadAll() const"));
+}
+
+#[test]
+fn generate_to_sink_matches_legacy_generate_output() {
+    let meta = linked_fixture();
+    let temp_dir = tempdir().expect("temp dir");
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.out_dir = temp_dir.path().join("cpp_out");
+
+    let legacy = CppCodeGenerator.generate(&input).expect("legacy cpp code");
+    let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+    CppCodeGenerator
+        .generate_to_sink(&input, &sink)
+        .expect("streamed cpp code");
+    let result = sink.finish().expect("sink should finish");
+
+    assert_eq!(legacy.len(), 2);
+    assert_eq!(result.entries.len(), 2);
+    for file in &legacy {
+        let entry = result
+            .entries
+            .iter()
+            .find(|entry| entry.path == file.path)
+            .expect("streamed entry should match legacy path");
+        assert_eq!(entry.bytes, file.content.len());
+        assert_eq!(
+            fs::read_to_string(&file.path).expect("streamed cpp file"),
+            file.content
+        );
+    }
 }
 
 #[test]
