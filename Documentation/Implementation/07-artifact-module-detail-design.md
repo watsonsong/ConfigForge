@@ -169,17 +169,17 @@ runtime table exporter、aggregate exporter 和 codegen 可以并行生成 artif
 
 1. 用一个中心协调器统一 path reservation、dry-run、direct、temp-commit、byte accounting 和 result entry 生成，避免 `Vec<Artifact>` writer 与 streaming writer 长期并存。
 2. 不强制 build 一开始预判所有 artifact path；path 冲突可以在 `ArtifactSink::create(path)` 时动态发现，但发现冲突后必须阻断当前 stream，并使最终 `finish()` 返回稳定错误。
-3. ArtifactSink 只负责返回标准同步 `std::io::Write` 流和管理文件生命周期，不承担全局 memory budget / byte semaphore / artifact semaphore。
+3. ArtifactSink 只负责返回标准同步 `std::io::Write` 流和管理文件生命周期，不承担全局资源调度职责。
 4. 保持 `DryRun`、`Direct`、`TempCommit` 语义稳定；dry-run 不创建目录、不写临时文件，但仍执行内容生成并通过 counting writer 获得准确 bytes。
 5. 保持 result entries、commit 顺序与错误优先级稳定。
 
 #### CLI / BuildOptions 边界
 
-当前 CLI 只暴露 artifact 写入模式，不再提供 artifact memory limit 参数。`BuildOptions` 只接收 `artifact_write_mode`；`--serial` / `--jobs` 仍控制 CPU 执行并行度，但不再派生 artifact memory budget。原因是 ArtifactSink 返回标准文件流后，sink 自身不持有完整 artifact 内容；真实内存峰值应通过生成端 streaming 化（避免构建完整 `String` / `Vec<u8>`）降低，而不是在 sink 内维护无法覆盖总 RSS 的预算。
+当前 CLI 只暴露 artifact 写入模式。`BuildOptions` 只接收 `artifact_write_mode`；`--serial` / `--jobs` 仍控制 CPU 执行并行度。原因是 ArtifactSink 返回标准文件流后，sink 自身不持有完整 artifact 内容；真实内存峰值应通过生成端 streaming 化（避免构建完整 `String` / `Vec<u8>`）降低，而不是在 sink 内维护无法覆盖总 RSS 的预算。
 
 #### Pipeline 模型
 
-当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。Build 主流程已创建共享 `ArtifactSink` 并传入 runtime/codegen 分支。runtime table exporter 与 aggregate exporter 均直接写入 sink，JSON / MessagePack / binary 已覆盖 writer-style serializer；codegen 短期仍生成 `String`，随后调用 `sink.write_text()`。
+当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。Build 主流程已创建共享 `ArtifactSink` 并传入 runtime/codegen 分支。runtime table exporter 与 aggregate exporter 均直接写入 sink，JSON / MessagePack / binary 已覆盖 writer-style serializer；Rust / TypeScript / C++ codegen 的 production path 均通过 `generate_to_sink()` 打开 sink stream 并使用 streaming code writer 写出。
 
 已实现 API：
 
@@ -255,7 +255,7 @@ Build / exporters / codegen
 #### Direct / TempCommit / DryRun 细节
 
 - `DryRun`：仍执行 full build、validation 和内容生成，以获得准确 bytes；`ArtifactSink::create()` 返回 `CountingWriter`，`write()` 只累计 bytes，不创建目录、不写文件。若后续需要纯 path-only dry-run，可另加 `--dry-run=plan-only`，不能改变现有 dry-run 语义。
-- `Direct`：`ArtifactSink::create()` 创建父目录并打开最终路径文件；`write()` 同步写入最终文件并按 chunk 参与 byte budget。Direct 模式失败时可能已经留下部分最终文件，这是该模式的既有弱语义；需要“全部成功后再可见”时应使用 `TempCommit`。
+- `Direct`：`ArtifactSink::create()` 创建父目录并打开最终路径文件；`write()` 同步写入最终文件并统计 bytes。Direct 模式失败时可能已经留下部分最终文件，这是该模式的既有弱语义；需要“全部成功后再可见”时应使用 `TempCommit`。
 - `TempCommit`：`ArtifactSink::create()` 创建同目录 temp file，stream 写入 temp file；所有 stream 都 `finish()` 且无错误后，`ArtifactSink::finish()` 按 normalized final path 稳定顺序 rename。commit 阶段不再持有 artifact content bytes，因此内存峰值只与打开 stream 的 buffer / temp file writer 有关。
 - `TempCommit` 清理：任一 stream 写 temp 阶段失败时，`ArtifactSink::finish()` 清理已创建 temp files；如果 build / 调用方在 `finish()` 前因其它错误提前返回，sink drop 也会兜底删除已记录的 temp files；commit 阶段失败时沿用当前语义，可能已有部分最终文件被 rename 成功，但错误路径必须稳定。
 - `create()` 失败持久化：duplicate path、final/temp file open 失败都会记录 `first_error`；即使调用方忽略 `create()` 返回的错误，后续 `ArtifactSink::finish()` 仍必须失败。若存在 `Failed` path 但没有 `first_error`，`finish()` 会返回 fallback validation error。
@@ -280,7 +280,7 @@ create(path) -> Open
 
 #### 超大单文件策略
 
-streaming path 不应要求一次性持有完整 artifact bytes；`write()` 直接转发到底层 counting writer / file writer，因此单文件大小不受 sink 内部预算限制。兼容入口 `ArtifactWriter::write(Vec<Artifact>)` 仍会先持有调用方传入的 materialized content；后续优化应迁移生成端，避免先构建完整 `Vec<u8>` / `String`。
+streaming path 不要求一次性持有完整 artifact bytes；`write()` 直接转发到底层 counting writer / file writer，因此单文件大小不受 sink 内部预算限制。兼容入口 `ArtifactWriter::write(Vec<Artifact>)` 仍会先持有调用方传入的 materialized content；新 exporter / codegen 路径应优先通过 `ArtifactSink::create()` 直接写入，避免重新引入完整 `Vec<u8>` / `String` materialization。
 
 ## 7.5 与 Exporter 的关系
 
@@ -304,24 +304,25 @@ pub(crate) fn export_runtime_data_to_sink(
 
 ## 7.6 与 Codegen 的关系
 
-Codegen 短期继续返回生成文件列表，但目标模型也应迁移到 `ArtifactSink`，避免 codegen 与 exporter 走两套写入路径：
+Codegen production path 已迁移到 `ArtifactSink`，避免 codegen 与 exporter 走两套写入路径。Build-facing generator API 是：
 
 ```rust
-pub struct GeneratedFile {
-    pub path: PathBuf,
-    pub content: String,
+pub trait CodeGenerator {
+    fn generate_to_sink(&self, input: &CodeExportInput<'_>, sink: &ArtifactSink) -> Result<()>;
 }
 ```
 
-兼容期 Build 可把 `GeneratedFile` 写入 sink：
+典型 codegen 写出流程：
 
 ```rust
-let mut stream = sink.create(output.join(generated.path))?;
-stream.write_all(generated.content.as_bytes())?;
+let mut stream = sink.create(output_path)?;
+let mut writer = CheckedStreamingCodeWriter::new(stream, formatting);
+render_language_file(&mut writer, input)?;
+let stream = writer.finish()?;
 stream.finish()?;
 ```
 
-长期可以把 codegen trait 改为接收 `&ArtifactSink` 或更窄的 `GeneratedCodeSink` wrapper；小型源码文件仍可先构造 `String` 再调用 `sink.write_text()`，大型聚合代码生成器可以直接向 stream 写模板片段。
+`GeneratedFile` / `CodeGenerator::generate()` 只在 `#[cfg(test)]` 下保留，用于 String-backed snapshot 和 streaming equivalence 测试；Build 不再持有或排序 generated content。小型表达式片段仍可局部返回 `String`，但文件级 / 语句级写出应走 streaming writer。
 
 ## 7.7 与 Build / CLI 的关系
 
@@ -335,7 +336,7 @@ Build 是唯一编排者：
 
 CLI dry-run 不应跳过 validation 或 serialization/codegen，因为用户需要确认完整构建能成功，只是不提交文件系统变更。
 
-过渡期为了降低一次性改造风险，`ArtifactWriter::write(Vec<Artifact>) -> ArtifactSink` 兼容层仍保留给旧 API、测试和外部调用使用；Build 主流程不再收集全局 `Vec<Artifact>`，而是在 `build_target()` 创建共享 sink，exporter/codegen 分支直接或通过兼容 wrapper 写入同一个 sink。不能让旧 writer 重新保留独立的 path conflict / temp commit 实现。
+`ArtifactWriter::write(Vec<Artifact>)` 兼容层仍保留给测试、外部调用和少量旧 API 使用；Build 主流程不再收集全局 `Vec<Artifact>`，而是在 `build_target()` 创建共享 sink，exporter/codegen 分支直接写入同一个 sink。不能让旧 writer 重新保留独立的 path conflict / temp commit 实现。
 
 ## 7.8 错误边界
 
@@ -377,14 +378,14 @@ Artifact 模块单元测试应覆盖：
 
 - `src/artifact/` 已提供 `Artifact`、`ArtifactContent`、`ArtifactWriter`、`ArtifactSink`、`ArtifactWriteStream`、`ArtifactWriteMode` 和 `ArtifactWriteResult`。
 - Artifact 模块内的写入 authority 已收敛到 `ArtifactSink`；`ArtifactWriter::write(Vec<Artifact>)` 是兼容 wrapper，并通过 sink 写入。
-- 旧 dedicated bounded queue、sink byte / artifact semaphore、`ArtifactWriteLimits` 和 `ArtifactGenerationLimiter` 已移除；ArtifactSink 只负责标准写入流与生命周期。
-- runtime table exporter、aggregate exporter 与 generated code 在 Build 主流程中已接入共享 `ArtifactSink`；runtime table exporter 通过 stream API 写入 sink，JSON / MessagePack / binary 使用 writer-style serializer。aggregate exporter 通过 required `export_to_sink()` 写入 sink。codegen 短期仍先生成 `String`，再立即 `sink.write_text()`。
-- CLI 支持 `--dry-run`、`--write-mode direct|temp-commit`；artifact memory limit 参数已移除。
+- 旧 dedicated bounded queue 和 sink 级资源限流实现已移除；ArtifactSink 只负责标准写入流与生命周期。
+- runtime table exporter、aggregate exporter 与 generated code 在 Build 主流程中已接入共享 `ArtifactSink`；runtime table exporter 通过 stream API 写入 sink，JSON / MessagePack / binary 使用 writer-style serializer；aggregate exporter 通过 required `export_to_sink()` 写入 sink；Rust / TypeScript / C++ codegen 通过 `generate_to_sink()` 与 streaming writer 写入 sink。
+- CLI 支持 `--dry-run`、`--write-mode direct|temp-commit`；artifact 写入资源控制不再暴露独立参数。
 - temp-commit 当前提供临时文件阶段保护；提交阶段失败按 `ConfigForgeError::WriteFile` 报错，并可能保留已提交的最终文件。
 
 下一阶段规划：
 
-- codegen trait 继续从“返回 materialized String”迁移到“接收 sink 或 writer context 并向 stream 写入”。runtime table exporter 与 aggregate exporter 已直接使用 shared sink 主路径，JSON / MessagePack / binary 均通过 writer-style serializer 写出，后续重点是 codegen 的 materialized fallback。
+- 继续压缩兼容 API 的使用面：`ArtifactWriter::write(Vec<Artifact>)`、table exporter `serialize_table()` 和 aggregate exporter `export()` 只应作为测试 / 兼容 helper，不应回到 Build 主路径。
 - 短期使用同步 file writer 与标准 `std::io::Write` 接口；远端 source provider 落地时再评估是否引入 async runtime。
 - filesystem-aware path key 可在跨平台大小写不敏感冲突或 symlink alias 成为实际问题时接入，当前 lexical-normalized key 继续作为默认 authority。
 - summary manifest、远端上传、增量缓存或分布式 artifact store 应作为独立 writer / exporter 扩展，不改变当前 Artifact Writer 的基础语义。

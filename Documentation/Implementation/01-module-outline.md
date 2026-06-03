@@ -24,9 +24,9 @@
 | Runtime Contract | `src/runtime_contract.rs` | exporter / codegen / build 共享的底层运行时契约，包括 export dependency、runtime data file metadata 和 binary schema revision 计算。 | `LinkedTableMeta<'meta>`、`TargetTags`。 | `ExportDependency`、`RuntimeDataFile`、schema revision。 | 本文档总览。 |
 | Data | `src/data/` | 根据加载计划读取 CSV 等数据源，形成 raw `DataSet`，并提供 Meta-aware resolver。 | `DataLoadPlan`、source files、`LinkedMetaModel<'meta>`。 | `DataSet`、`ResolvedDataSet` / resolved view。 | `05-data-module-detail-design.md` |
 | Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、注册式 validator；入口、table、FK、struct value、default 逻辑分文件维护。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
-| Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 列表、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
-| Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack / `bin` exporter、export type registry、由统一 export task 适配得到的 exporter 内部配置。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`。 | `RuntimeDataFile` / runtime data artifacts。 | `08-exporter-module-detail-design.md` |
-| Codegen | `src/codegen/` | 语言无关 CodeModel IR，Rust / TypeScript / C++ 格式无关代码生成；每种语言按 runtime / types / reader / repository / symbols 拆分。 | `LinkedMetaModel<'meta>`、target tags。 | `GeneratedFile`。 | `09-codegen-module-detail-design.md` |
+| Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 兼容列表或 `ArtifactSink` stream 写入请求、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
+| Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack / `bin` exporter、export type registry、由统一 export task 适配得到的 exporter 内部配置。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`、`ArtifactSink`。 | `RuntimeDataFile` metadata / runtime data artifacts。 | `08-exporter-module-detail-design.md` |
+| Codegen | `src/codegen/` | 语言无关 CodeModel IR，Rust / TypeScript / C++ 格式无关代码生成；每种语言按 runtime / types / reader / repository / symbols 拆分。 | `LinkedMetaModel<'meta>`、target tags、`ArtifactSink`。 | generated code artifacts。 | `09-codegen-module-detail-design.md` |
 | Build | `src/build/` | 工程构建主编排：归一化 target，并按 target 调度 data load、validation、runtime export、format-agnostic codegen、artifact 写入。 | `ProjectConfig`、CLI options。 | `BuildOutput`、文件系统产物。 | `10-build-module-detail-design.md` |
 
 ## 1.3 强制单向依赖规则

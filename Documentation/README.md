@@ -81,7 +81,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 
 ## Retired / Merged Areas
 
-- `Documentation/Todo/` is intentionally not a canonical documentation area. Runtime binary follow-ups have been merged into [`Implementation/13-runtime-binary-format-detail-design.md`](Implementation/13-runtime-binary-format-detail-design.md#1311-当前状态与未来规划). Future planning should either be promoted into the target canonical document as a current-state / future-planning section or tracked outside `Documentation/`.
+- `Documentation/Todo/` is intentionally not a canonical documentation area. Runtime binary follow-ups have been merged into [`Implementation/13-runtime-binary-format-detail-design.md`](Implementation/13-runtime-binary-format-detail-design.md#1311-当前状态与未来规划); the artifact streaming simplification plan has been merged into [`Implementation/07-artifact-module-detail-design.md`](Implementation/07-artifact-module-detail-design.md), [`Implementation/08-exporter-module-detail-design.md`](Implementation/08-exporter-module-detail-design.md), [`Implementation/09-codegen-module-detail-design.md`](Implementation/09-codegen-module-detail-design.md), [`Implementation/10-build-module-detail-design.md`](Implementation/10-build-module-detail-design.md), and [`Tech/task-system-design.md`](Tech/task-system-design.md). Future planning should either be promoted into the target canonical document as a current-state / future-planning section or tracked outside `Documentation/`.
 
 ## Documentation Writing Standards
 

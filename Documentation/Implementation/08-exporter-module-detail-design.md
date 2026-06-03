@@ -194,7 +194,7 @@ pub enum DataExporterKind {
 
 1. Build 层负责解析 target `data` 配置、按 `format` 查询 registry、构造 `AggregateExportContext`、合并 artifact plan。
 2. 聚合 exporter 默认读取 target ExportView，而不是 Full DataSet。若需要读取 `export = false` 辅助字段，必须通过 Meta 字段策略或 exporter policy 明确允许。
-3. 聚合 exporter 只产出 `artifact::Artifact`，不直接写文件。
+3. 聚合 exporter 通过 required `export_to_sink()` 直接写入 shared `ArtifactSink`；`export() -> Vec<Artifact>` 只作为测试 / 兼容 helper，不回到 Build 主路径。
 4. 聚合 exporter 不绕过 validation；若需要 text placeholder / context 诊断，应在 validation 增加规则或由 exporter 产出 warning/error diagnostic，但不能静默修复数据。
 5. 聚合 exporter 与 runtime data exporter 共享 DataResolver / resolved value 模型，避免再次解释 CSV raw cell。
 6. `ExportProjectInfo` 是 exporter 层自己的轻量 project 描述，最多包含 project name/desc/copyright 等 header 渲染所需字段，不依赖 codegen 模块的 `CodeExportProject`，避免 `exporter -> codegen` 依赖倒置。

@@ -137,7 +137,7 @@ pub struct NormalizedExportTask {
 
 `RuntimeDataFile` 中保存的 `path` 必须是已带正确后缀的相对文件名，例如 `items.json`、`items.msgpack` 或 `items.bin`。该路径相对当前 data artifact root / runtime loader root，不相对 code output 或 project root。CodeModel 不使用这些真实 artifact path 生成加载常量；每张表统一使用逻辑表名。`bin` 的 schema revision 由 CodeModel 基于 Meta 和 target tags 计算，用于运行时 reader 暴露 revision 时进行可选校验。
 
-当一个 target 同时导出多套 runtime data export task 时，Build DAG 只校验每个 task output 的 `export_name` 与声明顺序匹配，不再向 codegen 聚合 runtime metadata。`generate_code_task` 在构造每个 `CodeExportInput` 时传入空 `runtime_data_files`。同一 table 同时出现 `items.json`、`items.msgpack` 和 `items.bin` 时也不会影响 CodeModel；格式选择由运行时 loader / reader 完成。未来 manifest 可以记录所有 runtime data export task 的真实 artifact path，但不进入 codegen 决策。
+当一个 target 同时导出多套 runtime data export task 时，Build DAG 只校验每个 task output 的 `export_name` 与声明顺序匹配，不再向 codegen 聚合 runtime metadata。MetaOnly codegen export task 在构造每个 `CodeExportInput` 时传入空 `runtime_data_files`。同一 table 同时出现 `items.json`、`items.msgpack` 和 `items.bin` 时也不会影响 CodeModel；格式选择由运行时 loader / reader 完成。未来 manifest 可以记录所有 runtime data export task 的真实 artifact path，但不进入 codegen 决策。
 
 ### 9.4.2.2 `CodegenOptions`
 
