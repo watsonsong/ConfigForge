@@ -508,12 +508,36 @@ fn open_file_for_write(path: &Path) -> Result<File> {
 
 fn commit_temp_files(temp_files: &BTreeMap<PathBuf, PathBuf>) -> Result<()> {
     for (final_path, temp_path) in temp_files {
-        fs::rename(temp_path, final_path).map_err(|source| ConfigForgeError::WriteFile {
-            path: final_path.clone(),
-            source,
-        })?;
+        replace_with_temp_file(temp_path, final_path)?;
     }
     Ok(())
+}
+
+#[cfg(not(windows))]
+fn replace_with_temp_file(temp_path: &Path, final_path: &Path) -> Result<()> {
+    fs::rename(temp_path, final_path).map_err(|source| ConfigForgeError::WriteFile {
+        path: final_path.to_path_buf(),
+        source,
+    })
+}
+
+#[cfg(windows)]
+fn replace_with_temp_file(temp_path: &Path, final_path: &Path) -> Result<()> {
+    match fs::remove_file(final_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(ConfigForgeError::WriteFile {
+                path: final_path.to_path_buf(),
+                source,
+            });
+        }
+    }
+
+    fs::rename(temp_path, final_path).map_err(|source| ConfigForgeError::WriteFile {
+        path: final_path.to_path_buf(),
+        source,
+    })
 }
 
 fn cleanup_temp_files<'a>(temp_files: impl IntoIterator<Item = &'a PathBuf>) {
@@ -650,6 +674,26 @@ mod tests {
         assert_eq!(
             fs::read_to_string(path).expect("written artifact"),
             "pub struct Generated;"
+        );
+    }
+
+    #[test]
+    fn temp_commit_replaces_existing_final_file() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("out/generated.rs");
+        fs::create_dir_all(path.parent().expect("out dir")).expect("create out dir");
+        fs::write(&path, "old content").expect("seed existing artifact");
+
+        let result = ArtifactWriter::new(ArtifactWriteMode::TempCommit)
+            .write(vec![Artifact::text(&path, "new content")])
+            .expect("temp commit should replace existing final file");
+
+        assert_eq!(result.mode, ArtifactWriteMode::TempCommit);
+        assert_eq!(result.entries[0].path, path);
+        assert_eq!(result.entries[0].bytes, "new content".len());
+        assert_eq!(
+            fs::read_to_string(&result.entries[0].path).expect("written artifact"),
+            "new content"
         );
     }
 

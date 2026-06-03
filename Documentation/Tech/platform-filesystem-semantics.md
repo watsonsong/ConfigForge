@@ -86,6 +86,12 @@ Dry-run 必须执行与真实写入一致的 artifact planning 和 conflict chec
 
 并发写入前仍必须先完成全局 conflict check。引入 canonicalize 和 case-fold 后，key builder 应在 coordination 阶段完成，不能散落到 worker 写入任务中；否则错误顺序和部分写入风险会变得不可控。
 
+## 7.1 TempCommit replace 语义
+
+`direct` 与 `temp-commit` 对已有最终 artifact 的产品语义应一致：新 artifact 覆盖旧文件。平台 API 行为不同：Unix / macOS 上 `rename(temp, final)` 通常可以替换已有普通文件；Windows 上 `std::fs::rename` 遇到已有目标通常失败。因此 ArtifactSink 的 TempCommit 提交不能只依赖裸 `rename` 的平台默认行为：Windows 路径应显式删除已有 final 后再 rename temp，以维持“覆盖已有 artifact”的用户语义。
+
+该策略只解决单个 final path 的跨平台覆盖一致性，不把 TempCommit 提升为完整多文件事务。提交阶段如果已经删除旧 final、但 rename temp 失败，旧文件可能已经不可恢复；错误仍按 `WriteFile` 报告，并由用户重新运行构建恢复一致状态。
+
 ## 8. 测试建议
 
 测试分层建议：

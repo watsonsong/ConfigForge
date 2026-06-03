@@ -219,8 +219,8 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 
 ### Artifact Writer
 
-- `temp-commit` 模式下先写临时文件再提交；写临时文件失败不提交最终产物，提交阶段失败可能保留已提交文件。
-- `direct` 模式下按项目配置直接写目标路径。
+- `temp-commit` 模式下先写临时文件再提交；已有最终文件应被新 artifact 覆盖，写临时文件失败不提交最终产物，提交阶段失败可能保留已提交文件。
+- `direct` 模式下按项目配置直接写目标路径；已有最终文件会被截断并覆盖。
 - 路径冲突在任何写入前报错。
 - 并行 artifact 生成不影响 manifest 稳定排序。
 

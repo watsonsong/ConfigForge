@@ -597,15 +597,15 @@ Artifact 内容类型：
 - 产物写入通过 Artifact Writer。
 - Artifact Writer 支持 `direct` 和 `temp-commit` 写入策略；CLI 默认 `direct`，可通过 `--write-mode temp-commit` 选择临时提交写入。
 - 并行生成不影响 artifact write result 顺序。
-- `temp-commit` 模式先完成所有临时文件写入，再按稳定顺序提交到最终路径；临时文件写入失败时不提交最终产物并清理已创建的临时文件，提交阶段失败可能保留已经 rename 成功的最终文件。
+- `temp-commit` 模式先完成所有临时文件写入，再按稳定顺序提交到最终路径；如果最终文件已存在，应与 `direct` 一样由新 artifact 覆盖旧内容。临时文件写入失败时不提交最终产物并清理已创建的临时文件，提交阶段失败可能保留已经 replace 成功的最终文件。
 - 未来 summary manifest 可作为 `targets.exports` 的聚合导出格式产物；记录 runtime data artifact 时，应以 `(target_name, export_name, table_name)` 作为稳定 key，并额外记录 `type`、相对 data artifact root 的 `path` 和最终写入 path，避免同一 table 的多格式产物互相覆盖。POT / manifest 这类聚合 export task 应使用 `(target_name, export_name, type, artifact_name)` 作为稳定 key。
 
 写入策略：
 
 | 策略 | 说明 |
 | --- | --- |
-| `temp-commit` | 先写入同目录临时文件；所有临时文件成功写入后，按稳定顺序 rename 到最终路径。 |
-| `direct` | 直接写入最终路径，适合本地调试或项目明确选择该行为的场景。 |
+| `temp-commit` | 先写入同目录临时文件；所有临时文件成功写入后，按稳定顺序 replace 到最终路径，覆盖已有最终文件。 |
+| `direct` | 直接写入最终路径；最终文件已存在时截断并覆盖，适合本地调试或项目明确选择该行为的场景。 |
 
 无论使用哪种策略，都必须在写入前完成 export plan 和路径冲突检查。
 

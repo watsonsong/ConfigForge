@@ -80,7 +80,7 @@ pub enum ArtifactWriteMode {
 
 - `DryRun`：检查路径冲突并返回写入计划，不创建目录、不写临时文件、不覆盖最终文件。
 - `Direct`：创建父目录并直接写最终路径。
-- `TempCommit`：先写入同目录临时文件，全部临时文件写入成功后再按稳定顺序 rename/commit；临时文件写入失败时清理已创建的临时文件，提交阶段失败可能保留已提交的最终文件。
+- `TempCommit`：先写入同目录临时文件，全部临时文件写入成功后再按稳定顺序 replace/commit 到最终路径；它与 `Direct` 一样允许覆盖已有最终文件。临时文件写入失败时清理已创建的临时文件，提交阶段失败可能保留已提交的最终文件。
 
 ### 7.3.4 `ArtifactWriteResult`
 
@@ -154,7 +154,7 @@ Build creates ArtifactSink
   -> sink.finish returns stable ArtifactWriteResult
      -> if DryRun: no directories/files are created
      -> if Direct: files have been written to final paths
-     -> if TempCommit: all temp files are renamed to final paths in stable order
+     -> if TempCommit: all temp files replace final paths in stable order
 ```
 
 路径冲突检查不要求 build 一开始预判所有 artifact path；但所有写入都必须经过同一个 `ArtifactSink`。`create(path)` 在写入流打开前完成 path normalization 与 registry 占用：如果 normalized final path 已经处于 `Open` / `Finished` / `Failed` 任一状态，立即返回 duplicate artifact path 错误。这样可以在生成过程中动态发现跨 task 冲突，同时避免多个任务绕过协调器直接写同一 final path。
@@ -256,7 +256,7 @@ Build / exporters / codegen
 
 - `DryRun`：仍执行 full build、validation 和内容生成，以获得准确 bytes；`ArtifactSink::create()` 返回 `CountingWriter`，`write()` 只累计 bytes，不创建目录、不写文件。若后续需要纯 path-only dry-run，可另加 `--dry-run=plan-only`，不能改变现有 dry-run 语义。
 - `Direct`：`ArtifactSink::create()` 创建父目录并打开最终路径文件；`write()` 同步写入最终文件并统计 bytes。Direct 模式失败时可能已经留下部分最终文件，这是该模式的既有弱语义；需要“全部成功后再可见”时应使用 `TempCommit`。
-- `TempCommit`：`ArtifactSink::create()` 创建同目录 temp file，stream 写入 temp file；所有 stream 都 `finish()` 且无错误后，`ArtifactSink::finish()` 按 normalized final path 稳定顺序 rename。commit 阶段不再持有 artifact content bytes，因此内存峰值只与打开 stream 的 buffer / temp file writer 有关。
+- `TempCommit`：`ArtifactSink::create()` 创建同目录 temp file，stream 写入 temp file；所有 stream 都 `finish()` 且无错误后，`ArtifactSink::finish()` 按 normalized final path 稳定顺序 replace 到最终路径。commit 阶段不再持有 artifact content bytes，因此内存峰值只与打开 stream 的 buffer / temp file writer 有关。replace 语义必须跨平台保持一致：Unix/macOS 可以直接 `rename` 覆盖已有最终文件；Windows 下因 `fs::rename` 不能替换已有文件，需要先删除已有最终文件再 rename 临时文件。
 - `TempCommit` 清理：任一 stream 写 temp 阶段失败时，`ArtifactSink::finish()` 清理已创建 temp files；如果 build / 调用方在 `finish()` 前因其它错误提前返回，sink drop 也会兜底删除已记录的 temp files；commit 阶段失败时沿用当前语义，可能已有部分最终文件被 rename 成功，但错误路径必须稳定。
 - `create()` 失败持久化：duplicate path、final/temp file open 失败都会记录 `first_error`；即使调用方忽略 `create()` 返回的错误，后续 `ArtifactSink::finish()` 仍必须失败。若存在 `Failed` path 但没有 `first_error`，`finish()` 会返回 fallback validation error。
 
