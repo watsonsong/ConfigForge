@@ -108,6 +108,79 @@ fn rejects_invalid_api_macro() {
 }
 
 #[test]
+fn rejects_blueprint_support_without_api_macro() {
+    let config: CodegenTaskConfig = toml::from_str(
+        r#"
+            language = "cpp_unreal"
+            output = "Generated/Unreal"
+
+            [cpp_unreal]
+            support = "blueprint"
+        "#,
+    )
+    .expect("config should parse");
+
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target = CodeExportTarget::from_task(config, &CppUnrealCodeGenerator).expect("target");
+    let error = CppUnrealCodeGenerator.generate(&input).unwrap_err();
+
+    assert!(format!("{error}").contains("api_macro is required"));
+}
+
+#[test]
+fn emits_blueprint_reflection_type_markers() {
+    let config: CodegenTaskConfig = toml::from_str(
+        r#"
+            language = "cpp_unreal"
+            output = "Generated/Unreal"
+            file_name = "reference_game_config"
+
+            [cpp_unreal]
+            support = "blueprint"
+            api_macro = "REFERENCE_GAME_CONFIG_API"
+            blueprint_category = "Reference Config"
+        "#,
+    )
+    .expect("config should parse");
+
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target = CodeExportTarget::from_task(config, &CppUnrealCodeGenerator).expect("target");
+    let files = CppUnrealCodeGenerator
+        .generate(&input)
+        .expect("cpp_unreal blueprint code");
+    let header = generated_content(&files, "reference_game_config.h");
+
+    let core_include = header
+        .find("#include \"CoreMinimal.h\"")
+        .expect("CoreMinimal include");
+    let generated_include = header
+        .find("#include \"reference_game_config.generated.h\"")
+        .expect("generated include");
+    assert!(core_include < generated_include);
+    assert_eq!(
+        header[generated_include..]
+            .lines()
+            .take_while(|line| line.starts_with("#include"))
+            .count(),
+        1,
+        "generated.h should be the final include"
+    );
+    assert!(header.contains("UENUM(BlueprintType)\nenum class EItemRarity : uint8"));
+    assert!(
+        header.contains("USTRUCT(BlueprintType)\nstruct REFERENCE_GAME_CONFIG_API FRewardInfo")
+    );
+    assert!(header.contains("USTRUCT(BlueprintType)\nstruct REFERENCE_GAME_CONFIG_API FItemsRow"));
+    assert!(header.contains("    GENERATED_BODY()"));
+    assert!(header.contains(
+        "    UPROPERTY(BlueprintReadOnly, Category=\"Reference Config\")\n    int64 Id;"
+    ));
+    assert!(!header.contains("std::"));
+    assert!(!header.contains("std::optional"));
+}
+
+#[test]
 fn emits_header_and_source_skeleton() {
     let meta = linked_fixture();
     let mut input = input_for(&meta, LANGUAGE);

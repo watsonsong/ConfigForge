@@ -120,6 +120,77 @@ fn builds_cpp_unreal_code_only_target() {
 }
 
 #[test]
+fn builds_cpp_unreal_blueprint_code_only_target() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let out_dir = temp_dir.path().join("generated_unreal_code");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                name = "standard_project"
+
+                [[targets]]
+                name = "code_only"
+
+                [[targets.exports]]
+                type = "cpp_unreal"
+                output = "{}"
+                file_name = "reference_game_config"
+                namespace = "ReferenceGameConfig"
+
+                [targets.exports.cpp_unreal]
+                support = "blueprint"
+                api_macro = "REFERENCE_GAME_CONFIG_API"
+                blueprint_category = "Reference Config"
+            "#,
+            standard_core_meta_imports(),
+            out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "code_only",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `code_only` built"));
+
+    let header =
+        fs::read_to_string(out_dir.join("reference_game_config.h")).expect("cpp_unreal header");
+    assert!(header.contains("#include \"reference_game_config.generated.h\""));
+    assert!(header.contains("USTRUCT(BlueprintType)"));
+    assert!(header.contains("UPROPERTY(BlueprintReadOnly, Category=\"Reference Config\")"));
+
+    if command_exists("c++") {
+        let shim_dir = temp_dir.path().join("unreal_shim");
+        write_cpp_unreal_core_minimal_shim(&shim_dir);
+        fs::write(out_dir.join("reference_game_config.generated.h"), "")
+            .expect("generated include shim should be written");
+        let output = StdCommand::new("c++")
+            .arg("-std=c++17")
+            .arg("-fsyntax-only")
+            .arg(out_dir.join("reference_game_config.cpp"))
+            .arg("-I")
+            .arg(&out_dir)
+            .arg("-I")
+            .arg(&shim_dir)
+            .output()
+            .expect("cpp_unreal blueprint syntax smoke should run");
+        assert_command_success(output, "cpp_unreal blueprint syntax smoke");
+    }
+}
+
+#[test]
 fn code_only_target_ignores_missing_project_input_and_sources() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let out_dir = temp_dir.path().join("generated_code");
@@ -3488,9 +3559,15 @@ fn write_cpp_unreal_core_minimal_shim(shim_dir: &std::path::Path) {
             using int32 = std::int32_t;
             using int64 = std::int64_t;
             using uint32 = std::uint32_t;
+            using uint8 = std::uint8_t;
             using TCHAR = char;
+            #define REFERENCE_GAME_CONFIG_API
             #define FORCEINLINE inline
             #define TEXT(value) value
+            #define USTRUCT(...)
+            #define UPROPERTY(...)
+            #define UENUM(...)
+            #define GENERATED_BODY()
             using FString = std::string;
             inline uint32 HashCombine(uint32 Left, uint32 Right) { return Left ^ (Right + 0x9e3779b9U + (Left << 6) + (Left >> 2)); }
             template <typename T>

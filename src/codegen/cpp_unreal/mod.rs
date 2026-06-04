@@ -137,6 +137,11 @@ fn cpp_unreal_options(input: &CodeExportInput<'_>) -> Result<CppUnrealCodegenOpt
         .options
         .language_options::<CppUnrealCodegenOptions>(LANGUAGE)?;
     validate_api_macro(options.api_macro.as_deref())?;
+    if matches!(options.support, CppUnrealSupportLevel::Blueprint) && options.api_macro.is_none() {
+        return Err(ConfigForgeError::Validation(format!(
+            "failed to parse {LANGUAGE} codegen options: api_macro is required when support = \"blueprint\""
+        )));
+    }
     Ok(options)
 }
 
@@ -169,7 +174,14 @@ fn render_header_file(
     let names = CppUnrealNames::new(&input.target.options);
     write_file_header(generator, content, input);
     content.raw("#pragma once\n\n");
-    content.raw("#include \"CoreMinimal.h\"\n\n");
+    content.raw("#include \"CoreMinimal.h\"\n");
+    if matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        content.raw_fmt(format_args!(
+            "#include {:?}\n",
+            format!("{}.generated.h", input.target.file_stem("generated"))
+        ));
+    }
+    content.raw("\n");
     render_runtime_declarations(content);
     render_namespace_open(content, input, options);
     content.raw_fmt(format_args!(
@@ -177,19 +189,26 @@ fn render_header_file(
         names.struct_type_name("game_data")?
     ));
     for code_enum in &model.enums {
-        render_enum_declaration(content, code_enum, &names)?;
+        render_enum_declaration(content, code_enum, &names, options)?;
     }
     for code_struct in &model.structs {
-        render_struct_declaration(content, code_struct, &names)?;
+        render_struct_declaration(content, code_struct, &names, options)?;
     }
     render_compound_index_key_structs(content, model, &names)?;
     for table in &model.tables {
-        render_table_declaration(content, table, &names)?;
+        render_table_declaration(content, table, &names, options)?;
     }
+    render_struct_prefix(
+        content,
+        &names.struct_type_name("game_data")?,
+        options,
+        true,
+    );
     content.raw_fmt(format_args!(
         "struct {} {{\n",
-        names.struct_type_name("game_data")?
+        api_qualified_type_name(&names.struct_type_name("game_data")?, options)
     ));
+    render_generated_body(content, options);
     content.raw("    static constexpr const TCHAR* Generator = TEXT(\"ConfigForge\");\n");
     for table in &model.tables {
         content.raw_fmt(format_args!(
@@ -215,6 +234,12 @@ fn render_lazy_game_data_declaration(
     model: &CodeModel,
     names: &CppUnrealNames<'_>,
 ) -> Result<()> {
+    render_struct_prefix(
+        content,
+        "FLazyGameData",
+        &CppUnrealCodegenOptions::default(),
+        false,
+    );
     content.raw("struct FLazyGameData {\n");
     content.raw("    explicit FLazyGameData(IConfigForgeRuntimeDataLoader& InLoader) : Loader(InLoader) {}\n");
     for table in &model.tables {
@@ -284,14 +309,61 @@ fn render_runtime_declarations(content: &mut impl CodeWriterLike) {
     ));
 }
 
+fn render_struct_prefix(
+    content: &mut impl CodeWriterLike,
+    _type_name: &str,
+    options: &CppUnrealCodegenOptions,
+    reflected: bool,
+) {
+    if reflected && matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        content.raw("USTRUCT(BlueprintType)\n");
+    }
+}
+
+fn api_qualified_type_name(type_name: &str, options: &CppUnrealCodegenOptions) -> String {
+    if matches!(options.support, CppUnrealSupportLevel::Blueprint)
+        && let Some(api_macro) = options.api_macro.as_deref()
+    {
+        return format!("{api_macro} {type_name}");
+    }
+    type_name.to_owned()
+}
+
+fn render_generated_body(content: &mut impl CodeWriterLike, options: &CppUnrealCodegenOptions) {
+    if matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        content.raw("    GENERATED_BODY()\n\n");
+    }
+}
+
+fn render_blueprint_property(content: &mut impl CodeWriterLike, options: &CppUnrealCodegenOptions) {
+    if matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        let category = options
+            .blueprint_category
+            .as_deref()
+            .unwrap_or("ConfigForge");
+        content.raw_fmt(format_args!(
+            "    UPROPERTY(BlueprintReadOnly, Category={category:?})\n"
+        ));
+    }
+}
+
 fn render_enum_declaration(
     content: &mut impl CodeWriterLike,
     code_enum: &CodeEnum,
     names: &CppUnrealNames<'_>,
+    options: &CppUnrealCodegenOptions,
 ) -> Result<()> {
+    if matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        content.raw("UENUM(BlueprintType)\n");
+    }
+    let underlying_type = if matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        " : uint8"
+    } else {
+        ""
+    };
     content.raw_fmt(format_args!(
-        "enum class {} {{\n",
-        names.enum_type_name(&code_enum.name)?
+        "enum class {}{underlying_type} {{\n",
+        names.enum_type_name(&code_enum.name)?,
     ));
     for value in &code_enum.values {
         content.raw_fmt(format_args!(
@@ -307,12 +379,17 @@ fn render_struct_declaration(
     content: &mut impl CodeWriterLike,
     code_struct: &CodeStruct,
     names: &CppUnrealNames<'_>,
+    options: &CppUnrealCodegenOptions,
 ) -> Result<()> {
+    let type_name = names.struct_type_name(&code_struct.name)?;
+    render_struct_prefix(content, &type_name, options, true);
     content.raw_fmt(format_args!(
         "struct {} {{\n",
-        names.struct_type_name(&code_struct.name)?
+        api_qualified_type_name(&type_name, options)
     ));
+    render_generated_body(content, options);
     for field in &code_struct.fields {
+        render_blueprint_property(content, options);
         content.raw_fmt(format_args!(
             "    {} {};\n",
             names.cpp_field_type(field)?,
@@ -322,7 +399,7 @@ fn render_struct_declaration(
     render_text_helper_declarations(content, &code_struct.name, &code_struct.fields, names)?;
     content.raw_fmt(format_args!(
         "    static TConfigForgeResult<{}> {}(IConfigForgeRuntimeDataReader& Reader);\n",
-        names.struct_type_name(&code_struct.name)?,
+        type_name,
         names.read_struct_function_name(&code_struct.name)?
     ));
     content.raw("};\n\n");
@@ -333,11 +410,15 @@ fn render_table_declaration(
     content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &CppUnrealNames<'_>,
+    options: &CppUnrealCodegenOptions,
 ) -> Result<()> {
+    let row_type = names.row_type_name(&table.name)?;
+    render_struct_prefix(content, &row_type, options, true);
     content.raw_fmt(format_args!(
         "struct {} {{\n",
-        names.row_type_name(&table.name)?
+        api_qualified_type_name(&row_type, options)
     ));
+    render_generated_body(content, options);
     if matches!(table.kind, super::CodeTableKind::Object) {
         content.raw_fmt(format_args!(
             "    static constexpr const TCHAR* {} = TEXT({:?});\n",
@@ -346,6 +427,7 @@ fn render_table_declaration(
         ));
     }
     for field in &table.fields {
+        render_blueprint_property(content, options);
         content.raw_fmt(format_args!(
             "    {} {};\n",
             names.cpp_field_type(field)?,
@@ -356,7 +438,7 @@ fn render_table_declaration(
     render_row_relation_declarations(content, table, names)?;
     content.raw_fmt(format_args!(
         "    static TConfigForgeResult<{}> {}(IConfigForgeRuntimeDataReader& Reader);\n",
-        names.row_type_name(&table.name)?,
+        row_type,
         names.read_row_function_name(&table.name)?
     ));
     content.raw("};\n\n");
