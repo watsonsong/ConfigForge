@@ -85,6 +85,16 @@ function = "GlobalTranslate"
 returns = "optional"
 cpp_include = "\"reference_game_i18n.hpp\""
 
+[[targets.exports]]
+type = "cpp_unreal"
+output = "out/client_code/cpp_unreal"
+file_name = "reference_game_config"
+namespace = "ReferenceGameConfig"
+
+[targets.exports.cpp_unreal]
+support = "containers"
+api_macro = "REFERENCE_GAME_CONFIG_API"
+
 [[targets]]
 name = "server"
 tags = ["server"]

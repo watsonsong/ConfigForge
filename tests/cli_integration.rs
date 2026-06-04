@@ -104,87 +104,7 @@ fn builds_cpp_unreal_code_only_target() {
 
     if command_exists("c++") {
         let shim_dir = temp_dir.path().join("unreal_shim");
-        fs::create_dir_all(&shim_dir).expect("shim dir should be created");
-        fs::write(
-            shim_dir.join("CoreMinimal.h"),
-            r#"
-                #pragma once
-                #include <cstdint>
-                #include <algorithm>
-                #include <memory>
-                #include <optional>
-                #include <functional>
-                #include <string>
-                #include <unordered_map>
-                #include <vector>
-
-                using int32 = std::int32_t;
-                using int64 = std::int64_t;
-                using uint32 = std::uint32_t;
-                using TCHAR = char;
-                #define FORCEINLINE inline
-                #define TEXT(value) value
-                using FString = std::string;
-                inline uint32 HashCombine(uint32 Left, uint32 Right) { return Left ^ (Right + 0x9e3779b9U + (Left << 6) + (Left >> 2)); }
-                template <typename T>
-                uint32 GetTypeHash(const T& Value) { return static_cast<uint32>(std::hash<T>{}(Value)); }
-                template <typename T>
-                struct FUnrealHash {
-                    std::size_t operator()(const T& Value) const { return GetTypeHash(Value); }
-                };
-                template <typename T>
-                using TUniquePtr = std::unique_ptr<T>;
-                template <typename T>
-                struct TArray : public std::vector<T> {
-                    using std::vector<T>::vector;
-                    void Add(const T& Value) { this->push_back(Value); }
-                    void Reserve(std::size_t Count) { this->reserve(Count); }
-                    int32 Num() const { return static_cast<int32>(this->size()); }
-                    bool IsValidIndex(int32 Index) const { return Index >= 0 && static_cast<std::size_t>(Index) < this->size(); }
-                    template <typename Predicate>
-                    void StableSort(Predicate Less) { std::stable_sort(this->begin(), this->end(), Less); }
-                };
-                template <typename K, typename V>
-                struct TPair {
-                    K Key;
-                    V Value;
-                    TPair() = default;
-                    TPair(const K& InKey, const V& InValue) : Key(InKey), Value(InValue) {}
-                };
-                template <typename K, typename V>
-                struct TMap : public std::unordered_map<K, V, FUnrealHash<K>> {
-                    using Base = std::unordered_map<K, V, FUnrealHash<K>>;
-                    bool Contains(const K& Key) const { return this->find(Key) != this->end(); }
-                    void Add(const K& Key, const V& Value) { (*this)[Key] = Value; }
-                    V* Find(const K& Key) { auto Iter = this->find(Key); return Iter == this->end() ? nullptr : &Iter->second; }
-                    const V* Find(const K& Key) const { auto Iter = this->find(Key); return Iter == this->end() ? nullptr : &Iter->second; }
-                    V& FindOrAdd(const K& Key) { return (*this)[Key]; }
-                };
-                template <typename Signature>
-                using TFunction = std::function<Signature>;
-                template <typename T>
-                struct TOptional : public std::optional<T> {
-                    using std::optional<T>::optional;
-                    TOptional() = default;
-                    TOptional(const T& Value) : std::optional<T>(Value) {}
-                    TOptional& operator=(const T& Value) { std::optional<T>::operator=(Value); return *this; }
-                    bool IsSet() const { return this->has_value(); }
-                    T& GetValue() { return this->value(); }
-                    const T& GetValue() const { return this->value(); }
-                };
-                namespace Algo {
-                    template <typename Array, typename Value, typename Projection>
-                    int32 LowerBoundBy(const Array& Values, const Value& Target, Projection Project) {
-                        return static_cast<int32>(std::lower_bound(Values.begin(), Values.end(), Target, [&](const auto& Entry, const auto& Needle) { return Project(Entry) < Needle; }) - Values.begin());
-                    }
-                    template <typename Array, typename Value, typename Projection>
-                    int32 UpperBoundBy(const Array& Values, const Value& Target, Projection Project) {
-                        return static_cast<int32>(std::upper_bound(Values.begin(), Values.end(), Target, [&](const auto& Needle, const auto& Entry) { return Needle < Project(Entry); }) - Values.begin());
-                    }
-                }
-            "#,
-        )
-        .expect("CoreMinimal shim should be written");
+        write_cpp_unreal_core_minimal_shim(&shim_dir);
         let output = StdCommand::new("c++")
             .arg("-std=c++17")
             .arg("-fsyntax-only")
@@ -1330,6 +1250,16 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(
         fixture_root
+            .join("out/client_code/cpp_unreal/reference_game_config.h")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/client_code/cpp_unreal/reference_game_config.cpp")
+            .exists()
+    );
+    assert!(
+        fixture_root
             .join("out/server_code/rust/reference_game_config.rs")
             .exists()
     );
@@ -1349,6 +1279,7 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
 
     verify_standard_generated_rust_runtime(fixture_root);
     verify_standard_generated_cpp_runtime(fixture_root);
+    verify_standard_generated_cpp_unreal_runtime(fixture_root);
     verify_standard_generated_typescript_runtime(fixture_root);
     verify_standard_generated_lua_runtime(fixture_root);
 }
@@ -3396,6 +3327,29 @@ fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
     assert_command_success(output, "C++ MessagePack adapter namespace check run");
 }
 
+fn verify_standard_generated_cpp_unreal_runtime(fixture_root: &std::path::Path) {
+    if !command_exists("c++") {
+        eprintln!("skipping standard generated cpp_unreal syntax test: c++ not found");
+        return;
+    }
+
+    let temp_dir = tempfile::tempdir().expect("cpp_unreal harness temp dir should be created");
+    let generated_dir = fixture_root.join("out/client_code/cpp_unreal");
+    write_cpp_unreal_core_minimal_shim(temp_dir.path());
+
+    let output = StdCommand::new("c++")
+        .arg("-std=c++17")
+        .arg("-fsyntax-only")
+        .arg(generated_dir.join("reference_game_config.cpp"))
+        .arg("-I")
+        .arg(&generated_dir)
+        .arg("-I")
+        .arg(temp_dir.path())
+        .output()
+        .expect("standard generated cpp_unreal syntax test should run");
+    assert_command_success(output, "standard generated cpp_unreal syntax test");
+}
+
 fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) {
     if !command_exists("node") {
         eprintln!("skipping standard generated TypeScript runtime test: node not found");
@@ -3514,6 +3468,89 @@ fn verify_standard_generated_lua_runtime(fixture_root: &std::path::Path) {
         .output()
         .expect("standard generated Lua runtime test should run");
     assert_command_success(output, "standard generated Lua runtime test");
+}
+
+fn write_cpp_unreal_core_minimal_shim(shim_dir: &std::path::Path) {
+    fs::create_dir_all(shim_dir).expect("cpp_unreal shim dir should be created");
+    fs::write(
+        shim_dir.join("CoreMinimal.h"),
+        r#"
+            #pragma once
+            #include <algorithm>
+            #include <cstdint>
+            #include <functional>
+            #include <memory>
+            #include <optional>
+            #include <string>
+            #include <unordered_map>
+            #include <vector>
+
+            using int32 = std::int32_t;
+            using int64 = std::int64_t;
+            using uint32 = std::uint32_t;
+            using TCHAR = char;
+            #define FORCEINLINE inline
+            #define TEXT(value) value
+            using FString = std::string;
+            inline uint32 HashCombine(uint32 Left, uint32 Right) { return Left ^ (Right + 0x9e3779b9U + (Left << 6) + (Left >> 2)); }
+            template <typename T>
+            uint32 GetTypeHash(const T& Value) { return static_cast<uint32>(std::hash<T>{}(Value)); }
+            template <typename T>
+            struct FUnrealHash {
+                std::size_t operator()(const T& Value) const { return GetTypeHash(Value); }
+            };
+            template <typename T>
+            using TUniquePtr = std::unique_ptr<T>;
+            template <typename T>
+            struct TArray : public std::vector<T> {
+                using std::vector<T>::vector;
+                void Add(const T& Value) { this->push_back(Value); }
+                void Reserve(std::size_t Count) { this->reserve(Count); }
+                int32 Num() const { return static_cast<int32>(this->size()); }
+                bool IsValidIndex(int32 Index) const { return Index >= 0 && static_cast<std::size_t>(Index) < this->size(); }
+                template <typename Predicate>
+                void StableSort(Predicate Less) { std::stable_sort(this->begin(), this->end(), Less); }
+            };
+            template <typename K, typename V>
+            struct TPair {
+                K Key;
+                V Value;
+                TPair() = default;
+                TPair(const K& InKey, const V& InValue) : Key(InKey), Value(InValue) {}
+            };
+            template <typename K, typename V>
+            struct TMap : public std::unordered_map<K, V, FUnrealHash<K>> {
+                bool Contains(const K& Key) const { return this->find(Key) != this->end(); }
+                void Add(const K& Key, const V& Value) { (*this)[Key] = Value; }
+                V* Find(const K& Key) { auto Iter = this->find(Key); return Iter == this->end() ? nullptr : &Iter->second; }
+                const V* Find(const K& Key) const { auto Iter = this->find(Key); return Iter == this->end() ? nullptr : &Iter->second; }
+                V& FindOrAdd(const K& Key) { return (*this)[Key]; }
+            };
+            template <typename Signature>
+            using TFunction = std::function<Signature>;
+            template <typename T>
+            struct TOptional : public std::optional<T> {
+                using std::optional<T>::optional;
+                TOptional() = default;
+                TOptional(const T& Value) : std::optional<T>(Value) {}
+                TOptional& operator=(const T& Value) { std::optional<T>::operator=(Value); return *this; }
+                bool IsSet() const { return this->has_value(); }
+                T& GetValue() { return this->value(); }
+                const T& GetValue() const { return this->value(); }
+            };
+            namespace Algo {
+                template <typename Array, typename Value, typename Projection>
+                int32 LowerBoundBy(const Array& Values, const Value& Target, Projection Project) {
+                    return static_cast<int32>(std::lower_bound(Values.begin(), Values.end(), Target, [&](const auto& Entry, const auto& Needle) { return Project(Entry) < Needle; }) - Values.begin());
+                }
+                template <typename Array, typename Value, typename Projection>
+                int32 UpperBoundBy(const Array& Values, const Value& Target, Projection Project) {
+                    return static_cast<int32>(std::upper_bound(Values.begin(), Values.end(), Target, [&](const auto& Needle, const auto& Entry) { return Needle < Project(Entry); }) - Values.begin());
+                }
+            }
+        "#,
+    )
+    .expect("CoreMinimal shim should be written");
 }
 
 fn command_exists(command: &str) -> bool {
