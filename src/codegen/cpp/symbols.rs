@@ -72,6 +72,11 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>
                     format!("{}_{}_key", table.name, index.name),
                     names.compound_index_key_type_name(table, index)?,
                 ));
+                type_symbols.push(GeneratedSymbol::new(
+                    "compound index key hash",
+                    format!("{}_{}_key_hash", table.name, index.name),
+                    names.compound_index_key_hash_type_name(table, index)?,
+                ));
             }
         }
         for fragment in &table.fragments {
@@ -176,6 +181,23 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>
                 &index.name,
                 names.index_function_name(index)?,
             ));
+            if index.ordered {
+                method_symbols.push(GeneratedSymbol::new(
+                    "ordered index lower bound function",
+                    &index.name,
+                    names.lower_bound_index_function_name(index)?,
+                ));
+                method_symbols.push(GeneratedSymbol::new(
+                    "ordered index upper bound function",
+                    &index.name,
+                    names.upper_bound_index_function_name(index)?,
+                ));
+                method_symbols.push(GeneratedSymbol::new(
+                    "ordered index range function",
+                    &index.name,
+                    names.range_index_function_name(index)?,
+                ));
+            }
         }
         if table
             .foreign_keys

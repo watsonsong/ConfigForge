@@ -92,6 +92,27 @@ impl<'a> CppNames<'a> {
         self.identifier(&format!("{prefix}_{suffix}"), self.options.naming.function)
     }
 
+    pub(super) fn lower_bound_index_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(
+            &format!("lower_bound_by_{suffix}"),
+            self.options.naming.function,
+        )
+    }
+
+    pub(super) fn upper_bound_index_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(
+            &format!("upper_bound_by_{suffix}"),
+            self.options.naming.function,
+        )
+    }
+
+    pub(super) fn range_index_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("range_by_{suffix}"), self.options.naming.function)
+    }
+
     pub(super) fn relation_function_name(&self, foreign_key: &CodeForeignKey) -> Result<String> {
         let name = foreign_key
             .linked_field
@@ -135,6 +156,15 @@ impl<'a> CppNames<'a> {
             })
             .collect::<Result<Vec<_>>>()
             .map(|params| params.join(", "))
+    }
+
+    pub(super) fn cpp_range_index_params(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+    ) -> Result<String> {
+        let key_type = self.cpp_key_type(table, index)?;
+        Ok(format!("{} lower, {} upper", key_type, key_type))
     }
 
     pub(super) fn cpp_type(&self, code_type: &CodeTypeRef) -> Result<String> {
@@ -262,15 +292,23 @@ impl<'a> CppNames<'a> {
 
     pub(super) fn cpp_index_storage(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
         let key = self.cpp_key_type(table, index)?;
-        let map_type = if index.fields.len() == 1 {
-            "std::unordered_map"
+        if index.ordered {
+            return Ok(format!("std::vector<std::pair<{key}, std::size_t>>"));
+        }
+        let hash = if index.fields.len() == 1 {
+            String::new()
         } else {
-            "std::map"
+            format!(
+                ", {}",
+                self.compound_index_key_hash_type_name(table, index)?
+            )
         };
         if index.unique {
-            Ok(format!("{map_type}<{key}, std::size_t>"))
+            Ok(format!("std::unordered_map<{key}, std::size_t{hash}>"))
         } else {
-            Ok(format!("{map_type}<{key}, std::vector<std::size_t>>"))
+            Ok(format!(
+                "std::unordered_map<{key}, std::vector<std::size_t>{hash}>"
+            ))
         }
     }
 
@@ -344,6 +382,14 @@ impl<'a> CppNames<'a> {
         index: &CodeIndex,
     ) -> Result<String> {
         self.type_name(&format!("{}_{}_key", table.name, index.name))
+    }
+
+    pub(super) fn compound_index_key_hash_type_name(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+    ) -> Result<String> {
+        self.type_name(&format!("{}_{}_key_hash", table.name, index.name))
     }
 
     pub(super) fn identifier(&self, value: &str, style: CaseStyle) -> Result<String> {

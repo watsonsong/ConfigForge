@@ -172,13 +172,14 @@ fn render_header_file(
     write_file_header(generator, header, input);
     header.raw("#pragma once\n\n");
     header.raw(concat!(
+        "#include <algorithm>\n",
         "#include <cstdint>\n",
         "#include <cstddef>\n",
-        "#include <map>\n",
         "#include <memory>\n",
         "#include <optional>\n",
         "#include <stdexcept>\n",
         "#include <functional>\n",
+        "#include <iterator>\n",
         "#include <string>\n",
         "#include <tuple>\n",
         "#include <type_traits>\n",

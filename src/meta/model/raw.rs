@@ -231,6 +231,8 @@ pub struct IndexMeta {
     pub unique: bool,
     #[serde(default)]
     pub primary: bool,
+    #[serde(default)]
+    pub ordered: bool,
 }
 
 fn default_export() -> bool {

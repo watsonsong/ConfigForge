@@ -160,6 +160,93 @@ fn indexed_source_order_table_emits_indexes_and_ordinal_apis() {
 }
 
 #[test]
+fn unordered_compound_index_uses_hash_map_and_generated_hash() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "rarity"
+            type = "string"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id_rarity"
+            fields = ["id", "rarity"]
+            unique = true
+        "#,
+    )
+    .expect("meta should load");
+
+    let files = CppCodeGenerator
+        .generate(&input_for(&meta, LANGUAGE))
+        .expect("cpp code");
+    let header = generated_content(&files, "generated.hpp");
+
+    assert!(header.contains("struct ItemsByIdRarityKey"));
+    assert!(header.contains("bool operator==(const ItemsByIdRarityKey& other) const"));
+    assert!(header.contains("struct ItemsByIdRarityKeyHash"));
+    assert!(header.contains(
+        "std::unordered_map<ItemsByIdRarityKey, std::size_t, ItemsByIdRarityKeyHash> by_id_rarity_;"
+    ));
+    assert!(!header.contains("std::map<ItemsByIdRarityKey"));
+}
+
+#[test]
+fn ordered_index_uses_sorted_vector_and_emits_range_api() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_level"
+            fields = ["level"]
+            unique = false
+            ordered = true
+        "#,
+    )
+    .expect("meta should load");
+
+    let files = CppCodeGenerator
+        .generate(&input_for(&meta, LANGUAGE))
+        .expect("cpp code");
+    let header = generated_content(&files, "generated.hpp");
+    let source = generated_content(&files, "generated.cpp");
+
+    assert!(header.contains("std::vector<std::pair<std::int64_t, std::size_t>> by_level_;"));
+    assert!(header.contains("std::vector<const ItemsRow*> FindByLevel(std::int64_t level) const;"));
+    assert!(header.contains("const ItemsRow* LowerBoundByLevel(std::int64_t level) const;"));
+    assert!(header.contains("const ItemsRow* UpperBoundByLevel(std::int64_t level) const;"));
+    assert!(header.contains(
+        "std::vector<const ItemsRow*> RangeByLevel(std::int64_t lower, std::int64_t upper) const;"
+    ));
+    assert!(source.contains("table.by_level_.push_back(std::make_pair(row.level, row_index));"));
+    assert!(source.contains("std::stable_sort(table.by_level_.begin(), table.by_level_.end()"));
+    assert!(source.contains("std::lower_bound(by_level_.begin(), by_level_.end(), level"));
+    assert!(source.contains("std::upper_bound(by_level_.begin(), by_level_.end(), level"));
+    assert!(source.contains("std::vector<const ItemsRow*> ItemsTable::RangeByLevel(std::int64_t lower, std::int64_t upper) const"));
+}
+
+#[test]
 fn rejects_source_order_method_collisions() {
     let meta = source_order_index_conflict_fixture("rows");
 

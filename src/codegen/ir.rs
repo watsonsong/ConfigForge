@@ -87,6 +87,7 @@ pub(crate) struct CodeIndex {
     pub name: String,
     pub unique: bool,
     pub primary: bool,
+    pub ordered: bool,
     pub fields: Vec<CodeField>,
 }
 
@@ -285,6 +286,7 @@ pub(crate) fn build_code_model(
                         name: index_meta.meta.name.clone(),
                         unique: index_meta.meta.unique,
                         primary: is_primary_index,
+                        ordered: index_meta.meta.ordered,
                         fields: index_fields,
                     });
                 }
@@ -301,6 +303,7 @@ pub(crate) fn build_code_model(
                             name: synthetic_index_name,
                             unique: true,
                             primary: false,
+                            ordered: false,
                             fields: vec![field.clone()],
                         });
                     }

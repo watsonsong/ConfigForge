@@ -70,7 +70,11 @@ fn render_from_rows_source(
         for index in &table.indexes {
             let storage_name = names.index_storage_name(index)?;
             let key = names.cpp_row_key_expr(table, index, "row")?;
-            if index.unique {
+            if index.ordered {
+                content.raw_fmt(format_args!(
+                    "        table.{storage_name}.push_back(std::make_pair({key}, row_index));\n"
+                ));
+            } else if index.unique {
                 content.raw_fmt(format_args!(
                     "        auto inserted_{storage_name} = table.{storage_name}.emplace({key}, row_index);\n"
                 ));
@@ -85,6 +89,22 @@ fn render_from_rows_source(
             }
         }
         content.raw("    }\n");
+        for index in table.indexes.iter().filter(|index| index.ordered) {
+            let storage_name = names.index_storage_name(index)?;
+            content.raw_fmt(format_args!(
+                "    std::stable_sort(table.{storage_name}.begin(), table.{storage_name}.end(), [](const auto& left, const auto& right) {{ return left.first < right.first; }});\n"
+            ));
+            if index.unique {
+                content.raw_fmt(format_args!(
+                    "    for (std::size_t index = 1; index < table.{storage_name}.size(); ++index) {{\n"
+                ));
+                content.raw_fmt(format_args!(
+                    "        if (table.{storage_name}[index - 1].first == table.{storage_name}[index].first) {{ throw std::runtime_error(\"Duplicate unique index key for {}.{}\"); }}\n",
+                    repository_type, index.name
+                ));
+                content.raw("    }\n");
+            }
+        }
     }
     content.raw("    return table;\n");
     content.raw("}\n\n");
@@ -109,7 +129,43 @@ fn render_index_function_source(
     let storage_name = names.index_storage_name(index)?;
     let key = names.cpp_lookup_key_expr(table, index)?;
 
-    if index.unique {
+    if index.ordered {
+        if index.unique {
+            content.raw_fmt(format_args!(
+                "const {}* {}::{}({}) const {{\n",
+                row_type, repository_type, function_name, params
+            ));
+            content.raw_fmt(format_args!(
+                "    auto iter = std::lower_bound({storage_name}.begin(), {storage_name}.end(), {key}, [](const auto& entry, const auto& value) {{ return entry.first < value; }});\n"
+            ));
+            content.raw_fmt(format_args!(
+                "    if (iter == {storage_name}.end() || !(iter->first == {key})) {{ return nullptr; }}\n"
+            ));
+            content.raw("    return &rows_[iter->second];\n");
+            content.raw("}\n\n");
+        } else {
+            content.raw_fmt(format_args!(
+                "std::vector<const {}*> {}::{}({}) const {{\n",
+                row_type, repository_type, function_name, params
+            ));
+            content.raw_fmt(format_args!(
+                "    auto iter = std::lower_bound({storage_name}.begin(), {storage_name}.end(), {key}, [](const auto& entry, const auto& value) {{ return entry.first < value; }});\n"
+            ));
+            content.raw_fmt(format_args!(
+                "    std::vector<const {}*> result;\n",
+                row_type
+            ));
+            content.raw_fmt(format_args!(
+                "    while (iter != {storage_name}.end() && iter->first == {key}) {{\n"
+            ));
+            content.raw("        result.push_back(&rows_[iter->second]);\n");
+            content.raw("        ++iter;\n");
+            content.raw("    }\n");
+            content.raw("    return result;\n");
+            content.raw("}\n\n");
+        }
+        render_ordered_index_function_sources(content, table, index, names)?;
+    } else if index.unique {
         content.raw_fmt(format_args!(
             "const {}* {}::{}({}) const {{\n",
             row_type, repository_type, function_name, params
@@ -148,6 +204,71 @@ fn render_index_function_source(
         content.raw("    return result;\n");
         content.raw("}\n\n");
     }
+    Ok(())
+}
+
+fn render_ordered_index_function_sources(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    index: &CodeIndex,
+    names: &CppNames<'_>,
+) -> Result<()> {
+    let repository_type = names.repository_type_name(&table.name)?;
+    let row_type = names.row_type_name(&table.name)?;
+    let storage_name = names.index_storage_name(index)?;
+    let key = names.cpp_lookup_key_expr(table, index)?;
+    let params = names.cpp_index_params(index)?;
+    let lower_name = names.lower_bound_index_function_name(index)?;
+    let upper_name = names.upper_bound_index_function_name(index)?;
+    let range_name = names.range_index_function_name(index)?;
+    let range_params = names.cpp_range_index_params(table, index)?;
+
+    content.raw_fmt(format_args!(
+        "const {}* {}::{}({}) const {{\n",
+        row_type, repository_type, lower_name, params
+    ));
+    content.raw_fmt(format_args!(
+        "    auto iter = std::lower_bound({storage_name}.begin(), {storage_name}.end(), {key}, [](const auto& entry, const auto& value) {{ return entry.first < value; }});\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    if (iter == {storage_name}.end()) {{ return nullptr; }}\n"
+    ));
+    content.raw("    return &rows_[iter->second];\n");
+    content.raw("}\n\n");
+
+    content.raw_fmt(format_args!(
+        "const {}* {}::{}({}) const {{\n",
+        row_type, repository_type, upper_name, params
+    ));
+    content.raw_fmt(format_args!(
+        "    auto iter = std::upper_bound({storage_name}.begin(), {storage_name}.end(), {key}, [](const auto& value, const auto& entry) {{ return value < entry.first; }});\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    if (iter == {storage_name}.end()) {{ return nullptr; }}\n"
+    ));
+    content.raw("    return &rows_[iter->second];\n");
+    content.raw("}\n\n");
+
+    content.raw_fmt(format_args!(
+        "std::vector<const {}*> {}::{}({}) const {{\n",
+        row_type, repository_type, range_name, range_params
+    ));
+    content.raw_fmt(format_args!(
+        "    auto begin = std::lower_bound({storage_name}.begin(), {storage_name}.end(), lower, [](const auto& entry, const auto& value) {{ return entry.first < value; }});\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    auto end = std::lower_bound({storage_name}.begin(), {storage_name}.end(), upper, [](const auto& entry, const auto& value) {{ return entry.first < value; }});\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    std::vector<const {}*> result;\n",
+        row_type
+    ));
+    content.raw("    result.reserve(static_cast<std::size_t>(std::distance(begin, end)));\n");
+    content.raw("    for (auto iter = begin; iter != end; ++iter) {\n");
+    content.raw("        result.push_back(&rows_[iter->second]);\n");
+    content.raw("    }\n");
+    content.raw("    return result;\n");
+    content.raw("}\n\n");
     Ok(())
 }
 
@@ -346,6 +467,30 @@ pub(super) fn render_compound_index_key_structs(
             }
             content.newline();
             content.raw_fmt(format_args!(
+                "    bool operator==(const {}& other) const {{\n",
+                names.compound_index_key_type_name(table, index)?
+            ));
+            content.raw("        return std::tie(");
+            content.raw(
+                index
+                    .fields
+                    .iter()
+                    .map(|field| names.field_name(&field.name))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", "),
+            );
+            content.raw(") == std::tie(");
+            content.raw(
+                index
+                    .fields
+                    .iter()
+                    .map(|field| Ok(format!("other.{}", names.field_name(&field.name)?)))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", "),
+            );
+            content.raw(");\n");
+            content.raw("    }\n");
+            content.raw_fmt(format_args!(
                 "    bool operator<(const {}& other) const {{\n",
                 names.compound_index_key_type_name(table, index)?
             ));
@@ -368,6 +513,26 @@ pub(super) fn render_compound_index_key_structs(
                     .join(", "),
             );
             content.raw(");\n");
+            content.raw("    }\n");
+            content.raw("};\n\n");
+
+            content.raw_fmt(format_args!(
+                "struct {} {{\n",
+                names.compound_index_key_hash_type_name(table, index)?
+            ));
+            content.raw_fmt(format_args!(
+                "    std::size_t operator()(const {}& value) const {{\n",
+                names.compound_index_key_type_name(table, index)?
+            ));
+            content.raw("        std::size_t seed = 0;\n");
+            for field in &index.fields {
+                let field_type = names.cpp_field_type(field)?;
+                let field_name = names.field_name(&field.name)?;
+                content.raw_fmt(format_args!(
+                    "        seed ^= std::hash<{field_type}>{{}}(value.{field_name}) + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);\n"
+                ));
+            }
+            content.raw("        return seed;\n");
             content.raw("    }\n");
             content.raw("};\n\n");
         }
@@ -450,19 +615,40 @@ fn render_index_function(
     names: &CppNames<'_>,
 ) -> Result<()> {
     let params = names.cpp_index_params(index)?;
+    let row_type = names.row_type_name(&table.name)?;
     if index.unique {
         content.raw_fmt(format_args!(
             "    const {}* {}({}) const;\n",
-            names.row_type_name(&table.name)?,
+            row_type,
             names.index_function_name(index)?,
             params
         ));
     } else {
         content.raw_fmt(format_args!(
             "    std::vector<const {}*> {}({}) const;\n",
-            names.row_type_name(&table.name)?,
+            row_type,
             names.index_function_name(index)?,
             params
+        ));
+    }
+    if index.ordered {
+        content.raw_fmt(format_args!(
+            "    const {}* {}({}) const;\n",
+            row_type,
+            names.lower_bound_index_function_name(index)?,
+            params
+        ));
+        content.raw_fmt(format_args!(
+            "    const {}* {}({}) const;\n",
+            row_type,
+            names.upper_bound_index_function_name(index)?,
+            params
+        ));
+        content.raw_fmt(format_args!(
+            "    std::vector<const {}*> {}({}) const;\n",
+            row_type,
+            names.range_index_function_name(index)?,
+            names.cpp_range_index_params(table, index)?
         ));
     }
     Ok(())
