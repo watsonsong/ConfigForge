@@ -110,6 +110,7 @@ fn builds_cpp_unreal_code_only_target() {
             r#"
                 #pragma once
                 #include <cstdint>
+                #include <memory>
                 #include <optional>
                 #include <string>
                 #include <vector>
@@ -119,7 +120,13 @@ fn builds_cpp_unreal_code_only_target() {
                 #define TEXT(value) value
                 using FString = std::string;
                 template <typename T>
-                using TArray = std::vector<T>;
+                using TUniquePtr = std::unique_ptr<T>;
+                template <typename T>
+                struct TArray : public std::vector<T> {
+                    using std::vector<T>::vector;
+                    void Add(const T& Value) { this->push_back(Value); }
+                    void Reserve(std::size_t Count) { this->reserve(Count); }
+                };
                 template <typename T>
                 using TOptional = std::optional<T>;
             "#,

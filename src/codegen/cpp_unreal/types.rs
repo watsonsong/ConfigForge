@@ -42,6 +42,25 @@ impl<'a> CppUnrealNames<'a> {
         }
     }
 
+    pub(super) fn read_row_function_name(&self, table_name: &str) -> Result<String> {
+        self.identifier(
+            &format!("read_{table_name}_row"),
+            self.options.naming.function,
+        )
+    }
+
+    pub(super) fn read_struct_function_name(&self, struct_name: &str) -> Result<String> {
+        self.identifier(&format!("read_{struct_name}"), self.options.naming.function)
+    }
+
+    pub(super) fn load_function_name(&self) -> Result<String> {
+        self.identifier("load", self.options.naming.function)
+    }
+
+    pub(super) fn data_file_constant_name(&self) -> Result<String> {
+        self.identifier("data_file", self.options.naming.constant)
+    }
+
     pub(super) fn enum_variant_name(&self, name: &str) -> Result<String> {
         self.identifier(name, self.options.naming.enum_value)
     }

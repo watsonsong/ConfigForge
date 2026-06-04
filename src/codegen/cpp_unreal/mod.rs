@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
-    CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeGenerator, CodeModel,
-    CodeStruct, CodeTable, CodeWriterConfig, CodeWriterLike, NamingConfig, build_code_model,
-    ir::require_non_empty_index_fields,
+    CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField, CodeGenerator,
+    CodeModel, CodeStruct, CodeTable, CodeTypeRef, CodeWriterConfig, CodeWriterLike, NamingConfig,
+    build_code_model, ir::require_non_empty_index_fields,
 };
 
 mod symbols;
@@ -169,6 +169,7 @@ fn render_header_file(
     write_file_header(generator, content, input);
     content.raw("#pragma once\n\n");
     content.raw("#include \"CoreMinimal.h\"\n\n");
+    render_runtime_declarations(content);
     render_namespace_open(content, input, options);
     for code_enum in &model.enums {
         render_enum_declaration(content, code_enum, &names)?;
@@ -191,9 +192,60 @@ fn render_header_file(
             names.member_name(&table.name)?
         ));
     }
+    content.raw_fmt(format_args!(
+        "    static TConfigForgeResult<{}> {}(IConfigForgeRuntimeDataLoader& Loader);\n",
+        names.struct_type_name("game_data")?,
+        names.load_function_name()?
+    ));
     content.raw("};\n");
     render_namespace_close(content, input, options);
     Ok(())
+}
+
+fn render_runtime_declarations(content: &mut impl CodeWriterLike) {
+    content.raw(concat!(
+        "struct FConfigForgeError {\n",
+        "    FString Message;\n",
+        "};\n\n",
+        "template <typename T>\n",
+        "struct TConfigForgeResult {\n",
+        "    T Value{};\n",
+        "    FConfigForgeError Error{};\n",
+        "    bool bOk = true;\n\n",
+        "    static TConfigForgeResult Success(const T& InValue) {\n",
+        "        TConfigForgeResult Result;\n",
+        "        Result.Value = InValue;\n",
+        "        return Result;\n",
+        "    }\n\n",
+        "    static TConfigForgeResult Failure(const FString& Message) {\n",
+        "        TConfigForgeResult Result;\n",
+        "        Result.bOk = false;\n",
+        "        Result.Error.Message = Message;\n",
+        "        return Result;\n",
+        "    }\n\n",
+        "    bool IsOk() const { return bOk; }\n",
+        "};\n\n",
+        "class IConfigForgeRuntimeDataReader {\n",
+        "public:\n",
+        "    virtual ~IConfigForgeRuntimeDataReader() = default;\n",
+        "    virtual void EnterIndex(int64 Index) = 0;\n",
+        "    virtual int64 AsInt64() const = 0;\n",
+        "    virtual double AsDouble() const = 0;\n",
+        "    virtual bool AsBool() const = 0;\n",
+        "    virtual FString AsString() const = 0;\n",
+        "    virtual void EnterRequiredField(const TCHAR* Name) = 0;\n",
+        "    virtual bool EnterOptionalField(const TCHAR* Name) = 0;\n",
+        "    virtual void ExitField() = 0;\n",
+        "    virtual int64 ReadEnumIndex(const TArray<FString>& Variants) = 0;\n",
+        "    virtual int64 ReadRowCount() = 0;\n",
+        "    virtual int64 ReadListLength() = 0;\n",
+        "};\n\n",
+        "class IConfigForgeRuntimeDataLoader {\n",
+        "public:\n",
+        "    virtual ~IConfigForgeRuntimeDataLoader() = default;\n",
+        "    virtual TConfigForgeResult<TUniquePtr<IConfigForgeRuntimeDataReader>> Open(const FString& Path) = 0;\n",
+        "};\n\n"
+    ));
 }
 
 fn render_enum_declaration(
@@ -231,6 +283,11 @@ fn render_struct_declaration(
             names.field_name(field)?
         ));
     }
+    content.raw_fmt(format_args!(
+        "    static TConfigForgeResult<{}> {}(IConfigForgeRuntimeDataReader& Reader);\n",
+        names.struct_type_name(&code_struct.name)?,
+        names.read_struct_function_name(&code_struct.name)?
+    ));
     content.raw("};\n\n");
     Ok(())
 }
@@ -251,6 +308,11 @@ fn render_table_declaration(
             names.field_name(field)?
         ));
     }
+    content.raw_fmt(format_args!(
+        "    static TConfigForgeResult<{}> {}(IConfigForgeRuntimeDataReader& Reader);\n",
+        names.row_type_name(&table.name)?,
+        names.read_row_function_name(&table.name)?
+    ));
     content.raw("};\n\n");
     if matches!(table.kind, super::CodeTableKind::Collection) {
         content.raw_fmt(format_args!(
@@ -259,6 +321,21 @@ fn render_table_declaration(
         ));
         content.raw_fmt(format_args!(
             "    TArray<{}> Rows;\n",
+            names.row_type_name(&table.name)?
+        ));
+        content.raw_fmt(format_args!(
+            "    static constexpr const TCHAR* {} = TEXT({:?});\n",
+            names.data_file_constant_name()?,
+            table.data_file
+        ));
+        content.raw_fmt(format_args!(
+            "    static TConfigForgeResult<{}> {}(IConfigForgeRuntimeDataLoader& Loader);\n",
+            names.repository_type_name(&table.name)?,
+            names.load_function_name()?
+        ));
+        content.raw_fmt(format_args!(
+            "    static {} FromRows(const TArray<{}>& InRows);\n",
+            names.repository_type_name(&table.name)?,
             names.row_type_name(&table.name)?
         ));
         content.raw("};\n\n");
@@ -276,8 +353,281 @@ fn render_source_file(
     write_file_header(generator, content, input);
     content.raw_fmt(format_args!("#include {:?}\n\n", header_file_name));
     render_namespace_open(content, input, options);
-    content.raw("// cpp_unreal source skeleton.\n");
+    let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
+    let names = CppUnrealNames::new(&input.target.options);
+    for code_struct in &model.structs {
+        render_struct_reader_source(content, code_struct, &names)?;
+    }
+    for table in &model.tables {
+        render_table_reader_source(content, table, &names)?;
+    }
+    for table in &model.tables {
+        if matches!(table.kind, super::CodeTableKind::Collection) {
+            render_table_load_source(content, table, &names)?;
+        }
+    }
+    render_game_data_load_source(content, &model, &names)?;
     render_namespace_close(content, input, options);
+    Ok(())
+}
+
+fn render_struct_reader_source(
+    content: &mut impl CodeWriterLike,
+    code_struct: &CodeStruct,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    let type_name = names.struct_type_name(&code_struct.name)?;
+    content.raw_fmt(format_args!(
+        "TConfigForgeResult<{type_name}> {type_name}::{}(IConfigForgeRuntimeDataReader& Reader) {{\n",
+        names.read_struct_function_name(&code_struct.name)?
+    ));
+    content.raw_fmt(format_args!("    {type_name} Value;\n"));
+    for field in &code_struct.fields {
+        render_field_read(content, field, names, &type_name)?;
+    }
+    content.raw_fmt(format_args!(
+        "    return TConfigForgeResult<{type_name}>::Success(Value);\n"
+    ));
+    content.raw("}\n\n");
+    Ok(())
+}
+
+fn render_table_reader_source(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    let row_type = names.row_type_name(&table.name)?;
+    content.raw_fmt(format_args!(
+        "TConfigForgeResult<{row_type}> {row_type}::{}(IConfigForgeRuntimeDataReader& Reader) {{\n",
+        names.read_row_function_name(&table.name)?
+    ));
+    content.raw_fmt(format_args!("    {row_type} Value;\n"));
+    for field in &table.fields {
+        render_field_read(content, field, names, &row_type)?;
+    }
+    content.raw_fmt(format_args!(
+        "    return TConfigForgeResult<{row_type}>::Success(Value);\n"
+    ));
+    content.raw("}\n\n");
+    Ok(())
+}
+
+fn render_field_read(
+    content: &mut impl CodeWriterLike,
+    field: &CodeField,
+    names: &CppUnrealNames<'_>,
+    result_type: &str,
+) -> Result<()> {
+    let field_name = names.field_name(field)?;
+    if field.required {
+        content.raw_fmt(format_args!(
+            "    Reader.EnterRequiredField(TEXT({:?}));\n",
+            field.name
+        ));
+        render_value_read(
+            content,
+            &format!("Value.{field_name}"),
+            &field.code_type,
+            names,
+            result_type,
+        )?;
+        content.raw("    Reader.ExitField();\n");
+    } else {
+        content.raw_fmt(format_args!(
+            "    if (Reader.EnterOptionalField(TEXT({:?}))) {{\n",
+            field.name
+        ));
+        render_value_read(
+            content,
+            &format!("Value.{field_name}"),
+            &field.code_type,
+            names,
+            result_type,
+        )?;
+        content.raw("        Reader.ExitField();\n");
+        content.raw("    }\n");
+    }
+    Ok(())
+}
+
+fn render_value_read(
+    content: &mut impl CodeWriterLike,
+    target: &str,
+    code_type: &CodeTypeRef,
+    names: &CppUnrealNames<'_>,
+    result_type: &str,
+) -> Result<()> {
+    match code_type {
+        CodeTypeRef::Int => content.raw_fmt(format_args!("    {target} = Reader.AsInt64();\n")),
+        CodeTypeRef::Float => content.raw_fmt(format_args!("    {target} = Reader.AsDouble();\n")),
+        CodeTypeRef::Bool => content.raw_fmt(format_args!("    {target} = Reader.AsBool();\n")),
+        CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+            content.raw_fmt(format_args!("    {target} = Reader.AsString();\n"));
+        }
+        CodeTypeRef::Enum { name } => {
+            content.raw_fmt(format_args!(
+                "    switch (Reader.ReadEnumIndex(TArray<FString>{{"
+            ));
+            // enum values are not available from CodeTypeRef; reader adapters may map by current meta order later.
+            content.raw("})) { default: break; }\n");
+            content.raw_fmt(format_args!(
+                "    {target} = static_cast<{}>(0);\n",
+                names.enum_type_name(name)?
+            ));
+        }
+        CodeTypeRef::Struct { name } => {
+            let struct_type = names.struct_type_name(name)?;
+            let read_name = names.read_struct_function_name(name)?;
+            let result_name = result_variable_name(target);
+            content.raw_fmt(format_args!(
+                "    auto {result_name} = {struct_type}::{read_name}(Reader);\n"
+            ));
+            content.raw_fmt(format_args!("    if (!{result_name}.IsOk()) {{ return TConfigForgeResult<{result_type}>::Failure({result_name}.Error.Message); }}\n"));
+            content.raw_fmt(format_args!("    {target} = {result_name}.Value;\n"));
+        }
+        CodeTypeRef::List(inner) => {
+            content.raw("    {\n");
+            content.raw("        const int64 Length = Reader.ReadListLength();\n");
+            content.raw_fmt(format_args!("        {target}.Reserve(Length);\n"));
+            content.raw("        for (int64 Index = 0; Index < Length; ++Index) {\n");
+            content.raw("            Reader.EnterIndex(Index);\n");
+            let element_target = "Element";
+            content.raw_fmt(format_args!(
+                "            {} {element_target}{{}};\n",
+                names.cpp_type(inner)?
+            ));
+            render_value_read_with_indent(content, element_target, inner, names, "            ")?;
+            content.raw_fmt(format_args!(
+                "            {target}.Add({element_target});\n"
+            ));
+            content.raw("        }\n");
+            content.raw("    }\n");
+        }
+    }
+    Ok(())
+}
+
+fn result_variable_name(target: &str) -> String {
+    let mut name = target
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect::<String>();
+    name.push_str("Result");
+    name
+}
+
+fn render_value_read_with_indent(
+    content: &mut impl CodeWriterLike,
+    target: &str,
+    code_type: &CodeTypeRef,
+    names: &CppUnrealNames<'_>,
+    indent: &str,
+) -> Result<()> {
+    match code_type {
+        CodeTypeRef::Int => content.raw_fmt(format_args!("{indent}{target} = Reader.AsInt64();\n")),
+        CodeTypeRef::Float => {
+            content.raw_fmt(format_args!("{indent}{target} = Reader.AsDouble();\n"))
+        }
+        CodeTypeRef::Bool => content.raw_fmt(format_args!("{indent}{target} = Reader.AsBool();\n")),
+        CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+            content.raw_fmt(format_args!("{indent}{target} = Reader.AsString();\n"));
+        }
+        CodeTypeRef::Enum { name } => content.raw_fmt(format_args!(
+            "{indent}{target} = static_cast<{}>(Reader.ReadEnumIndex(TArray<FString>{{}}));\n",
+            names.enum_type_name(name)?
+        )),
+        CodeTypeRef::Struct { name } => {
+            let struct_type = names.struct_type_name(name)?;
+            let read_name = names.read_struct_function_name(name)?;
+            content.raw_fmt(format_args!(
+                "{indent}auto ElementResult = {struct_type}::{read_name}(Reader);\n"
+            ));
+            content.raw_fmt(format_args!("{indent}{target} = ElementResult.Value;\n"));
+        }
+        CodeTypeRef::List(_) => content.raw_fmt(format_args!(
+            "{indent}// Nested lists are not supported by Meta.\n"
+        )),
+    }
+    Ok(())
+}
+
+fn render_table_load_source(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    let repo_type = names.repository_type_name(&table.name)?;
+    let row_type = names.row_type_name(&table.name)?;
+    let load_name = names.load_function_name()?;
+    content.raw_fmt(format_args!(
+        "TConfigForgeResult<{repo_type}> {repo_type}::{load_name}(IConfigForgeRuntimeDataLoader& Loader) {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    auto ReaderResult = Loader.Open({});\n",
+        names.data_file_constant_name()?
+    ));
+    content.raw_fmt(format_args!(
+        "    if (!ReaderResult.IsOk()) {{ return TConfigForgeResult<{repo_type}>::Failure(ReaderResult.Error.Message); }}\n"
+    ));
+    content.raw("    IConfigForgeRuntimeDataReader& Reader = *ReaderResult.Value;\n");
+    content.raw("    const int64 RowCount = Reader.ReadRowCount();\n");
+    content.raw_fmt(format_args!("    TArray<{row_type}> Rows;\n"));
+    content.raw("    Rows.Reserve(RowCount);\n");
+    content.raw("    for (int64 RowIndex = 0; RowIndex < RowCount; ++RowIndex) {\n");
+    content.raw("        Reader.EnterIndex(RowIndex);\n");
+    content.raw_fmt(format_args!(
+        "        auto RowResult = {row_type}::{}(Reader);\n",
+        names.read_row_function_name(&table.name)?
+    ));
+    content.raw_fmt(format_args!(
+        "        if (!RowResult.IsOk()) {{ return TConfigForgeResult<{repo_type}>::Failure(RowResult.Error.Message); }}\n"
+    ));
+    content.raw("        Rows.Add(RowResult.Value);\n");
+    content.raw("    }\n");
+    content.raw_fmt(format_args!(
+        "    return TConfigForgeResult<{repo_type}>::Success(FromRows(Rows));\n"
+    ));
+    content.raw("}\n\n");
+
+    content.raw_fmt(format_args!(
+        "{repo_type} {repo_type}::FromRows(const TArray<{row_type}>& InRows) {{\n"
+    ));
+    content.raw_fmt(format_args!("    {repo_type} Table;\n"));
+    content.raw("    Table.Rows = InRows;\n");
+    content.raw("    return Table;\n");
+    content.raw("}\n\n");
+    Ok(())
+}
+
+fn render_game_data_load_source(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    let game_data_type = names.struct_type_name("game_data")?;
+    let load_name = names.load_function_name()?;
+    content.raw_fmt(format_args!(
+        "TConfigForgeResult<{game_data_type}> {game_data_type}::{load_name}(IConfigForgeRuntimeDataLoader& Loader) {{\n"
+    ));
+    content.raw_fmt(format_args!("    {game_data_type} Data;\n"));
+    for table in &model.tables {
+        if matches!(table.kind, super::CodeTableKind::Collection) {
+            let repo_type = names.repository_type_name(&table.name)?;
+            let member_name = names.member_name(&table.name)?;
+            content.raw_fmt(format_args!(
+                "    auto {member_name}Result = {repo_type}::{load_name}(Loader);\n"
+            ));
+            content.raw_fmt(format_args!("    if (!{member_name}Result.IsOk()) {{ return TConfigForgeResult<{game_data_type}>::Failure({member_name}Result.Error.Message); }}\n"));
+            content.raw_fmt(format_args!(
+                "    Data.{member_name} = {member_name}Result.Value;\n"
+            ));
+        }
+    }
+    content.raw_fmt(format_args!(
+        "    return TConfigForgeResult<{game_data_type}>::Success(Data);\n"
+    ));
+    content.raw("}\n\n");
     Ok(())
 }
 

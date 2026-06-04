@@ -134,13 +134,25 @@ fn emits_header_and_source_skeleton() {
     assert!(header.contains("TArray<FItemsRow> Rows;"));
     assert!(header.contains("struct FGameData"));
     assert!(header.contains("FItemsTable Items;"));
+    assert!(header.contains("class IConfigForgeRuntimeDataReader"));
+    assert!(header.contains("class IConfigForgeRuntimeDataLoader"));
+    assert!(header.contains("TConfigForgeResult<TUniquePtr<IConfigForgeRuntimeDataReader>> Open"));
+    assert!(header.contains("static constexpr const TCHAR* DataFile = TEXT(\"items\");"));
+    assert!(header.contains("static TConfigForgeResult<FItemsTable> Load"));
+    assert!(header.contains("static TConfigForgeResult<FItemsRow> ReadItemsRow"));
+    assert!(header.contains("static TConfigForgeResult<FGameData> Load"));
     assert!(header.contains("TEXT(\"ConfigForge\")"));
     assert!(!header.contains("std::vector"));
     assert!(!header.contains("std::unordered_map"));
     assert!(!header.contains("std::string"));
     assert!(!source.contains("throw std::runtime_error"));
     assert!(source.contains("#include \"generated.h\""));
-    assert!(source.contains("cpp_unreal source skeleton"));
+    assert!(source.contains("TConfigForgeResult<FItemsTable> FItemsTable::Load"));
+    assert!(source.contains("auto ReaderResult = Loader.Open(DataFile);"));
+    assert!(source.contains("const int64 RowCount = Reader.ReadRowCount();"));
+    assert!(source.contains("Reader.EnterIndex(RowIndex);"));
+    assert!(source.contains("auto RowResult = FItemsRow::ReadItemsRow(Reader);"));
+    assert!(source.contains("TConfigForgeResult<FGameData> FGameData::Load"));
 }
 
 #[test]
