@@ -391,6 +391,24 @@ fn render_compound_index_key_structs(
             );
             content.raw(";\n");
             content.raw("    }\n");
+            content.raw_fmt(format_args!(
+                "    bool operator<(const {key_type}& Other) const {{\n"
+            ));
+            content.raw("        ");
+            for (field_index, field) in index.fields.iter().enumerate() {
+                let field_name = names.field_name(field)?;
+                if field_index > 0 {
+                    content.raw("        ");
+                }
+                content.raw_fmt(format_args!(
+                    "if ({field_name} < Other.{field_name}) {{ return true; }}\n"
+                ));
+                content.raw_fmt(format_args!(
+                    "        if (Other.{field_name} < {field_name}) {{ return false; }}\n"
+                ));
+            }
+            content.raw("        return false;\n");
+            content.raw("    }\n");
             content.raw("};\n\n");
             content.raw_fmt(format_args!(
                 "FORCEINLINE uint32 GetTypeHash(const {key_type}& Value) {{\n"
@@ -425,6 +443,21 @@ fn render_index_function_declaration(
     } else {
         content.raw_fmt(format_args!(
             "    TArray<const {row_type}*> {function_name}({params}) const;\n"
+        ));
+    }
+    if index.ordered {
+        content.raw_fmt(format_args!(
+            "    const {row_type}* {}({params}) const;\n",
+            names.lower_bound_index_function_name(index)?
+        ));
+        content.raw_fmt(format_args!(
+            "    const {row_type}* {}({params}) const;\n",
+            names.upper_bound_index_function_name(index)?
+        ));
+        content.raw_fmt(format_args!(
+            "    TArray<const {row_type}*> {}({}) const;\n",
+            names.range_index_function_name(index)?,
+            names.cpp_range_index_params(table, index)?
         ));
     }
     Ok(())
@@ -686,7 +719,12 @@ fn render_table_load_source(
         for index in &table.indexes {
             let storage_name = names.index_storage_name(index)?;
             let key = names.cpp_row_key_expr(table, index, "Row")?;
-            if index.unique {
+            if index.ordered {
+                let key_type = names.cpp_key_type(table, index)?;
+                content.raw_fmt(format_args!(
+                    "        Table.{storage_name}.Add(TPair<{key_type}, int32>({key}, RowIndex));\n"
+                ));
+            } else if index.unique {
                 content.raw_fmt(format_args!(
                     "        if (Table.{storage_name}.Contains({key})) {{ return TConfigForgeResult<{repo_type}>::Failure(TEXT(\"Duplicate unique index key for {repo_type}.{}\")); }}\n",
                     index.name
@@ -701,6 +739,22 @@ fn render_table_load_source(
             }
         }
         content.raw("    }\n");
+        for index in table.indexes.iter().filter(|index| index.ordered) {
+            let storage_name = names.index_storage_name(index)?;
+            content.raw_fmt(format_args!(
+                "    Table.{storage_name}.StableSort([](const auto& Left, const auto& Right) {{ return Left.Key < Right.Key; }});\n"
+            ));
+            if index.unique {
+                content.raw_fmt(format_args!(
+                    "    for (int32 Index = 1; Index < Table.{storage_name}.Num(); ++Index) {{\n"
+                ));
+                content.raw_fmt(format_args!(
+                    "        if (Table.{storage_name}[Index - 1].Key == Table.{storage_name}[Index].Key) {{ return TConfigForgeResult<{repo_type}>::Failure(TEXT(\"Duplicate unique index key for {repo_type}.{}\")); }}\n",
+                    index.name
+                ));
+                content.raw("    }\n");
+            }
+        }
     }
     content.raw_fmt(format_args!(
         "    return TConfigForgeResult<{repo_type}>::Success(Table);\n"
@@ -724,7 +778,9 @@ fn render_index_function_source(
     let params = names.cpp_index_params(index)?;
     let storage_name = names.index_storage_name(index)?;
     let key = names.cpp_lookup_key_expr(table, index)?;
-    if index.unique {
+    if index.ordered {
+        render_ordered_index_function_source(content, table, index, names)?;
+    } else if index.unique {
         content.raw_fmt(format_args!(
             "const {row_type}* {repo_type}::{function_name}({params}) const {{\n"
         ));
@@ -750,6 +806,98 @@ fn render_index_function_source(
         content.raw("    return Result;\n");
         content.raw("}\n\n");
     }
+    Ok(())
+}
+
+fn render_ordered_index_function_source(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    index: &CodeIndex,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    let repo_type = names.repository_type_name(&table.name)?;
+    let row_type = names.row_type_name(&table.name)?;
+    let storage_name = names.index_storage_name(index)?;
+    let key = names.cpp_lookup_key_expr(table, index)?;
+    let params = names.cpp_index_params(index)?;
+    let function_name = names.index_function_name(index)?;
+    let lower_name = names.lower_bound_index_function_name(index)?;
+    let upper_name = names.upper_bound_index_function_name(index)?;
+    let range_name = names.range_index_function_name(index)?;
+    let range_params = names.cpp_range_index_params(table, index)?;
+
+    if index.unique {
+        content.raw_fmt(format_args!(
+            "const {row_type}* {repo_type}::{function_name}({params}) const {{\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    int32 EntryIndex = Algo::LowerBoundBy({storage_name}, {key}, [](const auto& Entry) {{ return Entry.Key; }});\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    if (!{storage_name}.IsValidIndex(EntryIndex) || !({storage_name}[EntryIndex].Key == {key})) {{ return nullptr; }}\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    const int32 RowIndex = {storage_name}[EntryIndex].Value;\n"
+        ));
+        content.raw("    return Rows.IsValidIndex(RowIndex) ? &Rows[RowIndex] : nullptr;\n");
+        content.raw("}\n\n");
+    } else {
+        content.raw_fmt(format_args!(
+            "TArray<const {row_type}*> {repo_type}::{function_name}({params}) const {{\n"
+        ));
+        content.raw_fmt(format_args!("    return {range_name}({key}, {key});\n"));
+        content.raw("}\n\n");
+    }
+
+    content.raw_fmt(format_args!(
+        "const {row_type}* {repo_type}::{lower_name}({params}) const {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    int32 EntryIndex = Algo::LowerBoundBy({storage_name}, {key}, [](const auto& Entry) {{ return Entry.Key; }});\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    if (!{storage_name}.IsValidIndex(EntryIndex)) {{ return nullptr; }}\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    const int32 RowIndex = {storage_name}[EntryIndex].Value;\n"
+    ));
+    content.raw("    return Rows.IsValidIndex(RowIndex) ? &Rows[RowIndex] : nullptr;\n");
+    content.raw("}\n\n");
+
+    content.raw_fmt(format_args!(
+        "const {row_type}* {repo_type}::{upper_name}({params}) const {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    int32 EntryIndex = Algo::UpperBoundBy({storage_name}, {key}, [](const auto& Entry) {{ return Entry.Key; }});\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    if (!{storage_name}.IsValidIndex(EntryIndex)) {{ return nullptr; }}\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    const int32 RowIndex = {storage_name}[EntryIndex].Value;\n"
+    ));
+    content.raw("    return Rows.IsValidIndex(RowIndex) ? &Rows[RowIndex] : nullptr;\n");
+    content.raw("}\n\n");
+
+    content.raw_fmt(format_args!(
+        "TArray<const {row_type}*> {repo_type}::{range_name}({range_params}) const {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    const int32 Begin = Algo::LowerBoundBy({storage_name}, Lower, [](const auto& Entry) {{ return Entry.Key; }});\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    const int32 End = Algo::UpperBoundBy({storage_name}, Upper, [](const auto& Entry) {{ return Entry.Key; }});\n"
+    ));
+    content.raw_fmt(format_args!("    TArray<const {row_type}*> Result;\n"));
+    content.raw("    Result.Reserve(End - Begin);\n");
+    content.raw("    for (int32 EntryIndex = Begin; EntryIndex < End; ++EntryIndex) {\n");
+    content.raw_fmt(format_args!(
+        "        const int32 RowIndex = {storage_name}[EntryIndex].Value;\n"
+    ));
+    content.raw("        if (Rows.IsValidIndex(RowIndex)) { Result.Add(&Rows[RowIndex]); }\n");
+    content.raw("    }\n");
+    content.raw("    return Result;\n");
+    content.raw("}\n\n");
     Ok(())
 }
 

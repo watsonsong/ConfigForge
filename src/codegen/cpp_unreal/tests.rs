@@ -263,6 +263,56 @@ fn emits_non_unique_unordered_index_lookup() {
 }
 
 #[test]
+fn emits_ordered_index_storage_and_range_lookup() {
+    let meta = crate::meta::MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_level"
+            fields = ["level"]
+            unique = false
+            ordered = true
+        "#,
+    )
+    .expect("meta should parse");
+
+    let files = CppUnrealCodeGenerator
+        .generate(&input_for(&meta, LANGUAGE))
+        .expect("cpp_unreal code");
+    let header = generated_content(&files, "generated.h");
+    let source = generated_content(&files, "generated.cpp");
+
+    assert!(header.contains("TArray<TPair<int64, int32>> ByLevel;"));
+    assert!(header.contains("TArray<const FItemsRow*> FindByLevel(int64 Level) const;"));
+    assert!(header.contains("const FItemsRow* LowerBoundByLevel(int64 Level) const;"));
+    assert!(header.contains("const FItemsRow* UpperBoundByLevel(int64 Level) const;"));
+    assert!(
+        header.contains("TArray<const FItemsRow*> RangeByLevel(int64 Lower, int64 Upper) const;")
+    );
+    assert!(source.contains("Table.ByLevel.Add(TPair<int64, int32>(Row.Level, RowIndex));"));
+    assert!(source.contains("Table.ByLevel.StableSort([](const auto& Left, const auto& Right) { return Left.Key < Right.Key; });"));
+    assert!(source.contains("return RangeByLevel(Level, Level);"));
+    assert!(source.contains("Algo::LowerBoundBy(ByLevel, Level"));
+    assert!(source.contains("Algo::UpperBoundBy(ByLevel, Level"));
+    assert!(source.contains(
+        "TArray<const FItemsRow*> FItemsTable::RangeByLevel(int64 Lower, int64 Upper) const"
+    ));
+}
+
+#[test]
 fn maps_unreal_container_and_optional_types() {
     let meta = crate::meta::MetaModel::from_toml_str(
         r#"

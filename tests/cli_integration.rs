@@ -110,6 +110,7 @@ fn builds_cpp_unreal_code_only_target() {
             r#"
                 #pragma once
                 #include <cstdint>
+                #include <algorithm>
                 #include <memory>
                 #include <optional>
                 #include <string>
@@ -139,6 +140,15 @@ fn builds_cpp_unreal_code_only_target() {
                     void Reserve(std::size_t Count) { this->reserve(Count); }
                     int32 Num() const { return static_cast<int32>(this->size()); }
                     bool IsValidIndex(int32 Index) const { return Index >= 0 && static_cast<std::size_t>(Index) < this->size(); }
+                    template <typename Predicate>
+                    void StableSort(Predicate Less) { std::stable_sort(this->begin(), this->end(), Less); }
+                };
+                template <typename K, typename V>
+                struct TPair {
+                    K Key;
+                    V Value;
+                    TPair() = default;
+                    TPair(const K& InKey, const V& InValue) : Key(InKey), Value(InValue) {}
                 };
                 template <typename K, typename V>
                 struct TMap : public std::unordered_map<K, V, FUnrealHash<K>> {
@@ -151,6 +161,16 @@ fn builds_cpp_unreal_code_only_target() {
                 };
                 template <typename T>
                 using TOptional = std::optional<T>;
+                namespace Algo {
+                    template <typename Array, typename Value, typename Projection>
+                    int32 LowerBoundBy(const Array& Values, const Value& Target, Projection Project) {
+                        return static_cast<int32>(std::lower_bound(Values.begin(), Values.end(), Target, [&](const auto& Entry, const auto& Needle) { return Project(Entry) < Needle; }) - Values.begin());
+                    }
+                    template <typename Array, typename Value, typename Projection>
+                    int32 UpperBoundBy(const Array& Values, const Value& Target, Projection Project) {
+                        return static_cast<int32>(std::upper_bound(Values.begin(), Values.end(), Target, [&](const auto& Needle, const auto& Entry) { return Needle < Project(Entry); }) - Values.begin());
+                    }
+                }
             "#,
         )
         .expect("CoreMinimal shim should be written");

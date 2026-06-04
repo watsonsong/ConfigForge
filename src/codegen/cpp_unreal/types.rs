@@ -90,6 +90,27 @@ impl<'a> CppUnrealNames<'a> {
         self.identifier(&format!("{prefix}_{suffix}"), self.options.naming.function)
     }
 
+    pub(super) fn lower_bound_index_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(
+            &format!("lower_bound_by_{suffix}"),
+            self.options.naming.function,
+        )
+    }
+
+    pub(super) fn upper_bound_index_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(
+            &format!("upper_bound_by_{suffix}"),
+            self.options.naming.function,
+        )
+    }
+
+    pub(super) fn range_index_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("range_by_{suffix}"), self.options.naming.function)
+    }
+
     pub(super) fn cpp_index_params(&self, index: &CodeIndex) -> Result<String> {
         index
             .fields
@@ -103,6 +124,15 @@ impl<'a> CppUnrealNames<'a> {
             })
             .collect::<Result<Vec<_>>>()
             .map(|params| params.join(", "))
+    }
+
+    pub(super) fn cpp_range_index_params(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+    ) -> Result<String> {
+        let key_type = self.cpp_key_type(table, index)?;
+        Ok(format!("{key_type} Lower, {key_type} Upper"))
     }
 
     pub(super) fn cpp_type(&self, code_type: &CodeTypeRef) -> Result<String> {
@@ -128,6 +158,9 @@ impl<'a> CppUnrealNames<'a> {
 
     pub(super) fn cpp_index_storage(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
         let key_type = self.cpp_key_type(table, index)?;
+        if index.ordered {
+            return Ok(format!("TArray<TPair<{key_type}, int32>>"));
+        }
         if index.unique {
             Ok(format!("TMap<{key_type}, int32>"))
         } else {

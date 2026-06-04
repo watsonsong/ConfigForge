@@ -93,6 +93,23 @@ pub(super) fn validate_generated_symbols(
                 &index.name,
                 names.index_function_name(index)?,
             ));
+            if index.ordered {
+                member_symbols.push(GeneratedSymbol::new(
+                    "ordered index lower bound function",
+                    &index.name,
+                    names.lower_bound_index_function_name(index)?,
+                ));
+                member_symbols.push(GeneratedSymbol::new(
+                    "ordered index upper bound function",
+                    &index.name,
+                    names.upper_bound_index_function_name(index)?,
+                ));
+                member_symbols.push(GeneratedSymbol::new(
+                    "ordered index range function",
+                    &index.name,
+                    names.range_index_function_name(index)?,
+                ));
+            }
         }
         ensure_unique_generated_symbols(
             "cpp_unreal",
