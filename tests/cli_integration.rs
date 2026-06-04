@@ -113,6 +113,7 @@ fn builds_cpp_unreal_code_only_target() {
                 #include <algorithm>
                 #include <memory>
                 #include <optional>
+                #include <functional>
                 #include <string>
                 #include <unordered_map>
                 #include <vector>
@@ -159,8 +160,18 @@ fn builds_cpp_unreal_code_only_target() {
                     const V* Find(const K& Key) const { auto Iter = this->find(Key); return Iter == this->end() ? nullptr : &Iter->second; }
                     V& FindOrAdd(const K& Key) { return (*this)[Key]; }
                 };
+                template <typename Signature>
+                using TFunction = std::function<Signature>;
                 template <typename T>
-                using TOptional = std::optional<T>;
+                struct TOptional : public std::optional<T> {
+                    using std::optional<T>::optional;
+                    TOptional() = default;
+                    TOptional(const T& Value) : std::optional<T>(Value) {}
+                    TOptional& operator=(const T& Value) { std::optional<T>::operator=(Value); return *this; }
+                    bool IsSet() const { return this->has_value(); }
+                    T& GetValue() { return this->value(); }
+                    const T& GetValue() const { return this->value(); }
+                };
                 namespace Algo {
                     template <typename Array, typename Value, typename Projection>
                     int32 LowerBoundBy(const Array& Values, const Value& Target, Projection Project) {

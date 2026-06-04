@@ -16,6 +16,11 @@ pub(super) fn validate_generated_symbols(
         "game_data",
         names.struct_type_name("game_data")?,
     ));
+    type_symbols.push(GeneratedSymbol::new(
+        "lazy game data type",
+        "lazy_game_data",
+        "FLazyGameData",
+    ));
     for code_enum in &_model.enums {
         type_symbols.push(GeneratedSymbol::new(
             "enum type",
@@ -54,7 +59,19 @@ pub(super) fn validate_generated_symbols(
                 &field.name,
                 names.field_name(field)?,
             ));
+            if matches!(field.code_type, crate::codegen::CodeTypeRef::Text) {
+                field_symbols.push(GeneratedSymbol::new(
+                    "text helper",
+                    &field.name,
+                    names.text_function_name(&field.name)?,
+                ));
+            }
         }
+        field_symbols.push(GeneratedSymbol::new(
+            "reader function",
+            &code_struct.name,
+            names.read_struct_function_name(&code_struct.name)?,
+        ));
         ensure_unique_generated_symbols(
             "cpp_unreal",
             &format!("struct `{}`", code_struct.name),
@@ -69,7 +86,37 @@ pub(super) fn validate_generated_symbols(
                 &field.name,
                 names.field_name(field)?,
             ));
+            if matches!(field.code_type, crate::codegen::CodeTypeRef::Text) {
+                field_symbols.push(GeneratedSymbol::new(
+                    "text helper",
+                    &field.name,
+                    names.text_function_name(&field.name)?,
+                ));
+            }
         }
+        for foreign_key in table
+            .foreign_keys
+            .iter()
+            .filter(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            field_symbols.push(GeneratedSymbol::new(
+                "relation helper",
+                &foreign_key.name,
+                names.relation_function_name(foreign_key)?,
+            ));
+        }
+        if table
+            .foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            field_symbols.push(GeneratedSymbol::new("link function", "link", "Link"));
+        }
+        field_symbols.push(GeneratedSymbol::new(
+            "reader function",
+            &table.name,
+            names.read_row_function_name(&table.name)?,
+        ));
         ensure_unique_generated_symbols(
             "cpp_unreal",
             &format!("table `{}`", table.name),
@@ -82,6 +129,23 @@ pub(super) fn validate_generated_symbols(
             "Rows",
             names.member_name("rows")?,
         ));
+        member_symbols.push(GeneratedSymbol::new(
+            "load function",
+            "load",
+            names.load_function_name()?,
+        ));
+        member_symbols.push(GeneratedSymbol::new(
+            "from rows function",
+            "FromRows",
+            "FromRows",
+        ));
+        if table
+            .foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            member_symbols.push(GeneratedSymbol::new("link function", "link", "Link"));
+        }
         for index in &table.indexes {
             member_symbols.push(GeneratedSymbol::new(
                 "index storage",
@@ -117,5 +181,24 @@ pub(super) fn validate_generated_symbols(
             member_symbols,
         )?;
     }
+    let mut lazy_symbols = Vec::new();
+    lazy_symbols.push(GeneratedSymbol::new(
+        "preload all function",
+        "PreloadAll",
+        "PreloadAll",
+    ));
+    for table in &_model.tables {
+        lazy_symbols.push(GeneratedSymbol::new(
+            "lazy table accessor",
+            &table.name,
+            names.table_accessor_name(&table.name)?,
+        ));
+        lazy_symbols.push(GeneratedSymbol::new(
+            "lazy cache member",
+            &table.name,
+            names.member_name(&table.name)?,
+        ));
+    }
+    ensure_unique_generated_symbols("cpp_unreal", "FLazyGameData members", lazy_symbols)?;
     Ok(())
 }

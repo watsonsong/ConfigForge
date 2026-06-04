@@ -8,7 +8,8 @@ use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField, CodeGenerator,
     CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTypeRef, CodeWriterConfig, CodeWriterLike,
-    NamingConfig, build_code_model, ir::require_non_empty_index_fields,
+    NamingConfig, build_code_model,
+    ir::{CodeForeignKey, CodeRelationCardinality, require_non_empty_index_fields},
 };
 
 mod symbols;
@@ -171,6 +172,10 @@ fn render_header_file(
     content.raw("#include \"CoreMinimal.h\"\n\n");
     render_runtime_declarations(content);
     render_namespace_open(content, input, options);
+    content.raw_fmt(format_args!(
+        "struct {};\n\n",
+        names.struct_type_name("game_data")?
+    ));
     for code_enum in &model.enums {
         render_enum_declaration(content, code_enum, &names)?;
     }
@@ -198,8 +203,38 @@ fn render_header_file(
         names.struct_type_name("game_data")?,
         names.load_function_name()?
     ));
-    content.raw("};\n");
+    content.raw("    void LinkAll() const;\n");
+    content.raw("};\n\n");
+    render_lazy_game_data_declaration(content, model, &names)?;
     render_namespace_close(content, input, options);
+    Ok(())
+}
+
+fn render_lazy_game_data_declaration(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    content.raw("struct FLazyGameData {\n");
+    content.raw("    explicit FLazyGameData(IConfigForgeRuntimeDataLoader& InLoader) : Loader(InLoader) {}\n");
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "    TConfigForgeResult<{}> {}() const;\n",
+            names.table_data_type_name(table)?,
+            names.table_accessor_name(&table.name)?
+        ));
+    }
+    content.raw("    TConfigForgeResult<FGameData> PreloadAll() const;\n");
+    content.raw("private:\n");
+    content.raw("    IConfigForgeRuntimeDataLoader& Loader;\n");
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "    mutable TOptional<{}> {};\n",
+            names.table_data_type_name(table)?,
+            names.member_name(&table.name)?
+        ));
+    }
+    content.raw("};\n");
     Ok(())
 }
 
@@ -284,6 +319,7 @@ fn render_struct_declaration(
             names.field_name(field)?
         ));
     }
+    render_text_helper_declarations(content, &code_struct.name, &code_struct.fields, names)?;
     content.raw_fmt(format_args!(
         "    static TConfigForgeResult<{}> {}(IConfigForgeRuntimeDataReader& Reader);\n",
         names.struct_type_name(&code_struct.name)?,
@@ -302,6 +338,13 @@ fn render_table_declaration(
         "struct {} {{\n",
         names.row_type_name(&table.name)?
     ));
+    if matches!(table.kind, super::CodeTableKind::Object) {
+        content.raw_fmt(format_args!(
+            "    static constexpr const TCHAR* {} = TEXT({:?});\n",
+            names.data_file_constant_name()?,
+            table.data_file
+        ));
+    }
     for field in &table.fields {
         content.raw_fmt(format_args!(
             "    {} {};\n",
@@ -309,6 +352,8 @@ fn render_table_declaration(
             names.field_name(field)?
         ));
     }
+    render_text_helper_declarations(content, &table.name, &table.fields, names)?;
+    render_row_relation_declarations(content, table, names)?;
     content.raw_fmt(format_args!(
         "    static TConfigForgeResult<{}> {}(IConfigForgeRuntimeDataReader& Reader);\n",
         names.row_type_name(&table.name)?,
@@ -349,7 +394,96 @@ fn render_table_declaration(
         for index in &table.indexes {
             render_index_function_declaration(content, table, index, names)?;
         }
+        if table
+            .foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            content.raw("    void Link(const FGameData& Data) const;\n");
+        }
         content.raw("};\n\n");
+    }
+    Ok(())
+}
+
+fn render_text_helper_declarations(
+    content: &mut impl CodeWriterLike,
+    context_prefix: &str,
+    fields: &[CodeField],
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    for field in fields
+        .iter()
+        .filter(|field| matches!(field.code_type, CodeTypeRef::Text))
+    {
+        let function_name = names.text_function_name(&field.name)?;
+        let field_name = names.field_name(field)?;
+        let context = format!("{context_prefix}.{}", field.name);
+        if field.required {
+            content.raw_fmt(format_args!(
+                "    FString {function_name}(const TFunction<TOptional<FString>(const TCHAR*, const FString&)>& Translator) const {{\n"
+            ));
+            content.raw_fmt(format_args!(
+                "        auto Translated = Translator(TEXT({context:?}), {field_name});\n"
+            ));
+            content.raw_fmt(format_args!(
+                "        return Translated.IsSet() ? Translated.GetValue() : {field_name};\n"
+            ));
+            content.raw("    }\n");
+        } else {
+            content.raw_fmt(format_args!(
+                "    TOptional<FString> {function_name}(const TFunction<TOptional<FString>(const TCHAR*, const FString&)>& Translator) const {{\n"
+            ));
+            content.raw_fmt(format_args!(
+                "        if (!{field_name}.IsSet()) {{ return TOptional<FString>(); }}\n"
+            ));
+            content.raw_fmt(format_args!(
+                "        auto Translated = Translator(TEXT({context:?}), {field_name}.GetValue());\n"
+            ));
+            content.raw_fmt(format_args!(
+                "        return Translated.IsSet() ? Translated : {field_name};\n"
+            ));
+            content.raw("    }\n");
+        }
+    }
+    Ok(())
+}
+
+fn render_row_relation_declarations(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    for foreign_key in table
+        .foreign_keys
+        .iter()
+        .filter(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        let target_row_type = names.row_type_name(&foreign_key.target_table)?;
+        let function_name = names.relation_function_name(foreign_key)?;
+        match foreign_key
+            .linked_field
+            .as_ref()
+            .expect("linked field")
+            .cardinality
+        {
+            CodeRelationCardinality::One => content.raw_fmt(format_args!(
+                "    const {target_row_type}* {function_name}(const FGameData& Data) const;\n"
+            )),
+            CodeRelationCardinality::OptionalOne => content.raw_fmt(format_args!(
+                "    const {target_row_type}* {function_name}(const FGameData& Data) const;\n"
+            )),
+            CodeRelationCardinality::Many => content.raw_fmt(format_args!(
+                "    TArray<const {target_row_type}*> {function_name}(const FGameData& Data) const;\n"
+            )),
+        }
+    }
+    if table
+        .foreign_keys
+        .iter()
+        .any(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        content.raw("    void Link(const FGameData& Data) const;\n");
     }
     Ok(())
 }
@@ -486,7 +620,11 @@ fn render_source_file(
             render_table_load_source(content, table, &names)?;
         }
     }
+    for table in &model.tables {
+        render_row_relation_source(content, &model, table, &names)?;
+    }
     render_game_data_load_source(content, &model, &names)?;
+    render_lazy_game_data_source(content, &model, &names)?;
     render_namespace_close(content, input, options);
     Ok(())
 }
@@ -763,6 +901,19 @@ fn render_table_load_source(
     for index in &table.indexes {
         render_index_function_source(content, table, index, names)?;
     }
+    if table
+        .foreign_keys
+        .iter()
+        .any(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        content.raw_fmt(format_args!(
+            "void {repo_type}::Link(const FGameData& Data) const {{\n"
+        ));
+        content.raw("    for (const auto& Row : Rows) {\n");
+        content.raw("        Row.Link(Data);\n");
+        content.raw("    }\n");
+        content.raw("}\n\n");
+    }
     Ok(())
 }
 
@@ -901,6 +1052,176 @@ fn render_ordered_index_function_source(
     Ok(())
 }
 
+fn render_row_relation_source(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    table: &CodeTable,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    for foreign_key in table
+        .foreign_keys
+        .iter()
+        .filter(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        let target_table = table_by_name(model, &foreign_key.target_table)?;
+        let target_index = index_by_name(target_table, &foreign_key.target_index)?;
+        let source_row_type = names.row_type_name(&table.name)?;
+        let target_row_type = names.row_type_name(&target_table.name)?;
+        let function_name = names.relation_function_name(foreign_key)?;
+        match foreign_key
+            .linked_field
+            .as_ref()
+            .expect("linked field")
+            .cardinality
+        {
+            CodeRelationCardinality::One | CodeRelationCardinality::OptionalOne => {
+                content.raw_fmt(format_args!(
+                    "const {target_row_type}* {source_row_type}::{function_name}(const FGameData& Data) const {{\n"
+                ));
+                render_optional_relation_empty_check(content, foreign_key, names)?;
+                content.raw_fmt(format_args!(
+                    "    return Data.{}.{}({});\n",
+                    names.member_name(&target_table.name)?,
+                    names.index_function_name(target_index)?,
+                    relation_value_exprs(foreign_key, names)?.join(", ")
+                ));
+                content.raw("}\n\n");
+            }
+            CodeRelationCardinality::Many => {
+                let source_field = foreign_key.fields.first().ok_or_else(|| {
+                    ConfigForgeError::Validation(format!(
+                        "cpp_unreal codegen foreign key `{}` has no source fields",
+                        foreign_key.name
+                    ))
+                })?;
+                let source_field_name = names.field_name(source_field)?;
+                content.raw_fmt(format_args!(
+                    "TArray<const {target_row_type}*> {source_row_type}::{function_name}(const FGameData& Data) const {{\n"
+                ));
+                content.raw_fmt(format_args!(
+                    "    TArray<const {target_row_type}*> Result;\n"
+                ));
+                if source_field.required {
+                    content.raw_fmt(format_args!(
+                        "    Result.Reserve({source_field_name}.Num());\n"
+                    ));
+                    content.raw_fmt(format_args!(
+                        "    for (const auto& Key : {source_field_name}) {{\n"
+                    ));
+                } else {
+                    content.raw_fmt(format_args!(
+                        "    if (!{source_field_name}.IsSet()) {{ return Result; }}\n"
+                    ));
+                    content.raw_fmt(format_args!(
+                        "    Result.Reserve({source_field_name}.GetValue().Num());\n"
+                    ));
+                    content.raw_fmt(format_args!(
+                        "    for (const auto& Key : {source_field_name}.GetValue()) {{\n"
+                    ));
+                }
+                content.raw_fmt(format_args!(
+                    "        const auto* Row = Data.{}.{}(Key);\n",
+                    names.member_name(&target_table.name)?,
+                    names.index_function_name(target_index)?
+                ));
+                content.raw("        if (Row != nullptr) { Result.Add(Row); }\n");
+                content.raw("    }\n");
+                content.raw("    return Result;\n");
+                content.raw("}\n\n");
+            }
+        }
+    }
+    if table
+        .foreign_keys
+        .iter()
+        .any(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        let row_type = names.row_type_name(&table.name)?;
+        content.raw_fmt(format_args!(
+            "void {row_type}::Link(const FGameData& Data) const {{\n"
+        ));
+        for foreign_key in table
+            .foreign_keys
+            .iter()
+            .filter(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            content.raw_fmt(format_args!(
+                "    static_cast<void>({}(Data));\n",
+                names.relation_function_name(foreign_key)?
+            ));
+        }
+        content.raw("}\n\n");
+    }
+    Ok(())
+}
+
+fn render_optional_relation_empty_check(
+    content: &mut impl CodeWriterLike,
+    foreign_key: &CodeForeignKey,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    let optional_fields = foreign_key
+        .fields
+        .iter()
+        .filter(|field| !field.required)
+        .collect::<Vec<_>>();
+    if optional_fields.is_empty() {
+        return Ok(());
+    }
+    let empty_conditions = optional_fields
+        .iter()
+        .map(|field| Ok(format!("!{}.IsSet()", names.field_name(field)?)))
+        .collect::<Result<Vec<_>>>()?;
+    content.raw_fmt(format_args!(
+        "    if ({}) {{ return nullptr; }}\n",
+        empty_conditions.join(" || ")
+    ));
+    Ok(())
+}
+
+fn relation_value_exprs(
+    foreign_key: &CodeForeignKey,
+    names: &CppUnrealNames<'_>,
+) -> Result<Vec<String>> {
+    foreign_key
+        .fields
+        .iter()
+        .map(|field| {
+            let field_name = names.field_name(field)?;
+            if field.required {
+                Ok(field_name)
+            } else {
+                Ok(format!("{field_name}.GetValue()"))
+            }
+        })
+        .collect()
+}
+
+fn table_by_name<'a>(model: &'a CodeModel, name: &str) -> Result<&'a CodeTable> {
+    model
+        .tables
+        .iter()
+        .find(|table| table.name == name)
+        .ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "cpp_unreal codegen foreign key references unknown target table `{name}`"
+            ))
+        })
+}
+
+fn index_by_name<'a>(table: &'a CodeTable, name: &str) -> Result<&'a CodeIndex> {
+    table
+        .indexes
+        .iter()
+        .find(|index| index.name == name)
+        .ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "cpp_unreal codegen foreign key references unknown target index `{}.{}`",
+                table.name, name
+            ))
+        })
+}
+
 fn render_game_data_load_source(
     content: &mut impl CodeWriterLike,
     model: &CodeModel,
@@ -913,21 +1234,160 @@ fn render_game_data_load_source(
     ));
     content.raw_fmt(format_args!("    {game_data_type} Data;\n"));
     for table in &model.tables {
-        if matches!(table.kind, super::CodeTableKind::Collection) {
-            let repo_type = names.repository_type_name(&table.name)?;
-            let member_name = names.member_name(&table.name)?;
-            content.raw_fmt(format_args!(
-                "    auto {member_name}Result = {repo_type}::{load_name}(Loader);\n"
-            ));
-            content.raw_fmt(format_args!("    if (!{member_name}Result.IsOk()) {{ return TConfigForgeResult<{game_data_type}>::Failure({member_name}Result.Error.Message); }}\n"));
-            content.raw_fmt(format_args!(
-                "    Data.{member_name} = {member_name}Result.Value;\n"
-            ));
+        let member_name = names.member_name(&table.name)?;
+        match table.kind {
+            super::CodeTableKind::Collection => {
+                let repo_type = names.repository_type_name(&table.name)?;
+                content.raw_fmt(format_args!(
+                    "    auto {member_name}Result = {repo_type}::{load_name}(Loader);\n"
+                ));
+                content.raw_fmt(format_args!("    if (!{member_name}Result.IsOk()) {{ return TConfigForgeResult<{game_data_type}>::Failure({member_name}Result.Error.Message); }}\n"));
+                content.raw_fmt(format_args!(
+                    "    Data.{member_name} = {member_name}Result.Value;\n"
+                ));
+            }
+            super::CodeTableKind::Object => {
+                render_object_table_load_source(
+                    content,
+                    table,
+                    names,
+                    &game_data_type,
+                    &member_name,
+                )?;
+            }
         }
     }
+    content.raw("    Data.LinkAll();\n");
     content.raw_fmt(format_args!(
         "    return TConfigForgeResult<{game_data_type}>::Success(Data);\n"
     ));
+    content.raw("}\n\n");
+    render_game_data_link_all_source(content, model, names)?;
+    Ok(())
+}
+
+fn render_object_table_load_source(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &CppUnrealNames<'_>,
+    result_type: &str,
+    member_name: &str,
+) -> Result<()> {
+    let row_type = names.row_type_name(&table.name)?;
+    content.raw_fmt(format_args!(
+        "    auto {member_name}ReaderResult = Loader.Open({row_type}::{});\n",
+        names.data_file_constant_name()?
+    ));
+    content.raw_fmt(format_args!(
+        "    if (!{member_name}ReaderResult.IsOk()) {{ return TConfigForgeResult<{result_type}>::Failure({member_name}ReaderResult.Error.Message); }}\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    auto {member_name}Result = {row_type}::{}(*{member_name}ReaderResult.Value);\n",
+        names.read_row_function_name(&table.name)?
+    ));
+    content.raw_fmt(format_args!(
+        "    if (!{member_name}Result.IsOk()) {{ return TConfigForgeResult<{result_type}>::Failure({member_name}Result.Error.Message); }}\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    Data.{member_name} = {member_name}Result.Value;\n"
+    ));
+    Ok(())
+}
+
+fn render_game_data_link_all_source(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    let game_data_type = names.struct_type_name("game_data")?;
+    content.raw_fmt(format_args!("void {game_data_type}::LinkAll() const {{\n"));
+    for table in &model.tables {
+        if table
+            .foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            content.raw_fmt(format_args!(
+                "    {}.Link(*this);\n",
+                names.member_name(&table.name)?
+            ));
+        }
+    }
+    content.raw("}\n\n");
+    Ok(())
+}
+
+fn render_lazy_game_data_source(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    for table in &model.tables {
+        let table_type = names.table_data_type_name(table)?;
+        let accessor_name = names.table_accessor_name(&table.name)?;
+        let member_name = names.member_name(&table.name)?;
+        content.raw_fmt(format_args!(
+            "TConfigForgeResult<{table_type}> FLazyGameData::{accessor_name}() const {{\n"
+        ));
+        content.raw_fmt(format_args!("    if (!{member_name}.IsSet()) {{\n"));
+        match table.kind {
+            super::CodeTableKind::Collection => {
+                let repo_type = names.repository_type_name(&table.name)?;
+                content.raw_fmt(format_args!(
+                    "        auto LoadResult = {repo_type}::{}(Loader);\n",
+                    names.load_function_name()?
+                ));
+                content.raw_fmt(format_args!(
+                    "        if (!LoadResult.IsOk()) {{ return TConfigForgeResult<{table_type}>::Failure(LoadResult.Error.Message); }}\n"
+                ));
+                content.raw_fmt(format_args!("        {member_name} = LoadResult.Value;\n"));
+            }
+            super::CodeTableKind::Object => {
+                let row_type = names.row_type_name(&table.name)?;
+                content.raw_fmt(format_args!(
+                    "        auto ReaderResult = Loader.Open({row_type}::{});\n",
+                    names.data_file_constant_name()?
+                ));
+                content.raw_fmt(format_args!(
+                    "        if (!ReaderResult.IsOk()) {{ return TConfigForgeResult<{table_type}>::Failure(ReaderResult.Error.Message); }}\n"
+                ));
+                content.raw_fmt(format_args!(
+                    "        auto RowResult = {row_type}::{}(*ReaderResult.Value);\n",
+                    names.read_row_function_name(&table.name)?
+                ));
+                content.raw_fmt(format_args!(
+                    "        if (!RowResult.IsOk()) {{ return TConfigForgeResult<{table_type}>::Failure(RowResult.Error.Message); }}\n"
+                ));
+                content.raw_fmt(format_args!("        {member_name} = RowResult.Value;\n"));
+            }
+        }
+        content.raw("    }\n");
+        content.raw_fmt(format_args!(
+            "    return TConfigForgeResult<{table_type}>::Success({member_name}.GetValue());\n"
+        ));
+        content.raw("}\n\n");
+    }
+    content.raw("TConfigForgeResult<FGameData> FLazyGameData::PreloadAll() const {\n");
+    content.raw("    FGameData Data;\n");
+    for table in &model.tables {
+        let table_type = names.table_data_type_name(table)?;
+        let accessor_name = names.table_accessor_name(&table.name)?;
+        let member_name = names.member_name(&table.name)?;
+        content.raw_fmt(format_args!(
+            "    auto {member_name}Result = {accessor_name}();\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    if (!{member_name}Result.IsOk()) {{ return TConfigForgeResult<FGameData>::Failure({member_name}Result.Error.Message); }}\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    Data.{member_name} = {member_name}Result.Value;\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    static_cast<void>(sizeof({table_type}));\n"
+        ));
+    }
+    content.raw("    Data.LinkAll();\n");
+    content.raw("    return TConfigForgeResult<FGameData>::Success(Data);\n");
     content.raw("}\n\n");
     Ok(())
 }

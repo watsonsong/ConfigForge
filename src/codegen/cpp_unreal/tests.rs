@@ -313,6 +313,84 @@ fn emits_ordered_index_storage_and_range_lookup() {
 }
 
 #[test]
+fn emits_relation_text_and_lazy_helpers() {
+    let meta = crate::meta::MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "display_name"
+            type = "text"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "default_item_id"
+            type = "int"
+            required = true
+            foreign_key = { name = "default_item", target_table = "items", linked_field = "default_item" }
+
+            [[tables.fields]]
+            name = "starter_item_ids"
+            type = "int[]"
+            required = true
+            foreign_key = { name = "starter_item", target_table = "items", linked_field = "starter_items" }
+        "#,
+    )
+    .expect("meta should parse");
+
+    let files = CppUnrealCodeGenerator
+        .generate(&input_for(&meta, LANGUAGE))
+        .expect("cpp_unreal code");
+    let header = generated_content(&files, "generated.h");
+    let source = generated_content(&files, "generated.cpp");
+
+    assert!(header.contains("FString DisplayNameText("));
+    assert!(header.contains("const FItemsRow* GetDefaultItem(const FGameData& Data) const;"));
+    assert!(
+        header.contains("TArray<const FItemsRow*> GetStarterItems(const FGameData& Data) const;")
+    );
+    assert!(header.contains("void Link(const FGameData& Data) const;"));
+    assert!(header.contains("void LinkAll() const;"));
+    assert!(header.contains("struct FLazyGameData"));
+    assert!(header.contains("TConfigForgeResult<FItemsTable> GetItems() const;"));
+    assert!(header.contains("TConfigForgeResult<FGameConfigRow> GetGameConfig() const;"));
+    assert!(
+        source.contains(
+            "const FItemsRow* FGameConfigRow::GetDefaultItem(const FGameData& Data) const"
+        )
+    );
+    assert!(source.contains("return Data.Items.GetById(DefaultItemId);"));
+    assert!(source.contains(
+        "TArray<const FItemsRow*> FGameConfigRow::GetStarterItems(const FGameData& Data) const"
+    ));
+    assert!(source.contains("const auto* Row = Data.Items.GetById(Key);"));
+    assert!(source.contains("void FGameConfigRow::Link(const FGameData& Data) const"));
+    assert!(source.contains("void FGameData::LinkAll() const"));
+    assert!(source.contains("GameConfig.Link(*this);"));
+    assert!(source.contains("TConfigForgeResult<FItemsTable> FLazyGameData::GetItems() const"));
+    assert!(source.contains("TConfigForgeResult<FGameData> FLazyGameData::PreloadAll() const"));
+}
+
+#[test]
 fn maps_unreal_container_and_optional_types() {
     let meta = crate::meta::MetaModel::from_toml_str(
         r#"

@@ -4,7 +4,8 @@
 use crate::{
     ConfigForgeError, Result,
     codegen::{
-        CodeField, CodeIndex, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, naming,
+        CodeField, CodeIndex, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions,
+        ir::CodeForeignKey, naming,
     },
 };
 
@@ -78,6 +79,23 @@ impl<'a> CppUnrealNames<'a> {
 
     pub(super) fn member_name(&self, name: &str) -> Result<String> {
         self.identifier(name, self.options.naming.field)
+    }
+
+    pub(super) fn table_accessor_name(&self, table_name: &str) -> Result<String> {
+        self.identifier(&format!("get_{table_name}"), self.options.naming.function)
+    }
+
+    pub(super) fn text_function_name(&self, field_name: &str) -> Result<String> {
+        self.identifier(&format!("{field_name}_text"), self.options.naming.function)
+    }
+
+    pub(super) fn relation_function_name(&self, foreign_key: &CodeForeignKey) -> Result<String> {
+        let name = foreign_key
+            .linked_field
+            .as_ref()
+            .map(|linked_field| linked_field.name.as_str())
+            .unwrap_or(foreign_key.name.as_str());
+        self.identifier(&format!("get_{name}"), self.options.naming.function)
     }
 
     pub(super) fn index_storage_name(&self, index: &CodeIndex) -> Result<String> {
