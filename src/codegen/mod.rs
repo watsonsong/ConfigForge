@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod cpp;
+mod cpp_unreal;
 mod ir;
 mod naming;
 mod rust;
@@ -16,6 +17,8 @@ pub(crate) use self::ir::{
 };
 pub(crate) use cpp::CppCodeGenerator;
 pub use cpp::CppCodegenOptions;
+pub(crate) use cpp_unreal::CppUnrealCodeGenerator;
+pub use cpp_unreal::CppUnrealCodegenOptions;
 pub(crate) use rust::RustCodeGenerator;
 pub use rust::RustCodegenOptions;
 pub(crate) use typescript::TypeScriptCodeGenerator;
@@ -484,6 +487,7 @@ pub(crate) fn builtin_generators() -> Vec<Box<dyn CodeGenerator>> {
     vec![
         Box::new(RustCodeGenerator),
         Box::new(CppCodeGenerator),
+        Box::new(CppUnrealCodeGenerator),
         Box::new(TypeScriptCodeGenerator),
     ]
 }

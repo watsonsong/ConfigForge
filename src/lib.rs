@@ -28,9 +28,9 @@ pub use build::{
 pub use codegen::{
     CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeExportProject, CodeExportTarget,
     CodeWriterConfig, CodeWriterLike, CodegenOptions, CodegenTaskConfig, CppCodegenOptions,
-    I18nFunctionReturn, I18nMode, I18nOptions, IndentStyle, KeywordConflictPolicy, NamingConfig,
-    PartialCodeWriterConfig, PartialNamingConfig, RustCodegenOptions, StreamingCodeWriter,
-    TypeScriptCodegenOptions, default_module_name,
+    CppUnrealCodegenOptions, I18nFunctionReturn, I18nMode, I18nOptions, IndentStyle,
+    KeywordConflictPolicy, NamingConfig, PartialCodeWriterConfig, PartialNamingConfig,
+    RustCodegenOptions, StreamingCodeWriter, TypeScriptCodegenOptions, default_module_name,
 };
 pub use data::{
     AsyncSourceReadShell, CsvDataReader, DataLoadPlan, DataLoader, DataProvider, DataRow, DataSet,

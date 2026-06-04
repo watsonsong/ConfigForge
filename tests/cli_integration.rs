@@ -50,6 +50,60 @@ fn builds_code_only_target_without_loading_data() {
 }
 
 #[test]
+fn builds_cpp_unreal_code_only_target() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let out_dir = temp_dir.path().join("generated_unreal_code");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                name = "standard_project"
+
+                [[targets]]
+                name = "code_only"
+
+                [[targets.exports]]
+                type = "cpp_unreal"
+                output = "{}"
+                file_name = "reference_game_config"
+                namespace = "ReferenceGameConfig"
+
+                [targets.exports.cpp_unreal]
+                support = "containers"
+                api_macro = "REFERENCE_GAME_CONFIG_API"
+            "#,
+            standard_core_meta_imports(),
+            out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "code_only",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `code_only` built"));
+
+    let header =
+        fs::read_to_string(out_dir.join("reference_game_config.h")).expect("cpp_unreal header");
+    let source =
+        fs::read_to_string(out_dir.join("reference_game_config.cpp")).expect("cpp_unreal source");
+    assert!(header.contains("#include \"CoreMinimal.h\""));
+    assert!(header.contains("namespace ReferenceGameConfig"));
+    assert!(source.contains("#include \"reference_game_config.h\""));
+}
+
+#[test]
 fn code_only_target_ignores_missing_project_input_and_sources() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let out_dir = temp_dir.path().join("generated_code");

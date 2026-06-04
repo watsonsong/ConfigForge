@@ -1123,6 +1123,13 @@ fn builtin_generators_use_language_specific_formatting_defaults() {
         4
     );
     assert_eq!(
+        CodegenOptions::for_language(CppUnrealCodeGenerator.language())
+            .expect("cpp_unreal options")
+            .formatting
+            .indent_width,
+        4
+    );
+    assert_eq!(
         CodegenOptions::for_language(TypeScriptCodeGenerator.language())
             .expect("typescript options")
             .formatting
