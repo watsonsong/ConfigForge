@@ -55,7 +55,7 @@ deduplicate = true
 | --- | --- |
 | `name` | 当前 target 内唯一的 export task 名称。单 export task 可省略并由实现填入默认名；多 export task 省略时默认使用 `type`。 |
 | `output` | 产物输出目录。运行时表数据会在该目录下按表名生成文件；POT / manifest 这类聚合格式会在该目录下按格式选项规划一个或多个文件；codegen 会在该目录生成语言文件。 |
-| `type` | exporter 类型 ID。运行时格式支持 `json`、`messagepack` 和 `bin`；聚合/内嵌数据格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`；代码生成支持 `rust`、`cpp`、`typescript` 及其 alias，未来扩展 `cpp_unreal` 作为 Unreal Engine 专用 C++ codegen。 |
+| `type` | exporter 类型 ID。运行时格式支持 `json`、`messagepack` 和 `bin`；聚合/内嵌数据格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`；代码生成支持 `rust`、`cpp`、`typescript`、`cpp_unreal` 及其 alias，其中 `cpp_unreal` 是 Unreal Engine 专用 C++ codegen。 |
 | exporter 专属字段 | 可选。格式专属选项直接摊平在对应 `[[targets.exports]]` 下，例如 `type = "gettext_pot"` 的 `domain`、`file_name`、`source_reference`、`include_translator_comments`、`deduplicate`。 |
 
 导出规则：
@@ -112,10 +112,10 @@ CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 t
 | --- | --- | --- |
 | `[targets.exports.rust]` | `derive_serde` | 为生成类型派生 serde 序列化/反序列化 trait。 |
 | `[targets.exports.cpp]` | `namespace` | C++ namespace 覆盖；未设置时可使用通用 `namespace`。 |
-| `[targets.exports.cpp_unreal]` | `api_macro` / `support` / `blueprint` | 规划中的 Unreal C++ 生成器配置。`api_macro` 指定模块导出宏；`support = "containers"` 仅切换 Unreal 容器和基础类型；`support = "blueprint"` 额外生成可反射的 `USTRUCT` / `UFUNCTION` facade。 |
+| `[targets.exports.cpp_unreal]` | `api_macro` / `support` / `blueprint_category` / `namespace` | Unreal C++ 生成器配置。`api_macro` 指定模块导出宏，且 `support = "blueprint"` 时必填；`support = "containers"` 生成 Unreal 容器和基础类型的 C++ API；`support = "blueprint"` 额外生成可反射的 `USTRUCT` / `UFUNCTION` facade；`blueprint_category` 控制 `UPROPERTY` / `UFUNCTION` 分类；`namespace` 可覆盖通用 namespace。 |
 | `[targets.exports.typescript]` | `readonly_fields` | interface 字段是否生成 `readonly`。 |
 
-Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而规划为独立 `type = "cpp_unreal"`：
+Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `type = "cpp_unreal"`：
 
 - 标准 `cpp` 面向引擎无关 C++17 环境，继续使用 `std::vector`、`std::unordered_map`、`std::string`、异常和纯 C++ runtime loader contract。
 - `cpp_unreal` 面向 Unreal Engine module，生成代码默认符合 Unreal 命名、容器、字符串、断言和 Blueprint 反射约束，避免同一个生成器在 public API 中混用 `std::*` 与 Unreal API。

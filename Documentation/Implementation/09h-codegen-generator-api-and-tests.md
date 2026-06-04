@@ -180,6 +180,7 @@ pub struct CodegenDiagnostic {
 | Rust | `out/server_code/rust/generated.rs` + `out/server_data/*.msgpack` | `cargo test` | 实现通用 `RuntimeDataLoader` / reader，用 `rmp-serde` 读取真实 MessagePack payload，并把 payload 暴露给 generated parser；不手写 generated rows / objects 映射。 | `GameData::load` 成功；`items.get_by_id(id)` 命中；`class_levels.get_by_class_level(class_id, level)` 命中联合索引；`game_rules` object 字段可访问。 |
 | TypeScript | `out/client_code/typescript/generated.ts` + `out/client_data/*.json` | `tsc` + `node` | 实现通用 `RuntimeDataLoader` / reader，用 Node `fs` 读取真实 JSON payload，并由 generated parser 映射 row interface/object。 | `GameData.load` 成功；`items.getById(id)` 命中；`classLevels.getByClassLevel(classId, level)` 命中联合索引；object table 可访问。 |
 | C++ | `out/client_code/cpp/generated.hpp` / `generated.cpp` + `out/client_data/*.json` | `c++ -std=c++17` | 实现通用 `IRuntimeDataLoader` / reader，使用轻量 JSON reader 暴露 payload；不能按表手写 typed rows。 | `GameData::Load` 成功；`Items().GetById(id)` 命中；`ClassLevels().GetByClassLevel(class_id, level)` 命中联合索引；object table 可访问。 |
+| Unreal C++ | `out/client_code/cpp_unreal/generated.h` / `generated.cpp` + `out/client_data/*.json` | `c++ -std=c++17` + lightweight Unreal shim | 使用测试专用 `CoreMinimal.h` / `Kismet/BlueprintFunctionLibrary.h` shim 提供 `TArray`、`TMap`、`FString`、`TOptional`、`USTRUCT`、`UFUNCTION` 等最小定义；真实 UnrealHeaderTool / Editor 验证留给引擎侧 CI。 | containers 模式语法 smoke 覆盖 `GameData::Load` 依赖的生成声明；Blueprint 模式额外验证 `.generated.h` include、`USTRUCT` / `UPROPERTY` / `UCLASS` / `UFUNCTION` facade 可被 shim 编译。 |
 
 归档后的 harness 不应直接依赖仓库中某一次已生成的 `out/` 文件路径。推荐做法是：集成测试先执行 export，再把对应语言的 generated code 复制到临时 harness 工作目录（或通过 include path/link path 引用），最后执行目标语言测试命令。这样能确保测试的是“当前实现刚生成的代码和数据”，而不是历史残留 artifact。
 
@@ -194,7 +195,7 @@ pub struct CodegenDiagnostic {
 在 `tests/fixtures/standard_project/` 上运行：
 
 1. export 生成 runtime data。
-2. export 生成 Rust/C++/TS code。
+2. export 生成 Rust/C++/TS/Unreal C++ code。
 3. 检查输出文件存在。
 4. 检查关键 API 名称存在。
 5. 运行分语言 generated-code runtime test，确认生成代码能通过 loader 加载真实导出数据并执行代表性查询。
@@ -212,7 +213,7 @@ pub struct CodegenDiagnostic {
 - 三种语言都使用 Meta-agnostic reader loader contract，不直接绑定 JSON / MessagePack / bin exporter 结果。
 - runtime data 与 generated code 都以 artifact 形态参与统一写出；Artifact Writer 负责路径冲突检查、dry-run、direct write、`temp-commit` 与 bounded write queue。
 - `CodeGenerator::generate_to_sink()` 是 codegen 的唯一 production 写出入口；`GeneratedFile` / `generate()` 只在测试构建中存在，用于快照与 streaming equivalence 测试。
-- 标准工程 fixture 覆盖 runtime data + generated code 的端到端输出和代表性运行时加载。
+- 标准工程 fixture 覆盖 runtime data + generated code 的端到端输出和代表性运行时加载；`cpp_unreal` 通过标准工程 target 与 Unreal shim 编译 smoke 纳入回归。
 
 未来规划：
 

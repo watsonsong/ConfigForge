@@ -167,9 +167,9 @@ private:
 - `GameData::Load(loader)` 保持 eager，不保存 loader。`LazyGameData::PreloadAll()` 加载全部表；可选 `ReleaseLoader()` 只有在所有 table 都已 Loaded 后才允许清空 `loader_`，否则后续访问 unloaded table 应报错。
 - 为了让 linked relation helper 可同时接受 eager 与 lazy，后续可生成轻量 access interface（例如 `IGameDataAccess` 或模板参数），其中 `Items()` / `Classes()` 返回 const table reference 或抛错。eager `GameData` 与 `LazyGameData` 都实现同名 accessor。
 
-## Unreal C++ backend 规划
+## Unreal C++ backend
 
-Unreal Engine 环境不应由标准 `cpp` backend 增加一个“大开关”来兼容，而应新增独立 export type：`type = "cpp_unreal"`，内部实现命名为 `CppUnrealCodeGenerator`，输出目录仍由当前 `[[targets.exports]]` 的 `output` 指定。原因：
+Unreal Engine 环境不由标准 `cpp` backend 增加一个“大开关”来兼容，而是使用独立 export type：`type = "cpp_unreal"`，内部实现命名为 `CppUnrealCodeGenerator`，输出目录仍由当前 `[[targets.exports]]` 的 `output` 指定。原因：
 
 - 标准 C++ backend 的目标是引擎无关 C++17，public API 使用 `std::vector`、`std::unordered_map`、`std::string`、`std::unique_ptr`、异常等标准库约定。
 - Unreal 项目倾向于使用 `TArray`、`TMap`、`FString`、`TUniquePtr` / `TSharedPtr`、`check` / `ensure` / `UE_LOG`、`TEXT()` 字面量和 PascalCase + 类型前缀命名；同一个 public API 混用两套习惯会降低接入体验。
@@ -229,16 +229,16 @@ class GAMECONFIG_API UGameConfigBlueprintLibrary : public UBlueprintFunctionLibr
     GENERATED_BODY()
 
 public:
-    UFUNCTION(BlueprintCallable, Category="ConfigForge|Items")
-    static bool GetItemById(const UObject* WorldContextObject, int64 Id, FItemRow& OutRow);
+    UFUNCTION(BlueprintPure, Category="ConfigForge")
+    static bool GetItemsById(const FItemsTable& Table, int64 Id, FItemsRow& OutRow);
 
-    UFUNCTION(BlueprintCallable, Category="ConfigForge|Items")
-    static void FindItemsByRarity(const UObject* WorldContextObject, EItemRarity Rarity, TArray<FItemRow>& OutRows);
+    UFUNCTION(BlueprintPure, Category="ConfigForge")
+    static void FindItemsByRarity(const FItemsTable& Table, EItemRarity Rarity, TArray<FItemsRow>& OutRows);
 };
 ```
 
-- Blueprint pure/read-only helpers 可用 `BlueprintPure`，但需要避免隐式触发 I/O 的 lazy load。可能进行加载的 API 应使用 `BlueprintCallable`，让执行顺序显式。
-- 对于 `LazyGameData`，Blueprint facade 应明确初始化入口，例如 `LoadGameConfig` / `PreloadAll`，不在纯 getter 中隐式打开 runtime data。
+- 当前 Blueprint facade 只包装已经加载好的 repository 查询，调用方显式传入 `F<Table>Table`，不会隐式触发 I/O，因此使用 `BlueprintPure`。unique 查询返回 `bool` 并通过 `OutRow` 复制结果；non-unique / ordered range 查询通过 `TArray<F<Row>>` out 参数复制结果。可能进行加载 / I/O 的 Blueprint API 若未来加入，应使用 `BlueprintCallable`，让执行顺序显式。
+- 当前不为 `LazyGameData` 生成 Blueprint 加载入口；C++ 层仍可用 `FLazyGameData`。若未来暴露 lazy/eager 加载给 Blueprint，应明确初始化入口，例如 `LoadGameConfig` / `PreloadAll`，不在纯 getter 中隐式打开 runtime data。
 - 若暴露全局 singleton，需要由项目 adapter 决定生命周期；生成代码不直接创建 `UGameInstanceSubsystem`，但可以提供可被 subsystem 包装的 facade 类。
 
 ### 与现有 C++ backend 的复用边界

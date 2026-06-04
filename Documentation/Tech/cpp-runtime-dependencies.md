@@ -17,6 +17,16 @@
 
 本文给未来继续开发 C++ reader 的 AI / 开发者一套可复用的 CMake 技术指导。
 
+## Unreal C++ shim 边界
+
+`cpp_unreal` 生成器使用 Unreal 风格 public API（`TArray`、`TMap`、`FString`、`TOptional`、`USTRUCT`、`UCLASS`、`UFUNCTION` 等），但 ConfigForge 仓库中的集成测试不能要求安装完整 Unreal Engine。为此，`tests/cli_integration.rs` 会在临时目录写入轻量 `CoreMinimal.h` 与 `Kismet/BlueprintFunctionLibrary.h` shim，只用于 `c++ -fsyntax-only` smoke test：
+
+- shim 只覆盖生成代码当前需要的最小类型、容器、hash、Algo 二分和反射宏；它不是 runtime adapter，也不承诺与 Unreal Engine ABI / UHT 行为等价。
+- 生产 Unreal 项目必须包含真实 Unreal headers，并由项目 module 提供 `api_macro`（例如 `GAMECONFIG_API`）和真实 loader / reader adapter。
+- Blueprint 模式的真实 UHT / Editor 集成验证不在普通 ConfigForge CI 内完成，后续应由引擎侧 CI 覆盖。
+
+标准 `runtime/cpp/` adapter 仍面向引擎无关 C++ backend；Unreal 项目若需要 JSON / MessagePack / bin reader，应在 Unreal module 中实现 `IConfigForgeRuntimeDataLoader` / `IConfigForgeRuntimeDataReader`，而不是复用测试 shim 作为生产依赖。
+
 ## 总原则
 
 ### 默认不联网
