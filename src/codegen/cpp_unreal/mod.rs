@@ -7,8 +7,8 @@ use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField, CodeGenerator,
-    CodeModel, CodeStruct, CodeTable, CodeTypeRef, CodeWriterConfig, CodeWriterLike, NamingConfig,
-    build_code_model, ir::require_non_empty_index_fields,
+    CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTypeRef, CodeWriterConfig, CodeWriterLike,
+    NamingConfig, build_code_model, ir::require_non_empty_index_fields,
 };
 
 mod symbols;
@@ -177,6 +177,7 @@ fn render_header_file(
     for code_struct in &model.structs {
         render_struct_declaration(content, code_struct, &names)?;
     }
+    render_compound_index_key_structs(content, model, &names)?;
     for table in &model.tables {
         render_table_declaration(content, table, &names)?;
     }
@@ -323,6 +324,13 @@ fn render_table_declaration(
             "    TArray<{}> Rows;\n",
             names.row_type_name(&table.name)?
         ));
+        for index in &table.indexes {
+            content.raw_fmt(format_args!(
+                "    {} {};\n",
+                names.cpp_index_storage(table, index)?,
+                names.index_storage_name(index)?
+            ));
+        }
         content.raw_fmt(format_args!(
             "    static constexpr const TCHAR* {} = TEXT({:?});\n",
             names.data_file_constant_name()?,
@@ -334,11 +342,90 @@ fn render_table_declaration(
             names.load_function_name()?
         ));
         content.raw_fmt(format_args!(
-            "    static {} FromRows(const TArray<{}>& InRows);\n",
+            "    static TConfigForgeResult<{}> FromRows(const TArray<{}>& InRows);\n",
             names.repository_type_name(&table.name)?,
             names.row_type_name(&table.name)?
         ));
+        for index in &table.indexes {
+            render_index_function_declaration(content, table, index, names)?;
+        }
         content.raw("};\n\n");
+    }
+    Ok(())
+}
+
+fn render_compound_index_key_structs(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    for table in &model.tables {
+        for index in &table.indexes {
+            if index.fields.len() <= 1 {
+                continue;
+            }
+            let key_type = names.compound_index_key_type_name(table, index)?;
+            content.raw_fmt(format_args!("struct {key_type} {{\n"));
+            for field in &index.fields {
+                content.raw_fmt(format_args!(
+                    "    {} {};\n",
+                    names.cpp_field_type(field)?,
+                    names.field_name(field)?
+                ));
+            }
+            content.raw("\n");
+            content.raw_fmt(format_args!(
+                "    bool operator==(const {key_type}& Other) const {{\n"
+            ));
+            content.raw("        return ");
+            content.raw(
+                index
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        let field_name = names.field_name(field)?;
+                        Ok(format!("{field_name} == Other.{field_name}"))
+                    })
+                    .collect::<Result<Vec<_>>>()?
+                    .join(" && "),
+            );
+            content.raw(";\n");
+            content.raw("    }\n");
+            content.raw("};\n\n");
+            content.raw_fmt(format_args!(
+                "FORCEINLINE uint32 GetTypeHash(const {key_type}& Value) {{\n"
+            ));
+            content.raw("    uint32 Hash = 0;\n");
+            for field in &index.fields {
+                content.raw_fmt(format_args!(
+                    "    Hash = HashCombine(Hash, ::GetTypeHash(Value.{}));\n",
+                    names.field_name(field)?
+                ));
+            }
+            content.raw("    return Hash;\n");
+            content.raw("}\n\n");
+        }
+    }
+    Ok(())
+}
+
+fn render_index_function_declaration(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    index: &CodeIndex,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    let row_type = names.row_type_name(&table.name)?;
+    let function_name = names.index_function_name(index)?;
+    let params = names.cpp_index_params(index)?;
+    if index.unique {
+        content.raw_fmt(format_args!(
+            "    const {row_type}* {function_name}({params}) const;\n"
+        ));
+    } else {
+        content.raw_fmt(format_args!(
+            "    TArray<const {row_type}*> {function_name}({params}) const;\n"
+        ));
     }
     Ok(())
 }
@@ -585,18 +672,84 @@ fn render_table_load_source(
     ));
     content.raw("        Rows.Add(RowResult.Value);\n");
     content.raw("    }\n");
-    content.raw_fmt(format_args!(
-        "    return TConfigForgeResult<{repo_type}>::Success(FromRows(Rows));\n"
-    ));
+    content.raw_fmt(format_args!("    return FromRows(Rows);\n"));
     content.raw("}\n\n");
 
     content.raw_fmt(format_args!(
-        "{repo_type} {repo_type}::FromRows(const TArray<{row_type}>& InRows) {{\n"
+        "TConfigForgeResult<{repo_type}> {repo_type}::FromRows(const TArray<{row_type}>& InRows) {{\n"
     ));
     content.raw_fmt(format_args!("    {repo_type} Table;\n"));
     content.raw("    Table.Rows = InRows;\n");
-    content.raw("    return Table;\n");
+    if !table.indexes.is_empty() {
+        content.raw("    for (int32 RowIndex = 0; RowIndex < Table.Rows.Num(); ++RowIndex) {\n");
+        content.raw("        const auto& Row = Table.Rows[RowIndex];\n");
+        for index in &table.indexes {
+            let storage_name = names.index_storage_name(index)?;
+            let key = names.cpp_row_key_expr(table, index, "Row")?;
+            if index.unique {
+                content.raw_fmt(format_args!(
+                    "        if (Table.{storage_name}.Contains({key})) {{ return TConfigForgeResult<{repo_type}>::Failure(TEXT(\"Duplicate unique index key for {repo_type}.{}\")); }}\n",
+                    index.name
+                ));
+                content.raw_fmt(format_args!(
+                    "        Table.{storage_name}.Add({key}, RowIndex);\n"
+                ));
+            } else {
+                content.raw_fmt(format_args!(
+                    "        Table.{storage_name}.FindOrAdd({key}).Add(RowIndex);\n"
+                ));
+            }
+        }
+        content.raw("    }\n");
+    }
+    content.raw_fmt(format_args!(
+        "    return TConfigForgeResult<{repo_type}>::Success(Table);\n"
+    ));
     content.raw("}\n\n");
+    for index in &table.indexes {
+        render_index_function_source(content, table, index, names)?;
+    }
+    Ok(())
+}
+
+fn render_index_function_source(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    index: &CodeIndex,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    let repo_type = names.repository_type_name(&table.name)?;
+    let row_type = names.row_type_name(&table.name)?;
+    let function_name = names.index_function_name(index)?;
+    let params = names.cpp_index_params(index)?;
+    let storage_name = names.index_storage_name(index)?;
+    let key = names.cpp_lookup_key_expr(table, index)?;
+    if index.unique {
+        content.raw_fmt(format_args!(
+            "const {row_type}* {repo_type}::{function_name}({params}) const {{\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    const int32* RowIndex = {storage_name}.Find({key});\n"
+        ));
+        content.raw("    if (RowIndex == nullptr) { return nullptr; }\n");
+        content.raw("    return Rows.IsValidIndex(*RowIndex) ? &Rows[*RowIndex] : nullptr;\n");
+        content.raw("}\n\n");
+    } else {
+        content.raw_fmt(format_args!(
+            "TArray<const {row_type}*> {repo_type}::{function_name}({params}) const {{\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    const TArray<int32>* RowIndexes = {storage_name}.Find({key});\n"
+        ));
+        content.raw_fmt(format_args!("    TArray<const {row_type}*> Result;\n"));
+        content.raw("    if (RowIndexes == nullptr) { return Result; }\n");
+        content.raw("    Result.Reserve(RowIndexes->Num());\n");
+        content.raw("    for (int32 RowIndex : *RowIndexes) {\n");
+        content.raw("        if (Rows.IsValidIndex(RowIndex)) { Result.Add(&Rows[RowIndex]); }\n");
+        content.raw("    }\n");
+        content.raw("    return Result;\n");
+        content.raw("}\n\n");
+    }
     Ok(())
 }
 

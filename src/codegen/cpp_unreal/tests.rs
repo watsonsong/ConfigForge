@@ -140,6 +140,10 @@ fn emits_header_and_source_skeleton() {
     assert!(header.contains("static constexpr const TCHAR* DataFile = TEXT(\"items\");"));
     assert!(header.contains("static TConfigForgeResult<FItemsTable> Load"));
     assert!(header.contains("static TConfigForgeResult<FItemsRow> ReadItemsRow"));
+    assert!(header.contains("TMap<int64, int32> ById;"));
+    assert!(header.contains("TMap<EItemRarity, TArray<int32>> ByRarity;"));
+    assert!(header.contains("const FItemsRow* GetById(int64 Id) const;"));
+    assert!(header.contains("TArray<const FItemsRow*> FindByRarity(EItemRarity Rarity) const;"));
     assert!(header.contains("static TConfigForgeResult<FGameData> Load"));
     assert!(header.contains("TEXT(\"ConfigForge\")"));
     assert!(!header.contains("std::vector"));
@@ -152,7 +156,110 @@ fn emits_header_and_source_skeleton() {
     assert!(source.contains("const int64 RowCount = Reader.ReadRowCount();"));
     assert!(source.contains("Reader.EnterIndex(RowIndex);"));
     assert!(source.contains("auto RowResult = FItemsRow::ReadItemsRow(Reader);"));
+    assert!(source.contains("return FromRows(Rows);"));
+    assert!(source.contains("Table.ById.Add(Row.Id, RowIndex);"));
+    assert!(source.contains("Table.ByRarity.FindOrAdd(Row.Rarity).Add(RowIndex);"));
+    assert!(source.contains("const FItemsRow* FItemsTable::GetById(int64 Id) const"));
+    assert!(
+        source.contains(
+            "TArray<const FItemsRow*> FItemsTable::FindByRarity(EItemRarity Rarity) const"
+        )
+    );
     assert!(source.contains("TConfigForgeResult<FGameData> FGameData::Load"));
+}
+
+#[test]
+fn emits_compound_unordered_index_key_and_lookup() {
+    let meta = crate::meta::MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "localized_items"
+            source = "localized_items.csv"
+
+            [[tables.fields]]
+            name = "item_id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "locale"
+            type = "string"
+            required = true
+
+            [[tables.fields]]
+            name = "display_name"
+            type = "text"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_item_locale"
+            fields = ["item_id", "locale"]
+            unique = true
+        "#,
+    )
+    .expect("meta should parse");
+
+    let files = CppUnrealCodeGenerator
+        .generate(&input_for(&meta, LANGUAGE))
+        .expect("cpp_unreal code");
+    let header = generated_content(&files, "generated.h");
+    let source = generated_content(&files, "generated.cpp");
+
+    assert!(header.contains("struct FLocalizedItemsByItemLocaleKey"));
+    assert!(header.contains("int64 ItemId;"));
+    assert!(header.contains("FString Locale;"));
+    assert!(header.contains("bool operator==(const FLocalizedItemsByItemLocaleKey& Other) const"));
+    assert!(
+        header.contains(
+            "FORCEINLINE uint32 GetTypeHash(const FLocalizedItemsByItemLocaleKey& Value)"
+        )
+    );
+    assert!(header.contains("Hash = HashCombine(Hash, ::GetTypeHash(Value.ItemId));"));
+    assert!(header.contains("TMap<FLocalizedItemsByItemLocaleKey, int32> ByItemLocale;"));
+    assert!(header.contains(
+        "const FLocalizedItemsRow* GetByItemLocale(int64 ItemId, FString Locale) const;"
+    ));
+    assert!(source.contains("FLocalizedItemsByItemLocaleKey{Row.ItemId, Row.Locale}"));
+    assert!(source.contains("FLocalizedItemsByItemLocaleKey{ItemId, Locale}"));
+}
+
+#[test]
+fn emits_non_unique_unordered_index_lookup() {
+    let meta = crate::meta::MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "spawns"
+            source = "spawns.csv"
+
+            [[tables.fields]]
+            name = "zone"
+            type = "string"
+            required = true
+
+            [[tables.fields]]
+            name = "npc_id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_zone"
+            fields = ["zone"]
+            unique = false
+        "#,
+    )
+    .expect("meta should parse");
+
+    let files = CppUnrealCodeGenerator
+        .generate(&input_for(&meta, LANGUAGE))
+        .expect("cpp_unreal code");
+    let header = generated_content(&files, "generated.h");
+    let source = generated_content(&files, "generated.cpp");
+
+    assert!(header.contains("TMap<FString, TArray<int32>> ByZone;"));
+    assert!(header.contains("TArray<const FSpawnsRow*> FindByZone(FString Zone) const;"));
+    assert!(source.contains("Table.ByZone.FindOrAdd(Row.Zone).Add(RowIndex);"));
+    assert!(source.contains("const TArray<int32>* RowIndexes = ByZone.Find(Zone);"));
+    assert!(source.contains("Result.Reserve(RowIndexes->Num());"));
 }
 
 #[test]

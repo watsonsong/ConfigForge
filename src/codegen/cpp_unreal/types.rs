@@ -3,7 +3,9 @@
 
 use crate::{
     ConfigForgeError, Result,
-    codegen::{CodeField, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, naming},
+    codegen::{
+        CodeField, CodeIndex, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions, naming,
+    },
 };
 
 pub(super) struct CppUnrealNames<'a> {
@@ -78,6 +80,31 @@ impl<'a> CppUnrealNames<'a> {
         self.identifier(name, self.options.naming.field)
     }
 
+    pub(super) fn index_storage_name(&self, index: &CodeIndex) -> Result<String> {
+        self.identifier(&index.name, self.options.naming.field)
+    }
+
+    pub(super) fn index_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let prefix = if index.unique { "get_by" } else { "find_by" };
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("{prefix}_{suffix}"), self.options.naming.function)
+    }
+
+    pub(super) fn cpp_index_params(&self, index: &CodeIndex) -> Result<String> {
+        index
+            .fields
+            .iter()
+            .map(|field| {
+                Ok(format!(
+                    "{} {}",
+                    self.cpp_field_type(field)?,
+                    self.field_name(field)?
+                ))
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(|params| params.join(", "))
+    }
+
     pub(super) fn cpp_type(&self, code_type: &CodeTypeRef) -> Result<String> {
         Ok(match code_type {
             CodeTypeRef::Int => "int64".to_owned(),
@@ -97,6 +124,88 @@ impl<'a> CppUnrealNames<'a> {
         } else {
             Ok(format!("TOptional<{inner}>"))
         }
+    }
+
+    pub(super) fn cpp_index_storage(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
+        let key_type = self.cpp_key_type(table, index)?;
+        if index.unique {
+            Ok(format!("TMap<{key_type}, int32>"))
+        } else {
+            Ok(format!("TMap<{key_type}, TArray<int32>>"))
+        }
+    }
+
+    pub(super) fn cpp_key_type(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
+        if index.fields.len() == 1 {
+            self.cpp_field_type(&index.fields[0])
+        } else {
+            self.compound_index_key_type_name(table, index)
+        }
+    }
+
+    pub(super) fn cpp_row_key_expr(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+        row_expr: &str,
+    ) -> Result<String> {
+        if index.fields.len() == 1 {
+            Ok(format!(
+                "{}.{}",
+                row_expr,
+                self.field_name(&index.fields[0])?
+            ))
+        } else {
+            self.cpp_compound_key_expr(
+                table,
+                index,
+                index
+                    .fields
+                    .iter()
+                    .map(|field| Ok(format!("{}.{}", row_expr, self.field_name(field)?))),
+            )
+        }
+    }
+
+    pub(super) fn cpp_lookup_key_expr(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+    ) -> Result<String> {
+        if index.fields.len() == 1 {
+            self.field_name(&index.fields[0])
+        } else {
+            self.cpp_compound_key_expr(
+                table,
+                index,
+                index.fields.iter().map(|field| self.field_name(field)),
+            )
+        }
+    }
+
+    fn cpp_compound_key_expr(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+        values: impl Iterator<Item = Result<String>>,
+    ) -> Result<String> {
+        Ok(format!(
+            "{}{{{}}}",
+            self.compound_index_key_type_name(table, index)?,
+            values.collect::<Result<Vec<_>>>()?.join(", ")
+        ))
+    }
+
+    pub(super) fn compound_index_key_type_name(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+    ) -> Result<String> {
+        Ok(format!(
+            "F{}{}Key",
+            self.type_name(&table.name)?,
+            self.type_name(&index.name)?
+        ))
     }
 
     fn identifier(&self, value: &str, style: crate::codegen::CaseStyle) -> Result<String> {

@@ -75,6 +75,30 @@ pub(super) fn validate_generated_symbols(
             &format!("table `{}`", table.name),
             field_symbols,
         )?;
+
+        let mut member_symbols = Vec::new();
+        member_symbols.push(GeneratedSymbol::new(
+            "row storage",
+            "Rows",
+            names.member_name("rows")?,
+        ));
+        for index in &table.indexes {
+            member_symbols.push(GeneratedSymbol::new(
+                "index storage",
+                &index.name,
+                names.index_storage_name(index)?,
+            ));
+            member_symbols.push(GeneratedSymbol::new(
+                "index lookup function",
+                &index.name,
+                names.index_function_name(index)?,
+            ));
+        }
+        ensure_unique_generated_symbols(
+            "cpp_unreal",
+            &format!("table repository `{}` members", table.name),
+            member_symbols,
+        )?;
     }
     Ok(())
 }

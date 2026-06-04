@@ -113,12 +113,23 @@ fn builds_cpp_unreal_code_only_target() {
                 #include <memory>
                 #include <optional>
                 #include <string>
+                #include <unordered_map>
                 #include <vector>
 
+                using int32 = std::int32_t;
                 using int64 = std::int64_t;
+                using uint32 = std::uint32_t;
                 using TCHAR = char;
+                #define FORCEINLINE inline
                 #define TEXT(value) value
                 using FString = std::string;
+                inline uint32 HashCombine(uint32 Left, uint32 Right) { return Left ^ (Right + 0x9e3779b9U + (Left << 6) + (Left >> 2)); }
+                template <typename T>
+                uint32 GetTypeHash(const T& Value) { return static_cast<uint32>(std::hash<T>{}(Value)); }
+                template <typename T>
+                struct FUnrealHash {
+                    std::size_t operator()(const T& Value) const { return GetTypeHash(Value); }
+                };
                 template <typename T>
                 using TUniquePtr = std::unique_ptr<T>;
                 template <typename T>
@@ -126,6 +137,17 @@ fn builds_cpp_unreal_code_only_target() {
                     using std::vector<T>::vector;
                     void Add(const T& Value) { this->push_back(Value); }
                     void Reserve(std::size_t Count) { this->reserve(Count); }
+                    int32 Num() const { return static_cast<int32>(this->size()); }
+                    bool IsValidIndex(int32 Index) const { return Index >= 0 && static_cast<std::size_t>(Index) < this->size(); }
+                };
+                template <typename K, typename V>
+                struct TMap : public std::unordered_map<K, V, FUnrealHash<K>> {
+                    using Base = std::unordered_map<K, V, FUnrealHash<K>>;
+                    bool Contains(const K& Key) const { return this->find(Key) != this->end(); }
+                    void Add(const K& Key, const V& Value) { (*this)[Key] = Value; }
+                    V* Find(const K& Key) { auto Iter = this->find(Key); return Iter == this->end() ? nullptr : &Iter->second; }
+                    const V* Find(const K& Key) const { auto Iter = this->find(Key); return Iter == this->end() ? nullptr : &Iter->second; }
+                    V& FindOrAdd(const K& Key) { return (*this)[Key]; }
                 };
                 template <typename T>
                 using TOptional = std::optional<T>;
