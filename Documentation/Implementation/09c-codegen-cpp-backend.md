@@ -85,7 +85,8 @@ C++ 约束：
 - 第一阶段目标 C++17。
 - 运行时 JSON / MessagePack 解析库不强绑定。生成代码只定义通用 `IRuntimeDataLoader` / `IRuntimeDataReader`，由业务实现；标准 runtime support 层可提供基于 RapidJSON、msgpack-c 或引擎序列化系统的可选 adapter。按表读取、字段转换和 typed row 构造由生成的 `Load` / `ReadRow` 实现完成。
 - `Rows()` / `Size()` 等 public source-order API 应成为 `preserve_source_order = true` 的 opt-in 行为；普通 indexed table 默认只生成 `GetBy*` / `FindBy*`。底层 `std::vector<Row> rows_` 可以继续作为 private owner storage，多个 index 保存 `std::size_t` row handle，以避免行数据被每个索引复制；未 opt-in 时不得暴露 source-order API。
-- 复合 key 需要生成 `struct Key`、`operator==` 和 hash。
+- unordered index 应优先使用 `std::unordered_map`；单字段和复合 key 都应走 hash-based storage，复合 key 需要生成 `struct Key`、`operator==` 和 hash，不能因为复合 key 缺标准库 hash 而退回 `std::map`。当前 `class_levels.by_class_level` 之所以生成 `std::map`，只是现有实现以“复合 key 无 hash”为条件选择了树形 map；这不是目标设计。
+- `ordered = true` 的 index 不使用 `std::map` 作为默认结构，而使用 `std::vector<std::pair<Key, std::size_t>>` 排序数组：Load 阶段收集全部 `(key, row_index)`，按 key 字典序稳定排序；exact lookup 通过 `std::lower_bound` 找 equal range；范围查询通过 `lower_bound(lower)` 到 `lower_bound(upper)` 的半开区间实现。生成代码应额外提供 `LowerBoundBy*`、`UpperBoundBy*`、`RangeBy*` 或等价 range view API。
 - enum class 需要生成 hash 或转换为底层整数用于 unordered_map。
 
 C++ `linked_field` 生成规则：

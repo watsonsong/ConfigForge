@@ -234,6 +234,7 @@ runtime payload 应固定 fragment 表达方式。第一阶段推荐直接用 fr
 - unique index 在当前验证视图中无重复 key；
 - primary index 存在且 unique；
 - `primary_index` 与 `primary = true` 一致；
+- `ordered = true` 的 index 字段类型还必须可稳定排序；第一阶段允许 int、float、bool、string、text、asset、enum 以及这些类型组成的复合 key，struct/list 不允许作为 ordered key。float ordered key 仍应要求 finite，并可继续给出“不推荐用于稳定业务边界”的 warning；目标语言必须使用与 validation 一致的比较语义。
 - `preserve_source_order` 只能用于 CollectionTable，表示生成代码可暴露当前 target visible rows 的稳定顺序访问；它不创建 index，也不把 source order 当成 foreign key target；
 - 若后续启用“无 index 且未 preserve source order 的 codegen 表”诊断，应在 CodeModel 构造或 Meta/codegen validation 阶段给出清晰 warning/error，避免业务获得无法查询的 generated table。
 

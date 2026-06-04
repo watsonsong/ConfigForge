@@ -362,6 +362,14 @@ pub enum CodeFragmentPayload {
     Struct { name: String },
 }
 
+pub struct CodeIndex {
+    pub name: String,
+    pub unique: bool,
+    pub primary: bool,
+    pub ordered: bool,
+    pub fields: Vec<CodeField>,
+}
+
 pub struct CodeForeignKey {
     pub name: String,
     pub desc: Option<String>,
@@ -393,7 +401,8 @@ IR 职责：
 5. 把 `LinkedField` 转换为目标语言无关的 `CodeTypeRef`。
 6. 对 polymorphic table 保留 fragment 类型、table-fragment 关联和当前 target 可见的 fragment fields。
 7. 对声明了 `linked_field` 的 foreign key 保留生成 relation helper 所需的语言无关信息，包括 helper 语义名、source fields、target table/index、empty 策略和单值/list cardinality。
-8. 后续应保留 `preserve_source_order` / repository storage policy：区分只承诺 index lookup 的 indexed table，和显式要求 source-order 数组访问的 table。
+8. 保留 `CodeIndex.ordered`，让语言生成器区分 unordered exact lookup index 与 ordered range-capable index。
+9. 后续应保留 `preserve_source_order` / repository storage policy：区分只承诺 index lookup 的 indexed table，和显式要求 source-order 数组访问的 table。
 
 IR 不负责：
 
@@ -428,6 +437,7 @@ pub enum CodeTypeRef {
 - 渲染语法；
 - 渲染 loader / repository / index API；
 - 依据 table access policy 决定是否渲染 public row sequence API；`preserve_source_order = true` 才生成 row count / row_at / rows，indexed table 默认只生成 lookup；
+- 依据 `CodeIndex.ordered` 选择索引 storage 与 API：unordered index 生成 exact lookup；ordered index 除 exact lookup 外还生成 lower_bound / upper_bound / range 查询，并优先使用一次构建后排序数组而不是在线树结构；
 - 基于带 `linked_field` 的 `CodeForeignKey` 渲染 foreign key relation helper、cache slot 和 `link` / `link_all` API；未声明 `linked_field` 的 FK 只保留关系元数据，不生成访问 helper；
 - 处理 import/include/use。
 

@@ -787,6 +787,7 @@ name = "by_id"
 fields = ["id"]
 unique = true
 primary = true
+ordered = false
 desc = "按物品 ID 精确查找。"
 ```
 
@@ -797,11 +798,22 @@ desc = "按物品 ID 精确查找。"
 - Primary index 必须是 unique index。
 - Foreign key 默认指向目标表 primary index。
 - Override source 对 CollectionTable 的行替换依赖 primary index。
+- `ordered = false` 是默认值，表示索引只承诺 exact lookup；生成代码应优先使用 hash-based index（例如 C++ `std::unordered_map`、Rust `HashMap`、TypeScript `Map`）。复合 key 不应因为缺少标准库 hash 而退回树形 map，生成器应为复合 key 生成 hash / key serializer。
+- `ordered = true` 表示该索引除 exact lookup 外还承诺按 `fields` 声明顺序的字典序有序访问；生成代码应暴露 lower bound、upper bound 和 range query API。该语义用于等级段、时间段、价格区间等运行时范围查询，不应用作“让输出顺序稳定”的隐式开关。
+- ordered index 的推荐运行时结构是一次构建后排序的数组（`Vec<(Key, RowHandle)>` / `std::vector<std::pair<Key, RowHandle>>` / array），而不是红黑树或其它以频繁插入删除为目标的在线结构。ConfigForge 生成数据加载后默认只读，构建阶段一次性 sort 更符合读取多、修改少的场景。
 
 Index cardinality：
 
 - `unique = true`：一个 key 至多对应一条 record。
 - `unique = false`：一个 key 可对应多条 record。
+
+Index order：
+
+- 未声明 `ordered` 时等价于 `ordered = false`。
+- ordered index 的排序 key 由 `fields` 顺序定义；复合索引按第一个字段、第二个字段……依次比较，第一阶段只定义升序。若未来需要降序或自定义 collation，应扩展为独立字段（例如 `order = [{ field = "level", direction = "desc" }]`），不能改变 `fields` 的现有含义。
+- ordered index 的 exact lookup 语义与 unordered index 相同：unique 返回 0/1 条，non-unique 返回所有同 key rows。对于 non-unique ordered index，同 key rows 应保持当前 target visible row 的稳定相对顺序。
+- ordered index 额外生成边界和范围 API：`lower_bound_by_<index>(key)` 返回第一个 `index_key >= key` 的 row/range cursor；`upper_bound_by_<index>(key)` 返回第一个 `index_key > key` 的 cursor；`range_by_<index>(lower, upper)` 返回 `[lower, upper)` 范围中的 rows。目标语言可以用 iterator、slice/view 或只读数组表达，但不得暴露可修改内部索引结构。
+- 复合 ordered index 的边界 key 第一阶段使用完整 key（例如 `by_class_level(class_id, level)`）；后续可在保持兼容的前提下为 leftmost prefix 生成便捷 API（例如 `range_by_class(class_id)`），本质仍由完整 key 的 lower/upper bound 推导。
 
 ## 4.12 Foreign Key
 

@@ -17,7 +17,8 @@
 - `name`；
 - `fields`；
 - `unique`；
-- `primary`。
+- `primary`；
+- `ordered`。
 
 `FieldMeta.unique = true` 可视为单字段 unique index，建议在 CodeModel 中统一转成 synthetic index，命名为 `by_<field>`。
 
@@ -30,6 +31,16 @@
 | unique compound | `get_by_a_b(a, b) -> Option<&Row>` | `GetByAB(a, b) -> const Row*` | `getByAB(a, b): Row | undefined` |
 | non-unique compound | `find_by_a_b(a, b) -> Vec<&Row>` | `FindByAB(a, b) -> vector<const Row*>` | `findByAB(a, b): readonly Row[]` |
 
+`ordered = false` 是默认值，上表 API 只承诺 exact lookup。`ordered = true` 的 index 在 exact lookup 之外还必须生成边界和范围查询 API：
+
+| Ordered API | Rust | C++ | TypeScript |
+| --- | --- | --- | --- |
+| lower bound | `lower_bound_by_level(key) -> IndexCursor` / `RangeFrom` 等语言惯用 view | `LowerBoundByLevel(key) -> IndexIterator` 或 range view 起点 | `lowerBoundByLevel(key): IndexCursor` |
+| upper bound | `upper_bound_by_level(key) -> IndexCursor` / `RangeTo` 等语言惯用 view | `UpperBoundByLevel(key) -> IndexIterator` 或 range view 终点 | `upperBoundByLevel(key): IndexCursor` |
+| half-open range | `range_by_level(lower, upper) -> impl Iterator<Item = &Row>` | `RangeByLevel(lower, upper) -> RowRange` / `std::vector<const Row*>` | `rangeByLevel(lower, upper): readonly Row[]` |
+
+边界语义统一为按 index key 字典序比较：`lower_bound` 返回第一个 `key >= query` 的位置，`upper_bound` 返回第一个 `key > query` 的位置，`range(lower, upper)` 返回 `[lower, upper)`。复合 ordered index 第一阶段使用完整 key；leftmost prefix 便捷范围查询可后续扩展。
+
 ### 9.9.3 索引构建规则
 
 1. Repository 构造时一次性遍历 loaded rows 构建所有索引。
@@ -41,7 +52,28 @@
    - `text` / `asset` 作为字符串 key 允许；
    - struct key 不支持。
 
-### 9.9.3a Source-order row access policy（规划）
+### 9.9.3a Ordered index storage policy
+
+ConfigForge 的 generated runtime 数据默认加载后只读，索引构建是一次性成本，业务运行期以查询为主。因此 ordered index 不应使用 `std::map` / `BTreeMap` 这类面向持续插入删除的树结构作为默认实现；推荐 storage 是排序数组：
+
+```text
+load rows into private row arena
+for each ordered index:
+  collect (key, row_handle) into vector/Vec/array
+  stable_sort by key, then by source row order for equal keys
+  exact lookup: lower_bound(key), scan equal range
+  range lookup: lower_bound(lower)..lower_bound(upper)
+```
+
+语言实现要求：
+
+- Rust：unordered index 默认 `HashMap<Key, RowHandle | Vec<RowHandle>>`；ordered index 使用 `Vec<(Key, RowHandle)>` 并通过 `slice::partition_point` / binary search 实现边界查询。只有明确需要在线更新时，后续才考虑 `BTreeMap` option。
+- C++：unordered index 默认 `std::unordered_map<Key, std::size_t | std::vector<std::size_t>>`；ordered index 使用 `std::vector<std::pair<Key, std::size_t>>` + `std::sort` / `std::lower_bound` / `std::upper_bound`。复合 key 必须生成 `operator==`、严格弱序比较（`operator<` 或 comparator）和 hash；未 ordered 的复合 key 仍应走 `std::unordered_map`，不能因为复合 key 缺 hash 而退回 `std::map`。
+- TypeScript：unordered index 默认 `Map<SerializedKey, number | number[]>`；ordered index 使用 `{ key, rowIndex }[]` 排序数组。复合 key exact lookup 可继续使用稳定 key serializer，ordered 比较必须按字段类型逐项比较，不能用 JSON 字符串字典序替代数值比较。
+- non-unique ordered index 的 equal-key row handles 必须保持当前 target visible row 的稳定相对顺序。实现上可以 stable sort，或排序 comparator 在 key 相等时比较原始 row index。
+- exact lookup API 对 ordered / unordered index 行为一致；ordered 只是额外提供边界和范围能力，不改变 `get_by_*` / `find_by_*` 的返回类型。
+
+### 9.9.3b Source-order row access policy（规划）
 
 CollectionTable repository 需要把“内部为构建索引而遍历 rows”和“对业务公开 source-order rows 数组”分开建模：
 

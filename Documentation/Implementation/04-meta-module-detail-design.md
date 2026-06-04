@@ -447,6 +447,7 @@ pub struct IndexMeta {
     pub fields: Vec<String>,
     pub unique: bool,
     pub primary: bool,
+    pub ordered: bool,
 }
 ```
 
@@ -455,6 +456,8 @@ pub struct IndexMeta {
 - Raw `fields` 仍保存字段名字符串，方便 serde 加载和错误展示。
 - Link 后通过 `LinkedIndexMeta.fields: Vec<&FieldMeta>` 获得真实字段引用。
 - `export = false` / `export_when` 控制 index 是否生成到目标代码；primary index 如果引用了当前 target 不导出的字段，应报错；非 primary index 引用了不导出的字段时跳过该 index。
+- `ordered` 由 serde 默认 `false`，表示该索引只承诺 exact lookup；为 `true` 时表示生成代码还必须提供 lower/upper bound 与 range query。`ordered` 不影响 primary / foreign key / override identity 语义，FK target 仍只要求 target index 是 unique / primary。
+- Meta validate 除了检查 key type 可 hash / equality 外，还要对 `ordered = true` 检查 key type 可稳定排序；struct/list 不能作为 ordered key。float key 若允许，应要求 finite，并可保留 warning 策略。
 - 当前只支持 table 顶层简单字段名；后续如支持 `a.b[0].c`，应引入 `FieldPath` 和 `LinkedFieldPath<'meta>`。
 
 ## 4.6 Linked 数据结构
@@ -497,7 +500,7 @@ pub struct LinkedIndexMeta<'meta> {
 }
 ```
 
-`meta.fields` 保留原始字符串；`fields` 是解析到同一 table 字段列表中的真实字段引用。
+`meta.fields` 保留原始字符串；`fields` 是解析到同一 table 字段列表中的真实字段引用。`ordered` 仍从 `meta.ordered` 读取，不在 linked 结构中重复存储。
 
 ### 4.6.4 `LinkedTableMeta<'meta>`
 
