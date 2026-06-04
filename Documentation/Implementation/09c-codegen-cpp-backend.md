@@ -166,3 +166,86 @@ private:
 - 多线程第一阶段不承诺；如果需要，后续可为每个 table 加 `std::once_flag` + error propagation 或 mutex。默认文档要求同一个 `LazyGameData` 不并发首次访问同一 table。
 - `GameData::Load(loader)` 保持 eager，不保存 loader。`LazyGameData::PreloadAll()` 加载全部表；可选 `ReleaseLoader()` 只有在所有 table 都已 Loaded 后才允许清空 `loader_`，否则后续访问 unloaded table 应报错。
 - 为了让 linked relation helper 可同时接受 eager 与 lazy，后续可生成轻量 access interface（例如 `IGameDataAccess` 或模板参数），其中 `Items()` / `Classes()` 返回 const table reference 或抛错。eager `GameData` 与 `LazyGameData` 都实现同名 accessor。
+
+## Unreal C++ backend 规划
+
+Unreal Engine 环境不应由标准 `cpp` backend 增加一个“大开关”来兼容，而应新增独立 export type：`type = "cpp_unreal"`，内部实现命名为 `CppUnrealCodeGenerator`，输出目录仍由当前 `[[targets.exports]]` 的 `output` 指定。原因：
+
+- 标准 C++ backend 的目标是引擎无关 C++17，public API 使用 `std::vector`、`std::unordered_map`、`std::string`、`std::unique_ptr`、异常等标准库约定。
+- Unreal 项目倾向于使用 `TArray`、`TMap`、`FString`、`TUniquePtr` / `TSharedPtr`、`check` / `ensure` / `UE_LOG`、`TEXT()` 字面量和 PascalCase + 类型前缀命名；同一个 public API 混用两套习惯会降低接入体验。
+- Blueprint 反射还要求 `USTRUCT` / `UCLASS` / `UFUNCTION` / `UPROPERTY` / `GENERATED_BODY()` 等 UnrealHeaderTool 可解析形态，这会显著影响文件布局、include、类型命名和可暴露 API，不适合塞进标准 C++ emitter 的局部分支。
+
+### Unreal 习惯和生成约束
+
+Unreal backend 需要遵守以下生成约束：
+
+- **容器与字符串**：`std::vector<T>` 映射为 `TArray<T>`；unordered index 的唯一 key 映射为 `TMap<Key, int32>` 或 `TMap<Key, int64>` row handle；非唯一 key 映射为 `TMap<Key, TArray<int32>>`。配置文本字段优先使用 `FString`；如果未来区分本地化 display text，可额外支持 `FText`；name-like 轻量标识符可由选项映射到 `FName`，但默认不自动把 Meta string 改成 `FName`。
+- **有序索引**：继续使用排序数组策略，不使用 `TMap` 的排序迭代语义承载 range query。存储形态为 `TArray<TPair<Key, int32>>`；Load 后调用 `StableSort`；`FindBy*`、`LowerBoundBy*`、`UpperBoundBy*`、`RangeBy*` 使用手写二分或 `Algo::LowerBoundBy` / `Algo::UpperBoundBy`。等价 key 的相对顺序必须保持 source row order。
+- **复合 key**：生成 `F<Table><Index>Key` value struct，提供 `operator==`、`operator<` 和非成员 `GetTypeHash(const FKey&)`，使其可作为 `TMap` key。hash combine 使用 Unreal 提供的 hash combine helper 或显式组合各字段 `GetTypeHash`。
+- **错误模型**：Unreal 模块通常关闭或避免依赖 C++ exceptions。`cpp_unreal` 不应默认生成 `throw std::runtime_error`。第一阶段 containers 模式推荐生成 `FConfigForgeResult<T>` / `FConfigForgeStatus` 或 `bool + OutError` 形态；不可恢复的内部不变量可用 `check`，可诊断但不中断的集成问题可用 `ensure` / `UE_LOG`。所有字符串字面量使用 `TEXT("...")`。
+- **命名**：类型使用 Unreal 前缀：普通 value struct 使用 `F`，enum 使用 `E`，Blueprint function library 使用 `U`；bool 字段生成 `b` 前缀；函数、类型、属性默认 PascalCase。内部私有字段不沿用标准 C++ backend 的 `rows_` snake_case，而使用 `Rows` / `ById` 或明确 `Private` 后缀以避开 UPROPERTY 和方法名冲突。
+- **文件布局**：containers 模式可生成普通 `.h` / `.cpp`；Blueprint 模式必须生成 UnrealHeaderTool 可处理的 header，包含 `#pragma once`、模块 API 宏、`.generated.h` 必须位于 include 列表末尾。生成器需要配置 `api_macro`，例如 `GAMECONFIG_API`，用于 `UCLASS` / `USTRUCT` 导出。
+- **反射限制**：Blueprint public API 不暴露 `std::*`、裸 row pointer、模板返回值、`std::optional`、`std::reference_wrapper` 或复杂迭代器；用 `bool` 返回成功状态，结果通过 `UPARAM(ref)` / out 参数返回，或返回 Blueprint 支持的 `USTRUCT` / `TArray<USTRUCT>`。
+
+### 支持级别
+
+`cpp_unreal` 至少提供两个支持级别：
+
+```toml
+[[targets.exports]]
+type = "cpp_unreal"
+output = "Source/GameConfig/Generated"
+module_name = "GameConfig"
+
+[targets.exports.cpp_unreal]
+support = "containers" # 或 "blueprint"
+api_macro = "GAMECONFIG_API"
+namespace = "GameConfig"
+```
+
+#### Level 1: `support = "containers"`
+
+目标是让 C++ gameplay code 在 Unreal module 内自然使用生成代码，但不要求 Blueprint 可见：
+
+- 生成普通 C++ `struct` / `class` / repository / `GameData` / `LazyGameData`，不加 `USTRUCT` / `UCLASS`。
+- 类型和容器使用 Unreal API：`TArray`、`TMap`、`TPair`、`FString`、`TOptional`、`TUniquePtr` / `TSharedPtr`、`int32` / `int64`。
+- reader/loader contract 改成 Unreal 风格，例如 `TUniquePtr<IConfigForgeRuntimeDataReader> Open(const FString& Path, FConfigForgeError& OutError)`；生成代码仍只依赖逻辑 table name，不绑定 Asset Manager、Pak、本地文件或网络。
+- relation helper 和 text helper 复用标准 backend 的语义，但返回 Unreal 类型；例如 text helper 默认返回 `FString`，可选对接 `FText` translator。
+- 索引 API 可以返回 `const FItemRow*` 给 C++ 使用；但这些指针不出现在 Blueprint 层。
+
+#### Level 2: `support = "blueprint"`
+
+目标是在 containers 模式基础上增加 Blueprint 可见 facade：
+
+- row / object / fragment value type 生成 `USTRUCT(BlueprintType)`，首行 `GENERATED_BODY()`；字段生成 `UPROPERTY(BlueprintReadOnly, Category="ConfigForge")`。
+- enum 生成 `UENUM(BlueprintType)`，枚举值按 Unreal 习惯生成 `EItemRarity::Common` 这类强类型枚举；必要时为 display name 添加 metadata。
+- table repository 本体仍可保持非 UObject C++ 类型，避免大量配置行进入 GC 管理；Blueprint 层通过 `UBlueprintFunctionLibrary` 或 `UObject` facade 暴露静态/实例函数。
+- lookup 函数生成 Blueprint 友好形态，例如：
+
+```cpp
+UCLASS()
+class GAMECONFIG_API UGameConfigBlueprintLibrary : public UBlueprintFunctionLibrary
+{
+    GENERATED_BODY()
+
+public:
+    UFUNCTION(BlueprintCallable, Category="ConfigForge|Items")
+    static bool GetItemById(const UObject* WorldContextObject, int64 Id, FItemRow& OutRow);
+
+    UFUNCTION(BlueprintCallable, Category="ConfigForge|Items")
+    static void FindItemsByRarity(const UObject* WorldContextObject, EItemRarity Rarity, TArray<FItemRow>& OutRows);
+};
+```
+
+- Blueprint pure/read-only helpers 可用 `BlueprintPure`，但需要避免隐式触发 I/O 的 lazy load。可能进行加载的 API 应使用 `BlueprintCallable`，让执行顺序显式。
+- 对于 `LazyGameData`，Blueprint facade 应明确初始化入口，例如 `LoadGameConfig` / `PreloadAll`，不在纯 getter 中隐式打开 runtime data。
+- 若暴露全局 singleton，需要由项目 adapter 决定生命周期；生成代码不直接创建 `UGameInstanceSubsystem`，但可以提供可被 subsystem 包装的 facade 类。
+
+### 与现有 C++ backend 的复用边界
+
+`cpp_unreal` 应复用核心语义而不是复用标准 C++ 文本模板：
+
+- **复用**：`CodeExportInput`、`CodeModel`、target tags 过滤后的表/字段/index/foreign key IR、命名冲突检查框架、索引与 relation helper 的语言无关规划、runtime reader 的 Meta-agnostic 分层原则、sink-based streaming 输出基础设施。
+- **抽象成共享策略**：index 构建流程、ordered range API 的语义、复合 key 需要 equality / ordering / hash 的判定、`GameData` / `LazyGameData` eager/lazy 结构，可以提取为 backend-neutral helper 或 emitter plan。
+- **不直接复用**：`CppNames` 的 `std::*` 类型映射、include 列表、异常生成、snake_case private 字段、`std::optional` / `std::unique_ptr` / `std::shared_ptr` 形态、标准 C++ 的 reader interface 和所有 Blueprint 相关输出。
+- **测试复用**：继续使用同一 Meta fixture 验证导出可见性、索引、foreign key、text helper；新增 Unreal 专属 snapshot 断言 `TArray` / `TMap` / `GetTypeHash` / `USTRUCT(BlueprintType)` / `.generated.h` include 顺序 / 无 `std::` 和无 `throw`。

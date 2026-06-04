@@ -157,6 +157,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 | Runtime reader contract | [`09a-codegen-runtime-reader-contract.md`](09a-codegen-runtime-reader-contract.md) | `RuntimeDataLoader` / `RuntimeDataReader`、eager/lazy loading、TypeScript sync API、逻辑 table name 与 artifact path、schema revision 协作。 |
 | Rust backend | [`09b-codegen-rust-backend.md`](09b-codegen-rust-backend.md) | Rust 类型、repository、`GameData` / `LazyGameData`、relation helper 与 text helper。 |
 | C++ backend | [`09c-codegen-cpp-backend.md`](09c-codegen-cpp-backend.md) | C++ header/source、namespace、ownership、`GameData` / `LazyGameData`、relation helper 与 text helper。 |
+| Unreal C++ backend | [`09c-codegen-cpp-backend.md#unreal-c-backend-规划`](09c-codegen-cpp-backend.md#unreal-c-backend-规划) | 规划中的 `cpp_unreal` 独立生成器、Unreal 容器模式、Blueprint 反射模式，以及与标准 C++ backend 的复用边界。 |
 | TypeScript backend | [`09d-codegen-typescript-backend.md`](09d-codegen-typescript-backend.md) | TypeScript interface/class、async/sync loading、`LazyGameData`、relation helper 与 text helper。 |
 | Runtime adapters | [`09e-codegen-runtime-adapters.md`](09e-codegen-runtime-adapters.md) | `runtime/` 标准 adapters、C++ CMake、TS packages、Rust templates、compliance fixtures。 |
 | Core model / IR / options | [`09f-codegen-core-model-and-options.md`](09f-codegen-core-model-and-options.md) | `CodeExportTarget` / `CodeExportInput`、测试专用 `GeneratedFile`、CodeModel IR、命名策略、类型映射和 string-backed / streaming 通用 writer。 |
@@ -167,6 +168,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 ### 9.4.1 当前实现状态摘要
 
 - Rust / C++ / TypeScript backend 均已实现 MVP。
+- Unreal C++ 规划为独立 `cpp_unreal` backend，尚未实现；不作为标准 `cpp` backend 的开关，以避免生成 public API 同时混用 `std::*` 和 Unreal API。
 - Eager loading 和 table-level `LazyGameData` 均已实现 MVP；lazy facade 保留 loader，首次访问 table/object 时加载并缓存。
 - TypeScript 已生成 `loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`；同步 API 要求 loader 同步返回 reader，遇到 Promise 应报错。
 - 生成代码使用逻辑 table name，不绑定某个 `targets.exports` runtime data export task 的真实 artifact path。
