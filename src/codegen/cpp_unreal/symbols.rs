@@ -21,6 +21,11 @@ pub(super) fn validate_generated_symbols(
         "lazy_game_data",
         "FLazyGameData",
     ));
+    type_symbols.push(GeneratedSymbol::new(
+        "Blueprint facade type",
+        "config_forge_blueprint_library",
+        names.blueprint_library_type_name()?,
+    ));
     for code_enum in &_model.enums {
         type_symbols.push(GeneratedSymbol::new(
             "enum type",
@@ -200,5 +205,31 @@ pub(super) fn validate_generated_symbols(
         ));
     }
     ensure_unique_generated_symbols("cpp_unreal", "FLazyGameData members", lazy_symbols)?;
+
+    let mut blueprint_symbols = Vec::new();
+    for table in &_model.tables {
+        if !matches!(table.kind, crate::codegen::CodeTableKind::Collection) {
+            continue;
+        }
+        for index in &table.indexes {
+            blueprint_symbols.push(GeneratedSymbol::new(
+                "Blueprint index lookup function",
+                &format!("{}.{}", table.name, index.name),
+                names.blueprint_index_function_name(table, index)?,
+            ));
+            if index.ordered {
+                blueprint_symbols.push(GeneratedSymbol::new(
+                    "Blueprint ordered range function",
+                    &format!("{}.{}", table.name, index.name),
+                    names.blueprint_range_index_function_name(table, index)?,
+                ));
+            }
+        }
+    }
+    ensure_unique_generated_symbols(
+        "cpp_unreal",
+        "Blueprint facade functions",
+        blueprint_symbols,
+    )?;
     Ok(())
 }

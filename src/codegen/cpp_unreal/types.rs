@@ -129,6 +129,38 @@ impl<'a> CppUnrealNames<'a> {
         self.identifier(&format!("range_by_{suffix}"), self.options.naming.function)
     }
 
+    pub(super) fn blueprint_library_type_name(&self) -> Result<String> {
+        Ok(format!(
+            "U{}BlueprintLibrary",
+            self.type_name("config_forge")?
+        ))
+    }
+
+    pub(super) fn blueprint_index_function_name(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+    ) -> Result<String> {
+        let prefix = if index.unique { "get" } else { "find" };
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(
+            &format!("{prefix}_{}_by_{suffix}", table.name),
+            self.options.naming.function,
+        )
+    }
+
+    pub(super) fn blueprint_range_index_function_name(
+        &self,
+        table: &CodeTable,
+        index: &CodeIndex,
+    ) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(
+            &format!("range_{}_by_{suffix}", table.name),
+            self.options.naming.function,
+        )
+    }
+
     pub(super) fn cpp_index_params(&self, index: &CodeIndex) -> Result<String> {
         index
             .fields

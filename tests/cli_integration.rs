@@ -3555,7 +3555,8 @@ fn write_cpp_unreal_core_minimal_shim(shim_dir: &std::path::Path) {
             #include <string>
             #include <unordered_map>
             #include <vector>
-
+            class UBlueprintFunctionLibrary {};
+            
             using int32 = std::int32_t;
             using int64 = std::int64_t;
             using uint32 = std::uint32_t;
@@ -3567,6 +3568,8 @@ fn write_cpp_unreal_core_minimal_shim(shim_dir: &std::path::Path) {
             #define USTRUCT(...)
             #define UPROPERTY(...)
             #define UENUM(...)
+            #define UCLASS(...)
+            #define UFUNCTION(...)
             #define GENERATED_BODY()
             using FString = std::string;
             inline uint32 HashCombine(uint32 Left, uint32 Right) { return Left ^ (Right + 0x9e3779b9U + (Left << 6) + (Left >> 2)); }
@@ -3582,6 +3585,7 @@ fn write_cpp_unreal_core_minimal_shim(shim_dir: &std::path::Path) {
             struct TArray : public std::vector<T> {
                 using std::vector<T>::vector;
                 void Add(const T& Value) { this->push_back(Value); }
+                void Reset() { this->clear(); }
                 void Reserve(std::size_t Count) { this->reserve(Count); }
                 int32 Num() const { return static_cast<int32>(this->size()); }
                 bool IsValidIndex(int32 Index) const { return Index >= 0 && static_cast<std::size_t>(Index) < this->size(); }
@@ -3628,6 +3632,12 @@ fn write_cpp_unreal_core_minimal_shim(shim_dir: &std::path::Path) {
         "#,
     )
     .expect("CoreMinimal shim should be written");
+    fs::create_dir_all(shim_dir.join("Kismet")).expect("Kismet shim dir should be created");
+    fs::write(
+        shim_dir.join("Kismet/BlueprintFunctionLibrary.h"),
+        "#pragma once\n",
+    )
+    .expect("BlueprintFunctionLibrary shim should be written");
 }
 
 fn command_exists(command: &str) -> bool {

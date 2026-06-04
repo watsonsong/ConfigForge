@@ -176,8 +176,85 @@ fn emits_blueprint_reflection_type_markers() {
     assert!(header.contains(
         "    UPROPERTY(BlueprintReadOnly, Category=\"Reference Config\")\n    int64 Id;"
     ));
+    assert!(header.contains("#include \"Kismet/BlueprintFunctionLibrary.h\""));
+    assert!(
+        header.contains("UCLASS()\nclass REFERENCE_GAME_CONFIG_API UConfigForgeBlueprintLibrary")
+    );
+    assert!(header.contains("UFUNCTION(BlueprintPure, Category=\"Reference Config\")"));
+    assert!(header.contains(
+        "static bool GetItemsById(const FItemsTable& Table, int64 Id, FItemsRow& OutRow);"
+    ));
+    assert!(header.contains("static void FindItemsByRarity(const FItemsTable& Table, EItemRarity Rarity, TArray<FItemsRow>& OutRows);"));
     assert!(!header.contains("std::"));
     assert!(!header.contains("std::optional"));
+
+    let source = generated_content(&files, "reference_game_config.cpp");
+    assert!(source.contains(
+        "bool UConfigForgeBlueprintLibrary::GetItemsById(const FItemsTable& Table, int64 Id, FItemsRow& OutRow)"
+    ));
+    assert!(source.contains("const FItemsRow* Row = Table.GetById(Id);"));
+    assert!(source.contains("OutRow = *Row;"));
+    assert!(source.contains(
+        "void UConfigForgeBlueprintLibrary::FindItemsByRarity(const FItemsTable& Table, EItemRarity Rarity, TArray<FItemsRow>& OutRows)"
+    ));
+    assert!(source.contains("TArray<const FItemsRow*> Rows = Table.FindByRarity(Rarity);"));
+}
+
+#[test]
+fn emits_blueprint_facade_for_ordered_range_queries() {
+    let meta = crate::meta::MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "level_curves"
+            source = "level_curves.csv"
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "experience"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_level"
+            fields = ["level"]
+            unique = false
+            ordered = true
+        "#,
+    )
+    .expect("meta should parse");
+    let config: CodegenTaskConfig = toml::from_str(
+        r#"
+            language = "cpp_unreal"
+            output = "Generated/Unreal"
+            file_name = "reference_game_config"
+
+            [cpp_unreal]
+            support = "blueprint"
+            api_macro = "REFERENCE_GAME_CONFIG_API"
+            blueprint_category = "Reference Config"
+        "#,
+    )
+    .expect("config should parse");
+
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target = CodeExportTarget::from_task(config, &CppUnrealCodeGenerator).expect("target");
+    let files = CppUnrealCodeGenerator
+        .generate(&input)
+        .expect("cpp_unreal blueprint code");
+    let header = generated_content(&files, "reference_game_config.h");
+    let source = generated_content(&files, "reference_game_config.cpp");
+
+    assert!(header.contains("static void RangeLevelCurvesByLevel(const FLevelCurvesTable& Table, int64 Lower, int64 Upper, TArray<FLevelCurvesRow>& OutRows);"));
+    assert!(source.contains(
+        "void UConfigForgeBlueprintLibrary::RangeLevelCurvesByLevel(const FLevelCurvesTable& Table, int64 Lower, int64 Upper, TArray<FLevelCurvesRow>& OutRows)"
+    ));
+    assert!(
+        source.contains("TArray<const FLevelCurvesRow*> Rows = Table.RangeByLevel(Lower, Upper);")
+    );
 }
 
 #[test]

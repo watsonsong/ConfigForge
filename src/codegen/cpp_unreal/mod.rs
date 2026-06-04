@@ -176,6 +176,7 @@ fn render_header_file(
     content.raw("#pragma once\n\n");
     content.raw("#include \"CoreMinimal.h\"\n");
     if matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        content.raw("#include \"Kismet/BlueprintFunctionLibrary.h\"\n");
         content.raw_fmt(format_args!(
             "#include {:?}\n",
             format!("{}.generated.h", input.target.file_stem("generated"))
@@ -225,6 +226,7 @@ fn render_header_file(
     content.raw("    void LinkAll() const;\n");
     content.raw("};\n\n");
     render_lazy_game_data_declaration(content, model, &names)?;
+    render_blueprint_facade_declaration(content, model, &names, options)?;
     render_namespace_close(content, input, options);
     Ok(())
 }
@@ -260,6 +262,35 @@ fn render_lazy_game_data_declaration(
         ));
     }
     content.raw("};\n");
+    Ok(())
+}
+
+fn render_blueprint_facade_declaration(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &CppUnrealNames<'_>,
+    options: &CppUnrealCodegenOptions,
+) -> Result<()> {
+    if !matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        return Ok(());
+    }
+    let library_type = names.blueprint_library_type_name()?;
+    content.raw("UCLASS()\n");
+    content.raw_fmt(format_args!(
+        "class {} : public UBlueprintFunctionLibrary {{\n",
+        api_qualified_type_name(&library_type, options)
+    ));
+    content.raw("    GENERATED_BODY()\n\n");
+    content.raw("public:\n");
+    for table in &model.tables {
+        if !matches!(table.kind, super::CodeTableKind::Collection) {
+            continue;
+        }
+        for index in &table.indexes {
+            render_blueprint_index_function_declaration(content, table, index, names, options)?;
+        }
+    }
+    content.raw("};\n\n");
     Ok(())
 }
 
@@ -337,14 +368,18 @@ fn render_generated_body(content: &mut impl CodeWriterLike, options: &CppUnrealC
 
 fn render_blueprint_property(content: &mut impl CodeWriterLike, options: &CppUnrealCodegenOptions) {
     if matches!(options.support, CppUnrealSupportLevel::Blueprint) {
-        let category = options
-            .blueprint_category
-            .as_deref()
-            .unwrap_or("ConfigForge");
+        let category = blueprint_category(options);
         content.raw_fmt(format_args!(
             "    UPROPERTY(BlueprintReadOnly, Category={category:?})\n"
         ));
     }
+}
+
+fn blueprint_category(options: &CppUnrealCodegenOptions) -> &str {
+    options
+        .blueprint_category
+        .as_deref()
+        .unwrap_or("ConfigForge")
 }
 
 fn render_enum_declaration(
@@ -679,6 +714,46 @@ fn render_index_function_declaration(
     Ok(())
 }
 
+fn render_blueprint_index_function_declaration(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    index: &CodeIndex,
+    names: &CppUnrealNames<'_>,
+    options: &CppUnrealCodegenOptions,
+) -> Result<()> {
+    let category = blueprint_category(options);
+    let row_type = names.row_type_name(&table.name)?;
+    let table_type = names.repository_type_name(&table.name)?;
+    let params = names.cpp_index_params(index)?;
+    let function_name = names.blueprint_index_function_name(table, index)?;
+    if index.unique {
+        content.raw_fmt(format_args!(
+            "    UFUNCTION(BlueprintPure, Category={category:?})\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    static bool {function_name}(const {table_type}& Table, {params}, {row_type}& OutRow);\n"
+        ));
+    } else {
+        content.raw_fmt(format_args!(
+            "    UFUNCTION(BlueprintPure, Category={category:?})\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    static void {function_name}(const {table_type}& Table, {params}, TArray<{row_type}>& OutRows);\n"
+        ));
+    }
+    if index.ordered {
+        let range_name = names.blueprint_range_index_function_name(table, index)?;
+        let range_params = names.cpp_range_index_params(table, index)?;
+        content.raw_fmt(format_args!(
+            "    UFUNCTION(BlueprintPure, Category={category:?})\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    static void {range_name}(const {table_type}& Table, {range_params}, TArray<{row_type}>& OutRows);\n"
+        ));
+    }
+    Ok(())
+}
+
 fn render_source_file(
     generator: &dyn CodeGenerator,
     content: &mut impl CodeWriterLike,
@@ -707,6 +782,7 @@ fn render_source_file(
     }
     render_game_data_load_source(content, &model, &names)?;
     render_lazy_game_data_source(content, &model, &names)?;
+    render_blueprint_facade_source(content, &model, &names, options)?;
     render_namespace_close(content, input, options);
     Ok(())
 }
@@ -1472,6 +1548,93 @@ fn render_lazy_game_data_source(
     content.raw("    return TConfigForgeResult<FGameData>::Success(Data);\n");
     content.raw("}\n\n");
     Ok(())
+}
+
+fn render_blueprint_facade_source(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &CppUnrealNames<'_>,
+    options: &CppUnrealCodegenOptions,
+) -> Result<()> {
+    if !matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        return Ok(());
+    }
+    for table in &model.tables {
+        if !matches!(table.kind, super::CodeTableKind::Collection) {
+            continue;
+        }
+        for index in &table.indexes {
+            render_blueprint_index_function_source(content, table, index, names)?;
+        }
+    }
+    Ok(())
+}
+
+fn render_blueprint_index_function_source(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    index: &CodeIndex,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    let library_type = names.blueprint_library_type_name()?;
+    let row_type = names.row_type_name(&table.name)?;
+    let table_type = names.repository_type_name(&table.name)?;
+    let params = names.cpp_index_params(index)?;
+    let args = index_argument_names(index, names)?;
+    let function_name = names.blueprint_index_function_name(table, index)?;
+    let native_name = names.index_function_name(index)?;
+    if index.unique {
+        content.raw_fmt(format_args!(
+            "bool {library_type}::{function_name}(const {table_type}& Table, {params}, {row_type}& OutRow) {{\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    const {row_type}* Row = Table.{native_name}({args});\n"
+        ));
+        content.raw("    if (Row == nullptr) { return false; }\n");
+        content.raw("    OutRow = *Row;\n");
+        content.raw("    return true;\n");
+        content.raw("}\n\n");
+    } else {
+        content.raw_fmt(format_args!(
+            "void {library_type}::{function_name}(const {table_type}& Table, {params}, TArray<{row_type}>& OutRows) {{\n"
+        ));
+        content.raw("    OutRows.Reset();\n");
+        content.raw_fmt(format_args!(
+            "    TArray<const {row_type}*> Rows = Table.{native_name}({args});\n"
+        ));
+        content.raw("    OutRows.Reserve(Rows.Num());\n");
+        content.raw("    for (const auto* Row : Rows) {\n");
+        content.raw("        if (Row != nullptr) { OutRows.Add(*Row); }\n");
+        content.raw("    }\n");
+        content.raw("}\n\n");
+    }
+    if index.ordered {
+        let range_name = names.blueprint_range_index_function_name(table, index)?;
+        let native_range_name = names.range_index_function_name(index)?;
+        let range_params = names.cpp_range_index_params(table, index)?;
+        content.raw_fmt(format_args!(
+            "void {library_type}::{range_name}(const {table_type}& Table, {range_params}, TArray<{row_type}>& OutRows) {{\n"
+        ));
+        content.raw("    OutRows.Reset();\n");
+        content.raw_fmt(format_args!(
+            "    TArray<const {row_type}*> Rows = Table.{native_range_name}(Lower, Upper);\n"
+        ));
+        content.raw("    OutRows.Reserve(Rows.Num());\n");
+        content.raw("    for (const auto* Row : Rows) {\n");
+        content.raw("        if (Row != nullptr) { OutRows.Add(*Row); }\n");
+        content.raw("    }\n");
+        content.raw("}\n\n");
+    }
+    Ok(())
+}
+
+fn index_argument_names(index: &CodeIndex, names: &CppUnrealNames<'_>) -> Result<String> {
+    index
+        .fields
+        .iter()
+        .map(|field| names.field_name(field))
+        .collect::<Result<Vec<_>>>()
+        .map(|args| args.join(", "))
 }
 
 fn configured_namespace<'a>(
