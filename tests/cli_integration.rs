@@ -101,6 +101,42 @@ fn builds_cpp_unreal_code_only_target() {
     assert!(header.contains("#include \"CoreMinimal.h\""));
     assert!(header.contains("namespace ReferenceGameConfig"));
     assert!(source.contains("#include \"reference_game_config.h\""));
+
+    if command_exists("c++") {
+        let shim_dir = temp_dir.path().join("unreal_shim");
+        fs::create_dir_all(&shim_dir).expect("shim dir should be created");
+        fs::write(
+            shim_dir.join("CoreMinimal.h"),
+            r#"
+                #pragma once
+                #include <cstdint>
+                #include <optional>
+                #include <string>
+                #include <vector>
+
+                using int64 = std::int64_t;
+                using TCHAR = char;
+                #define TEXT(value) value
+                using FString = std::string;
+                template <typename T>
+                using TArray = std::vector<T>;
+                template <typename T>
+                using TOptional = std::optional<T>;
+            "#,
+        )
+        .expect("CoreMinimal shim should be written");
+        let output = StdCommand::new("c++")
+            .arg("-std=c++17")
+            .arg("-fsyntax-only")
+            .arg(out_dir.join("reference_game_config.cpp"))
+            .arg("-I")
+            .arg(&out_dir)
+            .arg("-I")
+            .arg(&shim_dir)
+            .output()
+            .expect("cpp_unreal syntax smoke should run");
+        assert_command_success(output, "cpp_unreal syntax smoke");
+    }
 }
 
 #[test]

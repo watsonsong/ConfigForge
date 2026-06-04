@@ -123,10 +123,107 @@ fn emits_header_and_source_skeleton() {
     assert!(header.contains("#pragma once"));
     assert!(header.contains("#include \"CoreMinimal.h\""));
     assert!(header.contains("namespace ReferenceGameConfig"));
-    assert!(header.contains("struct FConfigForgeUnrealGameData"));
+    assert!(header.contains("enum class EItemRarity"));
+    assert!(header.contains("struct FRewardInfo"));
+    assert!(header.contains("int64 Count;"));
+    assert!(header.contains("struct FItemsRow"));
+    assert!(header.contains("int64 Id;"));
+    assert!(header.contains("FString DisplayName;"));
+    assert!(header.contains("EItemRarity Rarity;"));
+    assert!(header.contains("struct FItemsTable"));
+    assert!(header.contains("TArray<FItemsRow> Rows;"));
+    assert!(header.contains("struct FGameData"));
+    assert!(header.contains("FItemsTable Items;"));
     assert!(header.contains("TEXT(\"ConfigForge\")"));
+    assert!(!header.contains("std::vector"));
+    assert!(!header.contains("std::unordered_map"));
+    assert!(!header.contains("std::string"));
+    assert!(!source.contains("throw std::runtime_error"));
     assert!(source.contains("#include \"generated.h\""));
     assert!(source.contains("cpp_unreal source skeleton"));
+}
+
+#[test]
+fn maps_unreal_container_and_optional_types() {
+    let meta = crate::meta::MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "RewardInfo"
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+            required = true
+
+            [[enums]]
+            name = "ItemRarity"
+
+            [[enums.values]]
+            name = "common"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "tradable"
+            type = "bool"
+            required = true
+
+            [[tables.fields]]
+            name = "subtitle"
+            type = "text"
+            required = false
+
+            [[tables.fields]]
+            name = "rewards"
+            type = "list<int>"
+            required = true
+        "#,
+    )
+    .expect("meta should parse");
+
+    let files = CppUnrealCodeGenerator
+        .generate(&input_for(&meta, LANGUAGE))
+        .expect("cpp_unreal code");
+    let header = generated_content(&files, "generated.h");
+
+    assert!(header.contains("bool bTradable;"));
+    assert!(header.contains("TOptional<FString> Subtitle;"));
+    assert!(header.contains("TArray<int64> Rewards;"));
+}
+
+#[test]
+fn rejects_unreal_generated_field_collisions() {
+    let meta = crate::meta::MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "flags"
+            source = "flags.csv"
+
+            [[tables.fields]]
+            name = "enabled"
+            type = "bool"
+            required = true
+
+            [[tables.fields]]
+            name = "Enabled"
+            type = "bool"
+            required = true
+        "#,
+    )
+    .expect("meta should parse");
+
+    let error = CppUnrealCodeGenerator
+        .generate(&input_for(&meta, LANGUAGE))
+        .unwrap_err();
+
+    assert!(format!("{error}").contains("duplicate generated identifier `bEnabled`"));
 }
 
 #[test]

@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
-    CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeGenerator, CodeModel,
-    CodeWriterConfig, CodeWriterLike, NamingConfig, build_code_model,
+    CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeGenerator, CodeModel,
+    CodeStruct, CodeTable, CodeWriterConfig, CodeWriterLike, NamingConfig, build_code_model,
     ir::require_non_empty_index_fields,
 };
 
@@ -69,7 +69,7 @@ impl CodeGenerator for CppUnrealCodeGenerator {
         let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
         require_non_empty_index_fields(&model)?;
         let options = cpp_unreal_options(input)?;
-        let names = CppUnrealNames;
+        let names = CppUnrealNames::new(&input.target.options);
         validate_generated_symbols(&model, &names)?;
 
         let header_file_name = input.target.single_file_name("generated", "h");
@@ -95,7 +95,7 @@ impl CodeGenerator for CppUnrealCodeGenerator {
         let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
         require_non_empty_index_fields(&model)?;
         let options = cpp_unreal_options(input)?;
-        let names = CppUnrealNames;
+        let names = CppUnrealNames::new(&input.target.options);
         validate_generated_symbols(&model, &names)?;
 
         let header_file_name = input.target.single_file_name("generated", "h");
@@ -162,17 +162,107 @@ fn render_header_file(
     generator: &dyn CodeGenerator,
     content: &mut impl CodeWriterLike,
     input: &CodeExportInput<'_>,
-    _model: &CodeModel,
+    model: &CodeModel,
     options: &CppUnrealCodegenOptions,
 ) -> Result<()> {
+    let names = CppUnrealNames::new(&input.target.options);
     write_file_header(generator, content, input);
     content.raw("#pragma once\n\n");
     content.raw("#include \"CoreMinimal.h\"\n\n");
     render_namespace_open(content, input, options);
-    content.raw("struct FConfigForgeUnrealGameData {\n");
+    for code_enum in &model.enums {
+        render_enum_declaration(content, code_enum, &names)?;
+    }
+    for code_struct in &model.structs {
+        render_struct_declaration(content, code_struct, &names)?;
+    }
+    for table in &model.tables {
+        render_table_declaration(content, table, &names)?;
+    }
+    content.raw_fmt(format_args!(
+        "struct {} {{\n",
+        names.struct_type_name("game_data")?
+    ));
     content.raw("    static constexpr const TCHAR* Generator = TEXT(\"ConfigForge\");\n");
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "    {} {};\n",
+            names.table_data_type_name(table)?,
+            names.member_name(&table.name)?
+        ));
+    }
     content.raw("};\n");
     render_namespace_close(content, input, options);
+    Ok(())
+}
+
+fn render_enum_declaration(
+    content: &mut impl CodeWriterLike,
+    code_enum: &CodeEnum,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    content.raw_fmt(format_args!(
+        "enum class {} {{\n",
+        names.enum_type_name(&code_enum.name)?
+    ));
+    for value in &code_enum.values {
+        content.raw_fmt(format_args!(
+            "    {},\n",
+            names.enum_variant_name(&value.name)?
+        ));
+    }
+    content.raw("};\n\n");
+    Ok(())
+}
+
+fn render_struct_declaration(
+    content: &mut impl CodeWriterLike,
+    code_struct: &CodeStruct,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    content.raw_fmt(format_args!(
+        "struct {} {{\n",
+        names.struct_type_name(&code_struct.name)?
+    ));
+    for field in &code_struct.fields {
+        content.raw_fmt(format_args!(
+            "    {} {};\n",
+            names.cpp_field_type(field)?,
+            names.field_name(field)?
+        ));
+    }
+    content.raw("};\n\n");
+    Ok(())
+}
+
+fn render_table_declaration(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    content.raw_fmt(format_args!(
+        "struct {} {{\n",
+        names.row_type_name(&table.name)?
+    ));
+    for field in &table.fields {
+        content.raw_fmt(format_args!(
+            "    {} {};\n",
+            names.cpp_field_type(field)?,
+            names.field_name(field)?
+        ));
+    }
+    content.raw("};\n\n");
+    if matches!(table.kind, super::CodeTableKind::Collection) {
+        content.raw_fmt(format_args!(
+            "struct {} {{\n",
+            names.repository_type_name(&table.name)?
+        ));
+        content.raw_fmt(format_args!(
+            "    TArray<{}> Rows;\n",
+            names.row_type_name(&table.name)?
+        ));
+        content.raw("};\n\n");
+    }
     Ok(())
 }
 

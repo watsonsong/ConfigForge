@@ -4,11 +4,77 @@
 use crate::Result;
 
 use super::types::CppUnrealNames;
-use crate::codegen::CodeModel;
+use crate::codegen::{CodeModel, GeneratedSymbol, ensure_unique_generated_symbols};
 
 pub(super) fn validate_generated_symbols(
     _model: &CodeModel,
-    _names: &CppUnrealNames,
+    names: &CppUnrealNames<'_>,
 ) -> Result<()> {
+    let mut type_symbols = Vec::new();
+    type_symbols.push(GeneratedSymbol::new(
+        "root game data type",
+        "game_data",
+        names.struct_type_name("game_data")?,
+    ));
+    for code_enum in &_model.enums {
+        type_symbols.push(GeneratedSymbol::new(
+            "enum type",
+            &code_enum.name,
+            names.enum_type_name(&code_enum.name)?,
+        ));
+    }
+    for code_struct in &_model.structs {
+        type_symbols.push(GeneratedSymbol::new(
+            "struct type",
+            &code_struct.name,
+            names.struct_type_name(&code_struct.name)?,
+        ));
+    }
+    for table in &_model.tables {
+        type_symbols.push(GeneratedSymbol::new(
+            "row type",
+            &table.name,
+            names.row_type_name(&table.name)?,
+        ));
+        if matches!(table.kind, crate::codegen::CodeTableKind::Collection) {
+            type_symbols.push(GeneratedSymbol::new(
+                "table repository type",
+                &table.name,
+                names.repository_type_name(&table.name)?,
+            ));
+        }
+    }
+    ensure_unique_generated_symbols("cpp_unreal", "top-level types", type_symbols)?;
+
+    for code_struct in &_model.structs {
+        let mut field_symbols = Vec::new();
+        for field in &code_struct.fields {
+            field_symbols.push(GeneratedSymbol::new(
+                "field",
+                &field.name,
+                names.field_name(field)?,
+            ));
+        }
+        ensure_unique_generated_symbols(
+            "cpp_unreal",
+            &format!("struct `{}`", code_struct.name),
+            field_symbols,
+        )?;
+    }
+    for table in &_model.tables {
+        let mut field_symbols = Vec::new();
+        for field in &table.fields {
+            field_symbols.push(GeneratedSymbol::new(
+                "field",
+                &field.name,
+                names.field_name(field)?,
+            ));
+        }
+        ensure_unique_generated_symbols(
+            "cpp_unreal",
+            &format!("table `{}`", table.name),
+            field_symbols,
+        )?;
+    }
     Ok(())
 }
