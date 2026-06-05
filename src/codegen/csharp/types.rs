@@ -119,6 +119,10 @@ impl CSharpNames {
         self.identifier(name, self.naming.field)
     }
 
+    pub(super) fn local_name(&self, name: &str) -> Result<String> {
+        self.identifier(name, crate::codegen::CaseStyle::CamelCase)
+    }
+
     pub(super) fn csharp_type(&self, code_type: &CodeTypeRef) -> Result<String> {
         Ok(match code_type {
             CodeTypeRef::Int => "long".to_owned(),
@@ -132,11 +136,55 @@ impl CSharpNames {
 
     pub(super) fn csharp_field_type(&self, field: &CodeField) -> Result<String> {
         let base_type = self.csharp_type(&field.code_type)?;
-        if field.required || !self.nullable {
+        if field.required {
             Ok(base_type)
-        } else {
+        } else if self.is_value_type(&field.code_type) || self.nullable {
             Ok(format!("{base_type}?"))
+        } else {
+            Ok(base_type)
         }
+    }
+
+    pub(super) fn is_value_type(&self, code_type: &CodeTypeRef) -> bool {
+        matches!(
+            code_type,
+            CodeTypeRef::Int | CodeTypeRef::Float | CodeTypeRef::Bool | CodeTypeRef::Enum { .. }
+        )
+    }
+
+    pub(super) fn read_value_function(&self, code_type: &CodeTypeRef) -> Result<String> {
+        Ok(match code_type {
+            CodeTypeRef::Int => "ConfigForgeRuntimeReader.ReadIntValue".to_owned(),
+            CodeTypeRef::Float => "ConfigForgeRuntimeReader.ReadFloatValue".to_owned(),
+            CodeTypeRef::Bool => "ConfigForgeRuntimeReader.ReadBoolValue".to_owned(),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                "ConfigForgeRuntimeReader.ReadStringValue".to_owned()
+            }
+            CodeTypeRef::Enum { name } => format!(
+                "ConfigForgeRuntimeReader.Read{}Value",
+                self.type_name(name)?
+            ),
+            CodeTypeRef::Struct { name } => format!("{}Reader.Read", self.type_name(name)?),
+            CodeTypeRef::List(element) => format!(
+                "reader => ConfigForgeRuntimeReader.ReadListValue(reader, {})",
+                self.read_value_function(element)?
+            ),
+        })
+    }
+
+    pub(super) fn read_field_expression(&self, field: &CodeField) -> Result<String> {
+        let helper = if field.required {
+            "ReadRequiredField"
+        } else if self.is_value_type(&field.code_type) {
+            "ReadOptionalStructField"
+        } else {
+            "ReadOptionalClassField"
+        };
+        Ok(format!(
+            "ConfigForgeRuntimeReader.{helper}(reader, {:?}, {})",
+            field.name,
+            self.read_value_function(&field.code_type)?
+        ))
     }
 
     pub(super) fn field_initializer(&self, field: &CodeField) -> Result<String> {

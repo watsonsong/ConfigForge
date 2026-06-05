@@ -111,6 +111,62 @@ fn generate_returns_single_csharp_file() {
 }
 
 #[test]
+fn emits_runtime_reader_contract_and_game_data_load() {
+    let meta = linked_fixture();
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = CSharpCodeGenerator.generate(&input).expect("csharp code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public interface IConfigForgeRuntimeDataReader"));
+    assert!(content.contains("public interface IConfigForgeRuntimeDataLoader"));
+    assert!(content.contains("void EnterRequiredField(string name);"));
+    assert!(content.contains("bool EnterOptionalField(string name);"));
+    assert!(content.contains("int ReadRowCount();"));
+    assert!(content.contains("int ReadListLength();"));
+    assert!(content.contains("public static T ReadRequiredField<T>"));
+    assert!(content.contains("public static T? ReadOptionalClassField<T>"));
+    assert!(content.contains("public static T[] ReadListValue<T>"));
+    assert!(content.contains("internal static partial class ItemsRowReader"));
+    assert!(content.contains("Id = ConfigForgeRuntimeReader.ReadRequiredField(reader, \"id\", ConfigForgeRuntimeReader.ReadIntValue)"));
+    assert!(content.contains("public const string DataFile = \"items\";"));
+    assert!(
+        content.contains("internal static ItemsTable Load(IConfigForgeRuntimeDataLoader loader)")
+    );
+    assert!(content.contains("var rowCount = reader.ReadRowCount();"));
+    assert!(content.contains("rows[rowIndex] = ItemsRowReader.Read(reader);"));
+    assert!(content.contains("public static GameData Load(IConfigForgeRuntimeDataLoader loader)"));
+    assert!(content.contains("ItemsTable.Load(loader)"));
+}
+
+#[test]
+fn emits_object_table_as_loaded_property_without_repository() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+            required = true
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = CSharpCodeGenerator.generate(&input).expect("csharp code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public partial class GameConfigRow"));
+    assert!(!content.contains("class GameConfigTable"));
+    assert!(content.contains("public GameConfigRow GameConfig { get; }"));
+    assert!(content.contains("GameConfigRow.Load(loader)"));
+}
+
+#[test]
 fn emits_csharp_types_and_nullable_field_mapping() {
     let meta = csharp_type_mapping_fixture();
     let input = input_for(&meta, LANGUAGE);

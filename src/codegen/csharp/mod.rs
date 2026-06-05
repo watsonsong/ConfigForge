@@ -176,9 +176,7 @@ fn render_csharp_code(
     }
     content.raw("using System;\n\n");
     content.raw_fmt(format_args!("namespace {}\n{{\n", names.namespace()));
-    content.raw("    public sealed class ConfigForgeRuntimeException : Exception\n    {\n");
-    content.raw("        public ConfigForgeRuntimeException(string message) : base(message) { }\n");
-    content.raw("    }\n\n");
+    render_runtime_contract(content, &model.enums, &names)?;
     let partial = if options.emit_partial { " partial" } else { "" };
 
     for code_enum in &model.enums {
@@ -205,6 +203,12 @@ fn render_csharp_code(
             &code_struct.fields,
             &names,
         )?;
+        render_read_method(
+            content,
+            &names.type_name(&code_struct.name)?,
+            &code_struct.fields,
+            &names,
+        )?;
     }
 
     for table in &model.tables {
@@ -220,6 +224,12 @@ fn render_csharp_code(
                 &fragment.fields,
                 &names,
             )?;
+            render_read_method(
+                content,
+                &names.fragment_type_name(&table.name, &fragment.name)?,
+                &fragment.fields,
+                &names,
+            )?;
         }
         render_csharp_row_class(
             content,
@@ -229,22 +239,79 @@ fn render_csharp_code(
             table,
             &names,
         )?;
+        render_row_read_method(content, &names.row_type_name(&table.name)?, table, &names)?;
         if table.kind == CodeTableKind::Collection {
-            content.raw_fmt(format_args!(
-                "    {}{} class {}\n    {{\n    }}\n\n",
-                names.access_modifier(),
-                partial,
-                names.repository_type_name(&table.name)?
-            ));
+            render_table_class(content, names.access_modifier(), partial, table, &names)?;
         }
     }
 
     content.raw_fmt(format_args!(
-        "    {}{} class {}\n    {{\n    }}\n\n",
+        "    {}{} class {}\n    {{\n",
         names.access_modifier(),
         partial,
         names.game_data_class_name()
     ));
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "        public {} {} {{ get; }}\n",
+            match table.kind {
+                CodeTableKind::Object => names.row_type_name(&table.name)?,
+                CodeTableKind::Collection => names.repository_type_name(&table.name)?,
+            },
+            names.property_name(&table.name)?
+        ));
+    }
+    content.raw("\n        private GameData(\n");
+    for (index, table) in model.tables.iter().enumerate() {
+        let comma = if index + 1 == model.tables.len() {
+            ""
+        } else {
+            ","
+        };
+        content.raw_fmt(format_args!(
+            "            {} {}{}\n",
+            match table.kind {
+                CodeTableKind::Object => names.row_type_name(&table.name)?,
+                CodeTableKind::Collection => names.repository_type_name(&table.name)?,
+            },
+            names.local_name(&table.name)?,
+            comma
+        ));
+    }
+    content.raw("        )\n        {\n");
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "            {} = {};\n",
+            names.property_name(&table.name)?,
+            names.local_name(&table.name)?
+        ));
+    }
+    content.raw("        }\n\n");
+    content.raw_fmt(format_args!(
+        "        public static {} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            return new {}(\n",
+        names.game_data_class_name(),
+        names.game_data_class_name()
+    ));
+    for (index, table) in model.tables.iter().enumerate() {
+        let comma = if index + 1 == model.tables.len() {
+            ""
+        } else {
+            ","
+        };
+        match table.kind {
+            CodeTableKind::Object => content.raw_fmt(format_args!(
+                "                {}.Load(loader){}\n",
+                names.row_type_name(&table.name)?,
+                comma
+            )),
+            CodeTableKind::Collection => content.raw_fmt(format_args!(
+                "                {}.Load(loader){}\n",
+                names.repository_type_name(&table.name)?,
+                comma
+            )),
+        }
+    }
+    content.raw("            );\n        }\n    }\n\n");
     content.raw_fmt(format_args!(
         "    {}{} class {}\n    {{\n    }}\n",
         names.access_modifier(),
@@ -252,6 +319,62 @@ fn render_csharp_code(
         names.lazy_game_data_class_name()
     ));
     content.raw("}\n");
+    Ok(())
+}
+
+fn render_runtime_contract(
+    content: &mut impl CodeWriterLike,
+    enums: &[super::CodeEnum],
+    names: &CSharpNames,
+) -> Result<()> {
+    content.raw("    public interface IConfigForgeRuntimeDataLoader\n    {\n");
+    content.raw("        IConfigForgeRuntimeDataReader Open(string path);\n");
+    content.raw("    }\n\n");
+    content.raw("    public interface IConfigForgeRuntimeDataReader\n    {\n");
+    content.raw("        void EnterRequiredField(string name);\n");
+    content.raw("        bool EnterOptionalField(string name);\n");
+    content.raw("        void ExitField();\n");
+    content.raw("        int ReadRowCount();\n");
+    content.raw("        void EnterRow(int index);\n");
+    content.raw("        void ExitRow();\n");
+    content.raw("        int ReadListLength();\n");
+    content.raw("        void EnterListElement(int index);\n");
+    content.raw("        void ExitListElement();\n");
+    content.raw("        long ReadInt();\n");
+    content.raw("        double ReadFloat();\n");
+    content.raw("        bool ReadBool();\n");
+    content.raw("        string ReadString();\n");
+    content.raw("    }\n\n");
+    content.raw("    public sealed class ConfigForgeRuntimeException : Exception\n    {\n");
+    content.raw("        public ConfigForgeRuntimeException(string message) : base(message) { }\n");
+    content.raw("    }\n\n");
+    content.raw("    internal static class ConfigForgeRuntimeReader\n    {\n");
+    content.raw("        public static long ReadIntValue(IConfigForgeRuntimeDataReader reader) => reader.ReadInt();\n");
+    content.raw("        public static double ReadFloatValue(IConfigForgeRuntimeDataReader reader) => reader.ReadFloat();\n");
+    content.raw("        public static bool ReadBoolValue(IConfigForgeRuntimeDataReader reader) => reader.ReadBool();\n");
+    content.raw("        public static string ReadStringValue(IConfigForgeRuntimeDataReader reader) => reader.ReadString();\n\n");
+    for code_enum in enums {
+        let type_name = names.type_name(&code_enum.name)?;
+        content.raw_fmt(format_args!(
+            "        public static {type_name} Read{type_name}Value(IConfigForgeRuntimeDataReader reader)\n        {{\n            var value = reader.ReadString();\n            return value switch\n            {{\n"
+        ));
+        for value in &code_enum.values {
+            content.raw_fmt(format_args!(
+                "                {:?} => {}.{},\n",
+                value.name,
+                type_name,
+                names.enum_value_name(&value.name)?
+            ));
+        }
+        content.raw_fmt(format_args!(
+            "                _ => throw new ConfigForgeRuntimeException($\"Unknown {type_name} value '{{value}}'\"),\n            }};\n        }}\n\n"
+        ));
+    }
+    content.raw("        public static T ReadRequiredField<T>(IConfigForgeRuntimeDataReader reader, string name, Func<IConfigForgeRuntimeDataReader, T> read)\n        {\n            reader.EnterRequiredField(name);\n            try\n            {\n                return read(reader);\n            }\n            finally\n            {\n                reader.ExitField();\n            }\n        }\n\n");
+    content.raw("        public static T? ReadOptionalClassField<T>(IConfigForgeRuntimeDataReader reader, string name, Func<IConfigForgeRuntimeDataReader, T> read) where T : class\n        {\n            if (!reader.EnterOptionalField(name))\n            {\n                return null;\n            }\n            try\n            {\n                return read(reader);\n            }\n            finally\n            {\n                reader.ExitField();\n            }\n        }\n\n");
+    content.raw("        public static T? ReadOptionalStructField<T>(IConfigForgeRuntimeDataReader reader, string name, Func<IConfigForgeRuntimeDataReader, T> read) where T : struct\n        {\n            if (!reader.EnterOptionalField(name))\n            {\n                return null;\n            }\n            try\n            {\n                return read(reader);\n            }\n            finally\n            {\n                reader.ExitField();\n            }\n        }\n\n");
+    content.raw("        public static T[] ReadListValue<T>(IConfigForgeRuntimeDataReader reader, Func<IConfigForgeRuntimeDataReader, T> read)\n        {\n            var length = reader.ReadListLength();\n            var values = new T[length];\n            for (var index = 0; index < length; index++)\n            {\n                reader.EnterListElement(index);\n                try\n                {\n                    values[index] = read(reader);\n                }\n                finally\n                {\n                    reader.ExitListElement();\n                }\n            }\n            return values;\n        }\n");
+    content.raw("    }\n\n");
     Ok(())
 }
 
@@ -275,6 +398,26 @@ fn render_csharp_class(
         ));
     }
     content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_read_method(
+    content: &mut impl CodeWriterLike,
+    type_name: &str,
+    fields: &[CodeField],
+    names: &CSharpNames,
+) -> Result<()> {
+    content.raw_fmt(format_args!(
+        "    internal static partial class {type_name}Reader\n    {{\n        public static {type_name} Read(IConfigForgeRuntimeDataReader reader)\n        {{\n            return new {type_name}\n            {{\n"
+    ));
+    for field in fields {
+        content.raw_fmt(format_args!(
+            "                {} = {},\n",
+            names.property_name(&field.name)?,
+            names.read_field_expression(field)?
+        ));
+    }
+    content.raw("            };\n        }\n    }\n\n");
     Ok(())
 }
 
@@ -304,6 +447,66 @@ fn render_csharp_row_class(
             names.property_name(&fragment.name)?
         ));
     }
+    if table.kind == CodeTableKind::Object {
+        content.raw_fmt(format_args!(
+            "\n        internal const string DataFile = {:?};\n\n        internal static {type_name} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var reader = loader.Open(DataFile);\n            return {type_name}Reader.Read(reader);\n        }}\n",
+            table.data_file
+        ));
+    }
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_row_read_method(
+    content: &mut impl CodeWriterLike,
+    type_name: &str,
+    table: &super::CodeTable,
+    names: &CSharpNames,
+) -> Result<()> {
+    content.raw_fmt(format_args!(
+        "    internal static partial class {type_name}Reader\n    {{\n        public static {type_name} Read(IConfigForgeRuntimeDataReader reader)\n        {{\n            return new {type_name}\n            {{\n"
+    ));
+    for field in &table.fields {
+        content.raw_fmt(format_args!(
+            "                {} = {},\n",
+            names.property_name(&field.name)?,
+            names.read_field_expression(field)?
+        ));
+    }
+    for fragment in &table.fragments {
+        content.raw_fmt(format_args!(
+            "                {} = ConfigForgeRuntimeReader.ReadRequiredField(reader, {:?}, {}Reader.Read),\n",
+            names.property_name(&fragment.name)?,
+            fragment.name,
+            names.fragment_payload_type_name(table, fragment)?
+        ));
+    }
+    content.raw("            };\n        }\n    }\n\n");
+    Ok(())
+}
+
+fn render_table_class(
+    content: &mut impl CodeWriterLike,
+    access_modifier: &str,
+    partial: &str,
+    table: &super::CodeTable,
+    names: &CSharpNames,
+) -> Result<()> {
+    let table_type = names.repository_type_name(&table.name)?;
+    let row_type = names.row_type_name(&table.name)?;
+    content.raw_fmt(format_args!(
+        "    {access_modifier}{partial} class {table_type}\n    {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        public const string DataFile = {:?};\n        private readonly {}[] _rows;\n\n",
+        table.data_file, row_type
+    ));
+    content.raw_fmt(format_args!(
+        "        public {table_type}({row_type}[] rows)\n        {{\n            _rows = rows;\n        }}\n\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        internal static {table_type} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var reader = loader.Open(DataFile);\n            var rowCount = reader.ReadRowCount();\n            var rows = new {row_type}[rowCount];\n            for (var rowIndex = 0; rowIndex < rowCount; rowIndex++)\n            {{\n                reader.EnterRow(rowIndex);\n                try\n                {{\n                    rows[rowIndex] = {row_type}Reader.Read(reader);\n                }}\n                finally\n                {{\n                    reader.ExitRow();\n                }}\n            }}\n            return new {table_type}(rows);\n        }}\n"
+    ));
     content.raw("    }\n\n");
     Ok(())
 }

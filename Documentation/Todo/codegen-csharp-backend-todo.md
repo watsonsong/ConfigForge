@@ -108,7 +108,7 @@ feat(codegen): register C# generator skeleton
 feat(codegen): add C# naming and type mapping
 ```
 
-## [ ] Step 3：runtime reader contract、row/object reader 和 eager `GameData`
+## [x] Step 3：runtime reader contract、row/object reader 和 eager `GameData`
 
 目标：生成可从 runtime data reader 读取 CollectionTable / ObjectTable 的 C# 代码。
 
