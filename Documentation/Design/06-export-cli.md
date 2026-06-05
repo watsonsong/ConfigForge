@@ -55,7 +55,7 @@ deduplicate = true
 | --- | --- |
 | `name` | 当前 target 内唯一的 export task 名称。单 export task 可省略并由实现填入默认名；多 export task 省略时默认使用 `type`。 |
 | `output` | 产物输出目录。运行时表数据会在该目录下按表名生成文件；POT / manifest 这类聚合格式会在该目录下按格式选项规划一个或多个文件；codegen 会在该目录生成语言文件。 |
-| `type` | exporter 类型 ID。运行时格式支持 `json`、`messagepack` 和 `bin`；聚合/内嵌数据格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`；代码生成支持 `rust`、`cpp`、`typescript`、`cpp_unreal` 及其 alias，其中 `cpp_unreal` 是 Unreal Engine 专用 C++ codegen。 |
+| `type` | exporter 类型 ID。运行时格式支持 `json`、`messagepack` 和 `bin`；聚合/内嵌数据格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`；代码生成支持 `rust`、`cpp`、`typescript`、`cpp_unreal`、`csharp` 及其 alias，其中 `cpp_unreal` 是 Unreal Engine 专用 C++ codegen，`csharp` 输出 .NET BCL-only 单文件 C#。 |
 | exporter 专属字段 | 可选。格式专属选项直接摊平在对应 `[[targets.exports]]` 下，例如 `type = "gettext_pot"` 的 `domain`、`file_name`、`source_reference`、`include_translator_comments`、`deduplicate`。 |
 
 导出规则：
@@ -96,7 +96,7 @@ namespace = "game::config"
 
 - `type` 决定使用哪个代码生成器。
 - `output` 是该代码生成 export task 的根目录，不与 runtime data output 混淆。
-- `file_name` 可覆盖生成代码文件名；Rust / TypeScript 单文件输出会自动补齐默认扩展，C++ 会用同一 stem 生成 `.hpp` / `.cpp`。
+- `file_name` 可覆盖生成代码文件名；Rust / TypeScript / C# 单文件输出会自动补齐默认扩展，C++ 会用同一 stem 生成 `.hpp` / `.cpp`。
 - `data` 不支持设置。生成代码格式无关，只依赖 Meta 和 target tags；格式选择由接入方在运行时传入的 loader / reader 决定。
 - `file_header` 是文本模板，支持 `{{project.name}}`、`{{project.desc}}`、`{{project.copyright}}`、`{{datetime}}`。
 - `keyword_conflict` 控制 Meta 名称转换成目标语言标识符后碰到关键字时如何处理。
@@ -113,6 +113,7 @@ CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 t
 | `[targets.exports.rust]` | `derive_serde` | 为生成类型派生 serde 序列化/反序列化 trait。 |
 | `[targets.exports.cpp]` | `namespace` | C++ namespace 覆盖；未设置时可使用通用 `namespace`。 |
 | `[targets.exports.cpp_unreal]` | `api_macro` / `support` / `blueprint_category` / `namespace` / `type_name_prefix` | Unreal C++ 生成器配置。`api_macro` 指定模块导出宏，且 `support = "blueprint"` 时必填；`support = "containers"` 生成 Unreal 容器和基础类型的 C++ API；`support = "blueprint"` 额外生成可反射的 `USTRUCT` / `UFUNCTION` facade；`blueprint_category` 控制 `UPROPERTY` / `UFUNCTION` 分类；containers 模式下 `namespace` 可覆盖通用 namespace；Blueprint 模式禁止 `namespace`，应使用 `type_name_prefix` 为全局反射类型加项目前缀。 |
+| `[targets.exports.csharp]` | `namespace` / `nullable` / `access_modifier` / `class_name` / `lazy_class_name` / `emit_partial` | C# 单文件生成器配置。`namespace` 可覆盖通用 namespace；`nullable = true` 输出 `#nullable enable`；`access_modifier` 允许 `public` / `internal`；`class_name` 与 `lazy_class_name` 覆盖 eager / lazy facade 名称；`emit_partial` 控制 generated 类型是否声明为 `partial`。 |
 | `[targets.exports.typescript]` | `readonly_fields` | interface 字段是否生成 `readonly`。 |
 
 Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `type = "cpp_unreal"`：
@@ -123,7 +124,7 @@ Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `typ
 - `support = "blueprint"` 时在 containers 模式基础上生成 Blueprint 可见层：row/value struct 使用 `USTRUCT(BlueprintType)`、required 且 UHT 可反射的字段使用 `UPROPERTY(BlueprintReadOnly)`，访问入口通过 `UBlueprintFunctionLibrary` 或 `UObject` facade 暴露 `UFUNCTION(BlueprintCallable)` / `BlueprintPure`。Blueprint 模式禁止 namespace（真实 UHT 对 namespace 内反射类型支持有限），需要命名隔离时使用 `type_name_prefix` 生成如 `FReferenceItemsRow` / `UReferenceConfigForgeBlueprintLibrary` 的全局类型。optional 字段仍按 C++ API 生成为 `TOptional<T>`，但不会生成 `UPROPERTY`，避免把 UHT 不支持的 optional 模板类型直接暴露给 Blueprint。Blueprint 层应避免暴露 raw pointer、`std::*`、模板化 helper 或不被反射系统支持的类型；必要时提供按值返回、`bool + Out` 参数或 `TArray<Struct>` 包装。
 - `cpp_unreal` 仍复用同一套 Meta / target tags / CodeModel IR。runtime data 的取得方式继续抽象化：生成代码不直接绑定本地文件、Pak、Asset Manager、Data Asset 或网络加载，Unreal 项目通过 Unreal 版 `RuntimeDataLoader` adapter 接入。
 
-`[targets.exports.i18n]` 控制 `text` 翻译 helper 的调用形态：默认 `mode = "generic"`，保留显式 translator 参数；`mode = "global_function"` 时必须配置 `function`，生成代码直接调用该全局函数，例如 gettext/libintl 或项目自己的全局 i18n facade。`returns = "string"` 表示函数总是返回最终文案，`returns = "optional"` 表示函数可能 missing，helper 会 fallback 到 raw text。C++ 可用 `cpp_include` 注入 include，TypeScript 可用 `typescript_import` 注入 import。
+`[targets.exports.i18n]` 控制 `text` 翻译 helper 的调用形态：默认 `mode = "generic"`，保留显式 translator 参数；`mode = "global_function"` 时必须配置 `function`，生成代码直接调用该全局函数，例如 gettext/libintl 或项目自己的全局 i18n facade。`returns = "string"` 表示函数总是返回最终文案，`returns = "optional"` 表示函数可能 missing，helper 会 fallback 到 raw text。C++ 可用 `cpp_include` 注入 include，C# 可用 `csharp_using` 注入 using，TypeScript 可用 `typescript_import` 注入 import。
 
 `keyword_conflict` 策略：
 
@@ -219,7 +220,7 @@ Protobuf 未来规则：
 
 ### 6.2.1 生成代码的 Runtime Data 加载抽象
 
-当前实现状态：Rust / C++ / TypeScript 生成代码使用 **Meta-agnostic reader loader 契约**，即接入方只实现通用 `open(path)` 并返回 `RuntimeDataReader` / `IRuntimeDataReader`；生成代码内部负责按 Meta 读取表、字段、fragment 和 object payload，并构造 typed rows / objects。生成代码 API 不包含按表生成的 `load_<table>_rows` / `Load<Table>Rows` / `load<Table>Rows` loader 方法。
+当前实现状态：Rust / C++ / TypeScript / C# 生成代码使用 **Meta-agnostic reader loader 契约**，即接入方只实现通用 `open(path)` / `Open(path)` 并返回 `RuntimeDataReader` / `IRuntimeDataReader` / `IConfigForgeRuntimeDataReader`；生成代码内部负责按 Meta 读取表、字段、fragment 和 object payload，并构造 typed rows / objects。生成代码 API 不包含按表生成的 `load_<table>_rows` / `Load<Table>Rows` / `load<Table>Rows` / `Load<Table>Rows` loader 方法。
 
 生成代码必须把“如何取得配置文件”和“如何把通用序列化数据组装成当前 Meta 对应的 typed rows / typed objects”分层：
 
@@ -233,6 +234,7 @@ Protobuf 未来规则：
 | Rust | `RuntimeDataLoader::open(path) -> Result<RuntimeDataReader, Error>`；reader 提供 begin/end object、begin/end array、按字段名读取 value、按序读取 value 等通用方法。 |
 | C++ | `IRuntimeDataLoader::Open(path) -> std::unique_ptr<IRuntimeDataReader>`；reader 只暴露格式无关的 object / array / field / scalar 读取能力。 |
 | TypeScript | `RuntimeDataLoader.open(path): Promise<RuntimeDataReader> | RuntimeDataReader`；reader 提供通用 JSON-like / MessagePack-like 读取 cursor。 |
+| C# | `IConfigForgeRuntimeDataLoader.Open(path) -> IConfigForgeRuntimeDataReader`；reader 提供 field / row / list / scalar 读取能力，生成代码抛 `ConfigForgeRuntimeException` 表达 data-code mismatch。 |
 
 通用 reader 至少需要覆盖两类 layout：
 
@@ -405,7 +407,7 @@ ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader ad
 
 设计原则：
 
-1. **生成代码核心仍保持无第三方 runtime 依赖**：Rust / C++ / TypeScript generated code 只声明 reader / loader 契约和 generated parser，不直接依赖 `serde_json`、`rmp-serde`、`RapidJSON`、`msgpack-c`、npm MessagePack 包等。
+1. **生成代码核心仍保持无第三方 runtime 依赖**：Rust / C++ / TypeScript / C# generated code 只声明 reader / loader 契约和 generated parser，不直接依赖 `serde_json`、`rmp-serde`、`RapidJSON`、`msgpack-c`、npm MessagePack 包、`System.Text.Json` 等具体解码库。
 2. **标准 adapter 按官方支持矩阵拆分**：stable runtime data export type 应覆盖官方 target language；experimental type 可以先只覆盖部分语言。每个 adapter 单元只负责“某语言中把某格式的通用 value/cursor 暴露为 RuntimeDataReader”，transport loader 作为可组合层，不进入语言 × 格式矩阵。
 3. **资源加载与格式解码分层**：`RuntimeDataLoader` 的文件系统、HTTP、引擎资源系统等 transport 逻辑应与 JSON / MessagePack reader 解码逻辑分开。标准包可以提供常用组合（如 Node fs + JSON、Rust fs + MessagePack），但底层 reader 应可被自定义 loader 复用。
 4. **依赖显式可选**：不同语言/格式 adapter 允许依赖不同三方库，但依赖必须限制在对应 adapter 包/模块内，并通过 Cargo feature、npm optional dependency、CMake option / package manager 选项等机制显式启用。

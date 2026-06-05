@@ -282,7 +282,7 @@ pub enum TaskResource {
 
 | 请求 / Export task | 必要依赖 | 不应触发 |
 | --- | --- | --- |
-| 只包含 `MetaOnly` codegen（Rust / C++ / TypeScript） | Project Config、Target normalize、effective target tags、Meta extract、Meta link / meta validate、GenerateCode、Artifact plan/write | DataLoadPlan、SourceRead、NormalizeDataSet、Data validation、MetaAndData exporter |
+| 只包含 `MetaOnly` codegen（Rust / C++ / TypeScript / Unreal C++ / C#） | Project Config、Target normalize、effective target tags、Meta extract、Meta link / meta validate、GenerateCode、Artifact plan/write | DataLoadPlan、SourceRead、NormalizeDataSet、Data validation、MetaAndData exporter |
 | 包含 `MetaAndData` runtime / aggregate / embedded data exporter（JSON / MessagePack / bin / POT / Lua） | Project Config、Target normalize、effective target tags、Meta extract、Meta link / meta validate、DataLoadPlan、SourceRead、NormalizeDataSet、FullDataSet validations、TargetView validations、data artifact generation、Artifact plan/write | 与该 target 无关的其他 target export tasks |
 | 多 target 构建（未来） | 每个 target 独立 effective tags / target view；共享 Project Config、raw MetaModel、Meta link；可按 `(project.input, effective_tags)` 复用 DataSet / validation 结果 | 只按 `project.input` 复用 DataSet；把一个 target 的 ExportValidationView 复用到另一个 target |
 

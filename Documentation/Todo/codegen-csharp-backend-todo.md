@@ -320,7 +320,7 @@ access_modifier = "public"
 test(fixtures): add standard C# codegen target
 ```
 
-## [ ] Step 10：文档收敛和最终回归
+## [x] Step 10：文档收敛和最终回归
 
 目标：把 C# backend 从规划状态更新为当前实现状态，补齐用户可见文档和测试说明。
 

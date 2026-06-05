@@ -1,6 +1,6 @@
 # 09. Codegen 模块详细设计
 
-本文档描述 ConfigForge 的代码导出任务设计。目标是在已加载、已链接并通过校验的 Meta 与 Data 基础上，生成 Rust、C++ 和 TypeScript 三种语言的运行时代码，覆盖枚举、结构体、数据表、索引辅助查找函数，并提供抽象的数据文件加载器接口，让接入方可以从本地文件、包内资源、网络或引擎资源系统中加载实际数据。加载器接口必须与具体 Meta、表和字段解耦；所有按表/字段解析和 typed row/object 构造职责属于生成代码。
+本文档描述 ConfigForge 的代码导出任务设计。目标是在已加载、已链接并通过校验的 Meta 与 Data 基础上，生成 Rust、C++、TypeScript、Unreal C++ 和 C# 等语言的运行时代码，覆盖枚举、结构体、数据表、索引辅助查找函数，并提供抽象的数据文件加载器接口，让接入方可以从本地文件、包内资源、网络或引擎资源系统中加载实际数据。加载器接口必须与具体 Meta、表和字段解耦；所有按表/字段解析和 typed row/object 构造职责属于生成代码。
 
 产品层语义仍以 `Documentation/Design/` 为准；本文档聚焦程序实现模块、生成代码形态、跨语言约束、运行时加载抽象和测试策略。
 
@@ -9,7 +9,7 @@
 当前已落地第一阶段 Code Export 需要达成：
 
 1. 基于 `LinkedMetaModel<'meta>` 生成完整类型代码，而不是只为每张表生成简单 stub。
-2. 支持三种目标语言：Rust、C++、TypeScript。
+2. 支持多种目标语言：Rust、C++、TypeScript、Unreal C++、C#。
 3. 生成所有 Meta 中声明的：
    - enum；
    - named struct；
@@ -46,7 +46,7 @@ ProjectConfig::from_path
   -> normalize_data_set
   -> validate_normalized_data_set_for_target
   -> export runtime data (JSON / MessagePack)
-  -> CodeGeneratorRegistry dispatch (Rust / C++ / TypeScript)
+  -> CodeGeneratorRegistry dispatch (Rust / C++ / TypeScript / Unreal C++ / C#)
   -> write generated files
 ```
 
@@ -96,6 +96,11 @@ src/codegen/
     repository.rs     # C++ repository、index、database facade 渲染
     symbols.rs        # CppNames 与符号冲突检查
     tests.rs          # C++ 生成器测试
+  csharp/
+    mod.rs            # CSharpCodeGenerator 与单文件编排
+    types.rs          # C# 命名、类型映射、key / helper 名称
+    symbols.rs        # C# 符号冲突检查
+    tests.rs          # C# 生成器测试
   typescript/
     mod.rs            # TypeScriptCodeGenerator 与生成编排
     runtime.rs        # TypeScript runtime loader/reader contract 渲染
@@ -164,17 +169,17 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 | Index and relation helpers | [`09g-codegen-index-and-relation-helpers.md`](09g-codegen-index-and-relation-helpers.md) | CollectionTable index lookup、`linked_field` relation helper、row-index cache、`link` / `link_all`。 |
 | Generator API and tests | [`09h-codegen-generator-api-and-tests.md`](09h-codegen-generator-api-and-tests.md) | `CodeGenerator` 接口、新语言接入步骤、文件组织、诊断和测试计划。 |
 | Lua embedded data generator | [`09i-lua-embedded-data-generator.md`](09i-lua-embedded-data-generator.md) | 已实现的 Lua data+code 合一导出、每表 `.lua`、lazy require、row array + metatable、索引和实现说明。 |
-| C# backend | [`09k-codegen-csharp-backend.md`](09k-codegen-csharp-backend.md) | 规划中的 C# backend、generated API、runtime reader contract、index/relation/text/lazy 设计和测试策略。 |
+| C# backend | [`09k-codegen-csharp-backend.md`](09k-codegen-csharp-backend.md) | 已实现的 C# backend、generated API、runtime reader contract、index/relation/text/lazy 设计和测试策略。 |
 
 ### 9.4.1 当前实现状态摘要
 
-- Rust / C++ / TypeScript backend 均已实现 MVP。
+- Rust / C++ / TypeScript / C# backend 均已实现 MVP。
 - Unreal C++ 已作为独立 `cpp_unreal` backend 实现；不作为标准 `cpp` backend 的开关，以避免生成 public API 同时混用 `std::*` 和 Unreal API。当前支持 `support = "containers"` 和 `support = "blueprint"` 两级输出：containers 模式生成 Unreal 类型/容器、repository、index、relation、text、`GameData` 与 `FLazyGameData`；Blueprint 模式额外生成 `USTRUCT(BlueprintType)` / `UENUM(BlueprintType)` / `UPROPERTY(BlueprintReadOnly)` 和 `UBlueprintFunctionLibrary` 查询 facade。
 - Eager loading 和 table-level `LazyGameData` 均已实现 MVP；lazy facade 保留 loader，首次访问 table/object 时加载并缓存。
 - TypeScript 已生成 `loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`；同步 API 要求 loader 同步返回 reader，遇到 Promise 应报错。
-- C# backend 处于设计规划阶段，目标是新增 `type = "csharp"`，生成 .NET BCL-only 的单文件 `generated.cs`，并逐步追齐 Rust / C++ / TypeScript backend 的类型、index、relation、text、eager/lazy facade 能力。
+- C# backend 已作为独立 `type = "csharp"` backend 实现，生成 .NET BCL-only 单文件 `.cs`，支持 enum / struct / row / object / repository、hash / ordered / compound index、`IGameDataAccess` relation helper、text helper、eager `GameData` 与同步 `LazyGameData`。
 - 生成代码使用逻辑 table name，不绑定某个 `targets.exports` runtime data export task 的真实 artifact path。
-- `linked_field` relation helper 和 `text` translation helper 已纳入 Rust / C++ / TypeScript 生成器。
+- `linked_field` relation helper 和 `text` translation helper 已纳入 Rust / C++ / TypeScript / C# 生成器。
 - Lua embedded data generator 已作为 `type = "lua_table"` 的 MetaAndData exporter 落地，而不是现有 format-agnostic `CodeGenerator` backend。
 - `preserve_source_order` 的 generated access 语义仍为规划项：目标行为是 indexed CollectionTable 默认不生成 public source-order `rows` API；只有显式声明 `preserve_source_order = true` 的表生成 row count / row_at / rows 访问，服务随机角色名这类按表格顺序随机访问的配置。
 

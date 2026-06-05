@@ -1,6 +1,6 @@
 # 09k. Codegen C# Backend
 
-本文描述规划中的 C# codegen backend 的实现设计、生成 API 形态、运行时 reader contract、测试策略和与现有 CodeModel / runtime data exporter 的复用边界。分步实现清单放在 [`../Todo/codegen-csharp-backend-todo.md`](../Todo/codegen-csharp-backend-todo.md)；本文作为稳定设计文档维护。
+本文描述已实现的 C# codegen backend 的生成 API 形态、运行时 reader contract、测试策略和与现有 CodeModel / runtime data exporter 的复用边界。分步实现清单放在 [`../Todo/codegen-csharp-backend-todo.md`](../Todo/codegen-csharp-backend-todo.md)；本文作为稳定设计文档维护。
 
 ## Related docs
 
@@ -13,9 +13,9 @@
 
 ## 当前状态
 
-C# backend 尚未实现。目标是新增独立 codegen type：`csharp`，内部生成器命名为 `CSharpCodeGenerator`，输出 `.cs` 源码文件，可被普通 .NET SDK / C# compiler 编译，不绑定 Unity 或特定游戏引擎。Unity / Godot / 自研引擎接入通过业务侧 runtime loader adapter 完成；生成核心代码只依赖 .NET BCL。
+C# backend 已实现为独立 codegen type：`csharp`（alias：`cs`），内部生成器命名为 `CSharpCodeGenerator`，输出 `.cs` 源码文件，可被普通 .NET SDK / C# compiler 编译，不绑定 Unity 或特定游戏引擎。Unity / Godot / 自研引擎接入通过业务侧 runtime loader adapter 完成；生成核心代码只依赖 .NET BCL。
 
-第一阶段采用单文件输出 `generated.cs`，覆盖和 Rust / C++ / TypeScript 同等的核心能力：enum、value struct / row class、ObjectTable、CollectionTable repository、eager `GameData`、`LazyGameData`、unique / non-unique / ordered index、compound key、`linked_field` relation helper、`text` helper，以及 format-agnostic runtime reader contract。
+第一阶段采用单文件输出 `generated.cs`，覆盖和 Rust / C++ / TypeScript 同等的核心能力：enum、class / row class、ObjectTable、CollectionTable repository、eager `GameData`、`LazyGameData`、unique / non-unique / ordered index、compound key、`linked_field` relation helper、`text` helper，以及 format-agnostic runtime reader contract。
 
 ## 设计目标与非目标
 
@@ -36,7 +36,7 @@ C# backend 尚未实现。目标是新增独立 codegen type：`csharp`，内部
 
 ## Codegen options
 
-建议在 `[targets.exports.csharp]` 下支持：
+`[targets.exports.csharp]` 支持：
 
 | Option | 默认值 | 说明 |
 | --- | --- | --- |
@@ -45,7 +45,6 @@ C# backend 尚未实现。目标是新增独立 codegen type：`csharp`，内部
 | `access_modifier` | `public` | 顶层 generated type 的访问级别；允许 `public` / `internal`。 |
 | `class_name` | `GameData` | root eager facade 名称。 |
 | `lazy_class_name` | `LazyGameData` | lazy facade 名称。 |
-| `collection_type` | `array` | row owner storage，第一阶段固定生成 `T[]`；后续可支持 `IReadOnlyList<T>` / `List<T>` profile。 |
 | `emit_partial` | `true` | 顶层 row/table/facade 是否生成 `partial`，便于业务扩展。 |
 | `file_name` | 通用 file name | 输出文件名，默认 `generated.cs`。 |
 
@@ -98,17 +97,19 @@ C# generated code 定义轻量同步接口：
 ```csharp
 public interface IConfigForgeRuntimeDataReader
 {
-    void EnterIndex(long index);
     void EnterRequiredField(string name);
     bool EnterOptionalField(string name);
     void ExitField();
-    long ReadRowCount();
-    long ReadListLength();
-    long ReadEnumIndex(IReadOnlyList<string> variants);
-    long AsInt64();
-    double AsDouble();
-    bool AsBool();
-    string AsString();
+    int ReadRowCount();
+    void EnterRow(int index);
+    void ExitRow();
+    int ReadListLength();
+    void EnterListElement(int index);
+    void ExitListElement();
+    long ReadInt();
+    double ReadFloat();
+    bool ReadBool();
+    string ReadString();
 }
 
 public interface IConfigForgeRuntimeDataLoader
@@ -134,7 +135,7 @@ generated.cs
 建议文件结构：
 
 1. 文件头和 `#nullable enable`。
-2. `using System; using System.Collections.Generic; using System.Linq;` 等最小 using。
+2. `using System; using System.Collections.Generic;` 等最小 using；global i18n 可追加 `csharp_using`。
 3. namespace open。
 4. runtime reader / loader / exception contract。
 5. enum / struct / row type。
@@ -146,7 +147,7 @@ generated.cs
 核心 API 示例：
 
 ```csharp
-public sealed partial class ItemsTable
+public partial class ItemsTable
 {
     public const string DataFile = "items";
 
@@ -162,13 +163,14 @@ public sealed partial class ItemsTable
     }
 
     public static ItemsTable Load(IConfigForgeRuntimeDataLoader loader) { ... }
-    internal static ItemsTable FromRows(IReadOnlyList<ItemsRow> rows) { ... }
-    internal ItemsRow RowAt(int index) => _rows[index];
+    private static ItemsTable FromRows(ItemsRow[] rows) { ... }
+    public int Count => _rows.Length;
+    public ItemsRow? RowAt(int index) { ... }
     public ItemsRow? GetById(long id) => _byId.TryGetValue(id, out var index) ? _rows[index] : null;
     public IReadOnlyList<ItemsRow> FindByRarity(ItemRarity rarity) { ... }
 }
 
-public sealed partial class GameData : IGameDataAccess
+public partial class GameData : IGameDataAccess
 {
     public ItemsTable Items { get; }
     public GameRulesRow GameRules { get; }
@@ -246,7 +248,7 @@ public sealed partial class LazyGameData : IGameDataAccess
     private readonly IConfigForgeRuntimeDataLoader _loader;
     private ItemsTable? _items;
 
-    public ItemsTable Items => _items ??= ItemsTable.Load(_loader);
+    public ItemsTable Items { get { ... } }
     public GameData PreloadAll() { ... }
 }
 ```
@@ -294,7 +296,7 @@ src/codegen/csharp/
 
 - 临时 project：`type = "csharp"` 能生成 `.cs`。
 - 若本机有 `dotnet`，临时创建最小 console project：`dotnet new console` 或直接写 `.csproj`，编译 generated code + mock reader，运行加载 / index / relation / text helper smoke。
-- standard_project 后续加入 `out/client_code/csharp/reference_game_config.cs`，长期回归覆盖 JSON / binary runtime data 的 mock reader 或最小 adapter。
+- standard_project 已加入 `out/client_code/csharp/reference_game_config.cs`，长期回归使用临时 `.csproj` + `System.Text.Json` reader harness 覆盖 JSON runtime data、index、relation、text helper、lazy cache 和 `PreloadAll()`。
 - 没有 `dotnet` 时不失败，只跳过 compiler harness；Rust unit 和内容断言仍必须通过。
 
 ## 后续扩展

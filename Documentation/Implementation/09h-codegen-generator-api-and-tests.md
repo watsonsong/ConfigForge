@@ -30,6 +30,7 @@ pub(crate) trait CodeGenerator: Send + Sync {
 ```rust
 pub(crate) struct RustCodeGenerator;
 pub(crate) struct CppCodeGenerator;
+pub(crate) struct CSharpCodeGenerator;
 pub(crate) struct TypeScriptCodeGenerator;
 ```
 
@@ -131,7 +132,7 @@ pub struct CodegenDiagnostic {
 
 ### 9.14.2 语言生成器 snapshot 测试
 
-对同一个小 Meta fixture 生成三种语言代码，断言关键片段：
+对同一个小 Meta fixture 生成各内置 backend 代码，断言关键片段：
 
 - enum 声明；
 - struct/interface 声明；
@@ -173,7 +174,7 @@ pub struct CodegenDiagnostic {
 
 ### 9.14.4 分语言 generated-code runtime test 方案
 
-标准工程当前按 target 拆分：client 生成 JSON + TypeScript/C++，server 生成 MessagePack + Rust。因此 generated-code runtime test 可以复用标准工程配置，分别验证三种语言。
+标准工程当前按 target 拆分：client 生成 JSON + TypeScript/C++/C#，server 生成 MessagePack + Rust。因此 generated-code runtime test 可以复用标准工程配置，分别验证各语言。
 
 | 语言 | 输入产物 | 工具链 | Harness 做法 | 必测断言 |
 | --- | --- | --- | --- | --- |
@@ -181,13 +182,14 @@ pub struct CodegenDiagnostic {
 | TypeScript | `out/client_code/typescript/generated.ts` + `out/client_data/*.json` | `tsc` + `node` | 实现通用 `RuntimeDataLoader` / reader，用 Node `fs` 读取真实 JSON payload，并由 generated parser 映射 row interface/object。 | `GameData.load` 成功；`items.getById(id)` 命中；`classLevels.getByClassLevel(classId, level)` 命中联合索引；object table 可访问。 |
 | C++ | `out/client_code/cpp/generated.hpp` / `generated.cpp` + `out/client_data/*.json` | `c++ -std=c++17` | 实现通用 `IRuntimeDataLoader` / reader，使用轻量 JSON reader 暴露 payload；不能按表手写 typed rows。 | `GameData::Load` 成功；`Items().GetById(id)` 命中；`ClassLevels().GetByClassLevel(class_id, level)` 命中联合索引；object table 可访问。 |
 | Unreal C++ | `out/client_code/cpp_unreal/generated.h` / `generated.cpp` + `out/client_data/*.json` | `c++ -std=c++17` + lightweight Unreal shim | 使用测试专用 `CoreMinimal.h` / `Kismet/BlueprintFunctionLibrary.h` shim 提供 `TArray`、`TMap`、`FString`、`TOptional`、`USTRUCT`、`UFUNCTION` 等最小定义；真实 UnrealHeaderTool / Editor 验证留给引擎侧 CI。 | containers 模式语法 smoke 覆盖 `GameData::Load` 依赖的生成声明；Blueprint 模式额外验证 `.generated.h` include、`USTRUCT` / `UPROPERTY` / `UCLASS` / `UFUNCTION` facade 可被 shim 编译。 |
+| C# | `out/client_code/csharp/reference_game_config.cs` + `out/client_data/*.json` | `dotnet run` | 临时写入最小 `.csproj` 和 `Program.cs` harness；harness 实现 `IConfigForgeRuntimeDataLoader` / `IConfigForgeRuntimeDataReader`，用 `System.Text.Json` 暴露真实 JSON payload。 | `GameData.Load` 成功；`Items.GetById(id)` 命中；`GameRules.DefaultClass(data)` relation 命中；`NameText` fallback/翻译 helper 可用；`LazyGameData` 首次访问、缓存和 `PreloadAll()` 可用。 |
 
 归档后的 harness 不应直接依赖仓库中某一次已生成的 `out/` 文件路径。推荐做法是：集成测试先执行 export，再把对应语言的 generated code 复制到临时 harness 工作目录（或通过 include path/link path 引用），最后执行目标语言测试命令。这样能确保测试的是“当前实现刚生成的代码和数据”，而不是历史残留 artifact。
 
 工具链缺失时的处理原则：
 
-- CI 环境应安装 Rust/Cargo、C++17 compiler、Node.js 和 TypeScript，使三类 runtime test 都能执行。
-- 本地开发环境如果缺少 C++ compiler、Node 或 `tsc`，对应测试可以显式 skip，但测试输出必须说明 skip 原因，不能静默通过。
+- CI 环境应安装 Rust/Cargo、C++17 compiler、Node.js、TypeScript 和 .NET SDK，使各语言 runtime test 都能执行。
+- 本地开发环境如果缺少 C++ compiler、Node、`tsc` 或 `dotnet`，对应测试可以显式 skip，但测试输出必须说明 skip 原因，不能静默通过。
 - Rust 生成代码测试不应 skip，因为项目本身依赖 Rust toolchain。
 
 ### 9.14.5 CLI 集成测试
@@ -210,10 +212,11 @@ pub struct CodegenDiagnostic {
 - Rust backend 输出 `generated.rs`，包含 enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`link_all` 与 `text` translation helper。
 - TypeScript backend 输出 `generated.ts`，包含 interface/class、repository、`GameData`、`LazyGameData`、Map-based index lookup、`linked_field` relation helper、`linkAll`、`text` translation helper、`loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`。
 - C++ backend 输出 `generated.hpp`，包含 enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`LinkAll` 与 `text` translation helper。
-- 三种语言都使用 Meta-agnostic reader loader contract，不直接绑定 JSON / MessagePack / bin exporter 结果。
+- C# backend 输出 `generated.cs`，包含 enum、class、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`LinkAll` 与 `text` translation helper。
+- Rust / C++ / TypeScript / C# 都使用 Meta-agnostic reader loader contract，不直接绑定 JSON / MessagePack / bin exporter 结果。
 - runtime data 与 generated code 都以 artifact 形态参与统一写出；Artifact Writer 负责路径冲突检查、dry-run、direct write、`temp-commit` 与 bounded write queue。
 - `CodeGenerator::generate_to_sink()` 是 codegen 的唯一 production 写出入口；`GeneratedFile` / `generate()` 只在测试构建中存在，用于快照与 streaming equivalence 测试。
-- 标准工程 fixture 覆盖 runtime data + generated code 的端到端输出和代表性运行时加载；`cpp_unreal` 通过标准工程 target 与 Unreal shim 编译 smoke 纳入回归。
+- 标准工程 fixture 覆盖 runtime data + generated code 的端到端输出和代表性运行时加载；`cpp_unreal` 通过标准工程 target 与 Unreal shim 编译 smoke 纳入回归，C# 通过临时 `.csproj` + `System.Text.Json` reader harness 纳入回归。
 
 未来规划：
 

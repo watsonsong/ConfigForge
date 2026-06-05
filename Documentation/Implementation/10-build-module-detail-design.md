@@ -69,7 +69,7 @@ pub(crate) enum ExportDependency {
 
 `dependency` 不应由用户手写，而应来自 exporter registry。Build normalization 阶段会从 data exporter registry 与 code generator registry 查询 `type_id` / alias 对应的 dependency contract，并写入 `NormalizedExportTask.dependency`：
 
-- Rust / C++ / TypeScript codegen adapter：`MetaOnly`。
+- Rust / C++ / TypeScript / Unreal C++ / C# codegen adapter：`MetaOnly`。
 - JSON / MessagePack / bin runtime data exporter：`MetaAndData`。
 - gettext POT：`MetaAndData`。
 - Lua table：`MetaAndData`。
