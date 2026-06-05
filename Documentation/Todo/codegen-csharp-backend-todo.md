@@ -281,7 +281,7 @@ feat(codegen): add C# text helpers
 feat(codegen): add C# lazy game data
 ```
 
-## [ ] Step 9：standard_project target 和 C# harness
+## [x] Step 9：standard_project target 和 C# harness
 
 目标：将 C# backend 纳入长期集成回归。
 

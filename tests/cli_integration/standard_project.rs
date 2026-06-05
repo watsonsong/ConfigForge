@@ -403,6 +403,11 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(
         fixture_root
+            .join("out/client_code/csharp/reference_game_config.cs")
+            .exists()
+    );
+    assert!(
+        fixture_root
             .join("out/server_code/rust/reference_game_config.rs")
             .exists()
     );
@@ -423,6 +428,7 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     verify_standard_generated_rust_runtime(fixture_root);
     verify_standard_generated_cpp_runtime(fixture_root);
     verify_standard_generated_cpp_unreal_runtime(fixture_root);
+    verify_standard_generated_csharp_runtime(fixture_root);
     verify_standard_generated_typescript_runtime(fixture_root);
     verify_standard_generated_lua_runtime(fixture_root);
 }

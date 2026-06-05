@@ -438,3 +438,211 @@ pub(crate) fn verify_standard_generated_lua_runtime(fixture_root: &std::path::Pa
         .expect("standard generated Lua runtime test should run");
     assert_command_success(output, "standard generated Lua runtime test");
 }
+
+pub(crate) fn verify_standard_generated_csharp_runtime(fixture_root: &std::path::Path) {
+    if !command_exists("dotnet") {
+        eprintln!("skipping standard generated C# runtime test: dotnet not found");
+        return;
+    }
+
+    let temp_dir = tempfile::tempdir().expect("csharp harness temp dir should be created");
+    let project_dir = temp_dir.path();
+    fs::copy(
+        fixture_root.join("out/client_code/csharp/reference_game_config.cs"),
+        project_dir.join("ReferenceGameConfig.cs"),
+    )
+    .expect("generated C# code should be copied into harness");
+    fs::write(
+        project_dir.join("ConfigForgeCSharpHarness.csproj"),
+        r#"<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>
+"#,
+    )
+    .expect("C# harness csproj should be written");
+    fs::write(
+        project_dir.join("Program.cs"),
+        r#"
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Text.Json;
+using ReferenceGame.Config;
+
+static void Check(bool condition, string message)
+{
+    if (!condition)
+    {
+        throw new Exception(message);
+    }
+}
+
+var dataDir = Environment.GetEnvironmentVariable("DATA_DIR") ?? throw new Exception("DATA_DIR missing");
+var loader = new JsonRuntimeDataLoader(dataDir);
+var data = GameData.Load(loader);
+Check(data.Items.GetById(2001)?.Name == "Iron Ore", "eager item lookup failed");
+Check(data.GameRules.DefaultClass(data).Name == "Warrior", "relation lookup failed");
+Check(data.GameRules.StarterItems(data).Count == 2, "list relation lookup failed");
+Check(data.Items.GetById(2001)?.NameText(new TestTranslator()) == "铁矿石", "text helper translation failed");
+
+var lazyLoader = new JsonRuntimeDataLoader(dataDir);
+var lazy = new LazyGameData(lazyLoader);
+Check(lazyLoader.OpenCount == 0, "lazy loader opened data before first access");
+Check(lazy.Items.GetById(2001)?.Name == "Iron Ore", "lazy item lookup failed");
+Check(lazyLoader.OpenCount == 1, "lazy loader should open items once");
+Check(lazy.Items.GetById(2002)?.Name == "Oak Wood", "lazy cache lookup failed");
+Check(lazyLoader.OpenCount == 1, "lazy cache should avoid duplicate load");
+var eagerFromLazy = lazy.PreloadAll();
+Check(eagerFromLazy.GameRules.DefaultClass(eagerFromLazy).Name == "Warrior", "preload relation failed");
+
+sealed class TestTranslator : ITextTranslator
+{
+    public string? Translate(string context, string text)
+    {
+        return context == "items.name" && text == "Iron Ore" ? "铁矿石" : null;
+    }
+}
+
+sealed class JsonRuntimeDataLoader : IConfigForgeRuntimeDataLoader
+{
+    private readonly string _root;
+    public int OpenCount { get; private set; }
+
+    public JsonRuntimeDataLoader(string root)
+    {
+        _root = root;
+    }
+
+    public IConfigForgeRuntimeDataReader Open(string path)
+    {
+        OpenCount++;
+        return new JsonRuntimeDataReader(Path.Combine(_root, path + ".json"));
+    }
+}
+
+sealed class JsonRuntimeDataReader : IConfigForgeRuntimeDataReader
+{
+    private readonly JsonDocument _document;
+    private readonly JsonDocument _nullDocument = JsonDocument.Parse("null");
+    private readonly Stack<JsonElement> _stack = new();
+
+    public JsonRuntimeDataReader(string path)
+    {
+        _document = JsonDocument.Parse(File.ReadAllText(path));
+        _stack.Push(_document.RootElement);
+    }
+
+    public void EnterRequiredField(string name)
+    {
+        var current = _stack.Peek();
+        if (current.ValueKind == JsonValueKind.Object && current.TryGetProperty(name, out var value))
+        {
+            _stack.Push(value);
+            return;
+        }
+        _stack.Push(_nullDocument.RootElement);
+    }
+
+    public bool EnterOptionalField(string name)
+    {
+        var current = _stack.Peek();
+        if (current.ValueKind == JsonValueKind.Object && current.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null)
+        {
+            _stack.Push(value);
+            return true;
+        }
+        return false;
+    }
+
+    public void ExitField() => _stack.Pop();
+
+    public int ReadRowCount()
+    {
+        var current = _stack.Peek();
+        return current.ValueKind == JsonValueKind.Object && current.TryGetProperty("rows", out var rows) && rows.ValueKind == JsonValueKind.Array
+            ? rows.GetArrayLength()
+            : 1;
+    }
+
+    public void EnterRow(int index)
+    {
+        var rows = _stack.Peek().GetProperty("rows");
+        _stack.Push(rows[index]);
+    }
+
+    public void ExitRow() => _stack.Pop();
+
+    public int ReadListLength()
+    {
+        var current = _stack.Peek();
+        return current.ValueKind == JsonValueKind.Array ? current.GetArrayLength() : 0;
+    }
+
+    public void EnterListElement(int index) => _stack.Push(_stack.Peek()[index]);
+    public void ExitListElement() => _stack.Pop();
+
+    public long ReadInt()
+    {
+        var current = _stack.Peek();
+        return current.ValueKind switch
+        {
+            JsonValueKind.String => long.Parse(current.GetString() ?? "0", CultureInfo.InvariantCulture),
+            JsonValueKind.Number => current.GetInt64(),
+            _ => 0,
+        };
+    }
+
+    public double ReadFloat()
+    {
+        var current = _stack.Peek();
+        return current.ValueKind switch
+        {
+            JsonValueKind.String => double.Parse(current.GetString() ?? "0", CultureInfo.InvariantCulture),
+            JsonValueKind.Number => current.GetDouble(),
+            _ => 0.0,
+        };
+    }
+
+    public bool ReadBool()
+    {
+        var current = _stack.Peek();
+        return current.ValueKind switch
+        {
+            JsonValueKind.String => bool.Parse(current.GetString() ?? "false"),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => false,
+        };
+    }
+
+    public string ReadString()
+    {
+        var current = _stack.Peek();
+        return current.ValueKind switch
+        {
+            JsonValueKind.String => current.GetString() ?? string.Empty,
+            JsonValueKind.Number => current.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => string.Empty,
+        };
+    }
+}
+"#,
+    )
+    .expect("C# harness Program.cs should be written");
+
+    let output = StdCommand::new("dotnet")
+        .args(["run", "--project"])
+        .arg(project_dir.join("ConfigForgeCSharpHarness.csproj"))
+        .env("DATA_DIR", fixture_root.join("out/client_data/json"))
+        .output()
+        .expect("standard generated C# runtime test should run");
+    assert_command_success(output, "standard generated C# runtime test");
+}

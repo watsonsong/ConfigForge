@@ -95,6 +95,16 @@ namespace = "ReferenceGameConfig"
 support = "containers"
 api_macro = "REFERENCE_GAME_CONFIG_API"
 
+[[targets.exports]]
+type = "csharp"
+output = "out/client_code/csharp"
+file_name = "reference_game_config"
+namespace = "ReferenceGame.Config"
+
+[targets.exports.csharp]
+nullable = true
+access_modifier = "public"
+
 [[targets]]
 name = "server"
 tags = ["server"]
