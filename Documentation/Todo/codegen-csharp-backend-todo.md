@@ -167,7 +167,7 @@ feat(codegen): load C# rows and game data
 feat(codegen): generate C# hash indexes
 ```
 
-## [ ] Step 5：ordered index 和 range API
+## [x] Step 5：ordered index 和 range API
 
 目标：支持 Meta `ordered = true` 的 lower / upper / range 查询。
 

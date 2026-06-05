@@ -213,6 +213,58 @@ fn emits_hash_indexes_and_compound_key() {
 }
 
 #[test]
+fn emits_ordered_index_storage_and_range_api() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables.indexes]]
+            name = "by_level"
+            fields = ["level"]
+            unique = false
+            ordered = true
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = CSharpCodeGenerator.generate(&input).expect("csharp code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public static int LowerBound<TKey>"));
+    assert!(content.contains("public static int UpperBound<TKey>"));
+    assert!(content.contains("private readonly (long Key, int RowIndex)[] _byLevelIndex;"));
+    assert!(content.contains("Array.Sort(_byLevelIndex, (left, right) => Comparer<long>.Default.Compare(left.Key, right.Key));"));
+    assert!(content.contains("public IReadOnlyList<ItemsRow> FindByLevel(long level)"));
+    assert!(content.contains("public int LowerBoundByLevel(long level)"));
+    assert!(content.contains("public int UpperBoundByLevel(long level)"));
+    assert!(
+        content
+            .contains("public IReadOnlyList<ItemsRow> RangeByLevel(long levelMin, long levelMax)")
+    );
+    assert!(content.contains("RowsFromOrderedRange(_byLevelIndex, start, end)"));
+}
+
+#[test]
 fn emits_object_table_as_loaded_property_without_repository() {
     let meta = MetaModel::from_toml_str(
         r#"

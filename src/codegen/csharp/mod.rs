@@ -241,11 +241,7 @@ fn render_csharp_code(
         )?;
         render_row_read_method(content, &names.row_type_name(&table.name)?, table, &names)?;
         if table.kind == CodeTableKind::Collection {
-            for index in table
-                .indexes
-                .iter()
-                .filter(|index| !index.ordered && index.fields.len() > 1)
-            {
+            for index in table.indexes.iter().filter(|index| index.fields.len() > 1) {
                 render_compound_key_type(
                     content,
                     &table.name,
@@ -387,6 +383,8 @@ fn render_runtime_contract(
     content.raw("        public static T? ReadOptionalClassField<T>(IConfigForgeRuntimeDataReader reader, string name, Func<IConfigForgeRuntimeDataReader, T> read) where T : class\n        {\n            if (!reader.EnterOptionalField(name))\n            {\n                return null;\n            }\n            try\n            {\n                return read(reader);\n            }\n            finally\n            {\n                reader.ExitField();\n            }\n        }\n\n");
     content.raw("        public static T? ReadOptionalStructField<T>(IConfigForgeRuntimeDataReader reader, string name, Func<IConfigForgeRuntimeDataReader, T> read) where T : struct\n        {\n            if (!reader.EnterOptionalField(name))\n            {\n                return null;\n            }\n            try\n            {\n                return read(reader);\n            }\n            finally\n            {\n                reader.ExitField();\n            }\n        }\n\n");
     content.raw("        public static T[] ReadListValue<T>(IConfigForgeRuntimeDataReader reader, Func<IConfigForgeRuntimeDataReader, T> read)\n        {\n            var length = reader.ReadListLength();\n            var values = new T[length];\n            for (var index = 0; index < length; index++)\n            {\n                reader.EnterListElement(index);\n                try\n                {\n                    values[index] = read(reader);\n                }\n                finally\n                {\n                    reader.ExitListElement();\n                }\n            }\n            return values;\n        }\n");
+    content.raw("\n        public static int LowerBound<TKey>((TKey Key, int RowIndex)[] entries, TKey key)\n        {\n            var comparer = Comparer<TKey>.Default;\n            var low = 0;\n            var high = entries.Length;\n            while (low < high)\n            {\n                var mid = low + ((high - low) / 2);\n                if (comparer.Compare(entries[mid].Key, key) < 0)\n                {\n                    low = mid + 1;\n                }\n                else\n                {\n                    high = mid;\n                }\n            }\n            return low;\n        }\n\n");
+    content.raw("        public static int UpperBound<TKey>((TKey Key, int RowIndex)[] entries, TKey key)\n        {\n            var comparer = Comparer<TKey>.Default;\n            var low = 0;\n            var high = entries.Length;\n            while (low < high)\n            {\n                var mid = low + ((high - low) / 2);\n                if (comparer.Compare(entries[mid].Key, key) <= 0)\n                {\n                    low = mid + 1;\n                }\n                else\n                {\n                    high = mid;\n                }\n            }\n            return low;\n        }\n");
     content.raw("    }\n\n");
     Ok(())
 }
@@ -514,10 +512,14 @@ fn render_table_class(
         "        public const string DataFile = {:?};\n        private readonly {}[] _rows;\n",
         table.data_file, row_type
     ));
-    for index in table.indexes.iter().filter(|index| !index.ordered) {
+    for index in &table.indexes {
         let key_type = names.index_key_type(&table.name, index)?;
         let storage = names.index_storage_name(index)?;
-        if index.unique {
+        if index.ordered {
+            content.raw_fmt(format_args!(
+                "        private readonly ({key_type} Key, int RowIndex)[] {storage};\n"
+            ));
+        } else if index.unique {
             content.raw_fmt(format_args!(
                 "        private readonly Dictionary<{key_type}, int> {storage};\n"
             ));
@@ -531,17 +533,19 @@ fn render_table_class(
     content.raw_fmt(format_args!(
         "        private {table_type}({row_type}[] rows"
     ));
-    for index in table.indexes.iter().filter(|index| !index.ordered) {
+    for index in &table.indexes {
         let key_type = names.index_key_type(&table.name, index)?;
         let storage = names.index_storage_name(index)?;
-        if index.unique {
+        if index.ordered {
+            content.raw_fmt(format_args!(", ({key_type} Key, int RowIndex)[] {storage}"));
+        } else if index.unique {
             content.raw_fmt(format_args!(", Dictionary<{key_type}, int> {storage}"));
         } else {
             content.raw_fmt(format_args!(", Dictionary<{key_type}, int[]> {storage}"));
         }
     }
     content.raw(")\n        {\n            _rows = rows;\n");
-    for index in table.indexes.iter().filter(|index| !index.ordered) {
+    for index in &table.indexes {
         let storage = names.index_storage_name(index)?;
         content.raw_fmt(format_args!("            this.{storage} = {storage};\n"));
     }
@@ -564,7 +568,7 @@ fn render_compound_key_type(
 ) -> Result<()> {
     let key_type = names.compound_key_type_name(table_name, index)?;
     content.raw_fmt(format_args!(
-        "    {access_modifier} readonly struct {key_type} : IEquatable<{key_type}>\n    {{\n"
+        "    {access_modifier} readonly struct {key_type} : IEquatable<{key_type}>, IComparable<{key_type}>\n    {{\n"
     ));
     for field in &index.fields {
         content.raw_fmt(format_args!(
@@ -605,6 +609,21 @@ fn render_compound_key_type(
     ));
     content.raw(";\n        }\n\n");
     content.raw_fmt(format_args!(
+        "        public int CompareTo({key_type} other)\n        {{\n"
+    ));
+    for field in &index.fields {
+        content.raw_fmt(format_args!(
+            "            var {}Comparison = Comparer<{}>.Default.Compare({}, other.{});\n            if ({}Comparison != 0)\n            {{\n                return {}Comparison;\n            }}\n",
+            names.local_name(&field.name)?,
+            names.csharp_type(&field.code_type)?,
+            names.property_name(&field.name)?,
+            names.property_name(&field.name)?,
+            names.local_name(&field.name)?,
+            names.local_name(&field.name)?
+        ));
+    }
+    content.raw("            return 0;\n        }\n\n");
+    content.raw_fmt(format_args!(
         "        public override bool Equals(object? obj) => obj is {key_type} other && Equals(other);\n"
     ));
     content.raw("        public override int GetHashCode() => HashCode.Combine(");
@@ -631,10 +650,14 @@ fn render_table_from_rows_method(
     content.raw_fmt(format_args!(
         "\n        private static {table_type} FromRows({row_type}[] rows)\n        {{\n"
     ));
-    for index in table.indexes.iter().filter(|index| !index.ordered) {
+    for index in &table.indexes {
         let key_type = names.index_key_type(&table.name, index)?;
         let storage = names.index_storage_name(index)?;
-        if index.unique {
+        if index.ordered {
+            content.raw_fmt(format_args!(
+                "            var {storage} = new ({key_type} Key, int RowIndex)[rows.Length];\n"
+            ));
+        } else if index.unique {
             content.raw_fmt(format_args!(
                 "            var {storage} = new Dictionary<{key_type}, int>();\n"
             ));
@@ -644,12 +667,16 @@ fn render_table_from_rows_method(
             ));
         }
     }
-    if table.indexes.iter().any(|index| !index.ordered) {
+    if !table.indexes.is_empty() {
         content.raw("            for (var rowIndex = 0; rowIndex < rows.Length; rowIndex++)\n            {\n                var row = rows[rowIndex];\n");
-        for index in table.indexes.iter().filter(|index| !index.ordered) {
+        for index in &table.indexes {
             let key_expr = names.index_key_from_row(&table.name, index, "row")?;
             let storage = names.index_storage_name(index)?;
-            if index.unique {
+            if index.ordered {
+                content.raw_fmt(format_args!(
+                    "                {storage}[rowIndex] = ({key_expr}, rowIndex);\n"
+                ));
+            } else if index.unique {
                 content.raw_fmt(format_args!(
                     "                var {storage}Key = {key_expr};\n                if ({storage}.ContainsKey({storage}Key))\n                {{\n                    throw new ConfigForgeRuntimeException(\"Duplicate unique index key for {table_type}.{index_name}\");\n                }}\n                {storage}.Add({storage}Key, rowIndex);\n",
                     index_name = index.name
@@ -661,6 +688,19 @@ fn render_table_from_rows_method(
             }
         }
         content.raw("            }\n");
+    }
+    for index in table.indexes.iter().filter(|index| index.ordered) {
+        let key_type = names.index_key_type(&table.name, index)?;
+        let storage = names.index_storage_name(index)?;
+        content.raw_fmt(format_args!(
+            "            Array.Sort({storage}, (left, right) => Comparer<{key_type}>.Default.Compare(left.Key, right.Key));\n"
+        ));
+        if index.unique {
+            content.raw_fmt(format_args!(
+                "            for (var index = 1; index < {storage}.Length; index++)\n            {{\n                if (Comparer<{key_type}>.Default.Compare({storage}[index - 1].Key, {storage}[index].Key) == 0)\n                {{\n                    throw new ConfigForgeRuntimeException(\"Duplicate unique index key for {table_type}.{index_name}\");\n                }}\n            }}\n",
+                index_name = index.name
+            ));
+        }
     }
     for index in table
         .indexes
@@ -674,7 +714,7 @@ fn render_table_from_rows_method(
         ));
     }
     content.raw_fmt(format_args!("            return new {table_type}(rows"));
-    for index in table.indexes.iter().filter(|index| !index.ordered) {
+    for index in &table.indexes {
         content.raw_fmt(format_args!(", {}", names.index_storage_name(index)?));
     }
     content.raw(");\n        }\n");
@@ -687,12 +727,33 @@ fn render_index_lookup_methods(
     names: &CSharpNames,
 ) -> Result<()> {
     let row_type = names.row_type_name(&table.name)?;
-    for index in table.indexes.iter().filter(|index| !index.ordered) {
+    for index in &table.indexes {
         let method = names.index_function_name(index)?;
         let parameters = names.index_parameters(index)?;
         let key = names.index_key_from_parameters(&table.name, index)?;
         let storage = names.index_storage_name(index)?;
-        if index.unique {
+        if index.ordered {
+            let lower_method = names.ordered_lower_bound_function_name(index)?;
+            let upper_method = names.ordered_upper_bound_function_name(index)?;
+            let range_method = names.ordered_range_function_name(index)?;
+            if index.unique {
+                content.raw_fmt(format_args!(
+                    "\n        public {row_type}? {method}({parameters})\n        {{\n            var key = {key};\n            var index = ConfigForgeRuntimeReader.LowerBound({storage}, key);\n            if (index < {storage}.Length && Comparer<{}>.Default.Compare({storage}[index].Key, key) == 0)\n            {{\n                return _rows[{storage}[index].RowIndex];\n            }}\n            return null;\n        }}\n",
+                    names.index_key_type(&table.name, index)?
+                ));
+            } else {
+                content.raw_fmt(format_args!(
+                    "\n        public IReadOnlyList<{row_type}> {method}({parameters})\n        {{\n            var key = {key};\n            var start = ConfigForgeRuntimeReader.LowerBound({storage}, key);\n            var end = ConfigForgeRuntimeReader.UpperBound({storage}, key);\n            return RowsFromOrderedRange({storage}, start, end);\n        }}\n"
+                ));
+            }
+            content.raw_fmt(format_args!(
+                "\n        public int {lower_method}({parameters})\n        {{\n            return ConfigForgeRuntimeReader.LowerBound({storage}, {key});\n        }}\n\n        public int {upper_method}({parameters})\n        {{\n            return ConfigForgeRuntimeReader.UpperBound({storage}, {key});\n        }}\n\n        public IReadOnlyList<{row_type}> {range_method}({min_parameters}, {max_parameters})\n        {{\n            var start = ConfigForgeRuntimeReader.LowerBound({storage}, {key_min});\n            var end = ConfigForgeRuntimeReader.UpperBound({storage}, {key_max});\n            return RowsFromOrderedRange({storage}, start, end);\n        }}\n",
+                min_parameters = names.index_parameters_with_suffix(index, "Min")?,
+                max_parameters = names.index_parameters_with_suffix(index, "Max")?,
+                key_min = names.index_key_from_parameter_suffix(&table.name, index, "Min")?,
+                key_max = names.index_key_from_parameter_suffix(&table.name, index, "Max")?
+            ));
+        } else if index.unique {
             content.raw_fmt(format_args!(
                 "\n        public {row_type}? {method}({parameters})\n        {{\n            return {storage}.TryGetValue({key}, out var rowIndex) ? _rows[rowIndex] : null;\n        }}\n"
             ));
@@ -701,6 +762,11 @@ fn render_index_lookup_methods(
                 "\n        public IReadOnlyList<{row_type}> {method}({parameters})\n        {{\n            if (!{storage}.TryGetValue({key}, out var rowIndexes))\n            {{\n                return Array.Empty<{row_type}>();\n            }}\n            var rows = new {row_type}[rowIndexes.Length];\n            for (var index = 0; index < rowIndexes.Length; index++)\n            {{\n                rows[index] = _rows[rowIndexes[index]];\n            }}\n            return rows;\n        }}\n"
             ));
         }
+    }
+    if table.indexes.iter().any(|index| index.ordered) {
+        content.raw_fmt(format_args!(
+            "\n        private {row_type}[] RowsFromOrderedRange<TKey>((TKey Key, int RowIndex)[] entries, int start, int end)\n        {{\n            var length = Math.Max(0, end - start);\n            var rows = new {row_type}[length];\n            for (var offset = 0; offset < length; offset++)\n            {{\n                rows[offset] = _rows[entries[start + offset].RowIndex];\n            }}\n            return rows;\n        }}\n"
+        ));
     }
     Ok(())
 }

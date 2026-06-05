@@ -133,6 +133,21 @@ impl CSharpNames {
         self.identifier(&format!("{prefix}_{suffix}"), self.naming.function)
     }
 
+    pub(super) fn ordered_lower_bound_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("lower_bound_by_{suffix}"), self.naming.function)
+    }
+
+    pub(super) fn ordered_upper_bound_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("upper_bound_by_{suffix}"), self.naming.function)
+    }
+
+    pub(super) fn ordered_range_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("range_by_{suffix}"), self.naming.function)
+    }
+
     pub(super) fn compound_key_type_name(
         &self,
         table_name: &str,
@@ -175,6 +190,14 @@ impl CSharpNames {
     }
 
     pub(super) fn index_parameters(&self, index: &CodeIndex) -> Result<String> {
+        self.index_parameters_with_suffix(index, "")
+    }
+
+    pub(super) fn index_parameters_with_suffix(
+        &self,
+        index: &CodeIndex,
+        suffix: &str,
+    ) -> Result<String> {
         index
             .fields
             .iter()
@@ -182,7 +205,7 @@ impl CSharpNames {
                 Ok(format!(
                     "{} {}",
                     self.csharp_type(&field.code_type)?,
-                    self.local_name(&field.name)?
+                    suffixed_name(self.local_name(&field.name)?, suffix)
                 ))
             })
             .collect::<Result<Vec<_>>>()
@@ -194,8 +217,20 @@ impl CSharpNames {
         table_name: &str,
         index: &CodeIndex,
     ) -> Result<String> {
+        self.index_key_from_parameter_suffix(table_name, index, "")
+    }
+
+    pub(super) fn index_key_from_parameter_suffix(
+        &self,
+        table_name: &str,
+        index: &CodeIndex,
+        suffix: &str,
+    ) -> Result<String> {
         if index.fields.len() == 1 {
-            self.local_name(&index.fields[0].name)
+            Ok(suffixed_name(
+                self.local_name(&index.fields[0].name)?,
+                suffix,
+            ))
         } else {
             Ok(format!(
                 "new {}({})",
@@ -203,7 +238,7 @@ impl CSharpNames {
                 index
                     .fields
                     .iter()
-                    .map(|field| self.local_name(&field.name))
+                    .map(|field| Ok(suffixed_name(self.local_name(&field.name)?, suffix)))
                     .collect::<Result<Vec<_>>>()?
                     .join(", ")
             ))
@@ -299,5 +334,13 @@ impl CSharpNames {
             |identifier| Some(format!("@{identifier}")),
         )
         .map_err(|message| ConfigForgeError::Validation(format!("csharp codegen: {message}")))
+    }
+}
+
+fn suffixed_name(name: String, suffix: &str) -> String {
+    if suffix.is_empty() {
+        name
+    } else {
+        format!("{name}{suffix}")
     }
 }
