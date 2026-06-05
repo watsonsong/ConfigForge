@@ -1,9 +1,136 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::Result;
+use crate::{
+    Result,
+    codegen::{
+        CodeField, CodeFragmentPayload, CodeModel, CodeTableKind, GeneratedSymbol,
+        ensure_unique_generated_symbols,
+    },
+};
 
-use super::validation_error;
+use super::{types::CSharpNames, validation_error};
+
+pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CSharpNames) -> Result<()> {
+    let mut type_symbols = vec![
+        GeneratedSymbol::new(
+            "class",
+            "ConfigForgeRuntimeException",
+            "ConfigForgeRuntimeException",
+        ),
+        GeneratedSymbol::new("class", "GameData", names.game_data_class_name()),
+        GeneratedSymbol::new("class", "LazyGameData", names.lazy_game_data_class_name()),
+    ];
+
+    for code_enum in &model.enums {
+        type_symbols.push(GeneratedSymbol::new(
+            "enum type",
+            &code_enum.name,
+            names.type_name(&code_enum.name)?,
+        ));
+        validate_named_symbols(
+            &format!("enum `{}` values", code_enum.name),
+            code_enum.values.iter().map(|value| {
+                Ok(GeneratedSymbol::new(
+                    "enum value",
+                    &value.name,
+                    names.enum_value_name(&value.name)?,
+                ))
+            }),
+        )?;
+    }
+
+    for code_struct in &model.structs {
+        type_symbols.push(GeneratedSymbol::new(
+            "struct class",
+            &code_struct.name,
+            names.type_name(&code_struct.name)?,
+        ));
+        validate_field_symbols(
+            &format!("struct `{}` properties", code_struct.name),
+            &code_struct.fields,
+            names,
+        )?;
+    }
+
+    for table in &model.tables {
+        type_symbols.push(GeneratedSymbol::new(
+            "table row class",
+            format!("{}_row", table.name),
+            names.row_type_name(&table.name)?,
+        ));
+        if table.kind == CodeTableKind::Collection {
+            type_symbols.push(GeneratedSymbol::new(
+                "table class",
+                format!("{}_table", table.name),
+                names.repository_type_name(&table.name)?,
+            ));
+        }
+        for fragment in &table.fragments {
+            if matches!(fragment.payload, CodeFragmentPayload::InlineFields) {
+                type_symbols.push(GeneratedSymbol::new(
+                    "fragment class",
+                    format!("{}_{}", table.name, fragment.name),
+                    names.fragment_type_name(&table.name, &fragment.name)?,
+                ));
+                validate_field_symbols(
+                    &format!(
+                        "table `{}` fragment `{}` properties",
+                        table.name, fragment.name
+                    ),
+                    &fragment.fields,
+                    names,
+                )?;
+            }
+        }
+        validate_named_symbols(
+            &format!("table `{}` row properties", table.name),
+            table
+                .fields
+                .iter()
+                .map(|field| {
+                    Ok(GeneratedSymbol::new(
+                        "field",
+                        &field.name,
+                        names.property_name(&field.name)?,
+                    ))
+                })
+                .chain(table.fragments.iter().map(|fragment| {
+                    Ok(GeneratedSymbol::new(
+                        "fragment field",
+                        &fragment.name,
+                        names.property_name(&fragment.name)?,
+                    ))
+                })),
+        )?;
+    }
+
+    ensure_unique_generated_symbols("csharp", "top-level types", type_symbols)
+}
+
+fn validate_field_symbols(scope: &str, fields: &[CodeField], names: &CSharpNames) -> Result<()> {
+    validate_named_symbols(
+        scope,
+        fields.iter().map(|field| {
+            Ok(GeneratedSymbol::new(
+                "field",
+                &field.name,
+                names.property_name(&field.name)?,
+            ))
+        }),
+    )
+}
+
+fn validate_named_symbols(
+    scope: &str,
+    symbols: impl IntoIterator<Item = Result<GeneratedSymbol>>,
+) -> Result<()> {
+    ensure_unique_generated_symbols(
+        "csharp",
+        scope,
+        symbols.into_iter().collect::<Result<Vec<_>>>()?,
+    )
+}
 
 pub(super) fn validate_csharp_namespace(value: &str) -> Result<()> {
     if value.split('.').all(|part| {

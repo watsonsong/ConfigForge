@@ -6,14 +6,15 @@ use serde::{Deserialize, Serialize};
 use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
-    CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeGenerator, CodeWriterConfig,
-    CodeWriterLike, NamingConfig,
+    CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField, CodeFragmentPayload,
+    CodeGenerator, CodeTableKind, CodeWriterConfig, CodeWriterLike, NamingConfig, build_code_model,
+    ir::require_non_empty_index_fields,
 };
 
 mod symbols;
 mod types;
 
-use symbols::{validate_csharp_identifier, validate_csharp_namespace};
+use symbols::{validate_csharp_identifier, validate_csharp_namespace, validate_generated_symbols};
 use types::CSharpNames;
 
 #[cfg(test)]
@@ -164,6 +165,9 @@ fn render_csharp_code(
         .options
         .language_options::<CSharpCodegenOptions>(LANGUAGE)?;
     let names = CSharpNames::new(input, &options)?;
+    let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
+    require_non_empty_index_fields(&model)?;
+    validate_generated_symbols(&model, &names)?;
 
     write_file_header(generator, content, input);
     content.newline();
@@ -176,6 +180,65 @@ fn render_csharp_code(
     content.raw("        public ConfigForgeRuntimeException(string message) : base(message) { }\n");
     content.raw("    }\n\n");
     let partial = if options.emit_partial { " partial" } else { "" };
+
+    for code_enum in &model.enums {
+        content.raw_fmt(format_args!(
+            "    {} enum {}\n    {{\n",
+            names.access_modifier(),
+            names.type_name(&code_enum.name)?
+        ));
+        for value in &code_enum.values {
+            content.raw_fmt(format_args!(
+                "        {},\n",
+                names.enum_value_name(&value.name)?
+            ));
+        }
+        content.raw("    }\n\n");
+    }
+
+    for code_struct in &model.structs {
+        render_csharp_class(
+            content,
+            names.access_modifier(),
+            partial,
+            &names.type_name(&code_struct.name)?,
+            &code_struct.fields,
+            &names,
+        )?;
+    }
+
+    for table in &model.tables {
+        for fragment in &table.fragments {
+            if matches!(fragment.payload, CodeFragmentPayload::Struct { .. }) {
+                continue;
+            }
+            render_csharp_class(
+                content,
+                names.access_modifier(),
+                partial,
+                &names.fragment_type_name(&table.name, &fragment.name)?,
+                &fragment.fields,
+                &names,
+            )?;
+        }
+        render_csharp_row_class(
+            content,
+            names.access_modifier(),
+            partial,
+            &names.row_type_name(&table.name)?,
+            table,
+            &names,
+        )?;
+        if table.kind == CodeTableKind::Collection {
+            content.raw_fmt(format_args!(
+                "    {}{} class {}\n    {{\n    }}\n\n",
+                names.access_modifier(),
+                partial,
+                names.repository_type_name(&table.name)?
+            ));
+        }
+    }
+
     content.raw_fmt(format_args!(
         "    {}{} class {}\n    {{\n    }}\n\n",
         names.access_modifier(),
@@ -189,6 +252,59 @@ fn render_csharp_code(
         names.lazy_game_data_class_name()
     ));
     content.raw("}\n");
+    Ok(())
+}
+
+fn render_csharp_class(
+    content: &mut impl CodeWriterLike,
+    access_modifier: &str,
+    partial: &str,
+    type_name: &str,
+    fields: &[CodeField],
+    names: &CSharpNames,
+) -> Result<()> {
+    content.raw_fmt(format_args!(
+        "    {access_modifier}{partial} class {type_name}\n    {{\n"
+    ));
+    for field in fields {
+        content.raw_fmt(format_args!(
+            "        public {} {} {{ get; init; }}{}\n",
+            names.csharp_field_type(field)?,
+            names.property_name(&field.name)?,
+            names.field_initializer(field)?
+        ));
+    }
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_csharp_row_class(
+    content: &mut impl CodeWriterLike,
+    access_modifier: &str,
+    partial: &str,
+    type_name: &str,
+    table: &super::CodeTable,
+    names: &CSharpNames,
+) -> Result<()> {
+    content.raw_fmt(format_args!(
+        "    {access_modifier}{partial} class {type_name}\n    {{\n"
+    ));
+    for field in &table.fields {
+        content.raw_fmt(format_args!(
+            "        public {} {} {{ get; init; }}{}\n",
+            names.csharp_field_type(field)?,
+            names.property_name(&field.name)?,
+            names.field_initializer(field)?
+        ));
+    }
+    for fragment in &table.fragments {
+        content.raw_fmt(format_args!(
+            "        public {} {} {{ get; init; }} = new();\n",
+            names.fragment_payload_type_name(table, fragment)?,
+            names.property_name(&fragment.name)?
+        ));
+    }
+    content.raw("    }\n\n");
     Ok(())
 }
 

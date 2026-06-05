@@ -80,7 +80,7 @@ docs(codegen): plan C# backend implementation
 feat(codegen): register C# generator skeleton
 ```
 
-## [ ] Step 2：C# 命名、类型映射和 symbol collision
+## [x] Step 2：C# 命名、类型映射和 symbol collision
 
 目标：建立 C# backend 的命名和类型系统，但暂不生成完整加载逻辑。
 
