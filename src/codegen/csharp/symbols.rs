@@ -4,7 +4,7 @@
 use crate::{
     Result,
     codegen::{
-        CodeField, CodeFragmentPayload, CodeModel, CodeTableKind, GeneratedSymbol,
+        CodeField, CodeFragmentPayload, CodeModel, CodeTableKind, CodeTypeRef, GeneratedSymbol,
         ensure_unique_generated_symbols,
     },
 };
@@ -31,11 +31,11 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CSharpNames)
         validate_named_symbols(
             &format!("enum `{}` values", code_enum.name),
             code_enum.values.iter().map(|value| {
-                Ok(GeneratedSymbol::new(
+                Ok(vec![GeneratedSymbol::new(
                     "enum value",
                     &value.name,
                     names.enum_value_name(&value.name)?,
-                ))
+                )])
             }),
         )?;
     }
@@ -89,18 +89,49 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CSharpNames)
                 .fields
                 .iter()
                 .map(|field| {
-                    Ok(GeneratedSymbol::new(
+                    let mut symbols = vec![GeneratedSymbol::new(
                         "field",
                         &field.name,
                         names.property_name(&field.name)?,
-                    ))
+                    )];
+                    if matches!(field.code_type, CodeTypeRef::Text) {
+                        symbols.push(GeneratedSymbol::new(
+                            "text helper",
+                            &field.name,
+                            names.text_function_name(&field.name)?,
+                        ));
+                    }
+                    Ok(symbols)
                 })
                 .chain(table.fragments.iter().map(|fragment| {
-                    Ok(GeneratedSymbol::new(
+                    Ok(vec![GeneratedSymbol::new(
                         "fragment field",
                         &fragment.name,
                         names.property_name(&fragment.name)?,
-                    ))
+                    )])
+                }))
+                .chain(
+                    table
+                        .indexes
+                        .iter()
+                        .filter(|index| !index.ordered)
+                        .map(|index| {
+                            Ok(vec![GeneratedSymbol::new(
+                                "index method",
+                                &index.name,
+                                names.index_function_name(index)?,
+                            )])
+                        }),
+                )
+                .chain(table.foreign_keys.iter().filter_map(|foreign_key| {
+                    foreign_key.linked_field.as_ref()?;
+                    Some(names.relation_function_name(foreign_key).map(|generated| {
+                        vec![GeneratedSymbol::new(
+                            "relation helper",
+                            &foreign_key.name,
+                            generated,
+                        )]
+                    }))
                 })),
         )?;
     }
@@ -112,23 +143,36 @@ fn validate_field_symbols(scope: &str, fields: &[CodeField], names: &CSharpNames
     validate_named_symbols(
         scope,
         fields.iter().map(|field| {
-            Ok(GeneratedSymbol::new(
+            let mut symbols = vec![GeneratedSymbol::new(
                 "field",
                 &field.name,
                 names.property_name(&field.name)?,
-            ))
+            )];
+            if matches!(field.code_type, CodeTypeRef::Text) {
+                symbols.push(GeneratedSymbol::new(
+                    "text helper",
+                    &field.name,
+                    names.text_function_name(&field.name)?,
+                ));
+            }
+            Ok(symbols)
         }),
     )
 }
 
 fn validate_named_symbols(
     scope: &str,
-    symbols: impl IntoIterator<Item = Result<GeneratedSymbol>>,
+    symbols: impl IntoIterator<Item = Result<Vec<GeneratedSymbol>>>,
 ) -> Result<()> {
     ensure_unique_generated_symbols(
         "csharp",
         scope,
-        symbols.into_iter().collect::<Result<Vec<_>>>()?,
+        symbols
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect(),
     )
 }
 

@@ -161,6 +161,10 @@ impl CSharpNames {
         Ok(format!("_{}Link", self.local_name(&foreign_key.name)?))
     }
 
+    pub(super) fn text_function_name(&self, field_name: &str) -> Result<String> {
+        self.identifier(&format!("{field_name}_text"), self.naming.function)
+    }
+
     pub(super) fn compound_key_type_name(
         &self,
         table_name: &str,

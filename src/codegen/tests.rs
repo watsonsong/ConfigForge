@@ -960,6 +960,7 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
             mode = "global_function"
             function = "translateText"
             returns = "optional"
+            csharp_using = "Demo.Localization"
             typescript_import = "import { translateText } from './i18n'"
 
             [naming]
@@ -993,6 +994,10 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
         Some("translateText")
     );
     assert_eq!(target.options.i18n.returns, I18nFunctionReturn::Optional);
+    assert_eq!(
+        target.options.i18n.csharp_using.as_deref(),
+        Some("Demo.Localization")
+    );
     assert_eq!(
         target.options.i18n.typescript_import.as_deref(),
         Some("import { translateText } from './i18n'")

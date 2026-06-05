@@ -9,7 +9,8 @@ use crate::{
     ConfigForgeError,
     artifact::{ArtifactWriteMode, ArtifactWriter},
     codegen::{
-        CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig,
+        CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, I18nFunctionReturn,
+        I18nMode,
         tests::{input_for, linked_fixture},
     },
     meta::MetaModel,
@@ -326,6 +327,157 @@ fn emits_relation_helpers_and_game_data_access_interface() {
     assert!(content.contains("return data.Items.GetById(BonusItemId.Value);"));
     assert!(content.contains("foreach (var key in StarterItemIds)"));
     assert!(content.contains("public void LinkAll()"));
+}
+
+#[test]
+fn emits_generic_translator_text_helpers() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "name"
+            type = "text"
+            required = true
+
+            [[tables.fields]]
+            name = "description"
+            type = "text"
+            required = false
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = CSharpCodeGenerator.generate(&input).expect("csharp code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public interface ITextTranslator"));
+    assert!(content.contains("string? Translate(string context, string text);"));
+    assert!(content.contains("public string NameText(ITextTranslator translator)"));
+    assert!(content.contains("var translated = translator.Translate(\"items.name\", Name);"));
+    assert!(content.contains("return translated ?? Name;"));
+    assert!(content.contains("public string? DescriptionText(ITextTranslator translator)"));
+    assert!(content.contains("if (Description is null)"));
+    assert!(content.contains("translator.Translate(\"items.description\", Description)"));
+}
+
+#[test]
+fn emits_global_function_text_helpers() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "localized_name"
+
+            [[structs.fields]]
+            name = "display"
+            type = "text"
+            required = true
+        "#,
+    )
+    .expect("meta should parse");
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.i18n.mode = I18nMode::GlobalFunction;
+    input.target.options.i18n.function = Some("Translator.Translate".to_owned());
+    input.target.options.i18n.returns = I18nFunctionReturn::Optional;
+    input.target.options.i18n.csharp_using = Some("Demo.Localization".to_owned());
+
+    let files = CSharpCodeGenerator.generate(&input).expect("csharp code");
+    let content = &files[0].content;
+
+    assert!(content.contains("using Demo.Localization;"));
+    assert!(!content.contains("public interface ITextTranslator"));
+    assert!(content.contains("public string DisplayText()"));
+    assert!(
+        content.contains(
+            "var translated = Translator.Translate(\"localized_name.display\", Display);"
+        )
+    );
+    assert!(content.contains("return translated ?? Display;"));
+}
+
+#[test]
+fn rejects_text_helper_name_collisions() {
+    for toml in [
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "name"
+            type = "text"
+            required = true
+
+            [[tables.fields]]
+            name = "name_text"
+            type = "string"
+            required = true
+        "#,
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "get_by_id"
+            type = "text"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id_text"
+            fields = ["id"]
+            unique = true
+        "#,
+        r#"
+            [[tables]]
+            name = "classes"
+            source = "classes.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "name"
+            type = "text"
+            required = true
+
+            [[tables.fields]]
+            name = "class_id"
+            type = "int"
+            required = true
+            foreign_key = { name = "class", target_table = "classes", linked_field = "name_text" }
+        "#,
+    ] {
+        let meta = MetaModel::from_toml_str(toml).expect("meta should parse");
+        let input = input_for(&meta, LANGUAGE);
+
+        let error = CSharpCodeGenerator.generate(&input).unwrap_err();
+        assert!(
+            matches!(error, ConfigForgeError::Validation(ref message) if message.contains("duplicate generated identifier `NameText`") || message.contains("duplicate generated identifier `GetByIdText`")),
+            "unexpected error: {error}"
+        );
+    }
 }
 
 #[test]

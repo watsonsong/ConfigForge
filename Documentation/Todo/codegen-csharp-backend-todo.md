@@ -225,7 +225,7 @@ feat(codegen): support ordered C# indexes
 feat(codegen): add C# relation helpers
 ```
 
-## [ ] Step 7：text helper 和 i18n options
+## [x] Step 7：text helper 和 i18n options
 
 目标：生成 C# text translation helper，支持 generic translator 和 global function 两种模式。
 

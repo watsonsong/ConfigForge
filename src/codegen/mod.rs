@@ -83,6 +83,8 @@ pub struct I18nOptions {
     #[serde(default)]
     pub cpp_include: Option<String>,
     #[serde(default)]
+    pub csharp_using: Option<String>,
+    #[serde(default)]
     pub typescript_import: Option<String>,
 }
 
@@ -237,6 +239,7 @@ fn validate_i18n_options(options: I18nOptions) -> Result<I18nOptions> {
         I18nMode::GlobalFunction => {
             validate_optional_code_snippet("function", &options.function)?;
             validate_optional_code_snippet("cpp_include", &options.cpp_include)?;
+            validate_optional_code_snippet("csharp_using", &options.csharp_using)?;
             validate_optional_code_snippet("typescript_import", &options.typescript_import)?;
             if options.function.is_none() {
                 return Err(ConfigForgeError::Validation(
@@ -364,6 +367,7 @@ impl Default for I18nOptions {
             function: None,
             returns: I18nFunctionReturn::String,
             cpp_include: None,
+            csharp_using: None,
             typescript_import: None,
         }
     }

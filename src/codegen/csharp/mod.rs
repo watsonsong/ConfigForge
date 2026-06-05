@@ -7,8 +7,9 @@ use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField, CodeFragmentPayload,
-    CodeGenerator, CodeModel, CodeTableKind, CodeWriterConfig, CodeWriterLike, NamingConfig,
-    build_code_model, ir::CodeRelationCardinality, ir::require_non_empty_index_fields,
+    CodeGenerator, CodeModel, CodeTableKind, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn,
+    I18nMode, I18nOptions, NamingConfig, build_code_model, ir::CodeRelationCardinality,
+    ir::require_non_empty_index_fields,
 };
 
 mod symbols;
@@ -174,10 +175,14 @@ fn render_csharp_code(
     if options.nullable {
         content.raw("#nullable enable\n\n");
     }
-    content.raw("using System;\nusing System.Collections.Generic;\n\n");
+    content.raw("using System;\nusing System.Collections.Generic;\n");
+    render_csharp_i18n_using(content, &input.target.options.i18n);
+    content.raw("\n");
     content.raw_fmt(format_args!("namespace {}\n{{\n", names.namespace()));
+    render_csharp_i18n_prelude(content, &input.target.options.i18n);
     render_runtime_contract(content, &model.enums, &names)?;
     let partial = if options.emit_partial { " partial" } else { "" };
+    let class_modifier = format!("{}{}", names.access_modifier(), partial);
 
     for code_enum in &model.enums {
         content.raw_fmt(format_args!(
@@ -197,11 +202,12 @@ fn render_csharp_code(
     for code_struct in &model.structs {
         render_csharp_class(
             content,
-            names.access_modifier(),
-            partial,
+            &class_modifier,
             &names.type_name(&code_struct.name)?,
             &code_struct.fields,
             &names,
+            &input.target.options.i18n,
+            &code_struct.name,
         )?;
         render_read_method(
             content,
@@ -218,11 +224,12 @@ fn render_csharp_code(
             }
             render_csharp_class(
                 content,
-                names.access_modifier(),
-                partial,
+                &class_modifier,
                 &names.fragment_type_name(&table.name, &fragment.name)?,
                 &fragment.fields,
                 &names,
+                &input.target.options.i18n,
+                &format!("{}.{}", table.name, fragment.name),
             )?;
             render_read_method(
                 content,
@@ -238,6 +245,7 @@ fn render_csharp_code(
             &names.row_type_name(&table.name)?,
             table,
             &names,
+            &input.target.options.i18n,
         )?;
         render_row_relation_methods(content, table, &model, &names)?;
         render_row_read_method(content, &names.row_type_name(&table.name)?, table, &names)?;
@@ -430,16 +438,43 @@ fn render_game_data_access_interface(
     Ok(())
 }
 
+fn render_csharp_i18n_using(content: &mut impl CodeWriterLike, i18n: &I18nOptions) {
+    if !matches!(i18n.mode, I18nMode::GlobalFunction) {
+        return;
+    }
+    if let Some(using) = i18n.csharp_using.as_deref() {
+        let trimmed = using.trim();
+        if trimmed.starts_with("using ") {
+            content.raw(trimmed);
+            if !trimmed.ends_with(';') {
+                content.raw(";");
+            }
+            content.newline();
+        } else {
+            content.raw_fmt(format_args!("using {trimmed};\n"));
+        }
+    }
+}
+
+fn render_csharp_i18n_prelude(content: &mut impl CodeWriterLike, i18n: &I18nOptions) {
+    if matches!(i18n.mode, I18nMode::Generic) {
+        content.raw(
+            "    public interface ITextTranslator\n    {\n        string? Translate(string context, string text);\n    }\n\n",
+        );
+    }
+}
+
 fn render_csharp_class(
     content: &mut impl CodeWriterLike,
-    access_modifier: &str,
-    partial: &str,
+    class_modifier: &str,
     type_name: &str,
     fields: &[CodeField],
     names: &CSharpNames,
+    i18n: &I18nOptions,
+    text_context: &str,
 ) -> Result<()> {
     content.raw_fmt(format_args!(
-        "    {access_modifier}{partial} class {type_name}\n    {{\n"
+        "    {class_modifier} class {type_name}\n    {{\n"
     ));
     for field in fields {
         content.raw_fmt(format_args!(
@@ -449,6 +484,7 @@ fn render_csharp_class(
             names.field_initializer(field)?
         ));
     }
+    render_csharp_text_helpers(content, text_context, fields, names, i18n)?;
     content.raw("    }\n\n");
     Ok(())
 }
@@ -480,6 +516,7 @@ fn render_csharp_row_class(
     type_name: &str,
     table: &super::CodeTable,
     names: &CSharpNames,
+    i18n: &I18nOptions,
 ) -> Result<()> {
     content.raw_fmt(format_args!(
         "    {access_modifier}{partial} class {type_name}\n    {{\n"
@@ -499,6 +536,7 @@ fn render_csharp_row_class(
             names.property_name(&fragment.name)?
         ));
     }
+    render_csharp_text_helpers(content, &table.name, &table.fields, names, i18n)?;
     if table.kind == CodeTableKind::Object {
         content.raw_fmt(format_args!(
             "\n        internal const string DataFile = {:?};\n\n        internal static {type_name} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var reader = loader.Open(DataFile);\n            return {type_name}Reader.Read(reader);\n        }}\n",
@@ -507,6 +545,63 @@ fn render_csharp_row_class(
     }
     content.raw("    }\n\n");
     Ok(())
+}
+
+fn render_csharp_text_helpers(
+    content: &mut impl CodeWriterLike,
+    context_prefix: &str,
+    fields: &[CodeField],
+    names: &CSharpNames,
+    i18n: &I18nOptions,
+) -> Result<()> {
+    for field in fields
+        .iter()
+        .filter(|field| matches!(field.code_type, super::CodeTypeRef::Text))
+    {
+        let function_name = names.text_function_name(&field.name)?;
+        let field_name = names.property_name(&field.name)?;
+        let context = format!("{context_prefix}.{}", field.name);
+        match i18n.mode {
+            I18nMode::Generic if field.required => {
+                content.raw_fmt(format_args!(
+                    "\n        public string {function_name}(ITextTranslator translator)\n        {{\n            var translated = translator.Translate({context:?}, {field_name});\n            return translated ?? {field_name};\n        }}\n"
+                ));
+            }
+            I18nMode::Generic => {
+                content.raw_fmt(format_args!(
+                    "\n        public string? {function_name}(ITextTranslator translator)\n        {{\n            if ({field_name} is null)\n            {{\n                return null;\n            }}\n            var translated = translator.Translate({context:?}, {field_name});\n            return translated ?? {field_name};\n        }}\n"
+                ));
+            }
+            I18nMode::GlobalFunction if field.required => {
+                content.raw_fmt(format_args!(
+                    "\n        public string {function_name}()\n        {{\n            {statement}\n        }}\n",
+                    statement = csharp_global_i18n_statement(i18n, &context, &field_name, &field_name)
+                ));
+            }
+            I18nMode::GlobalFunction => {
+                content.raw_fmt(format_args!(
+                    "\n        public string? {function_name}()\n        {{\n            if ({field_name} is null)\n            {{\n                return null;\n            }}\n            {statement}\n        }}\n",
+                    statement = csharp_global_i18n_statement(i18n, &context, &field_name, &field_name)
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn csharp_global_i18n_statement(
+    i18n: &I18nOptions,
+    context: &str,
+    msgid_expr: &str,
+    fallback_expr: &str,
+) -> String {
+    let function = i18n.function.as_deref().expect("global i18n function");
+    match i18n.returns {
+        I18nFunctionReturn::String => format!("return {function}({context:?}, {msgid_expr});"),
+        I18nFunctionReturn::Optional => format!(
+            "var translated = {function}({context:?}, {msgid_expr});\n            return translated ?? {fallback_expr};"
+        ),
+    }
 }
 
 fn render_row_relation_methods(
