@@ -7,8 +7,8 @@ use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField, CodeFragmentPayload,
-    CodeGenerator, CodeTableKind, CodeWriterConfig, CodeWriterLike, NamingConfig, build_code_model,
-    ir::require_non_empty_index_fields,
+    CodeGenerator, CodeModel, CodeTableKind, CodeWriterConfig, CodeWriterLike, NamingConfig,
+    build_code_model, ir::CodeRelationCardinality, ir::require_non_empty_index_fields,
 };
 
 mod symbols;
@@ -239,6 +239,7 @@ fn render_csharp_code(
             table,
             &names,
         )?;
+        render_row_relation_methods(content, table, &model, &names)?;
         render_row_read_method(content, &names.row_type_name(&table.name)?, table, &names)?;
         if table.kind == CodeTableKind::Collection {
             for index in table.indexes.iter().filter(|index| index.fields.len() > 1) {
@@ -254,8 +255,10 @@ fn render_csharp_code(
         }
     }
 
+    render_game_data_access_interface(content, &model, names.access_modifier(), &names)?;
+
     content.raw_fmt(format_args!(
-        "    {}{} class {}\n    {{\n",
+        "    {}{} class {} : IGameDataAccess\n    {{\n",
         names.access_modifier(),
         partial,
         names.game_data_class_name()
@@ -270,6 +273,21 @@ fn render_csharp_code(
             names.property_name(&table.name)?
         ));
     }
+    content.raw("\n        public void LinkAll()\n        {\n");
+    for table in model.tables.iter().filter(|table| {
+        table
+            .foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.linked_field.is_some())
+    }) {
+        if table.kind == CodeTableKind::Collection {
+            content.raw_fmt(format_args!(
+                "            {}.Link(this);\n",
+                names.property_name(&table.name)?
+            ));
+        }
+    }
+    content.raw("        }\n");
     content.raw("\n        private GameData(\n");
     for (index, table) in model.tables.iter().enumerate() {
         let comma = if index + 1 == model.tables.len() {
@@ -297,7 +315,7 @@ fn render_csharp_code(
     }
     content.raw("        }\n\n");
     content.raw_fmt(format_args!(
-        "        public static {} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            return new {}(\n",
+        "        public static {} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var data = new {}(\n",
         names.game_data_class_name(),
         names.game_data_class_name()
     ));
@@ -320,7 +338,7 @@ fn render_csharp_code(
             )),
         }
     }
-    content.raw("            );\n        }\n    }\n\n");
+    content.raw("            );\n            data.LinkAll();\n            return data;\n        }\n    }\n\n");
     content.raw_fmt(format_args!(
         "    {}{} class {}\n    {{\n    }}\n",
         names.access_modifier(),
@@ -385,6 +403,29 @@ fn render_runtime_contract(
     content.raw("        public static T[] ReadListValue<T>(IConfigForgeRuntimeDataReader reader, Func<IConfigForgeRuntimeDataReader, T> read)\n        {\n            var length = reader.ReadListLength();\n            var values = new T[length];\n            for (var index = 0; index < length; index++)\n            {\n                reader.EnterListElement(index);\n                try\n                {\n                    values[index] = read(reader);\n                }\n                finally\n                {\n                    reader.ExitListElement();\n                }\n            }\n            return values;\n        }\n");
     content.raw("\n        public static int LowerBound<TKey>((TKey Key, int RowIndex)[] entries, TKey key)\n        {\n            var comparer = Comparer<TKey>.Default;\n            var low = 0;\n            var high = entries.Length;\n            while (low < high)\n            {\n                var mid = low + ((high - low) / 2);\n                if (comparer.Compare(entries[mid].Key, key) < 0)\n                {\n                    low = mid + 1;\n                }\n                else\n                {\n                    high = mid;\n                }\n            }\n            return low;\n        }\n\n");
     content.raw("        public static int UpperBound<TKey>((TKey Key, int RowIndex)[] entries, TKey key)\n        {\n            var comparer = Comparer<TKey>.Default;\n            var low = 0;\n            var high = entries.Length;\n            while (low < high)\n            {\n                var mid = low + ((high - low) / 2);\n                if (comparer.Compare(entries[mid].Key, key) <= 0)\n                {\n                    low = mid + 1;\n                }\n                else\n                {\n                    high = mid;\n                }\n            }\n            return low;\n        }\n");
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_game_data_access_interface(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    access_modifier: &str,
+    names: &CSharpNames,
+) -> Result<()> {
+    content.raw_fmt(format_args!(
+        "    {access_modifier} interface IGameDataAccess\n    {{\n"
+    ));
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "        {} {} {{ get; }}\n",
+            match table.kind {
+                CodeTableKind::Object => names.row_type_name(&table.name)?,
+                CodeTableKind::Collection => names.repository_type_name(&table.name)?,
+            },
+            names.property_name(&table.name)?
+        ));
+    }
     content.raw("    }\n\n");
     Ok(())
 }
@@ -463,6 +504,130 @@ fn render_csharp_row_class(
             "\n        internal const string DataFile = {:?};\n\n        internal static {type_name} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var reader = loader.Open(DataFile);\n            return {type_name}Reader.Read(reader);\n        }}\n",
             table.data_file
         ));
+    }
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_row_relation_methods(
+    content: &mut impl CodeWriterLike,
+    table: &super::CodeTable,
+    model: &CodeModel,
+    names: &CSharpNames,
+) -> Result<()> {
+    let linked = table
+        .foreign_keys
+        .iter()
+        .filter(|foreign_key| foreign_key.linked_field.is_some())
+        .collect::<Vec<_>>();
+    if linked.is_empty() {
+        return Ok(());
+    }
+    let row_type = names.row_type_name(&table.name)?;
+    content.raw_fmt(format_args!(
+        "    public partial class {row_type}\n    {{\n"
+    ));
+    for foreign_key in &linked {
+        let cache = names.relation_cache_field_name(foreign_key)?;
+        match foreign_key
+            .linked_field
+            .as_ref()
+            .map(|linked| linked.cardinality)
+            .unwrap_or(CodeRelationCardinality::One)
+        {
+            CodeRelationCardinality::One | CodeRelationCardinality::OptionalOne => {
+                content.raw_fmt(format_args!("        private int {cache} = -1;\n"));
+            }
+            CodeRelationCardinality::Many => {
+                content.raw_fmt(format_args!("        private int[]? {cache};\n"));
+            }
+        }
+    }
+    content.raw("\n");
+    for foreign_key in linked {
+        let target_table = model
+            .tables
+            .iter()
+            .find(|table| table.name == foreign_key.target_table)
+            .ok_or_else(|| {
+                validation_error(format!(
+                    "missing target table `{}`",
+                    foreign_key.target_table
+                ))
+            })?;
+        let target_index = target_table
+            .indexes
+            .iter()
+            .find(|index| index.name == foreign_key.target_index)
+            .ok_or_else(|| {
+                validation_error(format!(
+                    "missing target index `{}`",
+                    foreign_key.target_index
+                ))
+            })?;
+        let method = names.relation_function_name(foreign_key)?;
+        let target_row = names.row_type_name(&foreign_key.target_table)?;
+        let target_property = names.property_name(&foreign_key.target_table)?;
+        let target_lookup = names.index_function_name(target_index)?;
+        let args = foreign_key
+            .fields
+            .iter()
+            .map(|field| {
+                let prop = names.property_name(&field.name)?;
+                if !field.required && names.is_value_type(&field.code_type) {
+                    Ok(format!("{prop}.Value"))
+                } else {
+                    Ok(prop)
+                }
+            })
+            .collect::<Result<Vec<_>>>()?
+            .join(", ");
+        match foreign_key
+            .linked_field
+            .as_ref()
+            .map(|linked| linked.cardinality)
+            .unwrap_or(CodeRelationCardinality::One)
+        {
+            CodeRelationCardinality::One => {
+                content.raw_fmt(format_args!(
+                    "        public {target_row} {method}(IGameDataAccess data)\n        {{\n            return data.{target_property}.{target_lookup}({args}) ?? throw new ConfigForgeRuntimeException(\"Missing relation target for {row_type}.{method}\");\n        }}\n\n"
+                ));
+            }
+            CodeRelationCardinality::OptionalOne => {
+                let guard = foreign_key
+                    .fields
+                    .iter()
+                    .filter(|field| !field.required)
+                    .map(|field| {
+                        let prop = names.property_name(&field.name)?;
+                        if names.is_value_type(&field.code_type) {
+                            Ok(format!("!{prop}.HasValue"))
+                        } else {
+                            Ok(format!("{prop} is null"))
+                        }
+                    })
+                    .collect::<Result<Vec<_>>>()?
+                    .join(" || ");
+                content.raw_fmt(format_args!(
+                    "        public {target_row}? {method}(IGameDataAccess data)\n        {{\n"
+                ));
+                if !guard.is_empty() {
+                    content.raw_fmt(format_args!(
+                        "            if ({guard})\n            {{\n                return null;\n            }}\n"
+                    ));
+                }
+                content.raw_fmt(format_args!(
+                    "            return data.{target_property}.{target_lookup}({args});\n        }}\n\n"
+                ));
+            }
+            CodeRelationCardinality::Many => {
+                let field = &foreign_key.fields[0];
+                let prop = names.property_name(&field.name)?;
+                content.raw_fmt(format_args!(
+                    "        public IReadOnlyList<{target_row}> {method}(IGameDataAccess data)\n        {{\n            var rows = new List<{target_row}>();\n            foreach (var key in {prop})\n            {{\n                var row = data.{target_property}.{target_lookup}(key);\n                if (row != null)\n                {{\n                    rows.Add(row);\n                }}\n            }}\n            return rows;\n        }}\n\n"
+                ));
+            }
+        }
     }
     content.raw("    }\n\n");
     Ok(())
@@ -553,8 +718,29 @@ fn render_table_class(
     content.raw_fmt(format_args!(
         "        internal static {table_type} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var reader = loader.Open(DataFile);\n            var rowCount = reader.ReadRowCount();\n            var rows = new {row_type}[rowCount];\n            for (var rowIndex = 0; rowIndex < rowCount; rowIndex++)\n            {{\n                reader.EnterRow(rowIndex);\n                try\n                {{\n                    rows[rowIndex] = {row_type}Reader.Read(reader);\n                }}\n                finally\n                {{\n                    reader.ExitRow();\n                }}\n            }}\n            return FromRows(rows);\n        }}\n"
     ));
+    content.raw_fmt(format_args!(
+        "\n        public int Count => _rows.Length;\n\n        public {row_type}? RowAt(int rowIndex)\n        {{\n            return rowIndex >= 0 && rowIndex < _rows.Length ? _rows[rowIndex] : null;\n        }}\n"
+    ));
     render_table_from_rows_method(content, table, names)?;
     render_index_lookup_methods(content, table, names)?;
+    if table
+        .foreign_keys
+        .iter()
+        .any(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        content.raw("\n        public void Link(IGameDataAccess data)\n        {\n");
+        for foreign_key in table
+            .foreign_keys
+            .iter()
+            .filter(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            let method = names.relation_function_name(foreign_key)?;
+            content.raw_fmt(format_args!(
+                "            foreach (var row in _rows)\n            {{\n                _ = row.{method}(data);\n            }}\n"
+            ));
+        }
+        content.raw("        }\n");
+    }
     content.raw("    }\n\n");
     Ok(())
 }

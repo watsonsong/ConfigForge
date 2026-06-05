@@ -265,6 +265,70 @@ fn emits_ordered_index_storage_and_range_api() {
 }
 
 #[test]
+fn emits_relation_helpers_and_game_data_access_interface() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "default_item_id"
+            type = "int"
+            required = true
+            foreign_key = { name = "default_item", target_table = "items", linked_field = "default_item" }
+
+            [[tables.fields]]
+            name = "bonus_item_id"
+            type = "int"
+            required = false
+            foreign_key = { name = "bonus_item", target_table = "items", linked_field = "bonus_item" }
+
+            [[tables.fields]]
+            name = "starter_item_ids"
+            type = "int[]"
+            required = true
+            foreign_key = { name = "starter_item", target_table = "items", linked_field = "starter_items" }
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = CSharpCodeGenerator.generate(&input).expect("csharp code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public interface IGameDataAccess"));
+    assert!(content.contains("public partial class GameData : IGameDataAccess"));
+    assert!(content.contains("private int _defaultItemLink = -1;"));
+    assert!(content.contains("private int _bonusItemLink = -1;"));
+    assert!(content.contains("private int[]? _starterItemLink;"));
+    assert!(content.contains("public ItemsRow DefaultItem(IGameDataAccess data)"));
+    assert!(content.contains("public ItemsRow? BonusItem(IGameDataAccess data)"));
+    assert!(content.contains("public IReadOnlyList<ItemsRow> StarterItems(IGameDataAccess data)"));
+    assert!(content.contains("return data.Items.GetById(DefaultItemId)"));
+    assert!(content.contains("return data.Items.GetById(BonusItemId.Value);"));
+    assert!(content.contains("foreach (var key in StarterItemIds)"));
+    assert!(content.contains("public void LinkAll()"));
+}
+
+#[test]
 fn emits_object_table_as_loaded_property_without_repository() {
     let meta = MetaModel::from_toml_str(
         r#"

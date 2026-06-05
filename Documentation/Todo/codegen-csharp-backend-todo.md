@@ -195,7 +195,7 @@ feat(codegen): generate C# hash indexes
 feat(codegen): support ordered C# indexes
 ```
 
-## [ ] Step 6：relation helper 和 `IGameDataAccess`
+## [x] Step 6：relation helper 和 `IGameDataAccess`
 
 目标：生成 linked_field relation helper，并让 eager/lazy 共享访问接口。
 

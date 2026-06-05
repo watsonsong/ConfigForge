@@ -8,7 +8,7 @@ use super::{
 };
 use crate::codegen::{
     CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
-    CodeTypeRef, KeywordConflictPolicy, NamingConfig, naming,
+    CodeTypeRef, KeywordConflictPolicy, NamingConfig, ir::CodeForeignKey, naming,
 };
 
 pub(super) struct CSharpNames {
@@ -146,6 +146,19 @@ impl CSharpNames {
     pub(super) fn ordered_range_function_name(&self, index: &CodeIndex) -> Result<String> {
         let suffix = index.name.trim_start_matches("by_");
         self.identifier(&format!("range_by_{suffix}"), self.naming.function)
+    }
+
+    pub(super) fn relation_function_name(&self, foreign_key: &CodeForeignKey) -> Result<String> {
+        let name = foreign_key
+            .linked_field
+            .as_ref()
+            .map(|linked_field| linked_field.name.as_str())
+            .unwrap_or(foreign_key.name.as_str());
+        self.identifier(name, self.naming.function)
+    }
+
+    pub(super) fn relation_cache_field_name(&self, foreign_key: &CodeForeignKey) -> Result<String> {
+        Ok(format!("_{}Link", self.local_name(&foreign_key.name)?))
     }
 
     pub(super) fn compound_key_type_name(
