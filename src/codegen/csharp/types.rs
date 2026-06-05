@@ -7,8 +7,8 @@ use super::{
     CSharpCodegenOptions, validate_csharp_identifier, validate_csharp_namespace, validation_error,
 };
 use crate::codegen::{
-    CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeTable, CodeTypeRef,
-    KeywordConflictPolicy, NamingConfig, naming,
+    CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
+    CodeTypeRef, KeywordConflictPolicy, NamingConfig, naming,
 };
 
 pub(super) struct CSharpNames {
@@ -121,6 +121,93 @@ impl CSharpNames {
 
     pub(super) fn local_name(&self, name: &str) -> Result<String> {
         self.identifier(name, crate::codegen::CaseStyle::CamelCase)
+    }
+
+    pub(super) fn index_storage_name(&self, index: &CodeIndex) -> Result<String> {
+        Ok(format!("_{}Index", self.local_name(&index.name)?))
+    }
+
+    pub(super) fn index_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let prefix = if index.unique { "get_by" } else { "find_by" };
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("{prefix}_{suffix}"), self.naming.function)
+    }
+
+    pub(super) fn compound_key_type_name(
+        &self,
+        table_name: &str,
+        index: &CodeIndex,
+    ) -> Result<String> {
+        self.type_name(&format!("{table_name}_{}_key", index.name))
+    }
+
+    pub(super) fn index_key_type(&self, table_name: &str, index: &CodeIndex) -> Result<String> {
+        if index.fields.len() == 1 {
+            self.csharp_type(&index.fields[0].code_type)
+        } else {
+            self.compound_key_type_name(table_name, index)
+        }
+    }
+
+    pub(super) fn index_key_from_row(
+        &self,
+        table_name: &str,
+        index: &CodeIndex,
+        row_var: &str,
+    ) -> Result<String> {
+        if index.fields.len() == 1 {
+            Ok(format!(
+                "{row_var}.{}",
+                self.property_name(&index.fields[0].name)?
+            ))
+        } else {
+            Ok(format!(
+                "new {}({})",
+                self.compound_key_type_name(table_name, index)?,
+                index
+                    .fields
+                    .iter()
+                    .map(|field| Ok(format!("{row_var}.{}", self.property_name(&field.name)?)))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", ")
+            ))
+        }
+    }
+
+    pub(super) fn index_parameters(&self, index: &CodeIndex) -> Result<String> {
+        index
+            .fields
+            .iter()
+            .map(|field| {
+                Ok(format!(
+                    "{} {}",
+                    self.csharp_type(&field.code_type)?,
+                    self.local_name(&field.name)?
+                ))
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(|parts| parts.join(", "))
+    }
+
+    pub(super) fn index_key_from_parameters(
+        &self,
+        table_name: &str,
+        index: &CodeIndex,
+    ) -> Result<String> {
+        if index.fields.len() == 1 {
+            self.local_name(&index.fields[0].name)
+        } else {
+            Ok(format!(
+                "new {}({})",
+                self.compound_key_type_name(table_name, index)?,
+                index
+                    .fields
+                    .iter()
+                    .map(|field| self.local_name(&field.name))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", ")
+            ))
+        }
     }
 
     pub(super) fn csharp_type(&self, code_type: &CodeTypeRef) -> Result<String> {

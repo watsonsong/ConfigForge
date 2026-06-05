@@ -174,7 +174,7 @@ fn render_csharp_code(
     if options.nullable {
         content.raw("#nullable enable\n\n");
     }
-    content.raw("using System;\n\n");
+    content.raw("using System;\nusing System.Collections.Generic;\n\n");
     content.raw_fmt(format_args!("namespace {}\n{{\n", names.namespace()));
     render_runtime_contract(content, &model.enums, &names)?;
     let partial = if options.emit_partial { " partial" } else { "" };
@@ -241,6 +241,19 @@ fn render_csharp_code(
         )?;
         render_row_read_method(content, &names.row_type_name(&table.name)?, table, &names)?;
         if table.kind == CodeTableKind::Collection {
+            for index in table
+                .indexes
+                .iter()
+                .filter(|index| !index.ordered && index.fields.len() > 1)
+            {
+                render_compound_key_type(
+                    content,
+                    &table.name,
+                    index,
+                    names.access_modifier(),
+                    &names,
+                )?;
+            }
             render_table_class(content, names.access_modifier(), partial, table, &names)?;
         }
     }
@@ -498,16 +511,197 @@ fn render_table_class(
         "    {access_modifier}{partial} class {table_type}\n    {{\n"
     ));
     content.raw_fmt(format_args!(
-        "        public const string DataFile = {:?};\n        private readonly {}[] _rows;\n\n",
+        "        public const string DataFile = {:?};\n        private readonly {}[] _rows;\n",
         table.data_file, row_type
     ));
+    for index in table.indexes.iter().filter(|index| !index.ordered) {
+        let key_type = names.index_key_type(&table.name, index)?;
+        let storage = names.index_storage_name(index)?;
+        if index.unique {
+            content.raw_fmt(format_args!(
+                "        private readonly Dictionary<{key_type}, int> {storage};\n"
+            ));
+        } else {
+            content.raw_fmt(format_args!(
+                "        private readonly Dictionary<{key_type}, int[]> {storage};\n"
+            ));
+        }
+    }
+    content.raw("\n");
     content.raw_fmt(format_args!(
-        "        public {table_type}({row_type}[] rows)\n        {{\n            _rows = rows;\n        }}\n\n"
+        "        private {table_type}({row_type}[] rows"
     ));
+    for index in table.indexes.iter().filter(|index| !index.ordered) {
+        let key_type = names.index_key_type(&table.name, index)?;
+        let storage = names.index_storage_name(index)?;
+        if index.unique {
+            content.raw_fmt(format_args!(", Dictionary<{key_type}, int> {storage}"));
+        } else {
+            content.raw_fmt(format_args!(", Dictionary<{key_type}, int[]> {storage}"));
+        }
+    }
+    content.raw(")\n        {\n            _rows = rows;\n");
+    for index in table.indexes.iter().filter(|index| !index.ordered) {
+        let storage = names.index_storage_name(index)?;
+        content.raw_fmt(format_args!("            this.{storage} = {storage};\n"));
+    }
+    content.raw("        }\n\n");
     content.raw_fmt(format_args!(
-        "        internal static {table_type} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var reader = loader.Open(DataFile);\n            var rowCount = reader.ReadRowCount();\n            var rows = new {row_type}[rowCount];\n            for (var rowIndex = 0; rowIndex < rowCount; rowIndex++)\n            {{\n                reader.EnterRow(rowIndex);\n                try\n                {{\n                    rows[rowIndex] = {row_type}Reader.Read(reader);\n                }}\n                finally\n                {{\n                    reader.ExitRow();\n                }}\n            }}\n            return new {table_type}(rows);\n        }}\n"
+        "        internal static {table_type} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var reader = loader.Open(DataFile);\n            var rowCount = reader.ReadRowCount();\n            var rows = new {row_type}[rowCount];\n            for (var rowIndex = 0; rowIndex < rowCount; rowIndex++)\n            {{\n                reader.EnterRow(rowIndex);\n                try\n                {{\n                    rows[rowIndex] = {row_type}Reader.Read(reader);\n                }}\n                finally\n                {{\n                    reader.ExitRow();\n                }}\n            }}\n            return FromRows(rows);\n        }}\n"
     ));
+    render_table_from_rows_method(content, table, names)?;
+    render_index_lookup_methods(content, table, names)?;
     content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_compound_key_type(
+    content: &mut impl CodeWriterLike,
+    table_name: &str,
+    index: &super::CodeIndex,
+    access_modifier: &str,
+    names: &CSharpNames,
+) -> Result<()> {
+    let key_type = names.compound_key_type_name(table_name, index)?;
+    content.raw_fmt(format_args!(
+        "    {access_modifier} readonly struct {key_type} : IEquatable<{key_type}>\n    {{\n"
+    ));
+    for field in &index.fields {
+        content.raw_fmt(format_args!(
+            "        public {} {} {{ get; }}\n",
+            names.csharp_type(&field.code_type)?,
+            names.property_name(&field.name)?
+        ));
+    }
+    content.raw_fmt(format_args!("\n        public {key_type}("));
+    content.raw_fmt(format_args!("{}", names.index_parameters(index)?));
+    content.raw(")\n        {\n");
+    for field in &index.fields {
+        content.raw_fmt(format_args!(
+            "            {} = {};\n",
+            names.property_name(&field.name)?,
+            names.local_name(&field.name)?
+        ));
+    }
+    content.raw("        }\n\n");
+    content.raw_fmt(format_args!(
+        "        public bool Equals({key_type} other)\n        {{\n            return "
+    ));
+    content.raw_fmt(format_args!(
+        "{}",
+        index
+            .fields
+            .iter()
+            .map(|field| {
+                Ok(format!(
+                    "EqualityComparer<{}>.Default.Equals({}, other.{})",
+                    names.csharp_type(&field.code_type)?,
+                    names.property_name(&field.name)?,
+                    names.property_name(&field.name)?
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .join(" && ")
+    ));
+    content.raw(";\n        }\n\n");
+    content.raw_fmt(format_args!(
+        "        public override bool Equals(object? obj) => obj is {key_type} other && Equals(other);\n"
+    ));
+    content.raw("        public override int GetHashCode() => HashCode.Combine(");
+    content.raw_fmt(format_args!(
+        "{}",
+        index
+            .fields
+            .iter()
+            .map(|field| names.property_name(&field.name))
+            .collect::<Result<Vec<_>>>()?
+            .join(", ")
+    ));
+    content.raw(");\n    }\n\n");
+    Ok(())
+}
+
+fn render_table_from_rows_method(
+    content: &mut impl CodeWriterLike,
+    table: &super::CodeTable,
+    names: &CSharpNames,
+) -> Result<()> {
+    let table_type = names.repository_type_name(&table.name)?;
+    let row_type = names.row_type_name(&table.name)?;
+    content.raw_fmt(format_args!(
+        "\n        private static {table_type} FromRows({row_type}[] rows)\n        {{\n"
+    ));
+    for index in table.indexes.iter().filter(|index| !index.ordered) {
+        let key_type = names.index_key_type(&table.name, index)?;
+        let storage = names.index_storage_name(index)?;
+        if index.unique {
+            content.raw_fmt(format_args!(
+                "            var {storage} = new Dictionary<{key_type}, int>();\n"
+            ));
+        } else {
+            content.raw_fmt(format_args!(
+                "            var {storage}Builder = new Dictionary<{key_type}, List<int>>();\n"
+            ));
+        }
+    }
+    if table.indexes.iter().any(|index| !index.ordered) {
+        content.raw("            for (var rowIndex = 0; rowIndex < rows.Length; rowIndex++)\n            {\n                var row = rows[rowIndex];\n");
+        for index in table.indexes.iter().filter(|index| !index.ordered) {
+            let key_expr = names.index_key_from_row(&table.name, index, "row")?;
+            let storage = names.index_storage_name(index)?;
+            if index.unique {
+                content.raw_fmt(format_args!(
+                    "                var {storage}Key = {key_expr};\n                if ({storage}.ContainsKey({storage}Key))\n                {{\n                    throw new ConfigForgeRuntimeException(\"Duplicate unique index key for {table_type}.{index_name}\");\n                }}\n                {storage}.Add({storage}Key, rowIndex);\n",
+                    index_name = index.name
+                ));
+            } else {
+                content.raw_fmt(format_args!(
+                    "                var {storage}Key = {key_expr};\n                if (!{storage}Builder.TryGetValue({storage}Key, out var {storage}Rows))\n                {{\n                    {storage}Rows = new List<int>();\n                    {storage}Builder.Add({storage}Key, {storage}Rows);\n                }}\n                {storage}Rows.Add(rowIndex);\n"
+                ));
+            }
+        }
+        content.raw("            }\n");
+    }
+    for index in table
+        .indexes
+        .iter()
+        .filter(|index| !index.ordered && !index.unique)
+    {
+        let key_type = names.index_key_type(&table.name, index)?;
+        let storage = names.index_storage_name(index)?;
+        content.raw_fmt(format_args!(
+            "            var {storage} = new Dictionary<{key_type}, int[]>();\n            foreach (var entry in {storage}Builder)\n            {{\n                {storage}.Add(entry.Key, entry.Value.ToArray());\n            }}\n"
+        ));
+    }
+    content.raw_fmt(format_args!("            return new {table_type}(rows"));
+    for index in table.indexes.iter().filter(|index| !index.ordered) {
+        content.raw_fmt(format_args!(", {}", names.index_storage_name(index)?));
+    }
+    content.raw(");\n        }\n");
+    Ok(())
+}
+
+fn render_index_lookup_methods(
+    content: &mut impl CodeWriterLike,
+    table: &super::CodeTable,
+    names: &CSharpNames,
+) -> Result<()> {
+    let row_type = names.row_type_name(&table.name)?;
+    for index in table.indexes.iter().filter(|index| !index.ordered) {
+        let method = names.index_function_name(index)?;
+        let parameters = names.index_parameters(index)?;
+        let key = names.index_key_from_parameters(&table.name, index)?;
+        let storage = names.index_storage_name(index)?;
+        if index.unique {
+            content.raw_fmt(format_args!(
+                "\n        public {row_type}? {method}({parameters})\n        {{\n            return {storage}.TryGetValue({key}, out var rowIndex) ? _rows[rowIndex] : null;\n        }}\n"
+            ));
+        } else {
+            content.raw_fmt(format_args!(
+                "\n        public IReadOnlyList<{row_type}> {method}({parameters})\n        {{\n            if (!{storage}.TryGetValue({key}, out var rowIndexes))\n            {{\n                return Array.Empty<{row_type}>();\n            }}\n            var rows = new {row_type}[rowIndexes.Length];\n            for (var index = 0; index < rowIndexes.Length; index++)\n            {{\n                rows[index] = _rows[rowIndexes[index]];\n            }}\n            return rows;\n        }}\n"
+            ));
+        }
+    }
     Ok(())
 }
 

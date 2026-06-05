@@ -140,6 +140,79 @@ fn emits_runtime_reader_contract_and_game_data_load() {
 }
 
 #[test]
+fn emits_hash_indexes_and_compound_key() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[enums]]
+            name = "ItemRarity"
+
+            [[enums.values]]
+            name = "common"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "rarity"
+            type = "ItemRarity"
+            required = true
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables.indexes]]
+            name = "by_rarity"
+            fields = ["rarity"]
+            unique = false
+
+            [[tables.indexes]]
+            name = "by_rarity_level"
+            fields = ["rarity", "level"]
+            unique = true
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = CSharpCodeGenerator.generate(&input).expect("csharp code");
+    let content = &files[0].content;
+
+    assert!(content.contains("private readonly Dictionary<long, int> _byIdIndex;"));
+    assert!(content.contains("private readonly Dictionary<ItemRarity, int[]> _byRarityIndex;"));
+    assert!(content.contains(
+        "public readonly struct ItemsByRarityLevelKey : IEquatable<ItemsByRarityLevelKey>"
+    ));
+    assert!(
+        content.contains(
+            "private readonly Dictionary<ItemsByRarityLevelKey, int> _byRarityLevelIndex;"
+        )
+    );
+    assert!(content.contains("Duplicate unique index key for ItemsTable.by_id"));
+    assert!(
+        content.contains("var _byRarityIndexBuilder = new Dictionary<ItemRarity, List<int>>();")
+    );
+    assert!(content.contains("var _byRarityIndex = new Dictionary<ItemRarity, int[]>();"));
+    assert!(content.contains("public ItemsRow? GetById(long id)"));
+    assert!(content.contains("public IReadOnlyList<ItemsRow> FindByRarity(ItemRarity rarity)"));
+    assert!(content.contains("public ItemsRow? GetByRarityLevel(ItemRarity rarity, long level)"));
+}
+
+#[test]
 fn emits_object_table_as_loaded_property_without_repository() {
     let meta = MetaModel::from_toml_str(
         r#"

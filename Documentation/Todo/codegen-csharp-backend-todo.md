@@ -137,7 +137,7 @@ feat(codegen): add C# naming and type mapping
 feat(codegen): load C# rows and game data
 ```
 
-## [ ] Step 4：unordered index 和 compound key
+## [x] Step 4：unordered index 和 compound key
 
 目标：支持 unique / non-unique hash lookup。
 
