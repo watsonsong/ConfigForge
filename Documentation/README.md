@@ -9,6 +9,7 @@ This directory contains durable project knowledge for ConfigForge.
 - [`Design/`](Design/) stores the consolidated canonical design set for product behavior, execution stages, configuration, Meta model, validation/export semantics, CLI, user workflows, and QA input.
 - [`Implementation/`](Implementation/) stores program implementation design, module boundaries, detailed module plans, and test organization guidance.
 - [`Tech/`](Tech/) stores technical practice documents, including test coverage evaluation and engineering workflow notes.
+- [`Todo/`](Todo/) stores short-lived implementation task lists and step plans before they are promoted into canonical design documents.
 - [`DevLogs/`](DevLogs/) stores raw phase-by-phase development logs for historical decision context, temporary decisions, and source material references.
 
 ## How AI Agents Should Use These Docs
@@ -61,6 +62,7 @@ Use the implementation documents after product behavior has been confirmed in `D
   - [`Implementation/09g-codegen-index-and-relation-helpers.md`](Implementation/09g-codegen-index-and-relation-helpers.md) — Index lookup and foreign-key relation helper design.
   - [`Implementation/09h-codegen-generator-api-and-tests.md`](Implementation/09h-codegen-generator-api-and-tests.md) — Generator API, new-language onboarding, diagnostics, file organization, and tests.
   - [`Implementation/09i-lua-embedded-data-generator.md`](Implementation/09i-lua-embedded-data-generator.md) — Implemented Lua data+code combined export, table file layout, row array/metatable memory strategy, indexes, and implementation notes.
+  - [`Implementation/09j-codegen-cpp-unreal-backend.md`](Implementation/09j-codegen-cpp-unreal-backend.md) — Implemented Unreal C++ backend, containers / Blueprint support, shim testing, and historical implementation steps.
 - [`Implementation/10-build-module-detail-design.md`](Implementation/10-build-module-detail-design.md) — Build orchestration, target normalization, export task DAG execution, and artifact write boundaries.
 - [`Implementation/11-foreign-key-detail-design.md`](Implementation/11-foreign-key-detail-design.md) — Foreign key raw/link model, referential-integrity validation, target semantics, codegen staging, and test plan.
 - [`Implementation/12-struct-expanded-value-detail-design.md`](Implementation/12-struct-expanded-value-detail-design.md) — Struct source layout auto detection and expanded CSV field-path layout for CollectionTable/ObjectTable, validation/export plan, and test plan.
@@ -79,9 +81,11 @@ Use the implementation documents after product behavior has been confirmed in `D
 - [`DevLogs/phase-0001.md`](DevLogs/phase-0001.md) — first raw phase log covering foundation, targets, fragments, foreign keys, and workflow decisions through 2026-05-21.
 - [`DevLogs/phase-0002.md`](DevLogs/phase-0002.md) — second raw phase log covering runtime helpers, module boundary cleanup, Artifact Writer, dry-run/write-mode, and documentation maintenance through 2026-05-24.
 
-## Retired / Merged Areas
+## Todo / Task Lists
 
-- `Documentation/Todo/` is intentionally not a canonical documentation area. Runtime binary follow-ups have been merged into [`Implementation/13-runtime-binary-format-detail-design.md`](Implementation/13-runtime-binary-format-detail-design.md#1311-当前状态与未来规划); the artifact streaming simplification plan has been merged into [`Implementation/07-artifact-module-detail-design.md`](Implementation/07-artifact-module-detail-design.md), [`Implementation/08-exporter-module-detail-design.md`](Implementation/08-exporter-module-detail-design.md), [`Implementation/09-codegen-module-detail-design.md`](Implementation/09-codegen-module-detail-design.md), [`Implementation/10-build-module-detail-design.md`](Implementation/10-build-module-detail-design.md), and [`Tech/task-system-design.md`](Tech/task-system-design.md). Future planning should either be promoted into the target canonical document as a current-state / future-planning section or tracked outside `Documentation/`.
+- `Documentation/Todo/` is the expected home for short-lived task lists, phased implementation checklists, and tactical TODO documents.
+- Todo documents are not canonical product / implementation contracts. Once a plan is implemented or stabilized, promote the durable design into the relevant `Design/`, `Implementation/`, or `Tech/` document, and either archive/remove the obsolete TODO or convert it into a historical implementation record with a non-TODO name.
+- Do not place new TODO checklists under `Documentation/Implementation/`; Implementation documents should describe current architecture, durable implementation design, and future extension sections.
 
 ## Documentation Writing Standards
 
@@ -94,7 +98,7 @@ Use these rules when creating or updating documents in this directory:
 5. **Keep examples executable against the current CLI and config schema.** TOML examples must match the current flattened / nested option rules, path resolution rules, and supported fields. CLI examples must match the current binary interface.
 6. **Separate current contract from future extensions.** Use headings or tables such as “Current behavior”, “Current limitations”, and “Future extensions” when a topic includes both implemented behavior and planned design.
 7. **Control document size.** When a document grows beyond roughly 600 lines, add a table of contents and “Related docs”; when it grows beyond roughly 900 lines, prefer splitting it into focused topic files with an index document.
-8. **Avoid hidden canonical areas.** Do not add new long-lived canonical directories under `Documentation/` without listing them in this README. Short-lived task lists should be merged into their target canonical document as current-state / future-planning sections or tracked outside `Documentation/`.
+8. **Avoid hidden canonical areas.** Do not add new long-lived canonical directories under `Documentation/` without listing them in this README. Short-lived task lists and tactical TODO documents belong under `Documentation/Todo/`; durable design must be promoted into `Design/`, `Implementation/`, or `Tech/`.
 9. **Update indexes together with topic changes.** When adding, renaming, splitting, or retiring a document, update [`../AGENTS.md`](../AGENTS.md), this README, and any affected directory index in the same change.
 10. **Treat DevLogs as evidence, not authority.** Phase logs may contain old paths, old names, or superseded decisions. Always resolve current behavior through `Design/`, `Implementation/`, `Tech/`, and source code.
 

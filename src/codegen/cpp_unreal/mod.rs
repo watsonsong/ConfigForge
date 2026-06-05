@@ -185,6 +185,7 @@ fn render_header_file(
     content.raw("\n");
     render_runtime_declarations(content);
     render_namespace_open(content, input, options);
+    content.raw("class IConfigForgeGameDataAccess;\n");
     content.raw_fmt(format_args!(
         "struct {};\n\n",
         names.struct_type_name("game_data")?
@@ -199,23 +200,30 @@ fn render_header_file(
     for table in &model.tables {
         render_table_declaration(content, table, &names, options)?;
     }
+    render_game_data_access_interface(content, model, &names)?;
     render_struct_prefix(
         content,
         &names.struct_type_name("game_data")?,
         options,
-        true,
+        false,
     );
     content.raw_fmt(format_args!(
-        "struct {} {{\n",
+        "struct {} : public IConfigForgeGameDataAccess {{\n",
         api_qualified_type_name(&names.struct_type_name("game_data")?, options)
     ));
-    render_generated_body(content, options);
     content.raw("    static constexpr const TCHAR* Generator = TEXT(\"ConfigForge\");\n");
     for table in &model.tables {
         content.raw_fmt(format_args!(
             "    {} {};\n",
             names.table_data_type_name(table)?,
             names.member_name(&table.name)?
+        ));
+    }
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "    TConfigForgeResult<const {}*> {}() const override;\n",
+            names.table_data_type_name(table)?,
+            names.table_accessor_name(&table.name)?
         ));
     }
     content.raw_fmt(format_args!(
@@ -242,11 +250,11 @@ fn render_lazy_game_data_declaration(
         &CppUnrealCodegenOptions::default(),
         false,
     );
-    content.raw("struct FLazyGameData {\n");
+    content.raw("struct FLazyGameData : public IConfigForgeGameDataAccess {\n");
     content.raw("    explicit FLazyGameData(IConfigForgeRuntimeDataLoader& InLoader) : Loader(InLoader) {}\n");
     for table in &model.tables {
         content.raw_fmt(format_args!(
-            "    TConfigForgeResult<{}> {}() const;\n",
+            "    TConfigForgeResult<const {}*> {}() const override;\n",
             names.table_data_type_name(table)?,
             names.table_accessor_name(&table.name)?
         ));
@@ -262,6 +270,25 @@ fn render_lazy_game_data_declaration(
         ));
     }
     content.raw("};\n");
+    Ok(())
+}
+
+fn render_game_data_access_interface(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    content.raw("class IConfigForgeGameDataAccess {\n");
+    content.raw("public:\n");
+    content.raw("    virtual ~IConfigForgeGameDataAccess() = default;\n");
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "    virtual TConfigForgeResult<const {}*> {}() const = 0;\n",
+            names.table_data_type_name(table)?,
+            names.table_accessor_name(&table.name)?
+        ));
+    }
+    content.raw("};\n\n");
     Ok(())
 }
 
@@ -516,7 +543,7 @@ fn render_table_declaration(
             .iter()
             .any(|foreign_key| foreign_key.linked_field.is_some())
         {
-            content.raw("    void Link(const FGameData& Data) const;\n");
+            content.raw("    void Link(const IConfigForgeGameDataAccess& Data) const;\n");
         }
         content.raw("};\n\n");
     }
@@ -585,13 +612,13 @@ fn render_row_relation_declarations(
             .cardinality
         {
             CodeRelationCardinality::One => content.raw_fmt(format_args!(
-                "    const {target_row_type}* {function_name}(const FGameData& Data) const;\n"
+                "    const {target_row_type}* {function_name}(const IConfigForgeGameDataAccess& Data) const;\n"
             )),
             CodeRelationCardinality::OptionalOne => content.raw_fmt(format_args!(
-                "    const {target_row_type}* {function_name}(const FGameData& Data) const;\n"
+                "    const {target_row_type}* {function_name}(const IConfigForgeGameDataAccess& Data) const;\n"
             )),
             CodeRelationCardinality::Many => content.raw_fmt(format_args!(
-                "    TArray<const {target_row_type}*> {function_name}(const FGameData& Data) const;\n"
+                "    TArray<const {target_row_type}*> {function_name}(const IConfigForgeGameDataAccess& Data) const;\n"
             )),
         }
     }
@@ -600,7 +627,7 @@ fn render_row_relation_declarations(
         .iter()
         .any(|foreign_key| foreign_key.linked_field.is_some())
     {
-        content.raw("    void Link(const FGameData& Data) const;\n");
+        content.raw("    void Link(const IConfigForgeGameDataAccess& Data) const;\n");
     }
     Ok(())
 }
@@ -1065,7 +1092,7 @@ fn render_table_load_source(
         .any(|foreign_key| foreign_key.linked_field.is_some())
     {
         content.raw_fmt(format_args!(
-            "void {repo_type}::Link(const FGameData& Data) const {{\n"
+            "void {repo_type}::Link(const IConfigForgeGameDataAccess& Data) const {{\n"
         ));
         content.raw("    for (const auto& Row : Rows) {\n");
         content.raw("        Row.Link(Data);\n");
@@ -1234,12 +1261,18 @@ fn render_row_relation_source(
         {
             CodeRelationCardinality::One | CodeRelationCardinality::OptionalOne => {
                 content.raw_fmt(format_args!(
-                    "const {target_row_type}* {source_row_type}::{function_name}(const FGameData& Data) const {{\n"
+                    "const {target_row_type}* {source_row_type}::{function_name}(const IConfigForgeGameDataAccess& Data) const {{\n"
                 ));
                 render_optional_relation_empty_check(content, foreign_key, names)?;
                 content.raw_fmt(format_args!(
-                    "    return Data.{}.{}({});\n",
-                    names.member_name(&target_table.name)?,
+                    "    auto TargetTableResult = Data.{}();\n",
+                    names.table_accessor_name(&target_table.name)?
+                ));
+                content.raw(
+                    "    if (!TargetTableResult.IsOk() || TargetTableResult.Value == nullptr) { return nullptr; }\n",
+                );
+                content.raw_fmt(format_args!(
+                    "    return TargetTableResult.Value->{}({});\n",
                     names.index_function_name(target_index)?,
                     relation_value_exprs(foreign_key, names)?.join(", ")
                 ));
@@ -1254,11 +1287,18 @@ fn render_row_relation_source(
                 })?;
                 let source_field_name = names.field_name(source_field)?;
                 content.raw_fmt(format_args!(
-                    "TArray<const {target_row_type}*> {source_row_type}::{function_name}(const FGameData& Data) const {{\n"
+                    "TArray<const {target_row_type}*> {source_row_type}::{function_name}(const IConfigForgeGameDataAccess& Data) const {{\n"
                 ));
                 content.raw_fmt(format_args!(
                     "    TArray<const {target_row_type}*> Result;\n"
                 ));
+                content.raw_fmt(format_args!(
+                    "    auto TargetTableResult = Data.{}();\n",
+                    names.table_accessor_name(&target_table.name)?
+                ));
+                content.raw(
+                    "    if (!TargetTableResult.IsOk() || TargetTableResult.Value == nullptr) { return Result; }\n",
+                );
                 if source_field.required {
                     content.raw_fmt(format_args!(
                         "    Result.Reserve({source_field_name}.Num());\n"
@@ -1278,8 +1318,7 @@ fn render_row_relation_source(
                     ));
                 }
                 content.raw_fmt(format_args!(
-                    "        const auto* Row = Data.{}.{}(Key);\n",
-                    names.member_name(&target_table.name)?,
+                    "        const auto* Row = TargetTableResult.Value->{}(Key);\n",
                     names.index_function_name(target_index)?
                 ));
                 content.raw("        if (Row != nullptr) { Result.Add(Row); }\n");
@@ -1296,7 +1335,7 @@ fn render_row_relation_source(
     {
         let row_type = names.row_type_name(&table.name)?;
         content.raw_fmt(format_args!(
-            "void {row_type}::Link(const FGameData& Data) const {{\n"
+            "void {row_type}::Link(const IConfigForgeGameDataAccess& Data) const {{\n"
         ));
         for foreign_key in table
             .foreign_keys
@@ -1421,6 +1460,7 @@ fn render_game_data_load_source(
     ));
     content.raw("}\n\n");
     render_game_data_link_all_source(content, model, names)?;
+    render_game_data_access_source(content, model, names)?;
     Ok(())
 }
 
@@ -1475,6 +1515,27 @@ fn render_game_data_link_all_source(
     Ok(())
 }
 
+fn render_game_data_access_source(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    let game_data_type = names.struct_type_name("game_data")?;
+    for table in &model.tables {
+        let table_type = names.table_data_type_name(table)?;
+        let accessor_name = names.table_accessor_name(&table.name)?;
+        let member_name = names.member_name(&table.name)?;
+        content.raw_fmt(format_args!(
+            "TConfigForgeResult<const {table_type}*> {game_data_type}::{accessor_name}() const {{\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    return TConfigForgeResult<const {table_type}*>::Success(&{member_name});\n"
+        ));
+        content.raw("}\n\n");
+    }
+    Ok(())
+}
+
 fn render_lazy_game_data_source(
     content: &mut impl CodeWriterLike,
     model: &CodeModel,
@@ -1485,7 +1546,7 @@ fn render_lazy_game_data_source(
         let accessor_name = names.table_accessor_name(&table.name)?;
         let member_name = names.member_name(&table.name)?;
         content.raw_fmt(format_args!(
-            "TConfigForgeResult<{table_type}> FLazyGameData::{accessor_name}() const {{\n"
+            "TConfigForgeResult<const {table_type}*> FLazyGameData::{accessor_name}() const {{\n"
         ));
         content.raw_fmt(format_args!("    if (!{member_name}.IsSet()) {{\n"));
         match table.kind {
@@ -1496,7 +1557,7 @@ fn render_lazy_game_data_source(
                     names.load_function_name()?
                 ));
                 content.raw_fmt(format_args!(
-                    "        if (!LoadResult.IsOk()) {{ return TConfigForgeResult<{table_type}>::Failure(LoadResult.Error.Message); }}\n"
+                    "        if (!LoadResult.IsOk()) {{ return TConfigForgeResult<const {table_type}*>::Failure(LoadResult.Error.Message); }}\n"
                 ));
                 content.raw_fmt(format_args!("        {member_name} = LoadResult.Value;\n"));
             }
@@ -1507,21 +1568,21 @@ fn render_lazy_game_data_source(
                     names.data_file_constant_name()?
                 ));
                 content.raw_fmt(format_args!(
-                    "        if (!ReaderResult.IsOk()) {{ return TConfigForgeResult<{table_type}>::Failure(ReaderResult.Error.Message); }}\n"
+                    "        if (!ReaderResult.IsOk()) {{ return TConfigForgeResult<const {table_type}*>::Failure(ReaderResult.Error.Message); }}\n"
                 ));
                 content.raw_fmt(format_args!(
                     "        auto RowResult = {row_type}::{}(*ReaderResult.Value);\n",
                     names.read_row_function_name(&table.name)?
                 ));
                 content.raw_fmt(format_args!(
-                    "        if (!RowResult.IsOk()) {{ return TConfigForgeResult<{table_type}>::Failure(RowResult.Error.Message); }}\n"
+                    "        if (!RowResult.IsOk()) {{ return TConfigForgeResult<const {table_type}*>::Failure(RowResult.Error.Message); }}\n"
                 ));
                 content.raw_fmt(format_args!("        {member_name} = RowResult.Value;\n"));
             }
         }
         content.raw("    }\n");
         content.raw_fmt(format_args!(
-            "    return TConfigForgeResult<{table_type}>::Success({member_name}.GetValue());\n"
+            "    return TConfigForgeResult<const {table_type}*>::Success(&{member_name}.GetValue());\n"
         ));
         content.raw("}\n\n");
     }
@@ -1538,7 +1599,10 @@ fn render_lazy_game_data_source(
             "    if (!{member_name}Result.IsOk()) {{ return TConfigForgeResult<FGameData>::Failure({member_name}Result.Error.Message); }}\n"
         ));
         content.raw_fmt(format_args!(
-            "    Data.{member_name} = {member_name}Result.Value;\n"
+            "    if ({member_name}Result.Value == nullptr) {{ return TConfigForgeResult<FGameData>::Failure(TEXT(\"Lazy table accessor returned null for {member_name}\")); }}\n"
+        ));
+        content.raw_fmt(format_args!(
+            "    Data.{member_name} = *{member_name}Result.Value;\n"
         ));
         content.raw_fmt(format_args!(
             "    static_cast<void>(sizeof({table_type}));\n"

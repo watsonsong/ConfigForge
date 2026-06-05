@@ -1,6 +1,18 @@
-# 09j. cpp_unreal 实现 TODO
+# 09j. cpp_unreal backend 实现设计
 
-本文是 `cpp_unreal` 生成器的分步实现清单。每一步都必须保持仓库可构建、测试可运行，并在完成后单独提交 git；不得把多个步骤攒成一次大提交。
+本文描述 `cpp_unreal` 生成器的实现设计、当前能力边界和已执行的阶段性实现记录。新的 TODO / 分步任务清单应放在 `Documentation/Todo/`；本文不再作为待办清单维护，而是作为 `src/codegen/cpp_unreal/` backend 的实现设计文档。
+
+## 当前实现状态
+
+- `cpp_unreal` 是独立 codegen type，内部生成器为 `CppUnrealCodeGenerator`，不作为标准 `cpp` backend 的开关。
+- `support = "containers"` 已支持 Unreal 容器和基础类型：`TArray`、`TMap`、`TPair`、`TOptional`、`TUniquePtr`、`FString`、`int32` / `int64`，并生成 row/object、repository、index、relation、text helper、`FGameData` 与 `FLazyGameData`。
+- `support = "blueprint"` 已在 containers 模式基础上生成 `USTRUCT(BlueprintType)`、`UENUM(BlueprintType)`、`UPROPERTY(BlueprintReadOnly)`、`.generated.h` include 和 `UBlueprintFunctionLibrary` 查询 facade。
+- `FGameData` 与 `FLazyGameData` 通过 `IConfigForgeGameDataAccess` 共享只读表访问接口；relation helper 接收该公共接口，避免只支持 eager `FGameData`。
+- 标准工程已包含 `cpp_unreal` target，普通 CI 通过 lightweight Unreal shim 做语法 smoke；真实 UHT / Editor 集成验证留给引擎侧 CI。
+
+## 历史实施记录
+
+以下内容保留为该 backend 的阶段性实施记录，用于追溯设计意图、测试覆盖和提交粒度；后续新的 TODO 不应继续追加到本文。
 
 ## 目标边界
 
@@ -33,7 +45,7 @@
 - `Documentation/Design/06-export-cli.md`
 - `Documentation/Implementation/09-codegen-module-detail-design.md`
 - `Documentation/Implementation/09c-codegen-cpp-backend.md`
-- `Documentation/Implementation/09j-codegen-cpp-unreal-implementation-todo.md`
+- `Documentation/Implementation/09j-codegen-cpp-unreal-backend.md`
 
 验证：
 

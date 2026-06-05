@@ -514,29 +514,43 @@ fn emits_relation_text_and_lazy_helpers() {
     let source = generated_content(&files, "generated.cpp");
 
     assert!(header.contains("FString DisplayNameText("));
-    assert!(header.contains("const FItemsRow* GetDefaultItem(const FGameData& Data) const;"));
-    assert!(
-        header.contains("TArray<const FItemsRow*> GetStarterItems(const FGameData& Data) const;")
-    );
-    assert!(header.contains("void Link(const FGameData& Data) const;"));
+    assert!(header.contains(
+        "const FItemsRow* GetDefaultItem(const IConfigForgeGameDataAccess& Data) const;"
+    ));
+    assert!(header.contains(
+        "TArray<const FItemsRow*> GetStarterItems(const IConfigForgeGameDataAccess& Data) const;"
+    ));
+    assert!(header.contains("class IConfigForgeGameDataAccess"));
+    assert!(header.contains("struct FGameData : public IConfigForgeGameDataAccess"));
+    assert!(header.contains("struct FLazyGameData : public IConfigForgeGameDataAccess"));
+    assert!(header.contains("void Link(const IConfigForgeGameDataAccess& Data) const;"));
     assert!(header.contains("void LinkAll() const;"));
-    assert!(header.contains("struct FLazyGameData"));
-    assert!(header.contains("TConfigForgeResult<FItemsTable> GetItems() const;"));
-    assert!(header.contains("TConfigForgeResult<FGameConfigRow> GetGameConfig() const;"));
+    assert!(header.contains("TConfigForgeResult<const FItemsTable*> GetItems() const override;"));
+    assert!(
+        header
+            .contains("TConfigForgeResult<const FGameConfigRow*> GetGameConfig() const override;")
+    );
     assert!(
         source.contains(
-            "const FItemsRow* FGameConfigRow::GetDefaultItem(const FGameData& Data) const"
+            "const FItemsRow* FGameConfigRow::GetDefaultItem(const IConfigForgeGameDataAccess& Data) const"
         )
     );
-    assert!(source.contains("return Data.Items.GetById(DefaultItemId);"));
+    assert!(source.contains("auto TargetTableResult = Data.GetItems();"));
+    assert!(source.contains("return TargetTableResult.Value->GetById(DefaultItemId);"));
     assert!(source.contains(
-        "TArray<const FItemsRow*> FGameConfigRow::GetStarterItems(const FGameData& Data) const"
+        "TArray<const FItemsRow*> FGameConfigRow::GetStarterItems(const IConfigForgeGameDataAccess& Data) const"
     ));
-    assert!(source.contains("const auto* Row = Data.Items.GetById(Key);"));
-    assert!(source.contains("void FGameConfigRow::Link(const FGameData& Data) const"));
+    assert!(source.contains("const auto* Row = TargetTableResult.Value->GetById(Key);"));
+    assert!(
+        source.contains("void FGameConfigRow::Link(const IConfigForgeGameDataAccess& Data) const")
+    );
     assert!(source.contains("void FGameData::LinkAll() const"));
     assert!(source.contains("GameConfig.Link(*this);"));
-    assert!(source.contains("TConfigForgeResult<FItemsTable> FLazyGameData::GetItems() const"));
+    assert!(source.contains("TConfigForgeResult<const FItemsTable*> FGameData::GetItems() const"));
+    assert!(source.contains("return TConfigForgeResult<const FItemsTable*>::Success(&Items);"));
+    assert!(
+        source.contains("TConfigForgeResult<const FItemsTable*> FLazyGameData::GetItems() const")
+    );
     assert!(source.contains("TConfigForgeResult<FGameData> FLazyGameData::PreloadAll() const"));
 }
 
