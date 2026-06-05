@@ -42,6 +42,8 @@ pub struct CppUnrealCodegenOptions {
     pub blueprint_category: Option<String>,
     #[serde(default)]
     pub namespace: Option<String>,
+    #[serde(default)]
+    pub type_name_prefix: Option<String>,
 }
 
 pub(crate) struct CppUnrealCodeGenerator;
@@ -70,7 +72,7 @@ impl CodeGenerator for CppUnrealCodeGenerator {
         let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
         require_non_empty_index_fields(&model)?;
         let options = cpp_unreal_options(input)?;
-        let names = CppUnrealNames::new(&input.target.options);
+        let names = CppUnrealNames::new(&input.target.options, &options);
         validate_generated_symbols(&model, &names)?;
 
         let header_file_name = input.target.single_file_name("generated", "h");
@@ -96,7 +98,7 @@ impl CodeGenerator for CppUnrealCodeGenerator {
         let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
         require_non_empty_index_fields(&model)?;
         let options = cpp_unreal_options(input)?;
-        let names = CppUnrealNames::new(&input.target.options);
+        let names = CppUnrealNames::new(&input.target.options, &options);
         validate_generated_symbols(&model, &names)?;
 
         let header_file_name = input.target.single_file_name("generated", "h");
@@ -137,9 +139,17 @@ fn cpp_unreal_options(input: &CodeExportInput<'_>) -> Result<CppUnrealCodegenOpt
         .options
         .language_options::<CppUnrealCodegenOptions>(LANGUAGE)?;
     validate_api_macro(options.api_macro.as_deref())?;
+    validate_type_name_prefix(options.type_name_prefix.as_deref())?;
     if matches!(options.support, CppUnrealSupportLevel::Blueprint) && options.api_macro.is_none() {
         return Err(ConfigForgeError::Validation(format!(
             "failed to parse {LANGUAGE} codegen options: api_macro is required when support = \"blueprint\""
+        )));
+    }
+    if matches!(options.support, CppUnrealSupportLevel::Blueprint)
+        && (options.namespace.is_some() || input.target.namespace.is_some())
+    {
+        return Err(ConfigForgeError::Validation(format!(
+            "failed to parse {LANGUAGE} codegen options: namespace is not supported when support = \"blueprint\"; use cpp_unreal.type_name_prefix to avoid global reflected type collisions"
         )));
     }
     Ok(options)
@@ -164,6 +174,25 @@ fn validate_api_macro(api_macro: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+fn validate_type_name_prefix(type_name_prefix: Option<&str>) -> Result<()> {
+    if let Some(type_name_prefix) = type_name_prefix {
+        let is_valid = !type_name_prefix.is_empty()
+            && type_name_prefix
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+            && type_name_prefix
+                .as_bytes()
+                .first()
+                .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_');
+        if !is_valid {
+            return Err(ConfigForgeError::Validation(format!(
+                "failed to parse {LANGUAGE} codegen options: type_name_prefix `{type_name_prefix}` must be a C++ identifier prefix"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn render_header_file(
     generator: &dyn CodeGenerator,
     content: &mut impl CodeWriterLike,
@@ -171,7 +200,7 @@ fn render_header_file(
     model: &CodeModel,
     options: &CppUnrealCodegenOptions,
 ) -> Result<()> {
-    let names = CppUnrealNames::new(&input.target.options);
+    let names = CppUnrealNames::new(&input.target.options, options);
     write_file_header(generator, content, input);
     content.raw("#pragma once\n\n");
     content.raw("#include \"CoreMinimal.h\"\n");
@@ -185,7 +214,10 @@ fn render_header_file(
     content.raw("\n");
     render_runtime_declarations(content);
     render_namespace_open(content, input, options);
-    content.raw("class IConfigForgeGameDataAccess;\n");
+    content.raw_fmt(format_args!(
+        "class {};\n",
+        names.game_data_access_interface_name()?
+    ));
     content.raw_fmt(format_args!(
         "struct {};\n\n",
         names.struct_type_name("game_data")?
@@ -208,8 +240,9 @@ fn render_header_file(
         false,
     );
     content.raw_fmt(format_args!(
-        "struct {} : public IConfigForgeGameDataAccess {{\n",
-        api_qualified_type_name(&names.struct_type_name("game_data")?, options)
+        "struct {} : public {} {{\n",
+        api_qualified_type_name(&names.struct_type_name("game_data")?, options),
+        names.game_data_access_interface_name()?
     ));
     content.raw("    static constexpr const TCHAR* Generator = TEXT(\"ConfigForge\");\n");
     for table in &model.tables {
@@ -244,14 +277,21 @@ fn render_lazy_game_data_declaration(
     model: &CodeModel,
     names: &CppUnrealNames<'_>,
 ) -> Result<()> {
+    let lazy_type = names.lazy_game_data_type_name()?;
+    let access_type = names.game_data_access_interface_name()?;
+    let game_data_type = names.struct_type_name("game_data")?;
     render_struct_prefix(
         content,
-        "FLazyGameData",
+        &lazy_type,
         &CppUnrealCodegenOptions::default(),
         false,
     );
-    content.raw("struct FLazyGameData : public IConfigForgeGameDataAccess {\n");
-    content.raw("    explicit FLazyGameData(IConfigForgeRuntimeDataLoader& InLoader) : Loader(InLoader) {}\n");
+    content.raw_fmt(format_args!(
+        "struct {lazy_type} : public {access_type} {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    explicit {lazy_type}(IConfigForgeRuntimeDataLoader& InLoader) : Loader(InLoader) {{}}\n"
+    ));
     for table in &model.tables {
         content.raw_fmt(format_args!(
             "    TConfigForgeResult<const {}*> {}() const override;\n",
@@ -259,7 +299,9 @@ fn render_lazy_game_data_declaration(
             names.table_accessor_name(&table.name)?
         ));
     }
-    content.raw("    TConfigForgeResult<FGameData> PreloadAll() const;\n");
+    content.raw_fmt(format_args!(
+        "    TConfigForgeResult<{game_data_type}> PreloadAll() const;\n"
+    ));
     content.raw("private:\n");
     content.raw("    IConfigForgeRuntimeDataLoader& Loader;\n");
     for table in &model.tables {
@@ -278,9 +320,10 @@ fn render_game_data_access_interface(
     model: &CodeModel,
     names: &CppUnrealNames<'_>,
 ) -> Result<()> {
-    content.raw("class IConfigForgeGameDataAccess {\n");
+    let access_type = names.game_data_access_interface_name()?;
+    content.raw_fmt(format_args!("class {access_type} {{\n"));
     content.raw("public:\n");
-    content.raw("    virtual ~IConfigForgeGameDataAccess() = default;\n");
+    content.raw_fmt(format_args!("    virtual ~{access_type}() = default;\n"));
     for table in &model.tables {
         content.raw_fmt(format_args!(
             "    virtual TConfigForgeResult<const {}*> {}() const = 0;\n",
@@ -393,8 +436,12 @@ fn render_generated_body(content: &mut impl CodeWriterLike, options: &CppUnrealC
     }
 }
 
-fn render_blueprint_property(content: &mut impl CodeWriterLike, options: &CppUnrealCodegenOptions) {
-    if matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+fn render_blueprint_property(
+    content: &mut impl CodeWriterLike,
+    field: &CodeField,
+    options: &CppUnrealCodegenOptions,
+) {
+    if matches!(options.support, CppUnrealSupportLevel::Blueprint) && field.required {
         let category = blueprint_category(options);
         content.raw_fmt(format_args!(
             "    UPROPERTY(BlueprintReadOnly, Category={category:?})\n"
@@ -451,7 +498,7 @@ fn render_struct_declaration(
     ));
     render_generated_body(content, options);
     for field in &code_struct.fields {
-        render_blueprint_property(content, options);
+        render_blueprint_property(content, field, options);
         content.raw_fmt(format_args!(
             "    {} {};\n",
             names.cpp_field_type(field)?,
@@ -489,7 +536,7 @@ fn render_table_declaration(
         ));
     }
     for field in &table.fields {
-        render_blueprint_property(content, options);
+        render_blueprint_property(content, field, options);
         content.raw_fmt(format_args!(
             "    {} {};\n",
             names.cpp_field_type(field)?,
@@ -543,7 +590,10 @@ fn render_table_declaration(
             .iter()
             .any(|foreign_key| foreign_key.linked_field.is_some())
         {
-            content.raw("    void Link(const IConfigForgeGameDataAccess& Data) const;\n");
+            content.raw_fmt(format_args!(
+                "    void Link(const {}& Data) const;\n",
+                names.game_data_access_interface_name()?
+            ));
         }
         content.raw("};\n\n");
     }
@@ -612,13 +662,16 @@ fn render_row_relation_declarations(
             .cardinality
         {
             CodeRelationCardinality::One => content.raw_fmt(format_args!(
-                "    const {target_row_type}* {function_name}(const IConfigForgeGameDataAccess& Data) const;\n"
+                "    const {target_row_type}* {function_name}(const {}& Data) const;\n",
+                names.game_data_access_interface_name()?
             )),
             CodeRelationCardinality::OptionalOne => content.raw_fmt(format_args!(
-                "    const {target_row_type}* {function_name}(const IConfigForgeGameDataAccess& Data) const;\n"
+                "    const {target_row_type}* {function_name}(const {}& Data) const;\n",
+                names.game_data_access_interface_name()?
             )),
             CodeRelationCardinality::Many => content.raw_fmt(format_args!(
-                "    TArray<const {target_row_type}*> {function_name}(const IConfigForgeGameDataAccess& Data) const;\n"
+                "    TArray<const {target_row_type}*> {function_name}(const {}& Data) const;\n",
+                names.game_data_access_interface_name()?
             )),
         }
     }
@@ -627,7 +680,10 @@ fn render_row_relation_declarations(
         .iter()
         .any(|foreign_key| foreign_key.linked_field.is_some())
     {
-        content.raw("    void Link(const IConfigForgeGameDataAccess& Data) const;\n");
+        content.raw_fmt(format_args!(
+            "    void Link(const {}& Data) const;\n",
+            names.game_data_access_interface_name()?
+        ));
     }
     Ok(())
 }
@@ -792,7 +848,7 @@ fn render_source_file(
     content.raw_fmt(format_args!("#include {:?}\n\n", header_file_name));
     render_namespace_open(content, input, options);
     let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
-    let names = CppUnrealNames::new(&input.target.options);
+    let names = CppUnrealNames::new(&input.target.options, options);
     for code_struct in &model.structs {
         render_struct_reader_source(content, code_struct, &names)?;
     }
@@ -1092,7 +1148,8 @@ fn render_table_load_source(
         .any(|foreign_key| foreign_key.linked_field.is_some())
     {
         content.raw_fmt(format_args!(
-            "void {repo_type}::Link(const IConfigForgeGameDataAccess& Data) const {{\n"
+            "void {repo_type}::Link(const {}& Data) const {{\n",
+            names.game_data_access_interface_name()?
         ));
         content.raw("    for (const auto& Row : Rows) {\n");
         content.raw("        Row.Link(Data);\n");
@@ -1261,7 +1318,8 @@ fn render_row_relation_source(
         {
             CodeRelationCardinality::One | CodeRelationCardinality::OptionalOne => {
                 content.raw_fmt(format_args!(
-                    "const {target_row_type}* {source_row_type}::{function_name}(const IConfigForgeGameDataAccess& Data) const {{\n"
+                    "const {target_row_type}* {source_row_type}::{function_name}(const {}& Data) const {{\n",
+                    names.game_data_access_interface_name()?
                 ));
                 render_optional_relation_empty_check(content, foreign_key, names)?;
                 content.raw_fmt(format_args!(
@@ -1287,7 +1345,8 @@ fn render_row_relation_source(
                 })?;
                 let source_field_name = names.field_name(source_field)?;
                 content.raw_fmt(format_args!(
-                    "TArray<const {target_row_type}*> {source_row_type}::{function_name}(const IConfigForgeGameDataAccess& Data) const {{\n"
+                    "TArray<const {target_row_type}*> {source_row_type}::{function_name}(const {}& Data) const {{\n",
+                    names.game_data_access_interface_name()?
                 ));
                 content.raw_fmt(format_args!(
                     "    TArray<const {target_row_type}*> Result;\n"
@@ -1335,7 +1394,8 @@ fn render_row_relation_source(
     {
         let row_type = names.row_type_name(&table.name)?;
         content.raw_fmt(format_args!(
-            "void {row_type}::Link(const IConfigForgeGameDataAccess& Data) const {{\n"
+            "void {row_type}::Link(const {}& Data) const {{\n",
+            names.game_data_access_interface_name()?
         ));
         for foreign_key in table
             .foreign_keys
@@ -1541,12 +1601,14 @@ fn render_lazy_game_data_source(
     model: &CodeModel,
     names: &CppUnrealNames<'_>,
 ) -> Result<()> {
+    let lazy_type = names.lazy_game_data_type_name()?;
+    let game_data_type = names.struct_type_name("game_data")?;
     for table in &model.tables {
         let table_type = names.table_data_type_name(table)?;
         let accessor_name = names.table_accessor_name(&table.name)?;
         let member_name = names.member_name(&table.name)?;
         content.raw_fmt(format_args!(
-            "TConfigForgeResult<const {table_type}*> FLazyGameData::{accessor_name}() const {{\n"
+            "TConfigForgeResult<const {table_type}*> {lazy_type}::{accessor_name}() const {{\n"
         ));
         content.raw_fmt(format_args!("    if (!{member_name}.IsSet()) {{\n"));
         match table.kind {
@@ -1586,8 +1648,10 @@ fn render_lazy_game_data_source(
         ));
         content.raw("}\n\n");
     }
-    content.raw("TConfigForgeResult<FGameData> FLazyGameData::PreloadAll() const {\n");
-    content.raw("    FGameData Data;\n");
+    content.raw_fmt(format_args!(
+        "TConfigForgeResult<{game_data_type}> {lazy_type}::PreloadAll() const {{\n"
+    ));
+    content.raw_fmt(format_args!("    {game_data_type} Data;\n"));
     for table in &model.tables {
         let table_type = names.table_data_type_name(table)?;
         let accessor_name = names.table_accessor_name(&table.name)?;
@@ -1596,10 +1660,10 @@ fn render_lazy_game_data_source(
             "    auto {member_name}Result = {accessor_name}();\n"
         ));
         content.raw_fmt(format_args!(
-            "    if (!{member_name}Result.IsOk()) {{ return TConfigForgeResult<FGameData>::Failure({member_name}Result.Error.Message); }}\n"
+            "    if (!{member_name}Result.IsOk()) {{ return TConfigForgeResult<{game_data_type}>::Failure({member_name}Result.Error.Message); }}\n"
         ));
         content.raw_fmt(format_args!(
-            "    if ({member_name}Result.Value == nullptr) {{ return TConfigForgeResult<FGameData>::Failure(TEXT(\"Lazy table accessor returned null for {member_name}\")); }}\n"
+            "    if ({member_name}Result.Value == nullptr) {{ return TConfigForgeResult<{game_data_type}>::Failure(TEXT(\"Lazy table accessor returned null for {member_name}\")); }}\n"
         ));
         content.raw_fmt(format_args!(
             "    Data.{member_name} = *{member_name}Result.Value;\n"
@@ -1609,7 +1673,9 @@ fn render_lazy_game_data_source(
         ));
     }
     content.raw("    Data.LinkAll();\n");
-    content.raw("    return TConfigForgeResult<FGameData>::Success(Data);\n");
+    content.raw_fmt(format_args!(
+        "    return TConfigForgeResult<{game_data_type}>::Success(Data);\n"
+    ));
     content.raw("}\n\n");
     Ok(())
 }

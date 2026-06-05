@@ -19,7 +19,12 @@ pub(super) fn validate_generated_symbols(
     type_symbols.push(GeneratedSymbol::new(
         "lazy game data type",
         "lazy_game_data",
-        "FLazyGameData",
+        names.lazy_game_data_type_name()?,
+    ));
+    type_symbols.push(GeneratedSymbol::new(
+        "game data access interface",
+        "config_forge_game_data_access",
+        names.game_data_access_interface_name()?,
     ));
     type_symbols.push(GeneratedSymbol::new(
         "Blueprint facade type",
@@ -204,7 +209,7 @@ pub(super) fn validate_generated_symbols(
             names.member_name(&table.name)?,
         ));
     }
-    ensure_unique_generated_symbols("cpp_unreal", "FLazyGameData members", lazy_symbols)?;
+    ensure_unique_generated_symbols("cpp_unreal", "lazy game data members", lazy_symbols)?;
 
     let mut blueprint_symbols = Vec::new();
     for table in &_model.tables {

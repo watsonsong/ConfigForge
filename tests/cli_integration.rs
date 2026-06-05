@@ -140,12 +140,12 @@ fn builds_cpp_unreal_blueprint_code_only_target() {
                 type = "cpp_unreal"
                 output = "{}"
                 file_name = "reference_game_config"
-                namespace = "ReferenceGameConfig"
 
                 [targets.exports.cpp_unreal]
                 support = "blueprint"
                 api_macro = "REFERENCE_GAME_CONFIG_API"
                 blueprint_category = "Reference Config"
+                type_name_prefix = "Reference"
             "#,
             standard_core_meta_imports(),
             out_dir.display()
@@ -169,6 +169,8 @@ fn builds_cpp_unreal_blueprint_code_only_target() {
         fs::read_to_string(out_dir.join("reference_game_config.h")).expect("cpp_unreal header");
     assert!(header.contains("#include \"reference_game_config.generated.h\""));
     assert!(header.contains("USTRUCT(BlueprintType)"));
+    assert!(header.contains("FReferenceItemsRow"));
+    assert!(header.contains("UReferenceConfigForgeBlueprintLibrary"));
     assert!(header.contains("UPROPERTY(BlueprintReadOnly, Category=\"Reference Config\")"));
 
     if command_exists("c++") {

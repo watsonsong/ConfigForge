@@ -112,7 +112,7 @@ CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 t
 | --- | --- | --- |
 | `[targets.exports.rust]` | `derive_serde` | 为生成类型派生 serde 序列化/反序列化 trait。 |
 | `[targets.exports.cpp]` | `namespace` | C++ namespace 覆盖；未设置时可使用通用 `namespace`。 |
-| `[targets.exports.cpp_unreal]` | `api_macro` / `support` / `blueprint_category` / `namespace` | Unreal C++ 生成器配置。`api_macro` 指定模块导出宏，且 `support = "blueprint"` 时必填；`support = "containers"` 生成 Unreal 容器和基础类型的 C++ API；`support = "blueprint"` 额外生成可反射的 `USTRUCT` / `UFUNCTION` facade；`blueprint_category` 控制 `UPROPERTY` / `UFUNCTION` 分类；`namespace` 可覆盖通用 namespace。 |
+| `[targets.exports.cpp_unreal]` | `api_macro` / `support` / `blueprint_category` / `namespace` / `type_name_prefix` | Unreal C++ 生成器配置。`api_macro` 指定模块导出宏，且 `support = "blueprint"` 时必填；`support = "containers"` 生成 Unreal 容器和基础类型的 C++ API；`support = "blueprint"` 额外生成可反射的 `USTRUCT` / `UFUNCTION` facade；`blueprint_category` 控制 `UPROPERTY` / `UFUNCTION` 分类；containers 模式下 `namespace` 可覆盖通用 namespace；Blueprint 模式禁止 `namespace`，应使用 `type_name_prefix` 为全局反射类型加项目前缀。 |
 | `[targets.exports.typescript]` | `readonly_fields` | interface 字段是否生成 `readonly`。 |
 
 Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `type = "cpp_unreal"`：
@@ -120,7 +120,7 @@ Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `typ
 - 标准 `cpp` 面向引擎无关 C++17 环境，继续使用 `std::vector`、`std::unordered_map`、`std::string`、异常和纯 C++ runtime loader contract。
 - `cpp_unreal` 面向 Unreal Engine module，生成代码默认符合 Unreal 命名、容器、字符串、断言和 Blueprint 反射约束，避免同一个生成器在 public API 中混用 `std::*` 与 Unreal API。
 - `support = "containers"` 时只替换运行时 API 形态：`TArray` / `TMap` / `FString` / `int32` 或 `int64` 等 Unreal 友好类型，repository、`GameData`、索引和 relation helper 仍是普通 C++ 类型，不要求 UnrealHeaderTool 参与。
-- `support = "blueprint"` 时在 containers 模式基础上生成 Blueprint 可见层：row/value struct 使用 `USTRUCT(BlueprintType)`、可见字段使用 `UPROPERTY(BlueprintReadOnly)`，访问入口通过 `UBlueprintFunctionLibrary` 或 `UObject` facade 暴露 `UFUNCTION(BlueprintCallable)` / `BlueprintPure`。Blueprint 层应避免暴露 raw pointer、`std::*`、模板化 helper 或不被反射系统支持的类型；必要时提供按值返回、`bool + Out` 参数或 `TArray<Struct>` 包装。
+- `support = "blueprint"` 时在 containers 模式基础上生成 Blueprint 可见层：row/value struct 使用 `USTRUCT(BlueprintType)`、required 且 UHT 可反射的字段使用 `UPROPERTY(BlueprintReadOnly)`，访问入口通过 `UBlueprintFunctionLibrary` 或 `UObject` facade 暴露 `UFUNCTION(BlueprintCallable)` / `BlueprintPure`。Blueprint 模式禁止 namespace（真实 UHT 对 namespace 内反射类型支持有限），需要命名隔离时使用 `type_name_prefix` 生成如 `FReferenceItemsRow` / `UReferenceConfigForgeBlueprintLibrary` 的全局类型。optional 字段仍按 C++ API 生成为 `TOptional<T>`，但不会生成 `UPROPERTY`，避免把 UHT 不支持的 optional 模板类型直接暴露给 Blueprint。Blueprint 层应避免暴露 raw pointer、`std::*`、模板化 helper 或不被反射系统支持的类型；必要时提供按值返回、`bool + Out` 参数或 `TArray<Struct>` 包装。
 - `cpp_unreal` 仍复用同一套 Meta / target tags / CodeModel IR。runtime data 的取得方式继续抽象化：生成代码不直接绑定本地文件、Pak、Asset Manager、Data Asset 或网络加载，Unreal 项目通过 Unreal 版 `RuntimeDataLoader` adapter 接入。
 
 `[targets.exports.i18n]` 控制 `text` 翻译 helper 的调用形态：默认 `mode = "generic"`，保留显式 translator 参数；`mode = "global_function"` 时必须配置 `function`，生成代码直接调用该全局函数，例如 gettext/libintl 或项目自己的全局 i18n facade。`returns = "string"` 表示函数总是返回最终文案，`returns = "optional"` 表示函数可能 missing，helper 会 fallback 到 raw text。C++ 可用 `cpp_include` 注入 include，TypeScript 可用 `typescript_import` 注入 import。

@@ -129,6 +129,50 @@ fn rejects_blueprint_support_without_api_macro() {
 }
 
 #[test]
+fn rejects_namespace_in_blueprint_support() {
+    let config: CodegenTaskConfig = toml::from_str(
+        r#"
+            language = "cpp_unreal"
+            output = "Generated/Unreal"
+            namespace = "ReferenceGameConfig"
+
+            [cpp_unreal]
+            support = "blueprint"
+            api_macro = "REFERENCE_GAME_CONFIG_API"
+        "#,
+    )
+    .expect("config should parse");
+
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target = CodeExportTarget::from_task(config, &CppUnrealCodeGenerator).expect("target");
+    let error = CppUnrealCodeGenerator.generate(&input).unwrap_err();
+
+    assert!(format!("{error}").contains("namespace is not supported"));
+}
+
+#[test]
+fn rejects_invalid_type_name_prefix() {
+    let config: CodegenTaskConfig = toml::from_str(
+        r#"
+            language = "cpp_unreal"
+            output = "Generated/Unreal"
+
+            [cpp_unreal]
+            type_name_prefix = "3Game"
+        "#,
+    )
+    .expect("config should parse");
+
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target = CodeExportTarget::from_task(config, &CppUnrealCodeGenerator).expect("target");
+    let error = CppUnrealCodeGenerator.generate(&input).unwrap_err();
+
+    assert!(format!("{error}").contains("type_name_prefix `3Game`"));
+}
+
+#[test]
 fn emits_blueprint_reflection_type_markers() {
     let config: CodegenTaskConfig = toml::from_str(
         r#"
@@ -198,6 +242,120 @@ fn emits_blueprint_reflection_type_markers() {
         "void UConfigForgeBlueprintLibrary::FindItemsByRarity(const FItemsTable& Table, EItemRarity Rarity, TArray<FItemsRow>& OutRows)"
     ));
     assert!(source.contains("TArray<const FItemsRow*> Rows = Table.FindByRarity(Rarity);"));
+}
+
+#[test]
+fn applies_type_name_prefix_to_generated_unreal_types() {
+    let config: CodegenTaskConfig = toml::from_str(
+        r#"
+            language = "cpp_unreal"
+            output = "Generated/Unreal"
+            file_name = "reference_game_config"
+
+            [cpp_unreal]
+            support = "blueprint"
+            api_macro = "REFERENCE_GAME_CONFIG_API"
+            type_name_prefix = "Reference"
+        "#,
+    )
+    .expect("config should parse");
+
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target = CodeExportTarget::from_task(config, &CppUnrealCodeGenerator).expect("target");
+    let files = CppUnrealCodeGenerator
+        .generate(&input)
+        .expect("cpp_unreal blueprint code");
+    let header = generated_content(&files, "reference_game_config.h");
+    let source = generated_content(&files, "reference_game_config.cpp");
+
+    assert!(header.contains("enum class EReferenceItemRarity : uint8"));
+    assert!(header.contains("struct REFERENCE_GAME_CONFIG_API FReferenceRewardInfo"));
+    assert!(!header.contains("struct REFERENCEItemsRow"));
+    assert!(header.contains("struct REFERENCE_GAME_CONFIG_API FReferenceItemsRow"));
+    assert!(header.contains("class IReferenceConfigForgeGameDataAccess"));
+    assert!(header.contains("struct REFERENCE_GAME_CONFIG_API FReferenceGameData : public IReferenceConfigForgeGameDataAccess"));
+    assert!(
+        header
+            .contains("struct FReferenceLazyGameData : public IReferenceConfigForgeGameDataAccess")
+    );
+    assert!(header.contains(
+        "UCLASS()\nclass REFERENCE_GAME_CONFIG_API UReferenceConfigForgeBlueprintLibrary"
+    ));
+    assert!(header.contains("const FReferenceItemsTable& Table"));
+    assert!(source.contains(
+        "bool UReferenceConfigForgeBlueprintLibrary::GetItemsById(const FReferenceItemsTable& Table"
+    ));
+    assert!(source.contains("TConfigForgeResult<FReferenceGameData> FReferenceGameData::Load"));
+    assert!(source.contains(
+        "TConfigForgeResult<FReferenceGameData> FReferenceLazyGameData::PreloadAll() const"
+    ));
+    assert!(!header.contains("namespace ReferenceGameConfig"));
+}
+
+#[test]
+fn skips_blueprint_property_for_optional_fields() {
+    let meta = crate::meta::MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "reward_info"
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+            required = true
+
+            [[structs.fields]]
+            name = "note"
+            type = "string"
+            required = false
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "subtitle"
+            type = "text"
+            required = false
+        "#,
+    )
+    .expect("meta should parse");
+    let config: CodegenTaskConfig = toml::from_str(
+        r#"
+            language = "cpp_unreal"
+            output = "Generated/Unreal"
+
+            [cpp_unreal]
+            support = "blueprint"
+            api_macro = "REFERENCE_GAME_CONFIG_API"
+        "#,
+    )
+    .expect("config should parse");
+
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target = CodeExportTarget::from_task(config, &CppUnrealCodeGenerator).expect("target");
+    let files = CppUnrealCodeGenerator
+        .generate(&input)
+        .expect("cpp_unreal blueprint code");
+    let header = generated_content(&files, "generated.h");
+
+    assert!(
+        header.contains("UPROPERTY(BlueprintReadOnly, Category=\"ConfigForge\")\n    int64 Count;")
+    );
+    assert!(header.contains("    TOptional<FString> Note;"));
+    assert!(header.contains("    TOptional<FString> Subtitle;"));
+    assert!(!header.contains(
+        "UPROPERTY(BlueprintReadOnly, Category=\"ConfigForge\")\n    TOptional<FString> Note;"
+    ));
+    assert!(!header.contains(
+        "UPROPERTY(BlueprintReadOnly, Category=\"ConfigForge\")\n    TOptional<FString> Subtitle;"
+    ));
 }
 
 #[test]

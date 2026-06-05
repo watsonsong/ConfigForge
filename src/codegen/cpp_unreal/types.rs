@@ -9,17 +9,33 @@ use crate::{
     },
 };
 
+use super::CppUnrealCodegenOptions;
+
 pub(super) struct CppUnrealNames<'a> {
     options: &'a CodegenOptions,
+    unreal_options: &'a CppUnrealCodegenOptions,
 }
 
 impl<'a> CppUnrealNames<'a> {
-    pub(super) fn new(options: &'a CodegenOptions) -> Self {
-        Self { options }
+    pub(super) fn new(
+        options: &'a CodegenOptions,
+        unreal_options: &'a CppUnrealCodegenOptions,
+    ) -> Self {
+        Self {
+            options,
+            unreal_options,
+        }
     }
 
     pub(super) fn type_name(&self, name: &str) -> Result<String> {
-        self.identifier(name, self.options.naming.type_name)
+        Ok(format!(
+            "{}{}",
+            self.unreal_options
+                .type_name_prefix
+                .as_deref()
+                .unwrap_or(""),
+            self.identifier(name, self.options.naming.type_name)?
+        ))
     }
 
     pub(super) fn enum_type_name(&self, name: &str) -> Result<String> {
@@ -28,6 +44,17 @@ impl<'a> CppUnrealNames<'a> {
 
     pub(super) fn struct_type_name(&self, name: &str) -> Result<String> {
         Ok(format!("F{}", self.type_name(name)?))
+    }
+
+    pub(super) fn lazy_game_data_type_name(&self) -> Result<String> {
+        self.struct_type_name("lazy_game_data")
+    }
+
+    pub(super) fn game_data_access_interface_name(&self) -> Result<String> {
+        Ok(format!(
+            "I{}GameDataAccess",
+            self.type_name("config_forge")?
+        ))
     }
 
     pub(super) fn row_type_name(&self, table_name: &str) -> Result<String> {

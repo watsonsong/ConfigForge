@@ -6,8 +6,9 @@
 
 - `cpp_unreal` 是独立 codegen type，内部生成器为 `CppUnrealCodeGenerator`，不作为标准 `cpp` backend 的开关。
 - `support = "containers"` 已支持 Unreal 容器和基础类型：`TArray`、`TMap`、`TPair`、`TOptional`、`TUniquePtr`、`FString`、`int32` / `int64`，并生成 row/object、repository、index、relation、text helper、`FGameData` 与 `FLazyGameData`。
-- `support = "blueprint"` 已在 containers 模式基础上生成 `USTRUCT(BlueprintType)`、`UENUM(BlueprintType)`、`UPROPERTY(BlueprintReadOnly)`、`.generated.h` include 和 `UBlueprintFunctionLibrary` 查询 facade。
-- `FGameData` 与 `FLazyGameData` 通过 `IConfigForgeGameDataAccess` 共享只读表访问接口；relation helper 接收该公共接口，避免只支持 eager `FGameData`。
+- `support = "blueprint"` 已在 containers 模式基础上生成 `USTRUCT(BlueprintType)`、`UENUM(BlueprintType)`、required 字段 `UPROPERTY(BlueprintReadOnly)`、`.generated.h` include 和 `UBlueprintFunctionLibrary` 查询 facade；optional 字段仍生成为 `TOptional<T>`，但不直接生成 `UPROPERTY`。
+- `FGameData` 与 `FLazyGameData` 通过生成的 `I<Prefix>ConfigForgeGameDataAccess` 共享只读表访问接口；relation helper 接收该公共接口，避免只支持 eager `FGameData`。未配置 `type_name_prefix` 时接口名为 `IConfigForgeGameDataAccess`。
+- Blueprint 模式禁止 namespace，避免真实 UHT 解析 namespace 内反射类型失败；需要命名隔离时配置 `type_name_prefix`，该前缀会应用到所有生成类型名，例如 `FReferenceItemsRow`、`FReferenceGameData`、`FReferenceLazyGameData`、`IReferenceConfigForgeGameDataAccess`、`UReferenceConfigForgeBlueprintLibrary`。
 - 标准工程已包含 `cpp_unreal` target，普通 CI 通过 lightweight Unreal shim 做语法 smoke；真实 UHT / Editor 集成验证留给引擎侧 CI。
 
 ## 历史实施记录
@@ -317,9 +318,10 @@ test(fixtures): add standard cpp_unreal target and harness
 
 - header include 顺序：所有 include 后最后一项为 `#include "<stem>.generated.h"`。
 - row / object / fragment：`USTRUCT(BlueprintType)` + `GENERATED_BODY()`。
-- 可见字段：`UPROPERTY(BlueprintReadOnly, Category="ConfigForge")`。
+- 可见字段：required 字段生成 `UPROPERTY(BlueprintReadOnly, Category="ConfigForge")`；optional 字段因当前生成为 `TOptional<T>`，不生成 `UPROPERTY`，避免 UHT 反射不支持的模板类型。
 - enum：`UENUM(BlueprintType)`。
 - `api_macro` 在 Blueprint 模式必填或有明确默认策略；缺失时报错。
+- Blueprint 模式禁止 `namespace`；如需避免全局 reflected type 冲突，使用 `type_name_prefix`。
 - containers-only 内部 repository 可继续非 reflected，避免配置行进入 GC 管理。
 
 单元测试：
@@ -327,6 +329,8 @@ test(fixtures): add standard cpp_unreal target and harness
 - Blueprint support 生成 `.generated.h` include 且顺序正确。
 - 生成 `USTRUCT(BlueprintType)`、`UPROPERTY(BlueprintReadOnly)`、`UENUM(BlueprintType)`。
 - 缺少必需 `api_macro` 报错。
+- Blueprint 模式配置 `namespace` 报错；`type_name_prefix` 应影响 row、struct、enum、`GameData`、`LazyGameData`、公共 access interface 和 Blueprint library 类型名。
+- optional 字段在 Blueprint 模式不生成 `UPROPERTY`。
 - Blueprint 模式 public API 不包含 `std::*`、`std::optional`、raw row pointer 暴露。
 
 集成 / harness：
