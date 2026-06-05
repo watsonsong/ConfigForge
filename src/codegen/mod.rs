@@ -3,6 +3,7 @@
 
 mod cpp;
 mod cpp_unreal;
+mod csharp;
 mod ir;
 mod naming;
 mod rust;
@@ -19,6 +20,9 @@ pub(crate) use cpp::CppCodeGenerator;
 pub use cpp::CppCodegenOptions;
 pub(crate) use cpp_unreal::CppUnrealCodeGenerator;
 pub use cpp_unreal::CppUnrealCodegenOptions;
+pub(crate) use csharp::CSharpCodeGenerator;
+#[allow(unused_imports)]
+pub use csharp::CSharpCodegenOptions;
 pub(crate) use rust::RustCodeGenerator;
 pub use rust::RustCodegenOptions;
 pub(crate) use typescript::TypeScriptCodeGenerator;
@@ -488,6 +492,7 @@ pub(crate) fn builtin_generators() -> Vec<Box<dyn CodeGenerator>> {
         Box::new(RustCodeGenerator),
         Box::new(CppCodeGenerator),
         Box::new(CppUnrealCodeGenerator),
+        Box::new(CSharpCodeGenerator),
         Box::new(TypeScriptCodeGenerator),
     ]
 }

@@ -44,7 +44,7 @@
 docs(codegen): plan C# backend implementation
 ```
 
-## [ ] Step 1：注册 `csharp` 生成器骨架
+## [x] Step 1：注册 `csharp` 生成器骨架
 
 目标：让 build / export registry 识别 `type = "csharp"`，先生成最小 `.cs` 文件。
 

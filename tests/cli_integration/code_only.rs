@@ -50,6 +50,54 @@ fn builds_code_only_target_without_loading_data() {
 }
 
 #[test]
+fn builds_csharp_code_only_target() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let out_dir = temp_dir.path().join("generated_csharp_code");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                name = "standard_project"
+
+                [[targets]]
+                name = "code_only"
+
+                [[targets.exports]]
+                type = "csharp"
+                output = "{}"
+                file_name = "reference_game_config"
+                namespace = "ReferenceGame.Config"
+            "#,
+            standard_core_meta_imports(),
+            out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "code_only",
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `code_only` built"));
+
+    let csharp_code =
+        fs::read_to_string(out_dir.join("reference_game_config.cs")).expect("csharp code");
+    assert!(csharp_code.contains("namespace ReferenceGame.Config"));
+    assert!(csharp_code.contains("public sealed class ConfigForgeRuntimeException"));
+    assert!(csharp_code.contains("public partial class GameData"));
+}
+
+#[test]
 fn builds_cpp_unreal_code_only_target() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let out_dir = temp_dir.path().join("generated_unreal_code");
