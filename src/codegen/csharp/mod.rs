@@ -323,8 +323,43 @@ fn render_csharp_code(
     }
     content.raw("        }\n\n");
     content.raw_fmt(format_args!(
-        "        public static {} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var data = new {}(\n",
-        names.game_data_class_name(),
+        "        internal static {} FromLoaded(\n",
+        names.game_data_class_name()
+    ));
+    for (index, table) in model.tables.iter().enumerate() {
+        let comma = if index + 1 == model.tables.len() {
+            ""
+        } else {
+            ","
+        };
+        content.raw_fmt(format_args!(
+            "            {} {}{}\n",
+            csharp_table_data_type(table, &names)?,
+            names.local_name(&table.name)?,
+            comma
+        ));
+    }
+    content.raw_fmt(format_args!(
+        "        )\n        {{\n            var data = new {}(\n",
+        names.game_data_class_name()
+    ));
+    for (index, table) in model.tables.iter().enumerate() {
+        let comma = if index + 1 == model.tables.len() {
+            ""
+        } else {
+            ","
+        };
+        content.raw_fmt(format_args!(
+            "                {}{}\n",
+            names.local_name(&table.name)?,
+            comma
+        ));
+    }
+    content.raw(
+        "            );\n            data.LinkAll();\n            return data;\n        }\n\n",
+    );
+    content.raw_fmt(format_args!(
+        "        public static {} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            return FromLoaded(\n",
         names.game_data_class_name()
     ));
     for (index, table) in model.tables.iter().enumerate() {
@@ -346,14 +381,73 @@ fn render_csharp_code(
             )),
         }
     }
-    content.raw("            );\n            data.LinkAll();\n            return data;\n        }\n    }\n\n");
+    content.raw("            );\n        }\n    }\n\n");
+    render_lazy_game_data_class(content, &model, names.access_modifier(), partial, &names)?;
+    content.raw("}\n");
+    Ok(())
+}
+
+fn csharp_table_data_type(table: &super::CodeTable, names: &CSharpNames) -> Result<String> {
+    match table.kind {
+        CodeTableKind::Object => names.row_type_name(&table.name),
+        CodeTableKind::Collection => names.repository_type_name(&table.name),
+    }
+}
+
+fn render_lazy_game_data_class(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    access_modifier: &str,
+    partial: &str,
+    names: &CSharpNames,
+) -> Result<()> {
     content.raw_fmt(format_args!(
-        "    {}{} class {}\n    {{\n    }}\n",
-        names.access_modifier(),
-        partial,
+        "    {access_modifier}{partial} class {} : IGameDataAccess\n    {{\n        private readonly IConfigForgeRuntimeDataLoader _loader;\n",
         names.lazy_game_data_class_name()
     ));
-    content.raw("}\n");
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "        private {}? _{};\n",
+            csharp_table_data_type(table, names)?,
+            names.local_name(&table.name)?
+        ));
+    }
+    content.raw_fmt(format_args!(
+        "\n        public {}(IConfigForgeRuntimeDataLoader loader)\n        {{\n            _loader = loader;\n        }}\n",
+        names.lazy_game_data_class_name()
+    ));
+    for table in &model.tables {
+        let data_type = csharp_table_data_type(table, names)?;
+        let property = names.property_name(&table.name)?;
+        let cache = format!("_{}", names.local_name(&table.name)?);
+        let load_expr = match table.kind {
+            CodeTableKind::Object => format!("{}.Load(_loader)", names.row_type_name(&table.name)?),
+            CodeTableKind::Collection => {
+                format!("{}.Load(_loader)", names.repository_type_name(&table.name)?)
+            }
+        };
+        content.raw_fmt(format_args!(
+            "\n        public {data_type} {property}\n        {{\n            get\n            {{\n                if ({cache} is not null)\n                {{\n                    return {cache};\n                }}\n                var loaded = {load_expr};\n                {cache} = loaded;\n                return loaded;\n            }}\n        }}\n"
+        ));
+    }
+    content.raw_fmt(format_args!(
+        "\n        public {} PreloadAll()\n        {{\n            return {}.FromLoaded(\n",
+        names.game_data_class_name(),
+        names.game_data_class_name()
+    ));
+    for (index, table) in model.tables.iter().enumerate() {
+        let comma = if index + 1 == model.tables.len() {
+            ""
+        } else {
+            ","
+        };
+        content.raw_fmt(format_args!(
+            "                {}{}\n",
+            names.property_name(&table.name)?,
+            comma
+        ));
+    }
+    content.raw("            );\n        }\n    }\n");
     Ok(())
 }
 

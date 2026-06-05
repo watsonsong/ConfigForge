@@ -481,6 +481,59 @@ fn rejects_text_helper_name_collisions() {
 }
 
 #[test]
+fn emits_lazy_game_data_with_retry_and_preload() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "game_rules"
+            kind = "object"
+            source = "game_rules.csv"
+
+            [[tables.fields]]
+            name = "starter_item_id"
+            type = "int"
+            required = true
+            foreign_key = { name = "starter_item", target_table = "items", linked_field = "starter_item" }
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = CSharpCodeGenerator.generate(&input).expect("csharp code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public partial class LazyGameData : IGameDataAccess"));
+    assert!(content.contains("private readonly IConfigForgeRuntimeDataLoader _loader;"));
+    assert!(content.contains("private ItemsTable? _items;"));
+    assert!(content.contains("private GameRulesRow? _gameRules;"));
+    assert!(content.contains("public ItemsTable Items"));
+    assert!(content.contains("if (_items is not null)"));
+    assert!(content.contains("var loaded = ItemsTable.Load(_loader);"));
+    assert!(content.contains("_items = loaded;"));
+    assert!(content.contains("public GameData PreloadAll()"));
+    assert!(content.contains("return GameData.FromLoaded("));
+    assert!(content.contains("Items"));
+    assert!(content.contains("GameRules"));
+    assert!(content.contains("public ItemsRow StarterItem(IGameDataAccess data)"));
+}
+
+#[test]
 fn emits_object_table_as_loaded_property_without_repository() {
     let meta = MetaModel::from_toml_str(
         r#"
