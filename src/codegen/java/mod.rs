@@ -6,13 +6,15 @@ use serde::{Deserialize, Serialize};
 use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
-    CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeGenerator, CodeWriterConfig,
-    CodeWriterLike, NamingConfig,
+    CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField, CodeFragmentPayload,
+    CodeGenerator, CodeModel, CodeTable, CodeTableKind, CodeTypeRef, CodeWriterConfig,
+    CodeWriterLike, NamingConfig, build_code_model, ir::require_non_empty_index_fields,
 };
 
 mod symbols;
 mod types;
 
+use symbols::validate_generated_symbols;
 use types::JavaNames;
 
 #[cfg(test)]
@@ -189,6 +191,9 @@ fn render_java_code(
     options: &JavaCodegenOptions,
 ) -> Result<()> {
     let names = JavaNames::new(input, options)?;
+    let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
+    require_non_empty_index_fields(&model)?;
+    validate_generated_symbols(&model, &names)?;
 
     write_file_header(generator, content, input);
     content.newline();
@@ -209,17 +214,183 @@ fn render_java_code(
         names.root_class_name()
     ));
     content.raw("    private ");
-    if options.emit_final {
-        content.raw("final ");
-    }
     content.raw_fmt(format_args!("{}() {{}}\n\n", names.root_class_name()));
+    render_runtime_exception(content);
+    render_java_types(content, &model, &names, options)?;
+    content.raw("}\n");
+    Ok(())
+}
+
+fn render_runtime_exception(content: &mut impl CodeWriterLike) {
     content.raw(
         "    public static final class ConfigForgeRuntimeException extends RuntimeException {\n",
     );
     content.raw("        public ConfigForgeRuntimeException(String message) { super(message); }\n");
     content.raw("        public ConfigForgeRuntimeException(String message, Throwable cause) { super(message, cause); }\n");
     content.raw("    }\n\n");
-    content.raw("}\n");
+}
+
+fn render_java_types(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &JavaNames,
+    options: &JavaCodegenOptions,
+) -> Result<()> {
+    for code_enum in &model.enums {
+        content.raw_fmt(format_args!(
+            "    public enum {} {{\n",
+            names.type_name(&code_enum.name)?
+        ));
+        for (index, value) in code_enum.values.iter().enumerate() {
+            let suffix = if index + 1 == code_enum.values.len() {
+                ";"
+            } else {
+                ","
+            };
+            content.raw_fmt(format_args!(
+                "        {}{}\n",
+                names.enum_value_name(&value.name)?,
+                suffix
+            ));
+        }
+        content.raw("    }\n\n");
+    }
+
+    for code_struct in &model.structs {
+        render_java_class(
+            content,
+            &names.type_name(&code_struct.name)?,
+            &code_struct.fields,
+            names,
+            options,
+        )?;
+    }
+
+    for table in &model.tables {
+        for fragment in &table.fragments {
+            if matches!(fragment.payload, CodeFragmentPayload::Struct { .. }) {
+                continue;
+            }
+            render_java_class(
+                content,
+                &names.fragment_type_name(&table.name, &fragment.name)?,
+                &fragment.fields,
+                names,
+                options,
+            )?;
+        }
+
+        let mut row_fields = table.fields.clone();
+        for fragment in &table.fragments {
+            row_fields.push(CodeField {
+                name: fragment.name.clone(),
+                code_type: CodeTypeRef::Struct {
+                    name: names.fragment_payload_type_name(table, fragment)?,
+                },
+                desc: fragment.desc.clone(),
+                required: false,
+            });
+        }
+        render_java_class(
+            content,
+            &names.row_type_name(&table.name)?,
+            &row_fields,
+            names,
+            options,
+        )?;
+
+        if table.kind == CodeTableKind::Collection {
+            render_java_table_skeleton(content, table, names, options)?;
+        }
+    }
+    Ok(())
+}
+
+fn render_java_class(
+    content: &mut impl CodeWriterLike,
+    class_name: &str,
+    fields: &[CodeField],
+    names: &JavaNames,
+    options: &JavaCodegenOptions,
+) -> Result<()> {
+    let final_modifier = if options.emit_final { " final" } else { "" };
+    content.raw_fmt(format_args!(
+        "    public static{} class {} {{\n",
+        final_modifier, class_name
+    ));
+    for field in fields {
+        content.raw_fmt(format_args!(
+            "        private final {} {};\n",
+            names.java_type(field)?,
+            names.field_name(&field.name)?
+        ));
+    }
+    if !fields.is_empty() {
+        content.raw("\n");
+    }
+    content.raw_fmt(format_args!("        private {}(", class_name));
+    for (index, field) in fields.iter().enumerate() {
+        if index > 0 {
+            content.raw(", ");
+        }
+        content.raw_fmt(format_args!(
+            "{} {}",
+            names.java_type(field)?,
+            names.field_name(&field.name)?
+        ));
+    }
+    content.raw(") {\n");
+    for field in fields {
+        let field_name = names.field_name(&field.name)?;
+        content.raw_fmt(format_args!(
+            "            this.{field_name} = {field_name};\n"
+        ));
+    }
+    content.raw("        }\n");
+    for field in fields {
+        content.raw("\n");
+        content.raw_fmt(format_args!(
+            "        public {} {}() {{ return {}; }}\n",
+            names.java_type(field)?,
+            names.getter_name(&field.name)?,
+            names.field_name(&field.name)?
+        ));
+    }
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_java_table_skeleton(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &JavaNames,
+    options: &JavaCodegenOptions,
+) -> Result<()> {
+    let final_modifier = if options.emit_final { " final" } else { "" };
+    let table_type = names.repository_type_name(&table.name)?;
+    let row_type = names.row_type_name(&table.name)?;
+    content.raw_fmt(format_args!(
+        "    public static{} class {} {{\n",
+        final_modifier, table_type
+    ));
+    content.raw_fmt(format_args!(
+        "        public static final String DATA_FILE = \"{}\";\n",
+        table.data_file
+    ));
+    content.raw_fmt(format_args!(
+        "        private final {}[] rows;\n\n",
+        row_type
+    ));
+    content.raw_fmt(format_args!(
+        "        private {}({}[] rows) {{\n            this.rows = rows;\n        }}\n\n",
+        table_type, row_type
+    ));
+    content.raw("        public int size() { return rows.length; }\n");
+    content.raw_fmt(format_args!(
+        "        public {} rowAt(int index) {{ return rows[index]; }}\n",
+        row_type
+    ));
+    content.raw("    }\n\n");
     Ok(())
 }
 

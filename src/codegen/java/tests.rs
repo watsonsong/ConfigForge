@@ -12,6 +12,7 @@ use crate::{
         CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig,
         tests::{input_for, linked_fixture},
     },
+    meta::MetaModel,
 };
 
 use super::{JavaCodeGenerator, JavaCodegenOptions, LANGUAGE};
@@ -132,11 +133,220 @@ fn generate_returns_single_java_file() {
     assert!(
         files[0]
             .content
-            .contains("private final ReferenceGameConfig() {}")
+            .contains("private ReferenceGameConfig() {}")
     );
     assert!(files[0].content.contains(
         "public static final class ConfigForgeRuntimeException extends RuntimeException"
     ));
+    assert!(files[0].content.contains("public enum ItemRarity"));
+    assert!(files[0].content.contains("COMMON,"));
+    assert!(files[0].content.contains("RARE;"));
+    assert!(
+        files[0]
+            .content
+            .contains("public static final class RewardInfo")
+    );
+    assert!(files[0].content.contains("private final long count;"));
+    assert!(
+        files[0]
+            .content
+            .contains("public long getCount() { return count; }")
+    );
+    assert!(
+        files[0]
+            .content
+            .contains("public static final class ItemsRow")
+    );
+    assert!(files[0].content.contains("private final long id;"));
+    assert!(
+        files[0]
+            .content
+            .contains("private final String displayName;")
+    );
+    assert!(
+        files[0]
+            .content
+            .contains("private final ItemRarity rarity;")
+    );
+    assert!(
+        files[0]
+            .content
+            .contains("public String getDisplayName() { return displayName; }")
+    );
+    assert!(
+        files[0]
+            .content
+            .contains("public static final class ItemsTable")
+    );
+    assert!(
+        files[0]
+            .content
+            .contains("public static final String DATA_FILE = \"items\";")
+    );
+}
+
+#[test]
+fn emits_java_types_and_optional_field_mapping() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[enums]]
+            name = "item_rarity"
+
+            [[enums.values]]
+            name = "common"
+
+            [[structs]]
+            name = "reward_info"
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+            required = true
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "optional_level"
+            type = "int"
+            required = false
+
+            [[tables.fields]]
+            name = "ratio"
+            type = "float"
+            required = false
+
+            [[tables.fields]]
+            name = "enabled"
+            type = "bool"
+            required = false
+
+            [[tables.fields]]
+            name = "name"
+            type = "string"
+            required = false
+
+            [[tables.fields]]
+            name = "rarity"
+            type = "item_rarity"
+            required = true
+
+            [[tables.fields]]
+            name = "rarities"
+            type = "list<item_rarity>"
+            required = true
+
+            [[tables.fields]]
+            name = "flags"
+            type = "list<bool>"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = JavaCodeGenerator.generate(&input).expect("java code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public enum ItemRarity"));
+    assert!(content.contains("private final Long optionalLevel;"));
+    assert!(content.contains("private final Double ratio;"));
+    assert!(content.contains("private final Boolean enabled;"));
+    assert!(content.contains("private final String name;"));
+    assert!(content.contains("private final ItemRarity rarity;"));
+    assert!(content.contains("private final ItemRarity[] rarities;"));
+    assert!(content.contains("private final boolean[] flags;"));
+}
+
+#[test]
+fn suffixes_java_keywords_by_default() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "class"
+            source = "class.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "default"
+            type = "string"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = JavaCodeGenerator.generate(&input).expect("java code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public static final class ClassRow"));
+    assert!(content.contains("private final String default_;"));
+    assert!(content.contains("public String getDefault_() { return default_; }"));
+}
+
+#[test]
+fn rejects_duplicate_generated_java_member_names() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "display_name"
+            type = "string"
+            required = true
+
+            [[tables.fields]]
+            name = "display-name"
+            type = "string"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let error = JavaCodeGenerator.generate(&input).unwrap_err();
+    assert!(
+        matches!(error, ConfigForgeError::Validation(ref message) if message.contains("duplicate generated identifier")),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]

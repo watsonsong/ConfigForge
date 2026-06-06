@@ -4,9 +4,13 @@
 use crate::Result;
 
 use super::{
-    JavaCodegenOptions, symbols::validate_java_identifier, symbols::validate_java_package,
+    JavaCodegenOptions,
+    symbols::{is_java_keyword, validate_java_identifier, validate_java_package},
 };
-use crate::codegen::CodeExportInput;
+use crate::codegen::{
+    CaseStyle, CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeTable,
+    CodeTypeRef, KeywordConflictPolicy, NamingConfig, naming,
+};
 
 pub(super) struct JavaNames {
     package: String,
@@ -14,6 +18,8 @@ pub(super) struct JavaNames {
     root_class_name: String,
     game_data_class_name: String,
     lazy_game_data_class_name: String,
+    naming: NamingConfig,
+    keyword_conflict: KeywordConflictPolicy,
 }
 
 impl JavaNames {
@@ -59,6 +65,8 @@ impl JavaNames {
             root_class_name,
             game_data_class_name,
             lazy_game_data_class_name,
+            naming: input.target.options.naming.clone(),
+            keyword_conflict: input.target.options.keyword_conflict,
         })
     }
 
@@ -94,5 +102,94 @@ impl JavaNames {
     #[allow(dead_code)]
     pub(super) fn lazy_game_data_class_name(&self) -> &str {
         &self.lazy_game_data_class_name
+    }
+
+    pub(super) fn type_name(&self, name: &str) -> Result<String> {
+        self.identifier(name, self.naming.type_name)
+    }
+
+    pub(super) fn row_type_name(&self, table_name: &str) -> Result<String> {
+        self.type_name(&format!("{table_name}_row"))
+    }
+
+    pub(super) fn repository_type_name(&self, table_name: &str) -> Result<String> {
+        self.type_name(&format!("{table_name}_table"))
+    }
+
+    pub(super) fn fragment_type_name(
+        &self,
+        table_name: &str,
+        fragment_name: &str,
+    ) -> Result<String> {
+        self.type_name(&format!("{table_name}_{fragment_name}_fragment"))
+    }
+
+    pub(super) fn fragment_payload_type_name(
+        &self,
+        table: &CodeTable,
+        fragment: &CodeFragment,
+    ) -> Result<String> {
+        match &fragment.payload {
+            CodeFragmentPayload::InlineFields => {
+                self.fragment_type_name(&table.name, &fragment.name)
+            }
+            CodeFragmentPayload::Struct { name } => self.type_name(name),
+        }
+    }
+
+    pub(super) fn enum_value_name(&self, name: &str) -> Result<String> {
+        self.identifier(name, self.naming.enum_value)
+    }
+
+    pub(super) fn field_name(&self, name: &str) -> Result<String> {
+        self.identifier(name, self.naming.field)
+    }
+
+    pub(super) fn getter_name(&self, name: &str) -> Result<String> {
+        let field = self.field_name(name)?;
+        let mut chars = field.chars();
+        let suffix = match chars.next() {
+            Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+            None => "Value".to_owned(),
+        };
+        let getter = format!("get{suffix}");
+        validate_java_identifier("getter", &getter)?;
+        Ok(getter)
+    }
+
+    pub(super) fn java_type(&self, field: &CodeField) -> Result<String> {
+        self.java_type_ref(&field.code_type, field.required)
+    }
+
+    pub(super) fn java_type_ref(&self, code_type: &CodeTypeRef, required: bool) -> Result<String> {
+        Ok(match code_type {
+            CodeTypeRef::Int if required => "long".to_owned(),
+            CodeTypeRef::Int => "Long".to_owned(),
+            CodeTypeRef::Float if required => "double".to_owned(),
+            CodeTypeRef::Float => "Double".to_owned(),
+            CodeTypeRef::Bool if required => "boolean".to_owned(),
+            CodeTypeRef::Bool => "Boolean".to_owned(),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
+            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
+            CodeTypeRef::List(element) => format!("{}[]", self.java_array_element_type(element)?),
+        })
+    }
+
+    fn java_array_element_type(&self, code_type: &CodeTypeRef) -> Result<String> {
+        Ok(match code_type {
+            CodeTypeRef::Int => "long".to_owned(),
+            CodeTypeRef::Float => "double".to_owned(),
+            CodeTypeRef::Bool => "boolean".to_owned(),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
+            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
+            CodeTypeRef::List(element) => format!("{}[]", self.java_array_element_type(element)?),
+        })
+    }
+
+    fn identifier(&self, name: &str, style: CaseStyle) -> Result<String> {
+        naming::make_identifier(name, style, self.keyword_conflict, is_java_keyword, |_| {
+            None
+        })
+        .map_err(|message| super::validation_error(format!("java codegen: {message}")))
     }
 }
