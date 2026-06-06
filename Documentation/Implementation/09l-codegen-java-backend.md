@@ -1,6 +1,6 @@
 # 09l. Codegen Java Backend
 
-本文描述规划中的 Java codegen backend 的实现设计、生成 API 形态、运行时 reader contract、测试策略和与现有 CodeModel / runtime data exporter 的复用边界。分步实现清单放在 [`../Todo/codegen-java-backend-todo.md`](../Todo/codegen-java-backend-todo.md)；本文作为稳定设计文档维护。
+本文描述已实现的 Java codegen backend 的实现设计、生成 API 形态、运行时 reader contract、测试策略和与现有 CodeModel / runtime data exporter 的复用边界。本文作为 Java backend 的稳定设计文档维护。
 
 ## Related docs
 
@@ -13,11 +13,11 @@
 
 ## 当前状态
 
-Java backend 尚未实现。目标是新增独立 codegen type：`java`，内部生成器命名为 `JavaCodeGenerator`，输出 JDK-only `.java` 源码文件，可被普通 `javac` / Maven / Gradle 工程编译，不绑定 Android、Spring、libGDX 或特定游戏引擎。Android / 服务器 / 自研引擎接入通过业务侧 runtime loader adapter 完成；生成核心代码只依赖 JDK 标准库。
+Java backend 已实现为独立 codegen type：`java`（alias：`jvm`），内部生成器命名为 `JavaCodeGenerator`，输出 JDK-only `.java` 源码文件，可被普通 `javac` / Maven / Gradle 工程编译，不绑定 Android、Spring、libGDX 或特定游戏引擎。Android / 服务器 / 自研引擎接入通过业务侧 runtime loader adapter 完成；生成核心代码只依赖 JDK 标准库。
 
 第一阶段采用单文件输出 `GeneratedGameConfig.java`。由于 Java 每个文件只能有一个 public top-level type，生成代码采用 **public root class + nested public static types** 形态：root class 承载 runtime contract、enum、row/value type、table repository、`GameData`、`LazyGameData`、compound key 和 helper。业务侧可通过 `GeneratedGameConfig.GameData.load(loader)`、`GeneratedGameConfig.ItemsRow` 等访问生成 API。
 
-功能目标追齐 Rust / C++ / TypeScript / C# format-agnostic backend MVP：enum、value struct / row class、ObjectTable、CollectionTable repository、eager `GameData`、`LazyGameData`、unique / non-unique / ordered index、compound key、`linked_field` relation helper、`text` helper，以及 format-agnostic runtime reader contract。
+当前已追齐 Rust / C++ / TypeScript / C# format-agnostic backend MVP：enum、value struct / row class、ObjectTable、CollectionTable repository、eager `GameData`、`LazyGameData`、unique / non-unique / ordered index、compound key、`linked_field` relation helper、`text` helper，以及 format-agnostic runtime reader contract。
 
 ## 设计目标与非目标
 
@@ -39,19 +39,19 @@ Java backend 尚未实现。目标是新增独立 codegen type：`java`，内部
 
 ## Codegen options
 
-建议在 `[targets.exports.java]` 下支持：
+`[targets.exports.java]` 下支持：
 
 | Option | 默认值 | 说明 |
 | --- | --- | --- |
-| `package` | 通用 `target.namespace` 转换或 `configforge.generated` | Java package。可由 language option 覆盖通用 namespace。 |
-| `root_class_name` | `GeneratedGameConfig` 或由 `file_name` stem 推导 | 唯一 public top-level class 名，必须与 `.java` 文件名一致。 |
+| `package` | `target.namespace` 或 `module_name`（默认 `configforge.generated`） | Java package。可由 language option 覆盖通用 namespace。 |
+| `root_class_name` | `file_name` stem 或 `GeneratedGameConfig` | 唯一 public top-level class 名，必须与 `.java` 文件名一致。 |
 | `game_data_class_name` | `GameData` | nested eager facade 名称。 |
 | `lazy_class_name` | `LazyGameData` | nested lazy facade 名称。 |
 | `access_modifier` | `public` | root class 访问级别；第一阶段允许 `public` / package-private（空字符串或 `package`）。 |
 | `emit_final` | `true` | row/value/table/facade 是否默认生成 `final`。 |
 | `file_name` | 通用 file name | 输出文件名，默认 `GeneratedGameConfig.java`；若设置 `.java` stem，默认同步为 `root_class_name`。 |
 
-无效 package、非法 identifier、非法 access modifier、`file_name` stem 与 `root_class_name` 不一致应在 `JavaCodeGenerator.generate_to_sink()` 前通过 validation diagnostic 报错。
+无效 package、非法 identifier、非法 access modifier、`file_name` stem 与 `root_class_name` 不一致会在 `JavaCodeGenerator.generate_to_sink()` 前通过 validation error 报错。
 
 ## 命名规则
 
@@ -221,7 +221,7 @@ public interface GameDataAccess {
 Row relation helper 规则：
 
 - 必填单值 FK：`ClassesRow getDefaultClass(GameDataAccess data)`，找不到目标时抛 `ConfigForgeRuntimeException`。
-- optional FK：`ClassesRow getDefaultClass(GameDataAccess data)`，source key 全空时返回 `null`；非空 key 找不到仍抛错。
+- optional FK：`ClassesRow getDefaultClass(GameDataAccess data)`，source key 全空时返回 `null`；非空 key 找不到返回 `null`（与 generated index lookup 语义一致）。
 - list FK：`List<ClassesRow> getStarterClasses(GameDataAccess data)`，保持 source list 顺序。
 - cache 保存 target row index：单值用 `int` sentinel，list 用 nullable `int[]`。不缓存目标 row 引用，避免生命周期和 mutable repository 问题。
 - `Table.link(GameDataAccess data)` 遍历 rows 预解析；`GameData.linkAll()` 按 CodeModel table 顺序调用。
@@ -284,7 +284,7 @@ public static final class LazyGameData implements GameDataAccess {
 
 ## 文件组织与 Rust 模块结构
 
-新增源码建议：
+源码结构：
 
 ```text
 src/codegen/java/
@@ -318,7 +318,7 @@ src/codegen/java/
 
 - 临时 project：`type = "java"` 能生成 `.java`。
 - 若本机有 `javac` / `java`，临时创建最小 harness：编译 generated code + generic in-memory reader，运行加载 / index / relation / text helper / lazy smoke。
-- standard_project 后续可加入 `out/client_code/java/GeneratedGameConfig.java`，长期回归先使用 in-memory value reader 验证 generated parser 和 repository API；真实 JSON / MessagePack reader adapter 可在 `runtime/java/` 落地后替换 harness。
+- standard_project 已加入 `out/client_code/java/ReferenceGameConfig.java`；集成测试使用 JDK-only JSON reader harness 验证 generated parser、repository、relation、text 和 lazy API。真实 JSON / MessagePack reader adapter 可在 `runtime/java/` 落地后替换或补充 harness。
 - 没有 JDK 时不失败，只跳过 Java compiler harness；Rust unit 和内容断言仍必须通过。
 
 ## 后续扩展

@@ -10,9 +10,9 @@
 
 ## 当前状态
 
-- Rust / C++ / TypeScript / C# generated code 均使用 Meta-agnostic reader loader contract。
+- Rust / C++ / TypeScript / C# / Java generated code 均使用 Meta-agnostic reader loader contract。
 - Eager `GameData` 与 table-level `LazyGameData` 已实现 MVP。
-- TypeScript 已提供 async 与 sync loading API；sync API 要求 loader 同步返回 reader。C# 当前提供同步 `Load` / `LazyGameData` API。
+- TypeScript 已提供 async 与 sync loading API；sync API 要求 loader 同步返回 reader。C# / Java 当前提供同步 `Load` / `load` 和 `LazyGameData` API。
 - Generated code 使用逻辑 table name；真实 artifact path、后缀和格式由 loader / reader 映射。
 
 ## Lazy loading state machine

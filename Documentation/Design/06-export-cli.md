@@ -55,7 +55,7 @@ deduplicate = true
 | --- | --- |
 | `name` | 当前 target 内唯一的 export task 名称。单 export task 可省略并由实现填入默认名；多 export task 省略时默认使用 `type`。 |
 | `output` | 产物输出目录。运行时表数据会在该目录下按表名生成文件；POT / manifest 这类聚合格式会在该目录下按格式选项规划一个或多个文件；codegen 会在该目录生成语言文件。 |
-| `type` | exporter 类型 ID。运行时格式支持 `json`、`messagepack` 和 `bin`；聚合/内嵌数据格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`；代码生成支持 `rust`、`cpp`、`typescript`、`cpp_unreal`、`csharp` 及其 alias，其中 `cpp_unreal` 是 Unreal Engine 专用 C++ codegen，`csharp` 输出 .NET BCL-only 单文件 C#。 |
+| `type` | exporter 类型 ID。运行时格式支持 `json`、`messagepack` 和 `bin`；聚合/内嵌数据格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`；代码生成支持 `rust`、`cpp`、`typescript`、`cpp_unreal`、`csharp`、`java` 及其 alias，其中 `cpp_unreal` 是 Unreal Engine 专用 C++ codegen，`csharp` 输出 .NET BCL-only 单文件 C#，`java` 输出 JDK-only 单文件 Java。 |
 | exporter 专属字段 | 可选。格式专属选项直接摊平在对应 `[[targets.exports]]` 下，例如 `type = "gettext_pot"` 的 `domain`、`file_name`、`source_reference`、`include_translator_comments`、`deduplicate`。 |
 
 导出规则：
@@ -114,9 +114,10 @@ CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 t
 | `[targets.exports.cpp]` | `namespace` | C++ namespace 覆盖；未设置时可使用通用 `namespace`。 |
 | `[targets.exports.cpp_unreal]` | `api_macro` / `support` / `blueprint_category` / `namespace` / `type_name_prefix` | Unreal C++ 生成器配置。`api_macro` 指定模块导出宏，且 `support = "blueprint"` 时必填；`support = "containers"` 生成 Unreal 容器和基础类型的 C++ API；`support = "blueprint"` 额外生成可反射的 `USTRUCT` / `UFUNCTION` facade；`blueprint_category` 控制 `UPROPERTY` / `UFUNCTION` 分类；containers 模式下 `namespace` 可覆盖通用 namespace；Blueprint 模式禁止 `namespace`，应使用 `type_name_prefix` 为全局反射类型加项目前缀。 |
 | `[targets.exports.csharp]` | `namespace` / `nullable` / `access_modifier` / `class_name` / `lazy_class_name` / `emit_partial` | C# 单文件生成器配置。`namespace` 可覆盖通用 namespace；`nullable = true` 输出 `#nullable enable`；`access_modifier` 允许 `public` / `internal`；`class_name` 与 `lazy_class_name` 覆盖 eager / lazy facade 名称；`emit_partial` 控制 generated 类型是否声明为 `partial`。 |
+| `[targets.exports.java]` | `package` / `root_class_name` / `game_data_class_name` / `lazy_class_name` / `access_modifier` / `emit_final` | Java 单文件生成器配置。`package` 可覆盖通用 `namespace`；`root_class_name` 必须与 `.java` 文件名 stem 一致；`game_data_class_name` 与 `lazy_class_name` 覆盖 nested eager / lazy facade 名称；`access_modifier` 允许 `public` / `package`；`emit_final` 控制 generated nested 类型是否声明为 `final`。 |
 | `[targets.exports.typescript]` | `readonly_fields` | interface 字段是否生成 `readonly`。 |
 
-规划中的 Java codegen 将使用 `type = "java"` 和 `[targets.exports.java]`，但当前尚未注册到 exporter registry，不能在现有 `ConfigForge.toml` 中启用。Java 设计见 [`../Implementation/09l-codegen-java-backend.md`](../Implementation/09l-codegen-java-backend.md)。
+Java codegen 使用 `type = "java"` 和 `[targets.exports.java]`，生成 public root class + nested public static types 的单个 `.java` 文件；设计见 [`../Implementation/09l-codegen-java-backend.md`](../Implementation/09l-codegen-java-backend.md)。
 
 Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `type = "cpp_unreal"`：
 
@@ -126,7 +127,7 @@ Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `typ
 - `support = "blueprint"` 时在 containers 模式基础上生成 Blueprint 可见层：row/value struct 使用 `USTRUCT(BlueprintType)`、required 且 UHT 可反射的字段使用 `UPROPERTY(BlueprintReadOnly)`，访问入口通过 `UBlueprintFunctionLibrary` 或 `UObject` facade 暴露 `UFUNCTION(BlueprintCallable)` / `BlueprintPure`。Blueprint 模式禁止 namespace（真实 UHT 对 namespace 内反射类型支持有限），需要命名隔离时使用 `type_name_prefix` 生成如 `FReferenceItemsRow` / `UReferenceConfigForgeBlueprintLibrary` 的全局类型。optional 字段仍按 C++ API 生成为 `TOptional<T>`，但不会生成 `UPROPERTY`，避免把 UHT 不支持的 optional 模板类型直接暴露给 Blueprint。Blueprint 层应避免暴露 raw pointer、`std::*`、模板化 helper 或不被反射系统支持的类型；必要时提供按值返回、`bool + Out` 参数或 `TArray<Struct>` 包装。
 - `cpp_unreal` 仍复用同一套 Meta / target tags / CodeModel IR。runtime data 的取得方式继续抽象化：生成代码不直接绑定本地文件、Pak、Asset Manager、Data Asset 或网络加载，Unreal 项目通过 Unreal 版 `RuntimeDataLoader` adapter 接入。
 
-`[targets.exports.i18n]` 控制 `text` 翻译 helper 的调用形态：默认 `mode = "generic"`，保留显式 translator 参数；`mode = "global_function"` 时必须配置 `function`，生成代码直接调用该全局函数，例如 gettext/libintl 或项目自己的全局 i18n facade。`returns = "string"` 表示函数总是返回最终文案，`returns = "optional"` 表示函数可能 missing，helper 会 fallback 到 raw text。C++ 可用 `cpp_include` 注入 include，C# 可用 `csharp_using` 注入 using，TypeScript 可用 `typescript_import` 注入 import。
+`[targets.exports.i18n]` 控制 `text` 翻译 helper 的调用形态：默认 `mode = "generic"`，保留显式 translator 参数；`mode = "global_function"` 时必须配置 `function`，生成代码直接调用该全局函数，例如 gettext/libintl 或项目自己的全局 i18n facade。`returns = "string"` 表示函数总是返回最终文案，`returns = "optional"` 表示函数可能 missing，helper 会 fallback 到 raw text。C++ 可用 `cpp_include` 注入 include，C# 可用 `csharp_using` 注入 using，TypeScript 可用 `typescript_import` 注入 import，Java 可用 `java_import` 注入 import。
 
 `keyword_conflict` 策略：
 
@@ -237,6 +238,7 @@ Protobuf 未来规则：
 | C++ | `IRuntimeDataLoader::Open(path) -> std::unique_ptr<IRuntimeDataReader>`；reader 只暴露格式无关的 object / array / field / scalar 读取能力。 |
 | TypeScript | `RuntimeDataLoader.open(path): Promise<RuntimeDataReader> | RuntimeDataReader`；reader 提供通用 JSON-like / MessagePack-like 读取 cursor。 |
 | C# | `IConfigForgeRuntimeDataLoader.Open(path) -> IConfigForgeRuntimeDataReader`；reader 提供 field / row / list / scalar 读取能力，生成代码抛 `ConfigForgeRuntimeException` 表达 data-code mismatch。 |
+| Java | `ConfigForgeRuntimeDataLoader.open(path) -> ConfigForgeRuntimeDataReader`；reader 提供 field / row / list / scalar 读取能力，生成代码抛 unchecked `ConfigForgeRuntimeException` 表达 data-code mismatch。 |
 
 通用 reader 至少需要覆盖两类 layout：
 
@@ -290,6 +292,7 @@ Foreign key relation helper 与 lazy load 的交互：
 | Rust | `LazyGameData<L: RuntimeDataLoader>` 持有 `L` 或 `&L`；每个 table 用 `OnceCell<Table>` 缓存 | `fn items(&self) -> RuntimeDataResult<&ItemsTable>`；`fn preload_all(&self) -> RuntimeDataResult<()>` | `GameData::load(&loader)` 保持一次性加载；也可让 `GameData` 与 `LazyGameData` 共同实现 generated `GameDataAccess` trait |
 | C++ | `LazyGameData` 持有 `std::shared_ptr<IRuntimeDataLoader>` 或明确生命周期的引用 wrapper；table cache 用 `std::optional<Table>` | `const ItemsTable& Items() const`，失败时 throw 或返回 `RuntimeDataResult<std::reference_wrapper<const ItemsTable>>`；`PreloadAll()` | `GameData::Load(loader)` 保持 eager；`LazyGameData::PreloadAll()` 后可选 `ReleaseLoader()` |
 | TypeScript | `LazyGameData` 持有 `RuntimeDataLoader`，每个 table cache 保存 `Promise<Table>` 或 loaded table | `items(): Promise<ItemsTable>` / `gameRules(): Promise<GameRulesRow>`；并发访问复用同一个 Promise | `await GameData.load(loader)` 保持 eager；`await LazyGameData.loadAll(loader)` 可返回 eager `GameData` 或加载完的 lazy facade |
+| Java | `LazyGameData` 持有 `ConfigForgeRuntimeDataLoader`；每个 table/object 用 nullable field 缓存 | `getItems(): ItemsTable` / `getGameRules(): GameRulesRow`；`preloadAll(): GameData` | `GameData.load(loader)` 保持 eager；`GameData.loadLazy(loader)` 构造 lazy facade，relation helper 通过 `GameDataAccess` 同时支持 eager / lazy |
 
 命名上应避免让 lazy facade 的 async / fallible accessor 伪装成 eager field。现有 eager `data.items.getById(...)` 可继续保留；lazy TypeScript 不应生成 `data.items` 这种看似同步的属性，而应生成 `await data.items()` 或 `await data.getItems()`。
 
@@ -409,7 +412,7 @@ ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader ad
 
 设计原则：
 
-1. **生成代码核心仍保持无第三方 runtime 依赖**：Rust / C++ / TypeScript / C# generated code 只声明 reader / loader 契约和 generated parser，不直接依赖 `serde_json`、`rmp-serde`、`RapidJSON`、`msgpack-c`、npm MessagePack 包、`System.Text.Json` 等具体解码库。
+1. **生成代码核心仍保持无第三方 runtime 依赖**：Rust / C++ / TypeScript / C# / Java generated code 只声明 reader / loader 契约和 generated parser，不直接依赖 `serde_json`、`rmp-serde`、`RapidJSON`、`msgpack-c`、npm MessagePack 包、`System.Text.Json`、Jackson、Gson 等具体解码库。
 2. **标准 adapter 按官方支持矩阵拆分**：stable runtime data export type 应覆盖官方 target language；experimental type 可以先只覆盖部分语言。每个 adapter 单元只负责“某语言中把某格式的通用 value/cursor 暴露为 RuntimeDataReader”，transport loader 作为可组合层，不进入语言 × 格式矩阵。
 3. **资源加载与格式解码分层**：`RuntimeDataLoader` 的文件系统、HTTP、引擎资源系统等 transport 逻辑应与 JSON / MessagePack reader 解码逻辑分开。标准包可以提供常用组合（如 Node fs + JSON、Rust fs + MessagePack），但底层 reader 应可被自定义 loader 复用。
 4. **依赖显式可选**：不同语言/格式 adapter 允许依赖不同三方库，但依赖必须限制在对应 adapter 包/模块内，并通过 Cargo feature、npm optional dependency、CMake option / package manager 选项等机制显式启用。
@@ -424,6 +427,8 @@ ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader ad
 | Rust | `serde_json` reader module；`serde_json_reader` | `rmp-serde` reader module；`serde_msgpack_reader` | Cargo features：`json`、`messagepack`、`fs`；当前为 `copyable_template`，各格式 reader 自带 value adapter 与 fs loader。 |
 | TypeScript | 原生 `JSON.parse` value reader | `@msgpack/msgpack` 解码后的 value reader | npm 包拆分与 peer dependency；Node fs / fetch loader 与格式 reader 分离。 |
 | C++ | 生产推荐 `RapidJSON` reader；`rapidjson_reader` 为生产推荐 JSON adapter | 推荐 `msgpack-cxx` reader；`msgpackc_reader` 解码到 msgpack object/value 后适配 | CMake options：`CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER`、`CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER`；通过 `find_package` / package manager / 显式 `FetchContent` 引入三方库，不 vendored 到 generated code。 |
+| C# | 当前 standard_project 使用 `System.Text.Json` harness | 未来 MessagePack reader adapter | 当前为 `test_harness`，生产可复用 adapter 待抽出到 `runtime/csharp/`。 |
+| Java | 当前 standard_project 使用 JDK-only JSON harness | 未来 MessagePack reader adapter | 当前为 `test_harness`，生产可复用 adapter 待抽出到 `runtime/java/`；可选择 JDK-only、Jackson、Gson 或 Android 友好实现。 |
 
 标准 adapter 的产物形式按语言习惯决定：
 
@@ -432,6 +437,7 @@ reader 目录和包名应优先表达“具体三方读取库”，而不是只�
 - **Rust**：由于当前 `RuntimeDataReader` trait 由 generated crate 声明，外部 crate 无法在不依赖用户 generated crate 的情况下“一次性”为 adapter 类型实现该 trait。短期应提供可复制/可 include 的 Rust reader module，放入 generated crate 或业务 crate 后实现本地 trait；具体 value reader 应放在对应格式 reader 中，例如 `serde_json_reader` 的 `JsonValueReader` 和 `serde_msgpack_reader` 的 `MessagePackValueReader`，避免把 `serde_json::Value` 伪装成通用 core。中期可评估把 reader trait 抽到稳定 runtime support crate，让 generated code 选择 `use config_forge_runtime::RuntimeDataReader`，从而使 adapter crate 可以直接实现 trait。
 - **TypeScript**：TypeScript 接口是结构化类型，标准 npm 包可以直接导出符合 `RuntimeDataReader` 形状的 classes/functions；generated code 无需 import adapter，业务侧把 adapter instance 传给 `GameData.load` 即可。
 - **C++**：`IRuntimeDataReader` 是 nominal virtual interface，adapter 需要与 generated header 一起编译。短期可提供 header/source template 或 header-only adapter，要求业务工程配置 generated header include path；中期可评估拆出稳定 runtime interface header，使 adapter 库不依赖某次 generated header。
+- **C# / Java**：当前由 standard_project 的临时 harness 验证 generated contract；后续可把 JSON reader 抽出到 `runtime/csharp/` / `runtime/java/`，继续保持 generated code 不 import 具体 JSON / MessagePack 库。
 
 推荐仓库目录为顶层 `runtime/`，例如：
 
@@ -451,6 +457,8 @@ runtime/
     msgpackc_reader/      # msgpack-cxx reader；生产推荐 MessagePack adapter
     loaders/              # filesystem / engine-resource 示例 loader
     CMakeLists.txt        # adapter targets、options、find_package、tests
+  csharp/                 # 未来：System.Text.Json / MessagePack reader adapters
+  java/                   # 未来：JDK/Jackson/Gson / MessagePack reader adapters
 ```
 
 `runtime/` 下的实现属于“标准 runtime adapter 源码/模板”，不是每次 codegen 的输出文件。后续可以通过 codegen option 选择是否把某个 adapter 拷贝到目标输出目录，也可以由游戏项目直接依赖该目录对应语言的 package/crate/library。

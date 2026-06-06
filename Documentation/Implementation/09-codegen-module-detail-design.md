@@ -1,6 +1,6 @@
 # 09. Codegen 模块详细设计
 
-本文档描述 ConfigForge 的代码导出任务设计。目标是在已加载、已链接并通过校验的 Meta 与 Data 基础上，生成 Rust、C++、TypeScript、Unreal C++ 和 C# 等语言的运行时代码，覆盖枚举、结构体、数据表、索引辅助查找函数，并提供抽象的数据文件加载器接口，让接入方可以从本地文件、包内资源、网络或引擎资源系统中加载实际数据。加载器接口必须与具体 Meta、表和字段解耦；所有按表/字段解析和 typed row/object 构造职责属于生成代码。
+本文档描述 ConfigForge 的代码导出任务设计。目标是在已加载、已链接并通过校验的 Meta 与 Data 基础上，生成 Rust、C++、TypeScript、Unreal C++、C# 和 Java 等语言的运行时代码，覆盖枚举、结构体、数据表、索引辅助查找函数，并提供抽象的数据文件加载器接口，让接入方可以从本地文件、包内资源、网络或引擎资源系统中加载实际数据。加载器接口必须与具体 Meta、表和字段解耦；所有按表/字段解析和 typed row/object 构造职责属于生成代码。
 
 产品层语义仍以 `Documentation/Design/` 为准；本文档聚焦程序实现模块、生成代码形态、跨语言约束、运行时加载抽象和测试策略。
 
@@ -9,7 +9,7 @@
 当前已落地第一阶段 Code Export 需要达成：
 
 1. 基于 `LinkedMetaModel<'meta>` 生成完整类型代码，而不是只为每张表生成简单 stub。
-2. 支持多种目标语言：Rust、C++、TypeScript、Unreal C++、C#。
+2. 支持多种目标语言：Rust、C++、TypeScript、Unreal C++、C#、Java。
 3. 生成所有 Meta 中声明的：
    - enum；
    - named struct；
@@ -46,7 +46,7 @@ ProjectConfig::from_path
   -> normalize_data_set
   -> validate_normalized_data_set_for_target
   -> export runtime data (JSON / MessagePack)
-  -> CodeGeneratorRegistry dispatch (Rust / C++ / TypeScript / Unreal C++ / C#)
+  -> CodeGeneratorRegistry dispatch (Rust / C++ / TypeScript / Unreal C++ / C# / Java)
   -> write generated files
 ```
 
@@ -106,6 +106,11 @@ src/codegen/
     types.rs          # C# 命名、类型映射、key / helper 名称
     symbols.rs        # C# 符号冲突检查
     tests.rs          # C# 生成器测试
+  java/
+    mod.rs            # JavaCodeGenerator 与单文件编排
+    types.rs          # Java 命名、类型映射、key / helper 名称
+    symbols.rs        # Java 符号冲突检查
+    tests.rs          # Java 生成器测试
   typescript/
     mod.rs            # TypeScriptCodeGenerator 与生成编排
     runtime.rs        # TypeScript runtime loader/reader contract 渲染
@@ -118,7 +123,7 @@ src/codegen/
   tests.rs            # IR、配置、命名等语言无关公共测试
 ```
 
-规划中的 Java backend 落地后会新增 `src/codegen/java/`，包含 `JavaCodeGenerator`、Java 命名/类型映射、符号冲突检查和单元测试；设计见 [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md)。
+Java backend 已落地为 `src/codegen/java/`，包含 `JavaCodeGenerator`、Java 命名/类型映射、符号冲突检查和单元测试；设计见 [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md)。
 
 Codegen 模块遵循开闭原则：核心模块只定义语言无关模型、crate 内部生成器 trait、注册表查找和公共配置结构；每种目标语言作为一等公民独立放在自己的目录中，语言标识常量、语言专属 options、类型映射、运行时 reader contract 渲染、命名默认值和测试都在该目录内维护。新增内置语言时应优先通过新增 `src/codegen/<language>/`、实现 crate 内部 `CodeGenerator` 并注册到 builtin registry 完成，不回到 IR 或 build 编排层增加语言分支，也不在核心 `mod.rs` 中新增语言常量或语言 options。
 
@@ -150,8 +155,8 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 - `CodeTable.kind` 区分 `Object` / `Collection`。
 - ObjectTable 生成目标语言中的 singleton object 类型和访问入口。
 - ObjectTable 不生成 collection repository，不生成 index lookup helpers。
-- ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前 Rust/C++/TypeScript 生成器已渲染 `linked_field` helper/cache/link。
-- Rust / TypeScript / C++ / C# 都应避免把 ObjectTable 误表达为 rows collection；规划中的 Java backend 也应遵循同一语义。
+- ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前 Rust/C++/TypeScript/C#/Java 生成器已渲染 `linked_field` helper/cache/link。
+- Rust / TypeScript / C++ / C# / Java 都应避免把 ObjectTable 误表达为 rows collection。
 - Runtime data load key 使用逻辑 table name，不由 exporter 真实写出的 `RuntimeDataFile.path` 决定；codegen 不关心 ObjectTable 的 CSV `key,value` 物理布局。
 
 建议 API 形态：
@@ -177,18 +182,18 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 | Generator API and tests | [`09h-codegen-generator-api-and-tests.md`](09h-codegen-generator-api-and-tests.md) | `CodeGenerator` 接口、新语言接入步骤、文件组织、诊断和测试计划。 |
 | Lua embedded data generator | [`09i-lua-embedded-data-generator.md`](09i-lua-embedded-data-generator.md) | 已实现的 Lua data+code 合一导出、每表 `.lua`、lazy require、row array + metatable、索引和实现说明。 |
 | C# backend | [`09k-codegen-csharp-backend.md`](09k-codegen-csharp-backend.md) | 已实现的 C# backend、generated API、runtime reader contract、index/relation/text/lazy 设计和测试策略。 |
-| Java backend | [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md) | 规划中的 Java backend、单文件嵌套 public API、runtime reader contract、index/relation/text/lazy 设计和测试策略。 |
+| Java backend | [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md) | 已实现的 Java backend、单文件嵌套 public API、runtime reader contract、index/relation/text/lazy 设计和测试策略。 |
 
 ### 9.4.1 当前实现状态摘要
 
-- Rust / C++ / TypeScript / C# backend 均已实现 MVP。
+- Rust / C++ / TypeScript / C# / Java backend 均已实现 MVP。
 - Unreal C++ 已作为独立 `cpp_unreal` backend 实现；不作为标准 `cpp` backend 的开关，以避免生成 public API 同时混用 `std::*` 和 Unreal API。当前支持 `support = "containers"` 和 `support = "blueprint"` 两级输出：containers 模式生成 Unreal 类型/容器、repository、index、relation、text、`GameData` 与 `FLazyGameData`；Blueprint 模式额外生成 `USTRUCT(BlueprintType)` / `UENUM(BlueprintType)` / `UPROPERTY(BlueprintReadOnly)` 和 `UBlueprintFunctionLibrary` 查询 facade。
 - Eager loading 和 table-level `LazyGameData` 均已实现 MVP；lazy facade 保留 loader，首次访问 table/object 时加载并缓存。
 - TypeScript 已生成 `loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`；同步 API 要求 loader 同步返回 reader，遇到 Promise 应报错。
 - C# backend 已作为独立 `type = "csharp"` backend 实现，生成 .NET BCL-only 单文件 `.cs`，支持 enum / struct / row / object / repository、hash / ordered / compound index、`IGameDataAccess` relation helper、text helper、eager `GameData` 与同步 `LazyGameData`。
-- Java backend 处于设计规划阶段，目标是新增独立 `type = "java"`，生成 JDK-only 单文件 `.java`，采用 public root class + nested public static generated types 规避 Java 单文件 public top-level type 限制，并逐步追齐现有 format-agnostic backend 能力。
+- Java backend 已作为独立 `type = "java"` backend 实现，生成 JDK-only 单文件 `.java`，采用 public root class + nested public static generated types 规避 Java 单文件 public top-level type 限制，支持 enum / struct / row / object / repository、hash / ordered / compound index、`GameDataAccess` relation helper、text helper、eager `GameData` 与同步 `LazyGameData`。
 - 生成代码使用逻辑 table name，不绑定某个 `targets.exports` runtime data export task 的真实 artifact path。
-- `linked_field` relation helper 和 `text` translation helper 已纳入 Rust / C++ / TypeScript / C# 生成器。
+- `linked_field` relation helper 和 `text` translation helper 已纳入 Rust / C++ / TypeScript / C# / Java 生成器。
 - Lua embedded data generator 已作为 `type = "lua_table"` 的 MetaAndData exporter 落地，而不是现有 format-agnostic `CodeGenerator` backend。
 - `preserve_source_order` 的 generated access 语义仍为规划项：目标行为是 indexed CollectionTable 默认不生成 public source-order `rows` API；只有显式声明 `preserve_source_order = true` 的表生成 row count / row_at / rows 访问，服务随机角色名这类按表格顺序随机访问的配置。
 
