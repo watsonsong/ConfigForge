@@ -98,14 +98,14 @@ missing/null 语义：
 | `runtime/typescript/messagepack_reader` | TypeScript MessagePack value reader | 已有基于 `@msgpack/msgpack` peer dependency 的 reader，复用 shared TypeScript core。 |
 | `runtime/cpp/rapidjson_reader` | C++ RapidJSON reader adapter | 已有 header-only RapidJSON adapter，可用于测试与生产接入。 |
 | `runtime/cpp/msgpackc_reader` | C++ msgpack-cxx reader adapter | 已有 header-only msgpack-cxx adapter，可用于 MessagePack runtime data 接入。 |
-| C# JSON harness reader | C# JSON reader smoke harness | 当前位于 standard_project 集成测试中，临时 `.csproj` 使用 `System.Text.Json` 实现 generated `IConfigForgeRuntimeDataReader` / `IConfigForgeRuntimeDataLoader`；尚未沉淀为 `runtime/csharp/` 标准 adapter。 |
-| Java JSON harness reader | Java JSON reader smoke harness | 当前位于 standard_project 集成测试中，临时 `RuntimeCheck.java` 使用 JDK-only 简化 JSON reader 实现 generated `ConfigForgeRuntimeDataReader` / `ConfigForgeRuntimeDataLoader`；尚未沉淀为 `runtime/java/` 标准 adapter。 |
+| `runtime/csharp/json_reader` | C# JSON reader template | 已有基于 .NET BCL `System.Text.Json` 的 reader 与 fs loader；standard_project harness 通过薄 adapter 接入每次 generated code 声明的 nominal interface。 |
+| `runtime/java/json_reader` | Java JSON reader template | 已有 JDK-only JSON reader 与 fs loader；standard_project harness 通过薄 adapter 接入每次 generated code 声明的 nominal interface。 |
 
 主要缺口：
 
 1. 各语言 adapter 缺少统一 compatibility / test matrix 描述，无法明确哪些 adapter 是生产推荐、哪些只是 custom/example。
 2. C++ stable interface header 仍待补齐，当前 C++ adapter 仍通过宏绑定 generated header 中的 `IRuntimeDataReader` / `IRuntimeDataLoader`。
-3. C# / Java 当前只有集成测试 harness reader，尚未提供可复用 `runtime/csharp/*` / `runtime/java/*` 标准 adapter。
+3. C# / Java JSON reader 已沉淀为 copyable template；下一步缺口是接入 runtime compliance runner，并按需补充 MessagePack / Jackson / Gson / Android 友好 adapter。
 
 因此 runtime loader 工程化按“两层稳定 + 多 adapter 可选”的方向推进：
 

@@ -4,7 +4,7 @@
 
 Related docs：[`11-foreign-key-detail-design.md`](../Implementation/11-foreign-key-detail-design.md)、[`12-struct-expanded-value-detail-design.md`](../Implementation/12-struct-expanded-value-detail-design.md)、[`05-data-validation.md`](05-data-validation.md)。
 
-- [4.0 当前实现状态](#40-当前实现状态)
+- [4.0 状态来源](#40-状态来源)
 - [4.3 Table](#43-table)
 - [4.9 字段类型](#49-字段类型)
 - [4.10 复合值书写方式](#410-复合值书写方式)
@@ -14,25 +14,9 @@ Related docs：[`11-foreign-key-detail-design.md`](../Implementation/11-foreign-
 - [4.14 Polymorphic Fragment](#414-polymorphic-fragment)
 
 
-## 4.0 当前实现状态
+## 4.0 状态来源
 
-本文档同时包含目标态设计和当前阶段实现。当前代码实现状态如下：
-
-| 能力 | 状态 | 说明 |
-| --- | --- | --- |
-| TOML Meta | Implemented | 当前 loader 支持 TOML parse、imports merge、link 与基础 validate。 |
-| XML Meta | Planned | 文档中的 XML 仅为目标态示例，当前 loader 不支持 XML。 |
-| primitive types | Implemented | 当前支持 `int`、`float`、`bool`、`string`、`text`、`asset`。 |
-| enum | Partial | 当前支持 enum 类型链接、default 校验与数据值校验。 |
-| struct/list | Implemented MVP | 当前支持 named struct 链接、struct JSON cell 数据校验与 nested object 导出；支持由 CSV/source 形态自动决定同一个 struct field occurrence 使用 JSON cell 或 field path 展开，并支持 recursive nested struct、JSON/expanded 混用错误、target-aware child filtering 与 child default；支持 `T[]` / `list<T>` 标量/enum list 的 JSON cell 校验、导出与代码生成。map、list expanded path、struct child validators 与 ObjectTable key-level source location 暂未实现。 |
-| default | Partial | 当前支持 primitive / enum scalar default 与 primitive / enum list default。 |
-| multi-source / override / fragments | Partial | 当前已支持 polymorphic CollectionTable 的 fragment variant source mode：多个 CSV source 可追加完整 records，并由 source `fragments` 声明激活 fragment set；也已支持 CollectionTable CSV `override_sources` 按 primary index 整行覆盖并由 `export_when` 按 effective target tags 启用。通用 multi-source split merge、ObjectTable 多源/override、base source `export_when` 与 fragment join mode 仍未实现。 |
-| builtin value types | Planned | `vector3` 等 builtin value types 仍为目标态，当前尚未实现。 |
-| foreign key | Implemented MVP + Rust/C++/TypeScript linked helpers | 当前支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique/primary index；标量/enum list source field 支持逐元素引用单字段 target index。FK 可声明 `linked_field`；Rust/C++/TypeScript codegen 已生成 lazy cached relation getter、row-index cache、table `link` 与 `GameData::link_all` / `LinkAll` / `linkAll`。 |
-| shared table schema / typed fragments | Partial | 当前没有 table inheritance / base fields / reusable field group；field group 仍是方向性目标，不进入近期实现。typed fragment payload 已支持 `[[tables.fragments]] type = "StructName"` 复用标准 struct，并把该 struct 的字段按 fragment object 展开；inline fragment fields 仍继续支持。标准参考项目通过同一 `items` polymorphic table 的多个 variant sources 解决道具公共字段复用，并通过 typed `attributes -> AttributeSet` 避免重复声明属性字段。 |
-| ObjectTable 特化语义 | Implemented MVP | 当前已支持 CSV `key,value` 行式 singleton ObjectTable：每行一个 top-level field key，导出单个 object，并支持 struct JSON/expanded value 与作为 FK source 引用 CollectionTable。ObjectTable 多源/override、作为 FK target、key-level source row 精确诊断、后续格子 expand 暂不实现。 |
-| target tags / export_when / row_export | Implemented | 当前 Project target 支持 `tags`；Meta 中 table / field / index 支持 `export` 与 `export_when`；collection table 支持 `row_export`，并已接入 validation、runtime data export 与 codegen 的 target-aware 视图。旧字段 `tool_only` / `filter_field` / `validator_only` 仅用于报 deprecated/unsupported 诊断，不再参与导出判断。 |
-| source-order collection access | Planned | CollectionTable 可通过 `preserve_source_order = true` 明确要求生成代码保留导出后的行顺序并暴露数组/随机访问 API。默认策略规划为：有 index 的表只生成 index lookup，不再默认暴露或承诺 `rows` 顺序数组；需要顺序访问时必须在 Meta 中显式声明。 |
+本文档描述 Meta 模型的目标语义和当前约束，不再维护独立的实现状态矩阵。全局能力状态以 [`Design/README.md`](README.md) 的 implementation status matrix 为准；涉及 codegen backend 覆盖范围、relation helper 支持和 runtime harness 状态时，以 [`Codegen backend capability matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 为准。
 
 ## 4.1 MetaModel
 

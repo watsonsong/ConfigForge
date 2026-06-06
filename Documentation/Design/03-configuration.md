@@ -234,7 +234,7 @@ Target Config 定义一次可构建的导出目标。一个 target 共享同一�
 
 ### 3.5.1 统一 exporter task 模型
 
-Lua table 导出同时生成 Lua 代码和内嵌数据；gettext POT 依赖 Meta + Data 但不是 runtime data；Rust/C++/TypeScript 生成器只依赖 Meta；JSON/MessagePack/bin 依赖 Meta + Data。因此 target 下所有产物统一使用 `[[targets.exports]]` 建模：
+Lua table 导出同时生成 Lua 代码和内嵌数据；gettext POT 依赖 Meta + Data 但不是 runtime data；format-agnostic codegen backend 只依赖 Meta；JSON/MessagePack/bin 依赖 Meta + Data。因此 target 下所有产物统一使用 `[[targets.exports]]` 建模：
 
 ```toml
 [project]

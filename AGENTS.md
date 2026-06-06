@@ -61,7 +61,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
 - `src/cli.rs` — CLI command definitions.
 - `src/meta/` — Meta schema loading, parsing, linking, validation, and tests.
 - `src/data/` — CSV data source loading, data load planning, normalization, and resolved row models.
-- `src/codegen/` — language-neutral CodeModel IR plus Rust / TypeScript / C++ / Unreal C++ / C# / Java generators.
+- `src/codegen/` — language-neutral CodeModel IR plus built-in generators; backend list and capabilities are tracked in the Codegen backend capability matrix.
 - `src/validation/` — schema, target-aware data validation, diagnostics, and validator registry.
 - `src/project/` — ConfigForge project TOML schema, import merging, path normalization, and Meta extraction.
 - `src/build/` — project build orchestration, target normalization, export task DAG execution, and artifact generation scheduling.
