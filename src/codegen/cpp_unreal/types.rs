@@ -1,331 +1,364 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{
-    ConfigForgeError, Result,
-    codegen::{
-        CodeField, CodeIndex, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions,
-        ir::CodeForeignKey, naming,
-    },
+use crate::{Result, codegen::CodeTableKind};
+
+use super::{
+    CodeEnum, CodeField, CodeModel, CodeRelationCardinality, CodeStruct, CodeTable, CodeTypeRef,
+    CodeWriterLike, CppUnrealCodegenOptions, CppUnrealSupportLevel,
+    repository::render_index_function_declaration, symbols::CppUnrealNames,
 };
 
-use super::CppUnrealCodegenOptions;
-
-pub(super) struct CppUnrealNames<'a> {
-    options: &'a CodegenOptions,
-    unreal_options: &'a CppUnrealCodegenOptions,
+pub(super) fn render_struct_prefix(
+    content: &mut impl CodeWriterLike,
+    _type_name: &str,
+    options: &CppUnrealCodegenOptions,
+    reflected: bool,
+) {
+    if reflected && matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        content.raw("USTRUCT(BlueprintType)\n");
+    }
 }
 
-impl<'a> CppUnrealNames<'a> {
-    pub(super) fn new(
-        options: &'a CodegenOptions,
-        unreal_options: &'a CppUnrealCodegenOptions,
-    ) -> Self {
-        Self {
-            options,
-            unreal_options,
+pub(super) fn api_qualified_type_name(
+    type_name: &str,
+    options: &CppUnrealCodegenOptions,
+) -> String {
+    if matches!(options.support, CppUnrealSupportLevel::Blueprint)
+        && let Some(api_macro) = options.api_macro.as_deref()
+    {
+        return format!("{api_macro} {type_name}");
+    }
+    type_name.to_owned()
+}
+
+fn render_generated_body(content: &mut impl CodeWriterLike, options: &CppUnrealCodegenOptions) {
+    if matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        content.raw("    GENERATED_BODY()\n\n");
+    }
+}
+
+fn render_blueprint_property(
+    content: &mut impl CodeWriterLike,
+    field: &CodeField,
+    options: &CppUnrealCodegenOptions,
+) {
+    if matches!(options.support, CppUnrealSupportLevel::Blueprint) && field.required {
+        let category = blueprint_category(options);
+        content.raw_fmt(format_args!(
+            "    UPROPERTY(BlueprintReadOnly, Category={category:?})\n"
+        ));
+    }
+}
+
+pub(super) fn blueprint_category(options: &CppUnrealCodegenOptions) -> &str {
+    options
+        .blueprint_category
+        .as_deref()
+        .unwrap_or("ConfigForge")
+}
+
+pub(super) fn render_enum_declaration(
+    content: &mut impl CodeWriterLike,
+    code_enum: &CodeEnum,
+    names: &CppUnrealNames<'_>,
+    options: &CppUnrealCodegenOptions,
+) -> Result<()> {
+    if matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        content.raw("UENUM(BlueprintType)\n");
+    }
+    let underlying_type = if matches!(options.support, CppUnrealSupportLevel::Blueprint) {
+        " : uint8"
+    } else {
+        ""
+    };
+    content.raw_fmt(format_args!(
+        "enum class {}{underlying_type} {{\n",
+        names.enum_type_name(&code_enum.name)?,
+    ));
+    for value in &code_enum.values {
+        content.raw_fmt(format_args!(
+            "    {},\n",
+            names.enum_variant_name(&value.name)?
+        ));
+    }
+    content.raw("};\n\n");
+    Ok(())
+}
+
+pub(super) fn render_struct_declaration(
+    content: &mut impl CodeWriterLike,
+    code_struct: &CodeStruct,
+    names: &CppUnrealNames<'_>,
+    options: &CppUnrealCodegenOptions,
+) -> Result<()> {
+    let type_name = names.struct_type_name(&code_struct.name)?;
+    render_struct_prefix(content, &type_name, options, true);
+    content.raw_fmt(format_args!(
+        "struct {} {{\n",
+        api_qualified_type_name(&type_name, options)
+    ));
+    render_generated_body(content, options);
+    for field in &code_struct.fields {
+        render_blueprint_property(content, field, options);
+        content.raw_fmt(format_args!(
+            "    {} {};\n",
+            names.cpp_field_type(field)?,
+            names.field_name(field)?
+        ));
+    }
+    render_text_helper_declarations(content, &code_struct.name, &code_struct.fields, names)?;
+    content.raw_fmt(format_args!(
+        "    static TConfigForgeResult<{}> {}(IConfigForgeRuntimeDataReader& Reader);\n",
+        type_name,
+        names.read_struct_function_name(&code_struct.name)?
+    ));
+    content.raw("};\n\n");
+    Ok(())
+}
+
+pub(super) fn render_table_declaration(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &CppUnrealNames<'_>,
+    options: &CppUnrealCodegenOptions,
+) -> Result<()> {
+    let row_type = names.row_type_name(&table.name)?;
+    render_struct_prefix(content, &row_type, options, true);
+    content.raw_fmt(format_args!(
+        "struct {} {{\n",
+        api_qualified_type_name(&row_type, options)
+    ));
+    render_generated_body(content, options);
+    if matches!(table.kind, CodeTableKind::Object) {
+        content.raw_fmt(format_args!(
+            "    static constexpr const TCHAR* {} = TEXT({:?});\n",
+            names.data_file_constant_name()?,
+            table.data_file
+        ));
+    }
+    for field in &table.fields {
+        render_blueprint_property(content, field, options);
+        content.raw_fmt(format_args!(
+            "    {} {};\n",
+            names.cpp_field_type(field)?,
+            names.field_name(field)?
+        ));
+    }
+    render_text_helper_declarations(content, &table.name, &table.fields, names)?;
+    render_row_relation_declarations(content, table, names)?;
+    content.raw_fmt(format_args!(
+        "    static TConfigForgeResult<{}> {}(IConfigForgeRuntimeDataReader& Reader);\n",
+        row_type,
+        names.read_row_function_name(&table.name)?
+    ));
+    content.raw("};\n\n");
+    if matches!(table.kind, CodeTableKind::Collection) {
+        content.raw_fmt(format_args!(
+            "struct {} {{\n",
+            names.repository_type_name(&table.name)?
+        ));
+        content.raw_fmt(format_args!(
+            "    TArray<{}> Rows;\n",
+            names.row_type_name(&table.name)?
+        ));
+        for index in &table.indexes {
+            content.raw_fmt(format_args!(
+                "    {} {};\n",
+                names.cpp_index_storage(table, index)?,
+                names.index_storage_name(index)?
+            ));
         }
-    }
-
-    pub(super) fn type_name(&self, name: &str) -> Result<String> {
-        Ok(format!(
-            "{}{}",
-            self.unreal_options
-                .type_name_prefix
-                .as_deref()
-                .unwrap_or(""),
-            self.identifier(name, self.options.naming.type_name)?
-        ))
-    }
-
-    pub(super) fn enum_type_name(&self, name: &str) -> Result<String> {
-        Ok(format!("E{}", self.type_name(name)?))
-    }
-
-    pub(super) fn struct_type_name(&self, name: &str) -> Result<String> {
-        Ok(format!("F{}", self.type_name(name)?))
-    }
-
-    pub(super) fn lazy_game_data_type_name(&self) -> Result<String> {
-        self.struct_type_name("lazy_game_data")
-    }
-
-    pub(super) fn game_data_access_interface_name(&self) -> Result<String> {
-        Ok(format!(
-            "I{}GameDataAccess",
-            self.type_name("config_forge")?
-        ))
-    }
-
-    pub(super) fn row_type_name(&self, table_name: &str) -> Result<String> {
-        Ok(format!("F{}Row", self.type_name(table_name)?))
-    }
-
-    pub(super) fn repository_type_name(&self, table_name: &str) -> Result<String> {
-        Ok(format!("F{}Table", self.type_name(table_name)?))
-    }
-
-    pub(super) fn table_data_type_name(&self, table: &CodeTable) -> Result<String> {
-        match table.kind {
-            CodeTableKind::Object => self.row_type_name(&table.name),
-            CodeTableKind::Collection => self.repository_type_name(&table.name),
+        content.raw_fmt(format_args!(
+            "    static constexpr const TCHAR* {} = TEXT({:?});\n",
+            names.data_file_constant_name()?,
+            table.data_file
+        ));
+        content.raw_fmt(format_args!(
+            "    static TConfigForgeResult<{}> {}(IConfigForgeRuntimeDataLoader& Loader);\n",
+            names.repository_type_name(&table.name)?,
+            names.load_function_name()?
+        ));
+        content.raw_fmt(format_args!(
+            "    static TConfigForgeResult<{}> FromRows(const TArray<{}>& InRows);\n",
+            names.repository_type_name(&table.name)?,
+            names.row_type_name(&table.name)?
+        ));
+        for index in &table.indexes {
+            render_index_function_declaration(content, table, index, names)?;
         }
+        if table
+            .foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.linked_field.is_some())
+        {
+            content.raw_fmt(format_args!(
+                "    void Link(const {}& Data) const;\n",
+                names.game_data_access_interface_name()?
+            ));
+        }
+        content.raw("};\n\n");
     }
+    Ok(())
+}
 
-    pub(super) fn read_row_function_name(&self, table_name: &str) -> Result<String> {
-        self.identifier(
-            &format!("read_{table_name}_row"),
-            self.options.naming.function,
-        )
-    }
-
-    pub(super) fn read_struct_function_name(&self, struct_name: &str) -> Result<String> {
-        self.identifier(&format!("read_{struct_name}"), self.options.naming.function)
-    }
-
-    pub(super) fn load_function_name(&self) -> Result<String> {
-        self.identifier("load", self.options.naming.function)
-    }
-
-    pub(super) fn data_file_constant_name(&self) -> Result<String> {
-        self.identifier("data_file", self.options.naming.constant)
-    }
-
-    pub(super) fn enum_variant_name(&self, name: &str) -> Result<String> {
-        self.identifier(name, self.options.naming.enum_value)
-    }
-
-    pub(super) fn field_name(&self, field: &CodeField) -> Result<String> {
-        let name = self.identifier(&field.name, self.options.naming.field)?;
-        if matches!(field.code_type, CodeTypeRef::Bool) && !name.starts_with('b') {
-            Ok(format!("b{name}"))
+fn render_text_helper_declarations(
+    content: &mut impl CodeWriterLike,
+    context_prefix: &str,
+    fields: &[CodeField],
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    for field in fields
+        .iter()
+        .filter(|field| matches!(field.code_type, CodeTypeRef::Text))
+    {
+        let function_name = names.text_function_name(&field.name)?;
+        let field_name = names.field_name(field)?;
+        let context = format!("{context_prefix}.{}", field.name);
+        if field.required {
+            content.raw_fmt(format_args!(
+                "    FString {function_name}(const TFunction<TOptional<FString>(const TCHAR*, const FString&)>& Translator) const {{\n"
+            ));
+            content.raw_fmt(format_args!(
+                "        auto Translated = Translator(TEXT({context:?}), {field_name});\n"
+            ));
+            content.raw_fmt(format_args!(
+                "        return Translated.IsSet() ? Translated.GetValue() : {field_name};\n"
+            ));
+            content.raw("    }\n");
         } else {
-            Ok(name)
+            content.raw_fmt(format_args!(
+                "    TOptional<FString> {function_name}(const TFunction<TOptional<FString>(const TCHAR*, const FString&)>& Translator) const {{\n"
+            ));
+            content.raw_fmt(format_args!(
+                "        if (!{field_name}.IsSet()) {{ return TOptional<FString>(); }}\n"
+            ));
+            content.raw_fmt(format_args!(
+                "        auto Translated = Translator(TEXT({context:?}), {field_name}.GetValue());\n"
+            ));
+            content.raw_fmt(format_args!(
+                "        return Translated.IsSet() ? Translated : {field_name};\n"
+            ));
+            content.raw("    }\n");
         }
     }
+    Ok(())
+}
 
-    pub(super) fn member_name(&self, name: &str) -> Result<String> {
-        self.identifier(name, self.options.naming.field)
-    }
-
-    pub(super) fn table_accessor_name(&self, table_name: &str) -> Result<String> {
-        self.identifier(&format!("get_{table_name}"), self.options.naming.function)
-    }
-
-    pub(super) fn text_function_name(&self, field_name: &str) -> Result<String> {
-        self.identifier(&format!("{field_name}_text"), self.options.naming.function)
-    }
-
-    pub(super) fn relation_function_name(&self, foreign_key: &CodeForeignKey) -> Result<String> {
-        let name = foreign_key
+fn render_row_relation_declarations(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    for foreign_key in table
+        .foreign_keys
+        .iter()
+        .filter(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        let target_row_type = names.row_type_name(&foreign_key.target_table)?;
+        let function_name = names.relation_function_name(foreign_key)?;
+        match foreign_key
             .linked_field
             .as_ref()
-            .map(|linked_field| linked_field.name.as_str())
-            .unwrap_or(foreign_key.name.as_str());
-        self.identifier(&format!("get_{name}"), self.options.naming.function)
-    }
-
-    pub(super) fn index_storage_name(&self, index: &CodeIndex) -> Result<String> {
-        self.identifier(&index.name, self.options.naming.field)
-    }
-
-    pub(super) fn index_function_name(&self, index: &CodeIndex) -> Result<String> {
-        let prefix = if index.unique { "get_by" } else { "find_by" };
-        let suffix = index.name.trim_start_matches("by_");
-        self.identifier(&format!("{prefix}_{suffix}"), self.options.naming.function)
-    }
-
-    pub(super) fn lower_bound_index_function_name(&self, index: &CodeIndex) -> Result<String> {
-        let suffix = index.name.trim_start_matches("by_");
-        self.identifier(
-            &format!("lower_bound_by_{suffix}"),
-            self.options.naming.function,
-        )
-    }
-
-    pub(super) fn upper_bound_index_function_name(&self, index: &CodeIndex) -> Result<String> {
-        let suffix = index.name.trim_start_matches("by_");
-        self.identifier(
-            &format!("upper_bound_by_{suffix}"),
-            self.options.naming.function,
-        )
-    }
-
-    pub(super) fn range_index_function_name(&self, index: &CodeIndex) -> Result<String> {
-        let suffix = index.name.trim_start_matches("by_");
-        self.identifier(&format!("range_by_{suffix}"), self.options.naming.function)
-    }
-
-    pub(super) fn blueprint_library_type_name(&self) -> Result<String> {
-        Ok(format!(
-            "U{}BlueprintLibrary",
-            self.type_name("config_forge")?
-        ))
-    }
-
-    pub(super) fn blueprint_index_function_name(
-        &self,
-        table: &CodeTable,
-        index: &CodeIndex,
-    ) -> Result<String> {
-        let prefix = if index.unique { "get" } else { "find" };
-        let suffix = index.name.trim_start_matches("by_");
-        self.identifier(
-            &format!("{prefix}_{}_by_{suffix}", table.name),
-            self.options.naming.function,
-        )
-    }
-
-    pub(super) fn blueprint_range_index_function_name(
-        &self,
-        table: &CodeTable,
-        index: &CodeIndex,
-    ) -> Result<String> {
-        let suffix = index.name.trim_start_matches("by_");
-        self.identifier(
-            &format!("range_{}_by_{suffix}", table.name),
-            self.options.naming.function,
-        )
-    }
-
-    pub(super) fn cpp_index_params(&self, index: &CodeIndex) -> Result<String> {
-        index
-            .fields
-            .iter()
-            .map(|field| {
-                Ok(format!(
-                    "{} {}",
-                    self.cpp_field_type(field)?,
-                    self.field_name(field)?
-                ))
-            })
-            .collect::<Result<Vec<_>>>()
-            .map(|params| params.join(", "))
-    }
-
-    pub(super) fn cpp_range_index_params(
-        &self,
-        table: &CodeTable,
-        index: &CodeIndex,
-    ) -> Result<String> {
-        let key_type = self.cpp_key_type(table, index)?;
-        Ok(format!("{key_type} Lower, {key_type} Upper"))
-    }
-
-    pub(super) fn cpp_type(&self, code_type: &CodeTypeRef) -> Result<String> {
-        Ok(match code_type {
-            CodeTypeRef::Int => "int64".to_owned(),
-            CodeTypeRef::Float => "double".to_owned(),
-            CodeTypeRef::Bool => "bool".to_owned(),
-            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "FString".to_owned(),
-            CodeTypeRef::Enum { name } => self.enum_type_name(name)?,
-            CodeTypeRef::Struct { name } => self.struct_type_name(name)?,
-            CodeTypeRef::List(inner) => format!("TArray<{}>", self.cpp_type(inner)?),
-        })
-    }
-
-    pub(super) fn cpp_field_type(&self, field: &CodeField) -> Result<String> {
-        let inner = self.cpp_type(&field.code_type)?;
-        if field.required {
-            Ok(inner)
-        } else {
-            Ok(format!("TOptional<{inner}>"))
+            .expect("linked field")
+            .cardinality
+        {
+            CodeRelationCardinality::One => content.raw_fmt(format_args!(
+                "    const {target_row_type}* {function_name}(const {}& Data) const;\n",
+                names.game_data_access_interface_name()?
+            )),
+            CodeRelationCardinality::OptionalOne => content.raw_fmt(format_args!(
+                "    const {target_row_type}* {function_name}(const {}& Data) const;\n",
+                names.game_data_access_interface_name()?
+            )),
+            CodeRelationCardinality::Many => content.raw_fmt(format_args!(
+                "    TArray<const {target_row_type}*> {function_name}(const {}& Data) const;\n",
+                names.game_data_access_interface_name()?
+            )),
         }
     }
-
-    pub(super) fn cpp_index_storage(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
-        let key_type = self.cpp_key_type(table, index)?;
-        if index.ordered {
-            return Ok(format!("TArray<TPair<{key_type}, int32>>"));
-        }
-        if index.unique {
-            Ok(format!("TMap<{key_type}, int32>"))
-        } else {
-            Ok(format!("TMap<{key_type}, TArray<int32>>"))
-        }
+    if table
+        .foreign_keys
+        .iter()
+        .any(|foreign_key| foreign_key.linked_field.is_some())
+    {
+        content.raw_fmt(format_args!(
+            "    void Link(const {}& Data) const;\n",
+            names.game_data_access_interface_name()?
+        ));
     }
+    Ok(())
+}
 
-    pub(super) fn cpp_key_type(&self, table: &CodeTable, index: &CodeIndex) -> Result<String> {
-        if index.fields.len() == 1 {
-            self.cpp_field_type(&index.fields[0])
-        } else {
-            self.compound_index_key_type_name(table, index)
-        }
-    }
-
-    pub(super) fn cpp_row_key_expr(
-        &self,
-        table: &CodeTable,
-        index: &CodeIndex,
-        row_expr: &str,
-    ) -> Result<String> {
-        if index.fields.len() == 1 {
-            Ok(format!(
-                "{}.{}",
-                row_expr,
-                self.field_name(&index.fields[0])?
-            ))
-        } else {
-            self.cpp_compound_key_expr(
-                table,
-                index,
+pub(super) fn render_compound_index_key_structs(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &CppUnrealNames<'_>,
+) -> Result<()> {
+    for table in &model.tables {
+        for index in &table.indexes {
+            if index.fields.len() <= 1 {
+                continue;
+            }
+            let key_type = names.compound_index_key_type_name(table, index)?;
+            content.raw_fmt(format_args!("struct {key_type} {{\n"));
+            for field in &index.fields {
+                content.raw_fmt(format_args!(
+                    "    {} {};\n",
+                    names.cpp_field_type(field)?,
+                    names.field_name(field)?
+                ));
+            }
+            content.raw("\n");
+            content.raw_fmt(format_args!(
+                "    bool operator==(const {key_type}& Other) const {{\n"
+            ));
+            content.raw("        return ");
+            content.raw(
                 index
                     .fields
                     .iter()
-                    .map(|field| Ok(format!("{}.{}", row_expr, self.field_name(field)?))),
-            )
+                    .map(|field| {
+                        let field_name = names.field_name(field)?;
+                        Ok(format!("{field_name} == Other.{field_name}"))
+                    })
+                    .collect::<Result<Vec<_>>>()?
+                    .join(" && "),
+            );
+            content.raw(";\n");
+            content.raw("    }\n");
+            content.raw_fmt(format_args!(
+                "    bool operator<(const {key_type}& Other) const {{\n"
+            ));
+            content.raw("        ");
+            for (field_index, field) in index.fields.iter().enumerate() {
+                let field_name = names.field_name(field)?;
+                if field_index > 0 {
+                    content.raw("        ");
+                }
+                content.raw_fmt(format_args!(
+                    "if ({field_name} < Other.{field_name}) {{ return true; }}\n"
+                ));
+                content.raw_fmt(format_args!(
+                    "        if (Other.{field_name} < {field_name}) {{ return false; }}\n"
+                ));
+            }
+            content.raw("        return false;\n");
+            content.raw("    }\n");
+            content.raw("};\n\n");
+            content.raw_fmt(format_args!(
+                "FORCEINLINE uint32 GetTypeHash(const {key_type}& Value) {{\n"
+            ));
+            content.raw("    uint32 Hash = 0;\n");
+            for field in &index.fields {
+                content.raw_fmt(format_args!(
+                    "    Hash = HashCombine(Hash, ::GetTypeHash(Value.{}));\n",
+                    names.field_name(field)?
+                ));
+            }
+            content.raw("    return Hash;\n");
+            content.raw("}\n\n");
         }
     }
-
-    pub(super) fn cpp_lookup_key_expr(
-        &self,
-        table: &CodeTable,
-        index: &CodeIndex,
-    ) -> Result<String> {
-        if index.fields.len() == 1 {
-            self.field_name(&index.fields[0])
-        } else {
-            self.cpp_compound_key_expr(
-                table,
-                index,
-                index.fields.iter().map(|field| self.field_name(field)),
-            )
-        }
-    }
-
-    fn cpp_compound_key_expr(
-        &self,
-        table: &CodeTable,
-        index: &CodeIndex,
-        values: impl Iterator<Item = Result<String>>,
-    ) -> Result<String> {
-        Ok(format!(
-            "{}{{{}}}",
-            self.compound_index_key_type_name(table, index)?,
-            values.collect::<Result<Vec<_>>>()?.join(", ")
-        ))
-    }
-
-    pub(super) fn compound_index_key_type_name(
-        &self,
-        table: &CodeTable,
-        index: &CodeIndex,
-    ) -> Result<String> {
-        Ok(format!(
-            "F{}{}Key",
-            self.type_name(&table.name)?,
-            self.type_name(&index.name)?
-        ))
-    }
-
-    fn identifier(&self, value: &str, style: crate::codegen::CaseStyle) -> Result<String> {
-        naming::make_identifier(
-            value,
-            style,
-            self.options.keyword_conflict,
-            naming::is_cpp_keyword,
-            |_| None,
-        )
-        .map_err(|message| ConfigForgeError::Validation(format!("cpp_unreal codegen: {message}")))
-    }
+    Ok(())
 }
