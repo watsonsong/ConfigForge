@@ -28,6 +28,7 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &JavaNames) -
             "ConfigForgeRuntimeDataLoader",
             "ConfigForgeRuntimeDataLoader",
         ),
+        GeneratedSymbol::new("interface", "GameDataAccess", "GameDataAccess"),
         GeneratedSymbol::new("class", "GameData", names.game_data_class_name()),
         GeneratedSymbol::new("class", "LazyGameData", names.lazy_game_data_class_name()),
     ];

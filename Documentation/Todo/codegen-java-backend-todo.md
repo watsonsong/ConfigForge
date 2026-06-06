@@ -201,7 +201,7 @@ feat(codegen): generate Java hash indexes
 feat(codegen): support ordered Java indexes
 ```
 
-## [ ] Step 6：relation helper 和 `GameDataAccess`
+## [x] Step 6：relation helper 和 `GameDataAccess`
 
 目标：生成 linked_field relation helper，并让 eager/lazy 共享访问接口。
 

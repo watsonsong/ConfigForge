@@ -9,7 +9,7 @@ use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeTable, CodeTableKind,
     CodeTypeRef, CodeWriterConfig, CodeWriterLike, NamingConfig, build_code_model,
-    ir::require_non_empty_index_fields,
+    ir::{CodeRelationCardinality, require_non_empty_index_fields},
 };
 
 mod symbols;
@@ -218,6 +218,7 @@ fn render_java_code(
     content.raw_fmt(format_args!("{}() {{}}\n\n", names.root_class_name()));
     render_runtime_contract(content, &model.enums, &names)?;
     render_java_types(content, &model, &names, options)?;
+    render_game_data_access_interface(content, &model, &names)?;
     render_game_data_class(content, &model, &names, options)?;
     content.raw("}\n");
     Ok(())
@@ -432,10 +433,12 @@ fn render_java_types(
                 required: false,
             });
         }
-        render_java_class(
+        render_java_row_class(
             content,
             &names.row_type_name(&table.name)?,
             &row_fields,
+            table,
+            model,
             names,
             options,
         )?;
@@ -478,6 +481,118 @@ fn render_read_method(
     content.raw("        );\n");
     content.raw("    }\n\n");
     Ok(())
+}
+
+fn render_relation_members(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    model: &CodeModel,
+    names: &JavaNames,
+) -> Result<()> {
+    let linked = table
+        .foreign_keys
+        .iter()
+        .filter(|foreign_key| foreign_key.linked_field.is_some())
+        .collect::<Vec<_>>();
+    if linked.is_empty() {
+        return Ok(());
+    }
+    content.raw("\n");
+    for foreign_key in &linked {
+        let cache = names.relation_cache_field_name(foreign_key)?;
+        match foreign_key
+            .linked_field
+            .as_ref()
+            .map(|linked| linked.cardinality)
+            .unwrap_or(CodeRelationCardinality::One)
+        {
+            CodeRelationCardinality::One | CodeRelationCardinality::OptionalOne => {
+                content.raw_fmt(format_args!("        private int {cache} = -1;\n"));
+            }
+            CodeRelationCardinality::Many => {
+                content.raw_fmt(format_args!("        private int[] {cache};\n"));
+            }
+        }
+    }
+    content.raw("\n");
+    let row_type = names.row_type_name(&table.name)?;
+    for foreign_key in linked {
+        let target_table = model
+            .tables
+            .iter()
+            .find(|table| table.name == foreign_key.target_table)
+            .ok_or_else(|| {
+                validation_error(format!(
+                    "missing target table `{}`",
+                    foreign_key.target_table
+                ))
+            })?;
+        let target_index = target_table
+            .indexes
+            .iter()
+            .find(|index| index.name == foreign_key.target_index)
+            .ok_or_else(|| {
+                validation_error(format!(
+                    "missing target index `{}`",
+                    foreign_key.target_index
+                ))
+            })?;
+        let method = names.relation_function_name(foreign_key)?;
+        let cache = names.relation_cache_field_name(foreign_key)?;
+        let target_row = names.row_type_name(&foreign_key.target_table)?;
+        let target_getter = names.getter_name(&foreign_key.target_table)?;
+        let target_index_lookup = names.index_row_index_function_name(target_index)?;
+        let args = foreign_key
+            .fields
+            .iter()
+            .map(|field| relation_arg(field, names))
+            .collect::<Result<Vec<_>>>()?
+            .join(", ");
+        match foreign_key
+            .linked_field
+            .as_ref()
+            .map(|linked| linked.cardinality)
+            .unwrap_or(CodeRelationCardinality::One)
+        {
+            CodeRelationCardinality::One => {
+                content.raw_fmt(format_args!(
+                    "        public {target_row} {method}(GameDataAccess data) {{\n            if ({cache} >= 0) {{\n                return data.{target_getter}().rowAt({cache});\n            }}\n            int targetIndex = data.{target_getter}().{target_index_lookup}({args});\n            if (targetIndex < 0) {{\n                throw new ConfigForgeRuntimeException(\"Missing relation target for {row_type}.{method}\");\n            }}\n            {cache} = targetIndex;\n            return data.{target_getter}().rowAt({cache});\n        }}\n\n"
+                ));
+            }
+            CodeRelationCardinality::OptionalOne => {
+                let guard = foreign_key
+                    .fields
+                    .iter()
+                    .filter(|field| !field.required)
+                    .map(|field| Ok(format!("{}() == null", names.getter_name(&field.name)?)))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(" || ");
+                content.raw_fmt(format_args!(
+                    "        public {target_row} {method}(GameDataAccess data) {{\n"
+                ));
+                if !guard.is_empty() {
+                    content.raw_fmt(format_args!(
+                        "            if ({guard}) {{\n                return null;\n            }}\n"
+                    ));
+                }
+                content.raw_fmt(format_args!(
+                    "            if ({cache} >= 0) {{\n                return data.{target_getter}().rowAt({cache});\n            }}\n            int targetIndex = data.{target_getter}().{target_index_lookup}({args});\n            if (targetIndex < 0) {{\n                throw new ConfigForgeRuntimeException(\"Missing relation target for {row_type}.{method}\");\n            }}\n            {cache} = targetIndex;\n            return data.{target_getter}().rowAt({cache});\n        }}\n\n"
+                ));
+            }
+            CodeRelationCardinality::Many => {
+                let field = &foreign_key.fields[0];
+                let getter = names.getter_name(&field.name)?;
+                content.raw_fmt(format_args!(
+                    "        public List<{target_row}> {method}(GameDataAccess data) {{\n            if ({cache} == null) {{\n                List<Integer> indexes = new ArrayList<>();\n                for (long key : {getter}()) {{\n                    int targetIndex = data.{target_getter}().{target_index_lookup}(key);\n                    if (targetIndex >= 0) {{\n                        indexes.add(targetIndex);\n                    }}\n                }}\n                {cache} = new int[indexes.size()];\n                for (int index = 0; index < {cache}.length; index++) {{\n                    {cache}[index] = indexes.get(index);\n                }}\n            }}\n            List<{target_row}> result = new ArrayList<>({cache}.length);\n            for (int targetIndex : {cache}) {{\n                result.add(data.{target_getter}().rowAt(targetIndex));\n            }}\n            return Collections.unmodifiableList(result);\n        }}\n\n"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn relation_arg(field: &CodeField, names: &JavaNames) -> Result<String> {
+    Ok(format!("{}()", names.getter_name(&field.name)?))
 }
 
 fn render_row_read_method(
@@ -540,6 +655,63 @@ fn render_java_class(
             names.field_name(&field.name)?
         ));
     }
+    if !fields.is_empty() {
+        content.raw("\n");
+    }
+    content.raw_fmt(format_args!("        private {}(", class_name));
+    for (index, field) in fields.iter().enumerate() {
+        if index > 0 {
+            content.raw(", ");
+        }
+        content.raw_fmt(format_args!(
+            "{} {}",
+            names.java_type(field)?,
+            names.field_name(&field.name)?
+        ));
+    }
+    content.raw(") {\n");
+    for field in fields {
+        let field_name = names.field_name(&field.name)?;
+        content.raw_fmt(format_args!(
+            "            this.{field_name} = {field_name};\n"
+        ));
+    }
+    content.raw("        }\n");
+    for field in fields {
+        content.raw("\n");
+        content.raw_fmt(format_args!(
+            "        public {} {}() {{ return {}; }}\n",
+            names.java_type(field)?,
+            names.getter_name(&field.name)?,
+            names.field_name(&field.name)?
+        ));
+    }
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_java_row_class(
+    content: &mut impl CodeWriterLike,
+    class_name: &str,
+    fields: &[CodeField],
+    table: &CodeTable,
+    model: &CodeModel,
+    names: &JavaNames,
+    options: &JavaCodegenOptions,
+) -> Result<()> {
+    let final_modifier = if options.emit_final { " final" } else { "" };
+    content.raw_fmt(format_args!(
+        "    public static{} class {} {{\n",
+        final_modifier, class_name
+    ));
+    for field in fields {
+        content.raw_fmt(format_args!(
+            "        private final {} {};\n",
+            names.java_type(field)?,
+            names.field_name(&field.name)?
+        ));
+    }
+    render_relation_members(content, table, model, names)?;
     if !fields.is_empty() {
         content.raw("\n");
     }
@@ -671,7 +843,33 @@ fn render_java_table(
     ));
     render_table_from_rows_method(content, table, names)?;
     render_index_lookup_methods(content, table, names)?;
+    render_table_link_method(content, table, names)?;
     content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_table_link_method(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &JavaNames,
+) -> Result<()> {
+    let linked = table
+        .foreign_keys
+        .iter()
+        .filter(|foreign_key| foreign_key.linked_field.is_some())
+        .collect::<Vec<_>>();
+    if linked.is_empty() {
+        return Ok(());
+    }
+    content.raw("\n        public void link(GameDataAccess data) {\n");
+    for foreign_key in linked {
+        let method = names.relation_function_name(foreign_key)?;
+        content.raw_fmt(format_args!(
+            "            for ({} row : rows) {{\n                row.{method}(data);\n            }}\n",
+            names.row_type_name(&table.name)?
+        ));
+    }
+    content.raw("        }\n");
     Ok(())
 }
 
@@ -913,8 +1111,15 @@ fn render_index_lookup_methods(
             let range_method = names.ordered_range_function_name(index)?;
             let entry_type = names.ordered_entry_type_name(&table.name, index)?;
             if index.unique {
+                let row_index_method = names.index_row_index_function_name(index)?;
                 content.raw_fmt(format_args!(
-                    "\n        public {row_type} {method}({parameters}) {{\n            {key_type} key = {key};\n            int index = lowerBound{entry_type}({storage}, key);\n            if (index < {storage}.length && ConfigForgeRuntimeReader.compareValues({storage}[index].key, key) == 0) {{\n                return rows[{storage}[index].rowIndex];\n            }}\n            return null;\n        }}\n",
+                    "\n        private int {row_index_method}({parameters}) {{\n            {key_type} key = {key};\n            int index = lowerBound{entry_type}({storage}, key);\n            if (index < {storage}.length && ConfigForgeRuntimeReader.compareValues({storage}[index].key, key) == 0) {{\n                return {storage}[index].rowIndex;\n            }}\n            return -1;\n        }}\n\n        public {row_type} {method}({parameters}) {{\n            int rowIndex = {row_index_method}({args});\n            return rowIndex >= 0 ? rows[rowIndex] : null;\n        }}\n",
+                    args = index
+                        .fields
+                        .iter()
+                        .map(|field| names.local_name(&field.name))
+                        .collect::<Result<Vec<_>>>()?
+                        .join(", "),
                     key_type = names.index_key_type(&table.name, index)?
                 ));
             } else {
@@ -938,8 +1143,15 @@ fn render_index_lookup_methods(
                 &storage,
             )?;
         } else if index.unique {
+            let row_index_method = names.index_row_index_function_name(index)?;
             content.raw_fmt(format_args!(
-                "\n        public {row_type} {method}({parameters}) {{\n            Integer rowIndex = {storage}.get({key});\n            return rowIndex != null ? rows[rowIndex] : null;\n        }}\n"
+                "\n        private int {row_index_method}({parameters}) {{\n            Integer rowIndex = {storage}.get({key});\n            return rowIndex != null ? rowIndex : -1;\n        }}\n\n        public {row_type} {method}({parameters}) {{\n            int rowIndex = {row_index_method}({args});\n            return rowIndex >= 0 ? rows[rowIndex] : null;\n        }}\n",
+                args = index
+                    .fields
+                    .iter()
+                    .map(|field| names.local_name(&field.name))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", ")
             ));
         } else {
             content.raw_fmt(format_args!(
@@ -1000,7 +1212,7 @@ fn render_game_data_class(
 ) -> Result<()> {
     let final_modifier = if options.emit_final { " final" } else { "" };
     content.raw_fmt(format_args!(
-        "    public static{} class {} {{\n",
+        "    public static{} class {} implements GameDataAccess {{\n",
         final_modifier,
         names.game_data_class_name()
     ));
@@ -1039,20 +1251,81 @@ fn render_game_data_class(
     content.raw("        }\n");
     for table in &model.tables {
         content.raw_fmt(format_args!(
-            "\n        public {} {}() {{ return {}; }}\n",
+            "\n        @Override\n        public {} {}() {{ return {}; }}\n",
             java_table_data_type(table, names)?,
             names.getter_name(&table.name)?,
             names.field_name(&table.name)?
         ));
     }
+    content.raw("\n        public void linkAll() {\n");
+    for table in model.tables.iter().filter(|table| {
+        table
+            .foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.linked_field.is_some())
+    }) {
+        match table.kind {
+            CodeTableKind::Collection => content.raw_fmt(format_args!(
+                "            {}.link(this);\n",
+                names.field_name(&table.name)?
+            )),
+            CodeTableKind::Object => {
+                for foreign_key in table
+                    .foreign_keys
+                    .iter()
+                    .filter(|foreign_key| foreign_key.linked_field.is_some())
+                {
+                    content.raw_fmt(format_args!(
+                        "            {}.{}(this);\n",
+                        names.field_name(&table.name)?,
+                        names.relation_function_name(foreign_key)?
+                    ));
+                }
+            }
+        }
+    }
+    content.raw("        }\n");
+    content.raw_fmt(format_args!(
+        "\n        private static {} fromLoaded(\n",
+        names.game_data_class_name()
+    ));
+    for (index, table) in model.tables.iter().enumerate() {
+        let comma = if index + 1 == model.tables.len() {
+            ""
+        } else {
+            ","
+        };
+        content.raw_fmt(format_args!(
+            "            {} {}{}\n",
+            java_table_data_type(table, names)?,
+            names.local_name(&table.name)?,
+            comma
+        ));
+    }
+    content.raw_fmt(format_args!(
+        "        ) {{\n            {} data = new {}(\n",
+        names.game_data_class_name(),
+        names.game_data_class_name()
+    ));
+    for (index, table) in model.tables.iter().enumerate() {
+        let comma = if index + 1 == model.tables.len() {
+            ""
+        } else {
+            ","
+        };
+        content.raw_fmt(format_args!(
+            "                {}{}\n",
+            names.local_name(&table.name)?,
+            comma
+        ));
+    }
+    content
+        .raw("            );\n            data.linkAll();\n            return data;\n        }\n");
     content.raw_fmt(format_args!(
         "\n        public static {} load(ConfigForgeRuntimeDataLoader loader) {{\n",
         names.game_data_class_name()
     ));
-    content.raw_fmt(format_args!(
-        "            return new {}(\n",
-        names.game_data_class_name()
-    ));
+    content.raw("            return fromLoaded(\n");
     for (index, table) in model.tables.iter().enumerate() {
         let comma = if index + 1 == model.tables.len() {
             ""
@@ -1069,6 +1342,23 @@ fn render_game_data_class(
     }
     content.raw("            );\n");
     content.raw("        }\n");
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_game_data_access_interface(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &JavaNames,
+) -> Result<()> {
+    content.raw("    public interface GameDataAccess {\n");
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "        {} {}();\n",
+            java_table_data_type(table, names)?,
+            names.getter_name(&table.name)?
+        ));
+    }
     content.raw("    }\n\n");
     Ok(())
 }

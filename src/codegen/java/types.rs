@@ -9,7 +9,7 @@ use super::{
 };
 use crate::codegen::{
     CaseStyle, CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
-    CodeTypeRef, KeywordConflictPolicy, NamingConfig, naming,
+    CodeTypeRef, KeywordConflictPolicy, NamingConfig, ir::CodeForeignKey, naming,
 };
 
 pub(super) struct JavaNames {
@@ -173,6 +173,24 @@ impl JavaNames {
         let prefix = if index.unique { "get_by" } else { "find_by" };
         let suffix = index.name.trim_start_matches("by_");
         self.identifier(&format!("{prefix}_{suffix}"), self.naming.function)
+    }
+
+    pub(super) fn index_row_index_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("index_of_by_{suffix}"), self.naming.function)
+    }
+
+    pub(super) fn relation_function_name(&self, foreign_key: &CodeForeignKey) -> Result<String> {
+        let name = foreign_key
+            .linked_field
+            .as_ref()
+            .map(|linked_field| linked_field.name.as_str())
+            .unwrap_or(foreign_key.name.as_str());
+        self.identifier(name, self.naming.function)
+    }
+
+    pub(super) fn relation_cache_field_name(&self, foreign_key: &CodeForeignKey) -> Result<String> {
+        Ok(format!("{}Link", self.local_name(&foreign_key.name)?))
     }
 
     pub(super) fn ordered_lower_bound_function_name(&self, index: &CodeIndex) -> Result<String> {
