@@ -46,7 +46,7 @@ ProjectConfig::from_path
   -> normalize_data_set
   -> validate_normalized_data_set_for_target
   -> export runtime data (JSON / MessagePack)
-  -> CodeGeneratorRegistry dispatch (Rust / C++ / TypeScript / Unreal C++ / C# / Java)
+  -> CodeGeneratorRegistry dispatch (built-in backends; see capability matrix below)
   -> write generated files
 ```
 
@@ -155,8 +155,8 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 - `CodeTable.kind` 区分 `Object` / `Collection`。
 - ObjectTable 生成目标语言中的 singleton object 类型和访问入口。
 - ObjectTable 不生成 collection repository，不生成 index lookup helpers。
-- ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前 Rust/C++/TypeScript/C#/Java 生成器已渲染 `linked_field` helper/cache/link。
-- Rust / TypeScript / C++ / C# / Java 都应避免把 ObjectTable 误表达为 rows collection。
+- ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前各 backend 的 `linked_field` helper/cache/link 覆盖范围见 [Codegen backend capability matrix](#941-codegen-backend-capability-matrix)。
+- capability matrix 中的 format-agnostic backend 都应避免把 ObjectTable 误表达为 rows collection。
 - Runtime data load key 使用逻辑 table name，不由 exporter 真实写出的 `RuntimeDataFile.path` 决定；codegen 不关心 ObjectTable 的 CSV `key,value` 物理布局。
 
 建议 API 形态：
@@ -184,17 +184,24 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 | C# backend | [`09k-codegen-csharp-backend.md`](09k-codegen-csharp-backend.md) | 已实现的 C# backend、generated API、runtime reader contract、index/relation/text/lazy 设计和测试策略。 |
 | Java backend | [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md) | 已实现的 Java backend、单文件嵌套 public API、runtime reader contract、index/relation/text/lazy 设计和测试策略。 |
 
-### 9.4.1 当前实现状态摘要
+### 9.4.1 Codegen backend capability matrix
 
-- Rust / C++ / TypeScript / Unreal C++ / C# / Java backend 均已实现 MVP。
-- Unreal C++ 已作为独立 `cpp_unreal` backend 实现；不作为标准 `cpp` backend 的开关，以避免生成 public API 同时混用 `std::*` 和 Unreal API。当前支持 `support = "containers"` 和 `support = "blueprint"` 两级输出：containers 模式生成 Unreal 类型/容器、repository、index、relation、text、`GameData` 与 `FLazyGameData`；Blueprint 模式额外生成 `USTRUCT(BlueprintType)` / `UENUM(BlueprintType)` / `UPROPERTY(BlueprintReadOnly)` 和 `UBlueprintFunctionLibrary` 查询 facade。
-- Eager loading 和 table-level `LazyGameData` 均已实现 MVP；lazy facade 保留 loader，首次访问 table/object 时加载并缓存。
-- TypeScript 已生成 `loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`；同步 API 要求 loader 同步返回 reader，遇到 Promise 应报错。
-- C# backend 已作为独立 `type = "csharp"` backend 实现，生成 .NET BCL-only 单文件 `.cs`，支持 enum / struct / row / object / repository、hash / ordered / compound index、`IGameDataAccess` relation helper、text helper、eager `GameData` 与同步 `LazyGameData`。
-- Java backend 已作为独立 `type = "java"` backend 实现，生成 JDK-only 单文件 `.java`，采用 public root class + nested public static generated types 规避 Java 单文件 public top-level type 限制，支持 enum / struct / row / object / repository、hash / ordered / compound index、`GameDataAccess` relation helper、text helper、eager `GameData` 与同步 `LazyGameData`。
-- 生成代码使用逻辑 table name，不绑定某个 `targets.exports` runtime data export task 的真实 artifact path。
-- `linked_field` relation helper 和 `text` translation helper 已纳入 Rust / C++ / TypeScript / Unreal C++ / C# / Java 生成器。
-- Lua embedded data generator 已作为 `type = "lua_table"` 的 MetaAndData exporter 落地，而不是现有 format-agnostic `CodeGenerator` backend。
+本表是当前内置 codegen backend 的权威能力矩阵。新增、删除或重命名 backend 时，优先更新本表；其他 Design / Implementation / Tech 文档应链接到本节，而不是复制完整 backend 清单。
+
+| Backend | Export type / aliases | Source module | Topic doc | Output shape | Dependency | Core capabilities | Runtime test / adapter status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Rust | `rust` | `src/codegen/rust/` | [`09b-codegen-rust-backend.md`](09b-codegen-rust-backend.md) | single `.rs` | `MetaOnly` | enum、struct、row/object、repository、eager `GameData`、`LazyGameData`、hash/ordered/compound index、relation/text helper、source-order opt-in | standard_project `cargo test`；`runtime/rust/` 已有 JSON / MessagePack / binary reader 模板 |
+| C++ | `cpp` / `c++` | `src/codegen/cpp/` | [`09c-codegen-cpp-backend.md`](09c-codegen-cpp-backend.md) | `.hpp` + `.cpp` | `MetaOnly` | enum、struct、row/object、repository、eager `GameData`、`LazyGameData`、hash/ordered/compound index、relation/text helper、source-order opt-in | standard_project C++17 harness；`runtime/cpp/` 已有 RapidJSON / msgpack-cxx / binary reader adapter |
+| TypeScript | `typescript` / `ts` | `src/codegen/typescript/` | [`09d-codegen-typescript-backend.md`](09d-codegen-typescript-backend.md) | single `.ts` | `MetaOnly` | interface/class、repository、eager `GameData`、`LazyGameData`、async + sync loading、Map index、relation/text helper、source-order opt-in | standard_project `tsc` + node harness；`runtime/typescript/` 已有 core / JSON / MessagePack / binary / node-fs packages |
+| Unreal C++ | `cpp_unreal` | `src/codegen/cpp_unreal/` | [`09j-codegen-cpp-unreal-backend.md`](09j-codegen-cpp-unreal-backend.md) | `.h` + `.cpp` | `MetaOnly` | Unreal containers mode、Blueprint mode、eager `FGameData`、`FLazyGameData`、hash/ordered/compound index、relation/text helper、`type_name_prefix` | standard_project lightweight Unreal shim syntax smoke；真实 UHT / Editor 验证由引擎侧 CI 覆盖；生产 adapter 由 Unreal module 提供 |
+| C# | `csharp` / `cs` | `src/codegen/csharp/` | [`09k-codegen-csharp-backend.md`](09k-codegen-csharp-backend.md) | single `.cs` | `MetaOnly` | enum、class/row/object、repository、eager `GameData`、同步 `LazyGameData`、hash/ordered/compound index、`IGameDataAccess` relation helper、text helper | standard_project `dotnet run` + `System.Text.Json` harness；生产 adapter 待抽出到 `runtime/csharp/` |
+| Java | `java` / `jvm` | `src/codegen/java/` | [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md) | single `.java` root class + nested public static types | `MetaOnly` | enum、class/row/object、repository、eager `GameData`、同步 `LazyGameData`、hash/ordered/compound index、`GameDataAccess` relation helper、text helper | standard_project `javac` + `java` + JDK-only JSON harness；生产 adapter 待抽出到 `runtime/java/` |
+
+横向约束：
+
+- 上表中的 format-agnostic backend 均使用 Meta-agnostic reader loader contract：接入方只提供通用 `open(path)` / `Open(path)` 和 reader cursor，生成代码负责 table / field / fragment / object parsing。
+- 上表中的 `MetaOnly` backend 都通过 `CodeGenerator::generate_to_sink()` 进入 production 写出路径，产物统一交给 `ArtifactSink`。
+- Lua embedded data generator 是 `type = "lua_table"` 的 MetaAndData exporter，不属于本矩阵中的 format-agnostic `CodeGenerator` backend。
 - `preserve_source_order` 的 generated access 语义仍为规划项：目标行为是 indexed CollectionTable 默认不生成 public source-order `rows` API；只有显式声明 `preserve_source_order = true` 的表生成 row count / row_at / rows 访问，服务随机角色名这类按表格顺序随机访问的配置。
 
 ## 9.5 总览文档维护规则
@@ -203,6 +210,6 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 
 1. Codegen 模块目标、流程位置和模块边界。
 2. ObjectTable 等跨专题边界的短说明。
-3. 拆分专题索引和当前实现状态摘要。
+3. 拆分专题索引和 backend capability matrix。
 
 如果需要新增正文，应优先落到 `09a`~`09l` 的专题文档；只有影响整个 Codegen 模块入口、依赖方向或专题划分时才修改本文。这样可以避免总览文档重新膨胀，保证 AI 和人类读者能在一次阅读内获得导航。

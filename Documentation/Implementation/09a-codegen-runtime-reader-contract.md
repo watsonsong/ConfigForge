@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-- Rust / C++ / TypeScript / Unreal C++ / C# / Java generated code 均使用 Meta-agnostic reader loader contract。
+- 当前内置 format-agnostic backend 的 runtime contract 覆盖范围见 [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。
 - Eager `GameData` 与 table-level `LazyGameData` 已实现 MVP。
 - TypeScript 已提供 async 与 sync loading API；sync API 要求 loader 同步返回 reader。C# / Java 当前提供同步 `Load` / `load` 和 `LazyGameData` API。
 - Generated code 使用逻辑 table name；真实 artifact path、后缀和格式由 loader / reader 映射。
@@ -82,7 +82,7 @@ RuntimeDataReader
   read_scalar(type)
 ```
 
-Rust / C++ / TypeScript / Unreal C++ / C# / Java 生成代码分别暴露同名语义的 `RuntimeDataLoader` / `IRuntimeDataLoader` / `RuntimeDataLoader` / `IConfigForgeRuntimeDataLoader` / `ConfigForgeRuntimeDataLoader`，以及配套 `RuntimeDataReader` / `IRuntimeDataReader` / `IConfigForgeRuntimeDataReader` / `ConfigForgeRuntimeDataReader`。接口方法不得按表名或字段名生成；表名、字段名、字段顺序只出现在生成的 parser 函数内部。
+各 backend 暴露的 runtime loader / reader 具体命名以 [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 和对应 backend 专题文档为准；语义上都必须提供“打开逻辑 table path 并返回通用 reader cursor”的能力。接口方法不得按表名或字段名生成；表名、字段名、字段顺序只出现在生成的 parser 函数内部。
 
 reader 需要支持两种读取模式：
 
@@ -121,7 +121,7 @@ loader.open("items")
 
 当前实现：
 
-- Rust / C++ / TypeScript / Unreal C++ / C# / Java 当前已生成通用 loader / reader interface，并由生成代码完成 typed parsing。
+- [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的 format-agnostic backend 当前已生成通用 loader / reader interface，并由生成代码完成 typed parsing。
 - 集成测试 harness 直接复用 `runtime/rust/serde_json_reader/src/runtime_reader.rs` 与 `runtime/rust/serde_msgpack_reader/src/runtime_reader.rs`，确保同一份 generated Rust code 可通过不同格式 reader 读取等价数据；新增表或字段时无需在 harness 中维护自定义 reader，只需要更新断言覆盖代表性查询。
 - 后续可按语言新增可选 adapter，而不是强制把文件系统或第三方解析库纳入生成代码。
 

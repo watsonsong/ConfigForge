@@ -407,7 +407,7 @@ CI 中三方依赖策略：
 
 迁移已完成：
 
-1. Rust / C++ / TypeScript / Unreal C++ / C# / Java 均生成 `RuntimeDataReader` trait/interface 和通用 `RuntimeDataLoader.open` / `IRuntimeDataLoader::Open` / `IConfigForgeRuntimeDataLoader.Open` / `ConfigForgeRuntimeDataLoader.open`。
+1. [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的 format-agnostic backend 均生成 `RuntimeDataReader` trait/interface 和通用 loader open API；具体命名见矩阵和对应 backend 专题文档。
 2. table row、object table、named struct、fragment 均由生成代码输出 reader parser helper。
 3. table/object `load` 已从 `loader.load_<table>_rows(DATA_FILE)` 切换为 `loader.open(DATA_FILE)`，由生成代码读取 `rows` 或 object payload。
 4. codegen 单测和 standard_project harness 已改为通用 reader loader，不再按表手写 typed rows / objects。

@@ -176,7 +176,7 @@ pub struct CodegenDiagnostic {
 
 ### 9.14.4 分语言 generated-code runtime test 方案
 
-标准工程当前按 target 拆分：client 生成 JSON + TypeScript/C++/Unreal C++/C#/Java，server 生成 MessagePack + Rust。因此 generated-code runtime test 可以复用标准工程配置，分别验证各语言。
+标准工程当前按 target 拆分生成多语言 codegen；backend 清单、输出位置和 runtime harness 状态见 [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。generated-code runtime test 可以复用标准工程配置，分别验证各语言。
 
 | 语言 | 输入产物 | 工具链 | Harness 做法 | 必测断言 |
 | --- | --- | --- | --- | --- |
@@ -200,7 +200,7 @@ pub struct CodegenDiagnostic {
 在 `tests/fixtures/standard_project/` 上运行：
 
 1. export 生成 runtime data。
-2. export 生成 Rust/C++/TS/Unreal C++/C#/Java code。
+2. export 生成 [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中列入 standard_project runtime test 的 generated code。
 3. 检查输出文件存在。
 4. 检查关键 API 名称存在。
 5. 运行分语言 generated-code runtime test，确认生成代码能通过 loader 加载真实导出数据并执行代表性查询。
@@ -212,15 +212,11 @@ pub struct CodegenDiagnostic {
 当前 codegen 主体能力：
 
 - `src/codegen/` 提供 CodeModel IR、naming / type mapping、生成符号冲突检测和内置 generator registry。
-- Rust backend 输出 `generated.rs`，包含 enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`link_all` 与 `text` translation helper。
-- TypeScript backend 输出 `generated.ts`，包含 interface/class、repository、`GameData`、`LazyGameData`、Map-based index lookup、`linked_field` relation helper、`linkAll`、`text` translation helper、`loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`。
-- C++ backend 输出 `generated.hpp`，包含 enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`LinkAll` 与 `text` translation helper。
-- C# backend 输出 `generated.cs`，包含 enum、class、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`LinkAll` 与 `text` translation helper。
-- Java backend 输出 `ReferenceGameConfig.java` / `<RootClass>.java`，包含 enum、class、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`linkAll` 与 `text` translation helper。
-- Rust / C++ / TypeScript / Unreal C++ / C# / Java 都使用 Meta-agnostic reader loader contract，不直接绑定 JSON / MessagePack / bin exporter 结果。
+- 内置 backend 的输出形态、核心能力和 runtime harness 状态见 [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。
+- format-agnostic backend 都使用 Meta-agnostic reader loader contract，不直接绑定 JSON / MessagePack / bin exporter 结果。
 - runtime data 与 generated code 都以 artifact 形态参与统一写出；Artifact Writer 负责路径冲突检查、dry-run、direct write、`temp-commit` 与 bounded write queue。
 - `CodeGenerator::generate_to_sink()` 是 codegen 的唯一 production 写出入口；`GeneratedFile` / `generate()` 只在测试构建中存在，用于快照与 streaming equivalence 测试。
-- 标准工程 fixture 覆盖 runtime data + generated code 的端到端输出和代表性运行时加载；`cpp_unreal` 通过标准工程 target 与 Unreal shim 编译 smoke 纳入回归，C# 通过临时 `.csproj` + `System.Text.Json` reader harness 纳入回归，Java 通过临时 `javac` / `java` + JDK-only reader harness 纳入回归。
+- 标准工程 fixture 覆盖 runtime data + generated code 的端到端输出和代表性运行时加载；各 backend 的回归方式见 [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。
 
 未来规划：
 

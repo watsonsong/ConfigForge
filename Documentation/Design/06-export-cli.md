@@ -55,7 +55,7 @@ deduplicate = true
 | --- | --- |
 | `name` | 当前 target 内唯一的 export task 名称。单 export task 可省略并由实现填入默认名；多 export task 省略时默认使用 `type`。 |
 | `output` | 产物输出目录。运行时表数据会在该目录下按表名生成文件；POT / manifest 这类聚合格式会在该目录下按格式选项规划一个或多个文件；codegen 会在该目录生成语言文件。 |
-| `type` | exporter 类型 ID。运行时格式支持 `json`、`messagepack` 和 `bin`；聚合/内嵌数据格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`；代码生成支持 `rust`、`cpp`、`typescript`、`cpp_unreal`、`csharp`、`java` 及其 alias，其中 `cpp_unreal` 是 Unreal Engine 专用 C++ codegen，`csharp` 输出 .NET BCL-only 单文件 C#，`java` 输出 JDK-only 单文件 Java。 |
+| `type` | exporter 类型 ID。运行时格式支持 `json`、`messagepack` 和 `bin`；聚合/内嵌数据格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`；代码生成支持的内置 backend、type id、alias 和输出形态见 [`09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。 |
 | exporter 专属字段 | 可选。格式专属选项直接摊平在对应 `[[targets.exports]]` 下，例如 `type = "gettext_pot"` 的 `domain`、`file_name`、`source_reference`、`include_translator_comments`、`deduplicate`。 |
 
 导出规则：
@@ -96,7 +96,7 @@ namespace = "game::config"
 
 - `type` 决定使用哪个代码生成器。
 - `output` 是该代码生成 export task 的根目录，不与 runtime data output 混淆。
-- `file_name` 可覆盖生成代码文件名；Rust / TypeScript / C# / Java 单文件输出会自动补齐默认扩展，标准 C++ 会用同一 stem 生成 `.hpp` / `.cpp`，Unreal C++ 会用同一 stem 生成 `.h` / `.cpp`。
+- `file_name` 可覆盖生成代码文件名；各 backend 的默认输出形态和扩展名见 [`Codegen backend capability matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。
 - `data` 不支持设置。生成代码格式无关，只依赖 Meta 和 target tags；格式选择由接入方在运行时传入的 loader / reader 决定。
 - `file_header` 是文本模板，支持 `{{project.name}}`、`{{project.desc}}`、`{{project.copyright}}`、`{{datetime}}`。
 - `keyword_conflict` 控制 Meta 名称转换成目标语言标识符后碰到关键字时如何处理。
@@ -223,7 +223,7 @@ Protobuf 未来规则：
 
 ### 6.2.1 生成代码的 Runtime Data 加载抽象
 
-当前实现状态：Rust / C++ / TypeScript / Unreal C++ / C# / Java 生成代码使用 **Meta-agnostic reader loader 契约**，即接入方只实现通用 `open(path)` / `Open(path)` 并返回 `RuntimeDataReader` / `IRuntimeDataReader` / `IConfigForgeRuntimeDataReader` / `ConfigForgeRuntimeDataReader`；生成代码内部负责按 Meta 读取表、字段、fragment 和 object payload，并构造 typed rows / objects。生成代码 API 不包含按表生成的 `load_<table>_rows` / `Load<Table>Rows` / `load<Table>Rows` / `Load<Table>Rows` loader 方法。
+当前 [`Codegen backend capability matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的 format-agnostic backend 使用 **Meta-agnostic reader loader 契约**，即接入方只实现通用 `open(path)` / `Open(path)` 并返回对应语言的 runtime reader；生成代码内部负责按 Meta 读取表、字段、fragment 和 object payload，并构造 typed rows / objects。生成代码 API 不包含按表生成的 `load_<table>_rows` / `Load<Table>Rows` / `load<Table>Rows` / `Load<Table>Rows` loader 方法。
 
 生成代码必须把“如何取得配置文件”和“如何把通用序列化数据组装成当前 Meta 对应的 typed rows / typed objects”分层：
 
@@ -412,7 +412,7 @@ ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader ad
 
 设计原则：
 
-1. **生成代码核心仍保持无第三方 runtime 依赖**：Rust / C++ / TypeScript / Unreal C++ / C# / Java generated code 只声明 reader / loader 契约和 generated parser，不直接依赖 `serde_json`、`rmp-serde`、`RapidJSON`、`msgpack-c`、npm MessagePack 包、Unreal JSON 模块、`System.Text.Json`、Jackson、Gson 等具体解码库。
+1. **生成代码核心仍保持无第三方 runtime 依赖**：[`Codegen backend capability matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的 format-agnostic backend 只声明 reader / loader 契约和 generated parser，不直接依赖 `serde_json`、`rmp-serde`、`RapidJSON`、`msgpack-c`、npm MessagePack 包、Unreal JSON 模块、`System.Text.Json`、Jackson、Gson 等具体解码库。
 2. **标准 adapter 按官方支持矩阵拆分**：stable runtime data export type 应覆盖官方 target language；experimental type 可以先只覆盖部分语言。每个 adapter 单元只负责“某语言中把某格式的通用 value/cursor 暴露为 RuntimeDataReader”，transport loader 作为可组合层，不进入语言 × 格式矩阵。
 3. **资源加载与格式解码分层**：`RuntimeDataLoader` 的文件系统、HTTP、引擎资源系统等 transport 逻辑应与 JSON / MessagePack reader 解码逻辑分开。标准包可以提供常用组合（如 Node fs + JSON、Rust fs + MessagePack），但底层 reader 应可被自定义 loader 复用。
 4. **依赖显式可选**：不同语言/格式 adapter 允许依赖不同三方库，但依赖必须限制在对应 adapter 包/模块内，并通过 Cargo feature、npm optional dependency、CMake option / package manager 选项等机制显式启用。

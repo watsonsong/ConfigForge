@@ -26,7 +26,7 @@
 | Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、注册式 validator；入口、table、FK、struct value、default 逻辑分文件维护。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
 | Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 兼容列表或 `ArtifactSink` stream 写入请求、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
 | Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack / `bin` exporter、export type registry、由统一 export task 适配得到的 exporter 内部配置。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`、`ArtifactSink`。 | `RuntimeDataFile` metadata / runtime data artifacts。 | `08-exporter-module-detail-design.md` |
-| Codegen | `src/codegen/` | 语言无关 CodeModel IR，Rust / TypeScript / C++ / Unreal C++ / C# / Java 格式无关代码生成；每种语言按 runtime / types / reader / repository / symbols 拆分。 | `LinkedMetaModel<'meta>`、target tags、`ArtifactSink`。 | generated code artifacts。 | `09-codegen-module-detail-design.md` |
+| Codegen | `src/codegen/` | 语言无关 CodeModel IR 和内置 codegen backend；backend 清单与能力矩阵见 `09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix`。 | `LinkedMetaModel<'meta>`、target tags、`ArtifactSink`。 | generated code artifacts。 | `09-codegen-module-detail-design.md` |
 | Build | `src/build/` | 工程构建主编排：归一化 target，并按 target 调度 data load、validation、runtime export、format-agnostic codegen、artifact 写入。 | `ProjectConfig`、CLI options。 | `BuildOutput`、文件系统产物。 | `10-build-module-detail-design.md` |
 
 ## 1.3 强制单向依赖规则
@@ -121,7 +121,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `06-validation-module-detail-design.md` | 模块 | Validation 主流程、ExportValidationView、ValidationReport、validator registry。 |
 | `07-artifact-module-detail-design.md` | 模块 | Artifact model、writer、dry-run、direct/temp-commit 策略和写入结果。 |
 | `08-exporter-module-detail-design.md` | 模块 | Runtime data exporter、格式 registry、JSON / MessagePack / `bin`、ObjectTable payload。 |
-| `09-codegen-module-detail-design.md` | 模块总览 | Codegen 目标、流程位置、模块边界、专题索引和当前实现状态摘要；详细设计见 `09a`~`09l`。 |
+| `09-codegen-module-detail-design.md` | 模块总览 | Codegen 目标、流程位置、模块边界、专题索引和 backend capability matrix；详细设计见 `09a`~`09l`。 |
 | `09a-codegen-runtime-reader-contract.md` | Codegen 专题 | Runtime reader contract、eager/lazy loading、TypeScript sync API、逻辑 table name 与 schema revision。 |
 | `09b-codegen-rust-backend.md` | Codegen 专题 | Rust backend generated API 与 lazy loading。 |
 | `09c-codegen-cpp-backend.md` | Codegen 专题 | C++ backend generated API、namespace/ownership 与 lazy loading。 |
