@@ -408,6 +408,11 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(
         fixture_root
+            .join("out/client_code/java/ReferenceGameConfig.java")
+            .exists()
+    );
+    assert!(
+        fixture_root
             .join("out/server_code/rust/reference_game_config.rs")
             .exists()
     );
@@ -425,10 +430,18 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(rust_code.contains("pub fn rows(&self) -> &[CharacterFemaleGivenNamesRow]"));
     assert!(!rust_code.contains("pub fn rows(&self) -> &[ItemsRow]"));
 
+    let java_code =
+        fs::read_to_string(fixture_root.join("out/client_code/java/ReferenceGameConfig.java"))
+            .expect("standard fixture Java code should be readable");
+    assert!(java_code.contains("package referencegame.config;"));
+    assert!(java_code.contains("public final class ReferenceGameConfig"));
+    assert!(java_code.contains("public static final class LazyGameData implements GameDataAccess"));
+
     verify_standard_generated_rust_runtime(fixture_root);
     verify_standard_generated_cpp_runtime(fixture_root);
     verify_standard_generated_cpp_unreal_runtime(fixture_root);
     verify_standard_generated_csharp_runtime(fixture_root);
+    verify_standard_generated_java_runtime(fixture_root);
     verify_standard_generated_typescript_runtime(fixture_root);
     verify_standard_generated_lua_runtime(fixture_root);
 }

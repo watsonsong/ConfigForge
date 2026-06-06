@@ -646,3 +646,262 @@ sealed class JsonRuntimeDataReader : IConfigForgeRuntimeDataReader
         .expect("standard generated C# runtime test should run");
     assert_command_success(output, "standard generated C# runtime test");
 }
+
+pub(crate) fn verify_standard_generated_java_runtime(fixture_root: &std::path::Path) {
+    if !command_exists("javac") || !command_exists("java") {
+        eprintln!("skipping standard generated Java runtime test: javac/java not found");
+        return;
+    }
+
+    let temp_dir = tempfile::tempdir().expect("java harness temp dir should be created");
+    let source_root = temp_dir.path().join("src");
+    let package_dir = source_root.join("referencegame/config");
+    let class_dir = temp_dir.path().join("classes");
+    fs::create_dir_all(&package_dir).expect("Java package dir should be created");
+    fs::create_dir_all(&class_dir).expect("Java class dir should be created");
+    fs::copy(
+        fixture_root.join("out/client_code/java/ReferenceGameConfig.java"),
+        package_dir.join("ReferenceGameConfig.java"),
+    )
+    .expect("generated Java code should be copied into harness");
+    fs::write(
+        source_root.join("RuntimeCheck.java"),
+        r#"
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Stack;
+import referencegame.config.ReferenceGameConfig;
+
+public final class RuntimeCheck {
+    public static void main(String[] args) throws Exception {
+        Path dataDir = Paths.get(System.getenv("DATA_DIR"));
+        JsonRuntimeDataLoader loader = new JsonRuntimeDataLoader(dataDir);
+        ReferenceGameConfig.GameData data = ReferenceGameConfig.GameData.load(loader);
+        check(data.getItems().getById(2001).getName().equals("Iron Ore"), "eager item lookup failed");
+        check(data.getGameRules().defaultClass(data).getName().equals("Warrior"), "relation lookup failed");
+        check(data.getGameRules().starterItems(data).size() == 2, "list relation lookup failed");
+        check(data.getItems().getById(2001).nameText(new TestTranslator()).equals("铁矿石"), "text helper translation failed");
+
+        JsonRuntimeDataLoader lazyLoader = new JsonRuntimeDataLoader(dataDir);
+        ReferenceGameConfig.LazyGameData lazy = new ReferenceGameConfig.LazyGameData(lazyLoader);
+        check(lazyLoader.openCount == 0, "lazy loader opened data before first access");
+        check(lazy.getItems().getById(2001).getName().equals("Iron Ore"), "lazy item lookup failed");
+        check(lazyLoader.openCount == 1, "lazy loader should open items once");
+        check(lazy.getItems().getById(2002).getName().equals("Oak Wood"), "lazy cache lookup failed");
+        check(lazyLoader.openCount == 1, "lazy cache should avoid duplicate load");
+        ReferenceGameConfig.GameData eagerFromLazy = lazy.preloadAll();
+        check(eagerFromLazy.getGameRules().defaultClass(eagerFromLazy).getName().equals("Warrior"), "preload relation failed");
+    }
+
+    static void check(boolean condition, String message) {
+        if (!condition) {
+            throw new RuntimeException(message);
+        }
+    }
+
+    static final class TestTranslator implements ReferenceGameConfig.TextTranslator {
+        public String translate(String context, String text) {
+            return context.equals("items.name") && text.equals("Iron Ore") ? "铁矿石" : null;
+        }
+    }
+
+    static final class JsonRuntimeDataLoader implements ReferenceGameConfig.ConfigForgeRuntimeDataLoader {
+        private final Path root;
+        int openCount;
+
+        JsonRuntimeDataLoader(Path root) {
+            this.root = root;
+        }
+
+        public ReferenceGameConfig.ConfigForgeRuntimeDataReader open(String path) {
+            openCount++;
+            try {
+                return new JsonRuntimeDataReader(Json.parse(new String(Files.readAllBytes(root.resolve(path + ".json")), StandardCharsets.UTF_8)));
+            } catch (IOException error) {
+                throw new RuntimeException(error);
+            }
+        }
+    }
+
+    static final class JsonRuntimeDataReader implements ReferenceGameConfig.ConfigForgeRuntimeDataReader {
+        private final Stack<Object> stack = new Stack<>();
+
+        JsonRuntimeDataReader(Object root) {
+            stack.push(root);
+        }
+
+        public void enterRequiredField(String name) {
+            Object current = stack.peek();
+            if (current instanceof Map && ((Map<?, ?>) current).containsKey(name)) {
+                Map<?, ?> map = (Map<?, ?>) current;
+                stack.push(map.get(name));
+            } else {
+                stack.push(null);
+            }
+        }
+
+        public boolean enterOptionalField(String name) {
+            Object current = stack.peek();
+            if (current instanceof Map && ((Map<?, ?>) current).containsKey(name) && ((Map<?, ?>) current).get(name) != null) {
+                Map<?, ?> map = (Map<?, ?>) current;
+                stack.push(map.get(name));
+                return true;
+            }
+            return false;
+        }
+
+        public void exitField() { stack.pop(); }
+
+        public int readRowCount() {
+            Object current = stack.peek();
+            if (current instanceof Map && ((Map<?, ?>) current).get("rows") instanceof List) {
+                List<?> rows = (List<?>) ((Map<?, ?>) current).get("rows");
+                return rows.size();
+            }
+            return 1;
+        }
+
+        public void enterRow(int index) {
+            Map<?, ?> current = (Map<?, ?>) stack.peek();
+            stack.push(((List<?>) current.get("rows")).get(index));
+        }
+
+        public void exitRow() { stack.pop(); }
+
+        public int readListLength() { return ((List<?>) stack.peek()).size(); }
+        public void enterListElement(int index) { stack.push(((List<?>) stack.peek()).get(index)); }
+        public void exitListElement() { stack.pop(); }
+        public long readInt() { return Long.parseLong(String.valueOf(stack.peek())); }
+        public double readFloat() { return Double.parseDouble(String.valueOf(stack.peek())); }
+        public boolean readBool() { return Boolean.parseBoolean(String.valueOf(stack.peek())); }
+        public String readString() { Object value = stack.peek(); return value == null ? "" : String.valueOf(value); }
+    }
+
+    static final class Json {
+        private final String text;
+        private int index;
+
+        private Json(String text) { this.text = text; }
+        static Object parse(String text) { return new Json(text).readValue(); }
+
+        private Object readValue() {
+            skipWhitespace();
+            char ch = text.charAt(index);
+            if (ch == '{') { return readObject(); }
+            if (ch == '[') { return readArray(); }
+            if (ch == '"') { return readStringValue(); }
+            if (text.startsWith("true", index)) { index += 4; return Boolean.TRUE; }
+            if (text.startsWith("false", index)) { index += 5; return Boolean.FALSE; }
+            if (text.startsWith("null", index)) { index += 4; return null; }
+            return readNumber();
+        }
+
+        private Map<String, Object> readObject() {
+            index++;
+            skipWhitespace();
+            Map<String, Object> result = new HashMap<>();
+            if (text.charAt(index) == '}') { index++; return result; }
+            while (true) {
+                String key = readStringValue();
+                skipWhitespace();
+                expect(':');
+                result.put(key, readValue());
+                skipWhitespace();
+                if (text.charAt(index) == '}') { index++; return result; }
+                expect(',');
+            }
+        }
+
+        private List<Object> readArray() {
+            index++;
+            skipWhitespace();
+            List<Object> result = new ArrayList<>();
+            if (text.charAt(index) == ']') { index++; return result; }
+            while (true) {
+                result.add(readValue());
+                skipWhitespace();
+                if (text.charAt(index) == ']') { index++; return result; }
+                expect(',');
+            }
+        }
+
+        private String readStringValue() {
+            expect('"');
+            StringBuilder builder = new StringBuilder();
+            while (true) {
+                char ch = text.charAt(index++);
+                if (ch == '"') { return builder.toString(); }
+                if (ch == '\\') {
+                    char escaped = text.charAt(index++);
+                    switch (escaped) {
+                        case '"': builder.append('"'); break;
+                        case '\\': builder.append('\\'); break;
+                        case '/': builder.append('/'); break;
+                        case 'b': builder.append('\b'); break;
+                        case 'f': builder.append('\f'); break;
+                        case 'n': builder.append('\n'); break;
+                        case 'r': builder.append('\r'); break;
+                        case 't': builder.append('\t'); break;
+                        case 'u':
+                            builder.append((char) Integer.parseInt(text.substring(index, index + 4), 16));
+                            index += 4;
+                            break;
+                        default: throw new RuntimeException("invalid escape: " + escaped);
+                    }
+                } else {
+                    builder.append(ch);
+                }
+            }
+        }
+
+        private String readNumber() {
+            int start = index;
+            while (index < text.length() && "-+0123456789.eE".indexOf(text.charAt(index)) >= 0) { index++; }
+            return text.substring(start, index);
+        }
+
+        private void expect(char expected) {
+            skipWhitespace();
+            if (text.charAt(index) != expected) {
+                throw new RuntimeException("expected " + expected + " at " + index);
+            }
+            index++;
+            skipWhitespace();
+        }
+
+        private void skipWhitespace() {
+            while (index < text.length() && Character.isWhitespace(text.charAt(index))) { index++; }
+        }
+    }
+}
+"#,
+    )
+    .expect("Java harness RuntimeCheck.java should be written");
+
+    let generated = package_dir.join("ReferenceGameConfig.java");
+    let runtime_check = source_root.join("RuntimeCheck.java");
+    let output = StdCommand::new("javac")
+        .arg("-d")
+        .arg(&class_dir)
+        .arg(&generated)
+        .arg(&runtime_check)
+        .output()
+        .expect("standard generated Java javac should run");
+    assert_command_success(output, "standard generated Java javac");
+
+    let output = StdCommand::new("java")
+        .arg("-cp")
+        .arg(&class_dir)
+        .arg("RuntimeCheck")
+        .env("DATA_DIR", fixture_root.join("out/client_data/json"))
+        .output()
+        .expect("standard generated Java runtime test should run");
+    assert_command_success(output, "standard generated Java runtime test");
+}

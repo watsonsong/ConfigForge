@@ -287,7 +287,7 @@ feat(codegen): add Java text helpers
 feat(codegen): add Java lazy game data
 ```
 
-## [ ] Step 9：standard_project target 和 Java harness
+## [x] Step 9：standard_project target 和 Java harness
 
 目标：将 Java backend 纳入长期集成回归。
 

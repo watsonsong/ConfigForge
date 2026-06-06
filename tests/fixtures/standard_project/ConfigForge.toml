@@ -105,6 +105,17 @@ namespace = "ReferenceGame.Config"
 nullable = true
 access_modifier = "public"
 
+[[targets.exports]]
+type = "java"
+output = "out/client_code/java"
+file_name = "ReferenceGameConfig"
+namespace = "referencegame.config"
+
+[targets.exports.java]
+package = "referencegame.config"
+root_class_name = "ReferenceGameConfig"
+access_modifier = "public"
+
 [[targets]]
 name = "server"
 tags = ["server"]

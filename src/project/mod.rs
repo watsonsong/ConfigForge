@@ -328,4 +328,40 @@ mod tests {
         .unwrap_err();
         assert!(code_error.to_string().contains("unknown field `code`"));
     }
+
+    #[test]
+    fn standard_project_config_includes_java_client_target() {
+        let config = ProjectConfig::from_path(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/standard_project/ConfigForge.toml"),
+        )
+        .expect("standard project config should load");
+        let client = config.target("client").expect("client target");
+        let java = client
+            .exports
+            .iter()
+            .find(|export| export.type_id == "java")
+            .expect("java client target should exist");
+
+        assert_eq!(
+            java.output,
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/standard_project/out/client_code/java")
+        );
+        assert_eq!(
+            java.options.get("file_name").and_then(toml::Value::as_str),
+            Some("ReferenceGameConfig")
+        );
+        let java_options = java
+            .options
+            .get("java")
+            .and_then(toml::Value::as_table)
+            .expect("java options");
+        assert_eq!(
+            java_options
+                .get("root_class_name")
+                .and_then(toml::Value::as_str),
+            Some("ReferenceGameConfig")
+        );
+    }
 }
