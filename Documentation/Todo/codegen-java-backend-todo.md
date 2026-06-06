@@ -46,7 +46,7 @@
 docs(codegen): plan Java backend implementation
 ```
 
-## [ ] Step 1：注册 `java` 生成器骨架
+## [x] Step 1：注册 `java` 生成器骨架
 
 目标：让 build / export registry 识别 `type = "java"`，先生成最小 `.java` 文件。
 
