@@ -42,6 +42,7 @@ Create one file per meaningful development phase:
 phase-0001.md
 phase-0002.md
 phase-0003.md
+phase-0004.md
 ```
 
 Use zero-padded sequential numbers. Do not rename old phase logs after they have
