@@ -548,6 +548,69 @@ fn emits_relation_helpers_and_game_data_access_interface() {
 }
 
 #[test]
+fn emits_lazy_game_data_cache_retry_and_preload() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.csv"
+
+            [[tables.fields]]
+            name = "default_item_id"
+            type = "int"
+            required = true
+            foreign_key = { name = "default_item", target_table = "items", linked_field = "default_item" }
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = JavaCodeGenerator.generate(&input).expect("java code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public static final class LazyGameData implements GameDataAccess"));
+    assert!(
+        content
+            .contains("public static LazyGameData loadLazy(ConfigForgeRuntimeDataLoader loader)")
+    );
+    assert!(content.contains("return new LazyGameData(loader);"));
+    assert!(content.contains("private final ConfigForgeRuntimeDataLoader loader;"));
+    assert!(content.contains("private ItemsTable items;"));
+    assert!(content.contains("private GameConfigRow gameConfig;"));
+    assert!(content.contains(
+        "throw new ConfigForgeRuntimeException(\"LazyGameData requires a runtime data loader\")"
+    ));
+    assert!(content.contains("public ItemsTable getItems()"));
+    assert!(content.contains("if (items != null)"));
+    assert!(content.contains("ItemsTable loaded = ItemsTable.load(loader);"));
+    assert!(content.contains("items = loaded;"));
+    assert!(content.contains("public GameConfigRow getGameConfig()"));
+    assert!(content.contains("GameConfigRow loaded = loadGameConfig(loader);"));
+    assert!(content.contains("public GameData preloadAll()"));
+    assert!(content.contains("return GameData.fromLoaded("));
+    assert!(content.contains("getItems()"));
+    assert!(content.contains("getGameConfig()"));
+    assert!(content.contains("public ItemsRow defaultItem(GameDataAccess data)"));
+}
+
+#[test]
 fn emits_generic_translator_text_helpers() {
     let meta = MetaModel::from_toml_str(
         r#"
@@ -653,6 +716,25 @@ fn rejects_text_helper_name_collisions() {
     let error = JavaCodeGenerator.generate(&input).unwrap_err();
     assert!(
         matches!(error, ConfigForgeError::Validation(ref message) if message.contains("duplicate generated identifier")),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn rejects_lazy_game_data_member_collisions() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "loader"
+            source = "loader.csv"
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let error = JavaCodeGenerator.generate(&input).unwrap_err();
+    assert!(
+        matches!(error, ConfigForgeError::Validation(ref message) if message.contains("LazyGameData members") && message.contains("duplicate generated identifier")),
         "unexpected error: {error}"
     );
 }

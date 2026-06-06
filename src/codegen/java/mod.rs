@@ -226,6 +226,7 @@ fn render_java_code(
     render_java_types(content, &model, &names, options, &input.target.options.i18n)?;
     render_game_data_access_interface(content, &model, &names)?;
     render_game_data_class(content, &model, &names, options)?;
+    render_lazy_game_data_class(content, &model, &names, options)?;
     content.raw("}\n");
     Ok(())
 }
@@ -1433,6 +1434,66 @@ fn render_game_data_class(
     }
     content.raw("            );\n");
     content.raw("        }\n");
+    content.raw_fmt(format_args!(
+        "\n        public static {} loadLazy(ConfigForgeRuntimeDataLoader loader) {{\n            return new {}(loader);\n        }}\n",
+        names.lazy_game_data_class_name(),
+        names.lazy_game_data_class_name()
+    ));
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_lazy_game_data_class(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &JavaNames,
+    options: &JavaCodegenOptions,
+) -> Result<()> {
+    let final_modifier = if options.emit_final { " final" } else { "" };
+    content.raw_fmt(format_args!(
+        "    public static{} class {} implements GameDataAccess {{\n",
+        final_modifier,
+        names.lazy_game_data_class_name()
+    ));
+    content.raw("        private final ConfigForgeRuntimeDataLoader loader;\n");
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "        private {} {};\n",
+            java_table_data_type(table, names)?,
+            names.field_name(&table.name)?
+        ));
+    }
+    content.raw_fmt(format_args!(
+        "\n        public {}(ConfigForgeRuntimeDataLoader loader) {{\n            if (loader == null) {{\n                throw new ConfigForgeRuntimeException(\"LazyGameData requires a runtime data loader\");\n            }}\n            this.loader = loader;\n        }}\n",
+        names.lazy_game_data_class_name()
+    ));
+    for table in &model.tables {
+        let data_type = java_table_data_type(table, names)?;
+        let field_name = names.field_name(&table.name)?;
+        let getter = names.getter_name(&table.name)?;
+        let load_expr = java_table_load_expression(table, names, "loader")?;
+        content.raw_fmt(format_args!(
+            "\n        @Override\n        public {data_type} {getter}() {{\n            if ({field_name} != null) {{\n                return {field_name};\n            }}\n            {data_type} loaded = {load_expr};\n            {field_name} = loaded;\n            return loaded;\n        }}\n"
+        ));
+    }
+    content.raw_fmt(format_args!(
+        "\n        public {} preloadAll() {{\n            return {}.fromLoaded(\n",
+        names.game_data_class_name(),
+        names.game_data_class_name()
+    ));
+    for (index, table) in model.tables.iter().enumerate() {
+        let comma = if index + 1 == model.tables.len() {
+            ""
+        } else {
+            ","
+        };
+        content.raw_fmt(format_args!(
+            "                {}(){}\n",
+            names.getter_name(&table.name)?,
+            comma
+        ));
+    }
+    content.raw("            );\n        }\n");
     content.raw("    }\n\n");
     Ok(())
 }
@@ -1458,6 +1519,20 @@ fn java_table_data_type(table: &CodeTable, names: &JavaNames) -> Result<String> 
     match table.kind {
         CodeTableKind::Object => names.row_type_name(&table.name),
         CodeTableKind::Collection => names.repository_type_name(&table.name),
+    }
+}
+
+fn java_table_load_expression(
+    table: &CodeTable,
+    names: &JavaNames,
+    loader: &str,
+) -> Result<String> {
+    match table.kind {
+        CodeTableKind::Collection => Ok(format!(
+            "{}.load({loader})",
+            names.repository_type_name(&table.name)?
+        )),
+        CodeTableKind::Object => Ok(format!("load{}({loader})", names.type_name(&table.name)?)),
     }
 }
 

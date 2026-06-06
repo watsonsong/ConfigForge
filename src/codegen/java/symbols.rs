@@ -118,6 +118,27 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &JavaNames) -
     }
 
     ensure_unique_generated_symbols("java", "nested types", type_symbols)
+        .and_then(|()| validate_lazy_game_data_symbols(model, names))
+}
+
+fn validate_lazy_game_data_symbols(model: &CodeModel, names: &JavaNames) -> Result<()> {
+    let mut symbols = vec![
+        GeneratedSymbol::new("field", "loader", "loader"),
+        GeneratedSymbol::new("method", "preloadAll", "preloadAll"),
+    ];
+    for table in &model.tables {
+        symbols.push(GeneratedSymbol::new(
+            "table cache field",
+            &table.name,
+            names.field_name(&table.name)?,
+        ));
+        symbols.push(GeneratedSymbol::new(
+            "table getter",
+            &table.name,
+            names.getter_name(&table.name)?,
+        ));
+    }
+    ensure_unique_generated_symbols("java", "LazyGameData members", symbols)
 }
 
 fn validate_field_symbols(scope: &str, fields: &[CodeField], names: &JavaNames) -> Result<()> {

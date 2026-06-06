@@ -259,7 +259,7 @@ feat(codegen): add Java relation helpers
 feat(codegen): add Java text helpers
 ```
 
-## [ ] Step 8：`LazyGameData`
+## [x] Step 8：`LazyGameData`
 
 目标：生成同步 lazy facade，支持按需加载和 `preloadAll()`。
 
