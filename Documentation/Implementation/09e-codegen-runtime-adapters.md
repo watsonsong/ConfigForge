@@ -186,8 +186,8 @@ runtime/
 | TypeScript | MessagePack | `runtime/typescript/messagepack_reader` | `preview template` | `copyable_package_template` | `@msgpack/msgpack` 作为 peer dependency；workspace/package 模板 | 解码后的 unknown value 复用 core reader 语义；尚未作为稳定 npm 包发布。 |
 | C++ | JSON | `runtime/cpp/rapidjson_reader` | `stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(RapidJSON CONFIG)` / package manager / optional `FetchContent` | 用 RapidJSON 完整处理转义、Unicode、数字和 parse error；可通过 CMake target 引入。 |
 | C++ | MessagePack | `runtime/cpp/msgpackc_reader` | `stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(msgpack-cxx CONFIG)` / package manager / `FetchContent` 固定 `cpp-6.1.1` | 不手写二进制 parser；解码到 msgpack object/value 后适配 reader，可通过 CMake target 引入。 |
-| C# | JSON | standard_project 临时 harness | `custom/example` | `test_harness` | .NET BCL `System.Text.Json` | 已用于 `dotnet run` 回归验证 generated C#；生产可复用 adapter 仍待抽出到 `runtime/csharp/`。 |
-| Java | JSON | standard_project 临时 harness | `custom/example` | `test_harness` | JDK-only 简化 JSON reader | 已用于 `javac` / `java` 回归验证 generated Java；生产可复用 adapter 仍待抽出到 `runtime/java/`，可选择 JDK-only、Jackson、Gson 或 Android 友好实现。 |
+| C# | JSON | `runtime/csharp/json_reader` | `custom/example` | `copyable_template` | .NET BCL `System.Text.Json` | standard_project `dotnet run` harness 复制该 reader，并用薄 adapter 实现 generated `IConfigForgeRuntimeDataReader` / `IConfigForgeRuntimeDataLoader`。 |
+| Java | JSON | `runtime/java/json_reader` | `custom/example` | `copyable_template` | JDK-only JSON parser | standard_project `javac` / `java` harness 复制该 reader，并用薄 adapter 实现 generated `ConfigForgeRuntimeDataReader` / `ConfigForgeRuntimeDataLoader`；后续可补 Jackson / Gson / Android 友好实现。 |
 
 依赖策略：
 

@@ -452,6 +452,11 @@ pub(crate) fn verify_standard_generated_csharp_runtime(fixture_root: &std::path:
         project_dir.join("ReferenceGameConfig.cs"),
     )
     .expect("generated C# code should be copied into harness");
+    fs::copy(
+        fixture_root.join("../../../runtime/csharp/json_reader/JsonRuntimeDataReader.cs"),
+        project_dir.join("JsonRuntimeDataReader.cs"),
+    )
+    .expect("C# JSON runtime reader should be copied into harness");
     fs::write(
         project_dir.join("ConfigForgeCSharpHarness.csproj"),
         r#"<Project Sdk="Microsoft.NET.Sdk">
@@ -469,10 +474,7 @@ pub(crate) fn verify_standard_generated_csharp_runtime(fixture_root: &std::path:
         project_dir.join("Program.cs"),
         r#"
 using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.IO;
-using System.Text.Json;
+using ConfigForge.Runtime.JsonReader;
 using ReferenceGame.Config;
 
 static void Check(bool condition, string message)
@@ -511,128 +513,42 @@ sealed class TestTranslator : ITextTranslator
 
 sealed class JsonRuntimeDataLoader : IConfigForgeRuntimeDataLoader
 {
-    private readonly string _root;
-    public int OpenCount { get; private set; }
+    private readonly JsonRuntimeDataFileLoader _loader;
+    public int OpenCount => _loader.OpenCount;
 
     public JsonRuntimeDataLoader(string root)
     {
-        _root = root;
+        _loader = new JsonRuntimeDataFileLoader(root);
     }
 
     public IConfigForgeRuntimeDataReader Open(string path)
     {
-        OpenCount++;
-        return new JsonRuntimeDataReader(Path.Combine(_root, path + ".json"));
+        return new JsonRuntimeDataReaderAdapter(_loader.OpenReader(path));
     }
 }
 
-sealed class JsonRuntimeDataReader : IConfigForgeRuntimeDataReader
+sealed class JsonRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader
 {
-    private readonly JsonDocument _document;
-    private readonly JsonDocument _nullDocument = JsonDocument.Parse("null");
-    private readonly Stack<JsonElement> _stack = new();
+    private readonly JsonRuntimeDataReader _reader;
 
-    public JsonRuntimeDataReader(string path)
+    public JsonRuntimeDataReaderAdapter(JsonRuntimeDataReader reader)
     {
-        _document = JsonDocument.Parse(File.ReadAllText(path));
-        _stack.Push(_document.RootElement);
+        _reader = reader;
     }
 
-    public void EnterRequiredField(string name)
-    {
-        var current = _stack.Peek();
-        if (current.ValueKind == JsonValueKind.Object && current.TryGetProperty(name, out var value))
-        {
-            _stack.Push(value);
-            return;
-        }
-        _stack.Push(_nullDocument.RootElement);
-    }
-
-    public bool EnterOptionalField(string name)
-    {
-        var current = _stack.Peek();
-        if (current.ValueKind == JsonValueKind.Object && current.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null)
-        {
-            _stack.Push(value);
-            return true;
-        }
-        return false;
-    }
-
-    public void ExitField() => _stack.Pop();
-
-    public int ReadRowCount()
-    {
-        var current = _stack.Peek();
-        return current.ValueKind == JsonValueKind.Object && current.TryGetProperty("rows", out var rows) && rows.ValueKind == JsonValueKind.Array
-            ? rows.GetArrayLength()
-            : 1;
-    }
-
-    public void EnterRow(int index)
-    {
-        var rows = _stack.Peek().GetProperty("rows");
-        _stack.Push(rows[index]);
-    }
-
-    public void ExitRow() => _stack.Pop();
-
-    public int ReadListLength()
-    {
-        var current = _stack.Peek();
-        return current.ValueKind == JsonValueKind.Array ? current.GetArrayLength() : 0;
-    }
-
-    public void EnterListElement(int index) => _stack.Push(_stack.Peek()[index]);
-    public void ExitListElement() => _stack.Pop();
-
-    public long ReadInt()
-    {
-        var current = _stack.Peek();
-        return current.ValueKind switch
-        {
-            JsonValueKind.String => long.Parse(current.GetString() ?? "0", CultureInfo.InvariantCulture),
-            JsonValueKind.Number => current.GetInt64(),
-            _ => 0,
-        };
-    }
-
-    public double ReadFloat()
-    {
-        var current = _stack.Peek();
-        return current.ValueKind switch
-        {
-            JsonValueKind.String => double.Parse(current.GetString() ?? "0", CultureInfo.InvariantCulture),
-            JsonValueKind.Number => current.GetDouble(),
-            _ => 0.0,
-        };
-    }
-
-    public bool ReadBool()
-    {
-        var current = _stack.Peek();
-        return current.ValueKind switch
-        {
-            JsonValueKind.String => bool.Parse(current.GetString() ?? "false"),
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            _ => false,
-        };
-    }
-
-    public string ReadString()
-    {
-        var current = _stack.Peek();
-        return current.ValueKind switch
-        {
-            JsonValueKind.String => current.GetString() ?? string.Empty,
-            JsonValueKind.Number => current.GetRawText(),
-            JsonValueKind.True => "true",
-            JsonValueKind.False => "false",
-            _ => string.Empty,
-        };
-    }
+    public void EnterRequiredField(string name) => _reader.EnterRequiredField(name);
+    public bool EnterOptionalField(string name) => _reader.EnterOptionalField(name);
+    public void ExitField() => _reader.ExitField();
+    public int ReadRowCount() => _reader.ReadRowCount();
+    public void EnterRow(int index) => _reader.EnterRow(index);
+    public void ExitRow() => _reader.ExitRow();
+    public int ReadListLength() => _reader.ReadListLength();
+    public void EnterListElement(int index) => _reader.EnterListElement(index);
+    public void ExitListElement() => _reader.ExitListElement();
+    public long ReadInt() => _reader.ReadInt();
+    public double ReadFloat() => _reader.ReadFloat();
+    public bool ReadBool() => _reader.ReadBool();
+    public string ReadString() => _reader.ReadString();
 }
 "#,
     )
@@ -656,27 +572,36 @@ pub(crate) fn verify_standard_generated_java_runtime(fixture_root: &std::path::P
     let temp_dir = tempfile::tempdir().expect("java harness temp dir should be created");
     let source_root = temp_dir.path().join("src");
     let package_dir = source_root.join("referencegame/config");
+    let runtime_package_dir = source_root.join("configforge/runtime/json");
     let class_dir = temp_dir.path().join("classes");
     fs::create_dir_all(&package_dir).expect("Java package dir should be created");
+    fs::create_dir_all(&runtime_package_dir).expect("Java runtime package dir should be created");
     fs::create_dir_all(&class_dir).expect("Java class dir should be created");
     fs::copy(
         fixture_root.join("out/client_code/java/ReferenceGameConfig.java"),
         package_dir.join("ReferenceGameConfig.java"),
     )
     .expect("generated Java code should be copied into harness");
+    let runtime_java_dir =
+        fixture_root.join("../../../runtime/java/json_reader/src/configforge/runtime/json");
+    for file_name in [
+        "ConfigForgeJsonRuntimeDataLoader.java",
+        "ConfigForgeJsonRuntimeDataReader.java",
+        "ConfigForgeJsonParser.java",
+    ] {
+        fs::copy(
+            runtime_java_dir.join(file_name),
+            runtime_package_dir.join(file_name),
+        )
+        .expect("Java JSON runtime reader should be copied into harness");
+    }
     fs::write(
         source_root.join("RuntimeCheck.java"),
         r#"
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Stack;
+import configforge.runtime.json.ConfigForgeJsonRuntimeDataLoader;
+import configforge.runtime.json.ConfigForgeJsonRuntimeDataReader;
 import referencegame.config.ReferenceGameConfig;
 
 public final class RuntimeCheck {
@@ -713,172 +638,39 @@ public final class RuntimeCheck {
     }
 
     static final class JsonRuntimeDataLoader implements ReferenceGameConfig.ConfigForgeRuntimeDataLoader {
-        private final Path root;
+        private final ConfigForgeJsonRuntimeDataLoader loader;
         int openCount;
 
         JsonRuntimeDataLoader(Path root) {
-            this.root = root;
+            this.loader = new ConfigForgeJsonRuntimeDataLoader(root);
         }
 
         public ReferenceGameConfig.ConfigForgeRuntimeDataReader open(String path) {
             openCount++;
-            try {
-                return new JsonRuntimeDataReader(Json.parse(new String(Files.readAllBytes(root.resolve(path + ".json")), StandardCharsets.UTF_8)));
-            } catch (IOException error) {
-                throw new RuntimeException(error);
-            }
+            return new JsonRuntimeDataReaderAdapter(loader.openReader(path));
         }
     }
 
-    static final class JsonRuntimeDataReader implements ReferenceGameConfig.ConfigForgeRuntimeDataReader {
-        private final Stack<Object> stack = new Stack<>();
+    static final class JsonRuntimeDataReaderAdapter implements ReferenceGameConfig.ConfigForgeRuntimeDataReader {
+        private final ConfigForgeJsonRuntimeDataReader reader;
 
-        JsonRuntimeDataReader(Object root) {
-            stack.push(root);
+        JsonRuntimeDataReaderAdapter(ConfigForgeJsonRuntimeDataReader reader) {
+            this.reader = reader;
         }
 
-        public void enterRequiredField(String name) {
-            Object current = stack.peek();
-            if (current instanceof Map && ((Map<?, ?>) current).containsKey(name)) {
-                Map<?, ?> map = (Map<?, ?>) current;
-                stack.push(map.get(name));
-            } else {
-                stack.push(null);
-            }
-        }
-
-        public boolean enterOptionalField(String name) {
-            Object current = stack.peek();
-            if (current instanceof Map && ((Map<?, ?>) current).containsKey(name) && ((Map<?, ?>) current).get(name) != null) {
-                Map<?, ?> map = (Map<?, ?>) current;
-                stack.push(map.get(name));
-                return true;
-            }
-            return false;
-        }
-
-        public void exitField() { stack.pop(); }
-
-        public int readRowCount() {
-            Object current = stack.peek();
-            if (current instanceof Map && ((Map<?, ?>) current).get("rows") instanceof List) {
-                List<?> rows = (List<?>) ((Map<?, ?>) current).get("rows");
-                return rows.size();
-            }
-            return 1;
-        }
-
-        public void enterRow(int index) {
-            Map<?, ?> current = (Map<?, ?>) stack.peek();
-            stack.push(((List<?>) current.get("rows")).get(index));
-        }
-
-        public void exitRow() { stack.pop(); }
-
-        public int readListLength() { return ((List<?>) stack.peek()).size(); }
-        public void enterListElement(int index) { stack.push(((List<?>) stack.peek()).get(index)); }
-        public void exitListElement() { stack.pop(); }
-        public long readInt() { return Long.parseLong(String.valueOf(stack.peek())); }
-        public double readFloat() { return Double.parseDouble(String.valueOf(stack.peek())); }
-        public boolean readBool() { return Boolean.parseBoolean(String.valueOf(stack.peek())); }
-        public String readString() { Object value = stack.peek(); return value == null ? "" : String.valueOf(value); }
-    }
-
-    static final class Json {
-        private final String text;
-        private int index;
-
-        private Json(String text) { this.text = text; }
-        static Object parse(String text) { return new Json(text).readValue(); }
-
-        private Object readValue() {
-            skipWhitespace();
-            char ch = text.charAt(index);
-            if (ch == '{') { return readObject(); }
-            if (ch == '[') { return readArray(); }
-            if (ch == '"') { return readStringValue(); }
-            if (text.startsWith("true", index)) { index += 4; return Boolean.TRUE; }
-            if (text.startsWith("false", index)) { index += 5; return Boolean.FALSE; }
-            if (text.startsWith("null", index)) { index += 4; return null; }
-            return readNumber();
-        }
-
-        private Map<String, Object> readObject() {
-            index++;
-            skipWhitespace();
-            Map<String, Object> result = new HashMap<>();
-            if (text.charAt(index) == '}') { index++; return result; }
-            while (true) {
-                String key = readStringValue();
-                skipWhitespace();
-                expect(':');
-                result.put(key, readValue());
-                skipWhitespace();
-                if (text.charAt(index) == '}') { index++; return result; }
-                expect(',');
-            }
-        }
-
-        private List<Object> readArray() {
-            index++;
-            skipWhitespace();
-            List<Object> result = new ArrayList<>();
-            if (text.charAt(index) == ']') { index++; return result; }
-            while (true) {
-                result.add(readValue());
-                skipWhitespace();
-                if (text.charAt(index) == ']') { index++; return result; }
-                expect(',');
-            }
-        }
-
-        private String readStringValue() {
-            expect('"');
-            StringBuilder builder = new StringBuilder();
-            while (true) {
-                char ch = text.charAt(index++);
-                if (ch == '"') { return builder.toString(); }
-                if (ch == '\\') {
-                    char escaped = text.charAt(index++);
-                    switch (escaped) {
-                        case '"': builder.append('"'); break;
-                        case '\\': builder.append('\\'); break;
-                        case '/': builder.append('/'); break;
-                        case 'b': builder.append('\b'); break;
-                        case 'f': builder.append('\f'); break;
-                        case 'n': builder.append('\n'); break;
-                        case 'r': builder.append('\r'); break;
-                        case 't': builder.append('\t'); break;
-                        case 'u':
-                            builder.append((char) Integer.parseInt(text.substring(index, index + 4), 16));
-                            index += 4;
-                            break;
-                        default: throw new RuntimeException("invalid escape: " + escaped);
-                    }
-                } else {
-                    builder.append(ch);
-                }
-            }
-        }
-
-        private String readNumber() {
-            int start = index;
-            while (index < text.length() && "-+0123456789.eE".indexOf(text.charAt(index)) >= 0) { index++; }
-            return text.substring(start, index);
-        }
-
-        private void expect(char expected) {
-            skipWhitespace();
-            if (text.charAt(index) != expected) {
-                throw new RuntimeException("expected " + expected + " at " + index);
-            }
-            index++;
-            skipWhitespace();
-        }
-
-        private void skipWhitespace() {
-            while (index < text.length() && Character.isWhitespace(text.charAt(index))) { index++; }
-        }
+        public void enterRequiredField(String name) { reader.enterRequiredField(name); }
+        public boolean enterOptionalField(String name) { return reader.enterOptionalField(name); }
+        public void exitField() { reader.exitField(); }
+        public int readRowCount() { return reader.readRowCount(); }
+        public void enterRow(int index) { reader.enterRow(index); }
+        public void exitRow() { reader.exitRow(); }
+        public int readListLength() { return reader.readListLength(); }
+        public void enterListElement(int index) { reader.enterListElement(index); }
+        public void exitListElement() { reader.exitListElement(); }
+        public long readInt() { return reader.readInt(); }
+        public double readFloat() { return reader.readFloat(); }
+        public boolean readBool() { return reader.readBool(); }
+        public String readString() { return reader.readString(); }
     }
 }
 "#,
@@ -892,6 +684,9 @@ public final class RuntimeCheck {
         .arg(&class_dir)
         .arg(&generated)
         .arg(&runtime_check)
+        .arg(runtime_package_dir.join("ConfigForgeJsonRuntimeDataLoader.java"))
+        .arg(runtime_package_dir.join("ConfigForgeJsonRuntimeDataReader.java"))
+        .arg(runtime_package_dir.join("ConfigForgeJsonParser.java"))
         .output()
         .expect("standard generated Java javac should run");
     assert_command_success(output, "standard generated Java javac");

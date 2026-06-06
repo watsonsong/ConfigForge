@@ -21,7 +21,7 @@
 - `tests/cli_integration/standard_project.rs` 已按语言调用 generated-code runtime harness，覆盖 Rust / C++ / Unreal C++ / C# / Java / TypeScript / Lua。
 - 多数 harness 已能在缺工具时 `eprintln!` skip，但 skip 逻辑分散，格式不统一，且需要继续清理静默 skip。
 - `runtime/compliance/` 已有初始 JSON payload 和 expected TOML，但尚未形成自动 runner，也未覆盖文档中规划的全部 canonical cases。
-- C# / Java 当前使用 standard_project harness 内嵌 reader 示例，尚未抽出为 `runtime/csharp/` / `runtime/java/` 标准 adapter。
+- C# / Java JSON reader 已抽出到 `runtime/csharp/json_reader` 与 `runtime/java/json_reader`，standard_project harness 通过薄 adapter 接入 generated loader / reader interface；尚未接入 runtime compliance runner。
 
 ## 全局验收规则
 
@@ -296,7 +296,7 @@ test(runtime): add Rust compliance runner
 test(runtime): add TypeScript and C++ compliance runners
 ```
 
-## [ ] Step 10：抽出 C# / Java 标准 JSON adapter
+## [x] Step 10：抽出 C# / Java 标准 JSON adapter
 
 目标：减少 standard_project harness 内嵌 reader 与未来生产 adapter 漂移，为 C# / Java compliance 接入做准备。
 
@@ -384,5 +384,5 @@ docs(testing): converge toolchain and compliance documentation
 - 不能让 TypeScript `npx`、C++ FetchContent、npm install 等联网行为默认发生。
 - 不能让 generated core 绑定具体 JSON / MessagePack / Android / Spring / Unreal / Jackson / Gson / System.Text.Json 等 runtime adapter 依赖。
 - 不能用 standard_project integration harness 替代 runtime compliance suite；二者覆盖目标不同。
-- 不能把 C# / Java harness 内嵌 reader 当作长期标准 adapter；应逐步抽出到 `runtime/`。
+- 不能把 C# / Java harness 内嵌 reader 当作长期标准 adapter；reader 逻辑应保留在 `runtime/`，harness 只保留适配 generated nominal interface 的薄包装。
 - 不能把长期测试矩阵只写在 TODO 中；实现稳定后必须收敛到 `Documentation/Tech/` 和相关 Implementation 文档。

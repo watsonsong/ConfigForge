@@ -318,7 +318,7 @@ src/codegen/java/
 
 - 临时 project：`type = "java"` 能生成 `.java`。
 - 若本机有 `javac` / `java`，临时创建最小 harness：编译 generated code + generic in-memory reader，运行加载 / index / relation / text helper / lazy smoke。
-- standard_project 已加入 `out/client_code/java/ReferenceGameConfig.java`；集成测试使用 JDK-only JSON reader harness 验证 generated parser、repository、relation、text 和 lazy API。真实 JSON / MessagePack reader adapter 可在 `runtime/java/` 落地后替换或补充 harness。
+- standard_project 已加入 `out/client_code/java/ReferenceGameConfig.java`；集成测试复制 `runtime/java/json_reader`，并用薄 adapter 接入 generated loader / reader interface，验证 generated parser、repository、relation、text 和 lazy API。
 - 没有 JDK 时不失败，只跳过 Java compiler harness；Rust unit 和内容断言仍必须通过。
 
 ## 后续扩展

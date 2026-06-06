@@ -427,8 +427,8 @@ ConfigForge 应提供一组标准化的 RuntimeDataReader / RuntimeDataLoader ad
 | Rust | `serde_json` reader module；`serde_json_reader` | `rmp-serde` reader module；`serde_msgpack_reader` | Cargo features：`json`、`messagepack`、`fs`；当前为 `copyable_template`，各格式 reader 自带 value adapter 与 fs loader。 |
 | TypeScript | 原生 `JSON.parse` value reader | `@msgpack/msgpack` 解码后的 value reader | npm 包拆分与 peer dependency；Node fs / fetch loader 与格式 reader 分离。 |
 | C++ | 生产推荐 `RapidJSON` reader；`rapidjson_reader` 为生产推荐 JSON adapter | 推荐 `msgpack-cxx` reader；`msgpackc_reader` 解码到 msgpack object/value 后适配 | CMake options：`CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER`、`CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER`；通过 `find_package` / package manager / 显式 `FetchContent` 引入三方库，不 vendored 到 generated code。 |
-| C# | 当前 standard_project 使用 `System.Text.Json` harness | 未来 MessagePack reader adapter | 当前为 `test_harness`，生产可复用 adapter 待抽出到 `runtime/csharp/`。 |
-| Java | 当前 standard_project 使用 JDK-only JSON harness | 未来 MessagePack reader adapter | 当前为 `test_harness`，生产可复用 adapter 待抽出到 `runtime/java/`；可选择 JDK-only、Jackson、Gson 或 Android 友好实现。 |
+| C# | `runtime/csharp/json_reader`，基于 .NET BCL `System.Text.Json` | 未来 MessagePack reader adapter | 当前为 `copyable_template`，standard_project harness 通过薄 adapter 接入 generated nominal interface。 |
+| Java | `runtime/java/json_reader`，JDK-only JSON parser | 未来 MessagePack reader adapter | 当前为 `copyable_template`，standard_project harness 通过薄 adapter 接入 generated nominal interface；后续可补 Jackson、Gson 或 Android 友好实现。 |
 
 标准 adapter 的产物形式按语言习惯决定：
 
@@ -437,7 +437,7 @@ reader 目录和包名应优先表达“具体三方读取库”，而不是只�
 - **Rust**：由于当前 `RuntimeDataReader` trait 由 generated crate 声明，外部 crate 无法在不依赖用户 generated crate 的情况下“一次性”为 adapter 类型实现该 trait。短期应提供可复制/可 include 的 Rust reader module，放入 generated crate 或业务 crate 后实现本地 trait；具体 value reader 应放在对应格式 reader 中，例如 `serde_json_reader` 的 `JsonValueReader` 和 `serde_msgpack_reader` 的 `MessagePackValueReader`，避免把 `serde_json::Value` 伪装成通用 core。中期可评估把 reader trait 抽到稳定 runtime support crate，让 generated code 选择 `use config_forge_runtime::RuntimeDataReader`，从而使 adapter crate 可以直接实现 trait。
 - **TypeScript**：TypeScript 接口是结构化类型，标准 npm 包可以直接导出符合 `RuntimeDataReader` 形状的 classes/functions；generated code 无需 import adapter，业务侧把 adapter instance 传给 `GameData.load` 即可。
 - **C++**：`IRuntimeDataReader` 是 nominal virtual interface，adapter 需要与 generated header 一起编译。短期可提供 header/source template 或 header-only adapter，要求业务工程配置 generated header include path；中期可评估拆出稳定 runtime interface header，使 adapter 库不依赖某次 generated header。
-- **C# / Java**：当前由 standard_project 的临时 harness 验证 generated contract；后续可把 JSON reader 抽出到 `runtime/csharp/` / `runtime/java/`，继续保持 generated code 不 import 具体 JSON / MessagePack 库。
+- **C# / Java**：当前已有 `runtime/csharp/json_reader` 与 `runtime/java/json_reader` JSON reader template；standard_project harness 只保留薄 adapter，用于把这些 reader 接到每次 generated code 声明的 nominal loader / reader interface。Generated code 继续不 import 具体 JSON / MessagePack 库。
 
 推荐仓库目录为顶层 `runtime/`，例如：
 
