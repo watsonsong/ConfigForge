@@ -30,6 +30,7 @@ pub(crate) trait CodeGenerator: Send + Sync {
 ```rust
 pub(crate) struct RustCodeGenerator;
 pub(crate) struct CppCodeGenerator;
+pub(crate) struct CppUnrealCodeGenerator;
 pub(crate) struct CSharpCodeGenerator;
 pub(crate) struct TypeScriptCodeGenerator;
 ```
@@ -152,12 +153,12 @@ pub struct CodegenDiagnostic {
 
 生成代码测试不应只停留在“文件存在”和字符串片段断言。集成测试需要把 runtime data artifact 与 generated code artifact 串起来，验证生成代码能被目标语言工具链接受，并能通过 generated loader interface 读取真实导出的数据。
 
-当前测试 harness 只实现一次 `open + RuntimeDataReader` / `IRuntimeDataReader`；typed rows / typed object 映射必须由生成代码完成，harness 不再按表手写 generated rows。
+当前测试 harness 只实现一次 `open + RuntimeDataReader` / `IRuntimeDataReader` / `IConfigForgeRuntimeDataReader`；typed rows / typed object 映射必须由生成代码完成，harness 不再按表手写 generated rows。
 
 通用流程：
 
 1. 在临时目录或被 `.gitignore` 忽略的 fixture `out/` 目录中执行 export，生成 runtime data 与对应语言代码。
-2. 为每种目标语言创建测试 harness。harness 实现通用 `RuntimeDataLoader` / `IRuntimeDataLoader` 与 reader 接口，并把 JSON / MessagePack payload 暴露为通用 reader。
+2. 为每种目标语言创建测试 harness。harness 实现通用 `RuntimeDataLoader` / `IRuntimeDataLoader` / `IConfigForgeRuntimeDataLoader` 与 reader 接口，并把 JSON / MessagePack payload 暴露为通用 reader。
 3. 编译或类型检查 generated code 与 harness。
 4. 运行 harness 测试 `GameData` / facade 的加载入口。
 5. 断言代表性查询函数正常工作。测试不需要覆盖每一个字段和每一个 index，但必须覆盖当前功能类型：
@@ -197,7 +198,7 @@ pub struct CodegenDiagnostic {
 在 `tests/fixtures/standard_project/` 上运行：
 
 1. export 生成 runtime data。
-2. export 生成 Rust/C++/TS/Unreal C++ code。
+2. export 生成 Rust/C++/TS/Unreal C++/C# code。
 3. 检查输出文件存在。
 4. 检查关键 API 名称存在。
 5. 运行分语言 generated-code runtime test，确认生成代码能通过 loader 加载真实导出数据并执行代表性查询。
@@ -220,6 +221,7 @@ pub struct CodegenDiagnostic {
 
 未来规划：
 
-- 如需降低单文件体量，可为 Rust / TypeScript / C++ 增加多文件输出模式。
+- 如需降低单文件体量，可为 Rust / TypeScript / C++ / C# 增加多文件输出模式。
+- Java backend 当前按 [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md) 规划，落地后应在本测试矩阵中补充 `javac` / `java` harness。
 - 如需发布稳定 runtime adapter，可为 C++ 优先拆出 external stable interface header。
 - summary manifest 可作为 `targets.exports` 的聚合导出格式独立实现，不进入默认 codegen 决策。

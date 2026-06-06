@@ -26,7 +26,7 @@
 | Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、注册式 validator；入口、table、FK、struct value、default 逻辑分文件维护。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
 | Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 兼容列表或 `ArtifactSink` stream 写入请求、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
 | Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack / `bin` exporter、export type registry、由统一 export task 适配得到的 exporter 内部配置。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`、`ArtifactSink`。 | `RuntimeDataFile` metadata / runtime data artifacts。 | `08-exporter-module-detail-design.md` |
-| Codegen | `src/codegen/` | 语言无关 CodeModel IR，Rust / TypeScript / C++ 格式无关代码生成；每种语言按 runtime / types / reader / repository / symbols 拆分。 | `LinkedMetaModel<'meta>`、target tags、`ArtifactSink`。 | generated code artifacts。 | `09-codegen-module-detail-design.md` |
+| Codegen | `src/codegen/` | 语言无关 CodeModel IR，Rust / TypeScript / C++ / Unreal C++ / C# 格式无关代码生成；每种语言按 runtime / types / reader / repository / symbols 拆分。Java backend 处于规划阶段。 | `LinkedMetaModel<'meta>`、target tags、`ArtifactSink`。 | generated code artifacts。 | `09-codegen-module-detail-design.md` |
 | Build | `src/build/` | 工程构建主编排：归一化 target，并按 target 调度 data load、validation、runtime export、format-agnostic codegen、artifact 写入。 | `ProjectConfig`、CLI options。 | `BuildOutput`、文件系统产物。 | `10-build-module-detail-design.md` |
 
 ## 1.3 强制单向依赖规则
@@ -131,6 +131,9 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `09g-codegen-index-and-relation-helpers.md` | Codegen 专题 | CollectionTable index lookup、`linked_field` relation helper、row-index cache 与 `link_all`。 |
 | `09h-codegen-generator-api-and-tests.md` | Codegen 专题 | `CodeGenerator` 接口、新语言接入、文件组织、诊断和测试计划。 |
 | `09i-lua-embedded-data-generator.md` | Codegen / Exporter 专题 | Lua data+code 合一导出；作为 `type = "lua_table"` 的 MetaAndData export task 消费 Meta + Data，生成每表 `.lua`、root facade、row array/metatable 和索引。 |
+| `09j-codegen-cpp-unreal-backend.md` | Codegen 专题 | Unreal C++ backend generated API、containers / Blueprint 支持、shim 测试和与标准 C++ backend 的复用边界。 |
+| `09k-codegen-csharp-backend.md` | Codegen 专题 | C# backend generated API、runtime reader contract、index/relation/text/lazy 设计和测试策略。 |
+| `09l-codegen-java-backend.md` | Codegen 专题 | 规划中的 Java backend generated API、单文件嵌套 public API、runtime reader contract、index/relation/text/lazy 设计和测试策略。 |
 | `10-build-module-detail-design.md` | 模块 | 构建编排、target/task binding、并行执行边界和 artifact 写入策略。 |
 | `11-foreign-key-detail-design.md` | 专项 | 外键 raw/link model、引用完整性校验、target 语义、codegen staging。 |
 | `12-struct-expanded-value-detail-design.md` | 专项 | Struct source layout 自动判定和 expanded CSV field-path。 |

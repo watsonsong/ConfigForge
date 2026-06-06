@@ -79,7 +79,7 @@ ConfigForge 的任务可按资源类型分为三类。
 - `Semaphore` 可限制同时打开文件、HTTP 请求、远端 API 请求数；
 - `JoinSet` / `FuturesUnordered` 可收集同类 I/O 任务。
 
-ArtifactSink 当前使用同步 `std::io::Write`，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 并传入 runtime/codegen 分支。runtime table exporter 与 aggregate exporter 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack / binary 均已使用 writer-style serializer；内置 Rust / TypeScript / C++ codegen production path 也通过 `generate_to_sink()` 和 streaming code writer 直接写 sink。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
+ArtifactSink 当前使用同步 `std::io::Write`，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 并传入 runtime/codegen 分支。runtime table exporter 与 aggregate exporter 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack / binary 均已使用 writer-style serializer；内置 Rust / TypeScript / C++ / C# codegen production path 也通过 `generate_to_sink()` 和 streaming code writer 直接写 sink。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
 
 建议配置：
 

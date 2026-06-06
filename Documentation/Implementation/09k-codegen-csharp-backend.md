@@ -1,6 +1,6 @@
 # 09k. Codegen C# Backend
 
-本文描述已实现的 C# codegen backend 的生成 API 形态、运行时 reader contract、测试策略和与现有 CodeModel / runtime data exporter 的复用边界。分步实现清单放在 [`../Todo/codegen-csharp-backend-todo.md`](../Todo/codegen-csharp-backend-todo.md)；本文作为稳定设计文档维护。
+本文描述已实现的 C# codegen backend 的生成 API 形态、运行时 reader contract、测试策略和与现有 CodeModel / runtime data exporter 的复用边界；本文作为稳定设计文档维护。
 
 ## Related docs
 

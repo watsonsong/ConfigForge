@@ -116,6 +116,8 @@ CLI 可以通过 `--tag <tag>` 为本次构建追加 extra tags。实际参与 t
 | `[targets.exports.csharp]` | `namespace` / `nullable` / `access_modifier` / `class_name` / `lazy_class_name` / `emit_partial` | C# 单文件生成器配置。`namespace` 可覆盖通用 namespace；`nullable = true` 输出 `#nullable enable`；`access_modifier` 允许 `public` / `internal`；`class_name` 与 `lazy_class_name` 覆盖 eager / lazy facade 名称；`emit_partial` 控制 generated 类型是否声明为 `partial`。 |
 | `[targets.exports.typescript]` | `readonly_fields` | interface 字段是否生成 `readonly`。 |
 
+规划中的 Java codegen 将使用 `type = "java"` 和 `[targets.exports.java]`，但当前尚未注册到 exporter registry，不能在现有 `ConfigForge.toml` 中启用。Java 设计见 [`../Implementation/09l-codegen-java-backend.md`](../Implementation/09l-codegen-java-backend.md)。
+
 Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `type = "cpp_unreal"`：
 
 - 标准 `cpp` 面向引擎无关 C++17 环境，继续使用 `std::vector`、`std::unordered_map`、`std::string`、异常和纯 C++ runtime loader contract。

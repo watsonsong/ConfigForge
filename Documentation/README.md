@@ -63,7 +63,8 @@ Use the implementation documents after product behavior has been confirmed in `D
   - [`Implementation/09h-codegen-generator-api-and-tests.md`](Implementation/09h-codegen-generator-api-and-tests.md) — Generator API, new-language onboarding, diagnostics, file organization, and tests.
   - [`Implementation/09i-lua-embedded-data-generator.md`](Implementation/09i-lua-embedded-data-generator.md) — Implemented Lua data+code combined export, table file layout, row array/metatable memory strategy, indexes, and implementation notes.
   - [`Implementation/09j-codegen-cpp-unreal-backend.md`](Implementation/09j-codegen-cpp-unreal-backend.md) — Implemented Unreal C++ backend, containers / Blueprint support, shim testing, and historical implementation steps.
-  - [`Implementation/09k-codegen-csharp-backend.md`](Implementation/09k-codegen-csharp-backend.md) — Planned C# backend, generated API, runtime reader contract, index/relation/text/lazy design, and test strategy.
+  - [`Implementation/09k-codegen-csharp-backend.md`](Implementation/09k-codegen-csharp-backend.md) — Implemented C# backend, generated API, runtime reader contract, index/relation/text/lazy design, and test strategy.
+  - [`Implementation/09l-codegen-java-backend.md`](Implementation/09l-codegen-java-backend.md) — Planned Java backend, single-file nested public API, runtime reader contract, index/relation/text/lazy design, and test strategy.
 - [`Implementation/10-build-module-detail-design.md`](Implementation/10-build-module-detail-design.md) — Build orchestration, target normalization, export task DAG execution, and artifact write boundaries.
 - [`Implementation/11-foreign-key-detail-design.md`](Implementation/11-foreign-key-detail-design.md) — Foreign key raw/link model, referential-integrity validation, target semantics, codegen staging, and test plan.
 - [`Implementation/12-struct-expanded-value-detail-design.md`](Implementation/12-struct-expanded-value-detail-design.md) — Struct source layout auto detection and expanded CSV field-path layout for CollectionTable/ObjectTable, validation/export plan, and test plan.
@@ -85,10 +86,10 @@ Use the implementation documents after product behavior has been confirmed in `D
 ## Todo / Task Lists
 
 - `Documentation/Todo/` is the expected home for short-lived task lists, phased implementation checklists, and tactical TODO documents.
-- [`Todo/codegen-csharp-backend-todo.md`](Todo/codegen-csharp-backend-todo.md) — phased implementation checklist for the planned C# codegen backend.
+- [`Todo/codegen-java-backend-todo.md`](Todo/codegen-java-backend-todo.md) — phased implementation checklist for the planned Java codegen backend.
 - Todo documents are not canonical product / implementation contracts. Once a plan is implemented or stabilized, promote the durable design into the relevant `Design/`, `Implementation/`, or `Tech/` document, and either archive/remove the obsolete TODO or convert it into a historical implementation record with a non-TODO name.
 - Do not place new TODO checklists under `Documentation/Implementation/`; Implementation documents should describe current architecture, durable implementation design, and future extension sections.
-- Every phased TODO step must include a Markdown checkbox in its step heading, for example `## [ ] Step 1：...` or `## [x] Step 1：...`; mark the checkbox as complete only after that step has been independently validated and committed.
+- Every phased TODO step must include a Markdown checkbox in its step heading, for example `## [ ] Step 1：...` or `## [x] Step 1：...`. Each step must be scoped so it can be developed independently, validated independently, and committed independently; mark the checkbox as complete only after that step has passed its documented validation and has been committed.
 
 ## Documentation Writing Standards
 
