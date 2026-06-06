@@ -4,7 +4,7 @@
 use crate::{
     Result,
     codegen::{
-        CodeField, CodeFragmentPayload, CodeModel, CodeTableKind, GeneratedSymbol,
+        CodeField, CodeFragmentPayload, CodeModel, CodeTableKind, CodeTypeRef, GeneratedSymbol,
         ensure_unique_generated_symbols,
     },
 };
@@ -128,10 +128,18 @@ fn validate_field_symbols(scope: &str, fields: &[CodeField], names: &JavaNames) 
 }
 
 fn field_symbols(field: &CodeField, names: &JavaNames) -> Result<Vec<GeneratedSymbol>> {
-    Ok(vec![
+    let mut symbols = vec![
         GeneratedSymbol::new("field", &field.name, names.field_name(&field.name)?),
         GeneratedSymbol::new("getter", &field.name, names.getter_name(&field.name)?),
-    ])
+    ];
+    if matches!(field.code_type, CodeTypeRef::Text) {
+        symbols.push(GeneratedSymbol::new(
+            "text helper",
+            &field.name,
+            names.text_function_name(&field.name)?,
+        ));
+    }
+    Ok(symbols)
 }
 
 fn validate_named_symbols(

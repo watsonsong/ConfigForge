@@ -90,6 +90,8 @@ pub struct I18nOptions {
     pub csharp_using: Option<String>,
     #[serde(default)]
     pub typescript_import: Option<String>,
+    #[serde(default)]
+    pub java_import: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -245,6 +247,7 @@ fn validate_i18n_options(options: I18nOptions) -> Result<I18nOptions> {
             validate_optional_code_snippet("cpp_include", &options.cpp_include)?;
             validate_optional_code_snippet("csharp_using", &options.csharp_using)?;
             validate_optional_code_snippet("typescript_import", &options.typescript_import)?;
+            validate_optional_code_snippet("java_import", &options.java_import)?;
             if options.function.is_none() {
                 return Err(ConfigForgeError::Validation(
                     "i18n mode `global_function` requires `function`".to_owned(),
@@ -373,6 +376,7 @@ impl Default for I18nOptions {
             cpp_include: None,
             csharp_using: None,
             typescript_import: None,
+            java_import: None,
         }
     }
 }

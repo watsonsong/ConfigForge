@@ -193,6 +193,10 @@ impl JavaNames {
         Ok(format!("{}Link", self.local_name(&foreign_key.name)?))
     }
 
+    pub(super) fn text_function_name(&self, field_name: &str) -> Result<String> {
+        self.identifier(&format!("{field_name}_text"), self.naming.function)
+    }
+
     pub(super) fn ordered_lower_bound_function_name(&self, index: &CodeIndex) -> Result<String> {
         let suffix = index.name.trim_start_matches("by_");
         self.identifier(&format!("lower_bound_by_{suffix}"), self.naming.function)

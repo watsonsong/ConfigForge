@@ -548,6 +548,116 @@ fn emits_relation_helpers_and_game_data_access_interface() {
 }
 
 #[test]
+fn emits_generic_translator_text_helpers() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "name"
+            type = "text"
+            required = true
+
+            [[tables.fields]]
+            name = "description"
+            type = "text"
+            required = false
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = JavaCodeGenerator.generate(&input).expect("java code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public interface TextTranslator"));
+    assert!(content.contains("String translate(String context, String text);"));
+    assert!(content.contains("public String nameText(TextTranslator translator)"));
+    assert!(content.contains("String translated = translator.translate(\"items.name\", name);"));
+    assert!(content.contains("return translated != null ? translated : name;"));
+    assert!(content.contains("public String descriptionText(TextTranslator translator)"));
+    assert!(content.contains("if (description == null)"));
+    assert!(content.contains("translator.translate(\"items.description\", description)"));
+}
+
+#[test]
+fn emits_global_function_text_helpers() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "localized_name"
+
+            [[structs.fields]]
+            name = "display"
+            type = "text"
+            required = true
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "subtitle"
+            type = "text"
+            required = false
+        "#,
+    )
+    .expect("meta should parse");
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.i18n.mode = crate::codegen::I18nMode::GlobalFunction;
+    input.target.options.i18n.function = Some("GameI18n.translate".to_owned());
+    input.target.options.i18n.returns = crate::codegen::I18nFunctionReturn::Optional;
+    input.target.options.i18n.java_import = Some("game.runtime.i18n.GameI18n".to_owned());
+
+    let files = JavaCodeGenerator.generate(&input).expect("java code");
+    let content = &files[0].content;
+
+    assert!(content.contains("import game.runtime.i18n.GameI18n;"));
+    assert!(!content.contains("public interface TextTranslator"));
+    assert!(content.contains("public String displayText()"));
+    assert!(
+        content.contains(
+            "String translated = GameI18n.translate(\"localized_name.display\", display);"
+        )
+    );
+    assert!(content.contains("return translated != null ? translated : display;"));
+    assert!(content.contains("public String subtitleText()"));
+    assert!(content.contains("if (subtitle == null)"));
+    assert!(content.contains("GameI18n.translate(\"items.subtitle\", subtitle)"));
+}
+
+#[test]
+fn rejects_text_helper_name_collisions() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "name"
+            type = "text"
+            required = true
+
+            [[tables.fields]]
+            name = "name_text"
+            type = "string"
+            required = true
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let error = JavaCodeGenerator.generate(&input).unwrap_err();
+    assert!(
+        matches!(error, ConfigForgeError::Validation(ref message) if message.contains("duplicate generated identifier")),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn suffixes_java_keywords_by_default() {
     let meta = MetaModel::from_toml_str(
         r#"

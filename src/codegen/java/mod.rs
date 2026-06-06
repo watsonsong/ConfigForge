@@ -8,7 +8,8 @@ use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeTable, CodeTableKind,
-    CodeTypeRef, CodeWriterConfig, CodeWriterLike, NamingConfig, build_code_model,
+    CodeTypeRef, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn, I18nMode, I18nOptions,
+    NamingConfig, build_code_model,
     ir::{CodeRelationCardinality, require_non_empty_index_fields},
 };
 
@@ -202,6 +203,10 @@ fn render_java_code(
         content.raw_fmt(format_args!("package {};\n\n", names.package()));
     }
     content.raw("import java.util.*;\n\n");
+    render_java_i18n_import(content, &input.target.options.i18n);
+    if input.target.options.i18n.java_import.is_some() {
+        content.raw("\n");
+    }
     let root_modifier = names.root_access_modifier();
     let final_modifier = if options.emit_final { " final" } else { "" };
     let prefix = if root_modifier.is_empty() {
@@ -216,12 +221,39 @@ fn render_java_code(
     ));
     content.raw("    private ");
     content.raw_fmt(format_args!("{}() {{}}\n\n", names.root_class_name()));
+    render_java_i18n_prelude(content, &input.target.options.i18n);
     render_runtime_contract(content, &model.enums, &names)?;
-    render_java_types(content, &model, &names, options)?;
+    render_java_types(content, &model, &names, options, &input.target.options.i18n)?;
     render_game_data_access_interface(content, &model, &names)?;
     render_game_data_class(content, &model, &names, options)?;
     content.raw("}\n");
     Ok(())
+}
+
+fn render_java_i18n_import(content: &mut impl CodeWriterLike, i18n: &I18nOptions) {
+    if !matches!(i18n.mode, I18nMode::GlobalFunction) {
+        return;
+    }
+    if let Some(java_import) = i18n.java_import.as_deref() {
+        let trimmed = java_import.trim();
+        if trimmed.starts_with("import ") {
+            content.raw(trimmed);
+            if !trimmed.ends_with(';') {
+                content.raw(";");
+            }
+            content.newline();
+        } else {
+            content.raw_fmt(format_args!("import {trimmed};\n"));
+        }
+    }
+}
+
+fn render_java_i18n_prelude(content: &mut impl CodeWriterLike, i18n: &I18nOptions) {
+    if matches!(i18n.mode, I18nMode::Generic) {
+        content.raw(
+            "    public interface TextTranslator {\n        String translate(String context, String text);\n    }\n\n",
+        );
+    }
 }
 
 fn render_runtime_contract(
@@ -360,6 +392,7 @@ fn render_java_types(
     model: &CodeModel,
     names: &JavaNames,
     options: &JavaCodegenOptions,
+    i18n: &I18nOptions,
 ) -> Result<()> {
     for code_enum in &model.enums {
         content.raw_fmt(format_args!(
@@ -388,6 +421,8 @@ fn render_java_types(
             &code_struct.fields,
             names,
             options,
+            i18n,
+            &code_struct.name,
         )?;
         render_read_method(
             content,
@@ -409,6 +444,8 @@ fn render_java_types(
                 &fragment.fields,
                 names,
                 options,
+                i18n,
+                &format!("{}.{}", table.name, fragment.name),
             )?;
             render_read_method(
                 content,
@@ -433,15 +470,7 @@ fn render_java_types(
                 required: false,
             });
         }
-        render_java_row_class(
-            content,
-            &names.row_type_name(&table.name)?,
-            &row_fields,
-            table,
-            model,
-            names,
-            options,
-        )?;
+        render_java_row_class(content, &row_fields, table, model, names, options, i18n)?;
         render_row_read_method(content, table, names)?;
 
         if table.kind == CodeTableKind::Collection {
@@ -642,6 +671,8 @@ fn render_java_class(
     fields: &[CodeField],
     names: &JavaNames,
     options: &JavaCodegenOptions,
+    i18n: &I18nOptions,
+    text_context: &str,
 ) -> Result<()> {
     let final_modifier = if options.emit_final { " final" } else { "" };
     content.raw_fmt(format_args!(
@@ -686,19 +717,21 @@ fn render_java_class(
             names.field_name(&field.name)?
         ));
     }
+    render_java_text_helpers(content, text_context, fields, names, i18n)?;
     content.raw("    }\n\n");
     Ok(())
 }
 
 fn render_java_row_class(
     content: &mut impl CodeWriterLike,
-    class_name: &str,
     fields: &[CodeField],
     table: &CodeTable,
     model: &CodeModel,
     names: &JavaNames,
     options: &JavaCodegenOptions,
+    i18n: &I18nOptions,
 ) -> Result<()> {
+    let class_name = names.row_type_name(&table.name)?;
     let final_modifier = if options.emit_final { " final" } else { "" };
     content.raw_fmt(format_args!(
         "    public static{} class {} {{\n",
@@ -743,8 +776,66 @@ fn render_java_row_class(
             names.field_name(&field.name)?
         ));
     }
+    render_java_text_helpers(content, &table.name, fields, names, i18n)?;
     content.raw("    }\n\n");
     Ok(())
+}
+
+fn render_java_text_helpers(
+    content: &mut impl CodeWriterLike,
+    context_prefix: &str,
+    fields: &[CodeField],
+    names: &JavaNames,
+    i18n: &I18nOptions,
+) -> Result<()> {
+    for field in fields
+        .iter()
+        .filter(|field| matches!(field.code_type, CodeTypeRef::Text))
+    {
+        let function_name = names.text_function_name(&field.name)?;
+        let field_name = names.field_name(&field.name)?;
+        let context = format!("{context_prefix}.{}", field.name);
+        match i18n.mode {
+            I18nMode::Generic if field.required => {
+                content.raw_fmt(format_args!(
+                    "\n        public String {function_name}(TextTranslator translator) {{\n            String translated = translator.translate({context:?}, {field_name});\n            return translated != null ? translated : {field_name};\n        }}\n"
+                ));
+            }
+            I18nMode::Generic => {
+                content.raw_fmt(format_args!(
+                    "\n        public String {function_name}(TextTranslator translator) {{\n            if ({field_name} == null) {{\n                return null;\n            }}\n            String translated = translator.translate({context:?}, {field_name});\n            return translated != null ? translated : {field_name};\n        }}\n"
+                ));
+            }
+            I18nMode::GlobalFunction if field.required => {
+                content.raw_fmt(format_args!(
+                    "\n        public String {function_name}() {{\n            {statement}\n        }}\n",
+                    statement = java_global_i18n_statement(i18n, &context, &field_name, &field_name)
+                ));
+            }
+            I18nMode::GlobalFunction => {
+                content.raw_fmt(format_args!(
+                    "\n        public String {function_name}() {{\n            if ({field_name} == null) {{\n                return null;\n            }}\n            {statement}\n        }}\n",
+                    statement = java_global_i18n_statement(i18n, &context, &field_name, &field_name)
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn java_global_i18n_statement(
+    i18n: &I18nOptions,
+    context: &str,
+    msgid_expr: &str,
+    fallback_expr: &str,
+) -> String {
+    let function = i18n.function.as_deref().expect("global i18n function");
+    match i18n.returns {
+        I18nFunctionReturn::String => format!("return {function}({context:?}, {msgid_expr});"),
+        I18nFunctionReturn::Optional => format!(
+            "String translated = {function}({context:?}, {msgid_expr});\n            return translated != null ? translated : {fallback_expr};"
+        ),
+    }
 }
 
 fn render_java_table(
