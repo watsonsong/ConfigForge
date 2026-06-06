@@ -19,7 +19,7 @@
 
 ## Unreal C++ shim 边界
 
-`cpp_unreal` 生成器使用 Unreal 风格 public API（`TArray`、`TMap`、`FString`、`TOptional`、`USTRUCT`、`UCLASS`、`UFUNCTION` 等），但 ConfigForge 仓库中的集成测试不能要求安装完整 Unreal Engine。为此，`tests/cli_integration.rs` 会在临时目录写入轻量 `CoreMinimal.h` 与 `Kismet/BlueprintFunctionLibrary.h` shim，只用于 `c++ -fsyntax-only` smoke test：
+`cpp_unreal` 生成器使用 Unreal 风格 public API（`TArray`、`TMap`、`FString`、`TOptional`、`USTRUCT`、`UCLASS`、`UFUNCTION` 等），但 ConfigForge 仓库中的集成测试不能要求安装完整 Unreal Engine。为此，`tests/cli_integration/support/unreal.rs` 会在临时目录写入轻量 `CoreMinimal.h` 与 `Kismet/BlueprintFunctionLibrary.h` shim，只用于 `c++ -fsyntax-only` smoke test：
 
 - shim 只覆盖生成代码当前需要的最小类型、容器、hash、Algo 二分和反射宏；它不是 runtime adapter，也不承诺与 Unreal Engine ABI / UHT 行为等价。
 - 生产 Unreal 项目必须包含真实 Unreal headers，并由项目 module 提供 `api_macro`（例如 `GAMECONFIG_API`）和真实 loader / reader adapter。

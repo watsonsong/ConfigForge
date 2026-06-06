@@ -179,7 +179,7 @@ runtime table exporter、aggregate exporter 和 codegen 可以并行生成 artif
 
 #### Pipeline 模型
 
-当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。Build 主流程已创建共享 `ArtifactSink` 并传入 runtime/codegen 分支。runtime table exporter 与 aggregate exporter 均直接写入 sink，JSON / MessagePack / binary 已覆盖 writer-style serializer；Rust / TypeScript / C++ / C# codegen 的 production path 均通过 `generate_to_sink()` 打开 sink stream 并使用 streaming code writer 写出。
+当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。Build 主流程已创建共享 `ArtifactSink` 并传入 runtime/codegen 分支。runtime table exporter 与 aggregate exporter 均直接写入 sink，JSON / MessagePack / binary 已覆盖 writer-style serializer；Rust / TypeScript / C++ / Unreal C++ / C# / Java codegen 的 production path 均通过 `generate_to_sink()` 打开 sink stream 并使用 streaming code writer 写出。
 
 已实现 API：
 
@@ -381,7 +381,7 @@ Artifact 模块单元测试应覆盖：
 - `src/artifact/` 已提供 `Artifact`、`ArtifactContent`、`ArtifactWriter`、`ArtifactSink`、`ArtifactWriteStream`、`ArtifactWriteMode` 和 `ArtifactWriteResult`。
 - Artifact 模块内的写入 authority 已收敛到 `ArtifactSink`；`ArtifactWriter::write(Vec<Artifact>)` 是兼容 wrapper，并通过 sink 写入。
 - 旧 dedicated bounded queue 和 sink 级资源限流实现已移除；ArtifactSink 只负责标准写入流与生命周期。
-- runtime table exporter、aggregate exporter 与 generated code 在 Build 主流程中已接入共享 `ArtifactSink`；runtime table exporter 通过 stream API 写入 sink，JSON / MessagePack / binary 使用 writer-style serializer；aggregate exporter 通过 required `export_to_sink()` 写入 sink；Rust / TypeScript / C++ / C# codegen 通过 `generate_to_sink()` 与 streaming writer 写入 sink。
+- runtime table exporter、aggregate exporter 与 generated code 在 Build 主流程中已接入共享 `ArtifactSink`；runtime table exporter 通过 stream API 写入 sink，JSON / MessagePack / binary 使用 writer-style serializer；aggregate exporter 通过 required `export_to_sink()` 写入 sink；Rust / TypeScript / C++ / Unreal C++ / C# / Java codegen 通过 `generate_to_sink()` 与 streaming writer 写入 sink。
 - CLI 支持 `--dry-run`、`--write-mode direct|temp-commit`；artifact 写入资源控制不再暴露独立参数。
 - temp-commit 当前提供临时文件阶段保护；提交阶段失败按 `ConfigForgeError::WriteFile` 报错，并可能保留已提交的最终文件。
 

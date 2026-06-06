@@ -17,7 +17,7 @@ Java backend 已实现为独立 codegen type：`java`（alias：`jvm`），内�
 
 第一阶段采用单文件输出 `GeneratedGameConfig.java`。由于 Java 每个文件只能有一个 public top-level type，生成代码采用 **public root class + nested public static types** 形态：root class 承载 runtime contract、enum、row/value type、table repository、`GameData`、`LazyGameData`、compound key 和 helper。业务侧可通过 `GeneratedGameConfig.GameData.load(loader)`、`GeneratedGameConfig.ItemsRow` 等访问生成 API。
 
-当前已追齐 Rust / C++ / TypeScript / C# format-agnostic backend MVP：enum、value struct / row class、ObjectTable、CollectionTable repository、eager `GameData`、`LazyGameData`、unique / non-unique / ordered index、compound key、`linked_field` relation helper、`text` helper，以及 format-agnostic runtime reader contract。
+当前已追齐 Rust / C++ / TypeScript / C# 等 format-agnostic backend MVP：enum、value struct / row class、ObjectTable、CollectionTable repository、eager `GameData`、`LazyGameData`、unique / non-unique / ordered index、compound key、`linked_field` relation helper、`text` helper，以及 format-agnostic runtime reader contract。
 
 ## 设计目标与非目标
 

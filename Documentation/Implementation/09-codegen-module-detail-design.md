@@ -186,14 +186,14 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 
 ### 9.4.1 当前实现状态摘要
 
-- Rust / C++ / TypeScript / C# / Java backend 均已实现 MVP。
+- Rust / C++ / TypeScript / Unreal C++ / C# / Java backend 均已实现 MVP。
 - Unreal C++ 已作为独立 `cpp_unreal` backend 实现；不作为标准 `cpp` backend 的开关，以避免生成 public API 同时混用 `std::*` 和 Unreal API。当前支持 `support = "containers"` 和 `support = "blueprint"` 两级输出：containers 模式生成 Unreal 类型/容器、repository、index、relation、text、`GameData` 与 `FLazyGameData`；Blueprint 模式额外生成 `USTRUCT(BlueprintType)` / `UENUM(BlueprintType)` / `UPROPERTY(BlueprintReadOnly)` 和 `UBlueprintFunctionLibrary` 查询 facade。
 - Eager loading 和 table-level `LazyGameData` 均已实现 MVP；lazy facade 保留 loader，首次访问 table/object 时加载并缓存。
 - TypeScript 已生成 `loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`；同步 API 要求 loader 同步返回 reader，遇到 Promise 应报错。
 - C# backend 已作为独立 `type = "csharp"` backend 实现，生成 .NET BCL-only 单文件 `.cs`，支持 enum / struct / row / object / repository、hash / ordered / compound index、`IGameDataAccess` relation helper、text helper、eager `GameData` 与同步 `LazyGameData`。
 - Java backend 已作为独立 `type = "java"` backend 实现，生成 JDK-only 单文件 `.java`，采用 public root class + nested public static generated types 规避 Java 单文件 public top-level type 限制，支持 enum / struct / row / object / repository、hash / ordered / compound index、`GameDataAccess` relation helper、text helper、eager `GameData` 与同步 `LazyGameData`。
 - 生成代码使用逻辑 table name，不绑定某个 `targets.exports` runtime data export task 的真实 artifact path。
-- `linked_field` relation helper 和 `text` translation helper 已纳入 Rust / C++ / TypeScript / C# / Java 生成器。
+- `linked_field` relation helper 和 `text` translation helper 已纳入 Rust / C++ / TypeScript / Unreal C++ / C# / Java 生成器。
 - Lua embedded data generator 已作为 `type = "lua_table"` 的 MetaAndData exporter 落地，而不是现有 format-agnostic `CodeGenerator` backend。
 - `preserve_source_order` 的 generated access 语义仍为规划项：目标行为是 indexed CollectionTable 默认不生成 public source-order `rows` API；只有显式声明 `preserve_source_order = true` 的表生成 row count / row_at / rows 访问，服务随机角色名这类按表格顺序随机访问的配置。
 
@@ -205,4 +205,4 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 2. ObjectTable 等跨专题边界的短说明。
 3. 拆分专题索引和当前实现状态摘要。
 
-如果需要新增正文，应优先落到 `09a`~`09h` 的专题文档；只有影响整个 Codegen 模块入口、依赖方向或专题划分时才修改本文。这样可以避免总览文档重新膨胀，保证 AI 和人类读者能在一次阅读内获得导航。
+如果需要新增正文，应优先落到 `09a`~`09l` 的专题文档；只有影响整个 Codegen 模块入口、依赖方向或专题划分时才修改本文。这样可以避免总览文档重新膨胀，保证 AI 和人类读者能在一次阅读内获得导航。

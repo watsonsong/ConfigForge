@@ -121,7 +121,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `06-validation-module-detail-design.md` | 模块 | Validation 主流程、ExportValidationView、ValidationReport、validator registry。 |
 | `07-artifact-module-detail-design.md` | 模块 | Artifact model、writer、dry-run、direct/temp-commit 策略和写入结果。 |
 | `08-exporter-module-detail-design.md` | 模块 | Runtime data exporter、格式 registry、JSON / MessagePack / `bin`、ObjectTable payload。 |
-| `09-codegen-module-detail-design.md` | 模块总览 | Codegen 目标、流程位置、模块边界、专题索引和当前实现状态摘要；详细设计见 `09a`~`09h`。 |
+| `09-codegen-module-detail-design.md` | 模块总览 | Codegen 目标、流程位置、模块边界、专题索引和当前实现状态摘要；详细设计见 `09a`~`09l`。 |
 | `09a-codegen-runtime-reader-contract.md` | Codegen 专题 | Runtime reader contract、eager/lazy loading、TypeScript sync API、逻辑 table name 与 schema revision。 |
 | `09b-codegen-rust-backend.md` | Codegen 专题 | Rust backend generated API 与 lazy loading。 |
 | `09c-codegen-cpp-backend.md` | Codegen 专题 | C++ backend generated API、namespace/ownership 与 lazy loading。 |

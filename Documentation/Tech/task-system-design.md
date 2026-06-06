@@ -79,7 +79,7 @@ ConfigForge 的任务可按资源类型分为三类。
 - `Semaphore` 可限制同时打开文件、HTTP 请求、远端 API 请求数；
 - `JoinSet` / `FuturesUnordered` 可收集同类 I/O 任务。
 
-ArtifactSink 当前使用同步 `std::io::Write`，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 并传入 runtime/codegen 分支。runtime table exporter 与 aggregate exporter 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack / binary 均已使用 writer-style serializer；内置 Rust / TypeScript / C++ / C# codegen production path 也通过 `generate_to_sink()` 和 streaming code writer 直接写 sink。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
+ArtifactSink 当前使用同步 `std::io::Write`，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 并传入 runtime/codegen 分支。runtime table exporter 与 aggregate exporter 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack / binary 均已使用 writer-style serializer；内置 Rust / TypeScript / C++ / Unreal C++ / C# / Java codegen production path 也通过 `generate_to_sink()` 和 streaming code writer 直接写 sink。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
 
 建议配置：
 
@@ -282,7 +282,7 @@ pub enum TaskResource {
 
 | 请求 / Export task | 必要依赖 | 不应触发 |
 | --- | --- | --- |
-| 只包含 `MetaOnly` codegen（Rust / C++ / TypeScript / Unreal C++ / C#） | Project Config、Target normalize、effective target tags、Meta extract、Meta link / meta validate、GenerateCode、Artifact plan/write | DataLoadPlan、SourceRead、NormalizeDataSet、Data validation、MetaAndData exporter |
+| 只包含 `MetaOnly` codegen（Rust / C++ / TypeScript / Unreal C++ / C# / Java） | Project Config、Target normalize、effective target tags、Meta extract、Meta link / meta validate、GenerateCode、Artifact plan/write | DataLoadPlan、SourceRead、NormalizeDataSet、Data validation、MetaAndData exporter |
 | 包含 `MetaAndData` runtime / aggregate / embedded data exporter（JSON / MessagePack / bin / POT / Lua） | Project Config、Target normalize、effective target tags、Meta extract、Meta link / meta validate、DataLoadPlan、SourceRead、NormalizeDataSet、FullDataSet validations、TargetView validations、data artifact generation、Artifact plan/write | 与该 target 无关的其他 target export tasks |
 | 多 target 构建（未来） | 每个 target 独立 effective tags / target view；共享 Project Config、raw MetaModel、Meta link；可按 `(project.input, effective_tags)` 复用 DataSet / validation 结果 | 只按 `project.input` 复用 DataSet；把一个 target 的 ExportValidationView 复用到另一个 target |
 
