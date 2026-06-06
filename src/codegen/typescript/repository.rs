@@ -5,7 +5,7 @@ use crate::{
     ConfigForgeError, Result,
     codegen::{
         CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriterLike,
-        ir::{CodeForeignKey, CodeRelationCardinality},
+        ir::{CodeForeignKey, CodeRelationCardinality, relation_key_plan},
     },
 };
 
@@ -703,15 +703,12 @@ fn render_optional_empty_check(
     names: &TypeScriptNames<'_>,
     cache_name: &str,
 ) -> Result<()> {
-    let optional_fields = foreign_key
-        .fields
-        .iter()
-        .filter(|field| !field.required)
-        .collect::<Vec<_>>();
-    if optional_fields.is_empty() {
+    let key_plan = relation_key_plan(foreign_key);
+    if key_plan.optional_key_fields.is_empty() {
         return Ok(());
     }
-    let empty_conditions = optional_fields
+    let empty_conditions = key_plan
+        .optional_key_fields
         .iter()
         .map(|field| {
             Ok(format!(
@@ -720,12 +717,12 @@ fn render_optional_empty_check(
             ))
         })
         .collect::<Result<Vec<_>>>()?;
-    if optional_fields.len() == foreign_key.fields.len() {
+    if key_plan.all_key_fields_optional {
         content.raw_fmt(format_args!(
             "  if ({}) {{ row.{cache_name} = LINK_EMPTY; return undefined; }}\n",
             empty_conditions.join(" && ")
         ));
-        if foreign_key.fields.len() > 1 {
+        if key_plan.should_report_partial_empty {
             content.raw_fmt(format_args!(
                 "  if ({}) {{ throw new Error({:?}); }}\n",
                 empty_conditions.join(" || "),
@@ -735,7 +732,7 @@ fn render_optional_empty_check(
                 )
             ));
         }
-    } else {
+    } else if key_plan.should_report_partial_empty {
         content.raw_fmt(format_args!(
             "  if ({}) {{ throw new Error({:?}); }}\n",
             empty_conditions.join(" || "),

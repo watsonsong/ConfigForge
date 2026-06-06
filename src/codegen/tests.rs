@@ -9,7 +9,7 @@ use crate::{
     runtime_contract::{ExportDependency, RuntimeDataFile},
 };
 
-use super::ir::CodeRelationCardinality;
+use super::ir::{CodeForeignKey, CodeRelationCardinality, relation_key_plan};
 use super::*;
 
 pub(in crate::codegen) fn linked_fixture() -> MetaModel {
@@ -432,6 +432,71 @@ fn code_model_classifies_linked_field_relation_cardinality() {
         CodeRelationCardinality::OptionalOne
     );
     assert_eq!(cardinality("starter_item"), CodeRelationCardinality::Many);
+}
+
+#[test]
+fn relation_key_plan_centralizes_optional_empty_semantics() {
+    let required = CodeField {
+        name: "class".to_owned(),
+        code_type: CodeTypeRef::String,
+        desc: None,
+        required: true,
+    };
+    let optional_level = CodeField {
+        name: "level".to_owned(),
+        code_type: CodeTypeRef::Int,
+        desc: None,
+        required: false,
+    };
+    let optional_variant = CodeField {
+        name: "variant".to_owned(),
+        code_type: CodeTypeRef::String,
+        desc: None,
+        required: false,
+    };
+
+    let mixed_key = CodeForeignKey {
+        name: "mixed_key".to_owned(),
+        desc: None,
+        fields: vec![required.clone(), optional_level.clone()],
+        target_table: "targets".to_owned(),
+        target_index: "by_key".to_owned(),
+        allow_empty: true,
+        linked_field: None,
+    };
+    let mixed_plan = relation_key_plan(&mixed_key);
+    assert_eq!(mixed_plan.key_fields.len(), 2);
+    assert_eq!(mixed_plan.optional_key_fields.len(), 1);
+    assert!(!mixed_plan.all_key_fields_optional);
+    assert!(mixed_plan.should_report_partial_empty);
+
+    let optional_single_key = CodeForeignKey {
+        name: "optional_single_key".to_owned(),
+        desc: None,
+        fields: vec![optional_level.clone()],
+        target_table: "targets".to_owned(),
+        target_index: "by_key".to_owned(),
+        allow_empty: true,
+        linked_field: None,
+    };
+    let optional_single_plan = relation_key_plan(&optional_single_key);
+    assert_eq!(optional_single_plan.optional_key_fields.len(), 1);
+    assert!(optional_single_plan.all_key_fields_optional);
+    assert!(!optional_single_plan.should_report_partial_empty);
+
+    let optional_composite_key = CodeForeignKey {
+        name: "optional_composite_key".to_owned(),
+        desc: None,
+        fields: vec![optional_level, optional_variant],
+        target_table: "targets".to_owned(),
+        target_index: "by_key".to_owned(),
+        allow_empty: true,
+        linked_field: None,
+    };
+    let optional_composite_plan = relation_key_plan(&optional_composite_key);
+    assert_eq!(optional_composite_plan.optional_key_fields.len(), 2);
+    assert!(optional_composite_plan.all_key_fields_optional);
+    assert!(optional_composite_plan.should_report_partial_empty);
 }
 
 #[test]

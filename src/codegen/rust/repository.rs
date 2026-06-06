@@ -5,7 +5,7 @@ use crate::{
     ConfigForgeError, Result,
     codegen::{
         CodeIndex, CodeModel, CodeTable, CodeTableKind, CodeWriterLike,
-        ir::{CodeForeignKey, CodeRelationCardinality},
+        ir::{CodeForeignKey, CodeRelationCardinality, relation_key_plan},
     },
 };
 
@@ -287,20 +287,19 @@ fn render_single_relation_method(
         .iter()
         .map(|field| Ok(format!("self.{}.clone()", names.field_name(&field.name)?)))
         .collect::<Result<Vec<_>>>()?;
-    if optional && foreign_key.fields.len() > 1 {
-        let partial_conditions = foreign_key
-            .fields
+    let key_plan = relation_key_plan(foreign_key);
+    if optional && key_plan.should_report_partial_empty {
+        let partial_conditions = key_plan
+            .optional_key_fields
             .iter()
-            .map(|field| {
-                if field.required {
-                    Ok("false".to_owned())
-                } else {
-                    Ok(format!("self.{}.is_none()", names.field_name(&field.name)?))
-                }
-            })
+            .map(|field| Ok(format!("self.{}.is_none()", names.field_name(&field.name)?)))
             .collect::<Result<Vec<_>>>()?;
         let any_empty = partial_conditions.join(" || ");
-        let all_empty = partial_conditions.join(" && ");
+        let all_empty = if key_plan.all_key_fields_optional {
+            partial_conditions.join(" && ")
+        } else {
+            "false".to_owned()
+        };
         content.raw_fmt(format_args!(
             "        if ({any_empty}) && !({all_empty}) {{ return Err(RuntimeDataError::decode({:?}.to_owned())); }}\n",
             format!("foreign key relation `{}` has partial empty source key", foreign_key.name)
@@ -418,16 +417,14 @@ fn render_optional_empty_check(
     names: &RustNames<'_>,
     indent: &str,
 ) -> Result<()> {
-    let conditions = foreign_key
-        .fields
+    let key_plan = relation_key_plan(foreign_key);
+    if !key_plan.all_key_fields_optional {
+        return Ok(());
+    }
+    let conditions = key_plan
+        .optional_key_fields
         .iter()
-        .map(|field| {
-            if field.required {
-                Ok("false".to_owned())
-            } else {
-                Ok(format!("self.{}.is_none()", names.field_name(&field.name)?))
-            }
-        })
+        .map(|field| Ok(format!("self.{}.is_none()", names.field_name(&field.name)?)))
         .collect::<Result<Vec<_>>>()?;
     if conditions.is_empty() {
         return Ok(());

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ConfigForgeError, Result};
+use crate::{ConfigForgeError, Result, codegen::ir::relation_key_plan};
 
 use super::{
     CodeForeignKey, CodeIndex, CodeModel, CodeRelationCardinality, CodeTable, CodeWriterLike,
@@ -313,7 +313,7 @@ pub(super) fn render_row_relation_source(
                     "const {target_row_type}* {source_row_type}::{function_name}(const {}& Data) const {{\n",
                     names.game_data_access_interface_name()?
                 ));
-                render_optional_relation_empty_check(content, foreign_key, names)?;
+                render_optional_relation_key_check(content, foreign_key, names)?;
                 content.raw_fmt(format_args!(
                     "    auto TargetTableResult = Data.{}();\n",
                     names.table_accessor_name(&target_table.name)?
@@ -404,27 +404,32 @@ pub(super) fn render_row_relation_source(
     Ok(())
 }
 
-fn render_optional_relation_empty_check(
+fn render_optional_relation_key_check(
     content: &mut impl CodeWriterLike,
     foreign_key: &CodeForeignKey,
     names: &CppUnrealNames<'_>,
 ) -> Result<()> {
-    let optional_fields = foreign_key
-        .fields
-        .iter()
-        .filter(|field| !field.required)
-        .collect::<Vec<_>>();
-    if optional_fields.is_empty() {
+    let key_plan = relation_key_plan(foreign_key);
+    if key_plan.optional_key_fields.is_empty() {
         return Ok(());
     }
-    let empty_conditions = optional_fields
+    let empty_conditions = key_plan
+        .optional_key_fields
         .iter()
         .map(|field| Ok(format!("!{}.IsSet()", names.field_name(field)?)))
         .collect::<Result<Vec<_>>>()?;
-    content.raw_fmt(format_args!(
-        "    if ({}) {{ return nullptr; }}\n",
-        empty_conditions.join(" || ")
-    ));
+    if key_plan.all_key_fields_optional {
+        content.raw_fmt(format_args!(
+            "    if ({}) {{ return nullptr; }}\n",
+            empty_conditions.join(" && ")
+        ));
+    }
+    if key_plan.should_report_partial_empty {
+        content.raw_fmt(format_args!(
+            "    if ({}) {{ return nullptr; }}\n",
+            empty_conditions.join(" || ")
+        ));
+    }
     Ok(())
 }
 

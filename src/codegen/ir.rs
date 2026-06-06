@@ -108,11 +108,39 @@ pub(crate) struct CodeLinkedField {
     pub cardinality: CodeRelationCardinality,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RelationKeyPlan<'a> {
+    pub key_fields: &'a [CodeField],
+    pub optional_key_fields: Vec<&'a CodeField>,
+    pub all_key_fields_optional: bool,
+    pub should_report_partial_empty: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CodeRelationCardinality {
     One,
     OptionalOne,
     Many,
+}
+
+pub(crate) fn relation_key_plan(foreign_key: &CodeForeignKey) -> RelationKeyPlan<'_> {
+    let optional_key_fields = foreign_key
+        .fields
+        .iter()
+        .filter(|field| !field.required)
+        .collect::<Vec<_>>();
+    let has_optional_key_fields = !optional_key_fields.is_empty();
+    let all_key_fields_optional =
+        has_optional_key_fields && optional_key_fields.len() == foreign_key.fields.len();
+    let should_report_partial_empty =
+        has_optional_key_fields && (!all_key_fields_optional || foreign_key.fields.len() > 1);
+
+    RelationKeyPlan {
+        key_fields: &foreign_key.fields,
+        optional_key_fields,
+        all_key_fields_optional,
+        should_report_partial_empty,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
