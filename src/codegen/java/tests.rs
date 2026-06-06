@@ -339,6 +339,80 @@ fn emits_object_table_loader_without_repository() {
 }
 
 #[test]
+fn emits_hash_indexes_and_compound_key() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[enums]]
+            name = "item_rarity"
+
+            [[enums.values]]
+            name = "common"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "rarity"
+            type = "item_rarity"
+            required = true
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables.indexes]]
+            name = "by_rarity"
+            fields = ["rarity"]
+            unique = false
+
+            [[tables.indexes]]
+            name = "by_rarity_level"
+            fields = ["rarity", "level"]
+            unique = true
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = JavaCodeGenerator.generate(&input).expect("java code");
+    let content = &files[0].content;
+
+    assert!(content.contains("private final Map<Long, Integer> byIdIndex;"));
+    assert!(content.contains("private final Map<ItemRarity, int[]> byRarityIndex;"));
+    assert!(content.contains("private static final class ItemsByRarityLevelKey"));
+    assert!(content.contains("public boolean equals(Object other)"));
+    assert!(content.contains("return Objects.hash(rarity, level);"));
+    assert!(content.contains("Map<Long, Integer> byIdIndex = new HashMap<>();"));
+    assert!(
+        content.contains("Map<ItemRarity, List<Integer>> byRarityIndexBuilder = new HashMap<>();")
+    );
+    assert!(content.contains(
+        "throw new ConfigForgeRuntimeException(\"Duplicate unique index key for ItemsTable.by_id\")"
+    ));
+    assert!(content.contains("Map<ItemRarity, int[]> byRarityIndex = new HashMap<>();"));
+    assert!(content.contains("public ItemsRow getById(long id)"));
+    assert!(content.contains("Integer rowIndex = byIdIndex.get(id);"));
+    assert!(content.contains("public List<ItemsRow> findByRarity(ItemRarity rarity)"));
+    assert!(content.contains("return Collections.unmodifiableList(result);"));
+    assert!(content.contains("public ItemsRow getByRarityLevel(ItemRarity rarity, long level)"));
+    assert!(content.contains("new ItemsByRarityLevelKey(rarity, level)"));
+}
+
+#[test]
 fn suffixes_java_keywords_by_default() {
     let meta = MetaModel::from_toml_str(
         r#"

@@ -8,7 +8,7 @@ use super::{
     symbols::{is_java_keyword, validate_java_identifier, validate_java_package},
 };
 use crate::codegen::{
-    CaseStyle, CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeTable,
+    CaseStyle, CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
     CodeTypeRef, KeywordConflictPolicy, NamingConfig, naming,
 };
 
@@ -116,6 +116,14 @@ impl JavaNames {
         self.type_name(&format!("{table_name}_table"))
     }
 
+    pub(super) fn compound_key_type_name(
+        &self,
+        table_name: &str,
+        index: &CodeIndex,
+    ) -> Result<String> {
+        self.type_name(&format!("{table_name}_{}_key", index.name))
+    }
+
     pub(super) fn fragment_type_name(
         &self,
         table_name: &str,
@@ -149,6 +157,16 @@ impl JavaNames {
         self.identifier(name, CaseStyle::CamelCase)
     }
 
+    pub(super) fn index_storage_name(&self, index: &CodeIndex) -> Result<String> {
+        Ok(format!("{}Index", self.local_name(&index.name)?))
+    }
+
+    pub(super) fn index_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let prefix = if index.unique { "get_by" } else { "find_by" };
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("{prefix}_{suffix}"), self.naming.function)
+    }
+
     pub(super) fn getter_name(&self, name: &str) -> Result<String> {
         let field = self.field_name(name)?;
         let mut chars = field.chars();
@@ -177,6 +195,86 @@ impl JavaNames {
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("{}[]", self.java_array_element_type(element)?),
         })
+    }
+
+    pub(super) fn java_key_type(&self, code_type: &CodeTypeRef) -> Result<String> {
+        Ok(match code_type {
+            CodeTypeRef::Int => "Long".to_owned(),
+            CodeTypeRef::Float => "Double".to_owned(),
+            CodeTypeRef::Bool => "Boolean".to_owned(),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
+            CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
+            CodeTypeRef::List(element) => format!("{}[]", self.java_array_element_type(element)?),
+        })
+    }
+
+    pub(super) fn index_key_type(&self, table_name: &str, index: &CodeIndex) -> Result<String> {
+        if index.fields.len() == 1 {
+            self.java_key_type(&index.fields[0].code_type)
+        } else {
+            self.compound_key_type_name(table_name, index)
+        }
+    }
+
+    pub(super) fn index_parameters(&self, index: &CodeIndex) -> Result<String> {
+        index
+            .fields
+            .iter()
+            .map(|field| {
+                Ok(format!(
+                    "{} {}",
+                    self.java_type_ref(&field.code_type, true)?,
+                    self.local_name(&field.name)?
+                ))
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(|parts| parts.join(", "))
+    }
+
+    pub(super) fn index_key_from_parameters(
+        &self,
+        table_name: &str,
+        index: &CodeIndex,
+    ) -> Result<String> {
+        if index.fields.len() == 1 {
+            Ok(self.local_name(&index.fields[0].name)?)
+        } else {
+            Ok(format!(
+                "new {}({})",
+                self.compound_key_type_name(table_name, index)?,
+                index
+                    .fields
+                    .iter()
+                    .map(|field| self.local_name(&field.name))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", ")
+            ))
+        }
+    }
+
+    pub(super) fn index_key_from_row(
+        &self,
+        table_name: &str,
+        index: &CodeIndex,
+        row_var: &str,
+    ) -> Result<String> {
+        if index.fields.len() == 1 {
+            Ok(format!(
+                "{row_var}.{}()",
+                self.getter_name(&index.fields[0].name)?
+            ))
+        } else {
+            Ok(format!(
+                "new {}({})",
+                self.compound_key_type_name(table_name, index)?,
+                index
+                    .fields
+                    .iter()
+                    .map(|field| Ok(format!("{row_var}.{}()", self.getter_name(&field.name)?)))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", ")
+            ))
+        }
     }
 
     pub(super) fn read_type_function_name(&self, type_name: &str) -> Result<String> {

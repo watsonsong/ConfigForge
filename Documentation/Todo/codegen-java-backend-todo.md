@@ -142,7 +142,7 @@ feat(codegen): add Java naming and type mapping
 feat(codegen): load Java rows and game data
 ```
 
-## [ ] Step 4：unordered index 和 compound key
+## [x] Step 4：unordered index 和 compound key
 
 目标：支持 unique / non-unique hash lookup。
 

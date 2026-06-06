@@ -7,8 +7,8 @@ use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
-    CodeFragmentPayload, CodeGenerator, CodeModel, CodeTable, CodeTableKind, CodeTypeRef,
-    CodeWriterConfig, CodeWriterLike, NamingConfig, build_code_model,
+    CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeTable, CodeTableKind,
+    CodeTypeRef, CodeWriterConfig, CodeWriterLike, NamingConfig, build_code_model,
     ir::require_non_empty_index_fields,
 };
 
@@ -441,6 +441,9 @@ fn render_java_types(
         render_row_read_method(content, table, names)?;
 
         if table.kind == CodeTableKind::Collection {
+            for index in table.indexes.iter().filter(|index| index.fields.len() > 1) {
+                render_compound_key_type(content, &table.name, index, names, options)?;
+            }
             render_java_table(content, table, names, options)?;
         } else {
             render_object_loader(content, table, names)?;
@@ -589,10 +592,41 @@ fn render_java_table(
         "        private final {}[] rows;\n\n",
         row_type
     ));
+    for index in &table.indexes {
+        let key_type = names.index_key_type(&table.name, index)?;
+        let storage = names.index_storage_name(index)?;
+        if index.unique {
+            content.raw_fmt(format_args!(
+                "        private final Map<{key_type}, Integer> {storage};\n"
+            ));
+        } else {
+            content.raw_fmt(format_args!(
+                "        private final Map<{key_type}, int[]> {storage};\n"
+            ));
+        }
+    }
+    if !table.indexes.is_empty() {
+        content.raw("\n");
+    }
     content.raw_fmt(format_args!(
-        "        private {}({}[] rows) {{\n            this.rows = rows;\n        }}\n\n",
+        "        private {}({}[] rows",
         table_type, row_type
     ));
+    for index in &table.indexes {
+        let key_type = names.index_key_type(&table.name, index)?;
+        let storage = names.index_storage_name(index)?;
+        if index.unique {
+            content.raw_fmt(format_args!(", Map<{key_type}, Integer> {storage}"));
+        } else {
+            content.raw_fmt(format_args!(", Map<{key_type}, int[]> {storage}"));
+        }
+    }
+    content.raw(") {\n            this.rows = rows;\n");
+    for index in &table.indexes {
+        let storage = names.index_storage_name(index)?;
+        content.raw_fmt(format_args!("            this.{storage} = {storage};\n"));
+    }
+    content.raw("        }\n\n");
     content.raw_fmt(format_args!(
         "        public static {table_type} load(ConfigForgeRuntimeDataLoader loader) {{\n"
     ));
@@ -613,9 +647,7 @@ fn render_java_table(
     content.raw("                        reader.exitRow();\n");
     content.raw("                    }\n");
     content.raw("                }\n");
-    content.raw_fmt(format_args!(
-        "                return new {table_type}(rows);\n"
-    ));
+    content.raw_fmt(format_args!("                return fromRows(rows);\n"));
     content.raw("            } catch (RuntimeException error) {\n");
     content.raw("                throw new ConfigForgeRuntimeException(\"Failed to load table '\" + DATA_FILE + \"'\", error);\n");
     content.raw("            }\n");
@@ -625,7 +657,187 @@ fn render_java_table(
         "        public {} rowAt(int index) {{ return rows[index]; }}\n",
         row_type
     ));
+    render_table_from_rows_method(content, table, names)?;
+    render_index_lookup_methods(content, table, names)?;
     content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_compound_key_type(
+    content: &mut impl CodeWriterLike,
+    table_name: &str,
+    index: &CodeIndex,
+    names: &JavaNames,
+    options: &JavaCodegenOptions,
+) -> Result<()> {
+    let final_modifier = if options.emit_final { " final" } else { "" };
+    let key_type = names.compound_key_type_name(table_name, index)?;
+    content.raw_fmt(format_args!(
+        "    private static{} class {key_type} {{\n",
+        final_modifier
+    ));
+    for field in &index.fields {
+        content.raw_fmt(format_args!(
+            "        private final {} {};\n",
+            names.java_type_ref(&field.code_type, true)?,
+            names.field_name(&field.name)?
+        ));
+    }
+    content.raw_fmt(format_args!(
+        "\n        private {key_type}({}) {{\n",
+        names.index_parameters(index)?
+    ));
+    for field in &index.fields {
+        let field_name = names.field_name(&field.name)?;
+        let local_name = names.local_name(&field.name)?;
+        content.raw_fmt(format_args!(
+            "            this.{field_name} = {local_name};\n"
+        ));
+    }
+    content.raw("        }\n\n");
+    content.raw("        @Override\n");
+    content.raw("        public boolean equals(Object other) {\n");
+    content.raw_fmt(format_args!(
+        "            if (!(other instanceof {key_type})) {{ return false; }}\n"
+    ));
+    content.raw_fmt(format_args!(
+        "            {key_type} key = ({key_type}) other;\n"
+    ));
+    let equals_expr = index
+        .fields
+        .iter()
+        .map(|field| {
+            let field_name = names.field_name(&field.name)?;
+            Ok(format!("Objects.equals({field_name}, key.{field_name})"))
+        })
+        .collect::<Result<Vec<_>>>()?
+        .join(" && ");
+    content.raw_fmt(format_args!("            return {equals_expr};\n"));
+    content.raw("        }\n\n");
+    content.raw("        @Override\n");
+    content.raw("        public int hashCode() {\n");
+    content.raw_fmt(format_args!(
+        "            return Objects.hash({});\n",
+        index
+            .fields
+            .iter()
+            .map(|field| names.field_name(&field.name))
+            .collect::<Result<Vec<_>>>()?
+            .join(", ")
+    ));
+    content.raw("        }\n");
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_table_from_rows_method(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &JavaNames,
+) -> Result<()> {
+    let table_type = names.repository_type_name(&table.name)?;
+    let row_type = names.row_type_name(&table.name)?;
+    content.raw_fmt(format_args!(
+        "\n        private static {table_type} fromRows({row_type}[] rows) {{\n"
+    ));
+    for index in &table.indexes {
+        let key_type = names.index_key_type(&table.name, index)?;
+        let storage = names.index_storage_name(index)?;
+        if index.unique {
+            content.raw_fmt(format_args!(
+                "            Map<{key_type}, Integer> {storage} = new HashMap<>();\n"
+            ));
+        } else {
+            content.raw_fmt(format_args!(
+                "            Map<{key_type}, List<Integer>> {storage}Builder = new HashMap<>();\n"
+            ));
+        }
+    }
+    if !table.indexes.is_empty() {
+        content.raw("            for (int rowIndex = 0; rowIndex < rows.length; rowIndex++) {\n");
+        content.raw("                ");
+        content.raw_fmt(format_args!("{} row = rows[rowIndex];\n", row_type));
+        for index in &table.indexes {
+            let key_expr = names.index_key_from_row(&table.name, index, "row")?;
+            let storage = names.index_storage_name(index)?;
+            if index.unique {
+                content.raw_fmt(format_args!(
+                    "                {} {storage}Key = {key_expr};\n",
+                    names.index_key_type(&table.name, index)?
+                ));
+                content.raw_fmt(format_args!(
+                    "                if ({storage}.containsKey({storage}Key)) {{\n                    throw new ConfigForgeRuntimeException(\"Duplicate unique index key for {table_type}.{index_name}\");\n                }}\n",
+                    index_name = index.name
+                ));
+                content.raw_fmt(format_args!(
+                    "                {storage}.put({storage}Key, rowIndex);\n"
+                ));
+            } else {
+                content.raw_fmt(format_args!(
+                    "                {} {storage}Key = {key_expr};\n",
+                    names.index_key_type(&table.name, index)?
+                ));
+                content.raw_fmt(format_args!(
+                    "                List<Integer> {storage}Rows = {storage}Builder.get({storage}Key);\n"
+                ));
+                content.raw_fmt(format_args!(
+                    "                if ({storage}Rows == null) {{\n                    {storage}Rows = new ArrayList<>();\n                    {storage}Builder.put({storage}Key, {storage}Rows);\n                }}\n"
+                ));
+                content.raw_fmt(format_args!(
+                    "                {storage}Rows.add(rowIndex);\n"
+                ));
+            }
+        }
+        content.raw("            }\n");
+    }
+    for index in table.indexes.iter().filter(|index| !index.unique) {
+        let key_type = names.index_key_type(&table.name, index)?;
+        let storage = names.index_storage_name(index)?;
+        content.raw_fmt(format_args!(
+            "            Map<{key_type}, int[]> {storage} = new HashMap<>();\n"
+        ));
+        content.raw_fmt(format_args!(
+            "            for (Map.Entry<{key_type}, List<Integer>> entry : {storage}Builder.entrySet()) {{\n"
+        ));
+        content.raw("                int[] rowIndexes = new int[entry.getValue().size()];\n");
+        content.raw("                for (int index = 0; index < rowIndexes.length; index++) {\n");
+        content.raw("                    rowIndexes[index] = entry.getValue().get(index);\n");
+        content.raw("                }\n");
+        content.raw_fmt(format_args!(
+            "                {storage}.put(entry.getKey(), rowIndexes);\n"
+        ));
+        content.raw("            }\n");
+    }
+    content.raw_fmt(format_args!("            return new {table_type}(rows"));
+    for index in &table.indexes {
+        content.raw_fmt(format_args!(", {}", names.index_storage_name(index)?));
+    }
+    content.raw(");\n");
+    content.raw("        }\n");
+    Ok(())
+}
+
+fn render_index_lookup_methods(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &JavaNames,
+) -> Result<()> {
+    let row_type = names.row_type_name(&table.name)?;
+    for index in &table.indexes {
+        let method = names.index_function_name(index)?;
+        let parameters = names.index_parameters(index)?;
+        let key = names.index_key_from_parameters(&table.name, index)?;
+        let storage = names.index_storage_name(index)?;
+        if index.unique {
+            content.raw_fmt(format_args!(
+                "\n        public {row_type} {method}({parameters}) {{\n            Integer rowIndex = {storage}.get({key});\n            return rowIndex != null ? rows[rowIndex] : null;\n        }}\n"
+            ));
+        } else {
+            content.raw_fmt(format_args!(
+                "\n        public List<{row_type}> {method}({parameters}) {{\n            int[] rowIndexes = {storage}.get({key});\n            if (rowIndexes == null) {{\n                return Collections.emptyList();\n            }}\n            List<{row_type}> result = new ArrayList<>(rowIndexes.length);\n            for (int rowIndex : rowIndexes) {{\n                result.add(rows[rowIndex]);\n            }}\n            return Collections.unmodifiableList(result);\n        }}\n"
+            ));
+        }
+    }
     Ok(())
 }
 
