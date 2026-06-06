@@ -173,7 +173,7 @@ feat(codegen): load Java rows and game data
 feat(codegen): generate Java hash indexes
 ```
 
-## [ ] Step 5：ordered index 和 range API
+## [x] Step 5：ordered index 和 range API
 
 目标：支持 Meta `ordered = true` 的 lower / upper / range 查询。
 

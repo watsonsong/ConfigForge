@@ -264,6 +264,7 @@ fn render_runtime_contract(
     content.raw("        static double readFloatValue(ConfigForgeRuntimeDataReader reader) { return reader.readFloat(); }\n");
     content.raw("        static boolean readBoolValue(ConfigForgeRuntimeDataReader reader) { return reader.readBool(); }\n");
     content.raw("        static String readStringValue(ConfigForgeRuntimeDataReader reader) { return reader.readString(); }\n\n");
+    content.raw("        static <T extends Comparable<T>> int compareValues(T left, T right) { return left.compareTo(right); }\n\n");
     for code_enum in enums {
         let type_name = names.type_name(&code_enum.name)?;
         content.raw_fmt(format_args!(
@@ -444,6 +445,9 @@ fn render_java_types(
             for index in table.indexes.iter().filter(|index| index.fields.len() > 1) {
                 render_compound_key_type(content, &table.name, index, names, options)?;
             }
+            for index in table.indexes.iter().filter(|index| index.ordered) {
+                render_ordered_entry_type(content, &table.name, index, names, options)?;
+            }
             render_java_table(content, table, names, options)?;
         } else {
             render_object_loader(content, table, names)?;
@@ -595,7 +599,12 @@ fn render_java_table(
     for index in &table.indexes {
         let key_type = names.index_key_type(&table.name, index)?;
         let storage = names.index_storage_name(index)?;
-        if index.unique {
+        if index.ordered {
+            let entry_type = names.ordered_entry_type_name(&table.name, index)?;
+            content.raw_fmt(format_args!(
+                "        private final {entry_type}[] {storage};\n"
+            ));
+        } else if index.unique {
             content.raw_fmt(format_args!(
                 "        private final Map<{key_type}, Integer> {storage};\n"
             ));
@@ -615,7 +624,10 @@ fn render_java_table(
     for index in &table.indexes {
         let key_type = names.index_key_type(&table.name, index)?;
         let storage = names.index_storage_name(index)?;
-        if index.unique {
+        if index.ordered {
+            let entry_type = names.ordered_entry_type_name(&table.name, index)?;
+            content.raw_fmt(format_args!(", {entry_type}[] {storage}"));
+        } else if index.unique {
             content.raw_fmt(format_args!(", Map<{key_type}, Integer> {storage}"));
         } else {
             content.raw_fmt(format_args!(", Map<{key_type}, int[]> {storage}"));
@@ -673,7 +685,7 @@ fn render_compound_key_type(
     let final_modifier = if options.emit_final { " final" } else { "" };
     let key_type = names.compound_key_type_name(table_name, index)?;
     content.raw_fmt(format_args!(
-        "    private static{} class {key_type} {{\n",
+        "    private static{} class {key_type} implements Comparable<{key_type}> {{\n",
         final_modifier
     ));
     for field in &index.fields {
@@ -726,6 +738,48 @@ fn render_compound_key_type(
             .join(", ")
     ));
     content.raw("        }\n");
+    content.raw("\n        @Override\n");
+    content.raw_fmt(format_args!(
+        "        public int compareTo({key_type} other) {{\n"
+    ));
+    for field in &index.fields {
+        let field_name = names.field_name(&field.name)?;
+        let local_name = names.local_name(&field.name)?;
+        content.raw_fmt(format_args!(
+            "            int {local_name}Comparison = ConfigForgeRuntimeReader.compareValues({field_name}, other.{field_name});\n"
+        ));
+        content.raw_fmt(format_args!(
+            "            if ({local_name}Comparison != 0) {{ return {local_name}Comparison; }}\n"
+        ));
+    }
+    content.raw("            return 0;\n");
+    content.raw("        }\n");
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_ordered_entry_type(
+    content: &mut impl CodeWriterLike,
+    table_name: &str,
+    index: &CodeIndex,
+    names: &JavaNames,
+    options: &JavaCodegenOptions,
+) -> Result<()> {
+    let final_modifier = if options.emit_final { " final" } else { "" };
+    let entry_type = names.ordered_entry_type_name(table_name, index)?;
+    let key_type = names.index_key_type(table_name, index)?;
+    content.raw_fmt(format_args!(
+        "    private static{} class {entry_type} {{\n",
+        final_modifier
+    ));
+    content.raw_fmt(format_args!("        private final {key_type} key;\n"));
+    content.raw("        private final int rowIndex;\n\n");
+    content.raw_fmt(format_args!(
+        "        private {entry_type}({key_type} key, int rowIndex) {{\n"
+    ));
+    content.raw("            this.key = key;\n");
+    content.raw("            this.rowIndex = rowIndex;\n");
+    content.raw("        }\n");
     content.raw("    }\n\n");
     Ok(())
 }
@@ -743,7 +797,12 @@ fn render_table_from_rows_method(
     for index in &table.indexes {
         let key_type = names.index_key_type(&table.name, index)?;
         let storage = names.index_storage_name(index)?;
-        if index.unique {
+        if index.ordered {
+            let entry_type = names.ordered_entry_type_name(&table.name, index)?;
+            content.raw_fmt(format_args!(
+                "            {entry_type}[] {storage} = new {entry_type}[rows.length];\n"
+            ));
+        } else if index.unique {
             content.raw_fmt(format_args!(
                 "            Map<{key_type}, Integer> {storage} = new HashMap<>();\n"
             ));
@@ -760,7 +819,12 @@ fn render_table_from_rows_method(
         for index in &table.indexes {
             let key_expr = names.index_key_from_row(&table.name, index, "row")?;
             let storage = names.index_storage_name(index)?;
-            if index.unique {
+            if index.ordered {
+                let entry_type = names.ordered_entry_type_name(&table.name, index)?;
+                content.raw_fmt(format_args!(
+                    "                {storage}[rowIndex] = new {entry_type}({key_expr}, rowIndex);\n"
+                ));
+            } else if index.unique {
                 content.raw_fmt(format_args!(
                     "                {} {storage}Key = {key_expr};\n",
                     names.index_key_type(&table.name, index)?
@@ -790,7 +854,22 @@ fn render_table_from_rows_method(
         }
         content.raw("            }\n");
     }
+    for index in table.indexes.iter().filter(|index| index.ordered) {
+        let storage = names.index_storage_name(index)?;
+        content.raw_fmt(format_args!(
+            "            Arrays.sort({storage}, (left, right) -> ConfigForgeRuntimeReader.compareValues(left.key, right.key));\n"
+        ));
+        if index.unique {
+            content.raw_fmt(format_args!(
+                "            for (int index = 1; index < {storage}.length; index++) {{\n                if (ConfigForgeRuntimeReader.compareValues({storage}[index - 1].key, {storage}[index].key) == 0) {{\n                    throw new ConfigForgeRuntimeException(\"Duplicate unique index key for {table_type}.{index_name}\");\n                }}\n            }}\n",
+                index_name = index.name
+            ));
+        }
+    }
     for index in table.indexes.iter().filter(|index| !index.unique) {
+        if index.ordered {
+            continue;
+        }
         let key_type = names.index_key_type(&table.name, index)?;
         let storage = names.index_storage_name(index)?;
         content.raw_fmt(format_args!(
@@ -828,7 +907,37 @@ fn render_index_lookup_methods(
         let parameters = names.index_parameters(index)?;
         let key = names.index_key_from_parameters(&table.name, index)?;
         let storage = names.index_storage_name(index)?;
-        if index.unique {
+        if index.ordered {
+            let lower_method = names.ordered_lower_bound_function_name(index)?;
+            let upper_method = names.ordered_upper_bound_function_name(index)?;
+            let range_method = names.ordered_range_function_name(index)?;
+            let entry_type = names.ordered_entry_type_name(&table.name, index)?;
+            if index.unique {
+                content.raw_fmt(format_args!(
+                    "\n        public {row_type} {method}({parameters}) {{\n            {key_type} key = {key};\n            int index = lowerBound{entry_type}({storage}, key);\n            if (index < {storage}.length && ConfigForgeRuntimeReader.compareValues({storage}[index].key, key) == 0) {{\n                return rows[{storage}[index].rowIndex];\n            }}\n            return null;\n        }}\n",
+                    key_type = names.index_key_type(&table.name, index)?
+                ));
+            } else {
+                content.raw_fmt(format_args!(
+                    "\n        public List<{row_type}> {method}({parameters}) {{\n            {key_type} key = {key};\n            int start = lowerBound{entry_type}({storage}, key);\n            int end = upperBound{entry_type}({storage}, key);\n            return rowsFrom{entry_type}Range({storage}, start, end);\n        }}\n",
+                    key_type = names.index_key_type(&table.name, index)?
+                ));
+            }
+            content.raw_fmt(format_args!(
+                "\n        public int {lower_method}({parameters}) {{\n            return lowerBound{entry_type}({storage}, {key});\n        }}\n\n        public int {upper_method}({parameters}) {{\n            return upperBound{entry_type}({storage}, {key});\n        }}\n\n        public List<{row_type}> {range_method}({min_parameters}, {max_parameters}) {{\n            int start = lowerBound{entry_type}({storage}, {key_min});\n            int end = upperBound{entry_type}({storage}, {key_max});\n            return rowsFrom{entry_type}Range({storage}, start, end);\n        }}\n",
+                min_parameters = names.index_parameters_with_suffix(index, "Min")?,
+                max_parameters = names.index_parameters_with_suffix(index, "Max")?,
+                key_min = names.index_key_from_parameter_suffix(&table.name, index, "Min")?,
+                key_max = names.index_key_from_parameter_suffix(&table.name, index, "Max")?
+            ));
+            render_ordered_search_helpers(
+                content,
+                &row_type,
+                &entry_type,
+                &names.index_key_type(&table.name, index)?,
+                &storage,
+            )?;
+        } else if index.unique {
             content.raw_fmt(format_args!(
                 "\n        public {row_type} {method}({parameters}) {{\n            Integer rowIndex = {storage}.get({key});\n            return rowIndex != null ? rows[rowIndex] : null;\n        }}\n"
             ));
@@ -838,6 +947,19 @@ fn render_index_lookup_methods(
             ));
         }
     }
+    Ok(())
+}
+
+fn render_ordered_search_helpers(
+    content: &mut impl CodeWriterLike,
+    row_type: &str,
+    entry_type: &str,
+    key_type: &str,
+    storage: &str,
+) -> Result<()> {
+    content.raw_fmt(format_args!(
+        "\n        private static int lowerBound{entry_type}({entry_type}[] entries, {key_type} key) {{\n            int low = 0;\n            int high = entries.length;\n            while (low < high) {{\n                int mid = low + ((high - low) / 2);\n                if (entries[mid].key.compareTo(key) < 0) {{\n                    low = mid + 1;\n                }} else {{\n                    high = mid;\n                }}\n            }}\n            return low;\n        }}\n\n        private static int upperBound{entry_type}({entry_type}[] entries, {key_type} key) {{\n            int low = 0;\n            int high = entries.length;\n            while (low < high) {{\n                int mid = low + ((high - low) / 2);\n                if (entries[mid].key.compareTo(key) <= 0) {{\n                    low = mid + 1;\n                }} else {{\n                    high = mid;\n                }}\n            }}\n            return low;\n        }}\n\n        private List<{row_type}> rowsFrom{entry_type}Range({entry_type}[] {storage}, int start, int end) {{\n            int length = Math.max(0, end - start);\n            List<{row_type}> result = new ArrayList<>(length);\n            for (int offset = 0; offset < length; offset++) {{\n                result.add(rows[{storage}[start + offset].rowIndex]);\n            }}\n            return Collections.unmodifiableList(result);\n        }}\n"
+    ));
     Ok(())
 }
 

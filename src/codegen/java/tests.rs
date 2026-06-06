@@ -413,6 +413,74 @@ fn emits_hash_indexes_and_compound_key() {
 }
 
 #[test]
+fn emits_ordered_index_storage_and_range_api() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+            required = true
+
+            [[tables.fields]]
+            name = "category"
+            type = "string"
+            required = true
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables.indexes]]
+            name = "by_level"
+            fields = ["level"]
+            unique = false
+            ordered = true
+
+            [[tables.indexes]]
+            name = "by_category_level"
+            fields = ["category", "level"]
+            unique = true
+            ordered = true
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = JavaCodeGenerator.generate(&input).expect("java code");
+    let content = &files[0].content;
+
+    assert!(content.contains("private static final class ItemsByLevelEntry"));
+    assert!(content.contains("private final ItemsByLevelEntry[] byLevelIndex;"));
+    assert!(content.contains("Arrays.sort(byLevelIndex, (left, right) -> ConfigForgeRuntimeReader.compareValues(left.key, right.key));"));
+    assert!(content.contains(
+        "private static int lowerBoundItemsByLevelEntry(ItemsByLevelEntry[] entries, Long key)"
+    ));
+    assert!(content.contains(
+        "private static int upperBoundItemsByLevelEntry(ItemsByLevelEntry[] entries, Long key)"
+    ));
+    assert!(content.contains("public List<ItemsRow> findByLevel(long level)"));
+    assert!(content.contains("public int lowerBoundByLevel(long level)"));
+    assert!(content.contains("public int upperBoundByLevel(long level)"));
+    assert!(content.contains("public List<ItemsRow> rangeByLevel(long levelMin, long levelMax)"));
+    assert!(content.contains("private static final class ItemsByCategoryLevelKey implements Comparable<ItemsByCategoryLevelKey>"));
+    assert!(content.contains("public int compareTo(ItemsByCategoryLevelKey other)"));
+    assert!(content.contains("throw new ConfigForgeRuntimeException(\"Duplicate unique index key for ItemsTable.by_category_level\")"));
+    assert!(content.contains("public ItemsRow getByCategoryLevel(String category, long level)"));
+}
+
+#[test]
 fn suffixes_java_keywords_by_default() {
     let meta = MetaModel::from_toml_str(
         r#"

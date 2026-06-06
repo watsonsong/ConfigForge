@@ -124,6 +124,14 @@ impl JavaNames {
         self.type_name(&format!("{table_name}_{}_key", index.name))
     }
 
+    pub(super) fn ordered_entry_type_name(
+        &self,
+        table_name: &str,
+        index: &CodeIndex,
+    ) -> Result<String> {
+        self.type_name(&format!("{table_name}_{}_entry", index.name))
+    }
+
     pub(super) fn fragment_type_name(
         &self,
         table_name: &str,
@@ -165,6 +173,21 @@ impl JavaNames {
         let prefix = if index.unique { "get_by" } else { "find_by" };
         let suffix = index.name.trim_start_matches("by_");
         self.identifier(&format!("{prefix}_{suffix}"), self.naming.function)
+    }
+
+    pub(super) fn ordered_lower_bound_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("lower_bound_by_{suffix}"), self.naming.function)
+    }
+
+    pub(super) fn ordered_upper_bound_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("upper_bound_by_{suffix}"), self.naming.function)
+    }
+
+    pub(super) fn ordered_range_function_name(&self, index: &CodeIndex) -> Result<String> {
+        let suffix = index.name.trim_start_matches("by_");
+        self.identifier(&format!("range_by_{suffix}"), self.naming.function)
     }
 
     pub(super) fn getter_name(&self, name: &str) -> Result<String> {
@@ -217,6 +240,14 @@ impl JavaNames {
     }
 
     pub(super) fn index_parameters(&self, index: &CodeIndex) -> Result<String> {
+        self.index_parameters_with_suffix(index, "")
+    }
+
+    pub(super) fn index_parameters_with_suffix(
+        &self,
+        index: &CodeIndex,
+        suffix: &str,
+    ) -> Result<String> {
         index
             .fields
             .iter()
@@ -224,7 +255,7 @@ impl JavaNames {
                 Ok(format!(
                     "{} {}",
                     self.java_type_ref(&field.code_type, true)?,
-                    self.local_name(&field.name)?
+                    suffixed_name(self.local_name(&field.name)?, suffix)
                 ))
             })
             .collect::<Result<Vec<_>>>()
@@ -236,8 +267,20 @@ impl JavaNames {
         table_name: &str,
         index: &CodeIndex,
     ) -> Result<String> {
+        self.index_key_from_parameter_suffix(table_name, index, "")
+    }
+
+    pub(super) fn index_key_from_parameter_suffix(
+        &self,
+        table_name: &str,
+        index: &CodeIndex,
+        suffix: &str,
+    ) -> Result<String> {
         if index.fields.len() == 1 {
-            Ok(self.local_name(&index.fields[0].name)?)
+            Ok(suffixed_name(
+                self.local_name(&index.fields[0].name)?,
+                suffix,
+            ))
         } else {
             Ok(format!(
                 "new {}({})",
@@ -245,7 +288,7 @@ impl JavaNames {
                 index
                     .fields
                     .iter()
-                    .map(|field| self.local_name(&field.name))
+                    .map(|field| Ok(suffixed_name(self.local_name(&field.name)?, suffix)))
                     .collect::<Result<Vec<_>>>()?
                     .join(", ")
             ))
@@ -369,5 +412,13 @@ impl JavaNames {
             None
         })
         .map_err(|message| super::validation_error(format!("java codegen: {message}")))
+    }
+}
+
+fn suffixed_name(name: String, suffix: &str) -> String {
+    if suffix.is_empty() {
+        name
+    } else {
+        format!("{name}{suffix}")
     }
 }
