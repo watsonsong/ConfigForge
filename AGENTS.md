@@ -29,6 +29,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
    - [`Documentation/Design/07-user-manual-and-qa.md`](Documentation/Design/07-user-manual-and-qa.md) — user workflows and QA input dimensions.
 5. For implementation changes, read [`Documentation/Implementation/01-module-outline.md`](Documentation/Implementation/01-module-outline.md) first, then the module document that matches the source area being changed.
 6. For engineering practice, use [`Documentation/Tech/`](Documentation/Tech/):
+   - [`Documentation/Tech/development-environment.md`](Documentation/Tech/development-environment.md) — required Rust core toolchain, optional cross-language harness tools, runtime adapter dependencies, and local/full-CI environment guidance.
    - [`Documentation/Tech/task-system-design.md`](Documentation/Tech/task-system-design.md) — concurrency/resource-limit design.
    - [`Documentation/Tech/unit-test-coverage.md`](Documentation/Tech/unit-test-coverage.md) — coverage tooling and evaluation workflow.
    - [`Documentation/Tech/cpp-runtime-dependencies.md`](Documentation/Tech/cpp-runtime-dependencies.md) — C++ runtime adapter dependency and CMake policy.

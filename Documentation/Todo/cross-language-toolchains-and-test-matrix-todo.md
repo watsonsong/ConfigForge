@@ -35,7 +35,7 @@
 6. 涉及 TypeScript `npx` / package install / C++ FetchContent 等可能联网行为时，必须验证默认不联网，只有显式配置允许联网。
 7. 每个步骤完成后单独 git commit，避免把文档、工具探测、runner 和 adapter 抽取混在一个提交中。
 
-## [ ] Step 0：TODO 计划落地
+## [x] Step 0：TODO 计划落地
 
 目标：先固化跨语言工具链与测试矩阵的分步计划，确保后续实现有独立提交边界。
 
@@ -56,7 +56,7 @@
 docs(testing): plan cross-language toolchain test matrix
 ```
 
-## [ ] Step 1：新增开发环境安装指导
+## [x] Step 1：新增开发环境安装指导
 
 目标：让开发者知道哪些工具是 ConfigForge Rust 核心开发必需，哪些工具只在负责特定语言 backend 或 runtime adapter 时安装。
 
