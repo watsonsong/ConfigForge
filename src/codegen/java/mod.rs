@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
-    CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField, CodeFragmentPayload,
-    CodeGenerator, CodeModel, CodeTable, CodeTableKind, CodeTypeRef, CodeWriterConfig,
-    CodeWriterLike, NamingConfig, build_code_model, ir::require_non_empty_index_fields,
+    CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
+    CodeFragmentPayload, CodeGenerator, CodeModel, CodeTable, CodeTableKind, CodeTypeRef,
+    CodeWriterConfig, CodeWriterLike, NamingConfig, build_code_model,
+    ir::require_non_empty_index_fields,
 };
 
 mod symbols;
@@ -204,7 +205,7 @@ fn render_java_code(
     let root_modifier = names.root_access_modifier();
     let final_modifier = if options.emit_final { " final" } else { "" };
     let prefix = if root_modifier.is_empty() {
-        format!("{final_modifier}")
+        final_modifier.to_owned()
     } else {
         format!("{root_modifier}{final_modifier}")
     };
@@ -215,19 +216,141 @@ fn render_java_code(
     ));
     content.raw("    private ");
     content.raw_fmt(format_args!("{}() {{}}\n\n", names.root_class_name()));
-    render_runtime_exception(content);
+    render_runtime_contract(content, &model.enums, &names)?;
     render_java_types(content, &model, &names, options)?;
+    render_game_data_class(content, &model, &names, options)?;
     content.raw("}\n");
     Ok(())
 }
 
-fn render_runtime_exception(content: &mut impl CodeWriterLike) {
+fn render_runtime_contract(
+    content: &mut impl CodeWriterLike,
+    enums: &[CodeEnum],
+    names: &JavaNames,
+) -> Result<()> {
+    content.raw("    public interface ConfigForgeRuntimeDataLoader {\n");
+    content.raw("        ConfigForgeRuntimeDataReader open(String path);\n");
+    content.raw("    }\n\n");
+    content.raw("    public interface ConfigForgeRuntimeDataReader {\n");
+    content.raw("        void enterRequiredField(String name);\n");
+    content.raw("        boolean enterOptionalField(String name);\n");
+    content.raw("        void exitField();\n");
+    content.raw("        int readRowCount();\n");
+    content.raw("        void enterRow(int index);\n");
+    content.raw("        void exitRow();\n");
+    content.raw("        int readListLength();\n");
+    content.raw("        void enterListElement(int index);\n");
+    content.raw("        void exitListElement();\n");
+    content.raw("        long readInt();\n");
+    content.raw("        double readFloat();\n");
+    content.raw("        boolean readBool();\n");
+    content.raw("        String readString();\n");
+    content.raw("    }\n\n");
     content.raw(
         "    public static final class ConfigForgeRuntimeException extends RuntimeException {\n",
     );
     content.raw("        public ConfigForgeRuntimeException(String message) { super(message); }\n");
     content.raw("        public ConfigForgeRuntimeException(String message, Throwable cause) { super(message, cause); }\n");
     content.raw("    }\n\n");
+    content.raw("    private interface ConfigForgeValueReader<T> {\n");
+    content.raw("        T read(ConfigForgeRuntimeDataReader reader);\n");
+    content.raw("    }\n\n");
+    content.raw("    private interface ConfigForgeArrayFactory<T> {\n");
+    content.raw("        T[] create(int length);\n");
+    content.raw("    }\n\n");
+    content.raw("    private static final class ConfigForgeRuntimeReader {\n");
+    content.raw("        private ConfigForgeRuntimeReader() {}\n\n");
+    content.raw("        static long readIntValue(ConfigForgeRuntimeDataReader reader) { return reader.readInt(); }\n");
+    content.raw("        static double readFloatValue(ConfigForgeRuntimeDataReader reader) { return reader.readFloat(); }\n");
+    content.raw("        static boolean readBoolValue(ConfigForgeRuntimeDataReader reader) { return reader.readBool(); }\n");
+    content.raw("        static String readStringValue(ConfigForgeRuntimeDataReader reader) { return reader.readString(); }\n\n");
+    for code_enum in enums {
+        let type_name = names.type_name(&code_enum.name)?;
+        content.raw_fmt(format_args!(
+            "        static {type_name} {}(ConfigForgeRuntimeDataReader reader) {{\n",
+            names.read_enum_function_name(&code_enum.name)?
+        ));
+        content.raw("            String value = reader.readString();\n");
+        content.raw("            switch (value) {\n");
+        for value in &code_enum.values {
+            content.raw_fmt(format_args!(
+                "                case {:?}: return {type_name}.{};\n",
+                value.name,
+                names.enum_value_name(&value.name)?
+            ));
+        }
+        content.raw_fmt(format_args!(
+            "                default: throw new ConfigForgeRuntimeException(\"Unknown {type_name} value '\" + value + \"'\");\n"
+        ));
+        content.raw("            }\n        }\n\n");
+    }
+    content.raw("        static <T> T readRequiredField(ConfigForgeRuntimeDataReader reader, String name, ConfigForgeValueReader<T> read) {\n");
+    content.raw("            reader.enterRequiredField(name);\n");
+    content.raw("            try {\n");
+    content.raw("                return read.read(reader);\n");
+    content.raw("            } catch (RuntimeException error) {\n");
+    content.raw("                throw new ConfigForgeRuntimeException(\"Failed to read required field '\" + name + \"'\", error);\n");
+    content.raw("            } finally {\n");
+    content.raw("                reader.exitField();\n");
+    content.raw("            }\n");
+    content.raw("        }\n\n");
+    content.raw("        static <T> T readOptionalField(ConfigForgeRuntimeDataReader reader, String name, ConfigForgeValueReader<T> read) {\n");
+    content.raw("            if (!reader.enterOptionalField(name)) {\n");
+    content.raw("                return null;\n");
+    content.raw("            }\n");
+    content.raw("            try {\n");
+    content.raw("                return read.read(reader);\n");
+    content.raw("            } catch (RuntimeException error) {\n");
+    content.raw("                throw new ConfigForgeRuntimeException(\"Failed to read optional field '\" + name + \"'\", error);\n");
+    content.raw("            } finally {\n");
+    content.raw("                reader.exitField();\n");
+    content.raw("            }\n");
+    content.raw("        }\n\n");
+    render_runtime_list_reader(content, "long", "readIntList", "readIntValue");
+    render_runtime_list_reader(content, "double", "readFloatList", "readFloatValue");
+    render_runtime_list_reader(content, "boolean", "readBoolList", "readBoolValue");
+    content.raw("        static <T> T[] readObjectList(ConfigForgeRuntimeDataReader reader, ConfigForgeArrayFactory<T> factory, ConfigForgeValueReader<T> read) {\n");
+    content.raw("            int length = reader.readListLength();\n");
+    content.raw("            T[] values = factory.create(length);\n");
+    content.raw("            for (int index = 0; index < length; index++) {\n");
+    content.raw("                reader.enterListElement(index);\n");
+    content.raw("                try {\n");
+    content.raw("                    values[index] = read.read(reader);\n");
+    content.raw("                } finally {\n");
+    content.raw("                    reader.exitListElement();\n");
+    content.raw("                }\n");
+    content.raw("            }\n");
+    content.raw("            return values;\n");
+    content.raw("        }\n");
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_runtime_list_reader(
+    content: &mut impl CodeWriterLike,
+    java_type: &str,
+    method_name: &str,
+    read_method: &str,
+) {
+    content.raw_fmt(format_args!(
+        "        static {java_type}[] {method_name}(ConfigForgeRuntimeDataReader reader) {{\n"
+    ));
+    content.raw("            int length = reader.readListLength();\n");
+    content.raw_fmt(format_args!(
+        "            {java_type}[] values = new {java_type}[length];\n"
+    ));
+    content.raw("            for (int index = 0; index < length; index++) {\n");
+    content.raw("                reader.enterListElement(index);\n");
+    content.raw("                try {\n");
+    content.raw_fmt(format_args!(
+        "                    values[index] = {read_method}(reader);\n"
+    ));
+    content.raw("                } finally {\n");
+    content.raw("                    reader.exitListElement();\n");
+    content.raw("                }\n");
+    content.raw("            }\n");
+    content.raw("            return values;\n");
+    content.raw("        }\n\n");
 }
 
 fn render_java_types(
@@ -264,6 +387,13 @@ fn render_java_types(
             names,
             options,
         )?;
+        render_read_method(
+            content,
+            &names.read_type_function_name(&code_struct.name)?,
+            &names.type_name(&code_struct.name)?,
+            &code_struct.fields,
+            names,
+        )?;
     }
 
     for table in &model.tables {
@@ -277,6 +407,16 @@ fn render_java_types(
                 &fragment.fields,
                 names,
                 options,
+            )?;
+            render_read_method(
+                content,
+                &names.read_type_function_name(&format!(
+                    "{}_{}_fragment",
+                    table.name, fragment.name
+                ))?,
+                &names.fragment_type_name(&table.name, &fragment.name)?,
+                &fragment.fields,
+                names,
             )?;
         }
 
@@ -298,11 +438,79 @@ fn render_java_types(
             names,
             options,
         )?;
+        render_row_read_method(content, table, names)?;
 
         if table.kind == CodeTableKind::Collection {
-            render_java_table_skeleton(content, table, names, options)?;
+            render_java_table(content, table, names, options)?;
+        } else {
+            render_object_loader(content, table, names)?;
         }
     }
+    Ok(())
+}
+
+fn render_read_method(
+    content: &mut impl CodeWriterLike,
+    method_name: &str,
+    type_name: &str,
+    fields: &[CodeField],
+    names: &JavaNames,
+) -> Result<()> {
+    content.raw_fmt(format_args!(
+        "    private static {type_name} {method_name}(ConfigForgeRuntimeDataReader reader) {{\n"
+    ));
+    content.raw_fmt(format_args!("        return new {type_name}(\n"));
+    for (index, field) in fields.iter().enumerate() {
+        let comma = if index + 1 == fields.len() { "" } else { "," };
+        content.raw_fmt(format_args!(
+            "            {}{}\n",
+            names.read_field_expression(field)?,
+            comma
+        ));
+    }
+    content.raw("        );\n");
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_row_read_method(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &JavaNames,
+) -> Result<()> {
+    let row_type = names.row_type_name(&table.name)?;
+    let method_name = names.read_type_function_name(&format!("{}_row", table.name))?;
+    content.raw_fmt(format_args!(
+        "    private static {row_type} {method_name}(ConfigForgeRuntimeDataReader reader) {{\n"
+    ));
+    content.raw_fmt(format_args!("        return new {row_type}(\n"));
+    let mut expressions = Vec::new();
+    for field in &table.fields {
+        expressions.push(names.read_field_expression(field)?);
+    }
+    for fragment in &table.fragments {
+        expressions.push(format!(
+            "ConfigForgeRuntimeReader.readOptionalField(reader, {:?}, {}::{})",
+            fragment.name,
+            names.root_class_name(),
+            names.read_type_function_name(&match &fragment.payload {
+                CodeFragmentPayload::InlineFields => {
+                    format!("{}_{}_fragment", table.name, fragment.name)
+                }
+                CodeFragmentPayload::Struct { name } => name.clone(),
+            })?
+        ));
+    }
+    for (index, expression) in expressions.iter().enumerate() {
+        let comma = if index + 1 == expressions.len() {
+            ""
+        } else {
+            ","
+        };
+        content.raw_fmt(format_args!("            {expression}{comma}\n"));
+    }
+    content.raw("        );\n");
+    content.raw("    }\n\n");
     Ok(())
 }
 
@@ -360,7 +568,7 @@ fn render_java_class(
     Ok(())
 }
 
-fn render_java_table_skeleton(
+fn render_java_table(
     content: &mut impl CodeWriterLike,
     table: &CodeTable,
     names: &JavaNames,
@@ -385,6 +593,33 @@ fn render_java_table_skeleton(
         "        private {}({}[] rows) {{\n            this.rows = rows;\n        }}\n\n",
         table_type, row_type
     ));
+    content.raw_fmt(format_args!(
+        "        public static {table_type} load(ConfigForgeRuntimeDataLoader loader) {{\n"
+    ));
+    content.raw("            ConfigForgeRuntimeDataReader reader = loader.open(DATA_FILE);\n");
+    content.raw("            try {\n");
+    content.raw("                int rowCount = reader.readRowCount();\n");
+    content.raw_fmt(format_args!(
+        "                {row_type}[] rows = new {row_type}[rowCount];\n"
+    ));
+    content.raw("                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++) {\n");
+    content.raw("                    reader.enterRow(rowIndex);\n");
+    content.raw("                    try {\n");
+    content.raw_fmt(format_args!(
+        "                        rows[rowIndex] = {}(reader);\n",
+        names.read_type_function_name(&format!("{}_row", table.name))?
+    ));
+    content.raw("                    } finally {\n");
+    content.raw("                        reader.exitRow();\n");
+    content.raw("                    }\n");
+    content.raw("                }\n");
+    content.raw_fmt(format_args!(
+        "                return new {table_type}(rows);\n"
+    ));
+    content.raw("            } catch (RuntimeException error) {\n");
+    content.raw("                throw new ConfigForgeRuntimeException(\"Failed to load table '\" + DATA_FILE + \"'\", error);\n");
+    content.raw("            }\n");
+    content.raw("        }\n\n");
     content.raw("        public int size() { return rows.length; }\n");
     content.raw_fmt(format_args!(
         "        public {} rowAt(int index) {{ return rows[index]; }}\n",
@@ -392,6 +627,123 @@ fn render_java_table_skeleton(
     ));
     content.raw("    }\n\n");
     Ok(())
+}
+
+fn render_object_loader(
+    content: &mut impl CodeWriterLike,
+    table: &CodeTable,
+    names: &JavaNames,
+) -> Result<()> {
+    content.raw_fmt(format_args!(
+        "    private static {} load{}(ConfigForgeRuntimeDataLoader loader) {{\n",
+        names.row_type_name(&table.name)?,
+        names.type_name(&table.name)?
+    ));
+    content.raw_fmt(format_args!(
+        "        ConfigForgeRuntimeDataReader reader = loader.open({:?});\n",
+        table.data_file
+    ));
+    content.raw("        try {\n");
+    content.raw_fmt(format_args!(
+        "            return {}(reader);\n",
+        names.read_type_function_name(&format!("{}_row", table.name))?
+    ));
+    content.raw("        } catch (RuntimeException error) {\n");
+    content.raw_fmt(format_args!(
+        "            throw new ConfigForgeRuntimeException(\"Failed to load object '{}'\", error);\n",
+        table.data_file
+    ));
+    content.raw("        }\n");
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn render_game_data_class(
+    content: &mut impl CodeWriterLike,
+    model: &CodeModel,
+    names: &JavaNames,
+    options: &JavaCodegenOptions,
+) -> Result<()> {
+    let final_modifier = if options.emit_final { " final" } else { "" };
+    content.raw_fmt(format_args!(
+        "    public static{} class {} {{\n",
+        final_modifier,
+        names.game_data_class_name()
+    ));
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "        private final {} {};\n",
+            java_table_data_type(table, names)?,
+            names.field_name(&table.name)?
+        ));
+    }
+    content.raw_fmt(format_args!(
+        "\n        private {}(\n",
+        names.game_data_class_name()
+    ));
+    for (index, table) in model.tables.iter().enumerate() {
+        let comma = if index + 1 == model.tables.len() {
+            ""
+        } else {
+            ","
+        };
+        content.raw_fmt(format_args!(
+            "            {} {}{}\n",
+            java_table_data_type(table, names)?,
+            names.local_name(&table.name)?,
+            comma
+        ));
+    }
+    content.raw("        ) {\n");
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "            this.{} = {};\n",
+            names.field_name(&table.name)?,
+            names.local_name(&table.name)?
+        ));
+    }
+    content.raw("        }\n");
+    for table in &model.tables {
+        content.raw_fmt(format_args!(
+            "\n        public {} {}() {{ return {}; }}\n",
+            java_table_data_type(table, names)?,
+            names.getter_name(&table.name)?,
+            names.field_name(&table.name)?
+        ));
+    }
+    content.raw_fmt(format_args!(
+        "\n        public static {} load(ConfigForgeRuntimeDataLoader loader) {{\n",
+        names.game_data_class_name()
+    ));
+    content.raw_fmt(format_args!(
+        "            return new {}(\n",
+        names.game_data_class_name()
+    ));
+    for (index, table) in model.tables.iter().enumerate() {
+        let comma = if index + 1 == model.tables.len() {
+            ""
+        } else {
+            ","
+        };
+        let load_expr = match table.kind {
+            CodeTableKind::Collection => {
+                format!("{}.load(loader)", names.repository_type_name(&table.name)?)
+            }
+            CodeTableKind::Object => format!("load{}(loader)", names.type_name(&table.name)?),
+        };
+        content.raw_fmt(format_args!("                {load_expr}{comma}\n"));
+    }
+    content.raw("            );\n");
+    content.raw("        }\n");
+    content.raw("    }\n\n");
+    Ok(())
+}
+
+fn java_table_data_type(table: &CodeTable, names: &JavaNames) -> Result<String> {
+    match table.kind {
+        CodeTableKind::Object => names.row_type_name(&table.name),
+        CodeTableKind::Collection => names.repository_type_name(&table.name),
+    }
 }
 
 pub(super) fn validation_error(message: String) -> ConfigForgeError {

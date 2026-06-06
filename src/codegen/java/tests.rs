@@ -272,6 +272,73 @@ fn emits_java_types_and_optional_field_mapping() {
 }
 
 #[test]
+fn emits_runtime_reader_contract_and_game_data_load() {
+    let meta = linked_fixture();
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = JavaCodeGenerator.generate(&input).expect("java code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public interface ConfigForgeRuntimeDataReader"));
+    assert!(content.contains("public interface ConfigForgeRuntimeDataLoader"));
+    assert!(content.contains("void enterRequiredField(String name);"));
+    assert!(content.contains("boolean enterOptionalField(String name);"));
+    assert!(content.contains("int readRowCount();"));
+    assert!(content.contains("int readListLength();"));
+    assert!(content.contains("static <T> T readRequiredField"));
+    assert!(content.contains("static <T> T readOptionalField"));
+    assert!(content.contains("static long[] readIntList"));
+    assert!(content.contains("readObjectList(ConfigForgeRuntimeDataReader reader"));
+    assert!(content.contains("private static ItemsRow readItemsRow"));
+    assert!(content.contains("ConfigForgeRuntimeReader.readRequiredField(reader, \"id\", ConfigForgeRuntimeReader::readIntValue)"));
+    assert!(content.contains("public static ItemsTable load(ConfigForgeRuntimeDataLoader loader)"));
+    assert!(content.contains("ConfigForgeRuntimeDataReader reader = loader.open(DATA_FILE);"));
+    assert!(content.contains("int rowCount = reader.readRowCount();"));
+    assert!(content.contains("rows[rowIndex] = readItemsRow(reader);"));
+    assert!(content.contains("public static GameData load(ConfigForgeRuntimeDataLoader loader)"));
+    assert!(content.contains("ItemsTable.load(loader)"));
+}
+
+#[test]
+fn emits_object_table_loader_without_repository() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            source = "game_config.toml"
+
+            [[tables.fields]]
+            name = "season"
+            type = "string"
+            required = true
+
+            [[tables.fields]]
+            name = "optional_level"
+            type = "int"
+            required = false
+        "#,
+    )
+    .expect("meta should parse");
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = JavaCodeGenerator.generate(&input).expect("java code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public static final class GameConfigRow"));
+    assert!(!content.contains("class GameConfigTable"));
+    assert!(content.contains(
+        "private static GameConfigRow loadGameConfig(ConfigForgeRuntimeDataLoader loader)"
+    ));
+    assert!(
+        content.contains("ConfigForgeRuntimeDataReader reader = loader.open(\"game_config\");")
+    );
+    assert!(content.contains("public GameConfigRow getGameConfig() { return gameConfig; }"));
+    assert!(content.contains("loadGameConfig(loader)"));
+    assert!(content.contains("ConfigForgeRuntimeReader.readOptionalField(reader, \"optional_level\", ConfigForgeRuntimeReader::readIntValue)"));
+}
+
+#[test]
 fn suffixes_java_keywords_by_default() {
     let meta = MetaModel::from_toml_str(
         r#"

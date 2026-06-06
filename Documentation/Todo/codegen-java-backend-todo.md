@@ -83,7 +83,7 @@ docs(codegen): plan Java backend implementation
 feat(codegen): register Java generator skeleton
 ```
 
-## [ ] Step 2：Java 命名、类型映射和 symbol collision
+## [x] Step 2：Java 命名、类型映射和 symbol collision
 
 目标：建立 Java backend 的命名和类型系统，但暂不生成完整加载逻辑。
 
@@ -112,7 +112,7 @@ feat(codegen): register Java generator skeleton
 feat(codegen): add Java naming and type mapping
 ```
 
-## [ ] Step 3：runtime reader contract、row/object reader 和 eager `GameData`
+## [x] Step 3：runtime reader contract、row/object reader 和 eager `GameData`
 
 目标：生成可从 runtime data reader 读取 CollectionTable / ObjectTable 的 Java 代码。
 

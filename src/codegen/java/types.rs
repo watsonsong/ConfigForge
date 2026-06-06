@@ -145,6 +145,10 @@ impl JavaNames {
         self.identifier(name, self.naming.field)
     }
 
+    pub(super) fn local_name(&self, name: &str) -> Result<String> {
+        self.identifier(name, CaseStyle::CamelCase)
+    }
+
     pub(super) fn getter_name(&self, name: &str) -> Result<String> {
         let field = self.field_name(name)?;
         let mut chars = field.chars();
@@ -172,6 +176,82 @@ impl JavaNames {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("{}[]", self.java_array_element_type(element)?),
+        })
+    }
+
+    pub(super) fn read_type_function_name(&self, type_name: &str) -> Result<String> {
+        Ok(format!("read{}", self.type_name(type_name)?))
+    }
+
+    pub(super) fn read_enum_function_name(&self, enum_name: &str) -> Result<String> {
+        Ok(format!("read{}Value", self.type_name(enum_name)?))
+    }
+
+    pub(super) fn read_field_expression(&self, field: &CodeField) -> Result<String> {
+        let helper = if field.required {
+            "readRequiredField"
+        } else {
+            "readOptionalField"
+        };
+        Ok(format!(
+            "ConfigForgeRuntimeReader.{helper}(reader, {:?}, {})",
+            field.name,
+            self.read_value_expression(&field.code_type)?
+        ))
+    }
+
+    pub(super) fn read_value_expression(&self, code_type: &CodeTypeRef) -> Result<String> {
+        Ok(match code_type {
+            CodeTypeRef::Int => "ConfigForgeRuntimeReader::readIntValue".to_owned(),
+            CodeTypeRef::Float => "ConfigForgeRuntimeReader::readFloatValue".to_owned(),
+            CodeTypeRef::Bool => "ConfigForgeRuntimeReader::readBoolValue".to_owned(),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
+                "ConfigForgeRuntimeReader::readStringValue".to_owned()
+            }
+            CodeTypeRef::Enum { name } => format!(
+                "ConfigForgeRuntimeReader::{}",
+                self.read_enum_function_name(name)?
+            ),
+            CodeTypeRef::Struct { name } => {
+                format!(
+                    "{}::{}",
+                    self.root_class_name,
+                    self.read_type_function_name(name)?
+                )
+            }
+            CodeTypeRef::List(element) => {
+                format!(
+                    "listReader -> {}",
+                    self.read_list_expression(element, "listReader")?
+                )
+            }
+        })
+    }
+
+    fn read_list_expression(&self, element: &CodeTypeRef, reader: &str) -> Result<String> {
+        Ok(match element {
+            CodeTypeRef::Int => format!("ConfigForgeRuntimeReader.readIntList({reader})"),
+            CodeTypeRef::Float => format!("ConfigForgeRuntimeReader.readFloatList({reader})"),
+            CodeTypeRef::Bool => format!("ConfigForgeRuntimeReader.readBoolList({reader})"),
+            CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => format!(
+                "ConfigForgeRuntimeReader.readObjectList({reader}, String[]::new, ConfigForgeRuntimeReader::readStringValue)"
+            ),
+            CodeTypeRef::Enum { name } => format!(
+                "ConfigForgeRuntimeReader.readObjectList({reader}, {}[]::new, ConfigForgeRuntimeReader::{})",
+                self.type_name(name)?,
+                self.read_enum_function_name(name)?
+            ),
+            CodeTypeRef::Struct { name } => format!(
+                "ConfigForgeRuntimeReader.readObjectList({reader}, {}[]::new, {}::{})",
+                self.type_name(name)?,
+                self.root_class_name,
+                self.read_type_function_name(name)?
+            ),
+            CodeTypeRef::List(nested) => format!(
+                "ConfigForgeRuntimeReader.readObjectList({reader}, {}[]::new, nestedReader -> {})",
+                self.java_array_element_type(element)?,
+                self.read_list_expression(nested, "nestedReader")?
+            ),
         })
     }
 
