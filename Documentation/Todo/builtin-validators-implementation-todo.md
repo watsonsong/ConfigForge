@@ -12,7 +12,7 @@
 - 诊断必须保留 stable code、table、field / group、row/source row、validator kind/name、target tags 等可测试信息。
 - 并行 validation 不得改变诊断顺序；新增 table/group validator 必须有 deterministic 排序策略。
 
-## [ ] Step 1：抽出 validator 参数与字段类型共享 helper
+## [x] Step 1：抽出 validator 参数与字段类型共享 helper
 
 目标：减少后续 built-in validators 重复实现参数解析、字段查找、target tags 判断和诊断构造。
 
@@ -33,7 +33,7 @@
 
 建议提交：`refactor(validation): share builtin validator helpers`
 
-## [ ] Step 2：实现 `regex` field validator
+## [x] Step 2：实现 `regex` field validator
 
 目标：支持游戏配置中 key / name / asset ref / text key 的正则命名规则。
 
@@ -55,7 +55,7 @@
 
 建议提交：`feat(validation): add regex validator`
 
-## [ ] Step 3：实现 `string_length` field validator
+## [x] Step 3：实现 `string_length` field validator
 
 目标：支持 UI 文本、昵称、道具名、描述字段长度限制。
 

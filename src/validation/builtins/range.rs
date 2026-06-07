@@ -1,16 +1,12 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeSet;
-
 use crate::{
     ConfigForgeError, Result,
-    meta::{
-        ExportCondition, LinkedField, LinkedMetaModel, PrimitiveFieldType, TargetTags,
-        ValidationSeverity, ValidatorMeta,
-    },
+    meta::{ExportCondition, LinkedMetaModel, TargetTags, ValidationSeverity, ValidatorMeta},
 };
 
+use super::common::{optional_bool, optional_number, scalar_field_kind, validate_allowed_params};
 use crate::validation::diagnostic::ValidationIssueLocation;
 use crate::validation::registry::{
     CompiledValidator, ValidatorFactory, ValidatorLocation, ValidatorScope,
@@ -44,19 +40,11 @@ impl ValidatorFactory for RangeValidatorFactory {
             ));
         };
 
-        let table = linked_meta.table(table_name).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "range validator references unknown table `{table_name}`"
-            ))
-        })?;
-        let field = table.field(field_name).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "table `{table_name}` range validator references unknown field `{field_name}`"
-            ))
-        })?;
-        let field_type = match field.linked_field {
-            LinkedField::Primitive(PrimitiveFieldType::Int) => RangeFieldType::Int,
-            LinkedField::Primitive(PrimitiveFieldType::Float) => RangeFieldType::Float,
+        let table = super::common::linked_table(linked_meta, "range", table_name)?;
+        let field = super::common::linked_field(table, "range", field_name)?;
+        let field_type = match scalar_field_kind(field).filter(|kind| kind.is_numeric()) {
+            Some(super::common::ScalarFieldKind::Int) => RangeFieldType::Int,
+            Some(super::common::ScalarFieldKind::Float) => RangeFieldType::Float,
             _ => {
                 return Err(ConfigForgeError::Validation(format!(
                     "table `{table_name}` field `{field_name}` validator `range` can only be used on int or float fields"
@@ -268,55 +256,24 @@ struct RangeValidatorConfig {
 
 impl RangeValidatorConfig {
     fn compile(meta: &ValidatorMeta) -> Result<Self> {
-        let allowed = [
-            "min",
-            "max",
-            "exclusive_min",
-            "exclusive_max",
-            "allow_empty",
-        ]
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-        for key in meta.params.keys() {
-            if !allowed.contains(key.as_str()) {
-                return Err(ConfigForgeError::Validation(format!(
-                    "validator `range` has unknown parameter `{key}`"
-                )));
-            }
-        }
+        validate_allowed_params(
+            "range",
+            meta,
+            &[
+                "min",
+                "max",
+                "exclusive_min",
+                "exclusive_max",
+                "allow_empty",
+            ],
+        )?;
 
         Ok(Self {
-            min: optional_number(meta, "min")?,
-            max: optional_number(meta, "max")?,
-            exclusive_min: optional_bool(meta, "exclusive_min")?.unwrap_or(false),
-            exclusive_max: optional_bool(meta, "exclusive_max")?.unwrap_or(false),
-            allow_empty: optional_bool(meta, "allow_empty")?.unwrap_or(true),
+            min: optional_number(meta, "range", "min")?,
+            max: optional_number(meta, "range", "max")?,
+            exclusive_min: optional_bool(meta, "range", "exclusive_min")?.unwrap_or(false),
+            exclusive_max: optional_bool(meta, "range", "exclusive_max")?.unwrap_or(false),
+            allow_empty: optional_bool(meta, "range", "allow_empty")?.unwrap_or(true),
         })
     }
-}
-
-fn optional_number(meta: &ValidatorMeta, key: &str) -> Result<Option<f64>> {
-    let Some(value) = meta.params.get(key) else {
-        return Ok(None);
-    };
-    if let Some(value) = value.as_integer() {
-        return Ok(Some(value as f64));
-    }
-    if let Some(value) = value.as_float() {
-        if value.is_finite() {
-            return Ok(Some(value));
-        }
-    }
-    Err(ConfigForgeError::Validation(format!(
-        "validator `range` parameter `{key}` must be finite integer or float"
-    )))
-}
-
-fn optional_bool(meta: &ValidatorMeta, key: &str) -> Result<Option<bool>> {
-    let Some(value) = meta.params.get(key) else {
-        return Ok(None);
-    };
-    value.as_bool().map(Some).ok_or_else(|| {
-        ConfigForgeError::Validation(format!("validator `range` parameter `{key}` must be bool"))
-    })
 }

@@ -2884,3 +2884,262 @@ fn range_validator_declared_on_table_reports_scope_error() {
 
     assert!(message.contains("cannot be declared at table `items`"));
 }
+
+#[test]
+fn regex_validator_accepts_full_match_and_rejects_mismatch() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "key"
+            type = "string"
+
+            [[tables.fields.validators]]
+            kind = "regex"
+            pattern = "[a-z][a-z0-9_]*"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let valid = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([(
+            "key".to_owned(),
+            "iron_sword".to_owned(),
+        )])],
+    )]);
+    let invalid = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([(
+            "key".to_owned(),
+            "Iron Sword".to_owned(),
+        )])],
+    )]);
+
+    assert!(validate_data_set(&linked_meta, &valid).is_ok());
+    let message = validate_error(validate_data_set(&linked_meta, &invalid));
+    assert!(message.contains("does not match regex"));
+}
+
+#[test]
+fn regex_validator_supports_search_case_insensitive_and_empty_policy() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "path"
+            type = "asset"
+            asset_kind = "unreal_asset"
+
+            [[tables.fields.validators]]
+            kind = "regex"
+            pattern = "skills"
+            match_mode = "search"
+            case_sensitive = false
+            allow_empty = false
+
+            [[asset_kinds]]
+            name = "unreal_asset"
+            input = "path"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let valid = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([(
+            "path".to_owned(),
+            "/Game/Skills/GA_Slash.GA_Slash_C".to_owned(),
+        )])],
+    )]);
+    let invalid = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([("path".to_owned(), String::new())])],
+    )]);
+
+    assert!(validate_data_set(&linked_meta, &valid).is_ok());
+    let message = validate_error(validate_data_set(&linked_meta, &invalid));
+    assert!(message.contains("does not match regex"));
+}
+
+#[test]
+fn regex_validator_rejects_invalid_pattern_and_unsupported_field_type() {
+    let invalid_pattern = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "key"
+            type = "string"
+
+            [[tables.fields.validators]]
+            kind = "regex"
+            pattern = "["
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = invalid_pattern.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([("key".to_owned(), "x".to_owned())])],
+    )]);
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    assert!(message.contains("parameter `pattern` is invalid"));
+
+    let unsupported_type = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+
+            [[tables.fields.validators]]
+            kind = "regex"
+            pattern = "^[0-9]+$"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = unsupported_type.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([("level".to_owned(), "1".to_owned())])],
+    )]);
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    assert!(message.contains("can only be used on string, text, asset or enum fields"));
+}
+
+#[test]
+fn string_length_validator_accepts_and_rejects_unicode_scalar_lengths() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "name"
+            type = "text"
+
+            [[tables.fields.validators]]
+            kind = "string_length"
+            min = 2
+            max = 4
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let valid = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([("name".to_owned(), "长剑".to_owned())])],
+    )]);
+    let invalid = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([(
+            "name".to_owned(),
+            "超长名字配置".to_owned(),
+        )])],
+    )]);
+
+    assert!(validate_data_set(&linked_meta, &valid).is_ok());
+    let message = validate_error(validate_data_set(&linked_meta, &invalid));
+    assert!(message.contains("exceeds max `4`"));
+}
+
+#[test]
+fn string_length_validator_supports_utf8_bytes_exact_trim_and_empty_policy() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "code"
+            type = "string"
+
+            [[tables.fields.validators]]
+            kind = "string_length"
+            exact = 3
+            unit = "utf8_bytes"
+            trim_before_count = true
+            allow_empty = false
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let valid = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([("code".to_owned(), " abc ".to_owned())])],
+    )]);
+    let invalid = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([("code".to_owned(), "中文".to_owned())])],
+    )]);
+
+    assert!(validate_data_set(&linked_meta, &valid).is_ok());
+    let message = validate_error(validate_data_set(&linked_meta, &invalid));
+    assert!(message.contains("expected exactly `3`"));
+}
+
+#[test]
+fn string_length_validator_rejects_ambiguous_config_and_unsupported_type() {
+    let ambiguous = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "name"
+            type = "string"
+
+            [[tables.fields.validators]]
+            kind = "string_length"
+            exact = 3
+            max = 4
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = ambiguous.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([("name".to_owned(), "abc".to_owned())])],
+    )]);
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    assert!(message.contains("cannot be used with `min` or `max`"));
+
+    let unsupported_type = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+
+            [[tables.fields.validators]]
+            kind = "string_length"
+            max = 4
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = unsupported_type.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([("level".to_owned(), "1".to_owned())])],
+    )]);
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    assert!(message.contains("can only be used on string, text or asset fields"));
+}

@@ -10,6 +10,7 @@ use crate::{
 
 use super::{
     ValidationContext, ValidationIssue, ValidationReport, builtins::range::RangeValidatorFactory,
+    builtins::regex::RegexValidatorFactory, builtins::string_length::StringLengthValidatorFactory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +68,8 @@ impl ValidatorRegistry {
     pub fn with_builtin_validators() -> Self {
         let mut registry = Self::new();
         registry.register(RangeValidatorFactory);
+        registry.register(RegexValidatorFactory);
+        registry.register(StringLengthValidatorFactory);
         registry
     }
 
