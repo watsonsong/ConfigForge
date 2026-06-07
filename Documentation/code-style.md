@@ -42,7 +42,7 @@
 - `validation` owns correctness checks, target-aware validation views, `ValidationReport`, and validator registry.
 - `exporter` owns runtime data export contracts, export type registry, JSON / MessagePack payloads, and future export type plugins.
 - `codegen` owns language-neutral CodeModel IR and built-in generated-code backends; backend list and capabilities are tracked in `Documentation/Implementation/09-codegen-module-detail-design.md`.
-- `build` owns project build orchestration, target normalization, export task DAG execution, and artifact scheduling/writes.
+- `build` owns project build orchestration, target normalization, export dependency branch pipeline execution, and artifact scheduling/writes.
 - `cli` owns command-line parsing and user-facing messages. It should call `build` rather than orchestrating lower-level modules directly.
 - Future plugin or executor modules should follow the one-way dependency rules in `Documentation/Implementation/01-module-outline.md`.
 - Public module roots should act as narrow facades. Internal files may be split freely for cohesion,

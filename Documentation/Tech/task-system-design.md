@@ -5,12 +5,12 @@
 当前实现已具备以下能力：
 
 - `build_target()` 使用局部 Rayon CPU worker pool 控制 `jobs`；
-- `execute_target_dag()` 维护 target-local execution view skeleton，并按 `MetaAndData` / `MetaOnly` 两个分支执行；
+- `execute_target_pipeline()` 记录 target-local execution summary，并按 `MetaAndData` / `MetaOnly` 两个分支执行；
 - DataLoader、table normalize、target-aware validation、runtime data export task、MetaOnly codegen task 已在受限 worker pool 中并行；
 - Artifact writer 已收敛为中心协调式 `ArtifactSink` 兼容入口，支持标准同步 `std::io::Write` 流、dry-run、direct 与 temp-commit；
 - 阶段式 build 已支持 `BuildTrace` 与 `--trace-tasks <path>` JSON metrics 输出。
 
-当前仍未实现、但保留为未来规划的方向包括：远端 provider 的正式 async runtime、multi-target build、filesystem-aware path key，以及仅在明确收益出现后再推进的通用 DAG executor。runtime exporter、aggregate exporter 和内置 codegen production path 已接入 shared `ArtifactSink` streaming 写出。
+当前仍未实现、但保留为未来规划的方向包括：远端 provider 的正式 async runtime、multi-target build、filesystem-aware path key，以及仅在明确收益出现后再重新评估的通用 DAG executor。runtime exporter、aggregate exporter 和内置 codegen production path 已接入 shared `ArtifactSink` streaming 写出。
 
 ## 1. 设计目标
 
@@ -274,7 +274,7 @@ pub enum TaskResource {
 }
 ```
 
-第一阶段不一定要暴露通用 DAG executor；可以先在 exporter 流程中按阶段使用 `join_all` / CPU pool parallel iter。但类型设计应向 DAG 收敛，避免后续重构推倒重来。当前阶段 A 采用“阶段式 pipeline”：不引入 ready queue，只把 `LinkMeta -> GenerateCode` 左支与 `SourceRead` 右支并行起来，待二者 join 后继续 Normalize / Validation / MetaAndData export。
+第一阶段不暴露通用 DAG executor；exporter 流程按阶段使用 CPU pool parallel iter 和局部 join。当前采用“阶段式 pipeline”：不引入 ready queue，只把 `LinkMeta -> GenerateCode` 左支与 `SourceRead` 右支并行起来，待二者 join 后继续 Normalize / Validation / MetaAndData export。若未来确实需要跨 target cache、远程执行或更细粒度调度，再重新设计 node-level model，避免当前代码同时维护“未来 DAG 视图”和“真实执行 pipeline”两套复杂度。
 
 ### 5.1a 从目标产物倒推依赖
 
@@ -298,9 +298,9 @@ pub struct TargetBuildPlan {
 }
 ```
 
-阶段 A 已解决 / 保留的边界：
+当前已解决 / 保留的边界：
 
-- `execute_target_dag()` 的 node key 仍只是 execution view skeleton，不是调度权威；文档若只写 “DAG” 容易误导为已有完整 DAG executor。
+- `execute_target_pipeline()` 的 `build_execution_view` 只是 trace/debug summary，不是调度权威；当前代码不再维护 node key skeleton。
 - build 已通过 dependency plan 判断 target 是否需要 Data，code-only target 不读取 Data；mixed target 中 source read 与 Meta link 并行，且 Meta link 完成后立即启动 codegen。
 - 当前 `NormalizeAndValidate` 仍把 normalize、full validation 和 target validation 合并成一个 runtime 分支步骤；目标态需要继续拆开，才能表达 full dataset validation 与 target-view validation 分层并行。
 - 当前只支持一次构建一个 target；目标态 multi-target 需要显式 cache key：`LinkedMeta` 可共享，Data / normalized data / validation result 至少按 `(project.input, effective_tags)` 或更细粒度 key 区分。
@@ -681,23 +681,23 @@ Artifact[]
 
 ## 7. 调度策略
 
-### 7.1 从 branch executor 过渡到依赖驱动 DAG
+### 7.1 阶段式 branch pipeline
 
-当前代码的 `execute_target_dag()` 是 branch executor：它按 export dependency contract 拆成 `MetaOnly` / `MetaAndData` 两条分支，并构造 node key 供测试和未来 tracing 使用。它尚不具备：
+当前代码的 `execute_target_pipeline()` 是 branch pipeline：它按 export dependency contract 拆成 `MetaOnly` / `MetaAndData` 两条分支，并只把 execution view 作为 trace/debug summary。它尚不具备，也不伪装成具备：
 
 - 从请求的 target/export task 反向裁剪依赖图；
 - node-level readiness scheduling；
 - Meta link 与 SourceRead 的交错并行；
 - full DataSet validation 与 target view validation 的分层调度；
 - multi-target cache key / result reuse；
-- cancellation、tracing、duration 统计等统一 task runtime 能力。
+- cancellation、node-level tracing、duration 统计等统一 task runtime 能力。
 
-迁移策略不应直接跳到“大而全 DAG executor”，而应采用 **dependency-plan first, executor later**：
+后续策略不应直接跳到“大而全 DAG executor”，而应采用 **dependency-plan first, executor only if needed**：
 
 1. 先让 build normalization 产出明确的 `TargetBuildPlan` / `BuildDependencyPlan`，准确表达 code-only target 不需要 Data。
 2. 再把当前 `NormalizeAndValidate` 大步骤拆成 source read、merge、normalize、full validation、target view validation 等可测试函数。
-3. 继续用阶段式/局部并行执行这些函数，但每个阶段的输入输出和 cache key 必须已接近 DAG node。
-4. 最后引入通用 DAG executor，替换手写阶段编排。
+3. 继续用阶段式/局部并行执行这些函数，测试绑定业务语义和 dependency plan，而不是绑定未来 node 形状。
+4. 只有当 multi-target cache、远程执行、ready queue 或 node-level observability 的收益明确超过复杂度时，才重新设计通用 DAG executor。
 
 推荐过渡形态：
 

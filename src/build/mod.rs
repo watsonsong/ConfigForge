@@ -83,7 +83,7 @@ fn build_target_inner(
 
     let sink = ArtifactWriter::new(options.artifact_write_mode).open_sink();
 
-    let dag_output = execute_target_dag(TargetDagExecutionContext {
+    let pipeline_output = execute_target_pipeline(TargetPipelineExecutionContext {
         project_root,
         project: &CodeExportProject::from(&project.project),
         target: &target,
@@ -98,7 +98,7 @@ fn build_target_inner(
     let artifacts = trace.record("finish_artifacts", None, || sink.finish())?;
 
     Ok(BuildOutputWithoutTrace {
-        warnings: dag_output.warnings,
+        warnings: pipeline_output.warnings,
         artifacts,
     })
 }
@@ -118,7 +118,7 @@ impl BuildOutputWithoutTrace {
     }
 }
 
-struct TargetDagExecutionContext<'a, 'meta> {
+struct TargetPipelineExecutionContext<'a, 'meta> {
     project_root: &'a Path,
     project: &'a CodeExportProject,
     target: &'a NormalizedTargetConfig,
@@ -155,37 +155,17 @@ struct DataDependencyKey {
     effective_tags: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum BuildDagNodeKey {
-    LinkMeta,
-    EffectiveTargetTags {
-        target_name: String,
-        effective_tags: Vec<String>,
-    },
-    DataLoadPlan {
-        input: Option<PathBuf>,
-        effective_tags: Vec<String>,
-    },
-    NormalizeAndValidate {
-        input: Option<PathBuf>,
-        effective_tags: Vec<String>,
-    },
-    RunExporter {
-        target_name: String,
-        export_name: String,
-    },
-    FinishArtifacts,
-}
-
-struct TargetDagOutput {
+struct TargetPipelineOutput {
     warnings: Vec<String>,
 }
 
-struct DagBranchOutput {
+struct ExportBranchOutput {
     warnings: Vec<String>,
 }
 
-fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<TargetDagOutput> {
+fn execute_target_pipeline(
+    context: TargetPipelineExecutionContext<'_, '_>,
+) -> Result<TargetPipelineOutput> {
     let dependency_plan = context.trace.record("plan_dependencies", None, || {
         Ok(BuildDependencyPlan::for_target(
             context.target,
@@ -194,12 +174,12 @@ fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<Targ
         ))
     })?;
     let target_plan = dependency_plan.single_target_plan()?;
-    // This node list is an execution-view skeleton for tests and future tracing/executor work.
-    // The current MVP below still executes two dependency branches directly instead of scheduling
-    // these node keys through a generic DAG executor.
-    let _execution_view_nodes = context.trace.record("build_execution_view", None, || {
-        Ok(build_target_local_dag(context.target, target_plan))
-    })?;
+    let execution_view_detail = build_execution_view_detail(context.target, target_plan);
+    context
+        .trace
+        .record("build_execution_view", Some(execution_view_detail), || {
+            Ok(())
+        })?;
     let meta_and_data_exports =
         target_plan.export_tasks(context.target, ExportDependency::MetaAndData);
     let meta_only_exports = target_plan.export_tasks(context.target, ExportDependency::MetaOnly);
@@ -239,7 +219,7 @@ fn execute_target_dag(context: TargetDagExecutionContext<'_, '_>) -> Result<Targ
             Ok(warnings)
         })?;
 
-    Ok(TargetDagOutput { warnings })
+    Ok(TargetPipelineOutput { warnings })
 }
 
 struct BuildTraceRecorder {
@@ -315,7 +295,7 @@ struct ExportPipelineContext<'a, 'meta> {
 
 fn execute_export_pipeline<'meta>(
     context: ExportPipelineContext<'_, 'meta>,
-) -> Result<(DagBranchOutput, DagBranchOutput)> {
+) -> Result<(ExportBranchOutput, ExportBranchOutput)> {
     let ExportPipelineContext {
         raw_meta,
         read_sources,
@@ -365,11 +345,11 @@ fn join_link_codegen_and_source_read<'meta, LinkCodeFn, SourceFn>(
     read_sources: Option<SourceFn>,
     pool: &ThreadPool,
 ) -> Result<(
-    (LinkedMetaModel<'meta>, DagBranchOutput),
+    (LinkedMetaModel<'meta>, ExportBranchOutput),
     Option<RawSourceData>,
 )>
 where
-    LinkCodeFn: FnOnce() -> Result<(LinkedMetaModel<'meta>, DagBranchOutput)> + Send,
+    LinkCodeFn: FnOnce() -> Result<(LinkedMetaModel<'meta>, ExportBranchOutput)> + Send,
     SourceFn: FnOnce() -> Result<RawSourceData> + Send,
 {
     if let Some(read_sources) = read_sources {
@@ -408,42 +388,26 @@ fn source_reader_for_target<'a>(
     }))
 }
 
-fn build_target_local_dag(
-    target: &NormalizedTargetConfig,
-    plan: &TargetBuildPlan,
-) -> Vec<BuildDagNodeKey> {
-    let mut nodes = Vec::new();
-    if plan.requires_meta {
-        nodes.push(BuildDagNodeKey::LinkMeta);
-    }
-    nodes.push(BuildDagNodeKey::EffectiveTargetTags {
-        target_name: plan.target_name.clone(),
-        effective_tags: plan.effective_tags.clone(),
-    });
-    if plan.requires_data() {
-        let data_dependency = plan
-            .data_dependency
-            .as_ref()
-            .expect("requires_data implies a data dependency key");
-        nodes.push(BuildDagNodeKey::DataLoadPlan {
-            input: data_dependency.input.clone(),
-            effective_tags: data_dependency.effective_tags.clone(),
-        });
-        nodes.push(BuildDagNodeKey::NormalizeAndValidate {
-            input: data_dependency.input.clone(),
-            effective_tags: data_dependency.effective_tags.clone(),
-        });
-    }
-    nodes.extend(
-        plan.export_indices_in_declaration_order()
-            .iter()
-            .map(|index| BuildDagNodeKey::RunExporter {
-                target_name: plan.target_name.clone(),
-                export_name: target.exports[*index].name.clone(),
-            }),
-    );
-    nodes.push(BuildDagNodeKey::FinishArtifacts);
-    nodes
+fn build_execution_view_detail(target: &NormalizedTargetConfig, plan: &TargetBuildPlan) -> String {
+    let data_mode = if plan.requires_data() {
+        "with_data"
+    } else {
+        "meta_only"
+    };
+    let exports = plan
+        .export_indices_in_declaration_order()
+        .iter()
+        .map(|index| target.exports[*index].name.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "target={}, mode={}, meta_only_exports={}, meta_and_data_exports={}, exports=[{}]",
+        plan.target_name,
+        data_mode,
+        plan.meta_only_exports.len(),
+        plan.meta_and_data_exports.len(),
+        exports
+    )
 }
 
 impl BuildDependencyPlan {
@@ -533,7 +497,7 @@ fn execute_runtime_export_nodes(
     target_tags: &TargetTags,
     pool: &ThreadPool,
     sink: &ArtifactSink,
-) -> Result<DagBranchOutput> {
+) -> Result<ExportBranchOutput> {
     let meta_and_data_tasks = export_tasks
         .iter()
         .map(|(_, task)| *task)
@@ -561,7 +525,7 @@ fn execute_runtime_export_nodes(
         }
     }
 
-    Ok(DagBranchOutput {
+    Ok(ExportBranchOutput {
         warnings: output.warnings,
     })
 }
@@ -570,7 +534,7 @@ fn execute_codegen_export_nodes(
     context: &CodegenTaskContext<'_, '_>,
     export_tasks: &[(usize, &NormalizedExportTask)],
     pool: &ThreadPool,
-) -> Result<DagBranchOutput> {
+) -> Result<ExportBranchOutput> {
     let mut generated_by_task = pool.install(|| {
         export_tasks
             .par_iter()
@@ -584,7 +548,7 @@ fn execute_codegen_export_nodes(
         result?;
     }
 
-    Ok(DagBranchOutput {
+    Ok(ExportBranchOutput {
         warnings: Vec::new(),
     })
 }
@@ -750,7 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn target_local_dag_includes_shared_data_nodes_once() {
+    fn target_build_plan_shares_data_dependency_for_data_exports() {
         let target = NormalizedTargetConfig {
             name: "client".to_owned(),
             tags: vec!["client".to_owned()],
@@ -784,33 +748,20 @@ mod tests {
             &TargetTags::new(["client", "shipping"]),
         );
 
-        let nodes = build_target_local_dag(&target, &plan);
-
+        assert!(plan.requires_data());
+        assert_eq!(plan.meta_only_exports, vec![0]);
+        assert_eq!(plan.meta_and_data_exports, vec![1, 2]);
         assert_eq!(
-            nodes
-                .iter()
-                .filter(|node| matches!(node, BuildDagNodeKey::DataLoadPlan { .. }))
-                .count(),
-            1
-        );
-        assert_eq!(
-            nodes
-                .iter()
-                .filter(|node| matches!(node, BuildDagNodeKey::NormalizeAndValidate { .. }))
-                .count(),
-            1
-        );
-        assert_eq!(
-            nodes
-                .iter()
-                .filter(|node| matches!(node, BuildDagNodeKey::RunExporter { .. }))
-                .count(),
-            3
+            plan.data_dependency,
+            Some(DataDependencyKey {
+                input: Some(PathBuf::from("Data")),
+                effective_tags: vec!["client".to_owned(), "shipping".to_owned()],
+            })
         );
     }
 
     #[test]
-    fn target_local_dag_skips_data_nodes_for_meta_only_exports() {
+    fn target_build_plan_skips_data_dependency_for_meta_only_exports() {
         let target = NormalizedTargetConfig {
             name: "client".to_owned(),
             tags: vec!["client".to_owned()],
@@ -824,18 +775,10 @@ mod tests {
         };
         let plan = TargetBuildPlan::new(&target, None, &TargetTags::new(["client"]));
 
-        let nodes = build_target_local_dag(&target, &plan);
-
-        assert!(
-            nodes
-                .iter()
-                .all(|node| !matches!(node, BuildDagNodeKey::DataLoadPlan { .. }))
-        );
-        assert!(
-            nodes
-                .iter()
-                .all(|node| !matches!(node, BuildDagNodeKey::NormalizeAndValidate { .. }))
-        );
+        assert!(!plan.requires_data());
+        assert!(plan.data_dependency.is_none());
+        assert_eq!(plan.meta_only_exports, vec![0]);
+        assert!(plan.meta_and_data_exports.is_empty());
     }
 
     #[test]
@@ -926,7 +869,7 @@ mod tests {
     }
 
     #[test]
-    fn target_local_dag_follows_target_build_plan_order() {
+    fn execution_view_detail_reports_plan_summary_without_exposing_node_shape() {
         let target = NormalizedTargetConfig {
             name: "client".to_owned(),
             tags: vec!["client".to_owned()],
@@ -942,18 +885,13 @@ mod tests {
             &TargetTags::new(["client"]),
         );
 
-        let nodes = build_target_local_dag(&target, &plan);
+        let detail = build_execution_view_detail(&target, &plan);
 
-        assert_eq!(
-            nodes
-                .iter()
-                .filter_map(|node| match node {
-                    BuildDagNodeKey::RunExporter { export_name, .. } => Some(export_name.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-            vec!["json", "rust", "lua"]
-        );
+        assert!(detail.contains("target=client"));
+        assert!(detail.contains("mode=with_data"));
+        assert!(detail.contains("meta_only_exports=1"));
+        assert!(detail.contains("meta_and_data_exports=2"));
+        assert!(detail.contains("exports=[json,rust,lua]"));
     }
 
     #[test]
@@ -979,7 +917,7 @@ mod tests {
                 thread::sleep(Duration::from_millis(40));
                 Ok((
                     meta.link().map_err(ConfigForgeError::MetaValidation)?,
-                    empty_dag_output(),
+                    empty_branch_output(),
                 ))
             },
             Some(|| {
@@ -1019,7 +957,7 @@ mod tests {
                 if !source_finished_for_codegen.load(Ordering::SeqCst) {
                     codegen_observed_source_unfinished_for_codegen.store(true, Ordering::SeqCst);
                 }
-                Ok((linked_meta, empty_dag_output()))
+                Ok((linked_meta, empty_branch_output()))
             },
             Some(|| {
                 thread::sleep(Duration::from_millis(100));
@@ -1127,7 +1065,7 @@ mod tests {
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
         let mut trace = BuildTraceRecorder::new();
 
-        let result = execute_target_dag(TargetDagExecutionContext {
+        let result = execute_target_pipeline(TargetPipelineExecutionContext {
             project_root: Path::new("."),
             project: &project,
             target: &target,
@@ -1258,8 +1196,8 @@ mod tests {
         RawSourceData::new(DataSet::try_new(Vec::new()).expect("empty data set should build"))
     }
 
-    fn empty_dag_output() -> DagBranchOutput {
-        DagBranchOutput {
+    fn empty_branch_output() -> ExportBranchOutput {
+        ExportBranchOutput {
             warnings: Vec::new(),
         }
     }

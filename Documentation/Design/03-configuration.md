@@ -230,7 +230,7 @@ override_sources = [
 
 ## 3.5 Target Config
 
-Target Config 定义一次可构建的导出目标。一个 target 共享同一组 `TargetTags` 和同一套 Meta-level filtering 规则，并挂载一组 exporter task。每个 exporter task 都声明自己的 exporter type、输入依赖、输出目录和专属参数；Build 根据这些依赖构造任务 DAG，先生成可复用的 Meta / Data / Validation 节点，再调度具体 exporter。
+Target Config 定义一次可构建的导出目标。一个 target 共享同一组 `TargetTags` 和同一套 Meta-level filtering 规则，并挂载一组 exporter task。每个 exporter task 都声明自己的 exporter type、输入依赖、输出目录和专属参数；Build 根据这些依赖拆分 MetaOnly / MetaAndData 分支，复用 Meta link、DataLoadPlan、normalize 和 validation 结果，再运行具体 exporter。
 
 ### 3.5.1 统一 exporter task 模型
 
@@ -278,7 +278,7 @@ domain = "game_config"
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `name` | 单 export task 可省略，规范化为 `default` | 当前 target 内稳定唯一的 task 名称；用于诊断、DAG 节点 id、artifact manifest 和未来 task 间依赖引用。 |
+| `name` | 单 export task 可省略，规范化为 `default` | 当前 target 内稳定唯一的 task 名称；用于诊断、trace、artifact manifest 和未来 task 间依赖引用。 |
 | `type` | 必填 | exporter ID，例如 `json`、`messagepack`、`bin`、`gettext_pot`、`lua_table`、`rust`、`cpp`、`typescript`。不再用 `format` / `language` 两套字段区分。 |
 | `output` | 必填 | 该 exporter 的产物输出根目录。所有 artifact 在写入前做全局规范化路径冲突检查。 |
 | exporter 专属字段 | 未设置 | 直接摊平在当前 `[[targets.exports]]` 下；通用子表如 `i18n`、`naming`、`formatting` 可被适用 exporter 复用。 |
@@ -292,11 +292,11 @@ Exporter 注册表需要声明每个 `type` 的 dependency contract：
 
 这样 Lua 不需要被强行归入 “data” 或 “code”：它只是一个 `type = "lua_table"`、dependency 为 `MetaAndData` 的 exporter。未来 schema manifest、asset manifest、doc generator、engine-specific bundle、binary schema 等都可以按同一套 task 模型接入。
 
-### 3.5.2 DAG 编排原则
+### 3.5.2 依赖分支编排原则
 
-统一 exporter task 后，Build 不再写死 “先 data 后 code” 两段流程，而是按 dependency contract 建立 target-local execution view。当前实现保持阶段式 executor，不引入完整通用 DAG 调度器；它会先构造 `BuildDagNodeKey` 作为测试与未来 executor 的 skeleton，再按依赖执行：`SourceRead` 可与 `LinkMeta` 并行，`LinkMeta` 完成后立即启动 `MetaOnly` codegen，因此 mixed target 中 codegen 不再等待 source read / normalize / validation 完成。阶段式 tracing 已通过 `BuildTrace` / `--trace-tasks` 落地，但这些 node key 尚未交给完整 DAG 调度器或缓存层执行。
+统一 exporter task 后，Build 不再写死 “先 data 后 code” 两段流程，而是按 dependency contract 建立 target-local execution view summary，并用阶段式 pipeline 执行两类分支：`SourceRead` 可与 `LinkMeta` 并行，`LinkMeta` 完成后立即启动 `MetaOnly` codegen，因此 mixed target 中 codegen 不再等待 source read / normalize / validation 完成。阶段式 tracing 已通过 `BuildTrace` / `--trace-tasks` 落地；当前不维护 node-level DAG key，也不引入完整通用 DAG 调度器。
 
-目标态 target-local DAG 形态：
+当前 target-local pipeline 形态：
 
 ```text
 ProjectConfig
@@ -310,14 +310,14 @@ ProjectConfig
           -> MetaAndData exporter tasks sharing project.input
 ```
 
-DAG key 必须包含 dependency 语义；当前 skeleton 中涉及 target tags 的节点使用已经合并 CLI extra tags 后的 effective target tags，避免未来接入缓存/tracing 时把不同 CLI tag 构建误判为同一节点：
+若未来重新引入跨 target cache 或 node-level scheduler，cache key 必须包含 dependency 语义。涉及 target tags 的 key 应使用已经合并 CLI extra tags 后的 effective target tags，避免把不同 CLI tag 构建误判为同一结果：
 
 - `LinkedMeta` key：`(project config, effective target tags)`。
 - `DataLoadPlan` / `DataSet` / `Validation` key：`(project.input, effective target tags)`，不能只按 `project.input` 缓存，因为 `override_sources[].export_when` 会受 CLI extra tags 影响。
 - `ExporterTask` key：`(target name, task name)`。
-- Artifact path 冲突检查是 DAG 汇总后的全局步骤，不属于单个 exporter 私有逻辑。
+- Artifact path 冲突检查是 shared sink / artifact writer 的全局步骤，不属于单个 exporter 私有逻辑。
 
-DAG 的收益是：只依赖 Meta 的 codegen 可与 data load 并行；同一 target 下的 JSON/MessagePack/bin/Lua/POT 共享同一次 DataLoadPlan、加载、归一化和校验；未来多 target 批量构建、增量缓存、远程执行、artifact manifest 都有稳定节点边界。当前阶段 A 的执行范围是“继续阶段式，但把 mixed target 的 codegen 提前”：先保留现有 stage trace 和稳定 artifact 汇总，只调整 branch 启动时机，不引入 node-level ready queue。
+当前分支 pipeline 已获得主要收益：只依赖 Meta 的 codegen 可与 data load 并行；同一 target 下的 JSON/MessagePack/bin/Lua/POT 共享同一次 DataLoadPlan、加载、归一化和校验；artifact manifest 仍可使用 export task name 作为稳定标识。多 target 批量构建、增量缓存、远程执行若未来需要，再重新评估是否引入 node-level DAG；当前不保留会造成“双轨复杂度”的 ready queue 或 DAG skeleton。
 
 路径基准规则：
 

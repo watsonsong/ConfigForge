@@ -615,7 +615,7 @@ config-forge --project ConfigForge.toml --target client
 1. 解析 Project Config，并递归加载其顶层 `imports` 指向的工程配置片段。
 2. 按 `--target` 找到目标 target。
 3. 合并所有配置片段中的 `enums`、`structs`、`tables` 并完成 link/validate。
-4. 根据 `[[targets.exports]]` 与 exporter dependency contract 构造 target-local execution view；当前实现按 MetaAndData / MetaOnly 两类依赖执行，而不是完整通用 DAG 调度器。若 target 同时包含两类任务，source read 会与 Meta link 并行；Meta link 完成后，MetaOnly 分支立即运行格式无关 codegen，不等待 source read、归一化、校验或数据相关 exporter。MetaAndData 分支继续读取 `project.input`、归一化、校验并运行数据相关 exporter。
+4. 根据 `[[targets.exports]]` 与 exporter dependency contract 构造 target-local execution summary；当前实现按 MetaAndData / MetaOnly 两类依赖执行，而不是完整通用 DAG 调度器。若 target 同时包含两类任务，source read 会与 Meta link 并行；Meta link 完成后，MetaOnly 分支立即运行格式无关 codegen，不等待 source read、归一化、校验或数据相关 exporter。MetaAndData 分支继续读取 `project.input`、归一化、校验并运行数据相关 exporter。
 5. 同 `(project.input, effective_tags)` 的 MetaAndData export task 复用加载、归一化和校验结果。
 6. 汇总所有 export artifacts，按 export task 声明顺序稳定排序，并统一完成路径归一化和冲突检查。
 7. 按 `--dry-run` / `--write-mode` 写出 artifact，或在 dry-run 模式下只返回写入计划；artifact writer 通过 shared `ArtifactSink` 管理 path reservation、Direct / TempCommit / DryRun 生命周期与 result entries。后续 streaming generator 会进一步降低生成阶段峰值。
