@@ -114,7 +114,16 @@
 
 ## Step 3：实现 asset resolver 基础模型
 
-状态：待开始
+状态：已完成（提交前验证通过）
+
+完成记录：
+
+- 新增 `AssetResolver`、`EffectiveAssetKind`、`ResolvedAssetRef` 基础模型。
+- Resolver 已接入 linked Meta 的 `asset_kind` 与 Project `assets.search_paths`，并按 `extends` 生成 effective asset kind。
+- 支持 `relative`、`mounted`、`mounted_object` 三种 path style，支持 wrapper stripping、object separator、`object_name = "{stem}" / "{stem}_C"` 和 `allow_auto_complete`。
+- 支持 `required`、`forbidden`、`optional` extension policy 的候选生成。
+- 支持 `search_paths × base_dirs × extensions` 候选生成，拒绝 absolute path 和 `..` 逃逸；存在唯一真实文件时优先选择，多个真实候选时报 ambiguous。
+- 验证命令：`cargo fmt --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml" && cargo test --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml"`。
 
 工作项：
 

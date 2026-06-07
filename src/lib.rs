@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod artifact;
+mod asset;
 mod build;
 mod cli;
 mod codegen;
@@ -21,6 +22,7 @@ pub use artifact::{
     Artifact, ArtifactContent, ArtifactWriteEntry, ArtifactWriteMode, ArtifactWriteResult,
     ArtifactWriter,
 };
+pub use asset::{AssetResolver, EffectiveAssetKind, ResolvedAssetRef};
 pub use build::{
     BuildOptions, BuildOutput, BuildTrace, BuildTraceStage, BuildTraceStageStatus,
     ExecutionOptions, build_target,
@@ -56,7 +58,9 @@ pub use meta::{
     RowExportPolicy, SourceRef, StructMeta, TableKind, TableMeta, TagMatchMode, TargetTags,
     ValidationSeverity, ValidatorMeta, ValueLayout,
 };
-pub use project::{ProjectConfig, ProjectConfigMeta, TargetConfig};
+pub use project::{
+    AssetSearchPathConfig, AssetsConfig, ProjectConfig, ProjectConfigMeta, TargetConfig,
+};
 pub use runtime_contract::{ExportDependency, RuntimeDataFile};
 pub use validation::{
     CompiledValidationPlan, CompiledValidator, ExportTableView, ExportValidationView,
