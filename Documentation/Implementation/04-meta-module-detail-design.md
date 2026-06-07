@@ -389,7 +389,7 @@ pub struct FieldMeta {
 - `default` 暂保留 `toml::Value`；后续可在 Link 或单独 default-link 阶段按字段类型解析为 typed default。
 - `export = false` 是字段导出的硬关闭；默认 `true`。
 - `export_when` 根据 target tags 判断字段是否进入 runtime row 与 codegen row type。
-- `validators` 保存 field-level validator 的 raw 配置，例如 range、regex、length、asset ref syntax 等；Meta 模块只做公共字段和轻量结构校验。当前实现已接受 TOML 配置，并通过 validation registry 编译执行；已内置 `range` validator，支持 `min`、`max`、`exclusive_min`、`exclusive_max`、`allow_empty`、`severity`、`message`、`export_when`。
+- `validators` 保存 field-level validator 的 raw 配置，例如 range、regex、string_length、asset ref syntax 等；Meta 模块只做公共字段和轻量结构校验。当前实现已接受 TOML 配置，并通过 validation registry 编译执行；已内置 field validators `range`、`regex`、`string_length`，支持公共字段 `severity`、`message`、`export_when`。
 - `tool_only`、`filter_field`、`validator_only` 已由 target tags 机制替代；当前仅保留为 `Option<bool>` 以便检测用户仍在使用并输出 `UnsupportedFeature` 诊断，不再参与导出判断。
 - `unique` 是内置便捷字段；当前基础 validation 会直接校验 single-field unique，codegen 也会生成对应 single-field unique index。复合唯一性建议优先通过 `IndexMeta { unique = true }` 表达；未来也可迁移为 implicit validator。
 - `foreign_key` 是字段级 FK 语法糖，只适用于单 source field 引用目标表单字段 unique / primary index；加载后会在 link 阶段转换为与 table-level `ForeignKeyMeta` 等价的 linked relation。字段级 FK 可以声明 `linked_field` 以驱动 codegen 生成关联 helper。
@@ -398,7 +398,7 @@ pub struct FieldMeta {
 
 Validator 采用注册式框架。Meta 层只保存 raw 配置，不依赖具体 validator 实现：
 
-状态：已实现 raw meta 承载与公共结构校验。当前已定义 `ValidatorMeta` / `ValidationSeverity`，并会解析 `[[tables.fields.validators]]` / `[[tables.validators]]` TOML；具体 validator 的 `kind`、scope 与专属参数由 `src/validation/registry.rs` 和内置 validator factory 在 compile 阶段校验。当前内置执行器已实现 `range` field validator，其余 validator kind 会报告 unknown validator。
+状态：已实现 raw meta 承载与公共结构校验。当前已定义 `ValidatorMeta` / `ValidationSeverity`，并会解析 `[[tables.fields.validators]]` / `[[tables.validators]]` TOML；具体 validator 的 `kind`、scope 与专属参数由 `src/validation/registry.rs` 和内置 validator factory 在 compile 阶段校验。当前内置执行器已实现 `range`、`regex`、`string_length`、`required_when`、`compare`、`sum`、`monotonic`；其他未知 validator kind 会报告 unknown validator。
 
 ```rust
 pub struct ValidatorMeta {

@@ -19,6 +19,15 @@ type = "text"
 required = true
 export_when = { any = ["client"] }
 
+[[tables.fields.validators]]
+kind = "regex"
+pattern = "[A-Z][A-Za-z ]+"
+
+[[tables.fields.validators]]
+kind = "string_length"
+min = 3
+max = 16
+
 [[tables.fields]]
 name = "description"
 type = "text"
@@ -51,6 +60,18 @@ kind = "collection"
 primary_index = "by_class_level"
 source = "class_levels.csv"
 desc = "角色职业等级属性配置，class_id 与等级组成联合主键。"
+
+[[tables.validators]]
+kind = "sum"
+field = "level"
+group_by = ["class_id"]
+equals = 3
+
+[[tables.validators]]
+kind = "monotonic"
+field = "level"
+group_by = ["class_id"]
+order_by = "level"
 
 [[tables.fields]]
 name = "class_id"

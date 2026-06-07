@@ -225,7 +225,7 @@
 
 建议提交：`feat(validation): add monotonic validator`
 
-## [ ] Step 11：标准工程样例、文档同步与回归验证
+## [x] Step 11：标准工程样例、文档同步与回归验证
 
 目标：把新增 validators 的推荐用法落到标准工程和文档，便于后续 QA 与用户学习。
 

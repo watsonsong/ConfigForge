@@ -2,18 +2,18 @@
 
 Related docs：[`05-data-validation.md`](05-data-validation.md)、[`04-meta-model.md`](04-meta-model.md)、[`../Implementation/06-validation-module-detail-design.md`](../Implementation/06-validation-module-detail-design.md)。
 
-本文聚焦 P1-2 阶段计划扩展的**游戏常用内置 validators**。目标不是替代 `05-data-validation.md` 的通用校验语义，而是在现有 validator registry 与 `range` validator 基础上，为 ConfigForge 提供一组更贴近游戏配置场景的内置规则，并明确它们的配置模型、作用域、目标视图语义、诊断口径和分阶段落地顺序。
+本文聚焦 P1-2 阶段扩展的**游戏常用内置 validators**。目标不是替代 `05-data-validation.md` 的通用校验语义，而是在 validator registry 与既有 `range` validator 基础上，为 ConfigForge 提供一组更贴近游戏配置场景的内置规则，并明确它们的配置模型、作用域、目标视图语义、诊断口径和落地状态。
 
 ## 9.1 当前状态
 
 当前代码与设计基线：
 
 - validator registry、`ValidatorMeta`、field/table validator TOML 承载方式已实现。
-- 当前唯一已落地的 registry 内置 validator 是 field-scope `range`。
+- registry 已注册游戏常用内置 validators：field-scope `range`、`regex`、`string_length`；record-scope `required_when`、`compare`；table-scope `sum`、`monotonic`。
 - required / type / enum / unique / foreign key integrity 仍主要由 validation 主流程或专门模块承担，不是完整的 registry built-in 集合。
-- 因此 validator 能力的当前状态仍是 **Implemented MVP**：框架可用，但内置规则覆盖面还不够游戏化。
+- 因此 validator 能力的当前状态是 **Implemented MVP**：显式 built-in validator 已覆盖 P1-2 高频规则，基础 required/type/enum/unique/FK 仍保留在原有校验路径中。
 
-P1-2 的目标是把最常见、最稳定、最不依赖表达式语言的游戏规则沉淀为内置 validators，优先覆盖：
+P1-2 已把最常见、最稳定、最不依赖表达式语言的游戏规则沉淀为内置 validators，覆盖：
 
 1. `range` 增强；
 2. `regex`；

@@ -13,7 +13,7 @@ Related docs：[`../Design/05-data-validation.md`](../Design/05-data-validation.
 - [6.11 测试计划](#611-测试计划)
 
 
-本文档描述 ConfigForge validator 框架的实现设计。当前已在保留 required / type / enum / unique / target-aware validation 行为的基础上，引入可注册、可扩展、可配置的 validator 机制；已落地 registry、结构化 `ValidationReport` 和内置 `range` validator。required / type / enum / unique 仍作为基础规则保留在 validation 主流程中，后续可继续迁移为 implicit validators。
+本文档描述 ConfigForge validator 框架的实现设计。当前已在保留 required / type / enum / unique / target-aware validation 行为的基础上，引入可注册、可扩展、可配置的 validator 机制；已落地 registry、结构化 `ValidationReport`，以及 `range`、`regex`、`string_length`、`required_when`、`compare`、`sum`、`monotonic` 等显式内置 validators。required / type / enum / unique 仍作为基础规则保留在 validation 主流程中，后续可继续迁移为 implicit validators。
 
 需要特别区分：**validator 是检查规则，foreign key 是数据关系模型**。外键关系不仅用于导出前校验，还会影响 runtime data/codegen，例如生成自动查找关联记录的 helper。因此外键不应只作为 `kind = "foreign_key"` 的普通 validator 配置存在；它应成为 Meta 中的一等关系数据，再由 validation 阶段从外键关系隐式生成 referential-integrity validator。
 
@@ -39,7 +39,16 @@ src/validation/
   registry.rs         # ValidatorFactory / CompiledValidator / ValidatorRegistry / CompiledValidationPlan
   builtins/
     mod.rs
-    range.rs          # 内置 range validator
+    common.rs         # built-in validators 参数解析、字段查找与 scalar 分类 helper
+    condition.rs      # record validator 共享 when 条件模型
+    table_common.rs   # table validator 共享 group_by / order_by / numeric helper
+    range.rs          # 内置 range field validator
+    regex.rs          # 内置 regex field validator
+    string_length.rs  # 内置 string_length field validator
+    required_when.rs  # 内置 required_when record validator
+    compare.rs        # 内置 compare record validator
+    sum.rs            # 内置 sum table validator
+    monotonic.rs      # 内置 monotonic table validator
   tests.rs            # validation 单元测试
 ```
 
@@ -397,11 +406,20 @@ src/validation/
   registry.rs         # ValidatorRegistry、ValidatorFactory 注册与 lookup
   builtins/
     mod.rs
+    common.rs
+    condition.rs
+    table_common.rs
+    compare.rs
+    monotonic.rs
     range.rs
+    regex.rs
+    required_when.rs
+    string_length.rs
+    sum.rs
   tests.rs
 ```
 
-`ValidatorMeta`、`ValidationSeverity` 当前由 `src/meta/model/` 下的 raw model 定义并经 `src/meta/model.rs` re-export；raw `ValidatorMeta -> CompiledValidator` 的 compile 流程由 `src/validation/registry.rs` 中的 `CompiledValidationPlan::compile` 负责。required / type / enum / unique 仍在 `src/validation/table.rs` 中作为基础校验执行；foreign key referential integrity 当前在 `src/validation/foreign_key.rs` 中执行，尚未迁移为 registry 内置 validator。后续可按需新增 `builtins/unique.rs`、`builtins/referential_integrity.rs` 等模块继续迁移。
+`ValidatorMeta`、`ValidationSeverity` 当前由 `src/meta/model/` 下的 raw model 定义并经 `src/meta/model.rs` re-export；raw `ValidatorMeta -> CompiledValidator` 的 compile 流程由 `src/validation/registry.rs` 中的 `CompiledValidationPlan::compile` 负责。explicit built-in validators 已拆到 `src/validation/builtins/`：`range` / `regex` / `string_length` 为 field scope，`required_when` / `compare` 为 record scope，`sum` / `monotonic` 为 table scope。required / type / enum / unique 仍在 `src/validation/table.rs` 中作为基础校验执行；foreign key referential integrity 当前在 `src/validation/foreign_key.rs` 中执行，尚未迁移为 registry 内置 validator。后续可按需新增 `builtins/unique.rs`、`builtins/referential_integrity.rs` 等模块继续迁移。
 
 `defaults.rs` 中的 normalize 保持 table-local：`normalize_table()` 只读取当前 `LinkedTableMeta` 与当前 `DataTable`，负责 field default、ObjectTable singleton 后续校验前的数据准备、fragment-scoped default 等规则；`normalize_data_set_with_pool()` 只把不同 table 分发到 Rayon pool 并按原始 `DataSet.tables()` 顺序收集结果。若未来 normalize 需要访问其他 table，必须先在 Build DAG 中显式新增依赖节点，不能在 table task 中隐式读取或修改全局状态。
 
@@ -797,6 +815,12 @@ impl ValidationReport {
 | type | `field.type_mismatch` |
 | enum | `field.enum_unknown_value` |
 | range | `field.range_violation` |
+| regex | `validator.regex_mismatch` |
+| string_length | `validator.string_too_short` / `validator.string_too_long` / `validator.string_length_mismatch` |
+| required_when | `validator.required_when_missing` |
+| compare | `validator.compare_failed` / `validator.compare_operand_missing` |
+| sum | `validator.sum_mismatch` / `validator.sum_too_small` / `validator.sum_too_large` |
+| monotonic | `validator.monotonic_violation` / `validator.monotonic_duplicate_order_key` |
 | unique | `table.unique_duplicate` |
 | referential_integrity | `dataset.foreign_key_missing` |
 
@@ -902,10 +926,10 @@ impl ValidationReport {
 | 测试位置 | 覆盖内容 |
 | --- | --- |
 | `src/meta/tests.rs` | validator meta 解析、公共字段默认值、无效公共字段诊断。 |
-| `src/validation/builtins/range.rs` | range 参数解析、边界比较、错误信息。 |
+| `src/validation/builtins/*.rs` | `range`、`regex`、`string_length`、`required_when`、`compare`、`sum`、`monotonic` 的参数解析、类型限制、target-aware 执行和诊断。 |
 | `src/validation/builtins/unique.rs` | explicit / implicit unique、复合 key、row_export 后过滤。 |
 | `src/validation/builtins/referential_integrity.rs` | 外键关系生成的完整性校验、target 查找、optional、复合 key、target ExportView 语义。 |
-| `src/validation/tests.rs` | registry compile/run 流程。 |
+| `src/validation/tests.rs` | registry compile/run 流程、record/table validators、target-aware hidden support field、group/order deterministic 行为。 |
 
 ### 集成测试
 
