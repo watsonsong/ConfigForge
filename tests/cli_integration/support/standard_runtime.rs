@@ -3,7 +3,9 @@
 
 use std::{fs, process::Command as StdCommand};
 
-use super::{assert_command_success, command_exists};
+use super::{
+    assert_command_success, command_exists, require_any_tool_or_skip, require_tool_or_skip,
+};
 
 pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
     let temp_dir = tempfile::tempdir().expect("rust harness temp dir should be created");
@@ -176,8 +178,7 @@ fn generated_external_rust_loads_exported_json() {
 "#;
 
 pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
-    if !command_exists("cmake") {
-        eprintln!("skipping standard generated C++ runtime test: cmake not found");
+    if require_tool_or_skip("standard generated C++ runtime test", "cmake").is_none() {
         return;
     }
 
@@ -392,8 +393,7 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
     assert_command_success(output, "C++ MessagePack adapter namespace check run");
 }
 pub(crate) fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) {
-    if !command_exists("node") {
-        eprintln!("skipping standard generated TypeScript runtime test: node not found");
+    if require_tool_or_skip("standard generated TypeScript runtime test", "node").is_none() {
         return;
     }
 
@@ -461,7 +461,10 @@ pub(crate) fn verify_standard_generated_typescript_runtime(fixture_root: &std::p
             "standard generated TypeScript npx tsc",
         );
     } else {
-        eprintln!("skipping standard generated TypeScript runtime test: tsc/npx not found");
+        let _ = require_any_tool_or_skip(
+            "standard generated TypeScript runtime test",
+            &["tsc", "npx"],
+        );
         return;
     }
 
@@ -494,15 +497,14 @@ pub(crate) fn verify_standard_generated_typescript_runtime(fixture_root: &std::p
     assert_command_success(output, "standard generated TypeScript runtime test");
 }
 pub(crate) fn verify_standard_generated_lua_runtime(fixture_root: &std::path::Path) {
-    let Some(lua_command) = ["lua5.4", "lua5.3", "lua", "luajit"]
-        .iter()
-        .find(|command| command_exists(command))
-    else {
-        eprintln!("skipping standard generated Lua runtime test: lua interpreter not found");
+    let Some(lua_probe) = require_any_tool_or_skip(
+        "standard generated Lua runtime test",
+        &["lua5.4", "lua5.3", "lua", "luajit"],
+    ) else {
         return;
     };
 
-    let output = StdCommand::new(lua_command)
+    let output = StdCommand::new(&lua_probe.command)
         .arg(fixture_root.join("harness/lua/runtime_check.lua"))
         .env("LUA_CONFIG_ROOT", fixture_root.join("out/client_lua"))
         .output()
@@ -511,8 +513,7 @@ pub(crate) fn verify_standard_generated_lua_runtime(fixture_root: &std::path::Pa
 }
 
 pub(crate) fn verify_standard_generated_csharp_runtime(fixture_root: &std::path::Path) {
-    if !command_exists("dotnet") {
-        eprintln!("skipping standard generated C# runtime test: dotnet not found");
+    if require_tool_or_skip("standard generated C# runtime test", "dotnet").is_none() {
         return;
     }
 
@@ -792,8 +793,9 @@ sealed class BinaryRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader
 }
 
 pub(crate) fn verify_standard_generated_java_runtime(fixture_root: &std::path::Path) {
-    if !command_exists("javac") || !command_exists("java") {
-        eprintln!("skipping standard generated Java runtime test: javac/java not found");
+    if require_tool_or_skip("standard generated Java runtime test", "javac").is_none()
+        || require_tool_or_skip("standard generated Java runtime test", "java").is_none()
+    {
         return;
     }
 

@@ -3,11 +3,10 @@
 
 use std::{fs, process::Command as StdCommand};
 
-use super::{assert_command_success, command_exists};
+use super::{assert_command_success, require_tool_or_skip};
 
 pub(crate) fn verify_standard_generated_cpp_unreal_runtime(fixture_root: &std::path::Path) {
-    if !command_exists("c++") {
-        eprintln!("skipping standard generated cpp_unreal syntax test: c++ not found");
+    if require_tool_or_skip("standard generated cpp_unreal syntax test", "c++").is_none() {
         return;
     }
 

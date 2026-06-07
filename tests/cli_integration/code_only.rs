@@ -198,7 +198,7 @@ fn builds_cpp_unreal_code_only_target() {
     assert!(header.contains("namespace ReferenceGameConfig"));
     assert!(source.contains("#include \"reference_game_config.h\""));
 
-    if command_exists("c++") {
+    if require_tool_or_skip("cpp_unreal syntax smoke", "c++").is_some() {
         let shim_dir = temp_dir.path().join("unreal_shim");
         write_cpp_unreal_core_minimal_shim(&shim_dir);
         let output = StdCommand::new("c++")
@@ -269,7 +269,7 @@ fn builds_cpp_unreal_blueprint_code_only_target() {
     assert!(header.contains("UReferenceConfigForgeBlueprintLibrary"));
     assert!(header.contains("UPROPERTY(BlueprintReadOnly, Category=\"Reference Config\")"));
 
-    if command_exists("c++") {
+    if require_tool_or_skip("cpp_unreal blueprint syntax smoke", "c++").is_some() {
         let shim_dir = temp_dir.path().join("unreal_shim");
         write_cpp_unreal_core_minimal_shim(&shim_dir);
         fs::write(out_dir.join("reference_game_config.generated.h"), "")

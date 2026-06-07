@@ -112,7 +112,7 @@ docs(testing): add development environment guide
 docs(testing): document test and CI matrix
 ```
 
-## [ ] Step 3：统一 ToolProbe 与 skip 输出
+## [x] Step 3：统一 ToolProbe 与 skip 输出
 
 目标：把现有分散的 bool 型 `command_exists` 探测升级为带诊断信息的统一工具探测层，但暂不改变测试 profile 语义。
 
@@ -132,6 +132,8 @@ docs(testing): document test and CI matrix
 - `cargo test --test cli_integration standard_project_generated_code_loads_exported_runtime_data`
 - 使用本机已有工具验证 harness 正常执行。
 - 通过单元测试或可控 fake command 覆盖 tool missing / version command failed 的分支。
+
+当前实现：`tests/cli_integration/support/commands.rs` 已新增 `ToolProbe`、`probe_tool`、`probe_any_tool`、`skip_optional_test`、`require_tool_or_skip` 与 `require_any_tool_or_skip`，保留 `command_exists` 兼容旧调用；C++、Unreal C++、standard_project C++ / TypeScript / Lua / C# / Java harness 已改为使用统一 skip helper 输出缺失工具诊断，并增加 missing command 分支测试。
 
 建议提交：
 

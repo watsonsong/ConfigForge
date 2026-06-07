@@ -3,7 +3,7 @@
 
 use std::{fs, process::Command as StdCommand};
 
-use super::{assert_command_success, command_exists};
+use super::{assert_command_success, require_tool_or_skip};
 
 pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
     fs::write(
@@ -163,8 +163,7 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
     )
     .expect("generated C++ compile check should be written");
 
-    if !command_exists("c++") {
-        eprintln!("skipping generated C++ runtime check: c++ not found");
+    if require_tool_or_skip("generated C++ runtime check", "c++").is_none() {
         return;
     }
 
@@ -226,8 +225,7 @@ pub(crate) fn verify_generated_cpp_global_i18n(generated_dir: &std::path::Path) 
     )
     .expect("generated C++ global i18n check should be written");
 
-    if !command_exists("c++") {
-        eprintln!("skipping generated C++ global i18n check: c++ not found");
+    if require_tool_or_skip("generated C++ global i18n check", "c++").is_none() {
         return;
     }
 

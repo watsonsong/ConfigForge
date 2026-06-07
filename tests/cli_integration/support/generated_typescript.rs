@@ -3,7 +3,7 @@
 
 use std::{fs, process::Command as StdCommand};
 
-use super::{assert_command_success, command_exists};
+use super::{assert_command_success, command_exists, require_any_tool_or_skip};
 
 pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
     fs::write(
@@ -201,7 +201,7 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
             "generated TypeScript npx tsc",
         );
     } else {
-        eprintln!("skipping generated TypeScript type check: tsc/npx not found");
+        let _ = require_any_tool_or_skip("generated TypeScript type check", &["tsc", "npx"]);
     }
 }
 pub(crate) fn verify_generated_typescript_global_i18n(generated_dir: &std::path::Path) {
@@ -263,6 +263,9 @@ pub(crate) fn verify_generated_typescript_global_i18n(generated_dir: &std::path:
             "generated TypeScript global i18n npx tsc",
         );
     } else {
-        eprintln!("skipping generated TypeScript global i18n type check: tsc/npx not found");
+        let _ = require_any_tool_or_skip(
+            "generated TypeScript global i18n type check",
+            &["tsc", "npx"],
+        );
     }
 }
