@@ -27,10 +27,10 @@ P1-1 的目标是把现有结构化 diagnostics 转换为可读、可筛选、�
 
 ### 10.2.1 目标
 
-- 提供 `validate` 命令的报告导出能力：
+- 提供当前 CLI 主入口的报告导出能力：
 
 ```bash
-config-forge validate \
+config-forge \
   --project ConfigForge.toml \
   --target client \
   --report html \
@@ -61,16 +61,16 @@ format = "html"
 
 ## 10.3 入口设计
 
-### 10.3.1 `validate` 命令参数
+### 10.3.1 CLI 报告参数
 
-建议为 `validate` 增加：
+当前已为 CLI 增加：
 
 | 参数 | 说明 |
 | --- | --- |
 | `--report <format>` | 可选。启用报告导出，取值 `html` / `markdown` / `json` / `csv`。 |
 | `--output <path>` | 报告输出路径。`html` / `markdown` / `json` 推荐为文件路径；`csv` 可为单文件或目录，见 10.8。 |
 | `--report-title <title>` | 可选。覆盖报告标题，默认使用 project name + target + timestamp。 |
-| `--include-passed` | 可选。默认只输出 warning/error；未来可输出通过项统计。P1-1 可先保留不实现。 |
+| `--include-passed` | 未实现。默认只输出 warning/error；未来可输出通过项统计。 |
 
 行为：
 
@@ -87,9 +87,9 @@ format = "html"
 示例：
 
 ```bash
-config-forge validate --project ConfigForge.toml --report markdown --output out/report/validation.md
-config-forge validate --project ConfigForge.toml --target client --report json --output out/report/client-validation.json
-config-forge validate --project ConfigForge.toml --target client --report csv --output out/report/client-validation.csv
+config-forge --project ConfigForge.toml --target client --report markdown --output out/report/validation.md
+config-forge --project ConfigForge.toml --target client --report json --output out/report/client-validation.json
+config-forge --project ConfigForge.toml --target client --report csv --output out/report/client-validation.csv
 ```
 
 ### 10.3.2 Build 附加产物
@@ -115,10 +115,11 @@ file_name = "client-validation.html"
 | `type` | string | 必填 | 固定为 `validation_report`，可考虑 alias `validation_reporter`，但 canonical 使用 `validation_report`。 |
 | `output` | path | 必填 | 输出目录。 |
 | `format` | string | `html` | `html` / `markdown` / `json` / `csv`。 |
-| `file_name` | string | 按 target + format 默认 | 输出文件名。CSV 如选择多文件模式时作为 basename。 |
-| `include_warnings` | bool | `true` | 是否包含 warning。P1-1 默认包含。 |
-| `include_errors` | bool | `true` | 是否包含 error。一般不建议关闭。 |
-| `group_by` | string[] | `[]` | 可选展示分组优先级，例如 `["severity", "owner", "table"]`。P1-1 可先固定内置分组。 |
+| `file_name` | string | `validation-report.<ext>` | 输出文件名。CSV 当前为单文件模式。 |
+| `title` | string | 自动标题 | 覆盖报告标题。 |
+| `include_warnings` | bool | 未实现 | 当前始终包含 warning。 |
+| `include_errors` | bool | 未实现 | 当前始终包含 error。 |
+| `group_by` | string[] | 未实现 | 当前固定输出 severity、table、owner、domain、code 分组。 |
 
 Build 语义：
 
@@ -436,11 +437,11 @@ ValidationReport / DiagnosticReport
 
 ## 10.10 实现分期建议
 
-### Phase A：最小可用报告
+### Phase A：最小可用报告（已实现 MVP）
 
 - 新增 report model 和 renderer trait。
 - 从 `ValidationReport` 生成 `DesignerValidationReport`。
-- 支持 `validate --report html|markdown|json|csv --output ...`。
+- 支持 `config-forge --project ... --target ... --report html|markdown|json|csv --output ...`。
 - HTML/Markdown/CSV/JSON 都输出 summary + issue list。
 - 补 source path / row number / current value 的 best-effort enrich。
 - 建立最小 code catalog，覆盖现有 validators。
@@ -452,11 +453,11 @@ ValidationReport / DiagnosticReport
 - target validation 下报告包含 target tags。
 - 输出顺序稳定。
 
-### Phase B：Build export task
+### Phase B：Build export task（已实现 MVP）
 
 - 新增 `type = "validation_report"` export task。
 - 让 build 在 validation 失败时也尽量输出 validation report artifact。
-- 支持 `format`、`file_name`、`include_warnings` 等配置。
+- 支持 `format`、`file_name`、`title` 等配置；`include_warnings` / `include_errors` / `group_by` 暂未实现，当前始终输出所有 issue 并使用固定分组。
 - 标准工程增加 HTML report target 或附加 export task。
 
 验收：
@@ -464,7 +465,7 @@ ValidationReport / DiagnosticReport
 - `config-forge build --target client` 可生成 validation report。
 - runtime/codegen 因 validation error 阻塞时，report artifact 仍可用于定位。
 
-### Phase C：Owner/domain 与更强 source trace
+### Phase C：Owner/domain 与更强 source trace（Planned / Not implemented）
 
 - 支持 owner/domain 配置或映射。
 - CSV source trace 增加 column/header 信息。
@@ -489,8 +490,8 @@ ValidationReport / DiagnosticReport
 
 集成测试：
 
-- `validate --report html --output ...` 在有 error 时写出文件且返回失败。
-- `validate --report json --output ...` 在只有 warning 时写出 warning 且返回成功。
+- `config-forge --report html --output ...` 在有 error 时写出文件且返回失败。
+- `config-forge --report json --output ...` 在只有 warning 时写出 warning 且返回成功。
 - target validation report 包含 target tags。
 - build `validation_report` export task 生成 artifact。
 - 并发 build 下报告顺序稳定。
@@ -502,6 +503,21 @@ ValidationReport / DiagnosticReport
 
 ## 10.12 当前状态
 
-当前实现状态：**Planned / Not implemented**。
+当前实现状态：**Implemented MVP**。
 
-现有基础已经具备 `Diagnostic`、`ValidationIssue`、`ValidationReport`、target-aware validation 和 source row trace；P1-1 的主要工作是把这些结构化信息 enrich 成 designer-facing report model，并实现 CLI/build 两种导出入口与四种 renderer。
+已实现内容：
+
+- `src/validation/report.rs` 提供 `DesignerValidationReport`、`ReportMetadata`、`ReportSummary`、`DesignerValidationIssue`、`IssueGroup` 和 `DesignerReportFormat`。
+- 报告模型可从 `ValidationReport` / `DiagnosticReport` enrichment 生成，保留 stable code、severity、table、field、row/source row、target 和 hint，并生成稳定 issue id（如 `E0001` / `W0001`）。
+- 内置 code catalog 已覆盖当前常用 validator code 和基础 required/type/enum/unique/FK/asset code；未知 code fallback 到原始 message/hint。
+- 支持 HTML / Markdown / JSON / CSV 四种 renderer，输出共享同一个 normalized report model。
+- CLI 支持 `--report <html|markdown|json|csv>`、`--output <path>`、`--report-title <title>`；validation error 时仍尽量写出报告，再保持失败退出码。
+- Build 支持 `[[targets.exports]] type = "validation_report"`，作为 data-backed 附加产物消费 validation 结果；validation error 阻塞 runtime/codegen 时仍尽量写出 report artifact。
+- 已有单元测试和 CLI integration tests 覆盖 report model、renderer、CLI 失败写报告、build HTML report artifact。
+
+当前边界：
+
+- CLI 当前是顶层参数形式，不存在独立 `validate` 子命令；文档示例使用当前可执行接口。
+- owner/domain 当前只有 `<unassigned>` / `<uncategorized>` fallback 和固定分组，Project 级 owner/domain 映射未实现。
+- `current_value`、`expected`、`source_column` 暂未从 DataSet / validator structured context 补齐，导出为空字段。
+- Build export task 当前支持 `format`、`file_name`、`title`；`include_warnings`、`include_errors`、`group_by` 尚未实现，当前始终输出全部 issue 并使用固定分组。

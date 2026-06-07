@@ -124,6 +124,9 @@ impl ExporterRegistry {
     }
 
     fn dependency(&self, target_name: &str, type_id: &str) -> Result<ExportDependency> {
+        if type_id == "validation_report" {
+            return Ok(ExportDependency::MetaAndData);
+        }
         let data_dependency = self.data_registry.dependency(type_id);
         let code_dependency =
             find_generator(&self.code_generators, type_id).map(|generator| generator.dependency());

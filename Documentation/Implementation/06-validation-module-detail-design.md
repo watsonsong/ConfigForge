@@ -13,7 +13,7 @@ Related docs：[`../Design/05-data-validation.md`](../Design/05-data-validation.
 - [6.11 测试计划](#611-测试计划)
 
 
-本文档描述 ConfigForge validator 框架的实现设计。当前已在保留 required / type / enum / unique / target-aware validation 行为的基础上，引入可注册、可扩展、可配置的 validator 机制；已落地 registry、结构化 `ValidationReport`，以及 `range`、`regex`、`string_length`、`required_when`、`compare`、`sum`、`monotonic` 等显式内置 validators。required / type / enum / unique 仍作为基础规则保留在 validation 主流程中，后续可继续迁移为 implicit validators。
+本文档描述 ConfigForge validator 框架的实现设计。当前已在保留 required / type / enum / unique / target-aware validation 行为的基础上，引入可注册、可扩展、可配置的 validator 机制；已落地 registry、结构化 `ValidationReport`、Designer Validation Report enrichment / renderer，以及 `range`、`regex`、`string_length`、`required_when`、`compare`、`sum`、`monotonic` 等显式内置 validators。required / type / enum / unique 仍作为基础规则保留在 validation 主流程中，后续可继续迁移为 implicit validators。
 
 需要特别区分：**validator 是检查规则，foreign key 是数据关系模型**。外键关系不仅用于导出前校验，还会影响 runtime data/codegen，例如生成自动查找关联记录的 helper。因此外键不应只作为 `kind = "foreign_key"` 的普通 validator 配置存在；它应成为 Meta 中的一等关系数据，再由 validation 阶段从外键关系隐式生成 referential-integrity validator。
 
@@ -37,6 +37,7 @@ src/validation/
   struct_value.rs     # struct JSON cell / expanded value 校验
   defaults.rs         # default 应用与 normalize_data_set / normalize_data_set_with_pool / normalize_table
   registry.rs         # ValidatorFactory / CompiledValidator / ValidatorRegistry / CompiledValidationPlan
+  report.rs           # DesignerValidationReport enrichment、code catalog、HTML/Markdown/JSON/CSV renderer
   builtins/
     mod.rs
     common.rs         # built-in validators 参数解析、字段查找与 scalar 分类 helper
@@ -68,6 +69,7 @@ Typed value 解析不在 Validation 模块内重复实现。Validation 需要验
 - `validate_data_set_for_target_with_report()`：target-aware 校验并返回 `ValidationReport`。
 - `validate_normalized_data_set_with_report_and_pool()`：在已 normalized 的 full `DataSet` 上把 table-local 基础校验按 table 分发到 Rayon CPU pool，按 Meta table 顺序合并局部 report，再执行 full FK / registry validators 并按 stable key 排序。
 - `validate_normalized_data_set_for_target_with_report_and_pool()`：并行构建 target `ExportValidationView`，再按 visible target table 并行执行 target-aware table validation；局部 report 按 ExportView table order 合并后继续执行 target FK / registry validators，并按 stable key 排序。
+- `DesignerValidationReport::from_validation_report()` / `from_diagnostic_report()`：把 validation/diagnostic 结果转换成人类与平台共用的 normalized report model，供 HTML / Markdown / JSON / CSV renderer 复用。
 - `normalize_data_set()`：串行应用 default，产出后续校验和导出共享的 normalized data。
 - `normalize_data_set_with_pool()`：按 table 并行执行 `normalize_table()`，再按输入 DataSet table 顺序稳定 merge；用于 build 主流程的 CPU pool。
 

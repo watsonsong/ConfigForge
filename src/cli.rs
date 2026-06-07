@@ -6,8 +6,10 @@ use std::{fs, path::PathBuf};
 use clap::{Parser, ValueEnum};
 
 use crate::{
+    ConfigForgeError,
     artifact::ArtifactWriteMode,
     build::{BuildOptions, ExecutionOptions, build_target_with_trace},
+    validation::{DesignerReportFormat, ValidationReportExportConfig},
 };
 
 #[derive(Debug, Parser)]
@@ -44,12 +46,40 @@ struct Cli {
     /// Write build tracing / metrics as JSON to this path.
     #[arg(long)]
     trace_tasks: Option<PathBuf>,
+    /// Export a human-readable validation report in the selected format.
+    #[arg(long, value_enum)]
+    report: Option<CliReportFormat>,
+    /// Output path for --report.
+    #[arg(long)]
+    output: Option<PathBuf>,
+    /// Optional title for the exported validation report.
+    #[arg(long)]
+    report_title: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum CliWriteMode {
     Direct,
     TempCommit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum CliReportFormat {
+    Html,
+    Markdown,
+    Json,
+    Csv,
+}
+
+impl From<CliReportFormat> for DesignerReportFormat {
+    fn from(format: CliReportFormat) -> Self {
+        match format {
+            CliReportFormat::Html => Self::Html,
+            CliReportFormat::Markdown => Self::Markdown,
+            CliReportFormat::Json => Self::Json,
+            CliReportFormat::Csv => Self::Csv,
+        }
+    }
 }
 
 impl From<CliWriteMode> for ArtifactWriteMode {
@@ -77,12 +107,33 @@ fn run_with_args(cli: Cli) -> anyhow::Result<()> {
     } else {
         cli.write_mode.unwrap_or(CliWriteMode::Direct).into()
     };
+    let validation_report = match cli.report {
+        Some(format) => Some(ValidationReportExportConfig {
+            format: format.into(),
+            output: cli.output.clone().ok_or_else(|| {
+                ConfigForgeError::Validation(
+                    "--output must be set when --report is used".to_owned(),
+                )
+            })?,
+            title: cli.report_title.clone(),
+        }),
+        None => {
+            if cli.output.is_some() || cli.report_title.is_some() {
+                return Err(ConfigForgeError::Validation(
+                    "--output and --report-title require --report".to_owned(),
+                )
+                .into());
+            }
+            None
+        }
+    };
     let build_result = build_target_with_trace(BuildOptions {
         project_path: &cli.project,
         target_name: &cli.target,
         extra_tags: &cli.extra_tags,
         execution,
         artifact_write_mode,
+        validation_report,
     });
     let output = match build_result {
         Ok(output) => output,

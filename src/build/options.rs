@@ -8,15 +8,17 @@ use serde::Serialize;
 use crate::{
     ConfigForgeError, Result,
     artifact::{ArtifactWriteMode, ArtifactWriteResult},
+    validation::ValidationReportExportConfig,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BuildOptions<'a> {
     pub project_path: &'a Path,
     pub target_name: &'a str,
     pub extra_tags: &'a [String],
     pub execution: ExecutionOptions,
     pub artifact_write_mode: ArtifactWriteMode,
+    pub validation_report: Option<ValidationReportExportConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

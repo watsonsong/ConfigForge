@@ -9,12 +9,15 @@ use crate::{
     artifact::ArtifactSink,
     asset::AssetResolver,
     data::{DataRow, DataSet, DataTable, RawSourceData},
+    diagnostic::{Diagnostic, DiagnosticReport},
     exporter::{DataExporterRef, DataFormatRegistry, export_runtime_data_to_sink},
     meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags},
     project::AssetsConfig,
     project::lexical_normalize_path,
     validation::{
-        normalize_data_set_with_pool,
+        DesignerReportFormat, DesignerReportOptions, DesignerValidationReport,
+        ValidationReportExportConfig, normalize_data_set_with_pool,
+        render_designer_validation_report,
         validate_normalized_data_set_for_target_with_assets_report_and_pool,
     },
 };
@@ -80,18 +83,44 @@ fn export_meta_and_data_tasks_with_registry(
     ensure_planned_runtime_output_paths(export_tasks, linked_meta, target_tags, registry, pool)?;
 
     let data_set = normalize_data_set_with_pool(linked_meta, raw_sources.as_data_set(), pool)?;
-    let validation_report = validate_normalized_data_set_for_target_with_assets_report_and_pool(
+    let validation_result = validate_normalized_data_set_for_target_with_assets_report_and_pool(
         linked_meta,
         assets,
         target_tags,
         &data_set,
         pool,
-    )?;
+    );
+    let validation_report = match validation_result {
+        Ok(report) => report,
+        Err(ConfigForgeError::ValidationReport(diagnostic_report)) => {
+            export_validation_report_tasks_from_diagnostics(
+                export_tasks,
+                linked_meta,
+                target_tags,
+                &diagnostic_report,
+                sink,
+            )?;
+            return Err(ConfigForgeError::ValidationReport(diagnostic_report));
+        }
+        Err(error) => return Err(error),
+    };
     let mut warnings = Vec::new();
     warnings.extend(validation_report.warning_messages());
+    export_validation_report_tasks(
+        export_tasks,
+        linked_meta,
+        target_tags,
+        &validation_report,
+        sink,
+    )?;
     let export_data_set = canonicalize_asset_refs(linked_meta, assets, target_tags, &data_set)?;
+    let data_export_tasks = export_tasks
+        .iter()
+        .copied()
+        .filter(|task| task.type_id != "validation_report")
+        .collect::<Vec<_>>();
     let mut task_outputs = pool.install(|| {
-        export_tasks
+        data_export_tasks
             .par_iter()
             .enumerate()
             .map(|(index, export_task)| {
@@ -112,15 +141,147 @@ fn export_meta_and_data_tasks_with_registry(
     });
     task_outputs.sort_by_key(|(index, _)| *index);
 
-    let mut stable_task_outputs = Vec::with_capacity(task_outputs.len());
     for (_, task_output) in task_outputs {
-        stable_task_outputs.push(task_output?);
+        task_output?;
     }
+
+    let stable_task_outputs = export_tasks
+        .iter()
+        .map(|task| RuntimeExportTaskOutput {
+            export_name: task.name.clone(),
+        })
+        .collect();
 
     Ok(RuntimeExportOutput {
         warnings,
         task_outputs: stable_task_outputs,
     })
+}
+
+fn export_validation_report_tasks(
+    export_tasks: &[&NormalizedExportTask],
+    linked_meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    validation_report: &crate::validation::ValidationReport,
+    sink: &ArtifactSink,
+) -> Result<()> {
+    let report_tasks = export_tasks
+        .iter()
+        .copied()
+        .filter(|task| task.type_id == "validation_report")
+        .collect::<Vec<_>>();
+    if report_tasks.is_empty() {
+        return Ok(());
+    }
+    let report = DesignerValidationReport::from_validation_report(
+        validation_report,
+        designer_report_options(linked_meta, target_tags),
+    );
+    for task in report_tasks {
+        write_report_task(task, &report, sink)?;
+    }
+    Ok(())
+}
+
+fn export_validation_report_tasks_from_diagnostics(
+    export_tasks: &[&NormalizedExportTask],
+    linked_meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    diagnostic_report: &DiagnosticReport<Diagnostic>,
+    sink: &ArtifactSink,
+) -> Result<()> {
+    let report_tasks = export_tasks
+        .iter()
+        .copied()
+        .filter(|task| task.type_id == "validation_report")
+        .collect::<Vec<_>>();
+    if report_tasks.is_empty() {
+        return Ok(());
+    }
+    let report = DesignerValidationReport::from_diagnostic_report(
+        diagnostic_report,
+        designer_report_options(linked_meta, target_tags),
+    );
+    for task in report_tasks {
+        write_report_task(task, &report, sink)?;
+    }
+    Ok(())
+}
+
+fn designer_report_options(
+    linked_meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+) -> DesignerReportOptions {
+    let _ = linked_meta;
+    DesignerReportOptions {
+        title: None,
+        project_name: None,
+        project_path: None,
+        target: None,
+        target_tags: target_tags.clone(),
+        generated_at: super::generated_at(),
+        input_root: None,
+    }
+}
+
+fn write_report_task(
+    task: &NormalizedExportTask,
+    report: &DesignerValidationReport,
+    sink: &ArtifactSink,
+) -> Result<()> {
+    let config = validation_report_export_config_from_task(task)?;
+    let mut report = report.clone();
+    if let Some(title) = &config.title {
+        report.metadata.title = title.clone();
+    }
+    let content = render_designer_validation_report(&report, config.format)?;
+    sink.write_text(config.output, content)
+}
+
+fn validation_report_export_config_from_task(
+    task: &NormalizedExportTask,
+) -> Result<ValidationReportExportConfig> {
+    let mut options = task.options.clone();
+    let format = take_report_format(&mut options)?.unwrap_or(DesignerReportFormat::Html);
+    let file_name = take_report_string(&mut options, "file_name")?
+        .unwrap_or_else(|| format!("validation-report.{}", format.extension()));
+    let title = take_report_string(&mut options, "title")?;
+    let unsupported = options.keys().cloned().collect::<Vec<_>>();
+    if let Some(key) = unsupported.first() {
+        return Err(ConfigForgeError::Validation(format!(
+            "validation_report export task `{}` has unknown option `{key}`",
+            task.name
+        )));
+    }
+    Ok(ValidationReportExportConfig {
+        format,
+        output: task.output.join(file_name),
+        title,
+    })
+}
+
+fn take_report_format(
+    options: &mut std::collections::BTreeMap<String, toml::Value>,
+) -> Result<Option<DesignerReportFormat>> {
+    take_report_string(options, "format")?
+        .map(|value| value.parse())
+        .transpose()
+}
+
+fn take_report_string(
+    options: &mut std::collections::BTreeMap<String, toml::Value>,
+    key: &str,
+) -> Result<Option<String>> {
+    options
+        .remove(key)
+        .map(|value| {
+            value.try_into().map_err(|source| {
+                ConfigForgeError::Validation(format!(
+                    "invalid validation_report option `{key}`: {source}"
+                ))
+            })
+        })
+        .transpose()
 }
 
 fn canonicalize_asset_refs(
@@ -353,6 +514,10 @@ fn plan_runtime_output_paths_for_task(
     target_tags: &TargetTags,
     registry: &DataFormatRegistry,
 ) -> Result<Vec<std::path::PathBuf>> {
+    if export_task.type_id == "validation_report" {
+        let config = validation_report_export_config_from_task(export_task)?;
+        return Ok(vec![lexical_normalize_path(&config.output)]);
+    }
     match registry.require_any(&export_task.type_id)? {
         DataExporterRef::Table(exporter) => linked_meta
             .tables

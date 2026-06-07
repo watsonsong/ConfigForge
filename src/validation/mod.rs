@@ -9,6 +9,7 @@ mod diagnostic;
 mod entry;
 mod foreign_key;
 mod registry;
+mod report;
 mod struct_value;
 mod table;
 
@@ -32,6 +33,10 @@ pub use entry::{
 };
 pub use registry::{
     CompiledValidationPlan, CompiledValidator, ValidatorFactory, ValidatorRegistry,
+};
+pub use report::{
+    DesignerReportFormat, DesignerReportOptions, DesignerValidationReport,
+    ValidationReportExportConfig, render_designer_validation_report,
 };
 pub use table::{validate_normalized_table, validate_normalized_table_for_target};
 

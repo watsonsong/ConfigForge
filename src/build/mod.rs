@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
+    collections::BTreeMap,
     path::Path,
     path::PathBuf,
     time::Instant,
@@ -75,9 +76,12 @@ fn build_target_inner(
         .project_path
         .parent()
         .unwrap_or_else(|| Path::new("."));
-    let target = trace.record("normalize_target", None, || {
+    let mut target = trace.record("normalize_target", None, || {
         project.target(options.target_name)?.normalize()
     })?;
+    if let Some(report_config) = options.validation_report {
+        add_cli_validation_report_task(&mut target, report_config)?;
+    }
     let meta_set = project.raw_meta_model();
     let target_tags = target.effective_target_tags(options.extra_tags);
 
@@ -102,6 +106,57 @@ fn build_target_inner(
         warnings: pipeline_output.warnings,
         artifacts,
     })
+}
+
+fn add_cli_validation_report_task(
+    target: &mut NormalizedTargetConfig,
+    report_config: crate::validation::ValidationReportExportConfig,
+) -> Result<()> {
+    if target
+        .exports
+        .iter()
+        .any(|task| task.name == "cli-validation-report")
+    {
+        return Err(ConfigForgeError::Validation(format!(
+            "target `{}` already declares export task `cli-validation-report`",
+            target.name
+        )));
+    }
+    let output_dir = report_config
+        .output
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let file_name = report_config
+        .output
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            ConfigForgeError::Validation(format!(
+                "validation report output `{}` must include a valid file name",
+                report_config.output.display()
+            ))
+        })?
+        .to_owned();
+    let mut options = BTreeMap::from([
+        (
+            "format".to_owned(),
+            toml::Value::String(report_config.format.to_string()),
+        ),
+        ("file_name".to_owned(), toml::Value::String(file_name)),
+    ]);
+    if let Some(title) = report_config.title {
+        options.insert("title".to_owned(), toml::Value::String(title));
+    }
+    target.exports.push(NormalizedExportTask {
+        name: "cli-validation-report".to_owned(),
+        type_id: "validation_report".to_owned(),
+        dependency: ExportDependency::MetaAndData,
+        output: output_dir,
+        options,
+    });
+    Ok(())
 }
 
 struct BuildOutputWithoutTrace {
