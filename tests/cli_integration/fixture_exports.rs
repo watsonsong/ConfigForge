@@ -81,6 +81,11 @@ fn builds_target_from_project_config() {
         game_rules["starter_item_ids"],
         serde_json::json!(["2001", "2002"])
     );
+    assert_eq!(game_rules["starter_reward"]["gold"], "500");
+    assert_eq!(
+        game_rules["starter_reward"]["item_ids"],
+        serde_json::json!(["2001", "2002"])
+    );
     assert_eq!(game_rules["stamina_cap"], "120");
     assert_eq!(game_rules["daily_reset_hour"], "5");
     assert_eq!(game_rules["pvp_enabled"], "true");

@@ -28,6 +28,10 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                         fields_.push_back("");
                         return;
                     }
+                    if (path_ == "game_rules" && CurrentField() == "item_ids" && index < 2) {
+                        fields_.push_back(index == 0 ? "starter_reward.item_ids[0]" : "starter_reward.item_ids[1]");
+                        return;
+                    }
                     throw std::runtime_error("unexpected index");
                 }
 
@@ -40,17 +44,17 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                     if (path_ == "items" && CurrentField() == "rows") {
                         return 1;
                     }
-                    if ((path_ == "classes" || path_ == "class_levels" || path_ == "character_surnames" || path_ == "character_male_given_names" || path_ == "character_female_given_names") && CurrentField() == "rows") {
+                    if ((path_ == "classes" || path_ == "class_levels" || path_ == "character_surnames" || path_ == "character_male_given_names" || path_ == "character_female_given_names" || path_ == "quests" || path_ == "loot_pools") && CurrentField() == "rows") {
                         return 0;
                     }
-                    if (path_ == "game_rules" && CurrentField() == "starter_item_ids") {
+                    if (path_ == "game_rules" && (CurrentField() == "starter_item_ids" || CurrentField() == "item_ids")) {
                         return 2;
                     }
                     throw std::runtime_error("unexpected row count");
                 }
 
                 std::size_t ReadListLength() override {
-                    if (path_ == "game_rules" && CurrentField() == "starter_item_ids") {
+                    if (path_ == "game_rules" && (CurrentField() == "starter_item_ids" || CurrentField() == "item_ids" || CurrentField().empty())) {
                         return 2;
                     }
                     throw std::runtime_error("unexpected list length");
@@ -63,6 +67,10 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                     if (path_ == "game_rules" && CurrentField() == "starter_gold") { return 500; }
                     if (path_ == "game_rules" && CurrentField() == "default_class_id") { return 1; }
                     if (path_ == "game_rules" && CurrentField() == "") { return 2001; }
+                    if (path_ == "game_rules" && CurrentField() == "xp") { return 0; }
+                    if (path_ == "game_rules" && CurrentField() == "gold") { return 500; }
+                    if (path_ == "game_rules" && CurrentField() == "starter_reward.item_ids[0]") { return 2001; }
+                    if (path_ == "game_rules" && CurrentField() == "starter_reward.item_ids[1]") { return 2002; }
                     if (path_ == "game_rules" && CurrentField() == "stamina_cap") { return 120; }
                     if (path_ == "game_rules" && CurrentField() == "daily_reset_hour") { return 5; }
                     throw std::runtime_error("unexpected int64");
@@ -108,7 +116,7 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
             class MockLoader final : public IRuntimeDataLoader {
             public:
                 std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) override {
-                    if (path == "items" || path == "classes" || path == "class_levels" || path == "character_surnames" || path == "character_male_given_names" || path == "character_female_given_names" || path == "game_rules") {
+                    if (path == "items" || path == "classes" || path == "class_levels" || path == "character_surnames" || path == "character_male_given_names" || path == "character_female_given_names" || path == "quests" || path == "loot_pools" || path == "game_rules") {
                         return std::make_unique<MockReader>(path);
                     }
                     throw std::runtime_error("unexpected path");
@@ -135,6 +143,8 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 rules.starter_gold = 500;
                 rules.default_class_id = 1;
                 rules.starter_item_ids = {2001, 2002};
+                rules.starter_reward.gold = 500;
+                rules.starter_reward.item_ids = {2001, 2002};
                 rules.stamina_cap = 120;
                 rules.daily_reset_hour = 5;
                 rules.pvp_enabled = true;
@@ -156,6 +166,9 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 }
                 if (data.GameRules().default_class_id != 1 || data.GameRules().starter_item_ids.size() != 2) {
                     return 5;
+                }
+                if (data.GameRules().starter_reward.gold != 500 || data.GameRules().starter_reward.item_ids.size() != 2) {
+                    return 7;
                 }
                 return 0;
             }

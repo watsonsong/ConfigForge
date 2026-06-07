@@ -66,6 +66,10 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                             "starter_gold" => "starter_gold",
                             "default_class_id" => "default_class_id",
                             "starter_item_ids" => "starter_item_ids",
+                            "starter_reward" => "starter_reward",
+                            "xp" => "xp",
+                            "gold" => "gold",
+                            "item_ids" => "item_ids",
                             "stamina_cap" => "stamina_cap",
                             "daily_reset_hour" => "daily_reset_hour",
                             "pvp_enabled" => "pvp_enabled",
@@ -77,7 +81,7 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                     }}
 
                     fn len(&self) -> RuntimeDataResult<usize> {{
-                        if self.path == "items" && self.current_field() == Some("rows") {{ Ok(1) }} else if matches!(self.path, "classes" | "class_levels" | "character_surnames" | "character_male_given_names" | "character_female_given_names") && self.current_field() == Some("rows") {{ Ok(0) }} else if self.path == "game_rules" && self.current_field() == Some("starter_item_ids") {{ Ok(2) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
+                        if self.path == "items" && self.current_field() == Some("rows") {{ Ok(1) }} else if matches!(self.path, "classes" | "class_levels" | "character_surnames" | "character_male_given_names" | "character_female_given_names" | "quests" | "loot_pools") && self.current_field() == Some("rows") {{ Ok(0) }} else if self.path == "game_rules" && matches!(self.current_field(), Some("starter_item_ids" | "item_ids")) {{ Ok(2) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
                     }}
                 }}
 
@@ -101,6 +105,9 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                             Ok(())
                         }} else if self.path == "game_rules" && self.current_field() == Some("starter_item_ids") && index < 2 {{
                             self.fields.borrow_mut().push(if index == 0 {{ "starter_item_ids[0]" }} else {{ "starter_item_ids[1]" }});
+                            Ok(())
+                        }} else if self.path == "game_rules" && self.current_field() == Some("item_ids") && index < 2 {{
+                            self.fields.borrow_mut().push(if index == 0 {{ "starter_reward.item_ids[0]" }} else {{ "starter_reward.item_ids[1]" }});
                             Ok(())
                         }} else {{
                             Err(RuntimeDataError::not_found(format!("unexpected index: {{index}}")))
@@ -139,6 +146,10 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                             ("game_rules", Some("default_class_id")) => Ok(1),
                             ("game_rules", Some("starter_item_ids[0]")) => Ok(2001),
                             ("game_rules", Some("starter_item_ids[1]")) => Ok(2002),
+                            ("game_rules", Some("xp")) => Ok(0),
+                            ("game_rules", Some("gold")) => Ok(500),
+                            ("game_rules", Some("starter_reward.item_ids[0]")) => Ok(2001),
+                            ("game_rules", Some("starter_reward.item_ids[1]")) => Ok(2002),
                             ("game_rules", Some("stamina_cap")) => Ok(120),
                             ("game_rules", Some("daily_reset_hour")) => Ok(5),
                             _ => Err(RuntimeDataError::type_mismatch("unexpected i64")),
@@ -174,6 +185,8 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                             "character_surnames" => Ok(MockReader::root("character_surnames")),
                             "character_male_given_names" => Ok(MockReader::root("character_male_given_names")),
                             "character_female_given_names" => Ok(MockReader::root("character_female_given_names")),
+                            "quests" => Ok(MockReader::root("quests")),
+                            "loot_pools" => Ok(MockReader::root("loot_pools")),
                             "game_rules" => Ok(MockReader::root("game_rules")),
                             other => Err(RuntimeDataError::not_found(format!("unexpected path: {{other}}"))),
                         }}
@@ -201,13 +214,15 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                     assert!(data.items.get_by_id(404).is_none());
                     assert_eq!(data.game_rules.default_class_id, 1);
                     assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2002]);
+                    assert_eq!(data.game_rules.starter_reward.gold, 500);
+                    assert_eq!(data.game_rules.starter_reward.item_ids, vec![2001, 2002]);
                     assert!(data.game_rules.pvp_enabled);
                 }}
 
                 {serde_assertion}
             "#,
             serde_assertion = if derive_serde {
-                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, stack: None, attributes: None, skill: None }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, default_class_id: 1, starter_item_ids: vec![2001], stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true, default_class_link: RefCell::new(LinkCache::default()), starter_items_link: RefCell::new(LinkListCache::default()) }).unwrap();\n}"
+                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, stack: None, attributes: None, skill: None }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, default_class_id: 1, starter_item_ids: vec![2001], starter_reward: FixedReward { xp: 0, gold: 500, item_ids: vec![2001] }, stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true, default_class_link: RefCell::new(LinkCache::default()), starter_items_link: RefCell::new(LinkListCache::default()) }).unwrap();\n}"
             } else {
                 ""
             }

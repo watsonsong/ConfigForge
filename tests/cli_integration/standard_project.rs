@@ -97,7 +97,7 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
     assert_eq!(quest_rows[0]["title"], "First Steps");
     assert_eq!(quest_rows[0]["reward"]["xp"], "100");
     assert_eq!(
-        quest_rows[1]["reward_item_ids"],
+        quest_rows[1]["reward"]["item_ids"],
         serde_json::json!(["2002", "2003"])
     );
     assert_eq!(
@@ -514,10 +514,15 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
 
     let quests_doc = fs::read_to_string(fixture_root.join("out/client_docs/quests.md"))
         .expect("standard fixture quests doc should be readable");
-    assert!(quests_doc.contains("QuestReward"));
+    assert!(quests_doc.contains("FixedReward"));
     assert!(quests_doc.contains("required_class_id | classes.class_id"));
-    assert!(quests_doc.contains("reward_item_ids | items.id | list-to-many"));
+    assert!(quests_doc.contains("item_ids"));
     assert!(quests_doc.contains("monotonic"));
+
+    let game_rules_doc = fs::read_to_string(fixture_root.join("out/client_docs/game_rules.md"))
+        .expect("standard fixture game_rules doc should be readable");
+    assert!(game_rules_doc.contains("starter_reward"));
+    assert!(game_rules_doc.contains("FixedReward"));
 
     let server_schema_index = fs::read_to_string(fixture_root.join("out/server_docs/index.md"))
         .expect("standard fixture server schema index should be readable");

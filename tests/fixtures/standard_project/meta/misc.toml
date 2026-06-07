@@ -29,6 +29,12 @@ required = true
 foreign_key = { name = "starter_item", target_table = "items", target_index = "by_id", linked_field = "starter_items" }
 
 [[tables.fields]]
+name = "starter_reward"
+type = "FixedReward"
+required = true
+desc = "新玩家默认初始固定奖励，用一个字段同时表达金币、经验和内嵌道具列表。"
+
+[[tables.fields]]
 name = "stamina_cap"
 type = "int"
 required = true

@@ -17,27 +17,13 @@ desc = "支线任务。"
 name = "daily"
 desc = "日常任务。"
 
-[[structs]]
-name = "QuestReward"
-desc = "任务完成奖励，包含经验、金币和可选道具列表。"
-
-[[structs.fields]]
-name = "xp"
-type = "int"
-default = 0
-
-[[structs.fields]]
-name = "gold"
-type = "int"
-default = 0
-
 [[tables]]
 name = "quests"
 kind = "collection"
 primary_index = "by_id"
 source = "quests.csv"
 row_export = { required_tags_field = "required_tags", excluded_tags_field = "excluded_tags" }
-desc = "任务配置表，覆盖主线、支线和日常任务；展示 enum、struct expanded value、list foreign key、自引用 FK、row_export 和多种 validator 的组合。"
+desc = "任务配置表，覆盖主线、支线和日常任务；展示 enum、FixedReward expanded value、自引用 FK、row_export 和多种 validator 的组合。"
 
 [[tables.validators]]
 kind = "monotonic"
@@ -121,16 +107,9 @@ max = 60
 
 [[tables.fields]]
 name = "reward"
-type = "QuestReward"
+type = "FixedReward"
 required = true
-desc = "任务奖励，使用 expanded struct 字段 reward.xp / reward.gold。"
-
-[[tables.fields]]
-name = "reward_item_ids"
-type = "int[]"
-required = true
-desc = "奖励道具列表。"
-foreign_key = { name = "reward_item", target_table = "items", target_index = "by_id", allow_empty = true, linked_field = "reward_items" }
+desc = "任务固定奖励，使用 expanded struct 字段 reward.xp / reward.gold / reward.item_ids。"
 
 [[tables.fields]]
 name = "prerequisite_quest_ids"

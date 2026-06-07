@@ -21,3 +21,28 @@ strip_wrappers = ["BlueprintGeneratedClass'{value}'", "Class'{value}'"]
 object_separator = "."
 allow_auto_complete = true
 allow_path_prefixes = ["/Game/"]
+
+[[structs]]
+name = "FixedReward"
+desc = "固定奖励结构，可用于任务奖励、初始发放、活动补偿等非随机奖励场景。"
+
+[[structs.fields]]
+name = "xp"
+type = "int"
+required = true
+default = 0
+desc = "固定经验奖励。"
+
+[[structs.fields]]
+name = "gold"
+type = "int"
+required = true
+default = 0
+desc = "固定金币奖励。"
+
+[[structs.fields]]
+name = "item_ids"
+type = "int[]"
+required = true
+default = []
+desc = "固定发放的道具 ID 列表。"

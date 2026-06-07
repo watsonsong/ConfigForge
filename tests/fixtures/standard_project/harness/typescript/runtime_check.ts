@@ -104,6 +104,9 @@ async function main(): Promise<void> {
     if (binaryData.gameRules.defaultClassId !== 1 || binaryData.gameRules.starterItemIds.join(",") !== "2001,2002") {
       throw new Error("binary object table array field load failed");
     }
+    if (binaryData.gameRules.starterReward.gold !== 500 || binaryData.gameRules.starterReward.itemIds.join(",") !== "2001,2002") {
+      throw new Error("binary object table fixed reward field load failed");
+    }
     if (binaryData.gameRules.defaultClass(binaryData).classId !== 1) {
       throw new Error("binary object table single relation failed");
     }
@@ -177,6 +180,9 @@ async function main(): Promise<void> {
   if (data.gameRules.defaultClassId !== 1 || data.gameRules.starterItemIds.join(",") !== "2001,2002") {
     throw new Error("object table array field load failed");
   }
+  if (data.gameRules.starterReward.gold !== 500 || data.gameRules.starterReward.itemIds.join(",") !== "2001,2002") {
+    throw new Error("object table fixed reward field load failed");
+  }
   if (data.gameRules.defaultClass(data).classId !== 1) {
     throw new Error("object table single relation failed");
   }
@@ -208,6 +214,9 @@ async function main(): Promise<void> {
   const lazyRules = await lazyData.gameRules();
   if (lazyRules.defaultClassId !== 1 || lazyRules.starterItemIds.join(",") !== "2001,2002") {
     throw new Error("lazy object table load failed");
+  }
+  if (lazyRules.starterReward.gold !== 500 || lazyRules.starterReward.itemIds.join(",") !== "2001,2002") {
+    throw new Error("lazy object table fixed reward load failed");
   }
   await lazyData.linkAll();
 

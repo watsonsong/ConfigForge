@@ -50,6 +50,10 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                         this.fields.push("");
                         return;
                     }
+                    if (this.path === "game_rules" && this.currentField() === "item_ids" && index < 2) {
+                        this.fields.push(index === 0 ? "starter_reward.item_ids[0]" : "starter_reward.item_ids[1]");
+                        return;
+                    }
                     throw new Error(`unexpected index: ${index}`);
                 }
 
@@ -89,10 +93,10 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     if (this.path === "items" && this.currentField() === "rows") {
                         return 1;
                     }
-                    if ((this.path === "classes" || this.path === "class_levels") && this.currentField() === "rows") {
+                    if ((this.path === "classes" || this.path === "class_levels" || this.path === "quests" || this.path === "loot_pools") && this.currentField() === "rows") {
                         return 0;
                     }
-                    if (this.path === "game_rules" && this.currentField() === "starter_item_ids") {
+                    if (this.path === "game_rules" && (this.currentField() === "starter_item_ids" || this.currentField() === "item_ids")) {
                         return 2;
                     }
                     throw new Error("unexpected length");
@@ -113,6 +117,10 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     if (this.path === "game_rules" && this.currentField() === "starter_gold") { return 500; }
                     if (this.path === "game_rules" && this.currentField() === "default_class_id") { return 1; }
                     if (this.path === "game_rules" && this.currentField() === "") { return 2001; }
+                    if (this.path === "game_rules" && this.currentField() === "xp") { return 0; }
+                    if (this.path === "game_rules" && this.currentField() === "gold") { return 500; }
+                    if (this.path === "game_rules" && this.currentField() === "starter_reward.item_ids[0]") { return 2001; }
+                    if (this.path === "game_rules" && this.currentField() === "starter_reward.item_ids[1]") { return 2002; }
                     if (this.path === "game_rules" && this.currentField() === "stamina_cap") { return 120; }
                     if (this.path === "game_rules" && this.currentField() === "daily_reset_hour") { return 5; }
                     throw new Error("unexpected number");
@@ -135,7 +143,7 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
 
             const loader: RuntimeDataLoader = {
                 open(path: string): RuntimeDataReader {
-                    if (path === "items" || path === "classes" || path === "class_levels" || path === "game_rules") {
+                    if (path === "items" || path === "classes" || path === "class_levels" || path === "quests" || path === "loot_pools" || path === "game_rules") {
                         return new MockReader(path);
                     }
                     throw new Error(`unexpected path: ${path}`);
@@ -157,6 +165,9 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 }
                 if (data.gameRules.defaultClassId !== 1 || data.gameRules.starterItemIds.length !== 2) {
                     throw new Error("generated TypeScript list field failed");
+                }
+                if (data.gameRules.starterReward.gold !== 500 || data.gameRules.starterReward.itemIds.length !== 2) {
+                    throw new Error("generated TypeScript fixed reward field failed");
                 }
             }
 

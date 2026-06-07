@@ -280,6 +280,8 @@ fn assert_standard_data(data: &GameData) {
     assert_eq!(data.game_rules.max_player_level, 60);
     assert_eq!(data.game_rules.default_class_id, 1);
     assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2002]);
+    assert_eq!(data.game_rules.starter_reward.gold, 500);
+    assert_eq!(data.game_rules.starter_reward.item_ids, vec![2001, 2002]);
     let warrior = data.classes.get_by_id(1).expect("class id should be indexed");
     assert_eq!(warrior.name_text(), "战士");
     assert_eq!(warrior.description_text(), "耐久的近战战士。");
@@ -336,6 +338,8 @@ fn assert_standard_lazy_data(data: &impl GameDataAccess) {
     assert_eq!(game_rules.max_player_level, 60);
     assert_eq!(game_rules.default_class_id, 1);
     assert_eq!(game_rules.starter_item_ids, vec![2001, 2002]);
+    assert_eq!(game_rules.starter_reward.gold, 500);
+    assert_eq!(game_rules.starter_reward.item_ids, vec![2001, 2002]);
     let default_class = game_rules
         .default_class(data)
         .expect("default class relation should resolve lazily");
