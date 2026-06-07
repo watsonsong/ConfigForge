@@ -7,7 +7,7 @@ use tempfile::tempdir;
 
 use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
-    codegen::{
+    code_artifact::{
         CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, GeneratedFile,
         tests::{input_for, linked_fixture},
     },
@@ -21,7 +21,7 @@ fn parses_default_options_for_registered_language() {
 
     assert_eq!(
         options.naming.type_name,
-        crate::codegen::CaseStyle::PascalCase
+        crate::code_artifact::CaseStyle::PascalCase
     );
     let unreal = options
         .language_options::<CppUnrealCodegenOptions>(LANGUAGE)

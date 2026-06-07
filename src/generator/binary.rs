@@ -7,7 +7,7 @@ use crate::{
     ConfigForgeError, Result,
     artifact::{ArtifactSink, ArtifactWriteStream},
     data::{ArrayElementValue, DataResolver, DataTable, DataValue, ResolvedValue, ScalarValue},
-    exporter::{DataFormatExporter, export_runtime_data_to_sink, runtime_table_artifacts},
+    data_artifact::{DataFormatExporter, export_runtime_data_to_sink, runtime_table_artifacts},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedFragmentMeta, LinkedStructType, LinkedTableMeta,
         PrimitiveFieldType, TableKind, TargetTags,
@@ -669,7 +669,7 @@ mod tests {
 
     use crate::{
         data::DataTable,
-        exporter::DataFormatExporter,
+        data_artifact::DataFormatExporter,
         meta::{MetaModel, TargetTags},
     };
 

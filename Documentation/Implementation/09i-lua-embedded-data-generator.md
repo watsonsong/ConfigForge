@@ -35,7 +35,7 @@
 当前 Lua 支持实现为 `type = "lua_table"` / alias `lua` 的 MetaAndData exporter，并通过 `GeneratorRegistry` adapter 暴露为 data-backed code-like artifact generator，而不是普通 codegen backend：
 
 ```text
-src/exporter/
+src/data_artifact/
   lua_table.rs       # LuaEmbeddedDataExporter / LuaTableExporter
 ```
 

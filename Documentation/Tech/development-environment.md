@@ -119,7 +119,7 @@ cargo test
 常用验证：
 
 ```bash
-cargo test codegen::<language>
+cargo test code_artifact::<language>
 cargo test --test cli_integration standard_project_generated_code_loads_exported_runtime_data
 ```
 

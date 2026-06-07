@@ -54,7 +54,7 @@ pub use schema_doc::{
 pub(crate) use typescript::TypeScriptCodeGenerator;
 pub use typescript::TypeScriptCodegenOptions;
 
-pub(crate) use crate::codegen::{
+pub(crate) use crate::code_artifact::{
     CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTableKind,
     CodeTypeRef, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn, I18nMode, I18nOptions,
@@ -62,4 +62,4 @@ pub(crate) use crate::codegen::{
 };
 
 #[cfg(test)]
-pub(crate) use crate::codegen::{CodeWriter, GeneratedFile};
+pub(crate) use crate::code_artifact::{CodeWriter, GeneratedFile};

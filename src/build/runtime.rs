@@ -524,7 +524,7 @@ mod tests {
     use crate::{
         artifact::{ArtifactWriteMode, ArtifactWriter},
         data::{DataSet, DataTable, RawSourceData},
-        exporter::{AggregateDataExporter, DataFormatExporter, RuntimeArtifactPlan},
+        data_artifact::{AggregateDataExporter, DataFormatExporter, RuntimeArtifactPlan},
         generator::{GeneratorRegistry, GeneratorRequirements},
         meta::{LinkedTableMeta, MetaModel, TargetTags},
     };
@@ -546,7 +546,7 @@ mod tests {
         fn plan_artifacts(
             &self,
             out_dir: &Path,
-            task: &crate::exporter::TargetDataConfig,
+            task: &crate::data_artifact::TargetDataConfig,
             _linked_meta: &LinkedMetaModel<'_>,
             _target_tags: &TargetTags,
         ) -> Result<Vec<PathBuf>> {
@@ -564,7 +564,7 @@ mod tests {
         fn export_to_sink(
             &self,
             out_dir: &Path,
-            task: &crate::exporter::TargetDataConfig,
+            task: &crate::data_artifact::TargetDataConfig,
             _linked_meta: &LinkedMetaModel<'_>,
             _target_tags: &TargetTags,
             _data_set: &DataSet,
@@ -590,7 +590,7 @@ mod tests {
         let max_active_plans = Arc::new(AtomicUsize::new(0));
         let active_exports = Arc::new(AtomicUsize::new(0));
         let max_active_exports = Arc::new(AtomicUsize::new(0));
-        let mut data_registry = crate::exporter::DataFormatRegistry::new();
+        let mut data_registry = crate::data_artifact::DataFormatRegistry::new();
         data_registry.register_aggregate(InstrumentedAggregateExporter {
             active_plans: active_plans.clone(),
             max_active_plans: max_active_plans.clone(),
@@ -679,7 +679,7 @@ mod tests {
 
     #[test]
     fn meta_and_data_parallel_planning_rejects_path_conflicts_before_generation() {
-        let mut data_registry = crate::exporter::DataFormatRegistry::new();
+        let mut data_registry = crate::data_artifact::DataFormatRegistry::new();
         data_registry.register(DuplicatePathExporter);
         let generator_registry = GeneratorRegistry::new(data_registry, Vec::new(), Vec::new());
         let meta = MetaModel::from_toml_str(

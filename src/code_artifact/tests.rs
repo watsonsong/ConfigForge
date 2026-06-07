@@ -976,34 +976,37 @@ pub(crate) fn assert_duplicate_generated_identifier(
 #[test]
 fn naming_handles_reserved_words_and_cases() {
     assert_eq!(
-        crate::codegen::naming::pascal_case("item-table"),
+        crate::code_artifact::naming::pascal_case("item-table"),
         "ItemTable"
     );
-    assert_eq!(crate::codegen::naming::snake_case("type"), "type");
+    assert_eq!(crate::code_artifact::naming::snake_case("type"), "type");
     assert_eq!(
-        crate::codegen::naming::make_identifier(
+        crate::code_artifact::naming::make_identifier(
             "type",
             CaseStyle::SnakeCase,
             KeywordConflictPolicy::SuffixUnderscore,
-            crate::codegen::naming::is_rust_keyword,
+            crate::code_artifact::naming::is_rust_keyword,
             |identifier| Some(format!("r#{identifier}")),
         )
         .expect("identifier"),
         "type_"
     );
-    assert!(crate::codegen::naming::is_rust_keyword("gen"));
+    assert!(crate::code_artifact::naming::is_rust_keyword("gen"));
     assert_eq!(
-        crate::codegen::naming::make_identifier(
+        crate::code_artifact::naming::make_identifier(
             "gen",
             CaseStyle::SnakeCase,
             KeywordConflictPolicy::SuffixUnderscore,
-            crate::codegen::naming::is_rust_keyword,
+            crate::code_artifact::naming::is_rust_keyword,
             |identifier| Some(format!("r#{identifier}")),
         )
         .expect("identifier"),
         "gen_"
     );
-    assert_eq!(crate::codegen::naming::camel_case("item-name"), "itemName");
+    assert_eq!(
+        crate::code_artifact::naming::camel_case("item-name"),
+        "itemName"
+    );
 }
 
 #[test]
@@ -1173,7 +1176,7 @@ fn rejects_codegen_file_name_with_path_separator() {
 
 #[test]
 fn builtin_generators_use_language_specific_formatting_defaults() {
-    fn accepts_code_artifact_options(_: &crate::codegen::CodeArtifactOptions) {}
+    fn accepts_code_artifact_options(_: &crate::code_artifact::CodeArtifactOptions) {}
 
     accepts_code_artifact_options(
         &CodegenOptions::for_language(RustCodeGenerator.language()).expect("rust options"),

@@ -215,7 +215,7 @@ pub struct CodegenDiagnostic {
 
 当前 codegen 主体能力：
 
-- `src/codegen/` 提供 CodeModel IR、naming / type mapping、生成符号冲突检测和内置 generator registry。
+- `src/code_artifact/` 提供 CodeModel IR、naming / type mapping、生成符号冲突检测和内置 generator registry。
 - 内置 backend 的输出形态、核心能力和 runtime harness 状态见 [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。
 - format-agnostic backend 都使用 Meta-agnostic reader loader contract，不直接绑定 JSON / MessagePack / bin exporter 结果。
 - runtime data 与 generated code 都以 artifact 形态参与统一写出；Artifact Writer 负责路径冲突检查、dry-run、direct write、`temp-commit` 与 bounded write queue。

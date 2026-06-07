@@ -3,7 +3,7 @@
 
 use crate::{
     ConfigForgeError, Result,
-    codegen::{
+    code_artifact::{
         CodeField, CodeIndex, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions,
         ir::CodeForeignKey, naming,
     },
@@ -318,7 +318,7 @@ impl<'a> CppUnrealNames<'a> {
         ))
     }
 
-    fn identifier(&self, value: &str, style: crate::codegen::CaseStyle) -> Result<String> {
+    fn identifier(&self, value: &str, style: crate::code_artifact::CaseStyle) -> Result<String> {
         naming::make_identifier(
             value,
             style,
@@ -330,7 +330,7 @@ impl<'a> CppUnrealNames<'a> {
     }
 }
 
-use crate::codegen::{CodeModel, GeneratedSymbol, ensure_unique_generated_symbols};
+use crate::code_artifact::{CodeModel, GeneratedSymbol, ensure_unique_generated_symbols};
 
 pub(super) fn validate_generated_symbols(
     _model: &CodeModel,
@@ -378,7 +378,7 @@ pub(super) fn validate_generated_symbols(
             &table.name,
             names.row_type_name(&table.name)?,
         ));
-        if matches!(table.kind, crate::codegen::CodeTableKind::Collection) {
+        if matches!(table.kind, crate::code_artifact::CodeTableKind::Collection) {
             type_symbols.push(GeneratedSymbol::new(
                 "table repository type",
                 &table.name,
@@ -396,7 +396,7 @@ pub(super) fn validate_generated_symbols(
                 &field.name,
                 names.field_name(field)?,
             ));
-            if matches!(field.code_type, crate::codegen::CodeTypeRef::Text) {
+            if matches!(field.code_type, crate::code_artifact::CodeTypeRef::Text) {
                 field_symbols.push(GeneratedSymbol::new(
                     "text helper",
                     &field.name,
@@ -423,7 +423,7 @@ pub(super) fn validate_generated_symbols(
                 &field.name,
                 names.field_name(field)?,
             ));
-            if matches!(field.code_type, crate::codegen::CodeTypeRef::Text) {
+            if matches!(field.code_type, crate::code_artifact::CodeTypeRef::Text) {
                 field_symbols.push(GeneratedSymbol::new(
                     "text helper",
                     &field.name,
@@ -540,7 +540,7 @@ pub(super) fn validate_generated_symbols(
 
     let mut blueprint_symbols = Vec::new();
     for table in &_model.tables {
-        if !matches!(table.kind, crate::codegen::CodeTableKind::Collection) {
+        if !matches!(table.kind, crate::code_artifact::CodeTableKind::Collection) {
             continue;
         }
         for index in &table.indexes {

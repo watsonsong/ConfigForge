@@ -7,7 +7,7 @@ use super::{
     JavaCodegenOptions,
     symbols::{is_java_keyword, validate_java_identifier, validate_java_package},
 };
-use crate::codegen::{
+use crate::code_artifact::{
     CaseStyle, CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
     CodeTypeRef, KeywordConflictPolicy, NamingConfig, ir::CodeForeignKey, naming,
 };

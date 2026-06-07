@@ -5,7 +5,7 @@ use crate::{
     ConfigForgeError, Result,
     artifact::{ArtifactSink, ArtifactWriteStream},
     data::DataTable,
-    exporter::{
+    data_artifact::{
         DataFormatExporter, build_exported_table_payload, export_runtime_data_to_sink,
         runtime_table_artifacts,
     },
@@ -107,7 +107,7 @@ mod tests {
 
     use crate::{
         data::DataTable,
-        exporter::DataFormatExporter,
+        data_artifact::DataFormatExporter,
         meta::{MetaModel, TargetTags},
     };
 

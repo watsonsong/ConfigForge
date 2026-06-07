@@ -1,7 +1,9 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ConfigForgeError, Result, codegen::CodeGenerator, exporter::DataFormatRegistry};
+use crate::{
+    ConfigForgeError, Result, code_artifact::CodeGenerator, data_artifact::DataFormatRegistry,
+};
 
 use super::{
     ArtifactGenerator, GeneratorRequirements,

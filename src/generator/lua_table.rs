@@ -8,12 +8,12 @@ use serde::Deserialize;
 use crate::{
     ConfigForgeError, Result,
     artifact::{Artifact, ArtifactSink},
-    codegen::{
+    code_artifact::{
         CaseStyle, CodeArtifactOptions, CodeWriterConfig, I18nFunctionReturn, I18nMode,
         I18nOptions, KeywordConflictPolicy, NamingConfig,
     },
     data::DataSet,
-    exporter::{
+    data_artifact::{
         AggregateDataExporter, ExportedTablePayload, ExportedValue, TargetDataConfig,
         build_exported_table_payload,
     },
@@ -1205,7 +1205,7 @@ mod tests {
     use crate::{
         artifact::{ArtifactContent, ArtifactWriteMode, ArtifactWriter},
         data::{DataSet, DataTable},
-        exporter::{AggregateDataExporter, TargetDataConfig},
+        data_artifact::{AggregateDataExporter, TargetDataConfig},
         meta::{MetaModel, TargetTags},
     };
 

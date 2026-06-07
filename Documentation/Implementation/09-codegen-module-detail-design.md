@@ -50,7 +50,7 @@ ProjectConfig::from_path
   -> shared ArtifactSink
 ```
 
-本文档描述当前 `src/codegen/` 的 code artifact 实现边界，以及目标态 code artifact toolkit 的迁移方向。`codegen` 这个名称在历史上同时承载“具体语言 generator”和“共享代码产物 helper”，在统一 `ArtifactGenerator` 模型下容易误导为与 `generator` 平级的产物归属地；目标态应把 Rust / C++ / TypeScript / C# / Java 等具体语言 export type 迁入 `src/generator/<type_id>/`，而把当前 codegen 中可复用的 CodeModel IR、CodeWriter、naming / formatting / keyword conflict、`CodeArtifactOptions` 和 runtime reader contract helper 沉淀为 code artifact toolkit。
+本文档描述当前 `src/code_artifact/` 的 code artifact 实现边界，以及目标态 code artifact toolkit 的迁移方向。`codegen` 这个名称在历史上同时承载“具体语言 generator”和“共享代码产物 helper”，在统一 `ArtifactGenerator` 模型下容易误导为与 `generator` 平级的产物归属地；目标态应把 Rust / C++ / TypeScript / C# / Java 等具体语言 export type 迁入 `src/generator/<type_id>/`，而把当前 codegen 中可复用的 CodeModel IR、CodeWriter、naming / formatting / keyword conflict、`CodeArtifactOptions` 和 runtime reader contract helper 沉淀为 code artifact toolkit。
 
 目标态 language code-like generator 内部流程仍可继续演进为：
 
@@ -74,10 +74,10 @@ Data Load / Normalize / Validate
 
 ## 9.3 模块结构建议
 
-当前 `src/codegen/` 是 code artifact toolkit；具体语言 backend 已迁入 `src/generator/<type_id>/`：
+当前 `src/code_artifact/` 是 code artifact toolkit；具体语言 backend 已迁入 `src/generator/<type_id>/`：
 
 ```text
-src/codegen/
+src/code_artifact/
   mod.rs              # 对外 API、re-export、CodeExportTarget / CodeExportInput / Artifact 等核心模型
   ir.rs               # Language-neutral CodeModel IR
   naming.rs           # 目标语言命名规范、保留字处理、冲突检测

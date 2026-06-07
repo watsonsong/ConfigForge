@@ -28,9 +28,9 @@
 | Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 兼容列表或 `ArtifactSink` stream 写入请求、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
 | Artifact Info | `src/artifact_info.rs` | 跨 codegen、schema_doc、validation report / manifest 等 artifact 生成器共享的轻量 Project 信息 facade，避免文档/导出模块依赖 codegen 专属类型。 | `ProjectConfigMeta`。 | `ArtifactProjectInfo`。 | 本文档总览。 |
 | Generator | `src/generator/` | Build-facing artifact generator facade、generator registry、input requirements 与 capability facet 适配层；目标态也作为所有具体 export type generator 的归属目录。它把 `MetaOnly` / `MetaAndData` 作为 requirements 派生出的调度属性，而不是继承体系；Rust / C++ / JSON / MessagePack / `bin` / POT / Lua / Asset Manifest / Schema Doc / report 等具体产物最终应作为平级 generator 接入。 | `NormalizedExportTask`、`LinkedMetaModel<'meta>`、可选 `DataSet` / validation report / assets、`ArtifactProjectInfo`、`ArtifactSink`。 | artifact generator dispatch / `GeneratorRequirements`。 | `10-build-module-detail-design.md` |
-| Data Artifact Toolkit（当前 `Exporter`） | 当前 `src/exporter/`，目标 `src/data_artifact/` | Target-aware runtime payload、`ExportedTablePayload` / `ExportedValue`、payload builder、runtime table serialization helper、binary layout helper 和 legacy data exporter adapter。`exporter` 这个名称在具体 generator 迁入 `src/generator/` 后容易误导为“生成器归属地”，因此目标命名为 data artifact toolkit。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`、`ArtifactSink`。 | payload model、runtime table artifact helper、`RuntimeDataFile` metadata。 | `08-exporter-module-detail-design.md` |
+| Data Artifact Toolkit | `src/data_artifact/` | Target-aware runtime payload、`ExportedTablePayload` / `ExportedValue`、payload builder、runtime table serialization helper、binary layout helper 和 legacy data exporter adapter。历史名称 `exporter` 在具体 generator 迁入 `src/generator/` 后容易误导为“生成器归属地”，因此已落地命名为 data artifact toolkit。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`、`ArtifactSink`。 | payload model、runtime table artifact helper、`RuntimeDataFile` metadata。 | `08-exporter-module-detail-design.md` |
 | SchemaDoc Generator | `src/generator/schema_doc.rs` | 基于 linked Meta、Project info 与 TargetTags 生成表结构文档 normalized model，并规划/写入 Markdown schema docs artifact。它直接实现 `ArtifactGenerator`，作为 requirements 只含 Meta 的 doc artifact generator 注册到 `GeneratorRegistry`；不属于 runtime data exporter，也不读取 source data。 | `LinkedMetaModel<'meta>`、`TargetTags`、`ArtifactProjectInfo`、`ArtifactSink`。 | `SchemaDoc` / schema docs artifacts。 | `../Design/11-schema-doc-generator.md` |
-| Code Artifact Toolkit（当前 `Codegen`） | 当前 `src/codegen/`，目标 `src/code_artifact/` | 语言无关 CodeModel IR、CodeWriter、naming / formatting / keyword conflict、`CodeArtifactOptions`、runtime reader contract helper 和 legacy `CodeGenerator` adapter。`codegen` 这个名称在具体语言 generator 迁入 `src/generator/` 后容易误导为“生成器归属地”，因此目标命名为 code artifact toolkit。 | `LinkedMetaModel<'meta>`、target tags、`ArtifactSink`。 | CodeModel / writer / code artifact helper。 | `09-codegen-module-detail-design.md` |
+| Code Artifact Toolkit | `src/code_artifact/` | 语言无关 CodeModel IR、CodeWriter、naming / formatting / keyword conflict、`CodeArtifactOptions`、runtime reader contract helper 和 legacy `CodeGenerator` adapter。历史名称 `codegen` 在具体语言 generator 迁入 `src/generator/` 后容易误导为“生成器归属地”，因此已落地命名为 code artifact toolkit。 | `LinkedMetaModel<'meta>`、target tags、`ArtifactSink`。 | CodeModel / writer / code artifact helper。 | `09-codegen-module-detail-design.md` |
 | Build | `src/build/` | 工程构建主编排：归一化 target，并按 generator requirements 调度 data load、validation、artifact generator 执行和 artifact 写入。 | `ProjectConfig`、CLI options。 | `BuildOutput`、文件系统产物。 | `10-build-module-detail-design.md` |
 
 ## 1.3 强制单向依赖规则
@@ -42,7 +42,7 @@
 插件 trait / registry、用户可依赖的 facade 才应暴露为 `pub`；纯 builder helper、格式实现文件、
 运行时中间产物和测试辅助不应因为位于独立文件而变成公共 API。
 
-目标依赖方向（当前代码仍在从历史 `codegen` / `exporter` 分类迁移到 generator-first 结构；迁移期可通过 adapter 保持兼容，但新设计应按下图约束）：
+目标依赖方向（代码已从历史 `codegen` / `exporter` 分类迁移到 generator-first 结构；迁移期仍可通过 adapter 保持内部 trait 兼容，但新设计应按下图约束）：
 
 ```text
 main / cli
@@ -76,7 +76,7 @@ main / cli
       └─ artifact
 
 diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 错误 facade，用于在边界层聚合各模块诊断。
-`runtime_contract` 是 data artifact toolkit / code artifact toolkit / generator / build 的共享底层契约层；`code_artifact` 与 `data_artifact` 是被具体 generator 依赖的工具箱，不是 Build 直接编排的平级 generator 分类。迁移期的物理路径仍可能是 `src/codegen/` 与 `src/exporter/`，但新依赖不应扩大 Build 对它们的直接认知。
+`runtime_contract` 是 data artifact toolkit / code artifact toolkit / generator / build 的共享底层契约层；`code_artifact` 与 `data_artifact` 是被具体 generator 依赖的工具箱，不是 Build 直接编排的平级 generator 分类；新依赖不应扩大 Build 对它们的直接认知。
 ```
 
 强制约束：
@@ -91,11 +91,11 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 - `artifact` 可以依赖标准库、`diagnostic::error` 等底层能力，不能依赖 `meta`、`data`、`validation`、`data_artifact`、`code_artifact`、`generator`、`project`、`build`。
 - `artifact_info` 是轻量共享 facade，只依赖标准库；`project` 可从 `ProjectConfigMeta` 构造它，code-like / doc / report / manifest generator 可消费它，避免互相依赖专属 Project 类型。
 - `generator` 是 build-facing facade 与具体 artifact generator 的归属层，可以依赖满足 generator requirements 所需的共享输入类型，也可以按需依赖 `code_artifact` / `data_artifact` 工具箱；不能让工具箱或下层领域模块反向依赖 build。`MetaOnly` / `MetaAndData` 在此层只是 `GeneratorRequirements` 派生出的调度属性。
-- `data_artifact`（当前 `src/exporter/`）可以依赖 `meta`、`data`、`artifact`、`diagnostic`、`runtime_contract` 和 code artifact option facet，不能依赖 `validation`、`generator` 或 `build`；导出前校验由 build 编排层调用 validation。Build-facing data-backed 执行通过具体 generator 或迁移期 adapter 暴露为 requirements 包含 Data 的 artifact generator。
+- `data_artifact`（当前 `src/data_artifact/`）可以依赖 `meta`、`data`、`artifact`、`diagnostic`、`runtime_contract` 和 code artifact option facet，不能依赖 `validation`、`generator` 或 `build`；导出前校验由 build 编排层调用 validation。Build-facing data-backed 执行通过具体 generator 或迁移期 adapter 暴露为 requirements 包含 Data 的 artifact generator。
 - `schema_doc` 目标态应迁入 `src/generator/schema_doc/`，作为 requirements 只含 Meta 的 doc artifact generator；迁移期独立模块可以依赖 `meta`、`artifact`、`artifact_info` 和 `generator` trait，但不能依赖 `data`、`validation`、`data_artifact`、`code_artifact` 或 `build`，也不能读取 source data。
-- `code_artifact`（当前 `src/codegen/`）可以依赖 `meta`、`artifact` 和 `runtime_contract`；生成代码使用逻辑 table name 作为 runtime load key，不依赖 data artifact toolkit 真实写出的 runtime data artifact path / format；不能依赖 `data_artifact`、`data`、`validation`、`generator`、`build`。`CodeGenerator` 表达 code artifact 能力，不应长期承担 doc/report/manifest 等非代码 generator 的统一基类职责。
+- `code_artifact`（当前 `src/code_artifact/`）可以依赖 `meta`、`artifact` 和 `runtime_contract`；生成代码使用逻辑 table name 作为 runtime load key，不依赖 data artifact toolkit 真实写出的 runtime data artifact path / format；不能依赖 `data_artifact`、`data`、`validation`、`generator`、`build`。`CodeGenerator` 表达 code artifact 能力，不应长期承担 doc/report/manifest 等非代码 generator 的统一基类职责。
 - `project` 只解析 `TargetExportConfig` 这一统一 Project TOML 结构，不引用 data/code artifact toolkit 内部 task 配置，也不能依赖 `build`。
-- `build` 是顶层业务编排层，可以依赖 `project`、`meta`、`data`、`validation`、`generator`、`runtime_contract` 和 `artifact`；不应新增对具体 code/data artifact toolkit 的直接调度依赖。迁移期遗留的 `codegen` / `exporter` 直接引用应逐步收敛到 generator adapter 内部。
+- `build` 是顶层业务编排层，可以依赖 `project`、`meta`、`data`、`validation`、`generator`、`runtime_contract` 和 `artifact`；不应新增对具体 code/data artifact toolkit 的直接调度依赖。少量 legacy adapter / 测试场景对 toolkit trait 的引用应继续收敛到 generator 内部。
 - `cli` 只能调用 `build` 和展示错误；不能绕过 build 直接串联底层模块。
 
 如果一个新增能力需要跨模块协作，优先选择：

@@ -67,11 +67,11 @@ Use this file as the short entry index. For any non-trivial change, follow the l
 - `src/cli.rs` — CLI command definitions.
 - `src/meta/` — Meta schema loading, parsing, linking, validation, and tests.
 - `src/data/` — CSV data source loading, data load planning, normalization, and resolved row models.
-- `src/codegen/` — current code artifact toolkit: language-neutral CodeModel IR, CodeWriter, naming / formatting / keyword conflict, and code artifact options helpers; concrete language generators live under `src/generator/<type_id>/`.
+- `src/code_artifact/` — current code artifact toolkit: language-neutral CodeModel IR, CodeWriter, naming / formatting / keyword conflict, and code artifact options helpers; concrete language generators live under `src/generator/<type_id>/`.
 - `src/validation/` — schema, target-aware data validation, diagnostics, and validator registry.
 - `src/project/` — ConfigForge project TOML schema, import merging, path normalization, and Meta extraction.
 - `src/build/` — project build orchestration, target normalization, generator requirements planning, branch pipeline execution, and artifact generation scheduling through `GeneratorRegistry`.
-- `src/exporter/` — current exporter module and target data artifact toolkit: runtime payload/export helper contracts, JSON / MessagePack / bin migration-period exporters; aggregate data-backed generators such as POT, Lua, and Asset Manifest live under `src/generator/<type_id>/`.
+- `src/data_artifact/` — current exporter module and target data artifact toolkit: runtime payload/export helper contracts, JSON / MessagePack / bin migration-period exporters; aggregate data-backed generators such as POT, Lua, and Asset Manifest live under `src/generator/<type_id>/`.
 - `src/diagnostic/` — shared diagnostic foundations and crate error model.
 - `runtime/` — standard runtime helpers/templates and compliance fixtures.
 - `tests/cli_integration.rs` — end-to-end CLI integration tests.

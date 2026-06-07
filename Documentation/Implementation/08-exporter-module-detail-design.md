@@ -1,6 +1,6 @@
 # 08. Exporter 模块详细设计
 
-本文档描述当前 `src/exporter/` 的 data export 实现边界，以及目标态 data artifact toolkit 的迁移方向。`exporter` 这个名称在历史上同时承载“具体 export type 实现”和“共享数据产物 helper”，在统一 `ArtifactGenerator` 模型下容易误导为与 `generator` 平级的产物归属地；目标态应把 JSON / MessagePack / `bin` / POT / Lua / Asset Manifest 等具体 export type 迁入 `src/generator/<type_id>/`，而把当前 exporter 中可复用的 payload、runtime table serialization、binary layout 和 adapter 逻辑沉淀为 data artifact toolkit。
+本文档描述当前 `src/data_artifact/` 的 data export 实现边界，以及目标态 data artifact toolkit 的迁移方向。`exporter` 这个名称在历史上同时承载“具体 export type 实现”和“共享数据产物 helper”，在统一 `ArtifactGenerator` 模型下容易误导为与 `generator` 平级的产物归属地；目标态应把 JSON / MessagePack / `bin` / POT / Lua / Asset Manifest 等具体 export type 迁入 `src/generator/<type_id>/`，而把当前 exporter 中可复用的 payload、runtime table serialization、binary layout 和 adapter 逻辑沉淀为 data artifact toolkit。
 
 在更抽象的 artifact generator 模型中，`DataFormatExporter` / `AggregateDataExporter` 是迁移期的领域 facet / adapter 来源，而不是所有 data-backed generator 的顶层基类。是否需要 Data 由 generator requirements 声明；Lua 这类 data-backed code-like artifact 当前通过 exporter 内部实现与 `GeneratorRegistry` adapter 暴露为 `type = "lua_table"` / alias `lua` 的 MetaAndData generator，并复用 code artifact toolkit 中的 `CodeArtifactOptions`。
 
@@ -27,7 +27,7 @@
 当前实现按职责拆分为（迁移前物理路径）：
 
 ```text
-src/exporter/
+src/data_artifact/
   mod.rs              # 对外 API 与 re-export
   config.rs           # TargetDataConfig
   model.rs            # ExportedTable / ExportedTablePayload / ExportedValue
@@ -44,7 +44,7 @@ src/exporter/
   tests.rs            # exporter 核心行为测试
 ```
 
-`mod.rs` 仅保留模块声明和公共 re-export，确保既有消费者仍可通过 `crate::exporter::*` 访问迁移期稳定 API。新增具体 export type 不应继续扩大 `src/exporter/`，而应优先新增 `src/generator/<type_id>/` 并依赖这里的 payload / runtime table helper；核心 registry / runtime / payload 不内联具体格式逻辑。
+`mod.rs` 仅保留模块声明和公共 re-export，确保既有消费者仍可通过 `crate::data_artifact::*` 访问迁移期稳定 API。新增具体 export type 不应继续扩大 `src/data_artifact/`，而应优先新增 `src/generator/<type_id>/` 并依赖这里的 payload / runtime table helper；核心 registry / runtime / payload 不内联具体格式逻辑。
 
 `TargetDataConfig.format` 是迁移期 exporter 内部使用的规范 export type，来自 Project TOML 的 `[[targets.exports]].type`。运行时表数据 export type（JSON、MessagePack、`bin`）通常是“一张 table 一个 artifact”；聚合 export type（POT、Lua、asset manifest、summary manifest）可能跨所有 table 汇总成一个或多个文件、读取非 runtime 辅助字段，artifact path 规划也不是 `table -> extension` 的简单映射。因此当前在同一个 `DataFormatRegistry` 下维护 `DataFormatExporter`（运行时表格式）与 `AggregateDataExporter`（聚合数据产物）两类能力，但 TOML 层不再引入 `targets.special_exporters`。目标态这些具体类型不再归属于 exporter registry，而是平级注册到 `GeneratorRegistry`，复用本模块提供的 helper。
 

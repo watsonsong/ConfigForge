@@ -3,7 +3,7 @@
 
 use crate::{
     ConfigForgeError, Result,
-    codegen::{
+    code_artifact::{
         CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
         CodeTableKind, CodeTypeRef, CodegenOptions, ir::CodeForeignKey, naming,
     },

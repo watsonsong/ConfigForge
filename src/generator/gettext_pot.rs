@@ -9,7 +9,7 @@ use crate::{
     ConfigForgeError, Result,
     artifact::{Artifact, ArtifactSink},
     data::{DataResolver, DataSet, DataTable, DataValue, ResolvedValue, ScalarValue},
-    exporter::{AggregateDataExporter, TargetDataConfig},
+    data_artifact::{AggregateDataExporter, TargetDataConfig},
     meta::{LinkedFieldMeta, LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags},
 };
 
@@ -534,7 +534,7 @@ mod tests {
     use crate::{
         artifact::{ArtifactWriteMode, ArtifactWriter},
         data::{DataSet, DataTable},
-        exporter::TargetDataConfig,
+        data_artifact::TargetDataConfig,
         meta::{MetaModel, TargetTags},
     };
 

@@ -3,7 +3,7 @@
 
 use crate::{
     Result,
-    codegen::{
+    code_artifact::{
         CodeField, CodeFragmentPayload, CodeModel, CodeTableKind, CodeTypeRef, GeneratedSymbol,
         ensure_unique_generated_symbols,
     },

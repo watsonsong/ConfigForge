@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::codegen::{CodeWriterLike, RuntimeInterfaceMode};
+use crate::code_artifact::{CodeWriterLike, RuntimeInterfaceMode};
 
 use super::CppCodegenOptions;
 

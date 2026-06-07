@@ -8,7 +8,7 @@ use tempfile::tempdir;
 use crate::{
     ConfigForgeError,
     artifact::{ArtifactWriteMode, ArtifactWriter},
-    codegen::{
+    code_artifact::{
         CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, RuntimeInterfaceMode,
         tests::{input_for, linked_fixture},
     },
@@ -705,9 +705,9 @@ fn emits_global_function_text_helpers() {
     )
     .expect("meta should parse");
     let mut input = input_for(&meta, LANGUAGE);
-    input.target.options.i18n.mode = crate::codegen::I18nMode::GlobalFunction;
+    input.target.options.i18n.mode = crate::code_artifact::I18nMode::GlobalFunction;
     input.target.options.i18n.function = Some("GameI18n.translate".to_owned());
-    input.target.options.i18n.returns = crate::codegen::I18nFunctionReturn::Optional;
+    input.target.options.i18n.returns = crate::code_artifact::I18nFunctionReturn::Optional;
     input.target.options.i18n.java_import = Some("game.runtime.i18n.GameI18n".to_owned());
 
     let files = JavaCodeGenerator.generate(&input).expect("java code");

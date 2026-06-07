@@ -1,9 +1,9 @@
 # Generator-first module migration TODO
 
-目标：把 build-facing 产物归属统一到 `src/generator/<type_id>/`，让当前 `src/codegen/` 和 `src/exporter/` 从“具体 generator 归属地”收敛为可复用工具箱。目标命名为：
+目标：把 build-facing 产物归属统一到 `src/generator/<type_id>/`，让当前 `src/code_artifact/` 和 `src/data_artifact/` 从“具体 generator 归属地”收敛为可复用工具箱。目标命名为：
 
-- `code artifact toolkit`：当前物理路径 `src/codegen/`，长期可迁为 `src/code_artifact/`；提供 CodeModel IR、CodeWriter、naming / formatting / keyword conflict、`CodeArtifactOptions`、runtime reader contract helper。
-- `data artifact toolkit`：当前物理路径 `src/exporter/`，长期可迁为 `src/data_artifact/`；提供 target-aware payload、`ExportedTablePayload` / `ExportedValue`、runtime table serialization、binary layout、legacy exporter adapter。
+- `code artifact toolkit`：当前物理路径 `src/code_artifact/`，长期可迁为 `src/code_artifact/`；提供 CodeModel IR、CodeWriter、naming / formatting / keyword conflict、`CodeArtifactOptions`、runtime reader contract helper。
+- `data artifact toolkit`：当前物理路径 `src/data_artifact/`，长期可迁为 `src/data_artifact/`；提供 target-aware payload、`ExportedTablePayload` / `ExportedValue`、runtime table serialization、binary layout、legacy exporter adapter。
 
 原则：
 
@@ -36,43 +36,43 @@
 
 ## Phase 3 — 迁移 aggregate / mixed data-backed generators
 
-- [x] 将 `src/exporter/lua_table.rs` 迁入 `src/generator/lua_table.rs`，直接实现 `ArtifactGenerator`；继续复用 `CodeArtifactOptions` 和 data artifact payload helper。当前 Lua 体量较大但仍为单文件；后续可再扩展成 `src/generator/lua_table/` 目录。
-- [x] 将 `src/exporter/asset_manifest.rs` 迁入 `src/generator/asset_manifest.rs`，直接实现 `ArtifactGenerator`。
-- [x] 将 `src/exporter/gettext_pot.rs` 迁入 `src/generator/gettext_pot.rs`，直接实现 `ArtifactGenerator`。
+- [x] 将 `src/data_artifact/lua_table.rs` 迁入 `src/generator/lua_table.rs`，直接实现 `ArtifactGenerator`；继续复用 `CodeArtifactOptions` 和 data artifact payload helper。当前 Lua 体量较大但仍为单文件；后续可再扩展成 `src/generator/lua_table/` 目录。
+- [x] 将 `src/data_artifact/asset_manifest.rs` 迁入 `src/generator/asset_manifest.rs`，直接实现 `ArtifactGenerator`。
+- [x] 将 `src/data_artifact/gettext_pot.rs` 迁入 `src/generator/gettext_pot.rs`，直接实现 `ArtifactGenerator`。
 - [x] 从 `DataFormatRegistry` 中移除这些 aggregate generator 的 build-facing 注册职责；如需共享逻辑，保留在 data artifact toolkit helper 中。
 - [x] 更新 `08-exporter-module-detail-design.md`、`09i-lua-embedded-data-generator.md`、Asset Manifest / POT 相关设计文档。
 
 ## Phase 4 — 迁移 language code-like generators
 
-- [x] 将 `src/codegen/rust/` 迁入 `src/generator/rust/`。
-- [x] 将 `src/codegen/cpp/` 迁入 `src/generator/cpp/`。
-- [x] 将 `src/codegen/cpp_unreal/` 迁入 `src/generator/cpp_unreal/`。
-- [x] 将 `src/codegen/typescript/` 迁入 `src/generator/typescript/`。
-- [x] 将 `src/codegen/csharp/` 迁入 `src/generator/csharp/`。
-- [x] 将 `src/codegen/java/` 迁入 `src/generator/java/`。
+- [x] 将 `src/code_artifact/rust/` 迁入 `src/generator/rust/`。
+- [x] 将 `src/code_artifact/cpp/` 迁入 `src/generator/cpp/`。
+- [x] 将 `src/code_artifact/cpp_unreal/` 迁入 `src/generator/cpp_unreal/`。
+- [x] 将 `src/code_artifact/typescript/` 迁入 `src/generator/typescript/`。
+- [x] 将 `src/code_artifact/csharp/` 迁入 `src/generator/csharp/`。
+- [x] 将 `src/code_artifact/java/` 迁入 `src/generator/java/`。
 - [x] 让 language generator 由 `GeneratorRegistry` 直接集中注册；迁移期保留 crate-internal `CodeGenerator` + `CodeArtifactGenerator` 薄 adapter，但删除 `codegen::builtin_generators()` 作为 Build-facing 注册入口。
 - [x] 将语言无关 `CodeModel` / `CodeWriter` / options 留在 code artifact toolkit，并禁止语言专属逻辑回流。
 - [x] 更新 codegen capability matrix 中的 source module 路径。
 
 ## Phase 5 — 迁移 runtime table data generators
 
-- [ ] 将 `src/exporter/json.rs` 迁入 `src/generator/json/`。
-- [ ] 将 `src/exporter/messagepack.rs` 迁入 `src/generator/messagepack/`。
-- [ ] 将 `src/exporter/binary.rs` 迁入 `src/generator/binary/`。
-- [ ] 抽出 runtime table iteration / path planning / `RuntimeDataFile` helper，留在 data artifact toolkit。
+- [x] 将 `src/data_artifact/json.rs` 迁入 `src/generator/json/`。
+- [x] 将 `src/data_artifact/messagepack.rs` 迁入 `src/generator/messagepack/`。
+- [x] 将 `src/data_artifact/binary.rs` 迁入 `src/generator/binary/`。
+- [x] 抽出 runtime table iteration / path planning / `RuntimeDataFile` helper，留在 data artifact toolkit。
 - [ ] 评估 `DataFormatExporter` 是否仍有价值；若只剩内部 helper，可改名为 `RuntimeTableFormat` 或删除。
-- [ ] 删除或降级 `DataFormatRegistry` 的 Build-facing 职责，`GeneratorRegistry` 直接注册 concrete runtime data generators。
+- [x] 删除或降级 `DataFormatRegistry` 的 Build-facing 职责，`GeneratorRegistry` 直接注册 concrete runtime data generators。
 
 ## Phase 6 — 工具箱命名落地
 
-- [ ] 评估是否把 `src/codegen/` 物理重命名为 `src/code_artifact/`；如果改名，提供一次性大迁移并更新全部文档、模块路径和 `use`。
-- [ ] 评估是否把 `src/exporter/` 物理重命名为 `src/data_artifact/`；如果改名，提供一次性大迁移并更新全部文档、模块路径和 `use`。
-- [ ] 如果短期不做物理改名，至少将模块级注释和文档统一表述为 “current codegen/exporter module, target code/data artifact toolkit”。
+- [x] 评估并将 `src/codegen/` 物理重命名为 `src/code_artifact/`，更新模块路径和 `use`。
+- [x] 评估并将 `src/exporter/` 物理重命名为 `src/data_artifact/`，更新模块路径和 `use`。
+- [x] 同步文档中的 source layout / toolkit 路径表述，不再描述为短期 legacy 物理路径。
 - [ ] 清理 glossary 中迁移期 legacy registry / trait 术语，保留最终术语。
 
 ## Phase 7 — Build 依赖收敛检查
 
-- [ ] 确认 `src/build/` 不再直接依赖具体 `codegen` / `exporter` 类型；只依赖 `generator`、`artifact`、`runtime_contract` 和必要输入模型。
+- [ ] 确认 `src/build/` 不再直接依赖具体 code/data artifact toolkit 类型；只依赖 `generator`、`artifact`、`runtime_contract` 和必要输入模型。
 - [ ] 确认 `project` 不引用 toolkit 内部 task config 类型，只保留统一 `TargetExportConfig`。
 - [ ] 确认 `runtime_contract` 不依赖 generator/toolkit 上层模块。
 - [ ] 补充模块依赖检查或 grep-based regression，防止 Build 新增按 code/data toolkit 分类分发。

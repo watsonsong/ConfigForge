@@ -6,7 +6,7 @@ use crate::{ConfigForgeError, Result};
 use super::{
     CSharpCodegenOptions, validate_csharp_identifier, validate_csharp_namespace, validation_error,
 };
-use crate::codegen::{
+use crate::code_artifact::{
     CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
     CodeTypeRef, KeywordConflictPolicy, NamingConfig, ir::CodeForeignKey, naming,
 };
@@ -120,7 +120,7 @@ impl CSharpNames {
     }
 
     pub(super) fn local_name(&self, name: &str) -> Result<String> {
-        self.identifier(name, crate::codegen::CaseStyle::CamelCase)
+        self.identifier(name, crate::code_artifact::CaseStyle::CamelCase)
     }
 
     pub(super) fn index_storage_name(&self, index: &CodeIndex) -> Result<String> {
@@ -342,7 +342,7 @@ impl CSharpNames {
         }
     }
 
-    fn identifier(&self, name: &str, style: crate::codegen::CaseStyle) -> Result<String> {
+    fn identifier(&self, name: &str, style: crate::code_artifact::CaseStyle) -> Result<String> {
         naming::make_identifier(
             name,
             style,

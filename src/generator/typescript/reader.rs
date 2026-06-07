@@ -3,7 +3,7 @@
 
 use crate::{
     Result,
-    codegen::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriterLike},
+    code_artifact::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriterLike},
 };
 
 use super::{

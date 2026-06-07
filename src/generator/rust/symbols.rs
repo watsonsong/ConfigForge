@@ -3,7 +3,7 @@
 
 use crate::{
     Result,
-    codegen::{
+    code_artifact::{
         CodeFragmentPayload, CodeModel, CodeTableKind, GeneratedSymbol,
         ensure_unique_generated_symbols,
     },
@@ -251,7 +251,7 @@ fn validate_named_symbols(
 }
 
 fn row_handle_function_name(
-    index: &crate::codegen::CodeIndex,
+    index: &crate::code_artifact::CodeIndex,
     names: &RustNames<'_>,
 ) -> Result<String> {
     Ok(names

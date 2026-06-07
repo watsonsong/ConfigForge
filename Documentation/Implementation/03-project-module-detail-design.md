@@ -17,8 +17,8 @@ Project 模块解决以下问题：
 
 - 不执行 build；执行编排属于 `src/build/`。
 - 不读取 CSV 数据；数据读取属于 `src/data/`。
-- 不序列化 runtime data；数据格式导出属于 `src/exporter/`。
-- 不生成代码；代码生成属于 `src/codegen/`。
+- 不序列化 runtime data；数据格式导出属于 `src/data_artifact/`。
+- 不生成代码；代码生成属于 `src/code_artifact/`。
 
 ## 3.2 模块结构
 

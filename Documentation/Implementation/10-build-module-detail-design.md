@@ -62,7 +62,7 @@ pub(crate) struct NormalizedExportTask {
 }
 ```
 
-`requirements` 不应由用户手写，而应来自 artifact generator registry。Build normalization 阶段会按 `type_id` / alias 查询已注册 generator 的 input requirements，并写入 `NormalizedExportTask.requirements`。当前实现通过统一 `GeneratorRegistry` facade 查询 build-facing `ArtifactGenerator`；language codegen、data-backed exporter 和 direct artifact generator 都先由 adapter / 直接实现收敛为同一种调度接口。目标态是所有具体 export type 都位于 `src/generator/<type_id>/` 并直接或通过轻量 adapter 注册，`codegen` / `exporter` 仅作为 toolkit：
+`requirements` 不应由用户手写，而应来自 artifact generator registry。Build normalization 阶段会按 `type_id` / alias 查询已注册 generator 的 input requirements，并写入 `NormalizedExportTask.requirements`。当前实现通过统一 `GeneratorRegistry` facade 查询 build-facing `ArtifactGenerator`；language code generator、data-backed generator 和 direct artifact generator 都先由 adapter / 直接实现收敛为同一种调度接口。所有具体 export type 位于 `src/generator/<type_id>/` 并直接或通过轻量 adapter 注册，`code_artifact` / `data_artifact` 仅作为 toolkit：
 
 - [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 code-like generator / 迁移期 codegen backend：`MetaOnly`。
 - JSON / MessagePack / bin runtime data exporter：`MetaAndData`。

@@ -100,7 +100,7 @@ Data validation 阶段规则：
 - Meta 限制放在 `src/meta/tests.rs`。
 - ObjectTable singleton row、required/default/type、field validator 放在 `src/validation/tests.rs`。
 - ObjectTable CSV `key,value` 读取放在 `src/data/tests.rs`。
-- ObjectTable runtime payload 放在 `src/exporter/` tests。
+- ObjectTable runtime payload 放在 `src/data_artifact/` tests。
 
 ## 6.1 设计目标
 

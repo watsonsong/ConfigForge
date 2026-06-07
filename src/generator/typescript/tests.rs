@@ -7,7 +7,7 @@ use tempfile::tempdir;
 
 use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
-    codegen::{
+    code_artifact::{
         CodeExportInput, CodeGenerator,
         tests::{
             assert_duplicate_generated_identifier, indexed_source_order_fixture, input_for,

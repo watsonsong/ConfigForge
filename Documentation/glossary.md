@@ -207,8 +207,8 @@
 | Artifact 生成器 | Artifact Generator | `ArtifactGenerator` | 根据声明的 input requirements 生成一个或多个 artifact 的 build-facing 抽象；requirements 决定调度，code/data/doc/report 等能力通过 facet/helper 组合。 |
 | 生成器输入需求 | Generator Requirements | `GeneratorRequirements` | 描述 generator 需要哪些输入，例如 Meta、Data、assets、validation report；当前 branch pipeline 直接用 `needs_data` 拆分 MetaOnly / MetaAndData 执行分组。 |
 | 生成器能力 Facet | Generator Facet | `CodeArtifactOptions`, `DocArtifactFacet` | 可组合的领域能力或选项集合，例如代码文本选项、runtime table serialization、聚合 artifact、文档渲染。 |
-| Code Artifact Toolkit | Code Artifact Toolkit | `code_artifact` / current `codegen` | 供 code-like generator 复用的工具箱，包括 CodeModel IR、CodeWriter、naming / formatting / keyword conflict、`CodeArtifactOptions` 和 runtime reader contract helper。当前物理路径仍为 `src/codegen/`；目标态不再作为具体语言 generator 的归属地。 |
-| Data Artifact Toolkit | Data Artifact Toolkit | `data_artifact` / current `exporter` | 供 data-backed generator 复用的工具箱，包括 target-aware payload、`ExportedTablePayload` / `ExportedValue`、runtime table serialization、binary layout 和 legacy data exporter adapter。当前物理路径仍为 `src/exporter/`；目标态不再作为具体 export type generator 的归属地。 |
+| Code Artifact Toolkit | Code Artifact Toolkit | `code_artifact` | 供 code-like generator 复用的工具箱，包括 CodeModel IR、CodeWriter、naming / formatting / keyword conflict、`CodeArtifactOptions` 和 runtime reader contract helper。物理路径为 `src/code_artifact/`；不再作为具体语言 generator 的归属地。 |
+| Data Artifact Toolkit | Data Artifact Toolkit | `data_artifact` | 供 data-backed generator 复用的工具箱，包括 target-aware payload、`ExportedTablePayload` / `ExportedValue`、runtime table serialization、binary layout 和 legacy data exporter adapter。物理路径为 `src/data_artifact/`；不再作为具体 export type generator 的归属地。 |
 | 数据导出器 | Data Exporter | `DataExporter` | 从 ExportView 写 runtime data 的迁移期 helper / adapter；目标态具体 JSON / MessagePack / `bin` 等导出类型应作为 artifact generator 注册。 |
 | 运行时数据格式 | Runtime Data Format | `RuntimeDataFormat` | 当前 runtime table data export type 支持 `json`、`messagepack`、`bin`；当前内置聚合 / 内嵌数据 export type 支持 `gettext_pot` / `pot`、`lua_table` / `lua`；未来可扩展 `yaml`、`sqlite`、`protobuf`。 |
 | JSON 导出 | JSON Export | `JsonDataExporter` | 输出 JSON runtime data。 |

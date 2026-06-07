@@ -293,7 +293,7 @@ mod tests {
             ]),
         };
 
-        let codegen_task = crate::codegen::CodegenTaskConfig::from_export_task_parts(
+        let codegen_task = crate::code_artifact::CodegenTaskConfig::from_export_task_parts(
             task.type_id.clone(),
             task.output.clone(),
             task.options.clone(),

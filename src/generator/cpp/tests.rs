@@ -8,7 +8,7 @@ use tempfile::tempdir;
 use crate::{
     ConfigForgeError,
     artifact::{ArtifactWriteMode, ArtifactWriter},
-    codegen::{
+    code_artifact::{
         CodeExportInput, CodeGenerator, GeneratedFile, RuntimeInterfaceMode,
         tests::{
             assert_duplicate_generated_identifier, indexed_source_order_fixture, input_for,

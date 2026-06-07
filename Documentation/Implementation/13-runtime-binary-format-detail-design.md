@@ -252,7 +252,7 @@ JSON / MessagePack v1 保持现有 named、string-compatible runtime payload con
 当前已新增：
 
 ```text
-src/exporter/
+src/data_artifact/
   binary.rs           # BinaryDataExporter / bin revision / encoder
 ```
 
@@ -447,7 +447,7 @@ Codegen / runtime helper 测试：
 
 当前状态：
 
-- `src/exporter/binary.rs` 已实现 `bin` exporter，包含 16 字节 header、layout、revision hash、primitive / struct / collection / object 编码。
+- `src/data_artifact/binary.rs` 已实现 `bin` exporter，包含 16 字节 header、layout、revision hash、primitive / struct / collection / object 编码。
 - Binary exporter 已注册为 runtime data export type，可与 JSON / MessagePack 并存。
 - CodeModel 已传播 optional 字段语义，Rust / TypeScript / C++ 分别生成 `Option<T>`、optional property、`std::optional<T>`。
 - TypeScript `int` contract 固定为 `number`，`bin` exporter 会拒绝超出 JavaScript safe integer 范围的值。

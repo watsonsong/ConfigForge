@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ConfigForgeError, Result, codegen::ir::relation_key_plan};
+use crate::{ConfigForgeError, Result, code_artifact::ir::relation_key_plan};
 
 use super::{
     CodeForeignKey, CodeIndex, CodeModel, CodeRelationCardinality, CodeTable, CodeWriterLike,

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{Result, codegen::CodeTableKind};
+use crate::{Result, code_artifact::CodeTableKind};
 
 use super::{
     CodeModel, CodeTable, CodeWriterLike, CppUnrealCodegenOptions, symbols::CppUnrealNames,

@@ -6,10 +6,10 @@ mod artifact_info;
 mod asset;
 mod build;
 mod cli;
-mod codegen;
+mod code_artifact;
 mod data;
+mod data_artifact;
 mod diagnostic;
-mod exporter;
 mod generator;
 mod meta;
 mod project;
@@ -30,7 +30,7 @@ pub use build::{
     BuildOptions, BuildOutput, BuildTrace, BuildTraceStage, BuildTraceStageStatus,
     ExecutionOptions, build_target,
 };
-pub use codegen::{
+pub use code_artifact::{
     CaseStyle, CheckedStreamingCodeWriter, CodeArtifactOptions, CodeExportInput, CodeExportProject,
     CodeExportTarget, CodeWriterConfig, CodeWriterLike, CodegenOptions, CodegenTaskConfig,
     I18nFunctionReturn, I18nMode, I18nOptions, IndentStyle, KeywordConflictPolicy, NamingConfig,
@@ -42,13 +42,13 @@ pub use data::{
     RemoteProviderPolicy, RowSourceInfo, SourceProvider, SourceProviderConcurrency,
     SourceProviderResource, SourceReadPlan,
 };
+pub use data_artifact::{
+    DataFormatExporter, DataFormatRegistry, ExportedTable, ExportedTablePayload, ExportedValue,
+    RuntimeArtifactPlan, TargetDataConfig,
+};
 pub use diagnostic::{
     ConfigForgeError, Diagnostic, DiagnosticEntry, DiagnosticLocation, DiagnosticReport,
     DiagnosticSeverity, Result,
-};
-pub use exporter::{
-    DataFormatExporter, DataFormatRegistry, ExportedTable, ExportedTablePayload, ExportedValue,
-    RuntimeArtifactPlan, TargetDataConfig,
 };
 pub use generator::{
     BinaryDataExporter, CSharpCodegenOptions, CppCodegenOptions, CppUnrealCodegenOptions,

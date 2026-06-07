@@ -727,9 +727,9 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use crate::artifact::{ArtifactWriteMode, ArtifactWriter};
-    use crate::codegen::{CodeExportInput, CodeGenerator, default_module_name};
+    use crate::code_artifact::{CodeExportInput, CodeGenerator, default_module_name};
     use crate::data::{DataSet, DataTable, RawSourceData};
-    use crate::exporter::build_exported_table_payload;
+    use crate::data_artifact::build_exported_table_payload;
     use crate::meta::{MetaModel, TargetTags};
 
     use super::*;
@@ -1194,20 +1194,20 @@ mod tests {
                 "sink_only"
             }
 
-            fn default_naming(&self) -> crate::codegen::NamingConfig {
-                crate::codegen::NamingConfig {
-                    type_name: crate::codegen::CaseStyle::PascalCase,
-                    enum_value: crate::codegen::CaseStyle::ScreamingSnakeCase,
-                    field: crate::codegen::CaseStyle::SnakeCase,
-                    function: crate::codegen::CaseStyle::SnakeCase,
-                    constant: crate::codegen::CaseStyle::ScreamingSnakeCase,
+            fn default_naming(&self) -> crate::code_artifact::NamingConfig {
+                crate::code_artifact::NamingConfig {
+                    type_name: crate::code_artifact::CaseStyle::PascalCase,
+                    enum_value: crate::code_artifact::CaseStyle::ScreamingSnakeCase,
+                    field: crate::code_artifact::CaseStyle::SnakeCase,
+                    function: crate::code_artifact::CaseStyle::SnakeCase,
+                    constant: crate::code_artifact::CaseStyle::ScreamingSnakeCase,
                 }
             }
 
             fn generate(
                 &self,
                 _input: &CodeExportInput<'_>,
-            ) -> Result<Vec<crate::codegen::GeneratedFile>> {
+            ) -> Result<Vec<crate::code_artifact::GeneratedFile>> {
                 panic!("build must call generate_to_sink instead of legacy generate fallback")
             }
 
@@ -1230,7 +1230,7 @@ mod tests {
             called: called.clone(),
         }) as Box<dyn CodeGenerator>];
         let generator_registry = GeneratorRegistry::new(
-            crate::exporter::DataFormatRegistry::new(),
+            crate::data_artifact::DataFormatRegistry::new(),
             generators,
             Vec::new(),
         );

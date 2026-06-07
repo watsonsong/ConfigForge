@@ -77,8 +77,8 @@ Representative verification commands run during this phase included:
 cargo fmt
 git diff --check
 cargo test --test cli_integration standard_project_generated_code_loads_exported_runtime_data
-cargo test codegen::csharp
-cargo test codegen::java
+cargo test code_artifact::csharp
+cargo test code_artifact::java
 ```
 
 Observed results near the end of the phase:

@@ -12,7 +12,7 @@ use crate::{
     ConfigForgeError, Result,
     artifact::{Artifact, ArtifactSink},
     data::{DataRow, DataSet, DataTable},
-    exporter::{AggregateDataExporter, TargetDataConfig},
+    data_artifact::{AggregateDataExporter, TargetDataConfig},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, LinkedTableMeta,
         PrimitiveFieldType, TableKind, TargetTags,
@@ -707,7 +707,7 @@ mod tests {
 
     use crate::{
         data::{DataSet, DataTable},
-        exporter::{AggregateDataExporter, TargetDataConfig},
+        data_artifact::{AggregateDataExporter, TargetDataConfig},
         meta::{MetaModel, TargetTags},
     };
 

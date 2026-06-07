@@ -7,7 +7,7 @@ use crate::{
     ConfigForgeError, Result,
     artifact::{Artifact, ArtifactSink, ArtifactWriteStream},
     data::{DataSet, DataTable},
-    exporter::TargetDataConfig,
+    data_artifact::TargetDataConfig,
     meta::{LinkedTableMeta, TargetTags},
 };
 

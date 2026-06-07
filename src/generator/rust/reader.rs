@@ -3,7 +3,7 @@
 
 use crate::{
     Result,
-    codegen::{
+    code_artifact::{
         CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriterLike,
         ir::CodeRelationCardinality,
     },

@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use crate::{
     ConfigForgeError, Result,
     artifact::ArtifactSink,
-    codegen::{
+    code_artifact::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, CodegenTaskConfig,
     },
-    exporter::{
+    data_artifact::{
         AggregateDataExporter, DataFormatExporter, TargetDataConfig, export_runtime_data_to_sink,
     },
 };
