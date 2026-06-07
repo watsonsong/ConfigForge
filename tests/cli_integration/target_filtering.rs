@@ -19,13 +19,19 @@ fn builds_target_from_imported_project_config_fragments() {
     fs::write(
         config_dir.join("ConfigForge.toml"),
         r#"
-            imports = ["Meta/items.toml", "Targets/client.toml"]
+            imports = ["Meta/common.toml", "Meta/items.toml", "Targets/client.toml"]
 
             [project]
             name = "imported_project"
         "#,
     )
     .expect("root project config should be written");
+    fs::write(
+        meta_dir.join("common.toml"),
+        fs::read_to_string(absolute_fixture_path("meta/common.toml"))
+            .expect("fixture common meta should exist"),
+    )
+    .expect("common meta config fragment should be written");
     fs::write(
         meta_dir.join("items.toml"),
         fs::read_to_string(absolute_fixture_path("meta/items.toml"))

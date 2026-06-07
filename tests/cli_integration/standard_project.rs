@@ -79,7 +79,10 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
     assert_eq!(rows[0]["stack"]["max_stack"], "999");
     assert_eq!(rows[3]["name"], "Iron Sword");
     assert_eq!(rows[3]["attributes"]["attack"], "12");
-    assert_eq!(rows[3]["skill"]["skill_asset"], "assets/skills/slash.asset");
+    assert_eq!(
+        rows[3]["skill"]["skill_asset"],
+        "/Game/Skills/GA_Slash.GA_Slash_C"
+    );
     assert_eq!(rows[6]["name"], "Leather Armor");
     assert_eq!(rows[6]["attributes"]["defence"], "6");
 

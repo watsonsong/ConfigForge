@@ -78,16 +78,15 @@ export_when = { any = ["client"] }
 [[tables.fragments.fields]]
 name = "skill_asset"
 type = "asset"
-asset_kind = "legacy_skill_asset"
+asset_kind = "unreal_skill_class"
 required = true
 export_when = { any = ["client"] }
 
 [[asset_kinds]]
-name = "legacy_skill_asset"
-input = "path"
-path_style = "relative"
-extension_policy = "required"
-extensions = [".asset"]
+name = "unreal_skill_class"
+extends = "unreal_asset"
+object_name = "{stem}_C"
+name_prefixes = ["GA_"]
 
 [[tables.indexes]]
 name = "by_id"

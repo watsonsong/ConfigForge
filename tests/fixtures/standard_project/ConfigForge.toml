@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 imports = [
+    "meta/common.toml",
     "meta/items.toml",
     "meta/characters.toml",
     "meta/misc.toml",

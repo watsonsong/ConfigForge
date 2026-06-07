@@ -10,16 +10,26 @@ pub(crate) fn absolute_fixture_path(relative_path: &str) -> String {
         .to_string()
 }
 pub(crate) fn standard_core_meta_imports() -> String {
-    ["meta/items.toml", "meta/characters.toml", "meta/misc.toml"]
-        .into_iter()
-        .map(|path| format!("\"{}\"", absolute_fixture_path(path)))
-        .collect::<Vec<_>>()
-        .join(", ")
+    [
+        "meta/common.toml",
+        "meta/items.toml",
+        "meta/characters.toml",
+        "meta/misc.toml",
+    ]
+    .into_iter()
+    .map(|path| format!("\"{}\"", absolute_fixture_path(path)))
+    .collect::<Vec<_>>()
+    .join(", ")
 }
 pub(crate) fn standard_reference_game_meta_imports() -> String {
-    ["meta/items.toml", "meta/characters.toml", "meta/misc.toml"]
-        .into_iter()
-        .map(|path| format!("\"{}\"", absolute_fixture_path(path)))
-        .collect::<Vec<_>>()
-        .join(", ")
+    [
+        "meta/common.toml",
+        "meta/items.toml",
+        "meta/characters.toml",
+        "meta/misc.toml",
+    ]
+    .into_iter()
+    .map(|path| format!("\"{}\"", absolute_fixture_path(path)))
+    .collect::<Vec<_>>()
+    .join(", ")
 }

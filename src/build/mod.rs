@@ -86,6 +86,7 @@ fn build_target_inner(
     let pipeline_output = execute_target_pipeline(TargetPipelineExecutionContext {
         project_root,
         project: &CodeExportProject::from(&project.project),
+        assets: &project.assets,
         target: &target,
         target_tags: &target_tags,
         raw_meta: &meta_set,
@@ -121,6 +122,7 @@ impl BuildOutputWithoutTrace {
 struct TargetPipelineExecutionContext<'a, 'meta> {
     project_root: &'a Path,
     project: &'a CodeExportProject,
+    assets: &'a crate::project::AssetsConfig,
     target: &'a NormalizedTargetConfig,
     target_tags: &'a TargetTags,
     raw_meta: &'meta MetaModel,
@@ -204,6 +206,7 @@ fn execute_target_pipeline(
             codegen_exports: &meta_only_exports,
             project_root: context.project_root,
             project: context.project,
+            assets: context.assets,
             target_tags: context.target_tags,
             generated_at: &generated_at,
             generators: &generators,
@@ -286,6 +289,7 @@ struct ExportPipelineContext<'a, 'meta> {
     codegen_exports: &'a [(usize, &'a NormalizedExportTask)],
     project_root: &'a Path,
     project: &'a CodeExportProject,
+    assets: &'a crate::project::AssetsConfig,
     target_tags: &'a TargetTags,
     generated_at: &'a str,
     generators: &'a [Box<dyn CodeGenerator>],
@@ -303,6 +307,7 @@ fn execute_export_pipeline<'meta>(
         codegen_exports,
         project_root,
         project,
+        assets,
         target_tags,
         generated_at,
         generators,
@@ -333,6 +338,7 @@ fn execute_export_pipeline<'meta>(
         raw_sources.as_ref(),
         runtime_exports,
         &linked_meta,
+        assets,
         target_tags,
         pool,
         sink,
@@ -494,6 +500,7 @@ fn execute_runtime_export_nodes(
     raw_sources: Option<&RawSourceData>,
     export_tasks: &[(usize, &NormalizedExportTask)],
     linked_meta: &crate::meta::LinkedMetaModel<'_>,
+    assets: &crate::project::AssetsConfig,
     target_tags: &TargetTags,
     pool: &ThreadPool,
     sink: &ArtifactSink,
@@ -506,6 +513,7 @@ fn execute_runtime_export_nodes(
         raw_sources,
         &meta_and_data_tasks,
         linked_meta,
+        assets,
         target_tags,
         pool,
         sink,
@@ -1062,12 +1070,14 @@ mod tests {
         };
         let target_tags = TargetTags::empty();
         let project = CodeExportProject::default();
+        let assets = crate::project::AssetsConfig::default();
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
         let mut trace = BuildTraceRecorder::new();
 
         let result = execute_target_pipeline(TargetPipelineExecutionContext {
             project_root: Path::new("."),
             project: &project,
+            assets: &assets,
             target: &target,
             target_tags: &target_tags,
             raw_meta: &meta,

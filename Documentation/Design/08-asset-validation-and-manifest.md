@@ -24,7 +24,7 @@
 
 ## 8.2 当前状态
 
-当前实现中 `asset` 已作为 primitive field type 出现在 Meta 设计中，但运行时仍按 string-like scalar 解析和导出。资源引用语法、`asset_kind`、文件存在性校验、导出补齐和 Asset Manifest exporter 尚未实现。
+当前实现已完成 P0-1：`asset` 字段必须声明 `asset_kind`，Meta 支持顶层 `[[asset_kinds]]` 和 `extends` 继承；Project Config 支持 `[assets]` / `[[assets.search_paths]]`；runtime build 会对当前 target ExportView 中可见的 asset 字段执行 resolver 校验，并在导出 JSON / MessagePack / bin 等 runtime data 前把可补齐引用写成 canonical export ref。Asset Manifest exporter 尚未实现，仍作为后续阶段单独推进。
 
 现有文档中的已确认语义仍保留：
 

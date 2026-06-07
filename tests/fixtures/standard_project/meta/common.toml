@@ -1,0 +1,23 @@
+# Copyright (c) 2026 ConfigForge contributors
+# SPDX-License-Identifier: Apache-2.0
+
+[assets]
+require_existing = true
+
+[[assets.search_paths]]
+name = "game"
+root = "../Content"
+kind = "filesystem"
+mount = "/Game"
+
+[[asset_kinds]]
+name = "unreal_asset"
+search_paths = ["game"]
+input = "path"
+path_style = "mounted_object"
+extension_policy = "required"
+extensions = [".uasset"]
+strip_wrappers = ["BlueprintGeneratedClass'{value}'", "Class'{value}'"]
+object_separator = "."
+allow_auto_complete = true
+allow_path_prefixes = ["/Game/"]

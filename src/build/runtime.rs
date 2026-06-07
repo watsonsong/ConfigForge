@@ -7,12 +7,15 @@ use std::collections::BTreeSet;
 use crate::{
     ConfigForgeError, Result,
     artifact::ArtifactSink,
-    data::RawSourceData,
+    asset::AssetResolver,
+    data::{DataRow, DataSet, DataTable, RawSourceData},
     exporter::{DataExporterRef, DataFormatRegistry, export_runtime_data_to_sink},
-    meta::{LinkedMetaModel, TargetTags},
+    meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags},
+    project::AssetsConfig,
     project::lexical_normalize_path,
     validation::{
-        normalize_data_set_with_pool, validate_normalized_data_set_for_target_with_report_and_pool,
+        normalize_data_set_with_pool,
+        validate_normalized_data_set_for_target_with_assets_report_and_pool,
     },
 };
 
@@ -33,6 +36,7 @@ pub(super) fn export_meta_and_data_tasks(
     raw_sources: Option<&RawSourceData>,
     export_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
+    assets: &AssetsConfig,
     target_tags: &TargetTags,
     pool: &ThreadPool,
     sink: &ArtifactSink,
@@ -42,6 +46,7 @@ pub(super) fn export_meta_and_data_tasks(
         raw_sources,
         export_tasks,
         linked_meta,
+        assets,
         target_tags,
         pool,
         sink,
@@ -53,6 +58,7 @@ fn export_meta_and_data_tasks_with_registry(
     raw_sources: Option<&RawSourceData>,
     export_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
+    assets: &AssetsConfig,
     target_tags: &TargetTags,
     pool: &ThreadPool,
     sink: &ArtifactSink,
@@ -74,14 +80,16 @@ fn export_meta_and_data_tasks_with_registry(
     ensure_planned_runtime_output_paths(export_tasks, linked_meta, target_tags, registry, pool)?;
 
     let data_set = normalize_data_set_with_pool(linked_meta, raw_sources.as_data_set(), pool)?;
-    let validation_report = validate_normalized_data_set_for_target_with_report_and_pool(
+    let validation_report = validate_normalized_data_set_for_target_with_assets_report_and_pool(
         linked_meta,
+        assets,
         target_tags,
         &data_set,
         pool,
     )?;
     let mut warnings = Vec::new();
     warnings.extend(validation_report.warning_messages());
+    let export_data_set = canonicalize_asset_refs(linked_meta, assets, target_tags, &data_set)?;
     let mut task_outputs = pool.install(|| {
         export_tasks
             .par_iter()
@@ -93,7 +101,7 @@ fn export_meta_and_data_tasks_with_registry(
                         export_task,
                         linked_meta,
                         target_tags,
-                        &data_set,
+                        &export_data_set,
                         pool,
                         sink,
                         registry,
@@ -113,6 +121,149 @@ fn export_meta_and_data_tasks_with_registry(
         warnings,
         task_outputs: stable_task_outputs,
     })
+}
+
+fn canonicalize_asset_refs(
+    meta: &LinkedMetaModel<'_>,
+    assets: &AssetsConfig,
+    target_tags: &TargetTags,
+    data_set: &DataSet,
+) -> Result<DataSet> {
+    if meta.model.asset_kinds.is_empty() {
+        return Ok(data_set.clone());
+    }
+
+    let resolver = AssetResolver::new(meta, assets)?;
+    let mut tables = Vec::with_capacity(data_set.tables.len());
+    for table in &data_set.tables {
+        let Some(table_meta) = meta.table(&table.name) else {
+            tables.push(table.clone());
+            continue;
+        };
+        let mut rows = Vec::with_capacity(table.rows.len());
+        for (row_index, row) in table.rows.iter().enumerate() {
+            let mut row = row.clone();
+            if table_meta
+                .meta
+                .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
+            {
+                for field in table_meta
+                    .fields
+                    .iter()
+                    .filter(|field| field.meta.is_exported_for(target_tags))
+                {
+                    canonicalize_asset_field_path(
+                        &resolver,
+                        target_tags,
+                        field.meta.name.as_str(),
+                        field,
+                        &mut row,
+                    )?;
+                }
+
+                let active_fragments = table
+                    .row_source(row_index)
+                    .map(|source| source.fragments.as_slice())
+                    .unwrap_or(&[]);
+                for fragment_name in active_fragments {
+                    let Some(fragment) = table_meta.fragment(fragment_name) else {
+                        continue;
+                    };
+                    if !fragment.meta.is_exported_for(target_tags) {
+                        continue;
+                    }
+                    if let Some(struct_type) = fragment.struct_type() {
+                        canonicalize_struct_asset_fields(
+                            &resolver,
+                            target_tags,
+                            fragment.meta.name.as_str(),
+                            struct_type,
+                            &mut row,
+                        )?;
+                    } else {
+                        for field in &fragment.fields {
+                            if !field.meta.is_exported_for(target_tags) {
+                                continue;
+                            }
+                            let field_path = format!(
+                                "{}.{}",
+                                fragment.meta.name.as_str(),
+                                field.meta.name.as_str()
+                            );
+                            canonicalize_asset_field_path(
+                                &resolver,
+                                target_tags,
+                                &field_path,
+                                field,
+                                &mut row,
+                            )?;
+                        }
+                    }
+                }
+            }
+            rows.push(row);
+        }
+        tables.push(DataTable::new_with_sources(
+            table.name.clone(),
+            rows,
+            table.row_sources.clone(),
+        )?);
+    }
+
+    DataSet::try_new(tables)
+}
+
+fn canonicalize_struct_asset_fields(
+    resolver: &AssetResolver,
+    target_tags: &TargetTags,
+    parent_path: &str,
+    struct_type: &LinkedStructType<'_>,
+    row: &mut DataRow,
+) -> Result<()> {
+    for field in &struct_type.fields {
+        if !field.meta.is_exported_for(target_tags) {
+            continue;
+        }
+        let field_path = format!("{parent_path}.{}", field.meta.name);
+        match &field.linked_field {
+            LinkedField::Struct(child_struct) => canonicalize_struct_asset_fields(
+                resolver,
+                target_tags,
+                &field_path,
+                child_struct,
+                row,
+            )?,
+            _ => canonicalize_asset_field_path(resolver, target_tags, &field_path, field, row)?,
+        }
+    }
+    Ok(())
+}
+
+fn canonicalize_asset_field_path(
+    resolver: &AssetResolver,
+    target_tags: &TargetTags,
+    field_path: &str,
+    field: &LinkedFieldMeta<'_>,
+    row: &mut DataRow,
+) -> Result<()> {
+    if !matches!(
+        field.linked_field,
+        LinkedField::Primitive(crate::meta::PrimitiveFieldType::Asset)
+    ) {
+        return Ok(());
+    }
+    let Some(asset_kind) = field.meta.asset_kind.as_deref() else {
+        return Ok(());
+    };
+    let Some(value) = row.get(field_path).cloned() else {
+        return Ok(());
+    };
+    if value.trim().is_empty() {
+        return Ok(());
+    }
+    let resolved = resolver.resolve_for_target(asset_kind, &value, target_tags)?;
+    row.insert(field_path.to_owned(), resolved.canonical_export_ref);
+    Ok(())
 }
 
 fn export_meta_and_data_task(
@@ -329,6 +480,7 @@ mod tests {
             Some(&raw_sources),
             &export_tasks,
             &linked_meta,
+            &AssetsConfig::default(),
             &TargetTags::empty(),
             &pool,
             &sink,
@@ -442,6 +594,7 @@ mod tests {
             Some(&raw_sources),
             &export_tasks,
             &linked_meta,
+            &AssetsConfig::default(),
             &TargetTags::empty(),
             &pool,
             &sink,

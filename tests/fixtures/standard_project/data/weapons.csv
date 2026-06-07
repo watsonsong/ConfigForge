@@ -1,4 +1,4 @@
 id,name,price,attributes.max_health,attributes.max_stamina,attributes.attack,attributes.defence,skill.skill_asset
-3001,Iron Sword,150,0,0,12,0,assets/skills/slash.asset
-3002,Hunter Bow,180,0,5,10,0,assets/skills/power_shot.asset
-3003,Apprentice Staff,220,10,0,8,1,assets/skills/fireball.asset
+3001,Iron Sword,150,0,0,12,0,Skills/GA_Slash
+3002,Hunter Bow,180,0,5,10,0,/Game/Skills/GA_PowerShot.GA_PowerShot_C
+3003,Apprentice Staff,220,10,0,8,1,BlueprintGeneratedClass'/Game/Skills/GA_Fireball.GA_Fireball_C'

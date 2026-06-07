@@ -21,6 +21,7 @@ use crate::meta::{
     EnumMeta, EnumValueMeta, ExportCondition, FieldMeta, LinkedField, LinkedFieldMeta,
     LinkedTableMeta, MetaModel, PrimitiveFieldType, TableMeta, TargetTags, ValidationSeverity,
 };
+use crate::project::{AssetSearchPathConfig, AssetsConfig};
 use crate::{ConfigForgeError, Result};
 
 use super::defaults::normalize_data_set_with_normalizer_and_pool;
@@ -1475,6 +1476,145 @@ fn validates_complete_data_set() {
     )]);
 
     assert!(validate_data_set(&linked_meta, &data_set).is_ok());
+}
+
+#[test]
+fn target_asset_validation_checks_visible_asset_fields() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let meta = MetaModel::from_toml_str(
+        r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "icon"
+                type = "asset"
+                asset_kind = "ui_icon"
+                export_when = { any = ["client"] }
+
+                [[asset_kinds]]
+                name = "ui_icon"
+                search_paths = ["game"]
+                extensions = [".png"]
+                require_existing = true
+            "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("icon".to_owned(), "Missing.png".to_owned()),
+        ])],
+    )]);
+    let assets = AssetsConfig {
+        search_paths: vec![AssetSearchPathConfig {
+            name: "game".to_owned(),
+            root: temp_dir.path().to_path_buf(),
+            kind: "filesystem".to_owned(),
+            mount: None,
+        }],
+        ..AssetsConfig::default()
+    };
+
+    let report = validation_report_error(
+        validate_normalized_data_set_for_target_with_assets_and_report(
+            &linked_meta,
+            &assets,
+            &TargetTags::new(["client"]),
+            &data_set,
+        ),
+    );
+
+    assert!(report.issues.iter().any(|issue| {
+        issue.code == "asset.reference"
+            && issue.location.table.as_deref() == Some("items")
+            && issue.location.field.as_deref() == Some("icon")
+            && issue.message.contains("missing file")
+    }));
+    validate_normalized_data_set_for_target_with_assets_and_report(
+        &linked_meta,
+        &assets,
+        &TargetTags::new(["server"]),
+        &data_set,
+    )
+    .expect("server target should skip client-only asset field");
+}
+
+#[test]
+fn target_asset_validation_skips_filtered_rows() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let asset_path = temp_dir.path().join("Icon_Sword.png");
+    std::fs::write(&asset_path, []).expect("write asset");
+    let meta = MetaModel::from_toml_str(
+        r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+                row_export = { required_tags_field = "tags" }
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "tags"
+                type = "string"
+
+                [[tables.fields]]
+                name = "icon"
+                type = "asset"
+                asset_kind = "ui_icon"
+
+                [[asset_kinds]]
+                name = "ui_icon"
+                search_paths = ["game"]
+                extensions = [".png"]
+                require_existing = true
+            "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![
+            BTreeMap::from([
+                ("id".to_owned(), "1".to_owned()),
+                ("tags".to_owned(), "client".to_owned()),
+                ("icon".to_owned(), "Icon_Sword.png".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("id".to_owned(), "2".to_owned()),
+                ("tags".to_owned(), "server".to_owned()),
+                ("icon".to_owned(), "Missing.png".to_owned()),
+            ]),
+        ],
+    )]);
+    let assets = AssetsConfig {
+        search_paths: vec![AssetSearchPathConfig {
+            name: "game".to_owned(),
+            root: temp_dir.path().to_path_buf(),
+            kind: "filesystem".to_owned(),
+            mount: None,
+        }],
+        ..AssetsConfig::default()
+    };
+
+    validate_normalized_data_set_for_target_with_assets_and_report(
+        &linked_meta,
+        &assets,
+        &TargetTags::new(["client"]),
+        &data_set,
+    )
+    .expect("client target should skip filtered server row");
 }
 
 #[test]

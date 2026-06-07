@@ -206,7 +206,15 @@
 
 ## Step 5：Validation pipeline 接入 ExportView
 
-状态：待开始
+状态：已完成（提交前验证通过）
+
+完成记录：
+
+- Target-aware validation 已遍历 ExportView 可见 table / row / field，仅校验当前 target 可见且非空的 asset 字段。
+- Asset resolver 已接入 runtime build validation，server target 会跳过 client-only asset 字段和被 row_export 排除的记录。
+- 诊断已带上 table、field、row、target 和 asset resolver 失败信息。
+- 标准工程已补齐 fixture 资源 search path 和伪造资源文件，解除集成测试阻塞。
+- 验证命令：`cargo fmt --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml" && cargo test --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml"`。
 
 工作项：
 
@@ -233,7 +241,15 @@
 
 ## Step 6：Runtime export 使用 canonical asset string
 
-状态：待开始
+状态：已完成（与 Step 5/7 一并验证通过）
+
+完成记录：
+
+- Runtime export 在 validation 通过后复用 `AssetResolver` 生成 target-visible asset 字段的 canonical export ref。
+- JSON / MessagePack / bin / 聚合 runtime exporter 共用 canonicalized DataSet，避免不同 exporter 输出不一致。
+- 未启用补齐或无需补齐的字段保持原有解析语义；非 asset 字段不受影响。
+- 标准工程 `Skills/GA_Slash`、canonical Unreal path 和 `BlueprintGeneratedClass'...'` wrapper 输入均可导出为 `/Game/Skills/GA_*.GA_*_C`。
+- 验证命令：`cargo fmt --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml" && cargo test --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml"`。
 
 工作项：
 
@@ -252,7 +268,16 @@
 
 ## Step 7：标准工程 Unreal 模式集成测试
 
-状态：待开始
+状态：已完成（与 Step 5/6 一并验证通过）
+
+完成记录：
+
+- 标准工程新增 `meta/common.toml`，集中保存公共 `[assets]` search path 和基础 `unreal_asset` kind。
+- `items.skill.skill_asset` 已切换到 `unreal_skill_class extends = "unreal_asset"`，字段专用 kind 仅保留技能类命名规则。
+- 标准工程 fixture 新增 `Content/Skills/*.uasset` 和 class icon 假文件，用于本地/CI 存在性校验。
+- `weapons.csv` 同时覆盖短写法、canonical Unreal mounted object path 和 Unreal wrapper 输入。
+- CLI 集成测试断言 client JSON 输出 canonical Unreal class path，并保持 server target 不输出 client-only skill asset。
+- 验证命令：`cargo fmt --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml" && cargo test --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml"`。
 
 工作项：
 
