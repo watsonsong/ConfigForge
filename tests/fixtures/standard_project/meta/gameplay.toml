@@ -1,0 +1,241 @@
+# Copyright (c) 2026 ConfigForge contributors
+# SPDX-License-Identifier: Apache-2.0
+
+[[enums]]
+name = "QuestType"
+desc = "任务类型，用于区分主线、支线和日常内容。"
+
+[[enums.values]]
+name = "story"
+desc = "主线任务。"
+
+[[enums.values]]
+name = "side"
+desc = "支线任务。"
+
+[[enums.values]]
+name = "daily"
+desc = "日常任务。"
+
+[[structs]]
+name = "QuestReward"
+desc = "任务完成奖励，包含经验、金币和可选道具列表。"
+
+[[structs.fields]]
+name = "xp"
+type = "int"
+default = 0
+
+[[structs.fields]]
+name = "gold"
+type = "int"
+default = 0
+
+[[tables]]
+name = "quests"
+kind = "collection"
+primary_index = "by_id"
+source = "quests.csv"
+row_export = { required_tags_field = "required_tags", excluded_tags_field = "excluded_tags" }
+desc = "任务配置表，覆盖主线、支线和日常任务；展示 enum、struct expanded value、list foreign key、自引用 FK、row_export 和多种 validator 的组合。"
+
+[[tables.validators]]
+kind = "monotonic"
+field = "sort_order"
+order_by = "sort_order"
+
+[[tables.validators]]
+kind = "compare"
+left = "min_player_level"
+op = "<="
+right = "max_player_level"
+
+[[tables.fields]]
+name = "quest_id"
+type = "int"
+required = true
+desc = "稳定任务 ID。"
+
+[[tables.fields.validators]]
+kind = "range"
+min = 5000
+max = 5999
+
+[[tables.fields]]
+name = "quest_type"
+type = "QuestType"
+required = true
+desc = "任务类型。"
+
+[[tables.fields]]
+name = "title"
+type = "text"
+required = true
+export_when = { any = ["client"] }
+desc = "客户端展示的任务标题。"
+
+[[tables.fields.validators]]
+kind = "string_length"
+min = 3
+max = 32
+
+[[tables.fields]]
+name = "required_class_id"
+type = "int"
+required = false
+desc = "限制职业；为空表示所有职业可接。"
+foreign_key = { name = "required_class", target_table = "classes", target_index = "by_id", allow_empty = true, linked_field = "required_class" }
+
+[[tables.fields]]
+name = "recommended_level"
+type = "int"
+required = true
+desc = "推荐等级。"
+
+[[tables.fields.validators]]
+kind = "range"
+min = 1
+max = 60
+
+[[tables.fields]]
+name = "min_player_level"
+type = "int"
+required = true
+desc = "最低可接等级。"
+
+[[tables.fields.validators]]
+kind = "range"
+min = 1
+max = 60
+
+[[tables.fields]]
+name = "max_player_level"
+type = "int"
+required = true
+desc = "最高推荐等级，用 compare validator 保证不小于最低等级。"
+
+[[tables.fields.validators]]
+kind = "range"
+min = 1
+max = 60
+
+[[tables.fields]]
+name = "reward"
+type = "QuestReward"
+required = true
+desc = "任务奖励，使用 expanded struct 字段 reward.xp / reward.gold。"
+
+[[tables.fields]]
+name = "reward_item_ids"
+type = "int[]"
+required = true
+desc = "奖励道具列表。"
+foreign_key = { name = "reward_item", target_table = "items", target_index = "by_id", allow_empty = true, linked_field = "reward_items" }
+
+[[tables.fields]]
+name = "prerequisite_quest_ids"
+type = "int[]"
+required = true
+desc = "前置任务列表，自引用 quests.by_id。"
+foreign_key = { name = "prerequisite_quest", target_table = "quests", target_index = "by_id", allow_empty = true, linked_field = "prerequisite_quests" }
+
+[[tables.fields]]
+name = "sort_order"
+type = "int"
+required = true
+desc = "任务列表排序字段，由 monotonic validator 保证递增。"
+
+[[tables.fields]]
+name = "required_tags"
+type = "string"
+export = false
+desc = "row_export 使用的 required tags，不进入 runtime payload。"
+
+[[tables.fields]]
+name = "excluded_tags"
+type = "string"
+export = false
+desc = "row_export 使用的 excluded tags，不进入 runtime payload。"
+
+[[tables.indexes]]
+name = "by_id"
+fields = ["quest_id"]
+unique = true
+primary = true
+
+[[tables.indexes]]
+name = "by_type_order"
+fields = ["quest_type", "sort_order"]
+unique = true
+
+[[tables]]
+name = "loot_pools"
+kind = "collection"
+primary_index = "by_pool_entry"
+source = "loot_pools.csv"
+desc = "掉落池配置。每个 pool 的 weight 总和必须为 100，并按 entry_id 稳定递增。"
+
+[[tables.validators]]
+kind = "sum"
+field = "weight"
+group_by = ["pool_id"]
+equals = 100
+
+[[tables.validators]]
+kind = "monotonic"
+field = "entry_id"
+group_by = ["pool_id"]
+order_by = "entry_id"
+
+[[tables.validators]]
+kind = "compare"
+left = "min_player_level"
+op = "<="
+right = "max_player_level"
+
+[[tables.fields]]
+name = "pool_id"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "entry_id"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "item_id"
+type = "int"
+required = true
+foreign_key = { name = "loot_item", target_table = "items", target_index = "by_id", linked_field = "item" }
+
+[[tables.fields]]
+name = "weight"
+type = "int"
+required = true
+
+[[tables.fields.validators]]
+kind = "range"
+min = 1
+max = 100
+
+[[tables.fields]]
+name = "min_player_level"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "max_player_level"
+type = "int"
+required = true
+
+[[tables.indexes]]
+name = "by_pool_entry"
+fields = ["pool_id", "entry_id"]
+unique = true
+primary = true
+
+[[tables.indexes]]
+name = "by_pool"
+fields = ["pool_id"]
+unique = false

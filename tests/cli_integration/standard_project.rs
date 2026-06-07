@@ -86,6 +86,36 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
     assert_eq!(rows[6]["name"], "Leather Armor");
     assert_eq!(rows[6]["attributes"]["defence"], "6");
 
+    let quests_json =
+        fs::read_to_string(client_out_dir.join("quests.json")).expect("quests json should exist");
+    let quests: serde_json::Value =
+        serde_json::from_str(&quests_json).expect("quests json should parse");
+    let quest_rows = quests["rows"]
+        .as_array()
+        .expect("quest rows should be array");
+    assert_eq!(quest_rows.len(), 3);
+    assert_eq!(quest_rows[0]["title"], "First Steps");
+    assert_eq!(quest_rows[0]["reward"]["xp"], "100");
+    assert_eq!(
+        quest_rows[1]["reward_item_ids"],
+        serde_json::json!(["2002", "2003"])
+    );
+    assert_eq!(
+        quest_rows[1]["prerequisite_quest_ids"],
+        serde_json::json!(["5001"])
+    );
+    assert!(
+        quest_rows
+            .iter()
+            .all(|row| row.get("required_tags").is_none())
+    );
+
+    let loot_pools_json = fs::read_to_string(client_out_dir.join("loot_pools.json"))
+        .expect("loot pools json should exist");
+    let loot_pools: serde_json::Value =
+        serde_json::from_str(&loot_pools_json).expect("loot pools json should parse");
+    assert_eq!(loot_pools["rows"].as_array().expect("loot rows").len(), 5);
+
     let mut server_cmd = Command::cargo_bin("config-forge").expect("binary should build");
     server_cmd.args([
         "--project",
@@ -351,6 +381,16 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(
         fixture_root
+            .join("out/client_data/json/quests.json")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/client_data/json/loot_pools.json")
+            .exists()
+    );
+    assert!(
+        fixture_root
             .join("out/client_i18n/reference_game_config.pot")
             .exists()
     );
@@ -369,6 +409,14 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
             .join("out/client_assets/client_assets_simple.csv")
             .exists()
     );
+    assert!(
+        fixture_root
+            .join("out/client_reports/validation.html")
+            .exists()
+    );
+    assert!(fixture_root.join("out/client_docs/index.md").exists());
+    assert!(fixture_root.join("out/client_docs/quests.md").exists());
+    assert!(fixture_root.join("out/server_docs/index.md").exists());
     assert!(
         fixture_root
             .join("out/client_lua/reference_game_config/init.lua")
@@ -449,6 +497,31 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(pot.contains("msgctxt \"items.name\""));
     assert!(pot.contains("msgid \"Iron Ore\""));
     assert!(pot.contains("msgctxt \"classes.description\""));
+    assert!(pot.contains("msgctxt \"quests.title\""));
+    assert!(pot.contains("msgid \"First Steps\""));
+
+    let validation_report =
+        fs::read_to_string(fixture_root.join("out/client_reports/validation.html"))
+            .expect("standard fixture validation report should be readable");
+    assert!(validation_report.contains("PASS"));
+    assert!(validation_report.contains("<h2>0</h2><p>Errors</p>"));
+
+    let schema_index = fs::read_to_string(fixture_root.join("out/client_docs/index.md"))
+        .expect("standard fixture schema index should be readable");
+    assert!(schema_index.contains("Client Schema Documentation"));
+    assert!(schema_index.contains("[quests](quests.md)"));
+    assert!(schema_index.contains("[loot_pools](loot_pools.md)"));
+
+    let quests_doc = fs::read_to_string(fixture_root.join("out/client_docs/quests.md"))
+        .expect("standard fixture quests doc should be readable");
+    assert!(quests_doc.contains("QuestReward"));
+    assert!(quests_doc.contains("required_class_id | classes.class_id"));
+    assert!(quests_doc.contains("reward_item_ids | items.id | list-to-many"));
+    assert!(quests_doc.contains("monotonic"));
+
+    let server_schema_index = fs::read_to_string(fixture_root.join("out/server_docs/index.md"))
+        .expect("standard fixture server schema index should be readable");
+    assert!(server_schema_index.contains("Server Schema Documentation"));
 
     let asset_manifest_json =
         fs::read_to_string(fixture_root.join("out/client_assets/client_assets.json"))

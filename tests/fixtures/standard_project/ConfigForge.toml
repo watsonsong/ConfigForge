@@ -5,6 +5,7 @@ imports = [
     "meta/common.toml",
     "meta/items.toml",
     "meta/characters.toml",
+    "meta/gameplay.toml",
     "meta/misc.toml",
 ]
 
@@ -36,6 +37,21 @@ domain = "reference_game_config"
 file_name = "reference_game_config.pot"
 context = "table_field"
 source_reference = "both"
+
+[[targets.exports]]
+name = "client_validation_report"
+type = "validation_report"
+output = "out/client_reports"
+format = "html"
+file_name = "validation.html"
+title = "Client Validation Report"
+
+[[targets.exports]]
+name = "client_schema_doc"
+type = "schema_doc"
+output = "out/client_docs"
+format = "markdown"
+title = "Client Schema Documentation"
 
 [[targets.exports]]
 name = "asset_manifest_json"
@@ -192,3 +208,10 @@ module_name = "reference_game_config"
 mode = "global_function"
 function = "crate::global_translate"
 returns = "optional"
+
+[[targets.exports]]
+name = "server_schema_doc"
+type = "schema_doc"
+output = "out/server_docs"
+format = "markdown"
+title = "Server Schema Documentation"

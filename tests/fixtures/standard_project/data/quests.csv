@@ -1,0 +1,5 @@
+quest_id,quest_type,title,required_class_id,recommended_level,min_player_level,max_player_level,reward.xp,reward.gold,reward_item_ids,prerequisite_quest_ids,sort_order,required_tags,excluded_tags
+5001,story,First Steps,1,1,1,5,100,50,"[2001]","[]",1,,
+5002,story,Forest Hunt,2,2,2,8,160,75,"[2002,2003]","[5001]",2,client,
+5003,side,Arcane Trial,3,3,3,12,240,120,"[3003]","[5001]",3,,
+5004,daily,Daily Hunt,,5,5,60,80,40,"[2003]","[]",4,server,

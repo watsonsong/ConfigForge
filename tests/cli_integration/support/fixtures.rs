@@ -26,6 +26,7 @@ pub(crate) fn standard_reference_game_meta_imports() -> String {
         "meta/common.toml",
         "meta/items.toml",
         "meta/characters.toml",
+        "meta/gameplay.toml",
         "meta/misc.toml",
     ]
     .into_iter()
