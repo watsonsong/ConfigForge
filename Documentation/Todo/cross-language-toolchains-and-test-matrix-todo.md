@@ -285,6 +285,8 @@ test(runtime): add Rust compliance runner
 - runner 接入 ToolProbe / profile policy：缺 Node / npm / tsc / cmake / C++ compiler / 三方库时明确 skip 或 fail-fast。
 - 更新 `Documentation/Tech/test-ci-matrix.md` 和 `Documentation/Implementation/09e-codegen-runtime-adapters.md` 的接入状态。
 
+当前进展：TypeScript JSON reader 已通过 `tests/typescript_runtime_compliance.rs` 接入 Rust 驱动的临时测试工程。Rust 测试负责读取 TOML / JSON fixture 并生成临时 TypeScript case 数据，避免为 JSON reader package 引入 TOML parser 或测试专用依赖；本地缺 `node` 或 `tsc` / `npx` 时明确 skip。TypeScript MessagePack 与 C++ runner 仍待接入。
+
 验证：
 
 - `cargo fmt`
