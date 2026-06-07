@@ -11,7 +11,7 @@
 - 将现有分散的 `command_exists` 风格探测收敛为统一 ToolProbe / skip / fail-fast 机制。
 - 保证可选语言环境缺失时本地测试明确 skip，不静默降低覆盖；full CI 中声明必需的工具缺失时 fail-fast。
 - 让 `standard_project` generated-code runtime harness 使用统一工具要求、统一 skip 输出和可汇总结果。
-- 将 `tests/fixtures/runtime_reader_compliance/` 的 canonical payload 与 expected 结果接入自动 runner，先覆盖已有 Rust / TypeScript / C++ runtime adapters，再扩展到 C# / Java 标准 adapters。
+- 将 `tests/fixtures/runtime_reader_compliance/` 的 canonical payload 与 expected 结果接入自动 runner；当前已覆盖 Rust JSON / MessagePack 与 TypeScript JSON，后续补齐 TypeScript MessagePack、C++ 与 C# / Java 标准 adapters。
 - 避免 TypeScript `npx` fallback 在 CI 中隐式联网；所有联网行为必须由显式配置启用。
 - 保持每个步骤可以独立开发、独立验证、独立提交。
 
@@ -19,9 +19,9 @@
 
 - `tests/cli_integration/support/commands.rs` 已有 `command_exists(command)`，但只返回 bool，缺少版本、路径、stderr 和测试 profile 诊断。
 - `tests/cli_integration/standard_project.rs` 已按语言调用 generated-code runtime harness，覆盖 Rust / C++ / Unreal C++ / C# / Java / TypeScript / Lua。
-- 多数 harness 已能在缺工具时 `eprintln!` skip，但 skip 逻辑分散，格式不统一，且需要继续清理静默 skip。
-- `tests/fixtures/runtime_reader_compliance/` 已有初始 JSON payload 和 expected TOML，但尚未形成自动 runner，也未覆盖文档中规划的全部 canonical cases。
-- C# / Java JSON / MessagePack reader 已抽出到 `runtime/csharp/` 与 `runtime/java/`，standard_project harness 通过薄 adapter 接入 generated loader / reader interface；尚未接入 runtime compliance runner。C# / Java binary reader 仍需先扩展 generated contract 的 positional reader API。
+- 多数 harness 已能在缺工具时 `eprintln!` skip，但 skip 逻辑分散，格式不统一；TypeScript 仍存在 `npx` fallback，后续需要受显式 network policy 控制。
+- `tests/fixtures/runtime_reader_compliance/` 已有首批 canonical JSON payload 与 expected TOML，并已形成自动 runner：`tests/runtime_compliance.rs` 覆盖 Rust JSON / MessagePack adapters，`tests/typescript_runtime_compliance.rs` 覆盖 TypeScript JSON reader。TypeScript MessagePack、C++、C#、Java runner 仍待接入。
+- C# / Java JSON / MessagePack / Binary reader 已抽出到 `runtime/csharp/` 与 `runtime/java/`，generated contract 已支持 schema revision、record boundary、enum index 与 exhausted check；standard_project harness 通过薄 adapter 与 generated adapter smoke 覆盖三种格式，但尚未接入 runtime compliance runner。
 
 ## 全局验收规则
 
@@ -91,7 +91,7 @@ docs(testing): add development environment guide
 - 新增 `Documentation/Tech/test-ci-matrix.md`。
 - 定义测试 profile：`local`、`quick`、`full`、`nightly`。
 - 定义 generated-code runtime harness 矩阵：Rust、C++、Unreal C++ shim、TypeScript、C#、Java、Lua。
-- 定义 runtime adapter compliance 矩阵：Rust JSON / MessagePack、TypeScript JSON / MessagePack、C++ RapidJSON / msgpack-cxx，以及 C# / Java 后续状态。
+- 定义 runtime adapter compliance 矩阵：Rust JSON / MessagePack、TypeScript JSON / MessagePack、C++ RapidJSON / msgpack-cxx / binary，以及 C# / Java JSON / MessagePack / Binary 后续状态。
 - 明确 skip vs fail-fast 策略：本地可选工具缺失显式 skip；full CI 声明必需工具缺失 fail-fast。
 - 明确 TypeScript `npx` fallback、C++ FetchContent、npm install 等联网行为必须显式开启。
 - 更新 `Documentation/README.md`、`AGENTS.md` 和 `Documentation/code-style.md` 链接。
@@ -274,18 +274,18 @@ test(runtime): expand compliance fixtures
 test(runtime): add Rust compliance runner
 ```
 
-## [ ] Step 9：接入 TypeScript 与 C++ runtime compliance runner
+## [ ] Step 9：补齐 TypeScript MessagePack 与 C++ runtime compliance runner
 
-目标：将同一套 compliance fixture 扩展到 TypeScript 和 C++ adapters，验证跨语言 contract 一致性。
+目标：在已接入 TypeScript JSON reader 的基础上，将同一套 compliance fixture 扩展到 TypeScript MessagePack 与 C++ adapters，验证跨语言 contract 一致性。
 
 主要修改：
 
-- TypeScript：新增 package-level compliance runner，读取同一批 fixture，覆盖 JSON reader，后续扩展 MessagePack reader。
-- C++：新增 CMake / CTest compliance runner，覆盖 RapidJSON JSON reader，后续扩展 msgpack-cxx reader。
+- TypeScript：扩展现有 Rust 驱动的临时 compliance runner 或迁移到 package-level runner，覆盖 MessagePack reader，并保留 JSON reader 覆盖。
+- C++：新增 CMake / CTest compliance runner，覆盖 RapidJSON JSON reader、msgpack-cxx reader 和 binary reader。
 - runner 接入 ToolProbe / profile policy：缺 Node / npm / tsc / cmake / C++ compiler / 三方库时明确 skip 或 fail-fast。
 - 更新 `Documentation/Tech/test-ci-matrix.md` 和 `Documentation/Implementation/09e-codegen-runtime-adapters.md` 的接入状态。
 
-当前进展：TypeScript JSON reader 已通过 `tests/typescript_runtime_compliance.rs` 接入 Rust 驱动的临时测试工程。Rust 测试负责读取 TOML / JSON fixture 并生成临时 TypeScript case 数据，避免为 JSON reader package 引入 TOML parser 或测试专用依赖；本地缺 `node` 或 `tsc` / `npx` 时明确 skip。TypeScript MessagePack 与 C++ runner 仍待接入。
+当前进展：TypeScript JSON reader 已通过 `tests/typescript_runtime_compliance.rs` 接入 Rust 驱动的临时测试工程。Rust 测试负责读取 TOML / JSON fixture 并生成临时 TypeScript case 数据，避免为 JSON reader package 引入 TOML parser 或测试专用依赖；本地缺 `node` 或 `tsc` / `npx` 时明确 skip。TypeScript MessagePack 与 C++ RapidJSON / msgpack-cxx / binary runner 仍待接入。
 
 验证：
 
@@ -300,7 +300,7 @@ test(runtime): add Rust compliance runner
 test(runtime): add TypeScript and C++ compliance runners
 ```
 
-## [x] Step 10：抽出 C# / Java 标准 JSON adapter
+## [x] Step 10：抽出 C# / Java 标准 runtime adapters
 
 目标：减少 standard_project harness 内嵌 reader 与未来生产 adapter 漂移，为 C# / Java compliance 接入做准备。
 
@@ -324,7 +324,7 @@ test(runtime): add TypeScript and C++ compliance runners
 建议提交：
 
 ```text
-feat(runtime): add C# and Java JSON adapters
+feat(runtime): add C# and Java standard runtime adapters
 ```
 
 ## [ ] Step 11：接入 C# / Java runtime compliance runner
@@ -333,8 +333,8 @@ feat(runtime): add C# and Java JSON adapters
 
 主要修改：
 
-- C#：新增 compliance runner project 或测试入口，读取 canonical fixtures。
-- Java：新增 compliance runner harness，读取 canonical fixtures。
+- C#：新增 compliance runner project 或测试入口，读取 canonical fixtures，覆盖 JSON / MessagePack / Binary reader。
+- Java：新增 compliance runner harness，读取 canonical fixtures，覆盖 JSON / MessagePack / Binary reader。
 - 接入 ToolProbe / profile policy：缺 `dotnet`、`javac`、`java` 时按 profile skip 或 fail-fast。
 - 更新 runtime adapter 文档中的支持矩阵。
 
