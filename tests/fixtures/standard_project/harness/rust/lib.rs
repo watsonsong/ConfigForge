@@ -61,9 +61,137 @@ mod msgpack_runtime_reader;
 
 use std::env;
 
-use config_forge_runtime_binary_reader::FsBinaryRuntimeDataLoader;
+use config_forge_runtime_binary_reader::{BinaryRuntimeDataReader, FsBinaryRuntimeDataLoader};
 use json_runtime_reader::{FsJsonRuntimeDataLoader, JsonValueReader};
-use msgpack_runtime_reader::FsMessagePackRuntimeDataLoader;
+use msgpack_runtime_reader::{FsMessagePackRuntimeDataLoader, MessagePackValueReader};
+
+fn runtime_error_from_core(
+    error: config_forge_runtime_reader_core::RuntimeDataError,
+) -> RuntimeDataError {
+    let kind = match error.kind {
+        config_forge_runtime_reader_core::RuntimeDataErrorKind::Io => RuntimeDataErrorKind::Io,
+        config_forge_runtime_reader_core::RuntimeDataErrorKind::Decode => {
+            RuntimeDataErrorKind::Decode
+        }
+        config_forge_runtime_reader_core::RuntimeDataErrorKind::SchemaMismatch => {
+            RuntimeDataErrorKind::SchemaMismatch
+        }
+        config_forge_runtime_reader_core::RuntimeDataErrorKind::TypeMismatch => {
+            RuntimeDataErrorKind::TypeMismatch
+        }
+        config_forge_runtime_reader_core::RuntimeDataErrorKind::NotFound => {
+            RuntimeDataErrorKind::NotFound
+        }
+        config_forge_runtime_reader_core::RuntimeDataErrorKind::Unsupported => {
+            RuntimeDataErrorKind::Unsupported
+        }
+        config_forge_runtime_reader_core::RuntimeDataErrorKind::InvalidPath => {
+            RuntimeDataErrorKind::InvalidPath
+        }
+    };
+    RuntimeDataError {
+        kind,
+        message: error.message,
+        path: error.path,
+        source: error.source,
+    }
+}
+
+macro_rules! impl_generated_runtime_reader {
+    ($reader:ty) => {
+        impl RuntimeDataReader for $reader {
+            fn enter_required_field(&self, name: &'static str) -> RuntimeDataResult<()> {
+                config_forge_runtime_reader_core::RuntimeDataReader::enter_required_field(self, name)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn enter_optional_field(&self, name: &'static str) -> RuntimeDataResult<bool> {
+                config_forge_runtime_reader_core::RuntimeDataReader::enter_optional_field(self, name)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn exit_field(&self) -> RuntimeDataResult<()> {
+                config_forge_runtime_reader_core::RuntimeDataReader::exit_field(self)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn enter_index(&self, index: usize) -> RuntimeDataResult<()> {
+                config_forge_runtime_reader_core::RuntimeDataReader::enter_index(self, index)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn exit(&self) -> RuntimeDataResult<()> {
+                config_forge_runtime_reader_core::RuntimeDataReader::exit(self)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn read_row_count(&self) -> RuntimeDataResult<usize> {
+                config_forge_runtime_reader_core::RuntimeDataReader::read_row_count(self)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn read_list_len(&self) -> RuntimeDataResult<usize> {
+                config_forge_runtime_reader_core::RuntimeDataReader::read_list_len(self)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn array_elements_are_positional(&self) -> bool {
+                config_forge_runtime_reader_core::RuntimeDataReader::array_elements_are_positional(self)
+            }
+
+            fn begin_record(&self, optional_slot_count: usize) -> RuntimeDataResult<()> {
+                config_forge_runtime_reader_core::RuntimeDataReader::begin_record(
+                    self,
+                    optional_slot_count,
+                )
+                .map_err(runtime_error_from_core)
+            }
+
+            fn end_record(&self) -> RuntimeDataResult<()> {
+                config_forge_runtime_reader_core::RuntimeDataReader::end_record(self)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn read_enum_index(&self, variants: &[&str]) -> RuntimeDataResult<usize> {
+                config_forge_runtime_reader_core::RuntimeDataReader::read_enum_index(self, variants)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn as_i64(&self) -> RuntimeDataResult<i64> {
+                config_forge_runtime_reader_core::RuntimeDataReader::as_i64(self)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn as_f64(&self) -> RuntimeDataResult<f64> {
+                config_forge_runtime_reader_core::RuntimeDataReader::as_f64(self)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn as_bool(&self) -> RuntimeDataResult<bool> {
+                config_forge_runtime_reader_core::RuntimeDataReader::as_bool(self)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn as_string(&self) -> RuntimeDataResult<String> {
+                config_forge_runtime_reader_core::RuntimeDataReader::as_string(self)
+                    .map_err(runtime_error_from_core)
+            }
+
+            fn schema_revision(&self) -> Option<u64> {
+                config_forge_runtime_reader_core::RuntimeDataReader::schema_revision(self)
+            }
+
+            fn ensure_exhausted(&self) -> RuntimeDataResult<()> {
+                config_forge_runtime_reader_core::RuntimeDataReader::ensure_exhausted(self)
+                    .map_err(runtime_error_from_core)
+            }
+        }
+    };
+}
+
+impl_generated_runtime_reader!(JsonValueReader);
+impl_generated_runtime_reader!(MessagePackValueReader);
+impl_generated_runtime_reader!(BinaryRuntimeDataReader);
 
 #[derive(Debug, Clone)]
 struct JsonFixtureRuntimeDataLoader {
@@ -82,7 +210,7 @@ impl RuntimeDataLoader for JsonFixtureRuntimeDataLoader {
     type Reader = JsonValueReader;
 
     fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {
-        self.inner.open_reader(path)
+        self.inner.open_reader(path).map_err(runtime_error_from_core)
     }
 }
 
@@ -100,10 +228,19 @@ impl MessagePackFixtureRuntimeDataLoader {
 }
 
 impl RuntimeDataLoader for MessagePackFixtureRuntimeDataLoader {
-    type Reader = msgpack_runtime_reader::MessagePackValueReader;
+    type Reader = MessagePackValueReader;
 
     fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {
-        self.inner.open_reader(path)
+        self.inner.open_reader(path).map_err(runtime_error_from_core)
+    }
+}
+
+impl RuntimeDataLoader for FsBinaryRuntimeDataLoader {
+    type Reader = BinaryRuntimeDataReader;
+
+    fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {
+        config_forge_runtime_reader_core::RuntimeDataLoader::open(self, path)
+            .map_err(runtime_error_from_core)
     }
 }
 

@@ -23,6 +23,17 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &RustNames<'_
             "RuntimeDataLoader",
             "RuntimeDataLoader",
         ),
+        GeneratedSymbol::new("runtime interface", "RuntimeDataError", "RuntimeDataError"),
+        GeneratedSymbol::new(
+            "runtime interface",
+            "RuntimeDataErrorKind",
+            "RuntimeDataErrorKind",
+        ),
+        GeneratedSymbol::new(
+            "runtime interface",
+            "RuntimeDataResult",
+            "RuntimeDataResult",
+        ),
         GeneratedSymbol::new("runtime interface", "GameDataAccess", "GameDataAccess"),
         GeneratedSymbol::new("facade", "GameData", "GameData"),
         GeneratedSymbol::new("facade", "LazyGameData", "LazyGameData"),

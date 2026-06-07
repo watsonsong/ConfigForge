@@ -22,7 +22,7 @@ use reader::{
     render_struct_reader_impl,
 };
 use repository::{render_game_data_link_methods, render_row_relation_methods, render_table};
-use runtime::{render_runtime_reader_helpers, render_runtime_reader_imports};
+use runtime::{render_runtime_reader_contract, render_runtime_reader_helpers};
 use symbols::validate_generated_symbols;
 use types::RustNames;
 
@@ -141,7 +141,7 @@ fn render_rust_code(
     validate_generated_symbols(&model, &names)?;
     write_file_header(generator, content, input);
     content.raw("use std::{cell::{Cell, OnceCell, RefCell}, collections::HashMap};\n\n");
-    render_runtime_reader_imports(content);
+    render_runtime_reader_contract(content, &rust_options);
     render_runtime_reader_helpers(content);
     render_rust_i18n_prelude(content, &input.target.options.i18n);
     content.raw(concat!(

@@ -87,7 +87,7 @@ docs(runtime): clarify runtime interface mode roadmap
 feat(codegen): parse runtime interface mode options
 ```
 
-## [ ] Step 2：Rust 支持 inline default
+## [x] Step 2：Rust 支持 inline default
 
 目标：Rust generated code 默认自带最小 reader / loader trait、error 和 result，不再强制依赖 `config_forge_runtime_reader_core`。
 
@@ -101,6 +101,8 @@ feat(codegen): parse runtime interface mode options
   - `runtime_core_path: Option<String>`，external 默认 `config_forge_runtime_reader_core`。
 - 更新 Rust codegen tests：默认不再包含 `pub use config_forge_runtime_reader_core`；external 测试覆盖自定义 path。
 - 更新 standard_project Rust harness：默认 inline 路径需要薄 adapter 或让 runtime reader template 同时实现 inline trait；external 路径保留 core crate smoke。
+
+当前实现：Rust 默认生成本地 `RuntimeDataReader` / `RuntimeDataLoader` / `RuntimeDataError` / `RuntimeDataResult` / contract version；`runtime_interface = "external"` 时仍通过 `pub use <runtime_core_path>::{...}` 绑定外部 core，未指定 `runtime_core_path` 时默认使用 `config_forge_runtime_reader_core`。standard_project Rust harness 已通过薄 adapter 将现有 core-based JSON / MessagePack / Binary readers 接到 inline trait。
 
 验证：
 
