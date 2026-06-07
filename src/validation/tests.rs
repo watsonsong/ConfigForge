@@ -3708,3 +3708,245 @@ fn sum_validator_handles_skip_empty_and_config_errors() {
     let message = validate_error(validate_data_set(&linked_meta, &data_set));
     assert!(message.contains("cannot be combined"));
 }
+
+#[test]
+fn monotonic_validator_checks_increasing_strict_sequence() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "levels"
+            source = "levels.csv"
+
+            [[tables.validators]]
+            kind = "monotonic"
+            field = "exp"
+            order_by = "level"
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+
+            [[tables.fields]]
+            name = "exp"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let valid = DataSet::new(vec![DataTable::new(
+        "levels",
+        vec![
+            BTreeMap::from([
+                ("level".to_owned(), "1".to_owned()),
+                ("exp".to_owned(), "100".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("level".to_owned(), "2".to_owned()),
+                ("exp".to_owned(), "200".to_owned()),
+            ]),
+        ],
+    )]);
+    let invalid = DataSet::new(vec![DataTable::new(
+        "levels",
+        vec![
+            BTreeMap::from([
+                ("level".to_owned(), "1".to_owned()),
+                ("exp".to_owned(), "200".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("level".to_owned(), "2".to_owned()),
+                ("exp".to_owned(), "100".to_owned()),
+            ]),
+        ],
+    )]);
+
+    assert!(validate_data_set(&linked_meta, &valid).is_ok());
+    let message = validate_error(validate_data_set(&linked_meta, &invalid));
+    assert!(message.contains("validator.monotonic_violation"));
+}
+
+#[test]
+fn monotonic_validator_supports_grouped_decreasing_non_strict() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "curves"
+            source = "curves.csv"
+
+            [[tables.validators]]
+            kind = "monotonic"
+            field = "value"
+            group_by = ["curve"]
+            order_by = "step"
+            direction = "decreasing"
+            strict = false
+
+            [[tables.fields]]
+            name = "curve"
+            type = "string"
+            export = false
+
+            [[tables.fields]]
+            name = "step"
+            type = "int"
+
+            [[tables.fields]]
+            name = "value"
+            type = "float"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let valid = DataSet::new(vec![DataTable::new(
+        "curves",
+        vec![
+            BTreeMap::from([
+                ("curve".to_owned(), "a".to_owned()),
+                ("step".to_owned(), "1".to_owned()),
+                ("value".to_owned(), "3.0".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("curve".to_owned(), "a".to_owned()),
+                ("step".to_owned(), "2".to_owned()),
+                ("value".to_owned(), "3.0".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("curve".to_owned(), "b".to_owned()),
+                ("step".to_owned(), "1".to_owned()),
+                ("value".to_owned(), "1.0".to_owned()),
+            ]),
+        ],
+    )]);
+
+    assert!(validate_data_set(&linked_meta, &valid).is_ok());
+}
+
+#[test]
+fn monotonic_validator_reports_duplicate_order_key_unless_skipped() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "levels"
+            source = "levels.csv"
+
+            [[tables.validators]]
+            kind = "monotonic"
+            field = "exp"
+            order_by = "level"
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+
+            [[tables.fields]]
+            name = "exp"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "levels",
+        vec![
+            BTreeMap::from([
+                ("level".to_owned(), "1".to_owned()),
+                ("exp".to_owned(), "100".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("level".to_owned(), "1".to_owned()),
+                ("exp".to_owned(), "200".to_owned()),
+            ]),
+        ],
+    )]);
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    assert!(message.contains("validator.monotonic_duplicate_order_key"));
+
+    let skip_meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "levels"
+            source = "levels.csv"
+
+            [[tables.validators]]
+            kind = "monotonic"
+            field = "exp"
+            order_by = "level"
+            skip_equal_order_key = true
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+
+            [[tables.fields]]
+            name = "exp"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = skip_meta.link().expect("meta should link");
+    assert!(validate_data_set(&linked_meta, &data_set).is_ok());
+}
+
+#[test]
+fn monotonic_validator_respects_target_row_filter() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "levels"
+            source = "levels.csv"
+            row_export = { excluded_tags_field = "exclude_tags" }
+
+            [[tables.validators]]
+            kind = "monotonic"
+            field = "exp"
+            order_by = "level"
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+
+            [[tables.fields]]
+            name = "exp"
+            type = "int"
+
+            [[tables.fields]]
+            name = "exclude_tags"
+            type = "string"
+            export = false
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "levels",
+        vec![
+            BTreeMap::from([
+                ("level".to_owned(), "1".to_owned()),
+                ("exp".to_owned(), "100".to_owned()),
+                ("exclude_tags".to_owned(), String::new()),
+            ]),
+            BTreeMap::from([
+                ("level".to_owned(), "2".to_owned()),
+                ("exp".to_owned(), "50".to_owned()),
+                ("exclude_tags".to_owned(), "client".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("level".to_owned(), "3".to_owned()),
+                ("exp".to_owned(), "200".to_owned()),
+                ("exclude_tags".to_owned(), String::new()),
+            ]),
+        ],
+    )]);
+    let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
+
+    assert!(
+        validate_normalized_data_set_for_target(
+            &linked_meta,
+            &TargetTags::new(["client"]),
+            &normalized,
+        )
+        .is_ok()
+    );
+    let message = validate_error(validate_normalized_data_set(&linked_meta, &normalized));
+    assert!(message.contains("validator.monotonic_violation"));
+}

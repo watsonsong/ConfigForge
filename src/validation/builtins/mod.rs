@@ -4,6 +4,7 @@
 pub(super) mod common;
 pub(super) mod compare;
 pub(super) mod condition;
+pub(super) mod monotonic;
 pub(super) mod range;
 pub(super) mod regex;
 pub(super) mod required_when;

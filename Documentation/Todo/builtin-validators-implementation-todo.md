@@ -203,7 +203,7 @@
 
 建议提交：`feat(validation): add sum validator`
 
-## [ ] Step 10：实现 `monotonic` table validator
+## [x] Step 10：实现 `monotonic` table validator
 
 目标：支持等级经验、成长曲线、关卡难度等有序曲线校验。
 

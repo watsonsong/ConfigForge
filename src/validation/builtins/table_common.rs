@@ -164,6 +164,10 @@ impl OrderByConfig {
         &self.field
     }
 
+    pub(crate) fn compare_values(&self, left: &str, right: &str) -> Option<Ordering> {
+        compare_values(self.kind, left, right)
+    }
+
     pub(crate) fn sort_rows(
         &self,
         table_view: &ExportTableView<'_, '_>,

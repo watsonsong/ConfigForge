@@ -10,8 +10,9 @@ use crate::{
 
 use super::{
     ValidationContext, ValidationIssue, ValidationReport,
-    builtins::compare::CompareValidatorFactory, builtins::range::RangeValidatorFactory,
-    builtins::regex::RegexValidatorFactory, builtins::required_when::RequiredWhenValidatorFactory,
+    builtins::compare::CompareValidatorFactory, builtins::monotonic::MonotonicValidatorFactory,
+    builtins::range::RangeValidatorFactory, builtins::regex::RegexValidatorFactory,
+    builtins::required_when::RequiredWhenValidatorFactory,
     builtins::string_length::StringLengthValidatorFactory, builtins::sum::SumValidatorFactory,
 };
 
@@ -75,6 +76,7 @@ impl ValidatorRegistry {
         registry.register(RequiredWhenValidatorFactory);
         registry.register(CompareValidatorFactory);
         registry.register(SumValidatorFactory);
+        registry.register(MonotonicValidatorFactory);
         registry
     }
 
