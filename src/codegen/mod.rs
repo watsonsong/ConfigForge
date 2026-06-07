@@ -78,7 +78,7 @@ impl From<&ArtifactProjectInfo> for CodeExportProject {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CodegenOptions {
+pub struct CodeArtifactOptions {
     pub file_header: Option<String>,
     pub keyword_conflict: KeywordConflictPolicy,
     pub i18n: I18nOptions,
@@ -86,6 +86,8 @@ pub struct CodegenOptions {
     pub formatting: CodeWriterConfig,
     pub language_options: HashMap<String, toml::Value>,
 }
+
+pub type CodegenOptions = CodeArtifactOptions;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct I18nOptions {
@@ -319,7 +321,7 @@ fn validate_generated_file_name(file_name: &str) -> Result<String> {
     }
 }
 
-impl CodegenOptions {
+impl CodeArtifactOptions {
     pub(crate) fn for_generator(generator: &dyn CodeGenerator) -> Result<Self> {
         let task = CodegenTaskConfig::for_language(generator.language());
         Ok(Self {
@@ -367,7 +369,7 @@ impl NamingConfig {
     }
 }
 
-impl Default for CodegenOptions {
+impl Default for CodeArtifactOptions {
     fn default() -> Self {
         Self {
             file_header: None,

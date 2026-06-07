@@ -1184,6 +1184,11 @@ fn rejects_codegen_file_name_with_path_separator() {
 
 #[test]
 fn builtin_generators_use_language_specific_formatting_defaults() {
+    fn accepts_code_artifact_options(_: &crate::codegen::CodeArtifactOptions) {}
+
+    accepts_code_artifact_options(
+        &CodegenOptions::for_language(RustCodeGenerator.language()).expect("rust options"),
+    );
     assert_eq!(
         CodegenOptions::for_language(RustCodeGenerator.language())
             .expect("rust options")

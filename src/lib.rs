@@ -32,10 +32,10 @@ pub use build::{
     ExecutionOptions, build_target,
 };
 pub use codegen::{
-    CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeExportProject, CodeExportTarget,
-    CodeWriterConfig, CodeWriterLike, CodegenOptions, CodegenTaskConfig, CppCodegenOptions,
-    CppUnrealCodegenOptions, I18nFunctionReturn, I18nMode, I18nOptions, IndentStyle,
-    KeywordConflictPolicy, NamingConfig, PartialCodeWriterConfig, PartialNamingConfig,
+    CaseStyle, CheckedStreamingCodeWriter, CodeArtifactOptions, CodeExportInput, CodeExportProject,
+    CodeExportTarget, CodeWriterConfig, CodeWriterLike, CodegenOptions, CodegenTaskConfig,
+    CppCodegenOptions, CppUnrealCodegenOptions, I18nFunctionReturn, I18nMode, I18nOptions,
+    IndentStyle, KeywordConflictPolicy, NamingConfig, PartialCodeWriterConfig, PartialNamingConfig,
     RustCodegenOptions, StreamingCodeWriter, TypeScriptCodegenOptions, default_module_name,
 };
 pub use data::{
