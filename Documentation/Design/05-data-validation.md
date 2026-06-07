@@ -91,6 +91,8 @@ fragment presence 的 target 判断顺序固定为：
 | Multi-Collection | foreign key、跨表一致性 | 当前验证视图中的多个 collection |
 | Export | target mapping、输出路径、artifact 能力 | Export plan |
 
+游戏常用 built-in validators 的专题设计见 [`09-builtin-validators.md`](09-builtin-validators.md)。其中 `regex`、`string_length` 属于 field-level validators；`required_when`、`compare` 属于 record-level validators；`sum`、`monotonic` 属于 table-level validators。它们默认仍运行在当前 target ExportView 上，但 record/table validators 可以显式引用 hidden support fields，不因此改变 runtime export 可见性。
+
 ObjectTable Step 1 的输入视图不是多行 records，而是由 CSV `key,value` rows 归一化出的单个 object row。即使 source 只有 header、没有数据行，也必须归一化为一个 empty logical row `{}`，使 required/default/type/enum/struct JSON cell 等字段级规则复用现有 field validation；index、row_export、fragment-scoped validation 不适用于 ObjectTable Step 1。ObjectTable 可以作为 foreign key source：其 singleton logical row 中的 FK source fields 按普通 raw cell key 引用 CollectionTable unique / primary index；ObjectTable 仍不能作为 FK target。ObjectTable 的 table-level `export/export_when` 与 field-level `export/export_when` 仍生效；table 可见但字段都被过滤时，导出 empty object。
 
 Struct source layout 自动判定落地后，Full DataSet 与 ExportView 中的 logical row 仍保持 row-oriented map，但 source key 可以是 nested field path。CollectionTable 的 CSV header 使用 `field.child` 多列表达；ObjectTable 的 `key,value` source 使用多行 `field.child` 表达。Validation 需要按当前 row/source 的 key 集合扫描每个 struct field occurrence：只出现 parent path 时按 JSON cell 解析；只出现 child paths 时按 expanded value 解析；两者同时出现应视为同一 occurrence 混用 JSON cell 与 expanded cells 并报错。该规则递归作用于 nested struct：如果某一级 occurrence 选择 JSON cell，则该级以下不能再出现展开子项；如果某一级选择 expanded value，则其内部 struct child 可以继续独立选择 JSON cell 或 expanded value。Meta `layout` 不参与 named struct 的 source layout 判定。
@@ -270,7 +272,7 @@ Asset 字段当前由 `asset_kind` + Project `[assets]` 驱动校验，至少检
 
 Asset existence 默认对 ExportView 执行。被 target filter 排除的记录，其 asset 不阻塞该 target 导出，也不进入 asset manifest。
 
-当前实现状态：P0-1 已实现 asset ref 校验和导出补齐。`asset` 字段必须声明 `asset_kind`；Meta 顶层 `[[asset_kinds]]` 支持 `extends` 继承；Project `[assets]` / `[[assets.search_paths]]` 提供 filesystem search path；validation 只检查当前 target ExportView 中可见且非空的 asset 字段；runtime JSON / MessagePack / bin 导出前会通过同一 resolver 把可补齐引用物化为 canonical asset string。标准参考工程已用 `meta/common.toml` 存放公共 Unreal 基础规则，并用伪造 `.uasset` fixture 覆盖存在性校验。Asset Manifest exporter 仍是后续阶段。目标态细节见 [`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)。
+当前实现状态：P0-1 已实现 asset ref 校验、导出补齐和 Asset Manifest。`asset` 字段必须声明 `asset_kind`；Meta 顶层 `[[asset_kinds]]` 支持 `extends` 继承；Project `[assets]` / `[[assets.search_paths]]` 提供 filesystem search path；validation 只检查当前 target ExportView 中可见且非空的 asset 字段；runtime JSON / MessagePack / bin 导出前会通过同一 resolver 把可补齐引用物化为 canonical asset string。标准参考工程已用 `meta/common.toml` 存放公共 Unreal 基础规则，并用伪造 `.uasset` fixture 覆盖存在性校验，同时在 client target 中导出 `asset_manifest` JSON 与 CSV 清单。Asset Manifest exporter 作为同级聚合 data exporter 接入，支持 deterministic JSON 与 Unreal DataTable 兼容 CSV。目标态细节见 [`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)。
 
 ### Text
 

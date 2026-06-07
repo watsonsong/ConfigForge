@@ -228,7 +228,7 @@ pub struct AssetRegexRuleMeta {
 - `object_separator` 与 `object_name` 描述 mounted object 引用中的对象名规则，例如 Unreal class `_C`。
 - `require_existing` 覆盖 Project `[assets].require_existing` 的默认存在性策略；`require_sidecars` 用于 Unity `.meta` 等配对文件校验。
 - `allow_path_prefixes` / `deny_path_prefixes` / `deny_when_tags` / `name_prefixes` / `name_suffixes` / `allow_patterns` / `deny_patterns` / `regex_rules` 是结构化与正则兜底校验规则；正则只参与校验，不参与路径重写或候选生成。
-- P0-1 当前通过 `src/asset.rs` 的 `AssetResolver` 消费该 Meta，validation 与 runtime export 共享同一解析语义；Asset Manifest exporter 后续也应复用 resolver 输出。
+- 当前通过 `src/asset.rs` 的 `AssetResolver` 消费该 Meta，validation 与 runtime export 共享同一解析语义；Asset Manifest exporter 读取导出前已 canonicalize 的 DataSet，避免与 runtime data exporter 出现不同的 asset string 语义。
 
 ### 4.5.2 Project 信息边界
 

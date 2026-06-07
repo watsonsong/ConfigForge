@@ -13,6 +13,7 @@ use crate::{
 };
 
 use super::{RuntimeArtifactPlan, binary, json, messagepack};
+use crate::exporter::asset_manifest::AssetManifestExporter;
 use crate::exporter::gettext_pot::GettextPotExporter;
 use crate::exporter::lua_table::LuaTableExporter;
 
@@ -237,5 +238,9 @@ pub fn builtin_exporters() -> Vec<Box<dyn DataFormatExporter>> {
 }
 
 pub fn builtin_aggregate_exporters() -> Vec<Box<dyn AggregateDataExporter>> {
-    vec![Box::new(GettextPotExporter), Box::new(LuaTableExporter)]
+    vec![
+        Box::new(GettextPotExporter),
+        Box::new(LuaTableExporter),
+        Box::new(AssetManifestExporter),
+    ]
 }

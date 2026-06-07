@@ -26,7 +26,7 @@
 | Asset Resolver | `src/asset.rs` | 根据 Meta `asset_kind` 与 Project asset search paths 解析资源引用，生成 canonical export ref，并执行存在性、sidecar、命名、prefix / regex、target-gated deny 等检查。 | `LinkedMetaModel<'meta>`、`AssetsConfig`、`TargetTags`、raw asset ref。 | `ResolvedAssetRef` / validation error。 | `08-asset-validation-and-manifest.md` |
 | Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、asset reference validation、注册式 validator；入口、table、FK、struct value、default、asset 逻辑分文件维护。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`、可选 `AssetsConfig`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
 | Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 兼容列表或 `ArtifactSink` stream 写入请求、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
-| Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack / `bin` exporter、export type registry、由统一 export task 适配得到的 exporter 内部配置。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`、`ArtifactSink`。 | `RuntimeDataFile` metadata / runtime data artifacts。 | `08-exporter-module-detail-design.md` |
+| Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack / `bin` table exporter、POT / Lua / Asset Manifest 聚合 exporter、export type registry、由统一 export task 适配得到的 exporter 内部配置。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`、`ArtifactSink`。 | `RuntimeDataFile` metadata / runtime data artifacts / aggregate data artifacts。 | `08-exporter-module-detail-design.md` |
 | Codegen | `src/codegen/` | 语言无关 CodeModel IR 和内置 codegen backend；backend 清单与能力矩阵见 `09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix`。 | `LinkedMetaModel<'meta>`、target tags、`ArtifactSink`。 | generated code artifacts。 | `09-codegen-module-detail-design.md` |
 | Build | `src/build/` | 工程构建主编排：归一化 target，并按 target 调度 data load、validation、runtime export、format-agnostic codegen、artifact 写入。 | `ProjectConfig`、CLI options。 | `BuildOutput`、文件系统产物。 | `10-build-module-detail-design.md` |
 
@@ -111,7 +111,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 5. **Data Load**：`data` 根据 target 可见表和 source declaration 生成加载计划并读取 `DataSet`。
 6. **Data Normalize / Resolve**：`validation` 调用 DataResolver 应用 default、struct JSON / expanded value、fragment 等规则，形成可校验输入。
 7. **Target-aware Validation**：`validation` 派生 `ExportValidationView`，执行 required/type/enum/index/FK/validator/asset reference 等规则并输出 `ValidationReport`。
-8. **Runtime Data Export**：`build` 在 validation 通过后复用 `AssetResolver` 将 target-visible asset 字段物化为 canonical export ref，再由 `exporter` 使用同一个 target tags 和 export view 语义生成 JSON / MessagePack / `bin` runtime data。
+8. **Runtime / Aggregate Data Export**：`build` 在 validation 通过后复用 `AssetResolver` 将 target-visible asset 字段物化为 canonical export ref，再由 `exporter` 使用同一个 target tags 和 export view 语义生成 JSON / MessagePack / `bin` runtime data，以及 POT / Lua / Asset Manifest 等聚合 data artifact。
 9. **Codegen**：`codegen` 基于 `LinkedMetaModel<'meta>` 和 target tags 生成代码；默认使用逻辑 table name 作为 runtime load key，不绑定真实 runtime data file 列表。
 10. **Artifact Write**：`artifact` 统一检查制品路径冲突并执行 dry-run / direct / temp-commit 写入；由 build 负责收集 exporter/codegen 产物并调用。
 

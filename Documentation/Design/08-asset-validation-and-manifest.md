@@ -1,6 +1,6 @@
 # 08. Asset 引用校验、补齐与 Asset Manifest 初步设计
 
-本文从现有 Data Validation / Export CLI 设计中拆出，专门收敛 `asset` 字段、资源存在性校验、target-aware 资源策略、资源引用自动补齐和 Asset Manifest 聚合导出的用户可见行为。当前 P0-1 实现先聚焦 `asset_kind`、导出前校验和 canonical ref 补齐；Asset Manifest 输出先放到后续阶段，避免同时引入新的聚合 exporter 复杂度。Rust 模块边界和当前实现细节见 `Documentation/Implementation/01-module-outline.md`、`03-project-module-detail-design.md`、`04-meta-module-detail-design.md` 和 `06-validation-module-detail-design.md`。
+本文从现有 Data Validation / Export CLI 设计中拆出，专门收敛 `asset` 字段、资源存在性校验、target-aware 资源策略、资源引用自动补齐和 Asset Manifest 聚合导出的用户可见行为。当前实现已完成 asset validation / completion 闭环，并将 `type = "asset_manifest"` 作为与 JSON、MessagePack、bin、POT、Lua 同级的 data export task 接入，支持 deterministic JSON 和 Unreal DataTable 兼容 CSV。Rust 模块边界和当前实现细节见 `Documentation/Implementation/01-module-outline.md`、`03-project-module-detail-design.md`、`04-meta-module-detail-design.md`、`06-validation-module-detail-design.md` 和 `08-exporter-module-detail-design.md`。
 
 ## 8.1 设计目标
 
@@ -12,7 +12,7 @@
 2. 用 Project Config 声明可变的资源搜索路径，用 Meta / schema TOML 声明稳定的 `asset_kind` 语义、扩展名、输入格式、大小写策略和 target policy。
 3. 对当前 target 的 ExportView 做资源引用校验：被 target tags / `export_when` / `row_export` 排除的数据不校验、不参与补齐。
 4. 在导出 runtime data 时可按 `asset_kind` 把短写法或编辑器复制引用规范化为 canonical ref，确保 JSON / MessagePack / bin 看到同一份补齐后的字符串值。
-5. 后续输出稳定排序的 Asset Manifest，供 Unity Addressables、Unreal Asset Manager、自研打包器、CDN 预热或资源审计系统消费；该 exporter 不阻塞 P0-1 asset validation MVP。
+5. 输出稳定排序的 Asset Manifest，供 Unity Addressables、Unreal Asset Manager、自研打包器、CDN 预热或资源审计系统消费；该 exporter 与其他 data exporter 同级，通过 `[[targets.exports]] type = "asset_manifest"` 启用。
 6. 保持 generated core 与 runtime data 低耦合：`asset` 在 runtime payload 中第一阶段仍是字符串值；资源存在性、补齐和 manifest 是导出前工具链能力，不把引擎资源系统绑定进 generated code。
 
 非目标：
@@ -24,7 +24,7 @@
 
 ## 8.2 当前状态
 
-当前实现已完成 P0-1：`asset` 字段必须声明 `asset_kind`，Meta 支持顶层 `[[asset_kinds]]` 和 `extends` 继承；Project Config 支持 `[assets]` / `[[assets.search_paths]]`；runtime build 会对当前 target ExportView 中可见的 asset 字段执行 resolver 校验，并在导出 JSON / MessagePack / bin 等 runtime data 前把可补齐引用写成 canonical export ref。已实现的 resolver 覆盖 local filesystem search path、relative / mounted / mounted_object、extension policy、wrapper stripping、object name 模板、存在性、sidecar、命名前后缀、prefix / pattern / regex、target-gated deny 和基础大小写检查。当前 validation 诊断 MVP 统一使用 `asset.reference` code 并携带 table / field / row / target 定位；更细粒度 asset diagnostic code 与 Asset Manifest exporter 仍作为后续阶段单独推进。
+当前实现已完成 P0-1 与 Asset Manifest exporter：`asset` 字段必须声明 `asset_kind`，Meta 支持顶层 `[[asset_kinds]]` 和 `extends` 继承；Project Config 支持 `[assets]` / `[[assets.search_paths]]`；runtime build 会对当前 target ExportView 中可见的 asset 字段执行 resolver 校验，并在导出 JSON / MessagePack / bin 等 runtime data 前把可补齐引用写成 canonical export ref。已实现的 resolver 覆盖 local filesystem search path、relative / mounted / mounted_object、extension policy、wrapper stripping、object name 模板、存在性、sidecar、命名前后缀、prefix / pattern / regex、target-gated deny 和基础大小写检查。`type = "asset_manifest"` 已作为聚合 data exporter 接入，读取同一 canonicalized DataSet，输出 deterministic JSON 或 Unreal DataTable 兼容 CSV。当前 validation 诊断 MVP 统一使用 `asset.reference` code 并携带 table / field / row / target 定位；更细粒度 asset diagnostic code、resolution cache 和 provider 扩展仍作为后续阶段单独推进。
 
 现有文档中的已确认语义仍保留：
 
@@ -32,7 +32,7 @@
 - 被 target filter 排除的记录，其 asset 不阻塞该 target 导出，也不进入 asset manifest。
 - POT、Asset Manifest 等聚合 data exporter 使用与 target runtime export 一致的过滤后数据视图。
 
-因此本功能可以作为 P0-1 落地：它在不破坏现有 runtime data / generated API 的前提下，先补齐游戏项目最常见的资源引用检查和导出值规范化闭环；manifest exporter 作为 P0-2 或后续任务单独推进。
+因此本功能已形成当前闭环：它在不破坏现有 runtime data / generated API 的前提下，补齐游戏项目最常见的资源引用检查、导出值规范化和 manifest 输出能力。
 
 ## 8.3 用户配置模型
 
@@ -175,7 +175,7 @@ name_suffixes = ["_Icon"]
 | `extensions` | `[]` | 允许的主资源后缀。Unity / filesystem 用真实后缀；Unreal 可用 `.uasset`；Cocos runtime path 可配置为 extensionless 输入但用此列表查找真实文件。 |
 | `input` | `path` | 策划填写值的基础语法。P0-1 建议只保留通用 `path` / `string` 类，不把 `cocos`、`unreal` 作为核心枚举。引擎差异由下方 path style、wrapper、extension、object name 等规则组合表达。 |
 | `path_style` | `relative` | path 解释方式。可选 `relative`、`mounted`、`mounted_object`：普通相对路径、带挂载前缀路径、带 package/object 名的路径。 |
-| `manifest_path` | `search_path_relative` | 后续 Asset Manifest exporter 的输出路径口径。可选 `input`、`search_path_relative`、`engine_canonical`；P0-1 resolver / runtime export 尚不消费该字段。 |
+| `manifest_path` | `search_path_relative` | Asset Manifest 输出路径口径的目标态选项。可选 `input`、`search_path_relative`、`engine_canonical`；当前 resolver / runtime export / Asset Manifest exporter 尚不消费该字段，manifest 使用导出前 canonicalize 后的 asset string。 |
 | `extension_policy` | `required` | source input 的扩展名策略。可选 `required`、`forbidden`、`optional`。Cocos `resources.load` 风格可用 `forbidden` + `extensions` 查找真实文件。 |
 | `strip_wrappers` | `[]` | 输入 wrapper 模板。用于接受编辑器复制引用，例如 `BlueprintGeneratedClass'{value}'`，解析时提取 `{value}` 再进入通用 path 校验。 |
 | `object_separator` | `.` | `mounted_object` 中 package path 与 object name 的分隔符。Unreal 可用 `.`。 |
@@ -376,7 +376,7 @@ extension_policy = "forbidden"
 
 ## 8.5 Target 校验与补齐策略
 
-基础策略由 effective target tags 驱动。P0-1 不要求先实现 `asset_manifest` export task，而是先把 resource validation 和 canonical ref 补齐绑定到 target 的 MetaAndData validation / export 阶段：只要当前 target 可见 asset 字段、Meta 声明了 matching kind，且 Project Config 提供了 kind 需要的 search path，就执行校验并在需要时补齐导出值。
+基础策略由 effective target tags 驱动。Resource validation 和 canonical ref 补齐绑定到 target 的 MetaAndData validation / export 阶段：只要当前 target 可见 asset 字段、Meta 声明了 matching kind，且 Project Config 提供了 kind 需要的 search path，就执行校验并在需要时补齐导出值。`asset_manifest` 是同级 data export task，消费 validation 通过后的 canonicalized DataSet，因此不会与 JSON / MessagePack / bin 看到不同的 asset string。
 
 示例：
 
@@ -390,7 +390,7 @@ type = "json"
 output = "Generated/Data/ClientShipping"
 ```
 
-在上面的 target 中，可见 asset 字段会被检查；如果某个 kind 开启 `allow_auto_complete = true`，runtime data exporter 看到的是补齐后的 canonical string。Manifest 输出后续仍作为普通 `[[targets.exports]]` 聚合 exporter 添加：
+在上面的 target 中，可见 asset 字段会被检查；如果某个 kind 开启 `allow_auto_complete = true`，runtime data exporter 和 asset manifest exporter 看到的是补齐后的 canonical string。Manifest 输出作为普通 `[[targets.exports]]` 聚合 exporter 添加：
 
 ```toml
 [[targets]]
@@ -407,6 +407,7 @@ include_referenced_by = true
 ```
 
 因此 P0-1 的判断标准是：没有 manifest task 时，asset validation / completion 仍然生效；manifest task 只是后续额外消费已解析 asset refs 的一个 exporter。
+当前实现仍保留该边界：没有 manifest task 时，asset validation / completion 仍然生效；声明 manifest task 时，它额外消费 canonical asset refs 生成清单。
 
 ## 8.6 校验语义
 
@@ -474,11 +475,11 @@ Shipping / region / platform 规则不建议写成硬编码 target 名称；应�
 
 ## 8.7 Asset Manifest 导出
 
-Asset Manifest 是后续聚合 data exporter，读取当前 target ExportView 中所有可见且非空的 `asset` 字段。P0-1 先不实现 manifest 输出，但 asset validation / completion 的内部结果应尽量设计成可复用结构，避免后续 exporter 重新实现资源解析。
+Asset Manifest 是已实现的聚合 data exporter，读取当前 target ExportView 中所有可见且非空的 `asset` 字段。它与 JSON、MessagePack、bin、POT、Lua 等 export task 同级，使用 `[[targets.exports]] type = "asset_manifest"` 启用；它消费导出前已经 canonicalize 的 asset string，因此不会重新定义资源解析语义。
 
 ### Export task
 
-建议新增 exporter type：
+当前 exporter type：
 
 ```toml
 [[targets.exports]]
@@ -490,24 +491,24 @@ deduplicate = true
 include_referenced_by = true
 ```
 
-字段建议：
+字段：
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `file_name` | `asset_manifest.json` | 输出文件名。 |
-| `format` | `json` | 首版建议支持 `json`；CSV 可作为兼容工具链的后续格式或 alias。 |
+| `format` | `json` | 支持 `json` / `csv`。CSV 输出为 Unreal DataTable 可导入格式。 |
 | `deduplicate` | `true` | 同一 `(kind, path)` 合并为一个 asset entry。 |
 | `include_referenced_by` | `true` | 是否输出引用来源数组。关闭后只输出资源列表，适合打包器快速消费。 |
 | `include_source_location` | `false` | 是否在 `referenced_by` 中附加 source path / row。默认关闭以保持 manifest 精简。 |
 
 ### JSON 输出结构
 
-推荐首版 JSON：
+当前 JSON：
 
 ```json
 {
   "version": 1,
-  "target": "client_shipping",
+  "target_tags": ["client", "shipping"],
   "assets": [
     {
       "kind": "ui_texture",
@@ -529,9 +530,9 @@ include_referenced_by = true
 | 字段 | 说明 |
 | --- | --- |
 | `version` | Manifest schema version。首版为 `1`。 |
-| `target` | target name。 |
+| `target_tags` | 当前 target 的 tag 集合，按稳定顺序输出。 |
 | `assets[].kind` | asset kind。 |
-| `assets[].path` | canonical logical path。首版建议由 `asset_kind.manifest_path` 决定，可输出 source input、search path relative path 或 engine canonical path，便于外部打包器统一消费。 |
+| `assets[].path` | canonical asset string，与 JSON / MessagePack / bin runtime export 中的 asset 字段值一致。 |
 | `assets[].referenced_by[]` | 引用来源。用于排查资源为何进入包。 |
 | `referenced_by.table` | table name。 |
 | `referenced_by.row` | record key；CollectionTable 使用 primary index 或 source row fallback，ObjectTable 可用 `<object>`。 |
@@ -544,26 +545,39 @@ include_referenced_by = true
 3. 相同引用去重。
 4. 输出 UTF-8，JSON object key 顺序固定。
 
-### CSV 输出兼容
+### CSV 输出兼容（Unreal DataTable）
 
-现有 `06-export-cli.md` 曾提到 `asset_manifest_csv`。为避免过早分裂 exporter，建议产品层使用统一 `type = "asset_manifest"`，通过 `format = "csv"` 输出 CSV：
+当前实现不拆分 exporter type，而是使用统一 `type = "asset_manifest"`，通过 `format = "csv"` 输出 CSV。CSV 头部使用 Unreal DataTable 可导入的 `Name` 行名列，并保持稳定列顺序：
 
 ```csv
-asset_ref,asset_kind,table,field_path,record_key,source,tag
+Name,AssetRef,AssetKind,ReferencedBy,Tables,Fields,RecordKeys,Sources
 ```
 
-其中 `asset_ref` 对应 JSON manifest 的 canonical `path`。CSV 不适合表达多引用合并结构，因此 `format = "csv"` 可以默认 `deduplicate = false`，每个引用一行；若 `deduplicate = true`，需要把 referenced_by 展平或省略，需在实现前再确认。
+字段语义：
+
+| 字段 | 说明 |
+| --- | --- |
+| `Name` | Unreal DataTable 行名，由 `(kind, path)` 生成 ASCII 安全稳定 ID；冲突时追加序号。 |
+| `AssetRef` | canonical asset string，与 JSON manifest 的 `assets[].path` 一致。 |
+| `AssetKind` | `asset_kind`。 |
+| `ReferencedBy` | 展平引用来源，格式如 `items[id=1001].icon`，多个引用用 `|` 分隔；`include_referenced_by = false` 时为空。 |
+| `Tables` | 去重后的表名集合，`|` 分隔。 |
+| `Fields` | 去重后的 field path 集合，`|` 分隔。 |
+| `RecordKeys` | 去重后的 record key 集合，`|` 分隔；ObjectTable 使用 `<object>`。 |
+| `Sources` | 当 `include_source_location = true` 时输出 source path / row，多个值用 `|` 分隔。 |
+
+CSV 默认同样 `deduplicate = true`，即同一 `(kind, path)` 合并为一个 DataTable row，并把 referenced_by 信息展平到字符串列。若设置 `deduplicate = false`，同一资源的多次引用会分别输出为多行，行名冲突时追加稳定序号。
 
 ## 8.8 与 runtime data / codegen 的关系
 
 第一阶段不改变 runtime data 和 generated code 的基础形态；当前实现已按以下语义落地：
 
-- `asset` 在 JSON / MessagePack / bin runtime payload 中仍按字符串输出，但当 `asset_kind` 允许补齐时，输出值应使用当前 target 解析得到的 canonical export ref，而不是原始 source cell。
+- `asset` 在 JSON / MessagePack / bin runtime payload 和 Asset Manifest 中仍按字符串输出，但当 `asset_kind` 允许补齐时，输出值应使用当前 target 解析得到的 canonical export ref，而不是原始 source cell。
 - 各语言 generated row 字段类型仍为 string-like 类型。
 - codegen 仍把 `asset` 映射为 string-like 类型，不默认生成引擎资源加载 API。
 - 业务运行时如何把 string asset path 转成 Unity Addressable、Unreal SoftObjectPath、AssetId、GUID 或句柄，由项目侧 adapter 或手写扩展决定。
 
-实现上已通过共享 `AssetResolver` 避免 validation 和 exporter 使用不同语义：validation 阶段用 resolver 产生 diagnostics，export 阶段复用同一解析逻辑把 raw asset value materialize 成 canonical string。后续可引入 target-level asset resolution cache，减少 validation 与 export 的重复解析成本。
+实现上已通过共享 `AssetResolver` 避免 validation 和 exporter 使用不同语义：validation 阶段用 resolver 产生 diagnostics，export 阶段复用同一解析逻辑把 raw asset value materialize 成 canonical string；Asset Manifest exporter 读取这份 canonicalized DataSet。后续可引入 target-level asset resolution cache，减少 validation 与 export 的重复解析成本。
 
 未来扩展可以在 codegen 层增加可选 mapping，例如 C# / TypeScript 生成品牌化 `AssetRef<TKind>` wrapper，或 Unreal C++ 生成 `FSoftObjectPath` / `TSoftClassPtr` 友好 API。但这些都不应成为 P0-1 的阻塞项。
 
@@ -595,11 +609,14 @@ asset_ref,asset_kind,table,field_path,record_key,source,tag
 - JSON / MessagePack / bin runtime export 输出 canonical asset string；未开启补齐或无需补齐时保持原值语义。
 - 标准工程中已有 `skill.skill_asset`、`classes.icon` 等 asset 字段，可先按 Unreal mounted object / class 模式改造测试，并在集成测试临时目录中伪造 `.uasset` 文件验证存在性和补齐。
 
-### P0-2：Asset Manifest JSON exporter
+### P0-2：Asset Manifest exporter
+
+状态：已实现。
 
 - 新增 `type = "asset_manifest"` 聚合 data exporter。
-- 输出 deterministic JSON manifest，包含 target、kind、path、referenced_by。
-- 与 JSON / MessagePack / bin runtime export 共用同一次 target validation 和 ExportView。
+- 输出 deterministic JSON manifest，包含 target tags、kind、path、referenced_by。
+- 支持 `format = "csv"` 输出 Unreal DataTable 可导入 CSV。
+- 与 JSON / MessagePack / bin runtime export 共用同一次 target validation、ExportView 和 canonicalized asset refs。
 - 覆盖 target-aware 行过滤：shipping 排除的 debug row 不进入 manifest。
 
 ### P0-3：工具链集成和扩展格式

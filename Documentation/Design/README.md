@@ -18,6 +18,7 @@
 6. `06-export-cli.md` — Data export format、artifact、CLI 命令和参数设计。
 7. `07-user-manual-and-qa.md` — 用户工作流、错误处理期望和 QA 测试用例输入维度。
 8. `08-asset-validation-and-manifest.md` — Asset 引用校验、asset kind、target-aware 资源策略、导出补齐和 Asset Manifest 初步设计。
+9. `09-builtin-validators.md` — 游戏常用内置 validators 设计，包括 regex、string_length、sum、monotonic、required_when、compare 与 range 增强方向。
 
 ## HTML 阅读版
 
@@ -38,7 +39,7 @@
 - Field path 保留字符为 `.`, `[`, `]`；table field、struct field、fragment name 第一阶段均不允许包含这些字符，特殊展示名应通过 header alias / source mapping 解决。
 - Protobuf 暂作为未来扩展考量；如未来支持，应通过字段级 `field_number` 明确 Protobuf 编号。
 - POT、asset manifest 等聚合 data exporter 使用与目标导出一致的过滤后数据视图。被 shipping 等上下文排除的数据，其资源和国际化文本默认不进入最终聚合数据产物。
-- `asset` 字段必须显式声明 `asset_kind`；资源存在性校验和导出补齐默认只处理当前 target ExportView 中可见且非空的 asset 引用。Asset Manifest 是后续聚合 exporter，不阻塞 P0-1 asset validation / completion MVP。
+- `asset` 字段必须显式声明 `asset_kind`；资源存在性校验、导出补齐和 Asset Manifest 默认只处理当前 target ExportView 中可见且非空的 asset 引用。Asset Manifest 已作为同级聚合 data exporter 接入，支持 deterministic JSON 与 Unreal DataTable 兼容 CSV。
 - Target 使用 `tags` 描述导出上下文；表、字段、索引用 `export_when` 匹配 target tags，collection 行用 `row_export` 控制行级导出。
 - 不再保留 `tool_only`、`validator_only`、`filter_field` 作为导出机制；用 `export = false`、`export_when`、`row_export` 替代。
 - 表格允许空行和空列；未映射到 field path 的行/列默认不进入导出，可作为表格注释或中间数据使用。
@@ -67,11 +68,11 @@
 | struct/list fields | Implemented MVP | 支持 named struct、JSON cell 校验和 nested object 导出；支持 CollectionTable/ObjectTable 中由 source path 自动判定的 struct expanded value、recursive nested struct、JSON/expanded 混用错误、target-aware child filtering 与 child default；支持 `T[]` / `list<T>` JSON cell 标量数组、数组导出和代码生成。map、struct/list expanded path、struct child validators、ObjectTable key-level source location 暂未实现。 |
 | scalar/list default | Stable | 支持 primitive / enum scalar default；支持 primitive / enum list default。复杂 struct/table default 当前不支持。 |
 | target tags / export_when / row_export | Stable | 已接入 validation、runtime export 和 codegen target-aware 视图。 |
-| asset validation / completion / manifest | Implemented MVP | 已实现 `asset` 字段强制声明 `asset_kind`、Project `[assets]` / `[[assets.search_paths]]`、Meta `[[asset_kinds]]` + `extends`、filesystem resolver、target ExportView 可见 asset 校验、存在性 / sidecar / 命名 / prefix / regex / 基础大小写检查，以及 runtime export canonical asset string 补齐。当前 validation 诊断统一使用 `asset.reference` code；更细粒度 asset diagnostic code、resolution cache、provider 扩展和 `type = "asset_manifest"` exporter 后续推进。 |
-| validators | Implemented MVP | 已有 validator registry 和 `range` field validator；后续可扩展更多 built-in/plugin validators。 |
+| asset validation / completion / manifest | Implemented MVP | 已实现 `asset` 字段强制声明 `asset_kind`、Project `[assets]` / `[[assets.search_paths]]`、Meta `[[asset_kinds]]` + `extends`、filesystem resolver、target ExportView 可见 asset 校验、存在性 / sidecar / 命名 / prefix / regex / 基础大小写检查、runtime export canonical asset string 补齐，以及 `type = "asset_manifest"` 聚合 exporter。Asset Manifest 支持 deterministic JSON 和 Unreal DataTable 兼容 CSV；当前 validation 诊断统一使用 `asset.reference` code；更细粒度 asset diagnostic code、resolution cache 和 provider 扩展后续推进。 |
+| validators | Implemented MVP | 已有 validator registry 和 `range` field validator；P1-2 计划扩展 `regex`、`string_length`、`sum`、`monotonic`、`required_when`、`compare` 等游戏常用 built-in validators，专题设计见 [`09-builtin-validators.md`](09-builtin-validators.md)。 |
 | fragments | Implemented MVP | 已支持 polymorphic variant source mode；fragment join mode 不实现。 |
 | foreign keys | Implemented MVP + generated linked helpers | 支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique/primary index；标量数组字段可作为单字段 FK，逐元素引用单字段 unique/primary index。FK 可声明 `linked_field`；各 codegen backend 的 relation helper 覆盖范围见 [`Codegen backend capability matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。 |
-| runtime data export | Implemented MVP | 支持 JSON、MessagePack 与 `bin` registry；`bin` 私有紧密二进制格式已实现 CFGB header、schema revision 与 positional typed payload；`gettext_pot` / `pot` 聚合 exporter 已实现 MVP，用于抽取可见 `text` 字段生成 POT；`lua_table` / `lua` 内嵌数据 exporter 已实现 MVP，用于生成 Lua data+code 合一产物；大表 streaming writer 仍为中期优化。 |
+| runtime data export | Implemented MVP | 支持 JSON、MessagePack 与 `bin` registry；`bin` 私有紧密二进制格式已实现 CFGB header、schema revision 与 positional typed payload；`gettext_pot` / `pot` 聚合 exporter 已实现 MVP，用于抽取可见 `text` 字段生成 POT；`lua_table` / `lua` 内嵌数据 exporter 已实现 MVP，用于生成 Lua data+code 合一产物；`asset_manifest` / `assets` 聚合 exporter 已实现 MVP，用于导出 target 可见 asset 清单；大表 streaming writer 仍为中期优化。 |
 | codegen backends | Implemented MVP + lazy + linked + text helpers | 内置 backend、type id、输出形态、核心能力和测试/adapter 状态以 [`Codegen backend capability matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 为准。 |
 | generated runtime loader contract | Implemented MVP + lazy loading implemented | [`Codegen backend capability matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的 format-agnostic backend 使用 Meta-agnostic `open + RuntimeDataReader + generated parser` 契约；用户 loader 新增表/字段时不变。Eager facade 一次加载所有表后释放 loader；Lazy facade 保留 loader，首次访问 table/object 时加载并缓存。 |
 | TypeScript sync loading | Implemented MVP | 已生成 `GameData.loadSync()`、lazy sync accessor、`preloadAllSync()` 与 `linkAllSync()`；sync API 要求 loader 同步返回 reader，遇到 Promise 应报错。 |

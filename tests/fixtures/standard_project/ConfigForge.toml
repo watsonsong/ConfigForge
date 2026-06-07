@@ -38,6 +38,22 @@ context = "table_field"
 source_reference = "both"
 
 [[targets.exports]]
+name = "asset_manifest_json"
+type = "asset_manifest"
+output = "out/client_assets"
+file_name = "client_assets.json"
+format = "json"
+include_source_location = true
+
+[[targets.exports]]
+name = "asset_manifest_csv"
+type = "asset_manifest"
+output = "out/client_assets"
+file_name = "client_assets.csv"
+format = "csv"
+include_source_location = true
+
+[[targets.exports]]
 type = "lua_table"
 output = "out/client_lua"
 module_name = "reference_game_config"

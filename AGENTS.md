@@ -27,7 +27,8 @@ Use this file as the short entry index. For any non-trivial change, follow the l
    - [`Documentation/Design/05-data-validation.md`](Documentation/Design/05-data-validation.md) — ExportView, target filtering, validation, diagnostics.
    - [`Documentation/Design/06-export-cli.md`](Documentation/Design/06-export-cli.md) — runtime data export, codegen, artifacts, CLI.
    - [`Documentation/Design/07-user-manual-and-qa.md`](Documentation/Design/07-user-manual-and-qa.md) — user workflows and QA input dimensions.
-   - [`Documentation/Design/08-asset-validation-and-manifest.md`](Documentation/Design/08-asset-validation-and-manifest.md) — Asset 引用校验、asset kind、target-aware 资源策略、导出补齐和后续 Asset Manifest。
+   - [`Documentation/Design/08-asset-validation-and-manifest.md`](Documentation/Design/08-asset-validation-and-manifest.md) — Asset 引用校验、asset kind、target-aware 资源策略、导出补齐和 Asset Manifest。
+   - [`Documentation/Design/09-builtin-validators.md`](Documentation/Design/09-builtin-validators.md) — 游戏常用内置 validators 设计，包括 regex、string_length、sum、monotonic、required_when、compare 与 range 增强方向。
 5. For implementation changes, read [`Documentation/Implementation/01-module-outline.md`](Documentation/Implementation/01-module-outline.md) first, then the module document that matches the source area being changed.
 6. For engineering practice, use [`Documentation/Tech/`](Documentation/Tech/):
    - [`Documentation/Tech/development-environment.md`](Documentation/Tech/development-environment.md) — required Rust core toolchain, optional cross-language harness tools, runtime adapter dependencies, and local/full-CI environment guidance.
@@ -68,7 +69,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
 - `src/validation/` — schema, target-aware data validation, diagnostics, and validator registry.
 - `src/project/` — ConfigForge project TOML schema, import merging, path normalization, and Meta extraction.
 - `src/build/` — project build orchestration, target normalization, export dependency planning, branch pipeline execution, and artifact generation scheduling.
-- `src/exporter/` — runtime data export contracts, JSON / MessagePack exporters, and future data format exporter extension point.
+- `src/exporter/` — runtime data export contracts, JSON / MessagePack / bin exporters, and aggregate exporters such as POT, Lua, and Asset Manifest.
 - `src/diagnostic/` — shared diagnostic foundations and crate error model.
 - `runtime/` — standard runtime helpers/templates and compliance fixtures.
 - `tests/cli_integration.rs` — end-to-end CLI integration tests.

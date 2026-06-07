@@ -8,7 +8,7 @@ Exporter 模块需要达成：
 
 1. 定义 exporter 内部配置 `TargetDataConfig`，由 build 从统一 `NormalizedExportTask` 适配得到。
 2. 定义 export type exporter trait 和 registry。
-3. 内置 JSON、MessagePack 与 `bin` 三种 runtime data export type；`bin` 使用 schema-aware positional typed layout；通过同一统一 export task `type` 支持已实现的 gettext POT 与 Lua 聚合 export type；asset manifest 等仍为后续扩展。
+3. 内置 JSON、MessagePack 与 `bin` 三种 runtime data export type；`bin` 使用 schema-aware positional typed layout；通过同一统一 export task `type` 支持已实现的 gettext POT、Lua 和 Asset Manifest 聚合 export type。
 4. 对 CollectionTable 与 ObjectTable 生成正确 runtime payload shape。
 5. 复用 DataResolver 解释 struct JSON cell / expanded value / target visibility，避免 exporter 自己重复实现 source layout 解析。
 6. 为未来二进制格式、自定义 export type、聚合数据产物和 artifact writer 留出扩展点。
@@ -37,6 +37,7 @@ src/exporter/
   binary.rs           # BinaryDataExporter：CFGB header + schema revision + positional typed payload
   aggregate.rs        # 后续可拆出的聚合 data exporter 共享 context / artifact plan helper
   gettext_pot.rs      # 已实现：type = "gettext_pot" / alias "pot"
+  asset_manifest.rs   # 已实现：type = "asset_manifest" / alias "assets"，JSON + Unreal DataTable CSV
   tests.rs            # exporter 核心行为测试
 ```
 
@@ -60,7 +61,7 @@ pub struct TargetDataConfig {
 
 - `name`：可选 export task 名称。单个未命名 task 由 build 归一化为 `default`；多个未命名 task 默认使用 `type`。
 - `output`：数据产物输出目录。运行时表数据按 table 规划文件；POT / manifest 等聚合格式按格式选项规划文件。
-- `format`：exporter 内部字段，由 `[[targets.exports]].type` 归一化而来；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；当前内置聚合 export type 支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`。Asset Manifest 后续统一使用 `type = "asset_manifest"`，CSV 作为其 `format = "csv"` 选项，而不再拆分 `asset_manifest_csv` exporter type；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
+- `format`：exporter 内部字段，由 `[[targets.exports]].type` 归一化而来；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；当前内置聚合 export type 支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`、`asset_manifest` / alias `assets`。Asset Manifest 的 `format = "csv"` 是其专属选项，不拆分为 `asset_manifest_csv` exporter type；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
 - `options`：export type 专属配置，由 `[[targets.exports]]` 下除通用字段外的 flattened 字段归一化得到，例如 `type = "gettext_pot"` 下的 `domain`、`file_name`、`source_reference`，或 `type = "lua_table"` 下的 `module_name`、`root_file`、`row_layout`。
 
 ```rust
@@ -94,7 +95,7 @@ pub trait AggregateDataExporter: Send + Sync {
 
 `DataFormatRegistry` 保存 table exporter 与 aggregate exporter 列表并按 name / alias 查询，同时暴露 dependency contract 查询。当前 data-backed exporter 的 dependency 均为 `MetaAndData`；没有单独的 `DataOnly` 模式，因为缺少 Meta 时无法可靠完成类型解释、target 过滤、索引语义和 validation。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行规划多个 export task、并行序列化多个 table artifact，并在 validation gate 通过后并行执行多个 data-backed exporter；aggregate exporter 也不得在实例内保存本次 build 的可变状态。table exporter 的主路径是 `serialize_table_to_stream()`；`serialize_table() -> Vec<u8>` 只作为少量测试和兼容调用的 legacy fallback。aggregate exporter 的主路径是 required `export_to_sink()`；`export() -> Vec<Artifact>` 只作为 legacy fallback。新增 exporter 应优先实现 streaming writer / sink writer。
 
-内置格式通过 `builtin_exporters()` / aggregate registry 注册到 `DataFormatRegistry`，当前 table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`；aggregate exporter 包括已实现的 `GettextPotExporter` 与 `LuaTableExporter`。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现对应 exporter trait，格式名、alias、dependency、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。JSON 使用 `serde_json::to_writer_pretty()`，MessagePack 使用 `rmp_serde::encode::write_named()`，`bin` 的 encoder 可直接写 `ArtifactWriteStream`，不再为最终 artifact 先构建完整 `Vec<u8>`；POT 和 Lua 聚合导出器也通过 `export_to_sink()` 直接写入 shared sink，不再经 `Vec<Artifact>` 回到 build。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
+内置格式通过 `builtin_exporters()` / aggregate registry 注册到 `DataFormatRegistry`，当前 table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`；aggregate exporter 包括已实现的 `GettextPotExporter`、`LuaTableExporter` 与 `AssetManifestExporter`。新增导出格式应优先新增 `src/exporter/<format>.rs` 并实现对应 exporter trait，格式名、alias、dependency、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。JSON 使用 `serde_json::to_writer_pretty()`，MessagePack 使用 `rmp_serde::encode::write_named()`，`bin` 的 encoder 可直接写 `ArtifactWriteStream`，不再为最终 artifact 先构建完整 `Vec<u8>`；POT、Lua 和 Asset Manifest 聚合导出器也通过 `export_to_sink()` 直接写入 shared sink，不再经 `Vec<Artifact>` 回到 build。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
 
 ## 8.4 Runtime payload contract
 
@@ -255,6 +256,29 @@ POT 渲染要求：
 - 新增 `I18nTextKind` 或 field option 后，extractor 根据 kind 生成普通 msgid、plural、ICU message 或 rich-text segments。
 - 外部 `.po` / localized catalog 导入不属于 exporter；如果未来需要“导入翻译并生成 runtime localization bundle”，应作为新的 localization build task 或 data provider，而不是 POT exporter 的职责。
 
+### 8.7.2 AssetManifestExporter (`type = "asset_manifest"`)
+
+`AssetManifestExporter` 当前模块为 `src/exporter/asset_manifest.rs`，通过 `[[targets.exports]] type = "asset_manifest"` 或 alias `assets` 启用。它是与 JSON、MessagePack、`bin`、POT、Lua 同级的聚合 data exporter，读取 validation / export 补齐后同一份 target-aware `DataSet`，只抽取当前 target ExportView 中可见且非空的 primitive `asset` 字段。
+
+配置选项：
+
+| 选项 | 默认 | 说明 |
+| --- | --- | --- |
+| `file_name` | `asset_manifest.json` 或 `asset_manifest.csv` | 单文件 manifest 输出名；未设置时随 `format` 选择默认扩展名。 |
+| `format` | `json` | 支持 `json` 与 `csv`。CSV 为 Unreal DataTable 可导入格式。 |
+| `deduplicate` | `true` | 是否把相同 `(kind, path)` 合并为一个 entry。 |
+| `include_referenced_by` | `true` | 是否输出 / 展平引用来源。 |
+| `include_source_location` | `false` | 是否附带 source path / row。 |
+
+抽取流程：
+
+1. 遍历当前 target 可见 table；CollectionTable 按导出后 row 过滤语义处理，ObjectTable 使用 singleton logical row。
+2. 遍历可见 top-level field、active fragment field 和 fragment struct child field，筛选 `PrimitiveFieldType::Asset` 且声明了 `asset_kind` 的字段。
+3. 从 canonicalized `DataSet` 读取非空 asset string，不重新解析资源路径。
+4. CollectionTable 使用 primary index field 生成 record key，缺少 primary index 时回退 source row；ObjectTable 使用 `<object>`。
+5. 默认按 `(kind, path)` 去重并用 `BTreeMap` / `BTreeSet` 保持 deterministic output。
+6. JSON 输出固定 `version`、`target_tags`、`assets`；CSV 输出固定列 `Name,AssetRef,AssetKind,ReferencedBy,Tables,Fields,RecordKeys,Sources`，其中 `Name` 是 ASCII-safe Unreal row name。
+
 ## 8.8 测试边界
 
 Exporter 模块测试应覆盖：
@@ -267,6 +291,6 @@ Exporter 模块测试应覆盖：
 - JSON 与 MessagePack 对 struct / ObjectTable 使用同一逻辑 payload。
 - `bin` 写出 CFGB header、schema revision 与 target-aware positional payload。
 - runtime table export 直接通过 `sink.create(path)` + `serialize_table_to_stream()` + `stream.finish()` 写出；custom exporter 测试覆盖 legacy `serialize_table()` fallback 不参与主路径。
-- aggregate export 直接通过 required `export_to_sink()` 写出；custom aggregate 测试覆盖 legacy `export() -> Vec<Artifact>` fallback 不参与主路径，POT / Lua 测试覆盖直接落盘内容。
+- aggregate export 直接通过 required `export_to_sink()` 写出；custom aggregate 测试覆盖 legacy `export() -> Vec<Artifact>` fallback 不参与主路径，POT / Lua / Asset Manifest 测试覆盖直接落盘内容。
 - struct expanded value 和 JSON cell 都能导出为 nested object。
-- 聚合 data exporter 测试覆盖 POT 抽取、去重、context、source reference、translator comment、target filter、ObjectTable、artifact path conflict；fragment/struct child text 深度抽取仍属于后续扩展测试。
+- 聚合 data exporter 测试覆盖 POT 抽取、去重、context、source reference、translator comment、target filter、ObjectTable、artifact path conflict；Asset Manifest 测试覆盖 JSON deterministic output、Unreal DataTable CSV header / row name、默认文件名、target-aware row filter 和 registry alias；fragment/struct child text 深度抽取仍属于后续扩展测试。

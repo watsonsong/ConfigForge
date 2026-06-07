@@ -356,6 +356,16 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(
         fixture_root
+            .join("out/client_assets/client_assets.json")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/client_assets/client_assets.csv")
+            .exists()
+    );
+    assert!(
+        fixture_root
             .join("out/client_lua/reference_game_config/init.lua")
             .exists()
     );
@@ -434,6 +444,27 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(pot.contains("msgctxt \"items.name\""));
     assert!(pot.contains("msgid \"Iron Ore\""));
     assert!(pot.contains("msgctxt \"classes.description\""));
+
+    let asset_manifest_json =
+        fs::read_to_string(fixture_root.join("out/client_assets/client_assets.json"))
+            .expect("standard fixture asset manifest JSON should be readable");
+    let asset_manifest: serde_json::Value = serde_json::from_str(&asset_manifest_json)
+        .expect("standard fixture asset manifest JSON should parse");
+    assert_eq!(asset_manifest["version"], 1);
+    assert!(asset_manifest["assets"].as_array().is_some_and(|assets| {
+        assets
+            .iter()
+            .any(|asset| asset["path"] == "/Game/Skills/GA_Slash.GA_Slash_C")
+    }));
+
+    let asset_manifest_csv =
+        fs::read_to_string(fixture_root.join("out/client_assets/client_assets.csv"))
+            .expect("standard fixture asset manifest CSV should be readable");
+    assert!(
+        asset_manifest_csv
+            .starts_with("Name,AssetRef,AssetKind,ReferencedBy,Tables,Fields,RecordKeys,Sources\n")
+    );
+    assert!(asset_manifest_csv.contains("/Game/Skills/GA_Slash.GA_Slash_C"));
 
     let rust_code =
         fs::read_to_string(fixture_root.join("out/client_code/rust/reference_game_config.rs"))

@@ -149,6 +149,8 @@ fn registry_reports_builtin_dependency_contracts() {
         "pot",
         "lua_table",
         "lua",
+        "asset_manifest",
+        "assets",
     ] {
         assert_eq!(
             registry
