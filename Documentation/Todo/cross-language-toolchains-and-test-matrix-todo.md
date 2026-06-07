@@ -173,7 +173,7 @@ test(integration): centralize optional tool probing
 test(integration): support profile-aware tool requirements
 ```
 
-## [ ] Step 5：标准工程 runtime harness 注册表化
+## [x] Step 5：标准工程 runtime harness 注册表化
 
 目标：将 `standard_project` 中逐个手写调用的多语言 harness 收敛成可声明工具要求、profile policy 和执行函数的注册表。
 
@@ -192,6 +192,8 @@ test(integration): support profile-aware tool requirements
 - `cargo test --test cli_integration standard_project_generated_code_loads_exported_runtime_data`
 - 人工检查输出中可区分 executed 与 skipped harness。
 - 确认各语言 harness 的实际断言没有因为注册表化而减少。
+
+当前实现：`tests/cli_integration/support/standard_runtime.rs` 已新增 `GeneratedRuntimeHarness` 注册表，逐项声明 language、test name、required tools、network policy 与 runner function；`standard_project` 统一通过注册表执行 Rust / C++ / Unreal C++ / C# / Java / TypeScript / Lua harness，并输出 executed / skipped / failed 汇总。Rust harness 仍不可 skip，各语言原有断言路径保持不变。
 
 建议提交：
 

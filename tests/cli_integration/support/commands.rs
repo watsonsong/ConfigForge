@@ -1,9 +1,14 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::process::Command as StdCommand;
+use std::{
+    process::Command as StdCommand,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use assert_cmd::Command;
+
+static SKIPPED_OPTIONAL_TESTS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TestProfile {
@@ -128,7 +133,12 @@ pub(crate) fn probe_any_tool(commands: &[&str]) -> Option<ToolProbe> {
 }
 
 pub(crate) fn skip_optional_test(test_name: &str, reason: &str) {
+    SKIPPED_OPTIONAL_TESTS.fetch_add(1, Ordering::Relaxed);
     eprintln!("skipping optional test `{test_name}`: {reason}");
+}
+
+pub(crate) fn skipped_optional_test_count() -> usize {
+    SKIPPED_OPTIONAL_TESTS.load(Ordering::Relaxed)
 }
 
 #[allow(dead_code)]

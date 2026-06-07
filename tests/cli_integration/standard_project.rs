@@ -477,11 +477,5 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
         "ConfigForgeMessagePackRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader"
     ));
 
-    verify_standard_generated_rust_runtime(fixture_root);
-    verify_standard_generated_cpp_runtime(fixture_root);
-    verify_standard_generated_cpp_unreal_runtime(fixture_root);
-    verify_standard_generated_csharp_runtime(fixture_root);
-    verify_standard_generated_java_runtime(fixture_root);
-    verify_standard_generated_typescript_runtime(fixture_root);
-    verify_standard_generated_lua_runtime(fixture_root);
+    verify_standard_generated_runtime_harnesses(fixture_root);
 }

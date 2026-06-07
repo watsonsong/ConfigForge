@@ -5,8 +5,109 @@ use std::{fs, process::Command as StdCommand};
 
 use super::{
     assert_command_success, command_exists, require_any_tool_or_skip, require_tool_or_skip,
-    skip_language_or_continue,
+    skip_language_or_continue, skipped_optional_test_count,
+    verify_standard_generated_cpp_unreal_runtime,
 };
+
+pub(crate) struct GeneratedRuntimeHarness {
+    pub(crate) language: &'static str,
+    pub(crate) test_name: &'static str,
+    pub(crate) required_tools: &'static [&'static str],
+    pub(crate) network_policy: &'static str,
+    pub(crate) runner: fn(&std::path::Path),
+}
+
+pub(crate) fn standard_generated_runtime_harnesses() -> &'static [GeneratedRuntimeHarness] {
+    &[
+        GeneratedRuntimeHarness {
+            language: "rust",
+            test_name: "standard generated Rust runtime test",
+            required_tools: &["cargo"],
+            network_policy: "offline",
+            runner: verify_standard_generated_rust_runtime,
+        },
+        GeneratedRuntimeHarness {
+            language: "cpp",
+            test_name: "standard generated C++ runtime test",
+            required_tools: &["cmake", "c++"],
+            network_policy: "offline unless FetchContent is explicitly allowed",
+            runner: verify_standard_generated_cpp_runtime,
+        },
+        GeneratedRuntimeHarness {
+            language: "cpp_unreal",
+            test_name: "standard generated cpp_unreal syntax test",
+            required_tools: &["c++"],
+            network_policy: "offline",
+            runner: verify_standard_generated_cpp_unreal_runtime,
+        },
+        GeneratedRuntimeHarness {
+            language: "csharp",
+            test_name: "standard generated C# runtime test",
+            required_tools: &["dotnet"],
+            network_policy: "offline",
+            runner: verify_standard_generated_csharp_runtime,
+        },
+        GeneratedRuntimeHarness {
+            language: "java",
+            test_name: "standard generated Java runtime test",
+            required_tools: &["javac", "java"],
+            network_policy: "offline",
+            runner: verify_standard_generated_java_runtime,
+        },
+        GeneratedRuntimeHarness {
+            language: "typescript",
+            test_name: "standard generated TypeScript runtime test",
+            required_tools: &["node", "tsc"],
+            network_policy: "npx fallback requires explicit network opt-in",
+            runner: verify_standard_generated_typescript_runtime,
+        },
+        GeneratedRuntimeHarness {
+            language: "lua",
+            test_name: "standard generated Lua runtime test",
+            required_tools: &["lua5.4|lua5.3|lua|luajit"],
+            network_policy: "offline",
+            runner: verify_standard_generated_lua_runtime,
+        },
+    ]
+}
+
+pub(crate) fn verify_standard_generated_runtime_harnesses(fixture_root: &std::path::Path) {
+    let mut executed = 0usize;
+    let mut skipped = 0usize;
+    let mut failed = Vec::new();
+
+    for harness in standard_generated_runtime_harnesses() {
+        eprintln!(
+            "running generated runtime harness `{}` for {} (tools: {}; network: {})",
+            harness.test_name,
+            harness.language,
+            harness.required_tools.join(", "),
+            harness.network_policy
+        );
+        let skips_before = skipped_optional_test_count();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            (harness.runner)(fixture_root);
+        }));
+        if result.is_err() {
+            failed.push(harness.test_name);
+            continue;
+        }
+        if skipped_optional_test_count() > skips_before {
+            skipped += 1;
+        } else {
+            executed += 1;
+        }
+    }
+
+    eprintln!(
+        "generated runtime harness summary: executed={executed}, skipped={skipped}, failed={}",
+        failed.len()
+    );
+    assert!(
+        failed.is_empty(),
+        "generated runtime harnesses failed: {failed:?}"
+    );
+}
 
 pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
     let temp_dir = tempfile::tempdir().expect("rust harness temp dir should be created");
