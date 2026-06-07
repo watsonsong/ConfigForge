@@ -64,12 +64,12 @@ cargo coverage-lcov
 | Rust generated code | Rust / Cargo | Rust generated-code JSON / MessagePack / bin runtime harness | 不应 skip。Rust 是核心开发必需环境。 |
 | C++ backend / runtime adapter | C++17 compiler、CMake 3.16+ | C++ generated-code compile/run、`runtime/cpp` CMake smoke | 显式 skip C++ harness。 |
 | Unreal C++ backend | C++17 compiler；真实 Unreal Engine 仅用于项目侧完整验证 | 仓库内使用 lightweight shim 做 `c++ -fsyntax-only` syntax smoke | 显式 skip Unreal C++ syntax smoke。 |
-| TypeScript backend / runtime | Node.js、npm、TypeScript compiler (`tsc`) | TypeScript generated-code typecheck、Node runtime harness、runtime package build | 显式 skip TypeScript harness；后续 full CI 可配置为 fail-fast。 |
+| TypeScript backend / runtime | Node.js、npm、TypeScript compiler (`tsc`) | TypeScript generated-code typecheck、Node runtime harness、runtime package build | 显式 skip TypeScript harness；full / nightly 或显式 require 时 fail-fast。 |
 | C# backend | .NET SDK（当前 harness 使用 `net6.0`） | C# generated-code compile/run | 显式 skip C# harness。 |
 | Java backend | JDK，包含 `javac` 和 `java` | Java generated-code compile/run | 显式 skip Java harness。 |
 | Lua data+code export | `lua5.4` / `lua5.3` / `lua` / `luajit` 之一 | Lua runtime smoke | 显式 skip Lua harness。 |
 
-当前本地集成测试使用工具探测来决定是否运行可选 harness。后续 [`../Todo/cross-language-toolchains-and-test-matrix-todo.md`](../Todo/cross-language-toolchains-and-test-matrix-todo.md) 的 Step 3+ 会把该探测收敛为统一 ToolProbe 和 profile-aware skip / fail-fast 机制。
+当前本地集成测试使用统一 ToolProbe 和 profile-aware policy 决定是否运行可选 harness。`CONFIG_FORGE_TEST_PROFILE`、`CONFIG_FORGE_REQUIRE_TOOLS`、`CONFIG_FORGE_SKIP_LANGUAGES` 和 `CONFIG_FORGE_ALLOW_NETWORK` 的语义见 [`test-ci-matrix.md`](test-ci-matrix.md)。
 
 ## 按需：runtime adapter 三方依赖
 
@@ -89,7 +89,7 @@ Generated core 不应直接依赖具体 JSON / MessagePack / engine / framework 
 本仓库的测试和 CMake 配置默认不应隐式联网：
 
 - C++ `runtime/cpp` 的 `CONFIG_FORGE_RUNTIME_FETCH_DEPS` 默认应保持 `OFF`；自动下载三方库必须显式开启。
-- TypeScript harness 未来对 `npx --yes -p typescript tsc` 这类 fallback 应受显式开关控制，避免 CI 隐式联网。
+- TypeScript harness 对 `npx --yes -p typescript tsc` 这类 fallback 受 `CONFIG_FORGE_ALLOW_NETWORK=1` 控制，避免 CI 隐式联网。
 - npm install、FetchContent、远程 package download 都应只出现在开发者主动安装或 full / nightly profile 显式允许的流程中。
 
 ## 推荐安装组合
@@ -130,6 +130,8 @@ cargo test --test cli_integration standard_project_generated_code_loads_exported
 - Rust adapter：Cargo 依赖即可。
 - TypeScript adapter：Node.js / npm / TypeScript；MessagePack reader 额外需要 `@msgpack/msgpack`。
 - C++ adapter：CMake、C++17 compiler、RapidJSON 或 msgpack-cxx。
+- C# adapter：.NET SDK；当前 JSON / MessagePack / Binary 标准 reader 已接入 compliance runner。
+- Java adapter：JDK (`javac` + `java`)；当前 JSON / MessagePack / Binary 标准 reader 已接入 compliance runner。
 
 常用验证示例：
 
@@ -157,7 +159,7 @@ ConfigForge 仓库内的 Unreal C++ 测试只验证 generated code 可以在 lig
 
 ### 为什么本地缺少 JDK / dotnet / Node 时测试仍能通过？
 
-因为这些工具只服务于对应语言的 generated-code harness。普通 Rust 开发不应被要求安装全部目标语言环境。测试必须明确打印 skip 原因，后续 full CI profile 可以把这些工具配置为必需并 fail-fast。
+因为这些工具只服务于对应语言的 generated-code harness 或 runtime adapter compliance runner。普通 Rust 开发不应被要求安装全部目标语言环境。测试必须明确打印 skip 原因；full / nightly profile 或 `CONFIG_FORGE_REQUIRE_TOOLS` 可以把这些工具配置为必需并 fail-fast。
 
 ### 为什么不能默认使用 `npx` 或 CMake FetchContent 自动下载依赖？
 

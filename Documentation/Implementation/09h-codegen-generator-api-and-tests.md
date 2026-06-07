@@ -178,7 +178,7 @@ pub struct CodegenDiagnostic {
 
 标准工程当前按 target 拆分生成多语言 codegen；backend 清单、输出位置和 runtime harness 状态见 [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。generated-code runtime test 可以复用标准工程配置，分别验证各语言。
 
-本节描述 generated-code harness 的实现形态和断言边界；local / quick / full / nightly profile、工具链要求、skip / fail-fast 策略和 runtime compliance 覆盖矩阵见 [`../Tech/test-ci-matrix.md`](../Tech/test-ci-matrix.md)。
+本节描述 generated-code harness 的实现形态和断言边界；local / quick / full / nightly profile、工具链要求、skip / fail-fast 策略和 runtime compliance 覆盖矩阵见 [`../Tech/test-ci-matrix.md`](../Tech/test-ci-matrix.md)。当前 `standard_project` harness 已注册表化：每个语言声明 language、test name、required tools、network policy、profile policy 和 runner function，统一汇总 executed / skipped / failed 结果。
 
 | 语言 | 输入产物 | 工具链 | Harness 做法 | 必测断言 |
 | --- | --- | --- | --- | --- |
@@ -195,6 +195,8 @@ pub struct CodegenDiagnostic {
 
 - CI 环境应安装 Rust/Cargo、C++17 compiler、Node.js、TypeScript、.NET SDK 和 JDK，使各语言 runtime test 都能执行。
 - 本地开发环境如果缺少 C++ compiler、Node、`tsc`、`dotnet`、`javac` 或 `java`，对应测试可以显式 skip，但测试输出必须说明 skip 原因，不能静默通过。
+- `CONFIG_FORGE_TEST_PROFILE=full|nightly` 或 `CONFIG_FORGE_REQUIRE_TOOLS` 声明的工具缺失时应 fail-fast；`CONFIG_FORGE_SKIP_LANGUAGES` 可显式禁用可选语言 harness。
+- `npx` fallback、C++ FetchContent 等潜在联网行为默认关闭，只能通过 `CONFIG_FORGE_ALLOW_NETWORK=1` 或 adapter 专用显式开关启用。
 - Rust 生成代码测试不应 skip，因为项目本身依赖 Rust toolchain。
 
 ### 9.14.5 CLI 集成测试
@@ -223,6 +225,6 @@ pub struct CodegenDiagnostic {
 未来规划：
 
 - 如需降低单文件体量，可为 Rust / TypeScript / C++ / C# 增加多文件输出模式。
-- Java backend 已按 [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md) 落地；当前集成测试已改为复用 `runtime/java/json_reader` / `runtime/java/messagepack_reader` / `runtime/java/binary_reader`，后续可补充 Jackson / Gson / Android 友好 adapter 与 compliance runner。
+- Java backend 已按 [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md) 落地；当前集成测试已改为复用 `runtime/java/json_reader` / `runtime/java/messagepack_reader` / `runtime/java/binary_reader`，并已接入 Java JSON / MessagePack / Binary compliance runner；后续可补充 Jackson / Gson / Android 友好 adapter。
 - 如需发布稳定 runtime adapter，可为 C++ 优先拆出 external stable interface header。
 - summary manifest 可作为 `targets.exports` 的聚合导出格式独立实现，不进入默认 codegen 决策。

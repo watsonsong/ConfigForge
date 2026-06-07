@@ -551,21 +551,21 @@ tests/fixtures/runtime_reader_compliance/
     error_cases.toml
 ```
 
-Rust / TypeScript / C++ adapter 都必须跑同一套 compliance cases。覆盖范围包括 missing vs null、bool `true/false/1/0`、numeric string、NaN/Infinity、int overflow、escaped string、array 越界、MessagePack 非 string map key、binary/ext unsupported 等场景。MessagePack cases 可以由同一份 logical fixture 生成 `.msgpack` payload，避免 JSON 与 MessagePack fixture 漂移。
+Rust / TypeScript / C++ / C# / Java adapter 都必须跑同一套 compliance cases。覆盖范围包括 missing vs null、bool `true/false/1/0`、numeric string、NaN/Infinity、int overflow、escaped string、array 越界、MessagePack 非 string map key、binary/ext unsupported 等场景。MessagePack cases 可以由同一份 logical fixture 生成 `.msgpack` payload，避免 JSON 与 MessagePack fixture 漂移。
 
 标准 runtime helpers 的 CI 至少覆盖：
 
-| 层级 | Rust | TypeScript | C++ |
-| --- | --- | --- | --- |
-| adapter unit | `cargo test --manifest-path runtime/rust/<adapter>/Cargo.toml` | `npm test` / `tsc -p` per package | `cmake -S runtime/cpp -B build -DCONFIG_FORGE_RUNTIME_BUILD_TESTS=ON ... && cmake --build build && ctest` |
-| format matrix | JSON + MessagePack | JSON + MessagePack | RapidJSON JSON smoke、RapidJSON JSON、msgpack-c MessagePack |
-| canonical payload | collection envelope、object table、nested struct、fragment object、missing/null、bool `1/0`、finite float、escaped string | 同左 | 同左 |
-| integration harness | standard_project Rust MessagePack + JSON compile check | standard_project TypeScript JSON，后续增加 MessagePack fixture | standard_project C++ RapidJSON JSON smoke；后续增加 RapidJSON JSON 与 MessagePack compile/run |
+| 层级 | Rust | TypeScript | C++ | C# | Java |
+| --- | --- | --- | --- | --- | --- |
+| adapter / compliance | `tests/runtime_compliance.rs` 复用 `runtime/rust/serde_json_reader` 与 `serde_msgpack_reader` | `tests/typescript_runtime_compliance.rs` 临时工程覆盖 JSON / MessagePack | `cmake -S runtime/cpp -B build -DCONFIG_FORGE_RUNTIME_BUILD_TESTS=ON ... && cmake --build build && ctest` | `tests/csharp_java_runtime_compliance.rs` 临时 `.NET` project 覆盖 JSON / MessagePack / Binary | `tests/csharp_java_runtime_compliance.rs` 临时 `javac` / `java` harness 覆盖 JSON / MessagePack / Binary |
+| format matrix | JSON + MessagePack | JSON + MessagePack | RapidJSON JSON、msgpack-cxx MessagePack、Binary | JSON、MessagePack、Binary | JSON、MessagePack、Binary |
+| canonical payload | collection envelope、object table、nested struct、fragment object、missing/null、bool `1/0`、finite float、escaped string | 同左，另含 MessagePack-only negative cases | 同左，binary 另覆盖 CFGB header / schema revision / record boundary / sequential rows | 同左，binary 另覆盖 CFGB header / schema revision / record boundary / scalar reads | 同左，binary 另覆盖 CFGB header / schema revision / record boundary / scalar reads |
+| integration harness | standard_project Rust JSON / MessagePack / Binary glue 与 external smoke | standard_project TypeScript JSON runtime smoke；MessagePack reader 由 compliance 覆盖 | standard_project C++ RapidJSON / binary 代表路径与 external smoke | standard_project C# JSON / MessagePack / Binary smoke | standard_project Java JSON / MessagePack / Binary smoke |
 
 CI 中三方依赖策略：
 
-- 默认快速 CI 只跑无三方或已缓存依赖：Rust、TS JSON、C++ builtin。
-- 完整 CI / nightly 跑 production adapter：TS MessagePack、C++ RapidJSON、C++ msgpack-c。
+- 默认快速 CI 只跑无三方或已缓存依赖：Rust、TS JSON、C# / Java dependency-free reader、C++ binary 或已安装依赖的 C++ reader。
+- 完整 CI / nightly 跑 production adapter：TS MessagePack、C++ RapidJSON、C++ msgpack-cxx、C# / Java JSON / MessagePack / Binary。
 - 如果三方包不可用，测试应明确 skip 或 fail-fast 给出安装提示，不能静默退回 builtin parser 造成覆盖误判。
 
 ## Reader loader 落地状态

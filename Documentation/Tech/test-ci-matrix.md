@@ -11,14 +11,14 @@
 | `full` | 跨语言 generated-code harness 与 runtime adapter 主要回归。 | Rust、C++17/CMake、Node/TypeScript、.NET SDK、JDK、Lua；按启用项安装 RapidJSON / msgpack-cxx。 | 声明必需的工具缺失时 fail-fast。 | 关闭，除非显式允许。 |
 | `nightly` | 最完整矩阵、慢速和依赖丰富的 adapter 验证。 | full profile 的工具集合，加上可选三方 adapter 依赖。 | 声明必需的工具缺失时 fail-fast。 | 关闭，除非显式允许。 |
 
-计划中的 profile 控制变量：
+Profile 控制变量：
 
 - `CONFIG_FORGE_TEST_PROFILE=local|quick|full|nightly`：选择测试 profile；未设置时等价 `local`。
 - `CONFIG_FORGE_REQUIRE_TOOLS=cmake,node,tsc,dotnet,javac,java`：在当前运行中把指定工具提升为必需。
 - `CONFIG_FORGE_SKIP_LANGUAGES=java,csharp,typescript`：显式禁用某些可选语言 harness。
 - `CONFIG_FORGE_ALLOW_NETWORK=0|1`：是否允许 `npx`、包安装、FetchContent 等潜在联网 fallback；默认 `0`。
 
-在 profile-aware harness 完成前，当前实现仍以本地友好的显式 skip 为主；full / nightly fail-fast 会随 ToolProbe 和 profile policy 落地。
+当前 ToolProbe 会按 profile、显式 require 和 language skip policy 统一输出 skip / fail-fast 诊断；未设置 profile 时按 `local` 处理。
 
 ## Generated-code runtime harness matrix
 
