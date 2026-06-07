@@ -252,6 +252,41 @@ pub(crate) trait ArtifactGenerator: Send + Sync {
 
 Lua 是该模型的关键校验用例：它 requirements 包含 Meta + Data，但输出形态明显是 code-like artifact，因此应复用 code artifact options，而不应因为需要 Data 就被排除在 code 能力之外。
 
+下一阶段的目标是把当前 adapter facade 进一步收敛为单一 task generator 模型：从任务调度角度看，`DataFormatExporter`、`AggregateDataExporter`、`CodeGenerator` 和 direct `ArtifactGenerator` 不应是四种调度对象，而只是领域模块内部的实现复用方式。Build 只面向一种对象：根据 export task 的 `type_id` 匹配到 generator，读取其 requirements 派生调度 dependency，准备满足 requirements 的上下文，然后把 task instance 输入交给 generator 执行。generator 内部可以再把输入转换成 `CodeExportInput`、`TargetDataConfig`、table payload、doc model 或 report renderer 所需的形态；这些转换不应回流到 Build 分支逻辑。
+
+建议的长期 build-facing trait 形态：
+
+```rust
+pub(crate) struct GeneratorDescriptor {
+    pub(crate) type_id: &'static str,
+    pub(crate) aliases: &'static [&'static str],
+    pub(crate) requirements: GeneratorRequirements,
+}
+
+pub(crate) struct GeneratorTaskInput<'a, 'meta> {
+    pub(crate) task: &'a NormalizedExportTask,
+    pub(crate) common: GeneratorCommonInput<'meta>,
+    pub(crate) prepared: PreparedGeneratorInputs<'a>,
+}
+
+pub(crate) enum PreparedGeneratorInputs<'a> {
+    MetaOnly,
+    MetaAndData {
+        data_set: &'a DataSet,
+        validation_report: &'a ValidationReport,
+        pool: &'a ThreadPool,
+    },
+}
+
+pub(crate) trait TaskGenerator: Send + Sync {
+    fn descriptor(&self) -> GeneratorDescriptor;
+    fn plan_artifacts(&self, input: &GeneratorTaskInput<'_, '_>) -> Result<Vec<PathBuf>>;
+    fn generate(&self, input: &GeneratorTaskInput<'_, '_>, sink: &ArtifactSink) -> Result<()>;
+}
+```
+
+这里的 “task name” 属于 export task instance（`[[targets.exports]].name`），不是 generator 类型本身的全局名字；同一个 generator type 可以被同一 target 以不同 task name / output / options 声明多次。scheduler 需要知道的是 generator descriptor 中的 requirements，而不是 generator 内部属于 code、table data、aggregate data 还是 doc。`MetaOnly` / `MetaAndData` 仍可以作为当前 branch pipeline 的派生执行分组；未来若出现 assets-only、validation-report-only 或更细粒度缓存，也应继续由 requirements 扩展，而不是新增调度侧 generator 子类。
+
 ## 10.6a 稳定性与回归基线
 
 并行执行、阶段式 pipeline 和不同 artifact write mode 都不能改变用户可见产物语义。Build 稳定性基线按三层覆盖：

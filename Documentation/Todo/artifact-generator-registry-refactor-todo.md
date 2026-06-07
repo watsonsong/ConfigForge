@@ -199,3 +199,123 @@
 - `validation_report` 当前是 data-backed 附加产物，是否应在 Step 6 一并纳入 `ArtifactGenerator`，还是单独拆 Step？
 - `CodeArtifactOptions` 应放在 `codegen`、`generator`，还是新建更底层 `code_artifact` / `text_writer` 模块，以避免 `exporter -> codegen` 依赖倒置？
 - `RuntimeDataFile` metadata 是否仍由 data exporter adapter 返回给未来 manifest，还是统一进入 `GeneratorOutput` side effects？
+
+## Follow-up：单一 TaskGenerator 调度模型 TODO
+
+当前实现已经把 Build-facing 执行入口收敛到 `GeneratorRegistry::require_generator(type_id)`，但 registry 内部仍保留 `DataFormatExporter`、`AggregateDataExporter`、`CodeGenerator`、direct `ArtifactGenerator` 四类来源，并通过 `ArtifactGeneratorRef` adapter 在调用点统一。下一阶段目标是继续把“统一”从调用点推进到模型层：任务系统只认识一种 task generator；四类对象只作为领域模块内部复用 helper 或 adapter source 存在，不再形成调度概念。
+
+### Step F0：确认概念边界和命名
+
+目标：先明确“task name”和“generator type id”的边界，避免把 export task instance 和 generator implementation 混为一谈。
+
+任务：
+
+- 明确 `[[targets.exports]].name` 是 task instance name，同一个 `type` 可以在同一 target 中被不同 name / output / options 多次实例化。
+- 明确 generator 的全局标识是 `type_id + aliases`，用于匹配 `[[targets.exports]].type`。
+- 将下一阶段 build-facing trait 暂命名为 `TaskGenerator` 或继续沿用 `ArtifactGenerator`，但文档必须说明它是 scheduler-facing trait，不是 code/data/doc 的领域基类。
+- 更新 glossary / implementation docs 中容易混淆的 “generator name / task name / type id” 表述。
+
+验收：
+
+- 文档中不再把 `CodeGenerator`、`DataFormatExporter` 称为 Build 调度对象。
+- `name` / `type_id` / `aliases` 的含义一致。
+
+建议提交：`docs(generator): define task generator identity`
+
+### Step F1：引入 `GeneratorDescriptor` 与统一匹配模型
+
+目标：把 `type_id()`、`aliases()`、`requirements()` 聚合成 registry 可统一索引的 descriptor。
+
+任务：
+
+- 新增 `GeneratorDescriptor { type_id, aliases, requirements }`。
+- 让现有 `ArtifactGenerator` 或新 `TaskGenerator` 返回 descriptor。
+- 将 `matches(type_id)` 从 trait default method 改为 descriptor helper。
+- 在 `GeneratorRegistry::with_builtin_generators()` 建立统一 descriptor index，启动时检测重复 type / alias。
+- 保持当前 unknown type 与 ambiguous registration 诊断稳定或更清晰。
+
+验收：
+
+- registry 单元测试覆盖 type id、alias、重复注册、dependency 派生。
+- `cargo test generator` / `cargo test build::target` 通过。
+
+建议提交：`refactor(generator): add descriptor based registry`
+
+### Step F2：统一 task 输入为 `GeneratorTaskInput`
+
+目标：让调度系统不再选择 `generate_to_sink()` vs `generate_with_data_to_sink()` 两套执行入口，而是准备好 requirements 对应的 inputs 后调用单一 `generate()`。
+
+任务：
+
+- 新增 `GeneratorTaskInput`：包含 task instance metadata、`GeneratorCommonInput` 和 prepared inputs。
+- 新增 `PreparedGeneratorInputs`，初期至少包含：
+  - `MetaOnly`；
+  - `MetaAndData { data_set, validation_report, pool }`。
+- 将当前 `GeneratorDataInput` 迁移为 `PreparedGeneratorInputs::MetaAndData` 的内部结构或兼容 type alias。
+- 保留 `plan_artifacts()`，但也改为接收 `GeneratorTaskInput`，便于需要 validation report / assets 的 generator 规划路径。
+
+验收：
+
+- MetaOnly codegen / schema_doc 仍不加载数据。
+- JSON / MessagePack / bin / POT / Lua / validation_report 仍共享一次 DataSet 和 validation report。
+- `cargo test` 通过。
+
+建议提交：`refactor(generator): unify task input contract`
+
+### Step F3：统一执行入口为 `TaskGenerator::generate()`
+
+目标：Build 不再根据 dependency 调用不同 trait method，只负责准备输入和调用 generator。
+
+任务：
+
+- 将 `ArtifactGenerator::{generate_to_sink, generate_with_data_to_sink}` 收敛为 `generate(input, sink)`。
+- MetaOnly branch 构造 `GeneratorTaskInput { prepared: MetaOnly }` 并调用 `generate()`。
+- MetaAndData branch 构造 `GeneratorTaskInput { prepared: MetaAndData { ... } }` 并调用 `generate()`。
+- generator 自己检查 prepared inputs 是否满足 descriptor requirements，并返回明确诊断。
+- 删除调度侧 “该 generator 是否 data-backed” 的实现分类判断，只保留 requirements 驱动的 branch grouping。
+
+验收：
+
+- Build 中不再出现 `generate_with_data_to_sink`。
+- Build 中不再出现 `require_data_generator` / `code_generator` / `direct_generator` 调用路径。
+- `cargo test` 通过。
+
+建议提交：`refactor(build): execute generators through single task entry`
+
+### Step F4：收敛 registry 内部来源类型
+
+目标：从 registry 结构上减少“四类对象”的可见性。
+
+任务：
+
+- 将 `GeneratorRegistry` 内部主索引改为 `Vec<Box<dyn TaskGenerator>>` 或 equivalent descriptor-indexed collection。
+- `DataFormatExporter`、`AggregateDataExporter`、`CodeGenerator` 只在 `with_builtin_generators()` 或领域模块提供的 adapter factory 中转换为 `Box<dyn TaskGenerator>`。
+- 评估 `DataFormatRegistry` 是否仍需要作为 exporter 内部 registry 保留；若保留，它不应被 Build-facing registry 作为公开字段或公开概念描述。
+- 移除 `ArtifactGeneratorRef::{Code, Data, Direct}` 这类调度期 enum，改为注册期 adapter box。
+
+验收：
+
+- `GeneratorRegistry` 对 Build 只暴露 `require_generator()` / `dependency()` / descriptor 查询。
+- 添加新 generator 时不需要修改 Build 分支代码。
+- `cargo test` 通过。
+
+建议提交：`refactor(generator): store unified task generators`
+
+### Step F5：领域 facet 文档与 Lua 归属复查
+
+目标：完成统一调度模型后，再复查 Lua / code artifact options 的模块归属，避免 exporter 与 codegen 互相倒置依赖。
+
+任务：
+
+- 重新评估 `CodeArtifactOptions` 是否继续位于 `codegen`，或下沉到 `generator` / `text_artifact` / `code_artifact` helper 模块。
+- 如果 Lua 继续在 `exporter` 内部实现，明确它通过 adapter 暴露为 data-backed code-like task generator。
+- 如果 Lua 迁入 `codegen/lua_table`，明确 data input 只通过 task generator contract 注入，不引入 `codegen -> build` 依赖。
+- 更新 `08-exporter`、`09-codegen`、`10-build` 和 Lua 专题文档。
+
+验收：
+
+- Lua 仍保持 `type = "lua_table"` / alias `lua`。
+- 普通 language codegen 不受 Data dependency 影响。
+- 文档中 code/data/doc/report 被描述为 facet/helper，而不是调度分类。
+
+建议提交：`docs(generator): document unified task generator facets`
