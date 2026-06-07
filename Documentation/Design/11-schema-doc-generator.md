@@ -323,14 +323,14 @@ Builder 输入：
 
 ### 11.7.1 与 Exporter Registry
 
-`schema_doc` 建议注册为 MetaOnly exporter 或 build 阶段特殊 aggregate artifact。优先采用 registry 方式：
+`schema_doc` 是 requirements 只包含 Meta 的 doc artifact generator。当前实现为了消除 build 特殊分支，临时注册到 `codegen::builtin_generators()` 并实现 `CodeGenerator`；长期应迁移到统一 artifact generator registry，而不是继续把文档产物建模成 codegen backend。优先采用 registry 方式：
 
-- dependency contract：`MetaOnly`；
+- requirements：linked Meta + effective target tags + project / task context；派生 dependency contract 为 `MetaOnly`；
 - output planning：`index.md` + visible table markdown files；
 - artifact conflict check：纳入现有路径冲突检测；
 - writer：使用 `ArtifactSink`，支持 direct / temp_commit / dry_run。
 
-如果现有 runtime data exporter trait 只服务 MetaAndData，可新增 schema/doc exporter trait 或把 aggregate exporter 抽象拆出，避免为了 schema doc 读取 data。
+如果现有 runtime data exporter trait 只服务 data-backed artifact，不应为了 schema doc 读取 data；如果现有 `CodeGenerator` trait 只服务 code artifact，也不应长期要求 schema doc 实现 code-specific naming / formatting / line comment API。推荐用统一 `ArtifactGenerator` facade + `DocArtifactFacet` 表达 schema doc。
 
 ### 11.7.2 与 Codegen
 
@@ -509,7 +509,7 @@ title = "Client Config Schema"
 已实现内容：
 
 - 新增 `src/schema_doc/`，提供 `SchemaDoc` normalized model、`SchemaDocOptions`、`SchemaDocExportConfig`、`SchemaDocFormat`、Markdown renderer 和 ArtifactSink 写入入口。
-- Build 支持 `[[targets.exports]] type = "schema_doc"`，作为注册到 `codegen::builtin_generators()` 的 `MetaOnly` generator 运行；它与语言 codegen 一样读取 Meta 后输出 artifact，不属于 `DataFormatRegistry`，docs-only target 不需要 `project.input`。
+- Build 支持 `[[targets.exports]] type = "schema_doc"`，当前作为注册到 `codegen::builtin_generators()` 的 `MetaOnly` generator 运行；它与语言 codegen 一样读取 Meta 后输出 artifact，不属于 `DataFormatRegistry`，docs-only target 不需要 `project.input`。这是过渡实现，长期应迁移为统一 generator registry 下的 doc artifact generator。
 - Markdown MVP 输出 `index.md` 与每张当前 target 可见 table 的 `<table>.md`。
 - 单表文档包含 Fields、Indexes、Relations，并补充 Assets、Text / POT、Validators 摘要。
 - Builder 使用 linked Meta 与 current target tags 计算 table / field / index / FK visibility；默认过滤当前 target 不可见或 `export = false` 的内容。
@@ -523,4 +523,4 @@ title = "Client Config Schema"
 - Asset rules 摘要只展示可静态解析的 `extensions`、prefix/suffix、require existing、allow/deny path 等基础规则，不读取实际资源引用。
 - Text / POT 摘要只标记当前 target 可见 `text` 字段理论上会被 POT exporter 处理，不读取具体文本值。
 - Struct / fragment 子字段已有基础展开；复杂平台化输出、owner/domain 分组、ER 图和 Lark / Confluence 发布仍是后续扩展。
-- 当后续新增 JSON Schema、Mermaid ER、HTML docs 等“只读 Meta 并输出 artifact”的任务时，优先按同一 MetaOnly generator 路径扩展，而不是在 build 中增加特殊分支。
+- 当后续新增 JSON Schema、Mermaid ER、HTML docs 等“只读 Meta 并输出 artifact”的任务时，优先按统一 artifact generator + requirements + doc facet 扩展，而不是在 build 中增加特殊分支，也不要继续把非代码文档任务塞进 code-specific `CodeGenerator` trait。

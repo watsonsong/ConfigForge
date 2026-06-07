@@ -200,11 +200,14 @@
 | --- | --- | --- | --- |
 | 导出 | Export | `Export`, `export` | 生成运行时数据、代码和特殊产物。 |
 | 导出目标 | Export Target | `ExportTarget` | 一个配置化输出目标。 |
+| Artifact 生成器 | Artifact Generator | `ArtifactGenerator` | 根据声明的 input requirements 生成一个或多个 artifact 的 build-facing 抽象；requirements 决定调度，code/data/doc/report 等能力通过 facet/helper 组合。 |
+| 生成器输入需求 | Generator Requirements | `GeneratorRequirements` | 描述 generator 需要哪些输入，例如 Meta、Data、assets、validation report；`MetaOnly` / `MetaAndData` 是从 requirements 派生出的调度属性，不是继承层级。 |
+| 生成器能力 Facet | Generator Facet | `CodeArtifactOptions`, `DocArtifactFacet` | 可组合的领域能力或选项集合，例如代码文本选项、runtime table serialization、聚合 artifact、文档渲染。 |
 | 数据导出器 | Data Exporter | `DataExporter` | 从 ExportView 写 runtime data 的导出器。 |
 | 运行时数据格式 | Runtime Data Format | `RuntimeDataFormat` | 当前 runtime table data export type 支持 `json`、`messagepack`、`bin`；当前内置聚合 / 内嵌数据 export type 支持 `gettext_pot` / `pot`、`lua_table` / `lua`；未来可扩展 `yaml`、`sqlite`、`protobuf`。 |
 | JSON 导出 | JSON Export | `JsonDataExporter` | 输出 JSON runtime data。 |
 | Lua Table 导出 | Lua Table Export | `LuaTableExporter` | 输出 Lua table；Lua 中代码和数据可合一。 |
-| Lua 内嵌数据生成器 | Lua Embedded Data Generator | `LuaEmbeddedDataExporter` | `type = "lua_table"` 的 MetaAndData export task；消费 Meta + Data，生成 root facade 与每表 `.lua` 文件。 |
+| Lua 内嵌数据生成器 | Lua Embedded Data Generator | `LuaTableGenerator` / `LuaEmbeddedDataExporter` | `type = "lua_table"` 的 data-backed mixed generator；requirements 包含 Meta + Data，输出 code-like Lua artifact，生成 root facade 与每表 `.lua` 文件。 |
 | YAML 导出 | YAML Export | `YamlDataExporter` | 可扩展 runtime data exporter。 |
 | MessagePack 导出 | MessagePack Export | `MessagePackDataExporter` | 第一阶段支持的紧凑二进制 runtime data exporter，配置规范名为 `messagepack`。 |
 | SQLite 导出 | SQLite Export | `SqliteDataExporter` | 可扩展数据库 exporter。 |
@@ -213,7 +216,7 @@
 | POT 导出器 | Gettext POT Exporter | `GettextPotExporter` | `type = "gettext_pot"`；从 ExportView 中的 `text` 字段导出 POT。 |
 | 翻译注释 | Translator Comment | `TranslatorComment` | POT 中给翻译人员的注释，可来自 text 字段、`desc` 或 source 中额外映射的注释列/行。 |
 | 资源清单导出器 | Asset Manifest Exporter | `AssetManifestExporter` | 从 ExportView 中的 `asset` 字段导出资源清单。 |
-| 代码生成器 | Code Generator | `CodeGenerator` | 根据 Meta/ExportView 生成目标语言代码或访问 API。 |
+| 代码生成器 | Code Generator | `CodeGenerator` | 生成目标语言代码或访问 API 的 code artifact 能力。当前内置 language codegen 只依赖 Meta；但 “是否需要 Data” 应由 generator requirements 声明，不应作为 CodeGenerator 继承层级的一部分。 |
 | 类型映射 | Type Mapping | `TypeMapping` | 逻辑类型到目标语言/引擎类型的映射。 |
 | 目标类型 | Target Type | `TargetTypeName` | 目标语言或引擎中的具体类型名。 |
 | 导出产物 | Export Artifact | `ExportArtifact` | 一个生成文件，例如 runtime data、code、POT、asset manifest。 |
@@ -236,9 +239,10 @@
 | 动态库插件 | Dynamic Library Plugin | `DynamicPlugin`, `PluginLibrary` | `.dylib`、`.so`、`.dll` 等动态库插件。 |
 | 插件清单 | Plugin Manifest | `PluginManifest` | 插件 ID、版本、API 版本和能力声明。 |
 | 插件能力 | Plugin Capability | `PluginCapability` | SourceProvider、DataExporter、CodeGenerator、Validator、BuiltinType 等能力。 |
+| Generator Registry | Generator Registry | `GeneratorRegistry` | build-facing artifact generator 注册表 / facade；根据 export type 查询 generator requirements，并可适配 data exporter registry、code generator registry 和 direct artifact generator。 |
 | Source Provider Registry | Source Provider Registry | `SourceProviderRegistry` | provider ID 到 provider factory 的注册表。 |
-| Data Exporter Registry | Data Exporter Registry | `DataExporterRegistry` | data export format 到 table/aggregate data exporter 的注册表。 |
-| Code Generator Registry | Code Generator Registry | `CodeGeneratorRegistry` | language/target 到 code generator 的注册表。 |
+| Data Exporter Registry | Data Exporter Registry | `DataExporterRegistry` | data export format 到 table/aggregate data exporter 的领域注册表；长期由 `GeneratorRegistry` adapter 暴露给 build-facing 调度。 |
+| Code Generator Registry | Code Generator Registry | `CodeGeneratorRegistry` | language/target 到 code generator 的领域注册表；长期只表达 code artifact 能力，不作为所有 MetaOnly generator 的总基类。 |
 | Validator Registry | Validator Registry | `ValidatorRegistry` | validator kind 到 validator factory 的注册表。 |
 | Builtin Type Registry | Builtin Type Registry | `BuiltinTypeRegistry` | builtin value type 到 parser/validator 的注册表。 |
 | 任务执行器 | Task Executor | `TaskExecutor` | 执行校验和导出任务，可并行。 |

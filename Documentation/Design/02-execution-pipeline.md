@@ -59,8 +59,9 @@ CLI Arguments
 输出：
 
 - SourceProviderRegistry；
-- DataExporterRegistry；
-- CodeGeneratorRegistry；
+- GeneratorRegistry（build-facing artifact generator facade；内部可适配 DataExporterRegistry / CodeGeneratorRegistry）；
+- DataExporterRegistry（data-backed generator 的领域 registry）；
+- CodeGeneratorRegistry（language code artifact 的领域 registry）；
 - ValidatorRegistry；
 - BuiltinTypeRegistry。
 

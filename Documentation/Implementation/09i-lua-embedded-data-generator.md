@@ -2,6 +2,8 @@
 
 本文档描述当前内置的 Lua 导出支持。Lua 目标与 Rust / C++ / TypeScript 的 format-agnostic codegen 不同：Lua 产物把**数据与访问代码合并在同一组 `.lua` 文件**中，直接由 Lua VM `require` 加载，不再通过 JSON / MessagePack / `bin` runtime reader 间接读取。因此它必须同时依赖 target-aware Meta 与已归一化、已校验的数据视图。
 
+设计定位：Lua 是 artifact generator requirements 与能力 facet 解耦的关键用例。它的 requirements 包含 Meta + Data，因此调度上走 data-backed 分支；但它的输出是 code-like `.lua` artifact，因此应该复用 code artifact 选项、命名、格式化和 writer helper。不要因为它需要 Data 就把 “是否为代码生成” 绑定到 MetaOnly 继承体系，也不要复制一套与 `CodegenOptions` 平行但语义重复的 Lua 专用基础选项。
+
 ## Related docs
 
 - [`09-codegen-module-detail-design.md`](09-codegen-module-detail-design.md) — Codegen 模块总览和专题索引。
@@ -23,14 +25,14 @@
 
 ### 非目标
 
-1. 不把 Lua 伪装成现有 `CodeGenerator` 的第四种 format-agnostic backend；Lua 产物依赖数据，执行边界不同。
+1. 不把 Lua 伪装成现有 `CodeGenerator` 的第四种 format-agnostic backend；Lua 产物依赖数据，执行边界不同。长期可通过统一 artifact generator + code artifact facet 复用 code options，而不是直接实现当前 MetaOnly 假设的 `CodeGenerator`。
 2. 不生成 Lua runtime reader contract，不读取 JSON / MessagePack / `bin`。
 3. 首版不追求 streaming 写超大 Lua 文件；可在后续为大表增加 chunked writer。
 4. 首版不实现增量 require 热更新、二进制 Lua bytecode 编译、LuaJIT FFI 或引擎私有 asset bundle 打包。
 
 ## 9i.2 模块归属与依赖边界
 
-推荐把 Lua 支持实现为 `type = "lua_table"` 的 MetaAndData exporter，而不是普通 codegen backend：
+当前推荐把 Lua 支持实现为 `type = "lua_table"` 的 MetaAndData exporter，而不是普通 codegen backend：
 
 ```text
 src/exporter/
@@ -43,6 +45,8 @@ src/exporter/
 - 现有 `codegen` 文档明确约束 Rust/C++/TypeScript codegen 只依赖 Meta 和 target tags，不绑定任何 MetaAndData export task；
 - Lua 的输出既是运行时数据，又包含访问 API，因此语义上更接近 MetaAndData export type，而不是纯代码 stub。
 
+长期模块边界建议：当 `GeneratorRegistry` / `ArtifactGenerator` facade 落地后，`lua_table` 应从 “AggregateDataExporter 的一种” 演进为 mixed artifact generator：`requirements = Meta + Data`，facets = `CodeArtifactOptions + AggregateArtifact`。这样可在不让 `codegen` 依赖 `data` 的前提下复用 code writer / naming / formatting / file header 等能力。
+
 Build 编排层应按 export task dependency contract 分发：
 
 ```text
@@ -50,8 +54,8 @@ ProjectConfig::from_path
   -> MetaModel::link
   -> Target normalize
   -> DataLoadPlan / DataLoader / normalize / validation
-  -> DataFormatRegistry dispatch(type = "lua_table")
-  -> LuaEmbeddedDataExporter(meta + export view + resolved data)
+  -> GeneratorRegistry dispatch(type = "lua_table")
+  -> LuaTableGenerator(meta + export view + resolved data, code artifact options)
   -> ArtifactWriter
 ```
 

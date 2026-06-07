@@ -237,11 +237,11 @@ override_sources = [
 
 ## 3.5 Target Config
 
-Target Config 定义一次可构建的导出目标。一个 target 共享同一组 `TargetTags` 和同一套 Meta-level filtering 规则，并挂载一组 exporter task。每个 exporter task 都声明自己的 exporter type、输入依赖、输出目录和专属参数；Build 根据这些依赖拆分 MetaOnly / MetaAndData 分支，复用 Meta link、DataLoadPlan、normalize 和 validation 结果，再运行具体 exporter。
+Target Config 定义一次可构建的导出目标。一个 target 共享同一组 `TargetTags` 和同一套 Meta-level filtering 规则，并挂载一组 export task。每个 export task 通过 `type` 选择一个 artifact generator，声明输出目录和专属参数；generator 自身声明 input requirements（例如是否需要 Data）。Build 根据 requirements 派生出的 dependency contract 拆分 MetaOnly / MetaAndData 调度分支，复用 Meta link、DataLoadPlan、normalize 和 validation 结果，再运行具体 generator。
 
-### 3.5.1 统一 exporter task 模型
+### 3.5.1 统一 export task / generator 模型
 
-Lua table 导出同时生成 Lua 代码和内嵌数据；gettext POT 依赖 Meta + Data 但不是 runtime data；format-agnostic codegen backend 只依赖 Meta；JSON/MessagePack/bin 依赖 Meta + Data。因此 target 下所有产物统一使用 `[[targets.exports]]` 建模：
+Lua table 导出同时生成 Lua 代码和内嵌数据；gettext POT 依赖 Meta + Data 但不是 runtime data；format-agnostic codegen backend 只依赖 Meta；JSON/MessagePack/bin 依赖 Meta + Data；schema docs 只读 Meta 但输出文档 artifact。因此 target 下所有产物统一使用 `[[targets.exports]]` 建模，Build 层把它们都视为 artifact generator task，而不是用 “code / data / doc” 拆成多套用户配置：
 
 ```toml
 [project]
@@ -286,22 +286,22 @@ domain = "game_config"
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `name` | 单 export task 可省略，规范化为 `default` | 当前 target 内稳定唯一的 task 名称；用于诊断、trace、artifact manifest 和未来 task 间依赖引用。 |
-| `type` | 必填 | exporter ID，例如 `json`、`messagepack`、`bin`、`gettext_pot`、`lua_table`、`rust`、`cpp`、`typescript`。不再用 `format` / `language` 两套字段区分。 |
-| `output` | 必填 | 该 exporter 的产物输出根目录。所有 artifact 在写入前做全局规范化路径冲突检查。 |
-| exporter 专属字段 | 未设置 | 直接摊平在当前 `[[targets.exports]]` 下；通用子表如 `i18n`、`naming`、`formatting` 可被适用 exporter 复用。 |
+| `type` | 必填 | generator ID，例如 `json`、`messagepack`、`bin`、`gettext_pot`、`lua_table`、`schema_doc`、`rust`、`cpp`、`typescript`。不再用 `format` / `language` 两套字段区分。 |
+| `output` | 必填 | 该 generator 的产物输出根目录。所有 artifact 在写入前做全局规范化路径冲突检查。 |
+| generator 专属字段 | 未设置 | 直接摊平在当前 `[[targets.exports]]` 下；通用子表如 `i18n`、`naming`、`formatting` 可被适用 generator facet 复用。 |
 
-Exporter 注册表需要声明每个 `type` 的 dependency contract：
+Generator 注册表需要声明每个 `type` 的 input requirements。`MetaOnly` / `MetaAndData` 是从 requirements 派生出的调度属性，不是 generator 的继承体系或领域身份：
 
-| 依赖类型 | 例子 | 说明 |
+| 派生 dependency | 例子 | 说明 |
 | --- | --- | --- |
-| `MetaOnly` | `rust`、`cpp`、`typescript` | 只需要 linked Meta 和 effective target tags；不加载 Data。 |
-| `MetaAndData` | `json`、`messagepack`、`bin`、`gettext_pot`、`lua_table` | 需要 DataLoadPlan、normalized DataSet、target validation 和 target-aware ExportView。 |
+| `MetaOnly` | `rust`、`cpp`、`typescript`、`schema_doc` | requirements 不包含 Data；只需要 linked Meta、effective target tags、project / task options 等上下文；不加载 Data。 |
+| `MetaAndData` | `json`、`messagepack`、`bin`、`gettext_pot`、`lua_table` | requirements 包含 Data；需要 DataLoadPlan、normalized DataSet、target validation 和 target-aware ExportView。 |
 
-这样 Lua 不需要被强行归入 “data” 或 “code”：它只是一个 `type = "lua_table"`、dependency 为 `MetaAndData` 的 exporter。未来 schema manifest、asset manifest、doc generator、engine-specific bundle、binary schema 等都可以按同一套 task 模型接入。
+这样 Lua 不需要被强行归入 “data exporter” 或 “code generator” 的继承分支：它是一个 `type = "lua_table"`、requirements 包含 Meta + Data、同时具备 code artifact facet 与 aggregate artifact facet 的 generator。Rust / C++ / TypeScript 是 requirements 只含 Meta 的 code artifact generator；`schema_doc` 是 requirements 只含 Meta 的 doc artifact generator。未来 schema manifest、asset manifest、doc generator、engine-specific bundle、binary schema 等都可以按同一套 task 模型接入，并各自组合 code / data / doc / report / manifest 等能力。
 
 ### 3.5.2 依赖分支编排原则
 
-统一 exporter task 后，Build 不再写死 “先 data 后 code” 两段流程，而是按 dependency contract 建立 target-local execution view summary，并用阶段式 pipeline 执行两类分支：`SourceRead` 可与 `LinkMeta` 并行，`LinkMeta` 完成后立即启动 `MetaOnly` codegen，因此 mixed target 中 codegen 不再等待 source read / normalize / validation 完成。阶段式 tracing 已通过 `BuildTrace` / `--trace-tasks` 落地；当前不维护 node-level DAG key，也不引入完整通用 DAG 调度器。
+统一 generator task 后，Build 不再写死 “先 data 后 code” 两段流程，而是按 generator requirements 派生出的 dependency contract 建立 target-local execution view summary，并用阶段式 pipeline 执行两类分支：`SourceRead` 可与 `LinkMeta` 并行，`LinkMeta` 完成后立即启动不需要 Data 的 MetaOnly generator，因此 mixed target 中 format-agnostic codegen / schema docs 不再等待 source read / normalize / validation 完成。阶段式 tracing 已通过 `BuildTrace` / `--trace-tasks` 落地；当前不维护 node-level DAG key，也不引入完整通用 DAG 调度器。
 
 当前 target-local pipeline 形态：
 
@@ -309,12 +309,12 @@ Exporter 注册表需要声明每个 `type` 的 dependency contract：
 ProjectConfig
   -> RawMeta
   -> LinkedMeta(target tags)
-      -> MetaOnly exporter tasks
+      -> MetaOnly generator tasks
       -> DataLoadPlan(project input, target tags)
           -> DataSet(project input, target tags)
           -> NormalizedDataSet(project input, target tags)
           -> Validation(project input, target tags)
-          -> MetaAndData exporter tasks sharing project.input
+          -> MetaAndData generator tasks sharing project.input
 ```
 
 若未来重新引入跨 target cache 或 node-level scheduler，cache key 必须包含 dependency 语义。涉及 target tags 的 key 应使用已经合并 CLI extra tags 后的 effective target tags，避免把不同 CLI tag 构建误判为同一结果：

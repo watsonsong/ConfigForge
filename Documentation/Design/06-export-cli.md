@@ -9,7 +9,7 @@
 | 字段 | 说明 |
 | --- | --- |
 | `name` | 稳定 target 名称。 |
-| `exports` | 当前 target 下的导出任务列表。每个任务通过 `type` 选择 exporter，由 exporter registry 的 dependency contract 决定只依赖 Meta，还是同时依赖 Meta + Data。 |
+| `exports` | 当前 target 下的导出任务列表。每个任务通过 `type` 选择 artifact generator；generator registry 根据该 generator 声明的 input requirements 派生 dependency contract，决定只依赖 Meta，还是同时依赖 Meta + Data。 |
 
 Project-level `name` / `desc` / `copyright` 可被 target 的代码生成器、schema exporter 或 manifest exporter 用于生成文件头。Codegen export task 可以通过 `file_header` 模板覆盖默认文件头。
 
@@ -22,7 +22,7 @@ Project-level `name` / `desc` / `copyright` 可被 target 的代码生成器、s
 
 ### 6.1.1 Export Task
 
-`[[targets.exports]]` 描述当前 target 要生成的产物、写到哪里，以及使用哪种 exporter。一个 target 可以声明多套 export task，例如同时导出 JSON 供工具链调试、MessagePack 或 `bin` 供客户端运行时加载，也可以导出 gettext POT、Lua table、Rust/C++/TypeScript 访问代码等产物：
+`[[targets.exports]]` 描述当前 target 要生成的产物、写到哪里，以及使用哪种 artifact generator。一个 target 可以声明多套 export task，例如同时导出 JSON 供工具链调试、MessagePack 或 `bin` 供客户端运行时加载，也可以导出 gettext POT、Lua table、schema docs、Rust/C++/TypeScript 访问代码等产物：
 
 ```toml
 [[targets]]
@@ -55,18 +55,18 @@ deduplicate = true
 | --- | --- |
 | `name` | 当前 target 内唯一的 export task 名称。单 export task 可省略并由实现填入默认名；多 export task 省略时默认使用 `type`。 |
 | `output` | 产物输出目录。运行时表数据会在该目录下按表名生成文件；POT / manifest 这类聚合格式会在该目录下按格式选项规划一个或多个文件；codegen 会在该目录生成语言文件。 |
-| `type` | exporter 类型 ID。运行时格式支持 `json`、`messagepack` 和 `bin`；聚合/内嵌数据格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`；代码生成支持的内置 backend、type id、alias 和输出形态见 [`09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。 |
-| exporter 专属字段 | 可选。格式专属选项直接摊平在对应 `[[targets.exports]]` 下，例如 `type = "gettext_pot"` 的 `domain`、`file_name`、`source_reference`、`include_translator_comments`、`deduplicate`。 |
+| `type` | generator 类型 ID。运行时格式支持 `json`、`messagepack` 和 `bin`；聚合/内嵌数据格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`；文档生成支持 `schema_doc`；代码生成支持的内置 backend、type id、alias 和输出形态见 [`09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。 |
+| generator 专属字段 | 可选。格式专属选项直接摊平在对应 `[[targets.exports]]` 下，例如 `type = "gettext_pot"` 的 `domain`、`file_name`、`source_reference`、`include_translator_comments`、`deduplicate`。 |
 
 导出规则：
 
 - 每张 table 输出一个 runtime data 文件。
 - `json` 使用 `.json` 后缀，`messagepack` 使用 `.msgpack` 后缀，`bin` 使用 `.bin` 后缀。
 - JSON / MessagePack 承载同一套 named payload：table meta 摘要和 normalized rows；字段名使用 Meta canonical name。`bin` 使用同一 target-aware export view，但 wire layout 不保存 name/tag，按 generated code 共享的 schema 顺序紧密排列。
-- 同一 target 下多个 MetaAndData export task 共享同一个 `project.input` 与 effective tags，因此执行层只加载、归一化、校验一次，再分发给不同 exporter。
+- 同一 target 下多个 requirements 包含 Data 的 export task 共享同一个 `project.input` 与 effective tags，因此执行层只加载、归一化、校验一次，再分发给不同 generator。
 - 同一个 target 的 code generation 不绑定 runtime data export task。生成代码使用逻辑表名作为默认加载路径，具体文件后缀和格式由运行时传入的 loader / reader 实现决定。
 - MetaOnly-only target 可以不设置 `project.input`；生成代码仍可通过同一套逻辑表名加载 API 在运行时读取任意受支持格式的数据。
-- Project Config 使用 `[[targets.exports]]` 数组表表达所有导出任务；`type` 与 registry dependency contract 决定它是运行时表数据、国际化模板、资源清单、Lua 内嵌数据还是代码产物。
+- Project Config 使用 `[[targets.exports]]` 数组表表达所有导出任务；`type` 与 generator requirements / capability facets 决定它是运行时表数据、国际化模板、资源清单、Lua 内嵌数据、schema docs 还是代码产物。`MetaOnly` / `MetaAndData` 是调度属性，不是 generator 的继承分类。
 
 ### 6.1.2 Code Generation Export Task
 
@@ -191,14 +191,14 @@ Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `typ
 
 ### Lua Table
 
-`lua_table` 是 MetaAndData export type，而不是普通 codegen backend。它会同时消费 Meta 与当前 target 的已归一化、已校验数据，输出可被 Lua VM 直接 `require` 的数据+访问代码：
+`lua_table` 是 requirements 包含 Meta + Data 的 mixed artifact generator，而不是普通 format-agnostic codegen backend。它会同时消费 Meta 与当前 target 的已归一化、已校验数据，并组合 code artifact facet 与 aggregate artifact facet，输出可被 Lua VM 直接 `require` 的数据+访问代码：
 
 - 每张可见 table 生成一个 `.lua` 文件；
 - 生成一个 root facade 文件，按访问情况 lazy `require` 对应 table 文件，也可提供 `preload_all()`；
 - CollectionTable 每行默认以数组存储字段值，并用共享 metatable 支持 `row.field` 访问，以降低每行重复字符串 key 的内存成本；
 - 为 CollectionTable 生成 primary / unique / non-unique index lookup，索引引用 row 对象，不复制 row 数据；
 - ObjectTable 默认输出 keyed Lua table；
-- 该格式依赖 `project.input`，不能用于未设置 source data root 的 MetaOnly-only target。
+- 该格式声明需要 Data，因此依赖 `project.input`，不能用于未设置 source data root 的 MetaOnly-only target。
 
 示例配置：
 
@@ -429,7 +429,7 @@ ConfigForge 提供标准 RuntimeDataReader / RuntimeDataLoader adapter 作为可
 
 ## 6.3 非运行时数据导出格式
 
-POT、Asset Manifest 等辅助产物不再引入独立的 `targets.special_exporters` 配置层，而是明确作为 `[[targets.exports]]` 的一种 `type`。这样 TOML 结构保持简单：`target.exports` 统一表示“当前 target 要生成的产物”，由 exporter dependency contract 区分 MetaOnly 与 MetaAndData。
+POT、Asset Manifest、Schema Doc 等辅助产物不再引入独立的 `targets.special_exporters` 配置层，而是明确作为 `[[targets.exports]]` 的一种 `type`。这样 TOML 结构保持简单：`target.exports` 统一表示“当前 target 要生成的产物”，由 generator requirements 派生出的 dependency contract 区分 MetaOnly 与 MetaAndData 调度路径。
 
 非运行时 data exporter 与 runtime data exporter 的定位不同：runtime data 面向游戏运行时加载；POT、资源清单、审计索引等面向本地化、资源打包、工具链或文档流程。它们共享同一个 Meta / Data / ExportView 语义，但非运行时 data exporter 可以读取被 runtime payload 隐藏、同时又被 exporter policy 显式允许的辅助字段，例如 text translator comment 或 asset bundle tag。无论是否读取辅助字段，都必须遵守 target tags、table/field visibility、`row_export` 和 artifact path conflict 规则。
 
@@ -623,8 +623,8 @@ config-forge --project ConfigForge.toml --target client
 1. 解析 Project Config，并递归加载其顶层 `imports` 指向的工程配置片段。
 2. 按 `--target` 找到目标 target。
 3. 合并所有配置片段中的 `enums`、`structs`、`tables` 并完成 link/validate。
-4. 根据 `[[targets.exports]]` 与 exporter dependency contract 构造 target-local execution summary；当前实现按 MetaAndData / MetaOnly 两类依赖执行，而不是完整通用 DAG 调度器。若 target 同时包含两类任务，source read 会与 Meta link 并行；Meta link 完成后，MetaOnly 分支立即运行格式无关 codegen，不等待 source read、归一化、校验或数据相关 exporter。MetaAndData 分支继续读取 `project.input`、归一化、校验并运行数据相关 exporter。
-5. 同 `(project.input, effective_tags)` 的 MetaAndData export task 复用加载、归一化和校验结果。
+4. 根据 `[[targets.exports]]` 与 generator requirements 派生出的 dependency contract 构造 target-local execution summary；当前实现按 MetaAndData / MetaOnly 两类依赖执行，而不是完整通用 DAG 调度器。若 target 同时包含两类任务，source read 会与 Meta link 并行；Meta link 完成后，MetaOnly 分支立即运行格式无关 codegen / schema docs 等不需要 Data 的 generator，不等待 source read、归一化、校验或数据相关 generator。MetaAndData 分支继续读取 `project.input`、归一化、校验并运行数据相关 generator。
+5. 同 `(project.input, effective_tags)` 且 requirements 包含 Data 的 export task 复用加载、归一化和校验结果。
 6. 汇总所有 export artifacts，按 export task 声明顺序稳定排序，并统一完成路径归一化和冲突检查。
 7. 按 `--dry-run` / `--write-mode` 写出 artifact，或在 dry-run 模式下只返回写入计划；artifact writer 通过 shared `ArtifactSink` 管理 path reservation、Direct / TempCommit / DryRun 生命周期与 result entries。后续 streaming generator 会进一步降低生成阶段峰值。
 8. 如果传入 `--trace-tasks`，在构建成功或阶段式 build 失败后写出 trace JSON，用于分析 Project load、input preparation、exporter、artifact write 等阶段耗时；失败阶段会标记为 `failed`，未开始的后续阶段不会出现在 trace 中。

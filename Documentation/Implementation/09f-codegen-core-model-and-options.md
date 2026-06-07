@@ -14,6 +14,8 @@
 
 目标语言使用字符串标识，不使用中心化枚举。这样新增一种语言时不需要修改 `CodeExportLanguage` 一类的核心 enum，也不需要在 build 层增加新的 match 分支。
 
+设计边界：`CodeGenerator` 表达的是 code artifact 能力（语言标识、命名、格式化、文件头、关键字冲突、CodeWriter / CodeModel 渲染），而不是 “只依赖 Meta” 这一输入依赖分类。当前内置 Rust/C++/C#/Java/TypeScript 等 format-agnostic codegen 的 requirements 都是 MetaOnly；但这只是这些 generator 的调度属性。Lua table 这类 data-backed code-like artifact 证明输入依赖不应成为继承体系：它需要 Meta + Data，却仍应复用 code artifact options / writer helper。长期应把当前 `CodegenOptions` 中可复用的部分沉淀为 `CodeArtifactOptions` facet，供普通 language codegen 和 mixed generator 共同使用。
+
 ```rust
 pub(crate) trait CodeGenerator: Send + Sync {
     fn language(&self) -> &'static str;
@@ -76,9 +78,9 @@ pub struct CodeExportTarget {
 - Project Config 中 `[[targets.exports]] type = "messagepack"` 选择 MessagePack exporter。
 - Project Config 中 `[[targets.exports]] type = "bin"` 选择私有紧密二进制 exporter。
 - Project Config 中 `[[targets.exports]] type = "gettext_pot"` / `"asset_manifest"` 等聚合格式仍属于 MetaAndData export task，但不产生 generated runtime loader 直接消费的 table data。Asset Manifest 已实现为聚合 exporter；CSV 输出通过 `type = "asset_manifest"` + `format = "csv"` 表达。
-- Project Config 中 `[[targets.exports]] type = "lua_table"` 属于特殊 data-backed exporter：它会直接生成 Lua 数据+访问代码合一产物，必须依赖当前 target 的 resolved data；不要把它接入普通 `CodeGenerator` trait。
+- Project Config 中 `[[targets.exports]] type = "lua_table"` 属于 data-backed mixed generator：它会直接生成 Lua 数据+访问代码合一产物，必须依赖当前 target 的 resolved data；不要把它接入当前只服务 format-agnostic language backend 的 `CodeGenerator` trait。长期应让它通过 code artifact facet 复用文件头、命名、格式化等通用代码生成选项。
 - 可兼容解析 `"msgpack"` 为 MessagePack，但错误信息、文档、生成代码和 manifest 中统一使用规范名 `messagepack`。
-- Project Config 使用 `[[targets.exports]]` 数组表表达所有导出任务；codegen 只关心 Meta 和 target tags，不绑定任意 MetaAndData export task。
+- Project Config 使用 `[[targets.exports]]` 数组表表达所有导出任务；format-agnostic codegen 只关心 Meta 和 target tags，不绑定任意 MetaAndData export task。更抽象的 artifact generator 模型会通过 requirements 声明是否需要 Data，而不是把 `CodeGenerator` 固定继承到 MetaOnly 分支。
 
 Project Config 层模型（`TargetConfig` 是 project-level 聚合结构；build 会按 exporter contract 把统一 export task 适配为 exporter / codegen 模块内部配置）：
 
@@ -122,8 +124,8 @@ pub struct NormalizedExportTask {
 - target 内 export task 多于 1 个时，省略 `name` 时默认使用 `type`，显式或默认名称必须在 target 内唯一。
 - export task name 大小写敏感；只允许 ASCII 字母、数字、`_`、`-`，且必须以字母或数字开头和结尾。
 - normalized model 中 `NormalizedExportTask.name` 使用非空 `String`；runtime export branch output 也以 export task name 作为稳定校验键。
-- MetaOnly codegen export task 的 `data` 必须为空；若配置 `data = "..."`，归一化阶段报错。生成代码格式无关，不绑定任意 MetaAndData export task。
-- 无论 target 有 0 个、1 个还是多个 MetaAndData export task，MetaOnly codegen task 都只接收 Meta、target tags 和语言配置。
+- 当前 format-agnostic codegen export task 的 `data` 必须为空；若配置 `data = "..."`，归一化阶段报错。生成代码格式无关，不绑定任意 MetaAndData export task。
+- 无论 target 有 0 个、1 个还是多个 MetaAndData export task，当前 format-agnostic codegen task 都只接收 Meta、target tags 和语言配置。长期如果出现 data-backed code-like generator，应作为普通 artifact generator 声明 `needs_data = true`，同时复用 code artifact facet，而不是复用当前 `CodeExportInput` 的 MetaOnly 假设。
 - `project.input` 与 `targets.exports.output` 相对路径在加载 Project Config 片段时按片段文件所在目录归一化；入口 `ConfigForge.toml` 的相对路径等价于 project root 相对路径。
 - DataLoader 的 `data_root` 使用 `project.input`，Meta `source` / `sources[].path` 再相对该 data root join。
 
@@ -139,7 +141,7 @@ pub struct NormalizedExportTask {
 
 当一个 target 同时导出多套 runtime data export task 时，Build DAG 只校验每个 task output 的 `export_name` 与声明顺序匹配，不再向 codegen 聚合 runtime metadata。MetaOnly codegen export task 在构造每个 `CodeExportInput` 时传入空 `runtime_data_files`。同一 table 同时出现 `items.json`、`items.msgpack` 和 `items.bin` 时也不会影响 CodeModel；格式选择由运行时 loader / reader 完成。未来 manifest 可以记录所有 runtime data export task 的真实 artifact path，但不进入 codegen 决策。
 
-### 9.4.2.2 `CodegenOptions`
+### 9.4.2.2 `CodegenOptions` / future `CodeArtifactOptions`
 
 ```rust
 pub struct CodegenOptions {
@@ -184,6 +186,16 @@ pub enum CaseStyle {
     ScreamingSnakeCase,
 }
 ```
+
+当前 `CodegenOptions` 是 language codegen 的内部配置结构。generator 统一化后，建议把其中和代码文本生成有关、但不依赖 MetaOnly 调度的字段提升为可复用 `CodeArtifactOptions`：
+
+- `file_header` 与 `{{project.*}}` / `{{datetime}}` 模板渲染；
+- `keyword_conflict` 与标识符冲突策略；
+- `i18n` helper 调用形态；
+- `naming` 与 `formatting`；
+- generator-specific option bucket，例如 `[targets.exports.lua_table]`、`[targets.exports.typescript]` 或其他 code-like generator 的专属子表。
+
+这样 Lua 这类 requirements 包含 Data 的 code-like generator 可以复用相同配置解析和 writer 行为，而不需要复制一套 `CodegenOptions`。`CodeExportTarget.language`、`CodeGenerator::language()`、CodeModel 构造等仍属于当前 format-agnostic language codegen adapter，不应强加给 schema doc、runtime table data exporter、asset manifest 或 validation report。
 
 配置来源：
 
