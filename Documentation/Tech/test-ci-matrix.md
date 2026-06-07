@@ -43,10 +43,10 @@ Runtime compliance runner 验证具体 reader adapter 对通用 contract 的解�
 | Rust `serde_json_reader` | JSON | Cargo | 已由 `tests/runtime_compliance.rs` 覆盖。 | 继续作为 local / quick 基线。 |
 | Rust `serde_msgpack_reader` | MessagePack | Cargo | 已由 `tests/runtime_compliance.rs` 通过 JSON → MessagePack materialization 覆盖。 | 增加格式特有 negative case 时同步扩展。 |
 | TypeScript `json_reader` | JSON | Node + TypeScript | 已由 `tests/typescript_runtime_compliance.rs` 覆盖。 | 接入 profile-aware ToolProbe；默认不联网。 |
-| TypeScript `messagepack_reader` | MessagePack | Node + TypeScript + `@msgpack/msgpack` peer 或测试注入 decoder | 未接入。 | 扩展现有 runner 或迁移 package-level test。 |
-| C++ `rapidjson_reader` | JSON | CMake + C++17 + RapidJSON | 未接入 compliance；已有 runtime smoke。 | 新增 CMake / CTest compliance runner。 |
-| C++ `msgpackc_reader` | MessagePack | CMake + C++17 + msgpack-cxx | 未接入 compliance；已有 adapter target。 | 与 RapidJSON runner 共享 logical cases。 |
-| C++ `binary_reader` | Binary | CMake + C++17 | 未接入 compliance；已有 binary runtime smoke。 | 增加 schema/header/materialized binary cases。 |
+| TypeScript `messagepack_reader` | MessagePack | Node + TypeScript + 测试注入 decoder；生产可使用 `@msgpack/msgpack` peer | 已由 `tests/typescript_runtime_compliance.rs` 覆盖 JSON → MessagePack materialization 与 MessagePack-only negative cases。 | 后续迁移到 package-level test 并覆盖 node-fs loader。 |
+| C++ `rapidjson_reader` | JSON | CMake + C++17 + RapidJSON | 已由 `runtime/cpp/compliance_test.cpp` 的 CTest target 覆盖，并保留 runtime smoke。 | 继续扩展 shared logical cases。 |
+| C++ `msgpackc_reader` | MessagePack | CMake + C++17 + msgpack-cxx + RapidJSON fixture materializer | 已由 `runtime/cpp/compliance_test.cpp` 的 CTest target 覆盖 JSON → MessagePack materialization，并保留 runtime smoke。 | 增加更多 MessagePack-only negative cases。 |
+| C++ `binary_reader` | Binary | CMake + C++17 | 已由 `runtime/cpp/compliance_test.cpp` 的 CTest target 覆盖 CFGB header、schema revision、record boundary、sequential rows 和 scalar/list reads。 | 增加 schema-derived binary materializer。 |
 | C# JSON / MessagePack / Binary | 多格式 | .NET SDK | 未接入 compliance；standard_project 已覆盖三格式 smoke。 | 新增 compliance runner project。 |
 | Java JSON / MessagePack / Binary | 多格式 | JDK | 未接入 compliance；standard_project 已覆盖三格式 smoke。 | 新增 JDK-only compliance harness。 |
 

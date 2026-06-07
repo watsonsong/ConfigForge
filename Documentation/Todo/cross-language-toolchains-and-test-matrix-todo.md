@@ -284,7 +284,7 @@ test(runtime): expand compliance fixtures
 test(runtime): add Rust compliance runner
 ```
 
-## [ ] Step 9：补齐 TypeScript MessagePack 与 C++ runtime compliance runner
+## [x] Step 9：补齐 TypeScript MessagePack 与 C++ runtime compliance runner
 
 目标：在已接入 TypeScript JSON reader 的基础上，将同一套 compliance fixture 扩展到 TypeScript MessagePack 与 C++ adapters，验证跨语言 contract 一致性。
 
@@ -295,7 +295,7 @@ test(runtime): add Rust compliance runner
 - runner 接入 ToolProbe / profile policy：缺 Node / npm / tsc / cmake / C++ compiler / 三方库时明确 skip 或 fail-fast。
 - 更新 `Documentation/Tech/test-ci-matrix.md` 和 `Documentation/Implementation/09e-codegen-runtime-adapters.md` 的接入状态。
 
-当前进展：TypeScript JSON reader 已通过 `tests/typescript_runtime_compliance.rs` 接入 Rust 驱动的临时测试工程。Rust 测试负责读取 TOML / JSON fixture 并生成临时 TypeScript case 数据，避免为 JSON reader package 引入 TOML parser 或测试专用依赖；本地缺 `node` 或 `tsc` / `npx` 时明确 skip。TypeScript MessagePack 与 C++ RapidJSON / msgpack-cxx / binary runner 仍待接入。
+当前实现：TypeScript JSON / MessagePack reader 已通过 `tests/typescript_runtime_compliance.rs` 接入 Rust 驱动的临时测试工程。Rust 测试负责读取 TOML / JSON fixture 并生成临时 TypeScript case 数据，MessagePack runner 在临时工程中通过 JSON → MessagePack materialization 与 injectable decoder 覆盖 shared logical cases 和 MessagePack-only negative cases；本地缺 `node` 或 `tsc` / `npx` 时明确 skip，`npx` fallback 仍受 `CONFIG_FORGE_ALLOW_NETWORK=1` 控制。C++ 已新增 `runtime/cpp/compliance_test.cpp`，并由 `runtime/cpp/CMakeLists.txt` 注册 RapidJSON、msgpack-cxx 与 binary CTest compliance target；RapidJSON / msgpack-cxx 复用 canonical fixture，binary target 覆盖 CFGB header、schema revision、record boundary、sequential rows、scalar/list reads 与 binary-only negative case。
 
 验证：
 

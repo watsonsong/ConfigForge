@@ -97,9 +97,9 @@ missing/null 语义：
 | `runtime/rust/serde_json_reader` | Rust JSON reader module | 已有基于 `serde_json` 的 `JsonValueReader` 与 fs loader，并接入 Rust adapter compliance runner。 |
 | `runtime/rust/serde_msgpack_reader` | Rust MessagePack reader module | 已有基于 `rmp-serde` 的 `MessagePackValueReader` 与 fs loader，并接入 Rust adapter compliance runner / standard_project Rust harness。 |
 | `runtime/typescript/json_reader` | TypeScript JSON reader + Node fs loader | 已有 JSON reader，使用结构化类型，不依赖 generated.ts，并通过 Rust 驱动的临时工程接入 JSON compliance runner。 |
-| `runtime/typescript/messagepack_reader` | TypeScript MessagePack value reader | 已有基于 `@msgpack/msgpack` peer dependency 的 reader，复用 shared TypeScript core。 |
-| `runtime/cpp/rapidjson_reader` | C++ RapidJSON reader adapter | 已有 header-only RapidJSON adapter，可用于测试与生产接入。 |
-| `runtime/cpp/msgpackc_reader` | C++ msgpack-cxx reader adapter | 已有 header-only msgpack-cxx adapter，可用于 MessagePack runtime data 接入。 |
+| `runtime/typescript/messagepack_reader` | TypeScript MessagePack value reader | 已有基于 injectable decoder 的 reader，生产可使用 `@msgpack/msgpack` peer；临时 compliance 工程通过 JSON → MessagePack materialization 和测试 decoder 覆盖。 |
+| `runtime/cpp/rapidjson_reader` | C++ RapidJSON reader adapter | 已有 header-only RapidJSON adapter，可用于测试与生产接入，并通过 CMake / CTest compliance target 覆盖。 |
+| `runtime/cpp/msgpackc_reader` | C++ msgpack-cxx reader adapter | 已有 header-only msgpack-cxx adapter，可用于 MessagePack runtime data 接入，并通过 CMake / CTest compliance target 覆盖。 |
 | `runtime/csharp/json_reader` | C# JSON reader template | 已有基于 .NET BCL `System.Text.Json` 的 reader 与 fs loader；standard_project harness 通过薄 adapter 接入每次 generated code 声明的 nominal interface。 |
 | `runtime/csharp/messagepack_reader` | C# MessagePack reader template | 已有 dependency-free MessagePack subset parser / reader 与 fs loader，覆盖当前 JSON 同构 named payload；standard_project harness 已同时验证 JSON / MessagePack。 |
 | `runtime/csharp/binary_reader` | C# binary reader template | 已有 dependency-free schema-aware `bin` reader 与 fs loader，覆盖 CFGB header、schema revision、record boundary、optional bitmap、enum ordinal 和 exhausted check；standard_project harness 已验证 Binary。 |
@@ -109,7 +109,7 @@ missing/null 语义：
 
 主要缺口：
 
-1. `tests/fixtures/runtime_reader_compliance/` 已有首批 canonical payload / expected 文件，并通过 `tests/runtime_compliance.rs` 覆盖 Rust JSON / MessagePack adapters，通过 `tests/typescript_runtime_compliance.rs` 覆盖 TypeScript JSON adapter；TypeScript MessagePack / C++ / C# / Java runner 尚未接入。
+1. `tests/fixtures/runtime_reader_compliance/` 已有首批 canonical payload / expected 文件，并通过 `tests/runtime_compliance.rs` 覆盖 Rust JSON / MessagePack adapters，通过 `tests/typescript_runtime_compliance.rs` 覆盖 TypeScript JSON / MessagePack adapters，通过 `runtime/cpp/compliance_test.cpp` 覆盖 C++ RapidJSON / msgpack-cxx / binary adapters；C# / Java runner 尚未接入。
 2. Rust `reader_core` 与 TypeScript workspace packages 已有 skeleton，core contract 已按 generated parser 直接调用面收敛；但尚未进入稳定发布形态，generated code 默认仍内联 / 声明本地 contract，未默认依赖稳定 Rust crate 或 npm package。
 3. C++ generated inline `IRuntimeDataReader` 已移除 `ReadArrayLength`、`ReadOptionalPresent`、`ReadNext*`、`ReadEnumOrdinal` 等非 generated-facing helper；并提供 `runtime/cpp/core/include/config_forge/runtime/reader.hpp` 与 `runtime_interface = "external"` opt-in，生产项目可逐步从 generated-header-bound 迁移到 stable core header。
 4. C# / Java JSON、MessagePack 与 Binary reader 已沉淀为 copyable template；下一步缺口是接入 runtime compliance runner，并按需补充 Jackson / Gson / Android 友好 adapter。
@@ -184,8 +184,8 @@ Compliance fixtures 长期不按“每种格式维护一整套手写用例”扩
 
 1. 固化 compliance fixture schema：补齐 `collection_envelope.json`、`object_table.json`、`nested_struct.json`、`fragment.json` 和 expected TOML。（已完成首批 case）
 2. Rust runner 先落地到 JSON adapter 或临时 test-only reader，借 `reader_core` 的 trait 形状快速证明 schema 可执行；稳定后应迁到具体 adapter crate / package，不把复杂 reader 逻辑沉淀进薄 core。（已通过 `tests/runtime_compliance.rs` 覆盖 `serde_json_reader` / `serde_msgpack_reader`）
-3. TypeScript runner 作为 package-level test 或 Rust 驱动的临时测试工程，验证 `reader_core`、JSON reader、MessagePack reader 与 node-fs loader。（已用临时测试工程覆盖 JSON reader；MessagePack / node-fs 待接入）
-4. C++ runner 通过 CMake / CTest 接入 RapidJSON、msgpack-cxx 和 binary reader，继续保持第三方依赖显式 opt-in。
+3. TypeScript runner 作为 package-level test 或 Rust 驱动的临时测试工程，验证 `reader_core`、JSON reader、MessagePack reader 与 node-fs loader。（已用临时测试工程覆盖 JSON / MessagePack reader；node-fs 待接入）
+4. C++ runner 通过 CMake / CTest 接入 RapidJSON、msgpack-cxx 和 binary reader，继续保持第三方依赖显式 opt-in。（已覆盖三种 reader 的首批 compliance target）
 5. C# / Java runner 复用现有 JSON / MessagePack / Binary copyable template，先验证 BCL/JDK-only named reader 与 dependency-free binary reader，再决定是否补 Jackson / Gson / Android 友好 adapter。
 
 #### Phase R2：Rust stable runtime crate
@@ -242,7 +242,7 @@ TypeScript 可以最早形成稳定 npm 包，因为 generated interface 是结�
   - `external`：generated code include `config_forge/runtime/reader.hpp`，并使用 core target 的接口类型。
 - 迁移期 adapter 可同时支持 generated-header-bound 和 external interface；新生产文档推荐 external。
 
-稳定前置条件：C++ RapidJSON / msgpack-cxx / binary compliance 通过；standard_project C++ harness 至少有一个 external interface smoke；CMake install / find_package 能重新找到 core 与可选三方依赖。
+稳定前置条件：C++ RapidJSON / msgpack-cxx / binary compliance 通过；standard_project C++ harness 至少有一个 external interface smoke；CMake install / find_package 能重新找到 core 与可选三方依赖。当前首批 CTest compliance target 已覆盖三种 reader，后续需继续补 install / find_package 体验与更多格式特有 negative cases。
 
 #### Phase R5：C# / Java compliance 与 package 形态
 
