@@ -366,6 +366,11 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(
         fixture_root
+            .join("out/client_assets/client_assets_simple.csv")
+            .exists()
+    );
+    assert!(
+        fixture_root
             .join("out/client_lua/reference_game_config/init.lua")
             .exists()
     );
@@ -465,6 +470,14 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
             .starts_with("Name,AssetRef,AssetKind,ReferencedBy,Tables,Fields,RecordKeys,Sources\n")
     );
     assert!(asset_manifest_csv.contains("/Game/Skills/GA_Slash.GA_Slash_C"));
+
+    let simple_asset_manifest_csv =
+        fs::read_to_string(fixture_root.join("out/client_assets/client_assets_simple.csv"))
+            .expect("standard fixture simple asset manifest CSV should be readable");
+    assert!(simple_asset_manifest_csv.starts_with("AssetRef\n"));
+    assert!(simple_asset_manifest_csv.contains("/Game/Skills/GA_Slash.GA_Slash_C"));
+    assert!(!simple_asset_manifest_csv.contains("ReferencedBy"));
+    assert!(!simple_asset_manifest_csv.contains("items["));
 
     let rust_code =
         fs::read_to_string(fixture_root.join("out/client_code/rust/reference_game_config.rs"))

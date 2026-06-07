@@ -266,6 +266,7 @@ POT 渲染要求：
 | --- | --- | --- |
 | `file_name` | `asset_manifest.json` 或 `asset_manifest.csv` | 单文件 manifest 输出名；未设置时随 `format` 选择默认扩展名。 |
 | `format` | `json` | 支持 `json` 与 `csv`。CSV 为 Unreal DataTable 可导入格式。 |
+| `csv_mode` | `unreal_datatable` | 仅 `format = "csv"` 生效。`unreal_datatable` 输出完整 Unreal DataTable 兼容列；`simple` 只输出去重后的 `AssetRef` 一列。 |
 | `deduplicate` | `true` | 是否把相同 `(kind, path)` 合并为一个 entry。 |
 | `include_referenced_by` | `true` | 是否输出 / 展平引用来源。 |
 | `include_source_location` | `false` | 是否附带 source path / row。 |
@@ -277,7 +278,7 @@ POT 渲染要求：
 3. 从 canonicalized `DataSet` 读取非空 asset string，不重新解析资源路径。
 4. CollectionTable 使用 primary index field 生成 record key，缺少 primary index 时回退 source row；ObjectTable 使用 `<object>`。
 5. 默认按 `(kind, path)` 去重并用 `BTreeMap` / `BTreeSet` 保持 deterministic output。
-6. JSON 输出固定 `version`、`target_tags`、`assets`；CSV 输出固定列 `Name,AssetRef,AssetKind,ReferencedBy,Tables,Fields,RecordKeys,Sources`，其中 `Name` 是 ASCII-safe Unreal row name。
+6. JSON 输出固定 `version`、`target_tags`、`assets`；默认 CSV 输出固定列 `Name,AssetRef,AssetKind,ReferencedBy,Tables,Fields,RecordKeys,Sources`，其中 `Name` 是 ASCII-safe Unreal row name；`csv_mode = "simple"` 时只输出 `AssetRef`，并按 canonical asset string 去重排序。
 
 ## 8.8 测试边界
 
@@ -293,4 +294,4 @@ Exporter 模块测试应覆盖：
 - runtime table export 直接通过 `sink.create(path)` + `serialize_table_to_stream()` + `stream.finish()` 写出；custom exporter 测试覆盖 legacy `serialize_table()` fallback 不参与主路径。
 - aggregate export 直接通过 required `export_to_sink()` 写出；custom aggregate 测试覆盖 legacy `export() -> Vec<Artifact>` fallback 不参与主路径，POT / Lua / Asset Manifest 测试覆盖直接落盘内容。
 - struct expanded value 和 JSON cell 都能导出为 nested object。
-- 聚合 data exporter 测试覆盖 POT 抽取、去重、context、source reference、translator comment、target filter、ObjectTable、artifact path conflict；Asset Manifest 测试覆盖 JSON deterministic output、Unreal DataTable CSV header / row name、默认文件名、target-aware row filter 和 registry alias；fragment/struct child text 深度抽取仍属于后续扩展测试。
+- 聚合 data exporter 测试覆盖 POT 抽取、去重、context、source reference、translator comment、target filter、ObjectTable、artifact path conflict；Asset Manifest 测试覆盖 JSON deterministic output、Unreal DataTable CSV header / row name、simple CSV 资源去重清单、默认文件名、target-aware row filter 和 registry alias；fragment/struct child text 深度抽取仍属于后续扩展测试。

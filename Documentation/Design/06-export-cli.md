@@ -164,7 +164,7 @@ Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `typ
 | `messagepack` | 紧凑二进制格式，用于包体和加载性能更敏感的 runtime。 |
 | `bin` | ConfigForge 私有紧密二进制格式；使用 positional typed layout、`.bin` 后缀、最小 magic/version header 和 generated code 的 expected schema revision，不改变 JSON / MessagePack named payload contract。 |
 
-格式实现采用注册工厂模式：核心导出流程只根据 `[[targets.exports]].type` 从 `DataFormatRegistry` 中查找 exporter，不在流程中通过枚举 `match` 分发。新增导出格式应通过注册新的 exporter 实现扩展，避免修改核心导出编排逻辑。当前内置注册器提供 `json`、`messagepack` 与 `bin` 三种 runtime table data exporter，以及 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`、`asset_manifest` / alias `assets` 聚合 exporter；`asset_manifest` 可通过专属选项 `format = "json"` 或 `format = "csv"` 输出 deterministic JSON 或 Unreal DataTable 兼容 CSV。`bin` 的具体 wire format 见 `../Implementation/13-runtime-binary-format-detail-design.md`。
+格式实现采用注册工厂模式：核心导出流程只根据 `[[targets.exports]].type` 从 `DataFormatRegistry` 中查找 exporter，不在流程中通过枚举 `match` 分发。新增导出格式应通过注册新的 exporter 实现扩展，避免修改核心导出编排逻辑。当前内置注册器提供 `json`、`messagepack` 与 `bin` 三种 runtime table data exporter，以及 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`、`asset_manifest` / alias `assets` 聚合 exporter；`asset_manifest` 可通过专属选项 `format = "json"` 或 `format = "csv"` 输出 deterministic JSON 或 CSV，CSV 默认是 Unreal DataTable 兼容列，也可通过 `csv_mode = "simple"` 只输出去重后的资源引用。`bin` 的具体 wire format 见 `../Implementation/13-runtime-binary-format-detail-design.md`。
 
 别名策略：
 
@@ -528,12 +528,18 @@ Asset manifest 同样作为 `[[targets.exports]] type = "asset_manifest"` 的聚
 
 输入：ExportView 中未被过滤的 asset 字段。
 
-输出：deterministic JSON，或通过 `format = "csv"` 输出 Unreal DataTable 可导入 CSV。
+输出：deterministic JSON，或通过 `format = "csv"` 输出 CSV。CSV 默认 `csv_mode = "unreal_datatable"`，也可使用 `csv_mode = "simple"` 输出只有资源引用的一列清单。
 
-当前 CSV 列：
+当前默认 Unreal DataTable CSV 列：
 
 ```csv
 Name,AssetRef,AssetKind,ReferencedBy,Tables,Fields,RecordKeys,Sources
+```
+
+Simple CSV 列：
+
+```csv
+AssetRef
 ```
 
 默认行为：
@@ -541,6 +547,7 @@ Name,AssetRef,AssetKind,ReferencedBy,Tables,Fields,RecordKeys,Sources
 - 不包含被 target / row / field / fragment filter 排除的数据。
 - 默认按 `(kind, path)` 去重并稳定排序。
 - JSON 顶层包含 `version`、`target_tags` 和 `assets`；CSV 首列 `Name` 是稳定生成的 ASCII-safe Unreal DataTable row name。
+- `csv_mode = "simple"` 时忽略来源、表名、字段、record key 和 Unreal row name，仅按 canonical asset string 去重后输出 `AssetRef`。
 
 ## 6.4 Code Generation Comments
 

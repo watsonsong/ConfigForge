@@ -497,6 +497,7 @@ include_referenced_by = true
 | --- | --- | --- |
 | `file_name` | `asset_manifest.json` | 输出文件名。 |
 | `format` | `json` | 支持 `json` / `csv`。CSV 输出为 Unreal DataTable 可导入格式。 |
+| `csv_mode` | `unreal_datatable` | 仅 `format = "csv"` 生效。`unreal_datatable` 输出 Unreal DataTable 兼容列；`simple` 只输出去重后的 `AssetRef` 一列。 |
 | `deduplicate` | `true` | 同一 `(kind, path)` 合并为一个 asset entry。 |
 | `include_referenced_by` | `true` | 是否输出引用来源数组。关闭后只输出资源列表，适合打包器快速消费。 |
 | `include_source_location` | `false` | 是否在 `referenced_by` 中附加 source path / row。默认关闭以保持 manifest 精简。 |
@@ -547,7 +548,7 @@ include_referenced_by = true
 
 ### CSV 输出兼容（Unreal DataTable）
 
-当前实现不拆分 exporter type，而是使用统一 `type = "asset_manifest"`，通过 `format = "csv"` 输出 CSV。CSV 头部使用 Unreal DataTable 可导入的 `Name` 行名列，并保持稳定列顺序：
+当前实现不拆分 exporter type，而是使用统一 `type = "asset_manifest"`，通过 `format = "csv"` 输出 CSV。默认 `csv_mode = "unreal_datatable"`，CSV 头部使用 Unreal DataTable 可导入的 `Name` 行名列，并保持稳定列顺序：
 
 ```csv
 Name,AssetRef,AssetKind,ReferencedBy,Tables,Fields,RecordKeys,Sources
@@ -567,6 +568,27 @@ Name,AssetRef,AssetKind,ReferencedBy,Tables,Fields,RecordKeys,Sources
 | `Sources` | 当 `include_source_location = true` 时输出 source path / row，多个值用 `|` 分隔。 |
 
 CSV 默认同样 `deduplicate = true`，即同一 `(kind, path)` 合并为一个 DataTable row，并把 referenced_by 信息展平到字符串列。若设置 `deduplicate = false`，同一资源的多次引用会分别输出为多行，行名冲突时追加稳定序号。
+
+当只需要把清单交给简单打包脚本、CDN 预热或资源审计流程，不需要 Unreal DataTable 行名、来源、表名、字段和 record key 时，可使用 simple 模式：
+
+```toml
+[[targets.exports]]
+type = "asset_manifest"
+output = "Generated/AssetManifest"
+file_name = "client_assets_simple.csv"
+format = "csv"
+csv_mode = "simple"
+```
+
+Simple CSV 固定只输出一列，并按 canonical asset string 去重和排序：
+
+```csv
+AssetRef
+/Game/Skills/GA_Slash.GA_Slash_C
+assets/icons/classes/warrior.png
+```
+
+Simple 模式不输出 `AssetKind`、`ReferencedBy`、`Tables`、`Fields`、`RecordKeys`、`Sources`，也不生成 Unreal row `Name`；它始终按资源路径去重，避免同一资源被多张表或多行引用时重复出现在简单清单中。
 
 ## 8.8 与 runtime data / codegen 的关系
 

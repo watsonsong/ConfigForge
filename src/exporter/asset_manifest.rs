@@ -29,6 +29,7 @@ pub struct AssetManifestExporter;
 struct AssetManifestOptions {
     file_name: Option<String>,
     format: AssetManifestFormat,
+    csv_mode: AssetManifestCsvMode,
     deduplicate: bool,
     include_referenced_by: bool,
     include_source_location: bool,
@@ -39,6 +40,13 @@ struct AssetManifestOptions {
 enum AssetManifestFormat {
     Json,
     Csv,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum AssetManifestCsvMode {
+    UnrealDatatable,
+    Simple,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +85,7 @@ impl Default for AssetManifestOptions {
         Self {
             file_name: None,
             format: AssetManifestFormat::Json,
+            csv_mode: AssetManifestCsvMode::UnrealDatatable,
             deduplicate: true,
             include_referenced_by: true,
             include_source_location: false,
@@ -157,7 +166,7 @@ fn render_asset_manifest(
     let entries = build_manifest_entries(references, &options);
     let content = match options.format {
         AssetManifestFormat::Json => render_json_manifest(&entries, target_tags, &options)?,
-        AssetManifestFormat::Csv => render_unreal_csv_manifest(&entries, &options)?,
+        AssetManifestFormat::Csv => render_csv_manifest(&entries, &options)?,
     };
     Ok((options.file_name(), content))
 }
@@ -439,6 +448,16 @@ fn render_json_manifest(
     Ok(output)
 }
 
+fn render_csv_manifest(
+    entries: &[AssetManifestEntry],
+    options: &AssetManifestOptions,
+) -> Result<String> {
+    match options.csv_mode {
+        AssetManifestCsvMode::UnrealDatatable => render_unreal_csv_manifest(entries, options),
+        AssetManifestCsvMode::Simple => render_simple_csv_manifest(entries),
+    }
+}
+
 fn render_unreal_csv_manifest(
     entries: &[AssetManifestEntry],
     options: &AssetManifestOptions,
@@ -510,6 +529,26 @@ fn render_unreal_csv_manifest(
                 sources.as_str(),
             ])
             .map_err(csv_error)?;
+    }
+    let bytes = writer.into_inner().map_err(|error| {
+        ConfigForgeError::Validation(format!("failed to finish asset manifest CSV: {error}"))
+    })?;
+    String::from_utf8(bytes).map_err(|error| {
+        ConfigForgeError::Validation(format!("asset manifest CSV is not valid UTF-8: {error}"))
+    })
+}
+
+fn render_simple_csv_manifest(entries: &[AssetManifestEntry]) -> Result<String> {
+    let mut writer = csv::WriterBuilder::new()
+        .terminator(csv::Terminator::Any(b'\n'))
+        .from_writer(Vec::new());
+    writer.write_record(["AssetRef"]).map_err(csv_error)?;
+    for asset_ref in entries
+        .iter()
+        .map(|entry| entry.path.as_str())
+        .collect::<BTreeSet<_>>()
+    {
+        writer.write_record([asset_ref]).map_err(csv_error)?;
     }
     let bytes = writer.into_inner().map_err(|error| {
         ConfigForgeError::Validation(format!("failed to finish asset manifest CSV: {error}"))
@@ -728,6 +767,23 @@ mod tests {
         assert!(output.contains("unreal_skill_class_Game_Skills_GA_Slash_GA_Slash_C"));
         assert!(output.contains("/Game/Skills/GA_Slash.GA_Slash_C"));
         assert!(output.contains("items[id=1].asset|items[id=3].asset"));
+    }
+
+    #[test]
+    fn renders_simple_csv_manifest_with_deduplicated_asset_refs_only() {
+        let linked = linked_meta();
+        let task = task_with_options(BTreeMap::from([
+            ("format".to_owned(), toml::Value::String("csv".to_owned())),
+            (
+                "csv_mode".to_owned(),
+                toml::Value::String("simple".to_owned()),
+            ),
+            ("deduplicate".to_owned(), toml::Value::Boolean(false)),
+        ]));
+        let (_, output) =
+            render_asset_manifest(&task, &linked, &TargetTags::new(["client"]), &data_set())
+                .unwrap();
+        assert_eq!(output, "AssetRef\n/Game/Skills/GA_Slash.GA_Slash_C\n");
     }
 
     #[test]

@@ -54,6 +54,14 @@ format = "csv"
 include_source_location = true
 
 [[targets.exports]]
+name = "asset_manifest_csv_simple"
+type = "asset_manifest"
+output = "out/client_assets"
+file_name = "client_assets_simple.csv"
+format = "csv"
+csv_mode = "simple"
+
+[[targets.exports]]
 type = "lua_table"
 output = "out/client_lua"
 module_name = "reference_game_config"
