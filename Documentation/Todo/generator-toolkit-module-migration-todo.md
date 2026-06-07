@@ -2,8 +2,8 @@
 
 目标：把 build-facing 产物归属统一到 `src/generator/<type_id>/`，让当前 `src/code_artifact/` 和 `src/data_artifact/` 从“具体 generator 归属地”收敛为可复用工具箱。目标命名为：
 
-- `code artifact toolkit`：当前物理路径 `src/code_artifact/`，长期可迁为 `src/code_artifact/`；提供 CodeModel IR、CodeWriter、naming / formatting / keyword conflict、`CodeArtifactOptions`、runtime reader contract helper。
-- `data artifact toolkit`：当前物理路径 `src/data_artifact/`，长期可迁为 `src/data_artifact/`；提供 target-aware payload、`ExportedTablePayload` / `ExportedValue`、runtime table serialization、binary layout、legacy exporter adapter。
+- `code artifact toolkit`：物理路径 `src/code_artifact/`；提供 CodeModel IR、CodeWriter、naming / formatting / keyword conflict、`CodeArtifactOptions`、runtime reader contract helper。
+- `data artifact toolkit`：物理路径 `src/data_artifact/`；提供 target-aware payload、`ExportedTablePayload` / `ExportedValue`、runtime table serialization、binary layout、legacy exporter adapter。
 
 原则：
 
@@ -68,19 +68,19 @@
 - [x] 评估并将 `src/codegen/` 物理重命名为 `src/code_artifact/`，更新模块路径和 `use`。
 - [x] 评估并将 `src/exporter/` 物理重命名为 `src/data_artifact/`，更新模块路径和 `use`。
 - [x] 同步文档中的 source layout / toolkit 路径表述，不再描述为短期 legacy 物理路径。
-- [ ] 清理 glossary 中迁移期 legacy registry / trait 术语，保留最终术语。
+- [x] 清理 glossary 中迁移期 legacy registry / trait 术语，保留最终术语。
 
 ## Phase 7 — Build 依赖收敛检查
 
-- [ ] 确认 `src/build/` 不再直接依赖具体 code/data artifact toolkit 类型；只依赖 `generator`、`artifact`、`runtime_contract` 和必要输入模型。
-- [ ] 确认 `project` 不引用 toolkit 内部 task config 类型，只保留统一 `TargetExportConfig`。
-- [ ] 确认 `runtime_contract` 不依赖 generator/toolkit 上层模块。
-- [ ] 补充模块依赖检查或 grep-based regression，防止 Build 新增按 code/data toolkit 分类分发。
+- [x] 确认 `src/build/` production code 不再直接依赖具体 code/data artifact toolkit 类型；只依赖 `generator`、`artifact`、`runtime_contract` 和必要输入模型。测试代码可继续构造 toolkit facet stub。
+- [x] 确认 `project` 不引用 toolkit 内部 task config 类型，只保留统一 `TargetExportConfig`。
+- [x] 确认 `runtime_contract` 不依赖 generator/toolkit 上层模块。
+- [x] 补充 grep-based regression，防止 Build production code 新增按 code/data toolkit 分类分发。
 
 ## Completion criteria
 
 - [ ] 所有 concrete export type 均位于 `src/generator/<type_id>/` 或有明确保留理由。
-- [ ] `build` 只通过 `GeneratorRegistry` 查询 requirements 与执行 generator。
-- [ ] `code artifact toolkit` / `data artifact toolkit` 不再承担 concrete generator 归属职责。
+- [x] `build` 只通过 `GeneratorRegistry` 查询 requirements 与执行 generator。
+- [x] `code artifact toolkit` / `data artifact toolkit` 不再承担 concrete generator 归属职责。
 - [ ] 文档中的 source layout、glossary、Design、Implementation 与实际代码路径一致。
 - [ ] `cargo fmt`、`cargo test`、相关 CLI integration 和 runtime compliance 测试通过。

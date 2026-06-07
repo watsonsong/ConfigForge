@@ -745,6 +745,29 @@ mod tests {
     }
 
     #[test]
+    fn production_build_code_does_not_dispatch_through_artifact_toolkits() {
+        for (path, source) in [
+            ("src/build/mod.rs", include_str!("mod.rs")),
+            ("src/build/runtime.rs", include_str!("runtime.rs")),
+            ("src/build/target.rs", include_str!("target.rs")),
+        ] {
+            let production_source = source
+                .split("\n#[cfg(test)]")
+                .next()
+                .expect("source split should always yield production section");
+
+            assert!(
+                !production_source.contains("crate::code_artifact"),
+                "{path} production code should route code artifacts through GeneratorRegistry"
+            );
+            assert!(
+                !production_source.contains("crate::data_artifact"),
+                "{path} production code should route data artifacts through GeneratorRegistry"
+            );
+        }
+    }
+
+    #[test]
     fn converts_unix_days_to_civil_date() {
         assert_eq!(civil_from_unix_days(0), (1970, 1, 1));
         assert_eq!(civil_from_unix_days(20_590), (2026, 5, 17));
