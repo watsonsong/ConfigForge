@@ -105,7 +105,7 @@ missing/null 语义：
 
 主要缺口：
 
-1. `runtime/compliance/` 已有首批 canonical payload / expected 文件，并通过 `tests/runtime_compliance.rs` 覆盖 Rust JSON / MessagePack adapters，通过 `tests/typescript_runtime_compliance.rs` 覆盖 TypeScript JSON adapter；TypeScript MessagePack / C++ / C# / Java runner 尚未接入。
+1. `tests/fixtures/runtime_reader_compliance/` 已有首批 canonical payload / expected 文件，并通过 `tests/runtime_compliance.rs` 覆盖 Rust JSON / MessagePack adapters，通过 `tests/typescript_runtime_compliance.rs` 覆盖 TypeScript JSON adapter；TypeScript MessagePack / C++ / C# / Java runner 尚未接入。
 2. Rust `reader_core` 与 TypeScript workspace packages 已有 skeleton，core contract 已按 generated parser 直接调用面收敛；但尚未进入稳定发布形态，generated code 默认仍内联 / 声明本地 contract，未默认依赖稳定 Rust crate 或 npm package。
 3. C++ generated inline `IRuntimeDataReader` 已移除 `ReadArrayLength`、`ReadOptionalPresent`、`ReadNext*`、`ReadEnumOrdinal` 等非 generated-facing helper；stable interface header 仍待补齐，当前 C++ adapter 仍通过宏绑定 generated header 中的 `IRuntimeDataReader` / `IRuntimeDataLoader`。
 4. C# / Java JSON reader 已沉淀为 copyable template；下一步缺口是接入 runtime compliance runner，并按需补充 MessagePack / Jackson / Gson / Android 友好 adapter。
@@ -121,7 +121,7 @@ Runtime adapter 工程化应按“先可执行规范，再稳定接口，再发�
 
 #### Phase R1：Adapter compliance runner MVP
 
-目标是把 `runtime/compliance/` 从 fixture 目录升级为跨语言 / 跨格式 reader adapter 的可执行规范。此阶段不改变 generated code 对第三方库的零强依赖原则，也不要求立即发布 runtime package。
+目标是把 `tests/fixtures/runtime_reader_compliance/` 升级为跨语言 / 跨格式 reader adapter 的可执行规范。此阶段不改变 generated code 对第三方库的零强依赖原则，也不要求立即发布 runtime package。
 
 Compliance runner 的验证对象不是“每个语言必须有一个厚 core 模块”。core 模块只定义 generated code 与 adapter 之间的最小形状：reader / loader trait 或结构化接口、error、decode limits、contract version。某些语言可以只有 generated inline interface 或一份很薄的 structural type；只要 adapter 能被 generated code 通过薄 glue 调用，就可以参与 compliance。真正需要被反复验证的是具体 reader adapter 对 contract 语义的解释，而不是 core 本身承载业务逻辑。
 
@@ -136,7 +136,7 @@ Compliance runner 的验证对象不是“每个语言必须有一个厚 core �
 
 | 测试层 | 验证对象 | 保留原因 | 不应承担 |
 | --- | --- | --- | --- |
-| `runtime/compliance` | reader adapter contract：missing/null、scalar conversion、path/index、decode limits、错误 kind/keyword、格式特有非法 payload。 | 让每个语言/格式 adapter 用同一批最小 logical cases 证明语义一致，适合用户自定义 reader 复用。 | 不验证 codegen 输出 API、target filtering、索引/关系 helper、完整导出流水线。 |
+| `tests/fixtures/runtime_reader_compliance` | reader adapter contract：missing/null、scalar conversion、path/index、decode limits、错误 kind/keyword、格式特有非法 payload。 | 让每个语言/格式 adapter 用同一批最小 logical cases 证明语义一致，适合用户自定义 reader 复用。 | 不验证 codegen 输出 API、target filtering、索引/关系 helper、完整导出流水线。 |
 | `standard_project` integration | 真实项目 fixture 的 build/export/codegen/generated API smoke，以及各语言代表性 runtime 加载路径。 | 覆盖端到端组合风险：Meta/Data/Exporter/Codegen/runtime glue 是否能一起工作。 | 不作为 reader contract 的完整枚举测试；不复制所有 scalar/error 边界。 |
 
 因此需要保留两层测试，但不能维护“两套重复语义用例”。`standard_project` 应保持少量真实世界端到端 smoke；reader contract 边界条件只放在 compliance logical cases 中。若发现 `standard_project` 只是为了覆盖某个 scalar/null/error 细节而增加人工 fixture，应优先迁移到 compliance；若 compliance case 开始依赖 generated API 行为或项目配置语义，也应迁回 integration harness。
@@ -520,7 +520,7 @@ loader = "fs"                      # fs / fetch / none / custom
 canonical payload 应升级为正式 compliance suite，而不是只停留在矩阵描述。推荐目录：
 
 ```text
-runtime/compliance/
+tests/fixtures/runtime_reader_compliance/
   payloads/
     collection_envelope.json
     object_table.json

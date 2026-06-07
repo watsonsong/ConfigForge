@@ -165,9 +165,9 @@ ConfigForge 仓库内的 Unreal C++ 测试只验证 generated code 可以在 lig
 
 ### runtime compliance 和 standard_project integration 有什么区别？
 
-`standard_project` integration harness 验证真实 fixture 的导出数据、generated code、runtime glue 和代表性 API 查询。`runtime/compliance/` 目标是用同一批 canonical logical cases 验证不同语言 / 不同格式 runtime reader adapter 对 reader contract 的解释一致。core 模块本身应尽量薄，只定义接口形状、错误和 limits；compliance 主要验证具体 adapter，而不是要求每种语言都有厚 core。
+`standard_project` integration harness 验证真实 fixture 的导出数据、generated code、runtime glue 和代表性 API 查询。`tests/fixtures/runtime_reader_compliance/` 目标是用同一批 canonical logical cases 验证不同语言 / 不同格式 runtime reader adapter 对 reader contract 的解释一致。core 模块本身应尽量薄，只定义接口形状、错误和 limits；compliance 主要验证具体 adapter，而不是要求每种语言都有厚 core。
 
-二者需要同时保留，但不能维护两套重复语义用例：`standard_project` 只放端到端 smoke 和真实项目组合风险，reader contract 的 scalar、missing/null、index、错误 kind/keyword、格式非法 payload 等边界条件放入 `runtime/compliance/`。新增测试时如果只是验证 reader 语义，应优先进入 compliance；如果验证 generated API、target filtering、索引/关系 helper 或完整 build/export/codegen 组合，才进入 `standard_project` integration。
+二者需要同时保留，但不能维护两套重复语义用例：`standard_project` 只放端到端 smoke 和真实项目组合风险，reader contract 的 scalar、missing/null、index、错误 kind/keyword、格式非法 payload 等边界条件放入 `tests/fixtures/runtime_reader_compliance/`。新增测试时如果只是验证 reader 语义，应优先进入 compliance；如果验证 generated API、target filtering、索引/关系 helper 或完整 build/export/codegen 组合，才进入 `standard_project` integration。
 
 ### 新增一种 reader 格式时，compliance 是否只能测 JSON？
 

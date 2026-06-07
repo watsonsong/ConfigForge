@@ -47,7 +47,7 @@ fn messagepack_adapter() -> ReaderAdapter<msgpack_runtime_reader::MessagePackVal
 }
 
 fn compliance_payload_dir() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/compliance/payloads")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/runtime_reader_compliance/payloads")
 }
 
 fn read_payload(name: &str) -> Value {
@@ -59,7 +59,7 @@ fn read_payload(name: &str) -> Value {
 
 fn read_expected_results() -> toml::Table {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("runtime/compliance/expected/scalar_results.toml");
+        .join("tests/fixtures/runtime_reader_compliance/expected/scalar_results.toml");
     let content = fs::read_to_string(path).expect("scalar expected TOML should exist");
     content
         .parse::<toml::Table>()
@@ -67,8 +67,8 @@ fn read_expected_results() -> toml::Table {
 }
 
 fn read_error_cases() -> toml::Table {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/compliance/expected/error_cases.toml");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/runtime_reader_compliance/expected/error_cases.toml");
     let content = fs::read_to_string(path).expect("error expected TOML should exist");
     content
         .parse::<toml::Table>()

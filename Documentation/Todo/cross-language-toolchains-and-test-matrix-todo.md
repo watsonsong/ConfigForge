@@ -1,6 +1,6 @@
 # Cross-language Toolchains and Test Matrix TODO
 
-本文是跨语言开发环境、generated-code integration harness、runtime adapter compliance suite 的分步推进计划。目标是让 ConfigForge 的 Rust 核心开发不强制依赖所有目标语言环境，同时让 C++ / Unreal C++ / TypeScript / C# / Java / Lua 等可选工具链在本地和 CI 中被明确探测、明确 skip 或 fail-fast，并逐步把 `runtime/compliance/` 从 fixture 目录升级为可执行规范。
+本文是跨语言开发环境、generated-code integration harness、runtime adapter compliance suite 的分步推进计划。目标是让 ConfigForge 的 Rust 核心开发不强制依赖所有目标语言环境，同时让 C++ / Unreal C++ / TypeScript / C# / Java / Lua 等可选工具链在本地和 CI 中被明确探测、明确 skip 或 fail-fast，并逐步把 `tests/fixtures/runtime_reader_compliance/` 升级为可执行规范。
 
 本文放在 `Documentation/Todo/`，只用于短期推进。稳定设计完成后，应把长期规则收敛到 `Documentation/Tech/`、`Documentation/Implementation/09e-codegen-runtime-adapters.md`、`Documentation/Implementation/09h-codegen-generator-api-and-tests.md` 等 canonical 文档，并删除或归档本文。
 
@@ -11,7 +11,7 @@
 - 将现有分散的 `command_exists` 风格探测收敛为统一 ToolProbe / skip / fail-fast 机制。
 - 保证可选语言环境缺失时本地测试明确 skip，不静默降低覆盖；full CI 中声明必需的工具缺失时 fail-fast。
 - 让 `standard_project` generated-code runtime harness 使用统一工具要求、统一 skip 输出和可汇总结果。
-- 将 `runtime/compliance/` 的 canonical payload 与 expected 结果接入自动 runner，先覆盖已有 Rust / TypeScript / C++ runtime adapters，再扩展到 C# / Java 标准 adapters。
+- 将 `tests/fixtures/runtime_reader_compliance/` 的 canonical payload 与 expected 结果接入自动 runner，先覆盖已有 Rust / TypeScript / C++ runtime adapters，再扩展到 C# / Java 标准 adapters。
 - 避免 TypeScript `npx` fallback 在 CI 中隐式联网；所有联网行为必须由显式配置启用。
 - 保持每个步骤可以独立开发、独立验证、独立提交。
 
@@ -20,7 +20,7 @@
 - `tests/cli_integration/support/commands.rs` 已有 `command_exists(command)`，但只返回 bool，缺少版本、路径、stderr 和测试 profile 诊断。
 - `tests/cli_integration/standard_project.rs` 已按语言调用 generated-code runtime harness，覆盖 Rust / C++ / Unreal C++ / C# / Java / TypeScript / Lua。
 - 多数 harness 已能在缺工具时 `eprintln!` skip，但 skip 逻辑分散，格式不统一，且需要继续清理静默 skip。
-- `runtime/compliance/` 已有初始 JSON payload 和 expected TOML，但尚未形成自动 runner，也未覆盖文档中规划的全部 canonical cases。
+- `tests/fixtures/runtime_reader_compliance/` 已有初始 JSON payload 和 expected TOML，但尚未形成自动 runner，也未覆盖文档中规划的全部 canonical cases。
 - C# / Java JSON reader 已抽出到 `runtime/csharp/json_reader` 与 `runtime/java/json_reader`，standard_project harness 通过薄 adapter 接入 generated loader / reader interface；尚未接入 runtime compliance runner。
 
 ## 全局验收规则
@@ -219,7 +219,7 @@ test(integration): gate network-dependent tool fallbacks
 
 ## [x] Step 7：补齐 runtime compliance fixture schema
 
-目标：先把 `runtime/compliance/` 的 case 范围补齐到可执行规范需要的最小集合，为 runner 做准备。
+目标：先把 `tests/fixtures/runtime_reader_compliance/` 的 case 范围补齐到可执行规范需要的最小集合，为 runner 做准备。
 
 主要修改：
 
@@ -248,12 +248,12 @@ test(runtime): expand compliance fixtures
 
 ## [x] Step 8：实现 Rust runtime compliance runner MVP
 
-目标：让 `runtime/compliance/` 首先被 Rust JSON / MessagePack runtime reader 消费，证明 fixture schema 可执行。
+目标：让 `tests/fixtures/runtime_reader_compliance/` 首先被 Rust JSON / MessagePack runtime reader 消费，证明 fixture schema 可执行。
 
 主要修改：
 
 - 新增 Rust compliance runner 测试入口，可放在 runtime/rust adapter crate tests 或 ConfigForge 集成测试中。
-- 读取 `runtime/compliance/payloads` 和 `runtime/compliance/expected`。
+- 读取 `tests/fixtures/runtime_reader_compliance/payloads` 和 `tests/fixtures/runtime_reader_compliance/expected`。
 - 复用现有 Rust JSON / MessagePack runtime reader templates。
 - 覆盖 scalar、missing/null、escaped string、collection envelope 等首批 cases。
 - 对错误 case 断言错误类型或错误消息的稳定关键字，不要求不同语言错误文本完全一致。
@@ -329,7 +329,7 @@ feat(runtime): add C# and Java JSON adapters
 
 ## [ ] Step 11：接入 C# / Java runtime compliance runner
 
-目标：让 C# / Java 标准 adapter 也消费 `runtime/compliance/`，覆盖与 Rust / TypeScript / C++ 一致的 reader contract。
+目标：让 C# / Java 标准 adapter 也消费 `tests/fixtures/runtime_reader_compliance/`，覆盖与 Rust / TypeScript / C++ 一致的 reader contract。
 
 主要修改：
 

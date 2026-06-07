@@ -85,7 +85,7 @@ fn copy_runtime_sources(src_dir: &Path) {
 
 fn write_compliance_data(src_dir: &Path) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let payload_dir = root.join("runtime/compliance/payloads");
+    let payload_dir = root.join("tests/fixtures/runtime_reader_compliance/payloads");
     let mut payloads = BTreeMap::new();
     for name in [
         "scalar_compat.json",
@@ -101,8 +101,12 @@ fn write_compliance_data(src_dir: &Path) {
         payloads.insert(name.to_owned(), content);
     }
 
-    let expected = read_toml_as_json(root.join("runtime/compliance/expected/scalar_results.toml"));
-    let errors = read_toml_as_json(root.join("runtime/compliance/expected/error_cases.toml"));
+    let expected = read_toml_as_json(
+        root.join("tests/fixtures/runtime_reader_compliance/expected/scalar_results.toml"),
+    );
+    let errors = read_toml_as_json(
+        root.join("tests/fixtures/runtime_reader_compliance/expected/error_cases.toml"),
+    );
 
     let payloads_json =
         serde_json::to_string_pretty(&payloads).expect("compliance payload map should serialize");
