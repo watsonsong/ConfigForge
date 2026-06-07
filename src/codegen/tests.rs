@@ -894,6 +894,7 @@ fn code_model_filters_tables_fields_and_indexes_by_target_tags() {
             [[tables.fields]]
             name = "icon"
             type = "asset"
+            asset_kind = "ui_icon"
             export_when = { any = ["client"] }
 
             [[tables.fields]]
@@ -914,6 +915,9 @@ fn code_model_filters_tables_fields_and_indexes_by_target_tags() {
             [[tables.fields]]
             name = "id"
             type = "int"
+
+            [[asset_kinds]]
+            name = "ui_icon"
         "#,
     )
     .expect("meta should load");

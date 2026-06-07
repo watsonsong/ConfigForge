@@ -28,8 +28,16 @@ export_when = { any = ["client"] }
 [[tables.fields]]
 name = "icon"
 type = "asset"
+asset_kind = "legacy_class_icon"
 required = true
 export_when = { any = ["client"] }
+
+[[asset_kinds]]
+name = "legacy_class_icon"
+input = "path"
+path_style = "relative"
+extension_policy = "required"
+extensions = [".png"]
 
 [[tables.indexes]]
 name = "by_id"

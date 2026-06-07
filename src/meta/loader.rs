@@ -79,12 +79,14 @@ fn merge_models(models: Vec<MetaModel>) -> MetaModel {
         enums: Vec::new(),
         structs: Vec::new(),
         tables: Vec::new(),
+        asset_kinds: Vec::new(),
     };
 
     for mut model in models {
         merged.enums.append(&mut model.enums);
         merged.structs.append(&mut model.structs);
         merged.tables.append(&mut model.tables);
+        merged.asset_kinds.append(&mut model.asset_kinds);
     }
 
     merged

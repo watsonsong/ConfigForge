@@ -19,7 +19,16 @@
 
 ## Step 1：Meta schema 接入 asset_kind
 
-状态：待开始
+状态：已完成（提交前验证通过）
+
+完成记录：
+
+- Raw / linked MetaModel 已接入 `asset_kind` 字段和顶层 `[[asset_kinds]]`。
+- Project embedded Meta extraction 已保留 `asset_kinds`，避免 Project Config 中的 Meta 片段丢失定义。
+- Meta validate 已强制 `type = "asset"` 声明 `asset_kind`，并拒绝非 asset 字段声明 `asset_kind`。
+- 已校验重复 `asset_kinds[].name` 和非法 regex pattern。
+- 标准工程现有 asset 字段已临时声明 legacy asset kind，保持当前集成测试通过；Step 7 再切换到 Unreal 模式 fixture。
+- 验证命令：`cargo fmt --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml" && cargo test --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml"`。
 
 工作项：
 

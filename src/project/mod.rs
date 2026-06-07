@@ -12,7 +12,7 @@ use serde::Deserialize;
 use crate::{
     ConfigForgeError, Result,
     codegen::CodeExportProject,
-    meta::{EnumMeta, MetaModel, StructMeta, TableMeta},
+    meta::{AssetKindMeta, EnumMeta, MetaModel, StructMeta, TableMeta},
 };
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -27,6 +27,8 @@ pub struct ProjectConfig {
     pub structs: Vec<StructMeta>,
     #[serde(default)]
     pub tables: Vec<TableMeta>,
+    #[serde(default)]
+    pub asset_kinds: Vec<AssetKindMeta>,
     #[serde(default)]
     pub targets: Vec<TargetConfig>,
 }
@@ -93,6 +95,7 @@ impl ProjectConfig {
             enums: self.enums.clone(),
             structs: self.structs.clone(),
             tables: self.tables.clone(),
+            asset_kinds: self.asset_kinds.clone(),
         }
     }
 }
@@ -181,6 +184,7 @@ fn merge_project_configs(fragments: Vec<ProjectConfig>) -> ProjectConfig {
         enums: Vec::new(),
         structs: Vec::new(),
         tables: Vec::new(),
+        asset_kinds: Vec::new(),
         targets: Vec::new(),
     };
 
@@ -200,6 +204,7 @@ fn merge_project_configs(fragments: Vec<ProjectConfig>) -> ProjectConfig {
         merged.enums.append(&mut fragment.enums);
         merged.structs.append(&mut fragment.structs);
         merged.tables.append(&mut fragment.tables);
+        merged.asset_kinds.append(&mut fragment.asset_kinds);
         merged.targets.append(&mut fragment.targets);
     }
 

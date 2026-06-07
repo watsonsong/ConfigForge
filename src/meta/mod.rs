@@ -8,8 +8,10 @@ mod model;
 mod validate;
 
 pub use diagnostic::{MetaDiagnostic, MetaDiagnosticCode};
+#[allow(unused_imports)]
 pub use model::{
-    EnumMeta, EnumValueMeta, ExportCondition, FieldForeignKeyMeta, FieldMeta,
+    AssetExtensionPolicy, AssetInputKind, AssetKindMeta, AssetPathStyle, AssetRegexRuleMeta,
+    AssetRegexTarget, EnumMeta, EnumValueMeta, ExportCondition, FieldForeignKeyMeta, FieldMeta,
     ForeignKeyDeclarationSite, ForeignKeyMeta, FragmentMeta, IndexMeta, LinkedField,
     LinkedFieldMeta, LinkedForeignKeyMeta, LinkedFragmentMeta, LinkedFragmentPayload,
     LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType, LinkedTableMeta,

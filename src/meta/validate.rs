@@ -4,13 +4,15 @@
 use std::collections::BTreeSet;
 
 use super::{
-    FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel, PrimitiveFieldType,
-    TableKind, TableMeta, ValidatorMeta, ValueLayout, list_element_type_name, model::normalize_tag,
+    AssetKindMeta, FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
+    PrimitiveFieldType, TableKind, TableMeta, ValidatorMeta, ValueLayout, list_element_type_name,
+    model::normalize_tag,
 };
 
 pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
     let mut diagnostics = Vec::new();
     validate_unique_names(model, &mut diagnostics);
+    validate_asset_kinds(model, &mut diagnostics);
     validate_enums(model, &mut diagnostics);
     for struct_meta in &model.structs {
         validate_struct_meta(model, struct_meta, &mut diagnostics);
@@ -56,6 +58,7 @@ fn validate_struct_meta(
         }
         validate_deprecated_field_export_flags(&owner, field, diagnostics);
         validate_unsupported_field_options(&owner, field, diagnostics);
+        validate_asset_field_options(model, &owner, field, diagnostics);
         validate_field_layout(model, &owner, field, diagnostics);
         validate_default_value(model, &owner, field, diagnostics);
     }
@@ -83,7 +86,110 @@ fn validate_unique_names(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic
         "struct",
         diagnostics,
     );
+    validate_names(
+        model
+            .asset_kinds
+            .iter()
+            .map(|asset_kind| asset_kind.name.as_str()),
+        MetaDiagnosticCode::DuplicateAssetKindName,
+        "asset kind",
+        diagnostics,
+    );
     validate_type_namespace_names(model, diagnostics);
+}
+
+fn validate_asset_kinds(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic>) {
+    for asset_kind in &model.asset_kinds {
+        validate_asset_kind_meta(asset_kind, diagnostics);
+    }
+}
+
+fn validate_asset_kind_meta(asset_kind: &AssetKindMeta, diagnostics: &mut Vec<MetaDiagnostic>) {
+    let owner = format!("asset kind `{}`", asset_kind.name);
+    if asset_kind.name.trim().is_empty() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::InvalidAssetKindDeclaration,
+            "asset kind name must be non-empty",
+        ));
+    }
+    for (field, values) in [
+        ("search_paths", &asset_kind.search_paths),
+        ("base_dirs", &asset_kind.base_dirs),
+        ("extensions", &asset_kind.extensions),
+        ("strip_wrappers", &asset_kind.strip_wrappers),
+        ("require_sidecars", &asset_kind.require_sidecars),
+        ("allow_path_prefixes", &asset_kind.allow_path_prefixes),
+        ("deny_path_prefixes", &asset_kind.deny_path_prefixes),
+        ("deny_when_tags", &asset_kind.deny_when_tags),
+        ("name_prefixes", &asset_kind.name_prefixes),
+        ("name_suffixes", &asset_kind.name_suffixes),
+        ("allow_patterns", &asset_kind.allow_patterns),
+        ("deny_patterns", &asset_kind.deny_patterns),
+    ] {
+        for value in values {
+            if value.trim().is_empty() {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidAssetKindDeclaration,
+                    format!("{owner} {field} contains an empty value"),
+                ));
+            }
+        }
+    }
+    for tag in &asset_kind.deny_when_tags {
+        if normalize_tag(tag.clone()).as_deref() != Some(tag.as_str()) {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidAssetKindDeclaration,
+                format!("{owner} deny_when_tags value `{tag}` is invalid; tags must be non-empty and trimmed"),
+            ));
+        }
+    }
+    for pattern in asset_kind
+        .allow_patterns
+        .iter()
+        .chain(asset_kind.deny_patterns.iter())
+    {
+        validate_regex_pattern(&owner, pattern, diagnostics);
+    }
+    let mut regex_rule_names = BTreeSet::new();
+    for rule in &asset_kind.regex_rules {
+        if rule.name.trim().is_empty() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidAssetKindDeclaration,
+                format!("{owner} regex rule name must be non-empty"),
+            ));
+        }
+        if !regex_rule_names.insert(rule.name.as_str()) {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidAssetKindDeclaration,
+                format!(
+                    "{owner} regex rule `{}` is defined more than once",
+                    rule.name
+                ),
+            ));
+        }
+        for tag in &rule.when_tags {
+            if normalize_tag(tag.clone()).as_deref() != Some(tag.as_str()) {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidAssetKindDeclaration,
+                    format!("{owner} regex rule `{}` when_tags value `{tag}` is invalid; tags must be non-empty and trimmed", rule.name),
+                ));
+            }
+        }
+        validate_regex_pattern(
+            &format!("{owner} regex rule `{}`", rule.name),
+            &rule.pattern,
+            diagnostics,
+        );
+    }
+}
+
+fn validate_regex_pattern(owner: &str, pattern: &str, diagnostics: &mut Vec<MetaDiagnostic>) {
+    if let Err(error) = regex::Regex::new(pattern) {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::InvalidAssetKindDeclaration,
+            format!("{owner} regex pattern `{pattern}` is invalid: {error}"),
+        ));
+    }
 }
 
 fn validate_type_namespace_names(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic>) {
@@ -206,6 +312,12 @@ fn validate_table_meta(
             diagnostics,
         );
         validate_unsupported_field_options(&format!("table `{}`", table.name), field, diagnostics);
+        validate_asset_field_options(
+            model,
+            &format!("table `{}`", table.name),
+            field,
+            diagnostics,
+        );
         validate_field_layout(
             model,
             &format!("table `{}`", table.name),
@@ -780,6 +892,7 @@ fn validate_fragment_meta(
         );
         validate_deprecated_field_export_flags(&owner, field, diagnostics);
         validate_unsupported_field_options(&owner, field, diagnostics);
+        validate_asset_field_options(model, &owner, field, diagnostics);
         validate_field_layout(model, &owner, field, diagnostics);
         validate_default_value(model, &owner, field, diagnostics);
     }
@@ -858,6 +971,55 @@ fn validate_unsupported_field_options(
             MetaDiagnosticCode::UnsupportedFeature,
             format!(
                 "{owner} field `{}` uses `field_number`, but field numbers are reserved for future schema/codegen formats and are not implemented yet",
+                field.name
+            ),
+        ));
+    }
+}
+
+fn validate_asset_field_options(
+    model: &MetaModel,
+    owner: &str,
+    field: &FieldMeta,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    let Some(asset_kind) = field.asset_kind.as_deref() else {
+        if field.is_asset_scalar() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidAssetKindDeclaration,
+                format!(
+                    "{owner} field `{}` uses type `asset` but does not declare `asset_kind`",
+                    field.name
+                ),
+            ));
+        }
+        return;
+    };
+
+    if asset_kind.trim().is_empty() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::InvalidAssetKindDeclaration,
+            format!(
+                "{owner} field `{}` asset_kind must be non-empty",
+                field.name
+            ),
+        ));
+    }
+    if !field.is_asset_scalar() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::InvalidAssetKindDeclaration,
+            format!(
+                "{owner} field `{}` declares `asset_kind`, but only type `asset` fields may use it",
+                field.name
+            ),
+        ));
+        return;
+    }
+    if model.asset_kind(asset_kind).is_none() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::InvalidAssetKindDeclaration,
+            format!(
+                "{owner} field `{}` references unknown asset_kind `{asset_kind}`",
                 field.name
             ),
         ));

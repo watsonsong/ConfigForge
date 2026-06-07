@@ -78,8 +78,16 @@ export_when = { any = ["client"] }
 [[tables.fragments.fields]]
 name = "skill_asset"
 type = "asset"
+asset_kind = "legacy_skill_asset"
 required = true
 export_when = { any = ["client"] }
+
+[[asset_kinds]]
+name = "legacy_skill_asset"
+input = "path"
+path_style = "relative"
+extension_policy = "required"
+extensions = [".asset"]
 
 [[tables.indexes]]
 name = "by_id"

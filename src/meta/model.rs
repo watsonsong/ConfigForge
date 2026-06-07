@@ -13,8 +13,10 @@ pub use linked::{
     LinkedIndexMeta, LinkedMetaModel, LinkedStructMeta, LinkedStructType, LinkedTableMeta,
 };
 pub use raw::{
-    EnumMeta, EnumValueMeta, FieldForeignKeyMeta, FieldMeta, ForeignKeyDeclarationSite,
-    ForeignKeyMeta, FragmentMeta, IndexMeta, MetaModel, ResolvedForeignKeyMeta, SourceRef,
-    StructMeta, TableMeta, ValidatorMeta, list_element_type_name,
+    AssetExtensionPolicy, AssetInputKind, AssetKindMeta, AssetPathStyle, AssetRegexRuleMeta,
+    AssetRegexTarget, EnumMeta, EnumValueMeta, FieldForeignKeyMeta, FieldMeta,
+    ForeignKeyDeclarationSite, ForeignKeyMeta, FragmentMeta, IndexMeta, MetaModel,
+    ResolvedForeignKeyMeta, SourceRef, StructMeta, TableMeta, ValidatorMeta,
+    list_element_type_name,
 };
 pub use types::{PrimitiveFieldType, TableKind, ValidationSeverity, ValueLayout};

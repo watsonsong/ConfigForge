@@ -782,6 +782,7 @@ fn csharp_type_mapping_fixture() -> MetaModel {
             [[tables.fields]]
             name = "icon"
             type = "asset"
+            asset_kind = "ui_icon"
             required = true
 
             [[tables.fields]]
@@ -804,6 +805,9 @@ fn csharp_type_mapping_fixture() -> MetaModel {
             fields = ["id"]
             unique = true
             primary = true
+
+            [[asset_kinds]]
+            name = "ui_icon"
         "#,
     )
     .expect("meta should parse")

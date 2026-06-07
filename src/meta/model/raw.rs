@@ -18,6 +18,108 @@ pub struct MetaModel {
     pub structs: Vec<StructMeta>,
     #[serde(default)]
     pub tables: Vec<TableMeta>,
+    #[serde(default)]
+    pub asset_kinds: Vec<AssetKindMeta>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AssetKindMeta {
+    pub name: String,
+    #[serde(default)]
+    pub search_paths: Vec<String>,
+    #[serde(default)]
+    pub base_dirs: Vec<String>,
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    #[serde(default)]
+    pub input: Option<AssetInputKind>,
+    #[serde(default)]
+    pub path_style: Option<AssetPathStyle>,
+    #[serde(default)]
+    pub extension_policy: Option<AssetExtensionPolicy>,
+    #[serde(default)]
+    pub strip_wrappers: Vec<String>,
+    #[serde(default)]
+    pub object_separator: Option<String>,
+    #[serde(default)]
+    pub object_name: Option<String>,
+    #[serde(default)]
+    pub case_sensitive: Option<bool>,
+    #[serde(default)]
+    pub require_existing: Option<bool>,
+    #[serde(default)]
+    pub require_sidecars: Vec<String>,
+    #[serde(default)]
+    pub allow_path_prefixes: Vec<String>,
+    #[serde(default)]
+    pub deny_path_prefixes: Vec<String>,
+    #[serde(default)]
+    pub deny_when_tags: Vec<String>,
+    #[serde(default)]
+    pub name_prefixes: Vec<String>,
+    #[serde(default)]
+    pub name_suffixes: Vec<String>,
+    #[serde(default)]
+    pub allow_patterns: Vec<String>,
+    #[serde(default)]
+    pub deny_patterns: Vec<String>,
+    #[serde(default)]
+    pub regex_rules: Vec<AssetRegexRuleMeta>,
+    #[serde(default)]
+    pub allow_auto_complete: bool,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetInputKind {
+    Path,
+    String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetPathStyle {
+    Relative,
+    Mounted,
+    MountedObject,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetExtensionPolicy {
+    Required,
+    Forbidden,
+    Optional,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AssetRegexRuleMeta {
+    pub name: String,
+    #[serde(default)]
+    pub target: Option<AssetRegexTarget>,
+    pub pattern: String,
+    #[serde(default)]
+    pub severity: ValidationSeverity,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub when_tags: Vec<String>,
+    #[serde(default)]
+    pub invert: bool,
+    #[serde(default)]
+    pub case_sensitive: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetRegexTarget {
+    RawInput,
+    LogicalRef,
+    SearchPathRelative,
+    FileName,
+    Stem,
+    ObjectName,
+    ExportRef,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -114,6 +216,8 @@ pub struct FieldMeta {
     pub desc: Option<String>,
     #[serde(rename = "type")]
     pub field_type: String,
+    #[serde(default)]
+    pub asset_kind: Option<String>,
     #[serde(default)]
     pub required: bool,
     #[serde(default)]
@@ -252,6 +356,12 @@ impl MetaModel {
         self.structs
             .iter()
             .find(|struct_meta| struct_meta.name == name)
+    }
+
+    pub fn asset_kind(&self, name: &str) -> Option<&AssetKindMeta> {
+        self.asset_kinds
+            .iter()
+            .find(|asset_kind| asset_kind.name == name)
     }
 
     pub fn linked_enum<'meta>(
@@ -411,6 +521,10 @@ impl TableMeta {
 impl FieldMeta {
     pub fn primitive_type(&self) -> Option<PrimitiveFieldType> {
         PrimitiveFieldType::parse(&self.field_type)
+    }
+
+    pub fn is_asset_scalar(&self) -> bool {
+        self.primitive_type() == Some(PrimitiveFieldType::Asset)
     }
 
     pub fn foreign_key_scalar_type_name(&self) -> &str {

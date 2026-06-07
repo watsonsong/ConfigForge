@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use super::{
-    EnumMeta, ExportCondition, FieldMeta, ForeignKeyDeclarationSite, FragmentMeta, IndexMeta,
-    MetaModel, PrimitiveFieldType, StructMeta, TableMeta, TargetTags,
+    AssetKindMeta, EnumMeta, ExportCondition, FieldMeta, ForeignKeyDeclarationSite, FragmentMeta,
+    IndexMeta, MetaModel, PrimitiveFieldType, StructMeta, TableMeta, TargetTags,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,6 +28,7 @@ pub struct LinkedMetaModel<'meta> {
     pub structs: Vec<LinkedStructMeta<'meta>>,
     enum_index: HashMap<&'meta str, &'meta EnumMeta>,
     struct_meta_index: HashMap<&'meta str, &'meta StructMeta>,
+    asset_kind_index: HashMap<&'meta str, &'meta AssetKindMeta>,
     table_index: HashMap<&'meta str, usize>,
     struct_index: HashMap<&'meta str, usize>,
 }
@@ -106,6 +107,11 @@ impl<'meta> LinkedMetaModel<'meta> {
             .iter()
             .map(|struct_meta| (struct_meta.name.as_str(), struct_meta))
             .collect();
+        let asset_kind_index = model
+            .asset_kinds
+            .iter()
+            .map(|asset_kind| (asset_kind.name.as_str(), asset_kind))
+            .collect();
         let table_index = tables
             .iter()
             .enumerate()
@@ -122,6 +128,7 @@ impl<'meta> LinkedMetaModel<'meta> {
             structs,
             enum_index,
             struct_meta_index,
+            asset_kind_index,
             table_index,
             struct_index,
         }
@@ -133,6 +140,10 @@ impl<'meta> LinkedMetaModel<'meta> {
 
     pub fn raw_struct_meta(&self, name: &str) -> Option<&'meta StructMeta> {
         self.struct_meta_index.get(name).copied()
+    }
+
+    pub fn asset_kind(&self, name: &str) -> Option<&'meta AssetKindMeta> {
+        self.asset_kind_index.get(name).copied()
     }
 
     pub fn table(&self, name: &str) -> Option<&LinkedTableMeta<'meta>> {

@@ -777,10 +777,14 @@ fn accepts_canonical_and_legacy_primitive_field_types() {
             [[tables.fields]]
             name = "asset_value"
             type = "asset"
+            asset_kind = "generic_asset"
 
             [[tables.fields]]
             name = "int_list"
             type = "int[]"
+
+            [[asset_kinds]]
+            name = "generic_asset"
         "#,
     );
 
@@ -825,6 +829,165 @@ fn accepts_canonical_and_legacy_primitive_field_types() {
             .foreign_key_scalar_type_name(),
         "int"
     );
+}
+
+#[test]
+fn parses_asset_kinds_and_field_asset_kind_links() {
+    let meta = parse(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "icon"
+            type = "asset"
+            asset_kind = "unreal_icon"
+
+            [[asset_kinds]]
+            name = "unreal_icon"
+            search_paths = ["unreal_game"]
+            base_dirs = ["UI"]
+            extensions = [".uasset"]
+            input = "path"
+            path_style = "mounted_object"
+            extension_policy = "required"
+            strip_wrappers = ["Texture2D'{value}'"]
+            object_separator = "."
+            object_name = "{stem}"
+            case_sensitive = true
+            require_existing = true
+            require_sidecars = ["{path}.meta"]
+            allow_path_prefixes = ["/Game/UI/"]
+            deny_path_prefixes = ["/Game/UI/Dev/"]
+            deny_when_tags = ["shipping"]
+            name_prefixes = ["T_"]
+            name_suffixes = ["_Icon"]
+            allow_patterns = ["^/Game/UI/.+$"]
+            deny_patterns = ["Dev"]
+            allow_auto_complete = true
+
+            [[asset_kinds.regex_rules]]
+            name = "canonical_unreal_icon"
+            target = "logical_ref"
+            pattern = "^/Game/UI/.+\\..+$"
+            severity = "error"
+            message = "must be a mounted object path"
+            when_tags = ["client"]
+        "#,
+    );
+
+    let field = meta.table("items").unwrap().field("icon").unwrap();
+    assert_eq!(field.asset_kind.as_deref(), Some("unreal_icon"));
+    let asset_kind = meta.asset_kind("unreal_icon").unwrap();
+    assert_eq!(asset_kind.search_paths, ["unreal_game"]);
+    assert_eq!(asset_kind.base_dirs, ["UI"]);
+    assert_eq!(asset_kind.extensions, [".uasset"]);
+    assert!(asset_kind.allow_auto_complete);
+    assert_eq!(asset_kind.regex_rules[0].name, "canonical_unreal_icon");
+
+    let linked = meta.link().expect("meta should link");
+    assert!(linked.asset_kind("unreal_icon").is_some());
+}
+
+#[test]
+fn rejects_asset_fields_without_asset_kind() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "icon"
+            type = "asset"
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::InvalidAssetKindDeclaration
+            && diagnostic.message.contains("does not declare `asset_kind`")
+    }));
+}
+
+#[test]
+fn rejects_asset_kind_on_non_asset_fields() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "name"
+            type = "string"
+            asset_kind = "ui_text"
+
+            [[asset_kinds]]
+            name = "ui_text"
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::InvalidAssetKindDeclaration
+            && diagnostic
+                .message
+                .contains("only type `asset` fields may use it")
+    }));
+}
+
+#[test]
+fn rejects_duplicate_asset_kind_names() {
+    let diagnostics = diagnostics(
+        r#"
+            [[asset_kinds]]
+            name = "ui_icon"
+
+            [[asset_kinds]]
+            name = "ui_icon"
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::DuplicateAssetKindName
+            && diagnostic
+                .message
+                .contains("asset kind `ui_icon` is defined more than once")
+    }));
+}
+
+#[test]
+fn rejects_invalid_asset_regex_patterns() {
+    let diagnostics = diagnostics(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "icon"
+            type = "asset"
+            asset_kind = "ui_icon"
+
+            [[asset_kinds]]
+            name = "ui_icon"
+            allow_patterns = ["("]
+
+            [[asset_kinds.regex_rules]]
+            name = "broken"
+            pattern = "["
+        "#,
+    );
+
+    let invalid_regex_count = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.code == MetaDiagnosticCode::InvalidAssetKindDeclaration
+                && diagnostic.message.contains("regex pattern")
+                && diagnostic.message.contains("is invalid")
+        })
+        .count();
+    assert_eq!(invalid_regex_count, 2);
 }
 
 #[test]

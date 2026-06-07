@@ -69,5 +69,7 @@ pub enum MetaDiagnosticCode {
     InvalidSourceDeclaration,
     InvalidValidatorConfig,
     InvalidForeignKeyDeclaration,
+    DuplicateAssetKindName,
+    InvalidAssetKindDeclaration,
     UnsupportedFeature,
 }
