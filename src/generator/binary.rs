@@ -5,8 +5,9 @@ use std::collections::BTreeMap;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::ArtifactWriteStream,
+    artifact::{ArtifactSink, ArtifactWriteStream},
     data::{ArrayElementValue, DataResolver, DataTable, DataValue, ResolvedValue, ScalarValue},
+    exporter::{DataFormatExporter, export_runtime_data_to_sink, runtime_table_artifacts},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedFragmentMeta, LinkedStructType, LinkedTableMeta,
         PrimitiveFieldType, TableKind, TargetTags,
@@ -14,7 +15,7 @@ use crate::{
     runtime_contract::binary_schema_revision,
 };
 
-use super::DataFormatExporter;
+use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements};
 
 pub const FORMAT: &str = "bin";
 
@@ -59,6 +60,52 @@ impl DataFormatExporter for BinaryDataExporter {
         stream: &mut ArtifactWriteStream,
     ) -> Result<()> {
         BinaryEncoder::new(table_meta, target_tags, stream).write_table(table)
+    }
+}
+
+impl ArtifactGenerator for BinaryDataExporter {
+    fn type_id(&self) -> &'static str {
+        FORMAT
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["binary"]
+    }
+
+    fn requirements(&self) -> GeneratorRequirements {
+        GeneratorRequirements::meta_and_data()
+    }
+
+    fn generate_to_sink(
+        &self,
+        _input: &GeneratorCommonInput<'_>,
+        _sink: &ArtifactSink,
+    ) -> Result<()> {
+        Err(ConfigForgeError::Validation(format!(
+            "generator `{}` requires Data-backed artifact input",
+            FORMAT
+        )))
+    }
+
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<std::path::PathBuf>> {
+        runtime_table_artifacts(&input.output, input.meta, &input.target_tags, self)
+    }
+
+    fn generate_with_data_to_sink(
+        &self,
+        input: &GeneratorDataInput<'_, '_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        export_runtime_data_to_sink(
+            &input.common.output,
+            input.common.meta,
+            &input.common.target_tags,
+            input.data_set,
+            self,
+            input.pool,
+            sink,
+        )
+        .map(|_| ())
     }
 }
 

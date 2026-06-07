@@ -6,13 +6,16 @@
 mod adapter;
 mod artifact_generator;
 mod asset_manifest;
+mod binary;
 mod cpp;
 mod cpp_unreal;
 mod csharp;
 mod gettext_pot;
 mod input;
 mod java;
+mod json;
 mod lua_table;
+mod messagepack;
 mod registry;
 mod requirements;
 mod rust;
@@ -21,6 +24,7 @@ mod typescript;
 mod validation_report;
 
 pub(crate) use artifact_generator::ArtifactGenerator;
+pub use binary::BinaryDataExporter;
 #[cfg(test)]
 pub(crate) use cpp::CppCodeGenerator;
 pub use cpp::CppCodegenOptions;
@@ -34,7 +38,9 @@ pub(crate) use input::{
     GeneratorCommonInput, GeneratorDataInput, GeneratorTaskInput, PreparedGeneratorInputs,
 };
 pub use java::JavaCodegenOptions;
+pub use json::JsonDataExporter;
 pub use lua_table::LuaTableExporter;
+pub use messagepack::MessagePackDataExporter;
 pub(crate) use registry::GeneratorRegistry;
 pub(crate) use requirements::{GeneratorDescriptor, GeneratorRequirements};
 #[cfg(test)]

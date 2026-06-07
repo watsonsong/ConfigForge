@@ -78,6 +78,24 @@ pub(crate) fn export_runtime_data_to_sink(
     Ok(files)
 }
 
+pub(crate) fn runtime_table_artifacts(
+    out_dir: &Path,
+    linked_meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    exporter: &dyn DataFormatExporter,
+) -> Result<Vec<std::path::PathBuf>> {
+    linked_meta
+        .tables
+        .iter()
+        .filter(|table_meta| table_meta.meta.is_exported_for(target_tags))
+        .map(|table_meta| {
+            exporter
+                .plan_table_artifact(table_meta)
+                .map(|plan| out_dir.join(plan.path))
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeArtifactPlan {
     pub table_name: String,

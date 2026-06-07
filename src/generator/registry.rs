@@ -7,12 +7,15 @@ use super::{
     ArtifactGenerator, GeneratorRequirements,
     adapter::{CodeArtifactGenerator, DataArtifactGenerator},
     asset_manifest::AssetManifestExporter,
+    binary::BinaryDataExporter,
     cpp::CppCodeGenerator,
     cpp_unreal::CppUnrealCodeGenerator,
     csharp::CSharpCodeGenerator,
     gettext_pot::GettextPotExporter,
     java::JavaCodeGenerator,
+    json::JsonDataExporter,
     lua_table::LuaTableExporter,
+    messagepack::MessagePackDataExporter,
     rust::RustCodeGenerator,
     schema_doc::SchemaDocGenerator,
     typescript::TypeScriptCodeGenerator,
@@ -56,6 +59,9 @@ impl GeneratorRegistry {
                 Box::new(TypeScriptCodeGenerator),
             ],
             vec![
+                Box::new(JsonDataExporter),
+                Box::new(MessagePackDataExporter),
+                Box::new(BinaryDataExporter),
                 Box::new(GettextPotExporter),
                 Box::new(LuaTableExporter),
                 Box::new(AssetManifestExporter),
@@ -169,6 +175,18 @@ mod tests {
             registry
                 .requirements("client", "json")
                 .expect("json requirements")
+                .needs_data
+        );
+        assert!(
+            registry
+                .requirements("client", "msgpack")
+                .expect("msgpack alias requirements")
+                .needs_data
+        );
+        assert!(
+            registry
+                .requirements("client", "binary")
+                .expect("binary alias requirements")
                 .needs_data
         );
         assert!(

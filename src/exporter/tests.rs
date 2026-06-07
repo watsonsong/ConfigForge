@@ -9,6 +9,7 @@ use crate::{
     ConfigForgeError, Result,
     artifact::{ArtifactSink, ArtifactWriteMode, ArtifactWriteStream, ArtifactWriter},
     data::{DataTable, SourceRole},
+    generator::BinaryDataExporter,
     meta::{LinkedTableMeta, MetaModel, TargetTags},
     runtime_contract::{RuntimeDataFile, binary_schema_revision},
 };
@@ -121,31 +122,28 @@ impl AggregateDataExporter for CustomAggregateExporter {
 }
 
 #[test]
-fn registry_resolves_builtin_exporters_and_aliases() {
-    let registry = DataFormatRegistry::with_builtin_exporters();
-
-    assert_eq!(registry.require("json").unwrap().extension(), "json");
-    assert_eq!(
-        registry.require("messagepack").unwrap().extension(),
-        "msgpack"
-    );
-    assert_eq!(registry.require("msgpack").unwrap().extension(), "msgpack");
-    assert_eq!(registry.require("bin").unwrap().extension(), "bin");
-    assert_eq!(registry.require("binary").unwrap().extension(), "bin");
-    assert!(registry.require("unknown").is_err());
-}
-
-#[test]
-fn registry_reports_builtin_dependency_contracts() {
+fn registry_no_longer_owns_builtin_runtime_exporters() {
     let registry = DataFormatRegistry::with_builtin_exporters();
 
     for format in ["json", "messagepack", "msgpack", "bin", "binary"] {
         assert!(
-            registry.get(format).is_some(),
-            "{format} should be registered"
+            registry.get(format).is_none(),
+            "{format} is now registered as a concrete generator"
         );
     }
+    assert!(registry.require("json").is_err());
+}
+
+#[test]
+fn registry_reports_no_builtin_exporters_after_generator_migration() {
+    let registry = DataFormatRegistry::with_builtin_exporters();
+
     for format in [
+        "json",
+        "messagepack",
+        "msgpack",
+        "bin",
+        "binary",
         "gettext_pot",
         "pot",
         "lua_table",

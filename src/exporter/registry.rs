@@ -11,7 +11,7 @@ use crate::{
     meta::{LinkedTableMeta, TargetTags},
 };
 
-use super::{RuntimeArtifactPlan, binary, json, messagepack};
+use super::RuntimeArtifactPlan;
 
 /// Runtime data format exporter.
 ///
@@ -125,11 +125,7 @@ impl DataFormatRegistry {
     }
 
     pub fn with_builtin_exporters() -> Self {
-        let mut registry = Self::new();
-        for exporter in builtin_exporters() {
-            registry.register_boxed(exporter);
-        }
-        registry
+        Self::new()
     }
 
     pub fn register(&mut self, exporter: impl DataFormatExporter + 'static) {
@@ -180,12 +176,4 @@ impl DataFormatRegistry {
     ) {
         (self.exporters, self.aggregate_exporters)
     }
-}
-
-pub fn builtin_exporters() -> Vec<Box<dyn DataFormatExporter>> {
-    vec![
-        Box::new(json::JsonDataExporter),
-        Box::new(messagepack::MessagePackDataExporter),
-        Box::new(binary::BinaryDataExporter),
-    ]
 }

@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    Result,
-    artifact::ArtifactWriteStream,
+    ConfigForgeError, Result,
+    artifact::{ArtifactSink, ArtifactWriteStream},
     data::DataTable,
+    exporter::{
+        DataFormatExporter, build_exported_table_payload, export_runtime_data_to_sink,
+        runtime_table_artifacts,
+    },
     meta::{LinkedTableMeta, TargetTags},
 };
 
-use super::{DataFormatExporter, build_exported_table_payload};
+use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements};
 
 pub const FORMAT: &str = "json";
 
@@ -43,6 +47,48 @@ impl DataFormatExporter for JsonDataExporter {
         let payload = build_exported_table_payload(table_meta, table, target_tags)?;
         serde_json::to_writer_pretty(stream, &payload)?;
         Ok(())
+    }
+}
+
+impl ArtifactGenerator for JsonDataExporter {
+    fn type_id(&self) -> &'static str {
+        FORMAT
+    }
+
+    fn requirements(&self) -> GeneratorRequirements {
+        GeneratorRequirements::meta_and_data()
+    }
+
+    fn generate_to_sink(
+        &self,
+        _input: &GeneratorCommonInput<'_>,
+        _sink: &ArtifactSink,
+    ) -> Result<()> {
+        Err(ConfigForgeError::Validation(format!(
+            "generator `{}` requires Data-backed artifact input",
+            FORMAT
+        )))
+    }
+
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<std::path::PathBuf>> {
+        runtime_table_artifacts(&input.output, input.meta, &input.target_tags, self)
+    }
+
+    fn generate_with_data_to_sink(
+        &self,
+        input: &GeneratorDataInput<'_, '_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        export_runtime_data_to_sink(
+            &input.common.output,
+            input.common.meta,
+            &input.common.target_tags,
+            input.data_set,
+            self,
+            input.pool,
+            sink,
+        )
+        .map(|_| ())
     }
 }
 
