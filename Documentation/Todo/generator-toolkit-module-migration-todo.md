@@ -29,10 +29,10 @@
 
 ## Phase 2 — 先迁移 direct generators
 
-- [ ] 将 `src/schema_doc/` 迁入 `src/generator/schema_doc/`，保留必要 compatibility re-export 或更新引用。
+- [x] 将 `src/schema_doc/` 迁入 `src/generator/schema_doc.rs`，保留必要 compatibility re-export 或更新引用。当前 schema doc 体量仍为单文件；后续如果继续膨胀，可再扩展成 `src/generator/schema_doc/` 目录。
 - [x] 将 `validation_report` 作为独立 concrete generator 注册，而不是内联在 registry/facade 文件里。已在 Phase 1 完成，保留在本阶段作为 direct generator 迁移复核项。
-- [ ] 更新 `GeneratorRegistry::with_builtin_generators()`，直接注册 `schema_doc` / `validation_report` concrete generator。
-- [ ] 更新 Schema Doc 设计文档与相关测试路径引用。
+- [x] 更新 `GeneratorRegistry::with_builtin_generators()`，直接注册 `schema_doc` / `validation_report` concrete generator。
+- [x] 更新 Schema Doc 设计文档与相关测试路径引用。
 
 ## Phase 3 — 迁移 aggregate / mixed data-backed generators
 

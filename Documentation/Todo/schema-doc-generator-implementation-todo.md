@@ -20,7 +20,7 @@
 
 范围：
 
-- 在合适模块下新增 schema doc 子模块，例如 `src/schema_doc/`，或在 exporter/build 下新增 meta-only document exporter 子模块；保持依赖方向不反向污染 `meta` / `validation` / `codegen`。
+- 在合适模块下新增 schema doc 子模块；当前已迁入 `src/generator/schema_doc.rs`，作为 MetaOnly artifact generator，保持依赖方向不反向污染 `meta` / `validation` / code artifact toolkit。
 - 定义 `SchemaDoc`、`SchemaDocMetadata`、`SchemaTableDoc`、`SchemaFieldDoc`、`SchemaIndexDoc`、`SchemaRelationDoc`、`SchemaDocOptions` 等核心结构。
 - 从 Project / target / LinkedMeta 中填充 project name、project path、target、target tags、generated_at、table name、table kind、desc、source summary、field path、type display、required、default、export visibility 等基础信息。
 - 先支持 CollectionTable / ObjectTable 的 table-level summary；复杂 struct/list/fragment 可先以字段 type display 表达，不展开详情。

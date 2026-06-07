@@ -5,12 +5,12 @@ use crate::{
     ConfigForgeError, Result,
     codegen::{CodeGenerator, builtin_generators},
     exporter::DataFormatRegistry,
-    schema_doc::SchemaDocGenerator,
 };
 
 use super::{
     ArtifactGenerator, GeneratorRequirements,
     adapter::{CodeArtifactGenerator, DataArtifactGenerator},
+    schema_doc::SchemaDocGenerator,
     validation_report::ValidationReportGenerator,
 };
 

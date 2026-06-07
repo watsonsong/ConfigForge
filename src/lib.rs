@@ -14,7 +14,6 @@ mod generator;
 mod meta;
 mod project;
 mod runtime_contract;
-mod schema_doc;
 mod validation;
 
 pub mod error {
@@ -53,6 +52,10 @@ pub use exporter::{
     ExportedTablePayload, ExportedValue, JsonDataExporter, LuaTableExporter,
     MessagePackDataExporter, RuntimeArtifactPlan, TargetDataConfig, builtin_exporters,
 };
+pub use generator::{
+    SchemaDoc, SchemaDocExportConfig, SchemaDocFormat, SchemaDocOptions,
+    render_schema_doc_index_markdown, render_schema_table_markdown,
+};
 pub use meta::{
     EnumMeta, EnumValueMeta, ExportCondition, FieldForeignKeyMeta, FieldMeta,
     ForeignKeyDeclarationSite, ForeignKeyMeta, FragmentMeta, IndexMeta, LinkedField,
@@ -66,10 +69,6 @@ pub use project::{
     AssetSearchPathConfig, AssetsConfig, ProjectConfig, ProjectConfigMeta, TargetConfig,
 };
 pub use runtime_contract::RuntimeDataFile;
-pub use schema_doc::{
-    SchemaDoc, SchemaDocExportConfig, SchemaDocFormat, SchemaDocOptions,
-    render_schema_doc_index_markdown, render_schema_table_markdown,
-};
 pub use validation::{
     CompiledValidationPlan, CompiledValidator, ExportTableView, ExportValidationView,
     ValidationContext, ValidationIssue, ValidationIssueLocation, ValidationReport,

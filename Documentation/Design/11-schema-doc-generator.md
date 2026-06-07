@@ -508,7 +508,7 @@ title = "Client Config Schema"
 
 已实现内容：
 
-- 新增 `src/schema_doc/`，提供 `SchemaDoc` normalized model、`SchemaDocOptions`、`SchemaDocExportConfig`、`SchemaDocFormat`、Markdown renderer 和 ArtifactSink 写入入口。
+- `schema_doc` 已迁入 `src/generator/schema_doc.rs`，提供 `SchemaDoc` normalized model、`SchemaDocOptions`、`SchemaDocExportConfig`、`SchemaDocFormat`、Markdown renderer 和 ArtifactSink 写入入口。
 - Build 支持 `[[targets.exports]] type = "schema_doc"`，当前作为注册到 `GeneratorRegistry` 的 direct `ArtifactGenerator` 运行；它读取 linked Meta、Project info 与 target tags 后输出 artifact，不属于 `DataFormatRegistry`，docs-only target 不需要 `project.input`。
 - Markdown MVP 输出 `index.md` 与每张当前 target 可见 table 的 `<table>.md`。
 - 单表文档包含 Fields、Indexes、Relations，并补充 Assets、Text / POT、Validators 摘要。
