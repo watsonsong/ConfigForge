@@ -20,17 +20,17 @@
 
 ## Phase 1 — 拆分 `src/generator/mod.rs`
 
-- [ ] 将 `GeneratorRequirements` 移到 `src/generator/requirements.rs`。
-- [ ] 将 `GeneratorCommonInput`、`GeneratorDataInput`、`GeneratorTaskInput`、`PreparedGeneratorInputs` 等输入模型移到 `src/generator/input.rs`。
-- [ ] 将 `GeneratorRegistry` 和 builtin registration 移到 `src/generator/registry.rs`。
-- [ ] 将迁移期 `CodeArtifactGenerator`、`DataArtifactGenerator` adapter 移到 `src/generator/adapter.rs`。
-- [ ] 将 `ValidationReportGenerator` 移到 `src/generator/validation_report/`。
-- [ ] 保持 `src/generator/mod.rs` 只做模块声明与必要 re-export。
+- [x] 将 `GeneratorRequirements` 移到 `src/generator/requirements.rs`。
+- [x] 将 `GeneratorCommonInput`、`GeneratorDataInput`、`GeneratorTaskInput`、`PreparedGeneratorInputs` 等输入模型移到 `src/generator/input.rs`。
+- [x] 将 `GeneratorRegistry` 和 builtin registration 移到 `src/generator/registry.rs`。
+- [x] 将迁移期 `CodeArtifactGenerator`、`DataArtifactGenerator` adapter 移到 `src/generator/adapter.rs`。
+- [x] 将 `ValidationReportGenerator` 移到 `src/generator/validation_report.rs`。后续若需要更多文件，可再扩展为 `src/generator/validation_report/` 目录。
+- [x] 保持 `src/generator/mod.rs` 只做模块声明与必要 re-export。
 
 ## Phase 2 — 先迁移 direct generators
 
 - [ ] 将 `src/schema_doc/` 迁入 `src/generator/schema_doc/`，保留必要 compatibility re-export 或更新引用。
-- [ ] 将 `validation_report` 作为独立 concrete generator 注册，而不是内联在 registry/facade 文件里。
+- [x] 将 `validation_report` 作为独立 concrete generator 注册，而不是内联在 registry/facade 文件里。已在 Phase 1 完成，保留在本阶段作为 direct generator 迁移复核项。
 - [ ] 更新 `GeneratorRegistry::with_builtin_generators()`，直接注册 `schema_doc` / `validation_report` concrete generator。
 - [ ] 更新 Schema Doc 设计文档与相关测试路径引用。
 
