@@ -31,6 +31,10 @@ use crate::{
     meta::{LinkedMetaModel, MetaModel, TargetTags},
     project::ProjectConfig,
     runtime_contract::ExportDependency,
+    schema_doc::{
+        SchemaDoc, SchemaDocOptions, schema_doc_export_config_from_options,
+        write_schema_doc_to_sink,
+    },
 };
 
 use runtime::export_meta_and_data_tasks;
@@ -261,6 +265,7 @@ fn execute_target_pipeline(
             codegen_exports: &meta_only_exports,
             project_root: context.project_root,
             project: context.project,
+            target_name: &context.target.name,
             assets: context.assets,
             target_tags: context.target_tags,
             generated_at: &generated_at,
@@ -344,6 +349,7 @@ struct ExportPipelineContext<'a, 'meta> {
     codegen_exports: &'a [(usize, &'a NormalizedExportTask)],
     project_root: &'a Path,
     project: &'a CodeExportProject,
+    target_name: &'a str,
     assets: &'a crate::project::AssetsConfig,
     target_tags: &'a TargetTags,
     generated_at: &'a str,
@@ -362,6 +368,7 @@ fn execute_export_pipeline<'meta>(
         codegen_exports,
         project_root,
         project,
+        target_name,
         assets,
         target_tags,
         generated_at,
@@ -375,6 +382,7 @@ fn execute_export_pipeline<'meta>(
             let codegen_context = CodegenTaskContext {
                 project_root,
                 project,
+                target_name,
                 target_tags,
                 linked_meta: &linked_meta,
                 generated_at,
@@ -619,6 +627,7 @@ fn execute_codegen_export_nodes(
 struct CodegenTaskContext<'a, 'meta> {
     project_root: &'a Path,
     project: &'a CodeExportProject,
+    target_name: &'a str,
     target_tags: &'a TargetTags,
     linked_meta: &'meta crate::meta::LinkedMetaModel<'meta>,
     generated_at: &'a str,
@@ -631,6 +640,9 @@ fn generate_and_write_code_task(
     export_task: &NormalizedExportTask,
 ) -> Result<()> {
     debug_assert_eq!(export_task.dependency, ExportDependency::MetaOnly);
+    if export_task.type_id == "schema_doc" {
+        return generate_and_write_schema_doc_task(context, export_task);
+    }
     let task = codegen_task_config_from_export_task(export_task)?;
     let generator =
         crate::codegen::find_generator(context.generators, &task.language).ok_or_else(|| {
@@ -641,6 +653,34 @@ fn generate_and_write_code_task(
         })?;
     let input = build_code_export_input(context, task, generator)?;
     generator.generate_to_sink(&input, context.sink)
+}
+
+fn generate_and_write_schema_doc_task(
+    context: &CodegenTaskContext<'_, '_>,
+    export_task: &NormalizedExportTask,
+) -> Result<()> {
+    let config = schema_doc_export_config_from_options(
+        export_task.output.clone(),
+        export_task.options.clone(),
+    )?;
+    let doc = SchemaDoc::from_meta(
+        context.linked_meta,
+        context.project,
+        SchemaDocOptions {
+            title: config.title.clone(),
+            project_name: context.project.name.clone(),
+            project_path: Some(context.project_root.to_path_buf()),
+            target: Some(context.target_name.to_owned()),
+            target_tags: context.target_tags.clone(),
+            generated_at: context.generated_at.to_owned(),
+            include_hidden: false,
+            include_internal: false,
+            include_struct_details: true,
+            include_asset_rules: true,
+            include_i18n: true,
+        },
+    );
+    write_schema_doc_to_sink(&doc, &config, context.sink)
 }
 
 fn build_code_export_input<'meta>(
@@ -1205,6 +1245,7 @@ mod tests {
         let context = CodegenTaskContext {
             project_root: Path::new("."),
             project: &project,
+            target_name: "default",
             target_tags: &target_tags,
             linked_meta: &linked_meta,
             generated_at: "2026-06-03T00:00:00Z",

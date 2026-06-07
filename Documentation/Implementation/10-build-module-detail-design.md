@@ -205,15 +205,16 @@ pub struct BuildTraceStage {
 - exporter 在单个 export task 内检查 table artifact path 冲突。
 - Artifact Writer final check / sink path reservation 仍是最后防线；当前使用 lexical-normalized path key，不解析 symlink，也不会覆盖 macOS / Windows 常见的大小写不敏感 alias。中期平台文件系统增强应统一下沉到 artifact/path key 层，而不是让 build/runtime/exporter 各自实现一套不同规则。
 
-## 10.6 MetaOnly codegen export 编排
+## 10.6 MetaOnly codegen / schema doc export 编排
 
-`generate_and_write_code_task()` 负责 MetaOnly codegen export task：
+`generate_and_write_code_task()` 负责 MetaOnly codegen export task 与 schema documentation task：
 
 - 内置生成器由 `codegen::builtin_generators()` 提供。
 - codegen export task 不选择数据 export task，也不消费 `RuntimeDataFile`。
 - 每个 codegen export task 构造 `CodeExportInput`，包含 linked meta、target tags、project 信息、target language config、空 runtime data file list、generated_at。
 - 传给 CodeModel 的 target tags 必须是 effective target tags，而不是仅 Project Config 中的 target tags；否则 CLI `--tag s1` 影响了 runtime data override，却没有同步影响 table/field/index codegen 过滤，会造成 schema 与数据不一致。
 - codegen export task 可以并行生成，并通过 `CodeGenerator::generate_to_sink()` 直接写入 shared `ArtifactSink`；全局路径冲突由 artifact 模块在 `create()` / convenience write API 中统一检查，dry-run / finish entries 由 sink 按 normalized path 稳定输出。
+- `schema_doc` 是 MetaOnly 文档导出任务，不读取 source data，也不执行 data validation；它基于 linked Meta、project 信息和 effective target tags 构建 `SchemaDoc` normalized model，并通过 Markdown renderer 写出 `index.md` 和每表 `<table>.md`。当前支持 `format = "markdown"`、`index_file`、`title`，未知格式或未知选项显式报错。
 
 ## 10.6a 稳定性与回归基线
 

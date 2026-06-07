@@ -124,6 +124,9 @@ impl ExporterRegistry {
     }
 
     fn dependency(&self, target_name: &str, type_id: &str) -> Result<ExportDependency> {
+        if type_id == "schema_doc" {
+            return Ok(ExportDependency::MetaOnly);
+        }
         if type_id == "validation_report" {
             return Ok(ExportDependency::MetaAndData);
         }

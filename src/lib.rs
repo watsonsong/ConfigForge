@@ -12,6 +12,7 @@ mod exporter;
 mod meta;
 mod project;
 mod runtime_contract;
+mod schema_doc;
 mod validation;
 
 pub mod error {
@@ -62,6 +63,10 @@ pub use project::{
     AssetSearchPathConfig, AssetsConfig, ProjectConfig, ProjectConfigMeta, TargetConfig,
 };
 pub use runtime_contract::{ExportDependency, RuntimeDataFile};
+pub use schema_doc::{
+    SchemaDoc, SchemaDocExportConfig, SchemaDocFormat, SchemaDocOptions,
+    render_schema_doc_index_markdown, render_schema_table_markdown,
+};
 pub use validation::{
     CompiledValidationPlan, CompiledValidator, ExportTableView, ExportValidationView,
     ValidationContext, ValidationIssue, ValidationIssueLocation, ValidationReport,

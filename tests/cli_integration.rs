@@ -16,6 +16,8 @@ mod export_conflicts;
 mod fixture_exports;
 #[path = "cli_integration/resource_flags.rs"]
 mod resource_flags;
+#[path = "cli_integration/schema_doc.rs"]
+mod schema_doc;
 #[path = "cli_integration/standard_project.rs"]
 mod standard_project;
 #[path = "cli_integration/target_filtering.rs"]
