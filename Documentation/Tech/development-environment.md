@@ -82,7 +82,7 @@ Generated core 不应直接依赖具体 JSON / MessagePack / engine / framework 
 | TypeScript MessagePack reader | `@msgpack/msgpack` peer dependency | 只在 MessagePack reader package / full matrix 中需要。 |
 | C++ RapidJSON reader | RapidJSON | 详见 [`cpp-runtime-dependencies.md`](cpp-runtime-dependencies.md)。 |
 | C++ msgpack-cxx reader | msgpack-cxx | 详见 [`cpp-runtime-dependencies.md`](cpp-runtime-dependencies.md)。 |
-| C# / Java standard adapters | .NET BCL `System.Text.Json` / dependency-free MessagePack subset parser / JDK-only JSON parser | 当前已提供 `runtime/csharp/json_reader`、`runtime/csharp/messagepack_reader`、`runtime/java/json_reader` 和 `runtime/java/messagepack_reader`，standard_project harness 通过薄 adapter 接入 generated loader / reader interface。 |
+| C# / Java standard adapters | .NET BCL `System.Text.Json` / dependency-free MessagePack subset parser / JDK-only JSON parser / dependency-free binary reader | 当前已提供 `runtime/csharp/json_reader`、`runtime/csharp/messagepack_reader`、`runtime/csharp/binary_reader`、`runtime/java/json_reader`、`runtime/java/messagepack_reader` 和 `runtime/java/binary_reader`，standard_project harness 通过薄 adapter 接入 generated loader / reader interface。 |
 
 ### 默认不联网
 

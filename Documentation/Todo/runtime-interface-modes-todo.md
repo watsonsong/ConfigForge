@@ -2,16 +2,14 @@
 
 本文规划 `runtime_interface = "inline" | "external"` 的分步落地。目标是统一 Rust / C++ / C# / Java 等 nominal 类型语言的 runtime reader 接入策略：默认生成代码保持自包含 inline contract，稳定 runtime core/package 成熟后可选择 external contract；TypeScript 因结构化类型可继续保持 package-friendly，但也应在文档中明确其等价策略。
 
-## 当前判断
+## 当前状态
 
-这项工作不建议一次性完成。原因：
+分步落地已完成：
 
-1. Rust 当前实现已经硬绑定 `config_forge_runtime_reader_core`，而文档目标写的是 inline default + external opt-in；修正会影响 Rust codegen、standard_project harness、adapter compliance 和生成 fixture。
-2. C++ 已有 generated-header-bound adapter 与计划中的 stable interface header，external 模式涉及 CMake target、宏兼容和 install / find_package 策略。
-3. C# / Java 当前是 inline nominal interface，标准 reader 通过薄 adapter 接入；external 模式需要先明确 NuGet / jar 包边界，且 binary reader 还依赖 record boundary / schema revision / enum ordinal 等 contract 扩展。
-4. 这会触及 codegen option schema、语言生成器、runtime adapter、standard_project、compliance runner 和文档矩阵；一次性改动过大，回归面也过宽。
-
-推荐策略：先把 Rust 从 external-only 调整为 inline default + external opt-in，再逐步推广到 C++ / C# / Java。
+1. Rust 已调整为 inline default + external opt-in，`runtime_core_path` 仅在 external 模式下生效。
+2. C++ 已提供 stable core header，并支持 inline default + external opt-in。
+3. C# / Java 保持 inline nominal interface；generated contract 已补齐 record boundary、schema revision、enum index 与 exhausted check，标准 JSON / MessagePack / Binary reader 通过薄 adapter 接入。
+4. canonical Design / Implementation / Tech 文档已同步当前状态，后续工作转入 compliance runner 与稳定 package / assembly 评估。
 
 ## 全局设计
 
@@ -231,7 +229,7 @@ feat(codegen): support C# and Java positional binary readers
 - standard_project C# / Java harness 已覆盖 JSON、MessagePack、Binary 的手写 adapter 与 generated adapter smoke。
 - 验证：`cargo test --manifest-path /Users/bytedance/Documents/ConfigForge/Cargo.toml` 通过。
 
-## [ ] Step 7：最终文档收敛
+## [x] Step 7：最终文档收敛
 
 目标：把 runtime interface mode 的设计从 TODO 收敛到 canonical 文档，并删除或归档本文。
 
@@ -244,7 +242,9 @@ feat(codegen): support C# and Java positional binary readers
 验证：
 
 - `git diff --check`
-- 人工检查文档中无过时 “Rust external-only” 或 “C# / Java only JSON” 表述。
+- 人工检查文档中无过时 runtime interface mode 或 C# / Java reader 格式覆盖表述。
+
+当前实现：已将 runtime interface mode 的当前状态收敛到 canonical Design / Implementation / Tech 文档；Rust / C++ 均记录为 inline default + external opt-in，C# / Java 记录为 inline nominal contract + JSON / MessagePack / Binary copyable templates，并补齐 C# / Java backend contract 示例中的 record boundary、schema revision、enum index 和 exhausted check API。
 
 建议提交：
 

@@ -234,18 +234,18 @@ Protobuf 未来规则：
 
 | 语言 | Runtime 加载接口语义 |
 | --- | --- |
-| Rust | `RuntimeDataLoader::open(path) -> Result<RuntimeDataReader, Error>`；reader 提供 begin/end object、begin/end array、按字段名读取 value、按序读取 value 等通用方法。 |
-| C++ | `IRuntimeDataLoader::Open(path) -> std::unique_ptr<IRuntimeDataReader>`；reader 只暴露格式无关的 object / array / field / scalar 读取能力。 |
-| TypeScript | `RuntimeDataLoader.open(path): Promise<RuntimeDataReader> | RuntimeDataReader`；reader 提供通用 JSON-like / MessagePack-like 读取 cursor。 |
-| C# | `IConfigForgeRuntimeDataLoader.Open(path) -> IConfigForgeRuntimeDataReader`；reader 提供 field / row / list / scalar 读取能力，生成代码抛 `ConfigForgeRuntimeException` 表达 data-code mismatch。 |
-| Java | `ConfigForgeRuntimeDataLoader.open(path) -> ConfigForgeRuntimeDataReader`；reader 提供 field / row / list / scalar 读取能力，生成代码抛 unchecked `ConfigForgeRuntimeException` 表达 data-code mismatch。 |
+| Rust | `RuntimeDataLoader::open(path) -> Result<RuntimeDataReader, Error>`；reader 提供 field / row / list / record boundary / enum index / scalar / schema revision / exhausted check 等 generated parser 直接调用的 schema-driven API。 |
+| C++ | `IRuntimeDataLoader::Open(path) -> std::unique_ptr<IRuntimeDataReader>`；reader 只暴露格式无关的 field / row / list / record boundary / enum index / scalar 读取能力，可 inline 生成或 external 绑定 `config_forge/runtime/reader.hpp`。 |
+| TypeScript | `RuntimeDataLoader.open(path): Promise<RuntimeDataReader> | RuntimeDataReader`；reader 提供通用 JSON-like / MessagePack-like / binary schema-driven cursor。 |
+| C# | `IConfigForgeRuntimeDataLoader.Open(path) -> IConfigForgeRuntimeDataReader`；reader 提供 field / row / list / record boundary / enum index / scalar / schema revision / exhausted check 能力，生成代码抛 `ConfigForgeRuntimeException` 表达 data-code mismatch。 |
+| Java | `ConfigForgeRuntimeDataLoader.open(path) -> ConfigForgeRuntimeDataReader`；reader 提供 field / row / list / record boundary / enum index / scalar / schema revision / exhausted check 能力，生成代码抛 unchecked `ConfigForgeRuntimeException` 表达 data-code mismatch。 |
 
 通用 reader 至少需要覆盖两类 layout：
 
 1. **Named-field layout**：例如 JSON object、MessagePack map。生成代码传入字段名，reader 定位并返回字段值；字段顺序不作为语义要求。
 2. **Positional / packed layout**：例如当前 `bin` 使用的紧密二进制 record。生成代码按 Meta 中稳定的字段顺序调用 reader；exporter 与 codegen 必须使用同一字段顺序定义，reader 不需要知道字段名。
 
-reader 的基础语义必须覆盖当前 Meta 类型：int、float、bool、string/text/asset、enum、object/array。enum 按 string 读取后由生成代码校验枚举值；`text` 和 `asset` 按 string 读取。字段缺失和字段存在但为 null 必须区分：required 字段缺失或 null 都由生成代码报错；optional field / optional fragment 缺失时视为 absent；null 是否等价 optional absent 由生成器策略统一定义，第一阶段建议只对 optional 视为 empty。当前 exporter 仍可能输出字符串 cell 时，string-to-int / string-to-bool / string-to-float 的兼容规则应由 generated parser helper 统一处理，避免每个业务 loader 重复实现。
+reader 的基础语义必须覆盖当前 Meta 类型：int、float、bool、string/text/asset、enum、object/array/list。enum 通过 `read_enum_index(variants)` / `ReadEnumIndex(variants)` / `readEnumIndex(variants)` 统一读取：named reader 将 string enum value 映射为 variants 下标，binary reader 读取 ordinal 并校验范围；generated enum parser 只根据 index 构造目标语言 enum。字段缺失和字段存在但为 null 必须区分：required 字段缺失或 null 都由生成代码报错；optional field / optional fragment 缺失时视为 absent；null 是否等价 optional absent 由生成器策略统一定义，第一阶段建议只对 optional 视为 empty。当前 exporter 仍可能输出字符串 cell 时，string-to-int / string-to-bool / string-to-float 的兼容规则应由 generated parser helper 统一处理，避免每个业务 loader 重复实现。
 
 因此业务 runtime 只需要长期维护一次通用 loader / reader 实现，可以选择：
 

@@ -114,12 +114,17 @@ public interface ConfigForgeRuntimeDataReader {
     void enterRequiredField(String name);
     boolean enterOptionalField(String name);
     void exitField();
+    Long schemaRevision();
     int readRowCount();
     void enterRow(int index);
     void exitRow();
     int readListLength();
     void enterListElement(int index);
     void exitListElement();
+    void beginRecord(int optionalSlotCount);
+    void endRecord();
+    int readEnumIndex(String[] variants);
+    void ensureExhausted();
     long readInt();
     double readFloat();
     boolean readBool();
@@ -135,6 +140,8 @@ public static final class ConfigForgeRuntimeException extends RuntimeException {
     public ConfigForgeRuntimeException(String message, Throwable cause) { super(message, cause); }
 }
 ```
+
+`beginRecord` / `endRecord`、`schemaRevision`、`readEnumIndex` 与 `ensureExhausted` 是 generated parser 直接调用的 schema-driven API：JSON / MessagePack reader 可在这些方法中保持轻量 no-op 或 string enum 映射，binary reader 则用它们消费 positional record、校验 schema revision、读取 enum ordinal 并确认 payload 已消费完毕。`readNext*`、optional bitmap 等低层 helper 不进入 generated inline contract，只保留在 concrete reader 或薄 adapter 内。
 
 错误模型使用 unchecked exception：
 
@@ -318,7 +325,7 @@ src/codegen/java/
 
 - 临时 project：`type = "java"` 能生成 `.java`。
 - 若本机有 `javac` / `java`，临时创建最小 harness：编译 generated code + generic in-memory reader，运行加载 / index / relation / text helper / lazy smoke。
-- standard_project 已加入 `out/client_code/java/ReferenceGameConfig.java`；集成测试复制 `runtime/java/json_reader`，并用薄 adapter 接入 generated loader / reader interface，验证 generated parser、repository、relation、text 和 lazy API。
+- standard_project 已加入 `out/client_code/java/ReferenceGameConfig.java`；集成测试复制 `runtime/java/json_reader`、`runtime/java/messagepack_reader` 与 `runtime/java/binary_reader`，并用薄 adapter 接入 generated loader / reader interface，验证 generated parser、repository、relation、text 和 lazy API。
 - 没有 JDK 时不失败，只跳过 Java compiler harness；Rust unit 和内容断言仍必须通过。
 
 ## 后续扩展
@@ -326,5 +333,5 @@ src/codegen/java/
 - Android profile：控制 package、nullable annotation、collection 返回类型和资源加载约定，但 generated core 仍不直接绑定 Android API。
 - Async profile：生成 `CompletableFuture<GameData> loadAsync(...)` 和 async lazy accessor。
 - Multi-file output：按 `Runtime.java`、`Types.java`、`Tables.java`、`GameData.java` 拆分，并在 artifact writer 中输出目录树；需要重新设计 public top-level type 与 package-private helper 边界。
-- Runtime adapter：在 `runtime/java/json_reader`、`runtime/java/messagepack_reader` 中提供 JDK / Jackson / Gson / MessagePack 可选 adapter，而不是写死进 generated core。
+- Runtime adapter：在 `runtime/java/json_reader`、`runtime/java/messagepack_reader`、`runtime/java/binary_reader` 中提供 JDK / Jackson / Gson / MessagePack / Binary 可选 adapter，而不是写死进 generated core。
 - Nullability annotation profile：可选生成 JetBrains / AndroidX / JSpecify annotation，但必须显式配置依赖。

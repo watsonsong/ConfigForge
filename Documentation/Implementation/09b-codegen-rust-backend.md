@@ -12,7 +12,7 @@
 
 Rust backend 已实现 MVP：生成 enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`link_all` 与 `text` translation helper。Build-facing `generate_to_sink()` 使用 `StreamingCodeWriter<ArtifactWriteStream>` 直接写入 shared `ArtifactSink`；`generate()` 仅在 `#[cfg(test)]` 下保留并复用同一渲染路径生成 `GeneratedFile`，用于 String-backed 快照和 streaming equivalence 校验。
 
-Runtime interface 当前实现为 external-core 绑定：生成代码直接 `pub use config_forge_runtime_reader_core::{RuntimeDataLoader, RuntimeDataReader, RuntimeDataError, RuntimeDataResult, ...}`。这与长期目标“默认 inline、自包含；external opt-in”尚未一致。后续将增加 `runtime_interface = "inline" | "external"` 与 `runtime_core_path` 选项：inline 模式在 generated code 中声明下述最小 contract，external 模式继续引用共享 core crate 或业务指定 re-export path。
+Runtime interface 当前默认实现为 inline、自包含 contract；可通过 `runtime_interface = "external"` opt-in 绑定共享 core crate 或业务指定 re-export path。`runtime_core_path` 可覆盖 external 模式的 re-export 路径，默认指向 `config_forge_runtime_reader_core`。inline 模式在 generated code 中声明下述最小 contract，external 模式则 `pub use` 对应 core path 中的 `RuntimeDataLoader`、`RuntimeDataReader`、`RuntimeDataError`、`RuntimeDataResult` 等符号。
 
 ## Rust 生成内容
 
@@ -98,7 +98,7 @@ Rust 约束：
 - 复合索引生成 key struct 或 tuple。公开 API 推荐展开参数：`get_by_region_id(region: String, id: i64)`。
 - public source-order API（`pub fn rows(&self)`、public `row_at(index)`、`len()` / `is_empty()`）应从“所有 CollectionTable 默认生成”改为 `preserve_source_order = true` 的 opt-in API。indexed table 默认只生成 lookup；随机名字表这类无 index 顺序表声明 `preserve_source_order = true` 后生成 `len()` / `row_at(index)` / `rows()`。底层仍可使用 `rows: Vec<Row>` 作为 private owner storage，并让多个索引保存 `usize` row handle，避免多索引复制行数据。
 - 若生成 serde 代码，需要生成 `serde` feature 说明或由项目配置决定是否带 derive。
-- 目标态中，默认生成代码只定义通用 `RuntimeDataLoader` / `RuntimeDataReader` trait，不强制生成 JSON 或 MessagePack 的具体 decoder；业务 runtime 可以用 `serde_json`、`rmp-serde` 或项目自研库实现 reader。当前实现仍临时依赖 `config_forge_runtime_reader_core` 提供这些 trait；`ItemsTable::load` 打开 `DATA_FILE` 后由生成代码读取 `rows` 数组、逐行调用 `read_row` 并构建索引。
+- 默认生成代码只定义通用 `RuntimeDataLoader` / `RuntimeDataReader` trait，不强制生成 JSON、MessagePack 或 binary 的具体 decoder；业务 runtime 可以用 `serde_json`、`rmp-serde`、标准 binary reader 或项目自研库实现 reader。若项目希望 adapter crate 直接实现共享 trait，可显式设置 `runtime_interface = "external"` 并通过 `runtime_core_path` 绑定共享 core。`ItemsTable::load` 打开 `DATA_FILE` 后由生成代码读取 `rows` 数组、逐行调用 `read_row` 并构建索引；binary reader 还通过 schema revision 与 `ensure_exhausted` 检查 data/code layout 一致性。
 
 Rust `linked_field` 生成规则：
 

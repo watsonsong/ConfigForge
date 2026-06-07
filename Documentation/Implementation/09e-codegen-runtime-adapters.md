@@ -102,15 +102,17 @@ missing/null 语义：
 | `runtime/cpp/msgpackc_reader` | C++ msgpack-cxx reader adapter | 已有 header-only msgpack-cxx adapter，可用于 MessagePack runtime data 接入。 |
 | `runtime/csharp/json_reader` | C# JSON reader template | 已有基于 .NET BCL `System.Text.Json` 的 reader 与 fs loader；standard_project harness 通过薄 adapter 接入每次 generated code 声明的 nominal interface。 |
 | `runtime/csharp/messagepack_reader` | C# MessagePack reader template | 已有 dependency-free MessagePack subset parser / reader 与 fs loader，覆盖当前 JSON 同构 named payload；standard_project harness 已同时验证 JSON / MessagePack。 |
+| `runtime/csharp/binary_reader` | C# binary reader template | 已有 dependency-free schema-aware `bin` reader 与 fs loader，覆盖 CFGB header、schema revision、record boundary、optional bitmap、enum ordinal 和 exhausted check；standard_project harness 已验证 Binary。 |
 | `runtime/java/json_reader` | Java JSON reader template | 已有 JDK-only JSON reader 与 fs loader；standard_project harness 通过薄 adapter 接入每次 generated code 声明的 nominal interface。 |
 | `runtime/java/messagepack_reader` | Java MessagePack reader template | 已有 JDK-only MessagePack subset parser / reader 与 fs loader，覆盖当前 JSON 同构 named payload；standard_project harness 已同时验证 JSON / MessagePack。 |
+| `runtime/java/binary_reader` | Java binary reader template | 已有 JDK-only schema-aware `bin` reader 与 fs loader，覆盖 CFGB header、schema revision、record boundary、optional bitmap、enum ordinal 和 exhausted check；standard_project harness 已验证 Binary。 |
 
 主要缺口：
 
 1. `tests/fixtures/runtime_reader_compliance/` 已有首批 canonical payload / expected 文件，并通过 `tests/runtime_compliance.rs` 覆盖 Rust JSON / MessagePack adapters，通过 `tests/typescript_runtime_compliance.rs` 覆盖 TypeScript JSON adapter；TypeScript MessagePack / C++ / C# / Java runner 尚未接入。
 2. Rust `reader_core` 与 TypeScript workspace packages 已有 skeleton，core contract 已按 generated parser 直接调用面收敛；但尚未进入稳定发布形态，generated code 默认仍内联 / 声明本地 contract，未默认依赖稳定 Rust crate 或 npm package。
-3. C++ generated inline `IRuntimeDataReader` 已移除 `ReadArrayLength`、`ReadOptionalPresent`、`ReadNext*`、`ReadEnumOrdinal` 等非 generated-facing helper；stable interface header 仍待补齐，当前 C++ adapter 仍通过宏绑定 generated header 中的 `IRuntimeDataReader` / `IRuntimeDataLoader`。
-4. C# / Java JSON 与 MessagePack named reader 已沉淀为 copyable template；下一步缺口是接入 runtime compliance runner，并按需补充 binary reader 所需的 generated contract 扩展、Jackson / Gson / Android 友好 adapter。
+3. C++ generated inline `IRuntimeDataReader` 已移除 `ReadArrayLength`、`ReadOptionalPresent`、`ReadNext*`、`ReadEnumOrdinal` 等非 generated-facing helper；并提供 `runtime/cpp/core/include/config_forge/runtime/reader.hpp` 与 `runtime_interface = "external"` opt-in，生产项目可逐步从 generated-header-bound 迁移到 stable core header。
+4. C# / Java JSON、MessagePack 与 Binary reader 已沉淀为 copyable template；下一步缺口是接入 runtime compliance runner，并按需补充 Jackson / Gson / Android 友好 adapter。
 
 因此 runtime loader 工程化按“两层稳定 + 多 adapter 可选”的方向推进：
 
@@ -182,13 +184,13 @@ Compliance fixtures 长期不按“每种格式维护一整套手写用例”扩
 2. Rust runner 先落地到 JSON adapter 或临时 test-only reader，借 `reader_core` 的 trait 形状快速证明 schema 可执行；稳定后应迁到具体 adapter crate / package，不把复杂 reader 逻辑沉淀进薄 core。（已通过 `tests/runtime_compliance.rs` 覆盖 `serde_json_reader` / `serde_msgpack_reader`）
 3. TypeScript runner 作为 package-level test 或 Rust 驱动的临时测试工程，验证 `reader_core`、JSON reader、MessagePack reader 与 node-fs loader。（已用临时测试工程覆盖 JSON reader；MessagePack / node-fs 待接入）
 4. C++ runner 通过 CMake / CTest 接入 RapidJSON、msgpack-cxx 和 binary reader，继续保持第三方依赖显式 opt-in。
-5. C# / Java runner 复用现有 JSON / MessagePack copyable template，先验证 BCL/JDK-only named reader，再决定是否补 binary、Jackson / Gson / Android 友好 adapter。
+5. C# / Java runner 复用现有 JSON / MessagePack / Binary copyable template，先验证 BCL/JDK-only named reader 与 dependency-free binary reader，再决定是否补 Jackson / Gson / Android 友好 adapter。
 
 #### Phase R2：Rust stable runtime crate
 
 目标是把 Rust 从“generated crate 本地 trait + copyable template”迁移到可选稳定 runtime crate，同时保持默认 generated code 不强制依赖该 crate。
 
-当前实现状态与目标态存在差异：Rust generated code 目前已经直接 `pub use config_forge_runtime_reader_core::{...}`，实际属于 external-core 绑定；这方便真实 adapter crate 直接实现共享 trait，但也让 generated Rust 默认强制依赖仓库内 core crate，并限制用户自定义 runtime core path。后续应按 `runtime_interface = "inline" | "external"` 收敛：默认恢复 inline 自包含 contract，external 作为 opt-in，并允许配置 `runtime_core_path` 指向 `config_forge_runtime_reader_core`、`crate::runtime` 或业务自有 re-export。
+当前实现已按 `runtime_interface = "inline" | "external"` 收敛：默认 inline 自包含 contract，external 作为 opt-in，并允许配置 `runtime_core_path` 指向 `config_forge_runtime_reader_core`、`crate::runtime` 或业务自有 re-export。这方便希望零额外依赖的用户直接复制 generated code，也允许真实 adapter crate 通过 external 模式实现共享 trait。
 
 包边界：
 
@@ -225,13 +227,15 @@ TypeScript 可以最早形成稳定 npm 包，因为 generated interface 是结�
 
 #### Phase R4：C++ stable interface header
 
+状态：核心 header 与 generated external opt-in 已落地；后续重点是补 C++ compliance、install / find_package 体验与生产文档。
+
 目标是解除 C++ adapter 对某次 generated header 的宏绑定，让生产项目可以像普通第三方库一样链接 runtime adapter。
 
-设计：
+已落地设计：
 
-- 新增 `runtime/cpp/core/include/config_forge/runtime/reader.hpp`，定义稳定 `IRuntimeDataReader`、`IRuntimeDataLoader`、error / result 类型、decode limits 和 `CONFIG_FORGE_READER_CONTRACT_VERSION`。
+- 新增 `runtime/cpp/core/include/config_forge/runtime/reader.hpp`，定义稳定 `IRuntimeDataReader`、`IRuntimeDataLoader`、decode limits 和 `CONFIG_FORGE_READER_CONTRACT_VERSION`。
 - CMake 提供 `config_forge_runtime::core` target；RapidJSON、msgpack-cxx、binary reader target 链接 core。
-- C++ codegen 增加 `runtime_interface = "inline" | "external"`：
+- C++ codegen 支持 `runtime_interface = "inline" | "external"`：
   - `inline`：保持当前 generated header 自带 nominal interface，兼容现有用户；
   - `external`：generated code include `config_forge/runtime/reader.hpp`，并使用 core target 的接口类型。
 - 迁移期 adapter 可同时支持 generated-header-bound 和 external interface；新生产文档推荐 external。
@@ -240,16 +244,16 @@ TypeScript 可以最早形成稳定 npm 包，因为 generated interface 是结�
 
 #### Phase R5：C# / Java compliance 与 package 形态
 
-C# / Java 当前先保持 copyable template，不急于承诺 NuGet / Maven 包。原因是它们是 nominal interface：generated code 每次声明自己的 `IConfigForgeRuntimeDataReader` / `ConfigForgeRuntimeDataReader`，标准 reader 需要薄 adapter 接入。
+C# / Java 当前先保持 copyable template，不急于承诺 NuGet / Maven 包。原因是它们是 nominal interface：generated code 每次声明自己的 `IConfigForgeRuntimeDataReader` / `ConfigForgeRuntimeDataReader`，标准 reader 需要薄 adapter 接入。当前 JSON、MessagePack 和 Binary 三种 reader template 都已存在，并通过 standard_project smoke 验证。
 
-当前审查结论：C# / Java generated inline reader interface 中的方法均被 generated parser 直接调用（field、row、list element、scalar），暂未发现类似 `enter_field` / `len` / `read_next_*` 这类只服务 concrete reader 的 helper 污染 core contract。后续若引入 stable interface assembly / package，也应保持这一最小形状；JSON reader 模板中的解析便利方法仍留在模板类或薄 adapter 中。
+当前审查结论：C# / Java generated inline reader interface 中的方法均被 generated parser 直接调用（field、row、list element、record boundary、enum index、schema revision、exhausted check、scalar），暂未发现类似 `enter_field` / `len` / `read_next_*` / `read_enum_ordinal` 这类只服务 concrete reader 的 helper 污染 core contract。后续若引入 stable interface assembly / package，也应保持这一最小形状；JSON / MessagePack / Binary reader 模板中的解析便利方法仍留在模板类或薄 adapter 中。
 
 推进顺序：
 
-1. 为 `runtime/csharp/json_reader` 增加 compliance runner project，读取同一批 fixture，并通过薄 adapter 适配 generated-style nominal interface。
-2. 为 `runtime/java/json_reader` 增加 compliance harness，保持 JDK-only 路线，验证 Android / 老 JDK 兼容边界另列。
+1. 为 `runtime/csharp/json_reader`、`runtime/csharp/messagepack_reader`、`runtime/csharp/binary_reader` 增加 compliance runner project，读取同一批 fixture，并通过薄 adapter 适配 generated-style nominal interface。
+2. 为 `runtime/java/json_reader`、`runtime/java/messagepack_reader`、`runtime/java/binary_reader` 增加 compliance harness，保持 JDK-only 路线，验证 Android / 老 JDK 兼容边界另列。
 3. compliance 通过后，再评估 C# stable interface assembly / Java stable interface package：只有当 generated code 支持 external runtime interface 时，NuGet / Maven 包才有长期价值。
-4. Jackson / Gson / MessagePack adapter 作为可选 adapter 层增加，不改变 generated core。
+4. Jackson / Gson 等生态 adapter 作为可选 adapter 层增加，不改变 generated core。
 
 #### Phase R6：Codegen adapter emit / reference
 
@@ -307,11 +311,13 @@ runtime/
       ConfigForgeRuntimeConfig.cmake.in
     CMakeLists.txt        # options、find_package、adapter targets、tests
   csharp/
-    json_reader/          # 未来：System.Text.Json reader + fs loader
-    messagepack_reader/   # 未来：MessagePack reader adapter
+    json_reader/          # System.Text.Json reader + fs loader
+    messagepack_reader/   # dependency-free MessagePack subset reader + fs loader
+    binary_reader/        # schema-aware bin reader + fs loader
   java/
-    json_reader/          # 未来：JDK/Jackson/Gson 可选 JSON reader + fs loader
-    messagepack_reader/   # 未来：MessagePack reader adapter
+    json_reader/          # JDK-only JSON reader + fs loader
+    messagepack_reader/   # JDK-only MessagePack subset reader + fs loader
+    binary_reader/        # JDK-only schema-aware bin reader + fs loader
 ```
 
 `runtime/` 不是每次 export 的输出目录；它是 ConfigForge 源码仓库中维护的标准 runtime adapter 集合。未来如增加 `yaml`、`sqlite`、自定义二进制等 export type，应按同样结构补充对应语言子目录。
@@ -340,10 +346,10 @@ runtime/
 | C++ | MessagePack | `runtime/cpp/msgpackc_reader` | `stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(msgpack-cxx CONFIG)` / package manager / `FetchContent` 固定 `cpp-6.1.1` | 不手写二进制 parser；解码到 msgpack object/value 后适配 reader，可通过 CMake target 引入。 |
 | C# | JSON | `runtime/csharp/json_reader` | `custom/example` | `copyable_template` | .NET BCL `System.Text.Json` | standard_project `dotnet run` harness 复制该 reader，并用薄 adapter 实现 generated `IConfigForgeRuntimeDataReader` / `IConfigForgeRuntimeDataLoader`。 |
 | C# | MessagePack | `runtime/csharp/messagepack_reader` | `custom/example` | `copyable_template` | 无第三方依赖，内置 MessagePack subset parser | standard_project `dotnet run` harness 复制该 reader，并验证同一份 generated code 可加载 `.msgpack` runtime data。 |
+| C# | Binary | `runtime/csharp/binary_reader` | `custom/example` | `copyable_template` | 无第三方依赖 | standard_project `dotnet run` harness 复制该 reader，并验证同一份 generated code 可加载 `.bin` runtime data。 |
 | Java | JSON | `runtime/java/json_reader` | `custom/example` | `copyable_template` | JDK-only JSON parser | standard_project `javac` / `java` harness 复制该 reader，并用薄 adapter 实现 generated `ConfigForgeRuntimeDataReader` / `ConfigForgeRuntimeDataLoader`；后续可补 Jackson / Gson / Android 友好实现。 |
 | Java | MessagePack | `runtime/java/messagepack_reader` | `custom/example` | `copyable_template` | JDK-only MessagePack subset parser | standard_project `javac` / `java` harness 复制该 reader，并验证同一份 generated code 可加载 `.msgpack` runtime data。 |
-
-C# / Java binary reader 暂未落地：当前 generated inline reader interface 还没有 `BeginRecord` / `EndRecord`、schema revision、enum ordinal 读取等 positional layout 必需 API。为了避免把 schema-specific 推断硬塞进 concrete reader，binary 支持应先扩展 C# / Java generated contract，再补对应 reader template。
+| Java | Binary | `runtime/java/binary_reader` | `custom/example` | `copyable_template` | JDK-only，无第三方依赖 | standard_project `javac` / `java` harness 复制该 reader，并验证同一份 generated code 可加载 `.bin` runtime data。 |
 
 依赖策略：
 
@@ -384,11 +390,12 @@ target_include_directories(game_config_runtime PRIVATE
 
 | target | 类型 | 说明 |
 | --- | --- | --- |
-| `config_forge_runtime::binary_reader` | interface | `bin` schema-aware reader 基础 target。 |
+| `config_forge_runtime::core` | interface | 稳定 `IRuntimeDataReader` / `IRuntimeDataLoader` header target。 |
+| `config_forge_runtime::binary_reader` | interface | `bin` schema-aware reader target，链接 core。 |
 | `config_forge_runtime::rapidjson_reader` | interface | RapidJSON based reader，生产推荐 JSON adapter；启用 `CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER` 后提供。 |
 | `config_forge_runtime::msgpackc_reader` | interface | msgpack-cxx based reader，生产推荐 MessagePack adapter；启用 `CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER` 后提供。 |
 
-当前 C++ adapter 不提供单独的 `config_forge_runtime::core` target。短期以 generated header 中的 `IRuntimeDataReader` / `IRuntimeDataLoader` 作为唯一 C++ contract，adapter 通过宏绑定到该 generated interface，避免同时存在 generated interface 与 runtime core interface 两套 nominal virtual 类型。后续如拆出稳定 `config_forge_runtime.hpp`，再重新引入独立 stable interface target。
+当前 C++ adapter 同时支持 generated inline interface 与 stable external core header：默认仍可通过宏绑定 generated interface；当 generated C++ 使用 `runtime_interface = "external"` 时，adapter 与 generated code 共同使用 `config_forge_runtime::core` 中的 nominal virtual 类型。
 
 #### 三方依赖解析
 
@@ -406,7 +413,7 @@ target_include_directories(game_config_runtime PRIVATE
 #include "config_forge/runtime/rapidjson_reader/runtime_loader.hpp"
 ```
 
-Phase 1.5 优先评估拆出稳定 `config_forge_runtime.hpp`：generated C++ 提供 `interface = "inline" | "external"` 选项。默认 `inline` 保持当前 generated header 自带 interface；production adapter 推荐 `external`，由 generated code 和 adapter 同时 include 稳定 header。这样 adapter library 不再依赖某次 generated header，CMake target 可以更像普通第三方库被复用。
+Generated C++ 提供 `runtime_interface = "inline" | "external"` 选项。默认 `inline` 保持当前 generated header 自带 interface；production adapter 推荐 `external`，由 generated code 和 adapter 同时 include 稳定 header。这样 adapter library 不再依赖某次 generated header，CMake target 可以更像普通第三方库被复用。
 
 #### C++ reader 语义要求
 

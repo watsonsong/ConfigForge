@@ -100,12 +100,17 @@ public interface IConfigForgeRuntimeDataReader
     void EnterRequiredField(string name);
     bool EnterOptionalField(string name);
     void ExitField();
+    ulong? SchemaRevision();
     int ReadRowCount();
     void EnterRow(int index);
     void ExitRow();
     int ReadListLength();
     void EnterListElement(int index);
     void ExitListElement();
+    void BeginRecord(int optionalSlotCount);
+    void EndRecord();
+    int ReadEnumIndex(IReadOnlyList<string> variants);
+    void EnsureExhausted();
     long ReadInt();
     double ReadFloat();
     bool ReadBool();
@@ -117,6 +122,8 @@ public interface IConfigForgeRuntimeDataLoader
     IConfigForgeRuntimeDataReader Open(string path);
 }
 ```
+
+`BeginRecord` / `EndRecord`、`SchemaRevision`、`ReadEnumIndex` 与 `EnsureExhausted` 是 generated parser 直接调用的 schema-driven API：JSON / MessagePack reader 可在这些方法中保持轻量 no-op 或 string enum 映射，binary reader 则用它们消费 positional record、校验 schema revision、读取 enum ordinal 并确认 payload 已消费完毕。`ReadNext*`、optional bitmap 等低层 helper 不进入 generated inline contract，只保留在 concrete reader 或薄 adapter 内。
 
 错误模型使用异常还是 Result 需要和 C# 生态习惯权衡。第一阶段推荐生成 `ConfigForgeRuntimeException : Exception` 并在 generated reader / repository 中抛出：
 

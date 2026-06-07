@@ -306,11 +306,11 @@ test(runtime): add TypeScript and C++ compliance runners
 
 主要修改：
 
-- 新增 `runtime/csharp/` JSON reader / filesystem loader 示例或 copyable adapter。
-- 新增 `runtime/java/` JSON reader / filesystem loader 示例或 copyable adapter。
+- 新增 `runtime/csharp/` JSON / MessagePack / Binary reader 与 filesystem loader 示例或 copyable adapter。
+- 新增 `runtime/java/` JSON / MessagePack / Binary reader 与 filesystem loader 示例或 copyable adapter。
 - standard_project C# harness 改为引用或复制 `runtime/csharp/` adapter，而不是长期维护内嵌 reader。
 - standard_project Java harness 改为引用或复制 `runtime/java/` adapter，而不是长期维护内嵌 reader。
-- C# / Java adapter 保持 generated core 无第三方依赖；adapter 可先选 BCL / JDK-only JSON 实现，或明确 Jackson / Gson / System.Text.Json 依赖边界。
+- C# / Java adapter 保持 generated core 无第三方依赖；当前标准模板覆盖 BCL / JDK-only JSON、dependency-free MessagePack subset 与 Binary reader，生态 adapter 可另行明确 Jackson / Gson / System.Text.Json 依赖边界。
 - 更新开发环境和测试矩阵文档。
 
 验证：

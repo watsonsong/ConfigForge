@@ -122,8 +122,8 @@ loader.open("items")
 | C++ | `FileSystemDataFileLoader { root }` + JSON/MessagePack value reader，依赖可选生成 |
 | TypeScript | `FetchDataFileLoader` / `NodeFsDataFileLoader` + JS value reader，二选一或都不默认生成 |
 | Unreal C++ | Unreal module 内实现 `IConfigForgeRuntimeDataLoader` / `IConfigForgeRuntimeDataReader`，当前仓库只提供测试 shim，不提供生产 adapter |
-| C# | `runtime/csharp/json_reader` 中的 `System.Text.Json` value reader + filesystem loader，及 `runtime/csharp/messagepack_reader` 中的 dependency-free MessagePack named reader；standard_project harness 通过薄 adapter 接入 generated interface |
-| Java | `runtime/java/json_reader` 中的 JDK-only value reader + filesystem loader，及 `runtime/java/messagepack_reader` 中的 JDK-only MessagePack named reader；standard_project harness 通过薄 adapter 接入 generated interface，后续可补 Jackson / Gson adapter |
+| C# | `runtime/csharp/json_reader` 中的 `System.Text.Json` value reader + filesystem loader、`runtime/csharp/messagepack_reader` 中的 dependency-free MessagePack named reader，以及 `runtime/csharp/binary_reader` 中的 dependency-free schema-aware `bin` reader；standard_project harness 通过薄 adapter 接入 generated interface |
+| Java | `runtime/java/json_reader` 中的 JDK-only value reader + filesystem loader、`runtime/java/messagepack_reader` 中的 JDK-only MessagePack named reader，以及 `runtime/java/binary_reader` 中的 JDK-only schema-aware `bin` reader；standard_project harness 通过薄 adapter 接入 generated interface，后续可补 Jackson / Gson adapter |
 
 当前实现：
 
