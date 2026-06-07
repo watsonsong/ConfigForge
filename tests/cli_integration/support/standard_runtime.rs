@@ -5,6 +5,7 @@ use std::{fs, process::Command as StdCommand};
 
 use super::{
     assert_command_success, command_exists, require_any_tool_or_skip, require_tool_or_skip,
+    skip_language_or_continue,
 };
 
 pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
@@ -178,6 +179,9 @@ fn generated_external_rust_loads_exported_json() {
 "#;
 
 pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
+    if skip_language_or_continue("standard generated C++ runtime test", "cpp") {
+        return;
+    }
     if require_tool_or_skip("standard generated C++ runtime test", "cmake").is_none() {
         return;
     }
@@ -393,6 +397,9 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
     assert_command_success(output, "C++ MessagePack adapter namespace check run");
 }
 pub(crate) fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) {
+    if skip_language_or_continue("standard generated TypeScript runtime test", "typescript") {
+        return;
+    }
     if require_tool_or_skip("standard generated TypeScript runtime test", "node").is_none() {
         return;
     }
@@ -497,6 +504,9 @@ pub(crate) fn verify_standard_generated_typescript_runtime(fixture_root: &std::p
     assert_command_success(output, "standard generated TypeScript runtime test");
 }
 pub(crate) fn verify_standard_generated_lua_runtime(fixture_root: &std::path::Path) {
+    if skip_language_or_continue("standard generated Lua runtime test", "lua") {
+        return;
+    }
     let Some(lua_probe) = require_any_tool_or_skip(
         "standard generated Lua runtime test",
         &["lua5.4", "lua5.3", "lua", "luajit"],
@@ -513,6 +523,9 @@ pub(crate) fn verify_standard_generated_lua_runtime(fixture_root: &std::path::Pa
 }
 
 pub(crate) fn verify_standard_generated_csharp_runtime(fixture_root: &std::path::Path) {
+    if skip_language_or_continue("standard generated C# runtime test", "csharp") {
+        return;
+    }
     if require_tool_or_skip("standard generated C# runtime test", "dotnet").is_none() {
         return;
     }
@@ -793,6 +806,9 @@ sealed class BinaryRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader
 }
 
 pub(crate) fn verify_standard_generated_java_runtime(fixture_root: &std::path::Path) {
+    if skip_language_or_continue("standard generated Java runtime test", "java") {
+        return;
+    }
     if require_tool_or_skip("standard generated Java runtime test", "javac").is_none()
         || require_tool_or_skip("standard generated Java runtime test", "java").is_none()
     {

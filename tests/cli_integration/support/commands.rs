@@ -5,6 +5,29 @@ use std::process::Command as StdCommand;
 
 use assert_cmd::Command;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TestProfile {
+    Local,
+    Quick,
+    Full,
+    Nightly,
+}
+
+impl TestProfile {
+    pub(crate) fn current() -> Self {
+        match std::env::var("CONFIG_FORGE_TEST_PROFILE") {
+            Ok(value) if value.eq_ignore_ascii_case("quick") => Self::Quick,
+            Ok(value) if value.eq_ignore_ascii_case("full") => Self::Full,
+            Ok(value) if value.eq_ignore_ascii_case("nightly") => Self::Nightly,
+            _ => Self::Local,
+        }
+    }
+
+    fn requires_optional_tools(self) -> bool {
+        matches!(self, Self::Full | Self::Nightly)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ToolProbe {
     pub(crate) command: String,
@@ -108,12 +131,31 @@ pub(crate) fn skip_optional_test(test_name: &str, reason: &str) {
     eprintln!("skipping optional test `{test_name}`: {reason}");
 }
 
+#[allow(dead_code)]
+pub(crate) fn language_is_skipped(language: &str) -> bool {
+    parse_tool_list(std::env::var("CONFIG_FORGE_SKIP_LANGUAGES").ok().as_deref())
+        .any(|candidate| candidate.eq_ignore_ascii_case(language))
+}
+
+#[allow(dead_code)]
+pub(crate) fn skip_language_or_continue(test_name: &str, language: &str) -> bool {
+    if language_is_skipped(language) {
+        skip_optional_test(
+            test_name,
+            &format!("language `{language}` disabled by CONFIG_FORGE_SKIP_LANGUAGES"),
+        );
+        true
+    } else {
+        false
+    }
+}
+
 pub(crate) fn require_tool_or_skip(test_name: &str, command: &str) -> Option<ToolProbe> {
     let probe = probe_tool(command);
     if probe.available {
         Some(probe)
     } else {
-        skip_optional_test(test_name, &probe.diagnostic());
+        handle_missing_required_tool(test_name, &[command], &probe.diagnostic());
         None
     }
 }
@@ -127,8 +169,9 @@ pub(crate) fn require_any_tool_or_skip(test_name: &str, commands: &[&str]) -> Op
         }
         diagnostics.push(probe.diagnostic());
     }
-    skip_optional_test(
+    handle_missing_required_tool(
         test_name,
+        commands,
         &format!(
             "none of [{}] is available ({})",
             commands.join(", "),
@@ -136,6 +179,37 @@ pub(crate) fn require_any_tool_or_skip(test_name: &str, commands: &[&str]) -> Op
         ),
     );
     None
+}
+
+fn handle_missing_required_tool(test_name: &str, commands: &[&str], reason: &str) {
+    if commands.iter().any(|command| tool_is_required(command)) {
+        panic!("required tool missing for `{test_name}`: {reason}");
+    }
+    skip_optional_test(test_name, reason);
+}
+
+fn tool_is_required(command: &str) -> bool {
+    tool_is_required_with(
+        TestProfile::current(),
+        std::env::var("CONFIG_FORGE_REQUIRE_TOOLS").ok().as_deref(),
+        command,
+    )
+}
+
+fn tool_is_required_with(profile: TestProfile, require_tools: Option<&str>, command: &str) -> bool {
+    profile.requires_optional_tools() || parse_tool_list(require_tools).any(|tool| tool == command)
+}
+
+fn parse_tool_list(raw: Option<&str>) -> impl Iterator<Item = &str> {
+    raw.into_iter()
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+#[allow(dead_code)]
+pub(crate) fn current_test_profile() -> TestProfile {
+    TestProfile::current()
 }
 pub(crate) fn assert_command_success(output: std::process::Output, label: &str) {
     assert!(
@@ -148,7 +222,7 @@ pub(crate) fn assert_command_success(output: std::process::Output, label: &str) 
 
 #[cfg(test)]
 mod tests {
-    use super::{probe_tool, require_any_tool_or_skip};
+    use super::{TestProfile, probe_tool, require_any_tool_or_skip, tool_is_required_with};
 
     #[test]
     fn probe_tool_reports_missing_command() {
@@ -167,5 +241,27 @@ mod tests {
             ],
         );
         assert!(probe.is_none());
+    }
+
+    #[test]
+    fn tool_requirement_respects_profile_and_env_list() {
+        assert!(!tool_is_required_with(TestProfile::Local, None, "node"));
+        assert!(tool_is_required_with(TestProfile::Full, None, "node"));
+        assert!(tool_is_required_with(
+            TestProfile::Local,
+            Some("cmake,node"),
+            "node"
+        ));
+        assert!(!tool_is_required_with(
+            TestProfile::Quick,
+            Some("cmake,node"),
+            "dotnet"
+        ));
+    }
+
+    #[test]
+    fn parse_tool_list_trims_empty_entries() {
+        let values: Vec<_> = super::parse_tool_list(Some(" cmake, ,node,, ")).collect();
+        assert_eq!(values, vec!["cmake", "node"]);
     }
 }

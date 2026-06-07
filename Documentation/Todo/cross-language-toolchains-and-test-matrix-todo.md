@@ -141,7 +141,7 @@ docs(testing): document test and CI matrix
 test(integration): centralize optional tool probing
 ```
 
-## [ ] Step 4：引入 profile-aware 工具要求
+## [x] Step 4：引入 profile-aware 工具要求
 
 目标：让同一套 harness 在本地默认 optional skip，在 full CI 中对声明必需工具 fail-fast。
 
@@ -164,6 +164,8 @@ test(integration): centralize optional tool probing
 - `CONFIG_FORGE_TEST_PROFILE=local cargo test --test cli_integration standard_project_generated_code_loads_exported_runtime_data`
 - 用 fake / impossible tool 名称覆盖 local skip 与 full fail-fast 分支。
 - 确认未设置环境变量时保持本地友好，不强制安装所有语言环境。
+
+当前实现：`tests/cli_integration/support/commands.rs` 已支持 `CONFIG_FORGE_TEST_PROFILE=local|quick|full|nightly`、`CONFIG_FORGE_REQUIRE_TOOLS` 与 `CONFIG_FORGE_SKIP_LANGUAGES`；local / quick 默认保持 optional skip，full / nightly 或显式 require 的工具缺失时 fail-fast。standard_project C++ / TypeScript / Lua / C# / Java harness 已接入 language skip，工具缺失与 profile policy 分支由 focused tests 覆盖。
 
 建议提交：
 
