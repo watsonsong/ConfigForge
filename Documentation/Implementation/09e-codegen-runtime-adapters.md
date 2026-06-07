@@ -107,12 +107,14 @@ missing/null 语义：
 | `runtime/java/messagepack_reader` | Java MessagePack reader template | 已有 JDK-only MessagePack subset parser / reader 与 fs loader，覆盖当前 JSON 同构 named payload；standard_project harness 已同时验证 JSON / MessagePack。 |
 | `runtime/java/binary_reader` | Java binary reader template | 已有 JDK-only schema-aware `bin` reader 与 fs loader，覆盖 CFGB header、schema revision、record boundary、optional bitmap、enum ordinal 和 exhausted check；standard_project harness 已验证 Binary。 |
 
-主要缺口：
+当前结论：standard runtime helpers 已达到基础 MVP。仓库已经具备标准 reader 源码、统一 reader contract、跨语言首批 compliance runner、standard_project 端到端 smoke，以及默认不强迫 generated core 依赖具体 JSON / MessagePack / Binary adapter 的边界。这里的 MVP 表示“可验证、可复制、可作为项目接入起点”，但还不等同于“稳定发布包 / 长期兼容 API”。
 
-1. `tests/fixtures/runtime_reader_compliance/` 已有首批 canonical payload / expected 文件，并通过 `tests/runtime_compliance.rs` 覆盖 Rust JSON / MessagePack adapters，通过 `tests/typescript_runtime_compliance.rs` 覆盖 TypeScript JSON / MessagePack adapters，通过 `runtime/cpp/compliance_test.cpp` 覆盖 C++ RapidJSON / msgpack-cxx / binary adapters，通过 `tests/csharp_java_runtime_compliance.rs` 覆盖 C# / Java JSON / MessagePack / Binary 标准 reader。
-2. Rust `reader_core` 与 TypeScript workspace packages 已有 skeleton，core contract 已按 generated parser 直接调用面收敛；但尚未进入稳定发布形态，generated code 默认仍内联 / 声明本地 contract，未默认依赖稳定 Rust crate 或 npm package。
-3. C++ generated inline `IRuntimeDataReader` 已移除 `ReadArrayLength`、`ReadOptionalPresent`、`ReadNext*`、`ReadEnumOrdinal` 等非 generated-facing helper；并提供 `runtime/cpp/core/include/config_forge/runtime/reader.hpp` 与 `runtime_interface = "external"` opt-in，生产项目可逐步从 generated-header-bound 迁移到 stable core header。
-4. C# / Java JSON、MessagePack 与 Binary reader 已沉淀为 copyable template，并接入首批 runtime compliance runner；下一步按需补充 Jackson / Gson / Android 友好 adapter。
+推进到初步稳定阶段前，主要缺口是：
+
+1. `tests/fixtures/runtime_reader_compliance/` 已有首批 canonical payload / expected 文件，并通过 `tests/runtime_compliance.rs` 覆盖 Rust JSON / MessagePack adapters，通过 `tests/typescript_runtime_compliance.rs` 覆盖 TypeScript JSON / MessagePack adapters，通过 `runtime/cpp/compliance_test.cpp` 覆盖 C++ RapidJSON / msgpack-cxx / binary adapters，通过 `tests/csharp_java_runtime_compliance.rs` 覆盖 C# / Java JSON / MessagePack / Binary 标准 reader。初步稳定前需要继续补齐格式特有 negative cases、binary schema-derived materializer，以及 loader / path traversal / decode limit 等 adapter 周边 case。
+2. Rust `reader_core` 与 TypeScript workspace packages 已有 skeleton，core contract 已按 generated parser 直接调用面收敛；但尚未进入稳定发布形态，generated code 默认仍内联 / 声明本地 contract，未默认依赖稳定 Rust crate 或 npm package。初步稳定前需要完成 package metadata、exports / features、版本号与 reader contract 兼容范围、package-level tests 和最小生产接入示例。
+3. C++ generated inline `IRuntimeDataReader` 已移除 `ReadArrayLength`、`ReadOptionalPresent`、`ReadNext*`、`ReadEnumOrdinal` 等非 generated-facing helper；并提供 `runtime/cpp/core/include/config_forge/runtime/reader.hpp` 与 `runtime_interface = "external"` opt-in，生产项目可逐步从 generated-header-bound 迁移到 stable core header。初步稳定前需要补齐 install / find_package 体验、导出的 CMake config、external interface 的生产示例和版本兼容说明。
+4. C# / Java JSON、MessagePack 与 Binary reader 已沉淀为 copyable template，并接入首批 runtime compliance runner；初步稳定前需要决定是否引入 stable interface assembly / package，若保持 copyable template，也需要补齐模板版本、contract range、升级策略和生态 adapter（Jackson / Gson / Android 等）的边界说明。
 
 因此 runtime loader 工程化按“两层稳定 + 多 adapter 可选”的方向推进：
 
@@ -123,9 +125,9 @@ missing/null 语义：
 
 Runtime adapter 工程化应按“先可执行规范，再稳定接口，再发布包”的顺序推进，避免在 contract 尚未被自动验证前承诺长期包 API。
 
-#### Phase R1：Adapter compliance runner MVP
+#### Phase R1：Adapter compliance runner MVP（已达到基础 MVP）
 
-目标是把 `tests/fixtures/runtime_reader_compliance/` 升级为跨语言 / 跨格式 reader adapter 的可执行规范。此阶段不改变 generated code 对第三方库的零强依赖原则，也不要求立即发布 runtime package。
+目标是把 `tests/fixtures/runtime_reader_compliance/` 升级为跨语言 / 跨格式 reader adapter 的可执行规范。此阶段不改变 generated code 对第三方库的零强依赖原则，也不要求立即发布 runtime package。当前 Rust、TypeScript、C++、C# 与 Java 的首批 runner 已接入，因此该阶段已经完成基础 MVP；后续工作属于扩展 case 覆盖和稳定化，不再是证明路线可行性的前置工作。
 
 Compliance runner 的验证对象不是“每个语言必须有一个厚 core 模块”。core 模块只定义 generated code 与 adapter 之间的最小形状：reader / loader trait 或结构化接口、error、decode limits、contract version。某些语言可以只有 generated inline interface 或一份很薄的 structural type；只要 adapter 能被 generated code 通过薄 glue 调用，就可以参与 compliance。真正需要被反复验证的是具体 reader adapter 对 contract 语义的解释，而不是 core 本身承载业务逻辑。
 
@@ -188,6 +190,17 @@ Compliance fixtures 长期不按“每种格式维护一整套手写用例”扩
 4. C++ runner 通过 CMake / CTest 接入 RapidJSON、msgpack-cxx 和 binary reader，继续保持第三方依赖显式 opt-in。（已覆盖三种 reader 的首批 compliance target）
 5. C# / Java runner 复用现有 JSON / MessagePack / Binary copyable template，先验证 BCL/JDK-only named reader 与 dependency-free binary reader，再决定是否补 Jackson / Gson / Android 友好 adapter。（已接入首批 compliance runner）
 
+#### 初步稳定阶段准入标准
+
+standard runtime helpers 从基础 MVP 推进到初步稳定，应至少满足下列条件：
+
+1. **Contract freeze**：reader / loader method set、missing/null、scalar conversion、record boundary、schema revision、enum index 和 error keyword 经过 breaking-change review，并明确 `1.0` 兼容范围。
+2. **Compliance coverage**：所有已列为标准 reader 的语言 / 格式组合继续通过 shared logical cases；MessagePack 非 string map key、bin header/schema revision、binary/ext unsupported、decode limit、loader path traversal 等格式/transport 特有 case 有明确覆盖或显式 unsupported 标注。
+3. **Package / template versioning**：Rust crate、TypeScript package、C++ CMake target、C# / Java copyable template 或未来 package 都能声明 adapter version 与 supported reader contract range。
+4. **Production integration path**：每个推荐 adapter 至少有一个最小接入示例，说明依赖安装、loader 组合、generated code 的 inline/external contract 选择，以及默认不联网策略。
+5. **CI profile policy**：local / quick / full / nightly 对应工具要求、skip / fail-fast 和 `CONFIG_FORGE_ALLOW_NETWORK` 行为稳定记录在测试矩阵中，并由 focused tests 或 harness 输出验证。
+6. **Release boundary**：明确哪些 adapter 是 stable、preview 或 custom/example；未进入 stable 的生态 adapter 不能被文档描述为默认生产依赖。
+
 #### Phase R2：Rust stable runtime crate
 
 目标是把 Rust 从“generated crate 本地 trait + copyable template”迁移到可选稳定 runtime crate，同时保持默认 generated code 不强制依赖该 crate。
@@ -244,17 +257,17 @@ TypeScript 可以最早形成稳定 npm 包，因为 generated interface 是结�
 
 稳定前置条件：C++ RapidJSON / msgpack-cxx / binary compliance 通过；standard_project C++ harness 至少有一个 external interface smoke；CMake install / find_package 能重新找到 core 与可选三方依赖。当前首批 CTest compliance target 已覆盖三种 reader，后续需继续补 install / find_package 体验与更多格式特有 negative cases。
 
-#### Phase R5：C# / Java compliance 与 package 形态
+#### Phase R5：C# / Java package 形态评估
 
-C# / Java 当前先保持 copyable template，不急于承诺 NuGet / Maven 包。原因是它们是 nominal interface：generated code 每次声明自己的 `IConfigForgeRuntimeDataReader` / `ConfigForgeRuntimeDataReader`，标准 reader 需要薄 adapter 接入。当前 JSON、MessagePack 和 Binary 三种 reader template 都已存在，并通过 standard_project smoke 验证。
+C# / Java 当前先保持 copyable template，不急于承诺 NuGet / Maven 包。原因是它们是 nominal interface：generated code 每次声明自己的 `IConfigForgeRuntimeDataReader` / `ConfigForgeRuntimeDataReader`，标准 reader 需要薄 adapter 接入。当前 JSON、MessagePack 和 Binary 三种 reader template 都已存在，并通过 standard_project smoke 与首批 compliance runner 验证。
 
 当前审查结论：C# / Java generated inline reader interface 中的方法均被 generated parser 直接调用（field、row、list element、record boundary、enum index、schema revision、exhausted check、scalar），暂未发现类似 `enter_field` / `len` / `read_next_*` / `read_enum_ordinal` 这类只服务 concrete reader 的 helper 污染 core contract。后续若引入 stable interface assembly / package，也应保持这一最小形状；JSON / MessagePack / Binary reader 模板中的解析便利方法仍留在模板类或薄 adapter 中。
 
 推进顺序：
 
-1. 为 `runtime/csharp/json_reader`、`runtime/csharp/messagepack_reader`、`runtime/csharp/binary_reader` 增加 compliance runner project，读取同一批 fixture，并通过薄 adapter 适配 generated-style nominal interface。
-2. 为 `runtime/java/json_reader`、`runtime/java/messagepack_reader`、`runtime/java/binary_reader` 增加 compliance harness，保持 JDK-only 路线，验证 Android / 老 JDK 兼容边界另列。
-3. compliance 通过后，再评估 C# stable interface assembly / Java stable interface package：只有当 generated code 支持 external runtime interface 时，NuGet / Maven 包才有长期价值。
+1. 继续扩展 C# / Java JSON、MessagePack 与 Binary 的格式特有 negative cases，保持与 Rust / TypeScript / C++ shared logical cases 一致。
+2. 评估 C# stable interface assembly / Java stable interface package：只有当 generated code 支持 external runtime interface 时，NuGet / Maven 包才有长期价值；否则优先完善 copyable template 的版本、contract range 和升级说明。
+3. 验证 Android / 老 JDK 兼容边界另列，不把 JDK-only reader 的当前能力过度承诺为移动端完整支持。
 4. Jackson / Gson 等生态 adapter 作为可选 adapter 层增加，不改变 generated core。
 
 #### Phase R6：Codegen adapter emit / reference
