@@ -15,6 +15,17 @@ desc = "Standard reference game fixture used by integration tests."
 input = "data"
 
 [[targets]]
+name = "schema_docs"
+tags = ["client", "server"]
+
+[[targets.exports]]
+name = "meta_schema_doc"
+type = "schema_doc"
+output = "out/schema_docs"
+format = "markdown"
+title = "Reference Game Meta Schema Documentation"
+
+[[targets]]
 name = "client"
 tags = ["client"]
 

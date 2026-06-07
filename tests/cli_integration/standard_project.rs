@@ -11,6 +11,7 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let client_out_dir = temp_dir.path().join("out/client_data");
     let server_out_dir = temp_dir.path().join("out/server_data");
+    let schema_doc_out_dir = temp_dir.path().join("out/schema_docs");
     let project_path = temp_dir.path().join("ConfigForge.toml");
     fs::write(
         &project_path,
@@ -37,11 +38,23 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
                 [[targets.exports]]
                 output = "{}"
                 type = "messagepack"
+
+                [[targets]]
+                name = "schema_docs"
+                tags = ["client", "server"]
+
+                [[targets.exports]]
+                name = "meta_schema_doc"
+                output = "{}"
+                type = "schema_doc"
+                format = "markdown"
+                title = "Reference Game Meta Schema Documentation"
             "#,
             standard_reference_game_meta_imports(),
             absolute_fixture_path("data"),
             client_out_dir.display(),
             server_out_dir.display(),
+            schema_doc_out_dir.display(),
         ),
     )
     .expect("project config should be written");
@@ -127,6 +140,20 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
         .assert()
         .success()
         .stdout(predicate::str::contains("target `server` built"));
+
+    let mut schema_docs_cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    schema_docs_cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "schema_docs",
+    ]);
+    schema_docs_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target `schema_docs` built"));
+    assert!(schema_doc_out_dir.join("index.md").exists());
+    assert!(schema_doc_out_dir.join("game_rules.md").exists());
 
     assert!(!client_out_dir.join("materials.json").exists());
     assert!(!client_out_dir.join("weapons.json").exists());
@@ -349,6 +376,18 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
         .success()
         .stdout(predicate::str::contains("target `server` built"));
 
+    let mut schema_docs_cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    schema_docs_cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "schema_docs",
+    ]);
+    schema_docs_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target `schema_docs` built"));
+
     assert!(
         fixture_root
             .join("out/client_data/json/items.json")
@@ -417,6 +456,8 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(fixture_root.join("out/client_docs/index.md").exists());
     assert!(fixture_root.join("out/client_docs/quests.md").exists());
     assert!(fixture_root.join("out/server_docs/index.md").exists());
+    assert!(fixture_root.join("out/schema_docs/index.md").exists());
+    assert!(fixture_root.join("out/schema_docs/game_rules.md").exists());
     assert!(
         fixture_root
             .join("out/client_lua/reference_game_config/init.lua")
@@ -527,6 +568,12 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     let server_schema_index = fs::read_to_string(fixture_root.join("out/server_docs/index.md"))
         .expect("standard fixture server schema index should be readable");
     assert!(server_schema_index.contains("Server Schema Documentation"));
+
+    let meta_schema_index = fs::read_to_string(fixture_root.join("out/schema_docs/index.md"))
+        .expect("standard fixture meta schema index should be readable");
+    assert!(meta_schema_index.contains("Reference Game Meta Schema Documentation"));
+    assert!(meta_schema_index.contains("[game_rules](game_rules.md)"));
+    assert!(meta_schema_index.contains("[items](items.md)"));
 
     let asset_manifest_json =
         fs::read_to_string(fixture_root.join("out/client_assets/client_assets.json"))
