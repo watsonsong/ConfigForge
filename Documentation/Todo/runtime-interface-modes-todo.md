@@ -117,7 +117,7 @@ feat(codegen): parse runtime interface mode options
 feat(codegen): make Rust runtime interface inline by default
 ```
 
-## [ ] Step 3：Rust external opt-in 与自定义 path 完整验证
+## [x] Step 3：Rust external opt-in 与自定义 path 完整验证
 
 目标：保留 Rust external core 能力，并允许用户自定义 core path / re-export path。
 
@@ -128,6 +128,8 @@ feat(codegen): make Rust runtime interface inline by default
   - 覆盖默认 `config_forge_runtime_reader_core`。
 - 增加自定义 path 生成测试，例如 `runtime_core_path = "crate::runtime"`。
 - 明确 external 模式生成 manifest / 诊断中提示所需 core crate / contract range。
+
+当前实现：standard_project 新增 Rust external target，使用默认 `config_forge_runtime_reader_core` 验证 external 生成结果；Rust harness 对 external target 增加 JSON smoke，focused codegen 测试覆盖 `runtime_core_path = "crate::runtime"` 自定义 path。external 生成会 re-export 与 inline contract 对齐的 `RuntimeDataErrorKind`，便于调用端共享完整错误类型。
 
 验证：
 

@@ -25,8 +25,8 @@ fn render_external_runtime_reader_contract(
         .unwrap_or("config_forge_runtime_reader_core");
     content.raw_fmt(format_args!(
         r#"pub use {runtime_core_path}::{{
-    CONFIG_FORGE_READER_CONTRACT_VERSION, RuntimeDataError, RuntimeDataLoader, RuntimeDataReader,
-    RuntimeDataResult,
+    CONFIG_FORGE_READER_CONTRACT_VERSION, RuntimeDataError, RuntimeDataErrorKind,
+    RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult,
 }};
 
 "#

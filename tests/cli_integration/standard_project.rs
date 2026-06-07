@@ -378,6 +378,11 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(
         fixture_root
+            .join("out/client_code/rust_external/reference_game_config.rs")
+            .exists()
+    );
+    assert!(
+        fixture_root
             .join("out/client_code/typescript/reference_game_config.ts")
             .exists()
     );
@@ -429,6 +434,14 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(rust_code.contains("pub fn rows(&self) -> &[CharacterMaleGivenNamesRow]"));
     assert!(rust_code.contains("pub fn rows(&self) -> &[CharacterFemaleGivenNamesRow]"));
     assert!(!rust_code.contains("pub fn rows(&self) -> &[ItemsRow]"));
+    assert!(!rust_code.contains("pub use config_forge_runtime_reader_core"));
+
+    let external_rust_code = fs::read_to_string(
+        fixture_root.join("out/client_code/rust_external/reference_game_config.rs"),
+    )
+    .expect("standard fixture external Rust code should be readable");
+    assert!(external_rust_code.contains("pub use config_forge_runtime_reader_core::{"));
+    assert!(!external_rust_code.contains("pub trait RuntimeDataReader"));
 
     let java_code =
         fs::read_to_string(fixture_root.join("out/client_code/java/ReferenceGameConfig.java"))

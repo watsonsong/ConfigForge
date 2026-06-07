@@ -126,8 +126,55 @@ pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::P
             output,
             &format!("standard generated Rust binary runtime test ({edition})"),
         );
+
+        fs::write(temp_dir.path().join("lib.rs"), RUST_EXTERNAL_HARNESS)
+            .expect("external Rust harness lib.rs should be written");
+        fs::copy(
+            fixture_root.join("out/client_code/rust_external/reference_game_config.rs"),
+            temp_dir.path().join("generated.rs"),
+        )
+        .expect("generated external Rust code should be copied into harness");
+        let output = StdCommand::new("cargo")
+            .args(["test", "--quiet", "--manifest-path"])
+            .arg(temp_dir.path().join("Cargo.toml"))
+            .arg("generated_external_rust_loads_exported_json")
+            .env(
+                "CARGO_TARGET_DIR",
+                temp_dir.path().join(format!("target-{edition}-external")),
+            )
+            .env("JSON_DATA_DIR", fixture_root.join("out/client_data/json"))
+            .output()
+            .expect("standard generated external Rust runtime test should run");
+        assert_command_success(
+            output,
+            &format!("standard generated external Rust runtime test ({edition})"),
+        );
+
+        fs::copy(harness_dir.join("lib.rs"), temp_dir.path().join("lib.rs"))
+            .expect("rust harness lib.rs should be restored");
     }
 }
+
+const RUST_EXTERNAL_HARNESS: &str = r#"
+fn global_translate(_context: Option<&str>, _msgid: &str) -> Option<String> {
+    None
+}
+
+include!("generated.rs");
+
+mod json_runtime_reader;
+
+#[test]
+fn generated_external_rust_loads_exported_json() {
+    let data_dir = std::env::var("JSON_DATA_DIR").expect("JSON_DATA_DIR should be set");
+    let loader = json_runtime_reader::FsJsonRuntimeDataLoader::new(data_dir);
+    let data = GameData::load(&loader).expect("external generated data should load from JSON");
+    let item = data.items.get_by_id(2001).expect("item id should be indexed");
+    assert_eq!(item.price, 5);
+    assert_eq!(data.game_rules.max_player_level, 60);
+}
+"#;
+
 pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
     if !command_exists("cmake") {
         eprintln!("skipping standard generated C++ runtime test: cmake not found");

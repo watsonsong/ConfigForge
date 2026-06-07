@@ -61,6 +61,16 @@ function = "crate::global_translate"
 returns = "optional"
 
 [[targets.exports]]
+name = "rust_external"
+type = "rust"
+output = "out/client_code/rust_external"
+file_name = "reference_game_config"
+module_name = "reference_game_config"
+
+[targets.exports.rust]
+runtime_interface = "external"
+
+[[targets.exports]]
 type = "typescript"
 output = "out/client_code/typescript"
 file_name = "reference_game_config"
