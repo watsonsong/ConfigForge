@@ -123,7 +123,8 @@ base_dirs = ["UI/Textures"]
 extensions = [".png", ".asset"]
 case_sensitive = true
 require_sidecars = ["{path}.meta"]
-input = "relative_file"
+input = "path"
+extension_policy = "required"
 manifest_path = "search_path_relative"
 
 [[asset_kinds]]
@@ -141,11 +142,11 @@ name = "unreal_blueprint_class"
 search_paths = ["unreal_game"]
 base_dirs = ["Characters", "UI"]
 extensions = [".uasset"]
-input = "unreal_soft_object_path"
-unreal_object = "class"
-allow_editor_copy_reference = true
+input = "path"
+path_style = "mounted_object"
+strip_wrappers = ["BlueprintGeneratedClass'{value}'", "Class'{value}'"]
+object_name = "{stem}_C"
 allow_auto_complete = true
-object_suffix = "_C"
 ```
 
 建议字段：
@@ -156,8 +157,13 @@ object_suffix = "_C"
 | `search_paths` | `[]` | 允许查找的 Project search path ID。空数组表示使用所有 search paths，不推荐。 |
 | `base_dirs` | `[""]` | kind 在 search path 下的候选子目录。icon、vfx、audio 等固定目录应写在这里，让策划只填短路径。 |
 | `extensions` | `[]` | 允许的主资源后缀。Unity / filesystem 用真实后缀；Unreal 可用 `.uasset`；Cocos runtime path 可配置为 extensionless 输入但用此列表查找真实文件。 |
-| `input` | `relative_file` | 策划填写格式。建议枚举见下文。 |
+| `input` | `path` | 策划填写值的基础语法。P0-1 建议只保留通用 `path` / `string` 类，不把 `cocos`、`unreal` 作为核心枚举。引擎差异由下方 path style、wrapper、extension、object name 等规则组合表达。 |
+| `path_style` | `relative` | path 解释方式。可选 `relative`、`mounted`、`mounted_object`：普通相对路径、带挂载前缀路径、带 package/object 名的路径。 |
 | `manifest_path` | `search_path_relative` | manifest 输出路径口径。可选 `input`、`search_path_relative`、`engine_canonical`。 |
+| `extension_policy` | `required` | source input 的扩展名策略。可选 `required`、`forbidden`、`optional`。Cocos `resources.load` 风格可用 `forbidden` + `extensions` 查找真实文件。 |
+| `strip_wrappers` | `[]` | 输入 wrapper 模板。用于接受编辑器复制引用，例如 `BlueprintGeneratedClass'{value}'`，解析时提取 `{value}` 再进入通用 path 校验。 |
+| `object_separator` | `.` | `mounted_object` 中 package path 与 object name 的分隔符。Unreal 可用 `.`。 |
+| `object_name` | 无 | object name 模板，例如 `{stem}` 或 `{stem}_C`。用于校验或自动补齐 package 内对象名，不限定 Unreal。 |
 | `case_sensitive` | 继承全局 | 是否要求 source ref 大小写与真实文件一致。 |
 | `require_existing` | 继承全局 | 是否检查主资源存在。 |
 | `require_sidecars` | `[]` | 配对文件模板，例如 Unity 主资源要求 `{path}.meta` 同时存在。 |
@@ -168,18 +174,19 @@ object_suffix = "_C"
 | `name_suffixes` | `[]` | 文件名或对象名必须满足的后缀集合，例如 `_Icon`、`_Mat`、`_C`。 |
 | `allow_auto_complete` | `false` | 是否允许从短路径 / 文件名补全 canonical ref。默认关闭，避免歧义。 |
 
-`input` 建议支持：
+`input` 不建议扩张成 `cocos_resource_path`、`unreal_soft_object_path` 这类引擎专用枚举。更好的模型是“少量通用基础语法 + 可组合规则”：
 
-| input | 用途 | 例子 |
+| 规则组合 | 可表达场景 | 例子 |
 | --- | --- | --- |
-| `relative_file` | 普通文件系统 / Unity 主资源。填写相对 `base_dirs` 的路径。 | `item_sword.png`、`Weapons/sword.prefab` |
-| `extensionless_file` | Cocos Creator `resources.load` 风格，策划填不带扩展名的 runtime path，校验时用 `extensions` 找真实文件。 | `ui/icon_sword` |
-| `godot_resource_path` | Godot `res://` project resource path。 | `res://ui/icon_sword.png` |
-| `unreal_soft_object_path` | Unreal soft object / class path，可接受编辑器复制引用。 | `/Game/UI/WBP_Item.WBP_Item_C`、`BlueprintGeneratedClass'/Game/UI/WBP_Item.WBP_Item_C'` |
+| `input = "path"` + `path_style = "relative"` + `extension_policy = "required"` | 普通文件系统 / Unity 主资源。填写相对 `base_dirs` 的路径。 | `item_sword.png`、`Weapons/sword.prefab` |
+| `input = "path"` + `path_style = "relative"` + `extension_policy = "forbidden"` | Cocos Creator `resources.load` 风格，策划填不带扩展名的 runtime path，校验时用 `extensions` 找真实文件。 | `ui/icon_sword` |
+| `input = "path"` + `path_style = "mounted"` + search path `mount = "res://"` | Godot `res://` project resource path。 | `res://ui/icon_sword.png` |
+| `input = "path"` + `path_style = "mounted_object"` + search path `mount = "/Game"` + `object_separator = "."` | Unreal soft object / class path。 | `/Game/UI/WBP_Item.WBP_Item_C` |
+| `strip_wrappers = ["BlueprintGeneratedClass'{value}'"]` + `path_style = "mounted_object"` | Unreal 编辑器复制引用。 | `BlueprintGeneratedClass'/Game/UI/WBP_Item.WBP_Item_C'` |
 
 路径解析推荐规则：
 
-1. 先按 `asset_kind.input` 解析 source cell，得到 canonical logical ref。
+1. 先按 `asset_kind.input` 和 `path_style` 解析 source cell，必要时应用 `strip_wrappers`，得到 canonical logical ref。
 2. 再按 `search_paths × base_dirs × extensions` 生成候选 filesystem path 或 engine virtual path。
 3. 候选必须在对应 search path root 内，禁止 absolute path 和 `..` 逃逸。
 4. 如果多个候选命中，除非 kind 配置了明确优先级，否则报 `AssetRefAmbiguous`。
@@ -208,7 +215,9 @@ name = "unity_ui_texture"
 search_paths = ["unity_assets"]
 base_dirs = ["UI/Textures"]
 extensions = [".png", ".asset"]
-input = "relative_file"
+input = "path"
+path_style = "relative"
+extension_policy = "required"
 require_sidecars = ["{path}.meta"]
 name_prefixes = ["Icon_"]
 ```
@@ -217,7 +226,7 @@ name_prefixes = ["Icon_"]
 
 Unreal 用户常从编辑器复制资源引用。常见路径是虚拟挂载路径而不是文件系统路径，例如 `/Game/...`；对象路径通常包含 package path 和对象名，形式类似 `/Game/UI/WBP_Item.WBP_Item`。Blueprint class / generated class 引用常见对象名后缀 `_C`，复制引用时还可能带类型前缀和引号，例如 `BlueprintGeneratedClass'/Game/UI/WBP_Item.WBP_Item_C'`。
 
-Unreal 风格 kind 应支持：
+Unreal 风格不是通过 `input = "unreal"` 这类专用枚举实现，而是通过 mounted object path、wrapper stripping、object name 模板和 extension lookup 等通用规则组合实现。kind 应支持：
 
 - search path mount 映射：`Content/` ↔ `/Game`。
 - 接受 canonical soft object path：`/Game/Folder/Asset.Asset`。
@@ -235,10 +244,11 @@ name = "unreal_widget_class"
 search_paths = ["unreal_game"]
 base_dirs = ["UI"]
 extensions = [".uasset"]
-input = "unreal_soft_object_path"
-unreal_object = "class"
-object_suffix = "_C"
-allow_editor_copy_reference = true
+input = "path"
+path_style = "mounted_object"
+strip_wrappers = ["BlueprintGeneratedClass'{value}'", "Class'{value}'"]
+object_separator = "."
+object_name = "{stem}_C"
 allow_auto_complete = true
 name_prefixes = ["WBP_"]
 ```
@@ -249,9 +259,9 @@ name_prefixes = ["WBP_"]
 
 Godot 项目资源通常使用 `res://` 表示项目根目录，`user://` 表示用户可写数据目录。配置引用游戏随包资源时通常应使用 `res://`；`user://` 更适合存档、设置、日志或用户生成内容，不应默认进入 shipping asset manifest。
 
-Godot 风格 kind 应支持：
+Godot 风格也可由通用 mounted path 表达，不需要独立 `godot` input：
 
-- `input = "godot_resource_path"`。
+- `input = "path"`，`path_style = "mounted"`。
 - `res://` prefix 校验，并映射到 project root search path。
 - 按 `.tscn`、`.tres`、图片、音频等后缀校验。
 - 可配置禁止 `user://`，或只允许特定 tool target 使用。
@@ -264,7 +274,8 @@ name = "godot_scene"
 search_paths = ["godot_project"]
 base_dirs = ["scenes"]
 extensions = [".tscn"]
-input = "godot_resource_path"
+input = "path"
+path_style = "mounted"
 allow_path_prefixes = ["res://scenes/"]
 ```
 
@@ -272,9 +283,9 @@ allow_path_prefixes = ["res://scenes/"]
 
 Cocos Creator 的动态加载常以 `assets/resources` 为根，`resources.load()` 传入相对 `resources` 的路径，并且通常不包含文件扩展名。图片等导入资源还可能有子资源路径，例如 `image/spriteFrame`、`image/texture`。
 
-Cocos 风格 kind 应支持：
+Cocos 风格可由 relative path + forbidden extension policy 表达，不需要独立 `cocos` input：
 
-- `input = "extensionless_file"`，策划填 runtime load path，不带后缀。
+- `input = "path"`，`path_style = "relative"`，`extension_policy = "forbidden"`，策划填 runtime load path，不带后缀。
 - `base_dirs = ["resources"]` 或 search path root 直接指向 `assets/resources`。
 - 校验时用 `extensions` 找真实主资源，例如 `.prefab`、`.png`、`.mp3`。
 - 支持子资源 suffix / subpath 规则，例如 SpriteFrame kind 要求 `/spriteFrame` 或根据主图片自动补 runtime path。
@@ -287,7 +298,9 @@ name = "cocos_prefab"
 search_paths = ["cocos_assets"]
 base_dirs = ["resources"]
 extensions = [".prefab"]
-input = "extensionless_file"
+input = "path"
+path_style = "relative"
+extension_policy = "forbidden"
 manifest_path = "input"
 ```
 
@@ -323,7 +336,7 @@ Asset 校验在 target ExportView 上执行。校验输入是当前 target 可�
 2. 非空 asset ref 必须是 string-like value，且符合 asset ref syntax。
 3. `asset_kind` 必须存在于 Meta `asset_kinds`，且引用的 search paths 必须存在于 Project Config。
 4. ref path 必须符合 `asset_kind.input` 的格式；解析后的候选路径不能是 absolute path，不能通过 `..` 逃逸 search path root / base dir。
-5. 如果 kind 配置了 `extensions`，ref 后缀必须命中；`extensionless_file` 则必须能通过 `extensions` 唯一解析到主资源。
+5. 如果 kind 配置了 `extensions`，`extension_policy = "required"` 时 ref 后缀必须命中；`extension_policy = "forbidden"` 时输入不得包含扩展名，并且必须能通过 `extensions` 唯一解析到主资源。
 6. 如果 kind 配置了 `name_prefixes` / `name_suffixes`，文件名或对象名必须命中。
 7. 如果 target tags 命中 kind 的禁止策略，不能引用禁止 prefix。
 8. 如果启用 existence 校验，resolved filesystem path 必须存在。
@@ -470,7 +483,7 @@ asset_ref,asset_kind,table,field_path,record_key,source,tag
 需要讨论确认的点：
 
 1. **asset ref 是相对 kind base_dirs、search path root，还是 engine virtual root？** 本文建议由 `asset_kind.input` 决定：Unity / filesystem 高频字段可相对 `base_dirs`，Unreal / Godot 可填写 engine canonical path，Cocos 可填写 runtime extensionless path。
-2. **是否允许 extension 自动补全？** 本文建议默认不补全；只有 `input = "extensionless_file"` 或 `allow_auto_complete = true` 时才允许，并且必须唯一命中。
+2. **是否允许 extension 自动补全？** 本文建议默认不补全；只有 `extension_policy = "forbidden"` 或 `allow_auto_complete = true` 时才允许，并且必须唯一命中。
 3. **是否支持 Unreal 短路径自动补齐？** 可以支持，但必须保守：唯一候选、对象名规则可确定、class `_C` 规则明确时才补齐；否则要求填写完整 Unreal path 或编辑器复制引用。
 4. **是否把不存在资源作为 warning？** 本文建议默认 error；只有 `assets.require_existing = false` 或 kind/target policy 显式关闭时跳过存在性校验。
 5. **是否需要资源 provider 抽象？** P0-1 可先支持 local filesystem；Unity Asset Database、Unreal Asset Registry、Godot import data、Cocos asset database、远程 CDN catalog 可后续作为 provider 扩展。
