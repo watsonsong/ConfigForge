@@ -170,7 +170,17 @@
 
 ## Step 4：资源存在性、sidecar、命名和正则校验
 
-状态：待开始
+状态：已完成（提交前验证通过）
+
+完成记录：
+
+- Resolver 已支持 `require_existing`，并按 asset kind 覆盖 Project 全局默认。
+- 已支持 `require_sidecars = ["{path}.meta"]` 这类主资源配对文件检查。
+- 已支持 `name_prefixes` / `name_suffixes`，以及 `object_name` 模板校验。
+- 已支持 `allow_path_prefixes` / `deny_path_prefixes`，并用 `deny_when_tags` 做 target-gated deny 规则。
+- 已支持 `allow_patterns` / `deny_patterns`，以及 `regex_rules` 的 `raw_input`、`logical_ref`、`search_path_relative`、`file_name`、`stem`、`object_name`、`export_ref` target。
+- 已支持基础大小写校验：当 `case_sensitive = true` 且目标文件存在时枚举父目录确认最终文件名大小写一致；后续如需要可扩展到逐段路径校验和平台 warning 诊断。
+- 验证命令：`cargo fmt --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml" && cargo test --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml"`。
 
 工作项：
 

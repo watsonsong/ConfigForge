@@ -10,7 +10,7 @@ use crate::{
     ConfigForgeError, Result,
     meta::{
         AssetExtensionPolicy, AssetInputKind, AssetKindMeta, AssetPathStyle, AssetRegexRuleMeta,
-        LinkedMetaModel,
+        AssetRegexTarget, LinkedMetaModel, TargetTags, ValidationSeverity,
     },
     project::{AssetSearchPathConfig, AssetsConfig},
 };
@@ -71,6 +71,8 @@ struct AssetCandidate {
 pub struct AssetResolver {
     search_paths: BTreeMap<String, AssetSearchPath>,
     effective_kinds: BTreeMap<String, EffectiveAssetKind>,
+    case_sensitive: Option<bool>,
+    require_existing: Option<bool>,
 }
 
 impl AssetResolver {
@@ -94,6 +96,8 @@ impl AssetResolver {
         Ok(Self {
             search_paths,
             effective_kinds,
+            case_sensitive: assets.case_sensitive,
+            require_existing: assets.require_existing,
         })
     }
 
@@ -102,10 +106,21 @@ impl AssetResolver {
     }
 
     pub fn resolve(&self, asset_kind: &str, raw_input: &str) -> Result<ResolvedAssetRef> {
+        self.resolve_for_target(asset_kind, raw_input, &TargetTags::empty())
+    }
+
+    pub fn resolve_for_target(
+        &self,
+        asset_kind: &str,
+        raw_input: &str,
+        target_tags: &TargetTags,
+    ) -> Result<ResolvedAssetRef> {
         let kind = self.effective_kind(asset_kind).ok_or_else(|| {
             ConfigForgeError::Validation(format!("unknown asset kind `{asset_kind}`"))
         })?;
-        self.resolve_with_kind(kind, raw_input)
+        let resolved = self.resolve_with_kind(kind, raw_input)?;
+        self.validate_resolved(kind, &resolved, target_tags)?;
+        Ok(resolved)
     }
 
     fn resolve_with_kind(
@@ -329,6 +344,115 @@ impl AssetResolver {
         self.search_paths.get(name).ok_or_else(|| {
             ConfigForgeError::Validation(format!("asset search path `{name}` not found"))
         })
+    }
+
+    fn validate_resolved(
+        &self,
+        kind: &EffectiveAssetKind,
+        resolved: &ResolvedAssetRef,
+        target_tags: &TargetTags,
+    ) -> Result<()> {
+        let require_existing = kind
+            .require_existing
+            .or(self.require_existing)
+            .unwrap_or(false);
+        if require_existing && !resolved.resolved_filesystem_path.is_file() {
+            return Err(ConfigForgeError::Validation(format!(
+                "asset kind `{}` resolved `{}` to missing file `{}`",
+                kind.name,
+                resolved.raw_input,
+                resolved.resolved_filesystem_path.display()
+            )));
+        }
+
+        for sidecar_template in &kind.require_sidecars {
+            let sidecar_path = sidecar_path_from_template(sidecar_template, resolved);
+            if !sidecar_path.is_file() {
+                return Err(ConfigForgeError::Validation(format!(
+                    "asset kind `{}` requires missing sidecar `{}` for `{}`",
+                    kind.name,
+                    sidecar_path.display(),
+                    resolved.raw_input
+                )));
+            }
+        }
+
+        let name = asset_rule_name(resolved);
+        if !kind.name_prefixes.is_empty()
+            && !kind
+                .name_prefixes
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+        {
+            return Err(ConfigForgeError::Validation(format!(
+                "asset kind `{}` name `{name}` does not match required prefixes {:?}",
+                kind.name, kind.name_prefixes
+            )));
+        }
+        if !kind.name_suffixes.is_empty()
+            && !kind
+                .name_suffixes
+                .iter()
+                .any(|suffix| name.ends_with(suffix))
+        {
+            return Err(ConfigForgeError::Validation(format!(
+                "asset kind `{}` name `{name}` does not match required suffixes {:?}",
+                kind.name, kind.name_suffixes
+            )));
+        }
+
+        if let Some(template) = kind.object_name.as_deref() {
+            if let Some(object_name) = resolved.object_name.as_deref() {
+                let stem = asset_stem(resolved);
+                let expected = render_object_name(Some(template), &stem);
+                if object_name != expected {
+                    return Err(ConfigForgeError::Validation(format!(
+                        "asset kind `{}` object name `{object_name}` must be `{expected}`",
+                        kind.name
+                    )));
+                }
+            }
+        }
+
+        if !kind.allow_path_prefixes.is_empty()
+            && !kind
+                .allow_path_prefixes
+                .iter()
+                .any(|prefix| resolved.logical_ref.starts_with(prefix))
+        {
+            return Err(ConfigForgeError::Validation(format!(
+                "asset kind `{}` logical ref `{}` is outside allowed prefixes {:?}",
+                kind.name, resolved.logical_ref, kind.allow_path_prefixes
+            )));
+        }
+        let deny_rules_enabled = kind.deny_when_tags.is_empty()
+            || kind
+                .deny_when_tags
+                .iter()
+                .any(|tag| target_tags.contains(tag));
+        if deny_rules_enabled {
+            if let Some(prefix) = kind
+                .deny_path_prefixes
+                .iter()
+                .find(|prefix| resolved.logical_ref.starts_with(prefix.as_str()))
+            {
+                return Err(ConfigForgeError::Validation(format!(
+                    "asset kind `{}` logical ref `{}` is denied by prefix `{prefix}`",
+                    kind.name, resolved.logical_ref
+                )));
+            }
+            validate_simple_patterns(kind, resolved)?;
+        } else {
+            validate_allow_patterns(kind, resolved)?;
+        }
+        validate_regex_rules(kind, resolved, target_tags)?;
+
+        let case_sensitive = kind.case_sensitive.or(self.case_sensitive).unwrap_or(false);
+        if case_sensitive && resolved.resolved_filesystem_path.exists() {
+            validate_case_sensitive_path(&resolved.resolved_filesystem_path)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -607,6 +731,165 @@ fn select_unique_candidate(
             candidates.len()
         ))),
     }
+}
+
+fn sidecar_path_from_template(template: &str, resolved: &ResolvedAssetRef) -> PathBuf {
+    if template == "{path}" {
+        return resolved.resolved_filesystem_path.clone();
+    }
+    if let Some(suffix) = template.strip_prefix("{path}") {
+        return PathBuf::from(format!(
+            "{}{}",
+            resolved.resolved_filesystem_path.display(),
+            suffix
+        ));
+    }
+    PathBuf::from(template.replace(
+        "{path}",
+        &resolved.resolved_filesystem_path.display().to_string(),
+    ))
+}
+
+fn asset_rule_name(resolved: &ResolvedAssetRef) -> String {
+    resolved
+        .object_name
+        .clone()
+        .unwrap_or_else(|| asset_stem(resolved))
+}
+
+fn asset_stem(resolved: &ResolvedAssetRef) -> String {
+    resolved
+        .search_path_relative_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn validate_simple_patterns(kind: &EffectiveAssetKind, resolved: &ResolvedAssetRef) -> Result<()> {
+    validate_allow_patterns(kind, resolved)?;
+    for pattern in &kind.deny_patterns {
+        let regex = regex::Regex::new(pattern).map_err(|source| {
+            ConfigForgeError::Validation(format!(
+                "asset kind `{}` deny pattern `{pattern}` is invalid: {source}",
+                kind.name
+            ))
+        })?;
+        if regex.is_match(&resolved.logical_ref) {
+            return Err(ConfigForgeError::Validation(format!(
+                "asset kind `{}` logical ref `{}` is denied by pattern `{pattern}`",
+                kind.name, resolved.logical_ref
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_allow_patterns(kind: &EffectiveAssetKind, resolved: &ResolvedAssetRef) -> Result<()> {
+    if kind.allow_patterns.is_empty() {
+        return Ok(());
+    }
+    for pattern in &kind.allow_patterns {
+        let regex = regex::Regex::new(pattern).map_err(|source| {
+            ConfigForgeError::Validation(format!(
+                "asset kind `{}` allow pattern `{pattern}` is invalid: {source}",
+                kind.name
+            ))
+        })?;
+        if regex.is_match(&resolved.logical_ref) {
+            return Ok(());
+        }
+    }
+    Err(ConfigForgeError::Validation(format!(
+        "asset kind `{}` logical ref `{}` does not match any allow pattern",
+        kind.name, resolved.logical_ref
+    )))
+}
+
+fn validate_regex_rules(
+    kind: &EffectiveAssetKind,
+    resolved: &ResolvedAssetRef,
+    target_tags: &TargetTags,
+) -> Result<()> {
+    for rule in &kind.regex_rules {
+        if !rule.when_tags.is_empty() && !rule.when_tags.iter().any(|tag| target_tags.contains(tag))
+        {
+            continue;
+        }
+        let pattern = if rule.case_sensitive == Some(false) {
+            format!("(?i:{})", rule.pattern)
+        } else {
+            rule.pattern.clone()
+        };
+        let regex = regex::Regex::new(&pattern).map_err(|source| {
+            ConfigForgeError::Validation(format!(
+                "asset kind `{}` regex rule `{}` pattern is invalid: {source}",
+                kind.name, rule.name
+            ))
+        })?;
+        let value = regex_target_value(
+            rule.target.unwrap_or(AssetRegexTarget::LogicalRef),
+            resolved,
+        );
+        let matched = regex.is_match(&value);
+        let passes = if rule.invert { !matched } else { matched };
+        if !passes && rule.severity == ValidationSeverity::Error {
+            return Err(ConfigForgeError::Validation(
+                rule.message.clone().unwrap_or_else(|| {
+                    format!(
+                        "asset kind `{}` regex rule `{}` failed for `{value}`",
+                        kind.name, rule.name
+                    )
+                }),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn regex_target_value(target: AssetRegexTarget, resolved: &ResolvedAssetRef) -> String {
+    match target {
+        AssetRegexTarget::RawInput => resolved.raw_input.clone(),
+        AssetRegexTarget::LogicalRef => resolved.logical_ref.clone(),
+        AssetRegexTarget::SearchPathRelative => {
+            path_to_asset_string(&resolved.search_path_relative_path)
+        }
+        AssetRegexTarget::FileName => resolved
+            .search_path_relative_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned(),
+        AssetRegexTarget::Stem => asset_stem(resolved),
+        AssetRegexTarget::ObjectName => resolved.object_name.clone().unwrap_or_default(),
+        AssetRegexTarget::ExportRef => resolved.canonical_export_ref.clone(),
+    }
+}
+
+fn validate_case_sensitive_path(path: &Path) -> Result<()> {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return Ok(());
+    };
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    let entries = std::fs::read_dir(parent).map_err(|source| ConfigForgeError::ReadFile {
+        path: parent.to_path_buf(),
+        source,
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| ConfigForgeError::ReadFile {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+        if entry.file_name().to_str() == Some(file_name) {
+            return Ok(());
+        }
+    }
+    Err(ConfigForgeError::Validation(format!(
+        "asset path `{}` does not match filesystem case",
+        path.display()
+    )))
 }
 
 fn split_mounted_object<'a>(
@@ -945,6 +1228,241 @@ mod tests {
         let parent_error = resolver.resolve("ui_icon", "../Icon.png").unwrap_err();
         assert!(
             matches!(parent_error, ConfigForgeError::Validation(message) if message.contains("must not escape"))
+        );
+    }
+
+    #[test]
+    fn require_existing_reports_missing_file() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let meta = linked_meta(
+            r#"
+                [[asset_kinds]]
+                name = "ui_icon"
+                search_paths = ["game"]
+                extensions = [".png"]
+                require_existing = true
+            "#,
+        );
+        let resolver = resolver(
+            &meta,
+            AssetsConfig {
+                search_paths: vec![search_path("game", temp_dir.path().to_path_buf(), None)],
+                ..AssetsConfig::default()
+            },
+        );
+
+        let error = resolver.resolve("ui_icon", "Missing.png").unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("missing file"))
+        );
+    }
+
+    #[test]
+    fn require_sidecars_reports_missing_pair_file() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let asset_path = temp_dir.path().join("Icon_Sword.png");
+        fs::write(&asset_path, []).expect("write asset");
+        let meta = linked_meta(
+            r#"
+                [[asset_kinds]]
+                name = "ui_icon"
+                search_paths = ["game"]
+                extensions = [".png"]
+                require_sidecars = ["{path}.meta"]
+            "#,
+        );
+        let resolver = resolver(
+            &meta,
+            AssetsConfig {
+                search_paths: vec![search_path("game", temp_dir.path().to_path_buf(), None)],
+                ..AssetsConfig::default()
+            },
+        );
+
+        let error = resolver.resolve("ui_icon", "Icon_Sword.png").unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("missing sidecar"))
+        );
+    }
+
+    #[test]
+    fn validates_name_prefixes_and_suffixes() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        fs::write(temp_dir.path().join("BadName.png"), []).expect("write asset");
+        let meta = linked_meta(
+            r#"
+                [[asset_kinds]]
+                name = "ui_icon"
+                search_paths = ["game"]
+                extensions = [".png"]
+                name_prefixes = ["Icon_"]
+                name_suffixes = ["_UI"]
+            "#,
+        );
+        let resolver = resolver(
+            &meta,
+            AssetsConfig {
+                search_paths: vec![search_path("game", temp_dir.path().to_path_buf(), None)],
+                ..AssetsConfig::default()
+            },
+        );
+
+        let error = resolver.resolve("ui_icon", "BadName.png").unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("required prefixes"))
+        );
+    }
+
+    #[test]
+    fn validates_object_name_template() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let asset_path = temp_dir.path().join("UI/WBP_Item.uasset");
+        fs::create_dir_all(asset_path.parent().expect("parent")).expect("create dirs");
+        fs::write(&asset_path, []).expect("write asset");
+        let meta = linked_meta(
+            r#"
+                [[asset_kinds]]
+                name = "unreal_widget_class"
+                search_paths = ["game"]
+                extensions = [".uasset"]
+                path_style = "mounted_object"
+                object_name = "{stem}_C"
+            "#,
+        );
+        let resolver = resolver(
+            &meta,
+            AssetsConfig {
+                search_paths: vec![search_path(
+                    "game",
+                    temp_dir.path().to_path_buf(),
+                    Some("/Game"),
+                )],
+                ..AssetsConfig::default()
+            },
+        );
+
+        let error = resolver
+            .resolve("unreal_widget_class", "/Game/UI/WBP_Item.WBP_Item")
+            .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("object name") && message.contains("WBP_Item_C"))
+        );
+    }
+
+    #[test]
+    fn validates_target_gated_deny_prefixes() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let asset_path = temp_dir.path().join("Dev/Icon_Debug.png");
+        fs::create_dir_all(asset_path.parent().expect("parent")).expect("create dirs");
+        fs::write(&asset_path, []).expect("write asset");
+        let meta = linked_meta(
+            r#"
+                [[asset_kinds]]
+                name = "ui_icon"
+                search_paths = ["game"]
+                extensions = [".png"]
+                deny_path_prefixes = ["Dev/"]
+                deny_when_tags = ["shipping"]
+            "#,
+        );
+        let resolver = resolver(
+            &meta,
+            AssetsConfig {
+                search_paths: vec![search_path("game", temp_dir.path().to_path_buf(), None)],
+                ..AssetsConfig::default()
+            },
+        );
+
+        resolver
+            .resolve_for_target("ui_icon", "Dev/Icon_Debug.png", &TargetTags::new(["dev"]))
+            .expect("dev target should allow dev asset");
+        let error = resolver
+            .resolve_for_target(
+                "ui_icon",
+                "Dev/Icon_Debug.png",
+                &TargetTags::new(["shipping"]),
+            )
+            .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("denied by prefix"))
+        );
+    }
+
+    #[test]
+    fn validates_allow_and_deny_patterns() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        for file_name in ["Icon_Sword.png", "Tmp_Icon.png"] {
+            fs::write(temp_dir.path().join(file_name), []).expect("write asset");
+        }
+        let meta = linked_meta(
+            r#"
+                [[asset_kinds]]
+                name = "ui_icon"
+                search_paths = ["game"]
+                extensions = [".png"]
+                allow_patterns = ["^Icon_"]
+                deny_patterns = ["Tmp"]
+            "#,
+        );
+        let resolver = resolver(
+            &meta,
+            AssetsConfig {
+                search_paths: vec![search_path("game", temp_dir.path().to_path_buf(), None)],
+                ..AssetsConfig::default()
+            },
+        );
+
+        resolver
+            .resolve("ui_icon", "Icon_Sword.png")
+            .expect("allowed pattern should pass");
+        let error = resolver.resolve("ui_icon", "Tmp_Icon.png").unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("does not match any allow pattern") || message.contains("denied by pattern"))
+        );
+    }
+
+    #[test]
+    fn validates_regex_rules_for_specific_targets() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        fs::write(temp_dir.path().join("Icon_Sword.png"), []).expect("write asset");
+        let meta = linked_meta(
+            r#"
+                [[asset_kinds]]
+                name = "ui_icon"
+                search_paths = ["game"]
+                extensions = [".png"]
+
+                [[asset_kinds.regex_rules]]
+                name = "shipping_icon_stem"
+                target = "stem"
+                pattern = "^Ship_"
+                message = "shipping icon stem must start with Ship_"
+                when_tags = ["shipping"]
+            "#,
+        );
+        let resolver = resolver(
+            &meta,
+            AssetsConfig {
+                search_paths: vec![search_path("game", temp_dir.path().to_path_buf(), None)],
+                ..AssetsConfig::default()
+            },
+        );
+
+        resolver
+            .resolve_for_target("ui_icon", "Icon_Sword.png", &TargetTags::new(["client"]))
+            .expect("non-shipping target should skip regex rule");
+        let error = resolver
+            .resolve_for_target("ui_icon", "Icon_Sword.png", &TargetTags::new(["shipping"]))
+            .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("shipping icon stem"))
         );
     }
 }
