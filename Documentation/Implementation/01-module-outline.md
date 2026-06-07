@@ -21,7 +21,7 @@
 | Diagnostic / Error | `src/diagnostic/` | 统一诊断基础类型、严重级别、位置、报告聚合、格式化，以及 crate 级错误桥接。 | 各模块诊断条目、底层错误。 | `DiagnosticSeverity`、`DiagnosticLocation`、`DiagnosticReport<T>`、`ConfigForgeError`。 | `02-diagnostic-module-detail-design.md` |
 | Project | `src/project/` | 加载 `ConfigForge.toml`、解析工程级配置、合并 imports、归一化路径、抽取 Meta。 | Project Config TOML。 | `ProjectConfig`、`TargetConfig`、`MetaModel`。 | `03-project-module-detail-design.md` |
 | Meta | `src/meta/` | Meta schema 加载、纯配置模型、link 借用视图、结构校验；模型定义按 raw / linked / types / conditions 拆分。 | Meta TOML 片段。 | `MetaModel`、`LinkedMetaModel<'meta>`、`MetaDiagnostic`。 | `04-meta-module-detail-design.md` |
-| Runtime Contract | `src/runtime_contract.rs` | exporter / codegen / build 共享的底层运行时契约，包括 export dependency、runtime data file metadata 和 binary schema revision 计算。 | `LinkedTableMeta<'meta>`、`TargetTags`。 | `ExportDependency`、`RuntimeDataFile`、schema revision。 | 本文档总览。 |
+| Runtime Contract | `src/runtime_contract.rs` | exporter / codegen / build 共享的底层运行时契约，包括 runtime data file metadata 和 binary schema revision 计算。 | `LinkedTableMeta<'meta>`、`TargetTags`。 | `RuntimeDataFile`、schema revision。 | 本文档总览。 |
 | Data | `src/data/` | 根据加载计划读取 CSV 等数据源，形成 raw `DataSet`，并提供 Meta-aware resolver。 | `DataLoadPlan`、source files、`LinkedMetaModel<'meta>`。 | `DataSet`、`ResolvedDataSet` / resolved view。 | `05-data-module-detail-design.md` |
 | Asset Resolver | `src/asset.rs` | 根据 Meta `asset_kind` 与 Project asset search paths 解析资源引用，生成 canonical export ref，并执行存在性、sidecar、命名、prefix / regex、target-gated deny 等检查。 | `LinkedMetaModel<'meta>`、`AssetsConfig`、`TargetTags`、raw asset ref。 | `ResolvedAssetRef` / validation error。 | `08-asset-validation-and-manifest.md` |
 | Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、asset reference validation、注册式 validator；入口、table、FK、struct value、default、asset 逻辑分文件维护。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`、可选 `AssetsConfig`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
@@ -125,7 +125,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 1. **CLI / Options**：`cli` 解析命令和参数，转换为 build options。
 2. **Project Load / Merge**：`project` 加载 `ConfigForge.toml`，递归展开 imports，归一化工程路径。
 3. **Meta Extract / Link / Validate**：`project` 抽取 `MetaModel`，`meta` 构造 `LinkedMetaModel<'meta>` 并输出结构诊断。
-4. **Target Normalize**：`build` 归一化 target 与统一 export task，并根据 generator requirements / derived dependency 构造执行视图。
+4. **Target Normalize**：`build` 归一化 target 与统一 export task，并根据 generator requirements 构造执行视图。
 5. **Data Load**：`data` 根据 target 可见表和 source declaration 生成加载计划并读取 `DataSet`。
 6. **Data Normalize / Resolve**：`validation` 调用 DataResolver 应用 default、struct JSON / expanded value、fragment 等规则，形成可校验输入。
 7. **Target-aware Validation**：`validation` 派生 `ExportValidationView`，执行 required/type/enum/index/FK/validator/asset reference 等规则并输出 `ValidationReport`。

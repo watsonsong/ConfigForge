@@ -121,7 +121,7 @@
 
 范围：
 
-- 在 export dependency planning 中声明 `schema_doc` 为 MetaOnly。
+- 在 generator requirements planning 中声明 `schema_doc` 不需要 Data，因此进入 MetaOnly 分支。
 - 解析 `schema_doc` export task 选项：`format`、`index_file`、`title`；暂未实现选项显式报错。
 - 在 MetaOnly 分支中构建 SchemaDoc 并写入 artifact。
 - 输出路径纳入现有 artifact conflict check，与 codegen/runtime data/validation_report 等任务互相检测冲突。

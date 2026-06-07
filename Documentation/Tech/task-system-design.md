@@ -683,7 +683,7 @@ Artifact[]
 
 ### 7.1 阶段式 branch pipeline
 
-当前代码的 `execute_target_pipeline()` 是 branch pipeline：它按 export dependency contract 拆成 `MetaOnly` / `MetaAndData` 两条分支，并只把 execution view 作为 trace/debug summary。它尚不具备，也不伪装成具备：
+当前代码的 `execute_target_pipeline()` 是 branch pipeline：它按 generator requirements 拆成 `MetaOnly` / `MetaAndData` 两条分支，并只把 execution view 作为 trace/debug summary。它尚不具备，也不伪装成具备：
 
 - 从请求的 target/export task 反向裁剪依赖图；
 - node-level readiness scheduling；

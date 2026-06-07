@@ -11,7 +11,7 @@ Build 模块需要解决：
 3. 创建和管理 CPU worker pool。
 4. 按 target tags 组织 runtime data export。
 5. 在导出前加载、归一化、校验数据。
-6. 支持一个 target 内多个 exporter task，并按 exporter 声明的 dependency contract 复用 Meta / Data / Validation 节点。
+6. 支持一个 target 内多个 export task，并按 generator 声明的 requirements 复用 Meta / Data / Validation 节点。
 7. 运行时数据格式选择停留在 exporter / runtime loader 层，不进入 MetaOnly codegen 绑定。
 8. 创建共享 `ArtifactSink` 并传给 exporter / codegen，由 artifact 模块统一协调路径占用、dry-run、direct/temp-commit 和写出文件。
 
@@ -40,7 +40,7 @@ src/build/
 | `runtime.rs` | MetaAndData export task 执行：消费已准备的 `RawSourceData`、复用 normalized DataSet、收集 validation warning、调用 exporter。 |
 | `mod.rs` | `build_target()` 主流程、target-local execution summary、MetaAndData / MetaOnly branch pipeline、共享 `ArtifactSink` 创建与 finish。 |
 
-当前 `target.rs` 输出 `NormalizedExportTask`；`mod.rs` 以 generator requirements 派生出的 dependency contract 拆分 MetaAndData / MetaOnly 两类分支，并直接执行阶段式 pipeline。`build_execution_view` 是 trace/debug summary，只记录 target、是否需要 data、两类 export 数量和声明顺序，不再维护或测试 node-level DAG key。`BuildTraceRecorder` 在现有阶段式 executor 边界记录 stage name、relative start、duration 和 result state，并通过 `BuildOutput.trace` 暴露给 CLI 的 `--trace-tasks` JSON 输出。`SourceReadPlan` 构造保留在 build input preparation；`MetaModel::link()`、`SourceReadPlan -> RawSourceData` 与 MetaOnly generators 在 `run_exporters` 阶段按依赖 pipeline 执行：source read 与 link 并行，link 完成后立即运行 MetaOnly generators，normalize / validation 等待 link + raw sources join。当前不维护通用 DAG executor 的迁移 skeleton；只有未来出现 multi-target cache、远程执行或更细粒度调度需求时，才重新设计 node-level model。
+当前 `target.rs` 输出 `NormalizedExportTask`；`mod.rs` 直接使用 generator requirements 中的 `needs_data` 拆分 MetaAndData / MetaOnly 两类分支，并直接执行阶段式 pipeline。`build_execution_view` 是 trace/debug summary，只记录 target、是否需要 data、两类 export 数量和声明顺序，不再维护或测试 node-level DAG key。`BuildTraceRecorder` 在现有阶段式 executor 边界记录 stage name、relative start、duration 和 result state，并通过 `BuildOutput.trace` 暴露给 CLI 的 `--trace-tasks` JSON 输出。`SourceReadPlan` 构造保留在 build input preparation；`MetaModel::link()`、`SourceReadPlan -> RawSourceData` 与 MetaOnly generators 在 `run_exporters` 阶段按依赖 pipeline 执行：source read 与 link 并行，link 完成后立即运行 MetaOnly generators，normalize / validation 等待 link + raw sources join。当前不维护通用 DAG executor 的迁移 skeleton；只有未来出现 multi-target cache、远程执行或更细粒度调度需求时，才重新设计 node-level model。
 
 ## 10.2a 统一 Export Task 与依赖分支
 
@@ -57,17 +57,12 @@ pub(crate) struct NormalizedExportTask {
     pub(crate) name: String,
     pub(crate) type_id: String,
     pub(crate) output: PathBuf,
-    pub(crate) dependency: ExportDependency,
+    pub(crate) requirements: GeneratorRequirements,
     pub(crate) options: BTreeMap<String, toml::Value>,
-}
-
-pub(crate) enum ExportDependency {
-    MetaOnly,
-    MetaAndData,
 }
 ```
 
-`dependency` 不应由用户手写，而应来自 artifact generator registry。Build normalization 阶段会从已注册 generator 的 input requirements 派生 `type_id` / alias 对应的 dependency contract，并写入 `NormalizedExportTask.dependency`。当前实现通过统一 `GeneratorRegistry` facade 查询 build-facing `ArtifactGenerator`；language codegen、data-backed exporter 和 direct artifact generator 都先由 adapter / 直接实现收敛为同一种调度接口：
+`requirements` 不应由用户手写，而应来自 artifact generator registry。Build normalization 阶段会按 `type_id` / alias 查询已注册 generator 的 input requirements，并写入 `NormalizedExportTask.requirements`。当前实现通过统一 `GeneratorRegistry` facade 查询 build-facing `ArtifactGenerator`；language codegen、data-backed exporter 和 direct artifact generator 都先由 adapter / 直接实现收敛为同一种调度接口：
 
 - [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 codegen backend：`MetaOnly`。
 - JSON / MessagePack / bin runtime data exporter：`MetaAndData`。
@@ -77,9 +72,9 @@ pub(crate) enum ExportDependency {
 
 `MetaOnly` / `MetaAndData` 是调度属性，不是 trait 继承体系。一个 generator 可以组合多种能力 facet：Rust / C++ / TypeScript 是 requirements 只含 Meta 的 code artifact generator；`schema_doc` 是 requirements 只含 Meta 的 doc artifact generator；`lua_table` 是 requirements 包含 Meta + Data、同时复用 code artifact 选项和 aggregate artifact 写出能力的 mixed generator。输入依赖不应决定 generator 的领域身份，避免 Lua 这类 data-backed code artifact 被迫在 “CodeGenerator vs DataExporter” 之间二选一。
 
-不提供 `DataOnly` 模式：当前和可预见的 generator 都需要 Meta 来完成类型解释、target 可见性、校验和 artifact 规划。若未来出现不需要 Meta 的纯文件搬运类能力，应作为独立 build step 重新设计，而不是复用 target export task dependency contract。
+不提供 `DataOnly` 模式：当前和可预见的 generator 都需要 Meta 来完成类型解释、target 可见性、校验和 artifact 规划。若未来出现不需要 Meta 的纯文件搬运类能力，应作为独立 build step 重新设计，而不是复用 target export task 的 requirements branch。
 
-当前实现不维护 target-local DAG node key。Build 只基于 dependency contract 得到一个 target-local execution summary，并按两类依赖执行分支：
+当前实现不维护 target-local DAG node key。Build 基于 requirements 中的 `needs_data` 得到一个 target-local execution summary，并按两类输入需求执行分支：
 
 | 分支 / 阶段 | 输入 | 产出 | 说明 |
 | --- | --- | --- | --- |
@@ -99,7 +94,7 @@ pub(crate) enum ExportDependency {
 5. 当前 Build 在 `build_target()` 创建共享 `ArtifactSink` 并传入 generator 分支；分支执行只按 export task 的 `type_id` 调用 `GeneratorRegistry::require_generator()`，再根据 requirements 传入 common input 或 data input。runtime table exporter 与 aggregate exporter 通过 data-backed adapter 写 sink，language codegen 通过 codegen adapter 写 sink，`schema_doc` 作为 direct `ArtifactGenerator` 写 sink。领域模块内部继续复用 table serialization、code writer、doc renderer 等能力。
 6. dry-run artifact plan 由 `ArtifactSink::finish()` 返回的 entries 按 normalized path 稳定排序；诊断仍按稳定阶段边界合并。
 
-当前状态：Project Config 使用 `[[targets.exports]]`；normalize 阶段全部转换为 `NormalizedExportTask`；`GeneratorRegistry` 统一提供 type / alias 到 requirements-derived dependency 的查询；branch pipeline 按 dependency contract 拆成 MetaAndData / MetaOnly 两类分支，并在阶段式执行器中提前启动只依赖 Meta 的 generator。通用 node-level DAG scheduler 不是当前默认执行模型，也不保留容易误导为“已 DAG 化”的 skeleton。
+当前状态：Project Config 使用 `[[targets.exports]]`；normalize 阶段全部转换为 `NormalizedExportTask`；`GeneratorRegistry` 统一提供 type / alias 到 `GeneratorRequirements` 的查询；branch pipeline 按 `requirements.needs_data` 拆成 MetaAndData / MetaOnly 两类分支，并在阶段式执行器中提前启动只依赖 Meta 的 generator。通用 node-level DAG scheduler 不是当前默认执行模型，也不保留容易误导为“已 DAG 化”的 skeleton。
 
 阶段 A 的实施步骤：
 
@@ -148,7 +143,7 @@ build_target(options)
       -> prepare build inputs:
           build optional SourceReadPlan when target requires data
           no SourceReadPlan when target is code-only
-      -> split export tasks by dependency contract
+      -> split export tasks by requirements.needs_data
       -> run exporters:
           (LinkMeta -> MetaOnly generators) || optional SourceReadPlan + RawSourceData
           after join: MetaAndData branch NormalizeTable[*] + deterministic merge / validation / generators
@@ -243,7 +238,7 @@ pub(crate) trait ArtifactGenerator: Send + Sync {
 }
 ```
 
-其中 `ExportDependency::MetaOnly / MetaAndData` 可由 `GeneratorRequirements::needs_data` 派生，继续服务当前 branch pipeline；但 requirements 不是继承层次。Build-facing registry 只暴露 `require_generator(type_id) -> ArtifactGeneratorRef`，不再把调度入口拆成 `code_generators`、`direct_generators`、`DataFormatExporter` 等多种调用路径；这些分类保留在各领域模块内部用于复用实现。领域复用应通过 facet / helper 表达：
+Build-facing registry 只暴露 `require_generator(type_id) -> &dyn ArtifactGenerator` 和 `requirements(type_id) -> GeneratorRequirements`，不再把调度入口拆成 `code_generators`、`direct_generators`、`DataFormatExporter` 等多种调用路径；这些分类保留在各领域模块内部用于复用实现。领域复用应通过 facet / helper 表达：
 
 - `CodeArtifactOptions` / `CodeWriter` / naming / formatting / keyword conflict：供 Rust/C++/TypeScript/Java/C# 和 Lua 这类 code-like generator 复用。
 - `RuntimeTableDataFacet`：供 JSON / MessagePack / bin 这类 per-table runtime data generator 复用。
@@ -252,7 +247,7 @@ pub(crate) trait ArtifactGenerator: Send + Sync {
 
 Lua 是该模型的关键校验用例：它 requirements 包含 Meta + Data，但输出形态明显是 code-like artifact，因此应复用 code artifact options，而不应因为需要 Data 就被排除在 code 能力之外。
 
-下一阶段的目标是把当前 adapter facade 进一步收敛为单一 task generator 模型：从任务调度角度看，`DataFormatExporter`、`AggregateDataExporter`、`CodeGenerator` 和 direct `ArtifactGenerator` 不应是四种调度对象，而只是领域模块内部的实现复用方式。Build 只面向一种对象：根据 export task 的 `type_id` 匹配到 generator，读取其 requirements 派生调度 dependency，准备满足 requirements 的上下文，然后把 task instance 输入交给 generator 执行。generator 内部可以再把输入转换成 `CodeExportInput`、`TargetDataConfig`、table payload、doc model 或 report renderer 所需的形态；这些转换不应回流到 Build 分支逻辑。
+下一阶段的目标是把当前 adapter facade 进一步收敛为单一 task generator 模型：从任务调度角度看，`DataFormatExporter`、`AggregateDataExporter`、`CodeGenerator` 和 direct `ArtifactGenerator` 不应是四种调度对象，而只是领域模块内部的实现复用方式。Build 只面向一种对象：根据 export task 的 `type_id` 匹配到 generator，读取其 requirements，准备满足 requirements 的上下文，然后把 task instance 输入交给 generator 执行。generator 内部可以再把输入转换成 `CodeExportInput`、`TargetDataConfig`、table payload、doc model 或 report renderer 所需的形态；这些转换不应回流到 Build 分支逻辑。
 
 建议的长期 build-facing trait 形态：
 
@@ -285,7 +280,7 @@ pub(crate) trait TaskGenerator: Send + Sync {
 }
 ```
 
-这里的 “task name” 属于 export task instance（`[[targets.exports]].name`），不是 generator 类型本身的全局名字；同一个 generator type 可以被同一 target 以不同 task name / output / options 声明多次。scheduler 需要知道的是 generator descriptor 中的 requirements，而不是 generator 内部属于 code、table data、aggregate data 还是 doc。`MetaOnly` / `MetaAndData` 仍可以作为当前 branch pipeline 的派生执行分组；未来若出现 assets-only、validation-report-only 或更细粒度缓存，也应继续由 requirements 扩展，而不是新增调度侧 generator 子类。
+这里的 “task name” 属于 export task instance（`[[targets.exports]].name`），不是 generator 类型本身的全局名字；同一个 generator type 可以被同一 target 以不同 task name / output / options 声明多次。scheduler 需要知道的是 generator descriptor 中的 requirements，而不是 generator 内部属于 code、table data、aggregate data 还是 doc。`MetaOnly` / `MetaAndData` 只是当前 branch pipeline 对 `requirements.needs_data` 的执行分组名称；未来若出现 assets-only、validation-report-only 或更细粒度缓存，也应继续由 requirements 扩展，而不是新增调度侧 generator 子类。
 
 ## 10.6a 稳定性与回归基线
 
@@ -311,7 +306,7 @@ Build 是顶层业务编排层，因此可以依赖：
 - `validation`：normalize 和 validation report；
 - `exporter`：runtime data export type 执行；
 - `codegen`：生成器和 generated files；
-- `runtime_contract`：`ExportDependency`、`RuntimeDataFile` 和 binary schema revision 等共享底层契约；
+- `runtime_contract`：`RuntimeDataFile` 和 binary schema revision 等共享底层契约；
 - `artifact`：统一制品写入、dry-run 和写入结果。
 
 但反向依赖禁止：上述模块不能为了调用方便引用 `build` 中的 normalized target 类型或 runtime export result。若类型需要跨模块共享，应下沉到更合适的模块，或由 build 做转换。

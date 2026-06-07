@@ -111,7 +111,7 @@ pub struct NormalizedTargetConfig {
 pub struct NormalizedExportTask {
     pub name: String,
     pub type_id: String,
-    pub dependency: ExportDependency,
+    pub requirements: GeneratorRequirements,
     pub output: PathBuf,
     pub options: BTreeMap<String, toml::Value>,
 }
@@ -141,16 +141,19 @@ pub struct NormalizedExportTask {
 
 当一个 target 同时导出多套 runtime data export task 时，Build DAG 只校验每个 task output 的 `export_name` 与声明顺序匹配，不再向 codegen 聚合 runtime metadata。MetaOnly codegen export task 在构造每个 `CodeExportInput` 时传入空 `runtime_data_files`。同一 table 同时出现 `items.json`、`items.msgpack` 和 `items.bin` 时也不会影响 CodeModel；格式选择由运行时 loader / reader 完成。未来 manifest 可以记录所有 runtime data export task 的真实 artifact path，但不进入 codegen 决策。
 
-### 9.4.2.2 `CodegenOptions` / future `CodeArtifactOptions`
+### 9.4.2.2 `CodeArtifactOptions` / `CodegenOptions`
 
 ```rust
-pub struct CodegenOptions {
+pub struct CodeArtifactOptions {
     pub file_header: Option<String>,
     pub keyword_conflict: KeywordConflictPolicy,
+    pub i18n: I18nOptions,
     pub naming: NamingConfig,
     pub formatting: CodeWriterConfig,
     pub language_options: HashMap<String, toml::Value>,
 }
+
+pub type CodegenOptions = CodeArtifactOptions;
 
 pub struct CodeWriterConfig {
     pub indent_style: IndentStyle,
@@ -187,7 +190,7 @@ pub enum CaseStyle {
 }
 ```
 
-当前 `CodegenOptions` 是 language codegen 的内部配置结构。generator 统一化后，建议把其中和代码文本生成有关、但不依赖 MetaOnly 调度的字段提升为可复用 `CodeArtifactOptions`：
+当前 `CodeArtifactOptions` 是 code-like artifact 复用的基础配置结构；`CodegenOptions` 作为 type alias 继续保持 language codegen API 兼容。它只表达代码文本生成能力，不表达 MetaOnly / MetaAndData 调度分类：
 
 - `file_header` 与 `{{project.*}}` / `{{datetime}}` 模板渲染；
 - `keyword_conflict` 与标识符冲突策略；
@@ -195,7 +198,7 @@ pub enum CaseStyle {
 - `naming` 与 `formatting`；
 - generator-specific option bucket，例如 `[targets.exports.lua_table]`、`[targets.exports.typescript]` 或其他 code-like generator 的专属子表。
 
-这样 Lua 这类 requirements 包含 Data 的 code-like generator 可以复用相同配置解析和 writer 行为，而不需要复制一套 `CodegenOptions`。`CodeExportTarget.language`、`CodeGenerator::language()`、CodeModel 构造等仍属于当前 format-agnostic language codegen adapter，不应强加给 schema doc、runtime table data exporter、asset manifest 或 validation report。
+这样 Lua 这类 requirements 包含 Data 的 code-like generator 可以复用相同配置解析和 writer 行为，而不需要复制一套与 `CodegenOptions` 平行的基础选项。当前 `LuaTableExporter` 仍位于 `exporter` 模块，通过 `GeneratorRegistry` adapter 暴露为 data-backed mixed generator；`CodeExportTarget.language`、`CodeGenerator::language()`、CodeModel 构造等仍属于 format-agnostic language codegen adapter，不应强加给 schema doc、runtime table data exporter、asset manifest 或 validation report。
 
 配置来源：
 

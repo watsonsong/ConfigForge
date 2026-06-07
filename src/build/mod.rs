@@ -26,11 +26,11 @@ use crate::{
     artifact::{ArtifactSink, ArtifactWriter},
     data::{DataLoader, RawSourceData, SourceReadPlan},
     generator::{
-        GeneratorCommonInput, GeneratorRegistry, GeneratorTaskInput, PreparedGeneratorInputs,
+        GeneratorCommonInput, GeneratorRegistry, GeneratorRequirements, GeneratorTaskInput,
+        PreparedGeneratorInputs,
     },
     meta::{LinkedMetaModel, MetaModel, TargetTags},
     project::ProjectConfig,
-    runtime_contract::ExportDependency,
 };
 
 use runtime::export_meta_and_data_tasks;
@@ -153,7 +153,7 @@ fn add_cli_validation_report_task(
     target.exports.push(NormalizedExportTask {
         name: "cli-validation-report".to_owned(),
         type_id: "validation_report".to_owned(),
-        dependency: ExportDependency::MetaAndData,
+        requirements: GeneratorRequirements::meta_and_data().with_validation_report(),
         output: output_dir,
         options,
     });
@@ -238,9 +238,8 @@ fn execute_target_pipeline(
         .record("build_execution_view", Some(execution_view_detail), || {
             Ok(())
         })?;
-    let meta_and_data_exports =
-        target_plan.export_tasks(context.target, ExportDependency::MetaAndData);
-    let meta_only_exports = target_plan.export_tasks(context.target, ExportDependency::MetaOnly);
+    let meta_and_data_exports = target_plan.meta_and_data_export_tasks(context.target);
+    let meta_only_exports = target_plan.meta_only_export_tasks(context.target);
     let mut prepared_inputs = context.trace.record("prepare_build_inputs", None, || {
         prepare_build_inputs(
             context.raw_meta,
@@ -508,9 +507,10 @@ impl TargetBuildPlan {
         let mut meta_only_exports = Vec::new();
         let mut meta_and_data_exports = Vec::new();
         for (index, task) in target.exports.iter().enumerate() {
-            match task.dependency {
-                ExportDependency::MetaOnly => meta_only_exports.push(index),
-                ExportDependency::MetaAndData => meta_and_data_exports.push(index),
+            if task.requirements.needs_data {
+                meta_and_data_exports.push(index);
+            } else {
+                meta_only_exports.push(index);
             }
         }
         let requires_meta = !target.exports.is_empty();
@@ -532,15 +532,25 @@ impl TargetBuildPlan {
         self.data_dependency.is_some()
     }
 
-    fn export_tasks<'a>(
+    fn meta_only_export_tasks<'a>(
         &'a self,
         target: &'a NormalizedTargetConfig,
-        dependency: ExportDependency,
     ) -> Vec<(usize, &'a NormalizedExportTask)> {
-        let indices = match dependency {
-            ExportDependency::MetaOnly => &self.meta_only_exports,
-            ExportDependency::MetaAndData => &self.meta_and_data_exports,
-        };
+        self.export_tasks_by_indices(target, &self.meta_only_exports)
+    }
+
+    fn meta_and_data_export_tasks<'a>(
+        &'a self,
+        target: &'a NormalizedTargetConfig,
+    ) -> Vec<(usize, &'a NormalizedExportTask)> {
+        self.export_tasks_by_indices(target, &self.meta_and_data_exports)
+    }
+
+    fn export_tasks_by_indices<'a>(
+        &'a self,
+        target: &'a NormalizedTargetConfig,
+        indices: &[usize],
+    ) -> Vec<(usize, &'a NormalizedExportTask)> {
         indices
             .iter()
             .map(|index| (*index, &target.exports[*index]))
@@ -642,7 +652,7 @@ fn generate_and_write_meta_only_task(
     context: &MetaOnlyGeneratorContext<'_, '_>,
     export_task: &NormalizedExportTask,
 ) -> Result<()> {
-    debug_assert_eq!(export_task.dependency, ExportDependency::MetaOnly);
+    debug_assert!(!export_task.requirements.needs_data);
     let generator = context
         .generator_registry
         .require_generator(&export_task.type_id)?;
@@ -802,21 +812,21 @@ mod tests {
                 NormalizedExportTask {
                     name: "rust".to_owned(),
                     type_id: "rust".to_owned(),
-                    dependency: ExportDependency::MetaOnly,
+                    requirements: GeneratorRequirements::meta_only(),
                     output: PathBuf::from("out/code"),
                     options: BTreeMap::new(),
                 },
                 NormalizedExportTask {
                     name: "json".to_owned(),
                     type_id: "json".to_owned(),
-                    dependency: ExportDependency::MetaAndData,
+                    requirements: GeneratorRequirements::meta_and_data(),
                     output: PathBuf::from("out/json"),
                     options: BTreeMap::new(),
                 },
                 NormalizedExportTask {
                     name: "messagepack".to_owned(),
                     type_id: "messagepack".to_owned(),
-                    dependency: ExportDependency::MetaAndData,
+                    requirements: GeneratorRequirements::meta_and_data(),
                     output: PathBuf::from("out/msgpack"),
                     options: BTreeMap::new(),
                 },
@@ -848,7 +858,7 @@ mod tests {
             exports: vec![NormalizedExportTask {
                 name: "rust".to_owned(),
                 type_id: "rust".to_owned(),
-                dependency: ExportDependency::MetaOnly,
+                requirements: GeneratorRequirements::meta_only(),
                 output: PathBuf::from("out/code"),
                 options: BTreeMap::new(),
             }],
@@ -866,7 +876,7 @@ mod tests {
         let target = NormalizedTargetConfig {
             name: "code_only".to_owned(),
             tags: vec!["client".to_owned()],
-            exports: vec![export_task("rust", ExportDependency::MetaOnly)],
+            exports: vec![export_task("rust", false)],
         };
 
         let plan = TargetBuildPlan::new(
@@ -889,7 +899,7 @@ mod tests {
         let target = NormalizedTargetConfig {
             name: "data_only".to_owned(),
             tags: vec!["client".to_owned()],
-            exports: vec![export_task("json", ExportDependency::MetaAndData)],
+            exports: vec![export_task("json", true)],
         };
 
         let plan = TargetBuildPlan::new(
@@ -917,9 +927,9 @@ mod tests {
             name: "client".to_owned(),
             tags: vec!["client".to_owned()],
             exports: vec![
-                export_task("json", ExportDependency::MetaAndData),
-                export_task("rust", ExportDependency::MetaOnly),
-                export_task("lua", ExportDependency::MetaAndData),
+                export_task("json", true),
+                export_task("rust", false),
+                export_task("lua", true),
             ],
         };
 
@@ -933,14 +943,14 @@ mod tests {
         assert_eq!(plan.meta_and_data_exports, vec![0, 2]);
         assert_eq!(plan.export_indices_in_declaration_order(), vec![0, 1, 2]);
         assert_eq!(
-            plan.export_tasks(&target, ExportDependency::MetaOnly)
+            plan.meta_only_export_tasks(&target)
                 .into_iter()
                 .map(|(index, task)| (index, task.name.as_str()))
                 .collect::<Vec<_>>(),
             vec![(1, "rust")]
         );
         assert_eq!(
-            plan.export_tasks(&target, ExportDependency::MetaAndData)
+            plan.meta_and_data_export_tasks(&target)
                 .into_iter()
                 .map(|(index, task)| (index, task.name.as_str()))
                 .collect::<Vec<_>>(),
@@ -954,9 +964,9 @@ mod tests {
             name: "client".to_owned(),
             tags: vec!["client".to_owned()],
             exports: vec![
-                export_task("json", ExportDependency::MetaAndData),
-                export_task("rust", ExportDependency::MetaOnly),
-                export_task("lua", ExportDependency::MetaAndData),
+                export_task("json", true),
+                export_task("rust", false),
+                export_task("lua", true),
             ],
         };
         let plan = TargetBuildPlan::new(
@@ -1084,7 +1094,7 @@ mod tests {
         let target = NormalizedTargetConfig {
             name: "code_only".to_owned(),
             tags: vec!["client".to_owned()],
-            exports: vec![export_task("rust", ExportDependency::MetaOnly)],
+            exports: vec![export_task("rust", false)],
         };
         let plan = TargetBuildPlan::new(&target, None, &TargetTags::new(["client"]));
 
@@ -1136,7 +1146,7 @@ mod tests {
             exports: vec![NormalizedExportTask {
                 name: "unknown".to_owned(),
                 type_id: "unknown_language".to_owned(),
-                dependency: ExportDependency::MetaOnly,
+                requirements: GeneratorRequirements::meta_only(),
                 output: PathBuf::from("out/code"),
                 options: BTreeMap::new(),
             }],
@@ -1238,7 +1248,7 @@ mod tests {
         let export_task = NormalizedExportTask {
             name: "code".to_owned(),
             type_id: "sink_only".to_owned(),
-            dependency: ExportDependency::MetaOnly,
+            requirements: GeneratorRequirements::meta_only(),
             output: PathBuf::from("out/sink_only"),
             options: BTreeMap::new(),
         };
@@ -1256,11 +1266,15 @@ mod tests {
         assert_eq!(result.entries[0].bytes, "sink-first".len());
     }
 
-    fn export_task(name: &str, dependency: ExportDependency) -> NormalizedExportTask {
+    fn export_task(name: &str, needs_data: bool) -> NormalizedExportTask {
         NormalizedExportTask {
             name: name.to_owned(),
             type_id: name.to_owned(),
-            dependency,
+            requirements: if needs_data {
+                GeneratorRequirements::meta_and_data()
+            } else {
+                GeneratorRequirements::meta_only()
+            },
             output: PathBuf::from(format!("out/{name}")),
             options: BTreeMap::new(),
         }

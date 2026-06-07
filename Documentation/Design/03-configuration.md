@@ -85,7 +85,7 @@ output = "Generated/TypeScript"
 要求：
 
 - CLI 不提供 `--meta`、`--data`、`--out`、`validate/export` 子命令等重复入口。
-- 构建时根据 export task 的 dependency contract 自动判断是否需要 Data：只包含 MetaOnly exporter 的 target 只加载 Meta；包含 MetaAndData exporter 的 target 使用 `project.input` 加载 Data。
+- 构建时根据 export task 对应 generator 的 requirements 自动判断是否需要 Data：只包含 MetaOnly generator 的 target 只加载 Meta；包含 MetaAndData generator 的 target 使用 `project.input` 加载 Data。
 
 ## 3.3 Meta 文件
 
@@ -237,7 +237,7 @@ override_sources = [
 
 ## 3.5 Target Config
 
-Target Config 定义一次可构建的导出目标。一个 target 共享同一组 `TargetTags` 和同一套 Meta-level filtering 规则，并挂载一组 export task。每个 export task 通过 `type` 选择一个 artifact generator，声明输出目录和专属参数；generator 自身声明 input requirements（例如是否需要 Data）。Build 根据 requirements 派生出的 dependency contract 拆分 MetaOnly / MetaAndData 调度分支，复用 Meta link、DataLoadPlan、normalize 和 validation 结果，再运行具体 generator。
+Target Config 定义一次可构建的导出目标。一个 target 共享同一组 `TargetTags` 和同一套 Meta-level filtering 规则，并挂载一组 export task。每个 export task 通过 `type` 选择一个 artifact generator，声明输出目录和专属参数；generator 自身声明 input requirements（例如是否需要 Data）。Build 根据 requirements 拆分 MetaOnly / MetaAndData 调度分支，复用 Meta link、DataLoadPlan、normalize 和 validation 结果，再运行具体 generator。
 
 ### 3.5.1 统一 export task / generator 模型
 
@@ -301,7 +301,7 @@ Generator 注册表需要声明每个 `type` 的 input requirements。`MetaOnly`
 
 ### 3.5.2 依赖分支编排原则
 
-统一 generator task 后，Build 不再写死 “先 data 后 code” 两段流程，而是按 generator requirements 派生出的 dependency contract 建立 target-local execution view summary，并用阶段式 pipeline 执行两类分支：`SourceRead` 可与 `LinkMeta` 并行，`LinkMeta` 完成后立即启动不需要 Data 的 MetaOnly generator，因此 mixed target 中 format-agnostic codegen / schema docs 不再等待 source read / normalize / validation 完成。阶段式 tracing 已通过 `BuildTrace` / `--trace-tasks` 落地；当前不维护 node-level DAG key，也不引入完整通用 DAG 调度器。
+统一 generator task 后，Build 不再写死 “先 data 后 code” 两段流程，而是按 generator requirements 建立 target-local execution view summary，并用阶段式 pipeline 执行两类分支：`SourceRead` 可与 `LinkMeta` 并行，`LinkMeta` 完成后立即启动不需要 Data 的 MetaOnly generator，因此 mixed target 中 format-agnostic codegen / schema docs 不再等待 source read / normalize / validation 完成。阶段式 tracing 已通过 `BuildTrace` / `--trace-tasks` 落地；当前不维护 node-level DAG key，也不引入完整通用 DAG 调度器。
 
 当前 target-local pipeline 形态：
 

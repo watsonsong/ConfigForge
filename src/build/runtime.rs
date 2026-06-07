@@ -525,9 +525,8 @@ mod tests {
         artifact::{ArtifactWriteMode, ArtifactWriter},
         data::{DataSet, DataTable, RawSourceData},
         exporter::{AggregateDataExporter, DataFormatExporter, RuntimeArtifactPlan},
-        generator::GeneratorRegistry,
+        generator::{GeneratorRegistry, GeneratorRequirements},
         meta::{LinkedTableMeta, MetaModel, TargetTags},
-        runtime_contract::ExportDependency,
     };
 
     use super::*;
@@ -715,7 +714,7 @@ mod tests {
         let task = NormalizedExportTask {
             name: "dup".to_owned(),
             type_id: "duplicate_path".to_owned(),
-            dependency: ExportDependency::MetaAndData,
+            requirements: GeneratorRequirements::meta_and_data(),
             output: PathBuf::from("out"),
             options: BTreeMap::new(),
         };
@@ -747,7 +746,7 @@ mod tests {
         NormalizedExportTask {
             name: name.to_owned(),
             type_id: "instrumented_aggregate".to_owned(),
-            dependency: ExportDependency::MetaAndData,
+            requirements: GeneratorRequirements::meta_and_data(),
             output,
             options: BTreeMap::new(),
         }

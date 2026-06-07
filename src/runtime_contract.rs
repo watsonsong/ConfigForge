@@ -6,12 +6,6 @@ use crate::meta::{
     PrimitiveFieldType, TableKind, TargetTags,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExportDependency {
-    MetaOnly,
-    MetaAndData,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeDataFile {
     pub table_name: String,

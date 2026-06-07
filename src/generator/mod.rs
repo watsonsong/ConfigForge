@@ -18,7 +18,6 @@ use crate::{
         export_runtime_data_to_sink,
     },
     meta::{LinkedMetaModel, TargetTags},
-    runtime_contract::ExportDependency,
     schema_doc::SchemaDocGenerator,
     validation::{DesignerReportFormat, DesignerValidationReport, ValidationReport},
 };
@@ -66,20 +65,6 @@ impl GeneratorRequirements {
     pub(crate) const fn with_validation_report(mut self) -> Self {
         self.needs_validation_report = true;
         self
-    }
-
-    pub(crate) const fn dependency(self) -> ExportDependency {
-        if self.needs_data {
-            ExportDependency::MetaAndData
-        } else {
-            ExportDependency::MetaOnly
-        }
-    }
-}
-
-impl From<GeneratorRequirements> for ExportDependency {
-    fn from(requirements: GeneratorRequirements) -> Self {
-        requirements.dependency()
     }
 }
 
@@ -292,9 +277,13 @@ impl GeneratorRegistry {
         Ok(generator)
     }
 
-    pub(crate) fn dependency(&self, target_name: &str, type_id: &str) -> Result<ExportDependency> {
+    pub(crate) fn requirements(
+        &self,
+        target_name: &str,
+        type_id: &str,
+    ) -> Result<GeneratorRequirements> {
         match self.require_generator(type_id) {
-            Ok(generator) => Ok(generator.requirements().dependency()),
+            Ok(generator) => Ok(generator.requirements()),
             Err(ConfigForgeError::Validation(message))
                 if message.contains("no artifact generator registered") =>
             {
@@ -595,29 +584,19 @@ mod tests {
     }
 
     #[test]
-    fn requirements_without_data_are_meta_only() {
+    fn requirements_without_data_do_not_need_data() {
         let requirements = GeneratorRequirements::meta_only();
 
         assert!(requirements.needs_meta);
         assert!(!requirements.needs_data);
-        assert_eq!(requirements.dependency(), ExportDependency::MetaOnly);
-        assert_eq!(
-            ExportDependency::from(requirements),
-            ExportDependency::MetaOnly
-        );
     }
 
     #[test]
-    fn requirements_with_data_are_meta_and_data() {
+    fn requirements_with_data_need_data() {
         let requirements = GeneratorRequirements::meta_and_data();
 
         assert!(requirements.needs_meta);
         assert!(requirements.needs_data);
-        assert_eq!(requirements.dependency(), ExportDependency::MetaAndData);
-        assert_eq!(
-            ExportDependency::from(requirements),
-            ExportDependency::MetaAndData
-        );
     }
 
     #[test]
@@ -625,9 +604,9 @@ mod tests {
         let meta_with_assets = GeneratorRequirements::meta_only().with_assets();
         let meta_with_report = GeneratorRequirements::meta_only().with_validation_report();
 
-        assert_eq!(meta_with_assets.dependency(), ExportDependency::MetaOnly);
+        assert!(!meta_with_assets.needs_data);
         assert!(meta_with_assets.needs_assets);
-        assert_eq!(meta_with_report.dependency(), ExportDependency::MetaOnly);
+        assert!(!meta_with_report.needs_data);
         assert!(meta_with_report.needs_validation_report);
     }
 
@@ -643,49 +622,48 @@ mod tests {
         assert!(descriptor.matches("msgpack"));
         assert!(descriptor.matches("mpack"));
         assert!(!descriptor.matches("json"));
-        assert_eq!(
-            descriptor.requirements.dependency(),
-            ExportDependency::MetaAndData
-        );
+        assert!(descriptor.requirements.needs_data);
     }
 
     #[test]
-    fn registry_classifies_known_generator_types() {
+    fn registry_reports_known_generator_requirements() {
         let registry = GeneratorRegistry::with_builtin_generators();
 
-        assert_eq!(
-            registry
-                .dependency("client", "rust")
-                .expect("rust dependency"),
-            ExportDependency::MetaOnly
+        assert!(
+            !registry
+                .requirements("client", "rust")
+                .expect("rust requirements")
+                .needs_data
         );
-        assert_eq!(
-            registry.dependency("client", "ts").expect("ts dependency"),
-            ExportDependency::MetaOnly
+        assert!(
+            !registry
+                .requirements("client", "ts")
+                .expect("ts requirements")
+                .needs_data
         );
-        assert_eq!(
-            registry
-                .dependency("client", "schema_doc")
-                .expect("schema_doc dependency"),
-            ExportDependency::MetaOnly
+        assert!(
+            !registry
+                .requirements("client", "schema_doc")
+                .expect("schema_doc requirements")
+                .needs_data
         );
-        assert_eq!(
+        assert!(
             registry
-                .dependency("client", "json")
-                .expect("json dependency"),
-            ExportDependency::MetaAndData
+                .requirements("client", "json")
+                .expect("json requirements")
+                .needs_data
         );
-        assert_eq!(
+        assert!(
             registry
-                .dependency("client", "lua")
-                .expect("lua dependency"),
-            ExportDependency::MetaAndData
+                .requirements("client", "lua")
+                .expect("lua requirements")
+                .needs_data
         );
-        assert_eq!(
+        assert!(
             registry
-                .dependency("client", "validation_report")
-                .expect("validation_report dependency"),
-            ExportDependency::MetaAndData
+                .requirements("client", "validation_report")
+                .expect("validation_report requirements")
+                .needs_data
         );
     }
 
@@ -694,7 +672,7 @@ mod tests {
         let registry = GeneratorRegistry::with_builtin_generators();
 
         assert!(
-            matches!(registry.dependency("client", "unknown"), Err(ConfigForgeError::Validation(message)) if message.contains("unknown export type `unknown`"))
+            matches!(registry.requirements("client", "unknown"), Err(ConfigForgeError::Validation(message)) if message.contains("unknown export type `unknown`"))
         );
     }
 

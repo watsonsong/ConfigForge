@@ -2,7 +2,7 @@
 
 本文档描述 `src/exporter/` 的 data export 实现边界。Exporter 模块负责把已经加载、归一化并通过 validation 的数据导出为数据产物，包括运行时表数据、gettext POT、asset manifest 等；它与 Codegen 平行，不再承载工程构建主流程。
 
-在更抽象的 artifact generator 模型中，`DataFormatExporter` / `AggregateDataExporter` 是 data-backed generator 的领域 facet / adapter 来源，而不是所有 generator 的顶层基类。是否需要 Data 由 generator requirements 声明，并派生为 Build 当前使用的 `MetaAndData` 调度属性；Lua 这类 data-backed code-like artifact 后续应能同时复用 exporter 的 aggregate 写出能力和 codegen 的 code artifact options。
+在更抽象的 artifact generator 模型中，`DataFormatExporter` / `AggregateDataExporter` 是 data-backed generator 的领域 facet / adapter 来源，而不是所有 generator 的顶层基类。是否需要 Data 由 generator requirements 声明；Lua 这类 data-backed code-like artifact 当前通过 exporter 内部实现与 `GeneratorRegistry` adapter 暴露为 `type = "lua_table"` / alias `lua` 的 MetaAndData generator，并复用 codegen 中的 `CodeArtifactOptions`。
 
 ## 8.1 设计目标
 
@@ -70,7 +70,6 @@ pub struct TargetDataConfig {
 pub trait DataFormatExporter: Send + Sync {
     fn name(&self) -> &'static str;
     fn aliases(&self) -> &'static [&'static str];
-    fn dependency(&self) -> ExportDependency { ExportDependency::MetaAndData }
     fn extension(&self) -> &'static str;
     fn plan_table_artifact(&self, table_meta: &LinkedTableMeta<'_>) -> Result<RuntimeArtifactPlan>;
     fn serialize_table_to_stream(..., stream: &mut ArtifactWriteStream) -> Result<()>;
@@ -80,7 +79,6 @@ pub trait DataFormatExporter: Send + Sync {
 pub trait AggregateDataExporter: Send + Sync {
     fn name(&self) -> &'static str;
     fn aliases(&self) -> &'static [&'static str] { &[] }
-    fn dependency(&self) -> ExportDependency { ExportDependency::MetaAndData }
     fn plan_artifacts(
         &self,
         out_dir: &Path,
@@ -101,9 +99,9 @@ pub trait AggregateDataExporter: Send + Sync {
 }
 ```
 
-`DataFormatRegistry` 保存 table exporter 与 aggregate exporter 列表并按 name / alias 查询，是 exporter 模块内部领域 registry。Build-facing 查询和执行通过统一 `GeneratorRegistry` facade 完成：`DataFormatExporter` / `AggregateDataExporter` 由 adapter 暴露为 requirements 包含 Meta + Data 的 `ArtifactGenerator`。当前 data-backed generator 的 derived dependency 均为 `MetaAndData`；没有单独的 `DataOnly` 模式，因为缺少 Meta 时无法可靠完成类型解释、target 过滤、索引语义和 validation。这里的 dependency 是 Build 调度属性，不是 trait 继承分类，由 `GeneratorRequirements` 派生。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行规划多个 export task、并行序列化多个 table artifact，并在 validation gate 通过后并行执行多个 data-backed generator；aggregate exporter 也不得在实例内保存本次 build 的可变状态。table exporter 的主路径是 `serialize_table_to_stream()`；`serialize_table() -> Vec<u8>` 只作为少量测试和兼容调用的 legacy fallback。aggregate exporter 的主路径是 required `export_to_sink()`；`export() -> Vec<Artifact>` 只作为 legacy fallback。新增 exporter 应优先实现 streaming writer / sink writer。
+`DataFormatRegistry` 保存 table exporter 与 aggregate exporter 列表并按 name / alias 查询，是 exporter 模块内部领域 registry。Build-facing 查询和执行通过统一 `GeneratorRegistry` facade 完成：`DataFormatExporter` / `AggregateDataExporter` 由 adapter 暴露为 requirements 包含 Meta + Data 的 `ArtifactGenerator`。当前 data-backed generator 均进入 `MetaAndData` 分支；没有单独的 `DataOnly` 模式，因为缺少 Meta 时无法可靠完成类型解释、target 过滤、索引语义和 validation。这里的 `MetaAndData` 是 Build 对 `GeneratorRequirements::needs_data` 的执行分组，不是 trait 继承分类。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行规划多个 export task、并行序列化多个 table artifact，并在 validation gate 通过后并行执行多个 data-backed generator；aggregate exporter 也不得在实例内保存本次 build 的可变状态。table exporter 的主路径是 `serialize_table_to_stream()`；`serialize_table() -> Vec<u8>` 只作为少量测试和兼容调用的 legacy fallback。aggregate exporter 的主路径是 required `export_to_sink()`；`export() -> Vec<Artifact>` 只作为 legacy fallback。新增 exporter 应优先实现 streaming writer / sink writer。
 
-内置格式通过 `builtin_exporters()` / aggregate registry 注册到 `DataFormatRegistry`，当前 table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`；aggregate exporter 包括已实现的 `GettextPotExporter`、`LuaTableExporter` 与 `AssetManifestExporter`。新增 data-backed 导出格式应优先新增 `src/exporter/<format>.rs` 并实现对应 exporter trait，格式名、alias、dependency、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。JSON 使用 `serde_json::to_writer_pretty()`，MessagePack 使用 `rmp_serde::encode::write_named()`，`bin` 的 encoder 可直接写 `ArtifactWriteStream`，不再为最终 artifact 先构建完整 `Vec<u8>`；POT、Lua 和 Asset Manifest 聚合导出器也通过 `export_to_sink()` 直接写入 shared sink，不再经 `Vec<Artifact>` 回到 build。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
+内置格式通过 `builtin_exporters()` / aggregate registry 注册到 `DataFormatRegistry`，当前 table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`；aggregate exporter 包括已实现的 `GettextPotExporter`、`LuaTableExporter` 与 `AssetManifestExporter`。新增 data-backed 导出格式应优先新增 `src/exporter/<format>.rs` 并实现对应 exporter trait，格式名、alias、扩展名和序列化逻辑由格式模块自己维护；核心模块只负责 registry、调度和共享 payload，不应内联具体格式序列化实现。JSON 使用 `serde_json::to_writer_pretty()`，MessagePack 使用 `rmp_serde::encode::write_named()`，`bin` 的 encoder 可直接写 `ArtifactWriteStream`，不再为最终 artifact 先构建完整 `Vec<u8>`；POT、Lua 和 Asset Manifest 聚合导出器也通过 `export_to_sink()` 直接写入 shared sink，不再经 `Vec<Artifact>` 回到 build。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
 
 `DataFormatRegistry` 继续作为 exporter 模块内部领域 registry；Build-facing 查询和执行由统一 `GeneratorRegistry` facade 提供。该 facade 用 adapter 包装 `DataFormatExporter` 与 `AggregateDataExporter` 并暴露为 `ArtifactGenerator`，使 Build 不需要知道 table exporter、aggregate exporter、language codegen、schema doc 的多套 registry 细节；Build 只按照 export task 声明的 type id 查询 generator requirements，并把 common input 或 data input 传给匹配的 generator 执行。
 

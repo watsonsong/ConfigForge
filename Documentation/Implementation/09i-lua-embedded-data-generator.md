@@ -32,7 +32,7 @@
 
 ## 9i.2 模块归属与依赖边界
 
-当前推荐把 Lua 支持实现为 `type = "lua_table"` 的 MetaAndData exporter，而不是普通 codegen backend：
+当前 Lua 支持实现为 `type = "lua_table"` / alias `lua` 的 MetaAndData exporter，并通过 `GeneratorRegistry` adapter 暴露为 data-backed code-like artifact generator，而不是普通 codegen backend：
 
 ```text
 src/exporter/
@@ -45,9 +45,9 @@ src/exporter/
 - 现有 `codegen` 文档明确约束 Rust/C++/TypeScript codegen 只依赖 Meta 和 target tags，不绑定任何 MetaAndData export task；
 - Lua 的输出既是运行时数据，又包含访问 API，因此语义上更接近 MetaAndData export type，而不是纯代码 stub。
 
-长期模块边界建议：当 `GeneratorRegistry` / `ArtifactGenerator` facade 落地后，`lua_table` 应从 “AggregateDataExporter 的一种” 演进为 mixed artifact generator：`requirements = Meta + Data`，facets = `CodeArtifactOptions + AggregateArtifact`。这样可在不让 `codegen` 依赖 `data` 的前提下复用 code writer / naming / formatting / file header 等能力。
+当前模块边界：`lua_table` 保留在 `exporter` 内部实现，继续复用 aggregate artifact 的路径规划和 sink 写出能力；`GeneratorRegistry` 在注册期把它适配为 `requirements = Meta + Data` 的 build-facing `ArtifactGenerator`。Lua 基础代码文本选项复用 `codegen::CodeArtifactOptions`（file header、i18n、naming / formatting 等通用能力），但 data input 只通过 task generator contract 注入；不引入 `codegen -> data` 或 `codegen -> build` 依赖。
 
-Build 编排层应按 export task dependency contract 分发：
+Build 编排层应按 generator requirements 分发：
 
 ```text
 ProjectConfig::from_path

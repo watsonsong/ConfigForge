@@ -325,7 +325,7 @@ Builder 输入：
 
 `schema_doc` 是 requirements 只包含 Meta 的 doc artifact generator。当前实现已直接实现 `ArtifactGenerator` 并由 `GeneratorRegistry` 注册；它不再注册到 `codegen::builtin_generators()`，也不再实现 code-specific `CodeGenerator` API。registry 行为如下：
 
-- requirements：linked Meta + effective target tags + project / task context；派生 dependency contract 为 `MetaOnly`；
+- requirements：linked Meta + effective target tags + project / task context；`needs_data = false`，因此进入 `MetaOnly` 分支；
 - output planning：`index.md` + visible table markdown files；
 - artifact conflict check：纳入现有路径冲突检测；
 - writer：使用 `ArtifactSink`，支持 direct / temp_commit / dry_run。

@@ -9,7 +9,7 @@
 | 字段 | 说明 |
 | --- | --- |
 | `name` | 稳定 target 名称。 |
-| `exports` | 当前 target 下的导出任务列表。每个任务通过 `type` 选择 artifact generator；generator registry 根据该 generator 声明的 input requirements 派生 dependency contract，决定只依赖 Meta，还是同时依赖 Meta + Data。 |
+| `exports` | 当前 target 下的导出任务列表。每个任务通过 `type` 选择 artifact generator；generator registry 根据该 generator 声明的 input requirements 决定只依赖 Meta，还是同时依赖 Meta + Data。 |
 
 Project-level `name` / `desc` / `copyright` 可被 target 的代码生成器、schema exporter 或 manifest exporter 用于生成文件头。Codegen export task 可以通过 `file_header` 模板覆盖默认文件头。
 
@@ -429,7 +429,7 @@ ConfigForge 提供标准 RuntimeDataReader / RuntimeDataLoader adapter 作为可
 
 ## 6.3 非运行时数据导出格式
 
-POT、Asset Manifest、Schema Doc 等辅助产物不再引入独立的 `targets.special_exporters` 配置层，而是明确作为 `[[targets.exports]]` 的一种 `type`。这样 TOML 结构保持简单：`target.exports` 统一表示“当前 target 要生成的产物”，由 generator requirements 派生出的 dependency contract 区分 MetaOnly 与 MetaAndData 调度路径。
+POT、Asset Manifest、Schema Doc 等辅助产物不再引入独立的 `targets.special_exporters` 配置层，而是明确作为 `[[targets.exports]]` 的一种 `type`。这样 TOML 结构保持简单：`target.exports` 统一表示“当前 target 要生成的产物”，由 generator requirements 区分 MetaOnly 与 MetaAndData 调度路径。
 
 非运行时 data exporter 与 runtime data exporter 的定位不同：runtime data 面向游戏运行时加载；POT、资源清单、审计索引等面向本地化、资源打包、工具链或文档流程。它们共享同一个 Meta / Data / ExportView 语义，但非运行时 data exporter 可以读取被 runtime payload 隐藏、同时又被 exporter policy 显式允许的辅助字段，例如 text translator comment 或 asset bundle tag。无论是否读取辅助字段，都必须遵守 target tags、table/field visibility、`row_export` 和 artifact path conflict 规则。
 
@@ -623,7 +623,7 @@ config-forge --project ConfigForge.toml --target client
 1. 解析 Project Config，并递归加载其顶层 `imports` 指向的工程配置片段。
 2. 按 `--target` 找到目标 target。
 3. 合并所有配置片段中的 `enums`、`structs`、`tables` 并完成 link/validate。
-4. 根据 `[[targets.exports]]` 与 generator requirements 派生出的 dependency contract 构造 target-local execution summary；当前实现按 MetaAndData / MetaOnly 两类依赖执行，而不是完整通用 DAG 调度器。若 target 同时包含两类任务，source read 会与 Meta link 并行；Meta link 完成后，MetaOnly 分支立即运行格式无关 codegen / schema docs 等不需要 Data 的 generator，不等待 source read、归一化、校验或数据相关 generator。MetaAndData 分支继续读取 `project.input`、归一化、校验并运行数据相关 generator。
+4. 根据 `[[targets.exports]]` 与 generator requirements 构造 target-local execution summary；当前实现按 MetaAndData / MetaOnly 两类输入需求执行，而不是完整通用 DAG 调度器。若 target 同时包含两类任务，source read 会与 Meta link 并行；Meta link 完成后，MetaOnly 分支立即运行格式无关 codegen / schema docs 等不需要 Data 的 generator，不等待 source read、归一化、校验或数据相关 generator。MetaAndData 分支继续读取 `project.input`、归一化、校验并运行数据相关 generator。
 5. 同 `(project.input, effective_tags)` 且 requirements 包含 Data 的 export task 复用加载、归一化和校验结果。
 6. 汇总所有 export artifacts，按 export task 声明顺序稳定排序，并统一完成路径归一化和冲突检查。
 7. 按 `--dry-run` / `--write-mode` 写出 artifact，或在 dry-run 模式下只返回写入计划；artifact writer 通过 shared `ArtifactSink` 管理 path reservation、Direct / TempCommit / DryRun 生命周期与 result entries。后续 streaming generator 会进一步降低生成阶段峰值。

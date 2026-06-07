@@ -203,10 +203,9 @@
 | 导出任务实例 | Export Task Instance | `NormalizedExportTask`, `task.name` | `[[targets.exports]]` 中的一条任务声明；`name` 是同一 target 内的实例名，同一个 generator type 可以用不同 name / output / options 声明多次。 |
 | 生成器类型标识 | Generator Type ID | `type_id` | build-facing generator 的全局类型标识，用于匹配 `[[targets.exports]].type`。 |
 | 生成器别名 | Generator Alias | `aliases` | generator type id 的兼容别名；registry 匹配时与 type id 一起组成 generator identity。 |
-| 生成器描述符 | Generator Descriptor | `GeneratorDescriptor` | 聚合 generator type id、aliases 和 requirements 的调度侧描述；registry 通过 descriptor 做匹配和 dependency 派生。 |
+| 生成器描述符 | Generator Descriptor | `GeneratorDescriptor` | 聚合 generator type id、aliases 和 requirements 的调度侧描述；registry 通过 descriptor 做匹配并读取 requirements。 |
 | Artifact 生成器 | Artifact Generator | `ArtifactGenerator` | 根据声明的 input requirements 生成一个或多个 artifact 的 build-facing 抽象；requirements 决定调度，code/data/doc/report 等能力通过 facet/helper 组合。 |
-| 生成器输入需求 | Generator Requirements | `GeneratorRequirements` | 描述 generator 需要哪些输入，例如 Meta、Data、assets、validation report；`MetaOnly` / `MetaAndData` 是从 requirements 派生出的调度属性，不是继承层级。 |
-| 导出依赖分组 | Export Dependency | `ExportDependency` | 当前 branch pipeline 使用的兼容调度分组，由 `GeneratorRequirements` 派生；长期可视为 implementation detail，而不是 generator 的权威能力描述。 |
+| 生成器输入需求 | Generator Requirements | `GeneratorRequirements` | 描述 generator 需要哪些输入，例如 Meta、Data、assets、validation report；当前 branch pipeline 直接用 `needs_data` 拆分 MetaOnly / MetaAndData 执行分组。 |
 | 生成器能力 Facet | Generator Facet | `CodeArtifactOptions`, `DocArtifactFacet` | 可组合的领域能力或选项集合，例如代码文本选项、runtime table serialization、聚合 artifact、文档渲染。 |
 | 数据导出器 | Data Exporter | `DataExporter` | 从 ExportView 写 runtime data 的导出器。 |
 | 运行时数据格式 | Runtime Data Format | `RuntimeDataFormat` | 当前 runtime table data export type 支持 `json`、`messagepack`、`bin`；当前内置聚合 / 内嵌数据 export type 支持 `gettext_pot` / `pot`、`lua_table` / `lua`；未来可扩展 `yaml`、`sqlite`、`protobuf`。 |

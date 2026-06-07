@@ -65,7 +65,7 @@ pub use meta::{
 pub use project::{
     AssetSearchPathConfig, AssetsConfig, ProjectConfig, ProjectConfigMeta, TargetConfig,
 };
-pub use runtime_contract::{ExportDependency, RuntimeDataFile};
+pub use runtime_contract::RuntimeDataFile;
 pub use schema_doc::{
     SchemaDoc, SchemaDocExportConfig, SchemaDocFormat, SchemaDocOptions,
     render_schema_doc_index_markdown, render_schema_table_markdown,

@@ -5,10 +5,9 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::{
     ConfigForgeError, Result,
-    generator::GeneratorRegistry,
+    generator::{GeneratorRegistry, GeneratorRequirements},
     meta::TargetTags,
     project::{TargetConfig, TargetExportConfig},
-    runtime_contract::ExportDependency,
 };
 
 pub(crate) const DEFAULT_EXPORT_TASK_NAME: &str = "default";
@@ -24,7 +23,7 @@ pub(crate) struct NormalizedTargetConfig {
 pub(crate) struct NormalizedExportTask {
     pub(crate) name: String,
     pub(crate) type_id: String,
-    pub(crate) dependency: ExportDependency,
+    pub(crate) requirements: GeneratorRequirements,
     pub(crate) output: PathBuf,
     pub(crate) options: BTreeMap<String, toml::Value>,
 }
@@ -74,12 +73,12 @@ fn normalize_export_tasks(
                 "target `{target_name}` declares duplicate export task `{name}`"
             )));
         }
-        let dependency = registry.dependency(target_name, &export_task.type_id)?;
-        validate_export_dependency(target_name, export_task, dependency)?;
+        let requirements = registry.requirements(target_name, &export_task.type_id)?;
+        validate_export_requirements(target_name, export_task, requirements)?;
         normalized.push(NormalizedExportTask {
             name,
             type_id: export_task.type_id.clone(),
-            dependency,
+            requirements,
             output: export_task.output.clone(),
             options: export_task.options.clone(),
         });
@@ -109,26 +108,21 @@ fn validate_export_task_name(target_name: &str, name: &str) -> Result<()> {
     }
 }
 
-fn validate_export_dependency(
+fn validate_export_requirements(
     target_name: &str,
     export_task: &TargetExportConfig,
-    dependency: ExportDependency,
+    requirements: GeneratorRequirements,
 ) -> Result<()> {
-    match dependency {
-        ExportDependency::MetaOnly => {
-            validate_no_export_input_option(target_name, export_task)?;
-            if export_task.options.contains_key("data") {
-                return Err(ConfigForgeError::Validation(format!(
-                    "target `{target_name}` export task `{}` must not set `data`; `{}` only depends on Meta",
-                    export_task
-                        .name
-                        .as_deref()
-                        .unwrap_or(DEFAULT_EXPORT_TASK_NAME),
-                    export_task.type_id
-                )));
-            }
-        }
-        ExportDependency::MetaAndData => validate_no_export_input_option(target_name, export_task)?,
+    validate_no_export_input_option(target_name, export_task)?;
+    if !requirements.needs_data && export_task.options.contains_key("data") {
+        return Err(ConfigForgeError::Validation(format!(
+            "target `{target_name}` export task `{}` must not set `data`; `{}` only depends on Meta",
+            export_task
+                .name
+                .as_deref()
+                .unwrap_or(DEFAULT_EXPORT_TASK_NAME),
+            export_task.type_id
+        )));
     }
     Ok(())
 }
@@ -173,10 +167,7 @@ mod tests {
         let normalized = target.normalize().expect("target should normalize");
 
         assert_eq!(normalized.exports[0].name, DEFAULT_EXPORT_TASK_NAME);
-        assert_eq!(
-            normalized.exports[0].dependency,
-            ExportDependency::MetaAndData
-        );
+        assert!(normalized.exports[0].requirements.needs_data);
     }
 
     #[test]
@@ -217,10 +208,7 @@ mod tests {
 
         let normalized = target.normalize().expect("target should normalize");
 
-        assert_eq!(
-            normalized.exports[0].dependency,
-            ExportDependency::MetaAndData
-        );
+        assert!(normalized.exports[0].requirements.needs_data);
     }
 
     #[test]
@@ -291,7 +279,7 @@ mod tests {
         let task = NormalizedExportTask {
             name: "cpp".to_owned(),
             type_id: "cpp".to_owned(),
-            dependency: ExportDependency::MetaOnly,
+            requirements: GeneratorRequirements::meta_only(),
             output: PathBuf::from("Generated/Cpp"),
             options: BTreeMap::from([
                 (
@@ -318,33 +306,35 @@ mod tests {
     }
 
     #[test]
-    fn export_dependency_classifies_known_types() {
+    fn generator_requirements_classify_known_types() {
         let registry = GeneratorRegistry::with_builtin_generators();
 
-        assert_eq!(
-            registry
-                .dependency("client", "rust")
-                .expect("rust dependency"),
-            ExportDependency::MetaOnly
-        );
-        assert_eq!(
-            registry.dependency("client", "ts").expect("ts dependency"),
-            ExportDependency::MetaOnly
-        );
-        assert_eq!(
-            registry
-                .dependency("client", "json")
-                .expect("json dependency"),
-            ExportDependency::MetaAndData
-        );
-        assert_eq!(
-            registry
-                .dependency("client", "lua")
-                .expect("lua dependency"),
-            ExportDependency::MetaAndData
+        assert!(
+            !registry
+                .requirements("client", "rust")
+                .expect("rust requirements")
+                .needs_data
         );
         assert!(
-            matches!(registry.dependency("client", "unknown"), Err(ConfigForgeError::Validation(message)) if message.contains("unknown export type `unknown`"))
+            !registry
+                .requirements("client", "ts")
+                .expect("ts requirements")
+                .needs_data
+        );
+        assert!(
+            registry
+                .requirements("client", "json")
+                .expect("json requirements")
+                .needs_data
+        );
+        assert!(
+            registry
+                .requirements("client", "lua")
+                .expect("lua requirements")
+                .needs_data
+        );
+        assert!(
+            matches!(registry.requirements("client", "unknown"), Err(ConfigForgeError::Validation(message)) if message.contains("unknown export type `unknown`"))
         );
     }
 }

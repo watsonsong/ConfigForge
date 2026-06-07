@@ -70,7 +70,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
 - `src/codegen/` — language-neutral CodeModel IR plus built-in generators; backend list and capabilities are tracked in the Codegen backend capability matrix.
 - `src/validation/` — schema, target-aware data validation, diagnostics, and validator registry.
 - `src/project/` — ConfigForge project TOML schema, import merging, path normalization, and Meta extraction.
-- `src/build/` — project build orchestration, target normalization, export dependency planning, branch pipeline execution, and artifact generation scheduling.
+- `src/build/` — project build orchestration, target normalization, generator requirements planning, branch pipeline execution, and artifact generation scheduling.
 - `src/exporter/` — runtime data export contracts, JSON / MessagePack / bin exporters, and aggregate exporters such as POT, Lua, and Asset Manifest.
 - `src/diagnostic/` — shared diagnostic foundations and crate error model.
 - `runtime/` — standard runtime helpers/templates and compliance fixtures.
