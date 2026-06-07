@@ -17,6 +17,7 @@ pub(crate) use self::ir::{
     CodeEnum, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel, CodeStruct,
     CodeTable, CodeTableKind, CodeTypeRef, build_code_model,
 };
+pub(crate) use crate::schema_doc::SchemaDocGenerator;
 pub(crate) use cpp::CppCodeGenerator;
 pub use cpp::CppCodegenOptions;
 pub(crate) use cpp_unreal::CppUnrealCodeGenerator;
@@ -408,6 +409,8 @@ pub struct CodeExportInput<'meta> {
     pub meta: &'meta LinkedMetaModel<'meta>,
     pub target_tags: TargetTags,
     pub project: CodeExportProject,
+    pub project_root: PathBuf,
+    pub target_name: String,
     pub target: CodeExportTarget,
     pub runtime_data_files: Vec<RuntimeDataFile>,
     pub generated_at: String,
@@ -525,6 +528,7 @@ pub(crate) fn builtin_generators() -> Vec<Box<dyn CodeGenerator>> {
         Box::new(CSharpCodeGenerator),
         Box::new(JavaCodeGenerator),
         Box::new(TypeScriptCodeGenerator),
+        Box::new(SchemaDocGenerator),
     ]
 }
 

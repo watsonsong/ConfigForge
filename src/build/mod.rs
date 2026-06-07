@@ -31,10 +31,6 @@ use crate::{
     meta::{LinkedMetaModel, MetaModel, TargetTags},
     project::ProjectConfig,
     runtime_contract::ExportDependency,
-    schema_doc::{
-        SchemaDoc, SchemaDocOptions, schema_doc_export_config_from_options,
-        write_schema_doc_to_sink,
-    },
 };
 
 use runtime::export_meta_and_data_tasks;
@@ -384,7 +380,6 @@ fn execute_export_pipeline<'meta>(
             let codegen_context = CodegenTaskContext {
                 project_root,
                 project: &codegen_project,
-                project_info,
                 target_name,
                 target_tags,
                 linked_meta: &linked_meta,
@@ -630,7 +625,6 @@ fn execute_codegen_export_nodes(
 struct CodegenTaskContext<'a, 'meta> {
     project_root: &'a Path,
     project: &'a CodeExportProject,
-    project_info: &'a ArtifactProjectInfo,
     target_name: &'a str,
     target_tags: &'a TargetTags,
     linked_meta: &'meta crate::meta::LinkedMetaModel<'meta>,
@@ -644,9 +638,6 @@ fn generate_and_write_code_task(
     export_task: &NormalizedExportTask,
 ) -> Result<()> {
     debug_assert_eq!(export_task.dependency, ExportDependency::MetaOnly);
-    if export_task.type_id == "schema_doc" {
-        return generate_and_write_schema_doc_task(context, export_task);
-    }
     let task = codegen_task_config_from_export_task(export_task)?;
     let generator =
         crate::codegen::find_generator(context.generators, &task.language).ok_or_else(|| {
@@ -657,34 +648,6 @@ fn generate_and_write_code_task(
         })?;
     let input = build_code_export_input(context, task, generator)?;
     generator.generate_to_sink(&input, context.sink)
-}
-
-fn generate_and_write_schema_doc_task(
-    context: &CodegenTaskContext<'_, '_>,
-    export_task: &NormalizedExportTask,
-) -> Result<()> {
-    let config = schema_doc_export_config_from_options(
-        export_task.output.clone(),
-        export_task.options.clone(),
-    )?;
-    let doc = SchemaDoc::from_meta(
-        context.linked_meta,
-        context.project_info,
-        SchemaDocOptions {
-            title: config.title.clone(),
-            project_name: context.project_info.name.clone(),
-            project_path: Some(context.project_root.to_path_buf()),
-            target: Some(context.target_name.to_owned()),
-            target_tags: context.target_tags.clone(),
-            generated_at: context.generated_at.to_owned(),
-            include_hidden: false,
-            include_internal: false,
-            include_struct_details: true,
-            include_asset_rules: true,
-            include_i18n: true,
-        },
-    );
-    write_schema_doc_to_sink(&doc, &config, context.sink)
 }
 
 fn build_code_export_input<'meta>(
@@ -698,6 +661,8 @@ fn build_code_export_input<'meta>(
         meta: context.linked_meta,
         target_tags: context.target_tags.clone(),
         project: context.project.clone(),
+        project_root: context.project_root.to_path_buf(),
+        target_name: context.target_name.to_owned(),
         target: code_target,
         runtime_data_files: Vec::new(),
         generated_at: context.generated_at.to_owned(),
@@ -1250,7 +1215,6 @@ mod tests {
         let context = CodegenTaskContext {
             project_root: Path::new("."),
             project: &project,
-            project_info: &project_info,
             target_name: "default",
             target_tags: &target_tags,
             linked_meta: &linked_meta,

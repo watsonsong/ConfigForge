@@ -509,7 +509,7 @@ title = "Client Config Schema"
 已实现内容：
 
 - 新增 `src/schema_doc/`，提供 `SchemaDoc` normalized model、`SchemaDocOptions`、`SchemaDocExportConfig`、`SchemaDocFormat`、Markdown renderer 和 ArtifactSink 写入入口。
-- Build 支持 `[[targets.exports]] type = "schema_doc"`，作为 build 内置 `MetaOnly` artifact task 运行；它不属于 `DataFormatRegistry`，docs-only target 不需要 `project.input`。
+- Build 支持 `[[targets.exports]] type = "schema_doc"`，作为注册到 `codegen::builtin_generators()` 的 `MetaOnly` generator 运行；它与语言 codegen 一样读取 Meta 后输出 artifact，不属于 `DataFormatRegistry`，docs-only target 不需要 `project.input`。
 - Markdown MVP 输出 `index.md` 与每张当前 target 可见 table 的 `<table>.md`。
 - 单表文档包含 Fields、Indexes、Relations，并补充 Assets、Text / POT、Validators 摘要。
 - Builder 使用 linked Meta 与 current target tags 计算 table / field / index / FK visibility；默认过滤当前 target 不可见或 `export = false` 的内容。
@@ -523,4 +523,4 @@ title = "Client Config Schema"
 - Asset rules 摘要只展示可静态解析的 `extensions`、prefix/suffix、require existing、allow/deny path 等基础规则，不读取实际资源引用。
 - Text / POT 摘要只标记当前 target 可见 `text` 字段理论上会被 POT exporter 处理，不读取具体文本值。
 - Struct / fragment 子字段已有基础展开；复杂平台化输出、owner/domain 分组、ER 图和 Lark / Confluence 发布仍是后续扩展。
-- 当后续新增 JSON Schema、Mermaid ER、HTML docs、build/schema manifest 等更多 MetaOnly artifact task 时，应抽出独立 `MetaOnlyArtifactExporter` registry 统一分派；当前 `schema_doc` 的 build 内置分支只是短期接入方式。
+- 当后续新增 JSON Schema、Mermaid ER、HTML docs 等“只读 Meta 并输出 artifact”的任务时，优先按同一 MetaOnly generator 路径扩展，而不是在 build 中增加特殊分支。
