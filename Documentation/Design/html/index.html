@@ -261,6 +261,7 @@
         <li><a href="#views">DataSet 与 ExportView</a></li>
         <li><a href="#source">多源与覆盖</a></li>
         <li><a href="#export">导出与 CLI</a></li>
+        <li><a href="#report">校验报告</a></li>
         <li><a href="#qa">QA 输入</a></li>
         <li><a href="#decisions">关键决策</a></li>
       </ul>
@@ -370,6 +371,7 @@
             <tr><td>Asset validation / completion</td><td><span class="tag orange">Implemented MVP</span></td><td>已实现 Project search paths + Meta asset_kinds / extends，在 ExportView 上校验资源引用、执行 Unreal mounted object / wrapper / 短路径唯一候选补齐，并让 runtime data 输出 canonical asset string；Asset Manifest 输出仍放到后续阶段。</td></tr>
             <tr><td>Codegen backends</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 Rust / TypeScript / C++ 基础生成、loader/repository helpers 和 target-aware IR。</td></tr>
             <tr><td>Diagnostics</td><td><span class="tag orange">Implemented MVP</span></td><td><code>src/diagnostic/</code> 已提供 severity、location、formatting、report aggregation 和 crate error facade；Data/Exporter/Codegen 领域 code 与完整 source trace 仍可增强。</td></tr>
+            <tr><td>Designer Validation Report</td><td><span class="tag red">Planned</span></td><td>目标是在现有 Diagnostic / ValidationReport 基础上导出 HTML / Markdown / JSON / CSV 报告，服务策划、QA、MR/CI 和平台系统；详见 <a href="../10-designer-validation-report.md">10-designer-validation-report.md</a>。</td></tr>
           </tbody>
         </table>
       </section>
@@ -562,8 +564,34 @@ override_sources = [
         </div>
       </section>
 
+      <section id="report">
+        <h2>10. Designer Validation Report</h2>
+        <p class="lead">Designer Validation Report 是 <a href="../10-designer-validation-report.md">10-designer-validation-report.md</a> 定义的 P1-1 能力：在不替代现有 CLI diagnostics 的前提下，把结构化校验结果转成更适合策划、QA、制作人和 CI/MR 平台阅读、筛选和归档的报告。</p>
+        <div class="grid grid-4">
+          <div class="card"><span class="tag blue">HTML</span><h3>人工阅读</h3><p>面向策划 / QA 的主报告格式，展示顶部阻塞状态、错误摘要、表格行定位、owner/domain 分组和修复建议。</p></div>
+          <div class="card"><span class="tag green">Markdown</span><h3>MR / CI 摘要</h3><p>适合贴到 MR comment、CI 日志或变更说明中，包含错误统计、Top tables / codes 和 issue 明细。</p></div>
+          <div class="card"><span class="tag purple">JSON</span><h3>平台消费</h3><p>保留 stable code、severity、table、field、row、target、owner/domain 和 catalog enrichment，便于平台入库和趋势分析。</p></div>
+          <div class="card"><span class="tag orange">CSV</span><h3>表格工具</h3><p>导出一行一个 issue 的扁平结构，便于 QA 在 Excel / Sheet 中筛选、分派、统计和留档。</p></div>
+        </div>
+        <h3>入口与语义</h3>
+        <table>
+          <thead><tr><th>入口</th><th>示例</th><th>行为</th></tr></thead>
+          <tbody>
+            <tr><td><code>validate</code> 命令</td><td><code>config-forge validate --project ConfigForge.toml --target client --report html --output out/report/validation.html</code></td><td>维持现有 CLI 摘要，同时把完整报告写入指定路径；存在 error 时仍返回失败退出码，但报告应尽量写出。</td></tr>
+            <tr><td>Build 附加产物</td><td><code>[[targets.exports]] type = "validation_report"</code></td><td>作为聚合 export task 消费 validation 阶段已有的结构化结果；不重复执行另一套校验逻辑。</td></tr>
+          </tbody>
+        </table>
+        <h3>报告模型</h3>
+        <div class="grid grid-3">
+          <div class="card"><h3>Metadata</h3><p>记录 project、target、target tags、生成时间、工具版本和输入根目录，方便 QA 留档与追溯。</p></div>
+          <div class="card"><h3>Summary</h3><p>汇总 error / warning 数量、是否阻塞、涉及表数量、owner/domain 覆盖和 Top N 问题分布。</p></div>
+          <div class="card"><h3>Issues</h3><p>每条 issue 保留 stable id、severity、code、message、source path、source row、当前值、期望、hint、owner/domain 和 target visibility。</p></div>
+        </div>
+        <div class="callout warn"><strong>当前状态：</strong>该能力仍是 Planned / Not implemented。P1-1 实施应先把现有 <code>ValidationReport</code> enrich 成 <code>DesignerValidationReport</code>，再分步接入 CLI、HTML/Markdown/JSON/CSV renderer 和 build export task。</div>
+      </section>
+
       <section id="qa">
-        <h2>10. QA 输入与断言</h2>
+        <h2>11. QA 输入与断言</h2>
         <p class="lead">QA 测试应优先断言结构化输出和产物内容，而不是只断言人类可读 message。</p>
         <div class="grid grid-3">
           <div class="card"><h3>配置解析</h3><p>Project/Meta 路径不存在、import 循环、TOML/XML 语法、等价语义。</p></div>
@@ -579,7 +607,7 @@ override_sources = [
       </section>
 
       <section id="decisions">
-        <h2>11. 当前关键设计决策</h2>
+        <h2>12. 当前关键设计决策</h2>
         <div class="grid grid-2">
           <div class="card"><h3>Project imports</h3><p>Project Config 支持顶层 <code>imports</code> 递归导入配置片段；Meta 文件本身不再声明 imports。</p></div>
           <div class="card"><h3>Source provider</h3><p><code>csv</code> 是当前稳定 provider；<code>xlsx</code>、<code>lark_sheet</code>、<code>google_sheet</code> 是明确 planned provider，不再设计 <code>local_file</code>。</p></div>

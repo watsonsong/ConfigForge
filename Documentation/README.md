@@ -41,6 +41,7 @@ For future technical overview design, detailed design, user manual writing, and 
 - [`Design/07-user-manual-and-qa.md`](Design/07-user-manual-and-qa.md) — user workflows, common operations, QA dimensions, and assertion guidance.
 - [`Design/08-asset-validation-and-manifest.md`](Design/08-asset-validation-and-manifest.md) — asset reference validation, asset kind policy, target-aware checks, export-time completion, and Asset Manifest export design.
 - [`Design/09-builtin-validators.md`](Design/09-builtin-validators.md) — built-in validator roadmap and canonical design for regex, string_length, sum, monotonic, required_when, compare, and range enhancement.
+- [`Design/10-designer-validation-report.md`](Design/10-designer-validation-report.md) — Designer Validation Report design for validate/build report exports, HTML/Markdown/JSON/CSV output, issue enrichment, owner/domain grouping, and implementation phasing.
 
 ## Implementation Design Set
 

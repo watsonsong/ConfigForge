@@ -19,6 +19,7 @@
 7. `07-user-manual-and-qa.md` — 用户工作流、错误处理期望和 QA 测试用例输入维度。
 8. `08-asset-validation-and-manifest.md` — Asset 引用校验、asset kind、target-aware 资源策略、导出补齐和 Asset Manifest 初步设计。
 9. `09-builtin-validators.md` — 游戏常用内置 validators 设计，包括 regex、string_length、sum、monotonic、required_when、compare 与 range 增强方向。
+10. `10-designer-validation-report.md` — 面向策划 / QA / CI 平台的 Designer Validation Report 设计，包括 validate/build 导出入口、HTML/Markdown/JSON/CSV 输出、issue enrichment、owner/domain 分组和实施分期。
 
 ## HTML 阅读版
 
@@ -78,3 +79,4 @@
 | TypeScript sync loading | Implemented MVP | 已生成 `GameData.loadSync()`、lazy sync accessor、`preloadAllSync()` 与 `linkAllSync()`；sync API 要求 loader 同步返回 reader，遇到 Promise 应报错。 |
 | standard runtime helpers | Implemented MVP | 顶层 `runtime/` 已有 Rust JSON/MessagePack/binary reader templates 与 `reader_core` skeleton、TypeScript core/JSON/MessagePack/binary/node-fs package skeleton、C++ core header + RapidJSON / msgpack-cxx / binary adapter、C# JSON/MessagePack/binary reader、Java JDK-only JSON/MessagePack/binary reader、C++ CMake targets 与初始 compliance fixtures。已声明 reader contract version。Rust、TypeScript、C++、C# 与 Java 标准 reader 已接入首批 runtime compliance runner；C# / Java generated contract 支持 record boundary / schema revision / enum ordinal API，并由 standard_project harness 覆盖 JSON、MessagePack、Binary smoke。当前已达到基础 MVP：标准 reader 有可复制/可引用源码、统一 contract、跨语言首批 compliance 和端到端 smoke；下一阶段按“补充格式特有 negative cases → 稳定 package / CMake 安装形态 → 生产接入文档与版本策略”的路线推进到初步稳定。核心 generated code 仍不强依赖这些三方库。 |
 | diagnostics | Implemented MVP | 已有 `src/diagnostic/` 共享 severity、location、entry formatting、report aggregation 和 crate error facade；MetaDiagnostic 与 ValidationIssue 已接入统一格式化。尚未为所有 Data/Exporter/Codegen 错误补齐领域 diagnostic code、span/hint 和完整 source trace。 |
+| designer validation report | Planned / Not implemented | 目标是在现有 Diagnostic / ValidationReport 基础上，为策划、QA、MR/CI 和平台系统导出 HTML / Markdown / JSON / CSV 报告；设计见 [`10-designer-validation-report.md`](10-designer-validation-report.md)。 |
