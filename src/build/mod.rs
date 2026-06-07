@@ -253,12 +253,12 @@ fn execute_target_pipeline(
     let generated_at = generated_at();
     let generator_registry = GeneratorRegistry::with_builtin_generators();
 
-    let (runtime_output, code_output) = context.trace.record("run_exporters", None, || {
+    let (runtime_output, meta_only_output) = context.trace.record("run_exporters", None, || {
         execute_export_pipeline(ExportPipelineContext {
             raw_meta: context.raw_meta,
             read_sources: prepared_inputs.read_sources.take(),
             runtime_exports: &meta_and_data_exports,
-            codegen_exports: &meta_only_exports,
+            meta_only_exports: &meta_only_exports,
             project_root: context.project_root,
             project_info: context.project_info,
             target_name: &context.target.name,
@@ -274,7 +274,7 @@ fn execute_target_pipeline(
         .trace
         .record("collect_export_diagnostics", None, || {
             let mut warnings = runtime_output.warnings;
-            warnings.extend(code_output.warnings);
+            warnings.extend(meta_only_output.warnings);
             Ok(warnings)
         })?;
 
@@ -342,7 +342,7 @@ struct ExportPipelineContext<'a, 'meta> {
     raw_meta: &'meta MetaModel,
     read_sources: Option<Box<dyn FnOnce() -> Result<RawSourceData> + Send + 'a>>,
     runtime_exports: &'a [(usize, &'a NormalizedExportTask)],
-    codegen_exports: &'a [(usize, &'a NormalizedExportTask)],
+    meta_only_exports: &'a [(usize, &'a NormalizedExportTask)],
     project_root: &'a Path,
     project_info: &'a ArtifactProjectInfo,
     target_name: &'a str,
@@ -361,7 +361,7 @@ fn execute_export_pipeline<'meta>(
         raw_meta,
         read_sources,
         runtime_exports,
-        codegen_exports,
+        meta_only_exports,
         project_root,
         project_info,
         target_name,
@@ -372,11 +372,11 @@ fn execute_export_pipeline<'meta>(
         pool,
         sink,
     } = context;
-    let ((linked_meta, code_output), raw_sources) = join_link_codegen_and_source_read(
+    let ((linked_meta, meta_only_output), raw_sources) = join_link_meta_only_and_source_read(
         || {
             let linked_meta = raw_meta.link().map_err(ConfigForgeError::MetaValidation)?;
             let codegen_project = CodeExportProject::from(project_info);
-            let codegen_context = CodegenTaskContext {
+            let meta_only_context = MetaOnlyGeneratorContext {
                 project_root,
                 project_info,
                 project: &codegen_project,
@@ -387,9 +387,9 @@ fn execute_export_pipeline<'meta>(
                 generator_registry,
                 sink,
             };
-            let code_output =
-                execute_codegen_export_nodes(&codegen_context, codegen_exports, pool)?;
-            Ok((linked_meta, code_output))
+            let meta_only_output =
+                execute_meta_only_generator_nodes(&meta_only_context, meta_only_exports, pool)?;
+            Ok((linked_meta, meta_only_output))
         },
         read_sources,
         pool,
@@ -404,11 +404,11 @@ fn execute_export_pipeline<'meta>(
         pool,
         sink,
     )?;
-    Ok((runtime_output, code_output))
+    Ok((runtime_output, meta_only_output))
 }
 
-fn join_link_codegen_and_source_read<'meta, LinkCodeFn, SourceFn>(
-    link_and_codegen: LinkCodeFn,
+fn join_link_meta_only_and_source_read<'meta, LinkMetaOnlyFn, SourceFn>(
+    link_and_generate_meta_only: LinkMetaOnlyFn,
     read_sources: Option<SourceFn>,
     pool: &ThreadPool,
 ) -> Result<(
@@ -416,17 +416,17 @@ fn join_link_codegen_and_source_read<'meta, LinkCodeFn, SourceFn>(
     Option<RawSourceData>,
 )>
 where
-    LinkCodeFn: FnOnce() -> Result<(LinkedMetaModel<'meta>, ExportBranchOutput)> + Send,
+    LinkMetaOnlyFn: FnOnce() -> Result<(LinkedMetaModel<'meta>, ExportBranchOutput)> + Send,
     SourceFn: FnOnce() -> Result<RawSourceData> + Send,
 {
     if let Some(read_sources) = read_sources {
-        let (link_codegen_result, source_result) =
-            pool.install(|| rayon::join(link_and_codegen, read_sources));
-        let link_codegen = link_codegen_result?;
+        let (link_meta_only_result, source_result) =
+            pool.install(|| rayon::join(link_and_generate_meta_only, read_sources));
+        let link_meta_only = link_meta_only_result?;
         let raw_sources = source_result?;
-        Ok((link_codegen, Some(raw_sources)))
+        Ok((link_meta_only, Some(raw_sources)))
     } else {
-        Ok((link_and_codegen()?, None))
+        Ok((link_and_generate_meta_only()?, None))
     }
 }
 
@@ -599,8 +599,8 @@ fn execute_runtime_export_nodes(
     })
 }
 
-fn execute_codegen_export_nodes(
-    context: &CodegenTaskContext<'_, '_>,
+fn execute_meta_only_generator_nodes(
+    context: &MetaOnlyGeneratorContext<'_, '_>,
     export_tasks: &[(usize, &NormalizedExportTask)],
     pool: &ThreadPool,
 ) -> Result<ExportBranchOutput> {
@@ -608,7 +608,10 @@ fn execute_codegen_export_nodes(
         export_tasks
             .par_iter()
             .map(|(index, export_task)| {
-                (*index, generate_and_write_code_task(context, export_task))
+                (
+                    *index,
+                    generate_and_write_meta_only_task(context, export_task),
+                )
             })
             .collect::<Vec<_>>()
     });
@@ -622,7 +625,7 @@ fn execute_codegen_export_nodes(
     })
 }
 
-struct CodegenTaskContext<'a, 'meta> {
+struct MetaOnlyGeneratorContext<'a, 'meta> {
     project_root: &'a Path,
     project_info: &'a ArtifactProjectInfo,
     project: &'a CodeExportProject,
@@ -634,8 +637,8 @@ struct CodegenTaskContext<'a, 'meta> {
     sink: &'a ArtifactSink,
 }
 
-fn generate_and_write_code_task(
-    context: &CodegenTaskContext<'_, '_>,
+fn generate_and_write_meta_only_task(
+    context: &MetaOnlyGeneratorContext<'_, '_>,
     export_task: &NormalizedExportTask,
 ) -> Result<()> {
     debug_assert_eq!(export_task.dependency, ExportDependency::MetaOnly);
@@ -662,7 +665,7 @@ fn generate_and_write_code_task(
 }
 
 fn build_generator_common_input<'meta>(
-    context: &CodegenTaskContext<'_, 'meta>,
+    context: &MetaOnlyGeneratorContext<'_, 'meta>,
     task: &NormalizedExportTask,
 ) -> GeneratorCommonInput<'meta> {
     GeneratorCommonInput {
@@ -680,7 +683,7 @@ fn build_generator_common_input<'meta>(
 }
 
 fn build_code_export_input<'meta>(
-    context: &CodegenTaskContext<'_, 'meta>,
+    context: &MetaOnlyGeneratorContext<'_, 'meta>,
     task: crate::codegen::CodegenTaskConfig,
     generator: &dyn CodeGenerator,
 ) -> Result<CodeExportInput<'meta>> {
@@ -996,7 +999,7 @@ mod tests {
     }
 
     #[test]
-    fn link_codegen_and_source_read_overlap_before_normalize_join() {
+    fn link_meta_only_and_source_read_overlap_before_normalize_join() {
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(2)
             .build()
@@ -1009,7 +1012,7 @@ mod tests {
         let source_started_for_source = source_started.clone();
         let started_at = Instant::now();
 
-        let ((linked_meta, code_output), raw_sources) = join_link_codegen_and_source_read(
+        let ((linked_meta, meta_only_output), raw_sources) = join_link_meta_only_and_source_read(
             || {
                 thread::sleep(Duration::from_millis(40));
                 if source_started_for_link.load(Ordering::SeqCst) {
@@ -1031,32 +1034,33 @@ mod tests {
         .expect("meta link and source read should finish");
 
         assert!(linked_meta.table("items").is_some());
-        assert!(code_output.warnings.is_empty());
+        assert!(meta_only_output.warnings.is_empty());
         assert!(raw_sources.is_some());
         assert!(link_observed_source.load(Ordering::SeqCst));
         assert!(started_at.elapsed() < Duration::from_millis(140));
     }
 
     #[test]
-    fn codegen_branch_can_start_before_source_read_finishes() {
+    fn meta_only_branch_can_start_before_source_read_finishes() {
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(2)
             .build()
             .expect("pool should build");
         let meta = minimal_meta_model();
         let source_finished = Arc::new(AtomicBool::new(false));
-        let codegen_observed_source_unfinished = Arc::new(AtomicBool::new(false));
-        let source_finished_for_codegen = source_finished.clone();
-        let codegen_observed_source_unfinished_for_codegen =
-            codegen_observed_source_unfinished.clone();
+        let meta_only_observed_source_unfinished = Arc::new(AtomicBool::new(false));
+        let source_finished_for_meta_only = source_finished.clone();
+        let meta_only_observed_source_unfinished_for_meta_only =
+            meta_only_observed_source_unfinished.clone();
         let source_finished_for_source = source_finished.clone();
 
-        let ((linked_meta, _code_output), raw_sources) = join_link_codegen_and_source_read(
+        let ((linked_meta, _meta_only_output), raw_sources) = join_link_meta_only_and_source_read(
             || {
                 thread::sleep(Duration::from_millis(20));
                 let linked_meta = meta.link().map_err(ConfigForgeError::MetaValidation)?;
-                if !source_finished_for_codegen.load(Ordering::SeqCst) {
-                    codegen_observed_source_unfinished_for_codegen.store(true, Ordering::SeqCst);
+                if !source_finished_for_meta_only.load(Ordering::SeqCst) {
+                    meta_only_observed_source_unfinished_for_meta_only
+                        .store(true, Ordering::SeqCst);
                 }
                 Ok((linked_meta, empty_branch_output()))
             },
@@ -1072,7 +1076,7 @@ mod tests {
         assert!(linked_meta.table("items").is_some());
         assert!(raw_sources.is_some());
         assert!(source_finished.load(Ordering::SeqCst));
-        assert!(codegen_observed_source_unfinished.load(Ordering::SeqCst));
+        assert!(meta_only_observed_source_unfinished.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -1081,7 +1085,7 @@ mod tests {
             .num_threads(2)
             .build()
             .expect("pool should build");
-        let result = join_link_codegen_and_source_read(
+        let result = join_link_meta_only_and_source_read(
             || Err(ConfigForgeError::Validation("meta failed".to_owned())),
             Some(|| Err(ConfigForgeError::Validation("source failed".to_owned()))),
             &pool,
@@ -1151,7 +1155,7 @@ mod tests {
             .expect("pool should build");
         let meta = minimal_meta_model();
         let target = NormalizedTargetConfig {
-            name: "bad_codegen".to_owned(),
+            name: "bad_meta_only".to_owned(),
             tags: Vec::new(),
             exports: vec![NormalizedExportTask {
                 name: "unknown".to_owned(),
@@ -1194,7 +1198,7 @@ mod tests {
     }
 
     #[test]
-    fn codegen_task_writes_via_sink_first_override() {
+    fn meta_only_code_generator_writes_via_sink_first_override() {
         struct SinkOnlyGenerator {
             called: Arc<AtomicBool>,
         }
@@ -1246,7 +1250,7 @@ mod tests {
             Vec::new(),
         );
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
-        let context = CodegenTaskContext {
+        let context = MetaOnlyGeneratorContext {
             project_root: Path::new("."),
             project_info: &project_info,
             project: &project,
@@ -1265,7 +1269,7 @@ mod tests {
             options: BTreeMap::new(),
         };
 
-        generate_and_write_code_task(&context, &export_task)
+        generate_and_write_meta_only_task(&context, &export_task)
             .expect("sink-first generator should write successfully");
         let result = sink.finish().expect("sink should finish");
 
