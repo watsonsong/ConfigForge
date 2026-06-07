@@ -96,6 +96,23 @@ returns = "optional"
 cpp_include = "\"reference_game_i18n.hpp\""
 
 [[targets.exports]]
+name = "cpp_external"
+type = "cpp"
+output = "out/client_code/cpp_external"
+file_name = "reference_game_config"
+module_name = "ReferenceGameConfig"
+namespace = "reference::game::config"
+
+[targets.exports.cpp]
+runtime_interface = "external"
+
+[targets.exports.i18n]
+mode = "global_function"
+function = "GlobalTranslate"
+returns = "optional"
+cpp_include = "\"reference_game_i18n.hpp\""
+
+[[targets.exports]]
 type = "cpp_unreal"
 output = "out/client_code/cpp_unreal"
 file_name = "reference_game_config"

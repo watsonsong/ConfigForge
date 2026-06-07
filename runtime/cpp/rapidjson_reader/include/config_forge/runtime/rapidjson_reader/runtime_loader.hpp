@@ -17,10 +17,10 @@
 #include <rapidjson/istreamwrapper.h>
 
 #if !defined(CONFIG_FORGE_RUNTIME_CPP_READER) || !defined(CONFIG_FORGE_RUNTIME_CPP_LOADER)
-#include "generated.hpp"
+#include "config_forge/runtime/reader.hpp"
 
-#define CONFIG_FORGE_RUNTIME_CPP_READER reference::game::config::IRuntimeDataReader
-#define CONFIG_FORGE_RUNTIME_CPP_LOADER reference::game::config::IRuntimeDataLoader
+#define CONFIG_FORGE_RUNTIME_CPP_READER config_forge_runtime::IRuntimeDataReader
+#define CONFIG_FORGE_RUNTIME_CPP_LOADER config_forge_runtime::IRuntimeDataLoader
 #endif
 
 namespace config_forge_runtime {

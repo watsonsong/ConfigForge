@@ -27,7 +27,9 @@ use repository::{
     render_row_relation_cache_members, render_row_relation_declarations,
     render_row_relation_methods, render_table, render_table_source,
 };
-use runtime::{render_reader_helpers_source, render_runtime_interfaces};
+use runtime::{
+    render_reader_helpers_source, render_runtime_interface_include, render_runtime_interfaces,
+};
 use symbols::validate_generated_symbols;
 use types::CppNames;
 
@@ -92,7 +94,15 @@ impl CodeGenerator for CppCodeGenerator {
         let namespace = namespace.map(String::as_str);
         let header_file_name = input.target.single_file_name("generated", "hpp");
         let source_file_name = format!("{}.cpp", input.target.file_stem("generated"));
-        render_header_file(self, &mut header, input, &model, namespace, &names)?;
+        render_header_file(
+            self,
+            &mut header,
+            input,
+            &model,
+            namespace,
+            &names,
+            &cpp_options,
+        )?;
         let mut source = super::CodeWriter::new(input.target.options.formatting);
         render_source_file(
             self,
@@ -139,7 +149,15 @@ impl CodeGenerator for CppCodeGenerator {
         let header_stream = sink.create(header_path.clone())?;
         let mut header =
             CheckedStreamingCodeWriter::new(header_stream, input.target.options.formatting);
-        render_header_file(self, &mut header, input, &model, namespace, &names)?;
+        render_header_file(
+            self,
+            &mut header,
+            input,
+            &model,
+            namespace,
+            &names,
+            &cpp_options,
+        )?;
         let header_stream = header
             .finish()
             .map_err(|source| ConfigForgeError::WriteFile {
@@ -196,6 +214,7 @@ fn render_header_file(
     model: &CodeModel,
     namespace: Option<&str>,
     names: &CppNames<'_>,
+    options: &CppCodegenOptions,
 ) -> Result<()> {
     write_file_header(generator, header, input);
     header.raw("#pragma once\n\n");
@@ -215,11 +234,12 @@ fn render_header_file(
         "#include <utility>\n",
         "#include <vector>\n\n",
     ));
+    render_runtime_interface_include(&mut header, options);
     render_cpp_i18n_include(&mut header, &input.target.options.i18n);
     if let Some(namespace) = namespace {
         header.raw_fmt(format_args!("namespace {namespace} {{\n\n"));
     }
-    render_runtime_interfaces(&mut header);
+    render_runtime_interfaces(&mut header, options);
     render_cpp_i18n_prelude(&mut header, &input.target.options.i18n);
     header.raw("class GameDataAccess;\nclass GameData;\n\n");
     if model.tables.iter().any(|table| {

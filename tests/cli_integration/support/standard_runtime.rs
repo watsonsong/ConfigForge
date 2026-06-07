@@ -184,9 +184,11 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
     let temp_dir = tempfile::tempdir().expect("cpp harness temp dir should be created");
     let runtime_cpp_dir = fixture_root.join("../../../runtime/cpp");
     let generated_cpp_dir = fixture_root.join("out/client_code/cpp");
+    let generated_external_cpp_dir = fixture_root.join("out/client_code/cpp_external");
     let harness_cpp_dir = fixture_root.join("harness/cpp");
     let harness_cpp = fixture_root.join("harness/cpp/runtime_check.cpp");
     let generated_cpp = generated_cpp_dir.join("reference_game_config.cpp");
+    let generated_external_cpp = generated_external_cpp_dir.join("reference_game_config.cpp");
     let gettext_locale_dir = temp_dir.path().join("locale");
     let gettext_messages_dir = gettext_locale_dir.join("zh_CN/LC_MESSAGES");
     fs::create_dir_all(&gettext_messages_dir).expect("gettext LC_MESSAGES dir should be created");
@@ -282,6 +284,12 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
                 target_include_directories(standard_runtime_check PRIVATE {generated_cpp_dir:?} {harness_cpp_dir:?})
                 target_link_libraries(standard_runtime_check PRIVATE config_forge_runtime::rapidjson_reader)
 
+                add_executable(standard_external_runtime_check
+                    {harness_cpp:?}
+                    {generated_external_cpp:?})
+                target_include_directories(standard_external_runtime_check PRIVATE {generated_external_cpp_dir:?} {harness_cpp_dir:?})
+                target_link_libraries(standard_external_runtime_check PRIVATE config_forge_runtime::rapidjson_reader)
+
                 add_executable(standard_binary_runtime_check
                     {harness_cpp:?}
                     {binary_generated_cpp:?})
@@ -291,8 +299,10 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
 
                 if(Intl_FOUND)
                     target_compile_definitions(standard_runtime_check PRIVATE CONFIG_FORGE_USE_LIBINTL)
+                    target_compile_definitions(standard_external_runtime_check PRIVATE CONFIG_FORGE_USE_LIBINTL)
                     target_compile_definitions(standard_binary_runtime_check PRIVATE CONFIG_FORGE_USE_LIBINTL)
                     target_link_libraries(standard_runtime_check PRIVATE Intl::Intl)
+                    target_link_libraries(standard_external_runtime_check PRIVATE Intl::Intl)
                     target_link_libraries(standard_binary_runtime_check PRIVATE Intl::Intl)
                 endif()
 
@@ -307,8 +317,10 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
             runtime_cpp_dir = runtime_cpp_dir.display().to_string(),
             harness_cpp = harness_cpp.display().to_string(),
             generated_cpp = generated_cpp.display().to_string(),
+            generated_external_cpp = generated_external_cpp.display().to_string(),
             binary_generated_cpp = generated_cpp.display().to_string(),
             generated_cpp_dir = generated_cpp_dir.display().to_string(),
+            generated_external_cpp_dir = generated_external_cpp_dir.display().to_string(),
             binary_generated_cpp_dir = generated_cpp_dir.display().to_string(),
             harness_cpp_dir = harness_cpp_dir.display().to_string(),
             temp_dir = temp_dir.path().display().to_string()
@@ -344,6 +356,18 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
         .output()
         .expect("standard generated C++ runtime test should run");
     assert_command_success(output, "standard generated C++ runtime test");
+
+    let output = StdCommand::new(build_dir.join("standard_external_runtime_check"))
+        .env("DATA_DIR", fixture_root.join("out/client_data/json"))
+        .env("I18N_LOCALE_DIR", &gettext_locale_dir)
+        .env("LANGUAGE", "zh_CN")
+        .env(
+            "I18N_MO",
+            fixture_root.join("i18n/zh_CN/reference_game_config.mo"),
+        )
+        .output()
+        .expect("standard generated external C++ runtime test should run");
+    assert_command_success(output, "standard generated external C++ runtime test");
 
     let output = StdCommand::new(build_dir.join("standard_binary_runtime_check"))
         .env("DATA_DIR", fixture_root.join("out/client_data/binary"))

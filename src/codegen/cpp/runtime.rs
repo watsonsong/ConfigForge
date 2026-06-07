@@ -1,9 +1,36 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::codegen::CodeWriterLike;
+use crate::codegen::{CodeWriterLike, RuntimeInterfaceMode};
 
-pub(super) fn render_runtime_interfaces(content: &mut impl CodeWriterLike) {
+use super::CppCodegenOptions;
+
+const DEFAULT_RUNTIME_CORE_HEADER: &str = "config_forge/runtime/reader.hpp";
+const DEFAULT_RUNTIME_CORE_NAMESPACE: &str = "config_forge_runtime";
+
+pub(super) fn render_runtime_interface_include(
+    content: &mut impl CodeWriterLike,
+    options: &CppCodegenOptions,
+) {
+    if !matches!(options.runtime_interface, RuntimeInterfaceMode::External) {
+        return;
+    }
+    let header = options
+        .runtime_core_header
+        .as_deref()
+        .unwrap_or(DEFAULT_RUNTIME_CORE_HEADER);
+    content.raw_fmt(format_args!("#include {:?}\n\n", header));
+}
+
+pub(super) fn render_runtime_interfaces(
+    content: &mut impl CodeWriterLike,
+    options: &CppCodegenOptions,
+) {
+    if matches!(options.runtime_interface, RuntimeInterfaceMode::External) {
+        render_external_runtime_interfaces(content, options);
+        return;
+    }
+
     content.raw("inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";\n\n");
     content.raw(concat!(
         "class IRuntimeDataReader {\n",
@@ -38,6 +65,21 @@ pub(super) fn render_runtime_interfaces(content: &mut impl CodeWriterLike) {
         "    virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;\n",
         "};\n\n",
     ));
+}
+
+fn render_external_runtime_interfaces(
+    content: &mut impl CodeWriterLike,
+    options: &CppCodegenOptions,
+) {
+    let namespace = options
+        .runtime_core_namespace
+        .as_deref()
+        .unwrap_or(DEFAULT_RUNTIME_CORE_NAMESPACE);
+    content.raw_fmt(format_args!(
+        "using {namespace}::CONFIG_FORGE_READER_CONTRACT_VERSION;\n"
+    ));
+    content.raw_fmt(format_args!("using {namespace}::IRuntimeDataLoader;\n"));
+    content.raw_fmt(format_args!("using {namespace}::IRuntimeDataReader;\n\n"));
 }
 
 pub(super) fn render_reader_helpers_source(content: &mut impl CodeWriterLike) {

@@ -20,6 +20,14 @@ if(CONFIG_FORGE_RUNTIME_FETCH_DEPS AND NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
     set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum CMake policy version for fetched runtime dependencies")
 endif()
 
+add_library(config_forge_runtime_core INTERFACE)
+add_library(config_forge_runtime::core ALIAS config_forge_runtime_core)
+set_target_properties(config_forge_runtime_core PROPERTIES EXPORT_NAME core)
+target_include_directories(config_forge_runtime_core INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_compile_features(config_forge_runtime_core INTERFACE cxx_std_17)
+
 add_library(config_forge_runtime_binary_reader INTERFACE)
 add_library(config_forge_runtime::binary_reader ALIAS config_forge_runtime_binary_reader)
 set_target_properties(config_forge_runtime_binary_reader PROPERTIES EXPORT_NAME binary_reader)
@@ -27,6 +35,7 @@ target_include_directories(config_forge_runtime_binary_reader INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/binary_reader/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_features(config_forge_runtime_binary_reader INTERFACE cxx_std_17)
+target_link_libraries(config_forge_runtime_binary_reader INTERFACE config_forge_runtime::core)
 
 if(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER)
     find_package(RapidJSON CONFIG QUIET)
@@ -75,6 +84,7 @@ if(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rapidjson_reader/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
     target_compile_features(config_forge_runtime_rapidjson_reader INTERFACE cxx_std_17)
+    target_link_libraries(config_forge_runtime_rapidjson_reader INTERFACE config_forge_runtime::core)
     if(TARGET RapidJSON::RapidJSON)
         target_link_libraries(config_forge_runtime_rapidjson_reader INTERFACE RapidJSON::RapidJSON)
     elseif(RAPIDJSON_INCLUDE_DIR)
@@ -127,6 +137,7 @@ if(CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/msgpackc_reader/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
     target_compile_features(config_forge_runtime_msgpackc_reader INTERFACE cxx_std_17)
+    target_link_libraries(config_forge_runtime_msgpackc_reader INTERFACE config_forge_runtime::core)
     if(TARGET msgpack-cxx)
         target_link_libraries(config_forge_runtime_msgpackc_reader INTERFACE msgpack-cxx)
     elseif(TARGET msgpackc-cxx)
@@ -140,7 +151,7 @@ if(CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER)
     endif()
 endif()
 
-set(config_forge_runtime_install_targets config_forge_runtime_binary_reader)
+set(config_forge_runtime_install_targets config_forge_runtime_core config_forge_runtime_binary_reader)
 if(TARGET config_forge_runtime_rapidjson_reader)
     list(APPEND config_forge_runtime_install_targets config_forge_runtime_rapidjson_reader)
 endif()
@@ -156,6 +167,7 @@ install(EXPORT ConfigForgeRuntimeTargets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ConfigForgeRuntime)
 
 install(DIRECTORY binary_reader/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY core/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 if(TARGET config_forge_runtime_rapidjson_reader)
     install(DIRECTORY rapidjson_reader/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 endif()

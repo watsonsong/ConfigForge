@@ -143,7 +143,7 @@ feat(codegen): make Rust runtime interface inline by default
 test(codegen): cover Rust external runtime interface mode
 ```
 
-## [ ] Step 4：C++ stable interface header 与 external 模式
+## [x] Step 4：C++ stable interface header 与 external 模式
 
 目标：让 C++ adapter 不再只能宏绑定某次 generated header，同时保留 inline 兼容。
 
@@ -153,6 +153,8 @@ test(codegen): cover Rust external runtime interface mode
 - CMake 新增 `config_forge_runtime::core` interface target。
 - C++ codegen 支持 `runtime_interface = "inline" | "external"`。
 - RapidJSON / msgpack-cxx / binary reader 兼容 external core header，同时保留当前 generated-header-bound 迁移路径。
+
+当前实现：已新增 `runtime/cpp/core/include/config_forge/runtime/reader.hpp` 和 `config_forge_runtime::core` CMake interface target；C++ codegen 在默认 inline 模式继续生成本地 interface，在 `runtime_interface = "external"` 时 include stable core header 并在当前 namespace 内 using 绑定 `config_forge_runtime` contract。RapidJSON / msgpack-cxx / binary readers 默认改为绑定 stable core header，同时仍支持调用方通过 `CONFIG_FORGE_RUNTIME_CPP_READER` / `CONFIG_FORGE_RUNTIME_CPP_LOADER` 宏接入 generated inline interface。standard_project 新增 C++ external target 和 runtime smoke。
 
 验证：
 

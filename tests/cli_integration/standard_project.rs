@@ -398,6 +398,11 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(
         fixture_root
+            .join("out/client_code/cpp_external/reference_game_config.hpp")
+            .exists()
+    );
+    assert!(
+        fixture_root
             .join("out/client_code/cpp_unreal/reference_game_config.h")
             .exists()
     );
@@ -442,6 +447,14 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     .expect("standard fixture external Rust code should be readable");
     assert!(external_rust_code.contains("pub use config_forge_runtime_reader_core::{"));
     assert!(!external_rust_code.contains("pub trait RuntimeDataReader"));
+
+    let cpp_external_code = fs::read_to_string(
+        fixture_root.join("out/client_code/cpp_external/reference_game_config.hpp"),
+    )
+    .expect("standard fixture external C++ header should be readable");
+    assert!(cpp_external_code.contains("#include \"config_forge/runtime/reader.hpp\""));
+    assert!(cpp_external_code.contains("using config_forge_runtime::IRuntimeDataReader;"));
+    assert!(!cpp_external_code.contains("class IRuntimeDataReader"));
 
     let java_code =
         fs::read_to_string(fixture_root.join("out/client_code/java/ReferenceGameConfig.java"))

@@ -126,7 +126,14 @@ fn parses_and_validates_cpp_runtime_interface_options() {
 
     CppCodeGenerator
         .generate(&input)
-        .expect("external runtime options should parse before C++ external mode changes output");
+        .expect("external runtime options should generate");
+    let files = CppCodeGenerator
+        .generate(&input)
+        .expect("external runtime options should generate");
+    let content = generated_content(&files, "generated.hpp");
+    assert!(content.contains("#include \"config_forge/runtime/reader.hpp\""));
+    assert!(content.contains("using config_forge_runtime::IRuntimeDataReader;"));
+    assert!(!content.contains("class IRuntimeDataReader"));
 
     input.target.options.language_options.insert(
         LANGUAGE.to_owned(),
