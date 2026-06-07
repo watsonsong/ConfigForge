@@ -5,7 +5,10 @@ use crate::{
     ConfigForgeError, Result,
     data::{
         DataRow, ValueSourceKind,
-        typed_value::{parse_list_cell_value, parse_list_json_value, parse_scalar_field_value},
+        typed_value::{
+            parse_list_cell_value, parse_list_json_value, parse_scalar_field_value,
+            parse_scalar_for_type,
+        },
         value_conversion::{
             json_value_is_empty, json_value_to_cell, json_value_to_scalar_cell_for_field,
             toml_default_to_json_value,
@@ -112,6 +115,38 @@ pub(super) fn validate_struct_occurrence_value(
                 has_effective_value |= child_effective;
             }
             LinkedField::List(element_type) => {
+                let indexed_cells = indexed_list_cells(row, &child_path);
+                if let Some(raw) = non_empty_row_value(row, &child_path) {
+                    if let Some((_, _, first_indexed_path)) = indexed_cells.first() {
+                        return Err(ConfigForgeError::Validation(format!(
+                            "table `{}` row {} field `{}` mixes list JSON cell with expanded list element path `{}`",
+                            table_name, row_number, child_path, first_indexed_path
+                        )));
+                    }
+                    parse_list_cell_value(
+                        table_name,
+                        row_number,
+                        &child_path,
+                        element_type,
+                        raw,
+                        None,
+                        ValueSourceKind::ExplicitCell,
+                    )?;
+                    has_effective_value = true;
+                    continue;
+                }
+                if !indexed_cells.is_empty() {
+                    validate_indexed_list_cells(
+                        table_name,
+                        row_number,
+                        &child_path,
+                        element_type,
+                        &indexed_cells,
+                    )?;
+                    has_effective_value = true;
+                    continue;
+                }
+
                 let effective_value =
                     effective_list_cell_value(table_name, row_number, &child_path, child, row)?;
                 if child.meta.required && effective_value.is_none() {
@@ -187,6 +222,7 @@ fn struct_occurrence_has_effective_value(
             LinkedField::List(_) => {
                 if effective_list_cell_value(table_name, row_number, &child_path, child, row)?
                     .is_some()
+                    || !indexed_list_cells(row, &child_path).is_empty()
                 {
                     return Ok(true);
                 }
@@ -236,6 +272,13 @@ pub(super) fn validate_struct_child_path(
     let Some((segment, rest)) = path.split_once('.') else {
         if struct_child(struct_type, path).is_some() {
             return Ok(());
+        }
+        if let Some((list_field_name, _)) = parse_list_element_path(path) {
+            if struct_child(struct_type, list_field_name)
+                .is_some_and(|field| matches!(field.linked_field, LinkedField::List(_)))
+            {
+                return Ok(());
+            }
         }
         return Err(ConfigForgeError::Validation(format!(
             "table `{}` row {} field `{}` references unknown struct child `{}`",
@@ -497,4 +540,79 @@ fn effective_list_cell_value(
             table_name, row_number, field_path
         ))
     })
+}
+
+fn validate_indexed_list_cells(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    element_type: &LinkedField<'_>,
+    indexed_cells: &[(usize, String, String)],
+) -> Result<()> {
+    for (expected_index, (index, raw, element_path)) in indexed_cells.iter().enumerate() {
+        if *index != expected_index {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` has non-contiguous expanded list element path `{}`; expected `{}`",
+                table_name,
+                row_number,
+                field_path,
+                element_path,
+                list_element_path(field_path, expected_index)
+            )));
+        }
+        parse_scalar_for_type(table_name, row_number, element_path, element_type, raw).map_err(
+            |_| {
+                ConfigForgeError::Validation(format!(
+                    "table `{}` row {} field `{}` value `{}` does not match list element type",
+                    table_name, row_number, element_path, raw
+                ))
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn indexed_list_cells(row: &DataRow, field_path: &str) -> Vec<(usize, String, String)> {
+    let mut cells = row
+        .iter()
+        .filter_map(|(key, raw)| {
+            list_index_for_field_path(key, field_path)
+                .map(|index| (index, raw.clone(), key.clone()))
+        })
+        .collect::<Vec<_>>();
+    cells.sort_by_key(|(index, _, _)| *index);
+    cells
+}
+
+fn list_index_for_field_path(key: &str, field_path: &str) -> Option<usize> {
+    let suffix = key.strip_prefix(field_path)?.strip_prefix('[')?;
+    let index_text = suffix.strip_suffix(']')?;
+    if index_text.is_empty()
+        || !index_text
+            .chars()
+            .all(|character| character.is_ascii_digit())
+    {
+        return None;
+    }
+    index_text.parse().ok()
+}
+
+fn parse_list_element_path(path: &str) -> Option<(&str, usize)> {
+    let open = path.rfind('[')?;
+    let close = path.strip_suffix(']')?;
+    let field_path = &path[..open];
+    let index_text = &close[open + 1..];
+    if field_path.is_empty()
+        || index_text.is_empty()
+        || !index_text
+            .chars()
+            .all(|character| character.is_ascii_digit())
+    {
+        return None;
+    }
+    Some((field_path, index_text.parse().ok()?))
+}
+
+fn list_element_path(field_path: &str, index: usize) -> String {
+    format!("{field_path}[{index}]")
 }

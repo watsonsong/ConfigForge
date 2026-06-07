@@ -5,7 +5,8 @@ default_class_id,1
 starter_item_ids,"[2001,2002]"
 starter_reward.xp,0
 starter_reward.gold,500
-starter_reward.item_ids,"[2001,2002]"
+starter_reward.item_ids[0],2001
+starter_reward.item_ids[1],2002
 stamina_cap,120
 daily_reset_hour,5
 pvp_enabled,true

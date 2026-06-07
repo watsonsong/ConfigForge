@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     ConfigForgeError, Result,
-    data::typed_value::{parse_list_cell_value, parse_scalar_field_value},
+    data::typed_value::{parse_list_cell_value, parse_scalar_field_value, parse_scalar_for_type},
     data::value_conversion::{
         json_value_is_empty, json_value_to_cell, json_value_to_scalar_cell_for_field,
         toml_default_to_json_value,
@@ -17,8 +17,8 @@ use crate::{
 };
 
 use super::{
-    DataRow, DataTable, DataValue, ResolvedRow, ResolvedTable, ResolvedValue, RowSourceInfo,
-    ValueSourceKind,
+    ArrayElementValue, DataRow, DataTable, DataValue, ResolvedRow, ResolvedTable, ResolvedValue,
+    RowSourceInfo, ValueSourceKind,
 };
 
 #[cfg(test)]
@@ -312,8 +312,25 @@ fn resolve_list_cell_value(
     element_type: &LinkedField<'_>,
     field: &LinkedFieldMeta<'_>,
 ) -> Result<Option<ResolvedValue>> {
+    let indexed_cells = indexed_list_cells(context.row, context.field_path)?;
     if let Some(raw) = non_empty_row_value(context.row, context.field_path) {
+        if let Some((_, _, first_indexed_path)) = indexed_cells.first() {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` row {} field `{}` mixes list JSON cell with expanded list element path `{}`",
+                context.table_name, context.row_number, context.field_path, first_indexed_path
+            )));
+        }
         let array = context.parse_list_cell(element_type, raw, ValueSourceKind::ExplicitCell)?;
+        return Ok(Some(context.explicit(DataValue::Array(array), raw)));
+    }
+
+    if !indexed_cells.is_empty() {
+        let array = parse_indexed_list_cells(context, element_type, &indexed_cells)?;
+        let raw = indexed_cells
+            .iter()
+            .map(|(_, _, path)| path.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
         return Ok(Some(context.explicit(DataValue::Array(array), raw)));
     }
 
@@ -332,6 +349,43 @@ fn resolve_list_cell_value(
     })?;
     let array = context.parse_list_cell(element_type, &raw, ValueSourceKind::DefaultValue)?;
     Ok(Some(context.defaulted(DataValue::Array(array), raw)))
+}
+
+fn parse_indexed_list_cells(
+    context: ValueContext<'_, '_>,
+    element_type: &LinkedField<'_>,
+    indexed_cells: &[(usize, String, String)],
+) -> Result<Vec<ArrayElementValue>> {
+    indexed_cells
+        .iter()
+        .enumerate()
+        .map(|(expected_index, (index, raw, element_path))| {
+            if *index != expected_index {
+                return Err(ConfigForgeError::Validation(format!(
+                    "table `{}` row {} field `{}` has non-contiguous expanded list element path `{}`; expected `{}`",
+                    context.table_name,
+                    context.row_number,
+                    context.field_path,
+                    element_path,
+                    list_element_path(context.field_path, expected_index)
+                )));
+            }
+            let scalar = parse_scalar_for_type(
+                context.table_name,
+                context.row_number,
+                element_path,
+                element_type,
+                raw,
+            )
+            .map_err(|_| {
+                ConfigForgeError::Validation(format!(
+                    "table `{}` row {} field `{}` value `{}` does not match list element type",
+                    context.table_name, context.row_number, element_path, raw
+                ))
+            })?;
+            Ok(ArrayElementValue::scalar(scalar, Some(raw.clone())))
+        })
+        .collect()
 }
 
 fn resolve_scalar_cell_value(
@@ -497,7 +551,9 @@ fn struct_occurrence_has_effective_value(
                 }
             }
             LinkedField::List(element_type) => {
-                if non_empty_row_value(context.row, &child_path).is_some() {
+                if non_empty_row_value(context.row, &child_path).is_some()
+                    || !indexed_list_cells(context.row, &child_path)?.is_empty()
+                {
                     return Ok(true);
                 }
                 let Some(default) = child.meta.default.as_ref() else {
@@ -547,6 +603,9 @@ fn validate_source_schema(
     }
     if meta.meta.kind == TableKind::Object {
         for key in context.row.keys().filter(|key| !key.contains('.')) {
+            if validate_top_level_source_key(meta, key) {
+                continue;
+            }
             if meta.field(key).is_none() {
                 return Err(ConfigForgeError::Validation(format!(
                     "object table `{}` row {} references unknown field key `{}`",
@@ -583,6 +642,14 @@ fn validate_source_schema(
         )?;
     }
     Ok(())
+}
+
+fn validate_top_level_source_key(meta: &LinkedTableMeta<'_>, key: &str) -> bool {
+    let Some((field_name, _)) = parse_list_element_path(key) else {
+        return false;
+    };
+    meta.field(field_name)
+        .is_some_and(|field| matches!(field.linked_field, LinkedField::List(_)))
 }
 
 fn validate_dotted_source_key(
@@ -649,6 +716,13 @@ fn validate_struct_child_path(
     let Some((segment, rest)) = path.split_once('.') else {
         if struct_child(struct_type, path).is_some() {
             return Ok(());
+        }
+        if let Some((list_field_name, _)) = parse_list_element_path(path) {
+            if struct_child(struct_type, list_field_name)
+                .is_some_and(|field| matches!(field.linked_field, LinkedField::List(_)))
+            {
+                return Ok(());
+            }
         }
         return Err(ConfigForgeError::Validation(format!(
             "table `{}` row {} field `{}` references unknown struct child `{}`",
@@ -737,6 +811,51 @@ fn non_empty_row_value<'a>(row: &'a DataRow, field_path: &str) -> Option<&'a str
     row.get(field_path)
         .map(String::as_str)
         .filter(|value| !value.trim().is_empty())
+}
+
+fn indexed_list_cells(row: &DataRow, field_path: &str) -> Result<Vec<(usize, String, String)>> {
+    let mut cells = row
+        .iter()
+        .filter_map(|(key, raw)| {
+            list_index_for_field_path(key, field_path)
+                .map(|index| (index, raw.clone(), key.clone()))
+        })
+        .collect::<Vec<_>>();
+    cells.sort_by_key(|(index, _, _)| *index);
+    Ok(cells)
+}
+
+fn list_index_for_field_path(key: &str, field_path: &str) -> Option<usize> {
+    let suffix = key.strip_prefix(field_path)?.strip_prefix('[')?;
+    let index_text = suffix.strip_suffix(']')?;
+    if index_text.is_empty()
+        || !index_text
+            .chars()
+            .all(|character| character.is_ascii_digit())
+    {
+        return None;
+    }
+    index_text.parse().ok()
+}
+
+fn parse_list_element_path(path: &str) -> Option<(&str, usize)> {
+    let open = path.rfind('[')?;
+    let close = path.strip_suffix(']')?;
+    let field_path = &path[..open];
+    let index_text = &close[open + 1..];
+    if field_path.is_empty()
+        || index_text.is_empty()
+        || !index_text
+            .chars()
+            .all(|character| character.is_ascii_digit())
+    {
+        return None;
+    }
+    Some((field_path, index_text.parse().ok()?))
+}
+
+fn list_element_path(field_path: &str, index: usize) -> String {
+    format!("{field_path}[{index}]")
 }
 
 fn fragment_field_key(fragment_name: &str, field_name: &str) -> String {

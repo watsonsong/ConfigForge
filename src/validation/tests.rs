@@ -1182,6 +1182,58 @@ fn validates_struct_expanded_value_columns() {
 }
 
 #[test]
+fn validates_expanded_list_element_paths_in_object_table_structs() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "FixedReward"
+
+            [[structs.fields]]
+            name = "gold"
+            type = "int"
+            required = true
+
+            [[structs.fields]]
+            name = "item_ids"
+            type = "int[]"
+            required = true
+
+            [[tables]]
+            name = "game_rules"
+            kind = "object"
+            source = "game_rules.csv"
+
+            [[tables.fields]]
+            name = "starter_reward"
+            type = "FixedReward"
+            required = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "game_rules",
+        vec![BTreeMap::from([
+            ("starter_reward.gold".to_owned(), "500".to_owned()),
+            ("starter_reward.item_ids[0]".to_owned(), "2001".to_owned()),
+            ("starter_reward.item_ids[1]".to_owned(), "2002".to_owned()),
+        ])],
+    )]);
+
+    assert!(validate_data_set(&linked_meta, &data_set).is_ok());
+
+    let sparse = DataSet::new(vec![DataTable::new(
+        "game_rules",
+        vec![BTreeMap::from([
+            ("starter_reward.gold".to_owned(), "500".to_owned()),
+            ("starter_reward.item_ids[1]".to_owned(), "2002".to_owned()),
+        ])],
+    )]);
+    let error = validate_error(validate_data_set(&linked_meta, &sparse));
+    assert!(error.contains("non-contiguous expanded list element path"));
+}
+
+#[test]
 fn struct_expanded_value_uses_child_defaults_for_effective_existence() {
     let meta = MetaModel::from_toml_str(
         r#"
