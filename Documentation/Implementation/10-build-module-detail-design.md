@@ -67,7 +67,7 @@ pub(crate) enum ExportDependency {
 }
 ```
 
-`dependency` 不应由用户手写，而应来自 artifact generator registry。Build normalization 阶段会从已注册 generator 的 input requirements 派生 `type_id` / alias 对应的 dependency contract，并写入 `NormalizedExportTask.dependency`。当前实现通过统一 `GeneratorRegistry` facade 查询 data-backed exporter adapter、language codegen 和 direct artifact generator：
+`dependency` 不应由用户手写，而应来自 artifact generator registry。Build normalization 阶段会从已注册 generator 的 input requirements 派生 `type_id` / alias 对应的 dependency contract，并写入 `NormalizedExportTask.dependency`。当前实现通过统一 `GeneratorRegistry` facade 查询 build-facing `ArtifactGenerator`；language codegen、data-backed exporter 和 direct artifact generator 都先由 adapter / 直接实现收敛为同一种调度接口：
 
 - [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 codegen backend：`MetaOnly`。
 - JSON / MessagePack / bin runtime data exporter：`MetaAndData`。
@@ -96,7 +96,7 @@ pub(crate) enum ExportDependency {
 2. `MetaAndData` generator 依赖对应 `(project.input, effective_tags)` 的 validation 成功结果。
 3. 同一 target 下的 JSON / MessagePack / bin / gettext / Lua 等 data-backed generator 共享一次 DataLoadPlan、DataSet、normalize 和 validation。
 4. data-backed target 在 raw `MetaModel` 和 effective tags 可用后即可构造 `SourceReadPlan` 并读取 `RawSourceData`，不等待 `LinkedMetaModel`；normalize 必须等待 `LinkMeta + RawSourceData` join。
-5. 当前 Build 在 `build_target()` 创建共享 `ArtifactSink` 并传入 generator 分支；runtime table exporter 与 aggregate exporter 通过 `GeneratorRegistry` data-backed adapter 写 sink，language codegen 通过 codegen adapter 写 sink，`schema_doc` 作为 direct `ArtifactGenerator` 写 sink。领域模块内部继续复用 table serialization、code writer、doc renderer 等能力。
+5. 当前 Build 在 `build_target()` 创建共享 `ArtifactSink` 并传入 generator 分支；分支执行只按 export task 的 `type_id` 调用 `GeneratorRegistry::require_generator()`，再根据 requirements 传入 common input 或 data input。runtime table exporter 与 aggregate exporter 通过 data-backed adapter 写 sink，language codegen 通过 codegen adapter 写 sink，`schema_doc` 作为 direct `ArtifactGenerator` 写 sink。领域模块内部继续复用 table serialization、code writer、doc renderer 等能力。
 6. dry-run artifact plan 由 `ArtifactSink::finish()` 返回的 entries 按 normalized path 稳定排序；诊断仍按稳定阶段边界合并。
 
 当前状态：Project Config 使用 `[[targets.exports]]`；normalize 阶段全部转换为 `NormalizedExportTask`；`GeneratorRegistry` 统一提供 type / alias 到 requirements-derived dependency 的查询；branch pipeline 按 dependency contract 拆成 MetaAndData / MetaOnly 两类分支，并在阶段式执行器中提前启动只依赖 Meta 的 generator。通用 node-level DAG scheduler 不是当前默认执行模型，也不保留容易误导为“已 DAG 化”的 skeleton。
@@ -214,12 +214,12 @@ pub struct BuildTraceStage {
 
 当前行为：`schema_doc` 与语言 codegen 一样读取 linked Meta、project 信息和 effective target tags，然后通过 `ArtifactSink` 输出制品；它不属于 `DataFormatRegistry`，因为不消费 source data / resolved data：
 
-- 内置 language codegen 由 `codegen::builtin_generators()` 提供并通过 `GeneratorRegistry` 查询；`schema_doc` 直接实现 doc artifact generator 并由 `GeneratorRegistry` 注册，而不是实现 code-specific `CodeGenerator`。
+- 内置 language codegen 由 `codegen::builtin_generators()` 提供，但 Build 不直接查询 `CodeGenerator`；`GeneratorRegistry` 用 codegen adapter 将其暴露为 build-facing `ArtifactGenerator`。`schema_doc` 直接实现 doc artifact generator 并由 `GeneratorRegistry` 注册，而不是实现 code-specific `CodeGenerator`。
 - codegen / schema_doc export task 不选择数据 export task，也不消费 `RuntimeDataFile`。
-- Build 从 `ProjectConfigMeta` 构造共享 `ArtifactProjectInfo`；再派生 `CodeExportProject` 传入统一的 `CodeExportInput`。
-- 每个 direct MetaOnly artifact generator export task 构造 `GeneratorCommonInput`；language codegen export task 构造 `CodeExportInput`，包含 linked meta、target tags、project 信息、project root、target name、target generator config、空 runtime data file list、generated_at。
+- Build 从 `ProjectConfigMeta` 构造共享 `ArtifactProjectInfo`，并为每个 export task 构造统一 `GeneratorCommonInput`；如果 requirements 包含 Data，则在 validation 成功后补充 `GeneratorDataInput`。
+- codegen adapter 从 `GeneratorCommonInput` 派生 `CodeExportInput`，包含 linked meta、target tags、project 信息、project root、target name、target generator config、空 runtime data file list、generated_at；这个转换属于 codegen adapter 细节，不属于 Build 调度分支逻辑。
 - 传给 CodeModel 的 target tags 必须是 effective target tags，而不是仅 Project Config 中的 target tags；否则 CLI `--tag s1` 影响了 runtime data override，却没有同步影响 table/field/index codegen 过滤，会造成 schema 与数据不一致。
-- MetaOnly generator export task 可以并行生成，并通过 direct `ArtifactGenerator::generate_to_sink()` 或 language `CodeGenerator::generate_to_sink()` 直接写入 shared `ArtifactSink`；全局路径冲突由 artifact 模块在 `create()` / convenience write API 中统一检查，dry-run / finish entries 由 sink 按 normalized path 稳定输出。
+- MetaOnly generator export task 可以并行生成，并统一通过 `ArtifactGenerator::generate_to_sink()` 直接写入 shared `ArtifactSink`；全局路径冲突由 artifact 模块在 `create()` / convenience write API 中统一检查，dry-run / finish entries 由 sink 按 normalized path 稳定输出。
 - `schema_doc` 的 generator language/type id 为 `schema_doc`，当前支持 `format = "markdown"`、`index_file`、`title`，未知格式或未知选项显式报错；它基于 linked Meta 构建 `SchemaDoc` normalized model，并通过 Markdown renderer 写出 `index.md` 和每表 `<table>.md`。
 - 未来 JSON Schema、Mermaid ER、HTML docs 等如果仍是“只读 Meta 并输出 artifact”，优先按统一 artifact generator + requirements + doc facet 扩展，而不是在 build 中增加特殊分支，也不要继续把非代码文档任务塞进 code-specific `CodeGenerator` trait。
 
@@ -237,11 +237,13 @@ pub(crate) trait ArtifactGenerator: Send + Sync {
     fn type_id(&self) -> &'static str;
     fn aliases(&self) -> &'static [&'static str] { &[] }
     fn requirements(&self) -> GeneratorRequirements;
-    fn generate_to_sink(&self, input: &GeneratorInput<'_>, sink: &ArtifactSink) -> Result<()>;
+    fn generate_to_sink(&self, input: &GeneratorCommonInput<'_>, sink: &ArtifactSink) -> Result<()>;
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>>;
+    fn generate_with_data_to_sink(&self, input: &GeneratorDataInput<'_, '_>, sink: &ArtifactSink) -> Result<()>;
 }
 ```
 
-其中 `ExportDependency::MetaOnly / MetaAndData` 可由 `GeneratorRequirements::needs_data` 派生，继续服务当前 branch pipeline；但 requirements 不是继承层次。领域复用应通过 facet / helper 表达：
+其中 `ExportDependency::MetaOnly / MetaAndData` 可由 `GeneratorRequirements::needs_data` 派生，继续服务当前 branch pipeline；但 requirements 不是继承层次。Build-facing registry 只暴露 `require_generator(type_id) -> ArtifactGeneratorRef`，不再把调度入口拆成 `code_generators`、`direct_generators`、`DataFormatExporter` 等多种调用路径；这些分类保留在各领域模块内部用于复用实现。领域复用应通过 facet / helper 表达：
 
 - `CodeArtifactOptions` / `CodeWriter` / naming / formatting / keyword conflict：供 Rust/C++/TypeScript/Java/C# 和 Lua 这类 code-like generator 复用。
 - `RuntimeTableDataFacet`：供 JSON / MessagePack / bin 这类 per-table runtime data generator 复用。

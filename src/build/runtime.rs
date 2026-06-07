@@ -442,7 +442,13 @@ fn export_meta_and_data_task(
     sink: &ArtifactSink,
     generator_registry: &GeneratorRegistry,
 ) -> Result<RuntimeExportTaskOutput> {
-    let generator = generator_registry.require_data_generator(&export_task.type_id)?;
+    let generator = generator_registry.require_generator(&export_task.type_id)?;
+    if !generator.requirements().needs_data {
+        return Err(ConfigForgeError::Validation(format!(
+            "export task `{}` was scheduled with Data, but generator `{}` does not require Data",
+            export_task.name, export_task.type_id
+        )));
+    }
     generator.generate_with_data_to_sink(
         &GeneratorDataInput {
             common: generator_common_input(export_task, linked_meta, target_tags),
@@ -503,12 +509,8 @@ fn plan_runtime_output_paths_for_task(
     target_tags: &TargetTags,
     generator_registry: &GeneratorRegistry,
 ) -> Result<Vec<std::path::PathBuf>> {
-    if export_task.type_id == "validation_report" {
-        let config = validation_report_export_config_from_task(export_task)?;
-        return Ok(vec![lexical_normalize_path(&config.output)]);
-    }
     generator_registry
-        .require_data_generator(&export_task.type_id)?
+        .require_generator(&export_task.type_id)?
         .plan_artifacts(&generator_common_input(
             export_task,
             linked_meta,

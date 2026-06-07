@@ -24,16 +24,15 @@ pub use options::{
 use crate::{
     ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::{ArtifactSink, ArtifactWriter},
-    codegen::{CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator},
     data::{DataLoader, RawSourceData, SourceReadPlan},
-    generator::{GeneratorCommonInput, GeneratorRegistry},
+    generator::{ArtifactGenerator, GeneratorCommonInput, GeneratorRegistry},
     meta::{LinkedMetaModel, MetaModel, TargetTags},
     project::ProjectConfig,
     runtime_contract::ExportDependency,
 };
 
 use runtime::export_meta_and_data_tasks;
-use target::{NormalizedExportTask, NormalizedTargetConfig, codegen_task_config_from_export_task};
+use target::{NormalizedExportTask, NormalizedTargetConfig};
 
 pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
     build_target_with_trace(options).map_err(|error| error.error)
@@ -375,11 +374,9 @@ fn execute_export_pipeline<'meta>(
     let ((linked_meta, meta_only_output), raw_sources) = join_link_meta_only_and_source_read(
         || {
             let linked_meta = raw_meta.link().map_err(ConfigForgeError::MetaValidation)?;
-            let codegen_project = CodeExportProject::from(project_info);
             let meta_only_context = MetaOnlyGeneratorContext {
                 project_root,
                 project_info,
-                project: &codegen_project,
                 target_name,
                 target_tags,
                 linked_meta: &linked_meta,
@@ -631,7 +628,6 @@ fn execute_meta_only_generator_nodes(
 struct MetaOnlyGeneratorContext<'a, 'meta> {
     project_root: &'a Path,
     project_info: &'a ArtifactProjectInfo,
-    project: &'a CodeExportProject,
     target_name: &'a str,
     target_tags: &'a TargetTags,
     linked_meta: &'meta crate::meta::LinkedMetaModel<'meta>,
@@ -645,25 +641,16 @@ fn generate_and_write_meta_only_task(
     export_task: &NormalizedExportTask,
 ) -> Result<()> {
     debug_assert_eq!(export_task.dependency, ExportDependency::MetaOnly);
-    if let Some(generator) = context
-        .generator_registry
-        .direct_generator(&export_task.type_id)
-    {
-        let input = build_generator_common_input(context, export_task);
-        return generator.generate_to_sink(&input, context.sink);
-    }
-
-    let task = codegen_task_config_from_export_task(export_task)?;
     let generator = context
         .generator_registry
-        .code_generator(&task.language)
-        .ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "no code generator registered for `{}`",
-                task.language
-            ))
-        })?;
-    let input = build_code_export_input(context, task, generator)?;
+        .require_generator(&export_task.type_id)?;
+    if generator.requirements().needs_data {
+        return Err(ConfigForgeError::Validation(format!(
+            "target `{}` export task `{}` requires Data but was scheduled in the Meta-only branch",
+            context.target_name, export_task.name
+        )));
+    }
+    let input = build_generator_common_input(context, export_task);
     generator.generate_to_sink(&input, context.sink)
 }
 
@@ -683,25 +670,6 @@ fn build_generator_common_input<'meta>(
         options: task.options.clone(),
         generated_at: context.generated_at.to_owned(),
     }
-}
-
-fn build_code_export_input<'meta>(
-    context: &MetaOnlyGeneratorContext<'_, 'meta>,
-    task: crate::codegen::CodegenTaskConfig,
-    generator: &dyn CodeGenerator,
-) -> Result<CodeExportInput<'meta>> {
-    let mut code_target = CodeExportTarget::from_task(task, generator)?;
-    code_target.out_dir = context.project_root.join(&code_target.out_dir);
-    Ok(CodeExportInput {
-        meta: context.linked_meta,
-        target_tags: context.target_tags.clone(),
-        project: context.project.clone(),
-        project_root: context.project_root.to_path_buf(),
-        target_name: context.target_name.to_owned(),
-        target: code_target,
-        runtime_data_files: Vec::new(),
-        generated_at: context.generated_at.to_owned(),
-    })
 }
 
 fn generated_at() -> String {
@@ -744,7 +712,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use crate::artifact::{ArtifactWriteMode, ArtifactWriter};
-    use crate::codegen::default_module_name;
+    use crate::codegen::{CodeExportInput, CodeGenerator, default_module_name};
     use crate::data::{DataSet, DataTable, RawSourceData};
     use crate::exporter::build_exported_table_payload;
     use crate::meta::{MetaModel, TargetTags};
@@ -1190,7 +1158,7 @@ mod tests {
         assert!(matches!(
             result,
             Err(ConfigForgeError::Validation(message))
-                if message.contains("no code generator registered")
+                if message.contains("no artifact generator registered")
         ));
         let run_exporters_stage = trace
             .stages
@@ -1242,7 +1210,6 @@ mod tests {
         let linked_meta = meta.link().expect("minimal meta should link");
         let target_tags = TargetTags::empty();
         let project_info = ArtifactProjectInfo::default();
-        let project = CodeExportProject::from(&project_info);
         let called = Arc::new(AtomicBool::new(false));
         let generators = vec![Box::new(SinkOnlyGenerator {
             called: called.clone(),
@@ -1256,7 +1223,6 @@ mod tests {
         let context = MetaOnlyGeneratorContext {
             project_root: Path::new("."),
             project_info: &project_info,
-            project: &project,
             target_name: "default",
             target_tags: &target_tags,
             linked_meta: &linked_meta,

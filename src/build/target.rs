@@ -5,7 +5,6 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::{
     ConfigForgeError, Result,
-    codegen::CodegenTaskConfig,
     exporter::TargetDataConfig,
     generator::GeneratorRegistry,
     meta::TargetTags,
@@ -158,56 +157,6 @@ pub(crate) fn target_data_config_from_export_task(task: &NormalizedExportTask) -
         format: task.type_id.clone(),
         options: task.options.clone(),
     }
-}
-
-pub(crate) fn codegen_task_config_from_export_task(
-    task: &NormalizedExportTask,
-) -> Result<CodegenTaskConfig> {
-    let mut options = task.options.clone();
-    Ok(CodegenTaskConfig {
-        language: task.type_id.clone(),
-        output: task.output.clone(),
-        file_name: take_string(&mut options, "file_name")?,
-        data: take_string(&mut options, "data")?,
-        module_name: take_string(&mut options, "module_name")?,
-        namespace: take_string(&mut options, "namespace")?,
-        file_header: take_string(&mut options, "file_header")?,
-        keyword_conflict: take_optional_value(&mut options, "keyword_conflict")?,
-        i18n: take_value(&mut options, "i18n")?.unwrap_or_default(),
-        naming: take_value(&mut options, "naming")?.unwrap_or_default(),
-        formatting: take_value(&mut options, "formatting")?.unwrap_or_default(),
-        language_options: options.into_iter().collect(),
-    })
-}
-
-fn take_string(options: &mut BTreeMap<String, toml::Value>, key: &str) -> Result<Option<String>> {
-    take_optional_value(options, key)
-}
-
-fn take_optional_value<T>(
-    options: &mut BTreeMap<String, toml::Value>,
-    key: &str,
-) -> Result<Option<T>>
-where
-    T: serde::de::DeserializeOwned,
-{
-    take_value(options, key)
-}
-
-fn take_value<T>(options: &mut BTreeMap<String, toml::Value>, key: &str) -> Result<Option<T>>
-where
-    T: serde::de::DeserializeOwned,
-{
-    options
-        .remove(key)
-        .map(|value| {
-            value.try_into().map_err(|source| {
-                ConfigForgeError::Validation(format!(
-                    "invalid export task option `{key}`: {source}"
-                ))
-            })
-        })
-        .transpose()
 }
 
 #[cfg(test)]
@@ -366,8 +315,12 @@ mod tests {
             ]),
         };
 
-        let codegen_task =
-            codegen_task_config_from_export_task(&task).expect("codegen export task");
+        let codegen_task = crate::codegen::CodegenTaskConfig::from_export_task_parts(
+            task.type_id.clone(),
+            task.output.clone(),
+            task.options.clone(),
+        )
+        .expect("codegen export task");
 
         assert_eq!(codegen_task.language, "cpp");
         assert_eq!(codegen_task.module_name.as_deref(), Some("GameConfig"));

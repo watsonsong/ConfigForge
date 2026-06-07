@@ -8,7 +8,10 @@ use std::{collections::BTreeMap, path::PathBuf};
 use crate::{
     ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::ArtifactSink,
-    codegen::{CodeGenerator, builtin_generators, find_generator},
+    codegen::{
+        CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, CodegenTaskConfig,
+        builtin_generators, find_generator,
+    },
     data::DataSet,
     exporter::{
         DataExporterRef, DataFormatRegistry, TargetDataConfig, export_runtime_data_to_sink,
@@ -168,63 +171,180 @@ impl GeneratorRegistry {
         )
     }
 
-    pub(crate) fn code_generator(&self, type_id: &str) -> Option<&dyn CodeGenerator> {
-        find_generator(&self.code_generators, type_id)
-    }
-
-    pub(crate) fn data_generator(&self, type_id: &str) -> Option<DataArtifactGeneratorRef<'_>> {
+    fn data_generator(&self, type_id: &str) -> Option<DataArtifactGeneratorRef<'_>> {
         self.data_registry
             .require_any(type_id)
             .ok()
             .map(DataArtifactGeneratorRef)
     }
 
-    pub(crate) fn require_data_generator(
-        &self,
-        type_id: &str,
-    ) -> Result<DataArtifactGeneratorRef<'_>> {
-        self.data_generator(type_id).ok_or_else(|| {
-            ConfigForgeError::Validation(format!("no data exporter registered for `{type_id}`"))
-        })
+    fn code_generator(&self, type_id: &str) -> Option<CodeArtifactGeneratorRef<'_>> {
+        find_generator(&self.code_generators, type_id).map(CodeArtifactGeneratorRef)
     }
 
-    pub(crate) fn direct_generator(&self, type_id: &str) -> Option<&dyn ArtifactGenerator> {
+    fn direct_generator(&self, type_id: &str) -> Option<&dyn ArtifactGenerator> {
         self.direct_generators
             .iter()
             .find(|generator| generator.matches(type_id))
             .map(Box::as_ref)
     }
 
-    pub(crate) fn dependency(&self, target_name: &str, type_id: &str) -> Result<ExportDependency> {
-        let mut matches = Vec::new();
+    fn matching_generators(&self, type_id: &str) -> Vec<ArtifactGeneratorRef<'_>> {
+        let mut generators = Vec::new();
+        if let Some(generator) = self.direct_generator(type_id) {
+            generators.push(ArtifactGeneratorRef::Direct(generator));
+        }
+        if let Some(generator) = self.code_generator(type_id) {
+            generators.push(ArtifactGeneratorRef::Code(generator));
+        }
         if let Some(generator) = self.data_generator(type_id) {
-            matches.push(generator.requirements().dependency());
+            generators.push(ArtifactGeneratorRef::Data(generator));
         }
-        if let Some(dependency) =
-            find_generator(&self.code_generators, type_id).map(|generator| generator.dependency())
-        {
-            matches.push(dependency);
-        }
-        if let Some(dependency) = self
-            .direct_generator(type_id)
-            .map(|generator| generator.requirements().dependency())
-        {
-            matches.push(dependency);
-        }
+        generators
+    }
 
-        let Some(first) = matches.first().copied() else {
+    pub(crate) fn require_generator(&self, type_id: &str) -> Result<ArtifactGeneratorRef<'_>> {
+        let mut generators = self.matching_generators(type_id).into_iter();
+        let Some(generator) = generators.next() else {
             return Err(ConfigForgeError::Validation(format!(
-                "target `{target_name}` declares unknown export type `{type_id}`"
+                "no artifact generator registered for `{type_id}`"
             )));
         };
-        if matches.iter().all(|dependency| *dependency == first) {
-            Ok(first)
-        } else {
-            Err(ConfigForgeError::Validation(format!(
-                "target `{target_name}` declares ambiguous export type `{type_id}`; multiple generator contracts with different dependencies are registered"
-            )))
+        if generators.next().is_some() {
+            return Err(ConfigForgeError::Validation(format!(
+                "ambiguous artifact generator registration for `{type_id}`"
+            )));
+        }
+        Ok(generator)
+    }
+
+    pub(crate) fn dependency(&self, target_name: &str, type_id: &str) -> Result<ExportDependency> {
+        match self.require_generator(type_id) {
+            Ok(generator) => Ok(generator.requirements().dependency()),
+            Err(ConfigForgeError::Validation(message))
+                if message.contains("no artifact generator registered") =>
+            {
+                Err(ConfigForgeError::Validation(format!(
+                    "target `{target_name}` declares unknown export type `{type_id}`"
+                )))
+            }
+            Err(error) => Err(error),
         }
     }
+}
+
+pub(crate) enum ArtifactGeneratorRef<'a> {
+    Direct(&'a dyn ArtifactGenerator),
+    Code(CodeArtifactGeneratorRef<'a>),
+    Data(DataArtifactGeneratorRef<'a>),
+}
+
+impl ArtifactGenerator for ArtifactGeneratorRef<'_> {
+    fn type_id(&self) -> &'static str {
+        match self {
+            Self::Direct(generator) => generator.type_id(),
+            Self::Code(generator) => generator.type_id(),
+            Self::Data(generator) => generator.type_id(),
+        }
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        match self {
+            Self::Direct(generator) => generator.aliases(),
+            Self::Code(generator) => generator.aliases(),
+            Self::Data(generator) => generator.aliases(),
+        }
+    }
+
+    fn requirements(&self) -> GeneratorRequirements {
+        match self {
+            Self::Direct(generator) => generator.requirements(),
+            Self::Code(generator) => generator.requirements(),
+            Self::Data(generator) => generator.requirements(),
+        }
+    }
+
+    fn generate_to_sink(
+        &self,
+        input: &GeneratorCommonInput<'_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        match self {
+            Self::Direct(generator) => generator.generate_to_sink(input, sink),
+            Self::Code(generator) => generator.generate_to_sink(input, sink),
+            Self::Data(generator) => generator.generate_to_sink(input, sink),
+        }
+    }
+
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
+        match self {
+            Self::Direct(generator) => generator.plan_artifacts(input),
+            Self::Code(generator) => generator.plan_artifacts(input),
+            Self::Data(generator) => generator.plan_artifacts(input),
+        }
+    }
+
+    fn generate_with_data_to_sink(
+        &self,
+        input: &GeneratorDataInput<'_, '_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        match self {
+            Self::Direct(generator) => generator.generate_with_data_to_sink(input, sink),
+            Self::Code(generator) => generator.generate_with_data_to_sink(input, sink),
+            Self::Data(generator) => generator.generate_with_data_to_sink(input, sink),
+        }
+    }
+}
+
+pub(crate) struct CodeArtifactGeneratorRef<'a>(&'a dyn CodeGenerator);
+
+impl ArtifactGenerator for CodeArtifactGeneratorRef<'_> {
+    fn type_id(&self) -> &'static str {
+        self.0.language()
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        self.0.language_aliases()
+    }
+
+    fn requirements(&self) -> GeneratorRequirements {
+        match self.0.dependency() {
+            ExportDependency::MetaOnly => GeneratorRequirements::meta_only(),
+            ExportDependency::MetaAndData => GeneratorRequirements::meta_and_data(),
+        }
+    }
+
+    fn generate_to_sink(
+        &self,
+        input: &GeneratorCommonInput<'_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let code_input = build_code_export_input(input, self.0)?;
+        self.0.generate_to_sink(&code_input, sink)
+    }
+}
+
+fn build_code_export_input<'meta>(
+    input: &GeneratorCommonInput<'meta>,
+    generator: &dyn CodeGenerator,
+) -> Result<CodeExportInput<'meta>> {
+    let task = CodegenTaskConfig::from_export_task_parts(
+        input.type_id.clone(),
+        input.output.clone(),
+        input.options.clone(),
+    )?;
+    let code_target = CodeExportTarget::from_task(task, generator)?;
+    Ok(CodeExportInput {
+        meta: input.meta,
+        target_tags: input.target_tags.clone(),
+        project: CodeExportProject::from(&input.project),
+        project_root: input.project_root.clone(),
+        target_name: input.target_name.clone(),
+        target: code_target,
+        runtime_data_files: Vec::new(),
+        generated_at: input.generated_at.clone(),
+    })
 }
 
 pub(crate) struct DataArtifactGeneratorRef<'a>(DataExporterRef<'a>);
@@ -333,6 +453,41 @@ impl ArtifactGenerator for ValidationReportGenerator {
                 .to_owned(),
         ))
     }
+
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
+        let mut options = input.options.clone();
+        let format = take_optional_string(&mut options, "format")?
+            .map(|value| value.parse())
+            .transpose()?
+            .unwrap_or(crate::validation::DesignerReportFormat::Html);
+        let file_name = take_optional_string(&mut options, "file_name")?
+            .unwrap_or_else(|| format!("validation-report.{}", format.extension()));
+        let _title = take_optional_string(&mut options, "title")?;
+        let unsupported = options.keys().cloned().collect::<Vec<_>>();
+        if let Some(key) = unsupported.first() {
+            return Err(ConfigForgeError::Validation(format!(
+                "validation_report export task `{}` has unknown option `{key}`",
+                input.task_name
+            )));
+        }
+        Ok(vec![input.output.join(file_name)])
+    }
+}
+
+fn take_optional_string(
+    options: &mut BTreeMap<String, toml::Value>,
+    key: &str,
+) -> Result<Option<String>> {
+    options
+        .remove(key)
+        .map(|value| {
+            value.try_into().map_err(|source| {
+                ConfigForgeError::Validation(format!(
+                    "invalid validation_report option `{key}`: {source}"
+                ))
+            })
+        })
+        .transpose()
 }
 
 #[cfg(test)]

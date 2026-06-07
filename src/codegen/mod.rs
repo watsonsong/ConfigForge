@@ -38,7 +38,7 @@ pub use writer::{
     PartialCodeWriterConfig, StreamingCodeWriter,
 };
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::BTreeMap, collections::HashMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -200,6 +200,57 @@ impl CodegenTaskConfig {
             language_options: HashMap::new(),
         }
     }
+
+    pub(crate) fn from_export_task_parts(
+        language: String,
+        output: PathBuf,
+        mut options: BTreeMap<String, toml::Value>,
+    ) -> Result<Self> {
+        Ok(Self {
+            language,
+            output,
+            file_name: take_string(&mut options, "file_name")?,
+            data: take_string(&mut options, "data")?,
+            module_name: take_string(&mut options, "module_name")?,
+            namespace: take_string(&mut options, "namespace")?,
+            file_header: take_string(&mut options, "file_header")?,
+            keyword_conflict: take_optional_value(&mut options, "keyword_conflict")?,
+            i18n: take_value(&mut options, "i18n")?.unwrap_or_default(),
+            naming: take_value(&mut options, "naming")?.unwrap_or_default(),
+            formatting: take_value(&mut options, "formatting")?.unwrap_or_default(),
+            language_options: options.into_iter().collect(),
+        })
+    }
+}
+
+fn take_string(options: &mut BTreeMap<String, toml::Value>, key: &str) -> Result<Option<String>> {
+    take_optional_value(options, key)
+}
+
+fn take_optional_value<T>(
+    options: &mut BTreeMap<String, toml::Value>,
+    key: &str,
+) -> Result<Option<T>>
+where
+    T: serde::de::DeserializeOwned,
+{
+    take_value(options, key)
+}
+
+fn take_value<T>(options: &mut BTreeMap<String, toml::Value>, key: &str) -> Result<Option<T>>
+where
+    T: serde::de::DeserializeOwned,
+{
+    options
+        .remove(key)
+        .map(|value| {
+            value.try_into().map_err(|source| {
+                ConfigForgeError::Validation(format!(
+                    "invalid export task option `{key}`: {source}"
+                ))
+            })
+        })
+        .transpose()
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
