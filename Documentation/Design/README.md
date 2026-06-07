@@ -17,7 +17,7 @@
 5. `05-data-validation.md` — 数据视图、过滤、缺省值、校验规则、诊断和确定性要求。
 6. `06-export-cli.md` — Data export format、artifact、CLI 命令和参数设计。
 7. `07-user-manual-and-qa.md` — 用户工作流、错误处理期望和 QA 测试用例输入维度。
-8. `08-asset-validation-and-manifest.md` — Asset 引用校验、asset kind、target-aware 资源策略和 Asset Manifest 初步设计。
+8. `08-asset-validation-and-manifest.md` — Asset 引用校验、asset kind、target-aware 资源策略、导出补齐和 Asset Manifest 初步设计。
 
 ## HTML 阅读版
 
@@ -38,7 +38,7 @@
 - Field path 保留字符为 `.`, `[`, `]`；table field、struct field、fragment name 第一阶段均不允许包含这些字符，特殊展示名应通过 header alias / source mapping 解决。
 - Protobuf 暂作为未来扩展考量；如未来支持，应通过字段级 `field_number` 明确 Protobuf 编号。
 - POT、asset manifest 等聚合 data exporter 使用与目标导出一致的过滤后数据视图。被 shipping 等上下文排除的数据，其资源和国际化文本默认不进入最终聚合数据产物。
-- `asset` 字段必须显式声明 `asset_kind`；资源存在性校验和 Asset Manifest 默认只读取当前 target ExportView 中可见且非空的 asset 引用。
+- `asset` 字段必须显式声明 `asset_kind`；资源存在性校验和导出补齐默认只处理当前 target ExportView 中可见且非空的 asset 引用。Asset Manifest 是后续聚合 exporter，不阻塞 P0-1 asset validation / completion MVP。
 - Target 使用 `tags` 描述导出上下文；表、字段、索引用 `export_when` 匹配 target tags，collection 行用 `row_export` 控制行级导出。
 - 不再保留 `tool_only`、`validator_only`、`filter_field` 作为导出机制；用 `export = false`、`export_when`、`row_export` 替代。
 - 表格允许空行和空列；未映射到 field path 的行/列默认不进入导出，可作为表格注释或中间数据使用。
@@ -67,7 +67,7 @@
 | struct/list fields | Implemented MVP | 支持 named struct、JSON cell 校验和 nested object 导出；支持 CollectionTable/ObjectTable 中由 source path 自动判定的 struct expanded value、recursive nested struct、JSON/expanded 混用错误、target-aware child filtering 与 child default；支持 `T[]` / `list<T>` JSON cell 标量数组、数组导出和代码生成。map、struct/list expanded path、struct child validators、ObjectTable key-level source location 暂未实现。 |
 | scalar/list default | Stable | 支持 primitive / enum scalar default；支持 primitive / enum list default。复杂 struct/table default 当前不支持。 |
 | target tags / export_when / row_export | Stable | 已接入 validation、runtime export 和 codegen target-aware 视图。 |
-| asset validation / manifest | Planned / Not implemented | 目标态见 [`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)：`asset` 字段应声明 `asset_kind`，Project Config 声明 `[assets]` / `[[assets.search_paths]]`，Meta / schema TOML 声明 `[[asset_kinds]]`，validation 对当前 ExportView 做资源路径、扩展名、target policy、存在性、sidecar 和大小写校验，并通过 `type = "asset_manifest"` 输出稳定资源清单。当前实现中 `asset` 仍按 string-like scalar 解析和导出，尚未实现 asset kind、存在性校验和 manifest exporter。 |
+| asset validation / completion / manifest | Planned / Not implemented | 目标态见 [`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)：`asset` 字段应声明 `asset_kind`，Project Config 声明 `[assets]` / `[[assets.search_paths]]`，Meta / schema TOML 声明 `[[asset_kinds]]`，validation 对当前 ExportView 做资源路径、扩展名、target policy、正则兜底、存在性、sidecar 和大小写校验，并在 runtime export 阶段输出补齐后的 canonical asset string。Asset Manifest 后续通过 `type = "asset_manifest"` 输出稳定资源清单；当前实现中 `asset` 仍按 string-like scalar 解析和导出，尚未实现 asset kind、存在性校验、导出补齐和 manifest exporter。 |
 | validators | Implemented MVP | 已有 validator registry 和 `range` field validator；后续可扩展更多 built-in/plugin validators。 |
 | fragments | Implemented MVP | 已支持 polymorphic variant source mode；fragment join mode 不实现。 |
 | foreign keys | Implemented MVP + generated linked helpers | 支持 field-level/table-level FK、link/meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique/primary index；标量数组字段可作为单字段 FK，逐元素引用单字段 unique/primary index。FK 可声明 `linked_field`；各 codegen backend 的 relation helper 覆盖范围见 [`Codegen backend capability matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。 |

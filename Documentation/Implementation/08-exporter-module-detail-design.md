@@ -60,7 +60,7 @@ pub struct TargetDataConfig {
 
 - `name`：可选 export task 名称。单个未命名 task 由 build 归一化为 `default`；多个未命名 task 默认使用 `type`。
 - `output`：数据产物输出目录。运行时表数据按 table 规划文件；POT / manifest 等聚合格式按格式选项规划文件。
-- `format`：exporter 内部字段，由 `[[targets.exports]].type` 归一化而来；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；当前内置聚合 export type 支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`，`asset_manifest_csv` 等仍为后续扩展；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
+- `format`：exporter 内部字段，由 `[[targets.exports]].type` 归一化而来；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；当前内置聚合 export type 支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`。Asset Manifest 后续统一使用 `type = "asset_manifest"`，CSV 作为其 `format = "csv"` 选项，而不再拆分 `asset_manifest_csv` exporter type；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
 - `options`：export type 专属配置，由 `[[targets.exports]]` 下除通用字段外的 flattened 字段归一化得到，例如 `type = "gettext_pot"` 下的 `domain`、`file_name`、`source_reference`，或 `type = "lua_table"` 下的 `module_name`、`root_file`、`row_layout`。
 
 ```rust

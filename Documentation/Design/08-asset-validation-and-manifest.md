@@ -1,6 +1,6 @@
-# 08. Asset 引用校验与 Asset Manifest 初步设计
+# 08. Asset 引用校验、补齐与 Asset Manifest 初步设计
 
-本文从现有 Data Validation / Export CLI 设计中拆出，专门收敛 `asset` 字段、资源存在性校验、target-aware 资源策略和 Asset Manifest 聚合导出的用户可见行为。当前文档是初步设计，用于讨论产品语义和配置口径；具体 Rust 模块拆分、缓存结构和 exporter 实现细节应后续进入 `Documentation/Implementation/`。
+本文从现有 Data Validation / Export CLI 设计中拆出，专门收敛 `asset` 字段、资源存在性校验、target-aware 资源策略、资源引用自动补齐和 Asset Manifest 聚合导出的用户可见行为。当前 P0-1 实现先聚焦 `asset_kind`、导出前校验和 canonical ref 补齐；Asset Manifest 输出先放到后续阶段，避免同时引入新的聚合 exporter 复杂度。具体 Rust 模块拆分、缓存结构和 exporter 实现细节应后续进入 `Documentation/Implementation/`。
 
 ## 8.1 设计目标
 
@@ -10,9 +10,10 @@
 
 1. 在 Meta 中用 `type = "asset"` + `asset_kind` 表达资源引用语义，而不是把所有资源路径都当普通 `string`。
 2. 用 Project Config 声明可变的资源搜索路径，用 Meta / schema TOML 声明稳定的 `asset_kind` 语义、扩展名、输入格式、大小写策略和 target policy。
-3. 对当前 target 的 ExportView 做资源引用校验：被 target tags / `export_when` / `row_export` 排除的数据不校验、不进入 manifest。
-4. 输出稳定排序的 Asset Manifest，供 Unity Addressables、Unreal Asset Manager、自研打包器、CDN 预热或资源审计系统消费。
-5. 保持 generated core 与 runtime data 低耦合：`asset` 在 runtime payload 中第一阶段仍是字符串值；资源存在性和 manifest 是导出前工具链能力，不把引擎资源系统绑定进 generated code。
+3. 对当前 target 的 ExportView 做资源引用校验：被 target tags / `export_when` / `row_export` 排除的数据不校验、不参与补齐。
+4. 在导出 runtime data 时可按 `asset_kind` 把短写法或编辑器复制引用规范化为 canonical ref，确保 JSON / MessagePack / bin 看到同一份补齐后的字符串值。
+5. 后续输出稳定排序的 Asset Manifest，供 Unity Addressables、Unreal Asset Manager、自研打包器、CDN 预热或资源审计系统消费；该 exporter 不阻塞 P0-1 asset validation MVP。
+6. 保持 generated core 与 runtime data 低耦合：`asset` 在 runtime payload 中第一阶段仍是字符串值；资源存在性、补齐和 manifest 是导出前工具链能力，不把引擎资源系统绑定进 generated code。
 
 非目标：
 
@@ -23,7 +24,7 @@
 
 ## 8.2 当前状态
 
-当前实现中 `asset` 已作为 primitive field type 出现在 Meta 设计中，但运行时仍按 string-like scalar 解析和导出。资源引用语法、`asset_kind`、文件存在性校验和 Asset Manifest exporter 尚未实现。
+当前实现中 `asset` 已作为 primitive field type 出现在 Meta 设计中，但运行时仍按 string-like scalar 解析和导出。资源引用语法、`asset_kind`、文件存在性校验、导出补齐和 Asset Manifest exporter 尚未实现。
 
 现有文档中的已确认语义仍保留：
 
@@ -31,7 +32,7 @@
 - 被 target filter 排除的记录，其 asset 不阻塞该 target 导出，也不进入 asset manifest。
 - POT、Asset Manifest 等聚合 data exporter 使用与 target runtime export 一致的过滤后数据视图。
 
-因此本功能可以作为 P0-1 落地：它在不破坏现有 runtime data / generated API 的前提下，补齐游戏项目最常见的资源引用检查闭环。
+因此本功能可以作为 P0-1 落地：它在不破坏现有 runtime data / generated API 的前提下，先补齐游戏项目最常见的资源引用检查和导出值规范化闭环；manifest exporter 作为 P0-2 或后续任务单独推进。
 
 ## 8.3 用户配置模型
 
@@ -172,6 +173,9 @@ allow_auto_complete = true
 | `deny_when_tags` | `[]` | 当前 target tags 命中任一 tag 时启用 deny rule。常见值为 `shipping`。 |
 | `name_prefixes` | `[]` | 文件名或对象名必须满足的前缀集合，例如 `Icon_`、`VFX_`、`BP_`。 |
 | `name_suffixes` | `[]` | 文件名或对象名必须满足的后缀集合，例如 `_Icon`、`_Mat`、`_C`。 |
+| `allow_patterns` | `[]` | 简化正则 allow list。匹配对象默认为规范化后的 logical ref；适合少量项目私有规则。 |
+| `deny_patterns` | `[]` | 简化正则 deny list。匹配对象默认为规范化后的 logical ref；用于禁止复杂目录、命名或私有包规则。 |
+| `regex_rules` | `[]` | 高级阶段化正则规则数组。用于兜底私有化引擎或难以结构化表达的特殊引用模式。 |
 | `allow_auto_complete` | `false` | 是否允许从短路径 / 文件名补全 canonical ref。默认关闭，避免歧义。 |
 
 `input` 不建议扩张成 `cocos_resource_path`、`unreal_soft_object_path` 这类引擎专用枚举。更好的模型是“少量通用基础语法 + 可组合规则”：
@@ -184,14 +188,66 @@ allow_auto_complete = true
 | `input = "path"` + `path_style = "mounted_object"` + search path `mount = "/Game"` + `object_separator = "."` | Unreal soft object / class path。 | `/Game/UI/WBP_Item.WBP_Item_C` |
 | `strip_wrappers = ["BlueprintGeneratedClass'{value}'"]` + `path_style = "mounted_object"` | Unreal 编辑器复制引用。 | `BlueprintGeneratedClass'/Game/UI/WBP_Item.WBP_Item_C'` |
 
+### 高级正则兜底规则
+
+`prefix`、`suffix`、`extensions`、`path_style`、`object_name` 等结构化规则应覆盖大多数公开引擎和常规项目约束。为了兼容不公开私有化引擎、项目私有包格式或特殊命名体系，`asset_kind` 可以额外提供正则规则作为高级 escape hatch，但正则只做校验，不参与核心路径解析、候选生成和自动补齐。
+
+简单场景可使用 `allow_patterns` / `deny_patterns`：
+
+```toml
+[[asset_kinds]]
+name = "private_ui_sprite"
+search_paths = ["private_game_assets"]
+base_dirs = ["ui/icons"]
+extensions = [".asset"]
+input = "path"
+path_style = "mounted_object"
+extension_policy = "forbidden"
+object_separator = "#"
+name_prefixes = ["Icon_"]
+allow_patterns = ["^pkg://ui/icons/Icon_[A-Za-z0-9_]+#[A-Za-z][A-Za-z0-9_]*$"]
+deny_patterns = ["(^|/)EditorOnly(/|$)"]
+```
+
+复杂场景使用阶段化 `regex_rules`：
+
+```toml
+[[asset_kinds.regex_rules]]
+name = "private_engine_package_ref"
+target = "logical_ref"
+pattern = "^pkg://[a-z0-9_]+/[a-z0-9_/]+#[A-Za-z][A-Za-z0-9_]*$"
+severity = "error"
+message = "私有引擎资源引用必须符合 pkg://package/path#ObjectName 格式。"
+```
+
+建议字段：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `name` | 必填 | 正则规则 ID，用于诊断、日志和测试定位。 |
+| `target` | `logical_ref` | 匹配对象。可选 `raw_input`、`logical_ref`、`search_path_relative`、`file_name`、`stem`、`object_name`、`export_ref`。 |
+| `pattern` | 必填 | Rust `regex` 语义的正则表达式。Meta load/link 阶段预编译，失败直接报 Meta 配置错误。 |
+| `severity` | `error` | `error` 或 `warning`。P0-1 可先只实现 `error`。 |
+| `message` | 自动生成 | 失败时的用户可读说明。 |
+| `when_tags` | `[]` | 非空时只在当前 target tags 命中时启用。 |
+| `invert` | `false` | `true` 表示反向匹配，适合表达 deny rule。 |
+| `case_sensitive` | 继承 kind | 正则大小写策略。 |
+
+正则约束：
+
+- 正则不应产生新的 canonical ref，也不应依赖 capture group 做路径重写；未来若需要转换能力，应单独设计 `rewrite_rules`。
+- 自动补齐只能依赖结构化规则和唯一候选，不依赖正则猜测。
+- 诊断应输出匹配目标、规则名和失败 message，便于项目自查私有规则。
+
 路径解析推荐规则：
 
 1. 先按 `asset_kind.input` 和 `path_style` 解析 source cell，必要时应用 `strip_wrappers`，得到 canonical logical ref。
 2. 再按 `search_paths × base_dirs × extensions` 生成候选 filesystem path 或 engine virtual path。
 3. 候选必须在对应 search path root 内，禁止 absolute path 和 `..` 逃逸。
 4. 如果多个候选命中，除非 kind 配置了明确优先级，否则报 `AssetRefAmbiguous`。
-5. 如果 `allow_auto_complete = true`，只允许在唯一候选时补全；补全结果进入 manifest，诊断可提示用户建议写 canonical ref。
-6. manifest 默认输出 canonical logical path，不输出本机绝对路径。
+5. 执行 prefix / suffix / allow / deny / regex 等语义规则；正则作用在解析后的阶段化值上。
+6. 如果 `allow_auto_complete = true`，只允许在唯一候选时补全；补全结果作为当前 target 的 canonical export ref 写入 runtime data，诊断可提示用户建议写 canonical ref。
+7. 后续 manifest 默认复用 canonical logical path，不输出本机绝对路径。
 
 ## 8.4 引擎资源规则映射
 
@@ -304,9 +360,23 @@ extension_policy = "forbidden"
 manifest_path = "input"
 ```
 
-## 8.5 Target 或 export task 策略
+## 8.5 Target 校验与补齐策略
 
-基础策略由 effective target tags 驱动。目标态可在 target 或 asset manifest export task 上增加更细粒度策略：
+基础策略由 effective target tags 驱动。P0-1 不要求先实现 `asset_manifest` export task，而是先把 resource validation 和 canonical ref 补齐绑定到 target 的 MetaAndData validation / export 阶段：只要当前 target 可见 asset 字段、Meta 声明了 matching kind，且 Project Config 提供了 kind 需要的 search path，就执行校验并在需要时补齐导出值。
+
+示例：
+
+```toml
+[[targets]]
+name = "client_shipping"
+tags = ["client", "shipping"]
+
+[[targets.exports]]
+type = "json"
+output = "Generated/Data/ClientShipping"
+```
+
+在上面的 target 中，可见 asset 字段会被检查；如果某个 kind 开启 `allow_auto_complete = true`，runtime data exporter 看到的是补齐后的 canonical string。Manifest 输出后续仍作为普通 `[[targets.exports]]` 聚合 exporter 添加：
 
 ```toml
 [[targets]]
@@ -322,7 +392,7 @@ deduplicate = true
 include_referenced_by = true
 ```
 
-P0-1 建议先把 resource validation 绑定到 target 的 MetaAndData validation 阶段，只要当前 target 可见 asset 字段、Meta 声明了 matching kind，且 Project Config 提供了 kind 需要的 search path，就执行校验；manifest 是否输出由 `[[targets.exports]] type = "asset_manifest"` 决定。
+因此 P0-1 的判断标准是：没有 manifest task 时，asset validation / completion 仍然生效；manifest task 只是后续额外消费已解析 asset refs 的一个 exporter。
 
 ## 8.6 校验语义
 
@@ -341,7 +411,9 @@ Asset 校验在 target ExportView 上执行。校验输入是当前 target 可�
 7. 如果 target tags 命中 kind 的禁止策略，不能引用禁止 prefix。
 8. 如果启用 existence 校验，resolved filesystem path 必须存在。
 9. 如果配置了 `require_sidecars`，主资源对应的配对文件也必须存在，例如 Unity `.meta`。
-10. 如果启用 case-sensitive 校验，source ref 的每个路径段大小写必须与真实文件系统项一致。
+10. 如果配置了 `allow_patterns`、`deny_patterns` 或 `regex_rules`，按规则匹配对应阶段化字符串；失败时报 `AssetRegexRuleMismatch` 或 `AssetPathDeniedForTarget`。
+11. 如果启用 case-sensitive 校验，source ref 的每个路径段大小写必须与真实文件系统项一致。
+12. 如果 `allow_auto_complete = true`，且 source ref 是短路径、缺少 mount / object name 或来自 wrapper 剥离后的可补齐形式，则只在唯一候选命中且 object name 规则确定时生成 canonical export ref；无法唯一确定时报 `AssetRefAmbiguous` 或 `AssetRefInvalid`。
 
 ### Target-aware 规则
 
@@ -362,7 +434,7 @@ Shipping / region / platform 规则不建议写成硬编码 target 名称；应�
 - validation 的 path normalization 使用 lexical 规则，不能吞掉 case mismatch。
 - `case_sensitive = true` 时，即使当前文件系统大小写不敏感，也应尽量通过逐段目录枚举确认真实路径段大小写。
 - 如果平台无法可靠判断大小写，应输出 warning 或 fail-fast 取决于配置；shipping target 推荐 fail-fast。
-- manifest 中输出 canonical logical path，默认使用 source 中经过规范化的相对 path；若校验阶段发现真实路径大小写不同，应报错而不是自动改写。
+- canonical export ref 默认使用 source 中经过规范化的 logical path；若校验阶段发现真实路径大小写不同，应报错而不是自动改写。后续 manifest 也应复用同一 canonical ref。
 
 ### 诊断
 
@@ -377,6 +449,7 @@ Shipping / region / platform 规则不建议写成硬编码 target 名称；应�
 | `AssetExtensionNotAllowed` | 后缀不在 kind `extensions` 中。 |
 | `AssetRefAmbiguous` | 短路径、自动补齐或 extensionless 输入命中多个候选资源。 |
 | `AssetNamePatternMismatch` | 文件名或对象名不满足 kind 的 prefix / suffix 规则。 |
+| `AssetRegexRuleMismatch` | asset ref 不满足 kind 的 allow pattern 或阶段化正则规则。 |
 | `AssetPathDeniedForTarget` | 当前 target tags 下命中禁止 prefix。 |
 | `AssetFileMissing` | resolved path 不存在。 |
 | `AssetSidecarMissing` | 主资源存在，但 required sidecar 缺失，例如 Unity `.meta`。 |
@@ -387,7 +460,7 @@ Shipping / region / platform 规则不建议写成硬编码 target 名称；应�
 
 ## 8.7 Asset Manifest 导出
 
-Asset Manifest 是聚合 data exporter，读取当前 target ExportView 中所有可见且非空的 `asset` 字段。
+Asset Manifest 是后续聚合 data exporter，读取当前 target ExportView 中所有可见且非空的 `asset` 字段。P0-1 先不实现 manifest 输出，但 asset validation / completion 的内部结果应尽量设计成可复用结构，避免后续 exporter 重新实现资源解析。
 
 ### Export task
 
@@ -471,10 +544,12 @@ asset_ref,asset_kind,table,field_path,record_key,source,tag
 
 第一阶段不改变 runtime data 和 generated code 的基础形态：
 
-- `asset` 在 JSON / MessagePack / bin runtime payload 中仍按字符串输出。
+- `asset` 在 JSON / MessagePack / bin runtime payload 中仍按字符串输出，但当 `asset_kind` 允许补齐时，输出值应使用当前 target 解析得到的 canonical export ref，而不是原始 source cell。
 - 各语言 generated row 字段类型仍为 string-like 类型。
 - codegen 可以在注释中保留 `asset_kind`，但不默认生成引擎资源加载 API。
 - 业务运行时如何把 string asset path 转成 Unity Addressable、Unreal SoftObjectPath、AssetId、GUID 或句柄，由项目侧 adapter 或手写扩展决定。
+
+实现上应避免 validation 和 exporter 对同一 asset ref 重复执行不一致的解析：推荐将 asset resolver 设计为可复用服务，validation 阶段可用它产生 diagnostics，export 阶段通过同一解析逻辑或缓存结果把 raw asset value materialize 成 canonical string。
 
 未来扩展可以在 codegen 层增加可选 mapping，例如 C# / TypeScript 生成品牌化 `AssetRef<TKind>` wrapper，或 Unreal C++ 生成 `FSoftObjectPath` / `TSoftClassPtr` 友好 API。但这些都不应成为 P0-1 的阻塞项。
 
@@ -488,7 +563,8 @@ asset_ref,asset_kind,table,field_path,record_key,source,tag
 4. **是否把不存在资源作为 warning？** 本文建议默认 error；只有 `assets.require_existing = false` 或 kind/target policy 显式关闭时跳过存在性校验。
 5. **是否需要资源 provider 抽象？** P0-1 可先支持 local filesystem；Unity Asset Database、Unreal Asset Registry、Godot import data、Cocos asset database、远程 CDN catalog 可后续作为 provider 扩展。
 6. **是否要校验 shipping 包禁止 dev/test 路径？** 本文建议通过 target tags + kind deny policy 实现，而不是硬编码 shipping target 名称。
-7. **是否输出 resolved filesystem path？** 本文建议 manifest 默认不输出本机绝对路径，避免不可复现；只在 diagnostics 或 debug mode 输出。
+7. **是否输出 resolved filesystem path？** 本文建议 runtime data 和后续 manifest 默认不输出本机绝对路径，避免不可复现；只在 diagnostics 或 debug mode 输出。
+8. **正则是否能参与路径重写？** P0-1 不支持。正则仅用于校验，避免把 `asset_kind` 变成难以诊断的脚本系统。
 
 ## 8.10 分阶段落地建议
 
@@ -496,17 +572,23 @@ asset_ref,asset_kind,table,field_path,record_key,source,tag
 
 - Meta parser 接受 `asset_kind` 并要求 `type = "asset"` 字段必须声明。
 - Project Config 接受 `[assets]` 和 `[[assets.search_paths]]`；Meta 接受 `[[asset_kinds]]`。
-- Validation 在 ExportView 上检查 kind、path syntax、extension、sidecar、prefix/suffix、deny prefix、existence 和 case sensitivity。
+- Validation 在 ExportView 上检查 kind、path syntax、extension、sidecar、prefix/suffix、deny prefix、regex、existence 和 case sensitivity。
 - 添加诊断 code 与标准 reference_game asset fixture。
 
-### P0-1b：Asset Manifest JSON exporter
+### P0-1b：Asset 引用补齐与 runtime export 集成
+
+- 增加可复用 asset resolver，支持 relative / mounted / mounted_object、wrapper stripping、object name 模板、extension lookup 和唯一候选补齐。
+- JSON / MessagePack / bin runtime export 输出 canonical asset string；未开启补齐或无需补齐时保持原值语义。
+- 标准工程中已有 `skill.skill_asset`、`classes.icon` 等 asset 字段，可先按 Unreal mounted object / class 模式改造测试，并在集成测试临时目录中伪造 `.uasset` 文件验证存在性和补齐。
+
+### P0-2：Asset Manifest JSON exporter
 
 - 新增 `type = "asset_manifest"` 聚合 data exporter。
 - 输出 deterministic JSON manifest，包含 target、kind、path、referenced_by。
 - 与 JSON / MessagePack / bin runtime export 共用同一次 target validation 和 ExportView。
 - 覆盖 target-aware 行过滤：shipping 排除的 debug row 不进入 manifest。
 
-### P0-1c：工具链集成和扩展格式
+### P0-3：工具链集成和扩展格式
 
 - 增加 CSV manifest 或 engine-specific transform 示例。
 - 补充 Unity Addressables / Unreal Asset Manager / 自研打包器的消费说明。
