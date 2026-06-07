@@ -337,7 +337,7 @@ test(runtime): add TypeScript and C++ compliance runners
 feat(runtime): add C# and Java standard runtime adapters
 ```
 
-## [ ] Step 11：接入 C# / Java runtime compliance runner
+## [x] Step 11：接入 C# / Java runtime compliance runner
 
 目标：让 C# / Java 标准 adapter 也消费 `tests/fixtures/runtime_reader_compliance/`，覆盖与 Rust / TypeScript / C++ 一致的 reader contract。
 
@@ -347,6 +347,8 @@ feat(runtime): add C# and Java standard runtime adapters
 - Java：新增 compliance runner harness，读取 canonical fixtures，覆盖 JSON / MessagePack / Binary reader。
 - 接入 ToolProbe / profile policy：缺 `dotnet`、`javac`、`java` 时按 profile skip 或 fail-fast。
 - 更新 runtime adapter 文档中的支持矩阵。
+
+当前实现：新增 `tests/csharp_java_runtime_compliance.rs`，由 Rust 集成测试在临时目录组装 C# console project 和 Java javac/java harness，复制 `runtime/csharp/`、`runtime/java/` 中的标准 JSON / MessagePack / Binary reader，并消费 `tests/fixtures/runtime_reader_compliance/payloads` 的 canonical payload。C# / Java JSON 与 MessagePack runner 覆盖 shared logical cases、missing/null、scalar conversion、escaped string、container/list、nested struct、fragment 和错误 case；Binary runner 覆盖 CFGB header、schema revision、sequential row、record boundary 和 scalar reads。C# / Java reader 已收紧为 contract 语义：required null/missing 报错、string 不自动 stringify、bool 仅接受 bool 或 `true/false/1/0` string、float 必须 finite。缺 `dotnet` 或 `javac` / `java` 时本地明确 skip。
 
 验证：
 

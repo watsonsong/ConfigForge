@@ -44,12 +44,12 @@ public class MessagePackRuntimeDataReader
     public void EnterRequiredField(string name)
     {
         var current = _stack.Peek();
-        if (current is Dictionary<string, object?> map && map.TryGetValue(name, out var value))
+        if (current is Dictionary<string, object?> map && map.TryGetValue(name, out var value) && value is not null)
         {
             _stack.Push(value);
             return;
         }
-        _stack.Push(null);
+        throw new InvalidOperationException($"missing required field {name}");
     }
 
     public bool EnterOptionalField(string name)
@@ -70,6 +70,10 @@ public class MessagePackRuntimeDataReader
     public int ReadRowCount()
     {
         var current = _stack.Peek();
+        if (current is List<object?> currentList)
+        {
+            return currentList.Count;
+        }
         return current is Dictionary<string, object?> map && map.TryGetValue("rows", out var rows) && rows is List<object?> list
             ? list.Count
             : 1;
@@ -141,26 +145,31 @@ public class MessagePackRuntimeDataReader
             long value => value,
             ulong value when value <= long.MaxValue => (long)value,
             int value => value,
-            uint value when value <= long.MaxValue => value,
+            uint value => value,
             string value => long.Parse(value, CultureInfo.InvariantCulture),
-            _ => 0,
+            _ => throw new InvalidOperationException($"expected int-like value, got {TypeName(current)}"),
         };
     }
 
     public double ReadFloat()
     {
         var current = _stack.Peek();
-        return current switch
+        var parsed = current switch
         {
-            double value => value,
-            float value => value,
-            long value => value,
-            ulong value => value,
-            int value => value,
-            uint value => value,
-            string value => double.Parse(value, CultureInfo.InvariantCulture),
-            _ => 0.0,
+            double number => number,
+            float number => number,
+            long number => number,
+            ulong number => number,
+            int number => number,
+            uint number => number,
+            string text => double.Parse(text, CultureInfo.InvariantCulture),
+            _ => throw new InvalidOperationException($"expected finite float-like value, got {TypeName(current)}"),
         };
+        if (!double.IsFinite(parsed))
+        {
+            throw new InvalidOperationException("expected finite float-like value");
+        }
+        return parsed;
     }
 
     public bool ReadBool()
@@ -170,11 +179,7 @@ public class MessagePackRuntimeDataReader
         {
             bool value => value,
             string value => ParseBoolString(value),
-            long value => value != 0,
-            ulong value => value != 0,
-            int value => value != 0,
-            uint value => value != 0,
-            _ => false,
+            _ => throw new InvalidOperationException($"expected bool-like value, got {TypeName(current)}"),
         };
     }
 
@@ -184,14 +189,7 @@ public class MessagePackRuntimeDataReader
         return current switch
         {
             string value => value,
-            long value => value.ToString(CultureInfo.InvariantCulture),
-            ulong value => value.ToString(CultureInfo.InvariantCulture),
-            int value => value.ToString(CultureInfo.InvariantCulture),
-            uint value => value.ToString(CultureInfo.InvariantCulture),
-            double value => value.ToString(CultureInfo.InvariantCulture),
-            float value => value.ToString(CultureInfo.InvariantCulture),
-            bool value => value ? "true" : "false",
-            _ => string.Empty,
+            _ => throw new InvalidOperationException($"expected string value, got {TypeName(current)}"),
         };
     }
 
@@ -201,7 +199,8 @@ public class MessagePackRuntimeDataReader
         {
             "1" => true,
             "0" => false,
-            var text when bool.TryParse(text, out var parsed) => parsed,
+            "true" => true,
+            "false" => false,
             _ => throw new FormatException($"invalid boolean string: {value}"),
         };
     }
@@ -276,6 +275,7 @@ internal sealed class MessagePackValueParser
             0xdd => ReadArray(ReadLength32("array length")),
             0xde => ReadMap(ReadUInt16()),
             0xdf => ReadMap(ReadLength32("map length")),
+            >= 0xc4 and <= 0xc9 => throw new FormatException("unsupported binary/ext value"),
             _ => throw new FormatException($"unsupported MessagePack marker 0x{marker:x2}"),
         };
     }

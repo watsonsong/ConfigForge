@@ -47,12 +47,14 @@ public class JsonRuntimeDataReader
     public void EnterRequiredField(string name)
     {
         var current = _stack.Peek();
-        if (current.ValueKind == JsonValueKind.Object && current.TryGetProperty(name, out var value))
+        if (current.ValueKind == JsonValueKind.Object
+            && current.TryGetProperty(name, out var value)
+            && value.ValueKind != JsonValueKind.Null)
         {
             _stack.Push(value);
             return;
         }
-        _stack.Push(_nullDocument.RootElement);
+        throw new InvalidOperationException($"missing required field {name}");
     }
 
     public bool EnterOptionalField(string name)
@@ -75,6 +77,10 @@ public class JsonRuntimeDataReader
     public int ReadRowCount()
     {
         var current = _stack.Peek();
+        if (current.ValueKind == JsonValueKind.Array)
+        {
+            return current.GetArrayLength();
+        }
         return current.ValueKind == JsonValueKind.Object
             && current.TryGetProperty("rows", out var rows)
             && rows.ValueKind == JsonValueKind.Array
@@ -136,19 +142,24 @@ public class JsonRuntimeDataReader
         {
             JsonValueKind.String => long.Parse(current.GetString() ?? "0", CultureInfo.InvariantCulture),
             JsonValueKind.Number => current.GetInt64(),
-            _ => 0,
+            _ => throw new InvalidOperationException($"expected int-like value, got {current.ValueKind}"),
         };
     }
 
     public double ReadFloat()
     {
         var current = _stack.Peek();
-        return current.ValueKind switch
+        var value = current.ValueKind switch
         {
             JsonValueKind.String => double.Parse(current.GetString() ?? "0", CultureInfo.InvariantCulture),
             JsonValueKind.Number => current.GetDouble(),
-            _ => 0.0,
+            _ => throw new InvalidOperationException($"expected finite float-like value, got {current.ValueKind}"),
         };
+        if (!double.IsFinite(value))
+        {
+            throw new InvalidOperationException("expected finite float-like value");
+        }
+        return value;
     }
 
     public bool ReadBool()
@@ -157,10 +168,9 @@ public class JsonRuntimeDataReader
         return current.ValueKind switch
         {
             JsonValueKind.String => ParseBoolString(current.GetString() ?? "false"),
-            JsonValueKind.Number => current.GetInt64() != 0,
             JsonValueKind.True => true,
             JsonValueKind.False => false,
-            _ => false,
+            _ => throw new InvalidOperationException($"expected bool-like value, got {current.ValueKind}"),
         };
     }
 
@@ -170,10 +180,7 @@ public class JsonRuntimeDataReader
         return current.ValueKind switch
         {
             JsonValueKind.String => current.GetString() ?? string.Empty,
-            JsonValueKind.Number => current.GetRawText(),
-            JsonValueKind.True => "true",
-            JsonValueKind.False => "false",
-            _ => string.Empty,
+            _ => throw new InvalidOperationException($"expected string value, got {current.ValueKind}"),
         };
     }
 
@@ -183,7 +190,8 @@ public class JsonRuntimeDataReader
         {
             "1" => true,
             "0" => false,
-            var text when bool.TryParse(text, out var parsed) => parsed,
+            "true" => true,
+            "false" => false,
             _ => throw new FormatException($"invalid boolean string: {value}"),
         };
     }

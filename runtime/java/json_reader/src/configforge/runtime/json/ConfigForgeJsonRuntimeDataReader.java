@@ -16,10 +16,10 @@ public class ConfigForgeJsonRuntimeDataReader {
 
     public void enterRequiredField(String name) {
         Object current = stack.peek();
-        if (current instanceof Map && ((Map<?, ?>) current).containsKey(name)) {
+        if (current instanceof Map && ((Map<?, ?>) current).containsKey(name) && ((Map<?, ?>) current).get(name) != null) {
             stack.push(((Map<?, ?>) current).get(name));
         } else {
-            stack.push(null);
+            throw new IllegalStateException("missing required field " + name);
         }
     }
 
@@ -42,6 +42,9 @@ public class ConfigForgeJsonRuntimeDataReader {
 
     public int readRowCount() {
         Object current = stack.peek();
+        if (current instanceof List) {
+            return ((List<?>) current).size();
+        }
         if (current instanceof Map && ((Map<?, ?>) current).get("rows") instanceof List) {
             return ((List<?>) ((Map<?, ?>) current).get("rows")).size();
         }
@@ -100,7 +103,7 @@ public class ConfigForgeJsonRuntimeDataReader {
         if (value instanceof String) {
             return Long.parseLong((String) value);
         }
-        return 0L;
+        throw new IllegalStateException("expected int-like value, got " + typeName(value));
     }
 
     public double readFloat() {
@@ -109,18 +112,19 @@ public class ConfigForgeJsonRuntimeDataReader {
             return ((Number) value).doubleValue();
         }
         if (value instanceof String) {
-            return Double.parseDouble((String) value);
+            double parsed = Double.parseDouble((String) value);
+            if (!Double.isFinite(parsed)) {
+                throw new IllegalStateException("expected finite float-like value");
+            }
+            return parsed;
         }
-        return 0.0;
+        throw new IllegalStateException("expected finite float-like value, got " + typeName(value));
     }
 
     public boolean readBool() {
         Object value = stack.peek();
         if (value instanceof Boolean) {
             return ((Boolean) value).booleanValue();
-        }
-        if (value instanceof Number) {
-            return ((Number) value).longValue() != 0L;
         }
         if (value instanceof String) {
             String text = ((String) value).trim();
@@ -130,9 +134,14 @@ public class ConfigForgeJsonRuntimeDataReader {
             if (text.equals("0")) {
                 return false;
             }
-            return Boolean.parseBoolean(text);
+            if (text.equals("true")) {
+                return true;
+            }
+            if (text.equals("false")) {
+                return false;
+            }
         }
-        return false;
+        throw new IllegalStateException("expected bool-like value, got " + typeName(value));
     }
 
     public String readString() {
@@ -140,10 +149,7 @@ public class ConfigForgeJsonRuntimeDataReader {
         if (value instanceof String) {
             return (String) value;
         }
-        if (value instanceof Number || value instanceof Boolean) {
-            return String.valueOf(value);
-        }
-        return "";
+        throw new IllegalStateException("expected string value, got " + typeName(value));
     }
 
     private static String typeName(Object value) {

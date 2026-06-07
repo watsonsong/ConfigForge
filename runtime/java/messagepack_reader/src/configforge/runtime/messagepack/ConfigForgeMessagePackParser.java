@@ -66,6 +66,9 @@ public final class ConfigForgeMessagePackParser {
             case 0xde: return readMap(readUInt16());
             case 0xdf: return readMap(readLength32("map length"));
             default:
+                if (marker >= 0xc4 && marker <= 0xc9) {
+                    throw new IllegalArgumentException("unsupported binary/ext value");
+                }
                 throw new IllegalArgumentException(String.format("unsupported MessagePack marker 0x%02x", marker));
         }
     }
