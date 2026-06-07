@@ -217,7 +217,7 @@ test(integration): register generated runtime harnesses
 test(integration): gate network-dependent tool fallbacks
 ```
 
-## [ ] Step 7：补齐 runtime compliance fixture schema
+## [x] Step 7：补齐 runtime compliance fixture schema
 
 目标：先把 `runtime/compliance/` 的 case 范围补齐到可执行规范需要的最小集合，为 runner 做准备。
 
@@ -246,7 +246,7 @@ test(integration): gate network-dependent tool fallbacks
 test(runtime): expand compliance fixtures
 ```
 
-## [ ] Step 8：实现 Rust runtime compliance runner MVP
+## [x] Step 8：实现 Rust runtime compliance runner MVP
 
 目标：让 `runtime/compliance/` 首先被 Rust JSON / MessagePack runtime reader 消费，证明 fixture schema 可执行。
 
@@ -258,6 +258,8 @@ test(runtime): expand compliance fixtures
 - 覆盖 scalar、missing/null、escaped string、collection envelope 等首批 cases。
 - 对错误 case 断言错误类型或错误消息的稳定关键字，不要求不同语言错误文本完全一致。
 - 输出 case name、format、adapter、结果。
+
+当前实现：`tests/runtime_compliance.rs` 作为 ConfigForge 集成测试入口，直接复用 `runtime/rust/serde_json_reader` 与 `runtime/rust/serde_msgpack_reader` 的真实 adapter 源码；同一套 canonical JSON payload 会分别经 JSON decode 与 JSON → MessagePack materialization → MessagePack decode 后执行相同 reader contract case。`reader_core` 内部的 test-only `ComplianceJsonReader` 仅保留 contract / fixture smoke，不再作为真实 adapter 合规性的唯一证明。
 
 验证：
 

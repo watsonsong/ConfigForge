@@ -26,5 +26,6 @@ toml = "1.1"
 
 [dev-dependencies]
 assert_cmd = "2.2"
+config-forge-runtime-reader-core = { path = "runtime/rust/reader_core" }
 predicates = "3.1"
 tempfile = "3.27"

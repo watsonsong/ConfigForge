@@ -164,6 +164,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "config-forge-runtime-reader-core",
  "csv",
  "predicates",
  "rayon",
@@ -174,6 +175,10 @@ dependencies = [
  "thiserror",
  "toml",
 ]
+
+[[package]]
+name = "config-forge-runtime-reader-core"
+version = "0.1.0"
 
 [[package]]
 name = "crossbeam-deque"

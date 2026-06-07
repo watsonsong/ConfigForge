@@ -358,16 +358,20 @@ mod tests {
     #[test]
     fn fs_json_loader_rejects_path_traversal() {
         let loader = FsJsonRuntimeDataLoader::new("/tmp/config_forge_runtime_root");
-        assert!(loader
-            .open_reader("../secret.json")
-            .unwrap_err()
-            .message
-            .contains("escapes"));
-        assert!(loader
-            .open_reader("/tmp/secret.json")
-            .unwrap_err()
-            .message
-            .contains("relative"));
+        assert!(
+            loader
+                .open_reader("../secret.json")
+                .unwrap_err()
+                .message
+                .contains("escapes")
+        );
+        assert!(
+            loader
+                .open_reader("/tmp/secret.json")
+                .unwrap_err()
+                .message
+                .contains("relative")
+        );
     }
 
     #[test]
@@ -411,11 +415,13 @@ mod tests {
                 ..RuntimeDecodeLimits::default()
             },
         );
-        assert!(reader
-            .read_row_count()
-            .unwrap_err()
-            .message
-            .contains("row count"));
+        assert!(
+            reader
+                .read_row_count()
+                .unwrap_err()
+                .message
+                .contains("row count")
+        );
 
         let reader = JsonValueReader::with_limits(
             serde_json::json!([1, 2]),
@@ -424,11 +430,13 @@ mod tests {
                 ..RuntimeDecodeLimits::default()
             },
         );
-        assert!(reader
-            .read_list_len()
-            .unwrap_err()
-            .message
-            .contains("list length"));
+        assert!(
+            reader
+                .read_list_len()
+                .unwrap_err()
+                .message
+                .contains("list length")
+        );
 
         let reader = JsonValueReader::with_limits(
             Value::String("abcd".to_owned()),
@@ -437,11 +445,13 @@ mod tests {
                 ..RuntimeDecodeLimits::default()
             },
         );
-        assert!(reader
-            .as_string()
-            .unwrap_err()
-            .message
-            .contains("string byte length"));
+        assert!(
+            reader
+                .as_string()
+                .unwrap_err()
+                .message
+                .contains("string byte length")
+        );
 
         let reader = JsonValueReader::with_limits(
             serde_json::json!({ "a": { "b": 1 } }),
@@ -451,11 +461,13 @@ mod tests {
             },
         );
         assert!(reader.enter_field("a").unwrap());
-        assert!(reader
-            .enter_field("b")
-            .unwrap_err()
-            .message
-            .contains("nesting depth"));
+        assert!(
+            reader
+                .enter_field("b")
+                .unwrap_err()
+                .message
+                .contains("nesting depth")
+        );
     }
 
     #[test]
@@ -475,11 +487,13 @@ mod tests {
                 ..RuntimeDecodeLimits::default()
             },
         );
-        assert!(loader
-            .open_reader("items.json")
-            .unwrap_err()
-            .message
-            .contains("runtime file bytes"));
+        assert!(
+            loader
+                .open_reader("items.json")
+                .unwrap_err()
+                .message
+                .contains("runtime file bytes")
+        );
 
         fs::remove_dir_all(&dir).expect("temp runtime data dir should be removed");
     }
