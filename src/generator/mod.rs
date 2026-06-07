@@ -6,7 +6,9 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::{
-    ArtifactProjectInfo,
+    ArtifactProjectInfo, ConfigForgeError, Result,
+    codegen::{CodeGenerator, builtin_generators, find_generator},
+    exporter::DataFormatRegistry,
     meta::{LinkedMetaModel, TargetTags},
     runtime_contract::ExportDependency,
 };
@@ -88,6 +90,87 @@ pub(crate) struct GeneratorCommonInput<'meta> {
     pub(crate) generated_at: String,
 }
 
+pub(crate) struct GeneratorRegistry {
+    data_registry: DataFormatRegistry,
+    code_generators: Vec<Box<dyn CodeGenerator>>,
+    direct_generators: Vec<DirectGeneratorRegistration>,
+}
+
+impl GeneratorRegistry {
+    pub(crate) fn with_builtin_generators() -> Self {
+        Self {
+            data_registry: DataFormatRegistry::with_builtin_exporters(),
+            code_generators: builtin_generators(),
+            direct_generators: vec![DirectGeneratorRegistration::new(
+                "validation_report",
+                &[],
+                GeneratorRequirements::meta_and_data().with_validation_report(),
+            )],
+        }
+    }
+
+    pub(crate) fn dependency(&self, target_name: &str, type_id: &str) -> Result<ExportDependency> {
+        let mut matches = Vec::new();
+        if let Some(dependency) = self.data_registry.dependency(type_id) {
+            matches.push(dependency);
+        }
+        if let Some(dependency) =
+            find_generator(&self.code_generators, type_id).map(|generator| generator.dependency())
+        {
+            matches.push(dependency);
+        }
+        if let Some(dependency) = self
+            .direct_generators
+            .iter()
+            .find(|generator| generator.matches(type_id))
+            .map(DirectGeneratorRegistration::dependency)
+        {
+            matches.push(dependency);
+        }
+
+        let Some(first) = matches.first().copied() else {
+            return Err(ConfigForgeError::Validation(format!(
+                "target `{target_name}` declares unknown export type `{type_id}`"
+            )));
+        };
+        if matches.iter().all(|dependency| *dependency == first) {
+            Ok(first)
+        } else {
+            Err(ConfigForgeError::Validation(format!(
+                "target `{target_name}` declares ambiguous export type `{type_id}`; multiple generator contracts with different dependencies are registered"
+            )))
+        }
+    }
+}
+
+struct DirectGeneratorRegistration {
+    type_id: &'static str,
+    aliases: &'static [&'static str],
+    requirements: GeneratorRequirements,
+}
+
+impl DirectGeneratorRegistration {
+    const fn new(
+        type_id: &'static str,
+        aliases: &'static [&'static str],
+        requirements: GeneratorRequirements,
+    ) -> Self {
+        Self {
+            type_id,
+            aliases,
+            requirements,
+        }
+    }
+
+    fn matches(&self, type_id: &str) -> bool {
+        self.type_id == type_id || self.aliases.contains(&type_id)
+    }
+
+    fn dependency(&self) -> ExportDependency {
+        self.requirements.dependency()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +210,54 @@ mod tests {
         assert!(meta_with_assets.needs_assets);
         assert_eq!(meta_with_report.dependency(), ExportDependency::MetaOnly);
         assert!(meta_with_report.needs_validation_report);
+    }
+
+    #[test]
+    fn registry_classifies_known_generator_types() {
+        let registry = GeneratorRegistry::with_builtin_generators();
+
+        assert_eq!(
+            registry
+                .dependency("client", "rust")
+                .expect("rust dependency"),
+            ExportDependency::MetaOnly
+        );
+        assert_eq!(
+            registry.dependency("client", "ts").expect("ts dependency"),
+            ExportDependency::MetaOnly
+        );
+        assert_eq!(
+            registry
+                .dependency("client", "schema_doc")
+                .expect("schema_doc dependency"),
+            ExportDependency::MetaOnly
+        );
+        assert_eq!(
+            registry
+                .dependency("client", "json")
+                .expect("json dependency"),
+            ExportDependency::MetaAndData
+        );
+        assert_eq!(
+            registry
+                .dependency("client", "lua")
+                .expect("lua dependency"),
+            ExportDependency::MetaAndData
+        );
+        assert_eq!(
+            registry
+                .dependency("client", "validation_report")
+                .expect("validation_report dependency"),
+            ExportDependency::MetaAndData
+        );
+    }
+
+    #[test]
+    fn registry_reports_unknown_generator_type() {
+        let registry = GeneratorRegistry::with_builtin_generators();
+
+        assert!(
+            matches!(registry.dependency("client", "unknown"), Err(ConfigForgeError::Validation(message)) if message.contains("unknown export type `unknown`"))
+        );
     }
 }

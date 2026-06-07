@@ -5,8 +5,9 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::{
     ConfigForgeError, Result,
-    codegen::{CodegenTaskConfig, builtin_generators, find_generator},
-    exporter::{DataFormatRegistry, TargetDataConfig},
+    codegen::CodegenTaskConfig,
+    exporter::TargetDataConfig,
+    generator::GeneratorRegistry,
     meta::TargetTags,
     project::{TargetConfig, TargetExportConfig},
     runtime_contract::ExportDependency,
@@ -57,7 +58,7 @@ fn normalize_export_tasks(
 ) -> Result<Vec<NormalizedExportTask>> {
     let mut normalized = Vec::with_capacity(export_tasks.len());
     let mut seen = std::collections::BTreeSet::new();
-    let registry = ExporterRegistry::with_builtin_exporters();
+    let registry = GeneratorRegistry::with_builtin_generators();
     for export_task in export_tasks {
         let name = match (&export_task.name, export_tasks.len()) {
             (Some(name), _) => {
@@ -107,45 +108,6 @@ fn validate_export_task_name(target_name: &str, name: &str) -> Result<()> {
         Err(ConfigForgeError::Validation(format!(
             "target `{target_name}` declares invalid export task name `{name}`; export task names must use ASCII letters, digits, `_` or `-`, and start and end with a letter or digit"
         )))
-    }
-}
-
-struct ExporterRegistry {
-    data_registry: DataFormatRegistry,
-    code_generators: Vec<Box<dyn crate::codegen::CodeGenerator>>,
-}
-
-impl ExporterRegistry {
-    fn with_builtin_exporters() -> Self {
-        Self {
-            data_registry: DataFormatRegistry::with_builtin_exporters(),
-            code_generators: builtin_generators(),
-        }
-    }
-
-    fn dependency(&self, target_name: &str, type_id: &str) -> Result<ExportDependency> {
-        if type_id == "validation_report" {
-            return Ok(ExportDependency::MetaAndData);
-        }
-        let data_dependency = self.data_registry.dependency(type_id);
-        let code_dependency =
-            find_generator(&self.code_generators, type_id).map(|generator| generator.dependency());
-
-        match (data_dependency, code_dependency) {
-            (Some(data_dependency), None) => Ok(data_dependency),
-            (None, Some(code_dependency)) => Ok(code_dependency),
-            (Some(data_dependency), Some(code_dependency))
-                if data_dependency == code_dependency =>
-            {
-                Ok(data_dependency)
-            }
-            (Some(_), Some(_)) => Err(ConfigForgeError::Validation(format!(
-                "target `{target_name}` declares ambiguous export type `{type_id}`; multiple exporter contracts with different dependencies are registered"
-            ))),
-            (None, None) => Err(ConfigForgeError::Validation(format!(
-                "target `{target_name}` declares unknown export type `{type_id}`"
-            ))),
-        }
     }
 }
 
@@ -414,7 +376,7 @@ mod tests {
 
     #[test]
     fn export_dependency_classifies_known_types() {
-        let registry = ExporterRegistry::with_builtin_exporters();
+        let registry = GeneratorRegistry::with_builtin_generators();
 
         assert_eq!(
             registry
