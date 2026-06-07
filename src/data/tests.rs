@@ -37,6 +37,8 @@ fn plan_source(table_name: &str, path: &str) -> DataSourcePlan {
         table_name: table_name.to_owned(),
         provider: DataProvider::Csv,
         path: PathBuf::from(path),
+        header_row: 1,
+        data_start_row: 3,
         fragments: Vec::new(),
         layout: DataSourceLayout::CollectionRecords,
         fields: Vec::new(),
@@ -56,7 +58,7 @@ fn data_provider_parses_supported_values() {
 fn csv_reader_reads_header_and_records() {
     let dir = tempdir().expect("temp dir should exist");
     let csv_path = dir.path().join("items.csv");
-    fs::write(&csv_path, "id,name\n1,Sword\n2,Shield\n").expect("csv should be written");
+    fs::write(&csv_path, "id,name\nID,Name\n1,Sword\n2,Shield\n").expect("csv should be written");
 
     let table = CsvDataReader::read_table("items", &csv_path).expect("csv should load");
 
@@ -71,6 +73,21 @@ fn csv_reader_reads_header_and_records() {
 }
 
 #[test]
+fn csv_reader_supports_custom_1_based_source_row_layout() {
+    let dir = tempdir().expect("temp dir should exist");
+    let csv_path = dir.path().join("items.csv");
+    fs::write(&csv_path, "sheet,title\nid,name\nID,Name\n1,Sword\n")
+        .expect("csv should be written");
+
+    let table =
+        CsvDataReader::read_table_with_layout("items", &csv_path, 2, 4).expect("csv should load");
+
+    assert_eq!(table.row_count(), 1);
+    assert_eq!(table.rows[0].get("id").map(String::as_str), Some("1"));
+    assert_eq!(table.row_sources[0].source_row_number, 4);
+}
+
+#[test]
 fn csv_reader_reports_parse_errors() {
     let error = CsvDataReader::read_table("items", &PathBuf::from("missing.csv")).unwrap_err();
 
@@ -81,7 +98,7 @@ fn csv_reader_reports_parse_errors() {
 fn csv_reader_rejects_duplicate_headers_but_allows_empty_header() {
     let dir = tempdir().expect("temp dir should exist");
     let duplicate_path = dir.path().join("duplicate.csv");
-    fs::write(&duplicate_path, "id,id\n1,2\n").expect("csv should be written");
+    fs::write(&duplicate_path, "id,id\nID,ID\n1,2\n").expect("csv should be written");
 
     let error = CsvDataReader::read_table("items", &duplicate_path).unwrap_err();
     assert!(
@@ -89,7 +106,7 @@ fn csv_reader_rejects_duplicate_headers_but_allows_empty_header() {
     );
 
     let empty_header_path = dir.path().join("empty_header.csv");
-    fs::write(&empty_header_path, ",name\nraw,Sword\n").expect("csv should be written");
+    fs::write(&empty_header_path, ",name\nRaw,Name\nraw,Sword\n").expect("csv should be written");
     let table = CsvDataReader::read_table("items", &empty_header_path).expect("csv should load");
 
     assert_eq!(table.rows[0].get("").map(String::as_str), Some("raw"));
@@ -101,14 +118,14 @@ fn csv_reader_handles_common_csv_boundaries() {
     let dir = tempdir().expect("temp dir should exist");
 
     let only_header_path = dir.path().join("only_header.csv");
-    fs::write(&only_header_path, "id,name\n").expect("csv should be written");
+    fs::write(&only_header_path, "id,name\nID,Name\n").expect("csv should be written");
     let table = CsvDataReader::read_table("items", &only_header_path).expect("csv should load");
     assert!(table.is_empty());
 
     let quoted_path = dir.path().join("quoted.csv");
     fs::write(
         &quoted_path,
-        "id,desc\n1,\"hello, world\"\n2,\"line1\nline2\"\n",
+        "id,desc\nID,Description\n1,\"hello, world\"\n2,\"line1\nline2\"\n",
     )
     .expect("csv should be written");
     let table = CsvDataReader::read_table("items", &quoted_path).expect("csv should load");
@@ -122,7 +139,11 @@ fn csv_reader_handles_common_csv_boundaries() {
     );
 
     let windows_bom_path = dir.path().join("windows_bom.csv");
-    fs::write(&windows_bom_path, "\u{feff}id,name\r\n1,Sword\r\n").expect("csv should be written");
+    fs::write(
+        &windows_bom_path,
+        "\u{feff}id,name\r\nID,Name\r\n1,Sword\r\n",
+    )
+    .expect("csv should be written");
     let table = CsvDataReader::read_table("items", &windows_bom_path).expect("csv should load");
     assert_eq!(table.rows[0].get("id").map(String::as_str), Some("1"));
     assert_eq!(table.rows[0].get("name").map(String::as_str), Some("Sword"));
@@ -139,14 +160,14 @@ fn csv_reader_reports_empty_file_and_ragged_rows() {
     );
 
     let missing_path = dir.path().join("missing.csv");
-    fs::write(&missing_path, "id,name\n1\n").expect("csv should be written");
+    fs::write(&missing_path, "id,name\nID,Name\n1\n").expect("csv should be written");
     assert!(matches!(
         CsvDataReader::read_table("items", &missing_path).unwrap_err(),
         ConfigForgeError::ParseCsv { .. }
     ));
 
     let extra_path = dir.path().join("extra.csv");
-    fs::write(&extra_path, "id,name\n1,Sword,extra\n").expect("csv should be written");
+    fs::write(&extra_path, "id,name\nID,Name\n1,Sword,extra\n").expect("csv should be written");
     assert!(matches!(
         CsvDataReader::read_table("items", &extra_path).unwrap_err(),
         ConfigForgeError::ParseCsv { .. }
@@ -182,16 +203,53 @@ fn data_load_plan_reads_legacy_and_canonical_sources() {
     assert_eq!(plan.sources()[0].table_name, "legacy_items");
     assert_eq!(plan.sources()[0].provider, DataProvider::Csv);
     assert_eq!(plan.sources()[0].path, PathBuf::from("legacy_items.csv"));
+    assert_eq!(plan.sources()[0].header_row, 1);
+    assert_eq!(plan.sources()[0].data_start_row, 3);
     assert_eq!(
         plan.sources()[0].layout,
         DataSourceLayout::CollectionRecords
     );
     assert_eq!(plan.sources()[1].table_name, "items");
     assert_eq!(plan.sources()[1].path, PathBuf::from("items.csv"));
+    assert_eq!(plan.sources()[1].header_row, 1);
+    assert_eq!(plan.sources()[1].data_start_row, 3);
     assert_eq!(
         plan.sources()[1].layout,
         DataSourceLayout::CollectionRecords
     );
+}
+
+#[test]
+fn data_load_plan_reads_source_level_row_layout() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = { path = "items.csv", header_row = 2, data_start_row = 4 }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables]]
+            name = "weapons"
+            sources = [{ provider = "csv", path = "weapons.csv", header_row = 3, data_start_row = 5 }]
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+
+    let plan = DataLoadPlan::from_meta_model(&meta).expect("plan should build");
+
+    assert_eq!(plan.sources()[0].path, PathBuf::from("items.csv"));
+    assert_eq!(plan.sources()[0].header_row, 2);
+    assert_eq!(plan.sources()[0].data_start_row, 4);
+    assert_eq!(plan.sources()[1].path, PathBuf::from("weapons.csv"));
+    assert_eq!(plan.sources()[1].header_row, 3);
+    assert_eq!(plan.sources()[1].data_start_row, 5);
 }
 
 #[test]
@@ -226,14 +284,19 @@ fn data_load_plan_marks_object_tables_as_key_value_rows() {
         plan.sources()[0].fields,
         vec!["max_level".to_owned(), "start_gold".to_owned()]
     );
+    assert_eq!(plan.sources()[0].header_row, 1);
+    assert_eq!(plan.sources()[0].data_start_row, 2);
 }
 
 #[test]
 fn csv_reader_reads_object_key_value_rows_as_one_logical_row() {
     let dir = tempdir().expect("temp dir should exist");
     let csv_path = dir.path().join("game_config.csv");
-    fs::write(&csv_path, "key,value\nmax_level,100\nstart_gold,500\n")
-        .expect("csv should be written");
+    fs::write(
+        &csv_path,
+        "key,title,value\nmax_level,最大等级,100\nstart_gold,初始金币,500\n",
+    )
+    .expect("csv should be written");
 
     let table = CsvDataReader::read_object_table(
         "game_config",
@@ -252,17 +315,21 @@ fn csv_reader_reads_object_key_value_rows_as_one_logical_row() {
         table.rows[0].get("start_gold").map(String::as_str),
         Some("500")
     );
+    assert_eq!(table.row_sources[0].source_row_number, 2);
 
     let only_header_path = dir.path().join("empty_config.csv");
-    fs::write(&only_header_path, "key,value\n").expect("csv should be written");
+    fs::write(&only_header_path, "key,title,value\n").expect("csv should be written");
     let table = CsvDataReader::read_object_table("game_config", &only_header_path, &[])
         .expect("only-header object csv should load");
     assert_eq!(table.rows.len(), 1);
     assert!(table.rows[0].is_empty());
 
     let whitespace_header_path = dir.path().join("whitespace_header.csv");
-    fs::write(&whitespace_header_path, " key , value \nmax_level,100\n")
-        .expect("csv should be written");
+    fs::write(
+        &whitespace_header_path,
+        " key , title , value \nmax_level,最大等级,100\n",
+    )
+    .expect("csv should be written");
     let table = CsvDataReader::read_object_table(
         "game_config",
         &whitespace_header_path,
@@ -281,23 +348,23 @@ fn csv_reader_rejects_invalid_object_key_value_rows() {
     let cases = [
         (
             "bad_header.csv",
-            "field,value\nmax_level,100\n",
-            "header must contain exactly two columns named `key` and `value`",
+            "field,title,value\nmax_level,最大等级,100\n",
+            "object table header must contain",
         ),
         (
             "missing_value_header.csv",
             "key\nmax_level\n",
-            "header must contain exactly two columns named `key` and `value`",
+            "object table header must contain",
         ),
         (
             "extra_header.csv",
-            "key,value,extra\nmax_level,100,ignored\n",
-            "header must contain exactly two columns named `key` and `value`",
+            "key,title,value,extra\nmax_level,最大等级,100,ignored\n",
+            "object table header must contain",
         ),
-        ("empty_key.csv", "key,value\n,100\n", "empty key"),
+        ("empty_key.csv", "key,title,value\n,空键,100\n", "empty key"),
         (
             "duplicate_key.csv",
-            "key,value\nmax_level,100\nmax_level,101\n",
+            "key,title,value\nmax_level,最大等级,100\nmax_level,最大等级覆盖,101\n",
             "duplicates key",
         ),
     ];
@@ -319,7 +386,7 @@ fn csv_reader_rejects_invalid_object_key_value_rows() {
 fn csv_reader_reports_object_table_ragged_rows() {
     let dir = tempdir().expect("temp dir should exist");
     let missing_path = dir.path().join("missing_value.csv");
-    fs::write(&missing_path, "key,value\nmax_level\n").expect("csv should be written");
+    fs::write(&missing_path, "key,title,value\nmax_level\n").expect("csv should be written");
     assert!(matches!(
         CsvDataReader::read_object_table("game_config", &missing_path, &["max_level".to_owned()])
             .unwrap_err(),
@@ -327,7 +394,11 @@ fn csv_reader_reports_object_table_ragged_rows() {
     ));
 
     let extra_path = dir.path().join("extra_value.csv");
-    fs::write(&extra_path, "key,value\nmax_level,100,extra\n").expect("csv should be written");
+    fs::write(
+        &extra_path,
+        "key,title,value\nmax_level,最大等级,100,extra\n",
+    )
+    .expect("csv should be written");
     assert!(matches!(
         CsvDataReader::read_object_table("game_config", &extra_path, &["max_level".to_owned()])
             .unwrap_err(),
@@ -958,7 +1029,7 @@ fn source_read_plan_filters_override_sources_without_linked_meta() {
 #[test]
 fn data_loader_read_sources_returns_raw_source_data_before_normalize() {
     let dir = tempdir().expect("temp dir should exist");
-    fs::write(dir.path().join("items.csv"), "id,name\n1,Sword\n").expect("items csv");
+    fs::write(dir.path().join("items.csv"), "id,name\nID,Name\n1,Sword\n").expect("items csv");
     let source_read_plan = SourceReadPlan::new(vec![plan_source("items", "items.csv")]);
 
     let raw_sources = DataLoader::new(dir.path())
@@ -1139,8 +1210,12 @@ fn data_load_plan_rejects_unsupported_source_features() {
 #[test]
 fn data_loader_loads_multiple_tables_into_data_set() {
     let dir = tempdir().expect("temp dir should exist");
-    fs::write(dir.path().join("items.csv"), "id,name\n1,Sword\n").expect("items csv");
-    fs::write(dir.path().join("levels.csv"), "id,name\n1,Forest\n").expect("levels csv");
+    fs::write(dir.path().join("items.csv"), "id,name\nID,Name\n1,Sword\n").expect("items csv");
+    fs::write(
+        dir.path().join("levels.csv"),
+        "id,name\nID,Name\n1,Forest\n",
+    )
+    .expect("levels csv");
     let source_read_plan = SourceReadPlan::new(vec![
         plan_source("items", "items.csv"),
         plan_source("levels", "levels.csv"),
@@ -1168,8 +1243,12 @@ fn data_loader_loads_multiple_tables_into_data_set() {
 #[test]
 fn data_loader_load_with_pool_preserves_plan_order() {
     let dir = tempdir().expect("temp dir should exist");
-    fs::write(dir.path().join("items.csv"), "id,name\n1,Sword\n").expect("items csv");
-    fs::write(dir.path().join("levels.csv"), "id,name\n1,Forest\n").expect("levels csv");
+    fs::write(dir.path().join("items.csv"), "id,name\nID,Name\n1,Sword\n").expect("items csv");
+    fs::write(
+        dir.path().join("levels.csv"),
+        "id,name\nID,Name\n1,Forest\n",
+    )
+    .expect("levels csv");
     let source_read_plan = SourceReadPlan::new(vec![
         plan_source("items", "items.csv"),
         plan_source("levels", "levels.csv"),
@@ -1491,8 +1570,16 @@ fn data_set_try_new_rejects_duplicate_table_names() {
 #[test]
 fn data_loader_merges_multiple_sources_for_one_table() {
     let dir = tempdir().expect("temp dir should exist");
-    fs::write(dir.path().join("weapons.csv"), "id,name\n1,Sword\n").expect("weapons csv");
-    fs::write(dir.path().join("armors.csv"), "id,name\n2,Shield\n").expect("armors csv");
+    fs::write(
+        dir.path().join("weapons.csv"),
+        "id,name\nID,Name\n1,Sword\n",
+    )
+    .expect("weapons csv");
+    fs::write(
+        dir.path().join("armors.csv"),
+        "id,name\nID,Name\n2,Shield\n",
+    )
+    .expect("armors csv");
     let plan = DataLoadPlan::new(SourceReadPlan::new(vec![
         DataSourcePlan {
             fragments: vec!["weapon".to_owned()],
@@ -1533,12 +1620,12 @@ fn data_loader_applies_override_rows_by_primary_key() {
     let dir = tempdir().expect("temp dir should exist");
     fs::write(
         dir.path().join("materials.csv"),
-        "id,name,price,stack.max_stack\n2001,Iron Ore,5,999\n2002,Oak Wood,3,999\n",
+        "id,name,price,stack.max_stack\nID,Name,Price,Max Stack\n2001,Iron Ore,5,999\n2002,Oak Wood,3,999\n",
     )
     .expect("materials csv");
     fs::write(
         dir.path().join("materials_s1.csv"),
-        "id,name,price,stack.max_stack\n2002,Oak Wood,5,999\n",
+        "id,name,price,stack.max_stack\nID,Name,Price,Max Stack\n2002,Oak Wood,5,999\n",
     )
     .expect("override csv");
     let primary_key_fields = vec!["id".to_owned()];
@@ -1579,7 +1666,7 @@ fn data_loader_applies_override_rows_by_primary_key() {
         .expect("override should record replaced base row");
     assert_eq!(replaced.source_index, 0);
     assert_eq!(replaced.source_path, PathBuf::from("materials.csv"));
-    assert_eq!(replaced.source_row_number, 2);
+    assert_eq!(replaced.source_row_number, 4);
 }
 
 #[test]
@@ -1587,23 +1674,23 @@ fn data_loader_rejects_invalid_override_rows() {
     let cases = [
         (
             "base.csv",
-            "id,name\n1,Sword\n1,Shield\n",
+            "id,name\nID,Name\n1,Sword\n1,Shield\n",
             "override.csv",
-            "id,name\n1,Axe\n",
+            "id,name\nID,Name\n1,Axe\n",
             "duplicates primary key",
         ),
         (
             "base.csv",
-            "id,name\n1,Sword\n",
+            "id,name\nID,Name\n1,Sword\n",
             "override.csv",
-            "id,name\n2,Axe\n",
+            "id,name\nID,Name\n2,Axe\n",
             "references missing base primary key",
         ),
         (
             "base.csv",
-            "id,name\n1,Sword\n",
+            "id,name\nID,Name\n1,Sword\n",
             "override.csv",
-            "id,name\n,Axe\n",
+            "id,name\nID,Name\n,Axe\n",
             "empty primary index field",
         ),
     ];

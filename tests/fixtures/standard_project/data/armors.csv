@@ -1,4 +1,5 @@
 id,name,price,attributes.max_health,attributes.max_stamina,attributes.attack,attributes.defence
+ID,名称,价格,生命加成,耐力加成,攻击加成,防御加成
 4001,Leather Armor,120,25,5,0,6
 4002,Iron Armor,260,60,0,0,14
 4003,Mage Robe,180,15,20,2,4

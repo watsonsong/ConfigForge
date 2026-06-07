@@ -1158,7 +1158,12 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
         ));
     }
 
-    for source in table.sources.iter().chain(table.override_sources.iter()) {
+    for source in table
+        .source
+        .iter()
+        .chain(table.sources.iter())
+        .chain(table.override_sources.iter())
+    {
         if source.provider != "csv" {
             diagnostics.push(MetaDiagnostic::new(
                 MetaDiagnosticCode::InvalidSourceDeclaration,
@@ -1168,6 +1173,7 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
                 ),
             ));
         }
+        validate_source_row_layout(table, source, diagnostics);
     }
 
     for source in &table.override_sources {
@@ -1176,6 +1182,43 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
             &source.export_when,
             diagnostics,
         );
+    }
+}
+
+fn validate_source_row_layout(
+    table: &TableMeta,
+    source: &super::SourceRef,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    if source.header_row == 0 {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::InvalidSourceDeclaration,
+            format!(
+                "table `{}` source `{}` declares `header_row = 0`, but source row positions are 1-based",
+                table.name, source.path
+            ),
+        ));
+    }
+    if source.data_start_row == 0 {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::InvalidSourceDeclaration,
+            format!(
+                "table `{}` source `{}` declares `data_start_row = 0`, but source row positions are 1-based",
+                table.name, source.path
+            ),
+        ));
+    }
+    if source.header_row > 0
+        && source.data_start_row > 0
+        && source.data_start_row <= source.header_row
+    {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::InvalidSourceDeclaration,
+            format!(
+                "table `{}` source `{}` declares `data_start_row = {}` before or at `header_row = {}`; data rows must start after the header row",
+                table.name, source.path, source.data_start_row, source.header_row
+            ),
+        ));
     }
 }
 

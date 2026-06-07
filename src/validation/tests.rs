@@ -81,7 +81,7 @@ fn rejects_invalid_type() {
         export_when: ExportCondition::default(),
         row_export: None,
         validators: vec![],
-        source: Some("items.csv".to_owned()),
+        source: Some(crate::meta::SourceRef::csv("items.csv")),
         sources: vec![],
         override_sources: vec![],
         fields: vec![FieldMeta {
@@ -137,7 +137,7 @@ fn applies_defaults_before_required_and_type_validation() {
         export_when: ExportCondition::default(),
         row_export: None,
         validators: vec![],
-        source: Some("items.csv".to_owned()),
+        source: Some(crate::meta::SourceRef::csv("items.csv")),
         sources: vec![],
         override_sources: vec![],
         fields: vec![FieldMeta {
@@ -232,7 +232,7 @@ fn validates_enum_values() {
         export_when: ExportCondition::default(),
         row_export: None,
         validators: vec![],
-        source: Some("items.csv".to_owned()),
+        source: Some(crate::meta::SourceRef::csv("items.csv")),
         sources: vec![],
         override_sources: vec![],
         fields: vec![FieldMeta {

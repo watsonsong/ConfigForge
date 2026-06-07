@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{
     ExportCondition, LinkedField, LinkedStructType, PrimitiveFieldType, RowExportPolicy, TableKind,
@@ -164,8 +164,12 @@ pub struct TableMeta {
     pub row_export: Option<RowExportPolicy>,
     #[serde(default)]
     pub validators: Vec<ValidatorMeta>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_source_ref",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source: Option<SourceRef>,
     #[serde(default)]
     pub sources: Vec<SourceRef>,
     #[serde(default)]
@@ -203,12 +207,37 @@ pub struct FragmentMeta {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SourceRef {
+    #[serde(default = "default_source_provider")]
     pub provider: String,
     pub path: String,
+    #[serde(default = "default_source_header_row")]
+    pub header_row: usize,
+    #[serde(default = "default_source_data_start_row")]
+    pub data_start_row: usize,
     #[serde(default)]
     pub fragments: Vec<String>,
     #[serde(default)]
     pub export_when: ExportCondition,
+}
+
+impl SourceRef {
+    pub fn csv(path: impl Into<String>) -> Self {
+        Self {
+            provider: default_source_provider(),
+            path: path.into(),
+            header_row: default_source_header_row(),
+            data_start_row: default_source_data_start_row(),
+            fragments: Vec::new(),
+            export_when: ExportCondition::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum SourceRefInput {
+    Path(String),
+    Ref(SourceRef),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -343,6 +372,31 @@ pub struct IndexMeta {
 
 fn default_export() -> bool {
     true
+}
+
+fn default_source_provider() -> String {
+    "csv".to_owned()
+}
+
+fn default_source_header_row() -> usize {
+    1
+}
+
+fn default_source_data_start_row() -> usize {
+    3
+}
+
+fn deserialize_optional_source_ref<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<SourceRef>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let input = Option::<SourceRefInput>::deserialize(deserializer)?;
+    Ok(input.map(|input| match input {
+        SourceRefInput::Path(path) => SourceRef::csv(path),
+        SourceRefInput::Ref(source) => source,
+    }))
 }
 
 impl MetaModel {
@@ -484,13 +538,13 @@ impl TableMeta {
         self.sources
             .first()
             .map(|source| source.path.as_str())
-            .or(self.source.as_deref())
+            .or(self.source.as_ref().map(|source| source.path.as_str()))
     }
 
     pub fn source_paths(&self) -> impl Iterator<Item = &str> {
         self.source
             .iter()
-            .map(String::as_str)
+            .map(|source| source.path.as_str())
             .chain(self.sources.iter().map(|source| source.path.as_str()))
     }
 

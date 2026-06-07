@@ -20,6 +20,8 @@ pub struct DataSourcePlan {
     pub table_name: String,
     pub provider: DataProvider,
     pub path: PathBuf,
+    pub header_row: usize,
+    pub data_start_row: usize,
     pub fragments: Vec<String>,
     pub layout: DataSourceLayout,
     pub fields: Vec<String>,
@@ -165,8 +167,8 @@ impl DataSourcePlan {
                 })
                 .collect::<Result<Vec<_>>>()?
         } else {
-            let path = if let Some(path) = &table.source {
-                path
+            let source = if let Some(source) = &table.source {
+                source
             } else {
                 return Err(ConfigForgeError::Validation(format!(
                     "table `{}` does not declare a source",
@@ -174,12 +176,28 @@ impl DataSourcePlan {
                 )));
             };
 
+            let layout = layout_for_table(table);
+            let data_start_row = if matches!(layout, DataSourceLayout::ObjectKeyValueRows)
+                && source.data_start_row == 3
+            {
+                2
+            } else {
+                source.data_start_row
+            };
+
             vec![Self {
                 table_name: table.name.clone(),
-                provider: DataProvider::Csv,
-                path: PathBuf::from(path),
+                provider: DataProvider::parse(&source.provider).ok_or_else(|| {
+                    ConfigForgeError::Validation(format!(
+                        "table `{}` source `{}` uses unsupported provider `{}`; only `csv` is supported",
+                        table.name, source.path, source.provider
+                    ))
+                })?,
+                path: PathBuf::from(&source.path),
+                header_row: source.header_row,
+                data_start_row,
                 fragments: Vec::new(),
-                layout: layout_for_table(table),
+                layout,
                 fields: table
                     .fields
                     .iter()
@@ -222,6 +240,8 @@ impl DataSourcePlan {
             table_name: table_name.to_owned(),
             provider,
             path: PathBuf::from(&source.path),
+            header_row: source.header_row,
+            data_start_row: source.data_start_row,
             fragments: source.fragments.clone(),
             layout: DataSourceLayout::CollectionRecords,
             fields: Vec::new(),

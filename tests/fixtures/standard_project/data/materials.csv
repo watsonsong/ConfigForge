@@ -1,4 +1,5 @@
 id,name,price,stack.max_stack
+ID,名称,价格,最大堆叠
 2001,Iron Ore,5,999
 2002,Oak Wood,3,999
 2003,Health Herb,8,99

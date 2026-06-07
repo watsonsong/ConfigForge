@@ -209,7 +209,7 @@ fn source_order_ordinals_follow_target_visible_rows() {
     fs::create_dir_all(&data_dir).expect("data dir should be created");
     fs::write(
         data_dir.join("names.csv"),
-        "id,value,required_tags,excluded_tags\n1,Always,,\n2,ClientOnly,client,\n3,ServerOnly,server,\n4,Hidden,qa,\n",
+        "id,value,required_tags,excluded_tags\nID,Value,Required Tags,Excluded Tags\n1,Always,,\n2,ClientOnly,client,\n3,ServerOnly,server,\n4,Hidden,qa,\n",
     )
     .expect("source-order data should be written");
     fs::write(

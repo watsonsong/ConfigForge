@@ -1,4 +1,5 @@
 quest_id,quest_type,title,required_class_id,recommended_level,min_player_level,max_player_level,reward.xp,reward.gold,reward.item_ids,prerequisite_quest_ids,sort_order,required_tags,excluded_tags
+任务ID,任务类型,标题,需求职业ID,推荐等级,最低玩家等级,最高玩家等级,奖励经验,奖励金币,奖励道具列表,前置任务列表,排序,需求标签,排除标签
 5001,story,First Steps,1,1,1,5,100,50,"[2001]","[]",1,,
 5002,story,Forest Hunt,2,2,2,8,160,75,"[2002,2003]","[5001]",2,client,
 5003,side,Arcane Trial,3,3,3,12,240,120,"[3003]","[5001]",3,,

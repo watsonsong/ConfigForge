@@ -1,4 +1,5 @@
 class_id,level,attributes.max_health,attributes.max_stamina,attributes.attack,attributes.defence
+职业ID,等级,最大生命,最大耐力,攻击,防御
 1,1,120,40,12,8
 1,2,145,45,16,11
 2,1,95,70,11,5

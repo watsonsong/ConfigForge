@@ -131,6 +131,28 @@ fn parses_basic_object_table_without_index() {
 }
 
 #[test]
+fn parses_source_ref_row_layout_from_legacy_source_property() {
+    let meta = parse(
+        r#"
+            [[tables]]
+            name = "items"
+            source = { path = "items.csv", header_row = 2, data_start_row = 4 }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    );
+
+    let table = meta.table("items").expect("table should exist");
+    let source = table.source.as_ref().expect("source should exist");
+    assert_eq!(source.provider, "csv");
+    assert_eq!(source.path, "items.csv");
+    assert_eq!(source.header_row, 2);
+    assert_eq!(source.data_start_row, 4);
+}
+
+#[test]
 fn rejects_object_table_step1_unsupported_features_except_foreign_keys() {
     let diagnostics = diagnostics(
         r#"

@@ -11,7 +11,8 @@ fn range_validator_blocks_invalid_data_before_export() {
     let data_dir = temp_dir.path().join("data");
     let data_out_dir = temp_dir.path().join("out/data");
     fs::create_dir_all(&data_dir).expect("data dir should be created");
-    fs::write(data_dir.join("items.csv"), "level\n11\n").expect("items data should be written");
+    fs::write(data_dir.join("items.csv"), "level\n等级\n11\n")
+        .expect("items data should be written");
 
     let project_path = temp_dir.path().join("ConfigForge.toml");
     fs::write(
@@ -69,7 +70,8 @@ fn warning_validator_is_visible_but_does_not_block_export() {
     let data_dir = temp_dir.path().join("data");
     let data_out_dir = temp_dir.path().join("out/data");
     fs::create_dir_all(&data_dir).expect("data dir should be created");
-    fs::write(data_dir.join("items.csv"), "level\n11\n").expect("items data should be written");
+    fs::write(data_dir.join("items.csv"), "level\n等级\n11\n")
+        .expect("items data should be written");
 
     let project_path = temp_dir.path().join("ConfigForge.toml");
     fs::write(
@@ -131,7 +133,8 @@ fn cli_report_json_is_written_when_validation_fails() {
     let data_out_dir = temp_dir.path().join("out/data");
     let report_path = temp_dir.path().join("out/report/validation.json");
     fs::create_dir_all(&data_dir).expect("data dir should be created");
-    fs::write(data_dir.join("items.csv"), "level\n11\n").expect("items data should be written");
+    fs::write(data_dir.join("items.csv"), "level\n等级\n11\n")
+        .expect("items data should be written");
 
     let project_path = temp_dir.path().join("ConfigForge.toml");
     fs::write(
@@ -202,7 +205,8 @@ fn build_validation_report_export_writes_html_artifact() {
     let data_out_dir = temp_dir.path().join("out/data");
     let report_dir = temp_dir.path().join("out/report");
     fs::create_dir_all(&data_dir).expect("data dir should be created");
-    fs::write(data_dir.join("items.csv"), "level\n11\n").expect("items data should be written");
+    fs::write(data_dir.join("items.csv"), "level\n等级\n11\n")
+        .expect("items data should be written");
 
     let project_path = temp_dir.path().join("ConfigForge.toml");
     fs::write(

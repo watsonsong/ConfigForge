@@ -80,7 +80,7 @@ fn target_tags_filter_validation_export_and_codegen() {
     fs::create_dir_all(&data_dir).expect("data dir should be created");
     fs::write(
         data_dir.join("items.csv"),
-        "id,name,server_value,exclude_tags\n1,Potion,,\n1,Debug Potion,,client\n",
+        "id,name,server_value,exclude_tags\nID,Name,Server Value,Exclude Tags\n1,Potion,,\n1,Debug Potion,,client\n",
     )
     .expect("items data should be written");
 

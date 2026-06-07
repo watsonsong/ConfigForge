@@ -83,15 +83,21 @@ impl DataLoader {
     pub fn load_source(&self, source: &DataSourcePlan) -> Result<DataTable> {
         match source.provider {
             DataProvider::Csv => match source.layout {
-                DataSourceLayout::CollectionRecords => CsvDataReader::read_table(
+                DataSourceLayout::CollectionRecords => CsvDataReader::read_table_with_layout(
                     &source.table_name,
                     &self.data_root.join(&source.path),
+                    source.header_row,
+                    source.data_start_row,
                 ),
-                DataSourceLayout::ObjectKeyValueRows => CsvDataReader::read_object_table(
-                    &source.table_name,
-                    &self.data_root.join(&source.path),
-                    &source.fields,
-                ),
+                DataSourceLayout::ObjectKeyValueRows => {
+                    CsvDataReader::read_object_table_with_layout(
+                        &source.table_name,
+                        &self.data_root.join(&source.path),
+                        &source.fields,
+                        source.header_row,
+                        source.data_start_row,
+                    )
+                }
             },
         }
     }
@@ -150,14 +156,19 @@ impl PendingTable {
         table: DataTable,
     ) -> Result<()> {
         for (row_index, row) in table.rows.into_iter().enumerate() {
-            let key = primary_key_for_row(source, row_index, &row)?;
+            let source_row_number = table
+                .row_sources
+                .get(row_index)
+                .map(|source| source.source_row_number)
+                .unwrap_or(row_index + 1);
+            let key = primary_key_for_row(source, source_row_number, &row)?;
             if let Some(key) = key {
                 if self.primary_key_index.contains_key(&key) {
                     return Err(ConfigForgeError::Validation(format!(
                         "table `{}` source `{}` row {} duplicates primary key `{}` before override_sources can be applied",
                         source.table_name,
                         source.path.display(),
-                        row_index + 1,
+                        source_row_number,
                         format_key(&key)
                     )));
                 }
@@ -167,7 +178,7 @@ impl PendingTable {
             self.row_sources.push(RowSourceInfo {
                 source_index,
                 source_path: source.path.clone(),
-                source_row_number: row_index + 1,
+                source_row_number,
                 fragments: source.fragments.clone(),
                 source_role: SourceRole::Base,
                 replaces: None,
@@ -183,12 +194,17 @@ impl PendingTable {
         table: DataTable,
     ) -> Result<()> {
         for (row_index, row) in table.rows.into_iter().enumerate() {
-            let key = primary_key_for_row(source, row_index, &row)?.ok_or_else(|| {
+            let source_row_number = table
+                .row_sources
+                .get(row_index)
+                .map(|source| source.source_row_number)
+                .unwrap_or(row_index + 1);
+            let key = primary_key_for_row(source, source_row_number, &row)?.ok_or_else(|| {
                 ConfigForgeError::Validation(format!(
                     "table `{}` override source `{}` row {} cannot be applied because no primary key fields were configured",
                     source.table_name,
                     source.path.display(),
-                    row_index + 1
+                    source_row_number
                 ))
             })?;
             let target_row = self.primary_key_index.get(&key).copied().ok_or_else(|| {
@@ -196,7 +212,7 @@ impl PendingTable {
                     "table `{}` override source `{}` row {} references missing base primary key `{}`",
                     source.table_name,
                     source.path.display(),
-                    row_index + 1,
+                    source_row_number,
                     format_key(&key)
                 ))
             })?;
@@ -205,7 +221,7 @@ impl PendingTable {
             self.row_sources[target_row] = RowSourceInfo {
                 source_index,
                 source_path: source.path.clone(),
-                source_row_number: row_index + 1,
+                source_row_number,
                 fragments: source.fragments.clone(),
                 source_role: SourceRole::Override,
                 replaces: Some(replaces),
@@ -217,7 +233,7 @@ impl PendingTable {
 
 fn primary_key_for_row(
     source: &DataSourcePlan,
-    row_index: usize,
+    source_row_number: usize,
     row: &DataRow,
 ) -> Result<Option<Vec<String>>> {
     if source.primary_key_fields.is_empty() {
@@ -230,7 +246,7 @@ fn primary_key_for_row(
                 "table `{}` source `{}` row {} is missing primary index field `{}`",
                 source.table_name,
                 source.path.display(),
-                row_index + 1,
+                source_row_number,
                 field
             ))
         })?;
@@ -239,7 +255,7 @@ fn primary_key_for_row(
                 "table `{}` source `{}` row {} has empty primary index field `{}`",
                 source.table_name,
                 source.path.display(),
-                row_index + 1,
+                source_row_number,
                 field
             )));
         }

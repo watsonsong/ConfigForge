@@ -127,15 +127,21 @@ impl SourceProvider for LocalCsvSourceProvider {
     fn read_source(&self, source: &DataSourcePlan) -> Result<DataTable> {
         match source.provider {
             DataProvider::Csv => match source.layout {
-                DataSourceLayout::CollectionRecords => CsvDataReader::read_table(
+                DataSourceLayout::CollectionRecords => CsvDataReader::read_table_with_layout(
                     &source.table_name,
                     &self.data_root.join(&source.path),
+                    source.header_row,
+                    source.data_start_row,
                 ),
-                DataSourceLayout::ObjectKeyValueRows => CsvDataReader::read_object_table(
-                    &source.table_name,
-                    &self.data_root.join(&source.path),
-                    &source.fields,
-                ),
+                DataSourceLayout::ObjectKeyValueRows => {
+                    CsvDataReader::read_object_table_with_layout(
+                        &source.table_name,
+                        &self.data_root.join(&source.path),
+                        &source.fields,
+                        source.header_row,
+                        source.data_start_row,
+                    )
+                }
             },
         }
     }

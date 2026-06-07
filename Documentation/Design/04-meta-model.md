@@ -124,19 +124,19 @@ ObjectTable 表示一个整体配置对象，例如全局游戏规则、经济�
 - 多 source 时，不同 source 可提供不同 field path。
 - override source 以 field path 为单位覆盖。
 
-Step 1 目标：ObjectTable 先支持 CSV `key,value` 行式常量表。CSV 第一行仍是 header，但每个数据行表示一个 top-level field key，而不是一条 record。默认约定如下：
+Step 1 目标：ObjectTable 先支持 CSV `key,value` 行式常量表。ObjectTable 的一行就是一个 field path，因此策划标题/说明默认使用额外列而不是额外行；当前支持 `key,value` 和 `key,title,value` 两种 header，其中 `title` 列被读取器忽略。每个数据行表示一个 field path，而不是一条 record。默认约定如下：
 
 ```csv
-key,value
-max_level,100
-start_gold,500
-economy,"{""gold_rate"":""1.2"",""drop_rate"":""0.8""}"
-start_item,"{""id"":""1"",""count"":""10""}"
+key,title,value
+max_level,最大等级,100
+start_gold,初始金币,500
+economy,经济参数,"{""gold_rate"":""1.2"",""drop_rate"":""0.8""}"
+start_item,初始物品,"{""id"":""1"",""count"":""10""}"
 ```
 
-Step 1 语义：
+当前语义：
 
-- `key` 列保存 Meta top-level field name；field path rows 留到后续 `expanded_value` 设计。
+- `key` 列保存 Meta field path；既可以是 top-level field name，也可以是 struct expanded value 的 dotted path，list child 也可以使用 `field[0]` / `field[1]` 这类 element-level path。
 - `value` 列保存该 field 的 raw cell value；scalar runtime export Step 1 保持与 CollectionTable 一致，仍输出 string。
 - named struct 字段可写当前已支持的 JSON object；后续也可由 CSV/source 形态决定写成 field path 展开；array/map schema 留到后续类型系统扩展。
 - 同一个 ObjectTable source 归一化为一个逻辑 object row，runtime data 导出为单个 object，而不是 records array。
@@ -144,7 +144,7 @@ Step 1 语义：
 - table-level `export/export_when` 和 field-level `export/export_when` 对 ObjectTable 生效；table 可见但所有字段被过滤时导出 `{}`。
 - ObjectTable Step 1 不支持 index、primary index、row_export、作为 foreign key target、variant source fragments；可以作为 foreign key source，字段值引用 CollectionTable 的 unique / primary index。
 - ObjectTable Step 1 只支持 `source = "...csv"`，不支持 `sources` / `override_sources`；后续应以 field path 为覆盖粒度扩展。
-- ObjectTable Step 1 不支持 field path 展开或“后续格子自动 expand 为数组元素”；复杂对象先使用 named struct JSON cell。后续 struct `expanded_value` 应支持 `field.child` 形式的 field path rows；array/map 和数组自动扩展另行设计。
+- ObjectTable 当前支持 struct field path 展开和标量 list element-level path 展开；仍不支持独立明细子表或跨格区域式展开。
 
 Step 1 推荐 Meta：
 
@@ -619,8 +619,8 @@ foreign_key = { target_table = "items", target_index = "by_id" }
 ```
 
 ```csv
-key,value
-starter_item_ids,"[2001,2002]"
+key,title,value
+starter_item_ids,初始道具,"[2001,2002]"
 ```
 
 规则：
@@ -628,7 +628,7 @@ starter_item_ids,"[2001,2002]"
 - JSON / MessagePack runtime payload 中数组元素仍遵循当前 scalar string-compatible contract，例如 `int[]` 输出为 `["2001", "2002"]`；`bin` 使用 schema-aware typed layout，写入 length prefix 后按元素类型写入。
 - 代码生成映射为 Rust `Vec<T>`、TypeScript `T[]`、C++ `std::vector<T>`；optional list 为对应语言的 optional 容器。
 - list default 必须是 TOML array，且每个元素都必须匹配元素类型。
-- 当前只支持 list 作为 JSON cell，不支持 `items[0]` / `items[0].field` 形式的 expanded array path；array field path 仍是后续能力。
+- 当前支持标量 list 作为 JSON cell，也支持 `items[0]` / `items[1]` 这类 element-level expanded path；expanded list 下标必须从 0 开始连续。`items[0].field` 这类 struct list 元素展开仍不是稳定能力。
 - 当前只支持标量/enum元素数组；`list<Struct>`、嵌套 list、map 暂不作为稳定能力。
 
 ## 4.10 复合值书写方式
@@ -637,7 +637,7 @@ starter_item_ids,"[2001,2002]"
 
 ObjectTable 和 CollectionTable 的基础组织方式不同：
 
-- ObjectTable 通常是一行表示一个 field path，例如 `field,value` 布局中每行写一个字段。
+- ObjectTable 通常是一行表示一个 field path，例如 `key,title,value` 布局中每行写一个字段，`title` 列仅用于说明。
 - CollectionTable 通常是一列表示一个 field path，每行写一条 record。
 
 因此，同一个复合值的“展开书写”在不同表类型中会落到不同物理方向上：
@@ -683,13 +683,13 @@ id,name,attributes.attack,attributes.max_health
 1002,Mage,4,70
 ```
 
-ObjectTable 的 Step 1 source 仍是 `key,value` 两列；struct expanded value 表现为多个 key rows：
+ObjectTable 当前支持 `key,value` 或 `key,title,value`；struct expanded value 表现为多个 key rows：
 
 ```csv
-key,value
-max_player_level,60
-default_attributes.attack,10
-default_attributes.max_health,120
+key,title,value
+max_player_level,最大玩家等级,60
+default_attributes.attack,默认攻击,10
+default_attributes.max_health,默认生命,120
 ```
 
 Struct source layout 判定规则：
