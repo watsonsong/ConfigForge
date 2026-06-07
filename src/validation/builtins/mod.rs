@@ -8,3 +8,4 @@ pub(super) mod range;
 pub(super) mod regex;
 pub(super) mod required_when;
 pub(super) mod string_length;
+pub(super) mod table_common;

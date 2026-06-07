@@ -3393,3 +3393,147 @@ fn compare_validator_handles_empty_operands_and_type_errors() {
     let message = validate_error(validate_data_set(&linked_meta, &data_set));
     assert!(message.contains("requires compatible comparable field types"));
 }
+
+#[test]
+fn table_group_helper_groups_visible_rows_with_hidden_support_field() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "drops"
+            source = "drops.csv"
+            row_export = { excluded_tags_field = "exclude_tags" }
+
+            [[tables.fields]]
+            name = "pool"
+            type = "string"
+            export = false
+
+            [[tables.fields]]
+            name = "weight"
+            type = "int"
+
+            [[tables.fields]]
+            name = "exclude_tags"
+            type = "string"
+            export = false
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "drops",
+        vec![
+            BTreeMap::from([
+                ("pool".to_owned(), "common".to_owned()),
+                ("weight".to_owned(), "10".to_owned()),
+                ("exclude_tags".to_owned(), String::new()),
+            ]),
+            BTreeMap::from([
+                ("pool".to_owned(), "rare".to_owned()),
+                ("weight".to_owned(), "1".to_owned()),
+                ("exclude_tags".to_owned(), "client".to_owned()),
+            ]),
+        ],
+    )]);
+    let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
+    let view =
+        ExportValidationView::for_target(&linked_meta, &normalized, &TargetTags::new(["client"]))
+            .expect("target view");
+    let table_view = view.table("drops").expect("drops table view");
+    let validator_meta = crate::meta::ValidatorMeta {
+        kind: "sum".to_owned(),
+        name: None,
+        desc: None,
+        severity: ValidationSeverity::Error,
+        message: None,
+        export_when: ExportCondition::default(),
+        params: BTreeMap::from([(
+            "group_by".to_owned(),
+            toml::Value::Array(vec![toml::Value::String("pool".to_owned())]),
+        )]),
+    };
+    let group_by = super::builtins::table_common::GroupByConfig::compile(
+        &validator_meta,
+        table_view.meta,
+        "sum",
+    )
+    .expect("group_by compiles");
+    let grouped =
+        super::builtins::table_common::GroupedRows::from_table_view(table_view, &group_by);
+    let groups = grouped
+        .iter()
+        .map(|(key, rows)| (key.label(), rows.len()))
+        .collect::<Vec<_>>();
+
+    assert_eq!(groups, vec![("pool=common".to_owned(), 1)]);
+}
+
+#[test]
+fn table_order_helper_stably_sorts_rows_by_scalar_field() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "levels"
+            source = "levels.csv"
+
+            [[tables.fields]]
+            name = "chapter"
+            type = "string"
+
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "levels",
+        vec![
+            BTreeMap::from([
+                ("chapter".to_owned(), "main".to_owned()),
+                ("level".to_owned(), "2".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("chapter".to_owned(), "main".to_owned()),
+                ("level".to_owned(), "1".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("chapter".to_owned(), "main".to_owned()),
+                ("level".to_owned(), "1".to_owned()),
+            ]),
+        ],
+    )]);
+    let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
+    let view = ExportValidationView::full(&linked_meta, &normalized);
+    let table_view = view.table("levels").expect("levels table view");
+    let table_meta = linked_meta.table("levels").expect("levels table meta");
+    let order_by = super::builtins::table_common::OrderByConfig::compile(
+        table_meta,
+        "monotonic",
+        "level".to_owned(),
+    )
+    .expect("order_by compiles");
+    let group_by = super::builtins::table_common::GroupByConfig::compile(
+        &crate::meta::ValidatorMeta {
+            kind: "monotonic".to_owned(),
+            name: None,
+            desc: None,
+            severity: ValidationSeverity::Error,
+            message: None,
+            export_when: ExportCondition::default(),
+            params: BTreeMap::new(),
+        },
+        table_view.meta,
+        "monotonic",
+    )
+    .expect("group_by compiles");
+    let grouped =
+        super::builtins::table_common::GroupedRows::from_table_view(table_view, &group_by);
+    let (_, rows) = grouped.iter().next().expect("whole table group");
+    let ordered = order_by.sort_rows(table_view, rows);
+    let ordered_indexes = ordered.iter().map(|row| row.row_index).collect::<Vec<_>>();
+
+    assert_eq!(order_by.field(), "level");
+    assert_eq!(ordered_indexes, vec![1, 2, 0]);
+}

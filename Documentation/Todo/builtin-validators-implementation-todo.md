@@ -160,7 +160,7 @@
 
 建议提交：`feat(validation): add compare validator`
 
-## [ ] Step 8：实现 table validator 分组、排序和数值聚合基础设施
+## [x] Step 8：实现 table validator 分组、排序和数值聚合基础设施
 
 目标：为 `sum` 与 `monotonic` 提供可复用的 group_by / order_by / deterministic diagnostics 能力。
 

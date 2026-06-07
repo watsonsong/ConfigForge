@@ -43,6 +43,25 @@ impl ScalarFieldKind {
             Self::Int | Self::Float | Self::String | Self::Text | Self::Asset | Self::Enum
         )
     }
+
+    #[allow(dead_code)]
+    pub(super) fn is_stable_key_capable(self) -> bool {
+        matches!(
+            self,
+            Self::Int
+                | Self::Float
+                | Self::Bool
+                | Self::String
+                | Self::Text
+                | Self::Asset
+                | Self::Enum
+        )
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn is_stable_sort_capable(self) -> bool {
+        self.is_comparable()
+    }
 }
 
 pub(super) fn validate_allowed_params(
@@ -85,6 +104,33 @@ pub(super) fn optional_string(
                 "validator `{kind}` parameter `{key}` must be string"
             ))
         })
+}
+
+#[allow(dead_code)]
+pub(super) fn optional_string_array(
+    meta: &ValidatorMeta,
+    kind: &str,
+    key: &str,
+) -> Result<Option<Vec<String>>> {
+    let Some(value) = meta.params.get(key) else {
+        return Ok(None);
+    };
+    let Some(values) = value.as_array() else {
+        return Err(ConfigForgeError::Validation(format!(
+            "validator `{kind}` parameter `{key}` must be an array of strings"
+        )));
+    };
+    values
+        .iter()
+        .map(|value| {
+            value.as_str().map(str::to_owned).ok_or_else(|| {
+                ConfigForgeError::Validation(format!(
+                    "validator `{kind}` parameter `{key}` must be an array of strings"
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(Some)
 }
 
 pub(super) fn optional_bool(meta: &ValidatorMeta, kind: &str, key: &str) -> Result<Option<bool>> {
