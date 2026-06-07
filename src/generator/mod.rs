@@ -10,15 +10,17 @@ use crate::{
     artifact::ArtifactSink,
     codegen::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, CodegenTaskConfig,
-        builtin_generators, find_generator,
+        builtin_generators,
     },
     data::DataSet,
     exporter::{
-        DataExporterRef, DataFormatRegistry, TargetDataConfig, export_runtime_data_to_sink,
+        AggregateDataExporter, DataFormatExporter, DataFormatRegistry, TargetDataConfig,
+        export_runtime_data_to_sink,
     },
     meta::{LinkedMetaModel, TargetTags},
     runtime_contract::ExportDependency,
     schema_doc::SchemaDocGenerator,
+    validation::{DesignerReportFormat, DesignerValidationReport, ValidationReport},
 };
 
 use rayon::ThreadPool;
@@ -81,12 +83,38 @@ impl From<GeneratorRequirements> for ExportDependency {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GeneratorDescriptor {
+    pub(crate) type_id: &'static str,
+    pub(crate) aliases: &'static [&'static str],
+    pub(crate) requirements: GeneratorRequirements,
+}
+
+impl GeneratorDescriptor {
+    pub(crate) const fn new(
+        type_id: &'static str,
+        aliases: &'static [&'static str],
+        requirements: GeneratorRequirements,
+    ) -> Self {
+        Self {
+            type_id,
+            aliases,
+            requirements,
+        }
+    }
+
+    pub(crate) fn matches(&self, type_id: &str) -> bool {
+        self.type_id == type_id || self.aliases.contains(&type_id)
+    }
+}
+
 /// Shared, task-local context for artifact generators.
 ///
 /// This is the common subset of information needed by current codegen,
 /// schema-doc, and data-backed exporters. Stepwise refactors will adapt this
 /// into concrete execution inputs without changing the public Project Config
 /// shape.
+#[derive(Clone)]
 pub(crate) struct GeneratorCommonInput<'meta> {
     pub(crate) meta: &'meta LinkedMetaModel<'meta>,
     pub(crate) target_tags: TargetTags,
@@ -102,9 +130,55 @@ pub(crate) struct GeneratorCommonInput<'meta> {
 
 pub(crate) struct GeneratorDataInput<'a, 'meta> {
     pub(crate) common: GeneratorCommonInput<'meta>,
-    pub(crate) target_data_config: TargetDataConfig,
     pub(crate) data_set: &'a DataSet,
+    pub(crate) validation_report: &'a ValidationReport,
     pub(crate) pool: &'a ThreadPool,
+}
+
+pub(crate) struct GeneratorTaskInput<'a, 'meta> {
+    pub(crate) common: GeneratorCommonInput<'meta>,
+    pub(crate) prepared: PreparedGeneratorInputs<'a>,
+}
+
+pub(crate) enum PreparedGeneratorInputs<'a> {
+    Planning,
+    MetaOnly,
+    MetaAndData {
+        data_set: &'a DataSet,
+        validation_report: &'a ValidationReport,
+        pool: &'a ThreadPool,
+    },
+}
+
+impl<'a> PreparedGeneratorInputs<'a> {
+    fn data_set(&self, generator_type: &str) -> Result<&'a DataSet> {
+        match self {
+            Self::MetaAndData { data_set, .. } => Ok(*data_set),
+            Self::Planning | Self::MetaOnly => Err(ConfigForgeError::Validation(format!(
+                "generator `{generator_type}` requires Data-backed artifact input"
+            ))),
+        }
+    }
+
+    fn validation_report(&self, generator_type: &str) -> Result<&'a ValidationReport> {
+        match self {
+            Self::MetaAndData {
+                validation_report, ..
+            } => Ok(*validation_report),
+            Self::Planning | Self::MetaOnly => Err(ConfigForgeError::Validation(format!(
+                "generator `{generator_type}` requires validation report input"
+            ))),
+        }
+    }
+
+    fn pool(&self, generator_type: &str) -> Result<&'a ThreadPool> {
+        match self {
+            Self::MetaAndData { pool, .. } => Ok(*pool),
+            Self::Planning | Self::MetaOnly => Err(ConfigForgeError::Validation(format!(
+                "generator `{generator_type}` requires Data-backed artifact input"
+            ))),
+        }
+    }
 }
 
 pub(crate) trait ArtifactGenerator: Send + Sync {
@@ -115,6 +189,10 @@ pub(crate) trait ArtifactGenerator: Send + Sync {
     }
 
     fn requirements(&self) -> GeneratorRequirements;
+
+    fn descriptor(&self) -> GeneratorDescriptor {
+        GeneratorDescriptor::new(self.type_id(), self.aliases(), self.requirements())
+    }
 
     fn generate_to_sink(&self, input: &GeneratorCommonInput<'_>, sink: &ArtifactSink)
     -> Result<()>;
@@ -136,15 +214,27 @@ pub(crate) trait ArtifactGenerator: Send + Sync {
         )))
     }
 
-    fn matches(&self, type_id: &str) -> bool {
-        self.type_id() == type_id || self.aliases().contains(&type_id)
+    fn plan_task_artifacts(&self, input: &GeneratorTaskInput<'_, '_>) -> Result<Vec<PathBuf>> {
+        self.plan_artifacts(&input.common)
+    }
+
+    fn generate(&self, input: &GeneratorTaskInput<'_, '_>, sink: &ArtifactSink) -> Result<()> {
+        if self.requirements().needs_data {
+            let data_input = GeneratorDataInput {
+                common: input.common.clone(),
+                data_set: input.prepared.data_set(self.type_id())?,
+                validation_report: input.prepared.validation_report(self.type_id())?,
+                pool: input.prepared.pool(self.type_id())?,
+            };
+            self.generate_with_data_to_sink(&data_input, sink)
+        } else {
+            self.generate_to_sink(&input.common, sink)
+        }
     }
 }
 
 pub(crate) struct GeneratorRegistry {
-    data_registry: DataFormatRegistry,
-    code_generators: Vec<Box<dyn CodeGenerator>>,
-    direct_generators: Vec<Box<dyn ArtifactGenerator>>,
+    generators: Vec<Box<dyn ArtifactGenerator>>,
 }
 
 impl GeneratorRegistry {
@@ -153,11 +243,19 @@ impl GeneratorRegistry {
         code_generators: Vec<Box<dyn CodeGenerator>>,
         direct_generators: Vec<Box<dyn ArtifactGenerator>>,
     ) -> Self {
-        Self {
-            data_registry,
-            code_generators,
-            direct_generators,
-        }
+        let mut generators = Vec::new();
+        let (table_exporters, aggregate_exporters) = data_registry.into_exporters();
+        generators.extend(table_exporters.into_iter().map(|exporter| {
+            Box::new(DataArtifactGenerator::Table(exporter)) as Box<dyn ArtifactGenerator>
+        }));
+        generators.extend(aggregate_exporters.into_iter().map(|exporter| {
+            Box::new(DataArtifactGenerator::Aggregate(exporter)) as Box<dyn ArtifactGenerator>
+        }));
+        generators.extend(code_generators.into_iter().map(|generator| {
+            Box::new(CodeArtifactGenerator(generator)) as Box<dyn ArtifactGenerator>
+        }));
+        generators.extend(direct_generators);
+        Self { generators }
     }
 
     pub(crate) fn with_builtin_generators() -> Self {
@@ -171,39 +269,15 @@ impl GeneratorRegistry {
         )
     }
 
-    fn data_generator(&self, type_id: &str) -> Option<DataArtifactGeneratorRef<'_>> {
-        self.data_registry
-            .require_any(type_id)
-            .ok()
-            .map(DataArtifactGeneratorRef)
-    }
-
-    fn code_generator(&self, type_id: &str) -> Option<CodeArtifactGeneratorRef<'_>> {
-        find_generator(&self.code_generators, type_id).map(CodeArtifactGeneratorRef)
-    }
-
-    fn direct_generator(&self, type_id: &str) -> Option<&dyn ArtifactGenerator> {
-        self.direct_generators
+    fn matching_generators(&self, type_id: &str) -> Vec<&dyn ArtifactGenerator> {
+        self.generators
             .iter()
-            .find(|generator| generator.matches(type_id))
             .map(Box::as_ref)
+            .filter(|generator| generator.descriptor().matches(type_id))
+            .collect()
     }
 
-    fn matching_generators(&self, type_id: &str) -> Vec<ArtifactGeneratorRef<'_>> {
-        let mut generators = Vec::new();
-        if let Some(generator) = self.direct_generator(type_id) {
-            generators.push(ArtifactGeneratorRef::Direct(generator));
-        }
-        if let Some(generator) = self.code_generator(type_id) {
-            generators.push(ArtifactGeneratorRef::Code(generator));
-        }
-        if let Some(generator) = self.data_generator(type_id) {
-            generators.push(ArtifactGeneratorRef::Data(generator));
-        }
-        generators
-    }
-
-    pub(crate) fn require_generator(&self, type_id: &str) -> Result<ArtifactGeneratorRef<'_>> {
+    pub(crate) fn require_generator(&self, type_id: &str) -> Result<&dyn ArtifactGenerator> {
         let mut generators = self.matching_generators(type_id).into_iter();
         let Some(generator) = generators.next() else {
             return Err(ConfigForgeError::Validation(format!(
@@ -233,73 +307,9 @@ impl GeneratorRegistry {
     }
 }
 
-pub(crate) enum ArtifactGeneratorRef<'a> {
-    Direct(&'a dyn ArtifactGenerator),
-    Code(CodeArtifactGeneratorRef<'a>),
-    Data(DataArtifactGeneratorRef<'a>),
-}
+pub(crate) struct CodeArtifactGenerator(Box<dyn CodeGenerator>);
 
-impl ArtifactGenerator for ArtifactGeneratorRef<'_> {
-    fn type_id(&self) -> &'static str {
-        match self {
-            Self::Direct(generator) => generator.type_id(),
-            Self::Code(generator) => generator.type_id(),
-            Self::Data(generator) => generator.type_id(),
-        }
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        match self {
-            Self::Direct(generator) => generator.aliases(),
-            Self::Code(generator) => generator.aliases(),
-            Self::Data(generator) => generator.aliases(),
-        }
-    }
-
-    fn requirements(&self) -> GeneratorRequirements {
-        match self {
-            Self::Direct(generator) => generator.requirements(),
-            Self::Code(generator) => generator.requirements(),
-            Self::Data(generator) => generator.requirements(),
-        }
-    }
-
-    fn generate_to_sink(
-        &self,
-        input: &GeneratorCommonInput<'_>,
-        sink: &ArtifactSink,
-    ) -> Result<()> {
-        match self {
-            Self::Direct(generator) => generator.generate_to_sink(input, sink),
-            Self::Code(generator) => generator.generate_to_sink(input, sink),
-            Self::Data(generator) => generator.generate_to_sink(input, sink),
-        }
-    }
-
-    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
-        match self {
-            Self::Direct(generator) => generator.plan_artifacts(input),
-            Self::Code(generator) => generator.plan_artifacts(input),
-            Self::Data(generator) => generator.plan_artifacts(input),
-        }
-    }
-
-    fn generate_with_data_to_sink(
-        &self,
-        input: &GeneratorDataInput<'_, '_>,
-        sink: &ArtifactSink,
-    ) -> Result<()> {
-        match self {
-            Self::Direct(generator) => generator.generate_with_data_to_sink(input, sink),
-            Self::Code(generator) => generator.generate_with_data_to_sink(input, sink),
-            Self::Data(generator) => generator.generate_with_data_to_sink(input, sink),
-        }
-    }
-}
-
-pub(crate) struct CodeArtifactGeneratorRef<'a>(&'a dyn CodeGenerator);
-
-impl ArtifactGenerator for CodeArtifactGeneratorRef<'_> {
+impl ArtifactGenerator for CodeArtifactGenerator {
     fn type_id(&self) -> &'static str {
         self.0.language()
     }
@@ -309,10 +319,11 @@ impl ArtifactGenerator for CodeArtifactGeneratorRef<'_> {
     }
 
     fn requirements(&self) -> GeneratorRequirements {
-        match self.0.dependency() {
-            ExportDependency::MetaOnly => GeneratorRequirements::meta_only(),
-            ExportDependency::MetaAndData => GeneratorRequirements::meta_and_data(),
-        }
+        GeneratorRequirements::meta_only()
+    }
+
+    fn descriptor(&self) -> GeneratorDescriptor {
+        GeneratorDescriptor::new(self.type_id(), self.aliases(), self.requirements())
     }
 
     fn generate_to_sink(
@@ -320,7 +331,7 @@ impl ArtifactGenerator for CodeArtifactGeneratorRef<'_> {
         input: &GeneratorCommonInput<'_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
-        let code_input = build_code_export_input(input, self.0)?;
+        let code_input = build_code_export_input(input, self.0.as_ref())?;
         self.0.generate_to_sink(&code_input, sink)
     }
 }
@@ -347,25 +358,32 @@ fn build_code_export_input<'meta>(
     })
 }
 
-pub(crate) struct DataArtifactGeneratorRef<'a>(DataExporterRef<'a>);
+enum DataArtifactGenerator {
+    Table(Box<dyn DataFormatExporter>),
+    Aggregate(Box<dyn AggregateDataExporter>),
+}
 
-impl ArtifactGenerator for DataArtifactGeneratorRef<'_> {
+impl ArtifactGenerator for DataArtifactGenerator {
     fn type_id(&self) -> &'static str {
-        match self.0 {
-            DataExporterRef::Table(exporter) => exporter.name(),
-            DataExporterRef::Aggregate(exporter) => exporter.name(),
+        match self {
+            Self::Table(exporter) => exporter.name(),
+            Self::Aggregate(exporter) => exporter.name(),
         }
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        match self.0 {
-            DataExporterRef::Table(exporter) => exporter.aliases(),
-            DataExporterRef::Aggregate(exporter) => exporter.aliases(),
+        match self {
+            Self::Table(exporter) => exporter.aliases(),
+            Self::Aggregate(exporter) => exporter.aliases(),
         }
     }
 
     fn requirements(&self) -> GeneratorRequirements {
         GeneratorRequirements::meta_and_data()
+    }
+
+    fn descriptor(&self) -> GeneratorDescriptor {
+        GeneratorDescriptor::new(self.type_id(), self.aliases(), self.requirements())
     }
 
     fn generate_to_sink(
@@ -380,8 +398,8 @@ impl ArtifactGenerator for DataArtifactGeneratorRef<'_> {
     }
 
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
-        match self.0 {
-            DataExporterRef::Table(exporter) => input
+        match self {
+            Self::Table(exporter) => input
                 .meta
                 .tables
                 .iter()
@@ -392,7 +410,7 @@ impl ArtifactGenerator for DataArtifactGeneratorRef<'_> {
                         .map(|plan| input.output.join(plan.path))
                 })
                 .collect(),
-            DataExporterRef::Aggregate(exporter) => {
+            Self::Aggregate(exporter) => {
                 let task = TargetDataConfig {
                     name: Some(input.task_name.clone()),
                     format: input.type_id.clone(),
@@ -409,20 +427,25 @@ impl ArtifactGenerator for DataArtifactGeneratorRef<'_> {
         input: &GeneratorDataInput<'_, '_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
-        match self.0 {
-            DataExporterRef::Table(exporter) => export_runtime_data_to_sink(
+        match self {
+            Self::Table(exporter) => export_runtime_data_to_sink(
                 &input.common.output,
                 input.common.meta,
                 &input.common.target_tags,
                 input.data_set,
-                exporter,
+                exporter.as_ref(),
                 input.pool,
                 sink,
             )
             .map(|_| ()),
-            DataExporterRef::Aggregate(exporter) => exporter.export_to_sink(
+            Self::Aggregate(exporter) => exporter.export_to_sink(
                 &input.common.output,
-                &input.target_data_config,
+                &TargetDataConfig {
+                    name: Some(input.common.task_name.clone()),
+                    output: input.common.output.clone(),
+                    format: input.common.type_id.clone(),
+                    options: input.common.options.clone(),
+                },
                 input.common.meta,
                 &input.common.target_tags,
                 input.data_set,
@@ -443,6 +466,10 @@ impl ArtifactGenerator for ValidationReportGenerator {
         GeneratorRequirements::meta_and_data().with_validation_report()
     }
 
+    fn descriptor(&self) -> GeneratorDescriptor {
+        GeneratorDescriptor::new(self.type_id(), self.aliases(), self.requirements())
+    }
+
     fn generate_to_sink(
         &self,
         _input: &GeneratorCommonInput<'_>,
@@ -454,24 +481,67 @@ impl ArtifactGenerator for ValidationReportGenerator {
         ))
     }
 
-    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
-        let mut options = input.options.clone();
-        let format = take_optional_string(&mut options, "format")?
-            .map(|value| value.parse())
-            .transpose()?
-            .unwrap_or(crate::validation::DesignerReportFormat::Html);
-        let file_name = take_optional_string(&mut options, "file_name")?
-            .unwrap_or_else(|| format!("validation-report.{}", format.extension()));
-        let _title = take_optional_string(&mut options, "title")?;
-        let unsupported = options.keys().cloned().collect::<Vec<_>>();
-        if let Some(key) = unsupported.first() {
-            return Err(ConfigForgeError::Validation(format!(
-                "validation_report export task `{}` has unknown option `{key}`",
-                input.task_name
-            )));
+    fn generate_with_data_to_sink(
+        &self,
+        input: &GeneratorDataInput<'_, '_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let config = validation_report_export_config_from_input(&input.common)?;
+        let mut report = DesignerValidationReport::from_validation_report(
+            input.validation_report,
+            crate::validation::DesignerReportOptions {
+                title: None,
+                project_name: input.common.project.name.clone(),
+                project_path: Some(input.common.project_root.clone()),
+                target: Some(input.common.target_name.clone()),
+                target_tags: input.common.target_tags.clone(),
+                generated_at: input.common.generated_at.clone(),
+                input_root: None,
+            },
+        );
+        if let Some(title) = config.title {
+            report.metadata.title = title;
         }
-        Ok(vec![input.output.join(file_name)])
+        let content = crate::validation::render_designer_validation_report(&report, config.format)?;
+        sink.write_text(config.output, content)
     }
+
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
+        Ok(vec![
+            validation_report_export_config_from_input(input)?.output,
+        ])
+    }
+}
+
+struct ValidationReportGeneratorConfig {
+    format: DesignerReportFormat,
+    output: PathBuf,
+    title: Option<String>,
+}
+
+fn validation_report_export_config_from_input(
+    input: &GeneratorCommonInput<'_>,
+) -> Result<ValidationReportGeneratorConfig> {
+    let mut options = input.options.clone();
+    let format = take_optional_string(&mut options, "format")?
+        .map(|value| value.parse())
+        .transpose()?
+        .unwrap_or(DesignerReportFormat::Html);
+    let file_name = take_optional_string(&mut options, "file_name")?
+        .unwrap_or_else(|| format!("validation-report.{}", format.extension()));
+    let title = take_optional_string(&mut options, "title")?;
+    let unsupported = options.keys().cloned().collect::<Vec<_>>();
+    if let Some(key) = unsupported.first() {
+        return Err(ConfigForgeError::Validation(format!(
+            "validation_report export task `{}` has unknown option `{key}`",
+            input.task_name
+        )));
+    }
+    Ok(ValidationReportGeneratorConfig {
+        format,
+        output: input.output.join(file_name),
+        title,
+    })
 }
 
 fn take_optional_string(
@@ -493,6 +563,36 @@ fn take_optional_string(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct StubGenerator {
+        descriptor: GeneratorDescriptor,
+    }
+
+    impl ArtifactGenerator for StubGenerator {
+        fn type_id(&self) -> &'static str {
+            self.descriptor.type_id
+        }
+
+        fn aliases(&self) -> &'static [&'static str] {
+            self.descriptor.aliases
+        }
+
+        fn requirements(&self) -> GeneratorRequirements {
+            self.descriptor.requirements
+        }
+
+        fn descriptor(&self) -> GeneratorDescriptor {
+            self.descriptor
+        }
+
+        fn generate_to_sink(
+            &self,
+            _input: &GeneratorCommonInput<'_>,
+            _sink: &ArtifactSink,
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn requirements_without_data_are_meta_only() {
@@ -529,6 +629,24 @@ mod tests {
         assert!(meta_with_assets.needs_assets);
         assert_eq!(meta_with_report.dependency(), ExportDependency::MetaOnly);
         assert!(meta_with_report.needs_validation_report);
+    }
+
+    #[test]
+    fn descriptor_matches_type_id_and_aliases() {
+        let descriptor = GeneratorDescriptor::new(
+            "messagepack",
+            &["msgpack", "mpack"],
+            GeneratorRequirements::meta_and_data(),
+        );
+
+        assert!(descriptor.matches("messagepack"));
+        assert!(descriptor.matches("msgpack"));
+        assert!(descriptor.matches("mpack"));
+        assert!(!descriptor.matches("json"));
+        assert_eq!(
+            descriptor.requirements.dependency(),
+            ExportDependency::MetaAndData
+        );
     }
 
     #[test]
@@ -577,6 +695,34 @@ mod tests {
 
         assert!(
             matches!(registry.dependency("client", "unknown"), Err(ConfigForgeError::Validation(message)) if message.contains("unknown export type `unknown`"))
+        );
+    }
+
+    #[test]
+    fn registry_reports_ambiguous_generator_registration() {
+        let registry = GeneratorRegistry::new(
+            DataFormatRegistry::new(),
+            Vec::new(),
+            vec![
+                Box::new(StubGenerator {
+                    descriptor: GeneratorDescriptor::new(
+                        "custom",
+                        &[],
+                        GeneratorRequirements::meta_only(),
+                    ),
+                }),
+                Box::new(StubGenerator {
+                    descriptor: GeneratorDescriptor::new(
+                        "other",
+                        &["custom"],
+                        GeneratorRequirements::meta_only(),
+                    ),
+                }),
+            ],
+        );
+
+        assert!(
+            matches!(registry.require_generator("custom"), Err(ConfigForgeError::Validation(message)) if message.contains("ambiguous artifact generator registration for `custom`"))
         );
     }
 }

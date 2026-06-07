@@ -25,7 +25,9 @@ use crate::{
     ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::{ArtifactSink, ArtifactWriter},
     data::{DataLoader, RawSourceData, SourceReadPlan},
-    generator::{ArtifactGenerator, GeneratorCommonInput, GeneratorRegistry},
+    generator::{
+        GeneratorCommonInput, GeneratorRegistry, GeneratorTaskInput, PreparedGeneratorInputs,
+    },
     meta::{LinkedMetaModel, MetaModel, TargetTags},
     project::ProjectConfig,
     runtime_contract::ExportDependency,
@@ -650,8 +652,11 @@ fn generate_and_write_meta_only_task(
             context.target_name, export_task.name
         )));
     }
-    let input = build_generator_common_input(context, export_task);
-    generator.generate_to_sink(&input, context.sink)
+    let input = GeneratorTaskInput {
+        common: build_generator_common_input(context, export_task),
+        prepared: PreparedGeneratorInputs::MetaOnly,
+    };
+    generator.generate(&input, context.sink)
 }
 
 fn build_generator_common_input<'meta>(

@@ -46,7 +46,7 @@ use crate::{
     ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::ArtifactSink,
     meta::{LinkedMetaModel, TargetTags},
-    runtime_contract::{ExportDependency, RuntimeDataFile},
+    runtime_contract::RuntimeDataFile,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -476,9 +476,6 @@ pub struct CodeExportInput<'meta> {
 /// internally or use a future factory-style registry to create per-task instances.
 pub(crate) trait CodeGenerator: Send + Sync {
     fn language(&self) -> &'static str;
-    fn dependency(&self) -> ExportDependency {
-        ExportDependency::MetaOnly
-    }
     fn language_aliases(&self) -> &'static [&'static str] {
         &[]
     }

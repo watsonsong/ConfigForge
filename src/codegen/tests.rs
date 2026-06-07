@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::{
     ConfigForgeError,
     meta::{MetaModel, TargetTags},
-    runtime_contract::{ExportDependency, RuntimeDataFile},
+    runtime_contract::RuntimeDataFile,
 };
 
 use super::ir::{CodeForeignKey, CodeRelationCardinality, relation_key_plan};
@@ -140,18 +140,6 @@ pub(in crate::codegen) fn indexed_source_order_fixture() -> MetaModel {
         "#,
     )
     .expect("indexed source-order fixture meta should parse")
-}
-
-#[test]
-fn builtin_generators_report_meta_only_dependency_contracts() {
-    for generator in builtin_generators() {
-        assert_eq!(
-            generator.dependency(),
-            ExportDependency::MetaOnly,
-            "{} generator should only depend on Meta",
-            generator.language()
-        );
-    }
 }
 
 pub(in crate::codegen) fn text_fixture() -> MetaModel {

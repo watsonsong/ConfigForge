@@ -10,7 +10,9 @@ use crate::{
     asset::AssetResolver,
     data::{DataRow, DataSet, DataTable, RawSourceData},
     diagnostic::{Diagnostic, DiagnosticReport},
-    generator::{ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRegistry},
+    generator::{
+        GeneratorCommonInput, GeneratorRegistry, GeneratorTaskInput, PreparedGeneratorInputs,
+    },
     meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags},
     project::AssetsConfig,
     project::lexical_normalize_path,
@@ -22,7 +24,7 @@ use crate::{
     },
 };
 
-use super::target::{NormalizedExportTask, target_data_config_from_export_task};
+use super::target::NormalizedExportTask;
 
 #[derive(Debug)]
 pub(super) struct RuntimeExportOutput {
@@ -112,21 +114,9 @@ fn export_meta_and_data_tasks_with_generator_registry(
     };
     let mut warnings = Vec::new();
     warnings.extend(validation_report.warning_messages());
-    export_validation_report_tasks(
-        export_tasks,
-        linked_meta,
-        target_tags,
-        &validation_report,
-        sink,
-    )?;
     let export_data_set = canonicalize_asset_refs(linked_meta, assets, target_tags, &data_set)?;
-    let data_export_tasks = export_tasks
-        .iter()
-        .copied()
-        .filter(|task| task.type_id != "validation_report")
-        .collect::<Vec<_>>();
     let mut task_outputs = pool.install(|| {
-        data_export_tasks
+        export_tasks
             .par_iter()
             .enumerate()
             .map(|(index, export_task)| {
@@ -137,6 +127,7 @@ fn export_meta_and_data_tasks_with_generator_registry(
                         linked_meta,
                         target_tags,
                         &export_data_set,
+                        &validation_report,
                         pool,
                         sink,
                         generator_registry,
@@ -162,31 +153,6 @@ fn export_meta_and_data_tasks_with_generator_registry(
         warnings,
         task_outputs: stable_task_outputs,
     })
-}
-
-fn export_validation_report_tasks(
-    export_tasks: &[&NormalizedExportTask],
-    linked_meta: &LinkedMetaModel<'_>,
-    target_tags: &TargetTags,
-    validation_report: &crate::validation::ValidationReport,
-    sink: &ArtifactSink,
-) -> Result<()> {
-    let report_tasks = export_tasks
-        .iter()
-        .copied()
-        .filter(|task| task.type_id == "validation_report")
-        .collect::<Vec<_>>();
-    if report_tasks.is_empty() {
-        return Ok(());
-    }
-    let report = DesignerValidationReport::from_validation_report(
-        validation_report,
-        designer_report_options(linked_meta, target_tags),
-    );
-    for task in report_tasks {
-        write_report_task(task, &report, sink)?;
-    }
-    Ok(())
 }
 
 fn export_validation_report_tasks_from_diagnostics(
@@ -438,6 +404,7 @@ fn export_meta_and_data_task(
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
     data_set: &crate::data::DataSet,
+    validation_report: &crate::validation::ValidationReport,
     pool: &ThreadPool,
     sink: &ArtifactSink,
     generator_registry: &GeneratorRegistry,
@@ -449,12 +416,14 @@ fn export_meta_and_data_task(
             export_task.name, export_task.type_id
         )));
     }
-    generator.generate_with_data_to_sink(
-        &GeneratorDataInput {
+    generator.generate(
+        &GeneratorTaskInput {
             common: generator_common_input(export_task, linked_meta, target_tags),
-            target_data_config: target_data_config_from_export_task(export_task),
-            data_set,
-            pool,
+            prepared: PreparedGeneratorInputs::MetaAndData {
+                data_set,
+                validation_report,
+                pool,
+            },
         },
         sink,
     )?;
@@ -511,11 +480,10 @@ fn plan_runtime_output_paths_for_task(
 ) -> Result<Vec<std::path::PathBuf>> {
     generator_registry
         .require_generator(&export_task.type_id)?
-        .plan_artifacts(&generator_common_input(
-            export_task,
-            linked_meta,
-            target_tags,
-        ))?
+        .plan_task_artifacts(&GeneratorTaskInput {
+            common: generator_common_input(export_task, linked_meta, target_tags),
+            prepared: PreparedGeneratorInputs::Planning,
+        })?
         .into_iter()
         .map(|path| Ok(lexical_normalize_path(&path)))
         .collect()

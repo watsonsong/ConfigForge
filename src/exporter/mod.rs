@@ -24,8 +24,7 @@ pub use messagepack::MessagePackDataExporter;
 pub use model::{ExportedTable, ExportedTablePayload, ExportedValue};
 pub use payload::build_exported_table_payload;
 pub use registry::{
-    AggregateDataExporter, DataExporterRef, DataFormatExporter, DataFormatRegistry,
-    builtin_exporters,
+    AggregateDataExporter, DataFormatExporter, DataFormatRegistry, builtin_exporters,
 };
 pub use runtime::RuntimeArtifactPlan;
 

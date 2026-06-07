@@ -10,7 +10,7 @@ use crate::{
     artifact::{ArtifactSink, ArtifactWriteMode, ArtifactWriteStream, ArtifactWriter},
     data::{DataTable, SourceRole},
     meta::{LinkedTableMeta, MetaModel, TargetTags},
-    runtime_contract::{ExportDependency, RuntimeDataFile, binary_schema_revision},
+    runtime_contract::{RuntimeDataFile, binary_schema_revision},
 };
 
 use super::*;
@@ -152,23 +152,13 @@ fn registry_reports_builtin_dependency_contracts() {
         "asset_manifest",
         "assets",
     ] {
-        assert_eq!(
-            registry
-                .require_dependency(format)
-                .expect("builtin dependency"),
-            ExportDependency::MetaAndData,
-            "{format} should depend on Meta and Data"
-        );
-        assert_eq!(
-            registry
-                .require_any(format)
-                .expect("builtin exporter")
-                .dependency(),
-            ExportDependency::MetaAndData,
-            "{format} exporter ref should report dependency"
+        assert!(
+            registry.get(format).is_some() || registry.get_aggregate(format).is_some(),
+            "{format} should be registered"
         );
     }
-    assert!(registry.dependency("unknown").is_none());
+    assert!(registry.get("unknown").is_none());
+    assert!(registry.get_aggregate("unknown").is_none());
 }
 
 #[test]

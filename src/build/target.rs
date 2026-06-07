@@ -5,7 +5,6 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::{
     ConfigForgeError, Result,
-    exporter::TargetDataConfig,
     generator::GeneratorRegistry,
     meta::TargetTags,
     project::{TargetConfig, TargetExportConfig},
@@ -148,15 +147,6 @@ fn validate_no_export_input_option(
         )));
     }
     Ok(())
-}
-
-pub(crate) fn target_data_config_from_export_task(task: &NormalizedExportTask) -> TargetDataConfig {
-    TargetDataConfig {
-        name: Some(task.name.clone()),
-        output: task.output.clone(),
-        format: task.type_id.clone(),
-        options: task.options.clone(),
-    }
 }
 
 #[cfg(test)]

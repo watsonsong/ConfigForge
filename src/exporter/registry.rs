@@ -9,7 +9,6 @@ use crate::{
     data::{DataSet, DataTable},
     exporter::TargetDataConfig,
     meta::{LinkedTableMeta, TargetTags},
-    runtime_contract::ExportDependency,
 };
 
 use super::{RuntimeArtifactPlan, binary, json, messagepack};
@@ -25,10 +24,6 @@ use crate::exporter::lua_table::LuaTableExporter;
 /// per-task factory instances in a future registry model.
 pub trait DataFormatExporter: Send + Sync {
     fn name(&self) -> &'static str;
-
-    fn dependency(&self) -> ExportDependency {
-        ExportDependency::MetaAndData
-    }
 
     fn aliases(&self) -> &'static [&'static str] {
         &[]
@@ -78,10 +73,6 @@ pub trait DataFormatExporter: Send + Sync {
 
 pub trait AggregateDataExporter: Send + Sync {
     fn name(&self) -> &'static str;
-
-    fn dependency(&self) -> ExportDependency {
-        ExportDependency::MetaAndData
-    }
 
     fn aliases(&self) -> &'static [&'static str] {
         &[]
@@ -183,49 +174,17 @@ impl DataFormatRegistry {
             .map(Box::as_ref)
     }
 
-    pub fn require_any(&self, format: &str) -> Result<DataExporterRef<'_>> {
-        if let Some(exporter) = self.get(format) {
-            return Ok(DataExporterRef::Table(exporter));
-        }
-        if let Some(exporter) = self.get_aggregate(format) {
-            return Ok(DataExporterRef::Aggregate(exporter));
-        }
-        Err(ConfigForgeError::Validation(format!(
-            "no data exporter registered for `{format}`"
-        )))
-    }
-
-    pub fn dependency(&self, format: &str) -> Option<ExportDependency> {
-        self.get(format)
-            .map(DataFormatExporter::dependency)
-            .or_else(|| {
-                self.get_aggregate(format)
-                    .map(AggregateDataExporter::dependency)
-            })
-    }
-
-    pub fn require_dependency(&self, format: &str) -> Result<ExportDependency> {
-        self.dependency(format).ok_or_else(|| {
-            ConfigForgeError::Validation(format!("no data exporter registered for `{format}`"))
-        })
-    }
-
     pub fn formats(&self) -> impl Iterator<Item = &dyn DataFormatExporter> {
         self.exporters.iter().map(Box::as_ref)
     }
-}
 
-pub enum DataExporterRef<'a> {
-    Table(&'a dyn DataFormatExporter),
-    Aggregate(&'a dyn AggregateDataExporter),
-}
-
-impl DataExporterRef<'_> {
-    pub fn dependency(&self) -> ExportDependency {
-        match self {
-            Self::Table(exporter) => exporter.dependency(),
-            Self::Aggregate(exporter) => exporter.dependency(),
-        }
+    pub(crate) fn into_exporters(
+        self,
+    ) -> (
+        Vec<Box<dyn DataFormatExporter>>,
+        Vec<Box<dyn AggregateDataExporter>>,
+    ) {
+        (self.exporters, self.aggregate_exporters)
     }
 }
 
