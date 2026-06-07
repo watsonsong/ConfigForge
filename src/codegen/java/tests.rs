@@ -9,7 +9,7 @@ use crate::{
     ConfigForgeError,
     artifact::{ArtifactWriteMode, ArtifactWriter},
     codegen::{
-        CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig,
+        CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, RuntimeInterfaceMode,
         tests::{input_for, linked_fixture},
     },
     meta::MetaModel,
@@ -38,6 +38,8 @@ fn export_target_from_task_reads_java_options() {
             lazy_class_name = "ReferenceLazyGameData"
             access_modifier = "package"
             emit_final = false
+            runtime_interface = "external"
+            runtime_package = "configforge.runtime"
         "#,
     )
     .expect("config should parse");
@@ -63,6 +65,11 @@ fn export_target_from_task_reads_java_options() {
     );
     assert_eq!(options.access_modifier, "package");
     assert!(!options.emit_final);
+    assert_eq!(options.runtime_interface, RuntimeInterfaceMode::External);
+    assert_eq!(
+        options.runtime_package.as_deref(),
+        Some("configforge.runtime")
+    );
 }
 
 #[test]
@@ -77,12 +84,18 @@ fn rejects_invalid_java_options() {
             "invalid game_data_class_name",
         ),
         ("lazy_class_name", "1Lazy", "invalid lazy_class_name"),
+        ("runtime_package", "1.bad", "invalid package"),
     ] {
         let meta = linked_fixture();
         let mut input = input_for(&meta, LANGUAGE);
+        let toml = if key == "runtime_package" {
+            format!("runtime_interface = \"external\"\n{key} = {value:?}")
+        } else {
+            format!("{key} = {value:?}")
+        };
         input.target.options.language_options.insert(
             LANGUAGE.to_owned(),
-            toml::from_str(&format!("{key} = {value:?}")).expect("toml value"),
+            toml::from_str(&toml).expect("toml value"),
         );
 
         let error = JavaCodeGenerator.generate(&input).unwrap_err();

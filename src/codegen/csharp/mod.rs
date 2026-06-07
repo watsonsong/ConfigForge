@@ -8,8 +8,8 @@ use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField, CodeFragmentPayload,
     CodeGenerator, CodeModel, CodeTableKind, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn,
-    I18nMode, I18nOptions, NamingConfig, build_code_model, ir::CodeRelationCardinality,
-    ir::require_non_empty_index_fields,
+    I18nMode, I18nOptions, NamingConfig, RuntimeInterfaceMode, build_code_model,
+    ir::CodeRelationCardinality, ir::require_non_empty_index_fields,
 };
 
 mod symbols;
@@ -37,6 +37,10 @@ pub struct CSharpCodegenOptions {
     pub lazy_class_name: Option<String>,
     #[serde(default = "default_emit_partial")]
     pub emit_partial: bool,
+    #[serde(default)]
+    pub runtime_interface: RuntimeInterfaceMode,
+    #[serde(default)]
+    pub runtime_namespace: Option<String>,
 }
 
 impl Default for CSharpCodegenOptions {
@@ -48,6 +52,8 @@ impl Default for CSharpCodegenOptions {
             class_name: None,
             lazy_class_name: None,
             emit_partial: default_emit_partial(),
+            runtime_interface: RuntimeInterfaceMode::Inline,
+            runtime_namespace: None,
         }
     }
 }
@@ -165,6 +171,7 @@ fn render_csharp_code(
         .target
         .options
         .language_options::<CSharpCodegenOptions>(LANGUAGE)?;
+    validate_runtime_interface_options(&options)?;
     let names = CSharpNames::new(input, &options)?;
     let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
     require_non_empty_index_fields(&model)?;
@@ -384,6 +391,15 @@ fn render_csharp_code(
     content.raw("            );\n        }\n    }\n\n");
     render_lazy_game_data_class(content, &model, names.access_modifier(), partial, &names)?;
     content.raw("}\n");
+    Ok(())
+}
+
+fn validate_runtime_interface_options(options: &CSharpCodegenOptions) -> Result<()> {
+    if matches!(options.runtime_interface, RuntimeInterfaceMode::External) {
+        if let Some(namespace) = &options.runtime_namespace {
+            validate_csharp_namespace(namespace)?;
+        }
+    }
     Ok(())
 }
 

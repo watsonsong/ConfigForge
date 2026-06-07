@@ -8,7 +8,7 @@ use tempfile::tempdir;
 use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
     codegen::{
-        CaseStyle, CodeExportInput, CodeGenerator,
+        CaseStyle, CodeExportInput, CodeGenerator, RuntimeInterfaceMode,
         tests::{
             assert_duplicate_generated_identifier, indexed_source_order_fixture, input_for,
             linked_fixture, source_order_fixture,
@@ -26,7 +26,11 @@ fn emits_loader_table_and_index_helpers() {
     let mut input = input_for(&meta, LANGUAGE);
     input.target.options.language_options.insert(
         LANGUAGE.to_owned(),
-        toml::Value::try_from(RustCodegenOptions { derive_serde: true }).expect("rust options"),
+        toml::Value::try_from(RustCodegenOptions {
+            derive_serde: true,
+            ..RustCodegenOptions::default()
+        })
+        .expect("rust options"),
     );
 
     let files = RustCodeGenerator.generate(&input).expect("rust code");
@@ -64,6 +68,50 @@ fn emits_loader_table_and_index_helpers() {
     assert!(content.contains("pub fn preload_all(&self) -> RuntimeDataResult<()>"));
     assert!(content.contains("impl<L: RuntimeDataLoader> GameDataAccess for LazyGameData<L>"));
     assert!(content.contains("let value = ItemsTable::load(&self.loader)?;"));
+}
+
+#[test]
+fn parses_and_validates_rust_runtime_interface_options() {
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str(
+            r#"
+                runtime_interface = "external"
+                runtime_core_path = "crate::runtime"
+            "#,
+        )
+        .expect("toml value"),
+    );
+
+    let options = input
+        .target
+        .options
+        .language_options::<RustCodegenOptions>(LANGUAGE)
+        .expect("rust options");
+    assert_eq!(options.runtime_interface, RuntimeInterfaceMode::External);
+    assert_eq!(options.runtime_core_path.as_deref(), Some("crate::runtime"));
+
+    RustCodeGenerator
+        .generate(&input)
+        .expect("external runtime options should parse before Step 2 changes output");
+
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str(
+            r#"
+                runtime_interface = "external"
+                runtime_core_path = ""
+            "#,
+        )
+        .expect("toml value"),
+    );
+    let error = RustCodeGenerator.generate(&input).unwrap_err();
+    assert!(
+        matches!(error, crate::ConfigForgeError::Validation(ref message) if message.contains("runtime_core_path")),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]

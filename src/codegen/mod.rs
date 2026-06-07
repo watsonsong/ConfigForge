@@ -40,7 +40,7 @@ pub use writer::{
 
 use std::{collections::HashMap, path::PathBuf};
 
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
     ConfigForgeError, Result,
@@ -108,6 +108,14 @@ pub enum I18nFunctionReturn {
     #[default]
     String,
     Optional,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeInterfaceMode {
+    #[default]
+    Inline,
+    External,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

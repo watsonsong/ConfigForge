@@ -8,7 +8,7 @@ use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField, CodeFragmentPayload,
     CodeGenerator, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn, I18nMode, I18nOptions,
-    NamingConfig, build_code_model, ir::require_non_empty_index_fields,
+    NamingConfig, RuntimeInterfaceMode, build_code_model, ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -35,6 +35,10 @@ pub const LANGUAGE: &str = "rust";
 pub struct RustCodegenOptions {
     #[serde(default)]
     pub derive_serde: bool,
+    #[serde(default)]
+    pub runtime_interface: RuntimeInterfaceMode,
+    #[serde(default)]
+    pub runtime_core_path: Option<String>,
 }
 
 pub(crate) struct RustCodeGenerator;
@@ -132,6 +136,7 @@ fn render_rust_code(
         .target
         .options
         .language_options::<RustCodegenOptions>(LANGUAGE)?;
+    validate_runtime_interface_options(&rust_options)?;
     let names = RustNames::new(&input.target.options);
     validate_generated_symbols(&model, &names)?;
     write_file_header(generator, content, input);
@@ -464,6 +469,24 @@ fn render_rust_code(
     }
     content.raw("}\n");
 
+    Ok(())
+}
+
+fn validate_runtime_interface_options(options: &RustCodegenOptions) -> Result<()> {
+    if matches!(options.runtime_interface, RuntimeInterfaceMode::External) {
+        validate_optional_runtime_path("runtime_core_path", &options.runtime_core_path)?;
+    }
+    Ok(())
+}
+
+fn validate_optional_runtime_path(kind: &str, value: &Option<String>) -> Result<()> {
+    if let Some(value) = value {
+        if value.trim().is_empty() || value.chars().any(char::is_control) {
+            return Err(ConfigForgeError::Validation(format!(
+                "invalid Rust {kind} `{value}`; value must be non-empty and single-line"
+            )));
+        }
+    }
     Ok(())
 }
 

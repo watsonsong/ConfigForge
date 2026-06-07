@@ -63,7 +63,7 @@ runtime_core_path = "config_forge_runtime_reader_core" # external 时使用
 docs(runtime): clarify runtime interface mode roadmap
 ```
 
-## [ ] Step 1：抽象 shared runtime interface option schema
+## [x] Step 1：抽象 shared runtime interface option schema
 
 目标：为各语言 codegen option 提供统一的 `RuntimeInterfaceMode` 解析和校验，先不改变生成输出。
 
@@ -73,6 +73,8 @@ docs(runtime): clarify runtime interface mode roadmap
 - Rust / C++ / C# / Java options 先接收 `runtime_interface` 字段，默认 `inline`。
 - 对 external 相关 path / namespace / package 做基础校验：非空、合法标识符 / path 片段。
 - 为非法值增加 focused unit tests。
+
+当前实现：已新增共享 `RuntimeInterfaceMode`，Rust / C++ / C# / Java codegen options 均可解析 `runtime_interface`，并对 external 相关 path / namespace / package 做基础校验；本步骤只接收 option，不改变生成输出。
 
 验证：
 

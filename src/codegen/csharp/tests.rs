@@ -10,7 +10,7 @@ use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
     codegen::{
         CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, I18nFunctionReturn,
-        I18nMode,
+        I18nMode, RuntimeInterfaceMode,
         tests::{input_for, linked_fixture},
     },
     meta::MetaModel,
@@ -39,6 +39,8 @@ fn export_target_from_task_reads_csharp_options() {
             class_name = "ReferenceGameData"
             lazy_class_name = "ReferenceLazyGameData"
             emit_partial = false
+            runtime_interface = "external"
+            runtime_namespace = "ConfigForge.Runtime"
         "#,
     )
     .expect("config should parse");
@@ -58,6 +60,11 @@ fn export_target_from_task_reads_csharp_options() {
         Some("ReferenceLazyGameData")
     );
     assert!(!options.emit_partial);
+    assert_eq!(options.runtime_interface, RuntimeInterfaceMode::External);
+    assert_eq!(
+        options.runtime_namespace.as_deref(),
+        Some("ConfigForge.Runtime")
+    );
 }
 
 #[test]
@@ -67,12 +74,18 @@ fn rejects_invalid_csharp_options() {
         ("access_modifier", "private", "invalid access_modifier"),
         ("class_name", "class", "invalid class_name"),
         ("lazy_class_name", "1Lazy", "invalid lazy_class_name"),
+        ("runtime_namespace", "1.Bad", "invalid namespace"),
     ] {
         let meta = linked_fixture();
         let mut input = input_for(&meta, LANGUAGE);
+        let toml = if key == "runtime_namespace" {
+            format!("runtime_interface = \"external\"\n{key} = {value:?}")
+        } else {
+            format!("{key} = {value:?}")
+        };
         input.target.options.language_options.insert(
             LANGUAGE.to_owned(),
-            toml::from_str(&format!("{key} = {value:?}")).expect("toml value"),
+            toml::from_str(&toml).expect("toml value"),
         );
 
         let error = CSharpCodeGenerator.generate(&input).unwrap_err();

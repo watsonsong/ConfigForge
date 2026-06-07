@@ -6,9 +6,10 @@ use std::fs;
 use tempfile::tempdir;
 
 use crate::{
+    ConfigForgeError,
     artifact::{ArtifactWriteMode, ArtifactWriter},
     codegen::{
-        CodeExportInput, CodeGenerator, GeneratedFile,
+        CodeExportInput, CodeGenerator, GeneratedFile, RuntimeInterfaceMode,
         tests::{
             assert_duplicate_generated_identifier, indexed_source_order_fixture, input_for,
             linked_fixture, source_order_fixture,
@@ -28,6 +29,7 @@ fn emits_loader_and_repository_declarations() {
         LANGUAGE.to_owned(),
         toml::Value::try_from(CppCodegenOptions {
             namespace: Some("game::config".to_owned()),
+            ..CppCodegenOptions::default()
         })
         .expect("cpp options"),
     );
@@ -93,6 +95,54 @@ fn emits_loader_and_repository_declarations() {
     );
     assert!(source.contains("items_.emplace(ItemsTable::Load(*loader_));"));
     assert!(source.contains("void LazyGameData::PreloadAll() const"));
+}
+
+#[test]
+fn parses_and_validates_cpp_runtime_interface_options() {
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str(
+            r#"
+                runtime_interface = "external"
+                runtime_core_header = "config_forge/runtime/reader.hpp"
+                runtime_core_namespace = "config_forge_runtime"
+            "#,
+        )
+        .expect("toml value"),
+    );
+
+    let options = input
+        .target
+        .options
+        .language_options::<CppCodegenOptions>(LANGUAGE)
+        .expect("cpp options");
+    assert_eq!(options.runtime_interface, RuntimeInterfaceMode::External);
+    assert_eq!(
+        options.runtime_core_header.as_deref(),
+        Some("config_forge/runtime/reader.hpp")
+    );
+
+    CppCodeGenerator
+        .generate(&input)
+        .expect("external runtime options should parse before C++ external mode changes output");
+
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str(
+            r#"
+                runtime_interface = "external"
+                runtime_core_header = ""
+            "#,
+        )
+        .expect("toml value"),
+    );
+    let error = CppCodeGenerator.generate(&input).unwrap_err();
+    assert!(
+        matches!(error, ConfigForgeError::Validation(ref message) if message.contains("runtime_core_header")),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]

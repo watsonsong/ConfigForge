@@ -9,14 +9,14 @@ use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeTable, CodeTableKind,
     CodeTypeRef, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn, I18nMode, I18nOptions,
-    NamingConfig, build_code_model,
+    NamingConfig, RuntimeInterfaceMode, build_code_model,
     ir::{CodeRelationCardinality, require_non_empty_index_fields},
 };
 
 mod symbols;
 mod types;
 
-use symbols::validate_generated_symbols;
+use symbols::{validate_generated_symbols, validate_java_package};
 use types::JavaNames;
 
 #[cfg(test)]
@@ -38,6 +38,10 @@ pub struct JavaCodegenOptions {
     pub access_modifier: String,
     #[serde(default = "default_emit_final")]
     pub emit_final: bool,
+    #[serde(default)]
+    pub runtime_interface: RuntimeInterfaceMode,
+    #[serde(default)]
+    pub runtime_package: Option<String>,
 }
 
 impl Default for JavaCodegenOptions {
@@ -49,6 +53,8 @@ impl Default for JavaCodegenOptions {
             lazy_class_name: None,
             access_modifier: default_access_modifier(),
             emit_final: default_emit_final(),
+            runtime_interface: RuntimeInterfaceMode::Inline,
+            runtime_package: None,
         }
     }
 }
@@ -192,6 +198,7 @@ fn render_java_code(
     input: &CodeExportInput<'_>,
     options: &JavaCodegenOptions,
 ) -> Result<()> {
+    validate_runtime_interface_options(options)?;
     let names = JavaNames::new(input, options)?;
     let model = build_code_model(input.meta, &input.target_tags, &input.runtime_data_files)?;
     require_non_empty_index_fields(&model)?;
@@ -228,6 +235,15 @@ fn render_java_code(
     render_game_data_class(content, &model, &names, options)?;
     render_lazy_game_data_class(content, &model, &names, options)?;
     content.raw("}\n");
+    Ok(())
+}
+
+fn validate_runtime_interface_options(options: &JavaCodegenOptions) -> Result<()> {
+    if matches!(options.runtime_interface, RuntimeInterfaceMode::External) {
+        if let Some(package) = &options.runtime_package {
+            validate_java_package(package)?;
+        }
+    }
     Ok(())
 }
 

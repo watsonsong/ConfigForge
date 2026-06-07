@@ -8,7 +8,8 @@ use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 use super::{
     CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField, CodeFragmentPayload,
     CodeGenerator, CodeModel, CodeTableKind, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn,
-    I18nMode, I18nOptions, NamingConfig, build_code_model, ir::require_non_empty_index_fields,
+    I18nMode, I18nOptions, NamingConfig, RuntimeInterfaceMode, build_code_model,
+    ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -39,6 +40,12 @@ pub const LANGUAGE: &str = "cpp";
 pub struct CppCodegenOptions {
     #[serde(default)]
     pub namespace: Option<String>,
+    #[serde(default)]
+    pub runtime_interface: RuntimeInterfaceMode,
+    #[serde(default)]
+    pub runtime_core_header: Option<String>,
+    #[serde(default)]
+    pub runtime_core_namespace: Option<String>,
 }
 
 pub(crate) struct CppCodeGenerator;
@@ -74,6 +81,7 @@ impl CodeGenerator for CppCodeGenerator {
             .target
             .options
             .language_options::<CppCodegenOptions>(LANGUAGE)?;
+        validate_runtime_interface_options(&cpp_options)?;
         let names = CppNames::new(&input.target.options);
         validate_generated_symbols(&model, &names)?;
         let mut header = super::CodeWriter::new(input.target.options.formatting);
@@ -115,6 +123,7 @@ impl CodeGenerator for CppCodeGenerator {
             .target
             .options
             .language_options::<CppCodegenOptions>(LANGUAGE)?;
+        validate_runtime_interface_options(&cpp_options)?;
         let names = CppNames::new(&input.target.options);
         validate_generated_symbols(&model, &names)?;
         let namespace = cpp_options
@@ -159,6 +168,25 @@ impl CodeGenerator for CppCodeGenerator {
             })?;
         source_stream.finish().map(|_| ())
     }
+}
+
+fn validate_runtime_interface_options(options: &CppCodegenOptions) -> Result<()> {
+    if matches!(options.runtime_interface, RuntimeInterfaceMode::External) {
+        validate_optional_single_line("runtime_core_header", &options.runtime_core_header)?;
+        validate_optional_single_line("runtime_core_namespace", &options.runtime_core_namespace)?;
+    }
+    Ok(())
+}
+
+fn validate_optional_single_line(kind: &str, value: &Option<String>) -> Result<()> {
+    if let Some(value) = value {
+        if value.trim().is_empty() || value.chars().any(char::is_control) {
+            return Err(ConfigForgeError::Validation(format!(
+                "invalid C++ {kind} `{value}`; value must be non-empty and single-line"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn render_header_file(
