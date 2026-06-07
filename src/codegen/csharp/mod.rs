@@ -485,12 +485,17 @@ fn render_runtime_contract(
     content.raw("        void EnterRequiredField(string name);\n");
     content.raw("        bool EnterOptionalField(string name);\n");
     content.raw("        void ExitField();\n");
+    content.raw("        ulong? SchemaRevision();\n");
     content.raw("        int ReadRowCount();\n");
     content.raw("        void EnterRow(int index);\n");
     content.raw("        void ExitRow();\n");
     content.raw("        int ReadListLength();\n");
     content.raw("        void EnterListElement(int index);\n");
     content.raw("        void ExitListElement();\n");
+    content.raw("        void BeginRecord(int optionalSlotCount);\n");
+    content.raw("        void EndRecord();\n");
+    content.raw("        int ReadEnumIndex(IReadOnlyList<string> variants);\n");
+    content.raw("        void EnsureExhausted();\n");
     content.raw("        long ReadInt();\n");
     content.raw("        double ReadFloat();\n");
     content.raw("        bool ReadBool();\n");
@@ -507,18 +512,21 @@ fn render_runtime_contract(
     for code_enum in enums {
         let type_name = names.type_name(&code_enum.name)?;
         content.raw_fmt(format_args!(
-            "        public static {type_name} Read{type_name}Value(IConfigForgeRuntimeDataReader reader)\n        {{\n            var value = reader.ReadString();\n            return value switch\n            {{\n"
+            "        public static {type_name} Read{type_name}Value(IConfigForgeRuntimeDataReader reader)\n        {{\n            var index = reader.ReadEnumIndex(new[]\n            {{\n"
         ));
         for value in &code_enum.values {
+            content.raw_fmt(format_args!("                {:?},\n", value.name));
+        }
+        content.raw("            });\n            return index switch\n            {\n");
+        for (ordinal, value) in code_enum.values.iter().enumerate() {
             content.raw_fmt(format_args!(
-                "                {:?} => {}.{},\n",
-                value.name,
+                "                {ordinal} => {}.{},\n",
                 type_name,
                 names.enum_value_name(&value.name)?
             ));
         }
         content.raw_fmt(format_args!(
-            "                _ => throw new ConfigForgeRuntimeException($\"Unknown {type_name} value '{{value}}'\"),\n            }};\n        }}\n\n"
+            "                _ => throw new ConfigForgeRuntimeException($\"Unknown {type_name} enum index '{{index}}'\"),\n            }};\n        }}\n\n"
         ));
     }
     content.raw("        public static T ReadRequiredField<T>(IConfigForgeRuntimeDataReader reader, string name, Func<IConfigForgeRuntimeDataReader, T> read)\n        {\n            reader.EnterRequiredField(name);\n            try\n            {\n                return read(reader);\n            }\n            finally\n            {\n                reader.ExitField();\n            }\n        }\n\n");
@@ -543,6 +551,12 @@ fn render_standard_runtime_adapters(content: &mut impl CodeWriterLike) {
         "MessagePack",
         "ConfigForge.Runtime.MessagePackReader.MessagePackRuntimeDataFileLoader",
         "ConfigForge.Runtime.MessagePackReader.MessagePackRuntimeDataReader",
+    );
+    render_csharp_standard_runtime_adapter(
+        content,
+        "Binary",
+        "ConfigForge.Runtime.BinaryReader.BinaryRuntimeDataFileLoader",
+        "ConfigForge.Runtime.BinaryReader.BinaryRuntimeDataReader",
     );
 }
 
@@ -582,6 +596,7 @@ fn render_csharp_standard_runtime_adapter(
     content.raw("        public void EnterRequiredField(string name) => _reader.EnterRequiredField(name);\n");
     content.raw("        public bool EnterOptionalField(string name) => _reader.EnterOptionalField(name);\n");
     content.raw("        public void ExitField() => _reader.ExitField();\n");
+    content.raw("        public ulong? SchemaRevision() => _reader.SchemaRevision();\n");
     content.raw("        public int ReadRowCount() => _reader.ReadRowCount();\n");
     content.raw("        public void EnterRow(int index) => _reader.EnterRow(index);\n");
     content.raw("        public void ExitRow() => _reader.ExitRow();\n");
@@ -590,6 +605,10 @@ fn render_csharp_standard_runtime_adapter(
         "        public void EnterListElement(int index) => _reader.EnterListElement(index);\n",
     );
     content.raw("        public void ExitListElement() => _reader.ExitListElement();\n");
+    content.raw("        public void BeginRecord(int optionalSlotCount) => _reader.BeginRecord(optionalSlotCount);\n");
+    content.raw("        public void EndRecord() => _reader.EndRecord();\n");
+    content.raw("        public int ReadEnumIndex(IReadOnlyList<string> variants) => _reader.ReadEnumIndex(variants);\n");
+    content.raw("        public void EnsureExhausted() => _reader.EnsureExhausted();\n");
     content.raw("        public long ReadInt() => _reader.ReadInt();\n");
     content.raw("        public double ReadFloat() => _reader.ReadFloat();\n");
     content.raw("        public bool ReadBool() => _reader.ReadBool();\n");
@@ -677,17 +696,18 @@ fn render_read_method(
     fields: &[CodeField],
     names: &CSharpNames,
 ) -> Result<()> {
+    let optional_slot_count = fields.iter().filter(|field| !field.required).count();
     content.raw_fmt(format_args!(
-        "    internal static partial class {type_name}Reader\n    {{\n        public static {type_name} Read(IConfigForgeRuntimeDataReader reader)\n        {{\n            return new {type_name}\n            {{\n"
+        "    internal static partial class {type_name}Reader\n    {{\n        public static {type_name} Read(IConfigForgeRuntimeDataReader reader)\n        {{\n            reader.BeginRecord({optional_slot_count});\n            try\n            {{\n                return new {type_name}\n                {{\n"
     ));
     for field in fields {
         content.raw_fmt(format_args!(
-            "                {} = {},\n",
+            "                    {} = {},\n",
             names.property_name(&field.name)?,
             names.read_field_expression(field)?
         ));
     }
-    content.raw("            };\n        }\n    }\n\n");
+    content.raw("                };\n            }\n            finally\n            {\n                reader.EndRecord();\n            }\n        }\n    }\n\n");
     Ok(())
 }
 
@@ -721,8 +741,24 @@ fn render_csharp_row_class(
     render_csharp_text_helpers(content, &table.name, &table.fields, names, i18n)?;
     if table.kind == CodeTableKind::Object {
         content.raw_fmt(format_args!(
-            "\n        internal const string DataFile = {:?};\n\n        internal static {type_name} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var reader = loader.Open(DataFile);\n            return {type_name}Reader.Read(reader);\n        }}\n",
+            "\n        internal const string DataFile = {:?};\n",
             table.data_file
+        ));
+        if let Some(revision) = table.schema_revision {
+            content.raw_fmt(format_args!(
+                "        internal const ulong ExpectedSchemaRevision = {revision}UL;\n"
+            ));
+        }
+        content.raw_fmt(format_args!(
+            "\n        internal static {type_name} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var reader = loader.Open(DataFile);\n"
+        ));
+        if table.schema_revision.is_some() {
+            content.raw(
+                "            var schemaRevision = reader.SchemaRevision();\n            if (schemaRevision.HasValue && schemaRevision.Value != ExpectedSchemaRevision)\n            {\n                throw new ConfigForgeRuntimeException($\"Schema revision mismatch for '{DataFile}': expected {ExpectedSchemaRevision}, got {schemaRevision.Value}\");\n            }\n",
+            );
+        }
+        content.raw_fmt(format_args!(
+            "            var value = {type_name}Reader.Read(reader);\n            reader.EnsureExhausted();\n            return value;\n        }}\n"
         ));
     }
     content.raw("    }\n\n");
@@ -916,25 +952,29 @@ fn render_row_read_method(
     table: &super::CodeTable,
     names: &CSharpNames,
 ) -> Result<()> {
+    let optional_slot_count =
+        table.fields.iter().filter(|field| !field.required).count() + table.fragments.len();
     content.raw_fmt(format_args!(
-        "    internal static partial class {type_name}Reader\n    {{\n        public static {type_name} Read(IConfigForgeRuntimeDataReader reader)\n        {{\n            return new {type_name}\n            {{\n"
+        "    internal static partial class {type_name}Reader\n    {{\n        public static {type_name} Read(IConfigForgeRuntimeDataReader reader)\n        {{\n            reader.BeginRecord({optional_slot_count});\n            try\n            {{\n                return new {type_name}\n                {{\n"
     ));
     for field in &table.fields {
         content.raw_fmt(format_args!(
-            "                {} = {},\n",
+            "                    {} = {},\n",
             names.property_name(&field.name)?,
             names.read_field_expression(field)?
         ));
     }
     for fragment in &table.fragments {
+        let payload_type = names.fragment_payload_type_name(table, fragment)?;
         content.raw_fmt(format_args!(
-            "                {} = ConfigForgeRuntimeReader.ReadRequiredField(reader, {:?}, {}Reader.Read),\n",
+            "                    {} = ConfigForgeRuntimeReader.ReadOptionalClassField(reader, {:?}, {}Reader.Read) ?? new {}(),\n",
             names.property_name(&fragment.name)?,
             fragment.name,
-            names.fragment_payload_type_name(table, fragment)?
+            payload_type,
+            payload_type
         ));
     }
-    content.raw("            };\n        }\n    }\n\n");
+    content.raw("                };\n            }\n            finally\n            {\n                reader.EndRecord();\n            }\n        }\n    }\n\n");
     Ok(())
 }
 
@@ -951,8 +991,17 @@ fn render_table_class(
         "    {access_modifier}{partial} class {table_type}\n    {{\n"
     ));
     content.raw_fmt(format_args!(
-        "        public const string DataFile = {:?};\n        private readonly {}[] _rows;\n",
-        table.data_file, row_type
+        "        public const string DataFile = {:?};\n",
+        table.data_file
+    ));
+    if let Some(revision) = table.schema_revision {
+        content.raw_fmt(format_args!(
+            "        public const ulong ExpectedSchemaRevision = {revision}UL;\n"
+        ));
+    }
+    content.raw_fmt(format_args!(
+        "        private readonly {}[] _rows;\n",
+        row_type
     ));
     for index in &table.indexes {
         let key_type = names.index_key_type(&table.name, index)?;
@@ -993,7 +1042,15 @@ fn render_table_class(
     }
     content.raw("        }\n\n");
     content.raw_fmt(format_args!(
-        "        internal static {table_type} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var reader = loader.Open(DataFile);\n            var rowCount = reader.ReadRowCount();\n            var rows = new {row_type}[rowCount];\n            for (var rowIndex = 0; rowIndex < rowCount; rowIndex++)\n            {{\n                reader.EnterRow(rowIndex);\n                try\n                {{\n                    rows[rowIndex] = {row_type}Reader.Read(reader);\n                }}\n                finally\n                {{\n                    reader.ExitRow();\n                }}\n            }}\n            return FromRows(rows);\n        }}\n"
+        "        internal static {table_type} Load(IConfigForgeRuntimeDataLoader loader)\n        {{\n            var reader = loader.Open(DataFile);\n"
+    ));
+    if table.schema_revision.is_some() {
+        content.raw(
+            "            var schemaRevision = reader.SchemaRevision();\n            if (schemaRevision.HasValue && schemaRevision.Value != ExpectedSchemaRevision)\n            {\n                throw new ConfigForgeRuntimeException($\"Schema revision mismatch for '{DataFile}': expected {ExpectedSchemaRevision}, got {schemaRevision.Value}\");\n            }\n",
+        );
+    }
+    content.raw_fmt(format_args!(
+        "            var rowCount = reader.ReadRowCount();\n            var rows = new {row_type}[rowCount];\n            for (var rowIndex = 0; rowIndex < rowCount; rowIndex++)\n            {{\n                reader.EnterRow(rowIndex);\n                try\n                {{\n                    rows[rowIndex] = {row_type}Reader.Read(reader);\n                }}\n                finally\n                {{\n                    reader.ExitRow();\n                }}\n            }}\n            reader.EnsureExhausted();\n            return FromRows(rows);\n        }}\n"
     ));
     content.raw_fmt(format_args!(
         "\n        public int Count => _rows.Length;\n\n        public {row_type}? RowAt(int rowIndex)\n        {{\n            return rowIndex >= 0 && rowIndex < _rows.Length ? _rows[rowIndex] : null;\n        }}\n"

@@ -133,7 +133,8 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
 
     let rust_code = fs::read_to_string(rust_out_dir.join("generated.rs")).expect("rust code");
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items\""));
-    assert!(rust_code.contains("pub use config_forge_runtime_reader_core"));
+    assert!(rust_code.contains("pub trait RuntimeDataReader"));
+    assert!(!rust_code.contains("pub use config_forge_runtime_reader_core"));
     assert!(!rust_code.contains("RuntimeDataFormat"));
 
     verify_generated_rust_crate(&rust_out_dir, false);

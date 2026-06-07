@@ -291,12 +291,17 @@ fn render_runtime_contract(
     content.raw("        void enterRequiredField(String name);\n");
     content.raw("        boolean enterOptionalField(String name);\n");
     content.raw("        void exitField();\n");
+    content.raw("        Long schemaRevision();\n");
     content.raw("        int readRowCount();\n");
     content.raw("        void enterRow(int index);\n");
     content.raw("        void exitRow();\n");
     content.raw("        int readListLength();\n");
     content.raw("        void enterListElement(int index);\n");
     content.raw("        void exitListElement();\n");
+    content.raw("        void beginRecord(int optionalSlotCount);\n");
+    content.raw("        void endRecord();\n");
+    content.raw("        int readEnumIndex(String[] variants);\n");
+    content.raw("        void ensureExhausted();\n");
     content.raw("        long readInt();\n");
     content.raw("        double readFloat();\n");
     content.raw("        boolean readBool();\n");
@@ -327,17 +332,19 @@ fn render_runtime_contract(
             "        static {type_name} {}(ConfigForgeRuntimeDataReader reader) {{\n",
             names.read_enum_function_name(&code_enum.name)?
         ));
-        content.raw("            String value = reader.readString();\n");
-        content.raw("            switch (value) {\n");
+        content.raw("            int index = reader.readEnumIndex(new String[] {\n");
         for value in &code_enum.values {
+            content.raw_fmt(format_args!("                {:?},\n", value.name));
+        }
+        content.raw("            });\n            switch (index) {\n");
+        for (ordinal, value) in code_enum.values.iter().enumerate() {
             content.raw_fmt(format_args!(
-                "                case {:?}: return {type_name}.{};\n",
-                value.name,
+                "                case {ordinal}: return {type_name}.{};\n",
                 names.enum_value_name(&value.name)?
             ));
         }
         content.raw_fmt(format_args!(
-            "                default: throw new ConfigForgeRuntimeException(\"Unknown {type_name} value '\" + value + \"'\");\n"
+            "                default: throw new ConfigForgeRuntimeException(\"Unknown {type_name} enum index '\" + index + \"'\");\n"
         ));
         content.raw("            }\n        }\n\n");
     }
@@ -396,6 +403,12 @@ fn render_standard_runtime_adapters(content: &mut impl CodeWriterLike) {
         "configforge.runtime.messagepack.ConfigForgeMessagePackRuntimeDataLoader",
         "configforge.runtime.messagepack.ConfigForgeMessagePackRuntimeDataReader",
     );
+    render_java_standard_runtime_adapter(
+        content,
+        "Binary",
+        "configforge.runtime.binary.ConfigForgeBinaryRuntimeDataLoader",
+        "configforge.runtime.binary.ConfigForgeBinaryRuntimeDataReader",
+    );
 }
 
 fn render_java_standard_runtime_adapter(
@@ -434,6 +447,7 @@ fn render_java_standard_runtime_adapter(
     content.raw("        public void enterRequiredField(String name) { reader.enterRequiredField(name); }\n");
     content.raw("        public boolean enterOptionalField(String name) { return reader.enterOptionalField(name); }\n");
     content.raw("        public void exitField() { reader.exitField(); }\n");
+    content.raw("        public Long schemaRevision() { return reader.schemaRevision(); }\n");
     content.raw("        public int readRowCount() { return reader.readRowCount(); }\n");
     content.raw("        public void enterRow(int index) { reader.enterRow(index); }\n");
     content.raw("        public void exitRow() { reader.exitRow(); }\n");
@@ -442,6 +456,10 @@ fn render_java_standard_runtime_adapter(
         "        public void enterListElement(int index) { reader.enterListElement(index); }\n",
     );
     content.raw("        public void exitListElement() { reader.exitListElement(); }\n");
+    content.raw("        public void beginRecord(int optionalSlotCount) { reader.beginRecord(optionalSlotCount); }\n");
+    content.raw("        public void endRecord() { reader.endRecord(); }\n");
+    content.raw("        public int readEnumIndex(String[] variants) { return reader.readEnumIndex(variants); }\n");
+    content.raw("        public void ensureExhausted() { reader.ensureExhausted(); }\n");
     content.raw("        public long readInt() { return reader.readInt(); }\n");
     content.raw("        public double readFloat() { return reader.readFloat(); }\n");
     content.raw("        public boolean readBool() { return reader.readBool(); }\n");
@@ -584,19 +602,23 @@ fn render_read_method(
     fields: &[CodeField],
     names: &JavaNames,
 ) -> Result<()> {
+    let optional_slot_count = fields.iter().filter(|field| !field.required).count();
     content.raw_fmt(format_args!(
         "    private static {type_name} {method_name}(ConfigForgeRuntimeDataReader reader) {{\n"
     ));
-    content.raw_fmt(format_args!("        return new {type_name}(\n"));
+    content.raw_fmt(format_args!(
+        "        reader.beginRecord({optional_slot_count});\n        try {{\n            return new {type_name}(\n"
+    ));
     for (index, field) in fields.iter().enumerate() {
         let comma = if index + 1 == fields.len() { "" } else { "," };
         content.raw_fmt(format_args!(
-            "            {}{}\n",
+            "                {}{}\n",
             names.read_field_expression(field)?,
             comma
         ));
     }
-    content.raw("        );\n");
+    content
+        .raw("            );\n        } finally {\n            reader.endRecord();\n        }\n");
     content.raw("    }\n\n");
     Ok(())
 }
@@ -720,10 +742,14 @@ fn render_row_read_method(
 ) -> Result<()> {
     let row_type = names.row_type_name(&table.name)?;
     let method_name = names.read_type_function_name(&format!("{}_row", table.name))?;
+    let optional_slot_count =
+        table.fields.iter().filter(|field| !field.required).count() + table.fragments.len();
     content.raw_fmt(format_args!(
         "    private static {row_type} {method_name}(ConfigForgeRuntimeDataReader reader) {{\n"
     ));
-    content.raw_fmt(format_args!("        return new {row_type}(\n"));
+    content.raw_fmt(format_args!(
+        "        reader.beginRecord({optional_slot_count});\n        try {{\n            return new {row_type}(\n"
+    ));
     let mut expressions = Vec::new();
     for field in &table.fields {
         expressions.push(names.read_field_expression(field)?);
@@ -747,9 +773,10 @@ fn render_row_read_method(
         } else {
             ","
         };
-        content.raw_fmt(format_args!("            {expression}{comma}\n"));
+        content.raw_fmt(format_args!("                {expression}{comma}\n"));
     }
-    content.raw("        );\n");
+    content
+        .raw("            );\n        } finally {\n            reader.endRecord();\n        }\n");
     content.raw("    }\n\n");
     Ok(())
 }
@@ -944,6 +971,11 @@ fn render_java_table(
         "        public static final String DATA_FILE = \"{}\";\n",
         table.data_file
     ));
+    if let Some(revision) = table.schema_revision {
+        content.raw_fmt(format_args!(
+            "        public static final long EXPECTED_SCHEMA_REVISION = Long.parseUnsignedLong(\"{revision}\");\n"
+        ));
+    }
     content.raw_fmt(format_args!(
         "        private final {}[] rows;\n\n",
         row_type
@@ -996,6 +1028,9 @@ fn render_java_table(
     ));
     content.raw("            ConfigForgeRuntimeDataReader reader = loader.open(DATA_FILE);\n");
     content.raw("            try {\n");
+    if table.schema_revision.is_some() {
+        content.raw("                Long schemaRevision = reader.schemaRevision();\n                if (schemaRevision != null && schemaRevision.longValue() != EXPECTED_SCHEMA_REVISION) {\n                    throw new ConfigForgeRuntimeException(\"Schema revision mismatch for '\" + DATA_FILE + \"': expected \" + EXPECTED_SCHEMA_REVISION + \", got \" + schemaRevision);\n                }\n");
+    }
     content.raw("                int rowCount = reader.readRowCount();\n");
     content.raw_fmt(format_args!(
         "                {row_type}[] rows = new {row_type}[rowCount];\n"
@@ -1011,6 +1046,7 @@ fn render_java_table(
     content.raw("                        reader.exitRow();\n");
     content.raw("                    }\n");
     content.raw("                }\n");
+    content.raw("                reader.ensureExhausted();\n");
     content.raw_fmt(format_args!("                return fromRows(rows);\n"));
     content.raw("            } catch (RuntimeException error) {\n");
     content.raw("                throw new ConfigForgeRuntimeException(\"Failed to load table '\" + DATA_FILE + \"'\", error);\n");
@@ -1360,20 +1396,40 @@ fn render_object_loader(
     table: &CodeTable,
     names: &JavaNames,
 ) -> Result<()> {
+    let row_type = names.row_type_name(&table.name)?;
+    if let Some(revision) = table.schema_revision {
+        content.raw_fmt(format_args!(
+            "    private static final long {}_EXPECTED_SCHEMA_REVISION = Long.parseUnsignedLong(\"{revision}\");\n",
+            names.type_name(&table.name)?.to_uppercase()
+        ));
+        content.raw("\n");
+    }
     content.raw_fmt(format_args!(
         "    private static {} load{}(ConfigForgeRuntimeDataLoader loader) {{\n",
-        names.row_type_name(&table.name)?,
+        row_type,
         names.type_name(&table.name)?
     ));
+    let revision_constant = format!(
+        "{}_EXPECTED_SCHEMA_REVISION",
+        names.type_name(&table.name)?.to_uppercase()
+    );
     content.raw_fmt(format_args!(
         "        ConfigForgeRuntimeDataReader reader = loader.open({:?});\n",
         table.data_file
     ));
     content.raw("        try {\n");
+    if table.schema_revision.is_some() {
+        content.raw_fmt(format_args!(
+            "            Long schemaRevision = reader.schemaRevision();\n            if (schemaRevision != null && schemaRevision.longValue() != {revision_constant}) {{\n                throw new ConfigForgeRuntimeException(\"Schema revision mismatch for '{}' expected \" + {revision_constant} + \", got \" + schemaRevision);\n            }}\n",
+            table.data_file
+        ));
+    }
     content.raw_fmt(format_args!(
-        "            return {}(reader);\n",
+        "            {row_type} value = {}(reader);\n",
         names.read_type_function_name(&format!("{}_row", table.name))?
     ));
+    content.raw("            reader.ensureExhausted();\n");
+    content.raw("            return value;\n");
     content.raw("        } catch (RuntimeException error) {\n");
     content.raw_fmt(format_args!(
         "            throw new ConfigForgeRuntimeException(\"Failed to load object '{}'\", error);\n",

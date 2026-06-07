@@ -36,6 +36,10 @@ public class ConfigForgeMessagePackRuntimeDataReader {
         stack.pop();
     }
 
+    public Long schemaRevision() {
+        return null;
+    }
+
     public int readRowCount() {
         Object current = stack.peek();
         if (current instanceof Map && ((Map<?, ?>) current).get("rows") instanceof List) {
@@ -67,6 +71,25 @@ public class ConfigForgeMessagePackRuntimeDataReader {
 
     public void exitListElement() {
         stack.pop();
+    }
+
+    public void beginRecord(int optionalSlotCount) {
+    }
+
+    public void endRecord() {
+    }
+
+    public int readEnumIndex(String[] variants) {
+        String value = readString();
+        for (int index = 0; index < variants.length; index++) {
+            if (variants[index].equals(value)) {
+                return index;
+            }
+        }
+        throw new IllegalStateException("unknown enum value: " + value);
+    }
+
+    public void ensureExhausted() {
     }
 
     public long readInt() {

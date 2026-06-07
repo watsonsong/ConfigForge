@@ -91,7 +91,8 @@ fn builds_target_from_project_config() {
     let ts_code = fs::read_to_string(ts_out_dir.join("generated.ts")).expect("ts code");
     assert!(rust_code.contains("pub struct ItemsRow"));
     assert!(rust_code.contains("pub struct GameRulesRow"));
-    assert!(rust_code.contains("pub use config_forge_runtime_reader_core"));
+    assert!(rust_code.contains("pub trait RuntimeDataReader"));
+    assert!(!rust_code.contains("pub use config_forge_runtime_reader_core"));
     assert!(!rust_code.contains("pub struct GameRulesTable"));
     assert!(rust_code.contains("RuntimeDataLoader"));
     assert!(rust_code.contains("pub trait TextTranslator"));

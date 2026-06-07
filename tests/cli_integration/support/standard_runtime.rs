@@ -534,6 +534,11 @@ pub(crate) fn verify_standard_generated_csharp_runtime(fixture_root: &std::path:
         project_dir.join("MessagePackRuntimeDataReader.cs"),
     )
     .expect("C# MessagePack runtime reader should be copied into harness");
+    fs::copy(
+        fixture_root.join("../../../runtime/csharp/binary_reader/BinaryRuntimeDataReader.cs"),
+        project_dir.join("BinaryRuntimeDataReader.cs"),
+    )
+    .expect("C# binary runtime reader should be copied into harness");
     fs::write(
         project_dir.join("ConfigForgeCSharpHarness.csproj"),
         r#"<Project Sdk="Microsoft.NET.Sdk">
@@ -551,6 +556,8 @@ pub(crate) fn verify_standard_generated_csharp_runtime(fixture_root: &std::path:
         project_dir.join("Program.cs"),
         r#"
 using System;
+using System.Collections.Generic;
+using ConfigForge.Runtime.BinaryReader;
 using ConfigForge.Runtime.JsonReader;
 using ConfigForge.Runtime.MessagePackReader;
 using ReferenceGame.Config;
@@ -565,15 +572,20 @@ static void Check(bool condition, string message)
 
 var dataDir = Environment.GetEnvironmentVariable("DATA_DIR") ?? throw new Exception("DATA_DIR missing");
 var msgpackDataDir = Environment.GetEnvironmentVariable("MSGPACK_DATA_DIR") ?? throw new Exception("MSGPACK_DATA_DIR missing");
+var binaryDataDir = Environment.GetEnvironmentVariable("BIN_DATA_DIR") ?? throw new Exception("BIN_DATA_DIR missing");
 
 CheckRuntime(new JsonRuntimeDataLoader(dataDir), "json eager");
 CheckLazyRuntime(new JsonRuntimeDataLoader(dataDir), "json lazy");
 CheckRuntime(new MessagePackRuntimeDataLoader(msgpackDataDir), "messagepack eager");
 CheckLazyRuntime(new MessagePackRuntimeDataLoader(msgpackDataDir), "messagepack lazy");
+CheckRuntime(new BinaryRuntimeDataLoader(binaryDataDir), "binary eager");
+CheckLazyRuntime(new BinaryRuntimeDataLoader(binaryDataDir), "binary lazy");
 CheckRuntime(new ConfigForgeJsonRuntimeDataLoaderAdapter(dataDir), "json generated adapter eager");
 CheckLazyRuntime(new CountingAdapter(new ConfigForgeJsonRuntimeDataLoaderAdapter(dataDir)), "json generated adapter lazy");
 CheckRuntime(new ConfigForgeMessagePackRuntimeDataLoaderAdapter(msgpackDataDir), "messagepack generated adapter eager");
 CheckLazyRuntime(new CountingAdapter(new ConfigForgeMessagePackRuntimeDataLoaderAdapter(msgpackDataDir)), "messagepack generated adapter lazy");
+CheckRuntime(new ConfigForgeBinaryRuntimeDataLoaderAdapter(binaryDataDir), "binary generated adapter eager");
+CheckLazyRuntime(new CountingAdapter(new ConfigForgeBinaryRuntimeDataLoaderAdapter(binaryDataDir)), "binary generated adapter lazy");
 
 static void CheckRuntime(IConfigForgeRuntimeDataLoader loader, string label)
 {
@@ -659,6 +671,22 @@ sealed class MessagePackRuntimeDataLoader : ICountingRuntimeDataLoader
     }
 }
 
+sealed class BinaryRuntimeDataLoader : ICountingRuntimeDataLoader
+{
+    private readonly BinaryRuntimeDataFileLoader _loader;
+    public int OpenCount => _loader.OpenCount;
+
+    public BinaryRuntimeDataLoader(string root)
+    {
+        _loader = new BinaryRuntimeDataFileLoader(root);
+    }
+
+    public IConfigForgeRuntimeDataReader Open(string path)
+    {
+        return new BinaryRuntimeDataReaderAdapter(_loader.OpenReader(path));
+    }
+}
+
 sealed class JsonRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader
 {
     private readonly JsonRuntimeDataReader _reader;
@@ -671,12 +699,17 @@ sealed class JsonRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader
     public void EnterRequiredField(string name) => _reader.EnterRequiredField(name);
     public bool EnterOptionalField(string name) => _reader.EnterOptionalField(name);
     public void ExitField() => _reader.ExitField();
+    public ulong? SchemaRevision() => _reader.SchemaRevision();
     public int ReadRowCount() => _reader.ReadRowCount();
     public void EnterRow(int index) => _reader.EnterRow(index);
     public void ExitRow() => _reader.ExitRow();
     public int ReadListLength() => _reader.ReadListLength();
     public void EnterListElement(int index) => _reader.EnterListElement(index);
     public void ExitListElement() => _reader.ExitListElement();
+    public void BeginRecord(int optionalSlotCount) => _reader.BeginRecord(optionalSlotCount);
+    public void EndRecord() => _reader.EndRecord();
+    public int ReadEnumIndex(IReadOnlyList<string> variants) => _reader.ReadEnumIndex(variants);
+    public void EnsureExhausted() => _reader.EnsureExhausted();
     public long ReadInt() => _reader.ReadInt();
     public double ReadFloat() => _reader.ReadFloat();
     public bool ReadBool() => _reader.ReadBool();
@@ -695,12 +728,46 @@ sealed class MessagePackRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader
     public void EnterRequiredField(string name) => _reader.EnterRequiredField(name);
     public bool EnterOptionalField(string name) => _reader.EnterOptionalField(name);
     public void ExitField() => _reader.ExitField();
+    public ulong? SchemaRevision() => _reader.SchemaRevision();
     public int ReadRowCount() => _reader.ReadRowCount();
     public void EnterRow(int index) => _reader.EnterRow(index);
     public void ExitRow() => _reader.ExitRow();
     public int ReadListLength() => _reader.ReadListLength();
     public void EnterListElement(int index) => _reader.EnterListElement(index);
     public void ExitListElement() => _reader.ExitListElement();
+    public void BeginRecord(int optionalSlotCount) => _reader.BeginRecord(optionalSlotCount);
+    public void EndRecord() => _reader.EndRecord();
+    public int ReadEnumIndex(IReadOnlyList<string> variants) => _reader.ReadEnumIndex(variants);
+    public void EnsureExhausted() => _reader.EnsureExhausted();
+    public long ReadInt() => _reader.ReadInt();
+    public double ReadFloat() => _reader.ReadFloat();
+    public bool ReadBool() => _reader.ReadBool();
+    public string ReadString() => _reader.ReadString();
+}
+
+sealed class BinaryRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader
+{
+    private readonly BinaryRuntimeDataReader _reader;
+
+    public BinaryRuntimeDataReaderAdapter(BinaryRuntimeDataReader reader)
+    {
+        _reader = reader;
+    }
+
+    public void EnterRequiredField(string name) => _reader.EnterRequiredField(name);
+    public bool EnterOptionalField(string name) => _reader.EnterOptionalField(name);
+    public void ExitField() => _reader.ExitField();
+    public ulong? SchemaRevision() => _reader.SchemaRevision();
+    public int ReadRowCount() => _reader.ReadRowCount();
+    public void EnterRow(int index) => _reader.EnterRow(index);
+    public void ExitRow() => _reader.ExitRow();
+    public int ReadListLength() => _reader.ReadListLength();
+    public void EnterListElement(int index) => _reader.EnterListElement(index);
+    public void ExitListElement() => _reader.ExitListElement();
+    public void BeginRecord(int optionalSlotCount) => _reader.BeginRecord(optionalSlotCount);
+    public void EndRecord() => _reader.EndRecord();
+    public int ReadEnumIndex(IReadOnlyList<string> variants) => _reader.ReadEnumIndex(variants);
+    public void EnsureExhausted() => _reader.EnsureExhausted();
     public long ReadInt() => _reader.ReadInt();
     public double ReadFloat() => _reader.ReadFloat();
     public bool ReadBool() => _reader.ReadBool();
@@ -718,6 +785,7 @@ sealed class MessagePackRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader
             "MSGPACK_DATA_DIR",
             fixture_root.join("out/client_data/msgpack"),
         )
+        .env("BIN_DATA_DIR", fixture_root.join("out/client_data/binary"))
         .output()
         .expect("standard generated C# runtime test should run");
     assert_command_success(output, "standard generated C# runtime test");
@@ -734,11 +802,14 @@ pub(crate) fn verify_standard_generated_java_runtime(fixture_root: &std::path::P
     let package_dir = source_root.join("referencegame/config");
     let runtime_package_dir = source_root.join("configforge/runtime/json");
     let msgpack_runtime_package_dir = source_root.join("configforge/runtime/messagepack");
+    let binary_runtime_package_dir = source_root.join("configforge/runtime/binary");
     let class_dir = temp_dir.path().join("classes");
     fs::create_dir_all(&package_dir).expect("Java package dir should be created");
     fs::create_dir_all(&runtime_package_dir).expect("Java runtime package dir should be created");
     fs::create_dir_all(&msgpack_runtime_package_dir)
         .expect("Java MessagePack runtime package dir should be created");
+    fs::create_dir_all(&binary_runtime_package_dir)
+        .expect("Java binary runtime package dir should be created");
     fs::create_dir_all(&class_dir).expect("Java class dir should be created");
     fs::copy(
         fixture_root.join("out/client_code/java/ReferenceGameConfig.java"),
@@ -771,11 +842,25 @@ pub(crate) fn verify_standard_generated_java_runtime(fixture_root: &std::path::P
         )
         .expect("Java MessagePack runtime reader should be copied into harness");
     }
+    let binary_runtime_java_dir =
+        fixture_root.join("../../../runtime/java/binary_reader/src/configforge/runtime/binary");
+    for file_name in [
+        "ConfigForgeBinaryRuntimeDataLoader.java",
+        "ConfigForgeBinaryRuntimeDataReader.java",
+    ] {
+        fs::copy(
+            binary_runtime_java_dir.join(file_name),
+            binary_runtime_package_dir.join(file_name),
+        )
+        .expect("Java binary runtime reader should be copied into harness");
+    }
     fs::write(
         source_root.join("RuntimeCheck.java"),
         r#"
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import configforge.runtime.binary.ConfigForgeBinaryRuntimeDataLoader;
+import configforge.runtime.binary.ConfigForgeBinaryRuntimeDataReader;
 import configforge.runtime.json.ConfigForgeJsonRuntimeDataLoader;
 import configforge.runtime.json.ConfigForgeJsonRuntimeDataReader;
 import configforge.runtime.messagepack.ConfigForgeMessagePackRuntimeDataLoader;
@@ -786,14 +871,19 @@ public final class RuntimeCheck {
     public static void main(String[] args) throws Exception {
         Path dataDir = Paths.get(System.getenv("DATA_DIR"));
         Path msgpackDataDir = Paths.get(System.getenv("MSGPACK_DATA_DIR"));
+        Path binaryDataDir = Paths.get(System.getenv("BIN_DATA_DIR"));
         checkRuntime(new JsonRuntimeDataLoader(dataDir), "json eager");
         checkLazyRuntime(new JsonRuntimeDataLoader(dataDir), "json lazy");
         checkRuntime(new MessagePackRuntimeDataLoader(msgpackDataDir), "messagepack eager");
         checkLazyRuntime(new MessagePackRuntimeDataLoader(msgpackDataDir), "messagepack lazy");
+        checkRuntime(new BinaryRuntimeDataLoader(binaryDataDir), "binary eager");
+        checkLazyRuntime(new BinaryRuntimeDataLoader(binaryDataDir), "binary lazy");
         checkRuntime(new ReferenceGameConfig.ConfigForgeJsonRuntimeDataLoaderAdapter(dataDir), "json generated adapter eager");
         checkLazyRuntime(new CountingAdapter(new ReferenceGameConfig.ConfigForgeJsonRuntimeDataLoaderAdapter(dataDir)), "json generated adapter lazy");
         checkRuntime(new ReferenceGameConfig.ConfigForgeMessagePackRuntimeDataLoaderAdapter(msgpackDataDir), "messagepack generated adapter eager");
         checkLazyRuntime(new CountingAdapter(new ReferenceGameConfig.ConfigForgeMessagePackRuntimeDataLoaderAdapter(msgpackDataDir)), "messagepack generated adapter lazy");
+        checkRuntime(new ReferenceGameConfig.ConfigForgeBinaryRuntimeDataLoaderAdapter(binaryDataDir), "binary generated adapter eager");
+        checkLazyRuntime(new CountingAdapter(new ReferenceGameConfig.ConfigForgeBinaryRuntimeDataLoaderAdapter(binaryDataDir)), "binary generated adapter lazy");
     }
 
     static void checkRuntime(ReferenceGameConfig.ConfigForgeRuntimeDataLoader loader, String label) {
@@ -885,6 +975,24 @@ public final class RuntimeCheck {
         }
     }
 
+    static final class BinaryRuntimeDataLoader implements CountingRuntimeDataLoader {
+        private final ConfigForgeBinaryRuntimeDataLoader loader;
+        int openCount;
+
+        BinaryRuntimeDataLoader(Path root) {
+            this.loader = new ConfigForgeBinaryRuntimeDataLoader(root);
+        }
+
+        public int openCount() {
+            return openCount;
+        }
+
+        public ReferenceGameConfig.ConfigForgeRuntimeDataReader open(String path) {
+            openCount++;
+            return new BinaryRuntimeDataReaderAdapter(loader.openReader(path));
+        }
+    }
+
     static final class JsonRuntimeDataReaderAdapter implements ReferenceGameConfig.ConfigForgeRuntimeDataReader {
         private final ConfigForgeJsonRuntimeDataReader reader;
 
@@ -895,12 +1003,17 @@ public final class RuntimeCheck {
         public void enterRequiredField(String name) { reader.enterRequiredField(name); }
         public boolean enterOptionalField(String name) { return reader.enterOptionalField(name); }
         public void exitField() { reader.exitField(); }
+        public Long schemaRevision() { return reader.schemaRevision(); }
         public int readRowCount() { return reader.readRowCount(); }
         public void enterRow(int index) { reader.enterRow(index); }
         public void exitRow() { reader.exitRow(); }
         public int readListLength() { return reader.readListLength(); }
         public void enterListElement(int index) { reader.enterListElement(index); }
         public void exitListElement() { reader.exitListElement(); }
+        public void beginRecord(int optionalSlotCount) { reader.beginRecord(optionalSlotCount); }
+        public void endRecord() { reader.endRecord(); }
+        public int readEnumIndex(String[] variants) { return reader.readEnumIndex(variants); }
+        public void ensureExhausted() { reader.ensureExhausted(); }
         public long readInt() { return reader.readInt(); }
         public double readFloat() { return reader.readFloat(); }
         public boolean readBool() { return reader.readBool(); }
@@ -917,12 +1030,44 @@ public final class RuntimeCheck {
         public void enterRequiredField(String name) { reader.enterRequiredField(name); }
         public boolean enterOptionalField(String name) { return reader.enterOptionalField(name); }
         public void exitField() { reader.exitField(); }
+        public Long schemaRevision() { return reader.schemaRevision(); }
         public int readRowCount() { return reader.readRowCount(); }
         public void enterRow(int index) { reader.enterRow(index); }
         public void exitRow() { reader.exitRow(); }
         public int readListLength() { return reader.readListLength(); }
         public void enterListElement(int index) { reader.enterListElement(index); }
         public void exitListElement() { reader.exitListElement(); }
+        public void beginRecord(int optionalSlotCount) { reader.beginRecord(optionalSlotCount); }
+        public void endRecord() { reader.endRecord(); }
+        public int readEnumIndex(String[] variants) { return reader.readEnumIndex(variants); }
+        public void ensureExhausted() { reader.ensureExhausted(); }
+        public long readInt() { return reader.readInt(); }
+        public double readFloat() { return reader.readFloat(); }
+        public boolean readBool() { return reader.readBool(); }
+        public String readString() { return reader.readString(); }
+    }
+
+    static final class BinaryRuntimeDataReaderAdapter implements ReferenceGameConfig.ConfigForgeRuntimeDataReader {
+        private final ConfigForgeBinaryRuntimeDataReader reader;
+
+        BinaryRuntimeDataReaderAdapter(ConfigForgeBinaryRuntimeDataReader reader) {
+            this.reader = reader;
+        }
+
+        public void enterRequiredField(String name) { reader.enterRequiredField(name); }
+        public boolean enterOptionalField(String name) { return reader.enterOptionalField(name); }
+        public void exitField() { reader.exitField(); }
+        public Long schemaRevision() { return reader.schemaRevision(); }
+        public int readRowCount() { return reader.readRowCount(); }
+        public void enterRow(int index) { reader.enterRow(index); }
+        public void exitRow() { reader.exitRow(); }
+        public int readListLength() { return reader.readListLength(); }
+        public void enterListElement(int index) { reader.enterListElement(index); }
+        public void exitListElement() { reader.exitListElement(); }
+        public void beginRecord(int optionalSlotCount) { reader.beginRecord(optionalSlotCount); }
+        public void endRecord() { reader.endRecord(); }
+        public int readEnumIndex(String[] variants) { return reader.readEnumIndex(variants); }
+        public void ensureExhausted() { reader.ensureExhausted(); }
         public long readInt() { return reader.readInt(); }
         public double readFloat() { return reader.readFloat(); }
         public boolean readBool() { return reader.readBool(); }
@@ -946,6 +1091,8 @@ public final class RuntimeCheck {
         .arg(msgpack_runtime_package_dir.join("ConfigForgeMessagePackRuntimeDataLoader.java"))
         .arg(msgpack_runtime_package_dir.join("ConfigForgeMessagePackRuntimeDataReader.java"))
         .arg(msgpack_runtime_package_dir.join("ConfigForgeMessagePackParser.java"))
+        .arg(binary_runtime_package_dir.join("ConfigForgeBinaryRuntimeDataLoader.java"))
+        .arg(binary_runtime_package_dir.join("ConfigForgeBinaryRuntimeDataReader.java"))
         .output()
         .expect("standard generated Java javac should run");
     assert_command_success(output, "standard generated Java javac");
@@ -959,6 +1106,7 @@ public final class RuntimeCheck {
             "MSGPACK_DATA_DIR",
             fixture_root.join("out/client_data/msgpack"),
         )
+        .env("BIN_DATA_DIR", fixture_root.join("out/client_data/binary"))
         .output()
         .expect("standard generated Java runtime test should run");
     assert_command_success(output, "standard generated Java runtime test");

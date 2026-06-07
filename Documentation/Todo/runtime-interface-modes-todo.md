@@ -197,7 +197,7 @@ feat(runtime): add C++ external reader core header
 feat(codegen): prepare C# and Java runtime adapter glue
 ```
 
-## [ ] Step 6：C# / Java binary reader contract 扩展
+## [x] Step 6：C# / Java binary reader contract 扩展
 
 目标：为 C# / Java binary reader 补齐 positional layout 必需 API。
 
@@ -222,6 +222,14 @@ feat(codegen): prepare C# and Java runtime adapter glue
 ```text
 feat(codegen): support C# and Java positional binary readers
 ```
+
+完成记录：
+
+- C# / Java generated runtime reader contract 已补齐 schema revision、record boundary、enum index 与 exhausted check API。
+- generated parser 已在 struct / row / fragment 读取时包裹 record boundary，enum 改为 ordinal/index 读取，table/object load 增加 schema revision 与 exhausted 校验。
+- 新增 C# / Java binary runtime reader，并将 JSON / MessagePack reader 与 generated adapters 补齐新 contract 方法。
+- standard_project C# / Java harness 已覆盖 JSON、MessagePack、Binary 的手写 adapter 与 generated adapter smoke。
+- 验证：`cargo test --manifest-path /Users/bytedance/Documents/ConfigForge/Cargo.toml` 通过。
 
 ## [ ] Step 7：最终文档收敛
 

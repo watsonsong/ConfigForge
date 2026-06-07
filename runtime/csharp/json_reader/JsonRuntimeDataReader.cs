@@ -70,6 +70,8 @@ public class JsonRuntimeDataReader
 
     public void ExitField() => _stack.Pop();
 
+    public ulong? SchemaRevision() => null;
+
     public int ReadRowCount()
     {
         var current = _stack.Peek();
@@ -101,6 +103,31 @@ public class JsonRuntimeDataReader
     public void EnterListElement(int index) => _stack.Push(_stack.Peek()[index]);
 
     public void ExitListElement() => _stack.Pop();
+
+    public void BeginRecord(int optionalSlotCount)
+    {
+    }
+
+    public void EndRecord()
+    {
+    }
+
+    public int ReadEnumIndex(IReadOnlyList<string> variants)
+    {
+        var value = ReadString();
+        for (var index = 0; index < variants.Count; index++)
+        {
+            if (variants[index] == value)
+            {
+                return index;
+            }
+        }
+        throw new InvalidOperationException($"unknown enum value: {value}");
+    }
+
+    public void EnsureExhausted()
+    {
+    }
 
     public long ReadInt()
     {
