@@ -10,6 +10,7 @@ mod codegen;
 mod data;
 mod diagnostic;
 mod exporter;
+mod generator;
 mod meta;
 mod project;
 mod runtime_contract;
