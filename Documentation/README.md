@@ -39,6 +39,7 @@ For future technical overview design, detailed design, user manual writing, and 
 - [`Design/05-data-validation.md`](Design/05-data-validation.md) — data views, filtering, validation semantics, aggregate data exporter inputs, and diagnostics.
 - [`Design/06-export-cli.md`](Design/06-export-cli.md) — export targets, data export formats, artifact model, and CLI commands.
 - [`Design/07-user-manual-and-qa.md`](Design/07-user-manual-and-qa.md) — user workflows, common operations, QA dimensions, and assertion guidance.
+- [`Design/08-asset-validation-and-manifest.md`](Design/08-asset-validation-and-manifest.md) — asset reference validation, asset kind policy, target-aware asset checks, and Asset Manifest design.
 
 ## Implementation Design Set
 

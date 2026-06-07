@@ -164,7 +164,7 @@ Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `typ
 | `messagepack` | 紧凑二进制格式，用于包体和加载性能更敏感的 runtime。 |
 | `bin` | ConfigForge 私有紧密二进制格式；使用 positional typed layout、`.bin` 后缀、最小 magic/version header 和 generated code 的 expected schema revision，不改变 JSON / MessagePack named payload contract。 |
 
-格式实现采用注册工厂模式：核心导出流程只根据 `[[targets.exports]].type` 从 `DataFormatRegistry` 中查找 exporter，不在流程中通过枚举 `match` 分发。新增导出格式应通过注册新的 exporter 实现扩展，避免修改核心导出编排逻辑。当前内置注册器提供 `json`、`messagepack` 与 `bin` 三种 runtime table data exporter，以及 `gettext_pot` / alias `pot`、`lua_table` / alias `lua` 聚合 exporter；`asset_manifest_csv` 等聚合格式仍为后续扩展。`bin` 的具体 wire format 见 `../Implementation/13-runtime-binary-format-detail-design.md`。
+格式实现采用注册工厂模式：核心导出流程只根据 `[[targets.exports]].type` 从 `DataFormatRegistry` 中查找 exporter，不在流程中通过枚举 `match` 分发。新增导出格式应通过注册新的 exporter 实现扩展，避免修改核心导出编排逻辑。当前内置注册器提供 `json`、`messagepack` 与 `bin` 三种 runtime table data exporter，以及 `gettext_pot` / alias `pot`、`lua_table` / alias `lua` 聚合 exporter；`asset_manifest` 等聚合格式仍为后续扩展。`bin` 的具体 wire format 见 `../Implementation/13-runtime-binary-format-detail-design.md`。
 
 别名策略：
 
@@ -457,7 +457,7 @@ deduplicate = true
 | --- | --- |
 | `name` | 当前 target 内唯一的 export task 名称，用于诊断和 artifact key。 |
 | `output` | 数据产物输出目录。聚合格式如果只产生一个文件，应通过格式选项或默认规则确定文件名。 |
-| `type` | exporter 类型 ID，例如 `gettext_pot`、`asset_manifest_csv`。禁止使用模糊 `custom`。 |
+| `type` | exporter 类型 ID，例如 `gettext_pot`、`asset_manifest`。禁止使用模糊 `custom`。 |
 | exporter 专属字段 | 直接摊平在当前 `[[targets.exports]]` 下，例如 `domain`、`file_name`、`source_reference`。 |
 
 所有 export task 产物，无论是 runtime table data、POT / manifest 还是 codegen，都必须一起进入 artifact plan，最终由 Artifact Writer 统一检查路径冲突并写入。当前实现的冲突检查是 lexical path level：会折叠 `.` / `..`，但不会解析 symlink，也不会按大小写不敏感文件系统折叠 path key；平台增强策略见 Implementation / Tech 文档。
@@ -522,13 +522,13 @@ msgstr ""
 - helper 的 lookup contract 应保持语言无关并与当前生成代码一致：输入为 `(msgctxt, msgid)`，返回 translated string 或可选 translated string。`msgctxt` 默认来自 `table.field` / `struct.field`，`msgid` 为 raw text；generic translator 或 `global_function` 返回 missing 时，应回退 raw text。table、field path、record key 等 source metadata 可作为未来扩展，不属于当前 helper contract。
 - 若未来采用 key-driven text，生成代码可以把 raw field 视作 key，并通过同一 helper 访问 translated text；API 名称保持稳定，减少业务迁移成本。
 
-### Asset Manifest CSV
+### Asset Manifest
 
-Asset manifest 同样作为 `[[targets.exports]] type = "asset_manifest_csv"` 的聚合数据导出格式，而不是独立配置层。
+Asset manifest 同样作为 `[[targets.exports]] type = "asset_manifest"` 的聚合数据导出格式，而不是独立配置层。首选输出是 deterministic JSON；CSV 可通过 `format = "csv"` 作为工具链兼容格式。完整目标态见 [`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)。
 
 输入：ExportView 中未被过滤的 asset 字段。
 
-输出：CSV 或其他 manifest 格式。
+输出：JSON、CSV 或其他 manifest 格式。
 
 推荐列：
 
