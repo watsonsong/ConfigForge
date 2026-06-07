@@ -201,7 +201,7 @@ test(integration): support profile-aware tool requirements
 test(integration): register generated runtime harnesses
 ```
 
-## [ ] Step 6：控制 TypeScript 与三方依赖联网行为
+## [x] Step 6：控制 TypeScript 与三方依赖联网行为
 
 目标：避免本地或 CI 中因为 `npx` / FetchContent / package install 隐式联网造成不可重复测试。
 
@@ -218,6 +218,8 @@ test(integration): register generated runtime harnesses
 - `cargo test --test cli_integration standard_project_generated_code_loads_exported_runtime_data`
 - 覆盖 `CONFIG_FORGE_ALLOW_NETWORK=0` 且无 `tsc` 时不调用 `npx` 的分支。
 - 覆盖允许联网时仍可使用 `npx` fallback 的分支，若本机无网络则记录 skip / fail 原因但不能静默通过。
+
+当前实现：新增 `network_allowed()` 并以 `CONFIG_FORGE_ALLOW_NETWORK=1` 作为唯一联网 opt-in；generated TypeScript typecheck、standard_project TypeScript runtime harness 与 TypeScript JSON compliance runner 只有在该变量开启时才允许 `npx --yes -p typescript tsc` fallback。standard_project C++ harness 默认关闭 `CONFIG_FORGE_RUNTIME_FETCH_DEPS`，缺少 RapidJSON / msgpack-cxx 等依赖且未允许联网时明确 skip，而不是隐式 FetchContent。
 
 建议提交：
 

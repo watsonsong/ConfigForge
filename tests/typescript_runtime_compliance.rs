@@ -11,6 +11,12 @@ fn command_exists(command: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn network_allowed() -> bool {
+    std::env::var("CONFIG_FORGE_ALLOW_NETWORK")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
+}
+
 fn assert_command_success(output: std::process::Output, label: &str) {
     assert!(
         output.status.success(),
@@ -28,6 +34,12 @@ fn typescript_json_reader_passes_compliance_cases() {
     }
     if !command_exists("tsc") && !command_exists("npx") {
         eprintln!("skipping TypeScript JSON compliance runner: tsc/npx not found");
+        return;
+    }
+    if !command_exists("tsc") && command_exists("npx") && !network_allowed() {
+        eprintln!(
+            "skipping TypeScript JSON compliance runner: npx fallback requires CONFIG_FORGE_ALLOW_NETWORK=1"
+        );
         return;
     }
 

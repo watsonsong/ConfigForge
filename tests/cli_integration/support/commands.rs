@@ -137,6 +137,12 @@ pub(crate) fn skip_optional_test(test_name: &str, reason: &str) {
     eprintln!("skipping optional test `{test_name}`: {reason}");
 }
 
+pub(crate) fn network_allowed() -> bool {
+    std::env::var("CONFIG_FORGE_ALLOW_NETWORK")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
+}
+
 pub(crate) fn skipped_optional_test_count() -> usize {
     SKIPPED_OPTIONAL_TESTS.load(Ordering::Relaxed)
 }
@@ -273,5 +279,13 @@ mod tests {
     fn parse_tool_list_trims_empty_entries() {
         let values: Vec<_> = super::parse_tool_list(Some(" cmake, ,node,, ")).collect();
         assert_eq!(values, vec!["cmake", "node"]);
+    }
+
+    #[test]
+    fn network_allowed_defaults_to_false_without_env() {
+        // This test relies on the standard test environment not setting the opt-in variable.
+        if std::env::var("CONFIG_FORGE_ALLOW_NETWORK").is_err() {
+            assert!(!super::network_allowed());
+        }
     }
 }

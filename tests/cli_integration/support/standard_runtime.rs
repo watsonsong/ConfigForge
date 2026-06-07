@@ -4,9 +4,9 @@
 use std::{fs, process::Command as StdCommand};
 
 use super::{
-    assert_command_success, command_exists, require_any_tool_or_skip, require_tool_or_skip,
-    skip_language_or_continue, skipped_optional_test_count,
-    verify_standard_generated_cpp_unreal_runtime,
+    assert_command_success, command_exists, network_allowed, require_any_tool_or_skip,
+    require_tool_or_skip, skip_language_or_continue, skip_optional_test,
+    skipped_optional_test_count, verify_standard_generated_cpp_unreal_runtime,
 };
 
 pub(crate) struct GeneratedRuntimeHarness {
@@ -379,7 +379,7 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
                 set(CMAKE_CXX_STANDARD_REQUIRED ON)
                 set(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER ON CACHE BOOL "" FORCE)
                 set(CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER ON CACHE BOOL "" FORCE)
-                set(CONFIG_FORGE_RUNTIME_FETCH_DEPS ON CACHE BOOL "" FORCE)
+                set(CONFIG_FORGE_RUNTIME_FETCH_DEPS {fetch_deps} CACHE BOOL "" FORCE)
                 add_subdirectory({runtime_cpp_dir:?} config_forge_runtime)
 
                 find_package(Intl QUIET)
@@ -429,7 +429,8 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
             generated_external_cpp_dir = generated_external_cpp_dir.display().to_string(),
             binary_generated_cpp_dir = generated_cpp_dir.display().to_string(),
             harness_cpp_dir = harness_cpp_dir.display().to_string(),
-            temp_dir = temp_dir.path().display().to_string()
+            temp_dir = temp_dir.path().display().to_string(),
+            fetch_deps = if network_allowed() { "ON" } else { "OFF" }
         ),
     )
     .expect("C++ CMake harness should be written");
@@ -442,6 +443,13 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
         .arg(&build_dir)
         .output()
         .expect("standard generated C++ CMake configure should run");
+    if !output.status.success() && !network_allowed() {
+        skip_optional_test(
+            "standard generated C++ runtime test",
+            "C++ runtime dependencies are unavailable and CONFIG_FORGE_ALLOW_NETWORK=1 is not set",
+        );
+        return;
+    }
     assert_command_success(output, "standard generated C++ CMake configure");
 
     let output = StdCommand::new("cmake")
@@ -559,7 +567,7 @@ pub(crate) fn verify_standard_generated_typescript_runtime(fixture_root: &std::p
                 .expect("standard generated TypeScript tsc should run"),
             "standard generated TypeScript tsc",
         );
-    } else if command_exists("npx") {
+    } else if command_exists("npx") && network_allowed() {
         assert_command_success(
             StdCommand::new("npx")
                 .args(["--yes", "-p", "typescript", "tsc", "--project"])
@@ -568,6 +576,12 @@ pub(crate) fn verify_standard_generated_typescript_runtime(fixture_root: &std::p
                 .expect("standard generated TypeScript npx tsc should run"),
             "standard generated TypeScript npx tsc",
         );
+    } else if command_exists("npx") {
+        skip_optional_test(
+            "standard generated TypeScript runtime test",
+            "npx fallback requires CONFIG_FORGE_ALLOW_NETWORK=1",
+        );
+        return;
     } else {
         let _ = require_any_tool_or_skip(
             "standard generated TypeScript runtime test",

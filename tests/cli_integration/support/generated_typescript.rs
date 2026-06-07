@@ -3,7 +3,10 @@
 
 use std::{fs, process::Command as StdCommand};
 
-use super::{assert_command_success, command_exists, require_any_tool_or_skip};
+use super::{
+    assert_command_success, command_exists, network_allowed, require_any_tool_or_skip,
+    skip_optional_test,
+};
 
 pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
     fs::write(
@@ -191,7 +194,7 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 .expect("generated TypeScript type check should run"),
             "generated TypeScript tsc",
         );
-    } else if command_exists("npx") {
+    } else if command_exists("npx") && network_allowed() {
         assert_command_success(
             StdCommand::new("npx")
                 .args(["--yes", "-p", "typescript", "tsc", "--project"])
@@ -199,6 +202,11 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 .output()
                 .expect("generated TypeScript npx type check should run"),
             "generated TypeScript npx tsc",
+        );
+    } else if command_exists("npx") {
+        skip_optional_test(
+            "generated TypeScript type check",
+            "npx fallback requires CONFIG_FORGE_ALLOW_NETWORK=1",
         );
     } else {
         let _ = require_any_tool_or_skip("generated TypeScript type check", &["tsc", "npx"]);
@@ -253,7 +261,7 @@ pub(crate) fn verify_generated_typescript_global_i18n(generated_dir: &std::path:
                 .expect("generated TypeScript global i18n type check should run"),
             "generated TypeScript global i18n tsc",
         );
-    } else if command_exists("npx") {
+    } else if command_exists("npx") && network_allowed() {
         assert_command_success(
             StdCommand::new("npx")
                 .args(["--yes", "-p", "typescript", "tsc", "--project"])
@@ -261,6 +269,11 @@ pub(crate) fn verify_generated_typescript_global_i18n(generated_dir: &std::path:
                 .output()
                 .expect("generated TypeScript global i18n npx type check should run"),
             "generated TypeScript global i18n npx tsc",
+        );
+    } else if command_exists("npx") {
+        skip_optional_test(
+            "generated TypeScript global i18n type check",
+            "npx fallback requires CONFIG_FORGE_ALLOW_NETWORK=1",
         );
     } else {
         let _ = require_any_tool_or_skip(
