@@ -33,9 +33,8 @@ pub use build::{
 pub use codegen::{
     CaseStyle, CheckedStreamingCodeWriter, CodeArtifactOptions, CodeExportInput, CodeExportProject,
     CodeExportTarget, CodeWriterConfig, CodeWriterLike, CodegenOptions, CodegenTaskConfig,
-    CppCodegenOptions, CppUnrealCodegenOptions, I18nFunctionReturn, I18nMode, I18nOptions,
-    IndentStyle, KeywordConflictPolicy, NamingConfig, PartialCodeWriterConfig, PartialNamingConfig,
-    RustCodegenOptions, StreamingCodeWriter, TypeScriptCodegenOptions, default_module_name,
+    I18nFunctionReturn, I18nMode, I18nOptions, IndentStyle, KeywordConflictPolicy, NamingConfig,
+    PartialCodeWriterConfig, PartialNamingConfig, StreamingCodeWriter, default_module_name,
 };
 pub use data::{
     AsyncSourceReadShell, CsvDataReader, DataLoadPlan, DataLoader, DataProvider, DataRow, DataSet,
@@ -53,8 +52,10 @@ pub use exporter::{
     RuntimeArtifactPlan, TargetDataConfig, builtin_exporters,
 };
 pub use generator::{
-    LuaTableExporter, SchemaDoc, SchemaDocExportConfig, SchemaDocFormat, SchemaDocOptions,
-    render_schema_doc_index_markdown, render_schema_table_markdown,
+    CSharpCodegenOptions, CppCodegenOptions, CppUnrealCodegenOptions, CppUnrealSupportLevel,
+    JavaCodegenOptions, LuaTableExporter, RustCodegenOptions, SchemaDoc, SchemaDocExportConfig,
+    SchemaDocFormat, SchemaDocOptions, TypeScriptCodegenOptions, render_schema_doc_index_markdown,
+    render_schema_table_markdown,
 };
 pub use meta::{
     EnumMeta, EnumValueMeta, ExportCondition, FieldForeignKeyMeta, FieldMeta,

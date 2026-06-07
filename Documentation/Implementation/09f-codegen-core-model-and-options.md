@@ -20,29 +20,22 @@
 pub(crate) trait CodeGenerator: Send + Sync {
     fn language(&self) -> &'static str;
     fn language_aliases(&self) -> &'static [&'static str] { &[] }
-    fn supports_language(&self, language: &str) -> bool;
     fn default_module_name(&self) -> &'static str;
     fn default_naming(&self) -> NamingConfig;
     #[cfg(test)]
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<GeneratedFile>>;
     fn generate_to_sink(&self, input: &CodeExportInput<'_>, sink: &ArtifactSink) -> Result<()>;
 }
-
-pub(crate) fn builtin_generators() -> Vec<Box<dyn CodeGenerator>>;
-pub(crate) fn find_generator<'a>(
-    generators: &'a [Box<dyn CodeGenerator>],
-    language: &str,
-) -> Option<&'a dyn CodeGenerator>;
 ```
 
 注册表职责：
 
 - `CodeGenerator::language()` 返回规范语言名，例如 `rust`、`cpp`、`typescript`。
 - `language_aliases()` 提供兼容别名，例如 C++ 支持 `c++`，TypeScript 支持 `ts`。
-- 每个语言模块维护自己的 `LANGUAGE` 常量，例如 `src/codegen/rust/mod.rs` 中的 `LANGUAGE = "rust"`。核心 `src/codegen/mod.rs` 不定义 `pub mod languages`，避免新增语言时回到核心模块增加常量。
+- 每个语言模块维护自己的 `LANGUAGE` 常量，例如 `src/generator/rust/mod.rs` 中的 `LANGUAGE = "rust"`。核心 `src/codegen/mod.rs` 不定义 `pub mod languages`，避免新增语言时回到核心模块增加常量。
 - `CodeExportTarget::from_task` 接收已查找到的 `&dyn CodeGenerator`，由 generator 提供默认模块名和默认命名规则。
-- `src/build/` 只通过 `find_generator(context.generators, task.language)` 查找生成器；找不到时报告“未注册生成器”，不感知具体语言集合。
-- 内置语言的唯一集中注册点是 `builtin_generators()`。当前 `CodeGenerator` / builtin registry 是 crate 内部扩展点，不作为稳定外部 generator plugin API 暴露；外部用户通过 Project Config 选择内置语言，而不是实现该 trait。
+- `src/build/` 只通过 `GeneratorRegistry` 查找 build-facing artifact generator；找不到时报告“未注册生成器”，不感知具体语言集合。
+- 内置语言的集中注册点是 `GeneratorRegistry::with_builtin_generators()`。当前 `CodeGenerator` 是 crate 内部 code artifact adapter 接口，不作为稳定外部 generator plugin API 暴露；外部用户通过 Project Config 选择内置语言，而不是实现该 trait。
 
 ### 9.4.2 `CodeExportTarget`
 
@@ -233,7 +226,7 @@ derive_serde = true
 - `formatting` 是代码生成的跨语言通用格式配置，用于驱动共享 `CodeWriter`：`indent_style = "spaces" | "tab"` 控制缩进 token，`indent_width` 控制 spaces 模式下每级缩进宽度，`trailing_newline` 控制文件末尾是否至少保留一个换行，`trailing_blank_line` 控制文件结束是否保留一个空行（即内容以两个换行结束）。
 - 每个语言生成器通过 `CodeGenerator::default_formatting()` 声明语言默认格式：Rust / C++ 默认为 4 空格，TypeScript 默认为 2 空格；TOML 中 `[targets.exports.formatting]` 只覆盖显式声明的字段。
 - 语言配置不使用 tagged enum；`CodegenTaskConfig` 通过 `#[serde(flatten)]` 把 `[rust]`、`[cpp]`、`[typescript]` 等表保存在 `HashMap<String, toml::Value>` 中。
-- 每个语言生成器只能读取自己的扩展配置，例如 `RustCodegenOptions` 定义在 `src/codegen/rust/mod.rs`，并由 Rust generator 通过 `CodegenOptions::language_options::<RustCodegenOptions>(LANGUAGE)` 解析。
+- 每个语言生成器只能读取自己的扩展配置，例如 `RustCodegenOptions` 定义在 `src/generator/rust/mod.rs`，并由 Rust generator 通过 `CodegenOptions::language_options::<RustCodegenOptions>(LANGUAGE)` 解析。
 - 新增语言时应新增 generator、语言扩展 option struct 和该语言自己的解析逻辑；不修改 IR，不增加中心化 `LanguageCodegenOptions` enum，也不在核心模块增加语言专属 helper。
 - 如果配置中出现当前语言不支持的 `CaseStyle` 或 `KeywordConflictPolicy`，应在 codegen validate 阶段报错。
 

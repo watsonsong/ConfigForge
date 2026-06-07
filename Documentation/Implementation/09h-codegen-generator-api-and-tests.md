@@ -14,7 +14,6 @@
 pub(crate) trait CodeGenerator: Send + Sync {
     fn language(&self) -> &'static str;
     fn language_aliases(&self) -> &'static [&'static str] { &[] }
-    fn supports_language(&self, language: &str) -> bool;
     fn default_module_name(&self) -> &'static str;
     fn default_naming(&self) -> NamingConfig;
     #[cfg(test)]
@@ -40,7 +39,8 @@ pub(crate) struct TypeScriptCodeGenerator;
 
 ```text
 CodegenTaskConfig.language
-  -> find_generator(registry, language)
+  -> GeneratorRegistry::require_generator(language)
+  -> CodeArtifactGenerator adapter / language generator
   -> CodeExportTarget::from_task(task, generator)
   -> CodeExportInput
   -> build CodeModel
@@ -62,10 +62,10 @@ CodegenTaskConfig.language
 
 扩展新语言的步骤：
 
-1. 新增 `src/codegen/<language>/mod.rs`，在模块内定义 `LANGUAGE`、语言专属 options、实现 `CodeGenerator`，返回规范语言名、可选 alias、默认命名规则和生成逻辑。
-2. 新增 `src/codegen/<language>/tests.rs`，覆盖该语言的 loader/reader contract、row/object/parser、index 和命名冲突行为。
+1. 新增 `src/generator/<language>/mod.rs`，在模块内定义 `LANGUAGE`、语言专属 options、实现 `CodeGenerator` 或直接实现 `ArtifactGenerator`，返回规范语言名、可选 alias、默认命名规则和生成逻辑。
+2. 新增 `src/generator/<language>/tests.rs`，覆盖该语言的 loader/reader contract、row/object/parser、index 和命名冲突行为。
 3. 如有语言专属配置，新增 option struct，并通过 `CodegenOptions::language_options<T>("<language>")` 解析。
-4. 将 generator 加入 crate 内部 `builtin_generators()`；如果未来要支持外部插件 registry，应另行设计不暴露 concrete `ArtifactSink` 的稳定 public writer context trait，而不是直接公开当前内部 `CodeGenerator`。
+4. 将 generator 加入 crate 内部 `GeneratorRegistry::with_builtin_generators()`；如果未来要支持外部插件 registry，应另行设计不暴露 concrete `ArtifactSink` 的稳定 public writer context trait，而不是直接公开当前内部 `CodeGenerator`。
 5. 不修改 `CodeModel`、`src/build/` 的分发逻辑，也不新增中心化语言 enum。
 
 ## 9.12 文件组织策略

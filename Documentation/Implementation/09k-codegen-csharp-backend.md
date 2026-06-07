@@ -269,10 +269,10 @@ public sealed partial class LazyGameData : IGameDataAccess
 
 ## 文件组织与 Rust 模块结构
 
-新增源码建议：
+源码结构：
 
 ```text
-src/codegen/csharp/
+src/generator/csharp/
   mod.rs        # CSharpCodeGenerator、options、render orchestration
   types.rs      # CSharpNames、type mapping、key expr / params
   symbols.rs    # generated symbol collision validation
@@ -281,7 +281,7 @@ src/codegen/csharp/
 
 接入点：
 
-- `src/codegen/mod.rs` 注册 `CSharpCodeGenerator` 到 `builtin_generators()`。
+- `src/generator/registry.rs` 注册 `CSharpCodeGenerator` 到 `GeneratorRegistry::with_builtin_generators()`。
 - `CodegenOptions::for_language("csharp")` 返回 C# 默认命名：type/field/function/constant PascalCase。
 - `CodeExportTarget` 使用默认 `generated.cs`，支持 `file_name` 覆盖。
 

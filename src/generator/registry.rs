@@ -1,19 +1,21 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{
-    ConfigForgeError, Result,
-    codegen::{CodeGenerator, builtin_generators},
-    exporter::DataFormatRegistry,
-};
+use crate::{ConfigForgeError, Result, codegen::CodeGenerator, exporter::DataFormatRegistry};
 
 use super::{
     ArtifactGenerator, GeneratorRequirements,
     adapter::{CodeArtifactGenerator, DataArtifactGenerator},
     asset_manifest::AssetManifestExporter,
+    cpp::CppCodeGenerator,
+    cpp_unreal::CppUnrealCodeGenerator,
+    csharp::CSharpCodeGenerator,
     gettext_pot::GettextPotExporter,
+    java::JavaCodeGenerator,
     lua_table::LuaTableExporter,
+    rust::RustCodeGenerator,
     schema_doc::SchemaDocGenerator,
+    typescript::TypeScriptCodeGenerator,
     validation_report::ValidationReportGenerator,
 };
 
@@ -45,7 +47,14 @@ impl GeneratorRegistry {
     pub(crate) fn with_builtin_generators() -> Self {
         Self::new(
             DataFormatRegistry::with_builtin_exporters(),
-            builtin_generators(),
+            vec![
+                Box::new(RustCodeGenerator),
+                Box::new(CppCodeGenerator),
+                Box::new(CppUnrealCodeGenerator),
+                Box::new(CSharpCodeGenerator),
+                Box::new(JavaCodeGenerator),
+                Box::new(TypeScriptCodeGenerator),
+            ],
             vec![
                 Box::new(GettextPotExporter),
                 Box::new(LuaTableExporter),

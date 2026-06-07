@@ -1,14 +1,8 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-mod cpp;
-mod cpp_unreal;
-mod csharp;
-mod ir;
-mod java;
-mod naming;
-mod rust;
-mod typescript;
+pub(crate) mod ir;
+pub(crate) mod naming;
 mod writer;
 
 #[cfg(test)]
@@ -17,20 +11,6 @@ pub(crate) use self::ir::{
     CodeEnum, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel, CodeStruct,
     CodeTable, CodeTableKind, CodeTypeRef, build_code_model,
 };
-pub(crate) use cpp::CppCodeGenerator;
-pub use cpp::CppCodegenOptions;
-pub(crate) use cpp_unreal::CppUnrealCodeGenerator;
-pub use cpp_unreal::CppUnrealCodegenOptions;
-pub(crate) use csharp::CSharpCodeGenerator;
-#[allow(unused_imports)]
-pub use csharp::CSharpCodegenOptions;
-pub(crate) use java::JavaCodeGenerator;
-#[allow(unused_imports)]
-pub use java::JavaCodegenOptions;
-pub(crate) use rust::RustCodeGenerator;
-pub use rust::RustCodegenOptions;
-pub(crate) use typescript::TypeScriptCodeGenerator;
-pub use typescript::TypeScriptCodegenOptions;
 #[cfg(test)]
 pub(crate) use writer::CodeWriter;
 pub use writer::{
@@ -372,24 +352,21 @@ fn validate_generated_file_name(file_name: &str) -> Result<String> {
 }
 
 impl CodeArtifactOptions {
-    pub(crate) fn for_generator(generator: &dyn CodeGenerator) -> Result<Self> {
-        let task = CodegenTaskConfig::for_language(generator.language());
+    pub fn for_language(language: &str) -> Result<Self> {
+        let (canonical, naming, formatting) = language_defaults(language).ok_or_else(|| {
+            ConfigForgeError::Validation(format!("no code generator registered for `{language}`"))
+        })?;
         Ok(Self {
             file_header: None,
             keyword_conflict: KeywordConflictPolicy::SuffixUnderscore,
             i18n: I18nOptions::default(),
-            naming: generator.default_naming(),
-            formatting: generator.default_formatting(),
-            language_options: task.language_options,
+            naming,
+            formatting,
+            language_options: HashMap::from([(
+                canonical.to_owned(),
+                toml::Value::Table(Default::default()),
+            )]),
         })
-    }
-
-    pub fn for_language(language: &str) -> Result<Self> {
-        let generators = builtin_generators();
-        let generator = find_generator(&generators, language).ok_or_else(|| {
-            ConfigForgeError::Validation(format!("no code generator registered for `{language}`"))
-        })?;
-        Self::for_generator(generator)
     }
 
     pub fn language_options<T>(&self, language: &str) -> Result<T>
@@ -453,8 +430,67 @@ impl Default for I18nOptions {
 }
 
 pub fn default_module_name(language: &str) -> Option<&'static str> {
-    let generators = builtin_generators();
-    find_generator(&generators, language).map(|generator| generator.default_module_name())
+    language_defaults(language).map(|(canonical, _, _)| match canonical {
+        "typescript" => "configForgeGenerated",
+        "csharp" => "ConfigForge.Generated",
+        "java" => "configforge.generated",
+        _ => "config_forge_generated",
+    })
+}
+
+fn language_defaults(language: &str) -> Option<(&'static str, NamingConfig, CodeWriterConfig)> {
+    let canonical = match language {
+        "rust" => "rust",
+        "cpp" | "c++" => "cpp",
+        "cpp_unreal" => "cpp_unreal",
+        "typescript" | "ts" => "typescript",
+        "csharp" | "cs" => "csharp",
+        "java" | "jvm" => "java",
+        _ => return None,
+    };
+    let naming = match canonical {
+        "rust" => NamingConfig {
+            type_name: CaseStyle::PascalCase,
+            enum_value: CaseStyle::PascalCase,
+            field: CaseStyle::SnakeCase,
+            function: CaseStyle::SnakeCase,
+            constant: CaseStyle::ScreamingSnakeCase,
+        },
+        "cpp" => NamingConfig {
+            type_name: CaseStyle::PascalCase,
+            enum_value: CaseStyle::PascalCase,
+            field: CaseStyle::SnakeCase,
+            function: CaseStyle::PascalCase,
+            constant: CaseStyle::PascalCase,
+        },
+        "cpp_unreal" | "csharp" => NamingConfig {
+            type_name: CaseStyle::PascalCase,
+            enum_value: CaseStyle::PascalCase,
+            field: CaseStyle::PascalCase,
+            function: CaseStyle::PascalCase,
+            constant: CaseStyle::PascalCase,
+        },
+        "typescript" => NamingConfig {
+            type_name: CaseStyle::PascalCase,
+            enum_value: CaseStyle::Preserve,
+            field: CaseStyle::CamelCase,
+            function: CaseStyle::CamelCase,
+            constant: CaseStyle::CamelCase,
+        },
+        "java" => NamingConfig {
+            type_name: CaseStyle::PascalCase,
+            enum_value: CaseStyle::ScreamingSnakeCase,
+            field: CaseStyle::CamelCase,
+            function: CaseStyle::CamelCase,
+            constant: CaseStyle::ScreamingSnakeCase,
+        },
+        _ => unreachable!(),
+    };
+    let formatting = CodeWriterConfig::default().with_indent_width(match canonical {
+        "typescript" => 2,
+        _ => 4,
+    });
+    Some((canonical, naming, formatting))
 }
 
 pub struct CodeExportInput<'meta> {
@@ -478,9 +514,6 @@ pub(crate) trait CodeGenerator: Send + Sync {
     fn language(&self) -> &'static str;
     fn language_aliases(&self) -> &'static [&'static str] {
         &[]
-    }
-    fn supports_language(&self, language: &str) -> bool {
-        self.language() == language || self.language_aliases().contains(&language)
     }
     fn default_module_name(&self) -> &'static str {
         "config_forge_generated"
@@ -569,26 +602,5 @@ pub(crate) fn ensure_unique_generated_symbols(
     Ok(())
 }
 
-pub(crate) fn builtin_generators() -> Vec<Box<dyn CodeGenerator>> {
-    vec![
-        Box::new(RustCodeGenerator),
-        Box::new(CppCodeGenerator),
-        Box::new(CppUnrealCodeGenerator),
-        Box::new(CSharpCodeGenerator),
-        Box::new(JavaCodeGenerator),
-        Box::new(TypeScriptCodeGenerator),
-    ]
-}
-
-pub(crate) fn find_generator<'a>(
-    generators: &'a [Box<dyn CodeGenerator>],
-    language: &str,
-) -> Option<&'a dyn CodeGenerator> {
-    generators
-        .iter()
-        .map(Box::as_ref)
-        .find(|generator| generator.supports_language(language))
-}
-
 #[cfg(test)]
-pub(in crate::codegen) mod tests;
+pub(crate) mod tests;

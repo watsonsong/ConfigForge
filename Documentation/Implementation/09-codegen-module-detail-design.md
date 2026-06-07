@@ -74,14 +74,18 @@ Data Load / Normalize / Validate
 
 ## 9.3 模块结构建议
 
-当前 `src/codegen/` 目录模块（迁移前物理路径）：
+当前 `src/codegen/` 是 code artifact toolkit；具体语言 backend 已迁入 `src/generator/<type_id>/`：
 
 ```text
 src/codegen/
   mod.rs              # 对外 API、re-export、CodeExportTarget / CodeExportInput / Artifact 等核心模型
   ir.rs               # Language-neutral CodeModel IR
   naming.rs           # 目标语言命名规范、保留字处理、冲突检测
-  rust/               # 迁移期 RustCodeGenerator；目标迁入 src/generator/rust/
+  writer.rs           # CodeWriter / StreamingCodeWriter / indentation / trailing newline helper
+  tests.rs            # IR、配置、命名等语言无关公共测试
+
+src/generator/
+  rust/
     mod.rs            # RustCodeGenerator 与生成编排
     runtime.rs        # Rust runtime loader/reader contract 渲染
     types.rs          # Rust enum/struct/table row/fragment 类型渲染
@@ -89,7 +93,7 @@ src/codegen/
     repository.rs     # Rust repository、index、database facade 渲染
     symbols.rs        # RustNames 与符号冲突检查
     tests.rs          # Rust 生成器测试
-  cpp/                # 迁移期 CppCodeGenerator；目标迁入 src/generator/cpp/
+  cpp/
     mod.rs            # CppCodeGenerator 与 header/source 编排
     runtime.rs        # C++ runtime loader/reader contract 渲染
     types.rs          # C++ enum/struct/table row/fragment 类型渲染
@@ -97,22 +101,22 @@ src/codegen/
     repository.rs     # C++ repository、index、database facade 渲染
     symbols.rs        # CppNames 与符号冲突检查
     tests.rs          # C++ 生成器测试
-  cpp_unreal/         # 迁移期 CppUnrealCodeGenerator；目标迁入 src/generator/cpp_unreal/
+  cpp_unreal/
     mod.rs            # CppUnrealCodeGenerator 与 Unreal header/source 编排
     types.rs          # Unreal C++ enum/struct/table row/fragment 类型渲染
     symbols.rs        # Unreal C++ 符号冲突检查
     tests.rs          # Unreal C++ 生成器测试
-  csharp/             # 迁移期 CSharpCodeGenerator；目标迁入 src/generator/csharp/
+  csharp/
     mod.rs            # CSharpCodeGenerator 与单文件编排
     types.rs          # C# 命名、类型映射、key / helper 名称
     symbols.rs        # C# 符号冲突检查
     tests.rs          # C# 生成器测试
-  java/               # 迁移期 JavaCodeGenerator；目标迁入 src/generator/java/
+  java/
     mod.rs            # JavaCodeGenerator 与单文件编排
     types.rs          # Java 命名、类型映射、key / helper 名称
     symbols.rs        # Java 符号冲突检查
     tests.rs          # Java 生成器测试
-  typescript/         # 迁移期 TypeScriptCodeGenerator；目标迁入 src/generator/typescript/
+  typescript/
     mod.rs            # TypeScriptCodeGenerator 与生成编排
     runtime.rs        # TypeScript runtime loader/reader contract 渲染
     types.rs          # TypeScript enum/interface/fragment 类型渲染
@@ -120,15 +124,13 @@ src/codegen/
     repository.rs     # TypeScript repository、index、database facade 渲染
     symbols.rs        # TypeScriptNames 与符号冲突检查
     tests.rs          # TypeScript 生成器测试
-  writer.rs           # CodeWriter / StreamingCodeWriter / indentation / trailing newline helper
-  tests.rs            # IR、配置、命名等语言无关公共测试
 ```
 
-Java backend 已落地为 `src/codegen/java/`，包含 `JavaCodeGenerator`、Java 命名/类型映射、符号冲突检查和单元测试；目标态迁入 `src/generator/java/` 后仍复用 code artifact toolkit 中的 CodeModel / writer / options helper。设计见 [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md)。
+Java backend 已落地为 `src/generator/java/`，包含 `JavaCodeGenerator`、Java 命名/类型映射、符号冲突检查和单元测试，并复用 code artifact toolkit 中的 CodeModel / writer / options helper。设计见 [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md)。
 
-Code artifact toolkit 遵循开闭原则：核心模块只定义语言无关模型、crate 内部 code artifact 辅助 trait、公共配置结构和 writer/helper；每种目标语言作为一等公民独立放在自己的 generator 目录中，语言标识常量、语言专属 options、类型映射、运行时 reader contract 渲染、命名默认值和测试都在该目录内维护。迁移期新增内置语言仍可能通过 `src/codegen/<language>/`、实现 crate 内部 `CodeGenerator` 并注册到 builtin registry 完成；目标态应优先新增 `src/generator/<language>/`，直接作为 concrete `ArtifactGenerator` 注册，并依赖 code artifact toolkit，不回到 IR 或 build 编排层增加语言分支，也不在 toolkit 核心中新增语言常量或语言 options。
+Code artifact toolkit 遵循开闭原则：核心模块只定义语言无关模型、crate 内部 code artifact 辅助 trait、公共配置结构和 writer/helper；每种目标语言作为一等公民独立放在自己的 generator 目录中，语言标识常量、语言专属 options、类型映射、运行时 reader contract 渲染、命名默认值和测试都在该目录内维护。新增内置语言应新增 `src/generator/<language>/`，通过 `GeneratorRegistry` 注册为 build-facing generator，并依赖 code artifact toolkit，不回到 IR 或 build 编排层增加语言分支，也不在 toolkit 核心中新增语言常量或语言 options。
 
-概念边界：`CodeGenerator` 名称中虽然包含 “Generator”，但它不是直接提供给任务系统调度的 build-facing generator trait，而是迁移期 code artifact toolkit 内部的能力接口：提供 language id / alias、默认 module name、naming / formatting、`line_comment_prefix()`、文件头渲染约定，以及最终调用语言 backend 写出代码的入口。当前 language codegen backend 的 requirements 均为 MetaOnly；但 requirements 属于 build-facing generator 调度属性，由统一 `GeneratorRegistry` / `GeneratorRequirements` 表达，并通过 codegen adapter 暴露成 `ArtifactGenerator`。`schema_doc` 已迁为 direct doc `ArtifactGenerator`，不再注册到 codegen builtin registry；Lua 这类 requirements 包含 Meta + Data 的 code-like artifact 复用 `CodeArtifactOptions`，而不是复制配置或伪装成当前 format-agnostic `CodeGenerator`。
+概念边界：`CodeGenerator` 名称中虽然包含 “Generator”，但它不是直接提供给任务系统调度的 build-facing generator trait，而是迁移期 code artifact toolkit 内部的能力接口：提供 language id / alias、默认 module name、naming / formatting、`line_comment_prefix()`、文件头渲染约定，以及最终调用语言 backend 写出代码的入口。当前 language codegen backend 的 requirements 均为 MetaOnly；但 requirements 属于 build-facing generator 调度属性，由统一 `GeneratorRegistry` / `GeneratorRequirements` 表达，并通过 code artifact adapter 暴露成 `ArtifactGenerator`。`schema_doc` 已迁为 direct doc `ArtifactGenerator`，不再注册到 codegen builtin registry；Lua 这类 requirements 包含 Meta + Data 的 code-like artifact 复用 `CodeArtifactOptions`，而不是复制配置或伪装成当前 format-agnostic `CodeGenerator`。
 
 每个语言 generator 目录的 `mod.rs` 只负责实现 build-facing generator 或迁移期 `CodeGenerator` adapter、构造 `CodeModel`、调用语言内各渲染模块并写出生成文件；实际渲染逻辑按 runtime contract、类型声明、reader、repository 和符号解析拆分。当前 `generate_to_sink()` 是 build 调用的标准入口，内置 backend 均通过 `ArtifactSink` 和 streaming writer 直接写出 artifact；legacy `generate() -> Vec<GeneratedFile>` 已降级为 `#[cfg(test)]` 快照 / 等价性测试 helper，不参与 production build。类型映射当前随 `types.rs` / `reader.rs` 保持在语言目录内；若单一语言继续膨胀，可继续在该语言 generator 目录内拆出 `type_mapping.rs`、`index.rs` 等，不应把语言专属逻辑回流到 code artifact toolkit 核心。
 
@@ -189,16 +191,16 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 
 ### 9.4.1 Codegen backend capability matrix
 
-本表是当前内置 code-like generator / 迁移期 codegen backend 的权威能力矩阵。新增、删除或重命名 backend 时，优先更新本表；其他 Design / Implementation / Tech 文档应链接到本节，而不是复制完整 backend 清单。Source module 列记录当前物理路径；目标态语言目录迁入 `src/generator/<type_id>/` 后应同步更新。
+本表是当前内置 code-like generator / 迁移期 codegen backend 的权威能力矩阵。新增、删除或重命名 backend 时，优先更新本表；其他 Design / Implementation / Tech 文档应链接到本节，而不是复制完整 backend 清单。Source module 列记录当前物理路径。
 
 | Backend | Export type / aliases | Current source module | Topic doc | Output shape | Dependency | Core capabilities | Runtime test / adapter status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Rust | `rust` | `src/codegen/rust/` | [`09b-codegen-rust-backend.md`](09b-codegen-rust-backend.md) | single `.rs` | `MetaOnly` | enum、struct、row/object、repository、eager `GameData`、`LazyGameData`、hash/ordered/compound index、relation/text helper、source-order opt-in | standard_project `cargo test`；`runtime/rust/` 已有 JSON / MessagePack / binary reader 模板 |
-| C++ | `cpp` / `c++` | `src/codegen/cpp/` | [`09c-codegen-cpp-backend.md`](09c-codegen-cpp-backend.md) | `.hpp` + `.cpp` | `MetaOnly` | enum、struct、row/object、repository、eager `GameData`、`LazyGameData`、hash/ordered/compound index、relation/text helper、source-order opt-in | standard_project C++17 harness；`runtime/cpp/` 已有 RapidJSON / msgpack-cxx / binary reader adapter |
-| TypeScript | `typescript` / `ts` | `src/codegen/typescript/` | [`09d-codegen-typescript-backend.md`](09d-codegen-typescript-backend.md) | single `.ts` | `MetaOnly` | interface/class、repository、eager `GameData`、`LazyGameData`、async + sync loading、Map index、relation/text helper、source-order opt-in | standard_project `tsc` + node harness；`runtime/typescript/` 已有 core / JSON / MessagePack / binary / node-fs packages |
-| Unreal C++ | `cpp_unreal` | `src/codegen/cpp_unreal/` | [`09j-codegen-cpp-unreal-backend.md`](09j-codegen-cpp-unreal-backend.md) | `.h` + `.cpp` | `MetaOnly` | Unreal containers mode、Blueprint mode、eager `FGameData`、`FLazyGameData`、hash/ordered/compound index、relation/text helper、`type_name_prefix` | standard_project lightweight Unreal shim syntax smoke；真实 UHT / Editor 验证由引擎侧 CI 覆盖；生产 adapter 由 Unreal module 提供 |
-| C# | `csharp` / `cs` | `src/codegen/csharp/` | [`09k-codegen-csharp-backend.md`](09k-codegen-csharp-backend.md) | single `.cs` | `MetaOnly` | enum、class/row/object、repository、eager `GameData`、同步 `LazyGameData`、hash/ordered/compound index、`IGameDataAccess` relation helper、text helper、positional `bin` reader contract | standard_project `dotnet run` + `runtime/csharp/json_reader` / `runtime/csharp/messagepack_reader` / `runtime/csharp/binary_reader` |
-| Java | `java` / `jvm` | `src/codegen/java/` | [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md) | single `.java` root class + nested public static types | `MetaOnly` | enum、class/row/object、repository、eager `GameData`、同步 `LazyGameData`、hash/ordered/compound index、`GameDataAccess` relation helper、text helper、positional `bin` reader contract | standard_project `javac` + `java` + `runtime/java/json_reader` / `runtime/java/messagepack_reader` / `runtime/java/binary_reader` |
+| Rust | `rust` | `src/generator/rust/` | [`09b-codegen-rust-backend.md`](09b-codegen-rust-backend.md) | single `.rs` | `MetaOnly` | enum、struct、row/object、repository、eager `GameData`、`LazyGameData`、hash/ordered/compound index、relation/text helper、source-order opt-in | standard_project `cargo test`；`runtime/rust/` 已有 JSON / MessagePack / binary reader 模板 |
+| C++ | `cpp` / `c++` | `src/generator/cpp/` | [`09c-codegen-cpp-backend.md`](09c-codegen-cpp-backend.md) | `.hpp` + `.cpp` | `MetaOnly` | enum、struct、row/object、repository、eager `GameData`、`LazyGameData`、hash/ordered/compound index、relation/text helper、source-order opt-in | standard_project C++17 harness；`runtime/cpp/` 已有 RapidJSON / msgpack-cxx / binary reader adapter |
+| TypeScript | `typescript` / `ts` | `src/generator/typescript/` | [`09d-codegen-typescript-backend.md`](09d-codegen-typescript-backend.md) | single `.ts` | `MetaOnly` | interface/class、repository、eager `GameData`、`LazyGameData`、async + sync loading、Map index、relation/text helper、source-order opt-in | standard_project `tsc` + node harness；`runtime/typescript/` 已有 core / JSON / MessagePack / binary / node-fs packages |
+| Unreal C++ | `cpp_unreal` | `src/generator/cpp_unreal/` | [`09j-codegen-cpp-unreal-backend.md`](09j-codegen-cpp-unreal-backend.md) | `.h` + `.cpp` | `MetaOnly` | Unreal containers mode、Blueprint mode、eager `FGameData`、`FLazyGameData`、hash/ordered/compound index、relation/text helper、`type_name_prefix` | standard_project lightweight Unreal shim syntax smoke；真实 UHT / Editor 验证由引擎侧 CI 覆盖；生产 adapter 由 Unreal module 提供 |
+| C# | `csharp` / `cs` | `src/generator/csharp/` | [`09k-codegen-csharp-backend.md`](09k-codegen-csharp-backend.md) | single `.cs` | `MetaOnly` | enum、class/row/object、repository、eager `GameData`、同步 `LazyGameData`、hash/ordered/compound index、`IGameDataAccess` relation helper、text helper、positional `bin` reader contract | standard_project `dotnet run` + `runtime/csharp/json_reader` / `runtime/csharp/messagepack_reader` / `runtime/csharp/binary_reader` |
+| Java | `java` / `jvm` | `src/generator/java/` | [`09l-codegen-java-backend.md`](09l-codegen-java-backend.md) | single `.java` root class + nested public static types | `MetaOnly` | enum、class/row/object、repository、eager `GameData`、同步 `LazyGameData`、hash/ordered/compound index、`GameDataAccess` relation helper、text helper、positional `bin` reader contract | standard_project `javac` + `java` + `runtime/java/json_reader` / `runtime/java/messagepack_reader` / `runtime/java/binary_reader` |
 | Schema Doc | `schema_doc` | `src/generator/schema_doc.rs` | [`Design/11-schema-doc-generator.md`](../Design/11-schema-doc-generator.md) | `index.md` + per-table `.md` | `MetaOnly` | SchemaDoc normalized model、target-aware table/field/index/FK visibility、asset/text/validator 摘要、Markdown renderer | schema_doc unit tests；CLI docs-only target integration；standard_project `schema_docs` target |
 
 横向约束：

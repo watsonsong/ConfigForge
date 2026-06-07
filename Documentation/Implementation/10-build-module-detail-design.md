@@ -209,7 +209,7 @@ pub struct BuildTraceStage {
 
 当前行为：`schema_doc` 与语言 codegen 一样读取 linked Meta、project 信息和 effective target tags，然后通过 `ArtifactSink` 输出制品；它不属于 `DataFormatRegistry`，因为不消费 source data / resolved data：
 
-- 内置 language codegen 当前由 `codegen::builtin_generators()` 提供，但 Build 不直接查询 `CodeGenerator`；`GeneratorRegistry` 用 codegen adapter 将其暴露为 build-facing `ArtifactGenerator`。目标态 language generator 应迁入 `src/generator/<language>/` 并直接或通过轻量 adapter 注册，`codegen` 只保留 code artifact toolkit。`schema_doc` 直接实现 doc artifact generator 并由 `GeneratorRegistry` 注册，而不是实现 code-specific `CodeGenerator`。
+- 内置 language codegen 已迁入 `src/generator/<language>/` 并由 `GeneratorRegistry` 注册；迁移期仍可用 code artifact adapter 将 crate-internal `CodeGenerator` 暴露为 build-facing `ArtifactGenerator`。Build 不直接查询 `CodeGenerator`，`codegen` 只保留 code artifact toolkit。`schema_doc` 直接实现 doc artifact generator 并由 `GeneratorRegistry` 注册，而不是实现 code-specific `CodeGenerator`。
 - code-like / schema_doc export task 不选择数据 export task，也不消费 `RuntimeDataFile`。
 - Build 从 `ProjectConfigMeta` 构造共享 `ArtifactProjectInfo`，并为每个 export task 构造统一 `GeneratorCommonInput`；如果 requirements 包含 Data，则在 validation 成功后补充 `GeneratorDataInput`。
 - 迁移期 codegen adapter 从 `GeneratorCommonInput` 派生 `CodeExportInput`，包含 linked meta、target tags、project 信息、project root、target name、target generator config、空 runtime data file list、generated_at；这个转换属于 generator / code artifact toolkit 细节，不属于 Build 调度分支逻辑。

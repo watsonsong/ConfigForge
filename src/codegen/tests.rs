@@ -5,6 +5,10 @@ use std::path::PathBuf;
 
 use crate::{
     ConfigForgeError,
+    generator::{
+        CSharpCodeGenerator, CppCodeGenerator, CppUnrealCodeGenerator, RustCodeGenerator,
+        TypeScriptCodeGenerator, TypeScriptCodegenOptions,
+    },
     meta::{MetaModel, TargetTags},
     runtime_contract::RuntimeDataFile,
 };
@@ -12,7 +16,7 @@ use crate::{
 use super::ir::{CodeForeignKey, CodeRelationCardinality, relation_key_plan};
 use super::*;
 
-pub(in crate::codegen) fn linked_fixture() -> MetaModel {
+pub(crate) fn linked_fixture() -> MetaModel {
     MetaModel::from_toml_str(
         r#"
             [[enums]]
@@ -75,7 +79,7 @@ pub(in crate::codegen) fn linked_fixture() -> MetaModel {
     .expect("fixture meta should parse")
 }
 
-pub(in crate::codegen) fn source_order_fixture() -> MetaModel {
+pub(crate) fn source_order_fixture() -> MetaModel {
     MetaModel::from_toml_str(
         r#"
             [[tables]]
@@ -108,7 +112,7 @@ pub(in crate::codegen) fn source_order_fixture() -> MetaModel {
     .expect("source-order fixture meta should parse")
 }
 
-pub(in crate::codegen) fn indexed_source_order_fixture() -> MetaModel {
+pub(crate) fn indexed_source_order_fixture() -> MetaModel {
     MetaModel::from_toml_str(
         r#"
             [[tables]]
@@ -142,7 +146,7 @@ pub(in crate::codegen) fn indexed_source_order_fixture() -> MetaModel {
     .expect("indexed source-order fixture meta should parse")
 }
 
-pub(in crate::codegen) fn text_fixture() -> MetaModel {
+pub(crate) fn text_fixture() -> MetaModel {
     MetaModel::from_toml_str(
         r#"
             [[tables]]
@@ -176,10 +180,7 @@ pub(in crate::codegen) fn text_fixture() -> MetaModel {
     .expect("text fixture meta should parse")
 }
 
-pub(in crate::codegen) fn input_for<'a>(
-    meta: &'a MetaModel,
-    language: &str,
-) -> CodeExportInput<'a> {
+pub(crate) fn input_for<'a>(meta: &'a MetaModel, language: &str) -> CodeExportInput<'a> {
     let linked = meta.link().expect("fixture meta should link");
     let linked = Box::leak(Box::new(linked));
     CodeExportInput {
@@ -959,7 +960,7 @@ fn code_model_rejects_unsupported_index_key_types() {
     );
 }
 
-pub(in crate::codegen) fn assert_duplicate_generated_identifier(
+pub(crate) fn assert_duplicate_generated_identifier(
     result: crate::Result<Vec<GeneratedFile>>,
     language: &str,
     identifier: &str,

@@ -294,7 +294,7 @@ public static final class LazyGameData implements GameDataAccess {
 源码结构：
 
 ```text
-src/codegen/java/
+src/generator/java/
   mod.rs        # JavaCodeGenerator、options、render orchestration
   types.rs      # JavaNames、type mapping、key expr / params
   symbols.rs    # generated symbol collision validation
@@ -303,7 +303,7 @@ src/codegen/java/
 
 接入点：
 
-- `src/codegen/mod.rs` 注册 `JavaCodeGenerator` 到 `builtin_generators()`。
+- `src/generator/registry.rs` 注册 `JavaCodeGenerator` 到 `GeneratorRegistry::with_builtin_generators()`。
 - `CodegenOptions::for_language("java")` 返回 Java 默认命名：type PascalCase、field/function camelCase、constant screaming snake case。
 - `CodeExportTarget` 使用默认 `GeneratedGameConfig.java`，支持 `file_name` 覆盖；`file_name` stem 必须与 root public class 一致。
 

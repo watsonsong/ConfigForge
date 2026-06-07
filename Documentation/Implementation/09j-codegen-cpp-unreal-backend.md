@@ -1,6 +1,6 @@
 # 09j. cpp_unreal backend 实现设计
 
-本文描述 `cpp_unreal` 生成器的当前实现设计和能力边界。新的 TODO / 分步任务清单应放在 `Documentation/Todo/`；阶段性实施记录放在 `Documentation/DevLogs/`；本文不再作为待办清单维护，而是作为 `src/codegen/cpp_unreal/` backend 的实现设计文档。
+本文描述 `cpp_unreal` 生成器的当前实现设计和能力边界。新的 TODO / 分步任务清单应放在 `Documentation/Todo/`；阶段性实施记录放在 `Documentation/DevLogs/`；本文不再作为待办清单维护，而是作为 `src/generator/cpp_unreal/` backend 的实现设计文档。
 
 ## 当前实现状态
 
@@ -20,7 +20,7 @@
 
 ## 模块结构
 
-`src/codegen/cpp_unreal/` 按生成职责拆分：
+`src/generator/cpp_unreal/` 按生成职责拆分：
 
 | 模块 | 职责 |
 | --- | --- |

@@ -44,15 +44,15 @@
 
 ## Phase 4 — 迁移 language code-like generators
 
-- [ ] 将 `src/codegen/rust/` 迁入 `src/generator/rust/`。
-- [ ] 将 `src/codegen/cpp/` 迁入 `src/generator/cpp/`。
-- [ ] 将 `src/codegen/cpp_unreal/` 迁入 `src/generator/cpp_unreal/`。
-- [ ] 将 `src/codegen/typescript/` 迁入 `src/generator/typescript/`。
-- [ ] 将 `src/codegen/csharp/` 迁入 `src/generator/csharp/`。
-- [ ] 将 `src/codegen/java/` 迁入 `src/generator/java/`。
-- [ ] 让每个 language generator 直接实现 `ArtifactGenerator`，或只保留很薄的 local adapter；逐步删除 `codegen::builtin_generators()` 作为 Build-facing 注册入口。
-- [ ] 将语言无关 `CodeModel` / `CodeWriter` / options 留在 code artifact toolkit，并禁止语言专属逻辑回流。
-- [ ] 更新 codegen capability matrix 中的 source module 路径。
+- [x] 将 `src/codegen/rust/` 迁入 `src/generator/rust/`。
+- [x] 将 `src/codegen/cpp/` 迁入 `src/generator/cpp/`。
+- [x] 将 `src/codegen/cpp_unreal/` 迁入 `src/generator/cpp_unreal/`。
+- [x] 将 `src/codegen/typescript/` 迁入 `src/generator/typescript/`。
+- [x] 将 `src/codegen/csharp/` 迁入 `src/generator/csharp/`。
+- [x] 将 `src/codegen/java/` 迁入 `src/generator/java/`。
+- [x] 让 language generator 由 `GeneratorRegistry` 直接集中注册；迁移期保留 crate-internal `CodeGenerator` + `CodeArtifactGenerator` 薄 adapter，但删除 `codegen::builtin_generators()` 作为 Build-facing 注册入口。
+- [x] 将语言无关 `CodeModel` / `CodeWriter` / options 留在 code artifact toolkit，并禁止语言专属逻辑回流。
+- [x] 更新 codegen capability matrix 中的 source module 路径。
 
 ## Phase 5 — 迁移 runtime table data generators
 
