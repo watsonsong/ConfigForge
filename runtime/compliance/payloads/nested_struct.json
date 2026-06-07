@@ -1,0 +1,13 @@
+{
+  "meta": { "name": "nested_struct" },
+  "rows": [
+    {
+      "item_id": "2001",
+      "reward": {
+        "item_id": "3001",
+        "count": "3"
+      },
+      "attributes": ["fire", "rare"]
+    }
+  ]
+}

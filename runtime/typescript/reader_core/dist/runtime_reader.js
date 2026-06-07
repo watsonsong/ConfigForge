@@ -5,8 +5,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RuntimeValueReader = exports.DEFAULT_RUNTIME_DECODE_LIMITS = exports.SUPPORTED_CONFIG_FORGE_READER_CONTRACT = void 0;
 exports.normalizeRuntimeDecodeLimits = normalizeRuntimeDecodeLimits;
 exports.checkRuntimeDecodeLimit = checkRuntimeDecodeLimit;
-exports.readRuntimeRowCount = readRuntimeRowCount;
-exports.readRuntimeListLength = readRuntimeListLength;
 exports.SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0";
 exports.DEFAULT_RUNTIME_DECODE_LIMITS = Object.freeze({
     maxFileBytes: 64 * 1024 * 1024,
@@ -78,6 +76,17 @@ class RuntimeValueReader {
         }
         throw new Error("reader value is not array/object");
     }
+    enterRequiredField(name) {
+        if (!this.enterField(name)) {
+            throw new Error(`missing required field ${name}`);
+        }
+    }
+    enterOptionalField(name) {
+        return this.enterField(name);
+    }
+    exitField() {
+        this.exit();
+    }
     readRowCount() {
         const length = this.length();
         checkRuntimeDecodeLimit("row count", length, this.limits.maxRows);
@@ -88,13 +97,22 @@ class RuntimeValueReader {
         checkRuntimeDecodeLimit("list length", length, this.limits.maxArrayLength);
         return length;
     }
-    readArrayLength() {
-        return this.readListLength();
+    readEnumIndex(variants) {
+        const value = this.asString();
+        const index = variants.indexOf(value);
+        if (index < 0) {
+            throw new Error(`unknown enum value ${value}`);
+        }
+        return index;
     }
-    decodeLimits() {
-        return this.limits;
+    arrayElementsArePositional() {
+        return false;
     }
-    asNumber() {
+    beginRecord(_optionalSlotCount) {
+    }
+    endRecord() {
+    }
+    asInt64() {
         let parsed;
         const value = this.currentValue();
         if (typeof value === "number") {
@@ -112,7 +130,13 @@ class RuntimeValueReader {
         if (!Number.isFinite(parsed)) {
             throw new Error(`expected finite number-like value, got ${String(value)}`);
         }
+        if (!Number.isSafeInteger(parsed)) {
+            throw new Error(`expected safe integer-like value, got ${String(value)}`);
+        }
         return parsed;
+    }
+    asFloat64() {
+        return this.asFiniteNumber();
     }
     asBool() {
         const value = this.currentValue();
@@ -137,6 +161,28 @@ class RuntimeValueReader {
         }
         throw new Error(`expected string value, got ${String(value)}`);
     }
+    ensureExhausted() {
+    }
+    asFiniteNumber() {
+        let parsed;
+        const value = this.currentValue();
+        if (typeof value === "number") {
+            parsed = value;
+        }
+        else if (typeof value === "string") {
+            if (value.trim().length === 0) {
+                throw new Error("expected non-empty number-like string");
+            }
+            parsed = Number(value);
+        }
+        else {
+            throw new Error(`expected number-like value, got ${String(value)}`);
+        }
+        if (!Number.isFinite(parsed)) {
+            throw new Error(`expected finite number-like value, got ${String(value)}`);
+        }
+        return parsed;
+    }
     currentValue() {
         return this.stack[this.stack.length - 1];
     }
@@ -145,21 +191,6 @@ class RuntimeValueReader {
     }
 }
 exports.RuntimeValueReader = RuntimeValueReader;
-function readRuntimeRowCount(reader) {
-    if (!reader.readRowCount) {
-        throw new Error("runtime reader does not support row count");
-    }
-    return reader.readRowCount();
-}
-function readRuntimeListLength(reader) {
-    if (reader.readListLength) {
-        return reader.readListLength();
-    }
-    if (reader.readArrayLength) {
-        return reader.readArrayLength();
-    }
-    throw new Error("runtime reader does not support list length");
-}
 function normalizeLimit(label, value, fallback) {
     const resolved = value ?? fallback;
     if (!Number.isSafeInteger(resolved) || resolved < 0) {

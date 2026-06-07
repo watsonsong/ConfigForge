@@ -13,3 +13,7 @@ name = "config_forge_runtime_reader_core"
 path = "src/lib.rs"
 
 [dependencies]
+
+[dev-dependencies]
+serde_json = "1.0"
+toml = "1.1"

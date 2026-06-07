@@ -47,7 +47,10 @@ fn emits_loader_and_repository_declarations() {
             "inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";"
         )
     );
-    assert!(content.contains("#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH 1"));
+    assert!(!content.contains("CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH"));
+    assert!(!content.contains("ReadOptionalPresent"));
+    assert!(!content.contains("ReadNextInt64"));
+    assert!(!content.contains("ReadArrayLength"));
     assert!(content.contains("static constexpr const char* DataFile = \"items\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("IRuntimeDataDecoder"));

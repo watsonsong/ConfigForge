@@ -44,14 +44,15 @@ Unloaded
 
 Reader 基础语义：
 
-- `enter_field(name)` / `enterField(name)` 用于 Rust / TypeScript named-field layout 的底层 cursor API。C++ runtime contract 已收敛为 schema-driven 字段 API，不再暴露 `EnterField`。
+- `enter_field(name)` / `enterField(name)` 用于 Rust / TypeScript named-field layout 的底层 cursor API，不是 generated parser 的首选入口，也不属于 Rust `RuntimeDataReader` trait 或 TypeScript `RuntimeDataReaderLike` interface 的必选面。当前 generated parser 通过 `enter_required_field` / `enterRequiredField` / `EnterRequiredField` 与 `enter_optional_field` / `enterOptionalField` / `EnterOptionalField` 访问字段；`enter_field` 可以作为 JSON / MessagePack / BSON 等 named reader 的固有 helper 或 adapter 单测入口。positional/binary reader 不需要提供它。C++ runtime contract 已收敛为 schema-driven 字段 API，不再暴露 `EnterField`。
 - `enter_required_field(name)` / `EnterRequiredField(name)` / `enterRequiredField(name)` 是 generated parser 优先使用的 schema-driven 字段入口。Named reader 按字段名进入并执行 required/null 校验；binary reader 对 required 字段执行 no-op，因为字段由 generated schema 顺序隐式定位。
 - `enter_optional_field(name)` / `EnterOptionalField(name)` / `enterOptionalField(name)` 返回字段是否 present。Named reader 默认按字段 missing/null 判断；binary reader 消费当前 record 的下一个 optional presence bit。present 后 generated parser 读取字段 payload，并通过 `exit_field` / `ExitField` / `exitField` 结束字段；binary reader 的 exit field 是 no-op。
 - `read_enum_index(variants)` / `ReadEnumIndex(variants)` / `readEnumIndex(variants)` 统一 enum 读取。Named reader 将 string enum value 映射为 variants 下标；binary reader 读取 ordinal 并校验范围。Generated enum parser 只根据 index 构造目标语言 enum，不再分支判断 reader layout。
 - `enter_index(i)` / `EnterIndex(i)` / `enterIndex(i)` 用于 payload array 或 positional record。越界是读取错误，应带上 index 上下文。进入成功后通过 `exit` / `ExitField` / `exitField` 返回上一层；C++ 使用 `ExitField` 作为统一回退 API。
 - reader contract 采用可回退 cursor，而不是每次字段/数组访问返回新的 reader 对象。C++ adapter 因此避免 `std::make_unique` 子 reader 堆分配；TypeScript adapter 避免频繁临时对象；Rust adapter 避免 cloning `serde_json::Value` / MessagePack `Value` 子树。
 - 分层命名约定：Meta / IR / generated helper 层使用 `List` 表示 schema 字段类型；runtime value / wire payload 中的 `Array` 只表示 JSON / MessagePack / binary 的物理容器 shape。`row_count` / `ReadRowCount()` / `readRowCount()` / `read_row_count()` 只表示 CollectionTable 顶层记录数；`list length` / `ReadListLength()` / `readListLength()` / `read_list_len()` 只表示 Meta list 字段元素数。二者必须是不同语义，互不 fallback。
-- `len` / `length` 只对 payload array / object / map 有意义；对 scalar 调用应报错。Rust / TypeScript named reader 可在 `read_list_len` / `readListLength` 中复用底层 `len` / `length`，但 generated parser 不直接用通用长度 API 读取 list；C++ runtime contract 不暴露通用 `Size()`。兼容别名 `read_array_len` / `readArrayLength` / `ReadArrayLength` 仅保留给旧 adapter，语义委托给 list length，不得 fallback 到 row count。
+- `len` / `length` 只对 payload array / object / map 有意义；对 scalar 调用应报错。Rust / TypeScript named reader 可把 `len` / `length` 作为固有 helper，并在 `read_row_count` / `readRowCount` / `read_list_len` / `readListLength` 中复用它，但 generated parser 不直接用通用长度 API 读取 list；C++ runtime contract 不暴露通用 `Size()` 或 `ReadArrayLength()`。若旧 adapter 为兼容历史仍保留 `readArrayLength` / `ReadArrayLength` 固有 helper，其语义必须委托给 list length，不得 fallback 到 row count；Rust stable trait 不再保留 `read_array_len`。
+- `read_next_*` / `ReadNext*`、`read_optional_present` / `ReadOptionalPresent`、`read_enum_ordinal` / `ReadEnumOrdinal` 是 schema-aware binary / positional reader 的内部或固有 helper。Generated parser 只调用统一的 `as_*` / `As*`、`enter_optional_field` / `EnterOptionalField` 和 `read_enum_index` / `ReadEnumIndex`，由 binary reader 在这些 contract 方法内部消费顺序 payload。它们不应进入 core trait / interface。
 - 最小 scalar API 包含 int、float/number、bool、string。`text`、`asset` 按 string 读取；enum 先按 string 读取，再由 generated parser 校验枚举值。
 - 当 exporter 输出字符串 cell 时，推荐 generated parser helper 兼容 string-to-int、string-to-float、string-to-bool；reader 也可以直接在 `as_*` 中兼容字符串，但跨语言一致性以 generated parser 规则为准。
 - missing 与 null 必须区分：missing 表示字段不存在；null 表示字段存在但值为空。required 字段 missing 或 null 都应由 generated parser 报错；optional field / optional fragment missing 时得到 `None` / `undefined`；null 是否允许作为 optional empty value 由生成器策略统一决定，第一阶段建议将 null 等价为 optional empty，但对 required 字段仍报错。
@@ -76,18 +77,23 @@ RuntimeDataLoader
   open(path) -> RuntimeDataReader
 
 RuntimeDataReader
-  field(name) / index(i)
-  begin_object / end_object
-  begin_array / end_array / len
-  read_scalar(type)
+  enter_required_field(name) / enter_optional_field(name) / exit
+  enter_index(i) / exit
+  read_row_count() / read_list_length()
+  begin_record(optional_slot_count) / end_record()
+  read_enum_index(variants)
+  as_int64() / as_float64() / as_bool() / as_string()
+  schema_revision() / ensure_exhausted()
 ```
 
 各 backend 暴露的 runtime loader / reader 具体命名以 [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 和对应 backend 专题文档为准；语义上都必须提供“打开逻辑 table path 并返回通用 reader cursor”的能力。接口方法不得按表名或字段名生成；表名、字段名、字段顺序只出现在生成的 parser 函数内部。
 
+core contract 只保留 generated parser 直接调用的 schema-driven 方法。reader 可以在实现内部使用更低层 helper，但这些 helper 不属于 core 形状：named JSON / MessagePack / BSON reader 可以有 `enter_field`、`length`；binary reader 可以有 `read_next_*`、optional bitmap、enum ordinal；transport loader 可以有文件系统 / HTTP / 引擎资源缓存。除非 generated parser 直接调用，否则不进入 `reader_core`、稳定 header、npm core package 或 generated inline interface。
+
 reader 需要支持两种读取模式：
 
-1. named-field：生成代码调用 `field("id")`、`field("name")` 等方法，适合 JSON object、MessagePack map、引擎反射对象。
-2. positional：生成代码按 CodeModel 中稳定字段顺序调用 `index(0)`、`index(1)` 或连续 `read_next_*`，适合未来紧密二进制布局。选择 positional layout 时，exporter 和 codegen 必须共享同一字段顺序；顺序定义应来自 linked Meta 中 target-visible fields、fragment fields 和 object fields 的稳定遍历结果。
+1. named-field：生成代码调用 schema-driven required/optional field 方法，reader 内部按字段名定位，适合 JSON object、MessagePack map、引擎反射对象。
+2. positional：生成代码仍调用同一组 schema-driven contract 方法；binary reader 根据 generated parser 的稳定字段顺序顺序消费 payload。选择 positional layout 时，exporter 和 codegen 必须共享同一字段顺序；顺序定义应来自 linked Meta 中 target-visible fields、fragment fields 和 object fields 的稳定遍历结果。
 
 ### 数据格式适配
 

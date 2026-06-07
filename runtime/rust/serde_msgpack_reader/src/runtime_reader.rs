@@ -52,16 +52,17 @@ impl MessagePackValueReader {
         Some(current)
     }
 
-    fn with_current<T>(&self, read: impl FnOnce(&Value) -> RuntimeDataResult<T>) -> RuntimeDataResult<T> {
+    fn with_current<T>(
+        &self,
+        read: impl FnOnce(&Value) -> RuntimeDataResult<T>,
+    ) -> RuntimeDataResult<T> {
         let path = self.path.borrow();
         let value = Self::value_at(&self.value, &path)
             .ok_or_else(|| RuntimeDataError::decode("runtime reader cursor is invalid"))?;
         read(value)
     }
-}
 
-impl RuntimeDataReader for MessagePackValueReader {
-    fn enter_field(&self, name: &'static str) -> RuntimeDataResult<bool> {
+    pub fn enter_field(&self, name: &'static str) -> RuntimeDataResult<bool> {
         let found = {
             let path = self.path.borrow();
             Self::value_at(&self.value, &path)
@@ -76,6 +77,35 @@ impl RuntimeDataReader for MessagePackValueReader {
         Ok(found)
     }
 
+    pub fn len(&self) -> RuntimeDataResult<usize> {
+        self.with_current(|value| {
+            value
+                .as_array()
+                .map(Vec::len)
+                .or_else(|| value.as_object().map(|object| object.len()))
+                .ok_or_else(|| RuntimeDataError::type_mismatch("reader value is not array/object"))
+        })
+    }
+}
+
+impl RuntimeDataReader for MessagePackValueReader {
+    fn enter_required_field(&self, name: &'static str) -> RuntimeDataResult<()> {
+        if !self.enter_field(name)? {
+            return Err(RuntimeDataError::not_found(format!(
+                "missing required field `{name}`"
+            )));
+        }
+        Ok(())
+    }
+
+    fn enter_optional_field(&self, name: &'static str) -> RuntimeDataResult<bool> {
+        self.enter_field(name)
+    }
+
+    fn exit_field(&self) -> RuntimeDataResult<()> {
+        self.exit()
+    }
+
     fn enter_index(&self, index: usize) -> RuntimeDataResult<()> {
         let found = {
             let path = self.path.borrow();
@@ -85,7 +115,9 @@ impl RuntimeDataReader for MessagePackValueReader {
                 .is_some()
         };
         if !found {
-            return Err(RuntimeDataError::not_found(format!("missing array index {index}")));
+            return Err(RuntimeDataError::not_found(format!(
+                "missing array index {index}"
+            )));
         }
         let mut path = self.path.borrow_mut();
         self.limits.check_nesting_depth(path.len() + 1)?;
@@ -101,20 +133,6 @@ impl RuntimeDataReader for MessagePackValueReader {
             .ok_or_else(|| RuntimeDataError::decode("runtime reader cursor stack underflow"))
     }
 
-    fn len(&self) -> RuntimeDataResult<usize> {
-        self.with_current(|value| {
-            value
-                .as_array()
-                .map(Vec::len)
-                .or_else(|| value.as_object().map(|object| object.len()))
-                .ok_or_else(|| RuntimeDataError::type_mismatch("reader value is not array/object"))
-        })
-    }
-
-    fn decode_limits(&self) -> RuntimeDecodeLimits {
-        self.limits
-    }
-
     fn read_row_count(&self) -> RuntimeDataResult<usize> {
         let rows = self.len()?;
         self.limits.check_rows(rows)?;
@@ -125,6 +143,26 @@ impl RuntimeDataReader for MessagePackValueReader {
         let length = self.len()?;
         self.limits.check_list_length(length)?;
         Ok(length)
+    }
+
+    fn array_elements_are_positional(&self) -> bool {
+        false
+    }
+
+    fn begin_record(&self, _optional_slot_count: usize) -> RuntimeDataResult<()> {
+        Ok(())
+    }
+
+    fn end_record(&self) -> RuntimeDataResult<()> {
+        Ok(())
+    }
+
+    fn read_enum_index(&self, variants: &[&str]) -> RuntimeDataResult<usize> {
+        let value = self.as_string()?;
+        variants
+            .iter()
+            .position(|variant| *variant == value.as_str())
+            .ok_or_else(|| RuntimeDataError::decode(format!("unknown enum value `{value}`")))
     }
 
     fn as_i64(&self) -> RuntimeDataResult<i64> {
@@ -142,23 +180,23 @@ impl RuntimeDataReader for MessagePackValueReader {
     }
 
     fn as_f64(&self) -> RuntimeDataResult<f64> {
-        let parsed = self.with_current(|value| {
-            match value {
-                Value::Number(number) => number
-                    .as_f64()
-                    .ok_or_else(|| RuntimeDataError::type_mismatch("number is not f64")),
-                Value::String(text) => text
-                    .parse()
-                    .map_err(|error| RuntimeDataError::decode(format!("invalid f64: {error}"))),
-                other => Err(RuntimeDataError::type_mismatch(format!(
-                    "expected f64-like value, got {other:?}"
-                ))),
-            }
+        let parsed = self.with_current(|value| match value {
+            Value::Number(number) => number
+                .as_f64()
+                .ok_or_else(|| RuntimeDataError::type_mismatch("number is not f64")),
+            Value::String(text) => text
+                .parse()
+                .map_err(|error| RuntimeDataError::decode(format!("invalid f64: {error}"))),
+            other => Err(RuntimeDataError::type_mismatch(format!(
+                "expected f64-like value, got {other:?}"
+            ))),
         })?;
         if parsed.is_finite() {
             Ok(parsed)
         } else {
-            Err(RuntimeDataError::type_mismatch("expected finite f64-like value"))
+            Err(RuntimeDataError::type_mismatch(
+                "expected finite f64-like value",
+            ))
         }
     }
 
@@ -188,6 +226,13 @@ impl RuntimeDataReader for MessagePackValueReader {
         })
     }
 
+    fn schema_revision(&self) -> Option<u64> {
+        None
+    }
+
+    fn ensure_exhausted(&self) -> RuntimeDataResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -355,7 +400,11 @@ mod tests {
                 ..RuntimeDecodeLimits::default()
             },
         );
-        assert!(reader.read_row_count().unwrap_err().message.contains("row count"));
+        assert!(reader
+            .read_row_count()
+            .unwrap_err()
+            .message
+            .contains("row count"));
 
         let reader = MessagePackValueReader::with_limits(
             serde_json::json!([1, 2]),

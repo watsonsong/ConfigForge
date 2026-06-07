@@ -30,16 +30,9 @@ public:
     }
     virtual std::size_t ReadRowCount() { return 0; }
     virtual std::size_t ReadListLength() { throw std::runtime_error("runtime reader does not support list length"); }
-    virtual std::size_t ReadArrayLength() { return ReadListLength(); }
     virtual bool ArrayElementsArePositional() const { return false; }
     virtual void BeginRecord(std::size_t) {}
     virtual void EndRecord() {}
-    virtual bool ReadOptionalPresent() { return false; }
-    virtual std::int64_t ReadNextInt64() { return 0; }
-    virtual double ReadNextDouble() { return 0.0; }
-    virtual bool ReadNextBool() { return false; }
-    virtual std::string ReadNextString() { return {}; }
-    virtual std::uint64_t ReadEnumOrdinal() { return 0; }
     virtual void EnsureExhausted() {}
 };
 
@@ -49,8 +42,6 @@ public:
     virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;
 };
 
-#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH 1
-#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_ARRAY_LENGTH 1
 #define CONFIG_FORGE_RUNTIME_CPP_READER IRuntimeDataReader
 #define CONFIG_FORGE_RUNTIME_CPP_LOADER IRuntimeDataLoader
 #include "config_forge/runtime/binary_reader/runtime_loader.hpp"

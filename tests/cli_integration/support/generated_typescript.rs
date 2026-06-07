@@ -16,7 +16,21 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
 
                 constructor(private readonly path: string) {}
 
-                enterField(name: string): boolean {
+                enterRequiredField(name: string): void {
+                    if (!this.enterField(name)) {
+                        throw new Error(`missing required field: ${name}`);
+                    }
+                }
+
+                enterOptionalField(name: string): boolean {
+                    return this.enterField(name);
+                }
+
+                exitField(): void {
+                    this.exit();
+                }
+
+                private enterField(name: string): boolean {
                     if (name === "stack" || name === "attributes" || name === "skill") {
                         return false;
                     }
@@ -43,7 +57,32 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     this.fields.pop();
                 }
 
-                length(): number {
+                readRowCount(): number {
+                    return this.length();
+                }
+
+                readListLength(): number {
+                    return this.length();
+                }
+
+                readEnumIndex(variants: readonly string[]): number {
+                    const value = this.asString();
+                    const index = variants.indexOf(value);
+                    if (index < 0) {
+                        throw new Error(`unknown enum value: ${value}`);
+                    }
+                    return index;
+                }
+
+                arrayElementsArePositional(): boolean {
+                    return false;
+                }
+
+                beginRecord(_optionalSlotCount: number): void {}
+
+                endRecord(): void {}
+
+                private length(): number {
                     if (this.path === "items" && this.currentField() === "rows") {
                         return 1;
                     }
@@ -56,7 +95,15 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     throw new Error("unexpected length");
                 }
 
-                asNumber(): number {
+                asInt64(): number {
+                    return this.numberValue();
+                }
+
+                asFloat64(): number {
+                    return this.numberValue();
+                }
+
+                private numberValue(): number {
                     if (this.path === "items" && this.currentField() === "id") { return 1; }
                     if (this.path === "items" && this.currentField() === "price") { return 10; }
                     if (this.path === "game_rules" && this.currentField() === "max_player_level") { return 60; }

@@ -162,99 +162,23 @@ impl From<&str> for RuntimeDataError {
 }
 
 pub trait RuntimeDataReader {
-    fn enter_field(&self, name: &'static str) -> RuntimeDataResult<bool>;
+    fn enter_required_field(&self, name: &'static str) -> RuntimeDataResult<()>;
+    fn enter_optional_field(&self, name: &'static str) -> RuntimeDataResult<bool>;
+    fn exit_field(&self) -> RuntimeDataResult<()>;
     fn enter_index(&self, index: usize) -> RuntimeDataResult<()>;
     fn exit(&self) -> RuntimeDataResult<()>;
-    fn len(&self) -> RuntimeDataResult<usize>;
+    fn read_row_count(&self) -> RuntimeDataResult<usize>;
+    fn read_list_len(&self) -> RuntimeDataResult<usize>;
+    fn array_elements_are_positional(&self) -> bool;
+    fn begin_record(&self, optional_slot_count: usize) -> RuntimeDataResult<()>;
+    fn end_record(&self) -> RuntimeDataResult<()>;
+    fn read_enum_index(&self, variants: &[&str]) -> RuntimeDataResult<usize>;
     fn as_i64(&self) -> RuntimeDataResult<i64>;
     fn as_f64(&self) -> RuntimeDataResult<f64>;
     fn as_bool(&self) -> RuntimeDataResult<bool>;
     fn as_string(&self) -> RuntimeDataResult<String>;
-    fn schema_revision(&self) -> Option<u64> {
-        None
-    }
-    fn decode_limits(&self) -> RuntimeDecodeLimits {
-        RuntimeDecodeLimits::default()
-    }
-    fn enter_required_field(&self, name: &'static str) -> RuntimeDataResult<()> {
-        if !self.enter_field(name)? {
-            return Err(RuntimeDataError::not_found(format!(
-                "missing required field `{name}`"
-            )));
-        }
-        Ok(())
-    }
-    fn enter_optional_field(&self, name: &'static str) -> RuntimeDataResult<bool> {
-        if !self.enter_field(name)? {
-            return Ok(false);
-        }
-        Ok(true)
-    }
-    fn exit_field(&self) -> RuntimeDataResult<()> {
-        self.exit()
-    }
-    fn read_enum_index(&self, variants: &[&str]) -> RuntimeDataResult<usize> {
-        let value = self.as_string()?;
-        variants
-            .iter()
-            .position(|variant| *variant == value.as_str())
-            .ok_or_else(|| RuntimeDataError::decode(format!("unknown enum value `{value}`")))
-    }
-    fn read_row_count(&self) -> RuntimeDataResult<usize> {
-        let rows = self.len()?;
-        self.decode_limits().check_rows(rows)?;
-        Ok(rows)
-    }
-    fn read_list_len(&self) -> RuntimeDataResult<usize> {
-        let length = self.len()?;
-        self.decode_limits().check_list_length(length)?;
-        Ok(length)
-    }
-    fn read_array_len(&self) -> RuntimeDataResult<usize> {
-        self.read_list_len()
-    }
-    fn array_elements_are_positional(&self) -> bool {
-        false
-    }
-    fn begin_record(&self, _optional_slot_count: usize) -> RuntimeDataResult<()> {
-        Ok(())
-    }
-    fn end_record(&self) -> RuntimeDataResult<()> {
-        Ok(())
-    }
-    fn read_optional_present(&self) -> RuntimeDataResult<bool> {
-        Err(RuntimeDataError::unsupported(
-            "positional runtime reader is not supported",
-        ))
-    }
-    fn read_next_i64(&self) -> RuntimeDataResult<i64> {
-        Err(RuntimeDataError::unsupported(
-            "positional runtime reader is not supported",
-        ))
-    }
-    fn read_next_f64(&self) -> RuntimeDataResult<f64> {
-        Err(RuntimeDataError::unsupported(
-            "positional runtime reader is not supported",
-        ))
-    }
-    fn read_next_bool(&self) -> RuntimeDataResult<bool> {
-        Err(RuntimeDataError::unsupported(
-            "positional runtime reader is not supported",
-        ))
-    }
-    fn read_next_string(&self) -> RuntimeDataResult<String> {
-        Err(RuntimeDataError::unsupported(
-            "positional runtime reader is not supported",
-        ))
-    }
-    fn read_enum_ordinal(&self) -> RuntimeDataResult<u64> {
-        Err(RuntimeDataError::unsupported(
-            "positional runtime reader is not supported",
-        ))
-    }
-    fn ensure_exhausted(&self) -> RuntimeDataResult<()> {
-        Ok(())
-    }
+    fn schema_revision(&self) -> Option<u64>;
+    fn ensure_exhausted(&self) -> RuntimeDataResult<()>;
 }
 
 pub trait RuntimeDataLoader {
@@ -266,6 +190,8 @@ pub trait RuntimeDataLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
+    use std::{cell::RefCell, fs, path::Path, rc::Rc};
 
     struct LenOnlyReader {
         len: usize,
@@ -286,8 +212,16 @@ mod tests {
     }
 
     impl RuntimeDataReader for LenOnlyReader {
-        fn enter_field(&self, _name: &'static str) -> RuntimeDataResult<bool> {
+        fn enter_required_field(&self, _name: &'static str) -> RuntimeDataResult<()> {
+            Ok(())
+        }
+
+        fn enter_optional_field(&self, _name: &'static str) -> RuntimeDataResult<bool> {
             Ok(false)
+        }
+
+        fn exit_field(&self) -> RuntimeDataResult<()> {
+            Ok(())
         }
 
         fn enter_index(&self, _index: usize) -> RuntimeDataResult<()> {
@@ -298,8 +232,30 @@ mod tests {
             Ok(())
         }
 
-        fn len(&self) -> RuntimeDataResult<usize> {
+        fn read_row_count(&self) -> RuntimeDataResult<usize> {
+            self.limits.check_rows(self.len)?;
             Ok(self.len)
+        }
+
+        fn read_list_len(&self) -> RuntimeDataResult<usize> {
+            self.limits.check_list_length(self.len)?;
+            Ok(self.len)
+        }
+
+        fn array_elements_are_positional(&self) -> bool {
+            false
+        }
+
+        fn begin_record(&self, _optional_slot_count: usize) -> RuntimeDataResult<()> {
+            Ok(())
+        }
+
+        fn end_record(&self) -> RuntimeDataResult<()> {
+            Ok(())
+        }
+
+        fn read_enum_index(&self, _variants: &[&str]) -> RuntimeDataResult<usize> {
+            Err(RuntimeDataError::unsupported("not used in test"))
         }
 
         fn as_i64(&self) -> RuntimeDataResult<i64> {
@@ -318,8 +274,12 @@ mod tests {
             Err(RuntimeDataError::unsupported("not used in test"))
         }
 
-        fn decode_limits(&self) -> RuntimeDecodeLimits {
-            self.limits
+        fn schema_revision(&self) -> Option<u64> {
+            None
+        }
+
+        fn ensure_exhausted(&self) -> RuntimeDataResult<()> {
+            Ok(())
         }
     }
 
@@ -327,23 +287,699 @@ mod tests {
     fn row_count_and_list_length_have_distinct_limits() {
         let reader = LenOnlyReader::new(3, 2, 4);
 
-        let row_error = reader.read_row_count().expect_err("row count should be limited");
+        let row_error = reader
+            .read_row_count()
+            .expect_err("row count should be limited");
         assert!(row_error.message.contains("row count"));
         assert_eq!(reader.read_list_len().expect("list length should pass"), 3);
     }
 
+    #[derive(Debug)]
+    struct ComplianceJsonReader {
+        value: Rc<Value>,
+        path: Rc<RefCell<Vec<CompliancePathSegment>>>,
+    }
+
+    #[derive(Debug)]
+    enum CompliancePathSegment {
+        Field(&'static str),
+        Index(usize),
+    }
+
+    impl ComplianceJsonReader {
+        fn new(value: Value) -> Self {
+            Self {
+                value: Rc::new(value),
+                path: Rc::new(RefCell::new(Vec::new())),
+            }
+        }
+
+        fn value_at<'a>(value: &'a Value, path: &[CompliancePathSegment]) -> Option<&'a Value> {
+            let mut current = value;
+            for segment in path {
+                current = match segment {
+                    CompliancePathSegment::Field(name) => current.get(name)?,
+                    CompliancePathSegment::Index(index) => current.as_array()?.get(*index)?,
+                };
+            }
+            Some(current)
+        }
+
+        fn with_current<T>(
+            &self,
+            read: impl FnOnce(&Value) -> RuntimeDataResult<T>,
+        ) -> RuntimeDataResult<T> {
+            let path = self.path.borrow();
+            let value = Self::value_at(&self.value, &path)
+                .ok_or_else(|| RuntimeDataError::decode("runtime reader cursor is invalid"))?;
+            read(value)
+        }
+
+        fn enter_field(&self, name: &'static str) -> RuntimeDataResult<bool> {
+            let found = {
+                let path = self.path.borrow();
+                Self::value_at(&self.value, &path)
+                    .and_then(|value| value.get(name))
+                    .is_some_and(|value| !value.is_null())
+            };
+            if found {
+                self.path
+                    .borrow_mut()
+                    .push(CompliancePathSegment::Field(name));
+            }
+            Ok(found)
+        }
+
+        fn len(&self) -> RuntimeDataResult<usize> {
+            self.with_current(|value| {
+                value
+                    .as_array()
+                    .map(Vec::len)
+                    .or_else(|| value.as_object().map(|object| object.len()))
+                    .ok_or_else(|| {
+                        RuntimeDataError::type_mismatch("reader value is not array/object")
+                    })
+            })
+        }
+    }
+
+    impl RuntimeDataReader for ComplianceJsonReader {
+        fn enter_required_field(&self, name: &'static str) -> RuntimeDataResult<()> {
+            if !self.enter_field(name)? {
+                return Err(RuntimeDataError::not_found(format!(
+                    "missing required field `{name}`"
+                )));
+            }
+            Ok(())
+        }
+
+        fn enter_optional_field(&self, name: &'static str) -> RuntimeDataResult<bool> {
+            self.enter_field(name)
+        }
+
+        fn exit_field(&self) -> RuntimeDataResult<()> {
+            self.exit()
+        }
+
+        fn enter_index(&self, index: usize) -> RuntimeDataResult<()> {
+            let found = {
+                let path = self.path.borrow();
+                Self::value_at(&self.value, &path)
+                    .and_then(Value::as_array)
+                    .and_then(|values| values.get(index))
+                    .is_some()
+            };
+            if !found {
+                return Err(RuntimeDataError::not_found(format!(
+                    "missing array index {index}"
+                )));
+            }
+            self.path
+                .borrow_mut()
+                .push(CompliancePathSegment::Index(index));
+            Ok(())
+        }
+
+        fn exit(&self) -> RuntimeDataResult<()> {
+            self.path
+                .borrow_mut()
+                .pop()
+                .map(|_| ())
+                .ok_or_else(|| RuntimeDataError::decode("runtime reader cursor stack underflow"))
+        }
+
+        fn read_row_count(&self) -> RuntimeDataResult<usize> {
+            self.len()
+        }
+
+        fn read_list_len(&self) -> RuntimeDataResult<usize> {
+            self.len()
+        }
+
+        fn array_elements_are_positional(&self) -> bool {
+            false
+        }
+
+        fn begin_record(&self, _optional_slot_count: usize) -> RuntimeDataResult<()> {
+            Ok(())
+        }
+
+        fn end_record(&self) -> RuntimeDataResult<()> {
+            Ok(())
+        }
+
+        fn read_enum_index(&self, variants: &[&str]) -> RuntimeDataResult<usize> {
+            let value = self.as_string()?;
+            variants
+                .iter()
+                .position(|variant| *variant == value.as_str())
+                .ok_or_else(|| RuntimeDataError::decode(format!("unknown enum value `{value}`")))
+        }
+
+        fn as_i64(&self) -> RuntimeDataResult<i64> {
+            self.with_current(|value| match value {
+                Value::Number(number) => number
+                    .as_i64()
+                    .ok_or_else(|| RuntimeDataError::type_mismatch("number is not i64")),
+                Value::String(text) => text
+                    .parse()
+                    .map_err(|error| RuntimeDataError::decode(format!("invalid i64: {error}"))),
+                other => Err(RuntimeDataError::type_mismatch(format!(
+                    "expected i64-like value, got {other:?}"
+                ))),
+            })
+        }
+
+        fn as_f64(&self) -> RuntimeDataResult<f64> {
+            let parsed = self.with_current(|value| match value {
+                Value::Number(number) => number
+                    .as_f64()
+                    .ok_or_else(|| RuntimeDataError::type_mismatch("number is not f64")),
+                Value::String(text) => text
+                    .parse()
+                    .map_err(|error| RuntimeDataError::decode(format!("invalid f64: {error}"))),
+                other => Err(RuntimeDataError::type_mismatch(format!(
+                    "expected f64-like value, got {other:?}"
+                ))),
+            })?;
+            if parsed.is_finite() {
+                Ok(parsed)
+            } else {
+                Err(RuntimeDataError::type_mismatch(
+                    "expected finite f64-like value",
+                ))
+            }
+        }
+
+        fn as_bool(&self) -> RuntimeDataResult<bool> {
+            self.with_current(|value| match value {
+                Value::Bool(value) => Ok(*value),
+                Value::String(text) => match text.as_str() {
+                    "true" | "1" => Ok(true),
+                    "false" | "0" => Ok(false),
+                    _ => Err(RuntimeDataError::decode(format!("invalid bool: {text}"))),
+                },
+                other => Err(RuntimeDataError::type_mismatch(format!(
+                    "expected bool-like value, got {other:?}"
+                ))),
+            })
+        }
+
+        fn as_string(&self) -> RuntimeDataResult<String> {
+            self.with_current(|value| match value {
+                Value::String(text) => Ok(text.clone()),
+                other => Err(RuntimeDataError::type_mismatch(format!(
+                    "expected string value, got {other:?}"
+                ))),
+            })
+        }
+
+        fn schema_revision(&self) -> Option<u64> {
+            None
+        }
+
+        fn ensure_exhausted(&self) -> RuntimeDataResult<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    enum PathStep {
+        Field(&'static str),
+        Index(usize),
+    }
+
+    fn enter_path(reader: &ComplianceJsonReader, steps: &[PathStep]) -> RuntimeDataResult<usize> {
+        let mut entered = 0;
+        for step in steps {
+            match step {
+                PathStep::Field(name) => {
+                    if !reader.enter_field(name)? {
+                        return Err(RuntimeDataError::not_found(format!(
+                            "missing field `{name}`"
+                        )));
+                    }
+                }
+                PathStep::Index(index) => reader.enter_index(*index)?,
+            }
+            entered += 1;
+        }
+        Ok(entered)
+    }
+
+    fn exit_path(reader: &ComplianceJsonReader, entered: usize) {
+        for _ in 0..entered {
+            reader.exit().expect("compliance path should exit cleanly");
+        }
+    }
+
+    fn read_payload(name: &str) -> Value {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../compliance/payloads");
+        let content = fs::read_to_string(root.join(name)).expect("compliance payload should exist");
+        serde_json::from_str(&content).expect("compliance payload should be valid JSON")
+    }
+
+    fn read_expected_results() -> toml::Table {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../compliance/expected/scalar_results.toml");
+        let content = fs::read_to_string(path).expect("scalar expected TOML should exist");
+        content
+            .parse::<toml::Table>()
+            .expect("scalar expected TOML should parse")
+    }
+
+    fn read_error_cases() -> toml::Table {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../compliance/expected/error_cases.toml");
+        let content = fs::read_to_string(path).expect("error expected TOML should exist");
+        content
+            .parse::<toml::Table>()
+            .expect("error expected TOML should parse")
+    }
+
+    fn expect_table<'a>(table: &'a toml::Table, key: &str) -> &'a toml::Table {
+        table
+            .get(key)
+            .and_then(toml::Value::as_table)
+            .unwrap_or_else(|| panic!("missing expected table `{key}`"))
+    }
+
+    fn expect_i64(table: &toml::Table, key: &str) -> i64 {
+        table
+            .get(key)
+            .and_then(toml::Value::as_integer)
+            .unwrap_or_else(|| panic!("missing expected integer `{key}`"))
+    }
+
+    fn expect_f64(table: &toml::Table, key: &str) -> f64 {
+        table
+            .get(key)
+            .and_then(toml::Value::as_float)
+            .unwrap_or_else(|| panic!("missing expected float `{key}`"))
+    }
+
+    fn expect_bool(table: &toml::Table, key: &str) -> bool {
+        table
+            .get(key)
+            .and_then(toml::Value::as_bool)
+            .unwrap_or_else(|| panic!("missing expected bool `{key}`"))
+    }
+
+    fn expect_str<'a>(table: &'a toml::Table, key: &str) -> &'a str {
+        table
+            .get(key)
+            .and_then(toml::Value::as_str)
+            .unwrap_or_else(|| panic!("missing expected string `{key}`"))
+    }
+
+    fn read_i64(reader: &ComplianceJsonReader, steps: &[PathStep]) -> i64 {
+        let entered = enter_path(reader, steps).expect("path should be readable");
+        let value = reader.as_i64().expect("value should be i64-compatible");
+        exit_path(reader, entered);
+        value
+    }
+
+    fn read_f64(reader: &ComplianceJsonReader, steps: &[PathStep]) -> f64 {
+        let entered = enter_path(reader, steps).expect("path should be readable");
+        let value = reader.as_f64().expect("value should be f64-compatible");
+        exit_path(reader, entered);
+        value
+    }
+
+    fn read_bool(reader: &ComplianceJsonReader, steps: &[PathStep]) -> bool {
+        let entered = enter_path(reader, steps).expect("path should be readable");
+        let value = reader.as_bool().expect("value should be bool-compatible");
+        exit_path(reader, entered);
+        value
+    }
+
+    fn read_string(reader: &ComplianceJsonReader, steps: &[PathStep]) -> String {
+        let entered = enter_path(reader, steps).expect("path should be readable");
+        let value = reader.as_string().expect("value should be string");
+        exit_path(reader, entered);
+        value
+    }
+
+    fn read_len(reader: &ComplianceJsonReader, steps: &[PathStep]) -> usize {
+        let entered = enter_path(reader, steps).expect("path should be readable");
+        let value = reader.read_list_len().expect("value should have length");
+        exit_path(reader, entered);
+        value
+    }
+
     #[test]
-    fn legacy_array_len_alias_uses_list_length_contract() {
-        let reader = LenOnlyReader::new(3, 4, 2);
+    fn rust_runtime_compliance_scalar_and_string_cases_pass() {
+        let expected = read_expected_results();
+        let scalar = expect_table(&expected, "scalar_compat");
+        let row = [PathStep::Field("rows"), PathStep::Index(0)];
+        let reader = ComplianceJsonReader::new(read_payload("scalar_compat.json"));
 
-        let list_error = reader
-            .read_list_len()
-            .expect_err("list length should be limited");
-        assert!(list_error.message.contains("list length"));
+        assert_eq!(
+            read_i64(&reader, &[&row[..], &[PathStep::Field("id")]].concat()),
+            expect_i64(scalar, "id")
+        );
+        assert_eq!(
+            read_i64(&reader, &[&row[..], &[PathStep::Field("level")]].concat()),
+            expect_i64(scalar, "level")
+        );
+        assert_eq!(
+            read_f64(&reader, &[&row[..], &[PathStep::Field("ratio")]].concat()),
+            expect_f64(scalar, "ratio")
+        );
+        assert_eq!(
+            read_bool(
+                &reader,
+                &[&row[..], &[PathStep::Field("enabled_text")]].concat()
+            ),
+            expect_bool(scalar, "enabled_text")
+        );
+        assert_eq!(
+            read_bool(
+                &reader,
+                &[&row[..], &[PathStep::Field("disabled_text")]].concat()
+            ),
+            expect_bool(scalar, "disabled_text")
+        );
+        assert_eq!(
+            read_bool(
+                &reader,
+                &[&row[..], &[PathStep::Field("enabled_bool")]].concat()
+            ),
+            expect_bool(scalar, "enabled_bool")
+        );
+        assert_eq!(
+            read_string(&reader, &[&row[..], &[PathStep::Field("name")]].concat()),
+            expect_str(scalar, "name")
+        );
+        let entered = enter_path(&reader, &row).expect("row should be readable");
+        assert!(
+            !reader
+                .enter_optional_field("nullable")
+                .expect("null optional field should be absent")
+        );
+        exit_path(&reader, entered);
+        assert!(expect_bool(scalar, "nullable_is_null"));
 
-        let alias_error = reader
-            .read_array_len()
-            .expect_err("array len alias should share list limit");
-        assert!(alias_error.message.contains("list length"));
+        let escaped = expect_table(&expected, "escaped_string");
+        let reader = ComplianceJsonReader::new(read_payload("escaped_string.json"));
+        assert_eq!(
+            read_string(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("text"),
+                ],
+            ),
+            expect_str(escaped, "text")
+        );
+    }
+
+    #[test]
+    fn rust_runtime_compliance_collection_object_nested_and_fragment_cases_pass() {
+        let expected = read_expected_results();
+
+        let collection = expect_table(&expected, "collection_envelope");
+        let reader = ComplianceJsonReader::new(read_payload("collection_envelope.json"));
+        assert_eq!(
+            read_string(&reader, &[PathStep::Field("meta"), PathStep::Field("name")]),
+            expect_str(collection, "table_name")
+        );
+        assert_eq!(
+            read_len(&reader, &[PathStep::Field("rows")]),
+            usize::try_from(expect_i64(collection, "row_count")).expect("row count fits usize")
+        );
+        assert_eq!(
+            read_i64(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("id"),
+                ],
+            ),
+            expect_i64(collection, "first_id")
+        );
+        assert_eq!(
+            read_string(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(1),
+                    PathStep::Field("name"),
+                ],
+            ),
+            expect_str(collection, "second_name")
+        );
+        assert_eq!(
+            read_len(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("tags"),
+                ],
+            ),
+            usize::try_from(expect_i64(collection, "tag_count")).expect("tag count fits usize")
+        );
+        assert_eq!(
+            read_string(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("tags"),
+                    PathStep::Index(0),
+                ],
+            ),
+            expect_str(collection, "first_tag")
+        );
+
+        let object = expect_table(&expected, "object_table");
+        let reader = ComplianceJsonReader::new(read_payload("object_table.json"));
+        assert_eq!(
+            read_string(&reader, &[PathStep::Field("meta"), PathStep::Field("name")]),
+            expect_str(object, "table_name")
+        );
+        assert_eq!(
+            read_i64(&reader, &[PathStep::Field("default_class_id")]),
+            expect_i64(object, "default_class_id")
+        );
+        assert_eq!(
+            read_bool(&reader, &[PathStep::Field("enabled")]),
+            expect_bool(object, "enabled")
+        );
+        assert_eq!(
+            read_string(&reader, &[PathStep::Field("title")]),
+            expect_str(object, "title")
+        );
+
+        let nested = expect_table(&expected, "nested_struct");
+        let reader = ComplianceJsonReader::new(read_payload("nested_struct.json"));
+        assert_eq!(
+            read_i64(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("item_id"),
+                ],
+            ),
+            expect_i64(nested, "item_id")
+        );
+        assert_eq!(
+            read_i64(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("reward"),
+                    PathStep::Field("count"),
+                ],
+            ),
+            expect_i64(nested, "reward_count")
+        );
+        assert_eq!(
+            read_i64(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("reward"),
+                    PathStep::Field("item_id"),
+                ],
+            ),
+            expect_i64(nested, "reward_item_id")
+        );
+        assert_eq!(
+            read_len(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("attributes"),
+                ],
+            ),
+            usize::try_from(expect_i64(nested, "attribute_count"))
+                .expect("attribute count fits usize")
+        );
+        assert_eq!(
+            read_string(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("attributes"),
+                    PathStep::Index(0),
+                ],
+            ),
+            expect_str(nested, "first_attribute")
+        );
+
+        let fragment = expect_table(&expected, "fragment");
+        let reader = ComplianceJsonReader::new(read_payload("fragment.json"));
+        assert_eq!(
+            read_i64(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("item_id"),
+                ],
+            ),
+            expect_i64(fragment, "item_id")
+        );
+        assert_eq!(
+            read_string(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("effect"),
+                    PathStep::Field("kind"),
+                ],
+            ),
+            expect_str(fragment, "fragment_kind")
+        );
+        assert_eq!(
+            read_i64(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("effect"),
+                    PathStep::Field("amount"),
+                ],
+            ),
+            expect_i64(fragment, "fragment_amount")
+        );
+    }
+
+    #[test]
+    fn rust_runtime_compliance_error_cases_are_executable() {
+        let cases = read_error_cases();
+        let cases = cases
+            .get("cases")
+            .and_then(toml::Value::as_array)
+            .expect("error cases should be an array");
+        let mut executed_json_cases = 0;
+        for case in cases {
+            let case = case.as_table().expect("case should be a table");
+            if case
+                .get("format")
+                .and_then(toml::Value::as_str)
+                .is_some_and(|format| format != "json")
+            {
+                continue;
+            }
+            let name = expect_str(case, "name");
+            let payload = expect_str(case, "payload");
+            let operation = expect_str(case, "operation");
+            let expected_kind = expect_str(case, "expected_kind");
+            let expected_message_contains = expect_str(case, "expected_message_contains");
+            let reader = ComplianceJsonReader::new(read_payload(payload));
+            let error = match name {
+                "missing_field" => {
+                    let entered =
+                        enter_path(&reader, &[PathStep::Field("rows"), PathStep::Index(0)])
+                            .expect("row should be readable");
+                    let error = reader
+                        .enter_required_field("missing")
+                        .expect_err("missing required field should fail");
+                    exit_path(&reader, entered);
+                    error
+                }
+                "explicit_null_required_field" => {
+                    let entered =
+                        enter_path(&reader, &[PathStep::Field("rows"), PathStep::Index(0)])
+                            .expect("row should be readable");
+                    let error = reader
+                        .enter_required_field("explicit_null")
+                        .expect_err("null required field should fail");
+                    exit_path(&reader, entered);
+                    error
+                }
+                "array_index_out_of_bounds" => {
+                    let entered = enter_path(&reader, &[PathStep::Field("rows")])
+                        .expect("rows should be readable");
+                    let error = reader
+                        .enter_index(99)
+                        .expect_err("out-of-bounds index should fail");
+                    exit_path(&reader, entered);
+                    error
+                }
+                "int_overflow" => run_scalar_error(
+                    &reader,
+                    &[
+                        PathStep::Field("rows"),
+                        PathStep::Index(0),
+                        PathStep::Field("overflow_int"),
+                    ],
+                    |reader| reader.as_i64().map(|_| ()),
+                ),
+                "invalid_bool_string" => run_scalar_error(
+                    &reader,
+                    &[
+                        PathStep::Field("rows"),
+                        PathStep::Index(0),
+                        PathStep::Field("invalid_bool"),
+                    ],
+                    |reader| reader.as_bool().map(|_| ()),
+                ),
+                "non_finite_float_string" => run_scalar_error(
+                    &reader,
+                    &[
+                        PathStep::Field("rows"),
+                        PathStep::Index(0),
+                        PathStep::Field("non_finite_float"),
+                    ],
+                    |reader| reader.as_f64().map(|_| ()),
+                ),
+                other => panic!("unhandled JSON compliance error case `{other}`"),
+            };
+            assert_eq!(
+                format!("{:?}", error.kind),
+                expected_kind,
+                "case `{name}` operation `{operation}` should fail with expected kind"
+            );
+            assert!(
+                error.message.contains(expected_message_contains),
+                "case `{name}` error `{}` should contain `{expected_message_contains}`",
+                error.message
+            );
+            executed_json_cases += 1;
+        }
+        assert_eq!(executed_json_cases, 6);
+    }
+
+    fn run_scalar_error(
+        reader: &ComplianceJsonReader,
+        steps: &[PathStep],
+        operation: impl FnOnce(&ComplianceJsonReader) -> RuntimeDataResult<()>,
+    ) -> RuntimeDataError {
+        let entered = enter_path(reader, steps).expect("error case path should be readable");
+        let error = operation(reader).expect_err("operation should fail");
+        exit_path(reader, entered);
+        error
     }
 }

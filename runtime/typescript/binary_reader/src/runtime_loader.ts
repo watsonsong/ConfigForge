@@ -43,10 +43,6 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     this.revision = this.view.getBigUint64(8, true);
   }
 
-  enterField(_name: string): boolean {
-    throw new Error("binary reader does not support named fields");
-  }
-
   enterIndex(index: number): void {
     if (index !== this.nextRowIndex) {
       throw new Error(`binary reader rows must be read sequentially: expected index ${this.nextRowIndex}, got ${index}`);
@@ -58,12 +54,12 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     throw new Error("binary reader does not support nested named readers");
   }
 
-  length(): number {
-    throw new Error("binary reader does not support named list length");
+  asInt64(): number {
+    return this.readNextInt64();
   }
 
-  asNumber(): number {
-    return this.readNextNumber();
+  asFloat64(): number {
+    return this.readNextFloat64();
   }
 
   asBool(): boolean {
@@ -76,10 +72,6 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
 
   schemaRevision(): bigint {
     return this.revision;
-  }
-
-  decodeLimits(): RuntimeDecodeLimits {
-    return this.limits;
   }
 
   enterRequiredField(_name: string): void {
@@ -111,10 +103,6 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     const length = this.readVaruintAsNumber("list length");
     checkRuntimeDecodeLimit("list length", length, this.limits.maxArrayLength);
     return length;
-  }
-
-  readArrayLength(): number {
-    return this.readListLength();
   }
 
   arrayElementsArePositional(): boolean {

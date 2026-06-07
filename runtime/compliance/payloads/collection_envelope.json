@@ -1,0 +1,15 @@
+{
+  "meta": { "name": "items" },
+  "rows": [
+    {
+      "id": "1001",
+      "name": "Sword",
+      "tags": ["weapon", "starter"]
+    },
+    {
+      "id": 1002,
+      "name": "Shield",
+      "tags": ["armor"]
+    }
+  ]
+}

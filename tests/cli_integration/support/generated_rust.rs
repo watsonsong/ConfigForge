@@ -56,9 +56,6 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                     fn current_field(&self) -> Option<&'static str> {{
                         self.fields.borrow().last().copied()
                     }}
-                }}
-
-                impl RuntimeDataReader for MockReader {{
                     fn enter_field(&self, name: &'static str) -> RuntimeDataResult<bool> {{
                         let field = match name {{
                             "rows" => "rows",
@@ -78,6 +75,25 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                         self.fields.borrow_mut().push(field);
                         Ok(true)
                     }}
+
+                    fn len(&self) -> RuntimeDataResult<usize> {{
+                        if self.path == "items" && self.current_field() == Some("rows") {{ Ok(1) }} else if matches!(self.path, "classes" | "class_levels" | "character_surnames" | "character_male_given_names" | "character_female_given_names") && self.current_field() == Some("rows") {{ Ok(0) }} else if self.path == "game_rules" && self.current_field() == Some("starter_item_ids") {{ Ok(2) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
+                    }}
+                }}
+
+                impl RuntimeDataReader for MockReader {{
+                    fn enter_required_field(&self, name: &'static str) -> RuntimeDataResult<()> {{
+                        if !self.enter_field(name)? {{
+                            return Err(RuntimeDataError::not_found(format!("missing required field: {{name}}")));
+                        }}
+                        Ok(())
+                    }}
+
+                    fn enter_optional_field(&self, name: &'static str) -> RuntimeDataResult<bool> {{
+                        self.enter_field(name)
+                    }}
+
+                    fn exit_field(&self) -> RuntimeDataResult<()> {{ self.exit() }}
 
                     fn enter_index(&self, index: usize) -> RuntimeDataResult<()> {{
                         if self.path == "items" && self.current_field() == Some("rows") && index == 0 {{
@@ -99,8 +115,19 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                             .ok_or_else(|| RuntimeDataError::decode("unexpected exit"))
                     }}
 
-                    fn len(&self) -> RuntimeDataResult<usize> {{
-                        if self.path == "items" && self.current_field() == Some("rows") {{ Ok(1) }} else if matches!(self.path, "classes" | "class_levels" | "character_surnames" | "character_male_given_names" | "character_female_given_names") && self.current_field() == Some("rows") {{ Ok(0) }} else if self.path == "game_rules" && self.current_field() == Some("starter_item_ids") {{ Ok(2) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
+                    fn read_row_count(&self) -> RuntimeDataResult<usize> {{ self.len() }}
+
+                    fn read_list_len(&self) -> RuntimeDataResult<usize> {{ self.len() }}
+
+                    fn array_elements_are_positional(&self) -> bool {{ false }}
+
+                    fn begin_record(&self, _optional_slot_count: usize) -> RuntimeDataResult<()> {{ Ok(()) }}
+
+                    fn end_record(&self) -> RuntimeDataResult<()> {{ Ok(()) }}
+
+                    fn read_enum_index(&self, variants: &[&str]) -> RuntimeDataResult<usize> {{
+                        let value = self.as_string()?;
+                        variants.iter().position(|variant| *variant == value.as_str()).ok_or_else(|| RuntimeDataError::decode(format!("unknown enum value `{{value}}`")))
                     }}
 
                     fn as_i64(&self) -> RuntimeDataResult<i64> {{
@@ -127,6 +154,10 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                     fn as_string(&self) -> RuntimeDataResult<String> {{
                         if self.path == "items" && self.current_field() == Some("name") {{ Ok("Potion".to_owned()) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected string")) }}
                     }}
+
+                    fn schema_revision(&self) -> Option<u64> {{ None }}
+
+                    fn ensure_exhausted(&self) -> RuntimeDataResult<()> {{ Ok(()) }}
 
                 }}
 

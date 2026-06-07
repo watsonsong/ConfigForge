@@ -203,12 +203,8 @@ impl<'a> TypeScriptNames<'a> {
 
     fn ts_read_current_expr(&self, code_type: &CodeTypeRef) -> Result<String> {
         Ok(match code_type {
-            CodeTypeRef::Int => {
-                "value.readNextInt64 ? value.readNextInt64() : value.asNumber()".to_owned()
-            }
-            CodeTypeRef::Float => {
-                "value.readNextFloat64 ? value.readNextFloat64() : value.asNumber()".to_owned()
-            }
+            CodeTypeRef::Int => "value.asInt64()".to_owned(),
+            CodeTypeRef::Float => "value.asFloat64()".to_owned(),
             CodeTypeRef::Bool => "value.asBool()".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 "value.asString()".to_owned()

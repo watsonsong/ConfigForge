@@ -1,0 +1,6 @@
+{
+  "meta": { "name": "game_rules" },
+  "default_class_id": "10",
+  "enabled": "true",
+  "title": "Demo Game"
+}

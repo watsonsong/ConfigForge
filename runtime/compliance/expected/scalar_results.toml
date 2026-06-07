@@ -16,3 +16,29 @@ nullable_is_null = true
 
 [escaped_string]
 text = "line\nnext\t\"quoted\""
+
+[collection_envelope]
+table_name = "items"
+row_count = 2
+first_id = 1001
+second_name = "Shield"
+tag_count = 2
+first_tag = "weapon"
+
+[object_table]
+table_name = "game_rules"
+default_class_id = 10
+enabled = true
+title = "Demo Game"
+
+[nested_struct]
+item_id = 2001
+reward_count = 3
+reward_item_id = 3001
+attribute_count = 2
+first_attribute = "fire"
+
+[fragment]
+item_id = 4001
+fragment_kind = "fixed"
+fragment_amount = 50

@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-`runtime/` 下标准 adapters 是 generated code 的辅助接入层，不是每次 codegen 的必然输出。核心 generated code 只依赖 loader/reader contract；标准 adapters 提供可复用的 JSON / MessagePack / `bin` reader 和常用 transport loader。当前 C++ runtime helper 已有可通过 CMake 引入的 interface targets；Rust 与 TypeScript 仍以 copyable template / workspace package template 为主，尚不是发布稳定 crate / npm package。C++ 三方依赖与 CMake 策略以 [`../Tech/cpp-runtime-dependencies.md`](../Tech/cpp-runtime-dependencies.md) 为准。
+`runtime/` 下标准 adapters 是 generated code 的辅助接入层，不是每次 codegen 的必然输出。核心 generated code 只依赖 loader/reader contract；标准 adapters 提供可复用的 JSON / MessagePack / `bin` reader 和常用 transport loader。当前 Rust 已有 `runtime/rust/reader_core` crate skeleton，TypeScript 已有 workspace package skeleton，C++ runtime helper 已有可通过 CMake 引入的 interface targets；这些仍处于仓库内模板 / 未发布包状态，尚未承诺稳定 crates.io / npm / installed CMake package 兼容性。C++ 三方依赖与 CMake 策略以 [`../Tech/cpp-runtime-dependencies.md`](../Tech/cpp-runtime-dependencies.md) 为准。
 
 ## 标准 runtime helper 工程结构
 
@@ -25,6 +25,8 @@
 3. **Transport loader**：从文件系统、HTTP、bundle、引擎资源系统等位置读取 bytes/text，再交给 format reader。Transport 可选，业务项目可以只复用 format reader 并接入自己的资源系统。
 
 核心 codegen 不 import adapter，也不把 adapter 的第三方依赖写进 generated code。adapter 是可选 runtime support：可以被业务项目直接依赖，也可以由 codegen option 拷贝到目标目录，还可以作为测试 harness 的基础实现。
+
+Core purity 原则：要么某语言暂时不提供独立 core library，让 generated code 自带 inline / nominal contract；要么 core library 只包含 generated parser 直接调用的最小 reader / loader 形状、error、decode limits 和 contract version。JSON / MessagePack / BSON named reader 的 `enter_field`、`length`，binary reader 的 `read_next_*`、optional bitmap、enum ordinal，transport loader 的文件系统 / HTTP / 资源包逻辑，都应留在 concrete adapter 的固有方法或 utility 模块中。少量 reader 间重复实现优先接受，以换取用户引用 core 的最低成本；只有重复逻辑足够大且与 generated contract 无关时，才考虑单独 helper / utility 包，不能污染 core contract。
 
 ### Reader contract 可执行规范
 
@@ -103,14 +105,160 @@ missing/null 语义：
 
 主要缺口：
 
-1. 各语言 adapter 缺少统一 compatibility / test matrix 描述，无法明确哪些 adapter 是生产推荐、哪些只是 custom/example。
-2. C++ stable interface header 仍待补齐，当前 C++ adapter 仍通过宏绑定 generated header 中的 `IRuntimeDataReader` / `IRuntimeDataLoader`。
-3. C# / Java JSON reader 已沉淀为 copyable template；下一步缺口是接入 runtime compliance runner，并按需补充 MessagePack / Jackson / Gson / Android 友好 adapter。
+1. `runtime/compliance/` 已有 seed payload / expected 文件，但缺少自动 runner，尚不能把 reader contract 作为可执行规范持续验证。
+2. Rust `reader_core` 与 TypeScript workspace packages 已有 skeleton，core contract 已按 generated parser 直接调用面收敛；但尚未进入稳定发布形态，generated code 默认仍内联 / 声明本地 contract，未默认依赖稳定 Rust crate 或 npm package。
+3. C++ generated inline `IRuntimeDataReader` 已移除 `ReadArrayLength`、`ReadOptionalPresent`、`ReadNext*`、`ReadEnumOrdinal` 等非 generated-facing helper；stable interface header 仍待补齐，当前 C++ adapter 仍通过宏绑定 generated header 中的 `IRuntimeDataReader` / `IRuntimeDataLoader`。
+4. C# / Java JSON reader 已沉淀为 copyable template；下一步缺口是接入 runtime compliance runner，并按需补充 MessagePack / Jackson / Gson / Android 友好 adapter。
 
 因此 runtime loader 工程化按“两层稳定 + 多 adapter 可选”的方向推进：
 
 - **稳定契约层**：定义 reader/loader contract 版本、payload shape、错误语义、scalar 兼容策略。生成代码只依赖该契约，不依赖具体 adapter。
 - **可选 adapter 层**：每个语言/格式组合是独立工程单元，明确三方依赖、构建方式、测试入口和生产推荐等级。
+
+### 分阶段设计与开发路线
+
+Runtime adapter 工程化应按“先可执行规范，再稳定接口，再发布包”的顺序推进，避免在 contract 尚未被自动验证前承诺长期包 API。
+
+#### Phase R1：Adapter compliance runner MVP
+
+目标是把 `runtime/compliance/` 从 fixture 目录升级为跨语言 / 跨格式 reader adapter 的可执行规范。此阶段不改变 generated code 对第三方库的零强依赖原则，也不要求立即发布 runtime package。
+
+Compliance runner 的验证对象不是“每个语言必须有一个厚 core 模块”。core 模块只定义 generated code 与 adapter 之间的最小形状：reader / loader trait 或结构化接口、error、decode limits、contract version。某些语言可以只有 generated inline interface 或一份很薄的 structural type；只要 adapter 能被 generated code 通过薄 glue 调用，就可以参与 compliance。真正需要被反复验证的是具体 reader adapter 对 contract 语义的解释，而不是 core 本身承载业务逻辑。
+
+设计原则：
+
+- compliance case 使用语言无关 `case_id`、payload path、expected TOML 和 expected error keyword；不同语言错误文本不需要完全一致，但必须包含稳定关键字和 reader path / expected type 等定位信息。
+- runner 分成两层：共享 case schema + 各语言 adapter runner。共享 schema 不引用 Rust / TS / C++ 类型；语言 runner 只负责把 payload decode 成本语言 reader，再按同一批 operation 读取并断言结果。
+- 先覆盖 JSON named-field reader；MessagePack / `bin` 用同一批 logical case 派生二进制 payload，避免语义漂移。
+- fast/local profile 跑 Rust JSON 和无额外三方依赖的 runner；full/nightly profile 再跑 TypeScript、C++ RapidJSON/msgpack-cxx、C#、Java。缺工具时必须明确 skip 或 fail-fast，不能静默降级到其他 reader。
+
+与 `standard_project` integration harness 的边界：
+
+| 测试层 | 验证对象 | 保留原因 | 不应承担 |
+| --- | --- | --- | --- |
+| `runtime/compliance` | reader adapter contract：missing/null、scalar conversion、path/index、decode limits、错误 kind/keyword、格式特有非法 payload。 | 让每个语言/格式 adapter 用同一批最小 logical cases 证明语义一致，适合用户自定义 reader 复用。 | 不验证 codegen 输出 API、target filtering、索引/关系 helper、完整导出流水线。 |
+| `standard_project` integration | 真实项目 fixture 的 build/export/codegen/generated API smoke，以及各语言代表性 runtime 加载路径。 | 覆盖端到端组合风险：Meta/Data/Exporter/Codegen/runtime glue 是否能一起工作。 | 不作为 reader contract 的完整枚举测试；不复制所有 scalar/error 边界。 |
+
+因此需要保留两层测试，但不能维护“两套重复语义用例”。`standard_project` 应保持少量真实世界端到端 smoke；reader contract 边界条件只放在 compliance logical cases 中。若发现 `standard_project` 只是为了覆盖某个 scalar/null/error 细节而增加人工 fixture，应优先迁移到 compliance；若 compliance case 开始依赖 generated API 行为或项目配置语义，也应迁回 integration harness。
+
+用户视角与测试边界：
+
+- `ComplianceJsonReader` 只是 Rust MVP 内部的 `#[cfg(test)]` reader，用来证明 `RuntimeDataReader` contract 与 fixtures 可执行；它不是面向业务项目的公开 JSON adapter，也不应出现在 generated code 的接入文档中。
+- 面向用户的稳定入口是 `reader_core` 中的 trait / error / decode limits。用户通常有两种用法：直接依赖标准 adapter（例如未来稳定的 JSON / MessagePack / binary reader），或只依赖 `reader_core` 并实现自己的资源系统和 reader。
+- 自定义 reader 只需实现 generated code 会直接调用的 contract API：schema-driven field helpers、index/exit、row/list length、record boundary、enum/scalar read、schema revision 和 exhausted check。JSON / MessagePack / BSON 等 named reader 可以把 `enter_field` / `len` / `length` 做成固有 helper，再由 `enter_required_field` / `enterOptionalField` / `read_row_count` / `readListLength` 复用；binary reader 可以把 `read_next_*` / optional bitmap / enum ordinal 做成固有 helper，再由 `as_*` / `enter_optional_field` / `read_enum_index` 复用。这些 helper 不属于 Rust stable trait、TypeScript core interface 或 C++ generated inline interface 的必选面。Transport loader（文件、HTTP、引擎资源包）应保持独立，避免把资源系统绑定进 format reader。
+- 在 generated code 仍使用 inline nominal interface 的语言里，标准 reader 或用户 reader 需要一层薄 adapter；当语言支持 `runtime_interface = "external"` 后，generated code 才直接引用稳定 `reader_core` / core header / npm package。
+
+Compliance runner 不能绑定 JSON。JSON 只是当前最容易 review 的 canonical payload 与 Rust MVP 起点；长期 runner 应提供一个很薄的 adapter 接入点，让任意新格式（例如 BSON、FlatBuffers-like 自定义格式、加密压缩包内格式）都能复用同一批 logical cases：
+
+1. **case driver** 读取共享 logical case，负责执行 schema-driven field entry、index entry、scalar read / error assertion。
+2. **payload materializer** 由格式 adapter 提供，把 canonical Runtime Value 转成该格式的 bytes / value。例如 BSON adapter 把 object/array/string/int/float/bool/null materialize 为 BSON document；binary adapter 把 logical case materialize 为带 schema/header 的 bytes。
+3. **reader factory** 由格式 adapter 提供，把 materialized payload 解码成该语言的 `RuntimeDataReader` 实例。
+4. **capability / skip policy** 由格式 adapter 显式声明：某格式无法表达的 case、或只在该格式存在的 negative case，必须可诊断地 skip / fail / 标记 unsupported，不能默默用 JSON reader 代跑。
+
+以 BSON reader 为例，接入 compliance 不应复制一套 `bson_scalar_results.toml`。它应复用 `scalar_compat`、`collection_envelope`、`object_table` 等 logical cases，由 BSON materializer 生成 BSON document，再由 BSON reader factory 创建 reader 并跑同一批 operation/assertion。只有 BSON 特有边界（如 ObjectId / DateTime / Binary 是否 unsupported、document key 限制、BSON array 编码不连续等）才新增 BSON-only negative cases。
+
+Compliance fixtures 长期不按“每种格式维护一整套手写用例”扩散，而按“逻辑用例一份，多格式 materialization”维护：
+
+- 共享 schema 记录 logical case、读取 operation、path、expected scalar/error；这是唯一的语义来源。
+- JSON payload 是可读 canonical fixture，优先用于 review 与新增 case。
+- MessagePack / binary payload 应由 canonical fixture 或专门的 materializer 生成，必要时只额外维护格式特有 negative cases（例如 MessagePack non-string map key、bin header/schema revision 错误）。
+- 各语言 / 各格式 runner 读取同一批 logical case 并绑定到自己的 decoder；如果某格式不能表达某个 value kind，应在 case capability 中显式标注 skip/unsupported，而不是复制一份近似但可能漂移的 expected 文件。
+
+最小 case 范围：
+
+| 类别 | 必须覆盖 |
+| --- | --- |
+| scalar | int / float / bool / string，numeric string，bool `true/false/1/0`，有限 float。 |
+| missing/null | required missing/null 报错；optional missing/null 视为 absent。 |
+| container | object field、array/list length、index 越界、collection envelope `{ meta, rows }`。 |
+| string | escape、Unicode、换行、引号。 |
+| error | int overflow、float NaN/Infinity、非法 bool string、非 string map key、binary/ext unsupported。 |
+
+建议落地顺序：
+
+1. 固化 compliance fixture schema：补齐 `collection_envelope.json`、`object_table.json`、`nested_struct.json`、`fragment.json` 和 expected TOML。
+2. Rust runner 先落地到 JSON adapter 或临时 test-only reader，借 `reader_core` 的 trait 形状快速证明 schema 可执行；稳定后应迁到具体 adapter crate / package，不把复杂 reader 逻辑沉淀进薄 core。
+3. TypeScript runner 作为 package-level test，验证 `reader_core`、JSON reader、MessagePack reader 与 node-fs loader。
+4. C++ runner 通过 CMake / CTest 接入 RapidJSON、msgpack-cxx 和 binary reader，继续保持第三方依赖显式 opt-in。
+5. C# / Java runner 复用现有 JSON copyable template，先验证 BCL/JDK-only JSON reader，再决定是否补 Jackson / Gson / MessagePack adapter。
+
+#### Phase R2：Rust stable runtime crate
+
+目标是把 Rust 从“generated crate 本地 trait + copyable template”迁移到可选稳定 runtime crate，同时保持默认 generated code 不强制依赖该 crate。
+
+包边界：
+
+| crate | 定位 | 默认依赖 |
+| --- | --- | --- |
+| `config-forge-runtime-reader-core` | 稳定 trait、error、decode limits、contract version。 | 无或仅 `std`。 |
+| `config-forge-runtime-reader-json` | `serde_json` reader + 可选 fs loader。 | `core` + optional `serde_json` / `fs` feature。 |
+| `config-forge-runtime-reader-messagepack` | MessagePack reader。 | `core` + optional `rmp-serde`。 |
+| `config-forge-runtime-reader-binary` | schema-aware `bin` reader。 | `core`。 |
+
+Codegen 策略：
+
+- 默认 `runtime_interface = "inline"`：保持当前 generated code 自带 trait，避免破坏现有用户。
+- 可选 `runtime_interface = "external"`：generated Rust `use config_forge_runtime_reader_core::{RuntimeDataLoader, RuntimeDataReader, ...}`，adapter crate 可直接实现 trait。
+- external 模式必须在生成 manifest / 诊断中声明 core crate version 与 `SUPPORTED_CONFIG_FORGE_READER_CONTRACT` 范围。
+
+稳定前置条件：Rust JSON / MessagePack / binary runners 通过 compliance；standard_project Rust harness 同时覆盖 inline 与 external interface smoke；error 类型和 trait 方法经过一次 breaking-change review。
+
+#### Phase R3：TypeScript stable npm packages
+
+TypeScript 可以最早形成稳定 npm 包，因为 generated interface 是结构化类型，不需要 nominal trait 绑定。当前 workspace package skeleton 可演进为发布包，但发布前必须补齐 package metadata、exports 和 compliance test。
+
+推荐包：
+
+| package | 定位 | 依赖策略 |
+| --- | --- | --- |
+| `@config-forge/runtime-reader-core` | `RuntimeDataReaderLike`、`RuntimeDataLoaderLike`、limits、error helpers。 | 无 runtime dependency。 |
+| `@config-forge/runtime-reader-json` | `JsonValueReader`、`decodeJson`。 | 依赖 core。 |
+| `@config-forge/runtime-reader-messagepack` | MessagePack reader。 | 依赖 core，`@msgpack/msgpack` 作为 peer dependency。 |
+| `@config-forge/runtime-reader-binary` | `bin` reader。 | 依赖 core。 |
+| `@config-forge/runtime-loader-node-fs` | Node fs transport，可注入 decoder。 | 依赖 core，不依赖具体格式。 |
+
+发布前置条件：`npm run typecheck` / package build / compliance runner 覆盖 JSON、MessagePack、binary；package `exports` 同时声明 CJS/ESM 策略或明确只支持一种模块形态；semver 与 reader contract version 对齐。
+
+#### Phase R4：C++ stable interface header
+
+目标是解除 C++ adapter 对某次 generated header 的宏绑定，让生产项目可以像普通第三方库一样链接 runtime adapter。
+
+设计：
+
+- 新增 `runtime/cpp/core/include/config_forge/runtime/reader.hpp`，定义稳定 `IRuntimeDataReader`、`IRuntimeDataLoader`、error / result 类型、decode limits 和 `CONFIG_FORGE_READER_CONTRACT_VERSION`。
+- CMake 提供 `config_forge_runtime::core` target；RapidJSON、msgpack-cxx、binary reader target 链接 core。
+- C++ codegen 增加 `runtime_interface = "inline" | "external"`：
+  - `inline`：保持当前 generated header 自带 nominal interface，兼容现有用户；
+  - `external`：generated code include `config_forge/runtime/reader.hpp`，并使用 core target 的接口类型。
+- 迁移期 adapter 可同时支持 generated-header-bound 和 external interface；新生产文档推荐 external。
+
+稳定前置条件：C++ RapidJSON / msgpack-cxx / binary compliance 通过；standard_project C++ harness 至少有一个 external interface smoke；CMake install / find_package 能重新找到 core 与可选三方依赖。
+
+#### Phase R5：C# / Java compliance 与 package 形态
+
+C# / Java 当前先保持 copyable template，不急于承诺 NuGet / Maven 包。原因是它们是 nominal interface：generated code 每次声明自己的 `IConfigForgeRuntimeDataReader` / `ConfigForgeRuntimeDataReader`，标准 reader 需要薄 adapter 接入。
+
+当前审查结论：C# / Java generated inline reader interface 中的方法均被 generated parser 直接调用（field、row、list element、scalar），暂未发现类似 `enter_field` / `len` / `read_next_*` 这类只服务 concrete reader 的 helper 污染 core contract。后续若引入 stable interface assembly / package，也应保持这一最小形状；JSON reader 模板中的解析便利方法仍留在模板类或薄 adapter 中。
+
+推进顺序：
+
+1. 为 `runtime/csharp/json_reader` 增加 compliance runner project，读取同一批 fixture，并通过薄 adapter 适配 generated-style nominal interface。
+2. 为 `runtime/java/json_reader` 增加 compliance harness，保持 JDK-only 路线，验证 Android / 老 JDK 兼容边界另列。
+3. compliance 通过后，再评估 C# stable interface assembly / Java stable interface package：只有当 generated code 支持 external runtime interface 时，NuGet / Maven 包才有长期价值。
+4. Jackson / Gson / MessagePack adapter 作为可选 adapter 层增加，不改变 generated core。
+
+#### Phase R6：Codegen adapter emit / reference
+
+只有当对应语言 adapter 已通过 compliance 且包形态稳定后，才建议给 codegen 增加 adapter 辅助选项：
+
+```toml
+[targets.exports.runtime_reader]
+adapter = "typescript/json_reader"
+emit = "none"       # none / copy / reference
+loader = "node-fs"  # fs / fetch / none / custom
+```
+
+默认仍为 `emit = "none"`，即只生成核心 generated code。`copy` 和 `reference` 只是接入便利功能，不能让核心 generated code 直接依赖某个 JSON / MessagePack 库。
 
 ### 目录布局
 
@@ -319,7 +467,7 @@ const loader = new FsRuntimeDataLoader(dataDir, bytes => new MessagePackValueRea
 const data = await GameData.load(loader);
 ```
 
-MessagePack adapter 的 value 语义应与 JSON adapter 对齐：object/map 支持 `field(name)`，array 支持 `index/length`，scalar 支持 string-to-number / string-to-bool 兼容策略，`null/undefined` 在字段入口处按 missing 处理。
+MessagePack adapter 的 value 语义应与 JSON adapter 对齐：object/map 支持 schema-driven required/optional field entry，array 支持 `index` 与 list length，scalar 支持 string-to-number / string-to-bool 兼容策略，`null/undefined` 在字段入口处按 missing 处理。若 adapter 内部暴露 `field(name)` / `length` helper，它们仍是 concrete reader 的固有方法，不进入 core interface。
 
 ### 各语言 contract 约束
 

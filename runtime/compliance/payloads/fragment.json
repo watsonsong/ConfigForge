@@ -1,0 +1,12 @@
+{
+  "meta": { "name": "fragment" },
+  "rows": [
+    {
+      "item_id": "4001",
+      "effect": {
+        "kind": "fixed",
+        "amount": "50"
+      }
+    }
+  ]
+}

@@ -9,7 +9,10 @@
       "disabled_text": "0",
       "enabled_bool": true,
       "name": "Potion",
-      "nullable": null
+      "nullable": null,
+      "overflow_int": "9223372036854775808",
+      "invalid_bool": "yes",
+      "non_finite_float": "NaN"
     }
   ]
 }

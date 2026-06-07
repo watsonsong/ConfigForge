@@ -30,20 +30,26 @@ generated/rust/
 
 ```rust
 pub trait RuntimeDataReader {
-    // 通用 reader cursor；实现可以包装 JSON value、MessagePack value、二进制 reader 或引擎序列化对象。
-    // enter_* 在当前 reader 内部移动 cursor，exit 回到上一层，避免每次字段/数组访问创建子 reader。
-    fn enter_field(&self, name: &'static str) -> RuntimeDataResult<bool>;
-    fn enter_index(&self, index: usize) -> RuntimeDataResult<()>;
-    fn exit(&self) -> RuntimeDataResult<()>;
-    fn len(&self) -> Result<usize, String>;
-    fn as_i64(&self) -> Result<i64, String>;
-    fn as_f64(&self) -> Result<f64, String>;
-    fn as_bool(&self) -> Result<bool, String>;
-    fn as_string(&self) -> Result<String, String>;
+    // 只包含 generated Rust parser 直接调用的 contract 方法。
+    // JSON / MessagePack 等 named reader 可额外提供 enter_field / len 等固有 helper，
+    // 但这些 helper 不属于稳定 trait 必选面。
     fn enter_required_field(&self, name: &'static str) -> RuntimeDataResult<()>;
     fn enter_optional_field(&self, name: &'static str) -> RuntimeDataResult<bool>;
     fn exit_field(&self) -> RuntimeDataResult<()>;
+    fn enter_index(&self, index: usize) -> RuntimeDataResult<()>;
+    fn exit(&self) -> RuntimeDataResult<()>;
+    fn read_row_count(&self) -> RuntimeDataResult<usize>;
+    fn read_list_len(&self) -> RuntimeDataResult<usize>;
+    fn array_elements_are_positional(&self) -> bool;
+    fn begin_record(&self, optional_slot_count: usize) -> RuntimeDataResult<()>;
+    fn end_record(&self) -> RuntimeDataResult<()>;
     fn read_enum_index(&self, variants: &[&str]) -> RuntimeDataResult<usize>;
+    fn as_i64(&self) -> RuntimeDataResult<i64>;
+    fn as_f64(&self) -> RuntimeDataResult<f64>;
+    fn as_bool(&self) -> RuntimeDataResult<bool>;
+    fn as_string(&self) -> RuntimeDataResult<String>;
+    fn schema_revision(&self) -> Option<u64>;
+    fn ensure_exhausted(&self) -> RuntimeDataResult<()>;
 }
 
 pub trait RuntimeDataLoader {

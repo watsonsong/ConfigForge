@@ -4,32 +4,22 @@
 export const SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0" as const;
 
 export interface RuntimeDataReaderLike {
-  enterField(name: string): boolean;
+  enterRequiredField(name: string): void;
+  enterOptionalField(name: string): boolean;
+  exitField(): void;
   enterIndex(index: number): void;
   exit(): void;
-  length(): number;
-  asNumber(): number;
+  readRowCount(): number;
+  readListLength(): number;
+  readEnumIndex(variants: readonly string[]): number;
+  arrayElementsArePositional(): boolean;
+  beginRecord(optionalSlotCount: number): void;
+  endRecord(): void;
+  asInt64(): number;
+  asFloat64(): number;
   asBool(): boolean;
   asString(): string;
   schemaRevision?(): bigint | number | undefined;
-  decodeLimits?(): RuntimeDecodeLimits;
-  enterRequiredField?(name: string): void;
-  enterOptionalField?(name: string): boolean;
-  exitField?(): void;
-  readEnumIndex?(variants: readonly string[]): number;
-  readRowCount?(): number;
-  readListLength?(): number;
-  readArrayLength?(): number;
-  arrayElementsArePositional?(): boolean;
-  beginRecord?(optionalSlotCount: number): void;
-  endRecord?(): void;
-  readOptionalPresent?(): boolean;
-  readNextInt64?(): number;
-  readNextFloat64?(): number;
-  readNextNumber?(): number;
-  readNextBool?(): boolean;
-  readNextString?(): string;
-  readEnumOrdinal?(): number;
   ensureExhausted?(): void;
 }
 
@@ -135,6 +125,20 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
     throw new Error("reader value is not array/object");
   }
 
+  enterRequiredField(name: string): void {
+    if (!this.enterField(name)) {
+      throw new Error(`missing required field ${name}`);
+    }
+  }
+
+  enterOptionalField(name: string): boolean {
+    return this.enterField(name);
+  }
+
+  exitField(): void {
+    this.exit();
+  }
+
   readRowCount(): number {
     const length = this.length();
     checkRuntimeDecodeLimit("row count", length, this.limits.maxRows);
@@ -147,15 +151,26 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
     return length;
   }
 
-  readArrayLength(): number {
-    return this.readListLength();
+  readEnumIndex(variants: readonly string[]): number {
+    const value = this.asString();
+    const index = variants.indexOf(value);
+    if (index < 0) {
+      throw new Error(`unknown enum value ${value}`);
+    }
+    return index;
   }
 
-  decodeLimits(): RuntimeDecodeLimits {
-    return this.limits;
+  arrayElementsArePositional(): boolean {
+    return false;
   }
 
-  asNumber(): number {
+  beginRecord(_optionalSlotCount: number): void {
+  }
+
+  endRecord(): void {
+  }
+
+  asInt64(): number {
     let parsed: number;
     const value = this.currentValue();
     if (typeof value === "number") {
@@ -171,7 +186,14 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
     if (!Number.isFinite(parsed)) {
       throw new Error(`expected finite number-like value, got ${String(value)}`);
     }
+    if (!Number.isSafeInteger(parsed)) {
+      throw new Error(`expected safe integer-like value, got ${String(value)}`);
+    }
     return parsed;
+  }
+
+  asFloat64(): number {
+    return this.asFiniteNumber();
   }
 
   asBool(): boolean {
@@ -199,6 +221,28 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
     throw new Error(`expected string value, got ${String(value)}`);
   }
 
+  ensureExhausted(): void {
+  }
+
+  private asFiniteNumber(): number {
+    let parsed: number;
+    const value = this.currentValue();
+    if (typeof value === "number") {
+      parsed = value;
+    } else if (typeof value === "string") {
+      if (value.trim().length === 0) {
+        throw new Error("expected non-empty number-like string");
+      }
+      parsed = Number(value);
+    } else {
+      throw new Error(`expected number-like value, got ${String(value)}`);
+    }
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`expected finite number-like value, got ${String(value)}`);
+    }
+    return parsed;
+  }
+
   private currentValue(): unknown {
     return this.stack[this.stack.length - 1];
   }
@@ -206,23 +250,6 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
   private checkNestingDepth(depth: number): void {
     checkRuntimeDecodeLimit("nesting depth", depth, this.limits.maxNestingDepth);
   }
-}
-
-export function readRuntimeRowCount(reader: RuntimeDataReaderLike): number {
-  if (!reader.readRowCount) {
-    throw new Error("runtime reader does not support row count");
-  }
-  return reader.readRowCount();
-}
-
-export function readRuntimeListLength(reader: RuntimeDataReaderLike): number {
-  if (reader.readListLength) {
-    return reader.readListLength();
-  }
-  if (reader.readArrayLength) {
-    return reader.readArrayLength();
-  }
-  throw new Error("runtime reader does not support list length");
 }
 
 function normalizeLimit(label: string, value: number | undefined, fallback: number): number {

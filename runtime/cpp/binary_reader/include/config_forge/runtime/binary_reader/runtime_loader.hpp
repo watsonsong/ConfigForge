@@ -193,7 +193,7 @@ public:
         state_->records.pop_back();
     }
 
-    bool ReadOptionalPresent() override {
+    bool ReadOptionalPresent() {
         if (state_->records.empty()) {
             throw std::runtime_error("binary reader is not inside a record");
         }
@@ -206,15 +206,15 @@ public:
         return (record.bitmap[byte_index] & (1u << (slot_index % 8))) != 0;
     }
 
-    std::int64_t ReadNextInt64() override { return ReadNextInt64Value(); }
+    std::int64_t ReadNextInt64() { return ReadNextInt64Value(); }
 
-    double ReadNextDouble() override { return ReadNextDoubleValue(); }
+    double ReadNextDouble() { return ReadNextDoubleValue(); }
 
-    bool ReadNextBool() override { return ReadNextBoolValue(); }
+    bool ReadNextBool() { return ReadNextBoolValue(); }
 
-    std::string ReadNextString() override { return ReadNextStringValue(); }
+    std::string ReadNextString() { return ReadNextStringValue(); }
 
-    std::uint64_t ReadEnumOrdinal() override { return ReadVaruint(); }
+    std::uint64_t ReadEnumOrdinal() { return ReadVaruint(); }
 
     void EnsureExhausted() override {
         if (state_->offset != state_->bytes.size()) {

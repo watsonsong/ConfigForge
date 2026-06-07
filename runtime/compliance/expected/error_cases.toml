@@ -5,20 +5,67 @@
 name = "missing_field"
 payload = "missing_vs_null.json"
 path = "rows[0].missing"
-expected = "missing"
+operation = "enter_required_field"
+expected_kind = "NotFound"
+expected_message_contains = "missing required field"
+
+[[cases]]
+name = "explicit_null_required_field"
+payload = "missing_vs_null.json"
+path = "rows[0].explicit_null"
+operation = "enter_required_field"
+expected_kind = "NotFound"
+expected_message_contains = "missing required field"
 
 [[cases]]
 name = "array_index_out_of_bounds"
 payload = "scalar_compat.json"
 path = "rows[99]"
-expected = "array index error"
+operation = "enter_index"
+expected_kind = "NotFound"
+expected_message_contains = "missing array index"
+
+[[cases]]
+name = "int_overflow"
+payload = "scalar_compat.json"
+path = "rows[0].overflow_int"
+operation = "as_i64"
+expected_kind = "Decode"
+expected_message_contains = "invalid i64"
+
+[[cases]]
+name = "invalid_bool_string"
+payload = "scalar_compat.json"
+path = "rows[0].invalid_bool"
+operation = "as_bool"
+expected_kind = "Decode"
+expected_message_contains = "invalid bool"
+
+[[cases]]
+name = "non_finite_float_string"
+payload = "scalar_compat.json"
+path = "rows[0].non_finite_float"
+operation = "as_f64"
+expected_kind = "TypeMismatch"
+expected_message_contains = "finite"
 
 [[cases]]
 name = "messagepack_non_string_map_key"
 format = "messagepack"
-expected = "unsupported non-string map key"
+operation = "decode"
+expected_kind = "Unsupported"
+expected_message_contains = "unsupported non-string map key"
 
 [[cases]]
 name = "messagepack_binary_ext"
 format = "messagepack"
-expected = "unsupported binary/ext value"
+operation = "decode"
+expected_kind = "Unsupported"
+expected_message_contains = "unsupported binary/ext value"
+
+[[cases]]
+name = "binary_ext_unsupported"
+format = "binary"
+operation = "decode"
+expected_kind = "Unsupported"
+expected_message_contains = "unsupported binary/ext value"

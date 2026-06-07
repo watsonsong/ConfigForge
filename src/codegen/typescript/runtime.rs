@@ -6,31 +6,22 @@ use crate::codegen::CodeWriterLike;
 pub(super) fn render_runtime_reader_interfaces(content: &mut impl CodeWriterLike) {
     content.raw(
         r#"export interface RuntimeDataReader {
-  enterField(name: string): boolean;
+  enterRequiredField(name: string): void;
+  enterOptionalField(name: string): boolean;
+  exitField(): void;
   enterIndex(index: number): void;
   exit(): void;
-  length(): number;
-  asNumber(): number;
+  readRowCount(): number;
+  readListLength(): number;
+  readEnumIndex(variants: readonly string[]): number;
+  arrayElementsArePositional(): boolean;
+  beginRecord(optionalSlotCount: number): void;
+  endRecord(): void;
+  asInt64(): number;
+  asFloat64(): number;
   asBool(): boolean;
   asString(): string;
   schemaRevision?(): bigint | number | undefined;
-  enterRequiredField?(name: string): void;
-  enterOptionalField?(name: string): boolean;
-  exitField?(): void;
-  readEnumIndex?(variants: readonly string[]): number;
-  readRowCount?(): number;
-  readListLength?(): number;
-  readArrayLength?(): number;
-  arrayElementsArePositional?(): boolean;
-  beginRecord?(optionalSlotCount: number): void;
-  endRecord?(): void;
-  readOptionalPresent?(): boolean;
-  readNextInt64?(): number;
-  readNextFloat64?(): number;
-  readNextNumber?(): number;
-  readNextBool?(): boolean;
-  readNextString?(): string;
-  readEnumOrdinal?(): number;
   ensureExhausted?(): void;
 }
 
@@ -77,68 +68,35 @@ function optionalField<T>(reader: RuntimeDataReader, name: string, convert: (val
 }
 
 function enterRequiredField(reader: RuntimeDataReader, name: string): void {
-  if (reader.enterRequiredField) {
-    reader.enterRequiredField(name);
-    return;
-  }
-  if (!reader.enterField(name)) {
-    throw new Error(`missing required field ${name}`);
-  }
+  reader.enterRequiredField(name);
 }
 
 function enterOptionalField(reader: RuntimeDataReader, name: string): boolean {
-  if (reader.enterOptionalField) {
-    return reader.enterOptionalField(name);
-  }
-  if (!reader.enterField(name)) {
-    return false;
-  }
-  return true;
+  return reader.enterOptionalField(name);
 }
 
 function exitField(reader: RuntimeDataReader): void {
-  if (reader.exitField) {
-    reader.exitField();
-  } else {
-    reader.exit();
-  }
+  reader.exitField();
 }
 
 function readEnumIndex(reader: RuntimeDataReader, variants: readonly string[]): number {
-  if (reader.readEnumIndex) {
-    return reader.readEnumIndex(variants);
-  }
-  const value = reader.asString();
-  const index = variants.indexOf(value);
-  if (index < 0) {
-    throw new Error(`unknown enum value ${value}`);
-  }
-  return index;
+  return reader.readEnumIndex(variants);
 }
 
 function readRowCount(reader: RuntimeDataReader): number {
-  if (!reader.readRowCount) {
-    throw new Error("runtime reader does not support row count");
-  }
   return reader.readRowCount();
 }
 
 function readListLength(reader: RuntimeDataReader): number {
-  if (reader.readListLength) {
-    return reader.readListLength();
-  }
-  if (reader.readArrayLength) {
-    return reader.readArrayLength();
-  }
-  throw new Error("runtime reader does not support list length");
+  return reader.readListLength();
 }
 
 function readRequiredInt64(reader: RuntimeDataReader, name: string): number {
-  return requiredField(reader, name, (value) => value.readNextInt64 ? value.readNextInt64() : value.asNumber());
+  return requiredField(reader, name, (value) => value.asInt64());
 }
 
 function readRequiredFloat64(reader: RuntimeDataReader, name: string): number {
-  return requiredField(reader, name, (value) => value.readNextFloat64 ? value.readNextFloat64() : value.asNumber());
+  return requiredField(reader, name, (value) => value.asFloat64());
 }
 
 function readRequiredBool(reader: RuntimeDataReader, name: string): boolean {
@@ -150,11 +108,11 @@ function readRequiredString(reader: RuntimeDataReader, name: string): string {
 }
 
 function readOptionalInt64(reader: RuntimeDataReader, name: string): number | undefined {
-  return optionalField(reader, name, (value) => value.readNextInt64 ? value.readNextInt64() : value.asNumber());
+  return optionalField(reader, name, (value) => value.asInt64());
 }
 
 function readOptionalFloat64(reader: RuntimeDataReader, name: string): number | undefined {
-  return optionalField(reader, name, (value) => value.readNextFloat64 ? value.readNextFloat64() : value.asNumber());
+  return optionalField(reader, name, (value) => value.asFloat64());
 }
 
 function readOptionalBool(reader: RuntimeDataReader, name: string): boolean | undefined {
@@ -167,7 +125,7 @@ function readOptionalString(reader: RuntimeDataReader, name: string): string | u
 
 function readList<T>(reader: RuntimeDataReader, convert: (value: RuntimeDataReader) => T): T[] {
   const length = readListLength(reader);
-  const positional = reader.arrayElementsArePositional?.() === true;
+  const positional = reader.arrayElementsArePositional();
   const values: T[] = [];
   for (let index = 0; index < length; index += 1) {
     if (positional) {

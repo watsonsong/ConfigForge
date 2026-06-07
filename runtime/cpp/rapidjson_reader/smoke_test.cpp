@@ -20,7 +20,6 @@ public:
     virtual void ExitField() = 0;
     virtual std::size_t ReadRowCount() = 0;
     virtual std::size_t ReadListLength() { throw std::runtime_error("runtime reader does not support list length"); }
-    virtual std::size_t ReadArrayLength() { return ReadListLength(); }
 };
 
 class IRuntimeDataLoader {
@@ -29,8 +28,6 @@ public:
     virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) = 0;
 };
 
-#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH 1
-#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_ARRAY_LENGTH 1
 #define CONFIG_FORGE_RUNTIME_CPP_READER IRuntimeDataReader
 #define CONFIG_FORGE_RUNTIME_CPP_LOADER IRuntimeDataLoader
 #include "config_forge/runtime/rapidjson_reader/runtime_loader.hpp"

@@ -5,8 +5,6 @@ use crate::codegen::CodeWriterLike;
 
 pub(super) fn render_runtime_interfaces(content: &mut impl CodeWriterLike) {
     content.raw("inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";\n\n");
-    content.raw("#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH 1\n");
-    content.raw("#define CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_ARRAY_LENGTH 1\n\n");
     content.raw(concat!(
         "class IRuntimeDataReader {\n",
         "public:\n",
@@ -29,18 +27,9 @@ pub(super) fn render_runtime_interfaces(content: &mut impl CodeWriterLike) {
         "    }\n",
         "    virtual std::size_t ReadRowCount() = 0;\n",
         "    virtual std::size_t ReadListLength() { throw std::runtime_error(\"runtime reader does not support list length\"); }\n",
-        "    virtual std::size_t ReadArrayLength() { return ReadListLength(); }\n",
         "    virtual bool ArrayElementsArePositional() const { return false; }\n",
         "    virtual void BeginRecord(std::size_t) {}\n",
         "    virtual void EndRecord() {}\n",
-        "    virtual bool ReadOptionalPresent() {\n",
-        "        throw std::runtime_error(\"positional runtime reader is not supported\");\n",
-        "    }\n",
-        "    virtual std::int64_t ReadNextInt64() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
-        "    virtual double ReadNextDouble() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
-        "    virtual bool ReadNextBool() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
-        "    virtual std::string ReadNextString() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
-        "    virtual std::uint64_t ReadEnumOrdinal() { throw std::runtime_error(\"positional runtime reader is not supported\"); }\n",
         "    virtual void EnsureExhausted() {}\n",
         "};\n\n",
         "class IRuntimeDataLoader {\n",
