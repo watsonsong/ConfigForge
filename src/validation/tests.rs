@@ -3537,3 +3537,174 @@ fn table_order_helper_stably_sorts_rows_by_scalar_field() {
     assert_eq!(order_by.field(), "level");
     assert_eq!(ordered_indexes, vec![1, 2, 0]);
 }
+
+#[test]
+fn sum_validator_checks_grouped_int_totals() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "drops"
+            source = "drops.csv"
+
+            [[tables.validators]]
+            kind = "sum"
+            field = "weight"
+            group_by = ["pool"]
+            equals = 100
+
+            [[tables.fields]]
+            name = "pool"
+            type = "string"
+            export = false
+
+            [[tables.fields]]
+            name = "weight"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let valid = DataSet::new(vec![DataTable::new(
+        "drops",
+        vec![
+            BTreeMap::from([
+                ("pool".to_owned(), "common".to_owned()),
+                ("weight".to_owned(), "40".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("pool".to_owned(), "common".to_owned()),
+                ("weight".to_owned(), "60".to_owned()),
+            ]),
+        ],
+    )]);
+    let invalid = DataSet::new(vec![DataTable::new(
+        "drops",
+        vec![
+            BTreeMap::from([
+                ("pool".to_owned(), "common".to_owned()),
+                ("weight".to_owned(), "40".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("pool".to_owned(), "common".to_owned()),
+                ("weight".to_owned(), "59".to_owned()),
+            ]),
+        ],
+    )]);
+
+    assert!(validate_data_set(&linked_meta, &valid).is_ok());
+    let message = validate_error(validate_data_set(&linked_meta, &invalid));
+    assert!(message.contains("validator.sum_mismatch"));
+    assert!(message.contains("group `pool=common`"));
+}
+
+#[test]
+fn sum_validator_supports_float_epsilon_and_target_row_filter() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "rates"
+            source = "rates.csv"
+            row_export = { excluded_tags_field = "exclude_tags" }
+
+            [[tables.validators]]
+            kind = "sum"
+            field = "rate"
+            min = 0.99
+            max = 1.01
+            epsilon = 0.001
+
+            [[tables.fields]]
+            name = "rate"
+            type = "float"
+
+            [[tables.fields]]
+            name = "exclude_tags"
+            type = "string"
+            export = false
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "rates",
+        vec![
+            BTreeMap::from([
+                ("rate".to_owned(), "0.4".to_owned()),
+                ("exclude_tags".to_owned(), String::new()),
+            ]),
+            BTreeMap::from([
+                ("rate".to_owned(), "0.59".to_owned()),
+                ("exclude_tags".to_owned(), String::new()),
+            ]),
+            BTreeMap::from([
+                ("rate".to_owned(), "100".to_owned()),
+                ("exclude_tags".to_owned(), "client".to_owned()),
+            ]),
+        ],
+    )]);
+    let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
+
+    assert!(
+        validate_normalized_data_set_for_target(
+            &linked_meta,
+            &TargetTags::new(["client"]),
+            &normalized,
+        )
+        .is_ok()
+    );
+    let message = validate_error(validate_normalized_data_set(&linked_meta, &normalized));
+    assert!(message.contains("validator.sum_too_large"));
+}
+
+#[test]
+fn sum_validator_handles_skip_empty_and_config_errors() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "drops"
+            source = "drops.csv"
+
+            [[tables.validators]]
+            kind = "sum"
+            field = "weight"
+            equals = 10
+            skip_empty = true
+
+            [[tables.fields]]
+            name = "weight"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "drops",
+        vec![
+            BTreeMap::from([("weight".to_owned(), "10".to_owned())]),
+            BTreeMap::from([("weight".to_owned(), String::new())]),
+        ],
+    )]);
+    assert!(validate_data_set(&linked_meta, &data_set).is_ok());
+
+    let invalid_config = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "drops"
+            source = "drops.csv"
+
+            [[tables.validators]]
+            kind = "sum"
+            field = "weight"
+            equals = 10
+            min = 1
+
+            [[tables.fields]]
+            name = "weight"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = invalid_config.link().expect("meta should link");
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    assert!(message.contains("cannot be combined"));
+}

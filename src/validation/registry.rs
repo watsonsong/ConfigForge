@@ -12,7 +12,7 @@ use super::{
     ValidationContext, ValidationIssue, ValidationReport,
     builtins::compare::CompareValidatorFactory, builtins::range::RangeValidatorFactory,
     builtins::regex::RegexValidatorFactory, builtins::required_when::RequiredWhenValidatorFactory,
-    builtins::string_length::StringLengthValidatorFactory,
+    builtins::string_length::StringLengthValidatorFactory, builtins::sum::SumValidatorFactory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +74,7 @@ impl ValidatorRegistry {
         registry.register(StringLengthValidatorFactory);
         registry.register(RequiredWhenValidatorFactory);
         registry.register(CompareValidatorFactory);
+        registry.register(SumValidatorFactory);
         registry
     }
 

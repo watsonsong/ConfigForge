@@ -181,7 +181,7 @@
 
 建议提交：`feat(validation): add table validator helpers`
 
-## [ ] Step 9：实现 `sum` table validator
+## [x] Step 9：实现 `sum` table validator
 
 目标：支持掉落池、抽卡池、随机权重、概率分布的总和校验。
 
