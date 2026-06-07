@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, fmt, path::PathBuf, str::FromStr};
 use crate::{
     ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::ArtifactSink,
-    codegen::{CodeExportInput, CodeGenerator},
+    generator::{ArtifactGenerator, GeneratorCommonInput, GeneratorRequirements},
     meta::{
         AssetKindMeta, ExportCondition, LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta,
         LinkedMetaModel, LinkedStructType, LinkedTableMeta, PrimitiveFieldType, TableKind,
@@ -17,47 +17,25 @@ use crate::{
 
 pub(crate) struct SchemaDocGenerator;
 
-impl CodeGenerator for SchemaDocGenerator {
-    fn language(&self) -> &'static str {
+impl ArtifactGenerator for SchemaDocGenerator {
+    fn type_id(&self) -> &'static str {
         "schema_doc"
     }
 
-    fn default_naming(&self) -> crate::codegen::NamingConfig {
-        crate::codegen::NamingConfig {
-            type_name: crate::codegen::CaseStyle::Preserve,
-            enum_value: crate::codegen::CaseStyle::Preserve,
-            field: crate::codegen::CaseStyle::Preserve,
-            function: crate::codegen::CaseStyle::Preserve,
-            constant: crate::codegen::CaseStyle::Preserve,
-        }
+    fn requirements(&self) -> GeneratorRequirements {
+        GeneratorRequirements::meta_only()
     }
 
-    #[cfg(test)]
-    fn generate(&self, _input: &CodeExportInput<'_>) -> Result<Vec<crate::codegen::GeneratedFile>> {
-        Err(ConfigForgeError::Validation(
-            "schema_doc generator writes multiple artifacts through ArtifactSink".to_owned(),
-        ))
-    }
-
-    fn generate_to_sink(&self, input: &CodeExportInput<'_>, sink: &ArtifactSink) -> Result<()> {
-        let config = schema_doc_export_config_from_options(
-            input.target.out_dir.clone(),
-            input
-                .target
-                .options
-                .language_options
-                .iter()
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect(),
-        )?;
-        let project = ArtifactProjectInfo {
-            name: input.project.name.clone(),
-            desc: input.project.desc.clone(),
-            copyright: input.project.copyright.clone(),
-        };
+    fn generate_to_sink(
+        &self,
+        input: &GeneratorCommonInput<'_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let config =
+            schema_doc_export_config_from_options(input.output.clone(), input.options.clone())?;
         let doc = SchemaDoc::from_meta(
             input.meta,
-            &project,
+            &input.project,
             SchemaDocOptions {
                 title: config.title.clone(),
                 project_name: input.project.name.clone(),

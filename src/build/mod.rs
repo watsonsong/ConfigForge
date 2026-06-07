@@ -24,10 +24,9 @@ pub use options::{
 use crate::{
     ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::{ArtifactSink, ArtifactWriter},
-    codegen::{
-        CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, builtin_generators,
-    },
+    codegen::{CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator},
     data::{DataLoader, RawSourceData, SourceReadPlan},
+    generator::{GeneratorCommonInput, GeneratorRegistry},
     meta::{LinkedMetaModel, MetaModel, TargetTags},
     project::ProjectConfig,
     runtime_contract::ExportDependency,
@@ -252,7 +251,7 @@ fn execute_target_pipeline(
     })?;
 
     let generated_at = generated_at();
-    let generators = builtin_generators();
+    let generator_registry = GeneratorRegistry::with_builtin_generators();
 
     let (runtime_output, code_output) = context.trace.record("run_exporters", None, || {
         execute_export_pipeline(ExportPipelineContext {
@@ -266,7 +265,7 @@ fn execute_target_pipeline(
             assets: context.assets,
             target_tags: context.target_tags,
             generated_at: &generated_at,
-            generators: &generators,
+            generator_registry: &generator_registry,
             pool: context.pool,
             sink: context.sink,
         })
@@ -350,7 +349,7 @@ struct ExportPipelineContext<'a, 'meta> {
     assets: &'a crate::project::AssetsConfig,
     target_tags: &'a TargetTags,
     generated_at: &'a str,
-    generators: &'a [Box<dyn CodeGenerator>],
+    generator_registry: &'a GeneratorRegistry,
     pool: &'a ThreadPool,
     sink: &'a ArtifactSink,
 }
@@ -369,7 +368,7 @@ fn execute_export_pipeline<'meta>(
         assets,
         target_tags,
         generated_at,
-        generators,
+        generator_registry,
         pool,
         sink,
     } = context;
@@ -379,12 +378,13 @@ fn execute_export_pipeline<'meta>(
             let codegen_project = CodeExportProject::from(project_info);
             let codegen_context = CodegenTaskContext {
                 project_root,
+                project_info,
                 project: &codegen_project,
                 target_name,
                 target_tags,
                 linked_meta: &linked_meta,
                 generated_at,
-                generators,
+                generator_registry,
                 sink,
             };
             let code_output =
@@ -624,12 +624,13 @@ fn execute_codegen_export_nodes(
 
 struct CodegenTaskContext<'a, 'meta> {
     project_root: &'a Path,
+    project_info: &'a ArtifactProjectInfo,
     project: &'a CodeExportProject,
     target_name: &'a str,
     target_tags: &'a TargetTags,
     linked_meta: &'meta crate::meta::LinkedMetaModel<'meta>,
     generated_at: &'a str,
-    generators: &'a [Box<dyn CodeGenerator>],
+    generator_registry: &'a GeneratorRegistry,
     sink: &'a ArtifactSink,
 }
 
@@ -638,9 +639,19 @@ fn generate_and_write_code_task(
     export_task: &NormalizedExportTask,
 ) -> Result<()> {
     debug_assert_eq!(export_task.dependency, ExportDependency::MetaOnly);
+    if let Some(generator) = context
+        .generator_registry
+        .direct_generator(&export_task.type_id)
+    {
+        let input = build_generator_common_input(context, export_task);
+        return generator.generate_to_sink(&input, context.sink);
+    }
+
     let task = codegen_task_config_from_export_task(export_task)?;
-    let generator =
-        crate::codegen::find_generator(context.generators, &task.language).ok_or_else(|| {
+    let generator = context
+        .generator_registry
+        .code_generator(&task.language)
+        .ok_or_else(|| {
             ConfigForgeError::Validation(format!(
                 "no code generator registered for `{}`",
                 task.language
@@ -648,6 +659,24 @@ fn generate_and_write_code_task(
         })?;
     let input = build_code_export_input(context, task, generator)?;
     generator.generate_to_sink(&input, context.sink)
+}
+
+fn build_generator_common_input<'meta>(
+    context: &CodegenTaskContext<'_, 'meta>,
+    task: &NormalizedExportTask,
+) -> GeneratorCommonInput<'meta> {
+    GeneratorCommonInput {
+        meta: context.linked_meta,
+        target_tags: context.target_tags.clone(),
+        project: context.project_info.clone(),
+        project_root: context.project_root.to_path_buf(),
+        target_name: context.target_name.to_owned(),
+        task_name: task.name.clone(),
+        type_id: task.type_id.clone(),
+        output: context.project_root.join(&task.output),
+        options: task.options.clone(),
+        generated_at: context.generated_at.to_owned(),
+    }
 }
 
 fn build_code_export_input<'meta>(
@@ -1211,15 +1240,21 @@ mod tests {
         let generators = vec![Box::new(SinkOnlyGenerator {
             called: called.clone(),
         }) as Box<dyn CodeGenerator>];
+        let generator_registry = GeneratorRegistry::new(
+            crate::exporter::DataFormatRegistry::new(),
+            generators,
+            Vec::new(),
+        );
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
         let context = CodegenTaskContext {
             project_root: Path::new("."),
+            project_info: &project_info,
             project: &project,
             target_name: "default",
             target_tags: &target_tags,
             linked_meta: &linked_meta,
             generated_at: "2026-06-03T00:00:00Z",
-            generators: &generators,
+            generator_registry: &generator_registry,
             sink: &sink,
         };
         let export_task = NormalizedExportTask {
