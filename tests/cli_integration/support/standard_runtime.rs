@@ -457,6 +457,12 @@ pub(crate) fn verify_standard_generated_csharp_runtime(fixture_root: &std::path:
         project_dir.join("JsonRuntimeDataReader.cs"),
     )
     .expect("C# JSON runtime reader should be copied into harness");
+    fs::copy(
+        fixture_root
+            .join("../../../runtime/csharp/messagepack_reader/MessagePackRuntimeDataReader.cs"),
+        project_dir.join("MessagePackRuntimeDataReader.cs"),
+    )
+    .expect("C# MessagePack runtime reader should be copied into harness");
     fs::write(
         project_dir.join("ConfigForgeCSharpHarness.csproj"),
         r#"<Project Sdk="Microsoft.NET.Sdk">
@@ -475,6 +481,7 @@ pub(crate) fn verify_standard_generated_csharp_runtime(fixture_root: &std::path:
         r#"
 using System;
 using ConfigForge.Runtime.JsonReader;
+using ConfigForge.Runtime.MessagePackReader;
 using ReferenceGame.Config;
 
 static void Check(bool condition, string message)
@@ -486,22 +493,33 @@ static void Check(bool condition, string message)
 }
 
 var dataDir = Environment.GetEnvironmentVariable("DATA_DIR") ?? throw new Exception("DATA_DIR missing");
-var loader = new JsonRuntimeDataLoader(dataDir);
-var data = GameData.Load(loader);
-Check(data.Items.GetById(2001)?.Name == "Iron Ore", "eager item lookup failed");
-Check(data.GameRules.DefaultClass(data).Name == "Warrior", "relation lookup failed");
-Check(data.GameRules.StarterItems(data).Count == 2, "list relation lookup failed");
-Check(data.Items.GetById(2001)?.NameText(new TestTranslator()) == "铁矿石", "text helper translation failed");
+var msgpackDataDir = Environment.GetEnvironmentVariable("MSGPACK_DATA_DIR") ?? throw new Exception("MSGPACK_DATA_DIR missing");
 
-var lazyLoader = new JsonRuntimeDataLoader(dataDir);
-var lazy = new LazyGameData(lazyLoader);
-Check(lazyLoader.OpenCount == 0, "lazy loader opened data before first access");
-Check(lazy.Items.GetById(2001)?.Name == "Iron Ore", "lazy item lookup failed");
-Check(lazyLoader.OpenCount == 1, "lazy loader should open items once");
-Check(lazy.Items.GetById(2002)?.Name == "Oak Wood", "lazy cache lookup failed");
-Check(lazyLoader.OpenCount == 1, "lazy cache should avoid duplicate load");
-var eagerFromLazy = lazy.PreloadAll();
-Check(eagerFromLazy.GameRules.DefaultClass(eagerFromLazy).Name == "Warrior", "preload relation failed");
+CheckRuntime(new JsonRuntimeDataLoader(dataDir), "json eager");
+CheckLazyRuntime(new JsonRuntimeDataLoader(dataDir), "json lazy");
+CheckRuntime(new MessagePackRuntimeDataLoader(msgpackDataDir), "messagepack eager");
+CheckLazyRuntime(new MessagePackRuntimeDataLoader(msgpackDataDir), "messagepack lazy");
+
+static void CheckRuntime(IConfigForgeRuntimeDataLoader loader, string label)
+{
+    var data = GameData.Load(loader);
+    Check(data.Items.GetById(2001)?.Name == "Iron Ore", label + ": eager item lookup failed");
+    Check(data.GameRules.DefaultClass(data).Name == "Warrior", label + ": relation lookup failed");
+    Check(data.GameRules.StarterItems(data).Count == 2, label + ": list relation lookup failed");
+    Check(data.Items.GetById(2001)?.NameText(new TestTranslator()) == "铁矿石", label + ": text helper translation failed");
+}
+
+static void CheckLazyRuntime(ICountingRuntimeDataLoader loader, string label)
+{
+    var lazy = new LazyGameData(loader);
+    Check(loader.OpenCount == 0, label + ": lazy loader opened data before first access");
+    Check(lazy.Items.GetById(2001)?.Name == "Iron Ore", label + ": lazy item lookup failed");
+    Check(loader.OpenCount == 1, label + ": lazy loader should open items once");
+    Check(lazy.Items.GetById(2002)?.Name == "Oak Wood", label + ": lazy cache lookup failed");
+    Check(loader.OpenCount == 1, label + ": lazy cache should avoid duplicate load");
+    var eagerFromLazy = lazy.PreloadAll();
+    Check(eagerFromLazy.GameRules.DefaultClass(eagerFromLazy).Name == "Warrior", label + ": preload relation failed");
+}
 
 sealed class TestTranslator : ITextTranslator
 {
@@ -511,7 +529,12 @@ sealed class TestTranslator : ITextTranslator
     }
 }
 
-sealed class JsonRuntimeDataLoader : IConfigForgeRuntimeDataLoader
+interface ICountingRuntimeDataLoader : IConfigForgeRuntimeDataLoader
+{
+    int OpenCount { get; }
+}
+
+sealed class JsonRuntimeDataLoader : ICountingRuntimeDataLoader
 {
     private readonly JsonRuntimeDataFileLoader _loader;
     public int OpenCount => _loader.OpenCount;
@@ -524,6 +547,22 @@ sealed class JsonRuntimeDataLoader : IConfigForgeRuntimeDataLoader
     public IConfigForgeRuntimeDataReader Open(string path)
     {
         return new JsonRuntimeDataReaderAdapter(_loader.OpenReader(path));
+    }
+}
+
+sealed class MessagePackRuntimeDataLoader : ICountingRuntimeDataLoader
+{
+    private readonly MessagePackRuntimeDataFileLoader _loader;
+    public int OpenCount => _loader.OpenCount;
+
+    public MessagePackRuntimeDataLoader(string root)
+    {
+        _loader = new MessagePackRuntimeDataFileLoader(root);
+    }
+
+    public IConfigForgeRuntimeDataReader Open(string path)
+    {
+        return new MessagePackRuntimeDataReaderAdapter(_loader.OpenReader(path));
     }
 }
 
@@ -550,6 +589,30 @@ sealed class JsonRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader
     public bool ReadBool() => _reader.ReadBool();
     public string ReadString() => _reader.ReadString();
 }
+
+sealed class MessagePackRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader
+{
+    private readonly MessagePackRuntimeDataReader _reader;
+
+    public MessagePackRuntimeDataReaderAdapter(MessagePackRuntimeDataReader reader)
+    {
+        _reader = reader;
+    }
+
+    public void EnterRequiredField(string name) => _reader.EnterRequiredField(name);
+    public bool EnterOptionalField(string name) => _reader.EnterOptionalField(name);
+    public void ExitField() => _reader.ExitField();
+    public int ReadRowCount() => _reader.ReadRowCount();
+    public void EnterRow(int index) => _reader.EnterRow(index);
+    public void ExitRow() => _reader.ExitRow();
+    public int ReadListLength() => _reader.ReadListLength();
+    public void EnterListElement(int index) => _reader.EnterListElement(index);
+    public void ExitListElement() => _reader.ExitListElement();
+    public long ReadInt() => _reader.ReadInt();
+    public double ReadFloat() => _reader.ReadFloat();
+    public bool ReadBool() => _reader.ReadBool();
+    public string ReadString() => _reader.ReadString();
+}
 "#,
     )
     .expect("C# harness Program.cs should be written");
@@ -558,6 +621,10 @@ sealed class JsonRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader
         .args(["run", "--project"])
         .arg(project_dir.join("ConfigForgeCSharpHarness.csproj"))
         .env("DATA_DIR", fixture_root.join("out/client_data/json"))
+        .env(
+            "MSGPACK_DATA_DIR",
+            fixture_root.join("out/client_data/msgpack"),
+        )
         .output()
         .expect("standard generated C# runtime test should run");
     assert_command_success(output, "standard generated C# runtime test");
@@ -573,9 +640,12 @@ pub(crate) fn verify_standard_generated_java_runtime(fixture_root: &std::path::P
     let source_root = temp_dir.path().join("src");
     let package_dir = source_root.join("referencegame/config");
     let runtime_package_dir = source_root.join("configforge/runtime/json");
+    let msgpack_runtime_package_dir = source_root.join("configforge/runtime/messagepack");
     let class_dir = temp_dir.path().join("classes");
     fs::create_dir_all(&package_dir).expect("Java package dir should be created");
     fs::create_dir_all(&runtime_package_dir).expect("Java runtime package dir should be created");
+    fs::create_dir_all(&msgpack_runtime_package_dir)
+        .expect("Java MessagePack runtime package dir should be created");
     fs::create_dir_all(&class_dir).expect("Java class dir should be created");
     fs::copy(
         fixture_root.join("out/client_code/java/ReferenceGameConfig.java"),
@@ -595,6 +665,19 @@ pub(crate) fn verify_standard_generated_java_runtime(fixture_root: &std::path::P
         )
         .expect("Java JSON runtime reader should be copied into harness");
     }
+    let msgpack_runtime_java_dir = fixture_root
+        .join("../../../runtime/java/messagepack_reader/src/configforge/runtime/messagepack");
+    for file_name in [
+        "ConfigForgeMessagePackRuntimeDataLoader.java",
+        "ConfigForgeMessagePackRuntimeDataReader.java",
+        "ConfigForgeMessagePackParser.java",
+    ] {
+        fs::copy(
+            msgpack_runtime_java_dir.join(file_name),
+            msgpack_runtime_package_dir.join(file_name),
+        )
+        .expect("Java MessagePack runtime reader should be copied into harness");
+    }
     fs::write(
         source_root.join("RuntimeCheck.java"),
         r#"
@@ -602,27 +685,37 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import configforge.runtime.json.ConfigForgeJsonRuntimeDataLoader;
 import configforge.runtime.json.ConfigForgeJsonRuntimeDataReader;
+import configforge.runtime.messagepack.ConfigForgeMessagePackRuntimeDataLoader;
+import configforge.runtime.messagepack.ConfigForgeMessagePackRuntimeDataReader;
 import referencegame.config.ReferenceGameConfig;
 
 public final class RuntimeCheck {
     public static void main(String[] args) throws Exception {
         Path dataDir = Paths.get(System.getenv("DATA_DIR"));
-        JsonRuntimeDataLoader loader = new JsonRuntimeDataLoader(dataDir);
-        ReferenceGameConfig.GameData data = ReferenceGameConfig.GameData.load(loader);
-        check(data.getItems().getById(2001).getName().equals("Iron Ore"), "eager item lookup failed");
-        check(data.getGameRules().defaultClass(data).getName().equals("Warrior"), "relation lookup failed");
-        check(data.getGameRules().starterItems(data).size() == 2, "list relation lookup failed");
-        check(data.getItems().getById(2001).nameText(new TestTranslator()).equals("铁矿石"), "text helper translation failed");
+        Path msgpackDataDir = Paths.get(System.getenv("MSGPACK_DATA_DIR"));
+        checkRuntime(new JsonRuntimeDataLoader(dataDir), "json eager");
+        checkLazyRuntime(new JsonRuntimeDataLoader(dataDir), "json lazy");
+        checkRuntime(new MessagePackRuntimeDataLoader(msgpackDataDir), "messagepack eager");
+        checkLazyRuntime(new MessagePackRuntimeDataLoader(msgpackDataDir), "messagepack lazy");
+    }
 
-        JsonRuntimeDataLoader lazyLoader = new JsonRuntimeDataLoader(dataDir);
+    static void checkRuntime(ReferenceGameConfig.ConfigForgeRuntimeDataLoader loader, String label) {
+        ReferenceGameConfig.GameData data = ReferenceGameConfig.GameData.load(loader);
+        check(data.getItems().getById(2001).getName().equals("Iron Ore"), label + ": eager item lookup failed");
+        check(data.getGameRules().defaultClass(data).getName().equals("Warrior"), label + ": relation lookup failed");
+        check(data.getGameRules().starterItems(data).size() == 2, label + ": list relation lookup failed");
+        check(data.getItems().getById(2001).nameText(new TestTranslator()).equals("铁矿石"), label + ": text helper translation failed");
+    }
+
+    static void checkLazyRuntime(CountingRuntimeDataLoader lazyLoader, String label) {
         ReferenceGameConfig.LazyGameData lazy = new ReferenceGameConfig.LazyGameData(lazyLoader);
-        check(lazyLoader.openCount == 0, "lazy loader opened data before first access");
-        check(lazy.getItems().getById(2001).getName().equals("Iron Ore"), "lazy item lookup failed");
-        check(lazyLoader.openCount == 1, "lazy loader should open items once");
-        check(lazy.getItems().getById(2002).getName().equals("Oak Wood"), "lazy cache lookup failed");
-        check(lazyLoader.openCount == 1, "lazy cache should avoid duplicate load");
+        check(lazyLoader.openCount() == 0, label + ": lazy loader opened data before first access");
+        check(lazy.getItems().getById(2001).getName().equals("Iron Ore"), label + ": lazy item lookup failed");
+        check(lazyLoader.openCount() == 1, label + ": lazy loader should open items once");
+        check(lazy.getItems().getById(2002).getName().equals("Oak Wood"), label + ": lazy cache lookup failed");
+        check(lazyLoader.openCount() == 1, label + ": lazy cache should avoid duplicate load");
         ReferenceGameConfig.GameData eagerFromLazy = lazy.preloadAll();
-        check(eagerFromLazy.getGameRules().defaultClass(eagerFromLazy).getName().equals("Warrior"), "preload relation failed");
+        check(eagerFromLazy.getGameRules().defaultClass(eagerFromLazy).getName().equals("Warrior"), label + ": preload relation failed");
     }
 
     static void check(boolean condition, String message) {
@@ -637,12 +730,20 @@ public final class RuntimeCheck {
         }
     }
 
-    static final class JsonRuntimeDataLoader implements ReferenceGameConfig.ConfigForgeRuntimeDataLoader {
+    interface CountingRuntimeDataLoader extends ReferenceGameConfig.ConfigForgeRuntimeDataLoader {
+        int openCount();
+    }
+
+    static final class JsonRuntimeDataLoader implements CountingRuntimeDataLoader {
         private final ConfigForgeJsonRuntimeDataLoader loader;
         int openCount;
 
         JsonRuntimeDataLoader(Path root) {
             this.loader = new ConfigForgeJsonRuntimeDataLoader(root);
+        }
+
+        public int openCount() {
+            return openCount;
         }
 
         public ReferenceGameConfig.ConfigForgeRuntimeDataReader open(String path) {
@@ -651,10 +752,50 @@ public final class RuntimeCheck {
         }
     }
 
+    static final class MessagePackRuntimeDataLoader implements CountingRuntimeDataLoader {
+        private final ConfigForgeMessagePackRuntimeDataLoader loader;
+        int openCount;
+
+        MessagePackRuntimeDataLoader(Path root) {
+            this.loader = new ConfigForgeMessagePackRuntimeDataLoader(root);
+        }
+
+        public int openCount() {
+            return openCount;
+        }
+
+        public ReferenceGameConfig.ConfigForgeRuntimeDataReader open(String path) {
+            openCount++;
+            return new MessagePackRuntimeDataReaderAdapter(loader.openReader(path));
+        }
+    }
+
     static final class JsonRuntimeDataReaderAdapter implements ReferenceGameConfig.ConfigForgeRuntimeDataReader {
         private final ConfigForgeJsonRuntimeDataReader reader;
 
         JsonRuntimeDataReaderAdapter(ConfigForgeJsonRuntimeDataReader reader) {
+            this.reader = reader;
+        }
+
+        public void enterRequiredField(String name) { reader.enterRequiredField(name); }
+        public boolean enterOptionalField(String name) { return reader.enterOptionalField(name); }
+        public void exitField() { reader.exitField(); }
+        public int readRowCount() { return reader.readRowCount(); }
+        public void enterRow(int index) { reader.enterRow(index); }
+        public void exitRow() { reader.exitRow(); }
+        public int readListLength() { return reader.readListLength(); }
+        public void enterListElement(int index) { reader.enterListElement(index); }
+        public void exitListElement() { reader.exitListElement(); }
+        public long readInt() { return reader.readInt(); }
+        public double readFloat() { return reader.readFloat(); }
+        public boolean readBool() { return reader.readBool(); }
+        public String readString() { return reader.readString(); }
+    }
+
+    static final class MessagePackRuntimeDataReaderAdapter implements ReferenceGameConfig.ConfigForgeRuntimeDataReader {
+        private final ConfigForgeMessagePackRuntimeDataReader reader;
+
+        MessagePackRuntimeDataReaderAdapter(ConfigForgeMessagePackRuntimeDataReader reader) {
             this.reader = reader;
         }
 
@@ -687,6 +828,9 @@ public final class RuntimeCheck {
         .arg(runtime_package_dir.join("ConfigForgeJsonRuntimeDataLoader.java"))
         .arg(runtime_package_dir.join("ConfigForgeJsonRuntimeDataReader.java"))
         .arg(runtime_package_dir.join("ConfigForgeJsonParser.java"))
+        .arg(msgpack_runtime_package_dir.join("ConfigForgeMessagePackRuntimeDataLoader.java"))
+        .arg(msgpack_runtime_package_dir.join("ConfigForgeMessagePackRuntimeDataReader.java"))
+        .arg(msgpack_runtime_package_dir.join("ConfigForgeMessagePackParser.java"))
         .output()
         .expect("standard generated Java javac should run");
     assert_command_success(output, "standard generated Java javac");
@@ -696,6 +840,10 @@ public final class RuntimeCheck {
         .arg(&class_dir)
         .arg("RuntimeCheck")
         .env("DATA_DIR", fixture_root.join("out/client_data/json"))
+        .env(
+            "MSGPACK_DATA_DIR",
+            fixture_root.join("out/client_data/msgpack"),
+        )
         .output()
         .expect("standard generated Java runtime test should run");
     assert_command_success(output, "standard generated Java runtime test");

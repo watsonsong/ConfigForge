@@ -101,14 +101,16 @@ missing/null 语义：
 | `runtime/cpp/rapidjson_reader` | C++ RapidJSON reader adapter | 已有 header-only RapidJSON adapter，可用于测试与生产接入。 |
 | `runtime/cpp/msgpackc_reader` | C++ msgpack-cxx reader adapter | 已有 header-only msgpack-cxx adapter，可用于 MessagePack runtime data 接入。 |
 | `runtime/csharp/json_reader` | C# JSON reader template | 已有基于 .NET BCL `System.Text.Json` 的 reader 与 fs loader；standard_project harness 通过薄 adapter 接入每次 generated code 声明的 nominal interface。 |
+| `runtime/csharp/messagepack_reader` | C# MessagePack reader template | 已有 dependency-free MessagePack subset parser / reader 与 fs loader，覆盖当前 JSON 同构 named payload；standard_project harness 已同时验证 JSON / MessagePack。 |
 | `runtime/java/json_reader` | Java JSON reader template | 已有 JDK-only JSON reader 与 fs loader；standard_project harness 通过薄 adapter 接入每次 generated code 声明的 nominal interface。 |
+| `runtime/java/messagepack_reader` | Java MessagePack reader template | 已有 JDK-only MessagePack subset parser / reader 与 fs loader，覆盖当前 JSON 同构 named payload；standard_project harness 已同时验证 JSON / MessagePack。 |
 
 主要缺口：
 
 1. `tests/fixtures/runtime_reader_compliance/` 已有首批 canonical payload / expected 文件，并通过 `tests/runtime_compliance.rs` 覆盖 Rust JSON / MessagePack adapters，通过 `tests/typescript_runtime_compliance.rs` 覆盖 TypeScript JSON adapter；TypeScript MessagePack / C++ / C# / Java runner 尚未接入。
 2. Rust `reader_core` 与 TypeScript workspace packages 已有 skeleton，core contract 已按 generated parser 直接调用面收敛；但尚未进入稳定发布形态，generated code 默认仍内联 / 声明本地 contract，未默认依赖稳定 Rust crate 或 npm package。
 3. C++ generated inline `IRuntimeDataReader` 已移除 `ReadArrayLength`、`ReadOptionalPresent`、`ReadNext*`、`ReadEnumOrdinal` 等非 generated-facing helper；stable interface header 仍待补齐，当前 C++ adapter 仍通过宏绑定 generated header 中的 `IRuntimeDataReader` / `IRuntimeDataLoader`。
-4. C# / Java JSON reader 已沉淀为 copyable template；下一步缺口是接入 runtime compliance runner，并按需补充 MessagePack / Jackson / Gson / Android 友好 adapter。
+4. C# / Java JSON 与 MessagePack named reader 已沉淀为 copyable template；下一步缺口是接入 runtime compliance runner，并按需补充 binary reader 所需的 generated contract 扩展、Jackson / Gson / Android 友好 adapter。
 
 因此 runtime loader 工程化按“两层稳定 + 多 adapter 可选”的方向推进：
 
@@ -180,7 +182,7 @@ Compliance fixtures 长期不按“每种格式维护一整套手写用例”扩
 2. Rust runner 先落地到 JSON adapter 或临时 test-only reader，借 `reader_core` 的 trait 形状快速证明 schema 可执行；稳定后应迁到具体 adapter crate / package，不把复杂 reader 逻辑沉淀进薄 core。（已通过 `tests/runtime_compliance.rs` 覆盖 `serde_json_reader` / `serde_msgpack_reader`）
 3. TypeScript runner 作为 package-level test 或 Rust 驱动的临时测试工程，验证 `reader_core`、JSON reader、MessagePack reader 与 node-fs loader。（已用临时测试工程覆盖 JSON reader；MessagePack / node-fs 待接入）
 4. C++ runner 通过 CMake / CTest 接入 RapidJSON、msgpack-cxx 和 binary reader，继续保持第三方依赖显式 opt-in。
-5. C# / Java runner 复用现有 JSON copyable template，先验证 BCL/JDK-only JSON reader，再决定是否补 Jackson / Gson / MessagePack adapter。
+5. C# / Java runner 复用现有 JSON / MessagePack copyable template，先验证 BCL/JDK-only named reader，再决定是否补 binary、Jackson / Gson / Android 友好 adapter。
 
 #### Phase R2：Rust stable runtime crate
 
@@ -335,7 +337,11 @@ runtime/
 | C++ | JSON | `runtime/cpp/rapidjson_reader` | `stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(RapidJSON CONFIG)` / package manager / optional `FetchContent` | 用 RapidJSON 完整处理转义、Unicode、数字和 parse error；可通过 CMake target 引入。 |
 | C++ | MessagePack | `runtime/cpp/msgpackc_reader` | `stable` | `generated_header_bound`，中期 `external_interface` | CMake option + `find_package(msgpack-cxx CONFIG)` / package manager / `FetchContent` 固定 `cpp-6.1.1` | 不手写二进制 parser；解码到 msgpack object/value 后适配 reader，可通过 CMake target 引入。 |
 | C# | JSON | `runtime/csharp/json_reader` | `custom/example` | `copyable_template` | .NET BCL `System.Text.Json` | standard_project `dotnet run` harness 复制该 reader，并用薄 adapter 实现 generated `IConfigForgeRuntimeDataReader` / `IConfigForgeRuntimeDataLoader`。 |
+| C# | MessagePack | `runtime/csharp/messagepack_reader` | `custom/example` | `copyable_template` | 无第三方依赖，内置 MessagePack subset parser | standard_project `dotnet run` harness 复制该 reader，并验证同一份 generated code 可加载 `.msgpack` runtime data。 |
 | Java | JSON | `runtime/java/json_reader` | `custom/example` | `copyable_template` | JDK-only JSON parser | standard_project `javac` / `java` harness 复制该 reader，并用薄 adapter 实现 generated `ConfigForgeRuntimeDataReader` / `ConfigForgeRuntimeDataLoader`；后续可补 Jackson / Gson / Android 友好实现。 |
+| Java | MessagePack | `runtime/java/messagepack_reader` | `custom/example` | `copyable_template` | JDK-only MessagePack subset parser | standard_project `javac` / `java` harness 复制该 reader，并验证同一份 generated code 可加载 `.msgpack` runtime data。 |
+
+C# / Java binary reader 暂未落地：当前 generated inline reader interface 还没有 `BeginRecord` / `EndRecord`、schema revision、enum ordinal 读取等 positional layout 必需 API。为了避免把 schema-specific 推断硬塞进 concrete reader，binary 支持应先扩展 C# / Java generated contract，再补对应 reader template。
 
 依赖策略：
 

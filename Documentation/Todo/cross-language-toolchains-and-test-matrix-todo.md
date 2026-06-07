@@ -21,7 +21,7 @@
 - `tests/cli_integration/standard_project.rs` 已按语言调用 generated-code runtime harness，覆盖 Rust / C++ / Unreal C++ / C# / Java / TypeScript / Lua。
 - 多数 harness 已能在缺工具时 `eprintln!` skip，但 skip 逻辑分散，格式不统一，且需要继续清理静默 skip。
 - `tests/fixtures/runtime_reader_compliance/` 已有初始 JSON payload 和 expected TOML，但尚未形成自动 runner，也未覆盖文档中规划的全部 canonical cases。
-- C# / Java JSON reader 已抽出到 `runtime/csharp/json_reader` 与 `runtime/java/json_reader`，standard_project harness 通过薄 adapter 接入 generated loader / reader interface；尚未接入 runtime compliance runner。
+- C# / Java JSON / MessagePack reader 已抽出到 `runtime/csharp/` 与 `runtime/java/`，standard_project harness 通过薄 adapter 接入 generated loader / reader interface；尚未接入 runtime compliance runner。C# / Java binary reader 仍需先扩展 generated contract 的 positional reader API。
 
 ## 全局验收规则
 
