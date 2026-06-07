@@ -41,6 +41,7 @@ fn export_target_from_task_reads_csharp_options() {
             emit_partial = false
             runtime_interface = "external"
             runtime_namespace = "ConfigForge.Runtime"
+            emit_runtime_adapters = true
         "#,
     )
     .expect("config should parse");
@@ -65,6 +66,7 @@ fn export_target_from_task_reads_csharp_options() {
         options.runtime_namespace.as_deref(),
         Some("ConfigForge.Runtime")
     );
+    assert!(options.emit_runtime_adapters);
 }
 
 #[test]
@@ -94,6 +96,25 @@ fn rejects_invalid_csharp_options() {
             "unexpected error for {key}: {error}"
         );
     }
+}
+
+#[test]
+fn emits_csharp_standard_runtime_adapters_when_requested() {
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str("emit_runtime_adapters = true").expect("toml value"),
+    );
+
+    let files = CSharpCodeGenerator.generate(&input).expect("csharp code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public sealed class ConfigForgeJsonRuntimeDataLoaderAdapter : IConfigForgeRuntimeDataLoader"));
+    assert!(content.contains("public sealed class ConfigForgeJsonRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader"));
+    assert!(content.contains("public sealed class ConfigForgeMessagePackRuntimeDataLoaderAdapter : IConfigForgeRuntimeDataLoader"));
+    assert!(content.contains("ConfigForge.Runtime.JsonReader.JsonRuntimeDataFileLoader"));
+    assert!(content.contains("ConfigForge.Runtime.MessagePackReader.MessagePackRuntimeDataReader"));
 }
 
 #[test]

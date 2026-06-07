@@ -40,6 +40,7 @@ fn export_target_from_task_reads_java_options() {
             emit_final = false
             runtime_interface = "external"
             runtime_package = "configforge.runtime"
+            emit_runtime_adapters = true
         "#,
     )
     .expect("config should parse");
@@ -70,6 +71,7 @@ fn export_target_from_task_reads_java_options() {
         options.runtime_package.as_deref(),
         Some("configforge.runtime")
     );
+    assert!(options.emit_runtime_adapters);
 }
 
 #[test]
@@ -120,6 +122,27 @@ fn rejects_java_file_name_root_class_mismatch() {
     assert!(
         matches!(error, ConfigForgeError::Validation(ref message) if message.contains("must match root_class_name")),
         "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn emits_java_standard_runtime_adapters_when_requested() {
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str("emit_runtime_adapters = true").expect("toml value"),
+    );
+
+    let files = JavaCodeGenerator.generate(&input).expect("java code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public static final class ConfigForgeJsonRuntimeDataLoaderAdapter implements ConfigForgeRuntimeDataLoader"));
+    assert!(content.contains("public static final class ConfigForgeJsonRuntimeDataReaderAdapter implements ConfigForgeRuntimeDataReader"));
+    assert!(content.contains("public static final class ConfigForgeMessagePackRuntimeDataLoaderAdapter implements ConfigForgeRuntimeDataLoader"));
+    assert!(content.contains("configforge.runtime.json.ConfigForgeJsonRuntimeDataLoader"));
+    assert!(
+        content.contains("configforge.runtime.messagepack.ConfigForgeMessagePackRuntimeDataReader")
     );
 }
 

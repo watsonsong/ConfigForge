@@ -169,7 +169,7 @@ test(codegen): cover Rust external runtime interface mode
 feat(runtime): add C++ external reader core header
 ```
 
-## [ ] Step 5：C# / Java external 模式设计与 adapter 生成
+## [x] Step 5：C# / Java external 模式设计与 adapter 生成
 
 目标：在不强制 NuGet / Maven 的前提下，降低 inline nominal interface 下的用户 glue 成本，并为未来 external package 铺路。
 
@@ -182,6 +182,8 @@ feat(runtime): add C++ external reader core header
   - C#：`runtime_namespace`。
   - Java：`runtime_package`。
 - 文档明确 C# / Java external 模式需要稳定 assembly / jar 后才推荐生产使用。
+
+当前实现：C# / Java 新增 `emit_runtime_adapters` opt-in，用于在 generated code 内生成 JSON / MessagePack standard reader 到 inline runtime interface 的薄 adapter，降低 harness / 用户接入 glue 成本；`runtime_namespace` / `runtime_package` 仍作为 external package 设计字段保留并校验，等待稳定 assembly / jar 后再切到生产 external 模式。standard_project 已开启 adapter 生成并在 C# / Java runtime smoke 中覆盖 generated adapters。
 
 验证：
 

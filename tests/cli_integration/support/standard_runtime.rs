@@ -570,6 +570,10 @@ CheckRuntime(new JsonRuntimeDataLoader(dataDir), "json eager");
 CheckLazyRuntime(new JsonRuntimeDataLoader(dataDir), "json lazy");
 CheckRuntime(new MessagePackRuntimeDataLoader(msgpackDataDir), "messagepack eager");
 CheckLazyRuntime(new MessagePackRuntimeDataLoader(msgpackDataDir), "messagepack lazy");
+CheckRuntime(new ConfigForgeJsonRuntimeDataLoaderAdapter(dataDir), "json generated adapter eager");
+CheckLazyRuntime(new CountingAdapter(new ConfigForgeJsonRuntimeDataLoaderAdapter(dataDir)), "json generated adapter lazy");
+CheckRuntime(new ConfigForgeMessagePackRuntimeDataLoaderAdapter(msgpackDataDir), "messagepack generated adapter eager");
+CheckLazyRuntime(new CountingAdapter(new ConfigForgeMessagePackRuntimeDataLoaderAdapter(msgpackDataDir)), "messagepack generated adapter lazy");
 
 static void CheckRuntime(IConfigForgeRuntimeDataLoader loader, string label)
 {
@@ -603,6 +607,24 @@ sealed class TestTranslator : ITextTranslator
 interface ICountingRuntimeDataLoader : IConfigForgeRuntimeDataLoader
 {
     int OpenCount { get; }
+}
+
+sealed class CountingAdapter : ICountingRuntimeDataLoader
+{
+    private readonly IConfigForgeRuntimeDataLoader _loader;
+
+    public CountingAdapter(IConfigForgeRuntimeDataLoader loader)
+    {
+        _loader = loader;
+    }
+
+    public int OpenCount { get; private set; }
+
+    public IConfigForgeRuntimeDataReader Open(string path)
+    {
+        OpenCount++;
+        return _loader.Open(path);
+    }
 }
 
 sealed class JsonRuntimeDataLoader : ICountingRuntimeDataLoader
@@ -768,6 +790,10 @@ public final class RuntimeCheck {
         checkLazyRuntime(new JsonRuntimeDataLoader(dataDir), "json lazy");
         checkRuntime(new MessagePackRuntimeDataLoader(msgpackDataDir), "messagepack eager");
         checkLazyRuntime(new MessagePackRuntimeDataLoader(msgpackDataDir), "messagepack lazy");
+        checkRuntime(new ReferenceGameConfig.ConfigForgeJsonRuntimeDataLoaderAdapter(dataDir), "json generated adapter eager");
+        checkLazyRuntime(new CountingAdapter(new ReferenceGameConfig.ConfigForgeJsonRuntimeDataLoaderAdapter(dataDir)), "json generated adapter lazy");
+        checkRuntime(new ReferenceGameConfig.ConfigForgeMessagePackRuntimeDataLoaderAdapter(msgpackDataDir), "messagepack generated adapter eager");
+        checkLazyRuntime(new CountingAdapter(new ReferenceGameConfig.ConfigForgeMessagePackRuntimeDataLoaderAdapter(msgpackDataDir)), "messagepack generated adapter lazy");
     }
 
     static void checkRuntime(ReferenceGameConfig.ConfigForgeRuntimeDataLoader loader, String label) {
@@ -803,6 +829,24 @@ public final class RuntimeCheck {
 
     interface CountingRuntimeDataLoader extends ReferenceGameConfig.ConfigForgeRuntimeDataLoader {
         int openCount();
+    }
+
+    static final class CountingAdapter implements CountingRuntimeDataLoader {
+        private final ReferenceGameConfig.ConfigForgeRuntimeDataLoader loader;
+        int openCount;
+
+        CountingAdapter(ReferenceGameConfig.ConfigForgeRuntimeDataLoader loader) {
+            this.loader = loader;
+        }
+
+        public int openCount() {
+            return openCount;
+        }
+
+        public ReferenceGameConfig.ConfigForgeRuntimeDataReader open(String path) {
+            openCount++;
+            return loader.open(path);
+        }
     }
 
     static final class JsonRuntimeDataLoader implements CountingRuntimeDataLoader {

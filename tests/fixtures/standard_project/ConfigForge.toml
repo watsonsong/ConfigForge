@@ -131,6 +131,7 @@ namespace = "ReferenceGame.Config"
 [targets.exports.csharp]
 nullable = true
 access_modifier = "public"
+emit_runtime_adapters = true
 
 [[targets.exports]]
 type = "java"
@@ -142,6 +143,7 @@ namespace = "referencegame.config"
 package = "referencegame.config"
 root_class_name = "ReferenceGameConfig"
 access_modifier = "public"
+emit_runtime_adapters = true
 
 [[targets]]
 name = "server"

@@ -41,6 +41,8 @@ pub struct CSharpCodegenOptions {
     pub runtime_interface: RuntimeInterfaceMode,
     #[serde(default)]
     pub runtime_namespace: Option<String>,
+    #[serde(default)]
+    pub emit_runtime_adapters: bool,
 }
 
 impl Default for CSharpCodegenOptions {
@@ -54,6 +56,7 @@ impl Default for CSharpCodegenOptions {
             emit_partial: default_emit_partial(),
             runtime_interface: RuntimeInterfaceMode::Inline,
             runtime_namespace: None,
+            emit_runtime_adapters: false,
         }
     }
 }
@@ -188,6 +191,9 @@ fn render_csharp_code(
     content.raw_fmt(format_args!("namespace {}\n{{\n", names.namespace()));
     render_csharp_i18n_prelude(content, &input.target.options.i18n);
     render_runtime_contract(content, &model.enums, &names)?;
+    if options.emit_runtime_adapters {
+        render_standard_runtime_adapters(content);
+    }
     let partial = if options.emit_partial { " partial" } else { "" };
     let class_modifier = format!("{}{}", names.access_modifier(), partial);
 
@@ -523,6 +529,72 @@ fn render_runtime_contract(
     content.raw("        public static int UpperBound<TKey>((TKey Key, int RowIndex)[] entries, TKey key)\n        {\n            var comparer = Comparer<TKey>.Default;\n            var low = 0;\n            var high = entries.Length;\n            while (low < high)\n            {\n                var mid = low + ((high - low) / 2);\n                if (comparer.Compare(entries[mid].Key, key) <= 0)\n                {\n                    low = mid + 1;\n                }\n                else\n                {\n                    high = mid;\n                }\n            }\n            return low;\n        }\n");
     content.raw("    }\n\n");
     Ok(())
+}
+
+fn render_standard_runtime_adapters(content: &mut impl CodeWriterLike) {
+    render_csharp_standard_runtime_adapter(
+        content,
+        "Json",
+        "ConfigForge.Runtime.JsonReader.JsonRuntimeDataFileLoader",
+        "ConfigForge.Runtime.JsonReader.JsonRuntimeDataReader",
+    );
+    render_csharp_standard_runtime_adapter(
+        content,
+        "MessagePack",
+        "ConfigForge.Runtime.MessagePackReader.MessagePackRuntimeDataFileLoader",
+        "ConfigForge.Runtime.MessagePackReader.MessagePackRuntimeDataReader",
+    );
+}
+
+fn render_csharp_standard_runtime_adapter(
+    content: &mut impl CodeWriterLike,
+    format_name: &str,
+    loader_type: &str,
+    reader_type: &str,
+) {
+    content.raw_fmt(format_args!(
+        "    public sealed class ConfigForge{format_name}RuntimeDataLoaderAdapter : IConfigForgeRuntimeDataLoader\n    {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        private readonly {loader_type} _loader;\n\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        public ConfigForge{format_name}RuntimeDataLoaderAdapter(string root)\n            : this(new {loader_type}(root))\n        {{\n        }}\n\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        public ConfigForge{format_name}RuntimeDataLoaderAdapter({loader_type} loader)\n        {{\n            _loader = loader ?? throw new ArgumentNullException(nameof(loader));\n        }}\n\n"
+    ));
+    content.raw("        public int OpenCount => _loader.OpenCount;\n\n");
+    content.raw_fmt(format_args!(
+        "        public IConfigForgeRuntimeDataReader Open(string path) => new ConfigForge{format_name}RuntimeDataReaderAdapter(_loader.OpenReader(path));\n"
+    ));
+    content.raw("    }\n\n");
+
+    content.raw_fmt(format_args!(
+        "    public sealed class ConfigForge{format_name}RuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader\n    {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        private readonly {reader_type} _reader;\n\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        public ConfigForge{format_name}RuntimeDataReaderAdapter({reader_type} reader)\n        {{\n            _reader = reader ?? throw new ArgumentNullException(nameof(reader));\n        }}\n\n"
+    ));
+    content.raw("        public void EnterRequiredField(string name) => _reader.EnterRequiredField(name);\n");
+    content.raw("        public bool EnterOptionalField(string name) => _reader.EnterOptionalField(name);\n");
+    content.raw("        public void ExitField() => _reader.ExitField();\n");
+    content.raw("        public int ReadRowCount() => _reader.ReadRowCount();\n");
+    content.raw("        public void EnterRow(int index) => _reader.EnterRow(index);\n");
+    content.raw("        public void ExitRow() => _reader.ExitRow();\n");
+    content.raw("        public int ReadListLength() => _reader.ReadListLength();\n");
+    content.raw(
+        "        public void EnterListElement(int index) => _reader.EnterListElement(index);\n",
+    );
+    content.raw("        public void ExitListElement() => _reader.ExitListElement();\n");
+    content.raw("        public long ReadInt() => _reader.ReadInt();\n");
+    content.raw("        public double ReadFloat() => _reader.ReadFloat();\n");
+    content.raw("        public bool ReadBool() => _reader.ReadBool();\n");
+    content.raw("        public string ReadString() => _reader.ReadString();\n");
+    content.raw("    }\n\n");
 }
 
 fn render_game_data_access_interface(

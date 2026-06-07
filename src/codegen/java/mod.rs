@@ -42,6 +42,8 @@ pub struct JavaCodegenOptions {
     pub runtime_interface: RuntimeInterfaceMode,
     #[serde(default)]
     pub runtime_package: Option<String>,
+    #[serde(default)]
+    pub emit_runtime_adapters: bool,
 }
 
 impl Default for JavaCodegenOptions {
@@ -55,6 +57,7 @@ impl Default for JavaCodegenOptions {
             emit_final: default_emit_final(),
             runtime_interface: RuntimeInterfaceMode::Inline,
             runtime_package: None,
+            emit_runtime_adapters: false,
         }
     }
 }
@@ -230,6 +233,9 @@ fn render_java_code(
     content.raw_fmt(format_args!("{}() {{}}\n\n", names.root_class_name()));
     render_java_i18n_prelude(content, &input.target.options.i18n);
     render_runtime_contract(content, &model.enums, &names)?;
+    if options.emit_runtime_adapters {
+        render_standard_runtime_adapters(content);
+    }
     render_java_types(content, &model, &names, options, &input.target.options.i18n)?;
     render_game_data_access_interface(content, &model, &names)?;
     render_game_data_class(content, &model, &names, options)?;
@@ -375,6 +381,72 @@ fn render_runtime_contract(
     content.raw("        }\n");
     content.raw("    }\n\n");
     Ok(())
+}
+
+fn render_standard_runtime_adapters(content: &mut impl CodeWriterLike) {
+    render_java_standard_runtime_adapter(
+        content,
+        "Json",
+        "configforge.runtime.json.ConfigForgeJsonRuntimeDataLoader",
+        "configforge.runtime.json.ConfigForgeJsonRuntimeDataReader",
+    );
+    render_java_standard_runtime_adapter(
+        content,
+        "MessagePack",
+        "configforge.runtime.messagepack.ConfigForgeMessagePackRuntimeDataLoader",
+        "configforge.runtime.messagepack.ConfigForgeMessagePackRuntimeDataReader",
+    );
+}
+
+fn render_java_standard_runtime_adapter(
+    content: &mut impl CodeWriterLike,
+    format_name: &str,
+    loader_type: &str,
+    reader_type: &str,
+) {
+    content.raw_fmt(format_args!(
+        "    public static final class ConfigForge{format_name}RuntimeDataLoaderAdapter implements ConfigForgeRuntimeDataLoader {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        private final {loader_type} loader;\n\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        public ConfigForge{format_name}RuntimeDataLoaderAdapter(java.nio.file.Path root) {{\n            this(new {loader_type}(root));\n        }}\n\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        public ConfigForge{format_name}RuntimeDataLoaderAdapter({loader_type} loader) {{\n            if (loader == null) {{ throw new ConfigForgeRuntimeException(\"runtime loader is required\"); }}\n            this.loader = loader;\n        }}\n\n"
+    ));
+    content.raw("        public int openCount() { return loader.getOpenCount(); }\n\n");
+    content.raw_fmt(format_args!(
+        "        public ConfigForgeRuntimeDataReader open(String path) {{ return new ConfigForge{format_name}RuntimeDataReaderAdapter(loader.openReader(path)); }}\n"
+    ));
+    content.raw("    }\n\n");
+
+    content.raw_fmt(format_args!(
+        "    public static final class ConfigForge{format_name}RuntimeDataReaderAdapter implements ConfigForgeRuntimeDataReader {{\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        private final {reader_type} reader;\n\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        public ConfigForge{format_name}RuntimeDataReaderAdapter({reader_type} reader) {{\n            if (reader == null) {{ throw new ConfigForgeRuntimeException(\"runtime reader is required\"); }}\n            this.reader = reader;\n        }}\n\n"
+    ));
+    content.raw("        public void enterRequiredField(String name) { reader.enterRequiredField(name); }\n");
+    content.raw("        public boolean enterOptionalField(String name) { return reader.enterOptionalField(name); }\n");
+    content.raw("        public void exitField() { reader.exitField(); }\n");
+    content.raw("        public int readRowCount() { return reader.readRowCount(); }\n");
+    content.raw("        public void enterRow(int index) { reader.enterRow(index); }\n");
+    content.raw("        public void exitRow() { reader.exitRow(); }\n");
+    content.raw("        public int readListLength() { return reader.readListLength(); }\n");
+    content.raw(
+        "        public void enterListElement(int index) { reader.enterListElement(index); }\n",
+    );
+    content.raw("        public void exitListElement() { reader.exitListElement(); }\n");
+    content.raw("        public long readInt() { return reader.readInt(); }\n");
+    content.raw("        public double readFloat() { return reader.readFloat(); }\n");
+    content.raw("        public boolean readBool() { return reader.readBool(); }\n");
+    content.raw("        public String readString() { return reader.readString(); }\n");
+    content.raw("    }\n\n");
 }
 
 fn render_runtime_list_reader(
