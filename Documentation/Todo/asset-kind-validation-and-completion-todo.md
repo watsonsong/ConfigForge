@@ -307,7 +307,15 @@
 
 ## Step 8：诊断、文档和回归收敛
 
-状态：待开始
+状态：已完成（最终回归通过）
+
+完成记录：
+
+- Asset validation 诊断已使用 `asset.reference` code，并在单元测试中断言 table / field / row / target 定位。
+- Design 文档已更新 P0-1 当前状态，明确 Asset Manifest exporter 仍暂缓。
+- TODO 已按 Step 5 / 6 / 7 / 8 实际完成状态更新。
+- 最终验证命令：`cargo fmt --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml" && cargo test --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml"`。
+- 完成提交：`31b1264 feat(asset): integrate validation and canonical export`。
 
 工作项：
 
