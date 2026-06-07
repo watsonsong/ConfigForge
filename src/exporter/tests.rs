@@ -139,12 +139,13 @@ fn registry_resolves_builtin_exporters_and_aliases() {
 fn registry_reports_builtin_dependency_contracts() {
     let registry = DataFormatRegistry::with_builtin_exporters();
 
+    for format in ["json", "messagepack", "msgpack", "bin", "binary"] {
+        assert!(
+            registry.get(format).is_some(),
+            "{format} should be registered"
+        );
+    }
     for format in [
-        "json",
-        "messagepack",
-        "msgpack",
-        "bin",
-        "binary",
         "gettext_pot",
         "pot",
         "lua_table",
@@ -153,8 +154,8 @@ fn registry_reports_builtin_dependency_contracts() {
         "assets",
     ] {
         assert!(
-            registry.get(format).is_some() || registry.get_aggregate(format).is_some(),
-            "{format} should be registered"
+            registry.get_aggregate(format).is_none(),
+            "{format} is now registered as a concrete generator"
         );
     }
     assert!(registry.get("unknown").is_none());

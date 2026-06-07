@@ -36,11 +36,11 @@
 
 ## Phase 3 — 迁移 aggregate / mixed data-backed generators
 
-- [ ] 将 `src/exporter/lua_table.rs` 迁入 `src/generator/lua_table/`，直接实现 `ArtifactGenerator`；继续复用 `CodeArtifactOptions` 和 data artifact payload helper。
-- [ ] 将 `src/exporter/asset_manifest.rs` 迁入 `src/generator/asset_manifest/`，直接实现 `ArtifactGenerator`。
-- [ ] 将 `src/exporter/gettext_pot.rs` 迁入 `src/generator/gettext_pot/`，直接实现 `ArtifactGenerator`。
-- [ ] 从 `DataFormatRegistry` 中移除这些 aggregate generator 的 build-facing 注册职责；如需共享逻辑，保留在 data artifact toolkit helper 中。
-- [ ] 更新 `08-exporter-module-detail-design.md`、`09i-lua-embedded-data-generator.md`、Asset Manifest / POT 相关设计文档。
+- [x] 将 `src/exporter/lua_table.rs` 迁入 `src/generator/lua_table.rs`，直接实现 `ArtifactGenerator`；继续复用 `CodeArtifactOptions` 和 data artifact payload helper。当前 Lua 体量较大但仍为单文件；后续可再扩展成 `src/generator/lua_table/` 目录。
+- [x] 将 `src/exporter/asset_manifest.rs` 迁入 `src/generator/asset_manifest.rs`，直接实现 `ArtifactGenerator`。
+- [x] 将 `src/exporter/gettext_pot.rs` 迁入 `src/generator/gettext_pot.rs`，直接实现 `ArtifactGenerator`。
+- [x] 从 `DataFormatRegistry` 中移除这些 aggregate generator 的 build-facing 注册职责；如需共享逻辑，保留在 data artifact toolkit helper 中。
+- [x] 更新 `08-exporter-module-detail-design.md`、`09i-lua-embedded-data-generator.md`、Asset Manifest / POT 相关设计文档。
 
 ## Phase 4 — 迁移 language code-like generators
 

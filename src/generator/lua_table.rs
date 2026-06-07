@@ -14,7 +14,8 @@ use crate::{
     },
     data::DataSet,
     exporter::{
-        ExportedTablePayload, ExportedValue, TargetDataConfig, build_exported_table_payload,
+        AggregateDataExporter, ExportedTablePayload, ExportedValue, TargetDataConfig,
+        build_exported_table_payload,
     },
     meta::{
         LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedFragmentPayload, LinkedMetaModel,
@@ -22,7 +23,7 @@ use crate::{
     },
 };
 
-use super::AggregateDataExporter;
+use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements};
 
 pub const FORMAT: &str = "lua_table";
 
@@ -219,6 +220,68 @@ impl AggregateDataExporter for LuaTableExporter {
             table_stream.finish()?;
         }
         Ok(())
+    }
+}
+
+impl ArtifactGenerator for LuaTableExporter {
+    fn type_id(&self) -> &'static str {
+        FORMAT
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["lua"]
+    }
+
+    fn requirements(&self) -> GeneratorRequirements {
+        GeneratorRequirements::meta_and_data()
+    }
+
+    fn generate_to_sink(
+        &self,
+        _input: &GeneratorCommonInput<'_>,
+        _sink: &ArtifactSink,
+    ) -> Result<()> {
+        Err(ConfigForgeError::Validation(format!(
+            "generator `{}` requires Data-backed artifact input",
+            FORMAT
+        )))
+    }
+
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
+        let task = target_data_config_from_common(input);
+        <Self as AggregateDataExporter>::plan_artifacts(
+            self,
+            &input.output,
+            &task,
+            input.meta,
+            &input.target_tags,
+        )
+    }
+
+    fn generate_with_data_to_sink(
+        &self,
+        input: &GeneratorDataInput<'_, '_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let task = target_data_config_from_common(&input.common);
+        <Self as AggregateDataExporter>::export_to_sink(
+            self,
+            &input.common.output,
+            &task,
+            input.common.meta,
+            &input.common.target_tags,
+            input.data_set,
+            sink,
+        )
+    }
+}
+
+fn target_data_config_from_common(input: &GeneratorCommonInput<'_>) -> TargetDataConfig {
+    TargetDataConfig {
+        name: Some(input.task_name.clone()),
+        format: input.type_id.clone(),
+        output: input.output.clone(),
+        options: input.options.clone(),
     }
 }
 
@@ -425,7 +488,7 @@ fn render_table_file(
 ) -> Result<String> {
     match (table_meta.meta.kind, payload) {
         (TableKind::Collection, ExportedTablePayload::Collection(table)) => {
-            render_collection_table(table_meta, &table.rows, options, linked_meta, target_tags)
+            render_collection_table(table_meta, table.rows(), options, linked_meta, target_tags)
         }
         (TableKind::Object, ExportedTablePayload::Object(object)) => {
             render_object_table(table_meta, object, options, linked_meta, target_tags)
@@ -1188,14 +1251,14 @@ mod tests {
         )
         .expect("meta should load");
         let linked = meta.link().expect("meta should link");
-        let paths = LuaTableExporter
-            .plan_artifacts(
-                PathBuf::from("out").as_path(),
-                &lua_task(),
-                &linked,
-                &TargetTags::empty(),
-            )
-            .expect("paths should plan");
+        let paths = AggregateDataExporter::plan_artifacts(
+            &LuaTableExporter,
+            PathBuf::from("out").as_path(),
+            &lua_task(),
+            &linked,
+            &TargetTags::empty(),
+        )
+        .expect("paths should plan");
         assert_eq!(
             paths,
             vec![
@@ -1566,14 +1629,14 @@ mod tests {
         .expect("meta should load");
         let linked = meta.link().expect("meta should link");
 
-        let error = LuaTableExporter
-            .plan_artifacts(
-                PathBuf::from("out").as_path(),
-                &lua_task(),
-                &linked,
-                &TargetTags::empty(),
-            )
-            .unwrap_err();
+        let error = AggregateDataExporter::plan_artifacts(
+            &LuaTableExporter,
+            PathBuf::from("out").as_path(),
+            &lua_task(),
+            &linked,
+            &TargetTags::empty(),
+        )
+        .unwrap_err();
 
         assert!(
             matches!(error, crate::ConfigForgeError::Validation(message) if message.contains("table file `item_types.lua`"))

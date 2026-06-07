@@ -10,6 +10,9 @@ use crate::{
 use super::{
     ArtifactGenerator, GeneratorRequirements,
     adapter::{CodeArtifactGenerator, DataArtifactGenerator},
+    asset_manifest::AssetManifestExporter,
+    gettext_pot::GettextPotExporter,
+    lua_table::LuaTableExporter,
     schema_doc::SchemaDocGenerator,
     validation_report::ValidationReportGenerator,
 };
@@ -44,6 +47,9 @@ impl GeneratorRegistry {
             DataFormatRegistry::with_builtin_exporters(),
             builtin_generators(),
             vec![
+                Box::new(GettextPotExporter),
+                Box::new(LuaTableExporter),
+                Box::new(AssetManifestExporter),
                 Box::new(SchemaDocGenerator),
                 Box::new(ValidationReportGenerator),
             ],

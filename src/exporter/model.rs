@@ -11,6 +11,12 @@ pub struct ExportedTable {
     pub(super) rows: Vec<BTreeMap<String, ExportedValue>>,
 }
 
+impl ExportedTable {
+    pub fn rows(&self) -> &[BTreeMap<String, ExportedValue>] {
+        &self.rows
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum ExportedTablePayload {

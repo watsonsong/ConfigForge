@@ -5,7 +5,10 @@
 
 mod adapter;
 mod artifact_generator;
+mod asset_manifest;
+mod gettext_pot;
 mod input;
+mod lua_table;
 mod registry;
 mod requirements;
 mod schema_doc;
@@ -15,6 +18,7 @@ pub(crate) use artifact_generator::ArtifactGenerator;
 pub(crate) use input::{
     GeneratorCommonInput, GeneratorDataInput, GeneratorTaskInput, PreparedGeneratorInputs,
 };
+pub use lua_table::LuaTableExporter;
 pub(crate) use registry::GeneratorRegistry;
 pub(crate) use requirements::{GeneratorDescriptor, GeneratorRequirements};
 pub use schema_doc::{

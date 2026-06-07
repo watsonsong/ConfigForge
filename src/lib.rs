@@ -49,11 +49,11 @@ pub use diagnostic::{
 };
 pub use exporter::{
     BinaryDataExporter, DataFormatExporter, DataFormatRegistry, ExportedTable,
-    ExportedTablePayload, ExportedValue, JsonDataExporter, LuaTableExporter,
-    MessagePackDataExporter, RuntimeArtifactPlan, TargetDataConfig, builtin_exporters,
+    ExportedTablePayload, ExportedValue, JsonDataExporter, MessagePackDataExporter,
+    RuntimeArtifactPlan, TargetDataConfig, builtin_exporters,
 };
 pub use generator::{
-    SchemaDoc, SchemaDocExportConfig, SchemaDocFormat, SchemaDocOptions,
+    LuaTableExporter, SchemaDoc, SchemaDocExportConfig, SchemaDocFormat, SchemaDocOptions,
     render_schema_doc_index_markdown, render_schema_table_markdown,
 };
 pub use meta::{

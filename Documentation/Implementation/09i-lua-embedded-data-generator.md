@@ -344,13 +344,13 @@ Lua 关键字冲突策略应复用 Project Config 的 `keyword_conflict` 概念�
 
 ## 9i.12 当前实现状态
 
-当前 `lua_table` / alias `lua` 已作为内置 aggregate / embedded data exporter 落地，主要实现点包括：
+当前 `lua_table` / alias `lua` 已作为内置 aggregate / embedded data generator 落地，主要实现点包括：
 
 1. **配置与注册**
-   - 已在 exporter registry 注册 `lua_table` / alias `lua`。
+   - 已迁入 `src/generator/lua_table.rs`，并在 `GeneratorRegistry` 注册 `lua_table` / alias `lua`。
    - 已定义 `LuaTableOptions`，从统一 export task 的 flattened options 解析配置。
 2. **命名与符号检查**
-   - 在 `src/exporter/lua_table.rs` 内部实现 Lua naming / keyword helper；exporter 不依赖 codegen 模块。
+   - 在 `src/generator/lua_table.rs` 内部实现 Lua naming / keyword helper；generator 只复用 code artifact options / writer helper，不依赖 language codegen backend。
    - 检查 table file、field、index helper、method helper 冲突。
 3. **Lua literal writer**
    - 实现字符串、number、bool、nil、list、struct、fragment 的稳定渲染。

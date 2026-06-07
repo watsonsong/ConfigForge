@@ -12,13 +12,14 @@ use crate::{
     ConfigForgeError, Result,
     artifact::{Artifact, ArtifactSink},
     data::{DataRow, DataSet, DataTable},
+    exporter::{AggregateDataExporter, TargetDataConfig},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, LinkedTableMeta,
         PrimitiveFieldType, TableKind, TargetTags,
     },
 };
 
-use super::{AggregateDataExporter, TargetDataConfig};
+use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements};
 
 pub const FORMAT: &str = "asset_manifest";
 
@@ -139,6 +140,68 @@ impl AggregateDataExporter for AssetManifestExporter {
         stream.write_all_artifact(content.as_bytes())?;
         stream.finish()?;
         Ok(())
+    }
+}
+
+impl ArtifactGenerator for AssetManifestExporter {
+    fn type_id(&self) -> &'static str {
+        FORMAT
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["assets"]
+    }
+
+    fn requirements(&self) -> GeneratorRequirements {
+        GeneratorRequirements::meta_and_data().with_assets()
+    }
+
+    fn generate_to_sink(
+        &self,
+        _input: &GeneratorCommonInput<'_>,
+        _sink: &ArtifactSink,
+    ) -> Result<()> {
+        Err(ConfigForgeError::Validation(format!(
+            "generator `{}` requires Data-backed artifact input",
+            FORMAT
+        )))
+    }
+
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
+        let task = target_data_config_from_common(input);
+        <Self as AggregateDataExporter>::plan_artifacts(
+            self,
+            &input.output,
+            &task,
+            input.meta,
+            &input.target_tags,
+        )
+    }
+
+    fn generate_with_data_to_sink(
+        &self,
+        input: &GeneratorDataInput<'_, '_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let task = target_data_config_from_common(&input.common);
+        <Self as AggregateDataExporter>::export_to_sink(
+            self,
+            &input.common.output,
+            &task,
+            input.common.meta,
+            &input.common.target_tags,
+            input.data_set,
+            sink,
+        )
+    }
+}
+
+fn target_data_config_from_common(input: &GeneratorCommonInput<'_>) -> TargetDataConfig {
+    TargetDataConfig {
+        name: Some(input.task_name.clone()),
+        format: input.type_id.clone(),
+        output: input.output.clone(),
+        options: input.options.clone(),
     }
 }
 
@@ -793,14 +856,14 @@ mod tests {
             "format".to_owned(),
             toml::Value::String("csv".to_owned()),
         )]));
-        let paths = exporter
-            .plan_artifacts(
-                Path::new("Generated/Assets"),
-                &task,
-                &linked_meta(),
-                &TargetTags::empty(),
-            )
-            .unwrap();
+        let paths = AggregateDataExporter::plan_artifacts(
+            &exporter,
+            Path::new("Generated/Assets"),
+            &task,
+            &linked_meta(),
+            &TargetTags::empty(),
+        )
+        .unwrap();
         assert_eq!(
             paths,
             [PathBuf::from("Generated/Assets/asset_manifest.csv")]
