@@ -1,10 +1,12 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use crate::{
     ConfigForgeError, Result,
+    data::DataRow,
     meta::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedTableMeta, PrimitiveFieldType,
         ValidatorMeta,
@@ -33,6 +35,13 @@ impl ScalarFieldKind {
 
     pub(super) fn supports_regex(self) -> bool {
         self.is_string_like() || matches!(self, Self::Enum)
+    }
+
+    pub(super) fn is_comparable(self) -> bool {
+        matches!(
+            self,
+            Self::Int | Self::Float | Self::String | Self::Text | Self::Asset | Self::Enum
+        )
     }
 }
 
@@ -155,5 +164,70 @@ pub(super) fn scalar_field_kind(field: &LinkedFieldMeta<'_>) -> Option<ScalarFie
         LinkedField::Primitive(PrimitiveFieldType::Asset) => Some(ScalarFieldKind::Asset),
         LinkedField::Enum(_) => Some(ScalarFieldKind::Enum),
         LinkedField::Struct(_) | LinkedField::List(_) => None,
+    }
+}
+
+pub(super) fn literal_to_string(kind: &str, key: &str, value: &toml::Value) -> Result<String> {
+    if let Some(value) = value.as_str() {
+        return Ok(value.to_owned());
+    }
+    if let Some(value) = value.as_integer() {
+        return Ok(value.to_string());
+    }
+    if let Some(value) = value.as_float() {
+        if value.is_finite() {
+            return Ok(value.to_string());
+        }
+    }
+    if let Some(value) = value.as_bool() {
+        return Ok(value.to_string());
+    }
+    Err(ConfigForgeError::Validation(format!(
+        "validator `{kind}` parameter `{key}` must be string, integer, float or bool"
+    )))
+}
+
+pub(super) fn literal_array_to_strings(
+    kind: &str,
+    key: &str,
+    value: &toml::Value,
+) -> Result<Vec<String>> {
+    let Some(values) = value.as_array() else {
+        return Err(ConfigForgeError::Validation(format!(
+            "validator `{kind}` parameter `{key}` must be an array"
+        )));
+    };
+    values
+        .iter()
+        .map(|value| literal_to_string(kind, key, value))
+        .collect()
+}
+
+pub(super) fn row_value<'a>(row: &'a DataRow, field_name: &str) -> &'a str {
+    row.get(field_name).map(String::as_str).unwrap_or_default()
+}
+
+pub(super) fn is_empty_value(value: &str) -> bool {
+    value.trim().is_empty()
+}
+
+pub(super) fn compare_values(kind: ScalarFieldKind, left: &str, right: &str) -> Option<Ordering> {
+    match kind {
+        ScalarFieldKind::Int => Some(left.parse::<i64>().ok()?.cmp(&right.parse::<i64>().ok()?)),
+        ScalarFieldKind::Float => left
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())?
+            .partial_cmp(
+                &right
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|value| value.is_finite())?,
+            ),
+        ScalarFieldKind::String
+        | ScalarFieldKind::Text
+        | ScalarFieldKind::Asset
+        | ScalarFieldKind::Enum => Some(left.cmp(right)),
+        ScalarFieldKind::Bool => None,
     }
 }

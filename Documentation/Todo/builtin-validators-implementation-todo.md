@@ -96,7 +96,7 @@
 
 建议提交：`refactor(validation): align range validator behavior`
 
-## [ ] Step 5：实现 record validator 基础设施与共享 `when` 条件模型
+## [x] Step 5：实现 record validator 基础设施与共享 `when` 条件模型
 
 目标：为 `required_when` 和后续 record-level validators 提供 row 内条件判断、support field 读取和稳定诊断定位基础。
 
@@ -117,7 +117,7 @@
 
 建议提交：`feat(validation): add record condition helpers`
 
-## [ ] Step 6：实现 `required_when` record validator
+## [x] Step 6：实现 `required_when` record validator
 
 目标：支持“某条件满足时字段必填”的常见配置规则。
 
@@ -138,7 +138,7 @@
 
 建议提交：`feat(validation): add required when validator`
 
-## [ ] Step 7：实现 `compare` record validator
+## [x] Step 7：实现 `compare` record validator
 
 目标：支持 row 内上下界、时间窗口、等级区间等字段间比较。
 

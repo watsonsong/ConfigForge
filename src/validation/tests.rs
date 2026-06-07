@@ -3143,3 +3143,253 @@ fn string_length_validator_rejects_ambiguous_config_and_unsupported_type() {
     let message = validate_error(validate_data_set(&linked_meta, &data_set));
     assert!(message.contains("can only be used on string, text or asset fields"));
 }
+
+#[test]
+fn required_when_validator_requires_field_when_leaf_condition_matches() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.validators]]
+            kind = "required_when"
+            field = "skill_id"
+            when = { field = "kind", equals = "weapon" }
+
+            [[tables.fields]]
+            name = "kind"
+            type = "string"
+            export = false
+
+            [[tables.fields]]
+            name = "skill_id"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![
+            BTreeMap::from([
+                ("kind".to_owned(), "weapon".to_owned()),
+                ("skill_id".to_owned(), String::new()),
+            ]),
+            BTreeMap::from([
+                ("kind".to_owned(), "material".to_owned()),
+                ("skill_id".to_owned(), String::new()),
+            ]),
+        ],
+    )]);
+
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    assert!(message.contains("required by required_when"));
+}
+
+#[test]
+fn required_when_validator_supports_composite_conditions() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.validators]]
+            kind = "required_when"
+            field = "price"
+            when = { all = [ { field = "kind", equals = "shop_item" }, { field = "currency", not_empty = true } ] }
+
+            [[tables.fields]]
+            name = "kind"
+            type = "string"
+
+            [[tables.fields]]
+            name = "currency"
+            type = "string"
+
+            [[tables.fields]]
+            name = "price"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let invalid = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("kind".to_owned(), "shop_item".to_owned()),
+            ("currency".to_owned(), "gold".to_owned()),
+            ("price".to_owned(), String::new()),
+        ])],
+    )]);
+    let valid = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("kind".to_owned(), "shop_item".to_owned()),
+            ("currency".to_owned(), "".to_owned()),
+            ("price".to_owned(), String::new()),
+        ])],
+    )]);
+
+    assert!(validate_data_set(&linked_meta, &valid).is_ok());
+    let message = validate_error(validate_data_set(&linked_meta, &invalid));
+    assert!(message.contains("required by required_when"));
+}
+
+#[test]
+fn required_when_validator_reports_hidden_target_field_when_active() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.validators]]
+            kind = "required_when"
+            field = "skill_id"
+            when = { field = "kind", equals = "weapon" }
+
+            [[tables.fields]]
+            name = "kind"
+            type = "string"
+
+            [[tables.fields]]
+            name = "skill_id"
+            type = "int"
+            export_when = { any = ["server"] }
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("kind".to_owned(), "weapon".to_owned()),
+            ("skill_id".to_owned(), "1".to_owned()),
+        ])],
+    )]);
+    let normalized = normalize_data_set(&linked_meta, &data_set).expect("normalize data set");
+
+    let message = validate_error(validate_normalized_data_set_for_target(
+        &linked_meta,
+        &TargetTags::new(["client"]),
+        &normalized,
+    ));
+    assert!(message.contains("hidden for current target"));
+}
+
+#[test]
+fn compare_validator_checks_numeric_field_order() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.validators]]
+            kind = "compare"
+            left = "min_level"
+            op = "<="
+            right = "max_level"
+
+            [[tables.fields]]
+            name = "min_level"
+            type = "int"
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let valid = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("min_level".to_owned(), "1".to_owned()),
+            ("max_level".to_owned(), "10".to_owned()),
+        ])],
+    )]);
+    let invalid = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("min_level".to_owned(), "11".to_owned()),
+            ("max_level".to_owned(), "10".to_owned()),
+        ])],
+    )]);
+
+    assert!(validate_data_set(&linked_meta, &valid).is_ok());
+    let message = validate_error(validate_data_set(&linked_meta, &invalid));
+    assert!(message.contains("compare expected"));
+}
+
+#[test]
+fn compare_validator_handles_empty_operands_and_type_errors() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.validators]]
+            kind = "compare"
+            left = "start"
+            op = "<"
+            right = "end"
+            skip_if_either_empty = false
+
+            [[tables.fields]]
+            name = "start"
+            type = "string"
+
+            [[tables.fields]]
+            name = "end"
+            type = "string"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("start".to_owned(), "".to_owned()),
+            ("end".to_owned(), "z".to_owned()),
+        ])],
+    )]);
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    assert!(message.contains("empty operand"));
+
+    let incompatible = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.validators]]
+            kind = "compare"
+            left = "a"
+            op = "=="
+            right = "b"
+
+            [[tables.fields]]
+            name = "a"
+            type = "string"
+
+            [[tables.fields]]
+            name = "b"
+            type = "int"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = incompatible.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("a".to_owned(), "1".to_owned()),
+            ("b".to_owned(), "1".to_owned()),
+        ])],
+    )]);
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    assert!(message.contains("requires compatible comparable field types"));
+}
