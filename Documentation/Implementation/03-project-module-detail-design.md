@@ -8,8 +8,8 @@ Project 模块解决以下问题：
 
 1. 从 `ConfigForge.toml` 读取工程配置。
 2. 支持 Project Config 顶层 `imports`，递归加载配置片段并通过 canonical path 去重。
-3. 将不同配置片段中的 `project`、`enums`、`structs`、`tables`、`targets` 合并成一个 `ProjectConfig`。
-4. 将相对路径按声明文件所在目录归一化，避免 imports 后路径相对根目录漂移。
+3. 将不同配置片段中的 `project`、`assets`、`enums`、`structs`、`tables`、`asset_kinds`、`targets` 合并成一个 `ProjectConfig`。
+4. 将相对路径按声明文件所在目录归一化，避免 imports 后路径相对根目录漂移；其中包括 project input、export output 和 asset search path root。
 5. 保留 target 聚合结构：每个 target 可声明多个统一 export task，由 build 根据 exporter dependency contract 分发到 runtime data exporter、aggregate exporter 或 codegen。
 6. 从工程配置中抽取 raw `MetaModel`；Meta 的 link / validate 生命周期统一由 `src/meta/` 提供，Build 只负责按流程调用。
 
@@ -48,14 +48,34 @@ src/project/
 pub struct ProjectConfig {
     pub imports: Vec<PathBuf>,
     pub project: ProjectConfigMeta,
+    pub assets: AssetsConfig,
     pub enums: Vec<EnumMeta>,
     pub structs: Vec<StructMeta>,
     pub tables: Vec<TableMeta>,
+    pub asset_kinds: Vec<AssetKindMeta>,
     pub targets: Vec<TargetConfig>,
 }
 ```
 
-`ProjectConfig` 是合并后的工程视图。Project Config 允许直接承载 Meta 片段，因此 `enums`、`structs`、`tables` 的数据结构来自 `meta` 模块。
+`ProjectConfig` 是合并后的工程视图。Project Config 允许直接承载 Meta 片段，因此 `enums`、`structs`、`tables`、`asset_kinds` 的数据结构来自 `meta` 模块。`assets` 是工程环境相关配置，用于声明资源搜索路径和默认校验策略；Meta 中的 `asset_kinds` 只引用这些 search path name，不保存本机绝对路径。
+
+```rust
+pub struct AssetsConfig {
+    pub case_sensitive: Option<bool>,
+    pub require_existing: Option<bool>,
+    pub root: Option<PathBuf>,
+    pub search_paths: Vec<AssetSearchPathConfig>,
+}
+
+pub struct AssetSearchPathConfig {
+    pub name: String,
+    pub root: PathBuf,
+    pub kind: String,
+    pub mount: Option<String>,
+}
+```
+
+`AssetsConfig` 目前支持 local filesystem search paths。`assets.root` 是兼容简写，路径归一化时会补成名为 `default` 的 search path；推荐新配置使用 `[[assets.search_paths]]`。`AssetSearchPathConfig.kind` 当前只接受 `filesystem`，未来可扩展 Unreal Asset Registry、Unity Asset Database 或远程 catalog provider。
 
 ```rust
 pub struct TargetConfig {
@@ -92,15 +112,18 @@ ProjectConfig::from_path(root)
 
 - `imports` 仅控制加载，不进入最终语义。
 - `project.name` / `desc` / `copyright` 后加载片段覆盖先加载片段的非空值。
-- `enums` / `structs` / `tables` / `targets` 按片段加载顺序 append。
+- `assets.case_sensitive` / `require_existing` / `root` 后加载片段覆盖先加载片段的非空值；`assets.search_paths` 按片段加载顺序 append。
+- `enums` / `structs` / `tables` / `asset_kinds` / `targets` 按片段加载顺序 append。
 - 重复 table / enum / struct 等 Meta 语义错误不在 Project merge 阶段处理，而交由 Meta validate 输出 `MetaDiagnostic`。
 - 重复 target name 是 Project 层错误，因为 target 不属于 MetaModel。
+- 重复 asset search path name 和非 `filesystem` search path kind 是 Project 层错误；`asset_kind.search_paths` 引用未知 search path 也在 Project load 阶段报错，避免 runtime build 到 resolver 阶段才失败。
 
 ## 3.5 路径归一化
 
 Project 模块负责将 Project Config 中的路径归一化：
 
 - project-level `input`；
+- asset root / search path root；
 - export task `output`。
 
 路径以声明它的配置片段所在目录为 base，而不是以 root project 文件为 base。这样被 imports 的配置片段可以自包含地声明相对路径。
@@ -121,7 +144,7 @@ build
 
 - `project` 不能依赖 `build`。
 - `project` 不调用 `DataLoader`，不创建线程池。
-- `project.raw_meta_model()` 只把合并后的 `enums` / `structs` / `tables` 克隆为 raw `MetaModel`，不调用 `link_meta_model()`、`validate_meta_model()` 或 `MetaModel::link()`。
+- `project.raw_meta_model()` 只把合并后的 `enums` / `structs` / `tables` / `asset_kinds` 克隆为 raw `MetaModel`，不调用 `link_meta_model()`、`validate_meta_model()` 或 `MetaModel::link()`。
 - Meta link / validate 的唯一业务入口属于 Meta 模块：standalone loader 通过 `MetaModel::finish_loading()` 完成加载后校验，Build 对 Project 抽取出的 raw model 直接调用 `MetaModel::link()` 获取当前执行阶段使用的 borrowed view。
 
 ## 3.7 测试边界
@@ -133,3 +156,4 @@ Project 模块测试应覆盖：
 - target name 重复时报错。
 - export type alias / 默认值属于 exporter registry 与 build normalization 行为，但可通过 project 解析测试覆盖 TOML shape。
 - path lexical normalize 对 absolute root、leading parent、`.` / `..` 的处理。
+- `[assets]` / `[[assets.search_paths]]` 解析、root 归一化、重复 search path、unsupported kind、未知 search path 引用。

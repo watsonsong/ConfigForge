@@ -33,6 +33,7 @@ src/validation/
   entry.rs            # validate_data_set* / validate_table* 等对外入口
   table.rs            # table-level 基础规则、unique/index、target-aware table validation
   foreign_key.rs      # full / target-aware foreign key referential integrity validation
+  asset.rs            # full / target-aware asset reference validation，复用 src/asset.rs resolver
   struct_value.rs     # struct JSON cell / expanded value 校验
   defaults.rs         # default 应用与 normalize_data_set / normalize_data_set_with_pool / normalize_table
   registry.rs         # ValidatorFactory / CompiledValidator / ValidatorRegistry / CompiledValidationPlan
@@ -105,7 +106,8 @@ Data validation 阶段规则：
 
 3. **统一内置与扩展 validator**
    - 内置 validator：required、type、enum、range、unique、referential_integrity。
-   - 未来扩展 validator：asset existence、text key、weight sum、probability、业务自定义规则。
+   - Asset reference validation 当前作为 target-aware validation 的独立阶段接入，并复用 `src/asset.rs` 的 resolver；后续如果迁移进 registry，也应保持同一解析语义。
+   - 未来扩展 validator：text key、weight sum、probability、业务自定义规则。
    - 所有 validator 通过同一个 registry 注册、编译和执行。
 
 4. **与 Target Tags / ExportView 语义一致**

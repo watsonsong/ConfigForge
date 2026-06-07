@@ -262,15 +262,15 @@ FK 上的 `linked_field` 不引入新的数据校验规则；它只是要求生�
 
 ### Asset
 
-Asset 字段应至少检查：
+Asset 字段当前由 `asset_kind` + Project `[assets]` 驱动校验，至少检查：
 
 - ref 语法合法；
 - asset_kind 合法；
-- 如果 target 配置了 asset root/provider，则检查资源存在。
+- 如果 Project 配置了 filesystem search path 且全局 / kind 未关闭存在性校验，则检查资源存在。
 
 Asset existence 默认对 ExportView 执行。被 target filter 排除的记录，其 asset 不阻塞该 target 导出，也不进入 asset manifest。
 
-当前实现状态：`asset` 仍按 string-like scalar 解析和导出，尚未实现 asset ref syntax、asset kind 和文件存在性校验。标准参考游戏 fixture 中 class icon、weapon skill asset 等字段用于锁定目标业务形态：这些字段一般只对 client target 可见，server target 不应因为 client-only asset 缺失而失败；client target 后续应能按配置的 asset root 检查真实资源是否存在，并生成 asset manifest。目标态细节见 [`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)。
+当前实现状态：P0-1 已实现 asset ref 校验和导出补齐。`asset` 字段必须声明 `asset_kind`；Meta 顶层 `[[asset_kinds]]` 支持 `extends` 继承；Project `[assets]` / `[[assets.search_paths]]` 提供 filesystem search path；validation 只检查当前 target ExportView 中可见且非空的 asset 字段；runtime JSON / MessagePack / bin 导出前会通过同一 resolver 把可补齐引用物化为 canonical asset string。标准参考工程已用 `meta/common.toml` 存放公共 Unreal 基础规则，并用伪造 `.uasset` fixture 覆盖存在性校验。Asset Manifest exporter 仍是后续阶段。目标态细节见 [`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)。
 
 ### Text
 

@@ -1,6 +1,6 @@
 # 08. Asset 引用校验、补齐与 Asset Manifest 初步设计
 
-本文从现有 Data Validation / Export CLI 设计中拆出，专门收敛 `asset` 字段、资源存在性校验、target-aware 资源策略、资源引用自动补齐和 Asset Manifest 聚合导出的用户可见行为。当前 P0-1 实现先聚焦 `asset_kind`、导出前校验和 canonical ref 补齐；Asset Manifest 输出先放到后续阶段，避免同时引入新的聚合 exporter 复杂度。具体 Rust 模块拆分、缓存结构和 exporter 实现细节应后续进入 `Documentation/Implementation/`。
+本文从现有 Data Validation / Export CLI 设计中拆出，专门收敛 `asset` 字段、资源存在性校验、target-aware 资源策略、资源引用自动补齐和 Asset Manifest 聚合导出的用户可见行为。当前 P0-1 实现先聚焦 `asset_kind`、导出前校验和 canonical ref 补齐；Asset Manifest 输出先放到后续阶段，避免同时引入新的聚合 exporter 复杂度。Rust 模块边界和当前实现细节见 `Documentation/Implementation/01-module-outline.md`、`03-project-module-detail-design.md`、`04-meta-module-detail-design.md` 和 `06-validation-module-detail-design.md`。
 
 ## 8.1 设计目标
 
@@ -24,7 +24,7 @@
 
 ## 8.2 当前状态
 
-当前实现已完成 P0-1：`asset` 字段必须声明 `asset_kind`，Meta 支持顶层 `[[asset_kinds]]` 和 `extends` 继承；Project Config 支持 `[assets]` / `[[assets.search_paths]]`；runtime build 会对当前 target ExportView 中可见的 asset 字段执行 resolver 校验，并在导出 JSON / MessagePack / bin 等 runtime data 前把可补齐引用写成 canonical export ref。Asset Manifest exporter 尚未实现，仍作为后续阶段单独推进。
+当前实现已完成 P0-1：`asset` 字段必须声明 `asset_kind`，Meta 支持顶层 `[[asset_kinds]]` 和 `extends` 继承；Project Config 支持 `[assets]` / `[[assets.search_paths]]`；runtime build 会对当前 target ExportView 中可见的 asset 字段执行 resolver 校验，并在导出 JSON / MessagePack / bin 等 runtime data 前把可补齐引用写成 canonical export ref。已实现的 resolver 覆盖 local filesystem search path、relative / mounted / mounted_object、extension policy、wrapper stripping、object name 模板、存在性、sidecar、命名前后缀、prefix / pattern / regex、target-gated deny 和基础大小写检查。当前 validation 诊断 MVP 统一使用 `asset.reference` code 并携带 table / field / row / target 定位；更细粒度 asset diagnostic code 与 Asset Manifest exporter 仍作为后续阶段单独推进。
 
 现有文档中的已确认语义仍保留：
 
@@ -116,7 +116,7 @@ kind = "filesystem"
 
 ### Meta / schema TOML：asset kinds
 
-`asset_kind` 定义建议作为 Meta 的顶层配置归档，而不是 Project 环境配置。示例：
+`asset_kind` 定义建议作为 Meta 的顶层配置归档，而不是 Project 环境配置。公共引擎规则（例如 `unreal_asset`）应放在可复用的公共 Meta 片段中，字段专用 kind 再通过 `extends` 继承并收窄命名或目录规则。示例：
 
 ```toml
 [[asset_kinds]]
@@ -128,7 +128,6 @@ case_sensitive = true
 require_sidecars = ["{path}.meta"]
 input = "path"
 extension_policy = "required"
-manifest_path = "search_path_relative"
 
 [[asset_kinds]]
 name = "vfx_prefab"
@@ -176,7 +175,7 @@ name_suffixes = ["_Icon"]
 | `extensions` | `[]` | 允许的主资源后缀。Unity / filesystem 用真实后缀；Unreal 可用 `.uasset`；Cocos runtime path 可配置为 extensionless 输入但用此列表查找真实文件。 |
 | `input` | `path` | 策划填写值的基础语法。P0-1 建议只保留通用 `path` / `string` 类，不把 `cocos`、`unreal` 作为核心枚举。引擎差异由下方 path style、wrapper、extension、object name 等规则组合表达。 |
 | `path_style` | `relative` | path 解释方式。可选 `relative`、`mounted`、`mounted_object`：普通相对路径、带挂载前缀路径、带 package/object 名的路径。 |
-| `manifest_path` | `search_path_relative` | manifest 输出路径口径。可选 `input`、`search_path_relative`、`engine_canonical`。 |
+| `manifest_path` | `search_path_relative` | 后续 Asset Manifest exporter 的输出路径口径。可选 `input`、`search_path_relative`、`engine_canonical`；P0-1 resolver / runtime export 尚不消费该字段。 |
 | `extension_policy` | `required` | source input 的扩展名策略。可选 `required`、`forbidden`、`optional`。Cocos `resources.load` 风格可用 `forbidden` + `extensions` 查找真实文件。 |
 | `strip_wrappers` | `[]` | 输入 wrapper 模板。用于接受编辑器复制引用，例如 `BlueprintGeneratedClass'{value}'`，解析时提取 `{value}` 再进入通用 path 校验。 |
 | `object_separator` | `.` | `mounted_object` 中 package path 与 object name 的分隔符。Unreal 可用 `.`。 |
@@ -373,7 +372,6 @@ extensions = [".prefab"]
 input = "path"
 path_style = "relative"
 extension_policy = "forbidden"
-manifest_path = "input"
 ```
 
 ## 8.5 Target 校验与补齐策略
@@ -454,7 +452,7 @@ Shipping / region / platform 规则不建议写成硬编码 target 名称；应�
 
 ### 诊断
 
-建议稳定诊断 code：
+目标态建议稳定诊断 code：
 
 | Code | 场景 |
 | --- | --- |
@@ -472,7 +470,7 @@ Shipping / region / platform 规则不建议写成硬编码 target 名称；应�
 | `AssetPathCaseMismatch` | ref 大小写与真实文件不一致。 |
 | `AssetManifestConflict` | manifest 输出中同一 logical asset path 对应不同 kind 或 canonical path 冲突。 |
 
-诊断应包含：target、table、field_path、record_key、asset_kind、asset_ref、resolved_path、source location，以及相关 asset kind / search path 定义位置。
+当前实现的 validation 诊断 MVP 统一使用 `asset.reference` code，并包含 target、table、field_path、source row 和 resolver 失败信息。下表中的细粒度 code 是后续诊断增强目标；增强时应继续包含 target、table、field_path、record_key、asset_kind、asset_ref、resolved_path、source location，以及相关 asset kind / search path 定义位置。
 
 ## 8.7 Asset Manifest 导出
 
@@ -558,14 +556,14 @@ asset_ref,asset_kind,table,field_path,record_key,source,tag
 
 ## 8.8 与 runtime data / codegen 的关系
 
-第一阶段不改变 runtime data 和 generated code 的基础形态：
+第一阶段不改变 runtime data 和 generated code 的基础形态；当前实现已按以下语义落地：
 
 - `asset` 在 JSON / MessagePack / bin runtime payload 中仍按字符串输出，但当 `asset_kind` 允许补齐时，输出值应使用当前 target 解析得到的 canonical export ref，而不是原始 source cell。
 - 各语言 generated row 字段类型仍为 string-like 类型。
-- codegen 可以在注释中保留 `asset_kind`，但不默认生成引擎资源加载 API。
+- codegen 仍把 `asset` 映射为 string-like 类型，不默认生成引擎资源加载 API。
 - 业务运行时如何把 string asset path 转成 Unity Addressable、Unreal SoftObjectPath、AssetId、GUID 或句柄，由项目侧 adapter 或手写扩展决定。
 
-实现上应避免 validation 和 exporter 对同一 asset ref 重复执行不一致的解析：推荐将 asset resolver 设计为可复用服务，validation 阶段可用它产生 diagnostics，export 阶段通过同一解析逻辑或缓存结果把 raw asset value materialize 成 canonical string。
+实现上已通过共享 `AssetResolver` 避免 validation 和 exporter 使用不同语义：validation 阶段用 resolver 产生 diagnostics，export 阶段复用同一解析逻辑把 raw asset value materialize 成 canonical string。后续可引入 target-level asset resolution cache，减少 validation 与 export 的重复解析成本。
 
 未来扩展可以在 codegen 层增加可选 mapping，例如 C# / TypeScript 生成品牌化 `AssetRef<TKind>` wrapper，或 Unreal C++ 生成 `FSoftObjectPath` / `TSoftClassPtr` 友好 API。但这些都不应成为 P0-1 的阻塞项。
 

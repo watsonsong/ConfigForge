@@ -33,7 +33,7 @@ data/
   game_rules.csv
 ```
 
-拆分时使用 Project Config 顶层 `imports` 统一导入其他工程配置片段。被导入的文件与根配置使用同一套格式：可以直接声明 `[[enums]]`、`[[structs]]`、`[[tables]]`、`[[targets]]`，也可以继续声明 `imports`。不再需要单独的 `meta = [...]` 列表；所有导入片段中的 Meta 定义和 target 定义最终合并为一次构建使用的工程配置。标准参考游戏 fixture 采用 `ConfigForge.toml` 作为总控入口，按 `meta/characters.toml`、`meta/items.toml`、`meta/misc.toml` 拆分角色、道具、杂项定义，并在总控文件中声明 client/server 构建 target。
+拆分时使用 Project Config 顶层 `imports` 统一导入其他工程配置片段。被导入的文件与根配置使用同一套格式：可以直接声明 `[[enums]]`、`[[structs]]`、`[[tables]]`、`[[asset_kinds]]`、`[[targets]]`，也可以继续声明 `imports`。不再需要单独的 `meta = [...]` 列表；所有导入片段中的 Meta 定义和 target 定义最终合并为一次构建使用的工程配置。标准参考游戏 fixture 采用 `ConfigForge.toml` 作为总控入口，按 `meta/common.toml`、`meta/characters.toml`、`meta/items.toml`、`meta/misc.toml` 拆分公共规则、角色、道具、杂项定义，并在总控文件中声明 client/server 构建 target。
 
 ## 3.2 Project Config
 
@@ -43,10 +43,10 @@ Project Config 定义工程元信息、Meta 定义和可构建的 targets。CLI 
 
 ```toml
 imports = [
-  "Meta/common.toml",
-  "Meta/items.toml",
-  "Meta/quests.toml",
-  "Targets/client.toml",
+  "meta/common.toml",
+  "meta/items.toml",
+  "meta/quests.toml",
+  "targets/client.toml",
 ]
 
 [project]

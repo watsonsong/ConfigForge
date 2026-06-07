@@ -1,6 +1,13 @@
 # Asset Kind 校验与导出补齐 TODO
 
-本文跟踪 P0-1 `asset_kind`、资源引用校验和导出补齐的开发计划。Asset Manifest exporter 暂不纳入本轮实现；后续在校验 / 补齐闭环稳定后单独推进。
+本文归档 P0-1 `asset_kind`、资源引用校验和导出补齐的开发计划与完成状态。Asset Manifest exporter 暂不纳入本轮实现；后续在校验 / 补齐闭环稳定后单独推进。
+
+## 当前归档状态
+
+- P0-1 已完成并通过全量回归：Meta `asset_kind`、Project `[assets]` / `[[assets.search_paths]]`、resolver、target-aware validation、runtime export canonical asset string 和标准工程 Unreal fixture 均已落地。
+- 标准工程使用 `meta/common.toml` 存放公共 Unreal 基础规则，字段专用 kind 通过 `extends` 继承公共规则。
+- 当前诊断 MVP 在 validation 层统一使用 `asset.reference` code，并携带 target / table / field / row 定位；更细粒度 asset diagnostic code 保留为后续增强。
+- Asset Manifest exporter 仍保持“后续”状态，不影响当前 asset validation / completion 闭环。
 
 ## 目标范围
 
@@ -8,7 +15,7 @@
 - Project Config 支持 `[assets]` 和 `[[assets.search_paths]]`，用于描述本地资源搜索根与 mount 映射。
 - Validation 对当前 target ExportView 中可见 asset 字段执行资源引用校验。
 - Runtime data export 输出经过 asset resolver 补齐后的 canonical asset string。
-- 标准工程先按 Unreal mounted object / class 模式覆盖集成测试，通过测试临时目录伪造 `.uasset` 文件完成存在性校验。
+- 标准工程已按 Unreal mounted object / class 模式覆盖集成测试，通过 fixture `Content/` 下的伪造 `.uasset` 文件完成存在性校验。
 
 ## 非目标
 
@@ -27,7 +34,7 @@
 - Project embedded Meta extraction 已保留 `asset_kinds`，避免 Project Config 中的 Meta 片段丢失定义。
 - Meta validate 已强制 `type = "asset"` 声明 `asset_kind`，并拒绝非 asset 字段声明 `asset_kind`。
 - 已校验重复 `asset_kinds[].name` 和非法 regex pattern。
-- 标准工程现有 asset 字段已临时声明 legacy asset kind，保持当前集成测试通过；Step 7 再切换到 Unreal 模式 fixture。
+- 标准工程早期曾临时声明 legacy asset kind；最终已在 Step 7 切换为 Unreal 模式 fixture。
 - 验证命令：`cargo fmt --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml" && cargo test --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml"`。
 
 工作项：
@@ -212,7 +219,7 @@
 
 - Target-aware validation 已遍历 ExportView 可见 table / row / field，仅校验当前 target 可见且非空的 asset 字段。
 - Asset resolver 已接入 runtime build validation，server target 会跳过 client-only asset 字段和被 row_export 排除的记录。
-- 诊断已带上 table、field、row、target 和 asset resolver 失败信息。
+- 诊断已带上 table、field、row、target 和 asset resolver 失败信息；当前 validation code 统一为 `asset.reference`。
 - 标准工程已补齐 fixture 资源 search path 和伪造资源文件，解除集成测试阻塞。
 - 验证命令：`cargo fmt --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml" && cargo test --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml"`。
 
@@ -291,7 +298,7 @@
    - `Content/Skills/GA_Slash.uasset`
    - `Content/Skills/GA_PowerShot.uasset`
    - `Content/Skills/GA_Fireball.uasset`
-   - 如覆盖 classes icon，再创建对应 UI `.uasset`。
+   - 如覆盖 classes icon，再创建对应 UI 假文件。
 4. 数据表可先把现有值从 `assets/skills/slash.asset` 改为短写法或 Unreal canonical：
    - 短写法：`Skills/GA_Slash`
    - canonical：`/Game/Skills/GA_Slash.GA_Slash_C`
@@ -311,11 +318,11 @@
 
 完成记录：
 
-- Asset validation 诊断已使用 `asset.reference` code，并在单元测试中断言 table / field / row / target 定位。
+- Asset validation 诊断已使用 `asset.reference` code，并在单元测试中断言 table / field / row / target 定位；细粒度诊断 code 留作后续增强。
 - Design 文档已更新 P0-1 当前状态，明确 Asset Manifest exporter 仍暂缓。
 - TODO 已按 Step 5 / 6 / 7 / 8 实际完成状态更新。
 - 最终验证命令：`cargo fmt --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml" && cargo test --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml"`。
-- 完成提交：`31b1264 feat(asset): integrate validation and canonical export`。
+- 完成提交已记录在 git 历史中：核心实现为 `feat(asset): integrate validation and canonical export`，最终归档为 `docs(asset): close validation completion plan`。
 
 工作项：
 

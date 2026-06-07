@@ -123,6 +123,7 @@ pub struct MetaModel {
     pub enums: Vec<EnumMeta>,
     pub structs: Vec<StructMeta>,
     pub tables: Vec<TableMeta>,
+    pub asset_kinds: Vec<AssetKindMeta>,
 }
 ```
 
@@ -131,6 +132,7 @@ pub struct MetaModel {
 - `MetaModel` 是 serde 直接加载的 owned model。
 - 不包含 `HashMap` 索引，不包含内部引用。
 - 对外模型统一使用 `MetaModel`。
+- `asset_kinds` 是 Meta 级资源解析规则模板；Project Config 可以通过 imports 组合公共 Meta 片段，例如把 Unreal / Unity 等引擎通用规则放入 `meta/common.toml`，字段专用 kind 再用 `extends` 继承。
 - Project 信息和配置片段导入关系属于 Project Config，不属于 MetaModel。
 
 主要方法：
@@ -149,6 +151,84 @@ impl MetaModel {
     pub fn collection_tables(&self) -> impl Iterator<Item = &TableMeta>;
 }
 ```
+
+#### `AssetKindMeta`
+
+Asset kind 是 `type = "asset"` 字段引用的 Meta 级规则模板，描述资源引用如何解析、校验和导出前补齐。资源搜索路径本身由 Project `[assets]` / `[[assets.search_paths]]` 提供，Meta 中只保存稳定的规则和 search path name 引用。
+
+```rust
+pub struct AssetKindMeta {
+    pub name: String,
+    pub extends: Option<String>,
+    pub search_paths: Vec<String>,
+    pub base_dirs: Vec<String>,
+    pub extensions: Vec<String>,
+    pub input: Option<AssetInputKind>,
+    pub path_style: Option<AssetPathStyle>,
+    pub extension_policy: Option<AssetExtensionPolicy>,
+    pub strip_wrappers: Vec<String>,
+    pub object_separator: Option<String>,
+    pub object_name: Option<String>,
+    pub case_sensitive: Option<bool>,
+    pub require_existing: Option<bool>,
+    pub require_sidecars: Vec<String>,
+    pub allow_path_prefixes: Vec<String>,
+    pub deny_path_prefixes: Vec<String>,
+    pub deny_when_tags: Vec<String>,
+    pub name_prefixes: Vec<String>,
+    pub name_suffixes: Vec<String>,
+    pub allow_patterns: Vec<String>,
+    pub deny_patterns: Vec<String>,
+    pub regex_rules: Vec<AssetRegexRuleMeta>,
+    pub allow_auto_complete: bool,
+}
+```
+
+```rust
+#[serde(rename_all = "snake_case")]
+pub enum AssetInputKind {
+    Path,
+    String,
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum AssetPathStyle {
+    Relative,
+    Mounted,
+    MountedObject,
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum AssetExtensionPolicy {
+    Required,
+    Forbidden,
+    Optional,
+}
+
+pub struct AssetRegexRuleMeta {
+    pub name: String,
+    pub target: Option<AssetRegexTarget>,
+    pub pattern: String,
+    pub severity: ValidationSeverity,
+    pub message: Option<String>,
+    pub when_tags: Vec<String>,
+    pub invert: bool,
+    pub case_sensitive: Option<bool>,
+}
+```
+
+关键点：
+
+- `name` 是全局唯一的 asset kind ID，供 `FieldMeta.asset_kind` 引用。
+- `extends` 允许字段专用 kind 继承公共 kind，例如 `unreal_skill_class extends = "unreal_asset"`；Meta 校验拒绝未知父 kind、自继承和继承环。Resolver 使用合并后的 effective asset kind 执行校验和补齐。
+- `search_paths` 引用 Project `assets.search_paths[].name`，用于把稳定 Meta 规则与本地资源根目录解耦；Project load 阶段会校验引用存在。
+- `path_style` 支持 `relative`、`mounted`、`mounted_object`，覆盖常见相对路径、引擎 mount path 和 Unreal object path / class path。
+- `extension_policy` 与 `extensions` 控制输入是否必须携带扩展名、禁止扩展名或可选；`allow_auto_complete` 为 `true` 时允许 resolver 在唯一候选命中时补齐扩展名、mount/object name 等 canonical ref 组成部分。
+- `strip_wrappers` 用于剥离编辑器复制引用中的包装，例如 `BlueprintGeneratedClass'{value}'` 或 `Class'{value}'`。
+- `object_separator` 与 `object_name` 描述 mounted object 引用中的对象名规则，例如 Unreal class `_C`。
+- `require_existing` 覆盖 Project `[assets].require_existing` 的默认存在性策略；`require_sidecars` 用于 Unity `.meta` 等配对文件校验。
+- `allow_path_prefixes` / `deny_path_prefixes` / `deny_when_tags` / `name_prefixes` / `name_suffixes` / `allow_patterns` / `deny_patterns` / `regex_rules` 是结构化与正则兜底校验规则；正则只参与校验，不参与路径重写或候选生成。
+- P0-1 当前通过 `src/asset.rs` 的 `AssetResolver` 消费该 Meta，validation 与 runtime export 共享同一解析语义；Asset Manifest exporter 后续也应复用 resolver 输出。
 
 ### 4.5.2 Project 信息边界
 
@@ -286,6 +366,7 @@ pub struct FieldMeta {
     pub desc: Option<String>,
     #[serde(rename = "type")]
     pub field_type: String,
+    pub asset_kind: Option<String>,
     pub required: bool,
     pub default: Option<toml::Value>,
     pub layout: Option<ValueLayout>,
@@ -304,6 +385,7 @@ pub struct FieldMeta {
 关键点：
 
 - `field_type` 必须保持 `String`，因为它可能是 primitive，也可能是后续文件中定义的 enum / struct 名称。
+- `asset_kind` 只允许 `field_type = "asset"` 字段声明，且 asset 字段必须显式声明；它引用顶层 `MetaModel.asset_kinds[].name`，用于 target-aware asset validation 和 runtime export canonical ref 补齐。
 - `default` 暂保留 `toml::Value`；后续可在 Link 或单独 default-link 阶段按字段类型解析为 typed default。
 - `export = false` 是字段导出的硬关闭；默认 `true`。
 - `export_when` 根据 target tags 判断字段是否进入 runtime row 与 codegen row type。

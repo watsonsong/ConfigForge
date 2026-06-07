@@ -366,8 +366,8 @@
             <tr><td>ObjectTable</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 CSV <code>key,value</code> 常量表、单 object runtime payload，并可作为 FK source 引用 CollectionTable unique / primary index；多源、override、作为 FK target 暂不支持。</td></tr>
             <tr><td>Struct fields / expanded value</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 named struct、JSON cell、source-driven expanded value、recursive nested struct、target-aware child filtering 和 child default；array/map 与 struct child validators 待后续。</td></tr>
             <tr><td>Foreign keys</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 field/table-level FK、link、Meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique / primary index。</td></tr>
-            <tr><td>Runtime data export</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 JSON、MessagePack、bin table data exporter 与 gettext POT 聚合 exporter；streaming writer、asset manifest 和更多格式是后续扩展。</td></tr>
-            <tr><td>Asset validation / completion</td><td><span class="tag red">Planned</span></td><td>目标态是 Project search paths + Meta asset_kinds，在 ExportView 上校验资源引用、执行 Unreal 等模式的保守补齐，并让 runtime data 输出 canonical asset string；Asset Manifest 输出先放到后续阶段。</td></tr>
+            <tr><td>Runtime data export</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 JSON、MessagePack、bin table data exporter 与 gettext POT 聚合 exporter；runtime data 会在导出前使用 asset resolver 物化 canonical asset string。Asset Manifest 和更多格式是后续扩展。</td></tr>
+            <tr><td>Asset validation / completion</td><td><span class="tag orange">Implemented MVP</span></td><td>已实现 Project search paths + Meta asset_kinds / extends，在 ExportView 上校验资源引用、执行 Unreal mounted object / wrapper / 短路径唯一候选补齐，并让 runtime data 输出 canonical asset string；Asset Manifest 输出仍放到后续阶段。</td></tr>
             <tr><td>Codegen backends</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 Rust / TypeScript / C++ 基础生成、loader/repository helpers 和 target-aware IR。</td></tr>
             <tr><td>Diagnostics</td><td><span class="tag orange">Implemented MVP</span></td><td><code>src/diagnostic/</code> 已提供 severity、location、formatting、report aggregation 和 crate error facade；Data/Exporter/Codegen 领域 code 与完整 source trace 仍可增强。</td></tr>
           </tbody>
@@ -450,7 +450,7 @@ name = "private_engine_escape_hatch"
 target = "logical_ref"
 pattern = "^/Game/Skills/GA_[A-Za-z0-9_]+\\.GA_[A-Za-z0-9_]+_C$"
 message = "技能资源必须是 /Game/Skills/GA_Name.GA_Name_C 格式。"</code></pre>
-        <div class="callout"><strong>Asset P0-1：</strong>先实现 <code>asset_kind</code>、资源引用校验和导出补齐；<code>asset_manifest</code> exporter 暂缓。<code>asset_kind</code> 是字段 validation + post-modifier 规则模板，可用 <code>extends</code> 让字段专用规则继承全局 Unreal 等基础规则；正则规则只作为私有引擎复杂格式兜底，不参与路径重写或自动补齐。</div>
+        <div class="callout ok"><strong>Asset P0-1 已落地：</strong><code>asset_kind</code>、资源引用校验和导出补齐已接入 runtime build；<code>asset_manifest</code> exporter 暂缓。公共 Unreal 等基础规则应放在公共 Meta 片段中，字段专用规则通过 <code>extends</code> 继承；正则规则只作为私有引擎复杂格式兜底，不参与路径重写或自动补齐。</div>
       </section>
 
       <section id="meta">
@@ -558,7 +558,7 @@ override_sources = [
         </table>
         <div class="grid grid-2">
           <div class="card"><h3>Generated code</h3><p>Rust / TypeScript / C++ 代码使用 Meta-agnostic <code>RuntimeDataLoader</code> / <code>RuntimeDataReader</code> 契约；用户 loader 不按表生成方法。</p></div>
-          <div class="card"><h3>Aggregate exporters / Asset resolver</h3><p>gettext POT 已作为聚合 data exporter 接入；asset manifest、temp_commit writer 仍是后续扩展。Asset P0-1 先把 resolver 接入 validation 与 runtime export 的 canonical string 输出。</p></div>
+          <div class="card"><h3>Aggregate exporters / Asset resolver</h3><p>gettext POT 已作为聚合 data exporter 接入；asset resolver 已接入 validation 与 runtime export canonical string 输出。Asset manifest 仍是后续扩展。</p></div>
         </div>
       </section>
 
@@ -589,7 +589,7 @@ override_sources = [
           <div class="card"><h3>Target Tags</h3><p>Target 使用 <code>tags</code> 描述导出上下文；表、字段、索引用 <code>export_when</code> 匹配，collection 行用 <code>row_export</code> 控制。</p></div>
           <div class="card"><h3>Struct source layout</h3><p>Named struct 使用 JSON cell 还是 expanded value 由 source 中 parent path / child paths 自动判定，不由 Meta field 固定。</p></div>
           <div class="card"><h3>废弃旧导出字段</h3><p>不再保留 <code>tool_only</code>、<code>validator_only</code>、<code>filter_field</code> 作为导出机制；使用 <code>export = false</code>、<code>export_when</code>、<code>row_export</code> 替代。</p></div>
-          <div class="card"><h3>Asset Resolver</h3><p><code>asset_kind</code> 属于 Meta，资源 <code>search_paths</code> 属于 Project；P0-1 先实现校验与 runtime export 补齐，manifest exporter 后续独立推进。</p></div>
+          <div class="card"><h3>Asset Resolver</h3><p><code>asset_kind</code> 属于 Meta，资源 <code>search_paths</code> 属于 Project；当前已实现校验与 runtime export 补齐，manifest exporter 后续独立推进。</p></div>
           <div class="card"><h3>Source 注释区</h3><p>空行、空列和未映射行/列可用于表格注释或中间数据，不进入 DataSet。</p></div>
           <div class="card"><h3>并发与写入</h3><p>I/O 与计算任务分开调度；当前已有受 <code>jobs</code> 限制的 CPU worker pool，Artifact Writer 可配置策略仍是目标态。</p></div>
           <div class="card"><h3>配置兼容</h3><p>当前不引入通用 schema version；依赖稳定字符串 name，Protobuf 未来通过显式 <code>field_number</code> 处理兼容。</p></div>
