@@ -22,7 +22,7 @@ pub use options::{
 };
 
 use crate::{
-    ConfigForgeError, Result,
+    ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::{ArtifactSink, ArtifactWriter},
     codegen::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, builtin_generators,
@@ -90,10 +90,11 @@ fn build_target_inner(
     let target_tags = target.effective_target_tags(options.extra_tags);
 
     let sink = ArtifactWriter::new(options.artifact_write_mode).open_sink();
+    let project_info = ArtifactProjectInfo::from(&project.project);
 
     let pipeline_output = execute_target_pipeline(TargetPipelineExecutionContext {
         project_root,
-        project: &CodeExportProject::from(&project.project),
+        project_info: &project_info,
         assets: &project.assets,
         target: &target,
         target_tags: &target_tags,
@@ -180,7 +181,7 @@ impl BuildOutputWithoutTrace {
 
 struct TargetPipelineExecutionContext<'a, 'meta> {
     project_root: &'a Path,
-    project: &'a CodeExportProject,
+    project_info: &'a ArtifactProjectInfo,
     assets: &'a crate::project::AssetsConfig,
     target: &'a NormalizedTargetConfig,
     target_tags: &'a TargetTags,
@@ -264,7 +265,7 @@ fn execute_target_pipeline(
             runtime_exports: &meta_and_data_exports,
             codegen_exports: &meta_only_exports,
             project_root: context.project_root,
-            project: context.project,
+            project_info: context.project_info,
             target_name: &context.target.name,
             assets: context.assets,
             target_tags: context.target_tags,
@@ -348,7 +349,7 @@ struct ExportPipelineContext<'a, 'meta> {
     runtime_exports: &'a [(usize, &'a NormalizedExportTask)],
     codegen_exports: &'a [(usize, &'a NormalizedExportTask)],
     project_root: &'a Path,
-    project: &'a CodeExportProject,
+    project_info: &'a ArtifactProjectInfo,
     target_name: &'a str,
     assets: &'a crate::project::AssetsConfig,
     target_tags: &'a TargetTags,
@@ -367,7 +368,7 @@ fn execute_export_pipeline<'meta>(
         runtime_exports,
         codegen_exports,
         project_root,
-        project,
+        project_info,
         target_name,
         assets,
         target_tags,
@@ -379,9 +380,11 @@ fn execute_export_pipeline<'meta>(
     let ((linked_meta, code_output), raw_sources) = join_link_codegen_and_source_read(
         || {
             let linked_meta = raw_meta.link().map_err(ConfigForgeError::MetaValidation)?;
+            let codegen_project = CodeExportProject::from(project_info);
             let codegen_context = CodegenTaskContext {
                 project_root,
-                project,
+                project: &codegen_project,
+                project_info,
                 target_name,
                 target_tags,
                 linked_meta: &linked_meta,
@@ -627,6 +630,7 @@ fn execute_codegen_export_nodes(
 struct CodegenTaskContext<'a, 'meta> {
     project_root: &'a Path,
     project: &'a CodeExportProject,
+    project_info: &'a ArtifactProjectInfo,
     target_name: &'a str,
     target_tags: &'a TargetTags,
     linked_meta: &'meta crate::meta::LinkedMetaModel<'meta>,
@@ -665,10 +669,10 @@ fn generate_and_write_schema_doc_task(
     )?;
     let doc = SchemaDoc::from_meta(
         context.linked_meta,
-        context.project,
+        context.project_info,
         SchemaDocOptions {
             title: config.title.clone(),
-            project_name: context.project.name.clone(),
+            project_name: context.project_info.name.clone(),
             project_path: Some(context.project_root.to_path_buf()),
             target: Some(context.target_name.to_owned()),
             target_tags: context.target_tags.clone(),
@@ -1164,14 +1168,14 @@ mod tests {
             }],
         };
         let target_tags = TargetTags::empty();
-        let project = CodeExportProject::default();
+        let project_info = ArtifactProjectInfo::default();
         let assets = crate::project::AssetsConfig::default();
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
         let mut trace = BuildTraceRecorder::new();
 
         let result = execute_target_pipeline(TargetPipelineExecutionContext {
             project_root: Path::new("."),
-            project: &project,
+            project_info: &project_info,
             assets: &assets,
             target: &target,
             target_tags: &target_tags,
@@ -1236,7 +1240,8 @@ mod tests {
         let meta = minimal_meta_model();
         let linked_meta = meta.link().expect("minimal meta should link");
         let target_tags = TargetTags::empty();
-        let project = CodeExportProject::default();
+        let project_info = ArtifactProjectInfo::default();
+        let project = CodeExportProject::from(&project_info);
         let called = Arc::new(AtomicBool::new(false));
         let generators = vec![Box::new(SinkOnlyGenerator {
             called: called.clone(),
@@ -1245,6 +1250,7 @@ mod tests {
         let context = CodegenTaskContext {
             project_root: Path::new("."),
             project: &project,
+            project_info: &project_info,
             target_name: "default",
             target_tags: &target_tags,
             linked_meta: &linked_meta,

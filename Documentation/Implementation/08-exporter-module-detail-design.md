@@ -204,7 +204,7 @@ pub struct DataFormatRegistry {
 3. 聚合 exporter 通过 required `export_to_sink()` 直接写入 shared `ArtifactSink`；`export() -> Vec<Artifact>` 只作为测试 / 兼容 helper，不回到 Build 主路径。
 4. 聚合 exporter 不绕过 validation；若需要 text placeholder / context 诊断，应在 validation 增加规则或由 exporter 产出 warning/error diagnostic，但不能静默修复数据。
 5. 聚合 exporter 与 runtime data exporter 共享 DataResolver / resolved value 模型，避免再次解释 CSV raw cell。
-6. `ExportProjectInfo` 是 exporter 层自己的轻量 project 描述，最多包含 project name/desc/copyright 等 header 渲染所需字段，不依赖 codegen 模块的 `CodeExportProject`，避免 `exporter -> codegen` 依赖倒置。
+6. 需要 project name/desc/copyright 等 artifact header 信息时，应优先复用共享的 `ArtifactProjectInfo`，不依赖 codegen 模块的 `CodeExportProject`，避免 `exporter -> codegen` 依赖倒置。
 
 ### 8.7.1 GettextPotExporter (`type = "gettext_pot"`)
 

@@ -4,9 +4,8 @@
 use std::{collections::BTreeMap, fmt, path::PathBuf, str::FromStr};
 
 use crate::{
-    ConfigForgeError, Result,
+    ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::ArtifactSink,
-    codegen::CodeExportProject,
     meta::{
         AssetKindMeta, ExportCondition, LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta,
         LinkedMetaModel, LinkedStructType, LinkedTableMeta, PrimitiveFieldType, TableKind,
@@ -167,7 +166,7 @@ pub struct SchemaValidatorDoc {
 impl SchemaDoc {
     pub fn from_meta(
         linked_meta: &LinkedMetaModel<'_>,
-        project: &CodeExportProject,
+        project: &ArtifactProjectInfo,
         options: SchemaDocOptions,
     ) -> Self {
         let title = options.title.clone().unwrap_or_else(|| {
@@ -1037,8 +1036,8 @@ mod tests {
     use std::{collections::BTreeMap, path::PathBuf};
 
     use crate::{
+        ArtifactProjectInfo,
         artifact::{ArtifactWriteMode, ArtifactWriter},
-        codegen::CodeExportProject,
         meta::{MetaModel, TargetTags},
     };
 
@@ -1049,7 +1048,7 @@ mod tests {
         let linked = meta.link().expect("meta should link");
         SchemaDoc::from_meta(
             &linked,
-            &CodeExportProject {
+            &ArtifactProjectInfo {
                 name: Some("demo".to_owned()),
                 desc: None,
                 copyright: None,

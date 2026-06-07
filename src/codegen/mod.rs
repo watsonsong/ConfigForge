@@ -43,7 +43,7 @@ use std::{collections::HashMap, path::PathBuf};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
-    ConfigForgeError, Result,
+    ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::ArtifactSink,
     meta::{LinkedMetaModel, TargetTags},
     runtime_contract::{ExportDependency, RuntimeDataFile},
@@ -64,6 +64,16 @@ pub struct CodeExportProject {
     pub name: Option<String>,
     pub desc: Option<String>,
     pub copyright: Option<String>,
+}
+
+impl From<&ArtifactProjectInfo> for CodeExportProject {
+    fn from(project: &ArtifactProjectInfo) -> Self {
+        Self {
+            name: project.name.clone(),
+            desc: project.desc.clone(),
+            copyright: project.copyright.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

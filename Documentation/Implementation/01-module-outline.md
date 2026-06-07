@@ -26,8 +26,9 @@
 | Asset Resolver | `src/asset.rs` | 根据 Meta `asset_kind` 与 Project asset search paths 解析资源引用，生成 canonical export ref，并执行存在性、sidecar、命名、prefix / regex、target-gated deny 等检查。 | `LinkedMetaModel<'meta>`、`AssetsConfig`、`TargetTags`、raw asset ref。 | `ResolvedAssetRef` / validation error。 | `08-asset-validation-and-manifest.md` |
 | Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、asset reference validation、注册式 validator；入口、table、FK、struct value、default、asset 逻辑分文件维护。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`、可选 `AssetsConfig`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
 | Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 兼容列表或 `ArtifactSink` stream 写入请求、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
+| Artifact Info | `src/artifact_info.rs` | 跨 codegen、schema_doc、validation report / manifest 等 artifact 生成器共享的轻量 Project 信息 facade，避免文档/导出模块依赖 codegen 专属类型。 | `ProjectConfigMeta`。 | `ArtifactProjectInfo`。 | 本文档总览。 |
 | Exporter | `src/exporter/` | Runtime data export contract、JSON / MessagePack / `bin` table exporter、POT / Lua / Asset Manifest 聚合 exporter、export type registry、由统一 export task 适配得到的 exporter 内部配置。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`、`ArtifactSink`。 | `RuntimeDataFile` metadata / runtime data artifacts / aggregate data artifacts。 | `08-exporter-module-detail-design.md` |
-| SchemaDoc | `src/schema_doc/` | 基于 linked Meta、Project info 与 TargetTags 生成表结构文档 normalized model，并规划/写入 Markdown schema docs artifact。它是 MetaOnly artifact 生成器，不属于 runtime data exporter，也不读取 source data。 | `LinkedMetaModel<'meta>`、`TargetTags`、Project info、`ArtifactSink`。 | `SchemaDoc` / schema docs artifacts。 | `../Design/11-schema-doc-generator.md` |
+| SchemaDoc | `src/schema_doc/` | 基于 linked Meta、Project info 与 TargetTags 生成表结构文档 normalized model，并规划/写入 Markdown schema docs artifact。它是 build 内置 MetaOnly artifact task，不属于 runtime data exporter，也不读取 source data。 | `LinkedMetaModel<'meta>`、`TargetTags`、`ArtifactProjectInfo`、`ArtifactSink`。 | `SchemaDoc` / schema docs artifacts。 | `../Design/11-schema-doc-generator.md` |
 | Codegen | `src/codegen/` | 语言无关 CodeModel IR 和内置 codegen backend；backend 清单与能力矩阵见 `09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix`。 | `LinkedMetaModel<'meta>`、target tags、`ArtifactSink`。 | generated code artifacts。 | `09-codegen-module-detail-design.md` |
 | Build | `src/build/` | 工程构建主编排：归一化 target，并按 target 调度 data load、validation、runtime export、format-agnostic codegen、artifact 写入。 | `ProjectConfig`、CLI options。 | `BuildOutput`、文件系统产物。 | `10-build-module-detail-design.md` |
 
@@ -69,15 +70,16 @@ main / cli
       │   └─ diagnostic
       ├─ schema_doc
       │   ├─ meta
-      │   ├─ project
-      │   ├─ codegen        # 仅复用轻量 Project info facade
+      │   ├─ artifact_info
       │   └─ artifact
       ├─ codegen
       │   ├─ meta
       │   ├─ runtime_contract
+      │   ├─ artifact_info
       │   └─ artifact
       ├─ runtime_contract
       │   └─ meta
+      ├─ artifact_info
       └─ artifact
 
 diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 错误 facade，用于在边界层聚合各模块诊断。
@@ -94,8 +96,9 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 - `asset` 可以依赖 `meta` 与 `project` 的资产配置模型，不能依赖 `data`、`validation`、`exporter`、`codegen`、`build`。
 - `validation` 可以依赖 `meta`、`data`、`diagnostic`、`asset`，不能依赖 `exporter`、`codegen`、`build`。
 - `artifact` 可以依赖标准库、`diagnostic::error` 等底层能力，不能依赖 `meta`、`data`、`validation`、`exporter`、`codegen`、`project`、`build`。
+- `artifact_info` 是轻量共享 facade，只依赖标准库；`project` 可从 `ProjectConfigMeta` 构造它，codegen/schema_doc/validation report/future manifest 可消费它，避免互相依赖专属 Project 类型。
 - `exporter` 可以依赖 `meta`、`data`、`artifact`、`diagnostic`、`runtime_contract`，不能依赖 `validation`、`codegen`、`build`；导出前校验由 build 编排层调用 validation。
-- `schema_doc` 可以依赖 `meta`、`artifact` 和 Project info facade 生成 MetaOnly 文档 artifact；不能依赖 `data`、`validation`、`exporter` 或 `build`，也不能读取 source data。
+- `schema_doc` 可以依赖 `meta`、`artifact` 和 `artifact_info` 生成 MetaOnly 文档 artifact；不能依赖 `codegen`、`data`、`validation`、`exporter` 或 `build`，也不能读取 source data。
 - `codegen` 可以依赖 `meta`、`artifact` 和 `runtime_contract`；生成代码使用逻辑 table name 作为 runtime load key，不依赖 exporter 真实写出的 runtime data artifact path / format；不能依赖 `exporter`、`data`、`validation`、`build`。
 - `project` 只解析 `TargetExportConfig` 这一统一 Project TOML 结构，不引用 exporter/codegen 内部 task 配置，也不能依赖 `build`。
 - `build` 是顶层业务编排层，可以依赖 `project`、`meta`、`data`、`validation`、`exporter`、`codegen`、`runtime_contract`；这些被编排模块不能反向依赖 `build`。

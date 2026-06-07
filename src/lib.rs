@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod artifact;
+mod artifact_info;
 mod asset;
 mod build;
 mod cli;
@@ -23,6 +24,7 @@ pub use artifact::{
     Artifact, ArtifactContent, ArtifactWriteEntry, ArtifactWriteMode, ArtifactWriteResult,
     ArtifactWriter,
 };
+pub use artifact_info::ArtifactProjectInfo;
 pub use asset::{AssetResolver, EffectiveAssetKind, ResolvedAssetRef};
 pub use build::{
     BuildOptions, BuildOutput, BuildTrace, BuildTraceStage, BuildTraceStageStatus,

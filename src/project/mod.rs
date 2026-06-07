@@ -10,8 +10,7 @@ use std::{
 use serde::Deserialize;
 
 use crate::{
-    ConfigForgeError, Result,
-    codegen::CodeExportProject,
+    ArtifactProjectInfo, ConfigForgeError, Result,
     meta::{AssetKindMeta, EnumMeta, MetaModel, StructMeta, TableMeta},
 };
 
@@ -329,7 +328,7 @@ pub(crate) fn validate_unique_target_names(targets: &[TargetConfig]) -> Result<(
     Ok(())
 }
 
-impl From<&ProjectConfigMeta> for CodeExportProject {
+impl From<&ProjectConfigMeta> for ArtifactProjectInfo {
     fn from(project: &ProjectConfigMeta) -> Self {
         Self {
             name: project.name.clone(),

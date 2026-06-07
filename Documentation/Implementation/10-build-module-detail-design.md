@@ -207,14 +207,27 @@ pub struct BuildTraceStage {
 
 ## 10.6 MetaOnly codegen / schema doc export 编排
 
-`generate_and_write_code_task()` 负责 MetaOnly codegen export task 与 schema documentation task：
+`generate_and_write_code_task()` 目前负责 MetaOnly codegen export task，并通过内置分支处理 schema documentation task。`schema_doc` 当前是 build 内置 MetaOnly artifact task，不属于 `DataFormatRegistry`，也不强行塞进 codegen backend registry：
 
 - 内置生成器由 `codegen::builtin_generators()` 提供。
 - codegen export task 不选择数据 export task，也不消费 `RuntimeDataFile`。
+- Build 从 `ProjectConfigMeta` 构造共享 `ArtifactProjectInfo`；codegen 再从它派生 `CodeExportProject`，schema_doc 直接消费 `ArtifactProjectInfo`，避免 schema_doc 依赖 codegen 专属 project 类型。
 - 每个 codegen export task 构造 `CodeExportInput`，包含 linked meta、target tags、project 信息、target language config、空 runtime data file list、generated_at。
 - 传给 CodeModel 的 target tags 必须是 effective target tags，而不是仅 Project Config 中的 target tags；否则 CLI `--tag s1` 影响了 runtime data override，却没有同步影响 table/field/index codegen 过滤，会造成 schema 与数据不一致。
 - codegen export task 可以并行生成，并通过 `CodeGenerator::generate_to_sink()` 直接写入 shared `ArtifactSink`；全局路径冲突由 artifact 模块在 `create()` / convenience write API 中统一检查，dry-run / finish entries 由 sink 按 normalized path 稳定输出。
 - `schema_doc` 是 MetaOnly 文档导出任务，不读取 source data，也不执行 data validation；它基于 linked Meta、project 信息和 effective target tags 构建 `SchemaDoc` normalized model，并通过 Markdown renderer 写出 `index.md` 和每表 `<table>.md`。当前支持 `format = "markdown"`、`index_file`、`title`，未知格式或未知选项显式报错。
+
+中期方向：当 MetaOnly artifact task 继续增长（例如 JSON Schema exporter、Mermaid ER exporter、HTML docs、build/schema manifest）时，应抽出独立的 `MetaOnlyArtifactExporter` registry，而不是在 build 中继续堆叠 `if type_id == ...`，也不把这些任务塞进 DataFormatRegistry。建议接口形态：
+
+```rust
+trait MetaOnlyArtifactExporter {
+    fn type_id(&self) -> &'static str;
+    fn aliases(&self) -> &'static [&'static str] { &[] }
+    fn export_to_sink(&self, input: MetaOnlyExportInput<'_>, sink: &ArtifactSink) -> Result<()>;
+}
+```
+
+`MetaOnlyExportInput` 应包含 linked Meta、effective target tags、`ArtifactProjectInfo`、project root、target name、generated_at 和 export task options。Build 仍负责统一 export task 归一化、dependency classification、trace、并行调度和 ArtifactSink；registry 只负责按 type/alias 分派 MetaOnly artifact 生成。
 
 ## 10.6a 稳定性与回归基线
 
