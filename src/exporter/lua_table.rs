@@ -8,6 +8,10 @@ use serde::Deserialize;
 use crate::{
     ConfigForgeError, Result,
     artifact::{Artifact, ArtifactSink},
+    codegen::{
+        CaseStyle, CodeArtifactOptions, CodeWriterConfig, I18nFunctionReturn, I18nMode,
+        I18nOptions, KeywordConflictPolicy, NamingConfig,
+    },
     data::DataSet,
     exporter::{
         ExportedTablePayload, ExportedValue, TargetDataConfig, build_exported_table_payload,
@@ -37,29 +41,7 @@ struct LuaTableOptions {
     lazy_require: bool,
     emit_schema: bool,
     readonly: bool,
-    i18n: LuaI18nOptions,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(default)]
-struct LuaI18nOptions {
-    mode: LuaI18nMode,
-    function: Option<String>,
-    returns: LuaI18nFunctionReturn,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum LuaI18nMode {
-    Generic,
-    GlobalFunction,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum LuaI18nFunctionReturn {
-    String,
-    Optional,
+    i18n: I18nOptions,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -114,17 +96,29 @@ impl Default for LuaTableOptions {
             lazy_require: true,
             emit_schema: false,
             readonly: true,
-            i18n: LuaI18nOptions::default(),
+            i18n: I18nOptions::default(),
         }
     }
 }
 
-impl Default for LuaI18nOptions {
-    fn default() -> Self {
-        Self {
-            mode: LuaI18nMode::Generic,
-            function: None,
-            returns: LuaI18nFunctionReturn::String,
+impl LuaTableOptions {
+    fn code_artifact_options(&self) -> CodeArtifactOptions {
+        CodeArtifactOptions {
+            file_header: self.file_header.clone(),
+            keyword_conflict: KeywordConflictPolicy::SuffixUnderscore,
+            i18n: self.i18n.clone(),
+            naming: NamingConfig {
+                type_name: CaseStyle::Preserve,
+                enum_value: CaseStyle::Preserve,
+                field: match self.table_file_naming {
+                    NamingMode::SnakeCase => CaseStyle::SnakeCase,
+                    NamingMode::Preserve => CaseStyle::Preserve,
+                },
+                function: CaseStyle::SnakeCase,
+                constant: CaseStyle::ScreamingSnakeCase,
+            },
+            formatting: CodeWriterConfig::default(),
+            language_options: std::collections::HashMap::new(),
         }
     }
 }
@@ -271,7 +265,7 @@ fn validate_options(options: &LuaTableOptions) -> Result<()> {
             "lua_table file_header must not contain NUL bytes".to_owned(),
         ));
     }
-    if matches!(options.i18n.mode, LuaI18nMode::GlobalFunction) {
+    if matches!(options.i18n.mode, I18nMode::GlobalFunction) {
         let Some(function) = &options.i18n.function else {
             return Err(ConfigForgeError::Validation(
                 "lua_table i18n global_function mode requires function".to_owned(),
@@ -525,7 +519,8 @@ fn render_object_table(
 }
 
 fn render_file_header(options: &LuaTableOptions) -> String {
-    if let Some(header) = &options.file_header {
+    let code_options = options.code_artifact_options();
+    if let Some(header) = &code_options.file_header {
         let mut header = header.clone();
         if !header.ends_with('\n') {
             header.push('\n');
@@ -560,14 +555,14 @@ fn render_text_helpers(
         match access {
             RowValueAccess::Collection => {
                 content.push_str(&format!("function ROW_METHODS.{helper_name}(row"));
-                if matches!(options.i18n.mode, LuaI18nMode::Generic) {
+                if matches!(options.i18n.mode, I18nMode::Generic) {
                     content.push_str(", translator");
                 }
                 content.push_str(")\n");
             }
             RowValueAccess::Object => {
                 content.push_str(&format!("function T.{helper_name}("));
-                if matches!(options.i18n.mode, LuaI18nMode::Generic) {
+                if matches!(options.i18n.mode, I18nMode::Generic) {
                     content.push_str("translator");
                 }
                 content.push_str(")\n");
@@ -587,7 +582,7 @@ fn render_text_helper_body(
 ) {
     content.push_str(&format!("  local value = {value_expr}\n"));
     match options.i18n.mode {
-        LuaI18nMode::Generic => {
+        I18nMode::Generic => {
             content.push_str("  if translator ~= nil then\n");
             content.push_str(&format!(
                 "    local translated = translator({}, value)\n",
@@ -596,20 +591,20 @@ fn render_text_helper_body(
             content.push_str("    if translated ~= nil then return translated end\n  end\n");
             content.push_str("  return value\n");
         }
-        LuaI18nMode::GlobalFunction => {
+        I18nMode::GlobalFunction => {
             let function = options
                 .i18n
                 .function
                 .as_deref()
                 .expect("validated lua i18n function");
             match options.i18n.returns {
-                LuaI18nFunctionReturn::String => {
+                I18nFunctionReturn::String => {
                     content.push_str(&format!(
                         "  return {function}({}, value)\n",
                         lua_string(context)
                     ));
                 }
-                LuaI18nFunctionReturn::Optional => {
+                I18nFunctionReturn::Optional => {
                     content.push_str(&format!(
                         "  local translated = {function}({}, value)\n",
                         lua_string(context)
@@ -1342,6 +1337,10 @@ mod tests {
             ..LuaTableOptions::default()
         };
         assert_eq!(render_file_header(&options), "-- custom header\n");
+        assert_eq!(
+            options.code_artifact_options().file_header.as_deref(),
+            Some("-- custom header")
+        );
     }
 
     #[test]
@@ -1414,6 +1413,11 @@ mod tests {
         assert!(content.contains("function ROW_METHODS.name_text(row)"));
         assert!(content.contains("globalTranslate(\"items.name\", value)"));
         assert!(content.contains("if translated ~= nil then return translated end"));
+        let options = options_from_task(&task).expect("lua options should parse");
+        assert_eq!(
+            options.code_artifact_options().i18n.mode,
+            I18nMode::GlobalFunction
+        );
     }
 
     #[test]
