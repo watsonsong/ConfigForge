@@ -344,10 +344,18 @@ pub struct DataSourcePlan {
     pub table_name: String,
     pub provider: DataProvider,
     pub path: PathBuf,
+    pub header_row: usize,
+    pub data_start_row: usize,
     pub fragments: Vec<String>,
+    pub layout: DataSourceLayout,
+    pub fields: Vec<String>,
     pub role: SourceRole,
-    pub export_when: ExportCondition,
     pub primary_key_fields: Vec<String>,
+}
+
+pub enum DataSourceLayout {
+    CollectionRecords,
+    ObjectKeyValueRows,
 }
 ```
 
@@ -355,9 +363,11 @@ pub struct DataSourcePlan {
 
 - `table_name` 是目标逻辑表名。
 - `path` 是相对 data root 的路径，来自 `SourceRef.path` 或 legacy `TableMeta.source`。
+- `header_row` / `data_start_row` 是从 `SourceRef` 继承的 1-based CSV 物理行布局；CollectionTable 默认 `header_row = 1`、`data_start_row = 3`，ObjectTable 默认 `header_row = 1`、`data_start_row = 2`，因此可为策划标题行/标题列留出空间。
 - `fragments` 是该 source 声明的 polymorphic fragment 名称；普通表和 legacy `source` 为空。
+- `layout` 描述 reader 物理布局：CollectionTable 使用 `CollectionRecords`，ObjectTable 使用 `ObjectKeyValueRows`。
+- `fields` 是 ObjectTable 的 top-level field 名称快照，用于后续 key 校验和 source trace 增强；CollectionTable 可为空。
 - `role` 区分 base `source` / `sources` 与 `override_sources`。
-- `export_when` 是 source-level target 条件。当前只对 `override_sources` 生效；base source 必须保持 match-all，声明 `export_when` 会被 Meta validation / DataLoadPlan 显式拒绝，避免把未来的 target-specific base source selection 静默忽略。override source 可声明 `{ all = ["s1"] }` 等条件。
 - `primary_key_fields` 是当前 table primary index 的字段列表快照，仅在 `role = Override` 时用于 DataLoader 定位被覆盖 row；base source 可为空或携带同一份信息以便统一构造 per-table key map。字段路径保持 raw source header 使用的 field path 字符串，例如 `id` 或未来复合 key `region,id` 对应 `Vec<["region", "id"]>`。
 - variant source mode 下，polymorphic collection table 可以拥有多个 `DataSourcePlan`；非 polymorphic table 仍只允许一个 source。为了避免把普通 append mode 与未来通用 multi-source merge 混淆，多 source 必须由至少一个 source 的非空 `fragments` 声明驱动。
 
@@ -420,17 +430,36 @@ pub struct CsvDataReader;
 ```rust
 impl CsvDataReader {
     pub fn read_table(table_name: impl Into<String>, path: &Path) -> Result<DataTable>;
+    pub fn read_table_with_layout(
+        table_name: impl Into<String>,
+        path: &Path,
+        header_row: usize,
+        data_start_row: usize,
+    ) -> Result<DataTable>;
+    pub fn read_object_table(
+        table_name: impl Into<String>,
+        path: &Path,
+        fields: &[String],
+    ) -> Result<DataTable>;
+    pub fn read_object_table_with_layout(
+        table_name: impl Into<String>,
+        path: &Path,
+        fields: &[String],
+        header_row: usize,
+        data_start_row: usize,
+    ) -> Result<DataTable>;
 }
 ```
 
 读取规则：
 
-1. 使用 `csv::Reader::from_path` 打开文件。
-2. 第一行作为 header。
-3. 每条 record 与 header zip 成 `DataRow`；header 原样保留，包含 `stats.attack` 这类 fragment field path，以及 `attributes.attack` 这类 struct field path。
-4. 缺失 cell 当前不在读取阶段补齐；Validation 阶段按 required/default 处理。
-5. 多余 cell 当前由 csv crate 的 record 行为处理；后续如果需要严格列数，可在 Data 模块增加 header/record 长度校验。
-6. CsvDataReader 不理解 fragment schema；它只返回原始 row。DataLoader 在组装 DataTable 时为每行附加 `RowSourceInfo`。
+1. 使用 `csv::ReaderBuilder::new().has_headers(false)` 打开文件，CSV crate 不自动消费 header。
+2. `header_row` / `data_start_row` 均为 1-based，且必须非 0、`data_start_row > header_row`。CollectionTable 默认 `header_row = 1`、`data_start_row = 3`，第 2 行通常留作标题说明；可由每个 table source 的 `source = { path = "...", header_row = ..., data_start_row = ... }` 覆盖。
+3. `header_row` 指定的 record 作为 header；`header_row` 与 `data_start_row` 之间的行会被跳过，不进入 `DataTable.rows`。
+4. 从 `data_start_row` 开始，每条 record 与 header zip 成 `DataRow`；header 原样保留，包含 `stats.attack` 这类 fragment field path，以及 `attributes.attack` 这类 struct field path。
+5. 缺失 cell 当前不在读取阶段补齐；Validation 阶段按 required/default 处理。
+6. 多余 cell 当前由 csv crate 的 record 行为处理；后续如果需要严格列数，可在 Data 模块增加 header/record 长度校验。
+7. CsvDataReader 不理解 fragment schema；它只返回原始 row。DataLoader 在组装 DataTable 时为每行附加 `RowSourceInfo`，其中 `source_row_number` 使用真实 CSV 物理行号。
 
 当前 standard_project 参考游戏表格采用两种 source pattern：
 
@@ -441,33 +470,34 @@ impl CsvDataReader {
 
 variant source mode 要求每个 source 贡献完整 record：common fields 必须在每个 source 中完整出现，不做跨 source join；fragment fields 只允许出现在声明了对应 active fragment 的 source 中。
 
-### 5.6.2 ObjectTable `key,value` source layout
+### 5.6.2 ObjectTable `key,value` / `key,title,value` source layout
 
-ObjectTable Step 1 的 source 过程文档已并入 Data 模块。当前 `kind = "object"` 的 table 使用固定 CSV `key,value` 行式布局：
+ObjectTable Step 1 的 source 过程文档已并入 Data 模块。当前 `kind = "object"` 的 table 使用 CSV `key,value` 或 `key,title,value` 行式布局；标准工程推荐三列形式，把第二列作为面向策划的标题/说明列，读取时忽略：
 
 ```csv
-key,value
-max_level,100
-start_gold,500
-economy,"{""gold_rate"":""1.2"",""drop_rate"":""0.8""}"
+key,title,value
+max_level,最大等级,100
+start_gold,初始金币,500
+economy,经济参数,"{""gold_rate"":""1.2"",""drop_rate"":""0.8""}"
 ```
 
 读取规则：
 
-1. header 必须恰好两列，trim 后分别为 `key` 和 `value`。
-2. 每个数据行第一列是 top-level field key 或后续支持的 field path，第二列是 raw value。
+1. header 必须恰好两列或三列，trim 后分别为 `key,value` 或 `key,title,value`。
+2. 每个数据行第一列是 top-level field key 或后续支持的 field path；最后一列是 raw value。三列布局中的 `title` 列只供人类阅读，不参与 `DataRow`。
 3. `key` 不能为空。
 4. 同一个 ObjectTable source 中 key 不能重复。
 5. `key` 必须能被当前 table schema 识别；unknown key 应失败而不是静默忽略。
-6. 只有 header、没有数据行时，也必须产出一个 empty logical row。
-7. ObjectTable source 归一化后始终是一个 logical row：`DataTable.rows.len() == 1`。
+6. 默认 `header_row = 1`、`data_start_row = 2`；如果 source 配置覆盖行号，仍按同样的 1-based 语义读取。
+7. 只有 header、没有数据行时，也必须产出一个 empty logical row。
+8. ObjectTable source 归一化后始终是一个 logical row：`DataTable.rows.len() == 1`。
 
 归一化示例：
 
 ```text
 CSV rows:
-  key=max_level, value=100
-  key=start_gold, value=500
+  key=max_level, title=最大等级, value=100
+  key=start_gold, title=初始金币, value=500
 
 DataTable rows:
   [ { "max_level": "100", "start_gold": "500" } ]
@@ -481,7 +511,7 @@ DataTable rows:
 
 当前限制：
 
-- ObjectTable Step 1 只支持 legacy/simple `source = "...csv"`，不支持 `sources` / `override_sources`。
+- ObjectTable Step 1 只支持单个 `source` 属性；该属性可使用 legacy 字符串 `source = "...csv"`，也可使用带 `header_row` / `data_start_row` 的 source object。不支持 `sources` / `override_sources`。
 - ObjectTable 不支持 fragments / row_export / indexes；ObjectTable 可作为 foreign key source，归一化后的 singleton logical row 会进入 FK 校验，但不能作为 foreign key target。相关限制由 Meta / Validation 模块维护。
 - ObjectTable key-level source trace 仍需后续增强；当前 singleton logical row 会损失真实 key 行定位的一部分精度。
 

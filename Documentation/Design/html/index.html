@@ -453,7 +453,7 @@ name = "private_engine_escape_hatch"
 target = "logical_ref"
 pattern = "^/Game/Skills/GA_[A-Za-z0-9_]+\\.GA_[A-Za-z0-9_]+_C$"
 message = "技能资源必须是 /Game/Skills/GA_Name.GA_Name_C 格式。"</code></pre>
-        <div class="callout ok"><strong>Asset P0-1 已落地：</strong><code>asset_kind</code>、资源引用校验和导出补齐已接入 runtime build；<code>asset_manifest</code> exporter 暂缓。公共 Unreal 等基础规则应放在公共 Meta 片段中，字段专用规则通过 <code>extends</code> 继承；正则规则只作为私有引擎复杂格式兜底，不参与路径重写或自动补齐。</div>
+        <div class="callout ok"><strong>Asset P0-1 已落地：</strong><code>asset_kind</code>、资源引用校验、导出补齐和 <code>asset_manifest</code> exporter 已接入 runtime build；Asset Manifest 支持 JSON 与 Unreal DataTable CSV 输出。公共 Unreal 等基础规则应放在公共 Meta 片段中，字段专用规则通过 <code>extends</code> 继承；正则规则只作为私有引擎复杂格式兜底，不参与路径重写或自动补齐。</div>
       </section>
 
       <section id="meta">

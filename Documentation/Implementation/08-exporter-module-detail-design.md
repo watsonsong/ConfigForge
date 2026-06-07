@@ -29,7 +29,7 @@ src/exporter/
   mod.rs              # 对外 API 与 re-export
   config.rs           # TargetDataConfig
   model.rs            # ExportedTable / ExportedTablePayload / ExportedValue
-  registry.rs         # DataFormatRegistry / TableDataExporter / AggregateDataExporter / builtin_exporters
+  registry.rs         # DataFormatRegistry / DataFormatExporter / AggregateDataExporter / builtin_exporters
   runtime.rs          # runtime table data artifact plan、并行导出编排、artifact 写入入口
   payload.rs          # CollectionTable / ObjectTable 共享 payload builder
   json.rs             # JsonDataExporter
@@ -44,7 +44,7 @@ src/exporter/
 `mod.rs` 仅保留模块声明和公共 re-export，确保既有消费者仍可通过 `crate::exporter::*`
 访问稳定 API；新增格式应优先落在独立格式模块中，核心 registry / runtime / payload 不内联具体格式逻辑。
 
-`TargetDataConfig.format` 是 exporter 内部使用的规范 export type，来自 Project TOML 的 `[[targets.exports]].type`。运行时表数据 export type（JSON、MessagePack、`bin`）通常是“一张 table 一个 artifact”；聚合 export type（POT、Lua、asset manifest、summary manifest）可能跨所有 table 汇总成一个或多个文件、读取非 runtime 辅助字段，artifact path 规划也不是 `table -> extension` 的简单映射。因此实现上可以在同一个 exporter registry 下区分 `TableDataExporter` 与 `AggregateDataExporter` 两类能力，但 TOML 层不再引入 `targets.special_exporters`。
+`TargetDataConfig.format` 是 exporter 内部使用的规范 export type，来自 Project TOML 的 `[[targets.exports]].type`。运行时表数据 export type（JSON、MessagePack、`bin`）通常是“一张 table 一个 artifact”；聚合 export type（POT、Lua、asset manifest、summary manifest）可能跨所有 table 汇总成一个或多个文件、读取非 runtime 辅助字段，artifact path 规划也不是 `table -> extension` 的简单映射。因此实现上在同一个 `DataFormatRegistry` 下维护 `DataFormatExporter`（运行时表格式）与 `AggregateDataExporter`（聚合数据产物）两类能力，但 TOML 层不再引入 `targets.special_exporters`。
 
 ## 8.3 配置与 registry
 
@@ -53,7 +53,7 @@ pub struct TargetDataConfig {
     pub name: Option<String>,
     pub output: PathBuf,
     pub format: String,
-    pub options: toml::Value,
+    pub options: BTreeMap<String, toml::Value>,
 }
 ```
 
@@ -65,7 +65,7 @@ pub struct TargetDataConfig {
 - `options`：export type 专属配置，由 `[[targets.exports]]` 下除通用字段外的 flattened 字段归一化得到，例如 `type = "gettext_pot"` 下的 `domain`、`file_name`、`source_reference`，或 `type = "lua_table"` 下的 `module_name`、`root_file`、`row_layout`。
 
 ```rust
-pub trait TableDataExporter: Send + Sync {
+pub trait DataFormatExporter: Send + Sync {
     fn name(&self) -> &'static str;
     fn aliases(&self) -> &'static [&'static str];
     fn dependency(&self) -> ExportDependency { ExportDependency::MetaAndData }
@@ -75,21 +75,27 @@ pub trait TableDataExporter: Send + Sync {
     fn serialize_table(...) -> Result<Vec<u8>>; // legacy fallback only
 }
 
-pub struct AggregateExportContext<'a> {
-    pub linked_meta: &'a LinkedMetaModel<'a>,
-    pub data_set: &'a DataSet,
-    pub target_tags: &'a TargetTags,
-    pub project: &'a ExportProjectInfo,
-    pub generated_at: &'a str,
-}
-
 pub trait AggregateDataExporter: Send + Sync {
     fn name(&self) -> &'static str;
     fn aliases(&self) -> &'static [&'static str] { &[] }
     fn dependency(&self) -> ExportDependency { ExportDependency::MetaAndData }
-    fn plan_artifacts(&self, task: &TargetDataConfig, context: &AggregateExportContext<'_>) -> Result<Vec<ArtifactPlan>>;
-    fn export_to_sink(&self, task: &TargetDataConfig, context: &AggregateExportContext<'_>, sink: &ArtifactSink) -> Result<()>;
-    fn export(&self, task: &TargetDataConfig, context: &AggregateExportContext<'_>) -> Result<Vec<Artifact>>; // legacy fallback only
+    fn plan_artifacts(
+        &self,
+        out_dir: &Path,
+        task: &TargetDataConfig,
+        linked_meta: &LinkedMetaModel<'_>,
+        target_tags: &TargetTags,
+    ) -> Result<Vec<PathBuf>>;
+    fn export_to_sink(
+        &self,
+        out_dir: &Path,
+        task: &TargetDataConfig,
+        linked_meta: &LinkedMetaModel<'_>,
+        target_tags: &TargetTags,
+        data_set: &DataSet,
+        sink: &ArtifactSink,
+    ) -> Result<()>;
+    fn export(...) -> Result<Vec<Artifact>>; // legacy fallback only
 }
 ```
 
@@ -182,18 +188,18 @@ POT 这类单文件聚合 data exporter 的 artifact key 建议使用 `(target_n
 
 ## 8.7 聚合 Data Exporter 设计
 
-当前在 `DataFormatRegistry` 下使用 aggregate exporter 分支，而不是新增 TOML 层的 `special_exporters`：
+当前在 `DataFormatRegistry` 下分别注册运行时表格式 exporter 与 aggregate exporter，而不是新增 TOML 层的 `special_exporters`：
 
 ```rust
-pub enum DataExporterKind {
-    Table(Box<dyn TableDataExporter>),
-    Aggregate(Box<dyn AggregateDataExporter>),
+pub struct DataFormatRegistry {
+    exporters: Vec<Box<dyn DataFormatExporter>>,
+    aggregate_exporters: Vec<Box<dyn AggregateDataExporter>>,
 }
 ```
 
 实现边界：
 
-1. Build 层负责解析 target `data` 配置、按 `format` 查询 registry、构造 `AggregateExportContext`、合并 artifact plan。
+1. Build 层负责解析统一 export task 配置、按 `format` 查询 registry，并把 output dir、`TargetDataConfig`、linked Meta、target tags 与 raw/normalized data snapshot 传给 exporter，最后合并 artifact plan。
 2. 聚合 exporter 默认读取 target ExportView，而不是 Full DataSet。若需要读取 `export = false` 辅助字段，必须通过 Meta 字段策略或 exporter policy 明确允许。
 3. 聚合 exporter 通过 required `export_to_sink()` 直接写入 shared `ArtifactSink`；`export() -> Vec<Artifact>` 只作为测试 / 兼容 helper，不回到 Build 主路径。
 4. 聚合 exporter 不绕过 validation；若需要 text placeholder / context 诊断，应在 validation 增加规则或由 exporter 产出 warning/error diagnostic，但不能静默修复数据。

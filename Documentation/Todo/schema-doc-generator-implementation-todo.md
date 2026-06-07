@@ -1,6 +1,6 @@
 # Schema / Table 文档生成器实现 TODO
 
-本文把 [`Design/11-schema-doc-generator.md`](../Design/11-schema-doc-generator.md) 中的 P1-3 Schema / Table 文档生成器设计拆成可独立开发、验证和提交的实现步骤。当前实现基线是：Project / Meta / Target link、ExportDependency 规划、ArtifactSink、dry-run / temp-commit 写入、target-aware CodeModel / ExportView、asset / POT / FK / index 元信息均已有基础能力；但还没有 `type = "schema_doc"` exporter、SchemaDoc normalized model、Markdown renderer 或 schema docs artifact planning。
+本文把 [`Design/11-schema-doc-generator.md`](../Design/11-schema-doc-generator.md) 中的 P1-3 Schema / Table 文档生成器设计拆成可独立开发、验证和提交的实现步骤。当前实现状态是：Step 1～9 的 Markdown MVP 已完成，`type = "schema_doc"` MetaOnly export task、`SchemaDoc` normalized model、Markdown renderer、artifact path planning / `ArtifactSink` 写入、target-aware visibility、asset / POT / validator / FK / index / struct 摘要以及标准工程端到端 fixture 均已落地。本文后续只作为“已完成记录 + 剩余高级扩展”使用；当前状态说明以 canonical Design 和 Implementation 文档为准。
 
 ## 总体原则
 

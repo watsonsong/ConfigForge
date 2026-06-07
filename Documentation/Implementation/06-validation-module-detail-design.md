@@ -84,7 +84,7 @@ Meta validation 阶段限制：
 - ObjectTable 不能声明 fragments。
 - ObjectTable 可以声明 table-level `foreign_keys` 或 field-level `foreign_key` 作为 FK source。
 - FK target 不能指向 ObjectTable。
-- ObjectTable Step 1 只支持 legacy/simple `source = "...csv"`，不能声明 `sources` 或 `override_sources`。
+- ObjectTable Step 1 只支持单个 `source` 属性；该属性可使用 legacy 字符串或带 `header_row` / `data_start_row` 的 source object，不能声明 `sources` 或 `override_sources`。
 
 Data validation 阶段规则：
 
