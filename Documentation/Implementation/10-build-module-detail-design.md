@@ -40,7 +40,7 @@ src/build/
 | `runtime.rs` | MetaAndData export task 执行：消费已准备的 `RawSourceData`、复用 normalized DataSet、收集 validation warning、调用 exporter。 |
 | `mod.rs` | `build_target()` 主流程、target-local execution summary、MetaAndData / MetaOnly branch pipeline、共享 `ArtifactSink` 创建与 finish。 |
 
-当前 `target.rs` 输出 `NormalizedExportTask`；`mod.rs` 以 exporter dependency contract 拆分 MetaAndData / MetaOnly 两类分支，并直接执行阶段式 pipeline。`build_execution_view` 是 trace/debug summary，只记录 target、是否需要 data、两类 export 数量和声明顺序，不再维护或测试 node-level DAG key。`BuildTraceRecorder` 在现有阶段式 executor 边界记录 stage name、relative start、duration 和 result state，并通过 `BuildOutput.trace` 暴露给 CLI 的 `--trace-tasks` JSON 输出。`SourceReadPlan` 构造保留在 build input preparation；`MetaModel::link()`、`SourceReadPlan -> RawSourceData` 与 MetaOnly codegen 在 `run_exporters` 阶段按依赖 pipeline 执行：source read 与 link 并行，link 完成后立即运行 codegen，normalize / validation 等待 link + raw sources join。当前不维护通用 DAG executor 的迁移 skeleton；只有未来出现 multi-target cache、远程执行或更细粒度调度需求时，才重新设计 node-level model。
+当前 `target.rs` 输出 `NormalizedExportTask`；`mod.rs` 以 generator requirements 派生出的 dependency contract 拆分 MetaAndData / MetaOnly 两类分支，并直接执行阶段式 pipeline。`build_execution_view` 是 trace/debug summary，只记录 target、是否需要 data、两类 export 数量和声明顺序，不再维护或测试 node-level DAG key。`BuildTraceRecorder` 在现有阶段式 executor 边界记录 stage name、relative start、duration 和 result state，并通过 `BuildOutput.trace` 暴露给 CLI 的 `--trace-tasks` JSON 输出。`SourceReadPlan` 构造保留在 build input preparation；`MetaModel::link()`、`SourceReadPlan -> RawSourceData` 与 MetaOnly generators 在 `run_exporters` 阶段按依赖 pipeline 执行：source read 与 link 并行，link 完成后立即运行 MetaOnly generators，normalize / validation 等待 link + raw sources join。当前不维护通用 DAG executor 的迁移 skeleton；只有未来出现 multi-target cache、远程执行或更细粒度调度需求时，才重新设计 node-level model。
 
 ## 10.2a 统一 Export Task 与依赖分支
 
@@ -67,7 +67,7 @@ pub(crate) enum ExportDependency {
 }
 ```
 
-`dependency` 不应由用户手写，而应来自 artifact generator registry。Build normalization 阶段会从已注册 generator 的 input requirements 派生 `type_id` / alias 对应的 dependency contract，并写入 `NormalizedExportTask.dependency`。当前实现仍由 data exporter registry 与 code generator registry 分别提供查询，后续会收敛为统一 `GeneratorRegistry` facade：
+`dependency` 不应由用户手写，而应来自 artifact generator registry。Build normalization 阶段会从已注册 generator 的 input requirements 派生 `type_id` / alias 对应的 dependency contract，并写入 `NormalizedExportTask.dependency`。当前实现通过统一 `GeneratorRegistry` facade 查询 data-backed exporter adapter、language codegen 和 direct artifact generator：
 
 - [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 codegen backend：`MetaOnly`。
 - JSON / MessagePack / bin runtime data exporter：`MetaAndData`。
@@ -96,10 +96,10 @@ pub(crate) enum ExportDependency {
 2. `MetaAndData` generator 依赖对应 `(project.input, effective_tags)` 的 validation 成功结果。
 3. 同一 target 下的 JSON / MessagePack / bin / gettext / Lua 等 data-backed generator 共享一次 DataLoadPlan、DataSet、normalize 和 validation。
 4. data-backed target 在 raw `MetaModel` 和 effective tags 可用后即可构造 `SourceReadPlan` 并读取 `RawSourceData`，不等待 `LinkedMetaModel`；normalize 必须等待 `LinkMeta + RawSourceData` join。
-5. 当前 Build 在 `build_target()` 创建共享 `ArtifactSink` 并传入 exporter/codegen 分支；runtime table exporter 通过 stream API 写 sink，aggregate exporter 通过 required `export_to_sink()` 写 sink，codegen/schema_doc 通过 required `CodeGenerator::generate_to_sink()` 写 sink。长期目标是让 Build 只调用统一 artifact generator facade，领域模块内部再复用 table serialization、code writer、doc renderer 等能力。
+5. 当前 Build 在 `build_target()` 创建共享 `ArtifactSink` 并传入 generator 分支；runtime table exporter 与 aggregate exporter 通过 `GeneratorRegistry` data-backed adapter 写 sink，language codegen 通过 codegen adapter 写 sink，`schema_doc` 作为 direct `ArtifactGenerator` 写 sink。领域模块内部继续复用 table serialization、code writer、doc renderer 等能力。
 6. dry-run artifact plan 由 `ArtifactSink::finish()` 返回的 entries 按 normalized path 稳定排序；诊断仍按稳定阶段边界合并。
 
-当前状态：Project Config 使用 `[[targets.exports]]`；normalize 阶段全部转换为 `NormalizedExportTask`；data exporter registry 与 code generator registry 均提供 dependency contract；branch pipeline 按 dependency contract 拆成 MetaAndData / MetaOnly 两类分支，并在阶段式执行器中提前启动只依赖 Meta 的 generator。通用 node-level DAG scheduler 不是当前默认执行模型，也不保留容易误导为“已 DAG 化”的 skeleton。
+当前状态：Project Config 使用 `[[targets.exports]]`；normalize 阶段全部转换为 `NormalizedExportTask`；`GeneratorRegistry` 统一提供 type / alias 到 requirements-derived dependency 的查询；branch pipeline 按 dependency contract 拆成 MetaAndData / MetaOnly 两类分支，并在阶段式执行器中提前启动只依赖 Meta 的 generator。通用 node-level DAG scheduler 不是当前默认执行模型，也不保留容易误导为“已 DAG 化”的 skeleton。
 
 阶段 A 的实施步骤：
 
@@ -157,7 +157,7 @@ build_target(options)
   -> BuildOutput { warnings, artifacts, trace }
 ```
 
-Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。data-backed target 会先构造 `SourceReadPlan`，然后在 `run_exporters` 中并行执行 `MetaModel::link()` 与 raw source read；`LinkMeta` 完成后立即启动 `MetaOnly` generator，因此 mixed target 的代码生成 / schema docs 可以覆盖 source I/O 等待时间。normalize / validation 仍等待 `LinkedMetaModel + RawSourceData` join 后执行；normalize 在 table 粒度通过 CPU pool 并行，并按 raw `DataSet.tables()` 顺序稳定 merge；validation 先全量收集 `ValidationReport`，再按 stable key 排序并通过 error gate 阻断 data-backed export。validation 模块已提供 full `DataSet` table-local validation 的 CPU pool 入口；当前 single-target runtime path 的 source read 仍按 effective target tags 过滤 raw tables，因此 build 主流程继续对 target-scoped normalized data 执行 target-aware report-backed validation。runtime path 调用 `validate_normalized_data_set_for_target_with_assets_report_and_pool()`，并行构建 target `ExportValidationView`、按 visible table 并行执行 target table validation，再稳定合并 report；真正跨 target 共享 full normalized DataSet 的调度仍留给 multi-target build。MetaAndData branch 在 validation gate 通过后按 export task 并行执行 runtime table exporter、aggregate exporter 或 mixed generator；`validation_report` 是特殊 data-backed 附加产物，它消费同一次 validation report，并在 validation error 阻塞 runtime/codegen 时仍尽量通过共享 `ArtifactSink` 写出 HTML/Markdown/JSON/CSV report artifact。runtime table exporter 直接写入共享 `ArtifactSink` 并只返回 `RuntimeDataFile` metadata，aggregate exporter 也通过 required `export_to_sink()` 直接写入同一个 sink。MetaOnly branch 当前构造 `CodeExportInput` 后调用 `generate_to_sink()`，因此 build 层不再持有或排序 `GeneratedFile` 内容；长期会改为统一 generator input / facade。artifact path 冲突由 shared sink 在 `create()` / `write_text()` / `write_binary()` 时动态发现。code-only target 不启动 source read，因此缺失 `project.input` 或 data files 不会影响 MetaOnly codegen / docs。dry-run entries 由 `finish()` 按 path 稳定输出。
+Build 不再强制 “runtime data 阶段整体先于 codegen 阶段”。data-backed target 会先构造 `SourceReadPlan`，然后在 `run_exporters` 中并行执行 `MetaModel::link()` 与 raw source read；`LinkMeta` 完成后立即启动 `MetaOnly` generator，因此 mixed target 的代码生成 / schema docs 可以覆盖 source I/O 等待时间。normalize / validation 仍等待 `LinkedMetaModel + RawSourceData` join 后执行；normalize 在 table 粒度通过 CPU pool 并行，并按 raw `DataSet.tables()` 顺序稳定 merge；validation 先全量收集 `ValidationReport`，再按 stable key 排序并通过 error gate 阻断 data-backed export。validation 模块已提供 full `DataSet` table-local validation 的 CPU pool 入口；当前 single-target runtime path 的 source read 仍按 effective target tags 过滤 raw tables，因此 build 主流程继续对 target-scoped normalized data 执行 target-aware report-backed validation。runtime path 调用 `validate_normalized_data_set_for_target_with_assets_report_and_pool()`，并行构建 target `ExportValidationView`、按 visible table 并行执行 target table validation，再稳定合并 report；真正跨 target 共享 full normalized DataSet 的调度仍留给 multi-target build。MetaAndData branch 在 validation gate 通过后按 export task 并行执行 requirements 包含 Data 的 generator；`validation_report` 是特殊 data-backed 附加产物，它消费同一次 validation report，并在 validation error 阻塞 runtime/codegen 时仍尽量通过共享 `ArtifactSink` 写出 HTML/Markdown/JSON/CSV report artifact。runtime table exporter 和 aggregate exporter 均通过 `GeneratorRegistry` adapter 写入共享 `ArtifactSink`。MetaOnly branch 对 direct artifact generator 构造 `GeneratorCommonInput`，对 language codegen 构造 `CodeExportInput` 后调用 `generate_to_sink()`，因此 build 层不再持有或排序 `GeneratedFile` 内容。artifact path 冲突由 shared sink 在 `create()` / `write_text()` / `write_binary()` 时动态发现。code-only target 不启动 source read，因此缺失 `project.input` 或 data files 不会影响 MetaOnly codegen / docs。dry-run entries 由 `finish()` 按 path 稳定输出。
 
 ### 10.4a Build tracing / metrics
 
@@ -195,7 +195,7 @@ pub struct BuildTraceStage {
 - 构造 `SourceReadPlan` 时传入 effective target tags，用于过滤 `override_sources[].export_when`。例如 Project target 只有 `client, shipping`，CLI 传入 `--tag s1` 后，`materials_s1.csv` 才会进入 plan 并覆盖 Oak row。
 - 同一个 target 内多个 MetaAndData export task 基于 `(project.input, effective target tags)` 复用同一个 `RawSourceData` 和 normalized `DataSet`，避免重复读取和重复 validation。
 - 每个 export task 可使用不同 `type` 和 `output`，例如 JSON + MessagePack + Lua。
-- runtime table exporter 调用 `exporter::export_runtime_data_to_sink()` 生成 runtime artifacts，直接通过 `sink.create(path)` 打开 shared sink stream，调用 `DataFormatExporter::serialize_table_to_stream()` 后 `stream.finish()`，并保留 `RuntimeDataFile` 列表供未来 manifest 或诊断使用；codegen 不绑定该列表。同一 target 内多个 MetaAndData export task 通过 Rayon `par_iter()` 并行执行；JSON / MessagePack 已使用 writer-style serializer，binary serializer 也直接写 stream，不再为最终 artifact 先构建完整 `Vec<u8>`。aggregate exporter 通过 required `export_to_sink()` 直接写入 shared sink；POT 与 Lua 当前仍可在 exporter 内部局部生成 `String`，但不再通过 `Vec<Artifact>` 返回 build。
+- runtime table exporter 由 `GeneratorRegistry` data-backed adapter 调用 `exporter::export_runtime_data_to_sink()` 生成 runtime artifacts，直接通过 `sink.create(path)` 打开 shared sink stream，调用 `DataFormatExporter::serialize_table_to_stream()` 后 `stream.finish()`，并保留 `RuntimeDataFile` 列表供未来 manifest 或诊断使用；codegen 不绑定该列表。同一 target 内多个 MetaAndData export task 通过 Rayon `par_iter()` 并行执行；JSON / MessagePack 已使用 writer-style serializer，binary serializer 也直接写 stream，不再为最终 artifact 先构建完整 `Vec<u8>`。aggregate exporter 也由 data-backed adapter 通过 required `export_to_sink()` 直接写入 shared sink；POT 与 Lua 当前仍可在 exporter 内部局部生成 `String`，但不再通过 `Vec<Artifact>` 返回 build。
 - validation 使用 `validate_data_set_for_target()` 的 report-backed error gate：基础 required/type/enum/unique、registry validator、FK 与 target-aware checks 会先尽量收集为 `ValidationReport`，再统一判断 error / warning。warning 被收集到 `BuildOutput.warnings`，error 以 `ConfigForgeError::ValidationReport` 直接阻断依赖该 validated DataSet 的 data-backed export。
 
 错误顺序策略：`MetaLink` 与 `SourceRead` 并行执行，但 join 后优先返回 MetaLink 错误；如果 MetaLink 成功而 SourceRead 失败，则返回 source 错误。当前本地 CSV `DataLoader` 无 cancellation token，MetaLink failure 时已启动的 source read 会等待完成并丢弃结果；未来远端 provider 可在 `AsyncSourceReadShell` 基础上接入协作取消。
@@ -210,20 +210,20 @@ pub struct BuildTraceStage {
 
 ## 10.6 MetaOnly generator export 编排
 
-`generate_and_write_code_task()` 当前负责所有 MetaOnly generator export task，包括语言 codegen 和 `schema_doc`。这是一种过渡实现：它已经消除了 build 中对 `schema_doc` 的特殊分支，但仍让 `schema_doc` 借用 `CodeGenerator` registry / `CodeExportInput`。目标模型应是 Build 调用统一 artifact generator facade，generator 自身声明 requirements，并按需组合 code / doc / manifest 等 capability facet。
+`execute_meta_only_generator_nodes()` 负责所有 MetaOnly generator export task，包括语言 codegen 和 direct `schema_doc` artifact generator。Build 调用统一 artifact generator facade，generator 自身声明 requirements，并按需组合 code / doc / manifest 等 capability facet。
 
 当前行为：`schema_doc` 与语言 codegen 一样读取 linked Meta、project 信息和 effective target tags，然后通过 `ArtifactSink` 输出制品；它不属于 `DataFormatRegistry`，因为不消费 source data / resolved data：
 
-- 内置 MetaOnly 生成器当前由 `codegen::builtin_generators()` 提供；长期应迁到统一 `GeneratorRegistry`，让 `schema_doc` 直接实现 doc artifact generator，而不是实现 code-specific `CodeGenerator`。
+- 内置 language codegen 由 `codegen::builtin_generators()` 提供并通过 `GeneratorRegistry` 查询；`schema_doc` 直接实现 doc artifact generator 并由 `GeneratorRegistry` 注册，而不是实现 code-specific `CodeGenerator`。
 - codegen / schema_doc export task 不选择数据 export task，也不消费 `RuntimeDataFile`。
 - Build 从 `ProjectConfigMeta` 构造共享 `ArtifactProjectInfo`；再派生 `CodeExportProject` 传入统一的 `CodeExportInput`。
-- 每个 MetaOnly generator export task 构造 `CodeExportInput`，包含 linked meta、target tags、project 信息、project root、target name、target generator config、空 runtime data file list、generated_at。
+- 每个 direct MetaOnly artifact generator export task 构造 `GeneratorCommonInput`；language codegen export task 构造 `CodeExportInput`，包含 linked meta、target tags、project 信息、project root、target name、target generator config、空 runtime data file list、generated_at。
 - 传给 CodeModel 的 target tags 必须是 effective target tags，而不是仅 Project Config 中的 target tags；否则 CLI `--tag s1` 影响了 runtime data override，却没有同步影响 table/field/index codegen 过滤，会造成 schema 与数据不一致。
-- MetaOnly generator export task 可以并行生成，并通过 `CodeGenerator::generate_to_sink()` 直接写入 shared `ArtifactSink`；全局路径冲突由 artifact 模块在 `create()` / convenience write API 中统一检查，dry-run / finish entries 由 sink 按 normalized path 稳定输出。
+- MetaOnly generator export task 可以并行生成，并通过 direct `ArtifactGenerator::generate_to_sink()` 或 language `CodeGenerator::generate_to_sink()` 直接写入 shared `ArtifactSink`；全局路径冲突由 artifact 模块在 `create()` / convenience write API 中统一检查，dry-run / finish entries 由 sink 按 normalized path 稳定输出。
 - `schema_doc` 的 generator language/type id 为 `schema_doc`，当前支持 `format = "markdown"`、`index_file`、`title`，未知格式或未知选项显式报错；它基于 linked Meta 构建 `SchemaDoc` normalized model，并通过 Markdown renderer 写出 `index.md` 和每表 `<table>.md`。
 - 未来 JSON Schema、Mermaid ER、HTML docs 等如果仍是“只读 Meta 并输出 artifact”，优先按统一 artifact generator + requirements + doc facet 扩展，而不是在 build 中增加特殊分支，也不要继续把非代码文档任务塞进 code-specific `CodeGenerator` trait。
 
-长期 generator 抽象建议：
+当前 generator 抽象：
 
 ```rust
 pub(crate) struct GeneratorRequirements {

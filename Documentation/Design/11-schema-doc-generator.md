@@ -323,14 +323,14 @@ Builder 输入：
 
 ### 11.7.1 与 Exporter Registry
 
-`schema_doc` 是 requirements 只包含 Meta 的 doc artifact generator。当前实现为了消除 build 特殊分支，临时注册到 `codegen::builtin_generators()` 并实现 `CodeGenerator`；长期应迁移到统一 artifact generator registry，而不是继续把文档产物建模成 codegen backend。优先采用 registry 方式：
+`schema_doc` 是 requirements 只包含 Meta 的 doc artifact generator。当前实现已直接实现 `ArtifactGenerator` 并由 `GeneratorRegistry` 注册；它不再注册到 `codegen::builtin_generators()`，也不再实现 code-specific `CodeGenerator` API。registry 行为如下：
 
 - requirements：linked Meta + effective target tags + project / task context；派生 dependency contract 为 `MetaOnly`；
 - output planning：`index.md` + visible table markdown files；
 - artifact conflict check：纳入现有路径冲突检测；
 - writer：使用 `ArtifactSink`，支持 direct / temp_commit / dry_run。
 
-如果现有 runtime data exporter trait 只服务 data-backed artifact，不应为了 schema doc 读取 data；如果现有 `CodeGenerator` trait 只服务 code artifact，也不应长期要求 schema doc 实现 code-specific naming / formatting / line comment API。推荐用统一 `ArtifactGenerator` facade + `DocArtifactFacet` 表达 schema doc。
+如果现有 runtime data exporter trait 只服务 data-backed artifact，不应为了 schema doc 读取 data；`CodeGenerator` trait 只服务 language code artifact，也不要求 schema doc 实现 code-specific naming / formatting / line comment API。统一 `ArtifactGenerator` facade + doc renderer 表达 schema doc。
 
 ### 11.7.2 与 Codegen
 
@@ -509,7 +509,7 @@ title = "Client Config Schema"
 已实现内容：
 
 - 新增 `src/schema_doc/`，提供 `SchemaDoc` normalized model、`SchemaDocOptions`、`SchemaDocExportConfig`、`SchemaDocFormat`、Markdown renderer 和 ArtifactSink 写入入口。
-- Build 支持 `[[targets.exports]] type = "schema_doc"`，当前作为注册到 `codegen::builtin_generators()` 的 `MetaOnly` generator 运行；它与语言 codegen 一样读取 Meta 后输出 artifact，不属于 `DataFormatRegistry`，docs-only target 不需要 `project.input`。这是过渡实现，长期应迁移为统一 generator registry 下的 doc artifact generator。
+- Build 支持 `[[targets.exports]] type = "schema_doc"`，当前作为注册到 `GeneratorRegistry` 的 direct `ArtifactGenerator` 运行；它读取 linked Meta、Project info 与 target tags 后输出 artifact，不属于 `DataFormatRegistry`，docs-only target 不需要 `project.input`。
 - Markdown MVP 输出 `index.md` 与每张当前 target 可见 table 的 `<table>.md`。
 - 单表文档包含 Fields、Indexes、Relations，并补充 Assets、Text / POT、Validators 摘要。
 - Builder 使用 linked Meta 与 current target tags 计算 table / field / index / FK visibility；默认过滤当前 target 不可见或 `export = false` 的内容。

@@ -187,10 +187,10 @@ pub enum RuntimeTableDataFormat {
 写出流程：
 
 1. Project Config load 后先构造 `NormalizedTargetConfig`，完成 export task name 规范化，并拒绝 MetaOnly codegen export task 的 `data` 字段。
-2. `build_target` 消费当前 target 的 `Vec<NormalizedExportTask>`，并按 exporter dependency contract 构造 target-local execution view。当前实现直接执行 MetaAndData / MetaOnly 两个分支，没有 MetaAndData export task 时跳过 data load / validation，进入 MetaOnly-only 流程；完整 node-level DAG executor 仍是后续演进方向。
+2. `build_target` 消费当前 target 的 `Vec<NormalizedExportTask>`，并按 generator requirements 派生出的 dependency 构造 target-local execution view。当前实现直接执行 MetaAndData / MetaOnly 两个分支，没有 MetaAndData export task 时跳过 data load / validation，进入 MetaOnly-only 流程；完整 node-level DAG executor 仍是后续演进方向。
 3. 对同一 `(project.input, effective_tags)` 构造一次 `DataLoadPlan`，使用 `DataLoader::new(data_root)` 加载；Meta 中 source path 继续由 `data_root.join(source.path)` 解析。
 4. 对共享 DataSet 执行 normalize、target validation，并派生 DataSet-dependent ExportView；同 target 下 JSON / MessagePack / Bin / gettext_pot / lua_table 等多个 MetaAndData export task 复用该结果。
-5. 每个 MetaAndData export task 根据自身 `type` 从 `DataFormatRegistry` 选择 exporter，根据自身 `output` 写出一套数据产物。table exporter 写出每表 runtime data artifact；aggregate exporter 写出 POT / manifest / Lua 等聚合 artifact。
+5. 每个 MetaAndData export task 根据自身 `type` 通过 `GeneratorRegistry` 的 data-backed adapter 选择 exporter，根据自身 `output` 写出一套数据产物。table exporter 写出每表 runtime data artifact；aggregate exporter 写出 POT / manifest / Lua 等聚合 artifact。
 6. `Json` 使用 `serde_json::to_writer_pretty` 通过 shared `ArtifactSink` 写出 `<table>.json`。
 7. `MessagePack` 使用 `rmp_serde::encode::write_named` 或等价 named-field 编码通过 shared `ArtifactSink` 写出 `<table>.msgpack`。
 8. Runtime table data export task 在 exporter 内部生成 `RuntimeDataFile` metadata 用于保持规划顺序和未来 manifest 扩展；Build DAG 当前只保留 task 名称用于稳定校验，不再向上聚合 runtime result struct。聚合 exporter 通过 `export_to_sink()` 直接写入 shared sink。

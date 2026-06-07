@@ -127,7 +127,7 @@ Java backend 已落地为 `src/codegen/java/`，包含 `JavaCodeGenerator`、Jav
 
 Codegen 模块遵循开闭原则：核心模块只定义语言无关模型、crate 内部生成器 trait、注册表查找和公共配置结构；每种目标语言作为一等公民独立放在自己的目录中，语言标识常量、语言专属 options、类型映射、运行时 reader contract 渲染、命名默认值和测试都在该目录内维护。新增内置语言时应优先通过新增 `src/codegen/<language>/`、实现 crate 内部 `CodeGenerator` 并注册到 builtin registry 完成，不回到 IR 或 build 编排层增加语言分支，也不在核心 `mod.rs` 中新增语言常量或语言 options。
 
-概念边界：`CodeGenerator` 是 code artifact 能力，不是 “MetaOnly generator” 的总基类。当前 language codegen backend 的 requirements 均为 MetaOnly；但 requirements 属于 build-facing generator 调度属性，应由未来统一 `GeneratorRegistry` / `GeneratorRequirements` 表达。`schema_doc` 当前临时注册到 codegen builtin registry 以复用 MetaOnly 写出路径，长期应迁为 doc artifact generator；Lua 这类 requirements 包含 Meta + Data 的 code-like artifact 则应复用 code artifact options，而不是复制配置或伪装成当前 format-agnostic `CodeGenerator`。
+概念边界：`CodeGenerator` 是 code artifact 能力，不是 “MetaOnly generator” 的总基类。当前 language codegen backend 的 requirements 均为 MetaOnly；但 requirements 属于 build-facing generator 调度属性，由统一 `GeneratorRegistry` / `GeneratorRequirements` 表达。`schema_doc` 已迁为 direct doc `ArtifactGenerator`，不再注册到 codegen builtin registry；Lua 这类 requirements 包含 Meta + Data 的 code-like artifact 复用 `CodeArtifactOptions`，而不是复制配置或伪装成当前 format-agnostic `CodeGenerator`。
 
 每个语言目录的 `mod.rs` 只负责实现 `CodeGenerator`、构造 `CodeModel`、调用语言内各渲染模块并写出生成文件；实际渲染逻辑按 runtime contract、类型声明、reader、repository 和符号解析拆分。当前 `generate_to_sink()` 是 build 调用的标准入口，内置 backend 均通过 `ArtifactSink` 和 streaming writer 直接写出 artifact；legacy `generate() -> Vec<GeneratedFile>` 已降级为 `#[cfg(test)]` 快照 / 等价性测试 helper，不参与 production build。类型映射当前随 `types.rs` / `reader.rs` 保持在语言目录内；若单一语言继续膨胀，可继续在该语言目录内拆出 `type_mapping.rs`、`index.rs` 等，不应把语言专属逻辑回流到核心 `src/codegen/mod.rs`。
 

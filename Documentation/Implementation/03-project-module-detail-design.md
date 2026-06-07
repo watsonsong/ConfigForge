@@ -10,7 +10,7 @@ Project 模块解决以下问题：
 2. 支持 Project Config 顶层 `imports`，递归加载配置片段并通过 canonical path 去重。
 3. 将不同配置片段中的 `project`、`assets`、`enums`、`structs`、`tables`、`asset_kinds`、`targets` 合并成一个 `ProjectConfig`。
 4. 将相对路径按声明文件所在目录归一化，避免 imports 后路径相对根目录漂移；其中包括 project input、export output 和 asset search path root。
-5. 保留 target 聚合结构：每个 target 可声明多个统一 export task，由 build 根据 exporter dependency contract 分发到 runtime data exporter、aggregate exporter 或 codegen。
+5. 保留 target 聚合结构：每个 target 可声明多个统一 export task，由 build 根据 generator requirements 派生出的 dependency 分发到 MetaOnly 或 MetaAndData generator 分支。
 6. 从工程配置中抽取 raw `MetaModel`；Meta 的 link / validate 生命周期统一由 `src/meta/` 提供，Build 只负责按流程调用。
 
 非目标：
