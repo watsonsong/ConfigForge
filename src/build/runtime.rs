@@ -10,7 +10,7 @@ use crate::{
     asset::AssetResolver,
     data::{DataRow, DataSet, DataTable, RawSourceData},
     diagnostic::{Diagnostic, DiagnosticReport},
-    exporter::{DataExporterRef, DataFormatRegistry, export_runtime_data_to_sink},
+    generator::{ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRegistry},
     meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags},
     project::AssetsConfig,
     project::lexical_normalize_path,
@@ -41,31 +41,31 @@ pub(super) fn export_meta_and_data_tasks(
     linked_meta: &LinkedMetaModel<'_>,
     assets: &AssetsConfig,
     target_tags: &TargetTags,
+    generator_registry: &GeneratorRegistry,
     pool: &ThreadPool,
     sink: &ArtifactSink,
 ) -> Result<RuntimeExportOutput> {
-    let registry = DataFormatRegistry::with_builtin_exporters();
-    export_meta_and_data_tasks_with_registry(
+    export_meta_and_data_tasks_with_generator_registry(
         raw_sources,
         export_tasks,
         linked_meta,
         assets,
         target_tags,
+        generator_registry,
         pool,
         sink,
-        &registry,
     )
 }
 
-fn export_meta_and_data_tasks_with_registry(
+fn export_meta_and_data_tasks_with_generator_registry(
     raw_sources: Option<&RawSourceData>,
     export_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
     assets: &AssetsConfig,
     target_tags: &TargetTags,
+    generator_registry: &GeneratorRegistry,
     pool: &ThreadPool,
     sink: &ArtifactSink,
-    registry: &DataFormatRegistry,
 ) -> Result<RuntimeExportOutput> {
     if export_tasks.is_empty() {
         return Ok(RuntimeExportOutput {
@@ -80,7 +80,13 @@ fn export_meta_and_data_tasks_with_registry(
         )
     })?;
 
-    ensure_planned_runtime_output_paths(export_tasks, linked_meta, target_tags, registry, pool)?;
+    ensure_planned_runtime_output_paths(
+        export_tasks,
+        linked_meta,
+        target_tags,
+        generator_registry,
+        pool,
+    )?;
 
     let data_set = normalize_data_set_with_pool(linked_meta, raw_sources.as_data_set(), pool)?;
     let validation_result = validate_normalized_data_set_for_target_with_assets_report_and_pool(
@@ -133,7 +139,7 @@ fn export_meta_and_data_tasks_with_registry(
                         &export_data_set,
                         pool,
                         sink,
-                        registry,
+                        generator_registry,
                     ),
                 )
             })
@@ -434,45 +440,28 @@ fn export_meta_and_data_task(
     data_set: &crate::data::DataSet,
     pool: &ThreadPool,
     sink: &ArtifactSink,
-    registry: &DataFormatRegistry,
+    generator_registry: &GeneratorRegistry,
 ) -> Result<RuntimeExportTaskOutput> {
-    let format_exporter = registry.require_any(&export_task.type_id)?;
-    match format_exporter {
-        DataExporterRef::Table(exporter) => {
-            export_runtime_data_to_sink(
-                &export_task.output,
-                linked_meta,
-                target_tags,
-                data_set,
-                exporter,
-                pool,
-                sink,
-            )?;
-            Ok(RuntimeExportTaskOutput {
-                export_name: export_task.name.clone(),
-            })
-        }
-        DataExporterRef::Aggregate(exporter) => {
-            exporter.export_to_sink(
-                &export_task.output,
-                &target_data_config_from_export_task(export_task),
-                linked_meta,
-                target_tags,
-                data_set,
-                sink,
-            )?;
-            Ok(RuntimeExportTaskOutput {
-                export_name: export_task.name.clone(),
-            })
-        }
-    }
+    let generator = generator_registry.require_data_generator(&export_task.type_id)?;
+    generator.generate_with_data_to_sink(
+        &GeneratorDataInput {
+            common: generator_common_input(export_task, linked_meta, target_tags),
+            target_data_config: target_data_config_from_export_task(export_task),
+            data_set,
+            pool,
+        },
+        sink,
+    )?;
+    Ok(RuntimeExportTaskOutput {
+        export_name: export_task.name.clone(),
+    })
 }
 
 fn ensure_planned_runtime_output_paths(
     export_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
-    registry: &DataFormatRegistry,
+    generator_registry: &GeneratorRegistry,
     pool: &ThreadPool,
 ) -> Result<()> {
     let mut paths = BTreeSet::new();
@@ -487,7 +476,7 @@ fn ensure_planned_runtime_output_paths(
                         export_task,
                         linked_meta,
                         target_tags,
-                        registry,
+                        generator_registry,
                     ),
                 )
             })
@@ -512,31 +501,40 @@ fn plan_runtime_output_paths_for_task(
     export_task: &NormalizedExportTask,
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
-    registry: &DataFormatRegistry,
+    generator_registry: &GeneratorRegistry,
 ) -> Result<Vec<std::path::PathBuf>> {
     if export_task.type_id == "validation_report" {
         let config = validation_report_export_config_from_task(export_task)?;
         return Ok(vec![lexical_normalize_path(&config.output)]);
     }
-    match registry.require_any(&export_task.type_id)? {
-        DataExporterRef::Table(exporter) => linked_meta
-            .tables
-            .iter()
-            .filter(|table_meta| table_meta.meta.is_exported_for(target_tags))
-            .map(|table_meta| {
-                exporter
-                    .plan_table_artifact(table_meta)
-                    .map(|plan| lexical_normalize_path(&export_task.output.join(&plan.path)))
-            })
-            .collect(),
-        DataExporterRef::Aggregate(exporter) => {
-            let task = target_data_config_from_export_task(export_task);
-            exporter
-                .plan_artifacts(&export_task.output, &task, linked_meta, target_tags)?
-                .into_iter()
-                .map(|path| Ok(lexical_normalize_path(&path)))
-                .collect()
-        }
+    generator_registry
+        .require_data_generator(&export_task.type_id)?
+        .plan_artifacts(&generator_common_input(
+            export_task,
+            linked_meta,
+            target_tags,
+        ))?
+        .into_iter()
+        .map(|path| Ok(lexical_normalize_path(&path)))
+        .collect()
+}
+
+fn generator_common_input<'meta>(
+    export_task: &NormalizedExportTask,
+    linked_meta: &'meta LinkedMetaModel<'meta>,
+    target_tags: &TargetTags,
+) -> GeneratorCommonInput<'meta> {
+    GeneratorCommonInput {
+        meta: linked_meta,
+        target_tags: target_tags.clone(),
+        project: crate::ArtifactProjectInfo::default(),
+        project_root: std::path::PathBuf::new(),
+        target_name: String::new(),
+        task_name: export_task.name.clone(),
+        type_id: export_task.type_id.clone(),
+        output: export_task.output.clone(),
+        options: export_task.options.clone(),
+        generated_at: super::generated_at(),
     }
 }
 
@@ -557,6 +555,7 @@ mod tests {
         artifact::{ArtifactWriteMode, ArtifactWriter},
         data::{DataSet, DataTable, RawSourceData},
         exporter::{AggregateDataExporter, DataFormatExporter, RuntimeArtifactPlan},
+        generator::GeneratorRegistry,
         meta::{LinkedTableMeta, MetaModel, TargetTags},
         runtime_contract::ExportDependency,
     };
@@ -622,13 +621,14 @@ mod tests {
         let max_active_plans = Arc::new(AtomicUsize::new(0));
         let active_exports = Arc::new(AtomicUsize::new(0));
         let max_active_exports = Arc::new(AtomicUsize::new(0));
-        let mut registry = DataFormatRegistry::new();
-        registry.register_aggregate(InstrumentedAggregateExporter {
+        let mut data_registry = crate::exporter::DataFormatRegistry::new();
+        data_registry.register_aggregate(InstrumentedAggregateExporter {
             active_plans: active_plans.clone(),
             max_active_plans: max_active_plans.clone(),
             active_exports: active_exports.clone(),
             max_active_exports: max_active_exports.clone(),
         });
+        let generator_registry = GeneratorRegistry::new(data_registry, Vec::new(), Vec::new());
         let meta = minimal_meta_model();
         let linked_meta = meta.link().expect("meta should link");
         let raw_sources = raw_sources();
@@ -641,15 +641,15 @@ mod tests {
             .expect("pool should build");
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
 
-        let output = export_meta_and_data_tasks_with_registry(
+        let output = export_meta_and_data_tasks_with_generator_registry(
             Some(&raw_sources),
             &export_tasks,
             &linked_meta,
             &AssetsConfig::default(),
             &TargetTags::empty(),
+            &generator_registry,
             &pool,
             &sink,
-            &registry,
         )
         .expect("runtime export should succeed");
 
@@ -710,8 +710,9 @@ mod tests {
 
     #[test]
     fn meta_and_data_parallel_planning_rejects_path_conflicts_before_generation() {
-        let mut registry = DataFormatRegistry::new();
-        registry.register(DuplicatePathExporter);
+        let mut data_registry = crate::exporter::DataFormatRegistry::new();
+        data_registry.register(DuplicatePathExporter);
+        let generator_registry = GeneratorRegistry::new(data_registry, Vec::new(), Vec::new());
         let meta = MetaModel::from_toml_str(
             r#"
                 [[tables]]
@@ -755,15 +756,15 @@ mod tests {
             .expect("pool should build");
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
 
-        let error = export_meta_and_data_tasks_with_registry(
+        let error = export_meta_and_data_tasks_with_generator_registry(
             Some(&raw_sources),
             &export_tasks,
             &linked_meta,
             &AssetsConfig::default(),
             &TargetTags::empty(),
+            &generator_registry,
             &pool,
             &sink,
-            &registry,
         )
         .expect_err("duplicate path should fail during planning");
 

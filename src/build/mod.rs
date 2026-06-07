@@ -401,6 +401,7 @@ fn execute_export_pipeline<'meta>(
         &linked_meta,
         assets,
         target_tags,
+        generator_registry,
         pool,
         sink,
     )?;
@@ -563,6 +564,7 @@ fn execute_runtime_export_nodes(
     linked_meta: &crate::meta::LinkedMetaModel<'_>,
     assets: &crate::project::AssetsConfig,
     target_tags: &TargetTags,
+    generator_registry: &GeneratorRegistry,
     pool: &ThreadPool,
     sink: &ArtifactSink,
 ) -> Result<ExportBranchOutput> {
@@ -576,6 +578,7 @@ fn execute_runtime_export_nodes(
         linked_meta,
         assets,
         target_tags,
+        generator_registry,
         pool,
         sink,
     )?;

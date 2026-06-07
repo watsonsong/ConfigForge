@@ -9,11 +9,16 @@ use crate::{
     ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::ArtifactSink,
     codegen::{CodeGenerator, builtin_generators, find_generator},
-    exporter::DataFormatRegistry,
+    data::DataSet,
+    exporter::{
+        DataExporterRef, DataFormatRegistry, TargetDataConfig, export_runtime_data_to_sink,
+    },
     meta::{LinkedMetaModel, TargetTags},
     runtime_contract::ExportDependency,
     schema_doc::SchemaDocGenerator,
 };
+
+use rayon::ThreadPool;
 
 /// Input requirements declared by a build-facing artifact generator.
 ///
@@ -92,6 +97,13 @@ pub(crate) struct GeneratorCommonInput<'meta> {
     pub(crate) generated_at: String,
 }
 
+pub(crate) struct GeneratorDataInput<'a, 'meta> {
+    pub(crate) common: GeneratorCommonInput<'meta>,
+    pub(crate) target_data_config: TargetDataConfig,
+    pub(crate) data_set: &'a DataSet,
+    pub(crate) pool: &'a ThreadPool,
+}
+
 pub(crate) trait ArtifactGenerator: Send + Sync {
     fn type_id(&self) -> &'static str;
 
@@ -103,6 +115,23 @@ pub(crate) trait ArtifactGenerator: Send + Sync {
 
     fn generate_to_sink(&self, input: &GeneratorCommonInput<'_>, sink: &ArtifactSink)
     -> Result<()>;
+
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
+        let _ = input;
+        Ok(Vec::new())
+    }
+
+    fn generate_with_data_to_sink(
+        &self,
+        input: &GeneratorDataInput<'_, '_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let _ = (input, sink);
+        Err(ConfigForgeError::Validation(format!(
+            "generator `{}` does not support Data-backed artifact generation",
+            self.type_id()
+        )))
+    }
 
     fn matches(&self, type_id: &str) -> bool {
         self.type_id() == type_id || self.aliases().contains(&type_id)
@@ -143,6 +172,22 @@ impl GeneratorRegistry {
         find_generator(&self.code_generators, type_id)
     }
 
+    pub(crate) fn data_generator(&self, type_id: &str) -> Option<DataArtifactGeneratorRef<'_>> {
+        self.data_registry
+            .require_any(type_id)
+            .ok()
+            .map(DataArtifactGeneratorRef)
+    }
+
+    pub(crate) fn require_data_generator(
+        &self,
+        type_id: &str,
+    ) -> Result<DataArtifactGeneratorRef<'_>> {
+        self.data_generator(type_id).ok_or_else(|| {
+            ConfigForgeError::Validation(format!("no data exporter registered for `{type_id}`"))
+        })
+    }
+
     pub(crate) fn direct_generator(&self, type_id: &str) -> Option<&dyn ArtifactGenerator> {
         self.direct_generators
             .iter()
@@ -152,8 +197,8 @@ impl GeneratorRegistry {
 
     pub(crate) fn dependency(&self, target_name: &str, type_id: &str) -> Result<ExportDependency> {
         let mut matches = Vec::new();
-        if let Some(dependency) = self.data_registry.dependency(type_id) {
-            matches.push(dependency);
+        if let Some(generator) = self.data_generator(type_id) {
+            matches.push(generator.requirements().dependency());
         }
         if let Some(dependency) =
             find_generator(&self.code_generators, type_id).map(|generator| generator.dependency())
@@ -178,6 +223,91 @@ impl GeneratorRegistry {
             Err(ConfigForgeError::Validation(format!(
                 "target `{target_name}` declares ambiguous export type `{type_id}`; multiple generator contracts with different dependencies are registered"
             )))
+        }
+    }
+}
+
+pub(crate) struct DataArtifactGeneratorRef<'a>(DataExporterRef<'a>);
+
+impl ArtifactGenerator for DataArtifactGeneratorRef<'_> {
+    fn type_id(&self) -> &'static str {
+        match self.0 {
+            DataExporterRef::Table(exporter) => exporter.name(),
+            DataExporterRef::Aggregate(exporter) => exporter.name(),
+        }
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        match self.0 {
+            DataExporterRef::Table(exporter) => exporter.aliases(),
+            DataExporterRef::Aggregate(exporter) => exporter.aliases(),
+        }
+    }
+
+    fn requirements(&self) -> GeneratorRequirements {
+        GeneratorRequirements::meta_and_data()
+    }
+
+    fn generate_to_sink(
+        &self,
+        _input: &GeneratorCommonInput<'_>,
+        _sink: &ArtifactSink,
+    ) -> Result<()> {
+        Err(ConfigForgeError::Validation(format!(
+            "generator `{}` requires Data-backed artifact input",
+            self.type_id()
+        )))
+    }
+
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
+        match self.0 {
+            DataExporterRef::Table(exporter) => input
+                .meta
+                .tables
+                .iter()
+                .filter(|table_meta| table_meta.meta.is_exported_for(&input.target_tags))
+                .map(|table_meta| {
+                    exporter
+                        .plan_table_artifact(table_meta)
+                        .map(|plan| input.output.join(plan.path))
+                })
+                .collect(),
+            DataExporterRef::Aggregate(exporter) => {
+                let task = TargetDataConfig {
+                    name: Some(input.task_name.clone()),
+                    format: input.type_id.clone(),
+                    output: input.output.clone(),
+                    options: input.options.clone(),
+                };
+                exporter.plan_artifacts(&input.output, &task, input.meta, &input.target_tags)
+            }
+        }
+    }
+
+    fn generate_with_data_to_sink(
+        &self,
+        input: &GeneratorDataInput<'_, '_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        match self.0 {
+            DataExporterRef::Table(exporter) => export_runtime_data_to_sink(
+                &input.common.output,
+                input.common.meta,
+                &input.common.target_tags,
+                input.data_set,
+                exporter,
+                input.pool,
+                sink,
+            )
+            .map(|_| ()),
+            DataExporterRef::Aggregate(exporter) => exporter.export_to_sink(
+                &input.common.output,
+                &input.target_data_config,
+                input.common.meta,
+                &input.common.target_tags,
+                input.data_set,
+                sink,
+            ),
         }
     }
 }
