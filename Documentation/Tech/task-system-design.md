@@ -79,7 +79,7 @@ ConfigForge 的任务可按资源类型分为三类。
 - `Semaphore` 可限制同时打开文件、HTTP 请求、远端 API 请求数；
 - `JoinSet` / `FuturesUnordered` 可收集同类 I/O 任务。
 
-ArtifactSink 当前使用同步 `std::io::Write`，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 并传入 runtime/codegen 分支。runtime table exporter 与 aggregate exporter 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack / binary 均已使用 writer-style serializer；[`Codegen backend capability matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 codegen production path 也通过 `generate_to_sink()` 和 streaming code writer 直接写 sink。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
+ArtifactSink 当前使用同步 `std::io::Write`，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 并传入 generator 分支。runtime table exporter 与 aggregate exporter 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack / binary 均已使用 writer-style serializer；[`Codegen backend capability matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 code-like generator production path 也通过 `generate_to_sink()` 和 streaming code writer 直接写 sink。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
 
 建议配置：
 
@@ -1001,14 +1001,14 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 
 ### Phase 11：ArtifactSink coordinator 与 streaming pipeline
 
-状态：ArtifactSink coordinator、Build shared sink 接入、runtime table producer API、aggregate sink-first 写出和内置 codegen streaming 写出已完成。
+状态：ArtifactSink coordinator、Build shared sink 接入、runtime table producer API、aggregate sink-first 写出和内置 code-like generator streaming 写出已完成。
 
 当前状态：
 
 - Artifact 模块已提供 `ArtifactSink` / `ArtifactWriteStream`，并作为唯一写入协调器处理 path reservation、Direct / TempCommit / DryRun 与 result entries。
 - Artifact 模块已提供 `ArtifactPlan` / `ArtifactProducer`；`ArtifactWriter::write(Vec<Artifact>)` 已转为 sink compatibility wrapper；旧 dedicated bounded writer queue 与 sink 级资源限流实现已移除。
 - CLI 的 artifact 写入配置只保留 write mode；`--jobs` / `--serial` 仍控制 CPU 执行并行度。
-- Build 主流程已创建 shared `ArtifactSink` 并传入 exporter/codegen 分支；runtime table exporter 直接通过 `sink.create(path)` 打开 stream 并调用 `serialize_table_to_stream()` 写入，aggregate exporter 通过 required `export_to_sink()` 写入，内置 codegen 通过 required `generate_to_sink()` 与 streaming writer 写入。
+- Build 主流程已创建 shared `ArtifactSink` 并传入 generator 分支；runtime table exporter 直接通过 `sink.create(path)` 打开 stream 并调用 `serialize_table_to_stream()` 写入，aggregate exporter 通过 required `export_to_sink()` 写入，内置 code-like generator 通过 required `generate_to_sink()` 与 streaming writer 写入。目标态这些 exporter/codegen 入口应收敛到 concrete artifact generator 内部，data/code artifact toolkit 只保留 helper。
 
 未来规划：
 

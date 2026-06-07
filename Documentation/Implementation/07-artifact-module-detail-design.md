@@ -179,7 +179,7 @@ runtime table exporter、aggregate exporter 和 codegen 可以并行生成 artif
 
 #### Pipeline 模型
 
-当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。Build 主流程已创建共享 `ArtifactSink` 并传入 runtime/codegen 分支。runtime table exporter 与 aggregate exporter 均直接写入 sink，JSON / MessagePack / binary 已覆盖 writer-style serializer；[`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 codegen production path 均通过 `generate_to_sink()` 打开 sink stream 并使用 streaming code writer 写出。
+当前 artifact 模块已经以 `ArtifactSink` 作为唯一写入协调器；`ArtifactWriter::write(Vec<Artifact>)` 是兼容入口，负责遍历旧 artifact 列表，对每个 artifact 调用 `sink.write_text()` / `sink.write_binary()`，最后调用 `sink.finish()`。Build 主流程已创建共享 `ArtifactSink` 并传入 generator 分支。runtime table exporter 与 aggregate exporter 在迁移期均通过 `GeneratorRegistry` adapter 直接写入 sink，JSON / MessagePack / binary 已覆盖 writer-style serializer；[`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 code-like generator production path 均通过 `generate_to_sink()` 打开 sink stream 并使用 streaming code writer 写出。
 
 已实现 API：
 
@@ -209,7 +209,7 @@ pub trait ArtifactProducer {
 兼容入口流程：
 
 ```text
-Build / exporters / codegen
+Build / generators
   -> generate and collect Vec<Artifact> in declaration order
   -> ArtifactWriter::new(mode).write(artifacts)
      -> create ArtifactSink
@@ -222,14 +222,14 @@ Build 主流程：
 ```text
 build_target()
   -> ArtifactWriter::new(mode).open_sink()
-  -> run exporter/codegen branches with shared sink
+  -> run generator branches with shared sink
   -> sink.finish()
 ```
 
 streaming generator 流程：
 
 ```text
-Build / exporters / codegen
+Build / generators
   -> ArtifactWriter::new(mode).open_sink()
   -> tasks run in parallel
      -> stream = sink.create(path)
@@ -280,11 +280,11 @@ create(path) -> Open
 
 #### 超大单文件策略
 
-streaming path 不要求一次性持有完整 artifact bytes；`write()` 直接转发到底层 counting writer / file writer，因此单文件大小不受 sink 内部预算限制。兼容入口 `ArtifactWriter::write(Vec<Artifact>)` 仍会先持有调用方传入的 materialized content；新 exporter / codegen 路径应优先通过 `ArtifactSink::create()` 直接写入，避免重新引入完整 `Vec<u8>` / `String` materialization。
+streaming path 不要求一次性持有完整 artifact bytes；`write()` 直接转发到底层 counting writer / file writer，因此单文件大小不受 sink 内部预算限制。兼容入口 `ArtifactWriter::write(Vec<Artifact>)` 仍会先持有调用方传入的 materialized content；新 generator 路径应优先通过 `ArtifactSink::create()` 直接写入，避免重新引入完整 `Vec<u8>` / `String` materialization。
 
-## 7.5 与 Exporter 的关系
+## 7.5 与 data-backed generator / data artifact toolkit 的关系
 
-Exporter 的职责从“序列化并写文件”收敛为“向 Build 提供 artifact 写入逻辑”。目标模型中 exporter 不再返回完整 `Vec<u8>` / `String` 内容，而是接收 `ArtifactSink` 或 `ArtifactWriteContext`，为每个输出 path 打开 stream 并直接写入：
+当前 exporter 的职责从“序列化并写文件”收敛为“向 generator 提供 data artifact 写入 helper”。目标模型中具体 JSON / MessagePack / `bin` / POT / Lua / Asset Manifest 都是 `src/generator/<type_id>/` 下的 data-backed generator；data artifact toolkit 不再返回完整 `Vec<u8>` / `String` 内容，而是接收 `ArtifactSink` 或受限写入 context，为每个输出 path 打开 stream 并直接写入：
 
 ```rust
 pub(crate) fn export_runtime_data_to_sink(
@@ -297,14 +297,14 @@ pub(crate) fn export_runtime_data_to_sink(
 
 - `RuntimeDataFile` 是 runtime artifact metadata / manifest contract；当前默认 codegen 不消费真实 artifact path，而是使用逻辑 table name。
 - 实际写入路径由 export task output root + runtime data file path 得到，并传给 `sink.create(path)`。
-- Exporter 不再调用 `fs::create_dir_all` / `fs::write`，也不选择 `ArtifactWriteMode`。
+- Data artifact helper / generator 不再调用 `fs::create_dir_all` / `fs::write`，也不选择 `ArtifactWriteMode`。
 - Serializer 应优先支持 `std::io::Write` 输出，避免先构造完整 `Vec<u8>`；暂时只能产出内存 buffer 的格式可以通过 `sink.write_binary()` 兼容。
 
-旧 `RuntimeDataArtifact` / `Vec<Artifact>` table exporter 兼容入口已移除；测试若需要落盘断言，应使用 `ArtifactSink` / `ArtifactWriter` 辅助函数，不应让 exporter 自己暴露 filesystem API。aggregate exporter 主路径已改为 required `export_to_sink()`；`export() -> Vec<Artifact>` 仅作为 legacy fallback。
+旧 `RuntimeDataArtifact` / `Vec<Artifact>` table exporter 兼容入口已移除；测试若需要落盘断言，应使用 `ArtifactSink` / `ArtifactWriter` 辅助函数，不应让 data artifact helper 自己暴露 filesystem API。aggregate exporter 主路径已改为 required `export_to_sink()`；`export() -> Vec<Artifact>` 仅作为 legacy fallback。
 
-## 7.6 与 Codegen 的关系
+## 7.6 与 code-like generator / code artifact toolkit 的关系
 
-Codegen production path 已迁移到 `ArtifactSink`，避免 codegen 与 exporter 走两套写入路径。Build-facing generator API 是：
+Code-like generator production path 已迁移到 `ArtifactSink`，避免 code artifact toolkit 与 data artifact toolkit 走两套写入路径。迁移期 code artifact helper API 是：
 
 ```rust
 pub(crate) trait CodeGenerator {
@@ -312,9 +312,9 @@ pub(crate) trait CodeGenerator {
 }
 ```
 
-`CodeGenerator` 当前是 crate 内部扩展点，不作为稳定外部 generator plugin API 暴露；因此它可以直接依赖内部 `ArtifactSink` 类型，而不要求 crate root 同步 re-export sink/stream 细节。外部用户应通过 Project Config 的内置 `type` / `language` 选择 codegen backend，而不是自行实现该 trait。
+`CodeGenerator` 当前是 crate 内部迁移期扩展点，不作为稳定外部 generator plugin API 暴露；因此它可以直接依赖内部 `ArtifactSink` 类型，而不要求 crate root 同步 re-export sink/stream 细节。外部用户应通过 Project Config 的内置 `type` 选择 artifact generator，而不是自行实现该 trait。目标态 language generator 可直接实现 `ArtifactGenerator`，内部复用 code artifact toolkit。
 
-典型 codegen 写出流程：
+典型 code-like generator 写出流程：
 
 ```rust
 let mut stream = sink.create(output_path)?;
@@ -331,14 +331,14 @@ stream.finish()?;
 Build 是唯一编排者：
 
 1. CLI 解析 `--dry-run`，写入 `BuildOptions`。
-2. Build 正常执行 project/meta/data/validation/exporter/codegen。
-3. Build 创建 `ArtifactSink`，并把 sink 或受限 wrapper 传给 exporter/codegen。
-4. exporter/codegen 通过 sink 打开 artifact stream 并写入内容。
+2. Build 正常执行 project/meta/data/validation/generator。
+3. Build 创建 `ArtifactSink`，并把 sink 或受限 wrapper 传给 generator。
+4. generator 通过 sink 打开 artifact stream 并写入内容。
 5. Build 调用 `ArtifactSink::finish()` 获得 `ArtifactWriteResult`；dry-run 模式下 CLI 输出 artifact plan，但不写文件。
 
 CLI dry-run 不应跳过 validation 或 serialization/codegen，因为用户需要确认完整构建能成功，只是不提交文件系统变更。
 
-`ArtifactWriter::write(Vec<Artifact>)` 兼容层仍保留给测试、外部调用和少量旧 API 使用；Build 主流程不再收集全局 `Vec<Artifact>`，而是在 `build_target()` 创建共享 sink，exporter/codegen 分支直接写入同一个 sink。不能让旧 writer 重新保留独立的 path conflict / temp commit 实现。
+`ArtifactWriter::write(Vec<Artifact>)` 兼容层仍保留给测试、外部调用和少量旧 API 使用；Build 主流程不再收集全局 `Vec<Artifact>`，而是在 `build_target()` 创建共享 sink，generator 分支直接写入同一个 sink。不能让旧 writer 重新保留独立的 path conflict / temp commit 实现。
 
 ## 7.8 错误边界
 
@@ -381,7 +381,7 @@ Artifact 模块单元测试应覆盖：
 - `src/artifact/` 已提供 `Artifact`、`ArtifactContent`、`ArtifactWriter`、`ArtifactSink`、`ArtifactWriteStream`、`ArtifactWriteMode` 和 `ArtifactWriteResult`。
 - Artifact 模块内的写入 authority 已收敛到 `ArtifactSink`；`ArtifactWriter::write(Vec<Artifact>)` 是兼容 wrapper，并通过 sink 写入。
 - 旧 dedicated bounded queue 和 sink 级资源限流实现已移除；ArtifactSink 只负责标准写入流与生命周期。
-- runtime table exporter、aggregate exporter 与 generated code 在 Build 主流程中已接入共享 `ArtifactSink`；runtime table exporter 通过 stream API 写入 sink，JSON / MessagePack / binary 使用 writer-style serializer；aggregate exporter 通过 required `export_to_sink()` 写入 sink；[`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 codegen backend 通过 `generate_to_sink()` 与 streaming writer 写入 sink。
+- runtime table exporter、aggregate exporter 与 generated code 在 Build 主流程中已通过 `GeneratorRegistry` adapter 接入共享 `ArtifactSink`；runtime table exporter 通过 stream API 写入 sink，JSON / MessagePack / binary 使用 writer-style serializer；aggregate exporter 通过 required `export_to_sink()` 写入 sink；[`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 code-like generator 通过 `generate_to_sink()` 与 streaming writer 写入 sink。目标态这些入口应收敛到 concrete artifact generator 内部。
 - CLI 支持 `--dry-run`、`--write-mode direct|temp-commit`；artifact 写入资源控制不再暴露独立参数。
 - temp-commit 当前提供临时文件阶段保护；提交阶段失败按 `ConfigForgeError::WriteFile` 报错，并可能保留已提交的最终文件。
 
