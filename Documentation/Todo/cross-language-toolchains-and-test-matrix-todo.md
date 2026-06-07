@@ -82,7 +82,7 @@ docs(testing): plan cross-language toolchain test matrix
 docs(testing): add development environment guide
 ```
 
-## [ ] Step 2：新增测试与 CI 矩阵文档
+## [x] Step 2：新增测试与 CI 矩阵文档
 
 目标：明确本地、quick CI、full CI / nightly 的测试分层，以及各语言 generated-code harness 和 runtime compliance 的工具要求。
 
@@ -103,6 +103,8 @@ docs(testing): add development environment guide
 - `git diff --check`
 - 人工检查矩阵中每个语言的工具要求、默认 profile 策略和 full CI 策略都明确。
 - 人工检查没有把测试矩阵重复散落到多个 canonical 文档中。
+
+当前实现：已新增 `Documentation/Tech/test-ci-matrix.md`，记录 local / quick / full / nightly profile、generated-code runtime harness 矩阵、runtime adapter compliance 矩阵，以及 skip / fail-fast / 默认不联网策略；`Documentation/README.md`、`AGENTS.md`、`Documentation/code-style.md`、`09e-codegen-runtime-adapters.md` 和 `09h-codegen-generator-api-and-tests.md` 已链接该矩阵文档。
 
 建议提交：
 

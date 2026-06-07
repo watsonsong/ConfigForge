@@ -129,6 +129,8 @@ Runtime adapter 工程化应按“先可执行规范，再稳定接口，再发�
 
 Compliance runner 的验证对象不是“每个语言必须有一个厚 core 模块”。core 模块只定义 generated code 与 adapter 之间的最小形状：reader / loader trait 或结构化接口、error、decode limits、contract version。某些语言可以只有 generated inline interface 或一份很薄的 structural type；只要 adapter 能被 generated code 通过薄 glue 调用，就可以参与 compliance。真正需要被反复验证的是具体 reader adapter 对 contract 语义的解释，而不是 core 本身承载业务逻辑。
 
+跨语言 runner 的 profile、工具链要求、local skip 与 full/nightly fail-fast 策略统一记录在 [`../Tech/test-ci-matrix.md`](../Tech/test-ci-matrix.md)。本节只维护 adapter contract、case 边界和接入顺序，避免重复维护命令矩阵。
+
 设计原则：
 
 - compliance case 使用语言无关 `case_id`、payload path、expected TOML 和 expected error keyword；不同语言错误文本不需要完全一致，但必须包含稳定关键字和 reader path / expected type 等定位信息。

@@ -425,7 +425,7 @@ ConfigForge 提供标准 RuntimeDataReader / RuntimeDataLoader adapter 作为可
 
 - [`../Implementation/09e-codegen-runtime-adapters.md`](../Implementation/09e-codegen-runtime-adapters.md)：runtime adapter 分层、当前 adapter 矩阵、目录结构、reader contract compliance、语言包形态和测试矩阵。
 - [`../Tech/cpp-runtime-dependencies.md`](../Tech/cpp-runtime-dependencies.md)：C++ runtime adapter 三方依赖、CMake option / target、FetchContent 和 Unreal shim 边界。
-- 未来 `../Tech/test-ci-matrix.md`：跨语言 harness、可选工具链、skip / fail-fast 策略和 CI profile。
+- [`../Tech/test-ci-matrix.md`](../Tech/test-ci-matrix.md)：跨语言 harness、可选工具链、skip / fail-fast 策略和 CI profile。
 
 ## 6.3 非运行时数据导出格式
 

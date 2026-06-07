@@ -178,6 +178,8 @@ pub struct CodegenDiagnostic {
 
 标准工程当前按 target 拆分生成多语言 codegen；backend 清单、输出位置和 runtime harness 状态见 [`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。generated-code runtime test 可以复用标准工程配置，分别验证各语言。
 
+本节描述 generated-code harness 的实现形态和断言边界；local / quick / full / nightly profile、工具链要求、skip / fail-fast 策略和 runtime compliance 覆盖矩阵见 [`../Tech/test-ci-matrix.md`](../Tech/test-ci-matrix.md)。
+
 | 语言 | 输入产物 | 工具链 | Harness 做法 | 必测断言 |
 | --- | --- | --- | --- | --- |
 | Rust | `out/server_code/rust/generated.rs` + `out/server_data/*.msgpack` | `cargo test` | 实现通用 `RuntimeDataLoader` / reader，用 `rmp-serde` 读取真实 MessagePack payload，并把 payload 暴露给 generated parser；不手写 generated rows / objects 映射。 | `GameData::load` 成功；`items.get_by_id(id)` 命中；`class_levels.get_by_class_level(class_id, level)` 命中联合索引；`game_rules` object 字段可访问。 |
