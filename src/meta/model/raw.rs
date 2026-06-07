@@ -26,6 +26,8 @@ pub struct MetaModel {
 pub struct AssetKindMeta {
     pub name: String,
     #[serde(default)]
+    pub extends: Option<String>,
+    #[serde(default)]
     pub search_paths: Vec<String>,
     #[serde(default)]
     pub base_dirs: Vec<String>,

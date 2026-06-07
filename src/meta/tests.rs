@@ -846,6 +846,7 @@ fn parses_asset_kinds_and_field_asset_kind_links() {
 
             [[asset_kinds]]
             name = "unreal_icon"
+            extends = "unreal_asset"
             search_paths = ["unreal_game"]
             base_dirs = ["UI"]
             extensions = [".uasset"]
@@ -874,12 +875,18 @@ fn parses_asset_kinds_and_field_asset_kind_links() {
             severity = "error"
             message = "must be a mounted object path"
             when_tags = ["client"]
+
+            [[asset_kinds]]
+            name = "unreal_asset"
+            search_paths = ["unreal_game"]
+            path_style = "mounted_object"
         "#,
     );
 
     let field = meta.table("items").unwrap().field("icon").unwrap();
     assert_eq!(field.asset_kind.as_deref(), Some("unreal_icon"));
     let asset_kind = meta.asset_kind("unreal_icon").unwrap();
+    assert_eq!(asset_kind.extends.as_deref(), Some("unreal_asset"));
     assert_eq!(asset_kind.search_paths, ["unreal_game"]);
     assert_eq!(asset_kind.base_dirs, ["UI"]);
     assert_eq!(asset_kind.extensions, [".uasset"]);
@@ -888,6 +895,48 @@ fn parses_asset_kinds_and_field_asset_kind_links() {
 
     let linked = meta.link().expect("meta should link");
     assert!(linked.asset_kind("unreal_icon").is_some());
+}
+
+#[test]
+fn rejects_invalid_asset_kind_extends() {
+    let diagnostics = diagnostics(
+        r#"
+            [[asset_kinds]]
+            name = "self_ref"
+            extends = "self_ref"
+
+            [[asset_kinds]]
+            name = "unknown_ref"
+            extends = "missing"
+
+            [[asset_kinds]]
+            name = "cycle_a"
+            extends = "cycle_b"
+
+            [[asset_kinds]]
+            name = "cycle_b"
+            extends = "cycle_a"
+        "#,
+    );
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::InvalidAssetKindDeclaration
+            && diagnostic
+                .message
+                .contains("asset kind `self_ref` cannot extend itself")
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::InvalidAssetKindDeclaration
+            && diagnostic
+                .message
+                .contains("asset kind `unknown_ref` extends unknown asset kind `missing`")
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == MetaDiagnosticCode::InvalidAssetKindDeclaration
+            && diagnostic
+                .message
+                .contains("asset kind extends cycle detected")
+    }));
 }
 
 #[test]

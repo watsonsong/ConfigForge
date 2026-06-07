@@ -22,6 +22,8 @@ pub struct ProjectConfig {
     #[serde(default)]
     pub project: ProjectConfigMeta,
     #[serde(default)]
+    pub assets: AssetsConfig,
+    #[serde(default)]
     pub enums: Vec<EnumMeta>,
     #[serde(default)]
     pub structs: Vec<StructMeta>,
@@ -31,6 +33,32 @@ pub struct ProjectConfig {
     pub asset_kinds: Vec<AssetKindMeta>,
     #[serde(default)]
     pub targets: Vec<TargetConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct AssetsConfig {
+    #[serde(default)]
+    pub case_sensitive: Option<bool>,
+    #[serde(default)]
+    pub require_existing: Option<bool>,
+    #[serde(default)]
+    pub root: Option<PathBuf>,
+    #[serde(default)]
+    pub search_paths: Vec<AssetSearchPathConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct AssetSearchPathConfig {
+    pub name: String,
+    pub root: PathBuf,
+    #[serde(default = "default_asset_search_path_kind")]
+    pub kind: String,
+    #[serde(default)]
+    pub mount: Option<String>,
+}
+
+fn default_asset_search_path_kind() -> String {
+    "filesystem".to_owned()
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -73,6 +101,8 @@ impl ProjectConfig {
         load_project_config_recursive(path.as_ref(), &mut visited, &mut fragments)?;
         let merged = merge_project_configs(fragments);
         validate_unique_target_names(&merged.targets)?;
+        validate_asset_search_paths(&merged.assets.search_paths)?;
+        validate_asset_kind_search_path_refs(&merged)?;
         Ok(merged)
     }
 
@@ -136,6 +166,25 @@ fn normalize_project_config_paths(config: &mut ProjectConfig, base_dir: &Path) {
     if let Some(input) = &mut config.project.input {
         *input = normalize_config_path(base_dir, input);
     }
+    if let Some(root) = &mut config.assets.root {
+        *root = normalize_config_path(base_dir, root);
+        if !config
+            .assets
+            .search_paths
+            .iter()
+            .any(|search_path| search_path.name == "default")
+        {
+            config.assets.search_paths.push(AssetSearchPathConfig {
+                name: "default".to_owned(),
+                root: root.clone(),
+                kind: default_asset_search_path_kind(),
+                mount: None,
+            });
+        }
+    }
+    for search_path in &mut config.assets.search_paths {
+        search_path.root = normalize_config_path(base_dir, &search_path.root);
+    }
     for target in &mut config.targets {
         for export in &mut target.exports {
             export.output = normalize_config_path(base_dir, &export.output);
@@ -181,6 +230,7 @@ fn merge_project_configs(fragments: Vec<ProjectConfig>) -> ProjectConfig {
     let mut merged = ProjectConfig {
         imports: Vec::new(),
         project: ProjectConfigMeta::default(),
+        assets: AssetsConfig::default(),
         enums: Vec::new(),
         structs: Vec::new(),
         tables: Vec::new(),
@@ -201,6 +251,19 @@ fn merge_project_configs(fragments: Vec<ProjectConfig>) -> ProjectConfig {
         if fragment.project.copyright.is_some() {
             merged.project.copyright = fragment.project.copyright.take();
         }
+        if fragment.assets.case_sensitive.is_some() {
+            merged.assets.case_sensitive = fragment.assets.case_sensitive.take();
+        }
+        if fragment.assets.require_existing.is_some() {
+            merged.assets.require_existing = fragment.assets.require_existing.take();
+        }
+        if fragment.assets.root.is_some() {
+            merged.assets.root = fragment.assets.root.take();
+        }
+        merged
+            .assets
+            .search_paths
+            .append(&mut fragment.assets.search_paths);
         merged.enums.append(&mut fragment.enums);
         merged.structs.append(&mut fragment.structs);
         merged.tables.append(&mut fragment.tables);
@@ -209,6 +272,47 @@ fn merge_project_configs(fragments: Vec<ProjectConfig>) -> ProjectConfig {
     }
 
     merged
+}
+
+pub(crate) fn validate_asset_search_paths(search_paths: &[AssetSearchPathConfig]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for search_path in search_paths {
+        if !seen.insert(search_path.name.as_str()) {
+            return Err(ConfigForgeError::Validation(format!(
+                "duplicate asset search path `{}`",
+                search_path.name
+            )));
+        }
+        if search_path.kind != "filesystem" {
+            return Err(ConfigForgeError::Validation(format!(
+                "unsupported asset search path kind `{}` for `{}`; only `filesystem` is supported",
+                search_path.kind, search_path.name
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+pub(crate) fn validate_asset_kind_search_path_refs(config: &ProjectConfig) -> Result<()> {
+    let search_path_names = config
+        .assets
+        .search_paths
+        .iter()
+        .map(|search_path| search_path.name.as_str())
+        .collect::<BTreeSet<_>>();
+    for asset_kind in &config.asset_kinds {
+        for search_path in &asset_kind.search_paths {
+            if !search_path_names.contains(search_path.as_str()) {
+                return Err(ConfigForgeError::Validation(format!(
+                    "unknown asset search path `{search_path}` referenced by asset kind `{}`",
+                    asset_kind.name
+                )));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub(crate) fn validate_unique_target_names(targets: &[TargetConfig]) -> Result<()> {
@@ -237,7 +341,10 @@ impl From<&ProjectConfigMeta> for CodeExportProject {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
 
     use super::*;
 
@@ -304,6 +411,135 @@ mod tests {
 
         assert!(
             matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate target `client`"))
+        );
+    }
+
+    #[test]
+    fn project_config_normalizes_asset_search_path_roots() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let project_path = temp_dir.path().join("ConfigForge.toml");
+        fs::write(
+            &project_path,
+            r#"
+                [assets]
+                case_sensitive = true
+                require_existing = true
+
+                [[assets.search_paths]]
+                name = "game"
+                root = "Content/./UI/.."
+                mount = "/Game"
+            "#,
+        )
+        .expect("write project config");
+
+        let config = ProjectConfig::from_path(&project_path).expect("project config should load");
+
+        assert_eq!(config.assets.case_sensitive, Some(true));
+        assert_eq!(config.assets.require_existing, Some(true));
+        assert_eq!(config.assets.search_paths.len(), 1);
+        let search_path = &config.assets.search_paths[0];
+        assert_eq!(search_path.name, "game");
+        assert_eq!(search_path.kind, "filesystem");
+        assert_eq!(search_path.mount.as_deref(), Some("/Game"));
+        assert_eq!(
+            search_path.root,
+            fs::canonicalize(temp_dir.path())
+                .expect("canonical temp dir")
+                .join("Content")
+        );
+    }
+
+    #[test]
+    fn project_config_assets_root_adds_default_search_path() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let project_path = temp_dir.path().join("ConfigForge.toml");
+        fs::write(
+            &project_path,
+            r#"
+                [assets]
+                root = "Assets/../Content"
+            "#,
+        )
+        .expect("write project config");
+
+        let config = ProjectConfig::from_path(&project_path).expect("project config should load");
+
+        let expected_root = fs::canonicalize(temp_dir.path())
+            .expect("canonical temp dir")
+            .join("Content");
+        assert_eq!(config.assets.root, Some(expected_root.clone()));
+        assert_eq!(config.assets.search_paths.len(), 1);
+        let search_path = &config.assets.search_paths[0];
+        assert_eq!(search_path.name, "default");
+        assert_eq!(search_path.root, expected_root);
+    }
+
+    #[test]
+    fn project_config_rejects_duplicate_asset_search_path_names() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let project_path = temp_dir.path().join("ConfigForge.toml");
+        fs::write(
+            &project_path,
+            r#"
+                [[assets.search_paths]]
+                name = "game"
+                root = "Content"
+
+                [[assets.search_paths]]
+                name = "game"
+                root = "Plugins"
+            "#,
+        )
+        .expect("write project config");
+
+        let error = ProjectConfig::from_path(&project_path).unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate asset search path `game`"))
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_unsupported_asset_search_path_kind() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let project_path = temp_dir.path().join("ConfigForge.toml");
+        fs::write(
+            &project_path,
+            r#"
+                [[assets.search_paths]]
+                name = "registry"
+                root = "Content"
+                kind = "unreal_registry"
+            "#,
+        )
+        .expect("write project config");
+
+        let error = ProjectConfig::from_path(&project_path).unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("unsupported asset search path kind `unreal_registry`"))
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_unknown_asset_kind_search_path_ref() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let project_path = temp_dir.path().join("ConfigForge.toml");
+        fs::write(
+            &project_path,
+            r#"
+                [[asset_kinds]]
+                name = "ui_icon"
+                search_paths = ["missing"]
+            "#,
+        )
+        .expect("write project config");
+
+        let error = ProjectConfig::from_path(&project_path).unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("unknown asset search path `missing` referenced by asset kind `ui_icon`"))
         );
     }
 

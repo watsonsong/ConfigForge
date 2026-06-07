@@ -73,7 +73,16 @@
 
 ## Step 2：Project Config 接入 assets.search_paths
 
-状态：待开始
+状态：已完成（提交前验证通过）
+
+完成记录：
+
+- Project Config 已接入 `[assets]` 和 `[[assets.search_paths]]`，支持 `case_sensitive`、`require_existing`、`root` 兼容简写、`name`、`root`、`kind`、`mount`。
+- import 合并和路径规范化阶段已按声明文件所在目录解析 search path root，并把 `[assets] root = "..."` 规范化为 `default` search path。
+- 已校验 search path name 全局唯一，且 P0-1 只接受 `kind = "filesystem"`。
+- Project Config 加载阶段已校验 `asset_kind.search_paths` 引用必须存在。
+- 根据规则模板设计补充 `asset_kind.extends`，允许字段专用 kind 继承全局 Unreal 等基础规则；已校验未知父 kind、自继承和继承环。
+- 验证命令：`cargo fmt --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml" && cargo test --manifest-path "/Users/bytedance/Documents/ConfigForge/Cargo.toml"`。
 
 工作项：
 
@@ -91,6 +100,10 @@
    - search path name 全局唯一。
    - P0-1 只接受 `kind = "filesystem"`，其他 kind 明确报 unsupported。
 4. link / validate 阶段检查 `asset_kind.search_paths` 引用的 Project search path 存在。
+
+补充调整：
+
+- `asset_kind` 作为字段 validation + runtime export post-modifier 的规则模板，支持 `extends` 继承。后续 resolver 需要基于 effective asset kind 执行候选生成、校验和 canonical ref 补齐。
 
 建议测试：
 

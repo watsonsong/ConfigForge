@@ -429,9 +429,8 @@ kind = "filesystem"
 mount = "/Game"
 
 [[asset_kinds]]
-name = "unreal_skill_class"
+name = "unreal_asset"
 search_paths = ["unreal_game"]
-base_dirs = ["Skills"]
 extensions = [".uasset"]
 input = "path"
 path_style = "mounted_object"
@@ -439,6 +438,11 @@ strip_wrappers = ["BlueprintGeneratedClass'{value}'", "Class'{value}'"]
 object_separator = "."
 object_name = "{stem}_C"
 allow_auto_complete = true
+
+[[asset_kinds]]
+name = "unreal_skill_class"
+extends = "unreal_asset"
+base_dirs = ["Skills"]
 name_prefixes = ["GA_"]
 
 [[asset_kinds.regex_rules]]
@@ -446,7 +450,7 @@ name = "private_engine_escape_hatch"
 target = "logical_ref"
 pattern = "^/Game/Skills/GA_[A-Za-z0-9_]+\\.GA_[A-Za-z0-9_]+_C$"
 message = "技能资源必须是 /Game/Skills/GA_Name.GA_Name_C 格式。"</code></pre>
-        <div class="callout"><strong>Asset P0-1：</strong>先实现 <code>asset_kind</code>、资源引用校验和导出补齐；<code>asset_manifest</code> exporter 暂缓。正则规则只作为私有引擎复杂格式兜底，不参与路径重写或自动补齐。</div>
+        <div class="callout"><strong>Asset P0-1：</strong>先实现 <code>asset_kind</code>、资源引用校验和导出补齐；<code>asset_manifest</code> exporter 暂缓。<code>asset_kind</code> 是字段 validation + post-modifier 规则模板，可用 <code>extends</code> 让字段专用规则继承全局 Unreal 等基础规则；正则规则只作为私有引擎复杂格式兜底，不参与路径重写或自动补齐。</div>
       </section>
 
       <section id="meta">

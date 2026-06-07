@@ -47,6 +47,8 @@ Asset 配置分两层：
 
 `asset` 字段必须声明 `asset_kind`。`asset_kind` 是稳定字符串 ID，用来选择 Meta / schema TOML 中对应的资源解析规则。
 
+设计上，`asset_kind` 是一套可复用的“字段 validation + 导出前 post-modifier”规则模板：同一个全局 kind（例如 `unreal_asset`）可以定义 Unreal mounted object、wrapper stripping、`.uasset` 查找等基础规则；字段专用 kind（例如 `item_icon`、`skill_class`）可以通过 `extends` 继承全局 kind，再叠加更窄的 `base_dirs`、命名前后缀、正则和 target policy。字段仍然只引用一个最终 kind，resolver 使用继承合并后的 effective asset kind 执行校验和 canonical ref 补齐。
+
 ```toml
 [[tables.fields]]
 name = "icon"
@@ -139,15 +141,28 @@ deny_when_tags = ["shipping"]
 name_prefixes = ["VFX_"]
 
 [[asset_kinds]]
-name = "unreal_blueprint_class"
+name = "unreal_asset"
 search_paths = ["unreal_game"]
-base_dirs = ["Characters", "UI"]
 extensions = [".uasset"]
 input = "path"
 path_style = "mounted_object"
 strip_wrappers = ["BlueprintGeneratedClass'{value}'", "Class'{value}'"]
 object_name = "{stem}_C"
 allow_auto_complete = true
+
+[[asset_kinds]]
+name = "unreal_skill_class"
+extends = "unreal_asset"
+base_dirs = ["Skills"]
+name_prefixes = ["GA_"]
+
+[[asset_kinds]]
+name = "item_icon"
+extends = "unreal_asset"
+base_dirs = ["UI/Icons"]
+object_name = "{stem}"
+name_prefixes = ["T_"]
+name_suffixes = ["_Icon"]
 ```
 
 建议字段：
@@ -155,6 +170,7 @@ allow_auto_complete = true
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `name` | 必填 | `asset_kind` ID，供 field `asset_kind` 引用。必须全局唯一。 |
+| `extends` | 无 | 可选父 `asset_kind`。用于把引擎级通用规则（如 `unreal_asset`）与字段级定制规则（如 `item_icon`）组合；实现应拒绝未知父 kind、自继承和继承环。 |
 | `search_paths` | `[]` | 允许查找的 Project search path ID。空数组表示使用所有 search paths，不推荐。 |
 | `base_dirs` | `[""]` | kind 在 search path 下的候选子目录。icon、vfx、audio 等固定目录应写在这里，让策划只填短路径。 |
 | `extensions` | `[]` | 允许的主资源后缀。Unity / filesystem 用真实后缀；Unreal 可用 `.uasset`；Cocos runtime path 可配置为 extensionless 输入但用此列表查找真实文件。 |

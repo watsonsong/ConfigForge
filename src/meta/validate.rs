@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     AssetKindMeta, FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
@@ -100,17 +100,40 @@ fn validate_unique_names(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic
 
 fn validate_asset_kinds(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic>) {
     for asset_kind in &model.asset_kinds {
-        validate_asset_kind_meta(asset_kind, diagnostics);
+        validate_asset_kind_meta(model, asset_kind, diagnostics);
     }
+    validate_asset_kind_extends_cycles(model, diagnostics);
 }
 
-fn validate_asset_kind_meta(asset_kind: &AssetKindMeta, diagnostics: &mut Vec<MetaDiagnostic>) {
+fn validate_asset_kind_meta(
+    model: &MetaModel,
+    asset_kind: &AssetKindMeta,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
     let owner = format!("asset kind `{}`", asset_kind.name);
     if asset_kind.name.trim().is_empty() {
         diagnostics.push(MetaDiagnostic::new(
             MetaDiagnosticCode::InvalidAssetKindDeclaration,
             "asset kind name must be non-empty",
         ));
+    }
+    if let Some(parent) = asset_kind.extends.as_deref() {
+        if parent.trim().is_empty() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidAssetKindDeclaration,
+                format!("{owner} extends must be non-empty when declared"),
+            ));
+        } else if parent == asset_kind.name {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidAssetKindDeclaration,
+                format!("{owner} cannot extend itself"),
+            ));
+        } else if model.asset_kind(parent).is_none() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidAssetKindDeclaration,
+                format!("{owner} extends unknown asset kind `{parent}`"),
+            ));
+        }
     }
     for (field, values) in [
         ("search_paths", &asset_kind.search_paths),
@@ -180,6 +203,41 @@ fn validate_asset_kind_meta(asset_kind: &AssetKindMeta, diagnostics: &mut Vec<Me
             &rule.pattern,
             diagnostics,
         );
+    }
+}
+
+fn validate_asset_kind_extends_cycles(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic>) {
+    let parent_by_kind = model
+        .asset_kinds
+        .iter()
+        .filter_map(|asset_kind| {
+            asset_kind
+                .extends
+                .as_deref()
+                .map(|parent| (asset_kind.name.as_str(), parent))
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    for asset_kind in &model.asset_kinds {
+        let mut path = Vec::new();
+        let mut visited = BTreeSet::new();
+        let mut current = asset_kind.name.as_str();
+        while let Some(parent) = parent_by_kind.get(current).copied() {
+            if !visited.insert(current) {
+                break;
+            }
+            path.push(current);
+            if let Some(cycle_start) = path.iter().position(|kind| *kind == parent) {
+                let mut cycle = path[cycle_start..].to_vec();
+                cycle.push(parent);
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::InvalidAssetKindDeclaration,
+                    format!("asset kind extends cycle detected: {}", cycle.join(" -> ")),
+                ));
+                break;
+            }
+            current = parent;
+        }
     }
 }
 
