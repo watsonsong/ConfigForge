@@ -40,7 +40,7 @@ runtime_core_path = "config_forge_runtime_reader_core" # external 时使用
 | Java | inline | stable interface jar / Maven package 边界明确。 |
 | TypeScript | structural | core package 可继续使用结构化类型；如需 external import option，单独规划 package import path。 |
 
-## [ ] Step 0：确认现状并修正文档表述
+## [x] Step 0：确认现状并修正文档表述
 
 目标：把当前状态描述准确，避免“Rust 默认 inline”的文档与实现冲突。
 
@@ -49,6 +49,8 @@ runtime_core_path = "config_forge_runtime_reader_core" # external 时使用
 - 在 `Documentation/Implementation/09e-codegen-runtime-adapters.md` 中标明 Rust 当前实际为 external-core 绑定，目标是调整为 inline default + external opt-in。
 - 在 Rust backend 文档中说明当前生成代码依赖 `config_forge_runtime_reader_core`，后续会补 inline 模式。
 - 保留 C# / Java inline nominal + thin adapter 的当前说明。
+
+当前实现：已在 `09e-codegen-runtime-adapters.md` 与 `09b-codegen-rust-backend.md` 区分 Rust 当前 external-core 绑定和目标 inline default + external opt-in，避免把未落地的目标态描述成现状。
 
 验证：
 

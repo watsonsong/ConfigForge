@@ -188,6 +188,8 @@ Compliance fixtures 长期不按“每种格式维护一整套手写用例”扩
 
 目标是把 Rust 从“generated crate 本地 trait + copyable template”迁移到可选稳定 runtime crate，同时保持默认 generated code 不强制依赖该 crate。
 
+当前实现状态与目标态存在差异：Rust generated code 目前已经直接 `pub use config_forge_runtime_reader_core::{...}`，实际属于 external-core 绑定；这方便真实 adapter crate 直接实现共享 trait，但也让 generated Rust 默认强制依赖仓库内 core crate，并限制用户自定义 runtime core path。后续应按 `runtime_interface = "inline" | "external"` 收敛：默认恢复 inline 自包含 contract，external 作为 opt-in，并允许配置 `runtime_core_path` 指向 `config_forge_runtime_reader_core`、`crate::runtime` 或业务自有 re-export。
+
 包边界：
 
 | crate | 定位 | 默认依赖 |
@@ -199,7 +201,7 @@ Compliance fixtures 长期不按“每种格式维护一整套手写用例”扩
 
 Codegen 策略：
 
-- 默认 `runtime_interface = "inline"`：保持当前 generated code 自带 trait，避免破坏现有用户。
+- 默认 `runtime_interface = "inline"`：generated code 自带最小 reader / loader trait、error、result 与 contract version，避免强制用户引入 runtime core crate。
 - 可选 `runtime_interface = "external"`：generated Rust `use config_forge_runtime_reader_core::{RuntimeDataLoader, RuntimeDataReader, ...}`，adapter crate 可直接实现 trait。
 - external 模式必须在生成 manifest / 诊断中声明 core crate version 与 `SUPPORTED_CONFIG_FORGE_READER_CONTRACT` 范围。
 
