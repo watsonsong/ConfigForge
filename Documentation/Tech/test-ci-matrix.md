@@ -17,8 +17,9 @@ Profile 控制变量：
 - `CONFIG_FORGE_REQUIRE_TOOLS=cmake,node,tsc,dotnet,javac,java`：在当前运行中把指定工具提升为必需。
 - `CONFIG_FORGE_SKIP_LANGUAGES=java,csharp,typescript`：显式禁用某些可选语言 harness。
 - `CONFIG_FORGE_ALLOW_NETWORK=0|1`：是否允许 `npx`、包安装、FetchContent 等潜在联网 fallback；默认 `0`。
+- `CONFIG_FORGE_MAX_OPTIONAL_SKIPS=<count>`：覆盖本次运行允许的 optional skip 上限；未设置时，`full` / `nightly` 或设置了 `CONFIG_FORGE_REQUIRE_TOOLS` 的运行默认上限为 `0`，`local` / `quick` 默认不设上限。
 
-当前 ToolProbe 会按 profile、显式 require 和 language skip policy 统一输出 skip / fail-fast 诊断；未设置 profile 时按 `local` 处理。
+当前 ToolProbe 会按 profile、显式 require 和 language skip policy 统一输出 skip / fail-fast 诊断；未设置 profile 时按 `local` 处理。Generated-code runtime harness 与 standalone runtime compliance runner 必须输出 `executed/skipped/failed` summary，并在 summary 后检查 optional skip 上限，避免 CI 中由于可选工具缺失而静默降低覆盖率。
 
 ## Generated-code runtime harness matrix
 
@@ -53,7 +54,9 @@ Runtime compliance runner 验证具体 reader adapter 对通用 contract 的解�
 ## Skip, fail-fast and network policy
 
 - 本地 `local` profile 中，非 Rust target 工具缺失时必须输出明确 skip 原因，包括测试名称和缺失工具。
-- `full` / `nightly` 中，被矩阵声明为必需或由 `CONFIG_FORGE_REQUIRE_TOOLS` 指定的工具缺失时必须 fail-fast。
+- `full` / `nightly` 中，被矩阵声明为必需或由 `CONFIG_FORGE_REQUIRE_TOOLS` 指定的工具缺失时必须 fail-fast；summary 级别的 optional skip 上限默认为 `0`，因此即使某个 runner 先记录 skip，也会在同一测试入口失败。
+- CI 可通过 `CONFIG_FORGE_MAX_OPTIONAL_SKIPS=0` 显式加固 quick / custom profile；如确需临时放宽，必须设置为具体数字并在 CI 配置中说明原因。
+- Generated-code runtime harness、TypeScript compliance、C# compliance、Java compliance 都必须打印 `executed/skipped/failed`，方便从 CI 日志中确认真实覆盖数量。
 - 不允许静默降级到另一个 reader 代跑；adapter 不支持的 case 必须显式标注 unsupported / skipped，并说明原因。
 - 默认不允许联网：`npx --yes -p typescript tsc`、npm install、C++ `FetchContent` 等必须由 `CONFIG_FORGE_ALLOW_NETWORK=1` 或 adapter 专用显式开关启用。
 - 标准工程 integration harness 与 runtime compliance suite 的覆盖目标不同，新增边界语义 case 应优先放入 compliance；新增完整 pipeline / generated API case 才放入 standard_project。

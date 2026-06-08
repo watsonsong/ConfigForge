@@ -28,7 +28,7 @@ impl TestProfile {
         }
     }
 
-    fn requires_optional_tools(self) -> bool {
+    pub(crate) fn requires_optional_tools(self) -> bool {
         matches!(self, Self::Full | Self::Nightly)
     }
 }
@@ -66,6 +66,7 @@ impl ToolProbe {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn run_config_forge_stdout(args: &[&str]) -> String {
     let output = Command::cargo_bin("config-forge")
         .expect("binary should build")
@@ -80,6 +81,7 @@ pub(crate) fn run_config_forge_stdout(args: &[&str]) -> String {
     );
     String::from_utf8(output.stdout).expect("stdout should be utf8")
 }
+#[allow(dead_code)]
 pub(crate) fn run_config_forge_success(args: &[&str]) {
     let output = Command::cargo_bin("config-forge")
         .expect("binary should build")
@@ -93,6 +95,7 @@ pub(crate) fn run_config_forge_success(args: &[&str]) {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+#[allow(dead_code)]
 pub(crate) fn command_exists(command: &str) -> bool {
     probe_tool(command).available
 }
@@ -147,6 +150,57 @@ pub(crate) fn skipped_optional_test_count() -> usize {
     SKIPPED_OPTIONAL_TESTS.load(Ordering::Relaxed)
 }
 
+pub(crate) fn assert_optional_skips_within_limit(scope: &str, skipped: usize) {
+    let limit = optional_skip_limit();
+    eprintln!(
+        "{scope} optional skip limit: skipped={skipped}, limit={}, profile={:?}",
+        format_skip_limit(limit),
+        TestProfile::current()
+    );
+    assert!(
+        skipped <= limit,
+        "{scope} skipped {skipped} optional test(s), exceeding configured limit {}",
+        format_skip_limit(limit)
+    );
+}
+
+fn optional_skip_limit() -> usize {
+    optional_skip_limit_with(
+        TestProfile::current(),
+        std::env::var("CONFIG_FORGE_REQUIRE_TOOLS").ok().as_deref(),
+        std::env::var("CONFIG_FORGE_MAX_OPTIONAL_SKIPS")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn optional_skip_limit_with(
+    profile: TestProfile,
+    require_tools: Option<&str>,
+    max_optional_skips: Option<&str>,
+) -> usize {
+    if let Some(raw_limit) = max_optional_skips {
+        return raw_limit.trim().parse::<usize>().unwrap_or_else(|error| {
+            panic!(
+                "CONFIG_FORGE_MAX_OPTIONAL_SKIPS must be a non-negative integer, got `{raw_limit}`: {error}"
+            )
+        });
+    }
+    if profile.requires_optional_tools() || parse_tool_list(require_tools).next().is_some() {
+        0
+    } else {
+        usize::MAX
+    }
+}
+
+fn format_skip_limit(limit: usize) -> String {
+    if limit == usize::MAX {
+        "unbounded".to_owned()
+    } else {
+        limit.to_string()
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) fn language_is_skipped(language: &str) -> bool {
     parse_tool_list(std::env::var("CONFIG_FORGE_SKIP_LANGUAGES").ok().as_deref())
@@ -177,6 +231,14 @@ pub(crate) fn require_tool_or_skip(test_name: &str, command: &str) -> Option<Too
 }
 
 pub(crate) fn require_any_tool_or_skip(test_name: &str, commands: &[&str]) -> Option<ToolProbe> {
+    if let Some(required_command) = commands
+        .iter()
+        .copied()
+        .find(|command| tool_is_explicitly_required(command))
+    {
+        return require_tool_or_skip(test_name, required_command);
+    }
+
     let mut diagnostics = Vec::new();
     for command in commands {
         let probe = probe_tool(command);
@@ -212,6 +274,11 @@ fn tool_is_required(command: &str) -> bool {
     )
 }
 
+fn tool_is_explicitly_required(command: &str) -> bool {
+    parse_tool_list(std::env::var("CONFIG_FORGE_REQUIRE_TOOLS").ok().as_deref())
+        .any(|tool| tool == command)
+}
+
 fn tool_is_required_with(profile: TestProfile, require_tools: Option<&str>, command: &str) -> bool {
     profile.requires_optional_tools() || parse_tool_list(require_tools).any(|tool| tool == command)
 }
@@ -238,7 +305,10 @@ pub(crate) fn assert_command_success(output: std::process::Output, label: &str) 
 
 #[cfg(test)]
 mod tests {
-    use super::{TestProfile, probe_tool, require_any_tool_or_skip, tool_is_required_with};
+    use super::{
+        TestProfile, optional_skip_limit_with, probe_tool, require_any_tool_or_skip,
+        tool_is_required_with,
+    };
 
     #[test]
     fn probe_tool_reports_missing_command() {
@@ -249,14 +319,20 @@ mod tests {
 
     #[test]
     fn require_any_tool_reports_missing_commands() {
-        let probe = require_any_tool_or_skip(
-            "missing tool probe test",
-            &[
-                "config-forge-definitely-missing-tool-a",
-                "config-forge-definitely-missing-tool-b",
-            ],
-        );
-        assert!(probe.is_none());
+        let result = std::panic::catch_unwind(|| {
+            require_any_tool_or_skip(
+                "missing tool probe test",
+                &[
+                    "config-forge-definitely-missing-tool-a",
+                    "config-forge-definitely-missing-tool-b",
+                ],
+            )
+        });
+        if TestProfile::current().requires_optional_tools() {
+            assert!(result.is_err());
+        } else {
+            assert!(result.expect("local missing tools should skip").is_none());
+        }
     }
 
     #[test]
@@ -273,6 +349,23 @@ mod tests {
             Some("cmake,node"),
             "dotnet"
         ));
+    }
+
+    #[test]
+    fn optional_skip_limit_defaults_to_zero_for_full_or_required_tools() {
+        assert_eq!(optional_skip_limit_with(TestProfile::Full, None, None), 0);
+        assert_eq!(
+            optional_skip_limit_with(TestProfile::Local, Some("node"), None),
+            0
+        );
+        assert_eq!(
+            optional_skip_limit_with(TestProfile::Local, None, Some("2")),
+            2
+        );
+        assert_eq!(
+            optional_skip_limit_with(TestProfile::Local, None, None),
+            usize::MAX
+        );
     }
 
     #[test]

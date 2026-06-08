@@ -3,43 +3,63 @@
 
 use std::{collections::BTreeMap, fs, path::Path, process::Command};
 
-fn command_exists(command: &str) -> bool {
-    Command::new(command)
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
+#[path = "cli_integration/support/commands.rs"]
+mod commands;
 
-fn network_allowed() -> bool {
-    std::env::var("CONFIG_FORGE_ALLOW_NETWORK")
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
-        .unwrap_or(false)
-}
+use commands::{
+    assert_command_success, assert_optional_skips_within_limit, command_exists,
+    current_test_profile, network_allowed, require_any_tool_or_skip, require_tool_or_skip,
+    skip_optional_test, skipped_optional_test_count,
+};
 
-fn assert_command_success(output: std::process::Output, label: &str) {
-    assert!(
-        output.status.success(),
-        "{label} failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
+const TEST_NAME: &str = "TypeScript runtime compliance runner";
 
 #[test]
 fn typescript_json_and_messagepack_readers_pass_compliance_cases() {
-    if !command_exists("node") {
-        eprintln!("skipping TypeScript runtime compliance runner: node not found");
+    let skips_before = skipped_optional_test_count();
+    let mut executed = 0usize;
+    let mut skipped = 0usize;
+    let mut failed = 0usize;
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_typescript_runtime_compliance_cases()
+    }));
+    if result.is_err() {
+        failed += 1;
+    } else if skipped_optional_test_count() > skips_before {
+        skipped += 1;
+    } else {
+        executed += 1;
+    }
+
+    eprintln!(
+        "runtime compliance summary: suite=typescript, executed={executed}, skipped={skipped}, failed={failed}"
+    );
+    assert_optional_skips_within_limit("typescript runtime compliance", skipped);
+    if let Err(payload) = result {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+fn run_typescript_runtime_compliance_cases() {
+    if require_tool_or_skip(TEST_NAME, "node").is_none() {
         return;
     }
-    if !command_exists("tsc") && !command_exists("npx") {
-        eprintln!("skipping TypeScript runtime compliance runner: tsc/npx not found");
+
+    let has_tsc = command_exists("tsc");
+    let has_npx = command_exists("npx");
+    if !has_tsc && current_test_profile().requires_optional_tools() {
+        let _ = require_tool_or_skip(TEST_NAME, "tsc");
         return;
     }
-    if !command_exists("tsc") && command_exists("npx") && !network_allowed() {
-        eprintln!(
-            "skipping TypeScript runtime compliance runner: npx fallback requires CONFIG_FORGE_ALLOW_NETWORK=1"
+    if !has_tsc && has_npx && !network_allowed() {
+        skip_optional_test(
+            TEST_NAME,
+            "npx fallback requires CONFIG_FORGE_ALLOW_NETWORK=1",
         );
+        return;
+    }
+    if !has_tsc && !has_npx && require_any_tool_or_skip(TEST_NAME, &["tsc", "npx"]).is_none() {
         return;
     }
 
@@ -54,7 +74,7 @@ fn typescript_json_and_messagepack_readers_pass_compliance_cases() {
     fs::write(temp_dir.path().join("tsconfig.json"), tsconfig_source())
         .expect("typescript compliance tsconfig should be written");
 
-    let tsc_output = if command_exists("tsc") {
+    let tsc_output = if has_tsc {
         Command::new("tsc")
             .args(["--project"])
             .arg(temp_dir.path().join("tsconfig.json"))

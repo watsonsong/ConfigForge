@@ -3,30 +3,28 @@
 
 use std::{fs, path::Path, process::Command};
 
-fn command_exists(command: &str) -> bool {
-    Command::new(command)
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
+#[path = "cli_integration/support/commands.rs"]
+mod commands;
 
-fn assert_command_success(output: std::process::Output, label: &str) {
-    assert!(
-        output.status.success(),
-        "{label} failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
+use commands::{
+    assert_command_success, assert_optional_skips_within_limit, require_tool_or_skip,
+    skipped_optional_test_count,
+};
+
+const CSHARP_TEST_NAME: &str = "C# runtime compliance runner";
+const JAVA_TEST_NAME: &str = "Java runtime compliance runner";
 
 #[test]
 fn csharp_standard_readers_pass_runtime_compliance_cases() {
-    if !command_exists("dotnet") {
-        eprintln!("skipping C# runtime compliance runner: dotnet not found");
-        return;
-    }
+    run_compliance_case_with_summary("csharp", CSHARP_TEST_NAME, || {
+        if require_tool_or_skip(CSHARP_TEST_NAME, "dotnet").is_none() {
+            return;
+        }
+        run_csharp_runtime_compliance_cases();
+    });
+}
 
+fn run_csharp_runtime_compliance_cases() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let temp_dir = tempfile::tempdir().expect("C# compliance temp dir should be created");
     let project_dir = temp_dir.path();
@@ -77,11 +75,17 @@ fn csharp_standard_readers_pass_runtime_compliance_cases() {
 
 #[test]
 fn java_standard_readers_pass_runtime_compliance_cases() {
-    if !command_exists("javac") || !command_exists("java") {
-        eprintln!("skipping Java runtime compliance runner: javac/java not found");
-        return;
-    }
+    run_compliance_case_with_summary("java", JAVA_TEST_NAME, || {
+        if require_tool_or_skip(JAVA_TEST_NAME, "javac").is_none()
+            || require_tool_or_skip(JAVA_TEST_NAME, "java").is_none()
+        {
+            return;
+        }
+        run_java_runtime_compliance_cases();
+    });
+}
 
+fn run_java_runtime_compliance_cases() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let temp_dir = tempfile::tempdir().expect("Java compliance temp dir should be created");
     let source_root = temp_dir.path().join("src");
@@ -153,6 +157,34 @@ fn java_standard_readers_pass_runtime_compliance_cases() {
         .output()
         .expect("Java compliance runner should run");
     assert_command_success(output, "Java runtime compliance runner");
+}
+
+fn run_compliance_case_with_summary(
+    suite: &str,
+    scope: &str,
+    runner: impl FnOnce() + std::panic::UnwindSafe,
+) {
+    let skips_before = skipped_optional_test_count();
+    let mut executed = 0usize;
+    let mut skipped = 0usize;
+    let mut failed = 0usize;
+
+    let result = std::panic::catch_unwind(runner);
+    if result.is_err() {
+        failed += 1;
+    } else if skipped_optional_test_count() > skips_before {
+        skipped += 1;
+    } else {
+        executed += 1;
+    }
+
+    eprintln!(
+        "runtime compliance summary: suite={suite}, executed={executed}, skipped={skipped}, failed={failed}"
+    );
+    assert_optional_skips_within_limit(scope, skipped);
+    if let Err(payload) = result {
+        std::panic::resume_unwind(payload);
+    }
 }
 
 fn csharp_runner_source() -> &'static str {

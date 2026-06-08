@@ -4,9 +4,10 @@
 use std::{fs, process::Command as StdCommand};
 
 use super::{
-    assert_command_success, command_exists, network_allowed, require_any_tool_or_skip,
-    require_tool_or_skip, skip_language_or_continue, skip_optional_test,
-    skipped_optional_test_count, verify_standard_generated_cpp_unreal_runtime,
+    assert_command_success, assert_optional_skips_within_limit, command_exists,
+    current_test_profile, network_allowed, require_any_tool_or_skip, require_tool_or_skip,
+    skip_language_or_continue, skip_optional_test, skipped_optional_test_count,
+    verify_standard_generated_cpp_unreal_runtime,
 };
 
 pub(crate) struct GeneratedRuntimeHarness {
@@ -103,6 +104,7 @@ pub(crate) fn verify_standard_generated_runtime_harnesses(fixture_root: &std::pa
         "generated runtime harness summary: executed={executed}, skipped={skipped}, failed={}",
         failed.len()
     );
+    assert_optional_skips_within_limit("generated runtime harnesses", skipped);
     assert!(
         failed.is_empty(),
         "generated runtime harnesses failed: {failed:?}"
@@ -567,6 +569,9 @@ pub(crate) fn verify_standard_generated_typescript_runtime(fixture_root: &std::p
                 .expect("standard generated TypeScript tsc should run"),
             "standard generated TypeScript tsc",
         );
+    } else if current_test_profile().requires_optional_tools() {
+        let _ = require_tool_or_skip("standard generated TypeScript runtime test", "tsc");
+        return;
     } else if command_exists("npx") && network_allowed() {
         assert_command_success(
             StdCommand::new("npx")
