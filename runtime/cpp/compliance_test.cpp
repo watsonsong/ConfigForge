@@ -436,6 +436,15 @@ void RunBinaryCompliance() {
         reader.EnterIndex(1);
     }, "sequentially");
 
+    ExpectFailure("binary invalid optional bitmap padding", [&]() {
+        auto payload = Header();
+        WriteVaruint(payload, 1);
+        payload.push_back(0x80);
+        config_forge_runtime::BinaryRuntimeDataReader reader(std::move(payload));
+        Assert(reader.ReadRowCount() == 1, "binary malformed bitmap row count");
+        reader.BeginRecord(1);
+    }, "bitmap");
+
     ExpectFailure("binary unsupported ext", [&]() { throw std::runtime_error("unsupported binary/ext value"); }, "unsupported binary/ext value");
 }
 #endif

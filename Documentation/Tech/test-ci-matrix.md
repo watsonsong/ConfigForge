@@ -43,11 +43,13 @@ Runtime compliance runner 验证具体 reader adapter 对通用 contract 的解�
 | --- | --- | --- | --- | --- |
 | Rust `serde_json_reader` | JSON | Cargo | 已由 `tests/runtime_compliance.rs` 覆盖。 | 继续作为 local / quick 基线。 |
 | Rust `serde_msgpack_reader` | MessagePack | Cargo | 已由 `tests/runtime_compliance.rs` 通过 JSON → MessagePack materialization 覆盖。 | 增加格式特有 negative case 时同步扩展。 |
+| Rust `binary_reader` | Binary | Cargo | 已由 `runtime/rust/binary_reader` crate tests 与 standard_project binary harness 覆盖；包含 optional bitmap padding bits 非 0 拒绝。 | 后续增加 shared schema-derived binary materializer。 |
 | TypeScript `json_reader` | JSON | Node + TypeScript | 已由 `tests/typescript_runtime_compliance.rs` 覆盖，并接入 profile-aware ToolProbe；默认不联网。 | 后续迁移到 package-level test 并覆盖 node-fs loader。 |
 | TypeScript `messagepack_reader` | MessagePack | Node + TypeScript + 测试注入 decoder；生产可使用 `@msgpack/msgpack` peer | 已由 `tests/typescript_runtime_compliance.rs` 覆盖 JSON → MessagePack materialization 与 MessagePack-only negative cases。 | 后续迁移到 package-level test 并覆盖 node-fs loader。 |
+| TypeScript `binary_reader` | Binary | Node + TypeScript | 已由 `tests/typescript_runtime_compliance.rs` 覆盖 binary malformed case；包含 optional bitmap padding bits 非 0 拒绝。 | 后续纳入完整 shared binary negative corpus。 |
 | C++ `rapidjson_reader` | JSON | CMake + C++17 + RapidJSON | 已由 `runtime/cpp/compliance_test.cpp` 的 CTest target 覆盖，并保留 runtime smoke。 | 继续扩展 shared logical cases。 |
 | C++ `msgpackc_reader` | MessagePack | CMake + C++17 + msgpack-cxx + RapidJSON fixture materializer | 已由 `runtime/cpp/compliance_test.cpp` 的 CTest target 覆盖 JSON → MessagePack materialization，并保留 runtime smoke。 | 增加更多 MessagePack-only negative cases。 |
-| C++ `binary_reader` | Binary | CMake + C++17 | 已由 `runtime/cpp/compliance_test.cpp` 的 CTest target 覆盖 CFGB header、schema revision、record boundary、sequential rows 和 scalar/list reads。 | 增加 schema-derived binary materializer。 |
+| C++ `binary_reader` | Binary | CMake + C++17 | 已由 `runtime/cpp/compliance_test.cpp` 的 CTest target 覆盖 CFGB header、schema revision、record boundary、sequential rows、scalar/list reads 和 optional bitmap padding bits 非 0 拒绝。 | 增加 schema-derived binary materializer。 |
 | C# JSON / MessagePack / Binary | 多格式 | .NET SDK | 已由 `tests/csharp_java_runtime_compliance.rs` 覆盖标准 reader；Binary 覆盖 bad magic、unsupported version、truncated header/body、wrong schema revision、invalid optional bitmap、invalid enum ordinal、huge length prefix、not exhausted 与 record/row boundary。standard_project 继续覆盖三格式 smoke。 | 增加 schema-derived binary materializer。 |
 | Java JSON / MessagePack / Binary | 多格式 | JDK | 已由 `tests/csharp_java_runtime_compliance.rs` 覆盖标准 reader；Binary 覆盖 bad magic、unsupported version、truncated header/body、wrong schema revision、invalid optional bitmap、invalid enum ordinal、huge length prefix、not exhausted 与 record/row boundary。standard_project 继续覆盖三格式 smoke。 | 增加 schema-derived binary materializer。 |
 

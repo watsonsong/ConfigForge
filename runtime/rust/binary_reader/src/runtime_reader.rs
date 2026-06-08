@@ -137,6 +137,7 @@ impl RuntimeDataReader for BinaryRuntimeDataReader {
         let mut state = self.state.borrow_mut();
         self.limits.check_nesting_depth(state.records.len() + 1)?;
         let bytes = read_exact(&mut state, byte_count)?.to_vec();
+        validate_optional_bitmap(&bytes, optional_slot_count)?;
         state.records.push(RecordState {
             bitmap: bytes,
             next_optional_slot: 0,
@@ -331,6 +332,20 @@ fn read_exact(state: &mut BinaryState, len: usize) -> RuntimeDataResult<&[u8]> {
     Ok(&state.bytes[start..end])
 }
 
+fn validate_optional_bitmap(bitmap: &[u8], optional_slot_count: usize) -> RuntimeDataResult<()> {
+    let used_bits_in_last_byte = optional_slot_count % 8;
+    if bitmap.is_empty() || used_bits_in_last_byte == 0 {
+        return Ok(());
+    }
+    let unused_mask = !((1u8 << used_bits_in_last_byte) - 1);
+    if bitmap[bitmap.len() - 1] & unused_mask != 0 {
+        return Err(RuntimeDataError::decode(
+            "invalid optional bitmap padding bits",
+        ));
+    }
+    Ok(())
+}
+
 fn safe_join(root: &Path, relative: &str) -> RuntimeDataResult<PathBuf> {
     let path = Path::new(relative);
     if path.is_absolute() {
@@ -435,6 +450,22 @@ mod tests {
 
         let reader = BinaryRuntimeDataReader::from_bytes(oversized).unwrap();
         assert!(reader.read_row_count().unwrap_err().message.contains("u64"));
+    }
+
+    #[test]
+    fn binary_reader_rejects_optional_bitmap_padding_bits() {
+        let mut bytes = binary_bytes_with_row_count(1);
+        bytes.push(0b1000_0000);
+
+        let reader = BinaryRuntimeDataReader::from_bytes(bytes).unwrap();
+        assert_eq!(reader.read_row_count().unwrap(), 1);
+        assert!(
+            reader
+                .begin_record(1)
+                .unwrap_err()
+                .message
+                .contains("bitmap")
+        );
     }
 
     #[test]

@@ -88,7 +88,7 @@ if(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER)
     if(TARGET RapidJSON::RapidJSON)
         target_link_libraries(config_forge_runtime_rapidjson_reader INTERFACE RapidJSON::RapidJSON)
     elseif(RAPIDJSON_INCLUDE_DIR)
-        target_include_directories(config_forge_runtime_rapidjson_reader INTERFACE
+        target_include_directories(config_forge_runtime_rapidjson_reader SYSTEM INTERFACE
             $<BUILD_INTERFACE:${RAPIDJSON_INCLUDE_DIR}>)
     endif()
 endif()
@@ -219,7 +219,7 @@ if(CONFIG_FORGE_RUNTIME_BUILD_TESTS)
         if(TARGET config_forge_runtime_rapidjson_reader)
             target_link_libraries(config_forge_runtime_msgpackc_reader_compliance PRIVATE config_forge_runtime::rapidjson_reader)
         elseif(RAPIDJSON_INCLUDE_DIR)
-            target_include_directories(config_forge_runtime_msgpackc_reader_compliance PRIVATE ${RAPIDJSON_INCLUDE_DIR})
+            target_include_directories(config_forge_runtime_msgpackc_reader_compliance SYSTEM PRIVATE ${RAPIDJSON_INCLUDE_DIR})
         endif()
         target_compile_definitions(config_forge_runtime_msgpackc_reader_compliance PRIVATE
             CONFIG_FORGE_RUNTIME_COMPLIANCE_MSGPACKC

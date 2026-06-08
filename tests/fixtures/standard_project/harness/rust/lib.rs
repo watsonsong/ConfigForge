@@ -413,3 +413,37 @@ fn generated_rust_loads_exported_binary_and_queries_indexes() {
     let lazy_data = LazyGameData::new(binary_fixture_loader_from_env());
     assert_standard_lazy_data(&lazy_data);
 }
+
+#[test]
+fn rust_binary_reader_rejects_optional_bitmap_padding_bits() {
+    let mut bytes = Vec::from(*b"CFGB");
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(&7u64.to_le_bytes());
+    write_varuint_for_binary_test(&mut bytes, 1);
+    bytes.push(0x80);
+
+    let reader = BinaryRuntimeDataReader::from_bytes(bytes).expect("binary header should parse");
+    assert_eq!(reader.read_row_count().expect("row count"), 1);
+    assert!(
+        reader
+            .begin_record(1)
+            .expect_err("bitmap padding bits should be rejected")
+            .message
+            .contains("bitmap")
+    );
+}
+
+fn write_varuint_for_binary_test(bytes: &mut Vec<u8>, mut value: u64) {
+    loop {
+        let mut byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value != 0 {
+            byte |= 0x80;
+        }
+        bytes.push(byte);
+        if value == 0 {
+            break;
+        }
+    }
+}

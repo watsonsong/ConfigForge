@@ -15,7 +15,7 @@ use commands::{
 const TEST_NAME: &str = "TypeScript runtime compliance runner";
 
 #[test]
-fn typescript_json_and_messagepack_readers_pass_compliance_cases() {
+fn typescript_json_messagepack_and_binary_readers_pass_compliance_cases() {
     let skips_before = skipped_optional_test_count();
     let mut executed = 0usize;
     let mut skipped = 0usize;
@@ -124,6 +124,16 @@ fn copy_runtime_sources(src_dir: &Path) {
     );
     fs::write(src_dir.join("messagepack_reader.ts"), messagepack_reader)
         .expect("TypeScript MessagePack reader source should be written");
+
+    let binary_reader =
+        fs::read_to_string(root.join("runtime/typescript/binary_reader/src/runtime_loader.ts"))
+            .expect("TypeScript Binary reader source should be read");
+    let binary_reader = binary_reader.replace(
+        "} from \"@config-forge/runtime-reader-core\";",
+        "} from \"./reader_core\";",
+    );
+    fs::write(src_dir.join("binary_reader.ts"), binary_reader)
+        .expect("TypeScript Binary reader source should be written");
 }
 
 fn write_compliance_data(src_dir: &Path) {
@@ -204,6 +214,7 @@ fn runner_source() -> &'static str {
     r#"
 import { decodeJsonValue } from "./json_reader";
 import { decodeMessagePackValue } from "./messagepack_reader";
+import { BinaryRuntimeDataReader } from "./binary_reader";
 import { RuntimeDataReaderLike } from "./reader_core";
 import { payloads, expected, errorCases } from "./compliance_data";
 
@@ -372,6 +383,46 @@ function expectFailure(label: string, operation: () => void, keyword: string): v
     return;
   }
   throw new Error(`${label}: expected failure`);
+}
+
+function writeLe64(bytes: number[], value: bigint): void {
+  let current = value;
+  for (let index = 0; index < 8; index += 1) {
+    bytes.push(Number(current & 0xffn));
+    current >>= 8n;
+  }
+}
+
+function writeVaruint(bytes: number[], value: bigint): void {
+  let current = value;
+  while (true) {
+    let byte = Number(current & 0x7fn);
+    current >>= 7n;
+    if (current !== 0n) {
+      byte |= 0x80;
+    }
+    bytes.push(byte);
+    if (current === 0n) {
+      return;
+    }
+  }
+}
+
+function binaryHeader(): number[] {
+  const bytes = [0x43, 0x46, 0x47, 0x42, 1, 0, 16, 0];
+  writeLe64(bytes, 7n);
+  return bytes;
+}
+
+function runBinaryMalformedCases(): void {
+  expectFailure("typescript-binary invalid optional bitmap padding", () => {
+    const bytes = binaryHeader();
+    writeVaruint(bytes, 1n);
+    bytes.push(0x80);
+    const reader = new BinaryRuntimeDataReader(new Uint8Array(bytes));
+    assertEqual(reader.readRowCount(), 1, "binary row count before malformed bitmap");
+    reader.beginRecord(1);
+  }, "bitmap");
 }
 
 function expectedKeyword(caseName: string, fallback: string): string {
@@ -652,5 +703,6 @@ for (const adapter of adapters) {
   runCollectionObjectNestedAndFragmentCases(adapter);
   runErrorCases(adapter);
 }
+runBinaryMalformedCases();
 "#
 }

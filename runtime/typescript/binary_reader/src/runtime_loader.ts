@@ -112,7 +112,9 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   beginRecord(optionalSlotCount: number): void {
     checkRuntimeDecodeLimit("nesting depth", this.records.length + 1, this.limits.maxNestingDepth);
     const byteCount = Math.ceil(optionalSlotCount / 8);
-    this.records.push({ bitmap: this.readExact(byteCount), nextOptionalSlot: 0 });
+    const bitmap = this.readExact(byteCount);
+    validateOptionalBitmap(bitmap, optionalSlotCount);
+    this.records.push({ bitmap, nextOptionalSlot: 0 });
   }
 
   endRecord(): void {
@@ -227,6 +229,17 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     if (end > this.bytes.length) {
       throw new Error("truncated binary runtime data");
     }
+  }
+}
+
+function validateOptionalBitmap(bitmap: Uint8Array<ArrayBufferLike>, optionalSlotCount: number): void {
+  const usedBitsInLastByte = optionalSlotCount % 8;
+  if (bitmap.length === 0 || usedBitsInLastByte === 0) {
+    return;
+  }
+  const unusedMask = 0xff & ~((1 << usedBitsInLastByte) - 1);
+  if ((bitmap[bitmap.length - 1] & unusedMask) !== 0) {
+    throw new Error("invalid optional bitmap padding bits");
   }
 }
 

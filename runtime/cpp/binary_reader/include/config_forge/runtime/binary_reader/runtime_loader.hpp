@@ -159,11 +159,7 @@ public:
         return row_count;
     }
 
-    std::size_t ReadListLength()
-#if defined(CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH)
-        override
-#endif
-    {
+    std::size_t ReadListLength() override {
         const std::size_t length = CheckedSize(ReadVaruint(), "list length");
         CheckRuntimeDecodeLimit("list length", length, state_->limits.max_array_length);
         return length;
@@ -183,7 +179,9 @@ public:
         CheckRuntimeDecodeLimit("nesting depth", state_->records.size() + 1, state_->limits.max_nesting_depth);
         const std::size_t byte_count = (optional_slot_count + 7) / 8;
         const std::uint8_t* bytes = ReadExact(byte_count);
-        state_->records.push_back(RecordState{std::vector<std::uint8_t>(bytes, bytes + byte_count), 0});
+        std::vector<std::uint8_t> bitmap(bytes, bytes + byte_count);
+        ValidateOptionalBitmap(bitmap, optional_slot_count);
+        state_->records.push_back(RecordState{std::move(bitmap), 0});
     }
 
     void EndRecord() override {
@@ -239,6 +237,17 @@ private:
         std::size_t next_row_index = 0;
         std::vector<RecordState> records;
     };
+
+    static void ValidateOptionalBitmap(const std::vector<std::uint8_t>& bitmap, std::size_t optional_slot_count) {
+        const std::size_t used_bits_in_last_byte = optional_slot_count % 8;
+        if (bitmap.empty() || used_bits_in_last_byte == 0) {
+            return;
+        }
+        const auto unused_mask = static_cast<std::uint8_t>(0xffu & ~((1u << used_bits_in_last_byte) - 1u));
+        if ((bitmap.back() & unused_mask) != 0) {
+            throw std::runtime_error("invalid optional bitmap padding bits");
+        }
+    }
 
     std::int64_t ReadNextInt64Value() const {
         const std::uint64_t encoded = ReadVaruint();

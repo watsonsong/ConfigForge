@@ -146,11 +146,7 @@ public:
         throw std::runtime_error("reader value is not an array");
     }
 
-    std::size_t ReadListLength()
-#if defined(CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH)
-        override
-#endif
-    {
+    std::size_t ReadListLength() override {
         const rapidjson::Value& value = Current();
         if (value.IsArray()) {
             const std::size_t length = value.Size();
