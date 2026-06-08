@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
-    CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField, CodeGenerator,
-    CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTypeRef, CodeWriterConfig, CodeWriterLike,
-    NamingConfig, build_code_model,
+    ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
+    CodeGenerator, CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTypeRef, CodeWriterConfig,
+    CodeWriterLike, GeneratorCommonInput, GeneratorRequirements, NamingConfig, build_code_model,
     ir::{CodeForeignKey, CodeRelationCardinality, require_non_empty_index_fields},
 };
 
@@ -145,6 +145,25 @@ impl CodeGenerator for CppUnrealCodeGenerator {
             })?;
         source_stream.finish()?;
         Ok(())
+    }
+}
+
+impl ArtifactGenerator for CppUnrealCodeGenerator {
+    fn type_id(&self) -> &'static str {
+        LANGUAGE
+    }
+
+    fn requirements(&self) -> GeneratorRequirements {
+        GeneratorRequirements::meta_only()
+    }
+
+    fn generate_to_sink(
+        &self,
+        input: &GeneratorCommonInput<'_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let code_input = input.code_export_input(self)?;
+        CodeGenerator::generate_to_sink(self, &code_input, sink)
     }
 }
 

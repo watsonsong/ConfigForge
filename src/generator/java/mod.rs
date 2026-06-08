@@ -6,10 +6,11 @@ use serde::{Deserialize, Serialize};
 use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
-    CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
+    ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeTable, CodeTableKind,
-    CodeTypeRef, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn, I18nMode, I18nOptions,
-    NamingConfig, RuntimeInterfaceMode, build_code_model,
+    CodeTypeRef, CodeWriterConfig, CodeWriterLike, GeneratorCommonInput, GeneratorRequirements,
+    I18nFunctionReturn, I18nMode, I18nOptions, NamingConfig, RuntimeInterfaceMode,
+    build_code_model,
     ir::{CodeRelationCardinality, require_non_empty_index_fields},
 };
 
@@ -77,10 +78,6 @@ impl CodeGenerator for JavaCodeGenerator {
         LANGUAGE
     }
 
-    fn language_aliases(&self) -> &'static [&'static str] {
-        &["jvm"]
-    }
-
     fn default_module_name(&self) -> &'static str {
         "configforge.generated"
     }
@@ -130,6 +127,29 @@ impl CodeGenerator for JavaCodeGenerator {
                 source,
             })?;
         stream.finish().map(|_| ())
+    }
+}
+
+impl ArtifactGenerator for JavaCodeGenerator {
+    fn type_id(&self) -> &'static str {
+        LANGUAGE
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["jvm"]
+    }
+
+    fn requirements(&self) -> GeneratorRequirements {
+        GeneratorRequirements::meta_only()
+    }
+
+    fn generate_to_sink(
+        &self,
+        input: &GeneratorCommonInput<'_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let code_input = input.code_export_input(self)?;
+        CodeGenerator::generate_to_sink(self, &code_input, sink)
     }
 }
 

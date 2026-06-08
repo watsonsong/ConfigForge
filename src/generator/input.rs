@@ -7,6 +7,9 @@ use rayon::ThreadPool;
 
 use crate::{
     ArtifactProjectInfo, ConfigForgeError, Result,
+    code_artifact::{
+        CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, CodegenTaskConfig,
+    },
     data::DataSet,
     data_artifact::TargetDataConfig,
     meta::{LinkedMetaModel, TargetTags},
@@ -48,6 +51,30 @@ impl GeneratorCommonInput<'_> {
             output: self.output.clone(),
             options: self.options.clone(),
         }
+    }
+}
+
+impl<'meta> GeneratorCommonInput<'meta> {
+    pub(crate) fn code_export_input(
+        &self,
+        generator: &dyn CodeGenerator,
+    ) -> Result<CodeExportInput<'meta>> {
+        let task = CodegenTaskConfig::from_export_task_parts(
+            self.type_id.clone(),
+            self.output.clone(),
+            self.options.clone(),
+        )?;
+        let code_target = CodeExportTarget::from_task(task, generator)?;
+        Ok(CodeExportInput {
+            meta: self.meta,
+            target_tags: self.target_tags.clone(),
+            project: CodeExportProject::from(&self.project),
+            project_root: self.project_root.clone(),
+            target_name: self.target_name.clone(),
+            target: code_target,
+            runtime_data_files: Vec::new(),
+            generated_at: self.generated_at.clone(),
+        })
     }
 }
 

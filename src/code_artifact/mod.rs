@@ -512,9 +512,6 @@ pub struct CodeExportInput<'meta> {
 /// internally or use a future factory-style registry to create per-task instances.
 pub(crate) trait CodeGenerator: Send + Sync {
     fn language(&self) -> &'static str;
-    fn language_aliases(&self) -> &'static [&'static str] {
-        &[]
-    }
     fn default_module_name(&self) -> &'static str {
         "config_forge_generated"
     }

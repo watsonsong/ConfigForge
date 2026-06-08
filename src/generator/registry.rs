@@ -1,18 +1,17 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ConfigForgeError, Result, code_artifact::CodeGenerator};
+use crate::{ConfigForgeError, Result};
 
 #[cfg(test)]
 use crate::data_artifact::{AggregateDataExporter, DataFormatExporter};
 
 use super::{
-    ArtifactGenerator, GeneratorRequirements, adapter::CodeArtifactGenerator,
-    asset_manifest::AssetManifestExporter, binary::BinaryDataExporter, cpp::CppCodeGenerator,
-    cpp_unreal::CppUnrealCodeGenerator, csharp::CSharpCodeGenerator,
-    gettext_pot::GettextPotExporter, java::JavaCodeGenerator, json::JsonDataExporter,
-    lua::LuaTableExporter, messagepack::MessagePackDataExporter, rust::RustCodeGenerator,
-    schema_doc::SchemaDocGenerator, typescript::TypeScriptCodeGenerator,
+    ArtifactGenerator, GeneratorRequirements, asset_manifest::AssetManifestExporter,
+    binary::BinaryDataExporter, cpp::CppCodeGenerator, cpp_unreal::CppUnrealCodeGenerator,
+    csharp::CSharpCodeGenerator, gettext_pot::GettextPotExporter, java::JavaCodeGenerator,
+    json::JsonDataExporter, lua::LuaTableExporter, messagepack::MessagePackDataExporter,
+    rust::RustCodeGenerator, schema_doc::SchemaDocGenerator, typescript::TypeScriptCodeGenerator,
     validation_report::ValidationReportGenerator,
 };
 
@@ -32,7 +31,6 @@ impl GeneratorRegistry {
     pub(crate) fn from_compat_parts(
         table_exporters: Vec<Box<dyn DataFormatExporter>>,
         aggregate_exporters: Vec<Box<dyn AggregateDataExporter>>,
-        code_generators: Vec<Box<dyn CodeGenerator>>,
         direct_generators: Vec<Box<dyn ArtifactGenerator>>,
     ) -> Self {
         let mut generators = Vec::new();
@@ -42,21 +40,18 @@ impl GeneratorRegistry {
         generators.extend(aggregate_exporters.into_iter().map(|exporter| {
             Box::new(DataArtifactGenerator::aggregate(exporter)) as Box<dyn ArtifactGenerator>
         }));
-        generators.extend(code_generators.into_iter().map(|generator| {
-            Box::new(CodeArtifactGenerator(generator)) as Box<dyn ArtifactGenerator>
-        }));
         generators.extend(direct_generators);
         Self::new(generators)
     }
 
     pub(crate) fn with_builtin_generators() -> Self {
         Self::new(vec![
-            code_generator(RustCodeGenerator),
-            code_generator(CppCodeGenerator),
-            code_generator(CppUnrealCodeGenerator),
-            code_generator(CSharpCodeGenerator),
-            code_generator(JavaCodeGenerator),
-            code_generator(TypeScriptCodeGenerator),
+            Box::new(RustCodeGenerator),
+            Box::new(CppCodeGenerator),
+            Box::new(CppUnrealCodeGenerator),
+            Box::new(CSharpCodeGenerator),
+            Box::new(JavaCodeGenerator),
+            Box::new(TypeScriptCodeGenerator),
             Box::new(JsonDataExporter),
             Box::new(MessagePackDataExporter),
             Box::new(BinaryDataExporter),
@@ -108,10 +103,6 @@ impl GeneratorRegistry {
             Err(error) => Err(error),
         }
     }
-}
-
-fn code_generator(generator: impl CodeGenerator + 'static) -> Box<dyn ArtifactGenerator> {
-    Box::new(CodeArtifactGenerator(Box::new(generator)))
 }
 
 #[cfg(test)]

@@ -599,7 +599,6 @@ mod tests {
                 max_active_exports: max_active_exports.clone(),
             })],
             Vec::new(),
-            Vec::new(),
         );
         let meta = minimal_meta_model();
         let linked_meta = meta.link().expect("meta should link");
@@ -684,7 +683,6 @@ mod tests {
     fn meta_and_data_parallel_planning_rejects_path_conflicts_before_generation() {
         let generator_registry = GeneratorRegistry::from_compat_parts(
             vec![Box::new(DuplicatePathExporter)],
-            Vec::new(),
             Vec::new(),
             Vec::new(),
         );

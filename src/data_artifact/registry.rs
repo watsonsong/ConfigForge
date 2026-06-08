@@ -71,6 +71,7 @@ pub trait DataFormatExporter: Send + Sync {
 pub trait AggregateDataExporter: Send + Sync {
     fn name(&self) -> &'static str;
 
+    #[allow(dead_code)]
     fn aliases(&self) -> &'static [&'static str] {
         &[]
     }

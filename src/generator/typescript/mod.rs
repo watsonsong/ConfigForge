@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
-    CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField, CodeFragmentPayload,
-    CodeGenerator, CodeTableKind, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn, I18nMode,
-    I18nOptions, NamingConfig, build_code_model, ir::require_non_empty_index_fields,
+    ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField,
+    CodeFragmentPayload, CodeGenerator, CodeTableKind, CodeWriterConfig, CodeWriterLike,
+    GeneratorCommonInput, GeneratorRequirements, I18nFunctionReturn, I18nMode, I18nOptions,
+    NamingConfig, build_code_model, ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -46,10 +47,6 @@ pub(crate) struct TypeScriptCodeGenerator;
 impl CodeGenerator for TypeScriptCodeGenerator {
     fn language(&self) -> &'static str {
         LANGUAGE
-    }
-
-    fn language_aliases(&self) -> &'static [&'static str] {
-        &["ts"]
     }
 
     fn default_module_name(&self) -> &'static str {
@@ -92,6 +89,29 @@ impl CodeGenerator for TypeScriptCodeGenerator {
                 source,
             })?;
         stream.finish().map(|_| ())
+    }
+}
+
+impl ArtifactGenerator for TypeScriptCodeGenerator {
+    fn type_id(&self) -> &'static str {
+        LANGUAGE
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["ts"]
+    }
+
+    fn requirements(&self) -> GeneratorRequirements {
+        GeneratorRequirements::meta_only()
+    }
+
+    fn generate_to_sink(
+        &self,
+        input: &GeneratorCommonInput<'_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let code_input = input.code_export_input(self)?;
+        CodeGenerator::generate_to_sink(self, &code_input, sink)
     }
 }
 

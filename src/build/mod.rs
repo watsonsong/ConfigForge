@@ -743,9 +743,10 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use crate::artifact::{ArtifactWriteMode, ArtifactWriter};
-    use crate::code_artifact::{CodeExportInput, CodeGenerator, default_module_name};
+    use crate::code_artifact::default_module_name;
     use crate::data::{DataSet, DataTable, RawSourceData};
     use crate::data_artifact::build_exported_table_payload;
+    use crate::generator::ArtifactGenerator;
     use crate::meta::{MetaModel, TargetTags};
 
     use super::*;
@@ -1223,40 +1224,27 @@ mod tests {
     }
 
     #[test]
-    fn meta_only_code_generator_writes_via_sink_first_override() {
+    fn meta_only_generator_writes_via_shared_sink() {
         struct SinkOnlyGenerator {
             called: Arc<AtomicBool>,
         }
 
-        impl CodeGenerator for SinkOnlyGenerator {
-            fn language(&self) -> &'static str {
+        impl ArtifactGenerator for SinkOnlyGenerator {
+            fn type_id(&self) -> &'static str {
                 "sink_only"
             }
 
-            fn default_naming(&self) -> crate::code_artifact::NamingConfig {
-                crate::code_artifact::NamingConfig {
-                    type_name: crate::code_artifact::CaseStyle::PascalCase,
-                    enum_value: crate::code_artifact::CaseStyle::ScreamingSnakeCase,
-                    field: crate::code_artifact::CaseStyle::SnakeCase,
-                    function: crate::code_artifact::CaseStyle::SnakeCase,
-                    constant: crate::code_artifact::CaseStyle::ScreamingSnakeCase,
-                }
-            }
-
-            fn generate(
-                &self,
-                _input: &CodeExportInput<'_>,
-            ) -> Result<Vec<crate::code_artifact::GeneratedFile>> {
-                panic!("build must call generate_to_sink instead of legacy generate fallback")
+            fn requirements(&self) -> GeneratorRequirements {
+                GeneratorRequirements::meta_only()
             }
 
             fn generate_to_sink(
                 &self,
-                input: &CodeExportInput<'_>,
+                input: &GeneratorCommonInput<'_>,
                 sink: &ArtifactSink,
             ) -> Result<()> {
                 self.called.store(true, Ordering::SeqCst);
-                sink.write_text(input.target.out_dir.join("generated.txt"), "sink-first")
+                sink.write_text(input.output.join("generated.txt"), "sink-first")
             }
         }
 
@@ -1267,9 +1255,9 @@ mod tests {
         let called = Arc::new(AtomicBool::new(false));
         let generators = vec![Box::new(SinkOnlyGenerator {
             called: called.clone(),
-        }) as Box<dyn CodeGenerator>];
+        }) as Box<dyn ArtifactGenerator>];
         let generator_registry =
-            GeneratorRegistry::from_compat_parts(Vec::new(), Vec::new(), generators, Vec::new());
+            GeneratorRegistry::from_compat_parts(Vec::new(), Vec::new(), generators);
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
         let context = MetaOnlyGeneratorContext {
             project_root: Path::new("."),

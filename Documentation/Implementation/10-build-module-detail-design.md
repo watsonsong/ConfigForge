@@ -209,7 +209,7 @@ pub struct BuildTraceStage {
 
 当前行为：`schema_doc` 与语言 codegen 一样读取 linked Meta、project 信息和 effective target tags，然后通过 `ArtifactSink` 输出制品；它不属于 `DataFormatRegistry`，因为不消费 source data / resolved data：
 
-- 内置 language codegen 已迁入 `src/generator/<language>/` 并由 `GeneratorRegistry` 注册；迁移期仍可用 code artifact adapter 将 crate-internal `CodeGenerator` 暴露为 build-facing `ArtifactGenerator`。Build 不直接查询 `CodeGenerator`，`codegen` 只保留 code artifact toolkit。`schema_doc` 直接实现 doc artifact generator 并由 `GeneratorRegistry` 注册，而不是实现 code-specific `CodeGenerator`。
+- 内置 language codegen 已迁入 `src/generator/<language>/`，并由各 concrete language module 直接实现 build-facing `ArtifactGenerator` 后注册到 `GeneratorRegistry`。Build 不直接查询 `CodeGenerator`，`codegen` 只保留 code artifact toolkit；`CodeGenerator` 不再通过 `CodeArtifactGenerator` adapter 暴露为 registry entry。`schema_doc` 直接实现 doc artifact generator 并由 `GeneratorRegistry` 注册，而不是实现 code-specific `CodeGenerator`。
 - code-like / schema_doc export task 不选择数据 export task，也不消费 `RuntimeDataFile`。
 - Build 从 `ProjectConfigMeta` 构造共享 `ArtifactProjectInfo`，并为每个 export task 构造统一 `GeneratorCommonInput`；如果 requirements 包含 Data，则在 validation 成功后补充 `GeneratorDataInput`。
 - 迁移期 codegen adapter 从 `GeneratorCommonInput` 派生 `CodeExportInput`，包含 linked meta、target tags、project 信息、project root、target name、target generator config、空 runtime data file list、generated_at；这个转换属于 generator / code artifact toolkit 细节，不属于 Build 调度分支逻辑。
@@ -249,7 +249,7 @@ Lua 是该模型的关键校验用例：它 requirements 包含 Meta + Data，�
 
 下一阶段的目标是把当前 adapter facade 进一步收敛为单一 task generator 模型：从任务调度角度看，`DataFormatExporter`、`AggregateDataExporter`、`CodeGenerator` 和 direct `ArtifactGenerator` 不应是四种调度对象，而只是迁移期 toolkit 内部的实现复用方式。Build 只面向一种对象：根据 export task 的 `type_id` 匹配到 generator，读取其 requirements，准备满足 requirements 的上下文，然后把 task instance 输入交给 generator 执行。generator 内部可以再把输入转换成 `CodeExportInput`、`TargetDataConfig`、table payload、doc model 或 report renderer 所需的形态；这些转换不应回流到 Build 分支逻辑。
 
-当前收口方向：production `GeneratorRegistry` 构造只接受 direct `ArtifactGenerator` 列表；内置 data-backed generators 已直接注册，内置 language generators 仍可短期经 `CodeArtifactGenerator` 包装 `CodeGenerator` facet，但该 adapter 应继续降级为 code artifact toolkit 内部兼容层。`DataArtifactGenerator` / `DataFormatExporter` / `AggregateDataExporter` 只保留 external compatibility 或测试覆盖价值，不应再出现在内置注册路径。后续每迁移一个 language generator，都应让 concrete language module 自己实现 `ArtifactGenerator` 的 descriptor / requirements / artifact planning，把 `CodeGenerator` 缩小为 renderer / naming / formatting / file header 等 code artifact facet。
+当前收口方向：production `GeneratorRegistry` 构造只接受 direct `ArtifactGenerator` 列表；内置 data-backed generators 和内置 language generators 均已直接注册。`CodeArtifactGenerator` adapter 已删除，`DataArtifactGenerator` / `DataFormatExporter` / `AggregateDataExporter` 只保留 external compatibility 或测试覆盖价值，不应再出现在内置注册路径。后续应继续把 `CodeGenerator` 缩小为 renderer / naming / formatting / file header 等 code artifact facet，并评估 data exporter compatibility adapter 是否仍需要保留。
 
 建议的长期 build-facing trait 形态：
 
