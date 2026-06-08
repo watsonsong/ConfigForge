@@ -16,7 +16,7 @@ use super::{
     gettext_pot::GettextPotExporter,
     java::JavaCodeGenerator,
     json::JsonDataExporter,
-    lua_table::LuaTableExporter,
+    lua::LuaTableExporter,
     messagepack::MessagePackDataExporter,
     rust::RustCodeGenerator,
     schema_doc::SchemaDocGenerator,

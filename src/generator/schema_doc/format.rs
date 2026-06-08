@@ -1,0 +1,170 @@
+// Copyright (c) 2026 ConfigForge contributors
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{collections::BTreeMap, fmt, path::PathBuf, str::FromStr};
+
+use crate::{ConfigForgeError, Result, artifact::ArtifactSink, project::lexical_normalize_path};
+
+use super::{
+    markdown::{render_schema_doc_index_markdown, render_schema_table_markdown},
+    model::{SchemaDoc, SchemaTableDoc},
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchemaDocFormat {
+    Markdown,
+}
+
+impl SchemaDocFormat {
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Markdown => "md",
+        }
+    }
+}
+
+impl fmt::Display for SchemaDocFormat {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Markdown => "markdown",
+        })
+    }
+}
+
+impl FromStr for SchemaDocFormat {
+    type Err = ConfigForgeError;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "markdown" | "md" => Ok(Self::Markdown),
+            other => Err(ConfigForgeError::Validation(format!(
+                "unsupported schema_doc format `{other}`; supported formats: markdown"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaDocExportConfig {
+    pub format: SchemaDocFormat,
+    pub output: PathBuf,
+    pub index_file: String,
+    pub title: Option<String>,
+}
+
+pub fn write_schema_doc_to_sink(
+    doc: &SchemaDoc,
+    config: &SchemaDocExportConfig,
+    sink: &ArtifactSink,
+) -> Result<()> {
+    match config.format {
+        SchemaDocFormat::Markdown => {
+            let paths = schema_doc_output_paths(doc, config)?;
+            sink.write_text(&paths.index_path, render_schema_doc_index_markdown(doc))?;
+            for (table, path) in doc.tables.iter().zip(paths.table_paths) {
+                sink.write_text(path, render_schema_table_markdown(doc, table))?;
+            }
+            Ok(())
+        }
+    }
+}
+
+pub fn schema_doc_output_paths(
+    doc: &SchemaDoc,
+    config: &SchemaDocExportConfig,
+) -> Result<SchemaDocOutputPaths> {
+    validate_file_name(&config.index_file, "schema_doc index_file")?;
+    let index_path = lexical_normalize_path(&config.output.join(&config.index_file));
+    let mut seen = std::collections::BTreeSet::new();
+    if !seen.insert(index_path.clone()) {
+        return Err(ConfigForgeError::Validation(format!(
+            "schema_doc output path `{}` is duplicated",
+            index_path.display()
+        )));
+    }
+    let mut table_paths = Vec::with_capacity(doc.tables.len());
+    for table in &doc.tables {
+        let file_name = table_file_name(table, config.format);
+        validate_file_name(&file_name, "schema_doc table file")?;
+        let path = lexical_normalize_path(&config.output.join(file_name));
+        if !seen.insert(path.clone()) {
+            return Err(ConfigForgeError::Validation(format!(
+                "schema_doc output path `{}` is duplicated",
+                path.display()
+            )));
+        }
+        table_paths.push(path);
+    }
+    Ok(SchemaDocOutputPaths {
+        index_path,
+        table_paths,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaDocOutputPaths {
+    pub index_path: PathBuf,
+    pub table_paths: Vec<PathBuf>,
+}
+
+pub(super) fn table_file_name(table: &SchemaTableDoc, format: SchemaDocFormat) -> String {
+    format!("{}.{}", table.name, format.extension())
+}
+
+pub(super) fn validate_file_name(value: &str, label: &str) -> Result<()> {
+    let path = std::path::Path::new(value);
+    let valid = !value.is_empty()
+        && path.file_name().and_then(|name| name.to_str()) == Some(value)
+        && path.components().count() == 1
+        && !matches!(
+            path.components().next(),
+            Some(std::path::Component::ParentDir | std::path::Component::CurDir)
+        );
+    if valid {
+        Ok(())
+    } else {
+        Err(ConfigForgeError::Validation(format!(
+            "{label} `{value}` must be a plain file name"
+        )))
+    }
+}
+
+pub fn schema_doc_export_config_from_options(
+    output: PathBuf,
+    mut options: BTreeMap<String, toml::Value>,
+) -> Result<SchemaDocExportConfig> {
+    let format = take_schema_doc_string(&mut options, "format")?
+        .map(|value| value.parse())
+        .transpose()?
+        .unwrap_or(SchemaDocFormat::Markdown);
+    let index_file = take_schema_doc_string(&mut options, "index_file")?
+        .unwrap_or_else(|| format!("index.{}", format.extension()));
+    validate_file_name(&index_file, "schema_doc index_file")?;
+    let title = take_schema_doc_string(&mut options, "title")?;
+    let unsupported = options.keys().cloned().collect::<Vec<_>>();
+    if let Some(key) = unsupported.first() {
+        return Err(ConfigForgeError::Validation(format!(
+            "schema_doc export task has unknown option `{key}`"
+        )));
+    }
+    Ok(SchemaDocExportConfig {
+        format,
+        output,
+        index_file,
+        title,
+    })
+}
+
+fn take_schema_doc_string(
+    options: &mut BTreeMap<String, toml::Value>,
+    key: &str,
+) -> Result<Option<String>> {
+    options
+        .remove(key)
+        .map(|value| {
+            value.try_into().map_err(|source| {
+                ConfigForgeError::Validation(format!("invalid schema_doc option `{key}`: {source}"))
+            })
+        })
+        .transpose()
+}

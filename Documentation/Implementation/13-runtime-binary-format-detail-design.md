@@ -252,11 +252,13 @@ JSON / MessagePack v1 保持现有 named、string-compatible runtime payload con
 当前已新增：
 
 ```text
-src/data_artifact/
-  binary.rs           # BinaryDataExporter / bin revision / encoder
+src/generator/binary/
+  mod.rs              # BinaryDataExporter / ArtifactGenerator glue
+  encoder.rs          # CFGB header + table / record / value encoder
+  wire.rs             # varuint / bitmap / primitive wire helpers
 ```
 
-核心 API（当前实现使用 table data exporter registry 接口；示意如下）：
+核心 API（当前实现作为 concrete generator 直接注册，同时保留 `DataFormatExporter` runtime table writer 接口；示意如下）：
 
 ```rust
 pub const FORMAT: &str = "bin";
@@ -279,7 +281,7 @@ impl DataFormatExporter for BinaryDataExporter {
 3. 继续复用 `DataResolver::resolve_table_rows / resolve_table` 获取 normalized resolved values。
 4. CollectionTable 写 `row_count` + rows；ObjectTable 只写 object record。
 5. 按 layout 顺序从 `ResolvedValue` 取值并编码到 writer；如果 required value 缺失，返回 validation-style error。
-6. Registry 中注册 `BinaryDataExporter`，Project Config 支持 `type = "bin"`。
+6. `GeneratorRegistry` 中注册 `BinaryDataExporter`，Project Config 支持 `type = "bin"`。
 
 不要复用 `ExportedTablePayload` 直接 serde 序列化，因为 text payload 是 named map/object shape，而 `bin` 需要 typed positional layout。当前实现复用同一套 target-aware resolved export view / resolver 语义，JSON、MessagePack 和 Binary 从同一份可见数据语义构建：
 
@@ -410,7 +412,7 @@ JSON / MessagePack adapter 复用同一套 limits，而不仅限于 `.bin`，因
 
 Exporter 单元测试：
 
-1. `DataFormatRegistry::with_builtin_exporters()` 能解析 `bin` 和 `binary` alias。
+1. `GeneratorRegistry::with_builtin_generators()` 能解析 `bin` 和 `binary` alias。
 2. `BinaryDataExporter.extension() == "bin"`，artifact path 为 `<table>.bin`。
 3. 同一 Meta + target tags 重复导出得到相同 revision 和 bytes。
 4. 字段顺序变化、字段类型变化、enum value 顺序变化会改变 revision。
@@ -447,7 +449,7 @@ Codegen / runtime helper 测试：
 
 当前状态：
 
-- `src/data_artifact/binary.rs` 已实现 `bin` exporter，包含 16 字节 header、layout、revision hash、primitive / struct / collection / object 编码。
+- `src/generator/binary/` 已实现 `bin` exporter，包含 16 字节 header、layout、revision hash、primitive / struct / collection / object 编码。
 - Binary exporter 已注册为 runtime data export type，可与 JSON / MessagePack 并存。
 - CodeModel 已传播 optional 字段语义，Rust / TypeScript / C++ 分别生成 `Option<T>`、optional property、`std::optional<T>`。
 - TypeScript `int` contract 固定为 `number`，`bin` exporter 会拒绝超出 JavaScript safe integer 范围的值。

@@ -5,135 +5,28 @@ use std::collections::BTreeMap;
 
 use crate::{
     ConfigForgeError, Result,
-    artifact::{ArtifactSink, ArtifactWriteStream},
     data::{ArrayElementValue, DataResolver, DataTable, DataValue, ResolvedValue, ScalarValue},
-    data_artifact::{DataFormatExporter, export_runtime_data_to_sink, runtime_table_artifacts},
     meta::{
-        LinkedField, LinkedFieldMeta, LinkedFragmentMeta, LinkedStructType, LinkedTableMeta,
-        PrimitiveFieldType, TableKind, TargetTags,
+        EnumMeta, LinkedField, LinkedFieldMeta, LinkedFragmentMeta, LinkedStructType,
+        LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags,
     },
     runtime_contract::binary_schema_revision,
 };
 
-use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements};
+use super::wire::{
+    BinaryWriteTarget, FORMAT_VERSION, HEADER_SIZE, MAGIC, PresenceSlot,
+    ensure_javascript_safe_int, expected_scalar, fragment_present, write_bytes,
+    write_optional_bitmap, write_varuint, zigzag,
+};
 
-pub const FORMAT: &str = "bin";
-
-const MAGIC: &[u8; 4] = b"CFGB";
-const FORMAT_VERSION: u16 = 1;
-const HEADER_SIZE: u16 = 16;
-const JAVASCRIPT_SAFE_INT_MIN: i64 = -(1_i64 << 53) + 1;
-const JAVASCRIPT_SAFE_INT_MAX: i64 = (1_i64 << 53) - 1;
-
-pub struct BinaryDataExporter;
-
-impl DataFormatExporter for BinaryDataExporter {
-    fn name(&self) -> &'static str {
-        FORMAT
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        &["binary"]
-    }
-
-    fn extension(&self) -> &'static str {
-        "bin"
-    }
-
-    fn serialize_table(
-        &self,
-        table_meta: &LinkedTableMeta<'_>,
-        table: &DataTable,
-        target_tags: &TargetTags,
-    ) -> Result<Vec<u8>> {
-        let mut bytes = Vec::new();
-        let mut encoder = BinaryEncoder::new(table_meta, target_tags, &mut bytes);
-        encoder.write_table(table)?;
-        Ok(bytes)
-    }
-
-    fn serialize_table_to_stream(
-        &self,
-        table_meta: &LinkedTableMeta<'_>,
-        table: &DataTable,
-        target_tags: &TargetTags,
-        stream: &mut ArtifactWriteStream,
-    ) -> Result<()> {
-        BinaryEncoder::new(table_meta, target_tags, stream).write_table(table)
-    }
-}
-
-impl ArtifactGenerator for BinaryDataExporter {
-    fn type_id(&self) -> &'static str {
-        FORMAT
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        &["binary"]
-    }
-
-    fn requirements(&self) -> GeneratorRequirements {
-        GeneratorRequirements::meta_and_data()
-    }
-
-    fn generate_to_sink(
-        &self,
-        _input: &GeneratorCommonInput<'_>,
-        _sink: &ArtifactSink,
-    ) -> Result<()> {
-        Err(ConfigForgeError::Validation(format!(
-            "generator `{}` requires Data-backed artifact input",
-            FORMAT
-        )))
-    }
-
-    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<std::path::PathBuf>> {
-        runtime_table_artifacts(&input.output, input.meta, &input.target_tags, self)
-    }
-
-    fn generate_with_data_to_sink(
-        &self,
-        input: &GeneratorDataInput<'_, '_>,
-        sink: &ArtifactSink,
-    ) -> Result<()> {
-        export_runtime_data_to_sink(
-            &input.common.output,
-            input.common.meta,
-            &input.common.target_tags,
-            input.data_set,
-            self,
-            input.pool,
-            sink,
-        )
-        .map(|_| ())
-    }
-}
-
-trait BinaryWriteTarget {
-    fn write_binary_bytes(&mut self, bytes: &[u8]) -> Result<()>;
-}
-
-impl BinaryWriteTarget for Vec<u8> {
-    fn write_binary_bytes(&mut self, bytes: &[u8]) -> Result<()> {
-        self.extend_from_slice(bytes);
-        Ok(())
-    }
-}
-
-impl BinaryWriteTarget for ArtifactWriteStream {
-    fn write_binary_bytes(&mut self, bytes: &[u8]) -> Result<()> {
-        self.write_all_artifact(bytes)
-    }
-}
-
-struct BinaryEncoder<'a, 'meta, W: BinaryWriteTarget> {
+pub(super) struct BinaryEncoder<'a, 'meta, W: BinaryWriteTarget> {
     table_meta: &'a LinkedTableMeta<'meta>,
     target_tags: &'a TargetTags,
     out: &'a mut W,
 }
 
 impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
-    fn new(
+    pub(super) fn new(
         table_meta: &'a LinkedTableMeta<'meta>,
         target_tags: &'a TargetTags,
         out: &'a mut W,
@@ -145,7 +38,7 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
         }
     }
 
-    fn write_table(&mut self, table: &DataTable) -> Result<()> {
+    pub(super) fn write_table(&mut self, table: &DataTable) -> Result<()> {
         self.write_header()?;
         match self.table_meta.meta.kind {
             TableKind::Collection => self.write_collection(table),
@@ -468,7 +361,7 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
 
     fn write_enum(
         &mut self,
-        enum_meta: &crate::meta::EnumMeta,
+        enum_meta: &EnumMeta,
         field: &LinkedFieldMeta<'meta>,
         value: &ResolvedValue,
     ) -> Result<()> {
@@ -480,7 +373,7 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
 
     fn write_enum_array_element(
         &mut self,
-        enum_meta: &crate::meta::EnumMeta,
+        enum_meta: &EnumMeta,
         value: &ArrayElementValue,
     ) -> Result<()> {
         let DataValue::Scalar(ScalarValue::Enum(value)) = &value.value else {
@@ -493,7 +386,7 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
 
     fn write_enum_value(
         &mut self,
-        enum_meta: &crate::meta::EnumMeta,
+        enum_meta: &EnumMeta,
         value: &str,
         field_name: &str,
     ) -> Result<()> {
@@ -562,216 +455,5 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
             self.write_array_element_for_type(element_type, element)?;
         }
         Ok(())
-    }
-}
-
-fn fragment_present(
-    fragment: &LinkedFragmentMeta<'_>,
-    values: &BTreeMap<String, ResolvedValue>,
-    active_fragments: Option<&Vec<String>>,
-) -> bool {
-    let source_active = active_fragments
-        .map(|fragments| fragments.iter().any(|name| name == &fragment.meta.name))
-        .unwrap_or(true);
-    source_active && values.contains_key(&fragment.meta.name)
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct PresenceSlot {
-    optional: bool,
-    present: bool,
-}
-
-impl PresenceSlot {
-    fn field(field: &LinkedFieldMeta<'_>, values: &BTreeMap<String, ResolvedValue>) -> Self {
-        Self {
-            optional: !field.meta.required,
-            present: values.contains_key(&field.meta.name),
-        }
-    }
-
-    fn fragment(
-        fragment: &LinkedFragmentMeta<'_>,
-        values: &BTreeMap<String, ResolvedValue>,
-        active_fragments: Option<&Vec<String>>,
-    ) -> Self {
-        Self {
-            optional: true,
-            present: fragment_present(fragment, values, active_fragments),
-        }
-    }
-}
-
-fn write_optional_bitmap<W: BinaryWriteTarget>(
-    out: &mut W,
-    slots: impl IntoIterator<Item = PresenceSlot>,
-) -> Result<()> {
-    let optional_slots = slots
-        .into_iter()
-        .filter(|slot| slot.optional)
-        .collect::<Vec<_>>();
-    let mut bitmap = vec![0u8; optional_slots.len().div_ceil(8)];
-    for (optional_index, slot) in optional_slots.iter().enumerate() {
-        if slot.present {
-            set_bit(&mut bitmap, optional_index);
-        }
-    }
-    out.write_binary_bytes(&bitmap)
-}
-
-fn expected_scalar(field: &LinkedFieldMeta<'_>) -> ConfigForgeError {
-    ConfigForgeError::Validation(format!(
-        "binary export field `{}` expected scalar value",
-        field.meta.name
-    ))
-}
-
-fn ensure_javascript_safe_int(field_name: &str, value: i64) -> Result<()> {
-    if (JAVASCRIPT_SAFE_INT_MIN..=JAVASCRIPT_SAFE_INT_MAX).contains(&value) {
-        return Ok(());
-    }
-    Err(ConfigForgeError::Validation(format!(
-        "binary export field `{}` int value `{}` exceeds JavaScript safe integer range [{}, {}]",
-        field_name, value, JAVASCRIPT_SAFE_INT_MIN, JAVASCRIPT_SAFE_INT_MAX
-    )))
-}
-
-fn set_bit(bitmap: &mut [u8], index: usize) {
-    bitmap[index / 8] |= 1 << (index % 8);
-}
-
-fn zigzag(value: i64) -> u64 {
-    ((value << 1) ^ (value >> 63)) as u64
-}
-
-fn write_varuint<W: BinaryWriteTarget>(out: &mut W, mut value: u64) -> Result<()> {
-    loop {
-        let mut byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if value != 0 {
-            byte |= 0x80;
-        }
-        out.write_binary_bytes(&[byte])?;
-        if value == 0 {
-            break Ok(());
-        }
-    }
-}
-
-fn write_bytes<W: BinaryWriteTarget>(out: &mut W, bytes: &[u8]) -> Result<()> {
-    write_varuint(out, bytes.len() as u64)?;
-    out.write_binary_bytes(bytes)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use crate::{
-        data::DataTable,
-        data_artifact::DataFormatExporter,
-        meta::{MetaModel, TargetTags},
-    };
-
-    use super::{
-        BinaryDataExporter, FORMAT_VERSION, HEADER_SIZE, MAGIC, PresenceSlot, write_optional_bitmap,
-    };
-    use crate::runtime_contract::binary_schema_revision;
-
-    #[test]
-    fn optional_bitmap_skips_required_slots_and_packs_optional_presence() {
-        let mut bytes = Vec::new();
-
-        write_optional_bitmap(
-            &mut bytes,
-            [
-                PresenceSlot {
-                    optional: false,
-                    present: true,
-                },
-                PresenceSlot {
-                    optional: true,
-                    present: true,
-                },
-                PresenceSlot {
-                    optional: true,
-                    present: false,
-                },
-                PresenceSlot {
-                    optional: true,
-                    present: true,
-                },
-            ],
-        )
-        .expect("bitmap should write");
-
-        assert_eq!(bytes, vec![0b0000_0101]);
-    }
-
-    #[test]
-    fn optional_bitmap_extends_to_multiple_bytes() {
-        let mut bytes = Vec::new();
-        let slots = (0..10).map(|index| PresenceSlot {
-            optional: true,
-            present: index == 0 || index == 8 || index == 9,
-        });
-
-        write_optional_bitmap(&mut bytes, slots).expect("bitmap should write");
-
-        assert_eq!(bytes, vec![0b0000_0001, 0b0000_0011]);
-    }
-
-    #[test]
-    fn writes_header_and_collection_rows() {
-        let meta = MetaModel::from_toml_str(
-            r#"
-                [[tables]]
-                name = "items"
-                source = "items.csv"
-
-                [[tables.fields]]
-                name = "id"
-                type = "int"
-                required = true
-
-                [[tables.fields]]
-                name = "name"
-                type = "string"
-                required = false
-            "#,
-        )
-        .unwrap();
-        let linked = meta.link().unwrap();
-        let table_meta = linked.table("items").unwrap();
-        let table = DataTable::new(
-            "items",
-            vec![BTreeMap::from([
-                ("id".to_owned(), "7".to_owned()),
-                ("name".to_owned(), "Potion".to_owned()),
-            ])],
-        );
-
-        let bytes = BinaryDataExporter
-            .serialize_table(table_meta, &table, &TargetTags::default())
-            .unwrap();
-
-        assert_eq!(&bytes[0..4], MAGIC);
-        assert_eq!(
-            u16::from_le_bytes(bytes[4..6].try_into().unwrap()),
-            FORMAT_VERSION
-        );
-        assert_eq!(
-            u16::from_le_bytes(bytes[6..8].try_into().unwrap()),
-            HEADER_SIZE
-        );
-        assert_eq!(
-            u64::from_le_bytes(bytes[8..16].try_into().unwrap()),
-            binary_schema_revision(table_meta, &TargetTags::default())
-        );
-        assert_eq!(bytes[16], 1); // row_count
-        assert_eq!(bytes[17], 0b0000_0001); // id required, name optional present
-        assert_eq!(bytes[18], 14); // zigzag(7)
-        assert_eq!(bytes[19], 6);
-        assert_eq!(&bytes[20..26], b"Potion");
     }
 }

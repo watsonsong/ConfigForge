@@ -32,11 +32,15 @@
 
 ## 9i.2 模块归属与依赖边界
 
-当前 Lua 支持实现为 `type = "lua_table"` / alias `lua` 的 MetaAndData exporter，并通过 `GeneratorRegistry` adapter 暴露为 data-backed code-like artifact generator，而不是普通 codegen backend：
+当前 Lua 支持实现为 `type = "lua_table"` / alias `lua` 的 MetaAndData concrete generator，并直接注册到 `GeneratorRegistry`，而不是普通 codegen backend：
 
 ```text
-src/data_artifact/
-  lua_table.rs       # LuaEmbeddedDataExporter / LuaTableExporter
+src/generator/lua/
+  mod.rs             # LuaTableExporter / ArtifactGenerator glue
+  options.rs         # lua_table task options
+  naming.rs          # Lua module / identifier naming helper
+  render.rs          # root / table Lua renderer
+  tests.rs           # focused generator tests
 ```
 
 原因：
@@ -45,7 +49,7 @@ src/data_artifact/
 - 现有 `codegen` 文档明确约束 Rust/C++/TypeScript codegen 只依赖 Meta 和 target tags，不绑定任何 MetaAndData export task；
 - Lua 的输出既是运行时数据，又包含访问 API，因此语义上更接近 MetaAndData export type，而不是纯代码 stub。
 
-当前模块边界：`lua_table` 保留在 `exporter` 内部实现，继续复用 aggregate artifact 的路径规划和 sink 写出能力；`GeneratorRegistry` 在注册期把它适配为 `requirements = Meta + Data` 的 build-facing `ArtifactGenerator`。Lua 基础代码文本选项复用 `codegen::CodeArtifactOptions`（file header、i18n、naming / formatting 等通用能力），但 data input 只通过 task generator contract 注入；不引入 `codegen -> data` 或 `codegen -> build` 依赖。
+当前模块边界：`lua_table` 作为 `src/generator/lua/` 内的 concrete generator 实现，继续复用 aggregate artifact 的路径规划和 sink 写出能力；`GeneratorRegistry` 直接注册为 `requirements = Meta + Data` 的 build-facing `ArtifactGenerator`。Lua 基础代码文本选项复用 `code_artifact::CodeArtifactOptions`（file header、i18n、naming / formatting 等通用能力），但 data input 只通过 task generator contract 注入；不引入 `code_artifact -> data` 或 `code_artifact -> build` 依赖。
 
 Build 编排层应按 generator requirements 分发：
 
@@ -347,10 +351,10 @@ Lua 关键字冲突策略应复用 Project Config 的 `keyword_conflict` 概念�
 当前 `lua_table` / alias `lua` 已作为内置 aggregate / embedded data generator 落地，主要实现点包括：
 
 1. **配置与注册**
-   - 已迁入 `src/generator/lua_table.rs`，并在 `GeneratorRegistry` 注册 `lua_table` / alias `lua`。
+   - 已迁入 `src/generator/lua/`，并在 `GeneratorRegistry` 注册 `lua_table` / alias `lua`。
    - 已定义 `LuaTableOptions`，从统一 export task 的 flattened options 解析配置。
 2. **命名与符号检查**
-   - 在 `src/generator/lua_table.rs` 内部实现 Lua naming / keyword helper；generator 只复用 code artifact options / writer helper，不依赖 language codegen backend。
+   - 在 `src/generator/lua/` 内部实现 Lua naming / keyword helper；generator 只复用 code artifact options / writer helper，不依赖 language codegen backend。
    - 检查 table file、field、index helper、method helper 冲突。
 3. **Lua literal writer**
    - 实现字符串、number、bool、nil、list、struct、fragment 的稳定渲染。

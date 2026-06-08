@@ -20,7 +20,7 @@
 
 范围：
 
-- 在合适模块下新增 schema doc 子模块；当前已迁入 `src/generator/schema_doc.rs`，作为 MetaOnly artifact generator，保持依赖方向不反向污染 `meta` / `validation` / code artifact toolkit。
+- 在合适模块下新增 schema doc 子模块；当前已迁入 `src/generator/schema_doc/`，作为 MetaOnly artifact generator，保持依赖方向不反向污染 `meta` / `validation` / code artifact toolkit。
 - 定义 `SchemaDoc`、`SchemaDocMetadata`、`SchemaTableDoc`、`SchemaFieldDoc`、`SchemaIndexDoc`、`SchemaRelationDoc`、`SchemaDocOptions` 等核心结构。
 - 从 Project / target / LinkedMeta 中填充 project name、project path、target、target tags、generated_at、table name、table kind、desc、source summary、field path、type display、required、default、export visibility 等基础信息。
 - 先支持 CollectionTable / ObjectTable 的 table-level summary；复杂 struct/list/fragment 可先以字段 type display 表达，不展开详情。
@@ -83,7 +83,7 @@
 - 新增 Markdown renderer，共享 Step 1~3 的 normalized `SchemaDoc` model。
 - 输出 `index.md` 内容：title、project、target、tags、generated_at、table 列表和 summary。
 - 输出单表 Markdown 内容：table title/desc、properties、Fields、Indexes、Relations。
-- Markdown table escape：处理 `|`、换行、``、多行 desc、反引号等易破坏表格的内容。
+- Markdown table escape：处理 `|`、换行、`\r`、多行 desc、反引号等易破坏表格的内容。
 - 空字段统一显示 `-`；布尔值使用 `yes` / `no`。
 - 链接使用相对路径，如 `[items](items.md)`。
 

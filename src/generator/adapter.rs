@@ -9,9 +9,7 @@ use crate::{
     code_artifact::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, CodegenTaskConfig,
     },
-    data_artifact::{
-        AggregateDataExporter, DataFormatExporter, TargetDataConfig, export_runtime_data_to_sink,
-    },
+    data_artifact::{AggregateDataExporter, DataFormatExporter, export_runtime_data_to_sink},
 };
 
 use super::{
@@ -133,12 +131,7 @@ impl ArtifactGenerator for DataArtifactGenerator {
                 })
                 .collect(),
             Self::Aggregate(exporter) => {
-                let task = TargetDataConfig {
-                    name: Some(input.task_name.clone()),
-                    format: input.type_id.clone(),
-                    output: input.output.clone(),
-                    options: input.options.clone(),
-                };
+                let task = input.target_data_config();
                 exporter.plan_artifacts(&input.output, &task, input.meta, &input.target_tags)
             }
         }
@@ -162,12 +155,7 @@ impl ArtifactGenerator for DataArtifactGenerator {
             .map(|_| ()),
             Self::Aggregate(exporter) => exporter.export_to_sink(
                 &input.common.output,
-                &TargetDataConfig {
-                    name: Some(input.common.task_name.clone()),
-                    output: input.common.output.clone(),
-                    format: input.common.type_id.clone(),
-                    options: input.common.options.clone(),
-                },
+                &input.common.target_data_config(),
                 input.common.meta,
                 &input.common.target_tags,
                 input.data_set,

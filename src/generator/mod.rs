@@ -14,7 +14,7 @@ mod gettext_pot;
 mod input;
 mod java;
 mod json;
-mod lua_table;
+mod lua;
 mod messagepack;
 mod registry;
 mod requirements;
@@ -39,7 +39,7 @@ pub(crate) use input::{
 };
 pub use java::JavaCodegenOptions;
 pub use json::JsonDataExporter;
-pub use lua_table::LuaTableExporter;
+pub use lua::LuaTableExporter;
 pub use messagepack::MessagePackDataExporter;
 pub(crate) use registry::GeneratorRegistry;
 pub(crate) use requirements::{GeneratorDescriptor, GeneratorRequirements};

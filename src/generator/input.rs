@@ -8,6 +8,7 @@ use rayon::ThreadPool;
 use crate::{
     ArtifactProjectInfo, ConfigForgeError, Result,
     data::DataSet,
+    data_artifact::TargetDataConfig,
     meta::{LinkedMetaModel, TargetTags},
     validation::ValidationReport,
 };
@@ -37,6 +38,17 @@ pub(crate) struct GeneratorDataInput<'a, 'meta> {
     pub(crate) data_set: &'a DataSet,
     pub(crate) validation_report: &'a ValidationReport,
     pub(crate) pool: &'a ThreadPool,
+}
+
+impl GeneratorCommonInput<'_> {
+    pub(crate) fn target_data_config(&self) -> TargetDataConfig {
+        TargetDataConfig {
+            name: Some(self.task_name.clone()),
+            format: self.type_id.clone(),
+            output: self.output.clone(),
+            options: self.options.clone(),
+        }
+    }
 }
 
 pub(crate) struct GeneratorTaskInput<'a, 'meta> {

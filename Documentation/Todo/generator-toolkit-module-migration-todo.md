@@ -24,21 +24,21 @@
 - [x] 将 `GeneratorCommonInput`、`GeneratorDataInput`、`GeneratorTaskInput`、`PreparedGeneratorInputs` 等输入模型移到 `src/generator/input.rs`。
 - [x] 将 `GeneratorRegistry` 和 builtin registration 移到 `src/generator/registry.rs`。
 - [x] 将迁移期 `CodeArtifactGenerator`、`DataArtifactGenerator` adapter 移到 `src/generator/adapter.rs`。
-- [x] 将 `ValidationReportGenerator` 移到 `src/generator/validation_report.rs`。后续若需要更多文件，可再扩展为 `src/generator/validation_report/` 目录。
+- [x] 将 `ValidationReportGenerator` 移到 `src/generator/validation_report/` 目录，便于后续扩展更多 report format。
 - [x] 保持 `src/generator/mod.rs` 只做模块声明与必要 re-export。
 
 ## Phase 2 — 先迁移 direct generators
 
-- [x] 将 `src/schema_doc/` 迁入 `src/generator/schema_doc.rs`，保留必要 compatibility re-export 或更新引用。当前 schema doc 体量仍为单文件；后续如果继续膨胀，可再扩展成 `src/generator/schema_doc/` 目录。
+- [x] 将 `src/schema_doc/` 迁入 `src/generator/schema_doc/`，保留必要 compatibility re-export 或更新引用；当前已拆分为 model / build / format / markdown / tests 子模块。
 - [x] 将 `validation_report` 作为独立 concrete generator 注册，而不是内联在 registry/facade 文件里。已在 Phase 1 完成，保留在本阶段作为 direct generator 迁移复核项。
 - [x] 更新 `GeneratorRegistry::with_builtin_generators()`，直接注册 `schema_doc` / `validation_report` concrete generator。
 - [x] 更新 Schema Doc 设计文档与相关测试路径引用。
 
 ## Phase 3 — 迁移 aggregate / mixed data-backed generators
 
-- [x] 将 `src/data_artifact/lua_table.rs` 迁入 `src/generator/lua_table.rs`，直接实现 `ArtifactGenerator`；继续复用 `CodeArtifactOptions` 和 data artifact payload helper。当前 Lua 体量较大但仍为单文件；后续可再扩展成 `src/generator/lua_table/` 目录。
-- [x] 将 `src/data_artifact/asset_manifest.rs` 迁入 `src/generator/asset_manifest.rs`，直接实现 `ArtifactGenerator`。
-- [x] 将 `src/data_artifact/gettext_pot.rs` 迁入 `src/generator/gettext_pot.rs`，直接实现 `ArtifactGenerator`。
+- [x] 将 `src/data_artifact/lua_table.rs` 迁入 `src/generator/lua/`，直接实现 `ArtifactGenerator`；继续复用 `CodeArtifactOptions` 和 data artifact payload helper；当前已拆分为 naming / options / render / tests 子模块。
+- [x] 将 `src/data_artifact/asset_manifest.rs` 迁入 `src/generator/asset_manifest/`，直接实现 `ArtifactGenerator`。
+- [x] 将 `src/data_artifact/gettext_pot.rs` 迁入 `src/generator/gettext_pot/`，直接实现 `ArtifactGenerator`。
 - [x] 从 `DataFormatRegistry` 中移除这些 aggregate generator 的 build-facing 注册职责；如需共享逻辑，保留在 data artifact toolkit helper 中。
 - [x] 更新 `08-exporter-module-detail-design.md`、`09i-lua-embedded-data-generator.md`、Asset Manifest / POT 相关设计文档。
 
@@ -56,8 +56,8 @@
 
 ## Phase 5 — 迁移 runtime table data generators
 
-- [x] 将 `src/data_artifact/json.rs` 迁入 `src/generator/json/`。
-- [x] 将 `src/data_artifact/messagepack.rs` 迁入 `src/generator/messagepack/`。
+- [x] 将 `src/data_artifact/json.rs` 迁入 `src/generator/json.rs`。
+- [x] 将 `src/data_artifact/messagepack.rs` 迁入 `src/generator/messagepack.rs`。
 - [x] 将 `src/data_artifact/binary.rs` 迁入 `src/generator/binary/`。
 - [x] 抽出 runtime table iteration / path planning / `RuntimeDataFile` helper，留在 data artifact toolkit。
 - [ ] 评估 `DataFormatExporter` 是否仍有价值；若只剩内部 helper，可改名为 `RuntimeTableFormat` 或删除。
