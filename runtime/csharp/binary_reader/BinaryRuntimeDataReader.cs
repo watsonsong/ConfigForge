@@ -91,7 +91,9 @@ public class BinaryRuntimeDataReader
             throw new InvalidOperationException("optional slot count must be non-negative");
         }
         var byteCount = (optionalSlotCount + 7) / 8;
-        _records.Add(new RecordState(ReadExact(byteCount), 0));
+        var bitmap = ReadExact(byteCount);
+        ValidateOptionalBitmap(bitmap, optionalSlotCount);
+        _records.Add(new RecordState(bitmap, 0));
     }
 
     public void EndRecord()
@@ -170,6 +172,20 @@ public class BinaryRuntimeDataReader
             throw new InvalidOperationException("optional slot is out of current record bitmap");
         }
         return (record.Bitmap[byteIndex] & (1 << (slotIndex % 8))) != 0;
+    }
+
+    private static void ValidateOptionalBitmap(byte[] bitmap, int optionalSlotCount)
+    {
+        var usedBitsInLastByte = optionalSlotCount % 8;
+        if (bitmap.Length == 0 || usedBitsInLastByte == 0)
+        {
+            return;
+        }
+        var unusedMask = 0xff << usedBitsInLastByte;
+        if ((bitmap[^1] & unusedMask) != 0)
+        {
+            throw new InvalidOperationException("invalid optional bitmap padding bits");
+        }
     }
 
     private void ParseHeader()

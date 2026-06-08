@@ -122,56 +122,14 @@ impl AggregateDataExporter for CustomAggregateExporter {
 }
 
 #[test]
-fn registry_no_longer_owns_builtin_runtime_exporters() {
-    let registry = DataFormatRegistry::with_builtin_exporters();
-
-    for format in ["json", "messagepack", "msgpack", "bin", "binary"] {
-        assert!(
-            registry.get(format).is_none(),
-            "{format} is now registered as a concrete generator"
-        );
-    }
-    assert!(registry.require("json").is_err());
-}
-
-#[test]
-fn registry_reports_no_builtin_exporters_after_generator_migration() {
-    let registry = DataFormatRegistry::with_builtin_exporters();
-
-    for format in [
-        "json",
-        "messagepack",
-        "msgpack",
-        "bin",
-        "binary",
-        "gettext_pot",
-        "pot",
-        "lua_table",
-        "lua",
-        "asset_manifest",
-        "assets",
-    ] {
-        assert!(
-            registry.get_aggregate(format).is_none(),
-            "{format} is now registered as a concrete generator"
-        );
-    }
-    assert!(registry.get("unknown").is_none());
-    assert!(registry.get_aggregate("unknown").is_none());
-}
-
-#[test]
-fn registry_accepts_custom_exporter_plugins() {
-    let mut registry = DataFormatRegistry::new();
-    registry.register(CustomDataExporter {
+fn data_exporter_matches_name_and_alias() {
+    let exporter = CustomDataExporter {
         seen_tables: Mutex::new(Vec::new()),
-    });
+    };
 
-    assert_eq!(registry.require("custom").unwrap().extension(), "custom");
-    assert_eq!(
-        registry.require("custom_alias").unwrap().extension(),
-        "custom"
-    );
+    assert!(exporter.matches("custom"));
+    assert!(exporter.matches("custom_alias"));
+    assert!(!exporter.matches("unknown"));
 }
 
 #[test]

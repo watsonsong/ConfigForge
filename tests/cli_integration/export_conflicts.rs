@@ -110,6 +110,50 @@ fn rejects_runtime_data_path_conflict_before_writing_files() {
 }
 
 #[test]
+fn rejects_artifact_output_that_escapes_project_root() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let outside_out_dir = temp_dir.path().join("../outside-config-forge-artifacts");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                input = "{}"
+
+                [[targets]]
+                name = "escape"
+
+                [[targets.exports]]
+                name = "json"
+                output = "{}"
+                type = "json"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            outside_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "escape",
+    ]);
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("escapes output root"));
+    assert!(!outside_out_dir.join("items.json").exists());
+    assert!(!outside_out_dir.join("game_rules.json").exists());
+}
+
+#[test]
 fn rejects_lexically_equivalent_runtime_data_path_conflict_before_writing_files() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let data_out_dir = temp_dir.path().join("out/data");

@@ -48,8 +48,8 @@ Runtime compliance runner 验证具体 reader adapter 对通用 contract 的解�
 | C++ `rapidjson_reader` | JSON | CMake + C++17 + RapidJSON | 已由 `runtime/cpp/compliance_test.cpp` 的 CTest target 覆盖，并保留 runtime smoke。 | 继续扩展 shared logical cases。 |
 | C++ `msgpackc_reader` | MessagePack | CMake + C++17 + msgpack-cxx + RapidJSON fixture materializer | 已由 `runtime/cpp/compliance_test.cpp` 的 CTest target 覆盖 JSON → MessagePack materialization，并保留 runtime smoke。 | 增加更多 MessagePack-only negative cases。 |
 | C++ `binary_reader` | Binary | CMake + C++17 | 已由 `runtime/cpp/compliance_test.cpp` 的 CTest target 覆盖 CFGB header、schema revision、record boundary、sequential rows 和 scalar/list reads。 | 增加 schema-derived binary materializer。 |
-| C# JSON / MessagePack / Binary | 多格式 | .NET SDK | 已由 `tests/csharp_java_runtime_compliance.rs` 覆盖标准 reader；standard_project 继续覆盖三格式 smoke。 | 增加更多格式特有 negative cases。 |
-| Java JSON / MessagePack / Binary | 多格式 | JDK | 已由 `tests/csharp_java_runtime_compliance.rs` 覆盖标准 reader；standard_project 继续覆盖三格式 smoke。 | 增加更多格式特有 negative cases。 |
+| C# JSON / MessagePack / Binary | 多格式 | .NET SDK | 已由 `tests/csharp_java_runtime_compliance.rs` 覆盖标准 reader；Binary 覆盖 bad magic、unsupported version、truncated header/body、wrong schema revision、invalid optional bitmap、invalid enum ordinal、huge length prefix、not exhausted 与 record/row boundary。standard_project 继续覆盖三格式 smoke。 | 增加 schema-derived binary materializer。 |
+| Java JSON / MessagePack / Binary | 多格式 | JDK | 已由 `tests/csharp_java_runtime_compliance.rs` 覆盖标准 reader；Binary 覆盖 bad magic、unsupported version、truncated header/body、wrong schema revision、invalid optional bitmap、invalid enum ordinal、huge length prefix、not exhausted 与 record/row boundary。standard_project 继续覆盖三格式 smoke。 | 增加 schema-derived binary materializer。 |
 
 ## Skip, fail-fast and network policy
 

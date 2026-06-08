@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result, code_artifact::CodeGenerator, data_artifact::DataFormatRegistry,
+    ConfigForgeError, Result,
+    code_artifact::CodeGenerator,
+    data_artifact::{AggregateDataExporter, DataFormatExporter},
 };
 
 use super::{
@@ -29,13 +31,17 @@ pub(crate) struct GeneratorRegistry {
 }
 
 impl GeneratorRegistry {
-    pub(crate) fn new(
-        data_registry: DataFormatRegistry,
+    pub(crate) fn new(generators: Vec<Box<dyn ArtifactGenerator>>) -> Self {
+        Self { generators }
+    }
+
+    pub(crate) fn from_parts(
+        table_exporters: Vec<Box<dyn DataFormatExporter>>,
+        aggregate_exporters: Vec<Box<dyn AggregateDataExporter>>,
         code_generators: Vec<Box<dyn CodeGenerator>>,
         direct_generators: Vec<Box<dyn ArtifactGenerator>>,
     ) -> Self {
         let mut generators = Vec::new();
-        let (table_exporters, aggregate_exporters) = data_registry.into_exporters();
         generators.extend(table_exporters.into_iter().map(|exporter| {
             Box::new(DataArtifactGenerator::table(exporter)) as Box<dyn ArtifactGenerator>
         }));
@@ -46,12 +52,13 @@ impl GeneratorRegistry {
             Box::new(CodeArtifactGenerator(generator)) as Box<dyn ArtifactGenerator>
         }));
         generators.extend(direct_generators);
-        Self { generators }
+        Self::new(generators)
     }
 
     pub(crate) fn with_builtin_generators() -> Self {
-        Self::new(
-            DataFormatRegistry::with_builtin_exporters(),
+        Self::from_parts(
+            Vec::new(),
+            Vec::new(),
             vec![
                 Box::new(RustCodeGenerator),
                 Box::new(CppCodeGenerator),
@@ -216,26 +223,22 @@ mod tests {
 
     #[test]
     fn registry_reports_ambiguous_generator_registration() {
-        let registry = GeneratorRegistry::new(
-            DataFormatRegistry::new(),
-            Vec::new(),
-            vec![
-                Box::new(StubGenerator {
-                    descriptor: GeneratorDescriptor::new(
-                        "custom",
-                        &[],
-                        GeneratorRequirements::meta_only(),
-                    ),
-                }),
-                Box::new(StubGenerator {
-                    descriptor: GeneratorDescriptor::new(
-                        "other",
-                        &["custom"],
-                        GeneratorRequirements::meta_only(),
-                    ),
-                }),
-            ],
-        );
+        let registry = GeneratorRegistry::new(vec![
+            Box::new(StubGenerator {
+                descriptor: GeneratorDescriptor::new(
+                    "custom",
+                    &[],
+                    GeneratorRequirements::meta_only(),
+                ),
+            }),
+            Box::new(StubGenerator {
+                descriptor: GeneratorDescriptor::new(
+                    "other",
+                    &["custom"],
+                    GeneratorRequirements::meta_only(),
+                ),
+            }),
+        ]);
 
         assert!(
             matches!(registry.require_generator("custom"), Err(ConfigForgeError::Validation(message)) if message.contains("ambiguous artifact generator registration for `custom`"))

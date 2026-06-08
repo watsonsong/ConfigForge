@@ -4,14 +4,15 @@
 
 ## 1. 当前状态：lexical path level
 
-当前实现中，Project path normalization、runtime planned output conflict check 和 Artifact Writer final conflict check 都使用 `lexical_normalize_path()` 这一类词法归一化 key：
+当前实现中，Project path normalization 使用 `lexical_normalize_path()` 这一类词法归一化；Artifact Writer 在配置 output root 后会额外做 root containment、已存在 ancestor canonicalize、macOS / Windows case-fold conflict key、Unix hardlink inode key 与 symlink escape 检查：
 
 - 折叠 `.`；
 - 在不越过 root / prefix 的前提下折叠可安全处理的 `..`；
 - 不要求目标路径存在；
 - 不访问文件系统；
-- 不解析 symlink；
-- 不按平台或卷的大小写敏感性折叠 path component。
+- Project config 归一化不解析 symlink；
+- Artifact conflict key 对已存在 ancestor 解析 symlink / filesystem alias；
+- Artifact conflict key 在 macOS / Windows 采用 ASCII case-fold 的平台启发式。
 
 这保证 dry-run、未创建输出目录、首次构建等场景都可以稳定规划 artifact path，但它不是 filesystem-aware conflict detection。
 
@@ -32,10 +33,8 @@
 - `out/a/../items.json` 与 `out/items.json`；
 - 两个 export task 规划出完全相同的 lexical-normalized path。
 
-当前不能保证提前发现以下问题：
+当前仍不能保证提前发现以下问题：
 
-- 大小写不敏感卷上的 `Out/items.json` 与 `out/items.json`；
-- `out_link/items.json` 与 `out/items.json`，其中 `out_link -> out`；
 - Windows junction / mount point alias；
 - 网络盘或虚拟文件系统暴露的特殊 alias。
 
@@ -104,7 +103,6 @@ Dry-run 必须执行与真实写入一致的 artifact planning 和 conflict chec
 
 ## 9. 当前开放事项
 
-- 设计并实现统一 `ArtifactPathKey` / `OutputPathConflictKey` helper。
-- 决定大小写敏感性探测方式：平台启发式、目录探测、还是卷 metadata。
+- 将 build/runtime 早期 planned path conflict check 和 artifact final check 进一步收敛到同一 filesystem-aware key builder。
+- 决定大小写敏感性探测方式：当前 Artifact Writer 使用平台启发式，长期可升级为目录探测或卷 metadata。
 - 决定 canonicalize 失败时是否输出 warning，以及 warning 是否进入 `BuildOutput.warnings`。
-- 将 build/runtime 早期 planned path conflict check 和 artifact final check 收敛到同一 key builder。

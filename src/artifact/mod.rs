@@ -83,9 +83,10 @@ pub struct ArtifactWriteEntry {
     pub written: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactWriter {
     mode: ArtifactWriteMode,
+    output_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,7 +110,15 @@ pub trait ArtifactProducer {
 
 impl ArtifactWriter {
     pub fn new(mode: ArtifactWriteMode) -> Self {
-        Self { mode }
+        Self {
+            mode,
+            output_root: None,
+        }
+    }
+
+    pub fn with_output_root(mut self, output_root: impl Into<PathBuf>) -> Self {
+        self.output_root = Some(output_root.into());
+        self
     }
 
     pub fn mode(self) -> ArtifactWriteMode {
@@ -117,7 +126,7 @@ impl ArtifactWriter {
     }
 
     pub fn open_sink(self) -> ArtifactSink {
-        ArtifactSink::new(self.mode)
+        ArtifactSink::new(self.mode, self.output_root)
     }
 
     pub fn write(self, artifacts: Vec<Artifact>) -> Result<ArtifactWriteResult> {
@@ -136,13 +145,15 @@ impl ArtifactWriter {
 #[derive(Debug, Clone)]
 pub struct ArtifactSink {
     mode: ArtifactWriteMode,
+    output_root: Option<PathBuf>,
     inner: Arc<ArtifactSinkInner>,
 }
 
 impl ArtifactSink {
-    fn new(mode: ArtifactWriteMode) -> Self {
+    fn new(mode: ArtifactWriteMode, output_root: Option<PathBuf>) -> Self {
         Self {
             mode,
+            output_root: output_root.map(|path| lexical_normalize_path(&path)),
             inner: Arc::new(ArtifactSinkInner {
                 state: Mutex::new(ArtifactSinkState::default()),
             }),
@@ -151,7 +162,8 @@ impl ArtifactSink {
 
     pub fn create(&self, path: impl Into<PathBuf>) -> Result<ArtifactWriteStream> {
         let path = path.into();
-        let normalized_path = lexical_normalize_path(&path);
+        let normalized_path = normalize_artifact_path(self.output_root.as_deref(), &path)?;
+        let conflict_key = artifact_conflict_key(self.output_root.as_deref(), &normalized_path)?;
         let (index, temp_path) = {
             let mut state = self.inner.lock_state();
             if state.closed {
@@ -159,8 +171,18 @@ impl ArtifactSink {
                     "artifact sink is already closed".to_owned(),
                 ));
             }
-            if state.paths.contains_key(&normalized_path) {
-                let message = format!("multiple artifacts target `{}`", normalized_path.display());
+            if state.paths.contains_key(&normalized_path)
+                || state.conflict_keys.contains_key(&conflict_key)
+            {
+                let existing = state
+                    .conflict_keys
+                    .get(&conflict_key)
+                    .unwrap_or(&normalized_path);
+                let message = format!(
+                    "multiple artifacts target `{}` (conflicts with `{}`)",
+                    normalized_path.display(),
+                    existing.display()
+                );
                 if state.first_error.is_none() {
                     state.first_error = Some(ConfigForgeError::Validation(message.clone()));
                 }
@@ -177,6 +199,9 @@ impl ArtifactSink {
             state
                 .paths
                 .insert(normalized_path.clone(), ArtifactPathState::Open);
+            state
+                .conflict_keys
+                .insert(conflict_key, normalized_path.clone());
             let temp_path = (self.mode == ArtifactWriteMode::TempCommit)
                 .then(|| temp_path_for(&normalized_path, index));
             (index, temp_path)
@@ -487,6 +512,7 @@ struct ArtifactSinkState {
     next_index: usize,
     closed: bool,
     paths: BTreeMap<PathBuf, ArtifactPathState>,
+    conflict_keys: BTreeMap<PathBuf, PathBuf>,
     entries: BTreeMap<PathBuf, ArtifactWriteEntry>,
     temp_files: BTreeMap<PathBuf, PathBuf>,
     first_error: Option<ConfigForgeError>,
@@ -512,6 +538,105 @@ fn plan_artifacts(artifacts: Vec<Artifact>) -> Result<Vec<Artifact>> {
         by_path.insert(artifact.path.clone(), artifact);
     }
     Ok(by_path.into_values().collect())
+}
+
+fn normalize_artifact_path(output_root: Option<&Path>, path: &Path) -> Result<PathBuf> {
+    let normalized_path = if let Some(output_root) = output_root {
+        let normalized_root = lexical_normalize_path(output_root);
+        let candidate = if path.is_absolute() {
+            lexical_normalize_path(path)
+        } else {
+            lexical_normalize_path(&normalized_root.join(path))
+        };
+        if !path_is_within_root(&candidate, &normalized_root)
+            && !filesystem_path_is_within_root(&candidate, &normalized_root)
+        {
+            return Err(ConfigForgeError::Validation(format!(
+                "artifact path `{}` escapes output root `{}`",
+                path.display(),
+                normalized_root.display()
+            )));
+        }
+        candidate
+    } else {
+        lexical_normalize_path(path)
+    };
+    Ok(normalized_path)
+}
+
+fn path_is_within_root(path: &Path, root: &Path) -> bool {
+    path == root || path.starts_with(root)
+}
+
+fn filesystem_path_is_within_root(path: &Path, root: &Path) -> bool {
+    let root_key = filesystem_aware_path_key(root).unwrap_or_else(|| root.to_path_buf());
+    let path_key = filesystem_aware_path_key(path).unwrap_or_else(|| path.to_path_buf());
+    let root_key = case_fold_conflict_key(root_key);
+    let path_key = case_fold_conflict_key(path_key);
+    path_is_within_root(&path_key, &root_key)
+}
+
+fn artifact_conflict_key(output_root: Option<&Path>, normalized_path: &Path) -> Result<PathBuf> {
+    let alias_key =
+        filesystem_aware_path_key(normalized_path).unwrap_or_else(|| normalized_path.to_path_buf());
+    if let Some(output_root) = output_root {
+        let root_key = filesystem_aware_path_key(&lexical_normalize_path(output_root))
+            .unwrap_or_else(|| lexical_normalize_path(output_root));
+        let root_key = case_fold_conflict_key(root_key);
+        if !path_is_within_root(&case_fold_conflict_key(alias_key.clone()), &root_key) {
+            return Err(ConfigForgeError::Validation(format!(
+                "artifact path `{}` escapes output root `{}` through filesystem alias",
+                normalized_path.display(),
+                output_root.display()
+            )));
+        }
+    }
+    Ok(existing_file_identity_key(normalized_path)
+        .unwrap_or_else(|| case_fold_conflict_key(alias_key)))
+}
+
+fn filesystem_aware_path_key(path: &Path) -> Option<PathBuf> {
+    let mut suffix = Vec::new();
+    let mut ancestor = path;
+    while !ancestor.exists() {
+        let file_name = ancestor.file_name()?;
+        suffix.push(file_name.to_owned());
+        ancestor = ancestor.parent()?;
+    }
+    let mut key = ancestor.canonicalize().ok()?;
+    for component in suffix.iter().rev() {
+        key.push(component);
+    }
+    Some(lexical_normalize_path(&key))
+}
+
+#[cfg(unix)]
+fn existing_file_identity_key(path: &Path) -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = fs::metadata(path).ok()?;
+    metadata.is_file().then(|| {
+        PathBuf::from(format!(
+            "configforge-inode-key/{}/{}",
+            metadata.dev(),
+            metadata.ino()
+        ))
+    })
+}
+
+#[cfg(not(unix))]
+fn existing_file_identity_key(_path: &Path) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(any(target_os = "macos", windows))]
+fn case_fold_conflict_key(path: PathBuf) -> PathBuf {
+    PathBuf::from(path.to_string_lossy().to_ascii_lowercase())
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn case_fold_conflict_key(path: PathBuf) -> PathBuf {
+    path
 }
 
 fn open_file_for_write(path: &Path) -> Result<File> {
@@ -1059,5 +1184,149 @@ mod tests {
             matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
         );
         assert!(!temp_dir.path().join("out").exists());
+    }
+
+    #[test]
+    fn output_root_rejects_absolute_path_escape() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let root = temp_dir.path().join("project");
+        let outside = temp_dir.path().join("outside/generated.rs");
+
+        let error = ArtifactWriter::new(ArtifactWriteMode::Direct)
+            .with_output_root(&root)
+            .write(vec![Artifact::text(&outside, "escape")])
+            .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("escapes output root"))
+        );
+        assert!(!outside.exists());
+    }
+
+    #[test]
+    fn output_root_rejects_parent_escape() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let root = temp_dir.path().join("project");
+
+        let error = ArtifactWriter::new(ArtifactWriteMode::DryRun)
+            .with_output_root(&root)
+            .write(vec![Artifact::text("../outside/generated.rs", "escape")])
+            .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("escapes output root"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_root_detects_symlink_alias_conflict() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let root = temp_dir.path().join("project");
+        let out = root.join("out");
+        let alias = root.join("out_alias");
+        fs::create_dir_all(&out).expect("create out dir");
+        std::os::unix::fs::symlink(&out, &alias).expect("create symlink alias");
+
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun)
+            .with_output_root(&root)
+            .open_sink();
+        sink.write_text(out.join("items.json"), "first")
+            .expect("first path should plan");
+        let error = sink
+            .write_text(alias.join("items.json"), "second")
+            .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_root_rejects_existing_symlink_target_escape() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let root = temp_dir.path().join("project");
+        let outside = temp_dir.path().join("outside.txt");
+        let symlink_path = root.join("out/generated.rs");
+        fs::create_dir_all(symlink_path.parent().expect("out dir")).expect("create out dir");
+        fs::write(&outside, "outside").expect("write outside file");
+        std::os::unix::fs::symlink(&outside, &symlink_path).expect("create symlink file");
+
+        let error = ArtifactWriter::new(ArtifactWriteMode::Direct)
+            .with_output_root(&root)
+            .write(vec![Artifact::text(&symlink_path, "new")])
+            .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("filesystem alias"))
+        );
+        assert_eq!(
+            fs::read_to_string(outside).expect("outside file"),
+            "outside"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_root_detects_existing_hardlink_alias_conflict() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let root = temp_dir.path().join("project");
+        let first = root.join("out/a.txt");
+        let second = root.join("out/b.txt");
+        fs::create_dir_all(first.parent().expect("out dir")).expect("create out dir");
+        fs::write(&first, "same inode").expect("write first hardlink target");
+        fs::hard_link(&first, &second).expect("create hardlink alias");
+
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun)
+            .with_output_root(&root)
+            .open_sink();
+        sink.write_text(&first, "first")
+            .expect("first path should plan");
+        let error = sink.write_text(&second, "second").unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
+        );
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn output_root_detects_case_insensitive_collision() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let root = temp_dir.path().join("project");
+
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun)
+            .with_output_root(&root)
+            .open_sink();
+        sink.write_text("Out/items.json", "first")
+            .expect("first path should plan");
+        let error = sink.write_text("out/items.json", "second").unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
+        );
+    }
+
+    #[test]
+    fn temp_commit_reports_rename_failure_and_cleans_temp_file() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let root = temp_dir.path().join("project");
+        let path = root.join("out/generated.rs");
+        fs::create_dir_all(&path).expect("create final path as directory");
+
+        let error = ArtifactWriter::new(ArtifactWriteMode::TempCommit)
+            .with_output_root(&root)
+            .write(vec![Artifact::text(&path, "content")])
+            .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::WriteFile { path: error_path, .. } if error_path == path)
+        );
+        let temp_files = fs::read_dir(path.parent().expect("out dir"))
+            .expect("read out dir")
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .expect("collect out dir");
+        assert!(temp_files.iter().all(|entry| entry.path() == path));
     }
 }

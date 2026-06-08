@@ -43,8 +43,8 @@ pub use data::{
     SourceProviderResource, SourceReadPlan,
 };
 pub use data_artifact::{
-    DataFormatExporter, DataFormatRegistry, ExportedTable, ExportedTablePayload, ExportedValue,
-    RuntimeArtifactPlan, TargetDataConfig,
+    DataFormatExporter, ExportedTable, ExportedTablePayload, ExportedValue, RuntimeArtifactPlan,
+    TargetDataConfig,
 };
 pub use diagnostic::{
     ConfigForgeError, Diagnostic, DiagnosticEntry, DiagnosticLocation, DiagnosticReport,

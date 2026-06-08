@@ -70,7 +70,9 @@ public class ConfigForgeBinaryRuntimeDataReader {
             throw new IllegalStateException("optional slot count must be non-negative");
         }
         int byteCount = (optionalSlotCount + 7) / 8;
-        records.add(new RecordState(readExact(byteCount), 0));
+        byte[] bitmap = readExact(byteCount);
+        validateOptionalBitmap(bitmap, optionalSlotCount);
+        records.add(new RecordState(bitmap, 0));
     }
 
     public void endRecord() {
@@ -138,6 +140,17 @@ public class ConfigForgeBinaryRuntimeDataReader {
             throw new IllegalStateException("optional slot is out of current record bitmap");
         }
         return (record.bitmap[byteIndex] & (1 << (slotIndex % 8))) != 0;
+    }
+
+    private void validateOptionalBitmap(byte[] bitmap, int optionalSlotCount) {
+        int usedBitsInLastByte = optionalSlotCount % 8;
+        if (bitmap.length == 0 || usedBitsInLastByte == 0) {
+            return;
+        }
+        int unusedMask = 0xff << usedBitsInLastByte;
+        if ((bitmap[bitmap.length - 1] & unusedMask) != 0) {
+            throw new IllegalStateException("invalid optional bitmap padding bits");
+        }
     }
 
     private void parseHeader() {

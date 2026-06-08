@@ -590,14 +590,17 @@ mod tests {
         let max_active_plans = Arc::new(AtomicUsize::new(0));
         let active_exports = Arc::new(AtomicUsize::new(0));
         let max_active_exports = Arc::new(AtomicUsize::new(0));
-        let mut data_registry = crate::data_artifact::DataFormatRegistry::new();
-        data_registry.register_aggregate(InstrumentedAggregateExporter {
-            active_plans: active_plans.clone(),
-            max_active_plans: max_active_plans.clone(),
-            active_exports: active_exports.clone(),
-            max_active_exports: max_active_exports.clone(),
-        });
-        let generator_registry = GeneratorRegistry::new(data_registry, Vec::new(), Vec::new());
+        let generator_registry = GeneratorRegistry::from_parts(
+            Vec::new(),
+            vec![Box::new(InstrumentedAggregateExporter {
+                active_plans: active_plans.clone(),
+                max_active_plans: max_active_plans.clone(),
+                active_exports: active_exports.clone(),
+                max_active_exports: max_active_exports.clone(),
+            })],
+            Vec::new(),
+            Vec::new(),
+        );
         let meta = minimal_meta_model();
         let linked_meta = meta.link().expect("meta should link");
         let raw_sources = raw_sources();
@@ -679,9 +682,12 @@ mod tests {
 
     #[test]
     fn meta_and_data_parallel_planning_rejects_path_conflicts_before_generation() {
-        let mut data_registry = crate::data_artifact::DataFormatRegistry::new();
-        data_registry.register(DuplicatePathExporter);
-        let generator_registry = GeneratorRegistry::new(data_registry, Vec::new(), Vec::new());
+        let generator_registry = GeneratorRegistry::from_parts(
+            vec![Box::new(DuplicatePathExporter)],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
         let meta = MetaModel::from_toml_str(
             r#"
                 [[tables]]

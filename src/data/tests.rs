@@ -1051,6 +1051,60 @@ fn data_loader_read_sources_returns_raw_source_data_before_normalize() {
 }
 
 #[test]
+fn data_loader_rejects_absolute_source_escape() {
+    let dir = tempdir().expect("temp dir should exist");
+    let data_root = dir.path().join("data");
+    let outside = dir.path().join("outside.csv");
+    fs::create_dir_all(&data_root).expect("data root should be created");
+    fs::write(&outside, "id\nID\n1\n").expect("outside csv should be written");
+
+    let error = DataLoader::new(&data_root)
+        .load_source(&plan_source("items", &outside.display().to_string()))
+        .unwrap_err();
+
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("escapes data root"))
+    );
+}
+
+#[test]
+fn data_loader_rejects_parent_source_escape() {
+    let dir = tempdir().expect("temp dir should exist");
+    let data_root = dir.path().join("data");
+    fs::create_dir_all(&data_root).expect("data root should be created");
+
+    let error = DataLoader::new(&data_root)
+        .load_source(&plan_source("items", "../outside.csv"))
+        .unwrap_err();
+
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("escapes data root"))
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn data_loader_rejects_symlink_source_escape() {
+    let dir = tempdir().expect("temp dir should exist");
+    let data_root = dir.path().join("data");
+    let outside_dir = dir.path().join("outside");
+    let outside = outside_dir.join("items.csv");
+    let source_link = data_root.join("linked_items.csv");
+    fs::create_dir_all(&data_root).expect("data root should be created");
+    fs::create_dir_all(&outside_dir).expect("outside dir should be created");
+    fs::write(&outside, "id\nID\n1\n").expect("outside csv should be written");
+    std::os::unix::fs::symlink(&outside, &source_link).expect("source symlink should be created");
+
+    let error = DataLoader::new(&data_root)
+        .load_source(&plan_source("items", "linked_items.csv"))
+        .unwrap_err();
+
+    assert!(
+        matches!(error, ConfigForgeError::Validation(message) if message.contains("filesystem alias"))
+    );
+}
+
+#[test]
 fn data_load_plan_rejects_missing_source() {
     let meta: MetaModel = toml::from_str(
         r#"

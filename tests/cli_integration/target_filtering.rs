@@ -15,7 +15,7 @@ fn builds_target_from_imported_project_config_fragments() {
     fs::create_dir_all(&meta_dir).expect("meta dir should be created");
     fs::create_dir_all(&targets_dir).expect("config dirs should be created");
 
-    let out_dir = temp_dir.path().join("generated/rust");
+    let out_dir = config_dir.join("generated/rust");
     fs::write(
         config_dir.join("ConfigForge.toml"),
         r#"

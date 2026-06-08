@@ -367,8 +367,8 @@
             <tr><td>ObjectTable</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 CSV <code>key,value</code> 常量表、单 object runtime payload，并可作为 FK source 引用 CollectionTable unique / primary index；多源、override、作为 FK target 暂不支持。</td></tr>
             <tr><td>Struct fields / expanded value</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 named struct、JSON cell、source-driven expanded value、recursive nested struct、target-aware child filtering 和 child default；array/map 与 struct child validators 待后续。</td></tr>
             <tr><td>Foreign keys</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 field/table-level FK、link、Meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique / primary index。</td></tr>
-            <tr><td>Runtime data export</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 JSON、MessagePack、bin table data exporter 与 gettext POT 聚合 exporter；runtime data 会在导出前使用 asset resolver 物化 canonical asset string。Asset Manifest 和更多格式是后续扩展。</td></tr>
-            <tr><td>Asset validation / completion</td><td><span class="tag orange">Implemented MVP</span></td><td>已实现 Project search paths + Meta asset_kinds / extends，在 ExportView 上校验资源引用、执行 Unreal mounted object / wrapper / 短路径唯一候选补齐，并让 runtime data 输出 canonical asset string；Asset Manifest 输出仍放到后续阶段。</td></tr>
+            <tr><td>Runtime data export</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 JSON、MessagePack、bin table data generator 与 gettext POT、Lua、Asset Manifest 等 aggregate / mixed generator；runtime data 会在导出前使用 asset resolver 物化 canonical asset string。内置 data-backed generators 已直接注册到 GeneratorRegistry，更多格式仍可后续扩展。</td></tr>
+            <tr><td>Asset validation / completion / manifest</td><td><span class="tag orange">Implemented MVP</span></td><td>已实现 Project search paths + Meta asset_kinds / extends，在 ExportView 上校验资源引用、执行 Unreal mounted object / wrapper / 短路径唯一候选补齐，并让 runtime data 输出 canonical asset string；Asset Manifest 已支持 deterministic JSON 和 Unreal DataTable 兼容 CSV 输出。</td></tr>
             <tr><td>Codegen backends</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 Rust / TypeScript / C++ 基础生成、loader/repository helpers 和 target-aware IR。</td></tr>
             <tr><td>Diagnostics</td><td><span class="tag orange">Implemented MVP</span></td><td><code>src/diagnostic/</code> 已提供 severity、location、formatting、report aggregation 和 crate error facade；Data/Exporter/Codegen 领域 code 与完整 source trace 仍可增强。</td></tr>
             <tr><td>Designer Validation Report</td><td><span class="tag orange">Implemented MVP</span></td><td>已基于 ValidationReport / DiagnosticReport 实现 HTML / Markdown / JSON / CSV 报告、CLI <code>--report</code> 导出和 build <code>validation_report</code> 附加产物；owner/domain 映射、current value / expected enrichment 和部分 build 选项仍是后续增强。详见 <a href="../10-designer-validation-report.md">10-designer-validation-report.md</a>。</td></tr>
@@ -386,8 +386,8 @@
             <rect class="box root" x="390" y="25" width="200" height="72" rx="14"/><text class="txt" x="490" y="55" text-anchor="middle">Project Config</text><text class="small" x="490" y="77" text-anchor="middle">imports / assets.search_paths</text>
             <line class="arr" x1="490" y1="97" x2="205" y2="145"/><line class="arr" x1="490" y1="97" x2="490" y2="145"/><line class="arr" x1="490" y1="97" x2="775" y2="145"/>
             <rect class="box meta" x="70" y="145" width="270" height="95" rx="14"/><text class="txt" x="205" y="176" text-anchor="middle">Meta Sections</text><text class="small" x="205" y="199" text-anchor="middle">tables / structs / asset_kinds</text><text class="small" x="205" y="219" text-anchor="middle">validators / foreign keys / regex</text>
-            <rect class="box target" x="355" y="145" width="270" height="95" rx="14"/><text class="txt" x="490" y="176" text-anchor="middle">Target Config</text><text class="small" x="490" y="199" text-anchor="middle">tags / data / code tasks</text><text class="small" x="490" y="219" text-anchor="middle">output / format / naming</text>
-            <rect class="box plugin" x="640" y="145" width="270" height="95" rx="14"/><text class="txt" x="775" y="176" text-anchor="middle">Registries</text><text class="small" x="775" y="199" text-anchor="middle">data format / generator</text><text class="small" x="775" y="219" text-anchor="middle">validator / future plugins</text>
+            <rect class="box target" x="355" y="145" width="270" height="95" rx="14"/><text class="txt" x="490" y="176" text-anchor="middle">Target Config</text><text class="small" x="490" y="199" text-anchor="middle">tags / exports tasks</text><text class="small" x="490" y="219" text-anchor="middle">type / output / options</text>
+            <rect class="box plugin" x="640" y="145" width="270" height="95" rx="14"/><text class="txt" x="775" y="176" text-anchor="middle">Registries</text><text class="small" x="775" y="199" text-anchor="middle">generator / validator</text><text class="small" x="775" y="219" text-anchor="middle">future plugins</text>
             <line class="arr" x1="205" y1="240" x2="205" y2="295"/><line class="arr" x1="490" y1="240" x2="490" y2="295"/><line class="arr" x1="775" y1="240" x2="775" y2="295"/>
             <rect class="box" x="70" y="295" width="270" height="78" rx="14"/><text class="txt" x="205" y="326" text-anchor="middle">MetaModel</text><text class="small" x="205" y="349" text-anchor="middle">canonical, linked, merged</text>
             <rect class="box" x="355" y="295" width="270" height="78" rx="14"/><text class="txt" x="490" y="326" text-anchor="middle">Target Tags</text><text class="small" x="490" y="349" text-anchor="middle">client / server / debug / shipping</text>
@@ -411,15 +411,16 @@ primary_index = "by_id"
 name = "client_shipping"
 tags = ["client", "shipping"]
 
-[[targets.data]]
-input = "Data"
+[[targets.exports]]
+name = "runtime_json"
+type = "json"
 output = "Generated/Data/ClientShipping"
-format = "json"
 
-[[targets.code]]
-language = "typescript"
+[[targets.exports]]
+name = "client_ts"
+type = "typescript"
 output = "Generated/Code/TypeScript"</code></pre>
-        <div class="callout ok"><strong>Project 元信息：</strong><code>copyright</code> 可用于生成代码、schema、manifest 等文件头。Artifact Writer 的 <code>temp_commit</code> / <code>direct</code> 是目标态设计，当前写文件仍由 build/exporter/codegen 路径直接完成并先做路径冲突检查。</div>
+        <div class="callout ok"><strong>Project 元信息：</strong><code>copyright</code> 可用于生成代码、schema、manifest 等文件头。Artifact Writer 的 <code>dry_run</code> / <code>direct</code> / <code>temp_commit</code> 已通过共享 <code>ArtifactSink</code> 接入 build 主路径，并执行 artifact path conflict 与 output root containment 检查。</div>
         <h3>Asset search paths 与 asset kinds</h3>
         <pre><code>[assets]
 case_sensitive = true

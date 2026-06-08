@@ -83,6 +83,7 @@ pub trait AggregateDataExporter: Send + Sync {
         target_tags: &TargetTags,
     ) -> Result<Vec<PathBuf>>;
 
+    #[allow(dead_code)]
     fn export(
         &self,
         out_dir: &std::path::Path,
@@ -107,73 +108,4 @@ pub trait AggregateDataExporter: Send + Sync {
         data_set: &DataSet,
         sink: &ArtifactSink,
     ) -> Result<()>;
-
-    fn matches(&self, format: &str) -> bool {
-        self.name() == format || self.aliases().contains(&format)
-    }
-}
-
-#[derive(Default)]
-pub struct DataFormatRegistry {
-    exporters: Vec<Box<dyn DataFormatExporter>>,
-    aggregate_exporters: Vec<Box<dyn AggregateDataExporter>>,
-}
-
-impl DataFormatRegistry {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_builtin_exporters() -> Self {
-        Self::new()
-    }
-
-    pub fn register(&mut self, exporter: impl DataFormatExporter + 'static) {
-        self.exporters.push(Box::new(exporter));
-    }
-
-    pub fn register_boxed(&mut self, exporter: Box<dyn DataFormatExporter>) {
-        self.exporters.push(exporter);
-    }
-
-    pub fn register_aggregate(&mut self, exporter: impl AggregateDataExporter + 'static) {
-        self.aggregate_exporters.push(Box::new(exporter));
-    }
-
-    pub fn register_aggregate_boxed(&mut self, exporter: Box<dyn AggregateDataExporter>) {
-        self.aggregate_exporters.push(exporter);
-    }
-
-    pub fn get(&self, format: &str) -> Option<&dyn DataFormatExporter> {
-        self.exporters
-            .iter()
-            .find(|exporter| exporter.matches(format))
-            .map(Box::as_ref)
-    }
-
-    pub fn require(&self, format: &str) -> Result<&dyn DataFormatExporter> {
-        self.get(format).ok_or_else(|| {
-            ConfigForgeError::Validation(format!("no data exporter registered for `{format}`"))
-        })
-    }
-
-    pub fn get_aggregate(&self, format: &str) -> Option<&dyn AggregateDataExporter> {
-        self.aggregate_exporters
-            .iter()
-            .find(|exporter| exporter.matches(format))
-            .map(Box::as_ref)
-    }
-
-    pub fn formats(&self) -> impl Iterator<Item = &dyn DataFormatExporter> {
-        self.exporters.iter().map(Box::as_ref)
-    }
-
-    pub(crate) fn into_exporters(
-        self,
-    ) -> (
-        Vec<Box<dyn DataFormatExporter>>,
-        Vec<Box<dyn AggregateDataExporter>>,
-    ) {
-        (self.exporters, self.aggregate_exporters)
-    }
 }

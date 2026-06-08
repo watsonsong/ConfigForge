@@ -3,6 +3,7 @@
 
 use std::{
     collections::BTreeMap,
+    fs,
     path::Path,
     path::PathBuf,
     time::Instant,
@@ -76,6 +77,7 @@ fn build_target_inner(
         .project_path
         .parent()
         .unwrap_or_else(|| Path::new("."));
+    let artifact_output_root = artifact_output_root(options.project_path)?;
     let mut target = trace.record("normalize_target", None, || {
         project.target(options.target_name)?.normalize()
     })?;
@@ -85,7 +87,9 @@ fn build_target_inner(
     let meta_set = project.raw_meta_model();
     let target_tags = target.effective_target_tags(options.extra_tags);
 
-    let sink = ArtifactWriter::new(options.artifact_write_mode).open_sink();
+    let sink = ArtifactWriter::new(options.artifact_write_mode)
+        .with_output_root(artifact_output_root)
+        .open_sink();
     let project_info = ArtifactProjectInfo::from(&project.project);
 
     let pipeline_output = execute_target_pipeline(TargetPipelineExecutionContext {
@@ -107,6 +111,18 @@ fn build_target_inner(
         warnings: pipeline_output.warnings,
         artifacts,
     })
+}
+
+fn artifact_output_root(project_path: &Path) -> Result<PathBuf> {
+    let canonical_project_path =
+        fs::canonicalize(project_path).map_err(|source| ConfigForgeError::ReadFile {
+            path: project_path.to_path_buf(),
+            source,
+        })?;
+    Ok(canonical_project_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf())
 }
 
 fn add_cli_validation_report_task(
@@ -1252,11 +1268,8 @@ mod tests {
         let generators = vec![Box::new(SinkOnlyGenerator {
             called: called.clone(),
         }) as Box<dyn CodeGenerator>];
-        let generator_registry = GeneratorRegistry::new(
-            crate::data_artifact::DataFormatRegistry::new(),
-            generators,
-            Vec::new(),
-        );
+        let generator_registry =
+            GeneratorRegistry::from_parts(Vec::new(), Vec::new(), generators, Vec::new());
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
         let context = MetaOnlyGeneratorContext {
             project_root: Path::new("."),
