@@ -1269,7 +1269,7 @@ mod tests {
             called: called.clone(),
         }) as Box<dyn CodeGenerator>];
         let generator_registry =
-            GeneratorRegistry::from_parts(Vec::new(), Vec::new(), generators, Vec::new());
+            GeneratorRegistry::from_compat_parts(Vec::new(), Vec::new(), generators, Vec::new());
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
         let context = MetaOnlyGeneratorContext {
             project_root: Path::new("."),

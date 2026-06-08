@@ -77,10 +77,25 @@
 - [x] 确认 `runtime_contract` 不依赖 generator/toolkit 上层模块。
 - [x] 补充 grep-based regression，防止 Build production code 新增按 code/data toolkit 分类分发。
 
+## Phase 8 — Registry / adapter 收口
+
+目标：让 `GeneratorRegistry` 的 production 构造只接受 `Vec<Box<dyn ArtifactGenerator>>`，把 `DataFormatExporter` / `AggregateDataExporter` / `CodeGenerator` 退回 toolkit compatibility facet，不再作为 build-facing registration shape。
+
+- [x] 内置 data-backed generators 直接注册 concrete `ArtifactGenerator`：JSON / MessagePack / bin / POT / Lua / Asset Manifest 不再通过 `DataArtifactGenerator` adapter 进入 builtin registry。
+- [x] `GeneratorRegistry::with_builtin_generators()` 改为构造单一 `Vec<Box<dyn ArtifactGenerator>>`；不再把内置 generator 分成 `table_exporters` / `aggregate_exporters` / `code_generators` / `direct_generators` 四类。
+- [x] 将多输入 registry constructor 降级为 `#[cfg(test)] from_compat_parts()`，只服务迁移期单元测试和 compatibility facet 覆盖，不作为 production API 使用。
+- [ ] 将内置 language generators 逐步从 `CodeGenerator` adapter 迁为 direct `ArtifactGenerator`；迁移顺序建议按测试覆盖与共享程度推进：Rust → TypeScript → C++ → C# → Java → CppUnreal。每迁移一种语言，都应保留其 renderer / naming / formatting / CodeModel 复用在 `code_artifact` toolkit 内，而不是把 build-facing requirements 放在 `CodeGenerator` trait 上。
+- [ ] 拆分 `CodeArtifactGenerator` adapter 的职责：目标态 `CodeGenerator` 只描述 language renderer / toolkit facet（language id、alias、默认 module、naming、formatting、file header、render entry），requirements 与 artifact planning 由 concrete language `ArtifactGenerator` 提供。
+- [ ] 评估并改名或删除 `DataArtifactGenerator` adapter：若 external compatibility 仍需要把 `DataFormatExporter` / `AggregateDataExporter` 包装成 generator，应迁到明确命名的 compatibility module，并在文档中标注“不用于内置 generator 注册”；若没有外部插件入口，则删除 adapter。
+- [ ] 评估 `DataFormatExporter` 名称是否仍会误导为 build-facing exporter registry；若继续保留，应改名为 `RuntimeTableFormat` / `RuntimeTableSerializer` 这类 table serialization facet，并只暴露 plan / serialize helper。
+- [ ] 完成后删除 `from_compat_parts()`，测试改用直接的 stub `ArtifactGenerator` 或明确的 compatibility adapter 测试；grep 应确保 production code 中不存在 `GeneratorRegistry::from_compat_parts` / `DataArtifactGenerator` / `CodeArtifactGenerator` 注册路径。
+- [ ] 同步更新 `08-exporter-module-detail-design.md`、`09-codegen-module-detail-design.md`、`09h-codegen-generator-api-and-tests.md` 和 `10-build-module-detail-design.md`，确保它们描述的是单一 build-facing generator 模型，而非四类 registry 输入。
+
 ## Completion criteria
 
 - [ ] 所有 concrete export type 均位于 `src/generator/<type_id>/` 或有明确保留理由。
 - [x] `build` 只通过 `GeneratorRegistry` 查询 requirements 与执行 generator。
 - [x] `code artifact toolkit` / `data artifact toolkit` 不再承担 concrete generator 归属职责。
+- [ ] `GeneratorRegistry` production API 只接受 direct `ArtifactGenerator`；adapter / compatibility constructor 不参与内置注册路径。
 - [ ] 文档中的 source layout、glossary、Design、Implementation 与实际代码路径一致。
 - [ ] `cargo fmt`、`cargo test`、相关 CLI integration 和 runtime compliance 测试通过。

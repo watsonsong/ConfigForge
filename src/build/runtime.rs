@@ -590,7 +590,7 @@ mod tests {
         let max_active_plans = Arc::new(AtomicUsize::new(0));
         let active_exports = Arc::new(AtomicUsize::new(0));
         let max_active_exports = Arc::new(AtomicUsize::new(0));
-        let generator_registry = GeneratorRegistry::from_parts(
+        let generator_registry = GeneratorRegistry::from_compat_parts(
             Vec::new(),
             vec![Box::new(InstrumentedAggregateExporter {
                 active_plans: active_plans.clone(),
@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn meta_and_data_parallel_planning_rejects_path_conflicts_before_generation() {
-        let generator_registry = GeneratorRegistry::from_parts(
+        let generator_registry = GeneratorRegistry::from_compat_parts(
             vec![Box::new(DuplicatePathExporter)],
             Vec::new(),
             Vec::new(),
