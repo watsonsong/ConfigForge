@@ -21,6 +21,7 @@ pub struct DataTable {
     pub name: String,
     pub rows: Vec<DataRow>,
     pub row_sources: Vec<RowSourceInfo>,
+    pub cell_sources: Vec<BTreeMap<String, CellSourceInfo>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +37,14 @@ pub struct RowSourceInfo {
     pub fragments: Vec<String>,
     pub source_role: SourceRole,
     pub replaces: Option<RowSourceTrace>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellSourceInfo {
+    pub source_row_number: usize,
+    pub source_column_number: usize,
+    pub source_column_name: String,
+    pub column_index: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,10 +128,12 @@ impl RawSourceData {
 impl DataTable {
     pub fn new(name: impl Into<String>, rows: Vec<DataRow>) -> Self {
         let row_sources = default_row_sources(rows.len());
+        let cell_sources = default_cell_sources(rows.len());
         Self {
             name: name.into(),
             rows,
             row_sources,
+            cell_sources,
         }
     }
 
@@ -140,15 +151,58 @@ impl DataTable {
                 row_sources.len()
             )));
         }
+        Ok(Self::new_with_sources_and_cells(
+            name,
+            rows,
+            row_sources,
+            Vec::new(),
+        )?)
+    }
+
+    pub fn new_with_sources_and_cells(
+        name: impl Into<String>,
+        rows: Vec<DataRow>,
+        row_sources: Vec<RowSourceInfo>,
+        cell_sources: Vec<BTreeMap<String, CellSourceInfo>>,
+    ) -> Result<Self> {
+        let name = name.into();
+        if rows.len() != row_sources.len() {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` has {} rows but {} row source records",
+                name,
+                rows.len(),
+                row_sources.len()
+            )));
+        }
+        if !cell_sources.is_empty() && rows.len() != cell_sources.len() {
+            return Err(ConfigForgeError::Validation(format!(
+                "table `{}` has {} rows but {} cell source records",
+                name,
+                rows.len(),
+                cell_sources.len()
+            )));
+        }
+        let cell_sources = if cell_sources.is_empty() {
+            vec![BTreeMap::new(); rows.len()]
+        } else {
+            cell_sources
+        };
         Ok(Self {
             name,
             rows,
             row_sources,
+            cell_sources,
         })
     }
 
     pub fn row_source(&self, row_index: usize) -> Option<&RowSourceInfo> {
         self.row_sources.get(row_index)
+    }
+
+    pub fn cell_source(&self, row_index: usize, field: &str) -> Option<&CellSourceInfo> {
+        self.cell_sources
+            .get(row_index)
+            .and_then(|sources| sources.get(field))
     }
 
     pub fn row_count(&self) -> usize {
@@ -171,4 +225,8 @@ fn default_row_sources(row_count: usize) -> Vec<RowSourceInfo> {
             replaces: None,
         })
         .collect()
+}
+
+fn default_cell_sources(row_count: usize) -> Vec<BTreeMap<String, CellSourceInfo>> {
+    vec![BTreeMap::new(); row_count]
 }

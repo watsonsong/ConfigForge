@@ -13,7 +13,9 @@ pub(crate) mod value_conversion;
 
 pub use self::csv::CsvDataReader;
 pub use self::loader::DataLoader;
-pub use self::model::{DataRow, DataSet, DataTable, RawSourceData, RowSourceInfo, SourceRole};
+pub use self::model::{
+    CellSourceInfo, DataRow, DataSet, DataTable, RawSourceData, RowSourceInfo, SourceRole,
+};
 pub use self::plan::SourceReadPlan;
 pub use self::plan::{DataLoadPlan, DataProvider, DataSourceLayout, DataSourcePlan};
 pub use self::provider::{

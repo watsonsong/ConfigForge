@@ -39,7 +39,7 @@ pub fn validate_normalized_table_with_report(
     );
 
     for field in &meta.fields {
-        let location = field_location(meta, field);
+        let location = field_location(meta, field, None);
         collect_table_check(
             &mut report,
             "field.unsupported_type",
@@ -179,7 +179,7 @@ pub(super) fn validate_normalized_table_view_with_report(
         .iter()
         .filter(|field| table_view.is_field_visible(field.meta.name.as_str()))
     {
-        let location = field_location(meta, field);
+        let location = field_location(meta, field, None);
         collect_table_check(
             &mut report,
             "field.unsupported_type",
@@ -297,12 +297,30 @@ fn collect_table_check(
     }
 }
 
-fn field_location(meta: &LinkedTableMeta<'_>, field: &LinkedFieldMeta<'_>) -> DiagnosticLocation {
-    DiagnosticLocation {
+fn field_location(
+    meta: &LinkedTableMeta<'_>,
+    field: &LinkedFieldMeta<'_>,
+    row: Option<(&DataTable, usize)>,
+) -> DiagnosticLocation {
+    let mut location = DiagnosticLocation {
         table: Some(meta.meta.name.clone()),
         field: Some(field.meta.name.clone()),
         ..DiagnosticLocation::default()
+    };
+    if let Some((table, row_index)) = row {
+        location.row_index = Some(row_index);
+        if let Some(row_source) = table.row_source(row_index) {
+            location.source_path = Some(row_source.source_path.clone());
+            location.source_row_number = Some(row_source.source_row_number);
+        }
+        if let Some(cell_source) = table.cell_source(row_index, &field.meta.name) {
+            location.source_row_number = Some(cell_source.source_row_number);
+            location.source_column_number = Some(cell_source.source_column_number);
+            location.source_column_name = Some(cell_source.source_column_name.clone());
+            location.column_index = Some(cell_source.column_index);
+        }
     }
+    location
 }
 
 fn validate_object_table_row_count(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {

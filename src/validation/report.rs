@@ -6,7 +6,8 @@ use std::{collections::BTreeMap, fmt, path::PathBuf, str::FromStr};
 use serde::Serialize;
 
 use crate::{
-    ConfigForgeError, Diagnostic, DiagnosticReport, DiagnosticSeverity, Result, meta::TargetTags,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity, Result,
+    meta::TargetTags,
 };
 
 use super::{ValidationIssue, ValidationReport};
@@ -290,6 +291,7 @@ fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationI
                 .domain
                 .clone()
                 .unwrap_or_else(|| UNCATEGORIZED_DOMAIN.to_owned());
+            let source_column = source_column_label(&issue.location);
 
             DesignerValidationIssue {
                 id,
@@ -310,7 +312,7 @@ fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationI
                     .source_path
                     .as_ref()
                     .map(|path| path.display().to_string()),
-                source_column: None,
+                source_column,
                 current_value: issue.current_value,
                 expected: issue.expected,
                 target: issue.target,
@@ -320,6 +322,18 @@ fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationI
             }
         })
         .collect()
+}
+
+fn source_column_label(location: &DiagnosticLocation) -> Option<String> {
+    location
+        .source_column_name
+        .clone()
+        .or_else(|| {
+            location
+                .source_column_number
+                .map(|column| column.to_string())
+        })
+        .or_else(|| location.column_index.map(|column| (column + 1).to_string()))
 }
 
 fn summarize_issues(issues: &[DesignerValidationIssue]) -> ReportSummary {
@@ -796,6 +810,7 @@ mod tests {
                 field: Some("value".to_owned()),
                 row_index: Some(row - 2),
                 source_row_number: Some(row),
+                ..DiagnosticLocation::default()
             },
         )
     }

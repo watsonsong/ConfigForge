@@ -336,10 +336,11 @@ fn canonicalize_asset_refs(
             }
             rows.push(row);
         }
-        tables.push(DataTable::new_with_sources(
+        tables.push(DataTable::new_with_sources_and_cells(
             table.name.clone(),
             rows,
             table.row_sources.clone(),
+            table.cell_sources.clone(),
         )?);
     }
 

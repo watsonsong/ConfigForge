@@ -5,7 +5,7 @@ use std::{collections::BTreeSet, path::Path};
 
 use crate::{ConfigForgeError, Result};
 
-use super::{DataRow, DataTable, RowSourceInfo, SourceRole};
+use super::{CellSourceInfo, DataRow, DataTable, RowSourceInfo, SourceRole};
 
 pub struct CsvDataReader;
 
@@ -32,6 +32,7 @@ impl CsvDataReader {
         let mut headers = None;
         let mut rows = Vec::new();
         let mut row_sources = Vec::new();
+        let mut cell_sources = Vec::new();
         for (record_index, record) in reader.records().enumerate() {
             let source_row_number = record_index + 1;
             let record = record.map_err(|source| ConfigForgeError::ParseCsv {
@@ -64,11 +65,22 @@ impl CsvDataReader {
                 ))
             })?;
             let mut row = DataRow::new();
-            for (header, value) in headers.iter().zip(record.iter()) {
+            let mut row_cell_sources = std::collections::BTreeMap::new();
+            for (column_index, (header, value)) in headers.iter().zip(record.iter()).enumerate() {
                 row.insert(header.clone(), value.to_owned());
+                row_cell_sources.insert(
+                    header.clone(),
+                    CellSourceInfo {
+                        source_row_number,
+                        source_column_number: column_index + 1,
+                        source_column_name: header.clone(),
+                        column_index,
+                    },
+                );
             }
             rows.push(row);
             row_sources.push(default_csv_row_source(path, source_row_number));
+            cell_sources.push(row_cell_sources);
         }
 
         if headers.is_none() {
@@ -79,7 +91,7 @@ impl CsvDataReader {
             )));
         }
 
-        DataTable::new_with_sources(name, rows, row_sources)
+        DataTable::new_with_sources_and_cells(name, rows, row_sources, cell_sources)
     }
 
     pub fn read_object_table(
@@ -110,6 +122,7 @@ impl CsvDataReader {
         let mut value_column_index = None;
         let mut seen_keys = BTreeSet::new();
         let mut row = DataRow::new();
+        let mut row_cell_sources = std::collections::BTreeMap::new();
         for (record_index, record) in reader.records().enumerate() {
             let row_number = record_index + 1;
             let record = record.map_err(|source| ConfigForgeError::ParseCsv {
@@ -169,6 +182,15 @@ impl CsvDataReader {
                     .unwrap_or_default()
                     .to_owned(),
             );
+            row_cell_sources.insert(
+                key.to_owned(),
+                CellSourceInfo {
+                    source_row_number: row_number,
+                    source_column_number: value_column_index + 1,
+                    source_column_name: "value".to_owned(),
+                    column_index: value_column_index,
+                },
+            );
         }
 
         if value_column_index.is_none() {
@@ -184,10 +206,11 @@ impl CsvDataReader {
         } else {
             data_start_row
         };
-        DataTable::new_with_sources(
+        DataTable::new_with_sources_and_cells(
             table_name,
             vec![row],
             vec![default_csv_row_source(path, source_row_number)],
+            vec![row_cell_sources],
         )
     }
 }

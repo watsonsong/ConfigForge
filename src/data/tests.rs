@@ -70,6 +70,13 @@ fn csv_reader_reads_header_and_records() {
         table.rows[1].get("name").map(String::as_str),
         Some("Shield")
     );
+    let name_source = table
+        .cell_source(1, "name")
+        .expect("name cell source should be tracked");
+    assert_eq!(name_source.source_row_number, 4);
+    assert_eq!(name_source.source_column_number, 2);
+    assert_eq!(name_source.column_index, 1);
+    assert_eq!(name_source.source_column_name, "name");
 }
 
 #[test]
@@ -316,6 +323,13 @@ fn csv_reader_reads_object_key_value_rows_as_one_logical_row() {
         Some("500")
     );
     assert_eq!(table.row_sources[0].source_row_number, 2);
+    let start_gold_source = table
+        .cell_source(0, "start_gold")
+        .expect("object table field source should be tracked");
+    assert_eq!(start_gold_source.source_row_number, 3);
+    assert_eq!(start_gold_source.source_column_number, 3);
+    assert_eq!(start_gold_source.column_index, 2);
+    assert_eq!(start_gold_source.source_column_name, "value");
 
     let only_header_path = dir.path().join("empty_config.csv");
     fs::write(&only_header_path, "key,title,value\n").expect("csv should be written");

@@ -24,6 +24,9 @@ pub struct DiagnosticLocation {
     pub field: Option<String>,
     pub row_index: Option<usize>,
     pub source_row_number: Option<usize>,
+    pub source_column_number: Option<usize>,
+    pub source_column_name: Option<String>,
+    pub column_index: Option<usize>,
 }
 
 impl DiagnosticLocation {
@@ -33,6 +36,9 @@ impl DiagnosticLocation {
             && self.field.is_none()
             && self.row_index.is_none()
             && self.source_row_number.is_none()
+            && self.source_column_number.is_none()
+            && self.source_column_name.is_none()
+            && self.column_index.is_none()
     }
 }
 
@@ -49,6 +55,13 @@ impl fmt::Display for DiagnosticLocation {
             parts.push(format!("row {row_number}"));
         } else if let Some(row_index) = self.row_index {
             parts.push(format!("row {}", row_index + 1));
+        }
+        if let Some(column_name) = &self.source_column_name {
+            parts.push(format!("column `{column_name}`"));
+        } else if let Some(column_number) = self.source_column_number {
+            parts.push(format!("column {column_number}"));
+        } else if let Some(column_index) = self.column_index {
+            parts.push(format!("column {}", column_index + 1));
         }
         if let Some(field) = &self.field {
             parts.push(format!("field `{field}`"));
@@ -408,5 +421,24 @@ mod tests {
         );
         assert_eq!(diagnostic.domain.as_deref(), Some("items"));
         assert_eq!(diagnostic.owner.as_deref(), Some("systems"));
+    }
+
+    #[test]
+    fn diagnostic_location_display_includes_column_context() {
+        let location = DiagnosticLocation {
+            source_path: Some(PathBuf::from("items.csv")),
+            table: Some("items".to_owned()),
+            field: Some("name".to_owned()),
+            row_index: Some(0),
+            source_row_number: Some(3),
+            source_column_number: Some(2),
+            source_column_name: Some("name".to_owned()),
+            column_index: Some(1),
+        };
+
+        assert_eq!(
+            location.to_string(),
+            "source `items.csv`, table `items`, row 3, column `name`, field `name`"
+        );
     }
 }

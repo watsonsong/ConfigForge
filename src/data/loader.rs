@@ -11,8 +11,8 @@ use rayon::prelude::*;
 use crate::{ConfigForgeError, Result};
 
 use super::{
-    CsvDataReader, DataLoadPlan, DataProvider, DataRow, DataSet, DataSourceLayout, DataSourcePlan,
-    DataTable, RawSourceData, RowSourceInfo, SourceReadPlan, SourceRole,
+    CellSourceInfo, CsvDataReader, DataLoadPlan, DataProvider, DataRow, DataSet, DataSourceLayout,
+    DataSourcePlan, DataTable, RawSourceData, RowSourceInfo, SourceReadPlan, SourceRole,
 };
 
 #[derive(Debug, Clone)]
@@ -203,10 +203,11 @@ pub(crate) fn merge_loaded_sources(
     let mut tables = Vec::with_capacity(table_order.len());
     for table_name in table_order {
         if let Some(pending) = merged.remove(&table_name) {
-            tables.push(DataTable::new_with_sources(
+            tables.push(DataTable::new_with_sources_and_cells(
                 table_name,
                 pending.rows,
                 pending.row_sources,
+                pending.cell_sources,
             )?);
         }
     }
@@ -217,6 +218,7 @@ pub(crate) fn merge_loaded_sources(
 struct PendingTable {
     rows: Vec<DataRow>,
     row_sources: Vec<RowSourceInfo>,
+    cell_sources: Vec<BTreeMap<String, CellSourceInfo>>,
     primary_key_index: BTreeMap<Vec<String>, usize>,
 }
 
@@ -240,6 +242,11 @@ impl PendingTable {
         table: DataTable,
     ) -> Result<()> {
         for (row_index, row) in table.rows.into_iter().enumerate() {
+            let cell_sources = table
+                .cell_sources
+                .get(row_index)
+                .cloned()
+                .unwrap_or_default();
             let source_row_number = table
                 .row_sources
                 .get(row_index)
@@ -259,6 +266,7 @@ impl PendingTable {
                 self.primary_key_index.insert(key, self.rows.len());
             }
             self.rows.push(row);
+            self.cell_sources.push(cell_sources);
             self.row_sources.push(RowSourceInfo {
                 source_index,
                 source_path: source.path.clone(),
@@ -278,6 +286,11 @@ impl PendingTable {
         table: DataTable,
     ) -> Result<()> {
         for (row_index, row) in table.rows.into_iter().enumerate() {
+            let cell_sources = table
+                .cell_sources
+                .get(row_index)
+                .cloned()
+                .unwrap_or_default();
             let source_row_number = table
                 .row_sources
                 .get(row_index)
@@ -302,6 +315,7 @@ impl PendingTable {
             })?;
             let replaces = self.row_sources[target_row].trace();
             self.rows[target_row] = row;
+            self.cell_sources[target_row] = cell_sources;
             self.row_sources[target_row] = RowSourceInfo {
                 source_index,
                 source_path: source.path.clone(),
