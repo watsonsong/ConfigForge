@@ -786,6 +786,11 @@ pub struct ValidationIssue {
     pub validator: String,
     pub target: Option<String>,
     pub hint: Option<String>,
+    pub current_value: Option<String>,
+    pub expected: Option<String>,
+    pub explanation: Option<String>,
+    pub domain: Option<String>,
+    pub owner: Option<String>,
 }
 
 pub struct ValidationReport {
@@ -806,15 +811,16 @@ impl ValidationReport {
 - `validate_normalized_data_set_with_report_and_pool()` 让每个 table-local full validation task 返回局部 `ValidationReport`；coordination 层按 Meta table declaration order append，然后继续执行 dataset-level FK 与 registry validators，最后调用 `sort_by_stable_key()`。因此 `--jobs 1` / `--jobs N` 不应改变 report 内容或排序。
 - `validate_normalized_data_set_for_target_with_report_and_pool()` 先用 `ExportValidationView::for_target_with_pool()` 并行构建 target table views，再让每个 visible table view 返回局部 report；coordination 层按 target view table order append，然后继续执行 target FK 与 registry validators。
 - `ValidationReport::into_result()` 将 error report 桥接为 `ConfigForgeError::ValidationReport`；老的 `ConfigForgeError::Validation(String)` 仍可由更底层单项 helper 产生，但不再作为 validation 汇总模型。
+- `error_issue_from_result()` 遇到 `ConfigForgeError::ValidationReport` 时会拆出第一条 `Diagnostic` 并保留 code、location、target、hint、current_value、expected、explanation、domain、owner，避免 table-local check 通过 legacy error bridge 时丢失结构化字段。
 - warning issue 保留在 report 中，不阻断构建；只要存在 error，依赖对应 data validation 的 export 被阻断。
 - report 合并使用局部 report + `append()` / `extend()`，再调用 `sort_by_stable_key()`，避免未来并行 validation 受任务完成顺序影响。stable key 当前为 `(severity, target, table, row_index, source_row_number, field, validator, code, message)`。
 
-错误码建议：
+内置高价值错误码：
 
 | Validator | code |
 | --- | --- |
-| required | `field.required_missing` |
-| type | `field.type_mismatch` |
+| required | `CF_DATA_MISSING_REQUIRED_FIELD` |
+| type | `CF_DATA_INVALID_TYPE` |
 | enum | `field.enum_unknown_value` |
 | range | `field.range_violation` |
 | regex | `validator.regex_mismatch` |
@@ -823,8 +829,10 @@ impl ValidationReport {
 | compare | `validator.compare_failed` / `validator.compare_operand_missing` |
 | sum | `validator.sum_mismatch` / `validator.sum_too_small` / `validator.sum_too_large` |
 | monotonic | `validator.monotonic_violation` / `validator.monotonic_duplicate_order_key` |
-| unique | `table.unique_duplicate` |
-| referential_integrity | `dataset.foreign_key_missing` |
+| unique | `CF_DATA_DUPLICATE_KEY` |
+| referential_integrity | `CF_DATA_INVALID_FOREIGN_KEY` |
+
+`field.*`、`foreign_key.*` 等旧 code 仍在 code catalog 中以 deprecated metadata 保留，主要用于尚未迁移 producer 或历史报告兼容。新增 validation producer 应优先使用 catalog 中的 `CF_DATA_*` 或 validator 专属 stable code，并填充 `current_value`、`expected` 与 source trace。
 
 ## 6.9 修改路径
 

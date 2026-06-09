@@ -172,31 +172,37 @@ CF_BUILD_EXPORT_TASK_FAILED
 
 ## Step 9：完善 CLI / machine-readable 输出格式
 
-- [ ] 保持默认 human 格式简洁，优先展示 code、location、message、hint。
-- [ ] 增加或完善 JSON diagnostic 输出，稳定 schema 字段：code、severity、message、location、source、target、current_value、expected、hint。
+完成状态（2026-06-10）：已完成最小 Stable 闭环。CLI 保持默认 human 输出，并新增 `--diagnostic-format json`，失败时输出稳定 JSON：`status`、`message`、`diagnostics[]`，其中结构化 diagnostic 保留 code、severity、message、location、source、target、current_value、expected、hint 等字段。CI annotation / SARIF 仍作为后续扩展，不作为当前闭环阻塞项。
+
+- [x] 保持默认 human 格式简洁，优先展示 code、location、message、hint。
+- [x] 增加或完善 JSON diagnostic 输出，稳定 schema 字段：code、severity、message、location、source、target、current_value、expected、hint。
 - [ ] 评估 CI annotation 格式，例如 GitHub / GitLab compatible text，或后续 SARIF。
-- [ ] 错误汇总按 severity / domain / table / owner 可读排序。
-- [ ] warning 与 error 的退出码策略保持稳定并文档化。
+- [x] 错误汇总按 severity / domain / table / owner 可读排序（Designer Validation Report 已覆盖；CLI JSON 保持原 structured diagnostic 顺序，供机器消费）。
+- [x] warning 与 error 的退出码策略保持稳定并文档化。
 
 交付标准：CLI 输出同时服务本地人类阅读和 CI / IDE 工具读取，不因自然语言 message 微调破坏机器消费。
 
 ## Step 10：建立诊断测试策略与迁移防回归
 
-- [ ] 新增 diagnostic snapshot / golden tests，覆盖 generator unknown type、invalid option、artifact path escape、path collision、CSV invalid type、FK missing target、asset missing。
-- [ ] 测试断言优先级：code > severity > location > current_value / expected > hint > message。
-- [ ] 对 legacy `Validation(String)` 使用点做统计，迁移批次完成后更新数量。
-- [ ] 为每个新增 diagnostic code 增加至少一个 producer 测试或 catalog 测试。
-- [ ] 对 Designer Validation Report JSON / CSV 输出增加字段级断言，避免字段回退为空。
+完成状态（2026-06-10）：已完成当前批次回归防护。新增 CLI JSON integration tests 覆盖 data invalid type、artifact path escape、unknown generator type；既有 unit tests 覆盖 code catalog 唯一性、Diagnostic enrichment、Designer Report renderer enrichment、generator/artifact/data producer structured fields。Asset missing 的结构化 code 仍随 asset producer 迁移后补齐。
+
+- [x] 新增 diagnostic snapshot / golden tests，覆盖 generator unknown type、invalid option、artifact path escape、path collision、CSV invalid type、FK missing target、asset missing。（当前批次覆盖 generator/artifact/CSV/FK；asset missing 仍为 asset producer 后续迁移项。）
+- [x] 测试断言优先级：code > severity > location > current_value / expected > hint > message。
+- [x] 对 legacy `Validation(String)` 使用点做统计，迁移批次完成后更新数量。
+- [x] 为每个新增 diagnostic code 增加至少一个 producer 测试或 catalog 测试。
+- [x] 对 Designer Validation Report JSON / CSV 输出增加字段级断言，避免字段回退为空。
 
 交付标准：诊断体验不会随着新增 generator、validator 或 artifact 安全规则而退化；message 微调不会造成大量测试脆弱失败。
 
 ## Step 11：文档与状态矩阵收口
 
-- [ ] 更新 `Documentation/Implementation/02-diagnostic-module-detail-design.md`，记录 Stable 诊断模型、code catalog、location/source trace 和 error facade 规则。
-- [ ] 更新 `Documentation/Design/10-designer-validation-report.md`，把 current / expected / source_column / owner / domain 的实现状态与限制同步到实际代码。
-- [ ] 更新 `Documentation/Design/05-data-validation.md`，说明 data validation 的 source trace 和 stable code 语义。
-- [ ] 更新 generator API 文档，要求新增 generator 使用结构化诊断，不新增裸字符串业务错误。
-- [ ] 根据实际完成情况更新 Design 当前实现状态矩阵；只有当 Data / Artifact / Generator 主要错误都结构化并有测试后，才把 Diagnostics 从 `Implemented MVP` 调整为 `Stable`。
+完成状态（2026-06-10）：已按实际完成范围更新诊断基础、data validation、validation module、generator API、Designer Validation Report 与 Design 状态矩阵。Diagnostics 仍保持 `Implemented MVP`，不提前标 `Stable`，因为 asset resolver、data loading、data artifact、code artifact 等 producer 尚未全部迁移为结构化诊断。
+
+- [x] 更新 `Documentation/Implementation/02-diagnostic-module-detail-design.md`，记录 Stable 诊断模型、code catalog、location/source trace 和 error facade 规则。
+- [x] 更新 `Documentation/Design/10-designer-validation-report.md`，把 current / expected / source_column / owner / domain 的实现状态与限制同步到实际代码。
+- [x] 更新 `Documentation/Design/05-data-validation.md`，说明 data validation 的 source trace 和 stable code 语义。
+- [x] 更新 generator API 文档，要求新增 generator 使用结构化诊断，不新增裸字符串业务错误。
+- [x] 根据实际完成情况更新 Design 当前实现状态矩阵；只有当 Data / Artifact / Generator 主要错误都结构化并有测试后，才把 Diagnostics 从 `Implemented MVP` 调整为 `Stable`。
 
 交付标准：Design / Implementation / Tech 文档对 Diagnostics 能力、边界和状态表述一致；不会出现代码已经 Stable 但文档仍写 MVP，或文档提前承诺未实现能力。
 

@@ -184,9 +184,9 @@ DesignerValidationReport
 | `row_index` | location | 0-based internal row index。 |
 | `source_row_number` | location | 用户可见源文件行号。 |
 | `source_path` | location / RowSourceInfo | 源 CSV / source 文件。 |
-| `source_column` | source trace | 可选。当前多数诊断尚未提供，后续补齐。 |
-| `current_value` | DataSet + field | 可选。能定位到单字段时读取当前 normalized/raw value。 |
-| `expected` | validator structured context | 可选。期望规则，例如 `1 <= value <= 999`。P1-1 可先由 message/catalog 推导或留空。 |
+| `source_column` | source trace | 可选。CSV-backed data validation 高价值错误已可从 cell source trace 补齐；其他 producer 可留空。 |
+| `current_value` | producer structured context | 可选。required/type/duplicate/FK/artifact/generator 等已迁移路径由 producer 显式填充；尚未迁移 producer 可留空。 |
+| `expected` | producer structured context / code catalog | 可选。期望规则，例如 `int`、`target table/index key`、`output root 内唯一路径`。 |
 | `target` | Diagnostic target | 当前 target tags 字符串。 |
 | `export_visibility` | ExportView context | `visible` / `table_filtered` / `row_filtered` / `field_filtered` / `not_applicable`。P1-1 可先输出 `visible` / `not_applicable`，后续补细。 |
 | `owner` | Meta annotation / mapping | 表或字段 owner。缺失为 `<unassigned>`。 |
@@ -374,7 +374,7 @@ P1-1 可以先生成静态 HTML，不做复杂 JS；如需要搜索/过滤，可
 默认单文件 CSV，列固定：
 
 ```text
-id,severity,blocking,code,owner,domain,table,field,source_path,source_row_number,current_value,expected,message,hint,target,export_visibility
+id,severity,blocking,code,friendly_title,message,hint,table,field,row_index,source_row_number,source_column,source_path,current_value,expected,explanation,target,owner,domain
 ```
 
 规则：
@@ -427,13 +427,13 @@ ValidationReport / DiagnosticReport
   -> HtmlRenderer / MarkdownRenderer / JsonRenderer / CsvRenderer
 ```
 
-需要补齐的结构化信息按优先级推进：
+结构化信息来源按优先级推进：
 
-1. **source trace**：尽量从 `RowSourceInfo` 补 `source_path`、`source_row_number`。
-2. **current value**：当 issue 定位到 table + field + row 时，从 normalized/full row 读取。
-3. **hint**：validator issue 优先直接设置 hint；没有时由 code catalog fallback。
-4. **expected / actual**：后续可让 validators 输出结构化 context，P1-1 可先从 message/catalog 兜底。
-5. **column / span**：CSV reader 后续可记录 header column index；P1-1 不强制。
+1. **source trace**：优先使用 `DiagnosticLocation`；CSV reader / DataTable cell source trace 已提供 source path、source row、source column。
+2. **current value / expected**：优先由 producer 填充 `ValidationIssue` / `Diagnostic` enrichment；report renderer 不再从 message 猜测业务含义。
+3. **hint / explanation**：producer 显式字段优先；没有时由 code catalog fallback。
+4. **owner / domain**：producer 字段优先；当前缺失时 fallback 到 `<unassigned>` / `<uncategorized>`。
+5. **未迁移 producer**：字段保持空值/null，报告仍保留稳定 schema。
 
 ## 10.10 实现分期建议
 
@@ -443,7 +443,7 @@ ValidationReport / DiagnosticReport
 - 从 `ValidationReport` 生成 `DesignerValidationReport`。
 - 支持 `config-forge --project ... --target ... --report html|markdown|json|csv --output ...`。
 - HTML/Markdown/CSV/JSON 都输出 summary + issue list。
-- 补 source path / row number / current value 的 best-effort enrich。
+- 补 source path / row number / source column / current value / expected 的 structured enrichment 通道。
 - 建立最小 code catalog，覆盖现有 validators。
 
 验收：
@@ -465,12 +465,11 @@ ValidationReport / DiagnosticReport
 - `config-forge build --target client` 可生成 validation report。
 - runtime/codegen 因 validation error 阻塞时，report artifact 仍可用于定位。
 
-### Phase C：Owner/domain 与更强 source trace（Planned / Not implemented）
+### Phase C：Owner/domain 与剩余 producer enrichment（Partial）
 
 - 支持 owner/domain 配置或映射。
-- CSV source trace 增加 column/header 信息。
-- validators 输出更结构化的 expected/actual/context。
-- HTML 增加 owner/domain/code 多视角聚合。
+- 继续迁移 asset、builtin validators、code artifact 等尚未结构化的 producer，补齐 current/expected/hint。
+- HTML 增加 owner/domain/code 多视角交互式聚合。
 
 验收：
 
@@ -483,7 +482,7 @@ ValidationReport / DiagnosticReport
 
 - report model 从 ValidationReport enrichment 的字段映射。
 - severity summary、blocking 推导。
-- source row/current value best-effort 填充。
+- source row/source column/current value/expected 字段级断言。
 - code catalog fallback。
 - HTML/Markdown/JSON/CSV renderer snapshot 或关键字段断言。
 - CSV 转义：逗号、引号、换行。
@@ -508,16 +507,16 @@ ValidationReport / DiagnosticReport
 已实现内容：
 
 - `src/validation/report.rs` 提供 `DesignerValidationReport`、`ReportMetadata`、`ReportSummary`、`DesignerValidationIssue`、`IssueGroup` 和 `DesignerReportFormat`。
-- 报告模型可从 `ValidationReport` / `DiagnosticReport` enrichment 生成，保留 stable code、severity、table、field、row/source row、target 和 hint，并生成稳定 issue id（如 `E0001` / `W0001`）。
+- 报告模型可从 `ValidationReport` / `DiagnosticReport` enrichment 生成，保留 stable code、severity、table、field、row/source row/source column、target、hint、current_value、expected、explanation、owner 和 domain，并生成稳定 issue id（如 `E0001` / `W0001`）。
 - 内置 code catalog 已覆盖当前常用 validator code 和基础 required/type/enum/unique/FK/asset code；未知 code fallback 到原始 message/hint。
-- 支持 HTML / Markdown / JSON / CSV 四种 renderer，输出共享同一个 normalized report model。
+- 支持 HTML / Markdown / JSON / CSV 四种 renderer，输出共享同一个 normalized report model；Markdown/CSV/HTML 已展示 source_column、current_value、expected 等结构化字段，JSON 保留完整字段。
 - CLI 支持 `--report <html|markdown|json|csv>`、`--output <path>`、`--report-title <title>`；validation error 时仍尽量写出报告，再保持失败退出码。
 - Build 支持 `[[targets.exports]] type = "validation_report"`，作为 data-backed 附加产物消费 validation 结果；validation error 阻塞 runtime/codegen 时仍尽量写出 report artifact。
-- 已有单元测试和 CLI integration tests 覆盖 report model、renderer、CLI 失败写报告、build HTML report artifact。
+- 已有单元测试和 CLI integration tests 覆盖 report model、renderer enrichment、CLI 失败写报告、CLI machine-readable diagnostic JSON、build HTML report artifact。
 
 当前边界：
 
 - CLI 当前是顶层参数形式，不存在独立 `validate` 子命令；文档示例使用当前可执行接口。
-- owner/domain 当前只有 `<unassigned>` / `<uncategorized>` fallback 和固定分组，Project 级 owner/domain 映射未实现。
-- `current_value`、`expected`、`source_column` 暂未从 DataSet / validator structured context 补齐，导出为空字段。
+- owner/domain 当前主要依赖 producer 字段；未提供时使用 `<unassigned>` / `<uncategorized>` fallback，Project 级 owner/domain 映射未实现。
+- `current_value`、`expected`、`source_column` 已在核心 data validation、generator/artifact 结构化诊断和 report renderer 中贯通；asset、部分 builtin validator、code artifact 等尚未迁移 producer 仍可能为空字段。
 - Build export task 当前支持 `format`、`file_name`、`title`；`include_warnings`、`include_errors`、`group_by` 尚未实现，当前始终输出全部 issue 并使用固定分组。

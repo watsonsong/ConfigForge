@@ -94,14 +94,19 @@ config_forge_generated.ts
 
 ## 9.13 错误与诊断
 
-第一阶段可以继续使用 `ConfigForgeError::Validation(String)`，但建议新增 codegen diagnostic 模型：
+新增 generator / codegen 入口不应再新增裸 `ConfigForgeError::Validation(format!(...))` 作为业务错误。优先使用共享 `Diagnostic` / `ConfigForgeError::from_diagnostic()`，并复用 `src/diagnostic/code.rs` 中的稳定 code；只有语言后端内部尚未迁移的历史错误可以暂时保留 legacy fallback。
+
+若某个语言后端需要额外 codegen 语义，可在共享 code catalog 中新增 code，或在后端内部定义字符串 code 并补充 producer 测试。结构建议保持与共享 `Diagnostic` 字段一致：
 
 ```rust
 pub struct CodegenDiagnostic {
-    pub code: CodegenDiagnosticCode,
+    pub code: String,
     pub message: String,
     pub language: Option<String>,
     pub meta_object: Option<String>,
+    pub current_value: Option<String>,
+    pub expected: Option<String>,
+    pub hint: Option<String>,
 }
 ```
 

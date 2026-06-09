@@ -146,7 +146,22 @@ default = 1
 
 该字段在 source 缺失时使用 `1`，不会报 required error。
 
-### 5.5.1 Fragment 字段 Required / Default
+### 5.5.1 结构化 Data Diagnostics 与 Source Trace
+
+Data validation 的高频错误应输出稳定 diagnostic code，而不是只依赖自然语言 message。当前核心路径已使用以下内置 code：
+
+| 场景 | Code | 关键结构化字段 |
+| --- | --- | --- |
+| 类型解析失败 | `CF_DATA_INVALID_TYPE` | table、field、source path、source row、source column、current_value、expected |
+| 必填字段缺失 | `CF_DATA_MISSING_REQUIRED_FIELD` | table、field、source row、source column、expected |
+| 唯一字段 / index 重复 | `CF_DATA_DUPLICATE_KEY` | table、field/index、row、current_value、expected |
+| 外键引用无效 | `CF_DATA_INVALID_FOREIGN_KEY` | source table、source field、row、current_value、expected target table/index |
+
+CSV reader 在 `DataTable.cell_sources` 中保存 per-cell source trace：`source_row_number`、`source_column_number`、`source_column_name` 与 `column_index`。Validation 构造 `DiagnosticLocation` 时应优先使用该 cell trace，因此 Designer Validation Report 和 CLI JSON 可以直接定位到“源文件 / 源行 / 源列 / 逻辑表 / 字段”。
+
+测试断言优先级固定为：stable code > severity > location/source trace > current_value / expected > hint > message 片段。message 可继续面向用户优化，不应作为 CI 判断的唯一依据。
+
+### 5.5.2 Fragment 字段 Required / Default
 
 variant source mode 中，required/default 的输入范围由 source 声明的 fragments 决定：
 
