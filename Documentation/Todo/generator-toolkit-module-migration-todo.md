@@ -56,8 +56,8 @@
 
 ## Phase 5 — 迁移 runtime table data generators
 
-- [x] 将 `src/data_artifact/json.rs` 迁入 `src/generator/json.rs`。
-- [x] 将 `src/data_artifact/messagepack.rs` 迁入 `src/generator/messagepack.rs`。
+- [x] 将 `src/data_artifact/json.rs` 迁入 `src/generator/json/`。
+- [x] 将 `src/data_artifact/messagepack.rs` 迁入 `src/generator/messagepack/`。
 - [x] 将 `src/data_artifact/binary.rs` 迁入 `src/generator/binary/`。
 - [x] 抽出 runtime table iteration / path planning / `RuntimeDataFile` helper，留在 data artifact toolkit。
 - [ ] 评估 `DataFormatExporter` 是否仍有价值；若只剩内部 helper，可改名为 `RuntimeTableFormat` 或删除。
