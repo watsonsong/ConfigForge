@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity, Result,
-    meta::TargetTags,
+    diagnostic::code::metadata_for, meta::TargetTags,
 };
 
 use super::{ValidationIssue, ValidationReport};
@@ -144,13 +144,6 @@ pub struct DesignerValidationIssue {
     pub domain: String,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ReportCodeInfo {
-    friendly_title: &'static str,
-    explanation: &'static str,
-    hint: &'static str,
-}
-
 impl DesignerValidationReport {
     pub fn from_validation_report(
         validation_report: &ValidationReport,
@@ -271,9 +264,9 @@ fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationI
                     format!("W{warning_index:04}")
                 }
             };
-            let catalog = code_catalog(&issue.code);
+            let catalog = metadata_for(&issue.code);
             let friendly_title = catalog
-                .map(|info| info.friendly_title.to_owned())
+                .map(|info| info.title.to_owned())
                 .unwrap_or_else(|| issue.message.clone());
             let explanation = issue
                 .explanation
@@ -282,7 +275,7 @@ fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationI
             let hint = issue
                 .hint
                 .clone()
-                .or_else(|| catalog.map(|info| info.hint.to_owned()));
+                .or_else(|| catalog.and_then(|info| info.default_hint.map(str::to_owned)));
             let owner = issue
                 .owner
                 .clone()
@@ -290,6 +283,7 @@ fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationI
             let domain = issue
                 .domain
                 .clone()
+                .or_else(|| catalog.map(|info| info.domain.to_owned()))
                 .unwrap_or_else(|| UNCATEGORIZED_DOMAIN.to_owned());
             let source_column = source_column_label(&issue.location);
 
@@ -645,108 +639,6 @@ fn compare_validation_issues_for_report(
             right.code.as_str(),
             right.message.as_str(),
         ))
-}
-
-fn code_catalog(code: &str) -> Option<ReportCodeInfo> {
-    let info = match code {
-        "field.range_violation" | "validator.range_violation" => ReportCodeInfo {
-            friendly_title: "数值超出允许范围",
-            explanation: "该字段值不满足 range validator 配置的上下界。",
-            hint: "检查当前值、min/max/exclusive_min/exclusive_max 配置，确认数据是否填错或规则是否需要调整。",
-        },
-        "validator.regex_mismatch" => ReportCodeInfo {
-            friendly_title: "文本格式不符合命名规则",
-            explanation: "该字段值没有匹配 regex validator 配置的正则表达式。",
-            hint: "按规则调整字段文本，或确认 pattern/match_mode/case_sensitive 配置是否正确。",
-        },
-        "validator.string_too_short" => ReportCodeInfo {
-            friendly_title: "文本长度过短",
-            explanation: "该字段文本长度小于 string_length validator 配置的最小长度。",
-            hint: "补充文本内容，或调整 min / exact 配置。",
-        },
-        "validator.string_too_long" => ReportCodeInfo {
-            friendly_title: "文本长度过长",
-            explanation: "该字段文本长度大于 string_length validator 配置的最大长度。",
-            hint: "缩短文本内容，或调整 max / exact 配置。",
-        },
-        "validator.string_length_mismatch" => ReportCodeInfo {
-            friendly_title: "文本长度不等于期望值",
-            explanation: "该字段文本长度不等于 string_length validator 配置的 exact 长度。",
-            hint: "调整文本长度，或确认 exact 配置是否符合需求。",
-        },
-        "validator.required_when_missing" => ReportCodeInfo {
-            friendly_title: "条件满足时缺少必填字段",
-            explanation: "required_when validator 的 when 条件已满足，但目标字段为空。",
-            hint: "补充目标字段，或检查 when 条件与字段可见性配置。",
-        },
-        "validator.compare_failed" => ReportCodeInfo {
-            friendly_title: "字段间比较关系不成立",
-            explanation: "compare validator 检查的两个字段不满足配置的比较操作。",
-            hint: "检查左右字段值，确认 op 方向和空值策略是否正确。",
-        },
-        "validator.compare_operand_missing" => ReportCodeInfo {
-            friendly_title: "字段比较缺少操作数",
-            explanation: "compare validator 需要参与比较的字段值，但当前行缺少对应值。",
-            hint: "补齐参与比较的字段，或启用 skip_if_either_empty。",
-        },
-        "validator.sum_mismatch" => ReportCodeInfo {
-            friendly_title: "分组总和不等于期望值",
-            explanation: "sum validator 计算出的字段总和与 equals 配置不一致。",
-            hint: "检查该组每行数值、group_by 字段和 epsilon 配置。",
-        },
-        "validator.sum_too_small" => ReportCodeInfo {
-            friendly_title: "分组总和过小",
-            explanation: "sum validator 计算出的字段总和小于 min 配置。",
-            hint: "增加该组数值，或检查 min / group_by 配置。",
-        },
-        "validator.sum_too_large" => ReportCodeInfo {
-            friendly_title: "分组总和过大",
-            explanation: "sum validator 计算出的字段总和大于 max 配置。",
-            hint: "降低该组数值，或检查 max / group_by 配置。",
-        },
-        "validator.monotonic_violation" => ReportCodeInfo {
-            friendly_title: "序列单调性被破坏",
-            explanation: "monotonic validator 按 order_by 排序后发现字段值不满足递增/递减规则。",
-            hint: "检查当前行和上一行的排序键与字段值，确认 direction/strict 配置。",
-        },
-        "validator.monotonic_duplicate_order_key" => ReportCodeInfo {
-            friendly_title: "排序键重复",
-            explanation: "monotonic validator 遇到重复 order_by 值，且未允许 skip_equal_order_key。",
-            hint: "修正重复排序键，或确认是否应该启用 skip_equal_order_key。",
-        },
-        "field.required" => ReportCodeInfo {
-            friendly_title: "必填字段缺失",
-            explanation: "字段声明 required 且没有 default，但当前数据未提供值。",
-            hint: "补齐该字段，或在 Meta 中配置 default / 调整 required。",
-        },
-        "field.type" => ReportCodeInfo {
-            friendly_title: "字段类型解析失败",
-            explanation: "源数据无法按 Meta 字段类型解析。",
-            hint: "检查单元格内容是否符合字段类型、枚举值或复合值格式。",
-        },
-        "field.enum" => ReportCodeInfo {
-            friendly_title: "枚举值非法",
-            explanation: "字段值不在 Meta 声明的 enum values 中。",
-            hint: "改为合法枚举值，或确认 Meta enum 是否需要新增值。",
-        },
-        "field.unique" | "index.unique" => ReportCodeInfo {
-            friendly_title: "唯一性约束冲突",
-            explanation: "字段或索引要求唯一，但当前数据存在重复 key。",
-            hint: "修改重复行的 key 字段，或确认 unique/index 配置。",
-        },
-        "foreign_key.missing" | "foreign_key.invalid" => ReportCodeInfo {
-            friendly_title: "外键引用无效",
-            explanation: "当前字段引用的目标表记录不存在或不满足 target-aware 外键规则。",
-            hint: "检查引用值、目标表主键/唯一索引，以及当前 target 下目标记录是否可见。",
-        },
-        "asset.reference" => ReportCodeInfo {
-            friendly_title: "资源引用无效",
-            explanation: "asset 字段无法通过 asset_kind 和 search_paths 解析到合法资源。",
-            hint: "检查资源路径、文件是否存在、asset_kind 规则和 target tags。",
-        },
-        _ => return None,
-    };
-    Some(info)
 }
 
 fn severity_label(severity: DiagnosticSeverity) -> &'static str {

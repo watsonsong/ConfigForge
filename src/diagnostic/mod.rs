@@ -5,6 +5,7 @@ use std::{fmt, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub mod code;
 mod error;
 
 pub use error::{ConfigForgeError, Result};
