@@ -4,13 +4,16 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticSeverity, Result,
     data::{DataResolver, DataRow, DataTable},
-    diagnostic::DiagnosticLocation,
+    diagnostic::{
+        DiagnosticLocation,
+        code::{CF_DATA_DUPLICATE_KEY, CF_DATA_INVALID_TYPE, CF_DATA_MISSING_REQUIRED_FIELD},
+    },
     meta::{LinkedField, LinkedFieldMeta, LinkedIndexMeta, LinkedTableMeta, TableKind, TargetTags},
 };
 
-use super::diagnostic::{ValidationReport, error_issue_from_result};
+use super::diagnostic::{ValidationReport, error_issue_from_result, validation_error_message};
 use super::struct_value::{
     validate_struct_child_path, validate_struct_field_value_for_row,
     validate_struct_occurrence_value, validate_supported_field_type, validate_value_type,
@@ -323,6 +326,97 @@ fn field_location(
     location
 }
 
+fn data_validation_error(
+    code: &'static str,
+    source: &'static str,
+    message: String,
+    location: DiagnosticLocation,
+    current_value: Option<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    let mut diagnostic = Diagnostic::new(code, DiagnosticSeverity::Error, message, location)
+        .with_source(source)
+        .with_expected(expected);
+    if let Some(current_value) = current_value {
+        diagnostic = diagnostic.with_current_value(current_value);
+    }
+    ConfigForgeError::from_diagnostic(diagnostic)
+}
+
+fn missing_required_field_error(
+    message: String,
+    location: DiagnosticLocation,
+    current_value: Option<String>,
+) -> ConfigForgeError {
+    data_validation_error(
+        CF_DATA_MISSING_REQUIRED_FIELD,
+        "validation.required",
+        message,
+        location,
+        current_value,
+        "non-empty required field value or configured default",
+    )
+}
+
+fn invalid_field_type_error(
+    message: String,
+    location: DiagnosticLocation,
+    current_value: String,
+    field: &LinkedFieldMeta<'_>,
+) -> ConfigForgeError {
+    data_validation_error(
+        CF_DATA_INVALID_TYPE,
+        "validation.type",
+        message,
+        location,
+        Some(current_value),
+        expected_field_value(field),
+    )
+}
+
+fn duplicate_key_error(
+    message: String,
+    location: DiagnosticLocation,
+    current_value: String,
+) -> ConfigForgeError {
+    data_validation_error(
+        CF_DATA_DUPLICATE_KEY,
+        "validation.unique",
+        message,
+        location,
+        Some(current_value),
+        "unique field/index key value",
+    )
+}
+
+fn expected_field_value(field: &LinkedFieldMeta<'_>) -> String {
+    expected_linked_field_value(&field.linked_field)
+}
+
+fn expected_linked_field_value(field: &LinkedField<'_>) -> String {
+    match field {
+        LinkedField::Primitive(primitive) => primitive.as_str().to_owned(),
+        LinkedField::Enum(enum_meta) => {
+            let values = enum_meta
+                .values
+                .iter()
+                .map(|value| value.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("one of enum `{}` values: {values}", enum_meta.name)
+        }
+        LinkedField::Struct(struct_type) => {
+            format!("JSON object for struct `{}`", struct_type.meta.name)
+        }
+        LinkedField::List(element_type) => {
+            format!(
+                "JSON array of {}",
+                expected_linked_field_value(element_type)
+            )
+        }
+    }
+}
+
 fn validate_object_table_row_count(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
     if table.rows.len() != 1 {
         return Err(ConfigForgeError::Validation(format!(
@@ -376,13 +470,25 @@ fn validate_index_uniqueness(
             })
             .collect::<Vec<_>>();
         if !seen.insert(key.clone()) {
-            return Err(ConfigForgeError::Validation(format!(
+            let message = format!(
                 "table `{}` row {} index `{}` duplicates unique key `{:?}`",
                 meta.meta.name,
                 row_index + 1,
                 index.meta.name,
                 key
-            )));
+            );
+            return Err(duplicate_key_error(
+                message,
+                DiagnosticLocation {
+                    table: Some(meta.meta.name.clone()),
+                    row_index: Some(row_index),
+                    source_row_number: table
+                        .row_source(row_index)
+                        .map(|source| source.source_row_number),
+                    ..DiagnosticLocation::default()
+                },
+                format!("{}={:?}", index.meta.name, key),
+            ));
         }
     }
 
@@ -413,15 +519,23 @@ fn validate_index_uniqueness_view(
             })
             .collect::<Vec<_>>();
         if !seen.insert(key.clone()) {
-            return Err(ConfigForgeError::Validation(format!(
+            let row_number = visible_row
+                .source_row_number
+                .unwrap_or(visible_row.row_index + 1);
+            let message = format!(
                 "table `{}` row {} index `{}` duplicates unique key `{:?}`",
-                meta.meta.name,
-                visible_row
-                    .source_row_number
-                    .unwrap_or(visible_row.row_index + 1),
-                index.meta.name,
-                key
-            )));
+                meta.meta.name, row_number, index.meta.name, key
+            );
+            return Err(duplicate_key_error(
+                message,
+                DiagnosticLocation {
+                    table: Some(meta.meta.name.clone()),
+                    row_index: Some(visible_row.row_index),
+                    source_row_number: Some(row_number),
+                    ..DiagnosticLocation::default()
+                },
+                format!("{}={:?}", index.meta.name, key),
+            ));
         }
     }
 
@@ -445,10 +559,15 @@ fn validate_field_presence(
         .iter()
         .all(|row| row.contains_key(&field.meta.name));
     if !present {
-        return Err(ConfigForgeError::Validation(format!(
+        let message = format!(
             "table `{}` is missing field `{}`",
             meta.meta.name, field.meta.name
-        )));
+        );
+        return Err(missing_required_field_error(
+            message,
+            field_location(meta, field, None),
+            None,
+        ));
     }
     Ok(())
 }
@@ -474,10 +593,15 @@ fn validate_field_presence_view(
             .unwrap_or(false)
     });
     if !present {
-        return Err(ConfigForgeError::Validation(format!(
+        let message = format!(
             "table `{}` is missing field `{}`",
             meta.meta.name, field.meta.name
-        )));
+        );
+        return Err(missing_required_field_error(
+            message,
+            field_location(meta, field, None),
+            None,
+        ));
     }
     Ok(())
 }
@@ -497,19 +621,31 @@ fn validate_field_values(
             .map(String::as_str)
             .unwrap_or_default();
         if field.meta.required && value.trim().is_empty() {
-            return Err(ConfigForgeError::Validation(format!(
+            let message = format!(
                 "table `{}` row {} field `{}` is required",
                 meta.meta.name,
                 row_index + 1,
                 field.meta.name
-            )));
+            );
+            return Err(missing_required_field_error(
+                message,
+                field_location(meta, field, Some((table, row_index))),
+                Some(value.to_owned()),
+            ));
         }
 
         if value.trim().is_empty() {
             continue;
         }
 
-        validate_value_type(meta, field, value, row_index)?;
+        validate_value_type(meta, field, value, row_index).map_err(|error| {
+            invalid_field_type_error(
+                validation_error_message(error),
+                field_location(meta, field, Some((table, row_index))),
+                value.to_owned(),
+                field,
+            )
+        })?;
     }
     Ok(())
 }
@@ -536,17 +672,31 @@ fn validate_field_values_view(
             .map(String::as_str)
             .unwrap_or_default();
         if field.meta.required && value.trim().is_empty() {
-            return Err(ConfigForgeError::Validation(format!(
+            let message = format!(
                 "table `{}` row {} field `{}` is required",
                 meta.meta.name, row_number, field.meta.name
-            )));
+            );
+            return Err(missing_required_field_error(
+                message,
+                field_location(meta, field, Some((table_view.table, visible_row.row_index))),
+                Some(value.to_owned()),
+            ));
         }
 
         if value.trim().is_empty() {
             continue;
         }
 
-        validate_value_type_at_row_number(meta, field, value, row_number, target_tags)?;
+        validate_value_type_at_row_number(meta, field, value, row_number, target_tags).map_err(
+            |error| {
+                invalid_field_type_error(
+                    validation_error_message(error),
+                    field_location(meta, field, Some((table_view.table, visible_row.row_index))),
+                    value.to_owned(),
+                    field,
+                )
+            },
+        )?;
     }
     Ok(())
 }
@@ -711,13 +861,18 @@ fn validate_field_uniqueness(
             .map(String::as_str)
             .unwrap_or_default();
         if !seen.insert(value) {
-            return Err(ConfigForgeError::Validation(format!(
+            let message = format!(
                 "table `{}` row {} field `{}` duplicates unique value `{}`",
                 meta.meta.name,
                 row_index + 1,
                 field.meta.name,
                 value
-            )));
+            );
+            return Err(duplicate_key_error(
+                message,
+                field_location(meta, field, Some((table, row_index))),
+                value.to_owned(),
+            ));
         }
     }
 
@@ -743,15 +898,18 @@ fn validate_field_uniqueness_view(
             .map(String::as_str)
             .unwrap_or_default();
         if !seen.insert(value) {
-            return Err(ConfigForgeError::Validation(format!(
+            let row_number = visible_row
+                .source_row_number
+                .unwrap_or(visible_row.row_index + 1);
+            let message = format!(
                 "table `{}` row {} field `{}` duplicates unique value `{}`",
-                meta.meta.name,
-                visible_row
-                    .source_row_number
-                    .unwrap_or(visible_row.row_index + 1),
-                field.meta.name,
-                value
-            )));
+                meta.meta.name, row_number, field.meta.name, value
+            );
+            return Err(duplicate_key_error(
+                message,
+                field_location(meta, field, Some((table_view.table, visible_row.row_index))),
+                value.to_owned(),
+            ));
         }
     }
 

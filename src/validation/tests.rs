@@ -14,7 +14,13 @@ use std::{
 
 use crate::{
     data::{RowSourceInfo, SourceRole},
-    diagnostic::DiagnosticLocation,
+    diagnostic::{
+        DiagnosticLocation,
+        code::{
+            CF_DATA_DUPLICATE_KEY, CF_DATA_INVALID_FOREIGN_KEY, CF_DATA_INVALID_TYPE,
+            CF_DATA_MISSING_REQUIRED_FIELD,
+        },
+    },
 };
 
 use crate::meta::{
@@ -129,7 +135,16 @@ fn rejects_invalid_type() {
         vec![BTreeMap::from([("id".to_owned(), "abc".to_owned())])],
     );
 
-    assert!(validate_table(&linked_meta, &table).is_err());
+    let report = validation_report_error(validate_table(&linked_meta, &table));
+    let issue = report
+        .issues
+        .iter()
+        .find(|issue| issue.code == CF_DATA_INVALID_TYPE)
+        .expect("invalid type diagnostic");
+    assert_eq!(issue.location.table.as_deref(), Some("items"));
+    assert_eq!(issue.location.field.as_deref(), Some("id"));
+    assert_eq!(issue.current_value.as_deref(), Some("abc"));
+    assert_eq!(issue.expected.as_deref(), Some("int"));
 }
 
 #[test]
@@ -449,6 +464,22 @@ fn validates_foreign_key_reference_integrity() {
 
     let message = validate_error(validate_data_set(&linked_meta, &foreign_key_data("2")));
     assert!(message.contains("foreign key `drop_item` references missing `items.by_id` key"));
+
+    let report = validation_report_error(validate_data_set(&linked_meta, &foreign_key_data("2")));
+    let issue = report
+        .issues
+        .iter()
+        .find(|issue| issue.code == CF_DATA_INVALID_FOREIGN_KEY)
+        .expect("foreign key diagnostic");
+    assert_eq!(issue.location.table.as_deref(), Some("monsters"));
+    assert_eq!(issue.location.field.as_deref(), Some("drop_item_id"));
+    assert_eq!(issue.current_value.as_deref(), Some("[\"2\"]"));
+    assert!(
+        issue
+            .expected
+            .as_deref()
+            .is_some_and(|expected| expected.contains("items") && expected.contains("by_id"))
+    );
 }
 
 #[test]
@@ -2191,6 +2222,19 @@ fn object_table_only_header_required_without_default_fails() {
     let message = validate_error(validate_data_set(&linked_meta, &data_set));
 
     assert!(message.contains("missing field `max_level`"));
+
+    let report = validation_report_error(validate_data_set(&linked_meta, &data_set));
+    let issue = report
+        .issues
+        .iter()
+        .find(|issue| issue.code == CF_DATA_MISSING_REQUIRED_FIELD)
+        .expect("missing required field diagnostic");
+    assert_eq!(issue.location.table.as_deref(), Some("game_config"));
+    assert_eq!(issue.location.field.as_deref(), Some("max_level"));
+    assert_eq!(
+        issue.expected.as_deref(),
+        Some("non-empty required field value or configured default")
+    );
 }
 
 #[test]
@@ -2563,6 +2607,22 @@ fn validation_report_collects_multiple_basic_errors_before_failing() {
     assert!(messages.contains("field `id`"));
     assert!(messages.contains("duplicates unique value"));
     assert!(messages.contains("field `level`"));
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.code == CF_DATA_DUPLICATE_KEY
+                && issue.current_value.as_deref() == Some("same")
+                && issue.expected.as_deref() == Some("unique field/index key value"))
+    );
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.code == CF_DATA_INVALID_TYPE
+                && issue.current_value.as_deref() == Some("bad")
+                && issue.expected.as_deref() == Some("int"))
+    );
     assert!(report.error_messages().len() >= 3);
 }
 

@@ -4,12 +4,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     data::{
         DataRow, DataSet, DataTable, ValueSourceKind,
         typed_value::parse_list_cell_value,
         value_conversion::{json_value_is_empty, json_value_to_cell, toml_default_to_json_value},
     },
+    diagnostic::code::CF_DATA_INVALID_FOREIGN_KEY,
     meta::{
         LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedIndexMeta, LinkedMetaModel,
         LinkedTableMeta, TargetTags,
@@ -17,6 +18,37 @@ use crate::{
 };
 
 use super::{ExportTableView, ExportValidationView};
+
+fn foreign_key_error(
+    source_table_meta: &LinkedTableMeta<'_>,
+    row_number: usize,
+    foreign_key: &LinkedForeignKeyMeta<'_>,
+    message: String,
+    current_value: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_DATA_INVALID_FOREIGN_KEY,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation {
+                table: Some(source_table_meta.meta.name.clone()),
+                field: foreign_key
+                    .fields
+                    .first()
+                    .map(|field| field.meta.name.clone()),
+                source_row_number: Some(row_number),
+                ..DiagnosticLocation::default()
+            },
+        )
+        .with_source("validation.foreign_key")
+        .with_current_value(current_value)
+        .with_expected(format!(
+            "existing `{}`.`{}` key; allow_empty = {}",
+            foreign_key.target_table_name, foreign_key.target_index_name, foreign_key.allow_empty
+        )),
+    )
+}
 
 pub(super) fn validate_foreign_keys_full(
     meta: &LinkedMetaModel<'_>,
@@ -391,21 +423,36 @@ fn validate_single_foreign_key_row(
         if foreign_key.allow_empty {
             return Ok(());
         }
-        return Err(ConfigForgeError::Validation(format!(
+        let message = format!(
             "table `{}` row {} foreign key `{}` is empty but `allow_empty = false`",
             source_table_meta.meta.name, row_number, foreign_key.name
-        )));
+        );
+        return Err(foreign_key_error(
+            source_table_meta,
+            row_number,
+            foreign_key,
+            message,
+            key,
+        ));
     }
     if !target_keys.contains_single(&key) {
-        return Err(ConfigForgeError::Validation(format!(
+        let current_value = format!("{:?}", vec![key.as_str()]);
+        let message = format!(
             "table `{}` row {} foreign key `{}` references missing `{}.{}` key `{:?}`",
             source_table_meta.meta.name,
             row_number,
             foreign_key.name,
             foreign_key.target_table_name,
             foreign_key.target_index_name,
-            vec![key]
-        )));
+            vec![key.as_str()]
+        );
+        return Err(foreign_key_error(
+            source_table_meta,
+            row_number,
+            foreign_key,
+            message,
+            current_value,
+        ));
     }
     Ok(())
 }
@@ -424,19 +471,33 @@ fn validate_composite_foreign_key_row(
         if foreign_key.allow_empty {
             return Ok(());
         }
-        return Err(ConfigForgeError::Validation(format!(
+        let message = format!(
             "table `{}` row {} foreign key `{}` is empty but `allow_empty = false`",
             source_table_meta.meta.name, row_number, foreign_key.name
-        )));
+        );
+        return Err(foreign_key_error(
+            source_table_meta,
+            row_number,
+            foreign_key,
+            message,
+            format!("{:?}", key),
+        ));
     }
     if empty_count > 0 {
-        return Err(ConfigForgeError::Validation(format!(
+        let message = format!(
             "table `{}` row {} foreign key `{}` has partial empty key `{:?}`",
             source_table_meta.meta.name, row_number, foreign_key.name, key
-        )));
+        );
+        return Err(foreign_key_error(
+            source_table_meta,
+            row_number,
+            foreign_key,
+            message,
+            format!("{:?}", key),
+        ));
     }
     if !target_keys.contains_composite(&key) {
-        return Err(ConfigForgeError::Validation(format!(
+        let message = format!(
             "table `{}` row {} foreign key `{}` references missing `{}.{}` key `{:?}`",
             source_table_meta.meta.name,
             row_number,
@@ -444,7 +505,14 @@ fn validate_composite_foreign_key_row(
             foreign_key.target_table_name,
             foreign_key.target_index_name,
             key
-        )));
+        );
+        return Err(foreign_key_error(
+            source_table_meta,
+            row_number,
+            foreign_key,
+            message,
+            format!("{:?}", key),
+        ));
     }
     Ok(())
 }
@@ -487,10 +555,17 @@ fn validate_list_foreign_key_row(
         if foreign_key.allow_empty {
             return Ok(());
         }
-        return Err(ConfigForgeError::Validation(format!(
+        let message = format!(
             "table `{}` row {} foreign key `{}` is empty but `allow_empty = false`",
             source_table_meta.meta.name, row_number, foreign_key.name
-        )));
+        );
+        return Err(foreign_key_error(
+            source_table_meta,
+            row_number,
+            foreign_key,
+            message,
+            raw,
+        ));
     }
     let LinkedField::List(element_type) = &list_field.linked_field else {
         return Err(ConfigForgeError::Validation(format!(
@@ -515,10 +590,17 @@ fn validate_list_foreign_key_row(
         other => other,
     })?;
     if elements.is_empty() && !foreign_key.allow_empty {
-        return Err(ConfigForgeError::Validation(format!(
+        let message = format!(
             "table `{}` row {} foreign key `{}` is empty but `allow_empty = false`",
             source_table_meta.meta.name, row_number, foreign_key.name
-        )));
+        );
+        return Err(foreign_key_error(
+            source_table_meta,
+            row_number,
+            foreign_key,
+            message,
+            raw,
+        ));
     }
     for (index, element) in elements.iter().enumerate() {
         let key_value = element.scalar_export_string().ok_or_else(|| {
@@ -528,7 +610,8 @@ fn validate_list_foreign_key_row(
             ))
         })?;
         if !target_keys.contains_single(&key_value) {
-            return Err(ConfigForgeError::Validation(format!(
+            let current_value = format!("{:?}", vec![key_value.as_str()]);
+            let message = format!(
                 "table `{}` row {} foreign key `{}` source field `{}[{}]` references missing `{}.{}` key `{:?}`",
                 source_table_meta.meta.name,
                 row_number,
@@ -537,8 +620,15 @@ fn validate_list_foreign_key_row(
                 index,
                 foreign_key.target_table_name,
                 foreign_key.target_index_name,
-                vec![key_value]
-            )));
+                vec![key_value.as_str()]
+            );
+            return Err(foreign_key_error(
+                source_table_meta,
+                row_number,
+                foreign_key,
+                message,
+                current_value,
+            ));
         }
     }
     Ok(())

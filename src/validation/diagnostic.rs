@@ -209,9 +209,34 @@ pub(super) fn error_issue_from_result(
     result: Result<()>,
     location: ValidationIssueLocation,
 ) -> Option<ValidationIssue> {
+    let code = code.into();
+    let validator = validator.into();
     let Err(error) = result else {
         return None;
     };
+    if let ConfigForgeError::ValidationReport(report) = error {
+        if let Some(diagnostic) = report.diagnostics.into_iter().next() {
+            let mut issue = ValidationIssue::error(
+                diagnostic.code,
+                diagnostic.source.unwrap_or_else(|| validator.clone()),
+                diagnostic.message,
+                if diagnostic.location.is_empty() {
+                    location
+                } else {
+                    diagnostic.location
+                },
+            );
+            issue.target = diagnostic.target;
+            issue.hint = diagnostic.hint;
+            issue.current_value = diagnostic.current_value;
+            issue.expected = diagnostic.expected;
+            issue.explanation = diagnostic.explanation;
+            issue.domain = diagnostic.domain;
+            issue.owner = diagnostic.owner;
+            return Some(issue);
+        }
+        return None;
+    }
     Some(error_issue_from_message(
         code,
         validator,
