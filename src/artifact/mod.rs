@@ -9,7 +9,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::{ConfigForgeError, Result};
+use crate::{
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
+    diagnostic::code::{
+        CF_ARTIFACT_CASE_INSENSITIVE_COLLISION, CF_ARTIFACT_HARDLINK_ALIAS_COLLISION,
+        CF_ARTIFACT_PATH_COLLISION, CF_ARTIFACT_PATH_ESCAPE, CF_ARTIFACT_SYMLINK_ALIAS_COLLISION,
+    },
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Artifact {
@@ -177,16 +183,24 @@ impl ArtifactSink {
                 let existing = state
                     .conflict_keys
                     .get(&conflict_key)
-                    .unwrap_or(&normalized_path);
-                let message = format!(
-                    "multiple artifacts target `{}` (conflicts with `{}`)",
-                    normalized_path.display(),
-                    existing.display()
-                );
+                    .unwrap_or(&normalized_path)
+                    .clone();
+                let code = artifact_collision_code(&normalized_path, &existing, &conflict_key);
+                let message = artifact_collision_message(&normalized_path, &existing);
                 if state.first_error.is_none() {
-                    state.first_error = Some(ConfigForgeError::Validation(message.clone()));
+                    state.first_error = Some(artifact_collision_error(
+                        code,
+                        &message,
+                        &normalized_path,
+                        &existing,
+                    ));
                 }
-                return Err(ConfigForgeError::Validation(message));
+                return Err(artifact_collision_error(
+                    code,
+                    &message,
+                    &normalized_path,
+                    &existing,
+                ));
             }
             if state.first_error.is_some() {
                 return Err(ConfigForgeError::Validation(
@@ -530,10 +544,13 @@ fn plan_artifacts(artifacts: Vec<Artifact>) -> Result<Vec<Artifact>> {
     for mut artifact in artifacts {
         artifact.path = lexical_normalize_path(&artifact.path);
         if by_path.contains_key(&artifact.path) {
-            return Err(ConfigForgeError::Validation(format!(
-                "multiple artifacts target `{}`",
-                artifact.path.display(),
-            )));
+            let message = format!("multiple artifacts target `{}`", artifact.path.display());
+            return Err(artifact_path_error(
+                CF_ARTIFACT_PATH_COLLISION,
+                message,
+                &artifact.path,
+                "output root内唯一 normalized artifact path",
+            ));
         }
         by_path.insert(artifact.path.clone(), artifact);
     }
@@ -551,11 +568,16 @@ fn normalize_artifact_path(output_root: Option<&Path>, path: &Path) -> Result<Pa
         if !path_is_within_root(&candidate, &normalized_root)
             && !filesystem_path_is_within_root(&candidate, &normalized_root)
         {
-            return Err(ConfigForgeError::Validation(format!(
-                "artifact path `{}` escapes output root `{}`",
-                path.display(),
-                normalized_root.display()
-            )));
+            return Err(artifact_path_error(
+                CF_ARTIFACT_PATH_ESCAPE,
+                format!(
+                    "artifact path `{}` escapes output root `{}`",
+                    path.display(),
+                    normalized_root.display()
+                ),
+                path,
+                format!("path inside output root `{}`", normalized_root.display()),
+            ));
         }
         candidate
     } else {
@@ -584,15 +606,83 @@ fn artifact_conflict_key(output_root: Option<&Path>, normalized_path: &Path) -> 
             .unwrap_or_else(|| lexical_normalize_path(output_root));
         let root_key = case_fold_conflict_key(root_key);
         if !path_is_within_root(&case_fold_conflict_key(alias_key.clone()), &root_key) {
-            return Err(ConfigForgeError::Validation(format!(
-                "artifact path `{}` escapes output root `{}` through filesystem alias",
-                normalized_path.display(),
-                output_root.display()
-            )));
+            return Err(artifact_path_error(
+                CF_ARTIFACT_PATH_ESCAPE,
+                format!(
+                    "artifact path `{}` escapes output root `{}` through filesystem alias",
+                    normalized_path.display(),
+                    output_root.display()
+                ),
+                normalized_path,
+                format!(
+                    "filesystem-resolved path inside output root `{}`",
+                    output_root.display()
+                ),
+            ));
         }
     }
     Ok(existing_file_identity_key(normalized_path)
         .unwrap_or_else(|| case_fold_conflict_key(alias_key)))
+}
+
+fn artifact_collision_message(path: &Path, existing: &Path) -> String {
+    format!(
+        "multiple artifacts target `{}` (conflicts with `{}`)",
+        path.display(),
+        existing.display()
+    )
+}
+
+fn artifact_collision_code(path: &Path, existing: &Path, conflict_key: &Path) -> &'static str {
+    if existing_file_identity_key(path).is_some_and(|key| key == conflict_key) {
+        return CF_ARTIFACT_HARDLINK_ALIAS_COLLISION;
+    }
+    if path != existing
+        && case_fold_conflict_key(path.to_path_buf())
+            == case_fold_conflict_key(existing.to_path_buf())
+    {
+        return CF_ARTIFACT_CASE_INSENSITIVE_COLLISION;
+    }
+    if path != existing {
+        return CF_ARTIFACT_SYMLINK_ALIAS_COLLISION;
+    }
+    CF_ARTIFACT_PATH_COLLISION
+}
+
+fn artifact_collision_error(
+    code: &'static str,
+    message: &str,
+    path: &Path,
+    existing: &Path,
+) -> ConfigForgeError {
+    artifact_path_error(
+        code,
+        message.to_owned(),
+        path,
+        format!(
+            "output root 内唯一 normalized artifact path; conflicts with `{}`",
+            existing.display()
+        ),
+    )
+}
+
+fn artifact_path_error(
+    code: &'static str,
+    message: String,
+    path: &Path,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            code,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source("artifact.writer")
+        .with_current_value(path.display().to_string())
+        .with_expected(expected),
+    )
 }
 
 fn filesystem_aware_path_key(path: &Path) -> Option<PathBuf> {
@@ -738,9 +828,32 @@ fn lexical_normalize_path(path: &Path) -> PathBuf {
 mod tests {
     use std::{env, io::Write as _, sync::Mutex};
 
+    use crate::diagnostic::code::{
+        CF_ARTIFACT_CASE_INSENSITIVE_COLLISION, CF_ARTIFACT_HARDLINK_ALIAS_COLLISION,
+        CF_ARTIFACT_PATH_COLLISION, CF_ARTIFACT_PATH_ESCAPE, CF_ARTIFACT_SYMLINK_ALIAS_COLLISION,
+    };
+
     use super::*;
 
     static CURRENT_DIR_LOCK: Mutex<()> = Mutex::new(());
+
+    fn assert_artifact_diagnostic(error: ConfigForgeError, code: &str, current_contains: &str) {
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected structured artifact diagnostic");
+        };
+        let diagnostic = &report.diagnostics[0];
+        assert_eq!(diagnostic.code, code);
+        assert_eq!(diagnostic.source.as_deref(), Some("artifact.writer"));
+        assert!(
+            diagnostic
+                .current_value
+                .as_deref()
+                .is_some_and(|current| current.contains(current_contains)),
+            "expected current_value to contain `{current_contains}`, got {:?}",
+            diagnostic.current_value
+        );
+        assert!(diagnostic.expected.is_some());
+    }
 
     #[test]
     fn dry_run_returns_sorted_entries_without_writing() {
@@ -928,14 +1041,10 @@ mod tests {
         let stream = sink.create(&first).expect("create first stream");
         let error = sink.create(&duplicate).unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
-        );
+        assert_artifact_diagnostic(error, CF_ARTIFACT_PATH_COLLISION, "items.json");
         stream.finish().expect("finish first stream");
         let error = sink.finish().unwrap_err();
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
-        );
+        assert_artifact_diagnostic(error, CF_ARTIFACT_PATH_COLLISION, "items.json");
     }
 
     #[test]
@@ -951,9 +1060,7 @@ mod tests {
 
         let error = sink.finish().unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
-        );
+        assert_artifact_diagnostic(error, CF_ARTIFACT_PATH_COLLISION, "items.json");
     }
 
     #[test]
@@ -1180,9 +1287,7 @@ mod tests {
             ])
             .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
-        );
+        assert_artifact_diagnostic(error, CF_ARTIFACT_PATH_COLLISION, "items.json");
         assert!(!temp_dir.path().join("out").exists());
     }
 
@@ -1197,9 +1302,7 @@ mod tests {
             .write(vec![Artifact::text(&outside, "escape")])
             .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("escapes output root"))
-        );
+        assert_artifact_diagnostic(error, CF_ARTIFACT_PATH_ESCAPE, "outside/generated.rs");
         assert!(!outside.exists());
     }
 
@@ -1213,9 +1316,7 @@ mod tests {
             .write(vec![Artifact::text("../outside/generated.rs", "escape")])
             .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("escapes output root"))
-        );
+        assert_artifact_diagnostic(error, CF_ARTIFACT_PATH_ESCAPE, "../outside/generated.rs");
     }
 
     #[cfg(unix)]
@@ -1237,9 +1338,7 @@ mod tests {
             .write_text(alias.join("items.json"), "second")
             .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
-        );
+        assert_artifact_diagnostic(error, CF_ARTIFACT_SYMLINK_ALIAS_COLLISION, "items.json");
     }
 
     #[cfg(unix)]
@@ -1258,9 +1357,7 @@ mod tests {
             .write(vec![Artifact::text(&symlink_path, "new")])
             .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("filesystem alias"))
-        );
+        assert_artifact_diagnostic(error, CF_ARTIFACT_PATH_ESCAPE, "generated.rs");
         assert_eq!(
             fs::read_to_string(outside).expect("outside file"),
             "outside"
@@ -1285,9 +1382,7 @@ mod tests {
             .expect("first path should plan");
         let error = sink.write_text(&second, "second").unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
-        );
+        assert_artifact_diagnostic(error, CF_ARTIFACT_HARDLINK_ALIAS_COLLISION, "b.txt");
     }
 
     #[cfg(target_os = "macos")]
@@ -1319,9 +1414,7 @@ mod tests {
             .expect("first path should plan");
         let error = sink.write_text("out/items.json", "second").unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
-        );
+        assert_artifact_diagnostic(error, CF_ARTIFACT_CASE_INSENSITIVE_COLLISION, "items.json");
     }
 
     #[cfg(target_os = "macos")]
@@ -1353,9 +1446,7 @@ mod tests {
             .write_text(alias.join("items.json"), "second")
             .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
-        );
+        assert_artifact_diagnostic(error, CF_ARTIFACT_SYMLINK_ALIAS_COLLISION, "items.json");
     }
 
     #[cfg(windows)]
@@ -1379,9 +1470,7 @@ mod tests {
             .write_text(alias.join("items.json"), "second")
             .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
-        );
+        assert_artifact_diagnostic(error, CF_ARTIFACT_SYMLINK_ALIAS_COLLISION, "items.json");
     }
 
     #[cfg(windows)]
