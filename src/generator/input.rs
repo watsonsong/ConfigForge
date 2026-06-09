@@ -6,12 +6,14 @@ use std::{collections::BTreeMap, path::PathBuf};
 use rayon::ThreadPool;
 
 use crate::{
-    ArtifactProjectInfo, ConfigForgeError, Result,
+    ArtifactProjectInfo, ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity,
+    Result,
     code_artifact::{
         CodeExportInput, CodeExportProject, CodeExportTarget, CodeGenerator, CodegenTaskConfig,
     },
     data::DataSet,
     data_artifact::TargetDataConfig,
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{LinkedMetaModel, TargetTags},
     validation::ValidationReport,
 };
@@ -97,9 +99,11 @@ impl<'a> PreparedGeneratorInputs<'a> {
     pub(crate) fn data_set(&self, generator_type: &str) -> Result<&'a DataSet> {
         match self {
             Self::MetaAndData { data_set, .. } => Ok(*data_set),
-            Self::Planning | Self::MetaOnly => Err(ConfigForgeError::Validation(format!(
-                "generator `{generator_type}` requires Data-backed artifact input"
-            ))),
+            Self::Planning | Self::MetaOnly => Err(unsupported_data_input_error(
+                generator_type,
+                self.kind_label(),
+                "Data-backed artifact input",
+            )),
         }
     }
 
@@ -108,18 +112,75 @@ impl<'a> PreparedGeneratorInputs<'a> {
             Self::MetaAndData {
                 validation_report, ..
             } => Ok(*validation_report),
-            Self::Planning | Self::MetaOnly => Err(ConfigForgeError::Validation(format!(
-                "generator `{generator_type}` requires validation report input"
-            ))),
+            Self::Planning | Self::MetaOnly => Err(unsupported_data_input_error(
+                generator_type,
+                self.kind_label(),
+                "validation report input",
+            )),
         }
     }
 
     pub(crate) fn pool(&self, generator_type: &str) -> Result<&'a ThreadPool> {
         match self {
             Self::MetaAndData { pool, .. } => Ok(*pool),
-            Self::Planning | Self::MetaOnly => Err(ConfigForgeError::Validation(format!(
-                "generator `{generator_type}` requires Data-backed artifact input"
-            ))),
+            Self::Planning | Self::MetaOnly => Err(unsupported_data_input_error(
+                generator_type,
+                self.kind_label(),
+                "Data-backed artifact input",
+            )),
         }
+    }
+
+    fn kind_label(&self) -> &'static str {
+        match self {
+            Self::Planning => "Planning",
+            Self::MetaOnly => "MetaOnly",
+            Self::MetaAndData { .. } => "MetaAndData",
+        }
+    }
+}
+
+fn unsupported_data_input_error(
+    generator_type: &str,
+    current_input: &str,
+    expected_input: &str,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+            DiagnosticSeverity::Error,
+            format!("generator `{generator_type}` requires {expected_input}"),
+            DiagnosticLocation::default(),
+        )
+        .with_source("generator.input")
+        .with_current_value(current_input)
+        .with_expected(expected_input),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepared_inputs_report_structured_data_requirement_errors() {
+        let error = PreparedGeneratorInputs::MetaOnly
+            .data_set("json")
+            .unwrap_err();
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected structured diagnostic report");
+        };
+        assert_eq!(
+            report.diagnostics[0].code,
+            CF_GENERATOR_UNSUPPORTED_DATA_INPUT
+        );
+        assert_eq!(
+            report.diagnostics[0].source.as_deref(),
+            Some("generator.input")
+        );
+        assert_eq!(
+            report.diagnostics[0].current_value.as_deref(),
+            Some("MetaOnly")
+        );
     }
 }

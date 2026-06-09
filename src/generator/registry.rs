@@ -1,7 +1,12 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ConfigForgeError, Result};
+use std::collections::BTreeMap;
+
+use crate::{
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
+    diagnostic::code::{CF_GENERATOR_AMBIGUOUS_TYPE, CF_GENERATOR_UNKNOWN_TYPE},
+};
 
 use super::{
     ArtifactGenerator, GeneratorRequirements, asset_manifest::AssetManifestExporter,
@@ -51,16 +56,40 @@ impl GeneratorRegistry {
     pub(crate) fn require_generator(&self, type_id: &str) -> Result<&dyn ArtifactGenerator> {
         let mut generators = self.matching_generators(type_id).into_iter();
         let Some(generator) = generators.next() else {
-            return Err(ConfigForgeError::Validation(format!(
-                "no artifact generator registered for `{type_id}`"
-            )));
+            return Err(unknown_generator_error(type_id, None));
         };
         if generators.next().is_some() {
-            return Err(ConfigForgeError::Validation(format!(
-                "ambiguous artifact generator registration for `{type_id}`"
-            )));
+            return Err(ambiguous_generator_error(type_id));
         }
         Ok(generator)
+    }
+
+    pub(crate) fn validate_health(&self) -> Result<()> {
+        let mut owners = BTreeMap::<&'static str, &'static str>::new();
+        for generator in &self.generators {
+            let descriptor = generator.descriptor();
+            for name in
+                std::iter::once(descriptor.type_id).chain(descriptor.aliases.iter().copied())
+            {
+                if let Some(previous) = owners.insert(name, descriptor.type_id) {
+                    return Err(ConfigForgeError::from_diagnostic(
+                        Diagnostic::new(
+                            CF_GENERATOR_AMBIGUOUS_TYPE,
+                            DiagnosticSeverity::Error,
+                            format!(
+                                "artifact generator name `{name}` is registered by both `{previous}` and `{}`",
+                                descriptor.type_id
+                            ),
+                            DiagnosticLocation::default(),
+                        )
+                        .with_source("generator.registry")
+                        .with_current_value(name)
+                        .with_expected("globally unique generator type_id and alias"),
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn requirements(
@@ -68,18 +97,51 @@ impl GeneratorRegistry {
         target_name: &str,
         type_id: &str,
     ) -> Result<GeneratorRequirements> {
-        match self.require_generator(type_id) {
-            Ok(generator) => Ok(generator.requirements()),
-            Err(ConfigForgeError::Validation(message))
-                if message.contains("no artifact generator registered") =>
-            {
-                Err(ConfigForgeError::Validation(format!(
-                    "target `{target_name}` declares unknown export type `{type_id}`"
-                )))
-            }
-            Err(error) => Err(error),
+        let mut generators = self.matching_generators(type_id).into_iter();
+        let Some(generator) = generators.next() else {
+            return Err(unknown_generator_error(type_id, Some(target_name)));
+        };
+        if generators.next().is_some() {
+            return Err(ambiguous_generator_error(type_id));
         }
+        Ok(generator.requirements())
     }
+}
+
+fn unknown_generator_error(type_id: &str, target_name: Option<&str>) -> ConfigForgeError {
+    let message = match target_name {
+        Some(target_name) => {
+            format!("target `{target_name}` declares unknown export type `{type_id}`")
+        }
+        None => format!("no artifact generator registered for `{type_id}`"),
+    };
+    let mut diagnostic = Diagnostic::new(
+        CF_GENERATOR_UNKNOWN_TYPE,
+        DiagnosticSeverity::Error,
+        message,
+        DiagnosticLocation::default(),
+    )
+    .with_source("generator.registry")
+    .with_current_value(type_id)
+    .with_expected("registered generator type_id or alias");
+    if let Some(target_name) = target_name {
+        diagnostic = diagnostic.with_target(target_name);
+    }
+    ConfigForgeError::from_diagnostic(diagnostic)
+}
+
+fn ambiguous_generator_error(type_id: &str) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_GENERATOR_AMBIGUOUS_TYPE,
+            DiagnosticSeverity::Error,
+            format!("ambiguous artifact generator registration for `{type_id}`"),
+            DiagnosticLocation::default(),
+        )
+        .with_source("generator.registry")
+        .with_current_value(type_id)
+        .with_expected("exactly one matching generator type_id or alias"),
+    )
 }
 
 #[cfg(test)]
@@ -121,6 +183,9 @@ mod tests {
     #[test]
     fn registry_reports_known_generator_requirements() {
         let registry = GeneratorRegistry::with_builtin_generators();
+        registry
+            .validate_health()
+            .expect("healthy builtin registry");
 
         assert!(
             !registry
@@ -176,8 +241,15 @@ mod tests {
     fn registry_reports_unknown_generator_type() {
         let registry = GeneratorRegistry::with_builtin_generators();
 
-        assert!(
-            matches!(registry.requirements("client", "unknown"), Err(ConfigForgeError::Validation(message)) if message.contains("unknown export type `unknown`"))
+        let error = registry.requirements("client", "unknown").unwrap_err();
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected structured generator diagnostic");
+        };
+        assert_eq!(report.diagnostics[0].code, CF_GENERATOR_UNKNOWN_TYPE);
+        assert_eq!(report.diagnostics[0].target.as_deref(), Some("client"));
+        assert_eq!(
+            report.diagnostics[0].current_value.as_deref(),
+            Some("unknown")
         );
     }
 
@@ -200,8 +272,16 @@ mod tests {
             }),
         ]);
 
-        assert!(
-            matches!(registry.require_generator("custom"), Err(ConfigForgeError::Validation(message)) if message.contains("ambiguous artifact generator registration for `custom`"))
+        let Err(error) = registry.require_generator("custom") else {
+            panic!("expected ambiguous generator registration error");
+        };
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected structured generator diagnostic");
+        };
+        assert_eq!(report.diagnostics[0].code, CF_GENERATOR_AMBIGUOUS_TYPE);
+        assert_eq!(
+            report.diagnostics[0].current_value.as_deref(),
+            Some("custom")
         );
     }
 }

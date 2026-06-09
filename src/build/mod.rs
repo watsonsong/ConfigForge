@@ -746,6 +746,7 @@ mod tests {
     use crate::code_artifact::default_module_name;
     use crate::data::{DataSet, DataTable, RawSourceData};
     use crate::data_artifact::build_exported_table_payload;
+    use crate::diagnostic::code::CF_GENERATOR_UNKNOWN_TYPE;
     use crate::generator::ArtifactGenerator;
     use crate::meta::{MetaModel, TargetTags};
 
@@ -1210,11 +1211,14 @@ mod tests {
             trace: &mut trace,
         });
 
-        assert!(matches!(
-            result,
-            Err(ConfigForgeError::Validation(message))
-                if message.contains("no artifact generator registered")
-        ));
+        let Err(ConfigForgeError::ValidationReport(report)) = result else {
+            panic!("expected structured unknown generator diagnostic");
+        };
+        assert_eq!(report.diagnostics[0].code, CF_GENERATOR_UNKNOWN_TYPE);
+        assert_eq!(
+            report.diagnostics[0].current_value.as_deref(),
+            Some("unknown_language")
+        );
         let run_exporters_stage = trace
             .stages
             .iter()

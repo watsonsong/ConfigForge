@@ -146,6 +146,7 @@ fn validate_no_export_input_option(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostic::code::CF_GENERATOR_UNKNOWN_TYPE;
 
     fn export_task(type_id: &str) -> TargetExportConfig {
         TargetExportConfig {
@@ -333,8 +334,15 @@ mod tests {
                 .expect("lua requirements")
                 .needs_data
         );
-        assert!(
-            matches!(registry.requirements("client", "unknown"), Err(ConfigForgeError::Validation(message)) if message.contains("unknown export type `unknown`"))
+        let error = registry.requirements("client", "unknown").unwrap_err();
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected structured unknown generator diagnostic");
+        };
+        assert_eq!(report.diagnostics[0].code, CF_GENERATOR_UNKNOWN_TYPE);
+        assert_eq!(report.diagnostics[0].target.as_deref(), Some("client"));
+        assert_eq!(
+            report.diagnostics[0].current_value.as_deref(),
+            Some("unknown")
         );
     }
 }
