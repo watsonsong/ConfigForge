@@ -121,21 +121,25 @@ Batch C 记录：C++ runtime 已有 install / export set / version config 基础
 
 ## Step 9：C# package / template 策略定稿
 
-- [ ] 评估是否提供 stable interface assembly / NuGet package，或继续保持 copyable template。
+- [x] 评估是否提供 stable interface assembly / NuGet package，或继续保持 copyable template。
 - [ ] 若选择 NuGet：定义 target framework、package metadata、public API、source generator / template 边界和 compliance tests。
-- [ ] 若选择 copyable template：补齐模板版本、contract range、升级指南和 generated code glue 约束。
-- [ ] 明确第三方生态 adapter（如 Newtonsoft.Json）的支持级别；当前 BCL / dependency-free reader 仍作为 baseline。
+- [x] 若选择 copyable template：补齐模板版本、contract range、升级指南和 generated code glue 约束。
+- [x] 明确第三方生态 adapter（如 Newtonsoft.Json）的支持级别；当前 BCL / dependency-free reader 仍作为 baseline。
 - [ ] 增加最小生产接入示例。
+
+Batch D 记录：C# 本批选择继续保持 copyable template，不承诺 NuGet / stable interface assembly。原因是 generated code 仍声明 nominal `IConfigForgeRuntimeDataReader` / loader interface，标准 reader 通过薄 adapter 接入；此时发布 NuGet 会把接口 assembly 过早稳定化。JSON 使用 BCL `System.Text.Json`，MessagePack / Binary 保持 dependency-free baseline；Newtonsoft.Json 等生态 adapter 暂不进入稳定支持级别。三个 template 均声明 `TemplateVersion = "0.1.0"`、`SupportedConfigForgeReaderContract = "^1.0"` 与 `DistributionMode = "copyable-template"`，compliance runner 会断言这些元数据。
 
 交付标准：C# runtime helper 的分发策略明确，业务项目知道应该引用包、复制模板，还是接入自定义 reader。
 
 ## Step 10：Java package / template 策略定稿
 
-- [ ] 评估是否提供 Maven package，或继续保持 copyable JDK-only template。
+- [x] 评估是否提供 Maven package，或继续保持 copyable JDK-only template。
 - [ ] 若选择 Maven：定义 groupId/artifactId、Java baseline、module-info 策略、public API 和 compliance tests。
-- [ ] 若选择 copyable template：补齐模板版本、contract range、升级指南和 generated code glue 约束。
-- [ ] 明确 Jackson / Gson / Android 等生态 adapter 的支持级别；当前 JDK-only reader 仍作为 baseline。
+- [x] 若选择 copyable template：补齐模板版本、contract range、升级指南和 generated code glue 约束。
+- [x] 明确 Jackson / Gson / Android 等生态 adapter 的支持级别；当前 JDK-only reader 仍作为 baseline。
 - [ ] 增加最小生产接入示例。
+
+Batch D 记录：Java 本批选择继续保持 copyable JDK-only template，不承诺 Maven package。原因同 C#：generated code 仍使用 nominal `ConfigForgeRuntimeDataReader` / loader contract，Maven artifact 需要等 external runtime interface 明确后再稳定。JSON / MessagePack / Binary 均保持 JDK-only baseline；Jackson、Gson、Android 适配暂不进入稳定支持级别。三个 reader template 均声明 `TEMPLATE_VERSION = "0.1.0"`、`SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0"` 与 `DISTRIBUTION_MODE = "copyable-template"`，compliance runner 会断言这些元数据。
 
 交付标准：Java runtime helper 的分发策略明确，且不会在没有 compliance 覆盖时过早承诺生态 adapter。
 

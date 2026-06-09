@@ -217,6 +217,7 @@ static void Exit(dynamic reader, params object[] steps) { for (var i = steps.Len
 static T WithPath<T>(dynamic reader, Func<dynamic, T> read, params object[] steps) { Enter(reader, steps); try { return read(reader); } finally { Exit(reader, steps); } }
 
 static void RunNamedCompliance(string adapter, Func<string, dynamic> readerFor) {
+    AssertCSharpTemplateMetadata(adapter);
     dynamic scalar = readerFor("scalar_compat.json");
     Equal(WithPath<long>((object)scalar, r => r.ReadInt(), "rows", 0, "id"), 7L, adapter + " int scalar");
     Equal(WithPath<long>((object)scalar, r => r.ReadInt(), "rows", 0, "level"), 12L, adapter + " numeric string int");
@@ -244,6 +245,15 @@ static void RunNamedCompliance(string adapter, Func<string, dynamic> readerFor) 
     ExpectFailure(adapter + " overflow", () => WithPath<long>((object)scalar, r => r.ReadInt(), "rows", 0, "overflow_int"), "");
     ExpectFailure(adapter + " invalid bool", () => WithPath<bool>((object)scalar, r => r.ReadBool(), "rows", 0, "invalid_bool"), "");
     ExpectFailure(adapter + " non finite", () => WithPath<double>((object)scalar, r => r.ReadFloat(), "rows", 0, "non_finite_float"), "finite");
+}
+
+static void AssertCSharpTemplateMetadata(string adapter) {
+    Equal(JsonRuntimeDataReader.TemplateVersion, "0.1.0", adapter + " JSON template version");
+    Equal(JsonRuntimeDataReader.SupportedConfigForgeReaderContract, "^1.0", adapter + " JSON contract range");
+    Equal(JsonRuntimeDataReader.DistributionMode, "copyable-template", adapter + " JSON distribution");
+    Equal(MessagePackRuntimeDataReader.TemplateVersion, "0.1.0", adapter + " MessagePack template version");
+    Equal(MessagePackRuntimeDataReader.SupportedConfigForgeReaderContract, "^1.0", adapter + " MessagePack contract range");
+    Equal(MessagePackRuntimeDataReader.DistributionMode, "copyable-template", adapter + " MessagePack distribution");
 }
 
 static byte[] EncodeMessagePack(JsonElement value) { var bytes = new List<byte>(); WriteMessagePack(value, bytes); return bytes.ToArray(); }
@@ -277,6 +287,7 @@ static List<byte> NestedBinaryPayload() { var bytes = Header(); WriteVaruint(byt
 static List<byte> FragmentBinaryPayload() { var bytes = Header(); WriteVaruint(bytes, 1); WriteI64(bytes, 4001); WriteBinaryString(bytes, "fixed"); WriteI64(bytes, 50); return bytes; }
 static void RequireBinarySchema(BinaryRuntimeDataReader reader, ulong expected) { var revision = reader.SchemaRevision(); if (!revision.HasValue || revision.Value != expected) throw new Exception($"schema revision mismatch: expected {expected}, got {revision}"); }
 static void RunBinaryCompliance() {
+    Equal(BinaryRuntimeDataReader.TemplateVersion, "0.1.0", "binary template version"); Equal(BinaryRuntimeDataReader.SupportedConfigForgeReaderContract, "^1.0", "binary contract range"); Equal(BinaryRuntimeDataReader.DistributionMode, "copyable-template", "binary distribution");
     var reader = new BinaryRuntimeDataReader(ScalarBinaryPayload().ToArray()); Equal(reader.SchemaRevision(), 7UL, "binary schema revision"); Equal(reader.ReadRowCount(), 1, "binary scalar row count"); reader.EnterRow(0); reader.BeginRecord(1); Equal(reader.ReadInt(), 7L, "binary int"); Equal(reader.ReadInt(), 12L, "binary level"); Check(Math.Abs(reader.ReadFloat() - 1.5) < 0.000001, "binary float"); Equal(reader.ReadBool(), true, "binary true"); Equal(reader.ReadBool(), false, "binary false"); Equal(reader.ReadBool(), true, "binary enabled bool"); Equal(reader.ReadString(), "Potion", "binary string"); Equal(reader.EnterOptionalField("nullable"), false, "binary optional null"); reader.EndRecord(); reader.EnsureExhausted();
     reader = new BinaryRuntimeDataReader(CollectionBinaryPayload().ToArray()); Equal(reader.ReadRowCount(), 2, "binary collection row count"); reader.EnterRow(0); reader.BeginRecord(0); Equal(reader.ReadInt(), 1001L, "binary first id"); Equal(reader.ReadString(), "Sword", "binary first name"); Equal(reader.ReadListLength(), 2, "binary tag count"); Equal(reader.ReadString(), "weapon", "binary first tag"); Equal(reader.ReadString(), "starter", "binary second tag"); reader.EndRecord(); reader.EnterRow(1); reader.BeginRecord(0); Equal(reader.ReadInt(), 1002L, "binary second id"); Equal(reader.ReadString(), "Shield", "binary second name"); Equal(reader.ReadListLength(), 1, "binary second tag count"); Equal(reader.ReadString(), "armor", "binary third tag"); reader.EndRecord(); reader.EnsureExhausted();
     reader = new BinaryRuntimeDataReader(ObjectBinaryPayload().ToArray()); reader.BeginRecord(0); Equal(reader.ReadInt(), 10L, "binary object int"); Equal(reader.ReadBool(), true, "binary object bool"); Equal(reader.ReadString(), "Demo Game", "binary object title"); reader.EndRecord(); reader.EnsureExhausted();
@@ -341,6 +352,7 @@ public class RuntimeCompliance {
   static boolean enterOptional(Object r, String name) throws Exception { return ((Boolean)call(r, "enterOptionalField", new Class[]{String.class}, name)).booleanValue(); }
 
   static void runNamed(String adapter, ReaderFactory readerFor) throws Exception {
+    assertJavaTemplateMetadata(adapter);
     Object scalar = readerFor.create("scalar_compat.json");
     equal(withPath(scalar, r -> readInt(r), "rows", 0, "id"), Long.valueOf(7), adapter + " int");
     equal(withPath(scalar, r -> readInt(r), "rows", 0, "level"), Long.valueOf(12), adapter + " level");
@@ -362,6 +374,15 @@ public class RuntimeCompliance {
     expectFailure(adapter + " non finite", () -> withPath(scalar, r -> readFloat(r), "rows", 0, "non_finite_float"), "finite");
   }
 
+  static void assertJavaTemplateMetadata(String adapter) {
+    equal(ConfigForgeJsonRuntimeDataReader.TEMPLATE_VERSION, "0.1.0", adapter + " JSON template version");
+    equal(ConfigForgeJsonRuntimeDataReader.SUPPORTED_CONFIG_FORGE_READER_CONTRACT, "^1.0", adapter + " JSON contract range");
+    equal(ConfigForgeJsonRuntimeDataReader.DISTRIBUTION_MODE, "copyable-template", adapter + " JSON distribution");
+    equal(ConfigForgeMessagePackRuntimeDataReader.TEMPLATE_VERSION, "0.1.0", adapter + " MessagePack template version");
+    equal(ConfigForgeMessagePackRuntimeDataReader.SUPPORTED_CONFIG_FORGE_READER_CONTRACT, "^1.0", adapter + " MessagePack contract range");
+    equal(ConfigForgeMessagePackRuntimeDataReader.DISTRIBUTION_MODE, "copyable-template", adapter + " MessagePack distribution");
+  }
+
   static byte[] encodeMessagePack(Object value) throws Exception { ByteArrayOutputStream out = new ByteArrayOutputStream(); writeMessagePack(value, out); return out.toByteArray(); }
   static void writeMessagePack(Object value, ByteArrayOutputStream out) throws Exception { if (value == null) out.write(0xc0); else if (value instanceof Boolean) out.write(((Boolean)value) ? 0xc3 : 0xc2); else if (value instanceof String) writeString((String)value, out); else if (value instanceof List) { List<?> list = (List<?>)value; out.write(0x90 | list.size()); for (Object e: list) writeMessagePack(e, out); } else if (value instanceof Map) { Map<?,?> map = (Map<?,?>)value; out.write(0x80 | map.size()); for (Map.Entry<?,?> e: map.entrySet()) { writeString((String)e.getKey(), out); writeMessagePack(e.getValue(), out); } } else writeString(String.valueOf(value), out); }
   static void writeString(String value, ByteArrayOutputStream out) throws Exception { byte[] bytes = value.getBytes(StandardCharsets.UTF_8); out.write(0xa0 | bytes.length); out.write(bytes); }
@@ -378,7 +399,7 @@ public class RuntimeCompliance {
   static ByteArrayOutputStream nestedBinaryPayload() throws Exception { ByteArrayOutputStream out = header(); writeVaruint(out, 1); writeI64(out, 2001); writeI64(out, 3001); writeI64(out, 3); writeVaruint(out, 2); writeBinString(out, "fire"); writeBinString(out, "rare"); return out; }
   static ByteArrayOutputStream fragmentBinaryPayload() throws Exception { ByteArrayOutputStream out = header(); writeVaruint(out, 1); writeI64(out, 4001); writeBinString(out, "fixed"); writeI64(out, 50); return out; }
   static void requireBinarySchema(ConfigForgeBinaryRuntimeDataReader reader, long expected) { Long revision = reader.schemaRevision(); if (!Objects.equals(revision, Long.valueOf(expected))) throw new RuntimeException("schema revision mismatch: expected " + expected + ", got " + revision); }
-  static void runBinary() throws Exception { ConfigForgeBinaryRuntimeDataReader r = new ConfigForgeBinaryRuntimeDataReader(scalarBinaryPayload().toByteArray()); equal(r.schemaRevision(), Long.valueOf(7), "binary schema"); equal(Integer.valueOf(r.readRowCount()), Integer.valueOf(1), "binary scalar row count"); r.enterRow(0); r.beginRecord(1); equal(Long.valueOf(r.readInt()), Long.valueOf(7), "binary int"); equal(Long.valueOf(r.readInt()), Long.valueOf(12), "binary level"); check(Math.abs(r.readFloat() - 1.5) < 0.000001, "binary float"); equal(Boolean.valueOf(r.readBool()), Boolean.TRUE, "binary true"); equal(Boolean.valueOf(r.readBool()), Boolean.FALSE, "binary false"); equal(Boolean.valueOf(r.readBool()), Boolean.TRUE, "binary enabled bool"); equal(r.readString(), "Potion", "binary string"); equal(Boolean.valueOf(r.enterOptionalField("nullable")), Boolean.FALSE, "binary optional null"); r.endRecord(); r.ensureExhausted();
+  static void runBinary() throws Exception { equal(ConfigForgeBinaryRuntimeDataReader.TEMPLATE_VERSION, "0.1.0", "binary template version"); equal(ConfigForgeBinaryRuntimeDataReader.SUPPORTED_CONFIG_FORGE_READER_CONTRACT, "^1.0", "binary contract range"); equal(ConfigForgeBinaryRuntimeDataReader.DISTRIBUTION_MODE, "copyable-template", "binary distribution"); ConfigForgeBinaryRuntimeDataReader r = new ConfigForgeBinaryRuntimeDataReader(scalarBinaryPayload().toByteArray()); equal(r.schemaRevision(), Long.valueOf(7), "binary schema"); equal(Integer.valueOf(r.readRowCount()), Integer.valueOf(1), "binary scalar row count"); r.enterRow(0); r.beginRecord(1); equal(Long.valueOf(r.readInt()), Long.valueOf(7), "binary int"); equal(Long.valueOf(r.readInt()), Long.valueOf(12), "binary level"); check(Math.abs(r.readFloat() - 1.5) < 0.000001, "binary float"); equal(Boolean.valueOf(r.readBool()), Boolean.TRUE, "binary true"); equal(Boolean.valueOf(r.readBool()), Boolean.FALSE, "binary false"); equal(Boolean.valueOf(r.readBool()), Boolean.TRUE, "binary enabled bool"); equal(r.readString(), "Potion", "binary string"); equal(Boolean.valueOf(r.enterOptionalField("nullable")), Boolean.FALSE, "binary optional null"); r.endRecord(); r.ensureExhausted();
     r = new ConfigForgeBinaryRuntimeDataReader(collectionBinaryPayload().toByteArray()); equal(Integer.valueOf(r.readRowCount()), Integer.valueOf(2), "binary collection row count"); r.enterRow(0); r.beginRecord(0); equal(Long.valueOf(r.readInt()), Long.valueOf(1001), "binary first id"); equal(r.readString(), "Sword", "binary first name"); equal(Integer.valueOf(r.readListLength()), Integer.valueOf(2), "binary tag count"); equal(r.readString(), "weapon", "binary first tag"); equal(r.readString(), "starter", "binary second tag"); r.endRecord(); r.enterRow(1); r.beginRecord(0); equal(Long.valueOf(r.readInt()), Long.valueOf(1002), "binary second id"); equal(r.readString(), "Shield", "binary second name"); equal(Integer.valueOf(r.readListLength()), Integer.valueOf(1), "binary second tag count"); equal(r.readString(), "armor", "binary third tag"); r.endRecord(); r.ensureExhausted();
     r = new ConfigForgeBinaryRuntimeDataReader(objectBinaryPayload().toByteArray()); r.beginRecord(0); equal(Long.valueOf(r.readInt()), Long.valueOf(10), "binary object int"); equal(Boolean.valueOf(r.readBool()), Boolean.TRUE, "binary object bool"); equal(r.readString(), "Demo Game", "binary object title"); r.endRecord(); r.ensureExhausted();
     r = new ConfigForgeBinaryRuntimeDataReader(nestedBinaryPayload().toByteArray()); equal(Integer.valueOf(r.readRowCount()), Integer.valueOf(1), "binary nested row count"); r.enterRow(0); r.beginRecord(0); equal(Long.valueOf(r.readInt()), Long.valueOf(2001), "binary nested id"); r.beginRecord(0); equal(Long.valueOf(r.readInt()), Long.valueOf(3001), "binary reward item"); equal(Long.valueOf(r.readInt()), Long.valueOf(3), "binary reward count"); r.endRecord(); equal(Integer.valueOf(r.readListLength()), Integer.valueOf(2), "binary attributes"); equal(r.readString(), "fire", "binary first attribute"); equal(r.readString(), "rare", "binary second attribute"); r.endRecord(); r.ensureExhausted();

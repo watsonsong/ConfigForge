@@ -28,6 +28,10 @@ public class BinaryRuntimeDataFileLoader
 
 public class BinaryRuntimeDataReader
 {
+    public const string TemplateVersion = "0.1.0";
+    public const string SupportedConfigForgeReaderContract = "^1.0";
+    public const string DistributionMode = "copyable-template";
+
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     private readonly byte[] _bytes;

@@ -29,6 +29,10 @@ public class JsonRuntimeDataFileLoader
 
 public class JsonRuntimeDataReader
 {
+    public const string TemplateVersion = "0.1.0";
+    public const string SupportedConfigForgeReaderContract = "^1.0";
+    public const string DistributionMode = "copyable-template";
+
     private readonly JsonDocument _document;
     private readonly JsonDocument _nullDocument = JsonDocument.Parse("null");
     private readonly Stack<JsonElement> _stack = new();

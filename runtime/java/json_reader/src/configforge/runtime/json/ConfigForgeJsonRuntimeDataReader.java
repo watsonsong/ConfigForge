@@ -8,6 +8,10 @@ import java.util.Map;
 import java.util.Stack;
 
 public class ConfigForgeJsonRuntimeDataReader {
+    public static final String TEMPLATE_VERSION = "0.1.0";
+    public static final String SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0";
+    public static final String DISTRIBUTION_MODE = "copyable-template";
+
     private final Stack<Object> stack = new Stack<Object>();
 
     public ConfigForgeJsonRuntimeDataReader(Object root) {

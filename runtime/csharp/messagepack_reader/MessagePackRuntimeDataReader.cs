@@ -29,6 +29,10 @@ public class MessagePackRuntimeDataFileLoader
 
 public class MessagePackRuntimeDataReader
 {
+    public const string TemplateVersion = "0.1.0";
+    public const string SupportedConfigForgeReaderContract = "^1.0";
+    public const string DistributionMode = "copyable-template";
+
     private readonly Stack<object?> _stack = new();
 
     public MessagePackRuntimeDataReader(byte[] bytes)
