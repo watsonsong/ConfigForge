@@ -145,11 +145,13 @@ Batch D 记录：Java 本批选择继续保持 copyable JDK-only template，不�
 
 ## Step 11：文档与状态矩阵收口
 
-- [ ] 更新 runtime adapter 详细设计，记录 materializer、shared corpus、error taxonomy 和各语言 package 状态。
-- [ ] 更新 binary format 详细设计中的测试计划，区分 schema-derived happy-path 与 malformed byte-level corpus。
-- [ ] 更新测试矩阵文档，记录 local / quick / full / nightly 对 runtime compliance 的覆盖边界。
-- [ ] 根据实际完成情况评估 `standard runtime helpers` 是否仍为 `Implemented MVP`，或是否可细分出稳定的 contract 层。
-- [ ] 更新用户可见 runtime loading / package reference 文档，避免把未发布包描述为稳定依赖。
+- [x] 更新 runtime adapter 详细设计，记录 materializer、shared corpus、error taxonomy 和各语言 package 状态。
+- [x] 更新 binary format 详细设计中的测试计划，区分 schema-derived happy-path 与 malformed byte-level corpus。
+- [x] 更新测试矩阵文档，记录 local / quick / full / nightly 对 runtime compliance 的覆盖边界。
+- [x] 根据实际完成情况评估 `standard runtime helpers` 是否仍为 `Implemented MVP`，或是否可细分出稳定的 contract 层。
+- [x] 更新用户可见 runtime loading / package reference 文档，避免把未发布包描述为稳定依赖。
+
+Batch E 记录：文档已按实际完成情况收口。`standard runtime helpers` 仍保持 `Implemented MVP`，但状态细分为 preview packages/templates：Rust / TypeScript / C++ 已具备可引用形态，C# / Java 明确保持 copyable template，不提前承诺 NuGet / Maven。Binary 测试策略明确为 schema-derived happy-path + byte-level malformed corpus；测试矩阵记录五语言 runtime compliance、C++ find_package smoke、C# / Java template metadata 断言和 TypeScript package build/typecheck。后续剩余工作不再属于本批：结构化 error taxonomy、生产接入示例、generated `emit = "reference"` 依赖提示、正式发布流程。
 
 交付标准：Design / Implementation / Tech 文档对 runtime reader contract、binary fixture 生成和 package 分发状态表述一致。
 

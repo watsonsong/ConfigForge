@@ -13,7 +13,7 @@
 3. revision 由 Meta 中影响二进制布局和 typed reader 的关键信息稳定 hash 得到，不由用户手工配置。
 4. Exporter 与 Codegen 使用同一套 target-aware、schema-aware 顺序定义，确保生成代码按相同顺序读取。
 5. RuntimeDataReader contract 支持 named-field layout（JSON / MessagePack）和 positional packed layout（bin），生成代码的 typed row/object 构造逻辑尽量复用。
-6. 官方 runtime helper / reader adapter 后续覆盖 Rust、TypeScript、C++ 的 `bin` 读取能力。
+6. 官方 runtime helper / reader adapter 覆盖 Rust、TypeScript、C++、C#、Java 的 `bin` 读取能力，并通过同一批 logical compliance case 验证。
 
 非目标：
 
@@ -356,11 +356,13 @@ ensure_exhausted()
 
 | 语言 | bin reader 形态 |
 | --- | --- |
-| Rust | `binary_reader` / `binary_fs_loader` copyable template；无第三方依赖。 |
-| TypeScript | binary reader copyable package template；支持 `ArrayBuffer` / `Uint8Array`。 |
-| C++ | header-only 或小型源文件 `BinaryRuntimeDataReader`；只依赖标准库。 |
+| Rust | `config-forge-runtime-binary-reader` package；无第三方依赖。 |
+| TypeScript | `@config-forge/runtime-reader-binary` CommonJS workspace package；支持 `ArrayBuffer` / `Uint8Array`。 |
+| C++ | `config_forge_runtime::binary_reader` header-only target；只依赖标准库，支持 install + `find_package`。 |
+| C# | `runtime/csharp/binary_reader` copyable template；无第三方依赖，声明 template version 和 contract range。 |
+| Java | `runtime/java/binary_reader` JDK-only copyable template；声明 template version 和 contract range。 |
 
-binary reader 应共享 compliance fixtures：
+binary reader 应共享 compliance fixtures。当前 Rust reference runner 已使用 schema-derived materializer 从 canonical JSON logical case 派生 happy-path binary bytes；TypeScript、C++、C#、Java runner 已扩展到同一批 logical case（scalar、collection、ObjectTable、nested struct、fragment），后续新增 case 应优先抽出共享 operation/case schema，避免五种语言重复维护语义。malformed binary corpus 仍应保持 byte-level builder，以精确覆盖非法 wire：
 
 - varuint / zigzag 边界值；
 - UTF-8 错误；
@@ -430,14 +432,14 @@ Codegen / runtime helper 测试：
 2. revision mismatch 诊断包含 expected/actual。
 3. magic/version/header_size 错误有独立诊断，不被误报为 revision mismatch。
 4. JSON / MessagePack / bin 三种格式对同一 Meta 构造出的 typed rows/object 等价。
-5. 标准 runtime helper compliance suite 覆盖 malformed binary 输入和 decode limits。
+5. 标准 runtime helper compliance suite 覆盖 schema-derived happy-path bytes、malformed binary 输入和 decode limits。
 
-跨语言 canonical fixtures：
+跨语言 canonical fixtures 与 corpus 策略：
 
-1. `schema_signature.bin` 或可读 token dump，用于验证 Rust / TypeScript / C++ 计算出的 canonical signature 与 revision 完全一致。
-2. `varuint_zigzag.bin` 覆盖 ULEB128 / ZigZag 边界。
-3. `presence_bitmap_nested_struct.bin` 锁定 per-record immediate bitmap 语义。
-4. malformed fixtures 覆盖 invalid magic、unsupported version、truncated header、invalid UTF-8、invalid bool、enum ordinal 越界、resource limit exceeded。
+1. Happy-path binary fixture 不再依赖长期手写 bytes；以 canonical logical payload + schema layout 派生 CFGB header、schema revision、presence bitmap 和 typed values。当前 Rust compliance runner 是 reference materializer。
+2. malformed corpus 保持 byte-level builder 或专用 fixture，覆盖 bad magic、unsupported version、wrong header size、truncated header/body、schema revision mismatch、invalid bool、invalid UTF-8、varuint overflow、optional bitmap padding、enum ordinal 越界和 trailing bytes。
+3. 后续若引入持久化共享 binary fixture，可增加 `schema_signature.bin` 或可读 token dump，用于验证 Rust / TypeScript / C++ / C# / Java 计算出的 canonical signature 与 revision 完全一致。
+4. `varuint_zigzag.bin` / `presence_bitmap_nested_struct.bin` 这类 wire-level golden 只用于锁定编码边界，不应复制一整套 semantic happy-path fixture。
 
 集成测试：
 
@@ -454,13 +456,13 @@ Codegen / runtime helper 测试：
 - CodeModel 已传播 optional 字段语义，Rust / TypeScript / C++ 分别生成 `Option<T>`、optional property、`std::optional<T>`。
 - TypeScript `int` contract 固定为 `number`，`bin` exporter 会拒绝超出 JavaScript safe integer 范围的值。
 - Rust runtime reader contract 使用共享 core crate：`runtime/rust/reader_core` 定义 `RuntimeDataReader` / `RuntimeDataLoader`，generated Rust 通过 `config_forge_runtime_reader_core` 复用同一套 trait。
-- Rust / TypeScript / C++ binary reader 均支持默认 decode limits 与业务覆盖。
-- Rust、TypeScript、C++ standard project harness 已覆盖 `.bin` runtime helper 的端到端加载。
+- Rust / TypeScript / C++ binary reader 均支持默认 decode limits 与业务覆盖；C# / Java binary template 覆盖 dependency-free baseline。
+- Rust、TypeScript、C++、C#、Java compliance runner 已覆盖 `.bin` logical success cases；standard_project harness 覆盖各语言代表性 `.bin` runtime helper 端到端加载。
 
 未来规划：
 
-- 改进 C++ adapter 与 generated namespace / include 的集成方式，提供更稳定的 alias / macro header 或显式 reader/loader 类型配置。
-- 建立跨语言 binary compliance fixtures，覆盖 trailing bytes、invalid UTF-8、oversized varuint、oversized row count / string length、schema revision mismatch、optional fragment presence 等场景。
+- 改进 C++ adapter 与 generated namespace / include 的集成方式，提供更多 external interface 生产示例。
+- 将跨语言 binary compliance 的 operation/case schema 从各语言 runner 内联 builder 抽出，覆盖 trailing bytes、invalid UTF-8、oversized varuint、oversized row count / string length、schema revision mismatch、optional fragment presence 等场景。
 - 将 binary schema revision / layout signature 抽成更清晰的共享 contract 模块。
 - 完善 binary reader 错误上下文，包含 table、field path、row index、byte offset、expected / actual 等信息。
 - 增加 canonical varuint 校验策略。

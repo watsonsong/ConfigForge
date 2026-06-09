@@ -65,6 +65,7 @@ deduplicate = true
 - JSON / MessagePack 承载同一套 named payload：table meta 摘要和 normalized rows；字段名使用 Meta canonical name。`bin` 使用同一 target-aware export view，但 wire layout 不保存 name/tag，按 generated code 共享的 schema 顺序紧密排列。
 - 同一 target 下多个 requirements 包含 Data 的 export task 共享同一个 `project.input` 与 effective tags，因此执行层只加载、归一化、校验一次，再分发给不同 generator。
 - 同一个 target 的 code generation 不绑定 runtime data export task。生成代码使用逻辑表名作为默认加载路径，具体文件后缀和格式由运行时传入的 loader / reader 实现决定。
+- 标准 runtime helper 目前以 preview package / CMake target / copyable template 形式提供接入起点：Rust 和 TypeScript 可用 path/git/workspace package，C++ 可用 `add_subdirectory` 或 install 后 `find_package(ConfigForgeRuntime CONFIG)`，C# / Java 继续复制 template 并通过薄 adapter 接入 generated nominal interface。它们声明 reader contract version / supported range，但尚未作为正式 crates.io/npm/NuGet/Maven 稳定发布包承诺。
 - MetaOnly-only target 可以不设置 `project.input`；生成代码仍可通过同一套逻辑表名加载 API 在运行时读取任意受支持格式的数据。
 - Project Config 使用 `[[targets.exports]]` 数组表表达所有导出任务；`type` 与 generator requirements / capability facets 决定它是运行时表数据、国际化模板、资源清单、Lua 内嵌数据、schema docs 还是代码产物。`MetaOnly` / `MetaAndData` 是调度属性，不是 generator 的继承分类。
 
