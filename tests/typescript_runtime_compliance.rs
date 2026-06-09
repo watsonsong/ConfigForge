@@ -408,10 +408,154 @@ function writeVaruint(bytes: number[], value: bigint): void {
   }
 }
 
+function writeZigZag(bytes: number[], value: bigint): void {
+  writeVaruint(bytes, (value << 1n) ^ (value >> 63n));
+}
+
+function writeF64(bytes: number[], value: number): void {
+  const buffer = new ArrayBuffer(8);
+  new DataView(buffer).setFloat64(0, value, true);
+  bytes.push(...new Uint8Array(buffer));
+}
+
+function writeBinaryString(bytes: number[], value: string): void {
+  const encoded = textEncoder.encode(value);
+  writeVaruint(bytes, BigInt(encoded.length));
+  bytes.push(...encoded);
+}
+
 function binaryHeader(): number[] {
   const bytes = [0x43, 0x46, 0x47, 0x42, 1, 0, 16, 0];
   writeLe64(bytes, 7n);
   return bytes;
+}
+
+function scalarBinaryPayload(): number[] {
+  const bytes = binaryHeader();
+  writeVaruint(bytes, 1n);
+  bytes.push(0);
+  writeZigZag(bytes, 7n);
+  writeZigZag(bytes, 12n);
+  writeF64(bytes, 1.5);
+  bytes.push(1, 0, 1);
+  writeBinaryString(bytes, "Potion");
+  return bytes;
+}
+
+function collectionBinaryPayload(): number[] {
+  const bytes = binaryHeader();
+  writeVaruint(bytes, 2n);
+  writeZigZag(bytes, 1001n);
+  writeBinaryString(bytes, "Sword");
+  writeVaruint(bytes, 2n);
+  writeBinaryString(bytes, "weapon");
+  writeBinaryString(bytes, "starter");
+  writeZigZag(bytes, 1002n);
+  writeBinaryString(bytes, "Shield");
+  writeVaruint(bytes, 1n);
+  writeBinaryString(bytes, "armor");
+  return bytes;
+}
+
+function objectBinaryPayload(): number[] {
+  const bytes = binaryHeader();
+  writeZigZag(bytes, 10n);
+  bytes.push(1);
+  writeBinaryString(bytes, "Demo Game");
+  return bytes;
+}
+
+function nestedBinaryPayload(): number[] {
+  const bytes = binaryHeader();
+  writeVaruint(bytes, 1n);
+  writeZigZag(bytes, 2001n);
+  writeZigZag(bytes, 3001n);
+  writeZigZag(bytes, 3n);
+  writeVaruint(bytes, 2n);
+  writeBinaryString(bytes, "fire");
+  writeBinaryString(bytes, "rare");
+  return bytes;
+}
+
+function fragmentBinaryPayload(): number[] {
+  const bytes = binaryHeader();
+  writeVaruint(bytes, 1n);
+  writeZigZag(bytes, 4001n);
+  writeBinaryString(bytes, "fixed");
+  writeZigZag(bytes, 50n);
+  return bytes;
+}
+
+function runBinarySuccessCases(): void {
+  let reader = new BinaryRuntimeDataReader(new Uint8Array(scalarBinaryPayload()));
+  assertEqual(reader.schemaRevision(), 7n, "typescript-binary schema revision");
+  assertEqual(reader.readRowCount(), 1, "typescript-binary scalar row count");
+  reader.enterIndex(0);
+  reader.beginRecord(1);
+  assertEqual(reader.asInt64(), 7, "typescript-binary int");
+  assertEqual(reader.asInt64(), 12, "typescript-binary level");
+  assertEqual(reader.asFloat64(), 1.5, "typescript-binary float");
+  assertEqual(reader.asBool(), true, "typescript-binary true");
+  assertEqual(reader.asBool(), false, "typescript-binary false");
+  assertEqual(reader.asBool(), true, "typescript-binary enabled bool");
+  assertEqual(reader.asString(), "Potion", "typescript-binary string");
+  assertEqual(reader.enterOptionalField("nullable"), false, "typescript-binary optional null");
+  reader.endRecord();
+  reader.ensureExhausted();
+
+  reader = new BinaryRuntimeDataReader(new Uint8Array(collectionBinaryPayload()));
+  assertEqual(reader.readRowCount(), 2, "typescript-binary collection row count");
+  reader.enterIndex(0);
+  reader.beginRecord(0);
+  assertEqual(reader.asInt64(), 1001, "typescript-binary first id");
+  assertEqual(reader.asString(), "Sword", "typescript-binary first name");
+  assertEqual(reader.readListLength(), 2, "typescript-binary tag count");
+  assertEqual(reader.asString(), "weapon", "typescript-binary first tag");
+  assertEqual(reader.asString(), "starter", "typescript-binary second tag");
+  reader.endRecord();
+  reader.enterIndex(1);
+  reader.beginRecord(0);
+  assertEqual(reader.asInt64(), 1002, "typescript-binary second id");
+  assertEqual(reader.asString(), "Shield", "typescript-binary second name");
+  assertEqual(reader.readListLength(), 1, "typescript-binary second tag count");
+  assertEqual(reader.asString(), "armor", "typescript-binary third tag");
+  reader.endRecord();
+  reader.ensureExhausted();
+
+  reader = new BinaryRuntimeDataReader(new Uint8Array(objectBinaryPayload()));
+  reader.beginRecord(0);
+  assertEqual(reader.asInt64(), 10, "typescript-binary object int");
+  assertEqual(reader.asBool(), true, "typescript-binary object bool");
+  assertEqual(reader.asString(), "Demo Game", "typescript-binary object title");
+  reader.endRecord();
+  reader.ensureExhausted();
+
+  reader = new BinaryRuntimeDataReader(new Uint8Array(nestedBinaryPayload()));
+  assertEqual(reader.readRowCount(), 1, "typescript-binary nested row count");
+  reader.enterIndex(0);
+  reader.beginRecord(0);
+  assertEqual(reader.asInt64(), 2001, "typescript-binary nested id");
+  reader.beginRecord(0);
+  assertEqual(reader.asInt64(), 3001, "typescript-binary reward item");
+  assertEqual(reader.asInt64(), 3, "typescript-binary reward count");
+  reader.endRecord();
+  assertEqual(reader.readListLength(), 2, "typescript-binary attributes");
+  assertEqual(reader.asString(), "fire", "typescript-binary first attribute");
+  assertEqual(reader.asString(), "rare", "typescript-binary second attribute");
+  reader.endRecord();
+  reader.ensureExhausted();
+
+  reader = new BinaryRuntimeDataReader(new Uint8Array(fragmentBinaryPayload()));
+  assertEqual(reader.readRowCount(), 1, "typescript-binary fragment row count");
+  reader.enterIndex(0);
+  reader.beginRecord(0);
+  assertEqual(reader.asInt64(), 4001, "typescript-binary fragment id");
+  reader.beginRecord(0);
+  assertEqual(reader.asString(), "fixed", "typescript-binary fragment kind");
+  assertEqual(reader.asInt64(), 50, "typescript-binary fragment amount");
+  reader.endRecord();
+  reader.endRecord();
+  reader.ensureExhausted();
 }
 
 function runBinaryMalformedCases(): void {
@@ -703,6 +847,7 @@ for (const adapter of adapters) {
   runCollectionObjectNestedAndFragmentCases(adapter);
   runErrorCases(adapter);
 }
+runBinarySuccessCases();
 runBinaryMalformedCases();
 "#
 }

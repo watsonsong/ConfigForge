@@ -377,20 +377,70 @@ std::vector<std::uint8_t> Header() {
     return bytes;
 }
 
+std::vector<std::uint8_t> ScalarBinaryPayload() {
+    auto bytes = Header();
+    WriteVaruint(bytes, 1);
+    bytes.push_back(0);
+    WriteI64(bytes, 7);
+    WriteI64(bytes, 12);
+    WriteDouble(bytes, 1.5);
+    bytes.push_back(1);
+    bytes.push_back(0);
+    bytes.push_back(1);
+    WriteString(bytes, "Potion");
+    return bytes;
+}
+
+std::vector<std::uint8_t> CollectionBinaryPayload() {
+    auto bytes = Header();
+    WriteVaruint(bytes, 2);
+    WriteI64(bytes, 1001);
+    WriteString(bytes, "Sword");
+    WriteVaruint(bytes, 2);
+    WriteString(bytes, "weapon");
+    WriteString(bytes, "starter");
+    WriteI64(bytes, 1002);
+    WriteString(bytes, "Shield");
+    WriteVaruint(bytes, 1);
+    WriteString(bytes, "armor");
+    return bytes;
+}
+
+std::vector<std::uint8_t> ObjectBinaryPayload() {
+    auto bytes = Header();
+    WriteI64(bytes, 10);
+    bytes.push_back(1);
+    WriteString(bytes, "Demo Game");
+    return bytes;
+}
+
+std::vector<std::uint8_t> NestedBinaryPayload() {
+    auto bytes = Header();
+    WriteVaruint(bytes, 1);
+    WriteI64(bytes, 2001);
+    WriteI64(bytes, 3001);
+    WriteI64(bytes, 3);
+    WriteVaruint(bytes, 2);
+    WriteString(bytes, "fire");
+    WriteString(bytes, "rare");
+    return bytes;
+}
+
+std::vector<std::uint8_t> FragmentBinaryPayload() {
+    auto bytes = Header();
+    WriteVaruint(bytes, 1);
+    WriteI64(bytes, 4001);
+    WriteString(bytes, "fixed");
+    WriteI64(bytes, 50);
+    return bytes;
+}
+
 void RunBinaryCompliance() {
-    auto scalar = Header();
-    WriteVaruint(scalar, 1);
-    WriteI64(scalar, 7);
-    WriteI64(scalar, 12);
-    WriteDouble(scalar, 1.5);
-    scalar.push_back(1);
-    scalar.push_back(0);
-    scalar.push_back(1);
-    WriteString(scalar, "Potion");
-    config_forge_runtime::BinaryRuntimeDataReader scalar_reader(std::move(scalar));
+    config_forge_runtime::BinaryRuntimeDataReader scalar_reader(ScalarBinaryPayload());
+    Assert(scalar_reader.SchemaRevision().has_value() && *scalar_reader.SchemaRevision() == 7, "binary schema revision");
     Assert(scalar_reader.ReadRowCount() == 1, "binary row count");
     scalar_reader.EnterIndex(0);
-    scalar_reader.BeginRecord(0);
+    scalar_reader.BeginRecord(1);
     Assert(scalar_reader.AsInt64() == 7, "binary int scalar");
     Assert(scalar_reader.AsInt64() == 12, "binary numeric scalar");
     Assert(std::abs(scalar_reader.AsDouble() - 1.5) < 0.000001, "binary float scalar");
@@ -398,21 +448,11 @@ void RunBinaryCompliance() {
     Assert(!scalar_reader.AsBool(), "binary false scalar");
     Assert(scalar_reader.AsBool(), "binary bool scalar");
     Assert(scalar_reader.AsString() == "Potion", "binary string scalar");
+    Assert(!scalar_reader.EnterOptionalField("nullable"), "binary optional null");
     scalar_reader.EndRecord();
     scalar_reader.EnsureExhausted();
 
-    auto collection = Header();
-    WriteVaruint(collection, 2);
-    WriteI64(collection, 1001);
-    WriteString(collection, "Sword");
-    WriteVaruint(collection, 2);
-    WriteString(collection, "weapon");
-    WriteString(collection, "rare");
-    WriteI64(collection, 1002);
-    WriteString(collection, "Shield");
-    WriteVaruint(collection, 1);
-    WriteString(collection, "armor");
-    config_forge_runtime::BinaryRuntimeDataReader collection_reader(std::move(collection));
+    config_forge_runtime::BinaryRuntimeDataReader collection_reader(CollectionBinaryPayload());
     Assert(collection_reader.ReadRowCount() == 2, "binary collection row count");
     collection_reader.EnterIndex(0);
     collection_reader.BeginRecord(0);
@@ -420,13 +460,51 @@ void RunBinaryCompliance() {
     Assert(collection_reader.AsString() == "Sword", "binary first row name");
     Assert(collection_reader.ReadListLength() == 2, "binary tag count");
     Assert(collection_reader.AsString() == "weapon", "binary first tag");
-    Assert(collection_reader.AsString() == "rare", "binary second tag");
+    Assert(collection_reader.AsString() == "starter", "binary second tag");
     collection_reader.EndRecord();
     collection_reader.EnterIndex(1);
     collection_reader.BeginRecord(0);
     Assert(collection_reader.AsInt64() == 1002, "binary second row id");
     Assert(collection_reader.AsString() == "Shield", "binary second row name");
+    Assert(collection_reader.ReadListLength() == 1, "binary second tag count");
+    Assert(collection_reader.AsString() == "armor", "binary third tag");
     collection_reader.EndRecord();
+    collection_reader.EnsureExhausted();
+
+    config_forge_runtime::BinaryRuntimeDataReader object_reader(ObjectBinaryPayload());
+    object_reader.BeginRecord(0);
+    Assert(object_reader.AsInt64() == 10, "binary object int");
+    Assert(object_reader.AsBool(), "binary object bool");
+    Assert(object_reader.AsString() == "Demo Game", "binary object title");
+    object_reader.EndRecord();
+    object_reader.EnsureExhausted();
+
+    config_forge_runtime::BinaryRuntimeDataReader nested_reader(NestedBinaryPayload());
+    Assert(nested_reader.ReadRowCount() == 1, "binary nested row count");
+    nested_reader.EnterIndex(0);
+    nested_reader.BeginRecord(0);
+    Assert(nested_reader.AsInt64() == 2001, "binary nested id");
+    nested_reader.BeginRecord(0);
+    Assert(nested_reader.AsInt64() == 3001, "binary reward item");
+    Assert(nested_reader.AsInt64() == 3, "binary reward count");
+    nested_reader.EndRecord();
+    Assert(nested_reader.ReadListLength() == 2, "binary attributes");
+    Assert(nested_reader.AsString() == "fire", "binary first attribute");
+    Assert(nested_reader.AsString() == "rare", "binary second attribute");
+    nested_reader.EndRecord();
+    nested_reader.EnsureExhausted();
+
+    config_forge_runtime::BinaryRuntimeDataReader fragment_reader(FragmentBinaryPayload());
+    Assert(fragment_reader.ReadRowCount() == 1, "binary fragment row count");
+    fragment_reader.EnterIndex(0);
+    fragment_reader.BeginRecord(0);
+    Assert(fragment_reader.AsInt64() == 4001, "binary fragment id");
+    fragment_reader.BeginRecord(0);
+    Assert(fragment_reader.AsString() == "fixed", "binary fragment kind");
+    Assert(fragment_reader.AsInt64() == 50, "binary fragment amount");
+    fragment_reader.EndRecord();
+    fragment_reader.EndRecord();
+    fragment_reader.EnsureExhausted();
 
     ExpectFailure("binary out of order row", [&]() {
         auto payload = Header();

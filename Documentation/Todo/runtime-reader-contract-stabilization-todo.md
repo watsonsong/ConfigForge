@@ -61,21 +61,25 @@ Batch A 记录：malformed corpus 当前也先落在 Rust reference runner 内�
 
 ## Step 4：跨语言 runner 接入共享 corpus
 
-- [ ] TypeScript runner 接入 shared logical corpus 与 binary materialized payload。
-- [ ] C++ CTest runner 接入 shared logical corpus，覆盖 RapidJSON / msgpack-cxx / binary adapter。
-- [ ] C# runner 接入 shared logical corpus，覆盖 JSON / MessagePack / Binary reader template。
-- [ ] Java runner 接入 shared logical corpus，覆盖 JSON / MessagePack / Binary reader template。
-- [ ] 明确缺工具链时 local skip / full CI fail-fast 策略，保持与测试矩阵文档一致。
+- [x] TypeScript runner 接入 shared logical corpus 与 binary materialized payload。
+- [x] C++ CTest runner 接入 shared logical corpus，覆盖 RapidJSON / msgpack-cxx / binary adapter。
+- [x] C# runner 接入 shared logical corpus，覆盖 JSON / MessagePack / Binary reader template。
+- [x] Java runner 接入 shared logical corpus，覆盖 JSON / MessagePack / Binary reader template。
+- [x] 明确缺工具链时 local skip / full CI fail-fast 策略，保持与测试矩阵文档一致。
+
+Batch B1 记录：Rust、TypeScript、C++、C#、Java 的 binary success coverage 已扩展到同一批 logical case：scalar、optional null、collection list、ObjectTable、nested struct、fragment。当前仍是各语言 runner 内的轻量 byte builder，而不是共享持久化 `.bin` corpus；这样避免过早引入 fixture 生成/提交流程，但后续如果继续增加 binary case，应优先抽出共享 operation/case schema，避免重复维护。
 
 交付标准：Rust、TypeScript、C++、C#、Java 使用同一 logical case ID 报告结果；新增 case 不需要在每种语言复制一份语义定义。
 
 ## Step 5：统一 reader error taxonomy 与断言策略
 
-- [ ] 梳理 reader error category：missing field、wrong type、parse/range overflow、invalid enum ordinal、decode limit、malformed binary、schema revision mismatch、not exhausted。
-- [ ] 为每个 category 定义稳定 keyword 和必带上下文字段：logical path、reader path、expected、actual、resource path（loader 层）。
+- [x] 初步梳理 reader error category：missing field、wrong type、parse/range overflow、invalid enum ordinal、decode limit、malformed binary、schema revision mismatch、not exhausted。
+- [x] 现有 runner 统一采用稳定 keyword 断言，避免全文匹配。
 - [ ] 修改 compliance expected 文件，从全文匹配改为 category / keyword / path / expected / actual 的结构化断言。
 - [ ] 修正各语言 reader 中缺失 path 或 expected/actual 的错误。
 - [ ] 保留语言惯用 error type；不强制五种语言使用同名异常类。
+
+Batch B1 记录：本批先统一 binary success logical coverage，并维持现有 keyword-based negative assertion；尚未改造 expected schema 为结构化 error taxonomy。下一批应把 Step 5 拆成独立 Batch B2，集中处理 `expected_kind/category/path/expected/actual` schema 和各语言错误上下文补齐，再进入 package 稳定化。
 
 交付标准：跨语言错误不会因标点或自然语言微调导致测试脆弱，但关键诊断信息稳定可验证。
 
