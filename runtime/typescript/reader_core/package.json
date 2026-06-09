@@ -1,9 +1,26 @@
 {
   "name": "@config-forge/runtime-reader-core",
   "version": "0.1.0",
+  "description": "Core ConfigForge runtime reader contract shared by generated TypeScript code and runtime adapters.",
   "type": "commonjs",
   "main": "dist/runtime_reader.js",
   "types": "dist/runtime_reader.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/runtime_reader.d.ts",
+      "require": "./dist/runtime_reader.js"
+    }
+  },
+  "sideEffects": false,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ConfigForge/ConfigForge.git",
+    "directory": "runtime/typescript/reader_core"
+  },
+  "configForge": {
+    "runtimeReaderContract": "^1.0"
+  },
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
     "typecheck": "tsc --noEmit"

@@ -534,14 +534,15 @@ mod tests {
     }
 
     fn read_payload(name: &str) -> Value {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../compliance/payloads");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../tests/fixtures/runtime_reader_compliance/payloads");
         let content = fs::read_to_string(root.join(name)).expect("compliance payload should exist");
         serde_json::from_str(&content).expect("compliance payload should be valid JSON")
     }
 
     fn read_expected_results() -> toml::Table {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../compliance/expected/scalar_results.toml");
+            .join("../../../tests/fixtures/runtime_reader_compliance/expected/scalar_results.toml");
         let content = fs::read_to_string(path).expect("scalar expected TOML should exist");
         content
             .parse::<toml::Table>()
@@ -550,7 +551,7 @@ mod tests {
 
     fn read_error_cases() -> toml::Table {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../compliance/expected/error_cases.toml");
+            .join("../../../tests/fixtures/runtime_reader_compliance/expected/error_cases.toml");
         let content = fs::read_to_string(path).expect("error expected TOML should exist");
         content
             .parse::<toml::Table>()

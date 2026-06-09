@@ -6,7 +6,11 @@ name = "config-forge-runtime-reader-core"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
+description = "Core ConfigForge runtime reader contract shared by generated Rust code and runtime adapters."
 license = "Apache-2.0"
+keywords = ["configforge", "runtime", "reader"]
+categories = ["encoding", "game-development"]
+repository = "https://github.com/ConfigForge/ConfigForge"
 
 [lib]
 name = "config_forge_runtime_reader_core"

@@ -199,6 +199,41 @@ if(CONFIG_FORGE_RUNTIME_BUILD_TESTS)
     target_link_libraries(config_forge_runtime_binary_reader_compliance PRIVATE config_forge_runtime::binary_reader)
     target_compile_definitions(config_forge_runtime_binary_reader_compliance PRIVATE CONFIG_FORGE_RUNTIME_COMPLIANCE_BINARY)
     add_test(NAME config_forge_runtime_binary_reader_compliance COMMAND config_forge_runtime_binary_reader_compliance)
+    set(config_forge_runtime_find_package_smoke_script
+        "${CMAKE_CURRENT_BINARY_DIR}/ConfigForgeRuntimeFindPackageSmoke.cmake")
+    set(config_forge_runtime_find_package_smoke_script_in
+        "${config_forge_runtime_find_package_smoke_script}.in")
+    file(WRITE "${config_forge_runtime_find_package_smoke_script_in}" [=[
+set(prefix "@CMAKE_CURRENT_BINARY_DIR@/find_package_prefix")
+set(consumer_dir "@CMAKE_CURRENT_BINARY_DIR@/find_package_consumer")
+set(consumer_build_dir "@CMAKE_CURRENT_BINARY_DIR@/find_package_consumer_build")
+file(REMOVE_RECURSE "${prefix}" "${consumer_dir}" "${consumer_build_dir}")
+execute_process(
+    COMMAND "@CMAKE_COMMAND@" --install "@CMAKE_CURRENT_BINARY_DIR@" --prefix "${prefix}"
+    RESULT_VARIABLE install_result)
+if(NOT install_result EQUAL 0)
+    message(FATAL_ERROR "ConfigForgeRuntime install failed with ${install_result}")
+endif()
+file(MAKE_DIRECTORY "${consumer_dir}")
+file(WRITE "${consumer_dir}/CMakeLists.txt" "cmake_minimum_required(VERSION 3.16)\nproject(ConfigForgeRuntimeConsumer LANGUAGES CXX)\nfind_package(ConfigForgeRuntime 0.1 REQUIRED CONFIG)\nadd_executable(consumer main.cpp)\ntarget_link_libraries(consumer PRIVATE config_forge_runtime::core config_forge_runtime::binary_reader)\n")
+file(WRITE "${consumer_dir}/main.cpp" "#include <config_forge/runtime/reader.hpp>\n#include <config_forge/runtime/binary_reader/runtime_loader.hpp>\nint main() { return 0; }\n")
+execute_process(
+    COMMAND "@CMAKE_COMMAND@" -S "${consumer_dir}" -B "${consumer_build_dir}" -DCMAKE_PREFIX_PATH=${prefix}
+    RESULT_VARIABLE configure_result)
+if(NOT configure_result EQUAL 0)
+    message(FATAL_ERROR "ConfigForgeRuntime find_package consumer configure failed with ${configure_result}")
+endif()
+execute_process(
+    COMMAND "@CMAKE_COMMAND@" --build "${consumer_build_dir}"
+    RESULT_VARIABLE build_result)
+if(NOT build_result EQUAL 0)
+    message(FATAL_ERROR "ConfigForgeRuntime find_package consumer build failed with ${build_result}")
+endif()
+]=])
+    configure_file("${config_forge_runtime_find_package_smoke_script_in}"
+        "${config_forge_runtime_find_package_smoke_script}" @ONLY)
+    add_test(NAME config_forge_runtime_find_package_smoke
+        COMMAND ${CMAKE_COMMAND} -P "${config_forge_runtime_find_package_smoke_script}")
     if(CONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER)
         add_executable(config_forge_runtime_rapidjson_reader_smoke rapidjson_reader/smoke_test.cpp)
         target_link_libraries(config_forge_runtime_rapidjson_reader_smoke PRIVATE config_forge_runtime::rapidjson_reader)

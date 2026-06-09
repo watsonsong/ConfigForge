@@ -85,31 +85,37 @@ Batch B1 记录：本批先统一 binary success logical coverage，并维持现
 
 ## Step 6：Rust runtime crate 稳定化
 
-- [ ] 明确 `runtime/rust/reader_core` crate 的 public API：contract version、reader trait、loader trait、error、decode limits。
-- [ ] 为 JSON / MessagePack / Binary reader 选择 crate 边界：独立 crate、feature flag，或 workspace 内 packages。
-- [ ] 补齐 `Cargo.toml` metadata、features、docs、examples 和 license / repository 字段。
-- [ ] package-level tests 直接运行 compliance runner。
+- [x] 明确 `runtime/rust/reader_core` crate 的 public API：contract version、reader trait、loader trait、error、decode limits。
+- [x] 为 JSON / MessagePack / Binary reader 选择 crate 边界：独立 crate、feature flag，或 workspace 内 packages。
+- [x] 补齐 `Cargo.toml` metadata、features、docs、examples 和 license / repository 字段。
+- [x] package-level tests 直接运行 compliance runner。
 - [ ] 生成代码 `emit = "reference"` 时能提示所需 crate 名称、版本范围和 contract range。
+
+Batch C 记录：`reader_core` 与 `binary_reader` 继续作为独立 Cargo package，`serde_json_reader` / `serde_msgpack_reader` 补齐 package manifest，先保留 copyable module 兼容路径，同时允许业务项目用 path/git dependency 引入。`reader_core` package-level tests 修正为读取仓库共享 compliance fixture，避免独立 package 测试时依赖错误的相对路径。generated Rust 引用提示尚未改造，后续与 codegen reference emit 一并处理。
 
 交付标准：Rust runtime support 具备可发布 crate 形态，即使暂不发布 crates.io，也可被业务项目以 git/path dependency 稳定引用。
 
 ## Step 7：TypeScript npm package 稳定化
 
-- [ ] 明确 package 拆分：core、json reader、messagepack reader、binary reader、node fs loader。
-- [ ] 补齐 `package.json` exports、types、sideEffects、peer dependency、版本和 contract range。
-- [ ] 增加 package-level tests，覆盖 ESM / CJS 或明确只支持其中一种。
+- [x] 明确 package 拆分：core、json reader、messagepack reader、binary reader、node fs loader。
+- [x] 补齐 `package.json` exports、types、sideEffects、peer dependency、版本和 contract range。
+- [x] 增加 package-level tests，覆盖 ESM / CJS 或明确只支持其中一种。
 - [ ] 校验 generated TypeScript `emit = "reference"` 对 npm package 的引用方式和错误提示。
 - [ ] 编写最小生产接入示例：同步 loader、lazy facade、binary payload。
+
+Batch C 记录：TypeScript runtime workspace 明确维持 CommonJS package 输出，本批为五个 package 补齐 `exports`、`types`、`sideEffects`、license / repository 与 `configForge.runtimeReaderContract = "^1.0"`。本地缺少 workspace-installed `tsc` 时，验证使用 `npx -p typescript@5.9.3 tsc` 逐 package typecheck + build；构建产物不作为新提交内容，新增 ignore 规则避免未跟踪 dist 污染。
 
 交付标准：TypeScript runtime helper 可作为 npm workspace package 被引用，API 边界和依赖策略清晰。
 
 ## Step 8：C++ CMake install / find_package 稳定化
 
-- [ ] 补齐 `runtime/cpp/core` install target、export set、version file 和 `ConfigForgeRuntimeConfig.cmake`。
-- [ ] 为 RapidJSON、msgpack-cxx、binary adapter 明确 header-only target 与 optional dependency policy。
-- [ ] 增加 `find_package(ConfigForgeRuntime)` 示例工程，并在 CI / test profile 中编译。
-- [ ] 校验 generated C++ `runtime_interface = "external"` 与 installed core header 的兼容性。
-- [ ] 记录 CMake minimum version、namespace target 命名和 ABI / header-only 兼容策略。
+- [x] 补齐 `runtime/cpp/core` install target、export set、version file 和 `ConfigForgeRuntimeConfig.cmake`。
+- [x] 为 RapidJSON、msgpack-cxx、binary adapter 明确 header-only target 与 optional dependency policy。
+- [x] 增加 `find_package(ConfigForgeRuntime)` 示例工程，并在 CI / test profile 中编译。
+- [x] 校验 generated C++ `runtime_interface = "external"` 与 installed core header 的兼容性。
+- [x] 记录 CMake minimum version、namespace target 命名和 ABI / header-only 兼容策略。
+
+Batch C 记录：C++ runtime 已有 install / export set / version config 基础，本批把 `find_package(ConfigForgeRuntime 0.1 REQUIRED CONFIG)` 消费者 smoke test 纳入 `CONFIG_FORGE_RUNTIME_BUILD_TESTS`，测试会先 install 到临时 prefix，再配置并编译链接 `config_forge_runtime::core` 与 `config_forge_runtime::binary_reader` 的最小消费者工程，覆盖 installed header 与 namespace target 可用性。
 
 交付标准：C++ 项目可通过 install + `find_package` 使用 stable core header 和可选 adapters，而不是依赖源码相对路径。
 

@@ -6,7 +6,11 @@ name = "config-forge-runtime-binary-reader"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
+description = "ConfigForge binary runtime data reader for generated Rust code."
 license = "Apache-2.0"
+keywords = ["configforge", "runtime", "reader", "binary"]
+categories = ["encoding", "game-development"]
+repository = "https://github.com/ConfigForge/ConfigForge"
 
 [lib]
 name = "config_forge_runtime_binary_reader"

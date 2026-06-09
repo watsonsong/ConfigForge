@@ -1,9 +1,26 @@
 {
   "name": "@config-forge/runtime-reader-binary",
   "version": "0.1.0",
+  "description": "ConfigForge binary runtime data reader for generated TypeScript code.",
   "type": "commonjs",
   "main": "dist/runtime_loader.js",
   "types": "dist/runtime_loader.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/runtime_loader.d.ts",
+      "require": "./dist/runtime_loader.js"
+    }
+  },
+  "sideEffects": false,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ConfigForge/ConfigForge.git",
+    "directory": "runtime/typescript/binary_reader"
+  },
+  "configForge": {
+    "runtimeReaderContract": "^1.0"
+  },
   "dependencies": {
     "@config-forge/runtime-reader-core": "0.1.0"
   },
