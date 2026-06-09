@@ -65,6 +65,77 @@ fn range_validator_blocks_invalid_data_before_export() {
 }
 
 #[test]
+fn cli_diagnostic_format_json_emits_machine_readable_diagnostics() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_dir = temp_dir.path().join("data");
+    let data_out_dir = temp_dir.path().join("out/data");
+    fs::create_dir_all(&data_dir).expect("data dir should be created");
+    fs::write(data_dir.join("items.csv"), "level\n等级\nabc\n")
+        .expect("items data should be written");
+
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                [project]
+                name = "validator_project"
+                input = "{}"
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "level"
+                type = "int"
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [[targets.exports]]
+                output = "{}"
+                type = "json"
+            "#,
+            data_dir.display(),
+            data_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let output = Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .args([
+            "--project",
+            project_path.to_str().expect("path should be utf8"),
+            "--target",
+            "client",
+            "--diagnostic-format",
+            "json",
+        ])
+        .output()
+        .expect("config-forge should run");
+    assert!(!output.status.success(), "command should fail");
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    let diagnostic: serde_json::Value =
+        serde_json::from_str(&stderr).expect("stderr should be diagnostic JSON");
+    assert_eq!(diagnostic["status"], "error");
+    assert_eq!(diagnostic["diagnostics"][0]["code"], "CF_DATA_INVALID_TYPE");
+    assert_eq!(diagnostic["diagnostics"][0]["severity"], "error");
+    assert!(diagnostic["diagnostics"][0].get("target").is_some());
+    assert_eq!(diagnostic["diagnostics"][0]["current_value"], "abc");
+    assert_eq!(diagnostic["diagnostics"][0]["expected"], "int");
+    assert_eq!(diagnostic["diagnostics"][0]["location"]["table"], "items");
+    assert_eq!(diagnostic["diagnostics"][0]["location"]["field"], "level");
+    assert_eq!(
+        diagnostic["diagnostics"][0]["location"]["source_column_name"],
+        "level"
+    );
+}
+
+#[test]
 fn warning_validator_is_visible_but_does_not_block_export() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let data_dir = temp_dir.path().join("data");

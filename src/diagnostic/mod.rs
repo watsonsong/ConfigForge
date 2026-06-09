@@ -18,7 +18,7 @@ pub enum DiagnosticSeverity {
     Warning,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct DiagnosticLocation {
     pub source_path: Option<PathBuf>,
     pub table: Option<String>,
@@ -71,7 +71,7 @@ impl fmt::Display for DiagnosticLocation {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Diagnostic {
     pub code: String,
     pub severity: DiagnosticSeverity,
@@ -315,7 +315,7 @@ impl fmt::Display for dyn DiagnosticEntry + '_ {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct DiagnosticReport<T> {
     pub diagnostics: Vec<T>,
 }

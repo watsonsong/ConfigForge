@@ -1,12 +1,13 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, process::ExitCode};
 
 use clap::{Parser, ValueEnum};
+use serde::Serialize;
 
 use crate::{
-    ConfigForgeError,
+    ConfigForgeError, Diagnostic,
     artifact::ArtifactWriteMode,
     build::{BuildOptions, ExecutionOptions, build_target_with_trace},
     validation::{DesignerReportFormat, ValidationReportExportConfig},
@@ -55,6 +56,9 @@ struct Cli {
     /// Optional title for the exported validation report.
     #[arg(long)]
     report_title: Option<String>,
+    /// Format used for top-level CLI diagnostics on failure.
+    #[arg(long, value_enum, default_value = "human")]
+    diagnostic_format: CliDiagnosticFormat,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -69,6 +73,12 @@ enum CliReportFormat {
     Markdown,
     Json,
     Csv,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum CliDiagnosticFormat {
+    Human,
+    Json,
 }
 
 impl From<CliReportFormat> for DesignerReportFormat {
@@ -93,6 +103,18 @@ impl From<CliWriteMode> for ArtifactWriteMode {
 
 pub fn run() -> anyhow::Result<()> {
     run_with_args(Cli::parse())
+}
+
+pub fn run_main() -> ExitCode {
+    let cli = Cli::parse();
+    let diagnostic_format = cli.diagnostic_format;
+    match run_with_args(cli) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            render_cli_error(&error, diagnostic_format);
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn run_with_args(cli: Cli) -> anyhow::Result<()> {
@@ -175,4 +197,96 @@ fn write_trace_if_requested(
         fs::write(trace_path, trace_json)?;
     }
     Ok(())
+}
+
+fn render_cli_error(error: &anyhow::Error, format: CliDiagnosticFormat) {
+    match format {
+        CliDiagnosticFormat::Human => eprintln!("error: {error}"),
+        CliDiagnosticFormat::Json => match render_error_json(error) {
+            Ok(json) => eprintln!("{json}"),
+            Err(json_error) => eprintln!(
+                "error: failed to serialize diagnostic output: {json_error}; original error: {error}"
+            ),
+        },
+    }
+}
+
+fn render_error_json(error: &anyhow::Error) -> serde_json::Result<String> {
+    let diagnostics = error
+        .downcast_ref::<ConfigForgeError>()
+        .map(diagnostics_from_config_error)
+        .unwrap_or_default();
+    serde_json::to_string_pretty(&CliDiagnosticOutput {
+        status: "error",
+        message: error.to_string(),
+        diagnostics,
+    })
+}
+
+fn diagnostics_from_config_error(error: &ConfigForgeError) -> Vec<Diagnostic> {
+    match error {
+        ConfigForgeError::MetaValidation(diagnostics) => {
+            diagnostics.iter().map(Diagnostic::from_entry).collect()
+        }
+        ConfigForgeError::ValidationReport(report) => report.diagnostics.clone(),
+        _ => Vec::new(),
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct CliDiagnosticOutput {
+    status: &'static str,
+    message: String,
+    diagnostics: Vec<Diagnostic>,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    use crate::{
+        Diagnostic, DiagnosticLocation, DiagnosticSeverity, diagnostic::code::CF_DATA_INVALID_TYPE,
+    };
+
+    use super::*;
+
+    #[test]
+    fn json_error_output_preserves_structured_diagnostic_fields() {
+        let diagnostic = Diagnostic::new(
+            CF_DATA_INVALID_TYPE,
+            DiagnosticSeverity::Error,
+            "invalid integer",
+            DiagnosticLocation {
+                table: Some("items".to_owned()),
+                field: Some("level".to_owned()),
+                row_index: Some(0),
+                source_row_number: Some(2),
+                source_column_name: Some("level".to_owned()),
+                ..DiagnosticLocation::default()
+            },
+        )
+        .with_source("validation.table")
+        .with_target("client")
+        .with_current_value("abc")
+        .with_expected("integer")
+        .with_hint("use digits only");
+        let error: anyhow::Error = ConfigForgeError::from_diagnostic(diagnostic).into();
+
+        let json = render_error_json(&error).expect("json should render");
+        let output: Value = serde_json::from_str(&json).expect("json should parse");
+
+        assert_eq!(output["status"], "error");
+        assert_eq!(output["diagnostics"][0]["code"], CF_DATA_INVALID_TYPE);
+        assert_eq!(output["diagnostics"][0]["severity"], "error");
+        assert_eq!(output["diagnostics"][0]["source"], "validation.table");
+        assert_eq!(output["diagnostics"][0]["target"], "client");
+        assert_eq!(output["diagnostics"][0]["current_value"], "abc");
+        assert_eq!(output["diagnostics"][0]["expected"], "integer");
+        assert_eq!(output["diagnostics"][0]["hint"], "use digits only");
+        assert_eq!(output["diagnostics"][0]["location"]["table"], "items");
+        assert_eq!(
+            output["diagnostics"][0]["location"]["source_column_name"],
+            "level"
+        );
+    }
 }

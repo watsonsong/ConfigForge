@@ -89,3 +89,7 @@ pub use validation::{
 pub fn run_cli() -> anyhow::Result<()> {
     cli::run()
 }
+
+pub fn run_cli_main() -> std::process::ExitCode {
+    cli::run_main()
+}
