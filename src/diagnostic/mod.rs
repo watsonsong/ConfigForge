@@ -327,8 +327,22 @@ impl<T> DiagnosticReport<T> {
         }
     }
 
+    pub fn from_one(diagnostic: T) -> Self {
+        Self {
+            diagnostics: vec![diagnostic],
+        }
+    }
+
     pub fn push(&mut self, diagnostic: T) {
         self.diagnostics.push(diagnostic);
+    }
+
+    pub fn extend(&mut self, diagnostics: impl IntoIterator<Item = T>) {
+        self.diagnostics.extend(diagnostics);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.diagnostics.is_empty()
     }
 }
 
@@ -441,5 +455,28 @@ mod tests {
             location.to_string(),
             "source `items.csv`, table `items`, row 3, column `name`, field `name`"
         );
+    }
+
+    #[test]
+    fn diagnostic_report_helpers_manage_diagnostics() {
+        let first = Diagnostic::new(
+            "first",
+            DiagnosticSeverity::Error,
+            "first message",
+            DiagnosticLocation::default(),
+        );
+        let second = Diagnostic::new(
+            "second",
+            DiagnosticSeverity::Warning,
+            "second message",
+            DiagnosticLocation::default(),
+        );
+
+        let mut report = DiagnosticReport::from_one(first);
+        assert!(!report.is_empty());
+        assert_eq!(report.diagnostics.len(), 1);
+
+        report.extend([second]);
+        assert_eq!(report.diagnostics.len(), 2);
     }
 }

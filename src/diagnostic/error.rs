@@ -65,10 +65,26 @@ pub enum ConfigForgeError {
     },
 
     #[error("validation failed: {0}")]
+    /// Legacy unstructured validation fallback. Prefer `ValidationReport` for
+    /// new ConfigForge-produced business validation errors.
     Validation(String),
 
     #[error("validation failed: {}", format_diagnostic_report(.0))]
     ValidationReport(DiagnosticReport<Diagnostic>),
+}
+
+impl ConfigForgeError {
+    pub fn from_diagnostic(diagnostic: Diagnostic) -> Self {
+        Self::ValidationReport(DiagnosticReport::from_one(diagnostic))
+    }
+
+    pub fn from_diagnostics(diagnostics: Vec<Diagnostic>) -> Self {
+        Self::ValidationReport(DiagnosticReport { diagnostics })
+    }
+
+    pub fn from_diagnostic_report(report: DiagnosticReport<Diagnostic>) -> Self {
+        Self::ValidationReport(report)
+    }
 }
 
 fn format_meta_diagnostics(diagnostics: &[MetaDiagnostic]) -> String {
@@ -81,4 +97,33 @@ fn format_meta_diagnostics(diagnostics: &[MetaDiagnostic]) -> String {
 
 fn format_diagnostic_report(report: &DiagnosticReport<Diagnostic>) -> String {
     report.error_messages().join("; ")
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::diagnostic::{DiagnosticLocation, DiagnosticSeverity};
+
+    use super::*;
+
+    #[test]
+    fn structured_error_helpers_create_validation_report_errors() {
+        let diagnostic = Diagnostic::new(
+            "custom.code",
+            DiagnosticSeverity::Error,
+            "invalid value",
+            DiagnosticLocation::default(),
+        );
+
+        let error = ConfigForgeError::from_diagnostic(diagnostic.clone());
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected validation report error");
+        };
+        assert_eq!(report.diagnostics, vec![diagnostic.clone()]);
+
+        let error = ConfigForgeError::from_diagnostics(vec![diagnostic]);
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected validation report error");
+        };
+        assert_eq!(report.diagnostics.len(), 1);
+    }
 }
