@@ -1290,12 +1290,28 @@ mod tests {
         );
     }
 
-    #[cfg(any(target_os = "macos", windows))]
+    #[cfg(target_os = "macos")]
     #[test]
-    fn output_root_detects_case_insensitive_collision() {
+    fn output_root_detects_case_insensitive_collision_on_default_macos_volume() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let root = temp_dir.path().join("project");
+        if !directory_is_case_insensitive(temp_dir.path()) {
+            eprintln!(
+                "skipping macOS case-insensitive collision test: temp volume is case-sensitive"
+            );
+            return;
+        }
+        assert_case_alias_conflict(temp_dir.path().join("project"));
+    }
 
+    #[cfg(windows)]
+    #[test]
+    fn output_root_detects_case_insensitive_collision_on_windows() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        assert_case_alias_conflict(temp_dir.path().join("project"));
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    fn assert_case_alias_conflict(root: PathBuf) {
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun)
             .with_output_root(&root)
             .open_sink();
@@ -1306,6 +1322,132 @@ mod tests {
         assert!(
             matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    fn directory_is_case_insensitive(directory: &Path) -> bool {
+        let probe = directory.join("configforge_case_probe");
+        let alias = directory.join("CONFIGFORGE_CASE_PROBE");
+        fs::write(&probe, "probe").expect("write case probe");
+        alias.exists()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn output_root_detects_windows_symlink_alias_conflict() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let root = temp_dir.path().join("project");
+        let out = root.join("out");
+        let alias = root.join("out_alias");
+        fs::create_dir_all(&out).expect("create out dir");
+        if !try_create_windows_symlink_dir(&out, &alias) {
+            return;
+        }
+
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun)
+            .with_output_root(&root)
+            .open_sink();
+        sink.write_text(out.join("items.json"), "first")
+            .expect("first path should plan");
+        let error = sink
+            .write_text(alias.join("items.json"), "second")
+            .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn output_root_detects_windows_junction_alias_conflict() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let root = temp_dir.path().join("project");
+        let out = root.join("out");
+        let alias = root.join("out_junction");
+        fs::create_dir_all(&out).expect("create out dir");
+        if !try_create_windows_junction(&out, &alias) {
+            return;
+        }
+
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun)
+            .with_output_root(&root)
+            .open_sink();
+        sink.write_text(out.join("items.json"), "first")
+            .expect("first path should plan");
+        let error = sink
+            .write_text(alias.join("items.json"), "second")
+            .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple artifacts target"))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_lexical_normalization_preserves_drive_verbatim_and_unc_prefixes() {
+        let cases = [
+            (
+                r"C:\Project\out\..\Data\items.json",
+                r"C:\Project\Data\items.json",
+            ),
+            (
+                r"\\?\C:\Project\out\..\Data\items.json",
+                r"\\?\C:\Project\Data\items.json",
+            ),
+            (
+                r"\\server\share\Project\out\..\Data\items.json",
+                r"\\server\share\Project\Data\items.json",
+            ),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(
+                lexical_normalize_path(Path::new(input)),
+                PathBuf::from(expected)
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    fn try_create_windows_symlink_dir(target: &Path, link: &Path) -> bool {
+        match std::os::windows::fs::symlink_dir(target, link) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!(
+                    "skipping Windows symlink alias test: could not create directory symlink `{}` -> `{}`: {error}",
+                    link.display(),
+                    target.display()
+                );
+                false
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    fn try_create_windows_junction(target: &Path, link: &Path) -> bool {
+        let output = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output();
+        match output {
+            Ok(output) if output.status.success() => true,
+            Ok(output) => {
+                eprintln!(
+                    "skipping Windows junction alias test: mklink /J failed with status {}: {}{}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                false
+            }
+            Err(error) => {
+                eprintln!("skipping Windows junction alias test: could not run mklink /J: {error}");
+                false
+            }
+        }
     }
 
     #[test]

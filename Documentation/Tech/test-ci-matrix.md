@@ -53,6 +53,17 @@ Runtime compliance runner 验证具体 reader adapter 对通用 contract 的解�
 | C# JSON / MessagePack / Binary | 多格式 | .NET SDK | 已由 `tests/csharp_java_runtime_compliance.rs` 覆盖标准 reader；Binary 覆盖 bad magic、unsupported version、truncated header/body、wrong schema revision、invalid optional bitmap、invalid enum ordinal、huge length prefix、not exhausted 与 record/row boundary。standard_project 继续覆盖三格式 smoke。 | 增加 schema-derived binary materializer。 |
 | Java JSON / MessagePack / Binary | 多格式 | JDK | 已由 `tests/csharp_java_runtime_compliance.rs` 覆盖标准 reader；Binary 覆盖 bad magic、unsupported version、truncated header/body、wrong schema revision、invalid optional bitmap、invalid enum ordinal、huge length prefix、not exhausted 与 record/row boundary。standard_project 继续覆盖三格式 smoke。 | 增加 schema-derived binary materializer。 |
 
+## Platform filesystem edge matrix
+
+Artifact Writer 的 path containment 与 conflict key 需要在真实平台文件系统上验证；相关语义见 [`platform-filesystem-semantics.md`](platform-filesystem-semantics.md)。这些测试属于 Rust core test suite，不依赖跨语言工具。
+
+| 场景 | 平台 / 文件系统要求 | 覆盖入口 | quick 策略 | full / nightly 目标 | skip / 诊断策略 |
+| --- | --- | --- | --- | --- | --- |
+| macOS default case-insensitive volume | macOS 默认 APFS / HFS+ 大小写不敏感卷 | `src/artifact/mod.rs` 的 `output_root_detects_case_insensitive_collision_on_default_macos_volume` | 在 macOS runner 上执行；非 macOS 不适用。 | macOS runner 必跑。 | 如果 CI 临时目录所在卷被配置为大小写敏感，测试输出明确 skip 诊断并返回；CI 配置应优先使用默认大小写不敏感卷。 |
+| Linux symlink / hardlink alias | Linux ext4 / XFS 等常见大小写敏感文件系统，支持 symlink 与 hardlink | `src/artifact/mod.rs` 的 Unix artifact alias tests（symlink output root alias、existing hardlink alias） | Linux runner 必跑。 | Linux runner 必跑。 | 这些能力在 Linux CI 中视为基础能力；失败应作为真实回归处理，不静默 skip。 |
+| Windows symlink / junction alias | Windows NTFS / ReFS；symlink 可能需要 Developer Mode 或权限，junction 通常不需要管理员权限但仍可能受策略限制 | `src/artifact/mod.rs` 的 `output_root_detects_windows_symlink_alias_conflict`、`output_root_detects_windows_junction_alias_conflict` | Windows runner 上执行；创建 symlink / junction 失败时 graceful skip。 | Windows runner 上执行；建议启用 Developer Mode 使 symlink test 真实覆盖，junction 失败需在日志中说明。 | 测试必须打印被 skip 的对象、目标和系统错误；不能把权限不足伪装成 pass。 |
+| Windows path prefix / drive letter / UNC lexical normalization | Windows path parser，可覆盖 drive、verbatim drive (`\\?\C:`) 与 UNC (`\\server\share`) | `src/artifact/mod.rs` 的 `windows_lexical_normalization_preserves_drive_verbatim_and_unc_prefixes` | Windows runner 必跑。 | Windows runner 必跑。 | 不访问网络 UNC；只验证 lexical component 处理，因此不应因网络或权限 skip。 |
+
 ## Skip, fail-fast and network policy
 
 - 本地 `local` profile 中，非 Rust target 工具缺失时必须输出明确 skip 原因，包括测试名称和缺失工具。
