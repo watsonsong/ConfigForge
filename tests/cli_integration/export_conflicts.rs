@@ -6,6 +6,12 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 
+fn stderr_json(output: std::process::Output) -> serde_json::Value {
+    assert!(!output.status.success(), "command should fail");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    serde_json::from_str(&stderr).expect("stderr should be diagnostic JSON")
+}
+
 #[test]
 fn rejects_meta_only_export_data_binding() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
@@ -154,6 +160,64 @@ fn rejects_artifact_output_that_escapes_project_root() {
 }
 
 #[test]
+fn artifact_path_escape_json_diagnostic_has_stable_code_and_paths() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let outside_out_dir = temp_dir.path().join("../outside-config-forge-artifacts");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                input = "{}"
+
+                [[targets]]
+                name = "escape"
+
+                [[targets.exports]]
+                name = "json"
+                output = "{}"
+                type = "json"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            outside_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let output = Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .args([
+            "--project",
+            project_path.to_str().expect("path should be utf8"),
+            "--target",
+            "escape",
+            "--diagnostic-format",
+            "json",
+        ])
+        .output()
+        .expect("config-forge should run");
+
+    let json = stderr_json(output);
+    assert_eq!(json["diagnostics"][0]["code"], "CF_ARTIFACT_PATH_ESCAPE");
+    assert_eq!(json["diagnostics"][0]["severity"], "error");
+    assert_eq!(json["diagnostics"][0]["source"], "artifact.writer");
+    assert!(
+        json["diagnostics"][0]["current_value"]
+            .as_str()
+            .is_some_and(|value| value.contains("items.json"))
+    );
+    assert!(
+        json["diagnostics"][0]["expected"]
+            .as_str()
+            .is_some_and(|value| value.contains("output root"))
+    );
+}
+
+#[test]
 fn rejects_lexically_equivalent_runtime_data_path_conflict_before_writing_files() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let data_out_dir = temp_dir.path().join("out/data");
@@ -252,5 +316,61 @@ fn rejects_unknown_second_export_type_before_writing_first_export() {
         "unknown export type `unknown_binary`",
     ));
     assert!(!json_out_dir.join("items.json").exists());
+    assert!(!bad_out_dir.exists());
+}
+
+#[test]
+fn unknown_generator_json_diagnostic_has_stable_code_and_target() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let bad_out_dir = temp_dir.path().join("out/bad");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [project]
+                input = "{}"
+
+                [[targets]]
+                name = "bad_format"
+
+                [[targets.exports]]
+                name = "bad"
+                output = "{}"
+                type = "unknown_binary"
+            "#,
+            standard_core_meta_imports(),
+            absolute_fixture_path("data"),
+            bad_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let output = Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .args([
+            "--project",
+            project_path.to_str().expect("path should be utf8"),
+            "--target",
+            "bad_format",
+            "--diagnostic-format",
+            "json",
+        ])
+        .output()
+        .expect("config-forge should run");
+
+    let json = stderr_json(output);
+    assert_eq!(json["diagnostics"][0]["code"], "CF_GENERATOR_UNKNOWN_TYPE");
+    assert_eq!(json["diagnostics"][0]["severity"], "error");
+    assert_eq!(json["diagnostics"][0]["source"], "generator.registry");
+    assert_eq!(json["diagnostics"][0]["target"], "bad_format");
+    assert_eq!(json["diagnostics"][0]["current_value"], "unknown_binary");
+    assert!(
+        json["diagnostics"][0]["expected"]
+            .as_str()
+            .is_some_and(|value| value.contains("registered generator type"))
+    );
     assert!(!bad_out_dir.exists());
 }
