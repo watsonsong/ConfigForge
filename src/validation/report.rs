@@ -440,10 +440,10 @@ fn render_markdown(report: &DesignerValidationReport) -> String {
     }
 
     output.push_str("\n## Issues\n\n");
-    output.push_str("| ID | Severity | Code | Table | Field | Source row | Message | Hint |\n| --- | --- | --- | --- | --- | ---: | --- | --- |\n");
+    output.push_str("| ID | Severity | Code | Table | Field | Source row | Source column | Current | Expected | Message | Hint |\n| --- | --- | --- | --- | --- | ---: | --- | --- | --- | --- | --- |\n");
     for issue in &report.issues {
         output.push_str(&format!(
-            "| {} | {} | `{}` | {} | {} | {} | {} | {} |\n",
+            "| {} | {} | `{}` | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             issue.id,
             severity_label(issue.severity),
             escape_markdown(&issue.code),
@@ -453,6 +453,9 @@ fn render_markdown(report: &DesignerValidationReport) -> String {
                 .source_row_number
                 .map(|value| value.to_string())
                 .unwrap_or_default(),
+            escape_markdown(issue.source_column.as_deref().unwrap_or("")),
+            escape_markdown(issue.current_value.as_deref().unwrap_or("")),
+            escape_markdown(issue.expected.as_deref().unwrap_or("")),
             escape_markdown(&issue.message),
             escape_markdown(issue.hint.as_deref().unwrap_or("")),
         ));
@@ -474,7 +477,11 @@ fn render_csv(report: &DesignerValidationReport) -> String {
         "field",
         "row_index",
         "source_row_number",
+        "source_column",
         "source_path",
+        "current_value",
+        "expected",
+        "explanation",
         "target",
         "owner",
         "domain",
@@ -500,7 +507,11 @@ fn render_csv(report: &DesignerValidationReport) -> String {
                 .source_row_number
                 .map(|value| value.to_string())
                 .unwrap_or_default(),
+            issue.source_column.clone().unwrap_or_default(),
             issue.source_path.clone().unwrap_or_default(),
+            issue.current_value.clone().unwrap_or_default(),
+            issue.expected.clone().unwrap_or_default(),
+            issue.explanation.clone().unwrap_or_default(),
             issue.target.clone().unwrap_or_default(),
             issue.owner.clone(),
             issue.domain.clone(),
@@ -557,19 +568,21 @@ fn render_html(report: &DesignerValidationReport) -> String {
         "<div class=\"card\"><h2>{}</h2><p>Owners</p></div>",
         report.summary.owners_with_issues
     ));
-    output.push_str("</section><h2>Issues</h2><table><thead><tr><th>ID</th><th>Severity</th><th>Code</th><th>Location</th><th>Message</th><th>Hint</th></tr></thead><tbody>");
+    output.push_str("</section><h2>Issues</h2><table><thead><tr><th>ID</th><th>Severity</th><th>Code</th><th>Location</th><th>Current</th><th>Expected</th><th>Message</th><th>Hint</th></tr></thead><tbody>");
     for issue in &report.issues {
         let severity_class = match issue.severity {
             DiagnosticSeverity::Error => "sev-error",
             DiagnosticSeverity::Warning => "sev-warning",
         };
         output.push_str(&format!(
-            "<tr><td>{}</td><td class=\"{}\">{}</td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            "<tr><td>{}</td><td class=\"{}\">{}</td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             escape_html(&issue.id),
             severity_class,
             severity_label(issue.severity),
             escape_html(&issue.code),
             escape_html(&format_issue_location(issue)),
+            escape_html(issue.current_value.as_deref().unwrap_or("")),
+            escape_html(issue.expected.as_deref().unwrap_or("")),
             escape_html(&issue.message),
             escape_html(issue.hint.as_deref().unwrap_or("")),
         ));
@@ -601,6 +614,9 @@ fn format_issue_location(issue: &DesignerValidationIssue) -> String {
         parts.push(format!("row {row}"));
     } else if let Some(row_index) = issue.row_index {
         parts.push(format!("row {}", row_index + 1));
+    }
+    if let Some(column) = &issue.source_column {
+        parts.push(format!("column {column}"));
     }
     if let Some(field) = &issue.field {
         parts.push(format!("field {field}"));
@@ -860,5 +876,36 @@ mod tests {
         let html = render_designer_validation_report(&report, DesignerReportFormat::Html).unwrap();
         assert!(html.contains("&lt;value&gt;"));
         assert!(!html.contains("https://"));
+    }
+
+    #[test]
+    fn renderers_include_structured_enrichment_fields() {
+        let mut validation = ValidationReport::new();
+        validation.push(
+            issue("custom.code", ValidationSeverity::Error, "items", 2)
+                .with_current_value("abc")
+                .with_expected("integer"),
+        );
+        validation.issues[0].location.source_column_name = Some("level".to_owned());
+        validation.issues[0].explanation = Some("parse as integer".to_owned());
+        let report = DesignerValidationReport::from_validation_report(&validation, options());
+
+        let markdown =
+            render_designer_validation_report(&report, DesignerReportFormat::Markdown).unwrap();
+        assert!(markdown.contains("Source column"));
+        assert!(markdown.contains("abc"));
+        assert!(markdown.contains("integer"));
+
+        let csv = render_designer_validation_report(&report, DesignerReportFormat::Csv).unwrap();
+        assert!(csv.starts_with(
+            "id,severity,blocking,code,friendly_title,message,hint,table,field,row_index,source_row_number,source_column"
+        ));
+        assert!(csv.contains(",level,"));
+        assert!(csv.contains(",abc,integer,parse as integer,"));
+
+        let html = render_designer_validation_report(&report, DesignerReportFormat::Html).unwrap();
+        assert!(html.contains("abc"));
+        assert!(html.contains("integer"));
+        assert!(html.contains("column level"));
     }
 }
