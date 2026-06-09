@@ -1,4 +1,4 @@
-# 09. Codegen 模块详细设计
+# 09. Code Artifact Toolkit 详细设计（历史文件名：Codegen）
 
 本文档描述 ConfigForge 的代码导出任务设计。目标是在已加载、已链接并通过校验的 Meta 与 Data 基础上，生成 Rust、C++、TypeScript、Unreal C++、C# 和 Java 等语言的运行时代码，覆盖枚举、结构体、数据表、索引辅助查找函数，并提供抽象的数据文件加载器接口，让接入方可以从本地文件、包内资源、网络或引擎资源系统中加载实际数据。加载器接口必须与具体 Meta、表和字段解耦；所有按表/字段解析和 typed row/object 构造职责属于生成代码。
 
@@ -6,7 +6,7 @@
 
 ## 9.1 设计目标
 
-当前已落地第一阶段 Code Export 需要达成：
+当前已落地第一阶段 code artifact toolkit 与 language generators 需要达成：
 
 1. 基于 `LinkedMetaModel<'meta>` 生成完整类型代码，而不是只为每张表生成简单 stub。
 2. 支持多种目标语言：Rust、C++、TypeScript、Unreal C++、C#、Java。
@@ -36,7 +36,7 @@
 
 ## 9.2 与现有流程的关系
 
-当前 exporter 已经完成的基础流程：
+当前 generator-first 基础流程：
 
 ```text
 ProjectConfig::from_path
@@ -57,9 +57,9 @@ language code-like generator 内部流程仍可继续演进为：
 ```text
 Meta Load / Link
 Data Load / Normalize / Validate
-  -> ExportInput
-  -> CodeExportPlan::build
   -> GeneratorRegistry dispatch (build-facing)
+  -> GeneratorCommonInput::code_export_input()
+  -> CodeExportPlan::build
   -> generator/<language> converts to CodeExportPlan / CodeModel
   -> code artifact toolkit renders through CodeWriter
   -> ArtifactSink
@@ -153,16 +153,16 @@ src/artifact/
 
 `CodeGenerator` 的 crate-internal API 是 `generate_to_sink(input, sink)`：language `ArtifactGenerator` 从 `GeneratorCommonInput` 构造 `CodeExportInput` 并传入 shared `ArtifactSink`，Build 本身不再区分 language codegen、direct generator 或 data exporter，也不再遍历 `Vec<GeneratedFile>` 或了解生成文件的 materialization 方式。该 trait 不是稳定外部 generator plugin API，因此可以依赖内部 `ArtifactSink`；crate root 不 re-export `CodeGenerator`、builtin registry 或具体 generator 类型。`generate()` / `GeneratedFile` 仅在测试构建中存在，用于 String-backed snapshot 与 sink-backed streaming 输出等价性校验。每个 language generator 直接实现 `ArtifactGenerator`，内部继续复用 `CodeExportInput` / `CodeModel` / writer helper。
 
-### 9.3.1 ObjectTable codegen 边界
+### 9.3.1 ObjectTable code artifact 边界
 
-ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
+ObjectTable 的 code artifact 语义并入 code artifact toolkit：
 
 - `CodeTable.kind` 区分 `Object` / `Collection`。
 - ObjectTable 生成目标语言中的 singleton object 类型和访问入口。
 - ObjectTable 不生成 collection repository，不生成 index lookup helpers。
 - ObjectTable 可以携带 `CodeForeignKey` 关系元数据，用于生成从 singleton object 字段跳转到 CollectionTable repository 的 helper；当前各 backend 的 `linked_field` helper/cache/link 覆盖范围见 [Codegen backend capability matrix](#941-codegen-backend-capability-matrix)。
 - capability matrix 中的 format-agnostic backend 都应避免把 ObjectTable 误表达为 rows collection。
-- Runtime data load key 使用逻辑 table name，不由 exporter 真实写出的 `RuntimeDataFile.path` 决定；codegen 不关心 ObjectTable 的 CSV `key,value` 物理布局。
+- Runtime data load key 使用逻辑 table name，不由 runtime data generator 真实写出的 `RuntimeDataFile.path` 决定；code artifact generator 不关心 ObjectTable 的 CSV `key,value` 物理布局。
 
 建议 API 形态：
 
@@ -172,7 +172,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 
 ## 9.4 Codegen 专题索引
 
-为降低单文件体量，Codegen 的详细设计已拆到相邻专题文档。本文只保留 Codegen 总览、模块边界、专题索引和当前实现状态摘要；CodeModel IR、命名/冲突、索引、FK relation、生成器接口与测试计划等正文均迁移到专题文档。
+为降低单文件体量，code artifact 的详细设计已拆到相邻专题文档。本文只保留 toolkit 总览、模块边界、专题索引和当前实现状态摘要；CodeModel IR、命名/冲突、索引、FK relation、生成器接口与测试计划等正文均迁移到专题文档。
 
 | 专题 | 文档 | 内容 |
 | --- | --- | --- |
@@ -191,7 +191,7 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 
 ### 9.4.1 Codegen backend capability matrix
 
-本表是当前内置 code-like generator / code artifact backend 的权威能力矩阵。新增、删除或重命名 backend 时，优先更新本表；其他 Design / Implementation / Tech 文档应链接到本节，而不是复制完整 backend 清单。Source module 列记录当前物理路径。
+本表是当前内置 code-like artifact generator / code artifact backend 的权威能力矩阵。新增、删除或重命名 backend 时，优先更新本表；其他 Design / Implementation / Tech 文档应链接到本节，而不是复制完整 backend 清单。Source module 列记录当前物理路径。
 
 | Backend | Export type / aliases | Current source module | Topic doc | Output shape | Dependency | Core capabilities | Runtime test / adapter status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -214,8 +214,8 @@ ObjectTable Step 1 的 codegen 语义并入 Codegen 模块：
 
 本文只保留以下内容：
 
-1. 当前 Codegen 模块与目标 code artifact toolkit 的职责边界。
+1. 当前 code artifact toolkit 与 concrete language generators 的职责边界。
 2. ObjectTable 等跨专题边界的短说明。
 3. 拆分专题索引和 backend capability matrix。
 
-如果需要新增正文，应优先落到 `09a`~`09l` 的专题文档；只有影响整个 Codegen 模块入口、依赖方向或专题划分时才修改本文。这样可以避免总览文档重新膨胀，保证 AI 和人类读者能在一次阅读内获得导航。
+如果需要新增正文，应优先落到 `09a`~`09l` 的专题文档；只有影响整个 code artifact toolkit 入口、依赖方向或专题划分时才修改本文。这样可以避免总览文档重新膨胀，保证 AI 和人类读者能在一次阅读内获得导航。

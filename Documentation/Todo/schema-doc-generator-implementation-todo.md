@@ -30,7 +30,7 @@
 
 - 单元测试覆盖空 Meta、单表、多表、ObjectTable、带 desc/default/required 的字段。
 - 单元测试覆盖 builder 输出顺序 deterministic。
-- 不接入 export registry，不写任何文件产物。
+- 不接入 `GeneratorRegistry`，不写任何文件产物。
 
 建议提交：`feat(schema-doc): add schema documentation model`
 
@@ -115,7 +115,7 @@
 
 建议提交：`feat(schema-doc): plan and write markdown artifacts`
 
-## [x] Step 6：接入 export registry / build target planning
+## [x] Step 6：接入 GeneratorRegistry / build target planning
 
 目标：让用户可以在 `[[targets.exports]]` 中声明 `type = "schema_doc"`，并把它作为 MetaOnly export task 纳入 build orchestration。
 

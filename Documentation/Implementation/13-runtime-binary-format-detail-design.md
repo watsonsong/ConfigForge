@@ -294,7 +294,7 @@ impl RuntimeTableFormat for BinaryDataExporter {
 
 ### 13.8.1 CodeModel 与 format 解耦
 
-当前默认 codegen 不再消费真实 runtime data export task 结果，也不通过 `RuntimeDataFile.path` / `RuntimeDataFile.format` 绑定某个 runtime artifact。生成代码使用逻辑 table name（例如 `items`）作为 load key，实际打开 `items.json`、`items.msgpack` 或 `items.bin` 由运行时 loader / reader 组合决定。若未来 manifest 或 adapter 配置需要显式记录真实 artifact，可在 build/runtime 层维护下列 metadata，但它不是当前 CodeModel validate 的必需输入：
+当前默认 code artifact generator 不再消费真实 runtime data export task 结果，也不通过 `RuntimeDataFile.path` / `RuntimeDataFile.format` 绑定某个 runtime artifact。生成代码使用逻辑 table name（例如 `items`）作为 load key，实际打开 `items.json`、`items.msgpack` 或 `items.bin` 由运行时 loader / reader 组合决定。若未来 manifest 或 adapter 配置需要显式记录真实 artifact，可在 build/runtime 层维护下列 metadata，但它不是当前 CodeModel validate 的必需输入：
 
 ```rust
 pub struct RuntimeDataFile {
@@ -304,7 +304,7 @@ pub struct RuntimeDataFile {
 }
 ```
 
-`format` 是 runtime artifact / manifest metadata，不是当前默认 CodeModel 构建和 codegen validate 的必需输入。unknown export type 应由 build-facing `GeneratorRegistry` 或显式 runtime adapter 配置校验；生成代码本身保持格式无关。后缀只能作为 artifact path 规划结果，不能作为 reader layout 的隐式来源。
+`format` 是 runtime artifact / manifest metadata，不是当前默认 CodeModel 构建和 code artifact validate 的必需输入。unknown export type 应由 build-facing `GeneratorRegistry` 或显式 runtime adapter 配置校验；生成代码本身保持格式无关。后缀只能作为 artifact path 规划结果，不能作为 reader layout 的隐式来源。
 
 ### 13.8.2 Generated parser 分层
 

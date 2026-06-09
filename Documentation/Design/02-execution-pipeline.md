@@ -114,6 +114,8 @@ Source Provider 负责把 CSV、XLSX、Lark Sheet、Google Sheet 等外部数据
 
 该阶段根据 Meta 把二维 Sheet 转换为 typed logical data。
 
+内存模型原则：ConfigForge 当前选择把 Project / Meta / DataSet 全量物化到内存，以换取更简单、可验证的 target filtering、validation、multi-target 共享和 artifact generator 输入模型。后续除非有明确生产数据证明该模型不可接受，否则不设计 row paging、out-of-core DataSet、按 target 重读 source 或跨阶段数据流式游标；大表输出的内存控制放在 artifact 边界，通过 `ArtifactSink` / `ArtifactWriteStream` 直接写文件，避免把完整 artifact 内容先收集成 `String` / `Vec<u8>`。
+
 职责：
 
 - 解析 header 到 field path 的映射。

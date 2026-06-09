@@ -1,6 +1,6 @@
 # 09a. Codegen Runtime Reader Contract
 
-本文从 Codegen 模块详细设计中拆出，专门描述 generated code 与运行时 loader/reader 的契约。产品层语义以 [`../Design/06-export-cli.md`](../Design/06-export-cli.md) 为准。
+本文从 code artifact toolkit 详细设计中拆出，专门描述 generated code 与运行时 loader/reader 的契约。产品层语义以 [`../Design/06-export-cli.md`](../Design/06-export-cli.md) 为准。
 
 ## Related docs
 

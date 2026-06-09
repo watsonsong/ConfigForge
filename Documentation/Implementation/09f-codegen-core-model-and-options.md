@@ -1,10 +1,10 @@
 # 09f. Codegen Core Model and Options
 
-本文从 Codegen 模块详细设计中拆出，专门描述核心输入输出模型、`CodeExportTarget` / `CodeExportInput`、测试专用 `GeneratedFile`、CodeModel IR、命名策略、类型映射和通用 writer。
+本文从 code artifact toolkit 详细设计中拆出，专门描述核心输入输出模型、`CodeExportTarget` / `CodeExportInput`、测试专用 `GeneratedFile`、CodeModel IR、命名策略、类型映射和通用 writer。
 
 ## Related docs
 
-- [`09-codegen-module-detail-design.md`](09-codegen-module-detail-design.md) — Codegen 模块总览和专题索引。
+- [`09-codegen-module-detail-design.md`](09-codegen-module-detail-design.md) — code artifact toolkit 总览和专题索引。
 - [`../Design/06-export-cli.md`](../Design/06-export-cli.md) — 用户可见的导出、runtime loading 和 generated API 语义。
 - [`01-module-outline.md`](01-module-outline.md) — Rust 模块边界与依赖方向。
 
@@ -227,7 +227,7 @@ derive_serde = true
 - 语言配置不使用 tagged enum；`CodegenTaskConfig` 通过 `#[serde(flatten)]` 把 `[rust]`、`[cpp]`、`[typescript]` 等表保存在 `HashMap<String, toml::Value>` 中。
 - 每个语言生成器只能读取自己的扩展配置，例如 `RustCodegenOptions` 定义在 `src/generator/rust/mod.rs`，并由 Rust generator 通过 `CodegenOptions::language_options::<RustCodegenOptions>(LANGUAGE)` 解析。
 - 新增语言时应新增 generator、语言扩展 option struct 和该语言自己的解析逻辑；不修改 IR，不增加中心化 `LanguageCodegenOptions` enum，也不在核心模块增加语言专属 helper。
-- 如果配置中出现当前语言不支持的 `CaseStyle` 或 `KeywordConflictPolicy`，应在 codegen validate 阶段报错。
+- 如果配置中出现当前语言不支持的 `CaseStyle` 或 `KeywordConflictPolicy`，应在 code artifact validate 阶段报错。
 
 ### 9.4.2.3 `CodeWriter` / `StreamingCodeWriter`
 

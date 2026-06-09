@@ -290,11 +290,11 @@ pub(crate) trait TaskGenerator: Send + Sync {
 
 1. **执行资源稳定性**：同一 Project / target / effective tags 下，`--serial` 或 `--jobs 1` 与 `--jobs N` 必须生成相同 artifact manifest 和相同文件内容。若代码生成默认文件头包含 `{{datetime}}` 或当前时间，则测试应使用固定 `file_header` 消除时间因素，避免把有意的时间戳差异误判为并发非确定性。
 2. **写入模式稳定性**：`direct` 与 `temp-commit` 应写出相同相对路径、字节数和文件内容；`dry-run` 应返回同一 artifact plan（路径 + bytes），但所有 entry 的 `written` 必须为 `false` 且不得创建输出文件。
-3. **Artifact result 顺序稳定性**：不论 exporter/codegen 完成顺序如何，build 不再在 Artifact Writer 前汇总 artifact 内容；所有任务直接写入 shared `ArtifactSink`，由 artifact 模块完成路径规范化、冲突检查，并在 `finish()` 中按 normalized path 稳定输出 `ArtifactWriteResult.entries`。并行完成顺序不能影响 dry-run stdout、manifest 或第一个稳定冲突。
+3. **Artifact result 顺序稳定性**：不论 artifact generator 完成顺序如何，build 不再在 Artifact Writer 前汇总 artifact 内容；所有任务直接写入 shared `ArtifactSink`，由 artifact 模块完成路径规范化、冲突检查，并在 `finish()` 中按 normalized path 稳定输出 `ArtifactWriteResult.entries`。并行完成顺序不能影响 dry-run stdout、manifest 或第一个稳定冲突。
 
 回归测试建议组合：
 
-- CLI integration 使用混合 target（至少包含一个 MetaAndData exporter 和一个 MetaOnly codegen exporter）比较 `--serial` 与 `--jobs N` 的实际输出树。
+- CLI integration 使用混合 target（至少包含一个 MetaAndData data-backed generator 和一个 MetaOnly code artifact generator）比较 `--serial` 与 `--jobs N` 的实际输出树。
 - 使用同一 mixed target 分别运行 `--write-mode direct`、`--write-mode temp-commit` 和 `--dry-run`：direct/temp-commit 比较文件内容；dry-run 比较 plan 中的相对路径与 byte count，并断言未写出文件。
 - 单元测试继续覆盖内部 branch 时序，例如 `LinkMeta -> codegen` 可在 `SourceRead` 完成前开始；CLI 测试覆盖端到端产物稳定性。
 

@@ -1,6 +1,6 @@
 # 09c. Codegen C++ Backend
 
-本文从 Codegen 模块详细设计中拆出，专门描述 C++ backend 的 header/source 结构、namespace、ownership 和 lazy loading 落地方式。
+本文从 code artifact toolkit 详细设计中拆出，专门描述 C++ backend 的 header/source 结构、namespace、ownership 和 lazy loading 落地方式。
 
 ## Related docs
 

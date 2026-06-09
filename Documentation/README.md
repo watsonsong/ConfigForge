@@ -37,7 +37,7 @@ For future technical overview design, detailed design, user manual writing, and 
 - [`Design/03-configuration.md`](Design/03-configuration.md) — project, Meta, source, target, plugin, and field policy configuration.
 - [`Design/04-meta-model.md`](Design/04-meta-model.md) — canonical Meta model for tables, fields, types, indexes, foreign keys, multi-source, and fragments.
 - [`Design/05-data-validation.md`](Design/05-data-validation.md) — data views, filtering, validation semantics, aggregate data exporter inputs, and diagnostics.
-- [`Design/06-export-cli.md`](Design/06-export-cli.md) — export targets, data export formats, artifact model, and CLI commands.
+- [`Design/06-export-cli.md`](Design/06-export-cli.md) — export targets, export type configuration, artifact generator model, and CLI commands.
 - [`Design/07-user-manual-and-qa.md`](Design/07-user-manual-and-qa.md) — user workflows, common operations, QA dimensions, and assertion guidance.
 - [`Design/08-asset-validation-and-manifest.md`](Design/08-asset-validation-and-manifest.md) — asset reference validation, asset kind policy, target-aware checks, export-time completion, and Asset Manifest export design.
 - [`Design/09-builtin-validators.md`](Design/09-builtin-validators.md) — built-in validator roadmap and canonical design for regex, string_length, sum, monotonic, required_when, compare, and range enhancement.
@@ -55,8 +55,8 @@ Use the implementation documents after product behavior has been confirmed in `D
 - [`Implementation/05-data-module-detail-design.md`](Implementation/05-data-module-detail-design.md) — Data load/model/resolver flow, CSV readers, ObjectTable source layout, and DataSet design.
 - [`Implementation/06-validation-module-detail-design.md`](Implementation/06-validation-module-detail-design.md) — Validation flow, registered validator framework, diagnostics, ExportValidationView, and test plan.
 - [`Implementation/07-artifact-module-detail-design.md`](Implementation/07-artifact-module-detail-design.md) — Artifact model, writer, dry-run, direct/temp-commit strategy, and write result design.
-- [`Implementation/08-exporter-module-detail-design.md`](Implementation/08-exporter-module-detail-design.md) — Current exporter module and target data artifact toolkit boundaries, runtime/aggregate data exporter contracts, format registry, JSON / MessagePack / bin / POT output, and ObjectTable payload shape.
-- [`Implementation/09-codegen-module-detail-design.md`](Implementation/09-codegen-module-detail-design.md) — Current codegen module and target code artifact toolkit boundaries, source layout, split-topic index, and current status summary.
+- [`Implementation/08-exporter-module-detail-design.md`](Implementation/08-exporter-module-detail-design.md) — Current data artifact toolkit boundaries, runtime table serialization / aggregate artifact facets, JSON / MessagePack / bin / POT payload helpers, and ObjectTable payload shape. The filename keeps the historical `exporter` label for link stability; it is not a build-facing exporter registry design.
+- [`Implementation/09-codegen-module-detail-design.md`](Implementation/09-codegen-module-detail-design.md) — Current code artifact toolkit boundaries, concrete language generator layout, split-topic index, and current status summary. The filename keeps the historical `codegen` label for link stability; concrete language generators are build-facing `ArtifactGenerator`s under `src/generator/<type_id>/`.
   - [`Implementation/09a-codegen-runtime-reader-contract.md`](Implementation/09a-codegen-runtime-reader-contract.md) — Runtime loader/reader contract, eager/lazy loading, TypeScript sync API, logical table names, and schema revision coordination.
   - [`Implementation/09b-codegen-rust-backend.md`](Implementation/09b-codegen-rust-backend.md) — Rust backend generated API and lazy loading.
   - [`Implementation/09c-codegen-cpp-backend.md`](Implementation/09c-codegen-cpp-backend.md) — C++ backend generated API, ownership, namespace, and lazy loading.
@@ -72,7 +72,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 - [`Implementation/10-build-module-detail-design.md`](Implementation/10-build-module-detail-design.md) — Build orchestration, target normalization, generator requirements branch pipeline, and artifact write boundaries.
 - [`Implementation/11-foreign-key-detail-design.md`](Implementation/11-foreign-key-detail-design.md) — Foreign key raw/link model, referential-integrity validation, target semantics, codegen staging, and test plan.
 - [`Implementation/12-struct-expanded-value-detail-design.md`](Implementation/12-struct-expanded-value-detail-design.md) — Struct source layout auto detection and expanded CSV field-path layout for CollectionTable/ObjectTable, validation/export plan, and test plan.
-- [`Implementation/13-runtime-binary-format-detail-design.md`](Implementation/13-runtime-binary-format-detail-design.md) — Implemented `bin` runtime data packed binary format, schema revision, encoding rules, exporter/codegen/reader integration, and compliance fixtures.
+- [`Implementation/13-runtime-binary-format-detail-design.md`](Implementation/13-runtime-binary-format-detail-design.md) — Implemented `bin` runtime data packed binary format, schema revision, encoding rules, artifact generator / code artifact / reader integration, and compliance fixtures.
 
 ## Technical Practice Set
 
@@ -94,7 +94,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 ## Todo / Task Lists
 
 - `Documentation/Todo/` is the expected home for short-lived task lists, phased implementation checklists, and tactical TODO documents.
-- Todo documents are not canonical product / implementation contracts. Once a plan is implemented or stabilized, promote the durable design into the relevant `Design/`, `Implementation/`, or `Tech/` document, and either archive/remove the obsolete TODO or convert it into a historical implementation record with a non-TODO name.
+- Todo documents are not canonical product / implementation contracts. Once a plan is implemented or stabilized, promote the durable design into the relevant `Design/`, `Implementation/`, or `Tech/` document, then delete the completed TODO or convert it into a historical implementation record with a non-TODO name. Do not leave a fully completed TODO as the only current description of a feature.
 - Do not place new TODO checklists under `Documentation/Implementation/`; Implementation documents should describe current architecture, durable implementation design, and future extension sections.
 - Every phased TODO step must include a Markdown checkbox in its step heading, for example `## [ ] Step 1：...` or `## [x] Step 1：...`. Each step must be scoped so it can be developed independently, validated independently, and committed independently; mark the checkbox as complete only after that step has passed its documented validation and has been committed.
 

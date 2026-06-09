@@ -10,7 +10,7 @@
 - Artifact writer 已收敛为中心协调式 `ArtifactSink` 兼容入口，支持标准同步 `std::io::Write` 流、dry-run、direct 与 temp-commit；
 - 阶段式 build 已支持 `BuildTrace` 与 `--trace-tasks <path>` JSON metrics 输出。
 
-当前仍未实现、但保留为未来规划的方向包括：远端 provider 的正式 async runtime、multi-target build、filesystem-aware path key，以及仅在明确收益出现后再重新评估的通用 DAG executor。runtime exporter、aggregate exporter 和内置 codegen production path 已接入 shared `ArtifactSink` streaming 写出。
+当前仍未实现、但保留为未来规划的方向包括：远端 provider 的正式 async runtime、multi-target build、filesystem-aware path key，以及仅在明确收益出现后再重新评估的通用 DAG executor。runtime table generator、aggregate data-backed generator 和内置 code-like generator production path 已接入 shared `ArtifactSink` streaming 写出。内存模型上接受 parsed Meta / DataSet 全量驻留内存，后续不要为了“理论上的大表”提前引入 row paging、out-of-core DataSet 或按 target 重读 source 的复杂设计；大 artifact 的控制边界是 sink-first 输出。
 
 ## 1. 设计目标
 
@@ -79,7 +79,7 @@ ConfigForge 的任务可按资源类型分为三类。
 - `Semaphore` 可限制同时打开文件、HTTP 请求、远端 API 请求数；
 - `JoinSet` / `FuturesUnordered` 可收集同类 I/O 任务。
 
-ArtifactSink 当前使用同步 `std::io::Write`，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 并传入 generator 分支。runtime table exporter 与 aggregate exporter 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack / binary 均已使用 writer-style serializer；[`Codegen backend capability matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 code-like generator production path 也通过 `generate_to_sink()` 和 streaming code writer 直接写 sink。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
+ArtifactSink 当前使用同步 `std::io::Write`，不要求立刻引入 Tokio。它已经解决“所有写入统一经过中心协调器”的问题；Build 主流程也已创建 shared sink 并传入 generator 分支。runtime table generators 与 aggregate data-backed generators 已不再通过全局 `Vec<Artifact>` compatibility path 回到 build，JSON / MessagePack / binary 均已使用 writer-style serializer；[`Codegen backend capability matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 code-like generator production path 也通过 `generate_to_sink()` 和 streaming code writer 直接写 sink。远端 Google Sheet / 飞书表格这类 source provider 才是引入 async runtime 的主要触发点，因为网络请求需要超时、重试、限流和大量等待状态，长期用 OS thread 承载会浪费资源。等远端 source provider 稳定后，再评估是否把 ArtifactSink 的底层 writer lane 从同步 `Write` 平滑迁移为 async writer。
 
 建议配置：
 
@@ -598,39 +598,33 @@ Data-backed export 可拆成三段：
 
 ```text
 PlanRuntimeData(table)
-  -> Artifact { path, content }
+  -> ArtifactPlan { path, kind }
 conflict check by path
-bounded GenerateDataArtifact(export, table_or_aggregate)
-  -> ArtifactContent::Binary(bytes)
-bounded WriteArtifact(path, bytes)
+GenerateDataArtifact(export, table_or_aggregate)
+  -> sink.create(path)
+  -> stream bytes directly through ArtifactWriteStream
 ```
 
 路径冲突检查必须在写入前完成：
 
 ```text
-collect all Artifact
+collect artifact plans / planned paths
   -> sort by path
   -> reject duplicate path
-  -> bounded generate/write pipeline
+  -> generator writes through shared ArtifactSink
 ```
 
 当前 duplicate path key 是 lexical-normalized path；它不解析 symlink，也不覆盖大小写不敏感文件系统上的 case alias。后续并发写出管线如果引入更强的 filesystem-aware path key，必须保持“写入前完成冲突检查”的边界，并遵循 [`platform-filesystem-semantics.md`](platform-filesystem-semantics.md) 中的 canonicalize + lexical fallback 策略。
 
-不要先把所有大表都序列化成 `Vec<u8>` 后再统一写出。并发序列化大表会显著增加内存峰值。短期建议：
-
-```text
-max_in_flight_artifacts = min(jobs, 2)
-```
-
-后续可以按 bytes 估算做更精确的 bounded channel；再往后才考虑 streaming writer。
+不要先把所有大表都序列化成 `Vec<u8>` 后再统一写出。并发序列化大表会显著增加输出阶段内存峰值；当前主路径已经通过 shared `ArtifactSink` / `ArtifactWriteStream` sink-first 写出，后续新增 generator 应保持这个边界。不要为了降低 Meta/DataSet 驻留内存而引入 row paging 或 out-of-core 数据模型；只有单个 generator 内部重新 materialize 完整 artifact 内容时，才需要回到该 generator 内部修正为 writer-style serializer。
 
 JSON pretty 输出可读但体积大、CPU/IO 成本高。后续可增加 `compact_json` 选项，但这属于产物格式策略，应独立评审。
 
 生成任务之间可以并行，但必须满足：
 
 - JSON / MessagePack / bin table artifact 可按 table 并行。
-- gettext POT、Lua table 这类 aggregate / embedded data exporter 可以按 exporter 内部安全粒度并行；若需要全局去重或 root facade 汇总，必须先并行收集局部结果，再在 coordination 层稳定合并。
-- 一个 target 的 data-backed exporter 必须等待该 target 的 TargetView validation 成功；MetaOnly codegen 不等待 Data 或 TargetView validation。
+- gettext POT、Lua table 这类 aggregate / embedded data generator 可以按 generator 内部安全粒度并行；若需要全局去重或 root facade 汇总，必须先并行收集局部结果，再在 coordination 层稳定合并。
+- 一个 target 的 data-backed generator 必须等待该 target 的 TargetView validation 成功；MetaOnly code artifact generator 不等待 Data 或 TargetView validation。
 
 ### 6.7 Code generation
 
@@ -1008,12 +1002,12 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 - Artifact 模块已提供 `ArtifactSink` / `ArtifactWriteStream`，并作为唯一写入协调器处理 path reservation、Direct / TempCommit / DryRun 与 result entries。
 - Artifact 模块已提供 `ArtifactPlan` / `ArtifactProducer`；`ArtifactWriter::write(Vec<Artifact>)` 已转为 sink compatibility wrapper；旧 dedicated bounded writer queue 与 sink 级资源限流实现已移除。
 - CLI 的 artifact 写入配置只保留 write mode；`--jobs` / `--serial` 仍控制 CPU 执行并行度。
-- Build 主流程已创建 shared `ArtifactSink` 并传入 generator 分支；runtime table exporter 直接通过 `sink.create(path)` 打开 stream 并调用 `serialize_table_to_stream()` 写入，aggregate exporter 通过 required `export_to_sink()` 写入，内置 code-like generator 通过 required `generate_to_sink()` 与 streaming writer 写入。目标态这些 exporter/codegen 入口应收敛到 concrete artifact generator 内部，data/code artifact toolkit 只保留 helper。
+- Build 主流程已创建 shared `ArtifactSink` 并传入 generator 分支；runtime table generator 直接通过 `sink.create(path)` 打开 stream 并调用 `serialize_table_to_stream()` 写入，aggregate data-backed generator 通过 required `export_to_sink()` 写入，内置 code-like generator 通过 required `generate_to_sink()` 与 streaming writer 写入。这些入口已收敛到 concrete artifact generator 内部，data/code artifact toolkit 只保留 helper。
 
 未来规划：
 
 - `TempCommit` 的最终 rename 仍集中在 `sink.finish()`，保证失败时可以清理 temp files；`Direct` 模式保留可能产生 partial output 的弱语义。
-- ArtifactSink 不再承担资源调度职责；降低 RSS 峰值应优先保持 exporter/codegen streaming 主路径，避免在新功能中重新构建完整 `String` / `Vec<u8>` 后再写入。
+- ArtifactSink 不再承担资源调度职责；当前设计接受 Meta/DataSet 全量驻留内存，降低输出阶段 RSS 峰值应优先保持 artifact generator streaming 主路径，避免在新功能中重新构建完整 `String` / `Vec<u8>` 后再写入，而不是引入 out-of-core DataSet 或复杂 row paging。
 - filesystem-aware path key 仍保留为后续跨平台增强，不在当前 lexical-normalized key 基础上提前复杂化。
 
 ### Phase 12：阶段式 tracing / metrics
@@ -1028,7 +1022,7 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 
 未来规划：
 
-- 仅当 streaming generator、远程 source provider、多 target build、resource wait 或 cancellation 成为明确工程痛点时，再评估是否值得引入通用 `TaskSpec` / `TaskGraph` / readiness queue / resource-aware scheduler。
+- 仅当远程 source provider、多 target build、resource wait 或 cancellation 成为明确工程痛点时，再评估是否值得引入通用 `TaskSpec` / `TaskGraph` / readiness queue / resource-aware scheduler；不要仅因为大表或多 target artifact 输出就引入复杂 DAG / out-of-core 数据模型，artifact 输出已经由 streaming sink 承担。
 
 ## 11. 测试状态与规划
 
@@ -1042,13 +1036,13 @@ runtime data 和 generated code 都应进入同一写出管线。Artifact writer
 - Artifact path conflict 在并发规划 / 生成后仍稳定报错。
 - ArtifactSink Direct / TempCommit / DryRun、动态 path reservation、stream drop without finish 与 sink drop temp cleanup 语义。
 - `--trace-tasks` 输出包含关键阶段和成功 / 失败状态，并覆盖阶段式 build 失败时仍写出 trace 的路径。
-- CLI integration 覆盖 `--jobs 1` / 并发输出一致、code-only target 不读取 Data、多 exporter / 多 codegen 稳定输出、source / validation / artifact conflict 错误路径。
+- CLI integration 覆盖 `--jobs 1` / 并发输出一致、code-only target 不读取 Data、多 data-backed generator / 多 code artifact generator 稳定输出、source / validation / artifact conflict 错误路径。
 
 ### 11.2 未来测试规划
 
 - multi-target build 落地时，补充多 target / 多 effective tags 不错误复用 DataSetView 的 integration。
 - 远端 provider 落地时，补充 network concurrency、retry/backoff、cancellation 和 source diagnostics 稳定排序。
-- exporter/codegen streaming generator 落地时，补充端到端内存峰值测试；ArtifactSink coordinator 当前已覆盖动态 path reservation、stream drop without finish 等单元测试。
+- 新增大 artifact 输出路径或可能重新 materialize 完整文件内容的 generator 时，补充端到端内存峰值测试；ArtifactSink coordinator 当前已覆盖动态 path reservation、stream drop without finish 等单元测试。
 - 通用 DAG executor 若落地，补充 readiness queue、resource wait、cancellation propagation、node-level trace 和 result merge golden。
 
 ### 11.3 性能测试规划

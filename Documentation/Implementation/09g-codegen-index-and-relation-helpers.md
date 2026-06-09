@@ -1,10 +1,10 @@
 # 09g. Codegen Index and Relation Helpers
 
-本文从 Codegen 模块详细设计中拆出，专门描述 CollectionTable index lookup、Foreign Key `linked_field` relation helper、row-index cache 与 `link` / `link_all` API。
+本文从 code artifact toolkit 详细设计中拆出，专门描述 CollectionTable index lookup、Foreign Key `linked_field` relation helper、row-index cache 与 `link` / `link_all` API。
 
 ## Related docs
 
-- [`09-codegen-module-detail-design.md`](09-codegen-module-detail-design.md) — Codegen 模块总览和专题索引。
+- [`09-codegen-module-detail-design.md`](09-codegen-module-detail-design.md) — code artifact toolkit 总览和专题索引。
 - [`../Design/06-export-cli.md`](../Design/06-export-cli.md) — 用户可见的导出、runtime loading 和 generated API 语义。
 - [`01-module-outline.md`](01-module-outline.md) — Rust 模块边界与依赖方向。
 

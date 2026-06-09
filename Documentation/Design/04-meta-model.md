@@ -280,7 +280,7 @@ field group 展开后应等价于在 table 中内联声明字段，并继续参�
 - group 名称使用全局 Meta namespace，重复 group name 按 duplicate meta definition 报错；
 - group 不被 struct 或 fragment typed payload 直接引用；fragment payload 复用标准 struct，而不是 field group。
 
-### Typed fragment payload（Implemented MVP）
+### Typed fragment payload（Stable）
 
 当前 fragment 是一组局部字段，runtime payload 输出为：
 
@@ -913,7 +913,7 @@ Base `sources` 用于 split merge：
 
 ## 4.14 Polymorphic Fragment
 
-> 实现状态：Implemented MVP。当前版本已按 **variant source mode** 支持 polymorphic fragments，包括 `FragmentMeta`、source `fragments` 声明、按行 source/fragments 元数据、fragment scoped required/default/type 校验、target-aware validation、runtime nested object export，以及 Rust / TypeScript / C++ fragment 类型生成。fragment join mode 仍不实现。
+> 实现状态：Stable。当前版本已按 **variant source mode** 稳定支持 polymorphic fragments，包括 `FragmentMeta`、source `fragments` 声明、按行 source/fragments 元数据、fragment scoped required/default/type 校验、target-aware validation、runtime nested object export，以及 Rust / TypeScript / C++ fragment 类型生成。fragment join mode 仍不实现。
 
 多态表用于表达“同一逻辑集合中，不同 record 拥有不同附加字段集合”的场景，例如物品表中的 weapon、equipment、usable。ConfigForge 的多态模型使用 composition，不使用继承：record 始终由 table common fields 加零个或多个 fragment fields 组成。
 

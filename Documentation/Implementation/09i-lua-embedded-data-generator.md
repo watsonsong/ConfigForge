@@ -6,7 +6,7 @@
 
 ## Related docs
 
-- [`09-codegen-module-detail-design.md`](09-codegen-module-detail-design.md) — Codegen 模块总览和专题索引。
+- [`09-codegen-module-detail-design.md`](09-codegen-module-detail-design.md) — code artifact toolkit 总览和专题索引。
 - [`08-exporter-module-detail-design.md`](08-exporter-module-detail-design.md) — Data exporter contract、format registry 与 runtime data artifact 输出。
 - [`09f-codegen-core-model-and-options.md`](09f-codegen-core-model-and-options.md) — 当前 format-agnostic codegen 输入输出模型。
 - [`../Design/06-export-cli.md`](../Design/06-export-cli.md) — 用户可见的导出、Lua table format 与 CLI 行为。
@@ -27,7 +27,7 @@
 
 1. 不把 Lua 伪装成现有 `CodeGenerator` 的第四种 format-agnostic backend；Lua 产物依赖数据，执行边界不同。长期可通过统一 artifact generator + code artifact facet 复用 code options，而不是直接实现当前 MetaOnly 假设的 `CodeGenerator`。
 2. 不生成 Lua runtime reader contract，不读取 JSON / MessagePack / `bin`。
-3. 首版不追求 streaming 写超大 Lua 文件；可在后续为大表增加 chunked writer。
+3. 不为“超大 Lua 表”单独引入 out-of-core DataSet 或按 target 重读 source；当前产物写出仍应走 `ArtifactSink`。若未来需要降低 Lua runtime 侧单文件 parse / require 峰值，可评估 chunked files，而不是改变 ConfigForge 的 Meta/Data 全量内存模型。
 4. 首版不实现增量 require 热更新、二进制 Lua bytecode 编译、LuaJIT FFI 或引擎私有 asset bundle 打包。
 
 ## 9i.2 模块归属与依赖边界

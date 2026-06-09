@@ -139,6 +139,13 @@
       font-size: 0.9rem;
     }
 
+    .notice {
+      background: #fff7ed;
+      border-color: #fed7aa;
+      color: #7c2d12;
+    }
+    .notice strong { color: #9a3412; }
+
     section {
       margin: 1.4rem 0;
       background: rgba(255,255,255,0.92);
@@ -272,11 +279,16 @@
         <h1>ConfigForge 设计说明</h1>
         <p>面向游戏配置生产流程的命令行工具：把策划表格数据按照 Meta 定义解析、组合、过滤、校验，并导出运行时数据、代码和辅助产物。</p>
         <div class="meta">
-          <span class="pill">当前唯一产品设计入口</span>
+          <span class="pill">阅读摘要，不是 current canonical source</span>
           <span class="pill">面向技术设计 / 用户手册 / QA</span>
           <span class="pill">自包含 HTML，无外部依赖</span>
         </div>
       </header>
+
+      <section class="notice" id="canonical-warning">
+        <h2>阅读提示</h2>
+        <p><strong>本页是 HTML 阅读摘要，不是 current canonical source。</strong>当前产品设计、实现状态矩阵和术语边界以同目录 Markdown 文档为准，尤其是 <code>README.md</code>、<code>01-overview.md</code>、<code>02-execution-pipeline.md</code> 和 <code>06-export-cli.md</code>。当 Markdown canonical docs 与本页不一致时，以 Markdown 为准；维护设计状态或术语时，应同步检查本页是否仍需要更新。</p>
+      </section>
 
       <section id="summary">
         <h2>1. 总览</h2>
@@ -296,7 +308,7 @@
             <tr><td>客户端 / 服务器工程师</td><td>定义 Meta、索引和导出目标，得到类型明确的运行时数据和访问代码。</td></tr>
             <tr><td>构建 / 发布工程师</td><td>在 CI 中校验和导出，生成稳定产物、资源清单和国际化模板。</td></tr>
             <tr><td>QA</td><td>基于明确规则设计测试用例，断言过滤、错误提示和产物内容。</td></tr>
-            <tr><td>工具开发者</td><td>实现 provider、exporter、validator、code generator 和 plugin 能力。</td></tr>
+            <tr><td>工具开发者</td><td>实现 provider、artifact generator、validator、data/code artifact toolkit facet 和 plugin 能力。</td></tr>
           </tbody>
         </table>
       </section>
@@ -351,7 +363,7 @@
           <div class="step"><div><h3>Meta Link / Validate</h3><p>从 Project Config 抽取 MetaModel，构造 LinkedMetaModel 并输出结构化 Meta diagnostics。</p></div></div>
           <div class="step"><div><h3>Data Load / Resolve</h3><p>按 DataLoadPlan 加载 CSV，保留 RowSourceInfo，并用 DataResolver 统一解释 default、struct JSON cell / expanded value、fragment presence。</p></div></div>
           <div class="step"><div><h3>Validation / ExportView</h3><p>按 target tags、表/字段 <code>export_when</code>、行级 <code>row_export</code> 派生 ExportValidationView 并执行基础规则和 validator registry。</p></div></div>
-          <div class="step"><div><h3>Runtime Export / Codegen</h3><p>生成 JSON / MessagePack / bin runtime data；Rust / TypeScript / C++ codegen 使用逻辑 table name，不绑定真实 data artifact path。</p></div></div>
+          <div class="step"><div><h3>Artifact Generators</h3><p>生成 JSON / MessagePack / bin runtime data；Rust / TypeScript / C++ code artifact generator 使用逻辑 table name，不绑定真实 data artifact path。</p></div></div>
         </div>
         <div class="callout"><strong>并发策略：</strong>当前实现已使用受 <code>jobs</code> 限制的 Rayon CPU worker pool 并行 DataLoader、runtime serialization 和 codegen task；远端 provider、async I/O、完整任务 DAG 和独立 Artifact Writer 仍是后续演进。</div>
       </section>
@@ -364,13 +376,13 @@
           <tbody>
             <tr><td>Project / Meta loading</td><td><span class="tag green">Stable</span></td><td>支持 Project imports、Meta merge、link + validate；XML 仅为历史/目标态示例，当前未实现。</td></tr>
             <tr><td>CSV source provider</td><td><span class="tag green">Stable</span></td><td>当前唯一可执行 provider；XLSX、Lark Sheet、Google Sheet 是 planned。</td></tr>
-            <tr><td>ObjectTable</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 CSV <code>key,value</code> 常量表、单 object runtime payload，并可作为 FK source 引用 CollectionTable unique / primary index；多源、override、作为 FK target 暂不支持。</td></tr>
-            <tr><td>Struct fields / expanded value</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 named struct、JSON cell、source-driven expanded value、recursive nested struct、target-aware child filtering 和 child default；array/map 与 struct child validators 待后续。</td></tr>
-            <tr><td>Foreign keys</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 field/table-level FK、link、Meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique / primary index。</td></tr>
-            <tr><td>Runtime data export</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 JSON、MessagePack、bin table data generator 与 gettext POT、Lua、Asset Manifest 等 aggregate / mixed generator；runtime data 会在导出前使用 asset resolver 物化 canonical asset string。内置 data-backed generators 已直接注册到 GeneratorRegistry，更多格式仍可后续扩展。</td></tr>
+            <tr><td>ObjectTable</td><td><span class="tag green">Stable</span></td><td>支持 CSV <code>key,value</code> 常量表、单 object runtime payload，并可作为 FK source 引用 CollectionTable unique / primary index；多源、override、作为 FK target 暂不支持。</td></tr>
+            <tr><td>Struct fields / expanded value</td><td><span class="tag green">Stable</span></td><td>支持 named struct、JSON cell、source-driven expanded value、recursive nested struct、target-aware child filtering 和 child default；map 与 struct child validators 待后续。</td></tr>
+            <tr><td>Foreign keys</td><td><span class="tag green">Stable</span></td><td>支持 field/table-level FK、link、Meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique / primary index。</td></tr>
+            <tr><td>Runtime data export</td><td><span class="tag green">Stable</span></td><td>支持 JSON、MessagePack、bin table data generator 与 gettext POT、Lua、Asset Manifest 等 aggregate / mixed generator；runtime data 会在导出前使用 asset resolver 物化 canonical asset string。内置 data-backed generators 已直接注册到 GeneratorRegistry，更多格式仍可后续扩展。</td></tr>
             <tr><td>Asset validation / completion / manifest</td><td><span class="tag orange">Implemented MVP</span></td><td>已实现 Project search paths + Meta asset_kinds / extends，在 ExportView 上校验资源引用、执行 Unreal mounted object / wrapper / 短路径唯一候选补齐，并让 runtime data 输出 canonical asset string；Asset Manifest 已支持 deterministic JSON 和 Unreal DataTable 兼容 CSV 输出。</td></tr>
-            <tr><td>Codegen backends</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 Rust / TypeScript / C++ 基础生成、loader/repository helpers 和 target-aware IR。</td></tr>
-            <tr><td>Diagnostics</td><td><span class="tag orange">Implemented MVP</span></td><td><code>src/diagnostic/</code> 已提供 severity、location、formatting、report aggregation 和 crate error facade；Data/Exporter/Codegen 领域 code 与完整 source trace 仍可增强。</td></tr>
+            <tr><td>Code artifact generators</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 Rust / TypeScript / C++ 基础生成、loader/repository helpers 和 target-aware IR。</td></tr>
+            <tr><td>Diagnostics</td><td><span class="tag orange">Implemented MVP</span></td><td><code>src/diagnostic/</code> 已提供 severity、location、formatting、report aggregation 和 crate error facade；Data / data artifact / code artifact / generator 领域 code 与完整 source trace 仍可增强。</td></tr>
             <tr><td>Designer Validation Report</td><td><span class="tag orange">Implemented MVP</span></td><td>已基于 ValidationReport / DiagnosticReport 实现 HTML / Markdown / JSON / CSV 报告、CLI <code>--report</code> 导出和 build <code>validation_report</code> 附加产物；owner/domain 映射、current value / expected enrichment 和部分 build 选项仍是后续增强。详见 <a href="../10-designer-validation-report.md">10-designer-validation-report.md</a>。</td></tr>
             <tr><td>Schema / Table Docs</td><td><span class="tag orange">Implemented MVP</span></td><td>已实现 <code>type = "schema_doc"</code> MetaOnly export task，可生成 <code>index.md</code> 和每表 Markdown 文档，展示 fields、indexes、relations、target visibility、asset/POT/validator 摘要；当前仅支持 Markdown，HTML / JSON Schema / Mermaid 仍是后续扩展。详见 <a href="../11-schema-doc-generator.md">11-schema-doc-generator.md</a>。</td></tr>
           </tbody>

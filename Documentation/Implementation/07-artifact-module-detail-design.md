@@ -141,13 +141,13 @@ enum ArtifactPathState {
 }
 ```
 
-`paths` 的 key 必须使用 artifact 模块统一的 path normalization 结果；后续 filesystem-aware key 也应只在 artifact 模块中实现，不能让 build / exporter / codegen 各自维护不同规则。
+`paths` 的 key 必须使用 artifact 模块统一的 path normalization 结果；后续 filesystem-aware key 也应只在 artifact 模块中实现，不能让 build / artifact generator 各自维护不同规则。
 
 ## 7.4 Artifact Writer 流程
 
 ```text
 Build creates ArtifactSink
-  -> exporter/codegen asks sink.create(path)
+  -> artifact generator asks sink.create(path)
   -> sink normalizes and reserves final path atomically
   -> task writes bytes through ArtifactWriteStream::write_all / serializer.write_to
   -> stream.finish records bytes and stream status
@@ -175,7 +175,7 @@ runtime table exporter、aggregate exporter 和 codegen 可以并行生成 artif
 
 #### CLI / BuildOptions 边界
 
-当前 CLI 只暴露 artifact 写入模式。`BuildOptions` 只接收 `artifact_write_mode`；`--serial` / `--jobs` 仍控制 CPU 执行并行度。原因是 ArtifactSink 返回标准文件流后，sink 自身不持有完整 artifact 内容；真实内存峰值应通过生成端 streaming 化（避免构建完整 `String` / `Vec<u8>`）降低，而不是在 sink 内维护无法覆盖总 RSS 的预算。
+当前 CLI 只暴露 artifact 写入模式。`BuildOptions` 只接收 `artifact_write_mode`；`--serial` / `--jobs` 仍控制 CPU 执行并行度。原因是 ArtifactSink 返回标准文件流后，sink 自身不持有完整 artifact 内容；当前设计接受 parsed Meta / DataSet 全量驻留内存，把复杂度控制在 artifact 输出边界：生成端应保持 streaming 写出，避免构建完整 `String` / `Vec<u8>`，而不是在 sink 内维护无法覆盖总 RSS 的预算，也不为了大表输出引入 out-of-core DataSet。
 
 #### Pipeline 模型
 
@@ -351,7 +351,7 @@ CLI dry-run 不应跳过 validation 或 serialization/codegen，因为用户需�
 | 写最终文件失败 | `ConfigForgeError::WriteFile` |
 | temp commit rename 失败 | `ConfigForgeError::WriteFile`；已 rename 成功的文件可能保留在最终路径 |
 
-后续如果 artifact 诊断增多，可新增 `ArtifactDiagnostic`，但不应让 exporter/codegen 为写入错误各自包装一套错误类型。
+后续如果 artifact 诊断增多，可新增 `ArtifactDiagnostic`，但不应让各类 artifact generator 为写入错误各自包装一套错误类型。
 
 ## 7.9 测试计划
 
@@ -381,7 +381,7 @@ Artifact 模块单元测试应覆盖：
 - `src/artifact/` 已提供 `Artifact`、`ArtifactContent`、`ArtifactWriter`、`ArtifactSink`、`ArtifactWriteStream`、`ArtifactWriteMode` 和 `ArtifactWriteResult`。
 - Artifact 模块内的写入 authority 已收敛到 `ArtifactSink`；`ArtifactWriter::write(Vec<Artifact>)` 是兼容 wrapper，并通过 sink 写入。
 - 旧 dedicated bounded queue 和 sink 级资源限流实现已移除；ArtifactSink 只负责标准写入流与生命周期。
-- runtime table exporter、aggregate exporter 与 generated code 在 Build 主流程中已通过 direct `ArtifactGenerator` 接入共享 `ArtifactSink`；runtime table exporter 通过 stream API 写入 sink，JSON / MessagePack / binary 使用 writer-style serializer；aggregate exporter 通过 required `export_to_sink()` 写入 sink；[`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 code-like generator 通过 `generate_to_sink()` 与 streaming writer 写入 sink。
+- runtime table generator、aggregate data-backed generator 与 generated code 在 Build 主流程中已通过 direct `ArtifactGenerator` 接入共享 `ArtifactSink`；runtime table generator 通过 stream API 写入 sink，JSON / MessagePack / binary 使用 writer-style serializer；aggregate data-backed generator 通过 required `export_to_sink()` 写入 sink；[`Codegen backend capability matrix`](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix) 中的内置 code-like generator 通过 `generate_to_sink()` 与 streaming writer 写入 sink。
 - CLI 支持 `--dry-run`、`--write-mode direct|temp-commit`；artifact 写入资源控制不再暴露独立参数。
 - temp-commit 当前提供临时文件阶段保护；提交阶段失败按 `ConfigForgeError::WriteFile` 报错，并可能保留已提交的最终文件。
 

@@ -1,6 +1,6 @@
 # 09d. Codegen TypeScript Backend
 
-本文从 Codegen 模块详细设计中拆出，专门描述 TypeScript backend 的 generated API、async/sync loading、lazy loading 和 relation helper。
+本文从 code artifact toolkit 详细设计中拆出，专门描述 TypeScript backend 的 generated API、async/sync loading、lazy loading 和 relation helper。
 
 ## Related docs
 

@@ -1,6 +1,6 @@
 # 09b. Codegen Rust Backend
 
-本文从 Codegen 模块详细设计中拆出，专门描述 Rust backend 的生成内容、API 形态和 lazy loading 落地方式。
+本文从 code artifact toolkit 详细设计中拆出，专门描述 Rust backend 的生成内容、API 形态和 lazy loading 落地方式。
 
 ## Related docs
 

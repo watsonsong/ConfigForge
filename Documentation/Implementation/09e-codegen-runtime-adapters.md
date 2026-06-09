@@ -1,6 +1,6 @@
 # 09e. Codegen Runtime Adapters
 
-本文从 Codegen 模块详细设计中拆出，专门描述顶层 `runtime/` 标准 adapters、reader contract compliance、C++ CMake、TypeScript packages、Rust templates 与测试矩阵。
+本文从 code artifact toolkit 详细设计中拆出，专门描述顶层 `runtime/` 标准 adapters、reader contract compliance、C++ CMake、TypeScript packages、Rust templates 与测试矩阵。
 
 ## Related docs
 
@@ -145,7 +145,7 @@ Compliance runner 的验证对象不是“每个语言必须有一个厚 core �
 | 测试层 | 验证对象 | 保留原因 | 不应承担 |
 | --- | --- | --- | --- |
 | `tests/fixtures/runtime_reader_compliance` | reader adapter contract：missing/null、scalar conversion、path/index、decode limits、错误 kind/keyword、格式特有非法 payload。 | 让每个语言/格式 adapter 用同一批最小 logical cases 证明语义一致，适合用户自定义 reader 复用。 | 不验证 codegen 输出 API、target filtering、索引/关系 helper、完整导出流水线。 |
-| `standard_project` integration | 真实项目 fixture 的 build/export/codegen/generated API smoke，以及各语言代表性 runtime 加载路径。 | 覆盖端到端组合风险：Meta/Data/Exporter/Codegen/runtime glue 是否能一起工作。 | 不作为 reader contract 的完整枚举测试；不复制所有 scalar/error 边界。 |
+| `standard_project` integration | 真实项目 fixture 的 build/export/generated API smoke，以及各语言代表性 runtime 加载路径。 | 覆盖端到端组合风险：Meta / Data / data artifact generator / code artifact generator / runtime glue 是否能一起工作。 | 不作为 reader contract 的完整枚举测试；不复制所有 scalar/error 边界。 |
 
 因此需要保留两层测试，但不能维护“两套重复语义用例”。`standard_project` 应保持少量真实世界端到端 smoke；reader contract 边界条件只放在 compliance logical cases 中。若发现 `standard_project` 只是为了覆盖某个 scalar/null/error 细节而增加人工 fixture，应优先迁移到 compliance；若 compliance case 开始依赖 generated API 行为或项目配置语义，也应迁回 integration harness。
 

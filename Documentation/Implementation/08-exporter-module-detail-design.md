@@ -1,4 +1,4 @@
-# 08. Exporter 模块详细设计
+# 08. Data Artifact Toolkit 详细设计（历史文件名：Exporter）
 
 本文档描述当前 `src/data_artifact/` 的 data artifact toolkit 实现边界。`exporter` 这个名称在历史上同时承载“具体 export type 实现”和“共享数据产物 helper”，在统一 `ArtifactGenerator` 模型下容易误导为与 `generator` 平级的产物归属地；当前 JSON / MessagePack / `bin` / POT / Lua / Asset Manifest 等具体 export type 已迁入 `src/generator/<type_id>/`，`src/data_artifact/` 只保留可复用的 payload、runtime table serialization、binary layout 和聚合数据产物 facet。
 
@@ -6,13 +6,13 @@
 
 ## 8.1 设计目标
 
-当前 Exporter 模块 / 目标 data artifact toolkit 需要达成：
+当前 data artifact toolkit 需要达成：
 
-1. 定义 exporter 内部配置 `TargetDataConfig`，由 build 从统一 `NormalizedExportTask` 适配得到。
+1. 定义 toolkit 内部配置 `TargetDataConfig`，由 build-facing generator 从统一 `NormalizedExportTask` 适配得到。
 2. 定义 runtime table format 与 aggregate artifact facet；具体 export type 直接作为 `ArtifactGenerator` 注册。
 3. 为 JSON、MessagePack 与 `bin` 三种 runtime data generator 提供共享 runtime table helper；为 gettext POT、Lua 和 Asset Manifest 等聚合 / mixed generator 提供 payload、resolved value 和 sink 写出辅助能力。
 4. 对 CollectionTable 与 ObjectTable 生成正确 runtime payload shape。
-5. 复用 DataResolver 解释 struct JSON cell / expanded value / target visibility，避免 exporter 自己重复实现 source layout 解析。
+5. 复用 DataResolver 解释 struct JSON cell / expanded value / target visibility，避免 data artifact generator 自己重复实现 source layout 解析。
 6. 为未来二进制格式、自定义 export type、聚合数据产物和 artifact writer 留出扩展点。
 
 非目标：
@@ -20,7 +20,7 @@
 - 不执行数据加载计划；DataLoader 属于 `data` 模块，由 `build` 编排调用。
 - 不执行 validation；validation 属于 `validation` 模块，由 `build` 在导出前调用。
 - 不生成代码；code-like generator 如 Rust/C++/Lua 可按需依赖 code artifact toolkit。当前 format-agnostic language code 默认不消费 data artifact toolkit 真实写出的 runtime data artifact path / format，而是使用逻辑 table name 作为 runtime load key。
-- 不执行翻译或读取外部 `.po` / 文本库；gettext POT exporter 只生成待翻译模板，运行时翻译由业务 translator / localization runtime 处理。
+- 不执行翻译或读取外部 `.po` / 文本库；gettext POT generator 只生成待翻译模板，运行时翻译由业务 translator / localization runtime 处理。
 
 ## 8.2 模块结构
 
@@ -34,7 +34,7 @@ src/data_artifact/
   registry.rs         # RuntimeTableFormat / AggregateDataExporter toolkit facets
   runtime.rs          # runtime table data artifact plan、并行导出编排、artifact 写入入口
   payload.rs          # CollectionTable / ObjectTable 共享 payload builder
-  tests.rs            # exporter 核心行为测试
+  tests.rs            # data artifact toolkit 核心行为测试
 
 src/generator/
   json/               # type = "json"
@@ -45,7 +45,7 @@ src/generator/
   asset_manifest/     # type = "asset_manifest" / alias "assets"
 ```
 
-`mod.rs` 仅保留模块声明和公共 re-export，确保既有消费者仍可通过 `crate::data_artifact::*` 访问迁移期稳定 API。新增具体 export type 不应继续扩大 `src/data_artifact/`，而应优先新增 `src/generator/<type_id 或稳定 alias>/` 并依赖这里的 payload / runtime table helper；核心 registry / runtime / payload 不内联具体格式逻辑。
+`mod.rs` 仅保留模块声明和公共 re-export，确保既有消费者仍可通过 `crate::data_artifact::*` 访问稳定的 toolkit API。新增具体 export type 不应继续扩大 `src/data_artifact/`，而应优先新增 `src/generator/<type_id 或稳定 alias>/` 并依赖这里的 payload / runtime table helper；核心 runtime / payload 不内联具体格式逻辑。
 
 `TargetDataConfig.format` 是 data artifact toolkit 内部使用的规范 export type，来自 Project TOML 的 `[[targets.exports]].type`。运行时表数据 export type（JSON、MessagePack、`bin`）通常是“一张 table 一个 artifact”；聚合 export type（POT、Lua、asset manifest、summary manifest）可能跨所有 table 汇总成一个或多个文件、读取非 runtime 辅助字段，artifact path 规划也不是 `table -> extension` 的简单映射。具体 export type 不再归属于 data artifact registry，而是平级注册到 build-facing `GeneratorRegistry`，并按需复用 `RuntimeTableFormat`（运行时表格式）与 `AggregateDataExporter`（聚合数据产物）这两类 toolkit facet。
 
@@ -64,7 +64,7 @@ pub struct TargetDataConfig {
 
 - `name`：可选 export task 名称。单个未命名 task 由 build 归一化为 `default`；多个未命名 task 默认使用 `type`。
 - `output`：数据产物输出目录。运行时表数据按 table 规划文件；POT / manifest 等聚合格式按格式选项规划文件。
-- `format`：exporter 内部字段，由 `[[targets.exports]].type` 归一化而来；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；当前内置聚合 export type 支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`、`asset_manifest` / alias `assets`。Asset Manifest 的 `format = "csv"` 是其专属选项，不拆分为 `asset_manifest_csv` exporter type；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
+- `format`：toolkit 内部字段，由 `[[targets.exports]].type` 归一化而来；当前内置支持 runtime data 的 `json`、`messagepack`、`bin`，并接受 `msgpack` 与 `binary` alias；当前内置聚合 export type 支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`、`asset_manifest` / alias `assets`。Asset Manifest 的 `format = "csv"` 是其专属选项，不拆分为 `asset_manifest_csv` export type；`bin` 紧密二进制格式详见 `13-runtime-binary-format-detail-design.md`。
 - `options`：export type 专属配置，由 `[[targets.exports]]` 下除通用字段外的 flattened 字段归一化得到，例如 `type = "gettext_pot"` 下的 `domain`、`file_name`、`source_reference`，或 `type = "lua_table"` 下的 `module_name`、`root_file`、`row_layout`。
 
 ```rust
@@ -102,7 +102,7 @@ pub trait AggregateDataExporter: Send + Sync {
 
 Build-facing 查询和执行通过统一 `GeneratorRegistry` facade 完成：内置 data-backed generators 作为 concrete `ArtifactGenerator` 直接注册，production registry 构造只面向 `Vec<Box<dyn ArtifactGenerator>>`。`RuntimeTableFormat` / `AggregateDataExporter` 是 table / aggregate serialization helper，不再作为内置 build-facing registration shape，也没有 `from_compat_parts()` 这类兼容 constructor。当前 data-backed generator 均进入 `MetaAndData` 分支；没有单独的 `DataOnly` 模式，因为缺少 Meta 时无法可靠完成类型解释、target 过滤、索引语义和 validation。这里的 `MetaAndData` 是 Build 对 `GeneratorRequirements::needs_data` 的执行分组，不是 trait 继承分类。Runtime table format implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行规划多个 export task、并行序列化多个 table artifact，并在 validation gate 通过后并行执行多个 data-backed generator；aggregate exporter 也不得在实例内保存本次 build 的可变状态。table format 的主路径是 `serialize_table_to_stream()`；`serialize_table() -> Vec<u8>` 只作为少量测试和兼容调用的 legacy fallback。aggregate exporter 的主路径是 required `export_to_sink()`；`export() -> Vec<Artifact>` 只作为 legacy fallback。新增 data-backed generator 应优先实现 streaming writer / sink writer，并作为 concrete `ArtifactGenerator` 注册。
 
-内置 runtime table 格式已由 `GeneratorRegistry` 直接注册，table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`。`JsonDataExporter`、`MessagePackDataExporter`、`BinaryDataExporter`、`GettextPotExporter`、`LuaTableExporter` 与 `AssetManifestExporter` 已分别迁入 `src/generator/json/`、`src/generator/messagepack/`、`src/generator/binary/`、`src/generator/gettext_pot/`、`src/generator/lua/` 和 `src/generator/asset_manifest/`。格式名、alias、扩展名和序列化逻辑由 generator 自己维护；data artifact toolkit 只负责共享 payload、runtime table iteration / path planning、binary layout 和 streaming helper。JSON 使用 `serde_json::to_writer_pretty()`，MessagePack 使用 `rmp_serde::encode::write_named()`，`bin` 的 encoder 可直接写 `ArtifactWriteStream`，不再为最终 artifact 先构建完整 `Vec<u8>`；POT、Lua 和 Asset Manifest 也直接写入 shared sink，不再经 `Vec<Artifact>` 回到 build。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
+内置 runtime table export type 已由 `GeneratorRegistry` 直接注册，runtime table generators 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`。`JsonDataExporter`、`MessagePackDataExporter`、`BinaryDataExporter`、`GettextPotExporter`、`LuaTableExporter` 与 `AssetManifestExporter` 已分别迁入 `src/generator/json/`、`src/generator/messagepack/`、`src/generator/binary/`、`src/generator/gettext_pot/`、`src/generator/lua/` 和 `src/generator/asset_manifest/`。格式名、alias、扩展名和序列化逻辑由 generator 自己维护；data artifact toolkit 只负责共享 payload、runtime table iteration / path planning、binary layout 和 streaming helper。JSON 使用 `serde_json::to_writer_pretty()`，MessagePack 使用 `rmp_serde::encode::write_named()`，`bin` 的 encoder 可直接写 `ArtifactWriteStream`，不再为最终 artifact 先构建完整 `Vec<u8>`；POT、Lua 和 Asset Manifest 也直接写入 shared sink，不再经 `Vec<Artifact>` 回到 build。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
 
 当前内置 runtime data、aggregate、language codegen、schema doc、validation report 均由 `GeneratorRegistry` 直接注册 concrete generator，已不保留 registry adapter。Build 只按照 export task 声明的 type id 查询 generator requirements，并把 common input 或 data input 传给匹配的 generator 执行。
 
@@ -142,7 +142,7 @@ CollectionTable 输出包含 table meta envelope 和 rows：
 
 ### 8.4.2 ObjectTable
 
-ObjectTable Step 1 已并入 Exporter 模块语义：ObjectTable 不输出 rows array，而输出单个 object。
+ObjectTable runtime payload 语义已并入 data artifact toolkit：ObjectTable 不输出 rows array，而输出单个 object。
 
 ```json
 {
@@ -160,11 +160,11 @@ ObjectTable Step 1 已并入 Exporter 模块语义：ObjectTable 不输出 rows 
 - JSON / MessagePack 的 scalar runtime contract 当前仍为 string-compatible；如果未来改为 typed scalar，必须作为 named payload 的全局 runtime data contract change 同时影响 CollectionTable。`bin` 是 schema-aware typed binary encoding，按 Meta type 写 int/float/bool/enum bytes，不改变 JSON / MessagePack 的 named payload contract。
 - ObjectTable 中的 list 字段输出为 array，例如 `"starter_item_ids": ["2001", "2002"]`。
 
-ObjectTable source layout、校验限制和 codegen 表达分别记录在 Data / Validation / Codegen 模块文档，不再保留单独的 Step 1 过程文档。
+ObjectTable source layout、校验限制和 code artifact 表达分别记录在 Data / Validation / Code Artifact 文档，不再保留单独的 Step 1 过程文档。
 
 ## 8.5 DataResolver 使用原则
 
-Exporter 不应直接解释 raw `DataRow` 中的 JSON 字符串或 dotted path。当前实现通过：
+Data artifact toolkit 不应直接解释 raw `DataRow` 中的 JSON 字符串或 dotted path。当前实现通过：
 
 ```text
 DataResolver::resolve_table_rows / resolve_table
@@ -174,32 +174,32 @@ DataResolver::resolve_table_rows / resolve_table
 
 这样可保证：
 
-- validation 和 exporter 对 struct JSON cell / expanded value 的理解逐步收敛。
+- validation 和 data artifact generator 对 struct JSON cell / expanded value 的理解逐步收敛。
 - default、target-hidden child、empty struct occurrence 等语义不分叉。
 - array/list JSON cell 支持已通过 `DataValue::Array(Vec<ArrayElementValue>) -> ExportedValue::Array` 转换接入；scalar list element 只常驻 element value 与 raw value，元素级诊断路径由 parser 按需构造。后续 map 或 expanded array path 仍应继续复用该转换边界。
 
 ## 8.6 Artifact path 约束
 
-Exporter 负责在单个 export task 内检查 artifact path 冲突：
+Runtime / aggregate helper 负责在单个 export task 内检查 artifact path 冲突：
 
 - `plan_table_artifact()` 给出每张 table 的相对输出路径。
-- `ensure_unique_runtime_artifact_paths()` 拒绝同一个 exporter 计划出的重复路径。
-- 聚合 exporter 通过 `plan_artifacts()` 给出一个或多个相对输出路径，例如 POT 单文件或多 domain 多文件。
+- `ensure_unique_runtime_artifact_paths()` 拒绝同一个 runtime table format 计划出的重复路径。
+- 聚合 data-backed generator 通过 `plan_artifacts()` 给出一个或多个相对输出路径，例如 POT 单文件或多 domain 多文件。
 - 跨 export task 的输出路径冲突由 build 在目标级别提前检查，因为多个 export task 可能写入不同或相同 output root；该 planning step 会在 CPU pool 中按 export task 并行执行，再按 export task 声明顺序稳定合并 path key。
 
-POT 这类单文件聚合 data exporter 的 artifact key 建议使用 `(target_name, data_name, format)`；未来多 domain POT 可扩展为 `(target_name, data_name, format, domain)`。
+POT 这类单文件聚合 data-backed generator 的 artifact key 建议使用 `(target_name, data_name, format)`；未来多 domain POT 可扩展为 `(target_name, data_name, format, domain)`。
 
-## 8.7 聚合 Data Exporter 设计
+## 8.7 聚合 Data Artifact Facet 设计
 
 `RuntimeTableFormat` 与 `AggregateDataExporter` 保留为 data artifact toolkit 的复用 facet；内置 concrete generator 由 `GeneratorRegistry` 直接注册，TOML 层不新增 `special_exporters`。
 
 实现边界：
 
 1. Build 层只负责解析统一 export task 配置、按 `type_id` 查询 `GeneratorRegistry`，并把满足 requirements 的 common / data input 传给 generator。Concrete generator 可通过 `GeneratorCommonInput::target_data_config()` 转为 `TargetDataConfig` 复用 data artifact toolkit helper；Build 不应直接按 data/code toolkit 分类查询具体实现。
-2. 聚合 exporter 默认读取 target ExportView，而不是 Full DataSet。若需要读取 `export = false` 辅助字段，必须通过 Meta 字段策略或 exporter policy 明确允许。
-3. 聚合 exporter 通过 required `export_to_sink()` 直接写入 shared `ArtifactSink`；`export() -> Vec<Artifact>` 只作为测试 / 兼容 helper，不回到 Build 主路径。
-4. 聚合 exporter 不绕过 validation；若需要 text placeholder / context 诊断，应在 validation 增加规则或由 exporter 产出 warning/error diagnostic，但不能静默修复数据。
-5. 聚合 exporter 与 runtime data exporter 共享 DataResolver / resolved value 模型，避免再次解释 CSV raw cell。
+2. 聚合 data-backed generator 默认读取 target ExportView，而不是 Full DataSet。若需要读取 `export = false` 辅助字段，必须通过 Meta 字段策略或 generator policy 明确允许。
+3. 聚合 data-backed generator 通过 required `export_to_sink()` 直接写入 shared `ArtifactSink`；`export() -> Vec<Artifact>` 只作为测试 / 兼容 helper，不回到 Build 主路径。
+4. 聚合 data-backed generator 不绕过 validation；若需要 text placeholder / context 诊断，应在 validation 增加规则或由 generator 产出 warning/error diagnostic，但不能静默修复数据。
+5. 聚合 data-backed generator 与 runtime table generator 共享 DataResolver / resolved value 模型，避免再次解释 CSV raw cell。
 6. 需要 project name/desc/copyright 等 artifact header 信息时，应优先复用共享的 `ArtifactProjectInfo`，不依赖 code artifact toolkit 的 `CodeExportProject`，避免 data artifact toolkit 与 code artifact toolkit 之间形成依赖倒置。
 
 ### 8.7.1 GettextPotExporter (`type = "gettext_pot"`)
@@ -256,7 +256,7 @@ POT 渲染要求：
 
 - `TextExtractionEntry` 不应绑定 gettext；后续可复用同一抽取模型输出 CSV、XLIFF、Android strings、Unity localization table 或自定义翻译平台 JSON。
 - 新增 `I18nTextKind` 或 field option 后，extractor 根据 kind 生成普通 msgid、plural、ICU message 或 rich-text segments。
-- 外部 `.po` / localized catalog 导入不属于 exporter；如果未来需要“导入翻译并生成 runtime localization bundle”，应作为新的 localization build task 或 data provider，而不是 POT exporter 的职责。
+- 外部 `.po` / localized catalog 导入不属于 POT generator；如果未来需要“导入翻译并生成 runtime localization bundle”，应作为新的 localization build task 或 data provider，而不是 POT generator 的职责。
 
 ### 8.7.2 AssetManifestExporter (`type = "asset_manifest"`)
 
@@ -284,16 +284,16 @@ POT 渲染要求：
 
 ## 8.8 测试边界
 
-Exporter 模块测试应覆盖：
+Data artifact toolkit 与 data-backed generator 测试应覆盖：
 
-- registry 能解析内置 exporter 和 alias。
-- 自定义 exporter plugin 可以注册和执行。
+- `GeneratorRegistry` 能解析内置 data-backed generator 和 alias。
+- 自定义 data-backed `ArtifactGenerator` 可以注册和执行。
 - runtime data artifact path 冲突在写文件前失败。
 - CollectionTable 输出 rows envelope。
 - ObjectTable 输出单 object shape，包括 only-header、default、target field filtering、all fields filtered。
 - JSON 与 MessagePack 对 struct / ObjectTable 使用同一逻辑 payload。
 - `bin` 写出 CFGB header、schema revision 与 target-aware positional payload。
-- runtime table export 直接通过 `sink.create(path)` + `serialize_table_to_stream()` + `stream.finish()` 写出；custom exporter 测试覆盖 legacy `serialize_table()` fallback 不参与主路径。
-- aggregate export 直接通过 required `export_to_sink()` 写出；custom aggregate 测试覆盖 legacy `export() -> Vec<Artifact>` fallback 不参与主路径，POT / Lua / Asset Manifest 测试覆盖直接落盘内容。
+- runtime table export 直接通过 `sink.create(path)` + `serialize_table_to_stream()` + `stream.finish()` 写出；custom runtime table format 测试覆盖 legacy `serialize_table()` fallback 不参与主路径。
+- aggregate export 直接通过 required `export_to_sink()` 写出；custom aggregate facet 测试覆盖 legacy `export() -> Vec<Artifact>` fallback 不参与主路径，POT / Lua / Asset Manifest 测试覆盖直接落盘内容。
 - struct expanded value 和 JSON cell 都能导出为 nested object。
-- 聚合 data exporter 测试覆盖 POT 抽取、去重、context、source reference、translator comment、target filter、ObjectTable、artifact path conflict；Asset Manifest 测试覆盖 JSON deterministic output、Unreal DataTable CSV header / row name、simple CSV 资源去重清单、默认文件名、target-aware row filter 和 registry alias；fragment/struct child text 深度抽取仍属于后续扩展测试。
+- 聚合 data-backed generator 测试覆盖 POT 抽取、去重、context、source reference、translator comment、target filter、ObjectTable、artifact path conflict；Asset Manifest 测试覆盖 JSON deterministic output、Unreal DataTable CSV header / row name、simple CSV 资源去重清单、默认文件名、target-aware row filter 和 registry alias；fragment/struct child text 深度抽取仍属于后续扩展测试。

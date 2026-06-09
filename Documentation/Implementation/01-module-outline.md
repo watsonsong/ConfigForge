@@ -27,7 +27,7 @@
 | Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、asset reference validation、注册式 validator；入口、table、FK、struct value、default、asset 逻辑分文件维护。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`、可选 `AssetsConfig`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
 | Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 兼容列表或 `ArtifactSink` stream 写入请求、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
 | Artifact Info | `src/artifact_info.rs` | 跨 codegen、schema_doc、validation report / manifest 等 artifact 生成器共享的轻量 Project 信息 facade，避免文档/导出模块依赖 codegen 专属类型。 | `ProjectConfigMeta`。 | `ArtifactProjectInfo`。 | 本文档总览。 |
-| Generator | `src/generator/` | Build-facing artifact generator facade、generator registry、input requirements 与 capability facet 适配层；目标态也作为所有具体 export type generator 的归属目录。它把 `MetaOnly` / `MetaAndData` 作为 requirements 派生出的调度属性，而不是继承体系；Rust / C++ / JSON / MessagePack / `bin` / POT / Lua / Asset Manifest / Schema Doc / report 等具体产物最终应作为平级 generator 接入。 | `NormalizedExportTask`、`LinkedMetaModel<'meta>`、可选 `DataSet` / validation report / assets、`ArtifactProjectInfo`、`ArtifactSink`。 | artifact generator dispatch / `GeneratorRequirements`。 | `10-build-module-detail-design.md` |
+| Generator | `src/generator/` | Build-facing artifact generator facade、generator registry、input requirements 与具体 export type generator 的归属目录。它把 `MetaOnly` / `MetaAndData` 作为 requirements 派生出的调度属性，而不是继承体系；Rust / C++ / JSON / MessagePack / `bin` / POT / Lua / Asset Manifest / Schema Doc / report 等具体产物均作为平级 generator 接入，内部按需复用 data/code artifact toolkit facet。 | `NormalizedExportTask`、`LinkedMetaModel<'meta>`、可选 `DataSet` / validation report / assets、`ArtifactProjectInfo`、`ArtifactSink`。 | artifact generator dispatch / `GeneratorRequirements`。 | `10-build-module-detail-design.md` |
 | Data Artifact Toolkit | `src/data_artifact/` | Target-aware runtime payload、`ExportedTablePayload` / `ExportedValue`、payload builder、runtime table serialization helper、binary layout helper 和 aggregate data artifact facet。历史名称 `exporter` 在具体 generator 迁入 `src/generator/` 后容易误导为“生成器归属地”，因此已落地命名为 data artifact toolkit。 | `LinkedMetaModel<'meta>`、`TargetTags`、`DataSet`、`ArtifactSink`。 | payload model、runtime table artifact helper、`RuntimeDataFile` metadata。 | `08-exporter-module-detail-design.md` |
 | SchemaDoc Generator | `src/generator/schema_doc/` | 基于 linked Meta、Project info 与 TargetTags 生成表结构文档 normalized model，并规划/写入 Markdown schema docs artifact。它直接实现 `ArtifactGenerator`，作为 requirements 只含 Meta 的 doc artifact generator 注册到 `GeneratorRegistry`；不属于 runtime data exporter，也不读取 source data。 | `LinkedMetaModel<'meta>`、`TargetTags`、`ArtifactProjectInfo`、`ArtifactSink`。 | `SchemaDoc` / schema docs artifacts。 | `../Design/11-schema-doc-generator.md` |
 | Code Artifact Toolkit | `src/code_artifact/` | 语言无关 CodeModel IR、CodeWriter、naming / formatting / keyword conflict、`CodeArtifactOptions`、runtime reader contract helper 和 `CodeGenerator` renderer facet。历史名称 `codegen` 在具体语言 generator 迁入 `src/generator/` 后容易误导为“生成器归属地”，因此已落地命名为 code artifact toolkit。 | `LinkedMetaModel<'meta>`、target tags、`ArtifactSink`。 | CodeModel / writer / code artifact helper。 | `09-codegen-module-detail-design.md` |
@@ -84,7 +84,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 - `diagnostic` 的基础类型只能依赖标准库和通用 serde 等底层库，不能依赖 `meta`、`data`、`validation`、`exporter`、`codegen`、`project`、`build`。
 - `diagnostic::error` 作为 crate 错误桥接层可以引用稳定诊断类型和各模块诊断集合，但不能承载业务逻辑，也不能让业务模块为了错误格式化反向依赖上层模块。
 - `meta` 不依赖 `project`、`data`、`validation`、`exporter`、`codegen`、`build`。Meta 只描述 schema 与 link/validate 结果。
-- `data` 可以依赖 `meta` 做 resolver，但 source reader 层应保持 source-neutral；CSV reader 不能读取 exporter/codegen/validation 语义。
+- `data` 可以依赖 `meta` 做 resolver，但 source reader 层应保持 source-neutral；CSV reader 不能读取 data artifact / code artifact / validation 语义。
 - `runtime_contract` 可以依赖 `meta` 表达 target-visible runtime schema，但不能依赖 `data`、`validation`、`data_artifact`、`code_artifact`、`generator`、`project`、`build`。
 - `asset` 可以依赖 `meta` 与 `project` 的资产配置模型，不能依赖 `data`、`validation`、`exporter`、`codegen`、`build`。
 - `validation` 可以依赖 `meta`、`data`、`diagnostic`、`asset`，不能依赖 `data_artifact`、`code_artifact`、`generator`、`build`。
@@ -92,7 +92,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 - `artifact_info` 是轻量共享 facade，只依赖标准库；`project` 可从 `ProjectConfigMeta` 构造它，code-like / doc / report / manifest generator 可消费它，避免互相依赖专属 Project 类型。
 - `generator` 是 build-facing facade 与具体 artifact generator 的归属层，可以依赖满足 generator requirements 所需的共享输入类型，也可以按需依赖 `code_artifact` / `data_artifact` 工具箱；不能让工具箱或下层领域模块反向依赖 build。`MetaOnly` / `MetaAndData` 在此层只是 `GeneratorRequirements` 派生出的调度属性。
 - `data_artifact`（当前 `src/data_artifact/`）可以依赖 `meta`、`data`、`artifact`、`diagnostic`、`runtime_contract` 和 code artifact option facet，不能依赖 `validation`、`generator` 或 `build`；导出前校验由 build 编排层调用 validation。Build-facing data-backed 执行通过具体 generator 暴露为 requirements 包含 Data 的 artifact generator。
-- `schema_doc` 目标态应迁入 `src/generator/schema_doc/`，作为 requirements 只含 Meta 的 doc artifact generator；迁移期独立模块可以依赖 `meta`、`artifact`、`artifact_info` 和 `generator` trait，但不能依赖 `data`、`validation`、`data_artifact`、`code_artifact` 或 `build`，也不能读取 source data。
+- `schema_doc` 已位于 `src/generator/schema_doc/`，作为 requirements 只含 Meta 的 doc artifact generator；它可以依赖 `meta`、`artifact`、`artifact_info` 和 `generator` trait，但不能依赖 `data`、`validation`、`data_artifact`、`code_artifact` 或 `build`，也不能读取 source data。
 - `code_artifact`（当前 `src/code_artifact/`）可以依赖 `meta`、`artifact` 和 `runtime_contract`；生成代码使用逻辑 table name 作为 runtime load key，不依赖 data artifact toolkit 真实写出的 runtime data artifact path / format；不能依赖 `data_artifact`、`data`、`validation`、`generator`、`build`。`CodeGenerator` 表达 code artifact 能力，不应长期承担 doc/report/manifest 等非代码 generator 的统一基类职责。
 - `project` 只解析 `TargetExportConfig` 这一统一 Project TOML 结构，不引用 data/code artifact toolkit 内部 task 配置，也不能依赖 `build`。
 - `build` 是顶层业务编排层，可以依赖 `project`、`meta`、`data`、`validation`、`generator`、`runtime_contract` 和 `artifact`；不应新增对具体 code/data artifact toolkit 的直接调度依赖。测试场景也应优先构造 stub `ArtifactGenerator`，而不是绕过 registry facade 调用 toolkit trait。
@@ -130,8 +130,8 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `05-data-module-detail-design.md` | 模块 | Data load、CSV reader、DataSet、RowSourceInfo、DataResolver、ObjectTable source layout。 |
 | `06-validation-module-detail-design.md` | 模块 | Validation 主流程、ExportValidationView、ValidationReport、validator registry。 |
 | `07-artifact-module-detail-design.md` | 模块 | Artifact model、writer、dry-run、direct/temp-commit 策略和写入结果。 |
-| `08-exporter-module-detail-design.md` | 模块 / 迁移说明 | 当前 Exporter 模块与目标 data artifact toolkit 边界、runtime payload、格式 registry、JSON / MessagePack / `bin`、ObjectTable payload。 |
-| `09-codegen-module-detail-design.md` | 模块总览 / 迁移说明 | 当前 Codegen 模块与目标 code artifact toolkit 边界、CodeModel / CodeWriter / options、专题索引和 backend capability matrix；详细设计见 `09a`~`09l`。 |
+| `08-exporter-module-detail-design.md` | toolkit 说明 | 当前 data artifact toolkit 边界、runtime payload、`RuntimeTableFormat` / `AggregateDataExporter` facet、JSON / MessagePack / `bin` helper、ObjectTable payload。文件名保留历史 `exporter` 标签以维持链接稳定。 |
+| `09-codegen-module-detail-design.md` | toolkit 总览 | 当前 code artifact toolkit 边界、concrete language generator 布局、CodeModel / CodeWriter / options、专题索引和 backend capability matrix；详细设计见 `09a`~`09l`。文件名保留历史 `codegen` 标签以维持链接稳定。 |
 | `09a-codegen-runtime-reader-contract.md` | Codegen 专题 | Runtime reader contract、eager/lazy loading、TypeScript sync API、逻辑 table name 与 schema revision。 |
 | `09b-codegen-rust-backend.md` | Codegen 专题 | Rust backend generated API 与 lazy loading。 |
 | `09c-codegen-cpp-backend.md` | Codegen 专题 | C++ backend generated API、namespace/ownership 与 lazy loading。 |
@@ -140,7 +140,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `09f-codegen-core-model-and-options.md` | Codegen 专题 | 核心输入输出模型、CodeModel IR、命名策略、类型映射、`CodeWriter` 与文件头模板。 |
 | `09g-codegen-index-and-relation-helpers.md` | Codegen 专题 | CollectionTable index lookup、`linked_field` relation helper、row-index cache 与 `link_all`。 |
 | `09h-codegen-generator-api-and-tests.md` | Codegen 专题 | `CodeGenerator` 接口、新语言接入、文件组织、诊断和测试计划。 |
-| `09i-lua-embedded-data-generator.md` | Codegen / Exporter 专题 | Lua data+code 合一导出；作为 `type = "lua_table"` 的 MetaAndData export task 消费 Meta + Data，生成每表 `.lua`、root facade、row array/metatable 和索引。 |
+| `09i-lua-embedded-data-generator.md` | Mixed generator 专题 | Lua data+code 合一导出；作为 `type = "lua_table"` 的 MetaAndData export task 消费 Meta + Data，生成每表 `.lua`、root facade、row array/metatable 和索引。 |
 | `09j-codegen-cpp-unreal-backend.md` | Codegen 专题 | Unreal C++ backend generated API、containers / Blueprint 支持、shim 测试和与标准 C++ backend 的复用边界。 |
 | `09k-codegen-csharp-backend.md` | Codegen 专题 | C# backend generated API、runtime reader contract、index/relation/text/lazy 设计和测试策略。 |
 | `09l-codegen-java-backend.md` | Codegen 专题 | Java backend generated API、单文件嵌套 public API、runtime reader contract、index/relation/text/lazy 设计和测试策略。 |
@@ -154,7 +154,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | 测试层级 | 位置 | 覆盖内容 |
 | --- | --- | --- |
 | 模块单元测试 | `src/<module>/tests.rs` 或模块内 `#[cfg(test)]` | 单模块数据结构、边界条件、错误诊断。 |
-| 跨模块单元测试 | build / exporter / codegen 模块测试 | target normalization、export task dependency 分发、runtime data artifact 与 codegen 解耦。 |
+| 跨模块单元测试 | build / generator / data artifact / code artifact 模块测试 | target normalization、export task dependency 分发、runtime data artifact 与 code artifact 解耦。 |
 | 集成测试 | `tests/cli_integration.rs` | CLI 从工程配置到执行结果的跨模块流程。 |
 | fixture 回归测试 | `tests/fixtures/standard_project/` | 标准工程样例稳定输出、runtime reader 编译与读取。 |
 

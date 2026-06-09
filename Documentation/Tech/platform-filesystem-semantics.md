@@ -68,7 +68,7 @@
 - 不要改变实际写入路径，只改变 conflict key。
 - 不要全平台无条件 case-fold，否则 Linux 大小写敏感文件系统上合法的 `Items.json` / `items.json` 会被误报冲突。
 - macOS / Windows 可以先采用平台默认启发式作为中期方案，但长期最好按 path 所在卷 / 目录探测大小写敏感性。
-- Unicode case-fold 存在 locale 和 normalization 问题；首版可记录为 best-effort，并优先覆盖 ASCII case alias，因为 exporter/codegen 产物文件名通常来自 ASCII table / type / language 命名。
+- Unicode case-fold 存在 locale 和 normalization 问题；首版可记录为 best-effort，并优先覆盖 ASCII case alias，因为 artifact generator 产物文件名通常来自 ASCII table / type / language 命名。
 
 ## 6. Symlink / junction 策略
 

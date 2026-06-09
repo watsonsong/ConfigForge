@@ -161,7 +161,7 @@ Source declaration 描述 provider 和定位信息。
 | `lark_sheet` | Planned / Not implemented，Lark/飞书表格 | `uri` 或 provider-specific id，通常需要 `auth_ref` |
 | `google_sheet` | Planned / Not implemented，Google Sheet | `uri` 或 sheet id，通常需要 `auth_ref` |
 
-当前实现状态以 `Documentation/Design/README.md` 的状态矩阵为准：CSV provider 已稳定支持；同一逻辑表的多 CSV source 追加 records 已形成 MVP，主要服务 polymorphic variant source mode；`override_sources` 已支持 CollectionTable CSV 整行覆盖，并允许通过 source-level `export_when` 绑定到 effective target tags，用于赛季、热修或灰度包的临时覆盖。非 CSV provider、ObjectTable override 和 base source `export_when` 仍会显式拒绝或不提供入口。
+当前实现状态以 `Documentation/Design/README.md` 的状态矩阵为准：CSV provider 已稳定支持；同一逻辑表的多 CSV source 按声明顺序追加 records 已稳定，主要服务 polymorphic variant source mode；`override_sources` 已支持 CollectionTable CSV 整行覆盖，并允许通过 source-level `export_when` 绑定到 effective target tags，用于赛季、热修或灰度包的临时覆盖。非 CSV provider、ObjectTable override 和 base source `export_when` 仍会显式拒绝或不提供入口。
 
 CollectionTable CSV source 使用 source-level 行布局参数决定哪一行是机器可读 header、哪一行开始进入数据。`header_row` 和 `data_start_row` 都是 **1-based** 行号，默认值为 `header_row = 1`、`data_start_row = 3`；因此第 2 行默认保留给策划标题、字段说明或其它可读提示，不进入导出数据。`data_start_row` 必须大于 `header_row`。ObjectTable 是按行组织的 `key,value` 常量表，因此标题说明默认使用额外列而不是额外行：可写成 `key,title,value`，其中 `title` 列仅供策划阅读，实际值仍来自 `value` 列。Source sheet 允许出现空行和空列。未映射到 field path 的行/列不会进入导出结果，可用于策划注释、公式中间结果或视觉分隔。
 
@@ -185,7 +185,7 @@ source = "items.csv"
 
 语义：根据文件后缀推断为 `{ provider = "csv", path = "items.csv", header_row = 1, data_start_row = 3 }`。
 
-多 source（Implemented MVP，限同一逻辑表多个 CSV source 按声明顺序 append records，主要服务 polymorphic variant source mode）：
+多 source（Stable，限同一逻辑表多个 CSV source 按声明顺序 append records，主要服务 polymorphic variant source mode）：
 
 ```toml
 sources = [

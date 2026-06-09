@@ -1,10 +1,10 @@
 # 09h. Codegen Generator API and Tests
 
-本文从 Codegen 模块详细设计中拆出，专门描述 `CodeGenerator` 接口、新语言接入步骤、文件组织策略、codegen 诊断和测试计划。
+本文从 code artifact toolkit 详细设计中拆出，专门描述 `CodeGenerator` renderer facet、新语言接入步骤、文件组织策略、code artifact 诊断和测试计划。
 
 ## Related docs
 
-- [`09-codegen-module-detail-design.md`](09-codegen-module-detail-design.md) — Codegen 模块总览和专题索引。
+- [`09-codegen-module-detail-design.md`](09-codegen-module-detail-design.md) — code artifact toolkit 总览和专题索引。
 - [`../Design/06-export-cli.md`](../Design/06-export-cli.md) — 用户可见的导出、runtime loading 和 generated API 语义。
 - [`01-module-outline.md`](01-module-outline.md) — Rust 模块边界与依赖方向。
 
