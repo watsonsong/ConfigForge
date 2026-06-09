@@ -189,6 +189,11 @@ impl DesignerValidationReport {
                         .unwrap_or_else(|| "diagnostic".to_owned()),
                     target: diagnostic.target.clone(),
                     hint: diagnostic.hint.clone(),
+                    current_value: diagnostic.current_value.clone(),
+                    expected: diagnostic.expected.clone(),
+                    explanation: diagnostic.explanation.clone(),
+                    domain: diagnostic.domain.clone(),
+                    owner: diagnostic.owner.clone(),
                 })
                 .collect(),
         };
@@ -269,11 +274,22 @@ fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationI
             let friendly_title = catalog
                 .map(|info| info.friendly_title.to_owned())
                 .unwrap_or_else(|| issue.message.clone());
-            let explanation = catalog.map(|info| info.explanation.to_owned());
+            let explanation = issue
+                .explanation
+                .clone()
+                .or_else(|| catalog.map(|info| info.explanation.to_owned()));
             let hint = issue
                 .hint
                 .clone()
                 .or_else(|| catalog.map(|info| info.hint.to_owned()));
+            let owner = issue
+                .owner
+                .clone()
+                .unwrap_or_else(|| UNASSIGNED_OWNER.to_owned());
+            let domain = issue
+                .domain
+                .clone()
+                .unwrap_or_else(|| UNCATEGORIZED_DOMAIN.to_owned());
 
             DesignerValidationIssue {
                 id,
@@ -295,12 +311,12 @@ fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationI
                     .as_ref()
                     .map(|path| path.display().to_string()),
                 source_column: None,
-                current_value: None,
-                expected: None,
+                current_value: issue.current_value,
+                expected: issue.expected,
                 target: issue.target,
                 export_visibility: "visible".to_owned(),
-                owner: UNASSIGNED_OWNER.to_owned(),
-                domain: UNCATEGORIZED_DOMAIN.to_owned(),
+                owner,
+                domain,
             }
         })
         .collect()
@@ -782,6 +798,62 @@ mod tests {
                 source_row_number: Some(row),
             },
         )
+    }
+
+    #[test]
+    fn validation_report_enrichment_uses_issue_fields() {
+        let mut validation = ValidationReport::new();
+        validation.push(
+            issue("custom.code", ValidationSeverity::Error, "items", 2)
+                .with_hint("fix the value")
+                .with_current_value("abc")
+                .with_expected("integer")
+                .with_explanation("value must parse as an integer")
+                .with_domain("items")
+                .with_owner("systems"),
+        );
+
+        let report = DesignerValidationReport::from_validation_report(&validation, options());
+
+        let issue = &report.issues[0];
+        assert_eq!(issue.current_value.as_deref(), Some("abc"));
+        assert_eq!(issue.expected.as_deref(), Some("integer"));
+        assert_eq!(
+            issue.explanation.as_deref(),
+            Some("value must parse as an integer")
+        );
+        assert_eq!(issue.hint.as_deref(), Some("fix the value"));
+        assert_eq!(issue.domain, "items");
+        assert_eq!(issue.owner, "systems");
+    }
+
+    #[test]
+    fn diagnostic_report_enrichment_survives_report_conversion() {
+        let diagnostic = Diagnostic::new(
+            "custom.code",
+            DiagnosticSeverity::Error,
+            "invalid value",
+            DiagnosticLocation::default(),
+        )
+        .with_source("validation.custom")
+        .with_current_value("bad")
+        .with_expected("good")
+        .with_explanation("custom explanation")
+        .with_domain("custom-domain")
+        .with_owner("custom-owner");
+        let diagnostics = DiagnosticReport {
+            diagnostics: vec![diagnostic],
+        };
+
+        let report = DesignerValidationReport::from_diagnostic_report(&diagnostics, options());
+
+        let issue = &report.issues[0];
+        assert_eq!(issue.validator, "validation.custom");
+        assert_eq!(issue.current_value.as_deref(), Some("bad"));
+        assert_eq!(issue.expected.as_deref(), Some("good"));
+        assert_eq!(issue.explanation.as_deref(), Some("custom explanation"));
+        assert_eq!(issue.domain, "custom-domain");
+        assert_eq!(issue.owner, "custom-owner");
     }
 
     #[test]

@@ -20,6 +20,11 @@ pub struct ValidationIssue {
     pub validator: String,
     pub target: Option<String>,
     pub hint: Option<String>,
+    pub current_value: Option<String>,
+    pub expected: Option<String>,
+    pub explanation: Option<String>,
+    pub domain: Option<String>,
+    pub owner: Option<String>,
 }
 
 pub type ValidationIssueLocation = DiagnosticLocation;
@@ -130,6 +135,11 @@ impl ValidationIssue {
             validator: validator.into(),
             target: None,
             hint: None,
+            current_value: None,
+            expected: None,
+            explanation: None,
+            domain: None,
+            owner: None,
         }
     }
 
@@ -150,6 +160,36 @@ impl ValidationIssue {
 
     pub fn with_target(mut self, target: impl Into<String>) -> Self {
         self.target = Some(target.into());
+        self
+    }
+
+    pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+        self
+    }
+
+    pub fn with_current_value(mut self, current_value: impl Into<String>) -> Self {
+        self.current_value = Some(current_value.into());
+        self
+    }
+
+    pub fn with_expected(mut self, expected: impl Into<String>) -> Self {
+        self.expected = Some(expected.into());
+        self
+    }
+
+    pub fn with_explanation(mut self, explanation: impl Into<String>) -> Self {
+        self.explanation = Some(explanation.into());
+        self
+    }
+
+    pub fn with_domain(mut self, domain: impl Into<String>) -> Self {
+        self.domain = Some(domain.into());
+        self
+    }
+
+    pub fn with_owner(mut self, owner: impl Into<String>) -> Self {
+        self.owner = Some(owner.into());
         self
     }
 }
@@ -215,5 +255,25 @@ impl DiagnosticEntry for ValidationIssue {
 
     fn hint(&self) -> Option<&str> {
         self.hint.as_deref()
+    }
+
+    fn current_value(&self) -> Option<&str> {
+        self.current_value.as_deref()
+    }
+
+    fn expected(&self) -> Option<&str> {
+        self.expected.as_deref()
+    }
+
+    fn explanation(&self) -> Option<&str> {
+        self.explanation.as_deref()
+    }
+
+    fn domain(&self) -> Option<&str> {
+        self.domain.as_deref()
+    }
+
+    fn owner(&self) -> Option<&str> {
+        self.owner.as_deref()
     }
 }

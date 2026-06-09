@@ -66,6 +66,11 @@ pub struct Diagnostic {
     pub source: Option<String>,
     pub target: Option<String>,
     pub hint: Option<String>,
+    pub current_value: Option<String>,
+    pub expected: Option<String>,
+    pub explanation: Option<String>,
+    pub domain: Option<String>,
+    pub owner: Option<String>,
 }
 
 impl Diagnostic {
@@ -83,6 +88,11 @@ impl Diagnostic {
             source: None,
             target: None,
             hint: None,
+            current_value: None,
+            expected: None,
+            explanation: None,
+            domain: None,
+            owner: None,
         }
     }
 
@@ -95,7 +105,52 @@ impl Diagnostic {
             source: entry.source().map(str::to_owned),
             target: entry.target().map(str::to_owned),
             hint: entry.hint().map(str::to_owned),
+            current_value: entry.current_value().map(str::to_owned),
+            expected: entry.expected().map(str::to_owned),
+            explanation: entry.explanation().map(str::to_owned),
+            domain: entry.domain().map(str::to_owned),
+            owner: entry.owner().map(str::to_owned),
         }
+    }
+
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        self.source = Some(source.into());
+        self
+    }
+
+    pub fn with_target(mut self, target: impl Into<String>) -> Self {
+        self.target = Some(target.into());
+        self
+    }
+
+    pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+        self
+    }
+
+    pub fn with_current_value(mut self, current_value: impl Into<String>) -> Self {
+        self.current_value = Some(current_value.into());
+        self
+    }
+
+    pub fn with_expected(mut self, expected: impl Into<String>) -> Self {
+        self.expected = Some(expected.into());
+        self
+    }
+
+    pub fn with_explanation(mut self, explanation: impl Into<String>) -> Self {
+        self.explanation = Some(explanation.into());
+        self
+    }
+
+    pub fn with_domain(mut self, domain: impl Into<String>) -> Self {
+        self.domain = Some(domain.into());
+        self
+    }
+
+    pub fn with_owner(mut self, owner: impl Into<String>) -> Self {
+        self.owner = Some(owner.into());
+        self
     }
 }
 
@@ -117,6 +172,21 @@ pub trait DiagnosticEntry {
         None
     }
     fn hint(&self) -> Option<&str> {
+        None
+    }
+    fn current_value(&self) -> Option<&str> {
+        None
+    }
+    fn expected(&self) -> Option<&str> {
+        None
+    }
+    fn explanation(&self) -> Option<&str> {
+        None
+    }
+    fn domain(&self) -> Option<&str> {
+        None
+    }
+    fn owner(&self) -> Option<&str> {
         None
     }
 }
@@ -153,6 +223,26 @@ impl<T: DiagnosticEntry + ?Sized> DiagnosticEntry for &T {
     fn hint(&self) -> Option<&str> {
         (*self).hint()
     }
+
+    fn current_value(&self) -> Option<&str> {
+        (*self).current_value()
+    }
+
+    fn expected(&self) -> Option<&str> {
+        (*self).expected()
+    }
+
+    fn explanation(&self) -> Option<&str> {
+        (*self).explanation()
+    }
+
+    fn domain(&self) -> Option<&str> {
+        (*self).domain()
+    }
+
+    fn owner(&self) -> Option<&str> {
+        (*self).owner()
+    }
 }
 
 impl DiagnosticEntry for Diagnostic {
@@ -182,6 +272,26 @@ impl DiagnosticEntry for Diagnostic {
 
     fn hint(&self) -> Option<&str> {
         self.hint.as_deref()
+    }
+
+    fn current_value(&self) -> Option<&str> {
+        self.current_value.as_deref()
+    }
+
+    fn expected(&self) -> Option<&str> {
+        self.expected.as_deref()
+    }
+
+    fn explanation(&self) -> Option<&str> {
+        self.explanation.as_deref()
+    }
+
+    fn domain(&self) -> Option<&str> {
+        self.domain.as_deref()
+    }
+
+    fn owner(&self) -> Option<&str> {
+        self.owner.as_deref()
     }
 }
 
@@ -261,4 +371,42 @@ fn format_diagnostic_parts(
         write!(formatter, " [{hint}]")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_from_entry_preserves_enrichment_fields() {
+        let source = Diagnostic::new(
+            "custom.code",
+            DiagnosticSeverity::Error,
+            "invalid value",
+            DiagnosticLocation::default(),
+        )
+        .with_source("validation.custom")
+        .with_target("client")
+        .with_hint("fix it")
+        .with_current_value("bad")
+        .with_expected("good")
+        .with_explanation("the value is invalid")
+        .with_domain("items")
+        .with_owner("systems");
+
+        let diagnostic = Diagnostic::from_entry(&source);
+
+        assert_eq!(diagnostic.code, "custom.code");
+        assert_eq!(diagnostic.source.as_deref(), Some("validation.custom"));
+        assert_eq!(diagnostic.target.as_deref(), Some("client"));
+        assert_eq!(diagnostic.hint.as_deref(), Some("fix it"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("bad"));
+        assert_eq!(diagnostic.expected.as_deref(), Some("good"));
+        assert_eq!(
+            diagnostic.explanation.as_deref(),
+            Some("the value is invalid")
+        );
+        assert_eq!(diagnostic.domain.as_deref(), Some("items"));
+        assert_eq!(diagnostic.owner.as_deref(), Some("systems"));
+    }
 }

@@ -49,6 +49,11 @@ fn validation_report_error<T>(result: Result<T>) -> ValidationReport {
                     validator: diagnostic.source.unwrap_or_default(),
                     target: diagnostic.target,
                     hint: diagnostic.hint,
+                    current_value: diagnostic.current_value,
+                    expected: diagnostic.expected,
+                    explanation: diagnostic.explanation,
+                    domain: diagnostic.domain,
+                    owner: diagnostic.owner,
                 })
                 .collect(),
         },
