@@ -19,7 +19,6 @@
 ```rust
 pub(crate) trait CodeGenerator: Send + Sync {
     fn language(&self) -> &'static str;
-    fn language_aliases(&self) -> &'static [&'static str] { &[] }
     fn default_module_name(&self) -> &'static str;
     fn default_naming(&self) -> NamingConfig;
     #[cfg(test)]
@@ -31,11 +30,11 @@ pub(crate) trait CodeGenerator: Send + Sync {
 注册表职责：
 
 - `CodeGenerator::language()` 返回规范语言名，例如 `rust`、`cpp`、`typescript`。
-- `language_aliases()` 提供兼容别名，例如 C++ 支持 `c++`，TypeScript 支持 `ts`。
+- alias 是 build-facing `ArtifactGenerator` descriptor 的职责，例如 C++ 支持 `c++`，TypeScript 支持 `ts`；`CodeGenerator` 不再承载 alias / requirements。
 - 每个语言模块维护自己的 `LANGUAGE` 常量，例如 `src/generator/rust/mod.rs` 中的 `LANGUAGE = "rust"`。核心 `src/code_artifact/mod.rs` 不定义 `pub mod languages`，避免新增语言时回到核心模块增加常量。
 - `CodeExportTarget::from_task` 接收已查找到的 `&dyn CodeGenerator`，由 generator 提供默认模块名和默认命名规则。
 - `src/build/` 只通过 `GeneratorRegistry` 查找 build-facing artifact generator；找不到时报告“未注册生成器”，不感知具体语言集合。
-- 内置语言的集中注册点是 `GeneratorRegistry::with_builtin_generators()`。当前 `CodeGenerator` 是 crate 内部 code artifact adapter 接口，不作为稳定外部 generator plugin API 暴露；外部用户通过 Project Config 选择内置语言，而不是实现该 trait。
+- 内置语言的集中注册点是 `GeneratorRegistry::with_builtin_generators()`。当前 `CodeGenerator` 是 crate 内部 code artifact renderer facet，不作为稳定外部 generator plugin API 暴露；外部用户通过 Project Config 选择内置语言，而不是实现该 trait。
 
 ### 9.4.2 `CodeExportTarget`
 
@@ -191,7 +190,7 @@ pub enum CaseStyle {
 - `naming` 与 `formatting`；
 - generator-specific option bucket，例如 `[targets.exports.lua_table]`、`[targets.exports.typescript]` 或其他 code-like generator 的专属子表。
 
-这样 Lua 这类 requirements 包含 Data 的 code-like generator 可以复用相同配置解析和 writer 行为，而不需要复制一套与 `CodegenOptions` 平行的基础选项。当前 `LuaTableExporter` 仍位于 `exporter` 模块，通过 `GeneratorRegistry` adapter 暴露为 data-backed mixed generator；`CodeExportTarget.language`、`CodeGenerator::language()`、CodeModel 构造等仍属于 format-agnostic language codegen adapter，不应强加给 schema doc、runtime table data exporter、asset manifest 或 validation report。
+这样 Lua 这类 requirements 包含 Data 的 code-like generator 可以复用相同配置解析和 writer 行为，而不需要复制一套与 `CodegenOptions` 平行的基础选项。当前 `LuaTableExporter` 位于 `src/generator/lua/`，作为 direct data-backed mixed `ArtifactGenerator` 注册；`CodeExportTarget.language`、`CodeGenerator::language()`、CodeModel 构造等仍属于 format-agnostic language codegen renderer facet，不应强加给 schema doc、runtime table data exporter、asset manifest 或 validation report。
 
 配置来源：
 

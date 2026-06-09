@@ -154,6 +154,6 @@ Project 模块测试应覆盖：
 - imports 递归加载和去重。
 - 不同目录配置片段中的相对路径归一化。
 - target name 重复时报错。
-- export type alias / 默认值属于 exporter registry 与 build normalization 行为，但可通过 project 解析测试覆盖 TOML shape。
+- export type alias / 默认值属于 build-facing `GeneratorRegistry` 与 build normalization 行为，但可通过 project 解析测试覆盖 TOML shape。
 - path lexical normalize 对 absolute root、leading parent、`.` / `..` 的处理。
 - `[assets]` / `[[assets.search_paths]]` 解析、root 归一化、重复 search path、unsupported kind、未知 search path 引用。

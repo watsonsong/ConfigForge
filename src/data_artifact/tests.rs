@@ -27,7 +27,7 @@ fn export_runtime_data_to_disk(
     linked_meta: &crate::meta::LinkedMetaModel<'_>,
     target_tags: &TargetTags,
     data_set: &crate::data::DataSet,
-    exporter: &dyn DataFormatExporter,
+    exporter: &dyn RuntimeTableFormat,
     pool: &rayon::ThreadPool,
 ) -> Result<Vec<RuntimeDataFile>> {
     let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
@@ -44,7 +44,7 @@ fn export_runtime_data_to_disk(
     Ok(files)
 }
 
-impl DataFormatExporter for CustomDataExporter {
+impl RuntimeTableFormat for CustomDataExporter {
     fn name(&self) -> &'static str {
         "custom"
     }
@@ -486,7 +486,7 @@ fn binary_exporter_omits_absent_optional_fields() {
 
 struct ConflictDataExporter;
 
-impl DataFormatExporter for ConflictDataExporter {
+impl RuntimeTableFormat for ConflictDataExporter {
     fn name(&self) -> &'static str {
         "conflict"
     }

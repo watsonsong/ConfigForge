@@ -655,7 +655,7 @@ for each MetaOnly NormalizedExportTask:
 pub(crate) trait CodeGenerator: Send + Sync { ... }
 ```
 
-同理，若并行 runtime data export 共享 `DataFormatExporter` trait object，也需要 `Send + Sync`；或者每个任务重新构造 stateless exporter。当前 `CodeGenerator` 是 crate 内部扩展点；如果未来引入外部插件，也必须在新的稳定 public API 中声明线程安全边界。
+同理，若并行 runtime data export 共享 `RuntimeTableFormat` trait object，也需要 `Send + Sync`；或者每个任务重新构造 stateless format helper。当前 `CodeGenerator` 是 crate 内部 renderer facet；如果未来引入外部插件，也必须在新的稳定 public API 中声明线程安全边界。
 
 ### 6.8 Artifact write
 

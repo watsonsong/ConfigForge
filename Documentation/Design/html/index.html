@@ -556,7 +556,7 @@ override_sources = [
             <tr><td><code>messagepack</code> / <code>msgpack</code></td><td>已实现</td><td>二进制 runtime data；生成代码使用逻辑 table name，由 loader / reader 映射真实文件。</td></tr>
             <tr><td><code>bin</code> / <code>binary</code></td><td>已实现</td><td>ConfigForge 私有 positional typed runtime data，带 CFGB header 与 schema revision。</td></tr>
             <tr><td><code>gettext_pot</code> / <code>pot</code></td><td>已实现 MVP</td><td>聚合 data exporter，从可见 <code>text</code> 字段抽取 gettext POT。</td></tr>
-            <tr><td><code>lua_table</code> / <code>yaml</code> / <code>sqlite</code></td><td>未来可扩展</td><td>通过 data format exporter registry 扩展。</td></tr>
+            <tr><td><code>lua_table</code> / <code>yaml</code> / <code>sqlite</code></td><td>未来可扩展</td><td>通过 build-facing <code>GeneratorRegistry</code> 扩展。</td></tr>
             <tr><td><code>protobuf</code></td><td>未来</td><td>未来需要字段级 <code>field_number</code>，不使用 stable_hash 作为生产策略。</td></tr>
           </tbody>
         </table>

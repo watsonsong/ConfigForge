@@ -512,7 +512,7 @@ fn generator_common_input<'meta>(
 mod tests {
     use std::{
         collections::BTreeMap,
-        path::{Path, PathBuf},
+        path::PathBuf,
         sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -524,55 +524,63 @@ mod tests {
     use crate::{
         artifact::{ArtifactWriteMode, ArtifactWriter},
         data::{DataSet, DataTable, RawSourceData},
-        data_artifact::{AggregateDataExporter, DataFormatExporter, RuntimeArtifactPlan},
-        generator::{GeneratorRegistry, GeneratorRequirements},
-        meta::{LinkedTableMeta, MetaModel, TargetTags},
+        generator::{
+            ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRegistry,
+            GeneratorRequirements,
+        },
+        meta::{MetaModel, TargetTags},
     };
 
     use super::*;
 
-    struct InstrumentedAggregateExporter {
+    struct InstrumentedAggregateGenerator {
         active_plans: Arc<AtomicUsize>,
         max_active_plans: Arc<AtomicUsize>,
         active_exports: Arc<AtomicUsize>,
         max_active_exports: Arc<AtomicUsize>,
     }
 
-    impl AggregateDataExporter for InstrumentedAggregateExporter {
-        fn name(&self) -> &'static str {
+    impl ArtifactGenerator for InstrumentedAggregateGenerator {
+        fn type_id(&self) -> &'static str {
             "instrumented_aggregate"
         }
 
-        fn plan_artifacts(
+        fn requirements(&self) -> GeneratorRequirements {
+            GeneratorRequirements::meta_and_data()
+        }
+
+        fn generate_to_sink(
             &self,
-            out_dir: &Path,
-            task: &crate::data_artifact::TargetDataConfig,
-            _linked_meta: &LinkedMetaModel<'_>,
-            _target_tags: &TargetTags,
-        ) -> Result<Vec<PathBuf>> {
+            _input: &GeneratorCommonInput<'_>,
+            _sink: &ArtifactSink,
+        ) -> Result<()> {
+            Err(ConfigForgeError::Validation(
+                "instrumented aggregate test generator requires data input".to_owned(),
+            ))
+        }
+
+        fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
             let active_now = self.active_plans.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_active_plans
                 .fetch_max(active_now, Ordering::SeqCst);
             thread::sleep(Duration::from_millis(20));
             self.active_plans.fetch_sub(1, Ordering::SeqCst);
-            Ok(vec![out_dir.join(format!(
+            let task = input.target_data_config();
+            Ok(vec![input.output.join(format!(
                 "{}.txt",
                 task.name.as_deref().unwrap_or("default")
             ))])
         }
 
-        fn export_to_sink(
+        fn generate_with_data_to_sink(
             &self,
-            out_dir: &Path,
-            task: &crate::data_artifact::TargetDataConfig,
-            _linked_meta: &LinkedMetaModel<'_>,
-            _target_tags: &TargetTags,
-            _data_set: &DataSet,
+            input: &GeneratorDataInput<'_, '_>,
             sink: &ArtifactSink,
         ) -> Result<()> {
             let active_now = self.active_exports.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_active_exports
                 .fetch_max(active_now, Ordering::SeqCst);
+            let task = input.common.target_data_config();
             if task.name.as_deref() == Some("slow") {
                 thread::sleep(Duration::from_millis(30));
             } else {
@@ -580,7 +588,10 @@ mod tests {
             }
             self.active_exports.fetch_sub(1, Ordering::SeqCst);
             let task_name = task.name.as_deref().unwrap_or("default");
-            sink.write_text(out_dir.join(format!("{task_name}.txt")), task_name)
+            sink.write_text(
+                input.common.output.join(format!("{task_name}.txt")),
+                task_name,
+            )
         }
     }
 
@@ -590,16 +601,13 @@ mod tests {
         let max_active_plans = Arc::new(AtomicUsize::new(0));
         let active_exports = Arc::new(AtomicUsize::new(0));
         let max_active_exports = Arc::new(AtomicUsize::new(0));
-        let generator_registry = GeneratorRegistry::from_compat_parts(
-            Vec::new(),
-            vec![Box::new(InstrumentedAggregateExporter {
+        let generator_registry =
+            GeneratorRegistry::new(vec![Box::new(InstrumentedAggregateGenerator {
                 active_plans: active_plans.clone(),
                 max_active_plans: max_active_plans.clone(),
                 active_exports: active_exports.clone(),
                 max_active_exports: max_active_exports.clone(),
-            })],
-            Vec::new(),
-        );
+            })]);
         let meta = minimal_meta_model();
         let linked_meta = meta.link().expect("meta should link");
         let raw_sources = raw_sources();
@@ -648,44 +656,49 @@ mod tests {
         );
     }
 
-    struct DuplicatePathExporter;
+    struct DuplicatePathGenerator;
 
-    impl DataFormatExporter for DuplicatePathExporter {
-        fn name(&self) -> &'static str {
+    impl ArtifactGenerator for DuplicatePathGenerator {
+        fn type_id(&self) -> &'static str {
             "duplicate_path"
         }
 
-        fn extension(&self) -> &'static str {
-            "dup"
+        fn requirements(&self) -> GeneratorRequirements {
+            GeneratorRequirements::meta_and_data()
         }
 
-        fn plan_table_artifact(
+        fn generate_to_sink(
             &self,
-            table_meta: &LinkedTableMeta<'_>,
-        ) -> Result<RuntimeArtifactPlan> {
-            Ok(RuntimeArtifactPlan {
-                table_name: table_meta.meta.name.clone(),
-                path: PathBuf::from("same-file.dup"),
-            })
+            _input: &GeneratorCommonInput<'_>,
+            _sink: &ArtifactSink,
+        ) -> Result<()> {
+            Err(ConfigForgeError::Validation(
+                "duplicate path test generator requires data input".to_owned(),
+            ))
         }
 
-        fn serialize_table(
+        fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
+            input
+                .meta
+                .tables
+                .iter()
+                .filter(|table_meta| table_meta.meta.is_exported_for(&input.target_tags))
+                .map(|_table_meta| Ok(input.output.join("same-file.dup")))
+                .collect()
+        }
+
+        fn generate_with_data_to_sink(
             &self,
-            _table_meta: &LinkedTableMeta<'_>,
-            _table: &DataTable,
-            _target_tags: &TargetTags,
-        ) -> Result<Vec<u8>> {
+            _input: &GeneratorDataInput<'_, '_>,
+            _sink: &ArtifactSink,
+        ) -> Result<()> {
             panic!("duplicate path planning should fail before serialization");
         }
     }
 
     #[test]
     fn meta_and_data_parallel_planning_rejects_path_conflicts_before_generation() {
-        let generator_registry = GeneratorRegistry::from_compat_parts(
-            vec![Box::new(DuplicatePathExporter)],
-            Vec::new(),
-            Vec::new(),
-        );
+        let generator_registry = GeneratorRegistry::new(vec![Box::new(DuplicatePathGenerator)]);
         let meta = MetaModel::from_toml_str(
             r#"
                 [[tables]]

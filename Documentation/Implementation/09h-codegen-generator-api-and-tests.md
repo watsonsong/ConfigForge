@@ -13,7 +13,6 @@
 ```rust
 pub(crate) trait CodeGenerator: Send + Sync {
     fn language(&self) -> &'static str;
-    fn language_aliases(&self) -> &'static [&'static str] { &[] }
     fn default_module_name(&self) -> &'static str;
     fn default_naming(&self) -> NamingConfig;
     #[cfg(test)]
@@ -22,7 +21,7 @@ pub(crate) trait CodeGenerator: Send + Sync {
 }
 ```
 
-`generate_to_sink()` 是 build 调用的 sink-first 标准入口，也是生产代码必须实现的写出接口。Build 只传入 shared `ArtifactSink`，由 generator 负责 `sink.create(path)`、通过 streaming writer 渲染内容并 `finish()` stream；trait 不再提供 `generate()` fallback，避免 production path materialize 完整 `String` / `Vec<GeneratedFile>`。`CodeGenerator` 当前是 crate 内部扩展点，不作为稳定外部 generator plugin API 暴露，因此 crate root 不 re-export trait、builtin registry 或具体 generator 类型。`generate()` 与 `GeneratedFile` 仅在 `#[cfg(test)]` 下保留，用于单元测试中的 String-backed snapshot 和 streaming equivalence 校验。
+`generate_to_sink()` 是 code artifact renderer facet 的 sink-first 标准入口，也是生产代码必须实现的写出接口。Build 只传入 shared `ArtifactSink` 给 build-facing `ArtifactGenerator`；language module 先由 `GeneratorCommonInput::code_export_input()` 派生 `CodeExportInput`，再调用自身的 `CodeGenerator::generate_to_sink()`，由 renderer 负责 `sink.create(path)`、通过 streaming writer 渲染内容并 `finish()` stream；trait 不再提供 production `generate()` fallback，避免 production path materialize 完整 `String` / `Vec<GeneratedFile>`。`CodeGenerator` 当前是 crate 内部扩展点，不作为稳定外部 generator plugin API 暴露，因此 crate root 不 re-export trait、builtin registry 或具体 generator 类型。`generate()` 与 `GeneratedFile` 仅在 `#[cfg(test)]` 下保留，用于单元测试中的 String-backed snapshot 和 streaming equivalence 校验。alias 与 requirements 属于各 concrete language `ArtifactGenerator` 实现，不属于 `CodeGenerator`。
 
 内置生成器：
 
@@ -40,7 +39,7 @@ pub(crate) struct TypeScriptCodeGenerator;
 ```text
 CodegenTaskConfig.language
   -> GeneratorRegistry::require_generator(language)
-  -> CodeArtifactGenerator adapter / language generator
+  -> concrete language ArtifactGenerator
   -> CodeExportTarget::from_task(task, generator)
   -> CodeExportInput
   -> build CodeModel
@@ -62,7 +61,7 @@ CodegenTaskConfig.language
 
 扩展新语言的步骤：
 
-1. 新增 `src/generator/<language>/mod.rs`，在模块内定义 `LANGUAGE`、语言专属 options、实现 `CodeGenerator` 或直接实现 `ArtifactGenerator`，返回规范语言名、可选 alias、默认命名规则和生成逻辑。
+1. 新增 `src/generator/<language>/mod.rs`，在模块内定义 `LANGUAGE`、语言专属 options，并同时实现 `CodeGenerator`（renderer facet）与 build-facing `ArtifactGenerator`（type id、可选 alias、requirements、common input 转换）。
 2. 新增 `src/generator/<language>/tests.rs`，覆盖该语言的 loader/reader contract、row/object/parser、index 和命名冲突行为。
 3. 如有语言专属配置，新增 option struct，并通过 `CodegenOptions::language_options<T>("<language>")` 解析。
 4. 将 generator 加入 crate 内部 `GeneratorRegistry::with_builtin_generators()`；如果未来要支持外部插件 registry，应另行设计不暴露 concrete `ArtifactSink` 的稳定 public writer context trait，而不是直接公开当前内部 `CodeGenerator`。

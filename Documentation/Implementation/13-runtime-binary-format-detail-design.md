@@ -258,14 +258,14 @@ src/generator/binary/
   wire.rs             # varuint / bitmap / primitive wire helpers
 ```
 
-核心 API（当前实现作为 concrete generator 直接注册，同时保留 `DataFormatExporter` runtime table writer 接口；示意如下）：
+核心 API（当前实现作为 concrete generator 直接注册，同时实现 data artifact toolkit 的 `RuntimeTableFormat` runtime table writer facet；示意如下）：
 
 ```rust
 pub const FORMAT: &str = "bin";
 
 pub struct BinaryDataExporter;
 
-impl DataFormatExporter for BinaryDataExporter {
+impl RuntimeTableFormat for BinaryDataExporter {
     fn name(&self) -> &'static str { FORMAT }
     fn aliases(&self) -> &'static [&'static str] { &["binary"] }
     fn extension(&self) -> &'static str { "bin" }
@@ -304,7 +304,7 @@ pub struct RuntimeDataFile {
 }
 ```
 
-`format` 是 runtime artifact / manifest metadata，不是当前默认 CodeModel 构建和 codegen validate 的必需输入。unknown export type 应由 exporter registry 或显式 adapter 配置校验；生成代码本身保持格式无关。后缀只能作为 artifact path 规划结果，不能作为 reader layout 的隐式来源。
+`format` 是 runtime artifact / manifest metadata，不是当前默认 CodeModel 构建和 codegen validate 的必需输入。unknown export type 应由 build-facing `GeneratorRegistry` 或显式 runtime adapter 配置校验；生成代码本身保持格式无关。后缀只能作为 artifact path 规划结果，不能作为 reader layout 的隐式来源。
 
 ### 13.8.2 Generated parser 分层
 

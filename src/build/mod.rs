@@ -1256,8 +1256,7 @@ mod tests {
         let generators = vec![Box::new(SinkOnlyGenerator {
             called: called.clone(),
         }) as Box<dyn ArtifactGenerator>];
-        let generator_registry =
-            GeneratorRegistry::from_compat_parts(Vec::new(), Vec::new(), generators);
+        let generator_registry = GeneratorRegistry::new(generators);
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
         let context = MetaOnlyGeneratorContext {
             project_root: Path::new("."),

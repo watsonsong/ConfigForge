@@ -13,13 +13,13 @@ use crate::{
 
 use super::RuntimeArtifactPlan;
 
-/// Runtime data format exporter.
+/// Runtime table serialization format.
 ///
 /// Implementations may be shared across worker threads. `plan_table_artifact` and
 /// `serialize_table_to_stream` must therefore be thread-safe and reentrant;
 /// plugins with internal mutable state must synchronize it themselves or use
 /// per-task factory instances in a future registry model.
-pub trait DataFormatExporter: Send + Sync {
+pub trait RuntimeTableFormat: Send + Sync {
     fn name(&self) -> &'static str;
 
     fn aliases(&self) -> &'static [&'static str] {

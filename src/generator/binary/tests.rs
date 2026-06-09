@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     data::DataTable,
-    data_artifact::DataFormatExporter,
+    data_artifact::RuntimeTableFormat,
     meta::{MetaModel, TargetTags},
     runtime_contract::binary_schema_revision,
 };

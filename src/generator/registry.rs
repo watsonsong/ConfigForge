@@ -3,9 +3,6 @@
 
 use crate::{ConfigForgeError, Result};
 
-#[cfg(test)]
-use crate::data_artifact::{AggregateDataExporter, DataFormatExporter};
-
 use super::{
     ArtifactGenerator, GeneratorRequirements, asset_manifest::AssetManifestExporter,
     binary::BinaryDataExporter, cpp::CppCodeGenerator, cpp_unreal::CppUnrealCodeGenerator,
@@ -15,9 +12,6 @@ use super::{
     validation_report::ValidationReportGenerator,
 };
 
-#[cfg(test)]
-use super::adapter::DataArtifactGenerator;
-
 pub(crate) struct GeneratorRegistry {
     generators: Vec<Box<dyn ArtifactGenerator>>,
 }
@@ -25,23 +19,6 @@ pub(crate) struct GeneratorRegistry {
 impl GeneratorRegistry {
     pub(crate) fn new(generators: Vec<Box<dyn ArtifactGenerator>>) -> Self {
         Self { generators }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_compat_parts(
-        table_exporters: Vec<Box<dyn DataFormatExporter>>,
-        aggregate_exporters: Vec<Box<dyn AggregateDataExporter>>,
-        direct_generators: Vec<Box<dyn ArtifactGenerator>>,
-    ) -> Self {
-        let mut generators = Vec::new();
-        generators.extend(table_exporters.into_iter().map(|exporter| {
-            Box::new(DataArtifactGenerator::table(exporter)) as Box<dyn ArtifactGenerator>
-        }));
-        generators.extend(aggregate_exporters.into_iter().map(|exporter| {
-            Box::new(DataArtifactGenerator::aggregate(exporter)) as Box<dyn ArtifactGenerator>
-        }));
-        generators.extend(direct_generators);
-        Self::new(generators)
     }
 
     pub(crate) fn with_builtin_generators() -> Self {

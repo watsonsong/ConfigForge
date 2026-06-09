@@ -6,7 +6,7 @@ use crate::{
     artifact::{ArtifactSink, ArtifactWriteStream},
     data::DataTable,
     data_artifact::{
-        DataFormatExporter, build_exported_table_payload, export_runtime_data_to_sink,
+        RuntimeTableFormat, build_exported_table_payload, export_runtime_data_to_sink,
         runtime_table_artifacts,
     },
     meta::{LinkedTableMeta, TargetTags},
@@ -18,7 +18,7 @@ pub const FORMAT: &str = "json";
 
 pub struct JsonDataExporter;
 
-impl DataFormatExporter for JsonDataExporter {
+impl RuntimeTableFormat for JsonDataExporter {
     fn name(&self) -> &'static str {
         FORMAT
     }
@@ -98,7 +98,7 @@ mod tests {
 
     use crate::{
         data::DataTable,
-        data_artifact::DataFormatExporter,
+        data_artifact::RuntimeTableFormat,
         meta::{MetaModel, TargetTags},
     };
 

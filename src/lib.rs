@@ -43,7 +43,7 @@ pub use data::{
     SourceProviderResource, SourceReadPlan,
 };
 pub use data_artifact::{
-    DataFormatExporter, ExportedTable, ExportedTablePayload, ExportedValue, RuntimeArtifactPlan,
+    ExportedTable, ExportedTablePayload, ExportedValue, RuntimeArtifactPlan, RuntimeTableFormat,
     TargetDataConfig,
 };
 pub use diagnostic::{

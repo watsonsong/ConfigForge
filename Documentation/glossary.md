@@ -208,8 +208,8 @@
 | 生成器输入需求 | Generator Requirements | `GeneratorRequirements` | 描述 generator 需要哪些输入，例如 Meta、Data、assets、validation report；当前 branch pipeline 直接用 `needs_data` 拆分 MetaOnly / MetaAndData 执行分组。 |
 | 生成器能力 Facet | Generator Facet | `CodeArtifactOptions`, `DocArtifactFacet` | 可组合的领域能力或选项集合，例如代码文本选项、runtime table serialization、聚合 artifact、文档渲染。 |
 | Code Artifact Toolkit | Code Artifact Toolkit | `code_artifact` | 供 code-like generator 复用的工具箱，包括 CodeModel IR、CodeWriter、naming / formatting / keyword conflict、`CodeArtifactOptions` 和 runtime reader contract helper。物理路径为 `src/code_artifact/`；不再作为具体语言 generator 的归属地。 |
-| Data Artifact Toolkit | Data Artifact Toolkit | `data_artifact` | 供 data-backed generator 复用的工具箱，包括 target-aware payload、`ExportedTablePayload` / `ExportedValue`、runtime table serialization、binary layout 和 legacy data exporter adapter。物理路径为 `src/data_artifact/`；不再作为具体 export type generator 的归属地。 |
-| 数据导出器 | Data Exporter | `DataExporter` | 从 ExportView 写 runtime data 的迁移期 helper / adapter；目标态具体 JSON / MessagePack / `bin` 等导出类型应作为 artifact generator 注册。 |
+| Data Artifact Toolkit | Data Artifact Toolkit | `data_artifact` | 供 data-backed generator 复用的工具箱，包括 target-aware payload、`ExportedTablePayload` / `ExportedValue`、runtime table serialization、binary layout 和 aggregate data artifact facet。物理路径为 `src/data_artifact/`；不再作为具体 export type generator 的归属地。 |
+| Runtime Table Format | Runtime Table Format | `RuntimeTableFormat` | runtime table generator 复用的 table artifact planning / serialization facet；不是 build-facing registry input。具体 JSON / MessagePack / `bin` 等导出类型作为 artifact generator 注册。 |
 | 运行时数据格式 | Runtime Data Format | `RuntimeDataFormat` | 当前 runtime table data export type 支持 `json`、`messagepack`、`bin`；当前内置聚合 / 内嵌数据 export type 支持 `gettext_pot` / `pot`、`lua_table` / `lua`；未来可扩展 `yaml`、`sqlite`、`protobuf`。 |
 | JSON 导出 | JSON Export | `JsonDataExporter` | 输出 JSON runtime data。 |
 | Lua Table 导出 | Lua Table Export | `LuaTableExporter` | 输出 Lua table；Lua 中代码和数据可合一。 |
@@ -218,11 +218,11 @@
 | MessagePack 导出 | MessagePack Export | `MessagePackDataExporter` | 第一阶段支持的紧凑二进制 runtime data exporter，配置规范名为 `messagepack`。 |
 | SQLite 导出 | SQLite Export | `SqliteDataExporter` | 可扩展数据库 exporter。 |
 | Protobuf 导出 | Protobuf Export | `ProtobufDataExporter` | 未来扩展；需要显式 `field_number`。 |
-| 聚合数据导出器 | Aggregate Data Exporter | `AggregateDataExporter` | 输出跨表辅助数据产物的迁移期 data exporter helper，例如 POT、asset manifest；目标态具体聚合产物应作为 data-backed artifact generator 注册。 |
+| 聚合数据导出器 | Aggregate Data Exporter | `AggregateDataExporter` | 输出跨表辅助数据产物的 data artifact toolkit facet，例如 POT、asset manifest；具体聚合产物作为 data-backed artifact generator 注册。 |
 | POT 导出器 | Gettext POT Exporter | `GettextPotExporter` | `type = "gettext_pot"`；从 ExportView 中的 `text` 字段导出 POT。 |
 | 翻译注释 | Translator Comment | `TranslatorComment` | POT 中给翻译人员的注释，可来自 text 字段、`desc` 或 source 中额外映射的注释列/行。 |
 | 资源清单导出器 | Asset Manifest Exporter | `AssetManifestExporter` | 从 ExportView 中的 `asset` 字段导出资源清单。 |
-| 代码生成器 | Code Generator | `CodeGenerator` | 生成目标语言代码或访问 API 的迁移期 code artifact 能力接口。当前内置 language codegen 只依赖 Meta；但 “是否需要 Data” 应由 generator requirements 声明，不应作为 CodeGenerator 继承层级的一部分。目标态具体语言生成器应作为 `src/generator/<language>/` 下的 artifact generator，`CodeGenerator` 可删除或降级为 toolkit helper。 |
+| 代码生成器 | Code Generator | `CodeGenerator` | 生成目标语言代码或访问 API 的 code artifact renderer facet。当前内置 language codegen 只依赖 Meta；但 “是否需要 Data” 应由 generator requirements 声明，不应作为 CodeGenerator 继承层级的一部分。具体语言生成器作为 `src/generator/<language>/` 下的 artifact generator 注册，内部复用 `CodeGenerator`。 |
 | 类型映射 | Type Mapping | `TypeMapping` | 逻辑类型到目标语言/引擎类型的映射。 |
 | 目标类型 | Target Type | `TargetTypeName` | 目标语言或引擎中的具体类型名。 |
 | 导出产物 | Export Artifact | `ExportArtifact` | 一个生成文件，例如 runtime data、code、POT、asset manifest。 |
@@ -245,10 +245,8 @@
 | 动态库插件 | Dynamic Library Plugin | `DynamicPlugin`, `PluginLibrary` | `.dylib`、`.so`、`.dll` 等动态库插件。 |
 | 插件清单 | Plugin Manifest | `PluginManifest` | 插件 ID、版本、API 版本和能力声明。 |
 | 插件能力 | Plugin Capability | `PluginCapability` | SourceProvider、DataExporter、CodeGenerator、Validator、BuiltinType 等能力。 |
-| Generator Registry | Generator Registry | `GeneratorRegistry` | build-facing artifact generator 注册表 / facade；根据 export type 查询 generator requirements，并在迁移期适配 data exporter registry、code generator registry 和 direct artifact generator。目标态直接注册 `src/generator/<type_id>/` 下的 concrete generator。 |
+| Generator Registry | Generator Registry | `GeneratorRegistry` | build-facing artifact generator 注册表 / facade；根据 export type 查询 generator requirements，并直接注册 `src/generator/<type_id>/` 下的 concrete generator。 |
 | Source Provider Registry | Source Provider Registry | `SourceProviderRegistry` | provider ID 到 provider factory 的注册表。 |
-| Data Exporter Registry | Data Exporter Registry | `DataExporterRegistry` | data export format 到 table/aggregate data exporter 的迁移期领域注册表；由 `GeneratorRegistry` adapter 暴露给 build-facing 调度，目标态删除或降级为 data artifact toolkit 内部 helper。 |
-| Code Generator Registry | Code Generator Registry | `CodeGeneratorRegistry` | language/target 到 code generator 的迁移期领域注册表；只表达 code artifact 能力，不作为所有 MetaOnly generator 的总基类，目标态删除或降级为 code artifact toolkit 内部 helper。 |
 | Validator Registry | Validator Registry | `ValidatorRegistry` | validator kind 到 validator factory 的注册表。 |
 | Builtin Type Registry | Builtin Type Registry | `BuiltinTypeRegistry` | builtin value type 到 parser/validator 的注册表。 |
 | 任务执行器 | Task Executor | `TaskExecutor` | 执行校验和导出任务，可并行。 |

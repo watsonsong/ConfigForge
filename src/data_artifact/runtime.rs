@@ -13,14 +13,14 @@ use crate::{
     runtime_contract::RuntimeDataFile,
 };
 
-use super::DataFormatExporter;
+use super::RuntimeTableFormat;
 
 pub(crate) fn export_runtime_data_to_sink(
     out_dir: &Path,
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
     data_set: &DataSet,
-    exporter: &dyn DataFormatExporter,
+    exporter: &dyn RuntimeTableFormat,
     pool: &rayon::ThreadPool,
     sink: &ArtifactSink,
 ) -> Result<Vec<RuntimeDataFile>> {
@@ -82,7 +82,7 @@ pub(crate) fn runtime_table_artifacts(
     out_dir: &Path,
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
-    exporter: &dyn DataFormatExporter,
+    exporter: &dyn RuntimeTableFormat,
 ) -> Result<Vec<std::path::PathBuf>> {
     linked_meta
         .tables

@@ -1,15 +1,15 @@
 # 08. Exporter 模块详细设计
 
-本文档描述当前 `src/data_artifact/` 的 data export 实现边界，以及目标态 data artifact toolkit 的迁移方向。`exporter` 这个名称在历史上同时承载“具体 export type 实现”和“共享数据产物 helper”，在统一 `ArtifactGenerator` 模型下容易误导为与 `generator` 平级的产物归属地；目标态应把 JSON / MessagePack / `bin` / POT / Lua / Asset Manifest 等具体 export type 迁入 `src/generator/<type_id>/`，而把当前 exporter 中可复用的 payload、runtime table serialization、binary layout 和 adapter 逻辑沉淀为 data artifact toolkit。
+本文档描述当前 `src/data_artifact/` 的 data artifact toolkit 实现边界。`exporter` 这个名称在历史上同时承载“具体 export type 实现”和“共享数据产物 helper”，在统一 `ArtifactGenerator` 模型下容易误导为与 `generator` 平级的产物归属地；当前 JSON / MessagePack / `bin` / POT / Lua / Asset Manifest 等具体 export type 已迁入 `src/generator/<type_id>/`，`src/data_artifact/` 只保留可复用的 payload、runtime table serialization、binary layout 和聚合数据产物 facet。
 
-在更抽象的 artifact generator 模型中，`DataFormatExporter` / `AggregateDataExporter` 是迁移期的领域 facet / adapter 来源，而不是所有 data-backed generator 的顶层基类。是否需要 Data 由 generator requirements 声明；Lua 这类 data-backed code-like artifact 当前通过 exporter 内部实现与 `GeneratorRegistry` adapter 暴露为 `type = "lua_table"` / alias `lua` 的 MetaAndData generator，并复用 code artifact toolkit 中的 `CodeArtifactOptions`。
+在更抽象的 artifact generator 模型中，`RuntimeTableFormat` / `AggregateDataExporter` 是 data artifact toolkit 的领域 facet，而不是所有 data-backed generator 的顶层基类或 build-facing registry 输入。是否需要 Data 由 generator requirements 声明；Lua 这类 data-backed code-like artifact 直接作为 `type = "lua_table"` / alias `lua` 的 concrete `ArtifactGenerator` 注册，并复用 code artifact toolkit 中的 `CodeArtifactOptions`。
 
 ## 8.1 设计目标
 
 当前 Exporter 模块 / 目标 data artifact toolkit 需要达成：
 
 1. 定义 exporter 内部配置 `TargetDataConfig`，由 build 从统一 `NormalizedExportTask` 适配得到。
-2. 在迁移期定义 export type exporter trait 和 registry；目标态这些 trait 退化为 helper/facet，具体 export type 直接作为 `ArtifactGenerator` 注册。
+2. 定义 runtime table format 与 aggregate artifact facet；具体 export type 直接作为 `ArtifactGenerator` 注册。
 3. 为 JSON、MessagePack 与 `bin` 三种 runtime data generator 提供共享 runtime table helper；为 gettext POT、Lua 和 Asset Manifest 等聚合 / mixed generator 提供 payload、resolved value 和 sink 写出辅助能力。
 4. 对 CollectionTable 与 ObjectTable 生成正确 runtime payload shape。
 5. 复用 DataResolver 解释 struct JSON cell / expanded value / target visibility，避免 exporter 自己重复实现 source layout 解析。
@@ -31,14 +31,14 @@ src/data_artifact/
   mod.rs              # 对外 API 与 re-export
   config.rs           # TargetDataConfig
   model.rs            # ExportedTable / ExportedTablePayload / ExportedValue
-  registry.rs         # DataFormatExporter / AggregateDataExporter compatibility traits
+  registry.rs         # RuntimeTableFormat / AggregateDataExporter toolkit facets
   runtime.rs          # runtime table data artifact plan、并行导出编排、artifact 写入入口
   payload.rs          # CollectionTable / ObjectTable 共享 payload builder
   tests.rs            # exporter 核心行为测试
 
 src/generator/
-  json.rs             # type = "json"
-  messagepack.rs      # type = "messagepack" / alias "msgpack"
+  json/               # type = "json"
+  messagepack/        # type = "messagepack" / alias "msgpack"
   binary/             # type = "bin" / alias "binary"
   gettext_pot/        # type = "gettext_pot" / alias "pot"
   lua/                # type = "lua_table" / alias "lua"
@@ -47,7 +47,7 @@ src/generator/
 
 `mod.rs` 仅保留模块声明和公共 re-export，确保既有消费者仍可通过 `crate::data_artifact::*` 访问迁移期稳定 API。新增具体 export type 不应继续扩大 `src/data_artifact/`，而应优先新增 `src/generator/<type_id 或稳定 alias>/` 并依赖这里的 payload / runtime table helper；核心 registry / runtime / payload 不内联具体格式逻辑。
 
-`TargetDataConfig.format` 是 data artifact toolkit 内部使用的规范 export type，来自 Project TOML 的 `[[targets.exports]].type`。运行时表数据 export type（JSON、MessagePack、`bin`）通常是“一张 table 一个 artifact”；聚合 export type（POT、Lua、asset manifest、summary manifest）可能跨所有 table 汇总成一个或多个文件、读取非 runtime 辅助字段，artifact path 规划也不是 `table -> extension` 的简单映射。具体 export type 不再归属于 data artifact registry，而是平级注册到 build-facing `GeneratorRegistry`，并按需复用 `DataFormatExporter`（运行时表格式）与 `AggregateDataExporter`（聚合数据产物）这两类 compatibility facet。
+`TargetDataConfig.format` 是 data artifact toolkit 内部使用的规范 export type，来自 Project TOML 的 `[[targets.exports]].type`。运行时表数据 export type（JSON、MessagePack、`bin`）通常是“一张 table 一个 artifact”；聚合 export type（POT、Lua、asset manifest、summary manifest）可能跨所有 table 汇总成一个或多个文件、读取非 runtime 辅助字段，artifact path 规划也不是 `table -> extension` 的简单映射。具体 export type 不再归属于 data artifact registry，而是平级注册到 build-facing `GeneratorRegistry`，并按需复用 `RuntimeTableFormat`（运行时表格式）与 `AggregateDataExporter`（聚合数据产物）这两类 toolkit facet。
 
 ## 8.3 配置与 registry
 
@@ -68,7 +68,7 @@ pub struct TargetDataConfig {
 - `options`：export type 专属配置，由 `[[targets.exports]]` 下除通用字段外的 flattened 字段归一化得到，例如 `type = "gettext_pot"` 下的 `domain`、`file_name`、`source_reference`，或 `type = "lua_table"` 下的 `module_name`、`root_file`、`row_layout`。
 
 ```rust
-pub trait DataFormatExporter: Send + Sync {
+pub trait RuntimeTableFormat: Send + Sync {
     fn name(&self) -> &'static str;
     fn aliases(&self) -> &'static [&'static str];
     fn extension(&self) -> &'static str;
@@ -100,11 +100,11 @@ pub trait AggregateDataExporter: Send + Sync {
 }
 ```
 
-Build-facing 查询和执行通过统一 `GeneratorRegistry` facade 完成：内置 data-backed generators 作为 concrete `ArtifactGenerator` 直接注册，production registry 构造只面向 `Vec<Box<dyn ArtifactGenerator>>`。`DataFormatExporter` / `AggregateDataExporter` 是迁移期 compatibility facet 或 table / aggregate serialization helper，不再作为内置 build-facing registration shape；测试中如需覆盖 legacy facet，可通过 `from_compat_parts()` 这类 `#[cfg(test)]` compatibility constructor 临时包装。当前 data-backed generator 均进入 `MetaAndData` 分支；没有单独的 `DataOnly` 模式，因为缺少 Meta 时无法可靠完成类型解释、target 过滤、索引语义和 validation。这里的 `MetaAndData` 是 Build 对 `GeneratorRequirements::needs_data` 的执行分组，不是 trait 继承分类。Exporter implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行规划多个 export task、并行序列化多个 table artifact，并在 validation gate 通过后并行执行多个 data-backed generator；aggregate exporter 也不得在实例内保存本次 build 的可变状态。table exporter 的主路径是 `serialize_table_to_stream()`；`serialize_table() -> Vec<u8>` 只作为少量测试和兼容调用的 legacy fallback。aggregate exporter 的主路径是 required `export_to_sink()`；`export() -> Vec<Artifact>` 只作为 legacy fallback。新增 data-backed generator 应优先实现 streaming writer / sink writer，并作为 concrete `ArtifactGenerator` 注册。
+Build-facing 查询和执行通过统一 `GeneratorRegistry` facade 完成：内置 data-backed generators 作为 concrete `ArtifactGenerator` 直接注册，production registry 构造只面向 `Vec<Box<dyn ArtifactGenerator>>`。`RuntimeTableFormat` / `AggregateDataExporter` 是 table / aggregate serialization helper，不再作为内置 build-facing registration shape，也没有 `from_compat_parts()` 这类兼容 constructor。当前 data-backed generator 均进入 `MetaAndData` 分支；没有单独的 `DataOnly` 模式，因为缺少 Meta 时无法可靠完成类型解释、target 过滤、索引语义和 validation。这里的 `MetaAndData` 是 Build 对 `GeneratorRequirements::needs_data` 的执行分组，不是 trait 继承分类。Runtime table format implementation 必须是 thread-safe 和 reentrant，因为 `build` 会在 CPU worker pool 中并行规划多个 export task、并行序列化多个 table artifact，并在 validation gate 通过后并行执行多个 data-backed generator；aggregate exporter 也不得在实例内保存本次 build 的可变状态。table format 的主路径是 `serialize_table_to_stream()`；`serialize_table() -> Vec<u8>` 只作为少量测试和兼容调用的 legacy fallback。aggregate exporter 的主路径是 required `export_to_sink()`；`export() -> Vec<Artifact>` 只作为 legacy fallback。新增 data-backed generator 应优先实现 streaming writer / sink writer，并作为 concrete `ArtifactGenerator` 注册。
 
 内置 runtime table 格式已由 `GeneratorRegistry` 直接注册，table exporter 包括 `JsonDataExporter`、`MessagePackDataExporter` 和 `BinaryDataExporter`。`JsonDataExporter`、`MessagePackDataExporter`、`BinaryDataExporter`、`GettextPotExporter`、`LuaTableExporter` 与 `AssetManifestExporter` 已分别迁入 `src/generator/json/`、`src/generator/messagepack/`、`src/generator/binary/`、`src/generator/gettext_pot/`、`src/generator/lua/` 和 `src/generator/asset_manifest/`。格式名、alias、扩展名和序列化逻辑由 generator 自己维护；data artifact toolkit 只负责共享 payload、runtime table iteration / path planning、binary layout 和 streaming helper。JSON 使用 `serde_json::to_writer_pretty()`，MessagePack 使用 `rmp_serde::encode::write_named()`，`bin` 的 encoder 可直接写 `ArtifactWriteStream`，不再为最终 artifact 先构建完整 `Vec<u8>`；POT、Lua 和 Asset Manifest 也直接写入 shared sink，不再经 `Vec<Artifact>` 回到 build。`bin` 属于私有 positional wire layout，不直接 serde 序列化 `ExportedTablePayload`，而是与 JSON / MessagePack 共享 target-aware resolved export view 后渲染为 positional layout。
 
-当前内置 runtime data、aggregate、language codegen、schema doc、validation report 均由 `GeneratorRegistry` 直接注册 concrete generator，adapter 只保留给过渡期/外部扩展复用 `DataFormatExporter` 与 `AggregateDataExporter` 的场景。Build 只按照 export task 声明的 type id 查询 generator requirements，并把 common input 或 data input 传给匹配的 generator 执行。
+当前内置 runtime data、aggregate、language codegen、schema doc、validation report 均由 `GeneratorRegistry` 直接注册 concrete generator，已不保留 registry adapter。Build 只按照 export task 声明的 type id 查询 generator requirements，并把 common input 或 data input 传给匹配的 generator 执行。
 
 ## 8.4 Runtime payload contract
 
@@ -191,7 +191,7 @@ POT 这类单文件聚合 data exporter 的 artifact key 建议使用 `(target_n
 
 ## 8.7 聚合 Data Exporter 设计
 
-`DataFormatExporter` 与 `AggregateDataExporter` 保留为 data artifact toolkit 的 compatibility facet；内置 concrete generator 由 `GeneratorRegistry` 直接注册，TOML 层不新增 `special_exporters`。
+`RuntimeTableFormat` 与 `AggregateDataExporter` 保留为 data artifact toolkit 的复用 facet；内置 concrete generator 由 `GeneratorRegistry` 直接注册，TOML 层不新增 `special_exporters`。
 
 实现边界：
 

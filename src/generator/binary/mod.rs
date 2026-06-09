@@ -5,7 +5,7 @@ use crate::{
     ConfigForgeError, Result,
     artifact::{ArtifactSink, ArtifactWriteStream},
     data::DataTable,
-    data_artifact::{DataFormatExporter, export_runtime_data_to_sink, runtime_table_artifacts},
+    data_artifact::{RuntimeTableFormat, export_runtime_data_to_sink, runtime_table_artifacts},
     meta::{LinkedTableMeta, TargetTags},
 };
 
@@ -23,7 +23,7 @@ pub const FORMAT: &str = "bin";
 
 pub struct BinaryDataExporter;
 
-impl DataFormatExporter for BinaryDataExporter {
+impl RuntimeTableFormat for BinaryDataExporter {
     fn name(&self) -> &'static str {
         FORMAT
     }

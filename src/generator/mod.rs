@@ -3,8 +3,6 @@
 
 #![allow(dead_code)]
 
-#[cfg(test)]
-mod adapter;
 mod artifact_generator;
 mod asset_manifest;
 mod binary;
