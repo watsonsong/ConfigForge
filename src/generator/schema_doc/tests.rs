@@ -6,6 +6,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 use crate::{
     ArtifactProjectInfo,
     artifact::{ArtifactWriteMode, ArtifactWriter},
+    code_artifact::tests::expect_single_diagnostic,
+    diagnostic::code::{CF_ARTIFACT_PATH_COLLISION, CF_GENERATOR_UNSUPPORTED_OPTION},
     meta::{MetaModel, TargetTags},
 };
 
@@ -191,7 +193,14 @@ fn rejects_invalid_schema_doc_options_and_duplicate_paths() {
         BTreeMap::from([("format".to_owned(), toml::Value::String("html".to_owned()))]),
     )
     .unwrap_err();
-    assert!(error.to_string().contains("unsupported schema_doc format"));
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNSUPPORTED_OPTION);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.schema_doc.options")
+    );
+    assert_eq!(diagnostic.current_value.as_deref(), Some("html"));
+    assert_eq!(diagnostic.expected.as_deref(), Some("markdown"));
 
     let doc = SchemaDoc {
         metadata: SchemaDocMetadata {
@@ -226,7 +235,17 @@ fn rejects_invalid_schema_doc_options_and_duplicate_paths() {
         title: None,
     };
     let error = schema_doc_output_paths(&doc, &config).unwrap_err();
-    assert!(error.to_string().contains("duplicated"));
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_ARTIFACT_PATH_COLLISION);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.schema_doc.output")
+    );
+    assert!(
+        diagnostic
+            .current_value
+            .is_some_and(|value| value.contains("index.md"))
+    );
 }
 
 #[test]

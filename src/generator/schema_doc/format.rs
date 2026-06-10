@@ -3,7 +3,14 @@
 
 use std::{collections::BTreeMap, fmt, path::PathBuf, str::FromStr};
 
-use crate::{ConfigForgeError, Result, artifact::ArtifactSink, project::lexical_normalize_path};
+use crate::{
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
+    artifact::ArtifactSink,
+    diagnostic::code::{
+        CF_ARTIFACT_PATH_COLLISION, CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNSUPPORTED_OPTION,
+    },
+    project::lexical_normalize_path,
+};
 
 use super::{
     markdown::{render_schema_doc_index_markdown, render_schema_table_markdown},
@@ -37,9 +44,13 @@ impl FromStr for SchemaDocFormat {
     fn from_str(value: &str) -> Result<Self> {
         match value {
             "markdown" | "md" => Ok(Self::Markdown),
-            other => Err(ConfigForgeError::Validation(format!(
-                "unsupported schema_doc format `{other}`; supported formats: markdown"
-            ))),
+            other => Err(schema_doc_option_error(
+                CF_GENERATOR_UNSUPPORTED_OPTION,
+                "format",
+                format!("unsupported schema_doc format `{other}`; supported formats: markdown"),
+                other,
+                "markdown",
+            )),
         }
     }
 }
@@ -77,10 +88,7 @@ pub fn schema_doc_output_paths(
     let index_path = lexical_normalize_path(&config.output.join(&config.index_file));
     let mut seen = std::collections::BTreeSet::new();
     if !seen.insert(index_path.clone()) {
-        return Err(ConfigForgeError::Validation(format!(
-            "schema_doc output path `{}` is duplicated",
-            index_path.display()
-        )));
+        return Err(schema_doc_path_collision_error(&index_path));
     }
     let mut table_paths = Vec::with_capacity(doc.tables.len());
     for table in &doc.tables {
@@ -88,10 +96,7 @@ pub fn schema_doc_output_paths(
         validate_file_name(&file_name, "schema_doc table file")?;
         let path = lexical_normalize_path(&config.output.join(file_name));
         if !seen.insert(path.clone()) {
-            return Err(ConfigForgeError::Validation(format!(
-                "schema_doc output path `{}` is duplicated",
-                path.display()
-            )));
+            return Err(schema_doc_path_collision_error(&path));
         }
         table_paths.push(path);
     }
@@ -123,9 +128,13 @@ pub(super) fn validate_file_name(value: &str, label: &str) -> Result<()> {
     if valid {
         Ok(())
     } else {
-        Err(ConfigForgeError::Validation(format!(
-            "{label} `{value}` must be a plain file name"
-        )))
+        Err(schema_doc_option_error(
+            CF_GENERATOR_INVALID_OPTION,
+            label,
+            format!("{label} `{value}` must be a plain file name"),
+            value,
+            "plain file name without path separators",
+        ))
     }
 }
 
@@ -143,9 +152,13 @@ pub fn schema_doc_export_config_from_options(
     let title = take_schema_doc_string(&mut options, "title")?;
     let unsupported = options.keys().cloned().collect::<Vec<_>>();
     if let Some(key) = unsupported.first() {
-        return Err(ConfigForgeError::Validation(format!(
-            "schema_doc export task has unknown option `{key}`"
-        )));
+        return Err(schema_doc_option_error(
+            CF_GENERATOR_UNSUPPORTED_OPTION,
+            key,
+            format!("schema_doc export task has unknown option `{key}`"),
+            key,
+            "supported schema_doc option",
+        ));
     }
     Ok(SchemaDocExportConfig {
         format,
@@ -163,8 +176,53 @@ fn take_schema_doc_string(
         .remove(key)
         .map(|value| {
             value.try_into().map_err(|source| {
-                ConfigForgeError::Validation(format!("invalid schema_doc option `{key}`: {source}"))
+                schema_doc_option_error(
+                    CF_GENERATOR_INVALID_OPTION,
+                    key,
+                    format!("invalid schema_doc option `{key}`: {source}"),
+                    key,
+                    "string value",
+                )
             })
         })
         .transpose()
+}
+
+fn schema_doc_option_error(
+    code: &'static str,
+    option: impl Into<String>,
+    message: impl Into<String>,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            code,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source("generator.schema_doc.options")
+        .with_current_value(current)
+        .with_expected(expected)
+        .with_hint(format!(
+            "Check the schema_doc export task option `{}`.",
+            option.into()
+        )),
+    )
+}
+
+fn schema_doc_path_collision_error(path: &std::path::Path) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_ARTIFACT_PATH_COLLISION,
+            DiagnosticSeverity::Error,
+            format!("schema_doc output path `{}` is duplicated", path.display()),
+            DiagnosticLocation::default(),
+        )
+        .with_source("generator.schema_doc.output")
+        .with_current_value(path.display().to_string())
+        .with_expected("unique schema_doc output paths")
+        .with_hint("Rename the schema_doc index_file or table so generated files do not collide."),
+    )
 }

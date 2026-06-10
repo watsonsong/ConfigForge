@@ -12,7 +12,10 @@ use crate::{
     meta::{LinkedTableMeta, TargetTags},
 };
 
-use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements};
+use super::{
+    ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements,
+    artifact_generator::generator_contract_error,
+};
 
 pub const FORMAT: &str = "messagepack";
 
@@ -73,10 +76,13 @@ impl ArtifactGenerator for MessagePackDataExporter {
         _input: &GeneratorCommonInput<'_>,
         _sink: &ArtifactSink,
     ) -> Result<()> {
-        Err(ConfigForgeError::Validation(format!(
-            "generator `{}` requires Data-backed artifact input",
-            FORMAT
-        )))
+        Err(generator_contract_error(
+            FORMAT,
+            format!("generator `{FORMAT}` requires Data-backed artifact input"),
+            "meta-only generation call",
+            "data-backed generation input",
+            "Use the generator registry data-backed pipeline for messagepack exports.",
+        ))
     }
 
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<std::path::PathBuf>> {

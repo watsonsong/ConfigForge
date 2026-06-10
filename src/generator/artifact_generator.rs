@@ -3,7 +3,10 @@
 
 use std::path::PathBuf;
 
-use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
+use crate::{
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
+    artifact::ArtifactSink, diagnostic::code::CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH,
+};
 
 use super::{
     GeneratorCommonInput, GeneratorDataInput, GeneratorDescriptor, GeneratorRequirements,
@@ -37,10 +40,16 @@ pub(crate) trait ArtifactGenerator: Send + Sync {
         sink: &ArtifactSink,
     ) -> Result<()> {
         let _ = (input, sink);
-        Err(ConfigForgeError::Validation(format!(
-            "generator `{}` does not support Data-backed artifact generation",
-            self.type_id()
-        )))
+        Err(generator_contract_error(
+            self.type_id(),
+            format!(
+                "generator `{}` does not support Data-backed artifact generation",
+                self.type_id()
+            ),
+            "data-backed generation call",
+            "meta-only generation pipeline",
+            "Route meta-only generators through generate_to_sink instead of generate_with_data_to_sink.",
+        ))
     }
 
     fn plan_task_artifacts(&self, input: &GeneratorTaskInput<'_, '_>) -> Result<Vec<PathBuf>> {
@@ -60,4 +69,26 @@ pub(crate) trait ArtifactGenerator: Send + Sync {
             self.generate_to_sink(&input.common, sink)
         }
     }
+}
+
+pub(crate) fn generator_contract_error(
+    generator_type: impl Into<String>,
+    message: impl Into<String>,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    let generator_type = generator_type.into();
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source(format!("generator.{generator_type}.contract"))
+        .with_current_value(current)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
 }
