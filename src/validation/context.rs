@@ -4,8 +4,9 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     data::{DataSet, DataTable},
+    diagnostic::{DiagnosticLocation, code::CF_DATA_SOURCE_SCHEMA_INVALID},
     meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
 };
 
@@ -72,12 +73,9 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
                 continue;
             }
 
-            let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "data set is missing table `{}`",
-                    table_meta.meta.name
-                ))
-            })?;
+            let table = data_set
+                .table(&table_meta.meta.name)
+                .ok_or_else(|| missing_export_table_error(table_meta))?;
             let visible_fields = table_meta
                 .fields
                 .iter()
@@ -153,12 +151,9 @@ fn target_table_view<'meta, 'data>(
         return Ok(None);
     }
 
-    let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "data set is missing table `{}`",
-            table_meta.meta.name
-        ))
-    })?;
+    let table = data_set
+        .table(&table_meta.meta.name)
+        .ok_or_else(|| missing_export_table_error(table_meta))?;
     let visible_fields = table_meta
         .fields
         .iter()
@@ -182,6 +177,21 @@ fn target_table_view<'meta, 'data>(
         visible_fields,
         visible_rows,
     )))
+}
+
+fn missing_export_table_error(table_meta: &LinkedTableMeta<'_>) -> crate::ConfigForgeError {
+    super::validation_diagnostic_error(
+        CF_DATA_SOURCE_SCHEMA_INVALID,
+        "validation.export_view",
+        format!("data set is missing table `{}`", table_meta.meta.name),
+        DiagnosticLocation {
+            table: Some(table_meta.meta.name.clone()),
+            ..DiagnosticLocation::default()
+        },
+        "missing table",
+        format!("data table `{}`", table_meta.meta.name),
+        "Ensure data loading prepares every table exported for the current target.",
+    )
 }
 
 pub struct ExportTableView<'meta, 'data> {

@@ -10,7 +10,9 @@ use crate::{
         typed_value::parse_list_cell_value,
         value_conversion::{json_value_is_empty, json_value_to_cell, toml_default_to_json_value},
     },
-    diagnostic::code::CF_DATA_INVALID_FOREIGN_KEY,
+    diagnostic::code::{
+        CF_DATA_INVALID_FOREIGN_KEY, CF_DATA_INVALID_TYPE, CF_VALIDATION_INVALID_CONFIG,
+    },
     meta::{
         LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedIndexMeta, LinkedMetaModel,
         LinkedTableMeta, TargetTags,
@@ -50,6 +52,56 @@ fn foreign_key_error(
     )
 }
 
+fn foreign_key_config_error(
+    source_table_meta: &LinkedTableMeta<'_>,
+    foreign_key: &LinkedForeignKeyMeta<'_>,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    super::validation_diagnostic_error(
+        CF_VALIDATION_INVALID_CONFIG,
+        "validation.foreign_key.config",
+        message,
+        DiagnosticLocation {
+            table: Some(source_table_meta.meta.name.clone()),
+            field: foreign_key
+                .fields
+                .first()
+                .map(|field| field.meta.name.clone()),
+            ..DiagnosticLocation::default()
+        },
+        current_value,
+        expected,
+        "Check foreign key target table/index and target-aware export visibility.",
+    )
+}
+
+fn foreign_key_source_type_error(
+    source_table_meta: &LinkedTableMeta<'_>,
+    row_number: usize,
+    _foreign_key: &LinkedForeignKeyMeta<'_>,
+    field_name: impl Into<String>,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    super::validation_diagnostic_error(
+        CF_DATA_INVALID_TYPE,
+        "validation.foreign_key.source",
+        message,
+        DiagnosticLocation {
+            table: Some(source_table_meta.meta.name.clone()),
+            field: Some(field_name.into()),
+            source_row_number: Some(row_number),
+            ..DiagnosticLocation::default()
+        },
+        current_value,
+        expected,
+        "Check foreign key source field type and cell/default value shape.",
+    )
+}
+
 pub(super) fn validate_foreign_keys_full(
     meta: &LinkedMetaModel<'_>,
     data_set: &DataSet,
@@ -61,29 +113,52 @@ pub(super) fn validate_foreign_keys_full(
         };
         for foreign_key in &source_table_meta.foreign_keys {
             let target_table_meta = meta.table(foreign_key.target_table_name).ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "table `{}` foreign key `{}` references unknown target table `{}`",
-                    source_table_meta.meta.name, foreign_key.name, foreign_key.target_table_name
-                ))
+                foreign_key_config_error(
+                    source_table_meta,
+                    foreign_key,
+                    format!(
+                        "table `{}` foreign key `{}` references unknown target table `{}`",
+                        source_table_meta.meta.name,
+                        foreign_key.name,
+                        foreign_key.target_table_name
+                    ),
+                    foreign_key.target_table_name,
+                    "declared foreign key target table",
+                )
             })?;
             let target_index = target_table_meta
                 .index(foreign_key.target_index_name)
                 .ok_or_else(|| {
-                    ConfigForgeError::Validation(format!(
-                        "table `{}` foreign key `{}` references unknown target index `{}.{}`",
-                        source_table_meta.meta.name,
-                        foreign_key.name,
-                        target_table_meta.meta.name,
-                        foreign_key.target_index_name
-                    ))
+                    foreign_key_config_error(
+                        source_table_meta,
+                        foreign_key,
+                        format!(
+                            "table `{}` foreign key `{}` references unknown target index `{}.{}`",
+                            source_table_meta.meta.name,
+                            foreign_key.name,
+                            target_table_meta.meta.name,
+                            foreign_key.target_index_name
+                        ),
+                        format!(
+                            "{}.{}",
+                            target_table_meta.meta.name, foreign_key.target_index_name
+                        ),
+                        "declared target table index",
+                    )
                 })?;
             let target_table = data_set
                 .table(&target_table_meta.meta.name)
                 .ok_or_else(|| {
-                    ConfigForgeError::Validation(format!(
-                        "data set is missing foreign key target table `{}`",
-                        target_table_meta.meta.name
-                    ))
+                    foreign_key_config_error(
+                        source_table_meta,
+                        foreign_key,
+                        format!(
+                            "data set is missing foreign key target table `{}`",
+                            target_table_meta.meta.name
+                        ),
+                        "missing target table data",
+                        format!("data table `{}`", target_table_meta.meta.name),
+                    )
                 })?;
             let target_keys = target_key_cache.get_or_build(
                 &target_table_meta.meta.name,
@@ -116,40 +191,67 @@ pub(super) fn validate_foreign_keys_for_target(
             }
             validate_foreign_key_source_field_visibility(source_table_view, foreign_key)?;
             let target_table_meta = meta.table(foreign_key.target_table_name).ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "table `{}` foreign key `{}` references unknown target table `{}`",
-                    source_table_view.meta.meta.name,
-                    foreign_key.name,
-                    foreign_key.target_table_name
-                ))
+                foreign_key_config_error(
+                    source_table_view.meta,
+                    foreign_key,
+                    format!(
+                        "table `{}` foreign key `{}` references unknown target table `{}`",
+                        source_table_view.meta.meta.name,
+                        foreign_key.name,
+                        foreign_key.target_table_name
+                    ),
+                    foreign_key.target_table_name,
+                    "declared foreign key target table",
+                )
             })?;
             let Some(target_table_view) = export_view.table(foreign_key.target_table_name) else {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{}` foreign key `{}` references target table `{}` which is not exported for current target",
-                    source_table_view.meta.meta.name,
-                    foreign_key.name,
-                    foreign_key.target_table_name
-                )));
+                return Err(foreign_key_config_error(
+                    source_table_view.meta,
+                    foreign_key,
+                    format!(
+                        "table `{}` foreign key `{}` references target table `{}` which is not exported for current target",
+                        source_table_view.meta.meta.name,
+                        foreign_key.name,
+                        foreign_key.target_table_name
+                    ),
+                    foreign_key.target_table_name,
+                    "target table exported for current target",
+                ));
             };
             let target_index = target_table_meta
                 .index(foreign_key.target_index_name)
                 .ok_or_else(|| {
-                    ConfigForgeError::Validation(format!(
-                        "table `{}` foreign key `{}` references unknown target index `{}.{}`",
+                    foreign_key_config_error(
+                        source_table_view.meta,
+                        foreign_key,
+                        format!(
+                            "table `{}` foreign key `{}` references unknown target index `{}.{}`",
+                            source_table_view.meta.meta.name,
+                            foreign_key.name,
+                            target_table_meta.meta.name,
+                            foreign_key.target_index_name
+                        ),
+                        format!(
+                            "{}.{}",
+                            target_table_meta.meta.name, foreign_key.target_index_name
+                        ),
+                        "declared target table index",
+                    )
+                })?;
+            if !target_index.meta.is_exported_for(target_tags) {
+                return Err(foreign_key_config_error(
+                    source_table_view.meta,
+                    foreign_key,
+                    format!(
+                        "table `{}` foreign key `{}` references target index `{}.{}` which is not exported for current target",
                         source_table_view.meta.meta.name,
                         foreign_key.name,
                         target_table_meta.meta.name,
-                        foreign_key.target_index_name
-                    ))
-                })?;
-            if !target_index.meta.is_exported_for(target_tags) {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{}` foreign key `{}` references target index `{}.{}` which is not exported for current target",
-                    source_table_view.meta.meta.name,
-                    foreign_key.name,
-                    target_table_meta.meta.name,
-                    target_index.meta.name
-                )));
+                        target_index.meta.name
+                    ),
+                    format!("{}.{}", target_table_meta.meta.name, target_index.meta.name),
+                    "target index exported for current target",
+                ));
             }
             validate_foreign_key_target_field_visibility(
                 source_table_view,
@@ -181,10 +283,16 @@ fn validate_foreign_key_source_field_visibility(
 ) -> Result<()> {
     for field in &foreign_key.fields {
         if !source_table_view.is_field_visible(field.meta.name.as_str()) {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` foreign key `{}` references non-exported source field `{}` for current target",
-                source_table_view.meta.meta.name, foreign_key.name, field.meta.name
-            )));
+            return Err(foreign_key_config_error(
+                source_table_view.meta,
+                foreign_key,
+                format!(
+                    "table `{}` foreign key `{}` references non-exported source field `{}` for current target",
+                    source_table_view.meta.meta.name, foreign_key.name, field.meta.name
+                ),
+                field.meta.name.as_str(),
+                "source field exported for current target",
+            ));
         }
     }
     Ok(())
@@ -198,13 +306,19 @@ fn validate_foreign_key_target_field_visibility(
 ) -> Result<()> {
     for field in &target_index.fields {
         if !target_table_view.is_field_visible(field.meta.name.as_str()) {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` foreign key `{}` references non-exported target index field `{}.{}` for current target",
-                source_table_view.meta.meta.name,
-                foreign_key.name,
-                target_table_view.meta.meta.name,
-                field.meta.name
-            )));
+            return Err(foreign_key_config_error(
+                source_table_view.meta,
+                foreign_key,
+                format!(
+                    "table `{}` foreign key `{}` references non-exported target index field `{}.{}` for current target",
+                    source_table_view.meta.meta.name,
+                    foreign_key.name,
+                    target_table_view.meta.meta.name,
+                    field.meta.name
+                ),
+                format!("{}.{}", target_table_view.meta.meta.name, field.meta.name),
+                "target index field exported for current target",
+            ));
         }
     }
     Ok(())
@@ -538,10 +652,18 @@ fn validate_list_foreign_key_row(
                     raw_cell
                 } else {
                     default_raw = json_value_to_cell(&default_value).map_err(|_| {
-                        ConfigForgeError::Validation(format!(
-                            "table `{}` row {} foreign key `{}` source field `{}` default must be a JSON array",
-                            source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name
-                        ))
+                        foreign_key_source_type_error(
+                            source_table_meta,
+                            row_number,
+                            foreign_key,
+                            list_field.meta.name.as_str(),
+                            format!(
+                                "table `{}` row {} foreign key `{}` source field `{}` default must be a JSON array",
+                                source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name
+                            ),
+                            "non-array default value",
+                            "JSON array default for list foreign key source field",
+                        )
                     })?;
                     default_raw.as_str()
                 }
@@ -568,10 +690,18 @@ fn validate_list_foreign_key_row(
         ));
     }
     let LinkedField::List(element_type) = &list_field.linked_field else {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` foreign key `{}` expected list source field `{}`",
-            source_table_meta.meta.name, foreign_key.name, list_field.meta.name
-        )));
+        return Err(foreign_key_source_type_error(
+            source_table_meta,
+            row_number,
+            foreign_key,
+            list_field.meta.name.as_str(),
+            format!(
+                "table `{}` foreign key `{}` expected list source field `{}`",
+                source_table_meta.meta.name, foreign_key.name, list_field.meta.name
+            ),
+            list_field.meta.name.as_str(),
+            "list source field for list foreign key",
+        ));
     };
     let elements = parse_list_cell_value(
         &source_table_meta.meta.name,
@@ -583,10 +713,18 @@ fn validate_list_foreign_key_row(
         ValueSourceKind::ExplicitCell,
     )
     .map_err(|error| match error {
-        ConfigForgeError::Validation(message) => ConfigForgeError::Validation(message.replace(
-            " field `",
-            &format!(" foreign key `{}` source field `", foreign_key.name),
-        )),
+        ConfigForgeError::Validation(message) => foreign_key_source_type_error(
+            source_table_meta,
+            row_number,
+            foreign_key,
+            list_field.meta.name.as_str(),
+            message.replace(
+                " field `",
+                &format!(" foreign key `{}` source field `", foreign_key.name),
+            ),
+            raw,
+            "list value containing scalar foreign key elements",
+        ),
         other => other,
     })?;
     if elements.is_empty() && !foreign_key.allow_empty {
@@ -604,10 +742,18 @@ fn validate_list_foreign_key_row(
     }
     for (index, element) in elements.iter().enumerate() {
         let key_value = element.scalar_export_string().ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "table `{}` row {} foreign key `{}` source field `{}[{}]` must be a scalar key value",
-                source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name, index
-            ))
+            foreign_key_source_type_error(
+                source_table_meta,
+                row_number,
+                foreign_key,
+                format!("{}[{index}]", list_field.meta.name),
+                format!(
+                    "table `{}` row {} foreign key `{}` source field `{}[{}]` must be a scalar key value",
+                    source_table_meta.meta.name, row_number, foreign_key.name, list_field.meta.name, index
+                ),
+                "non-scalar list element",
+                "scalar foreign key element value",
+            )
         })?;
         if !target_keys.contains_single(&key_value) {
             let current_value = format!("{:?}", vec![key_value.as_str()]);

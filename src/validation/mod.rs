@@ -42,9 +42,29 @@ pub use table::{validate_normalized_table, validate_normalized_table_for_target}
 
 #[cfg(test)]
 use crate::data::{DataSet, DataTable};
+use crate::{ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity};
 
 pub(super) fn fragment_field_key(fragment_name: &str, field_name: &str) -> String {
     format!("{fragment_name}.{field_name}")
+}
+
+pub(super) fn validation_diagnostic_error(
+    code: &'static str,
+    source: impl Into<String>,
+    message: impl Into<String>,
+    location: DiagnosticLocation,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(code, DiagnosticSeverity::Error, message, location)
+            .with_source(source)
+            .with_domain("validation")
+            .with_current_value(current)
+            .with_expected(expected)
+            .with_hint(hint),
+    )
 }
 
 #[cfg(test)]

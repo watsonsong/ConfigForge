@@ -259,10 +259,19 @@ pub(super) fn validate_normalized_table_view_with_report(
                     &mut report,
                     "index.visibility",
                     "unique",
-                    Err(ConfigForgeError::Validation(format!(
-                        "table `{}` primary index `{}` references non-exported field `{}` for current target",
-                        meta.meta.name, index.meta.name, field_name
-                    ))),
+                    Err(table_schema_error(
+                        format!(
+                            "table `{}` primary index `{}` references non-exported field `{}` for current target",
+                            meta.meta.name, index.meta.name, field_name
+                        ),
+                        DiagnosticLocation {
+                            table: Some(meta.meta.name.clone()),
+                            field: Some(field_name.to_owned()),
+                            ..DiagnosticLocation::default()
+                        },
+                        format!("{}.{}", index.meta.name, field_name),
+                        "primary index fields exported for current target",
+                    )),
                     DiagnosticLocation {
                         table: Some(meta.meta.name.clone()),
                         field: Some(field_name.to_owned()),
@@ -343,6 +352,40 @@ fn data_validation_error(
     ConfigForgeError::from_diagnostic(diagnostic)
 }
 
+fn table_schema_error(
+    message: String,
+    location: DiagnosticLocation,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    super::validation_diagnostic_error(
+        CF_DATA_INVALID_TYPE,
+        "validation.table.schema",
+        message,
+        location,
+        current_value,
+        expected,
+        "Check table kind, fragment layout, target visibility, and schema/data alignment.",
+    )
+}
+
+fn fragment_value_error(
+    message: String,
+    location: DiagnosticLocation,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    super::validation_diagnostic_error(
+        CF_DATA_INVALID_TYPE,
+        "validation.fragment",
+        message,
+        location,
+        current_value,
+        expected,
+        "Check active fragment metadata and row payload values.",
+    )
+}
+
 fn missing_required_field_error(
     message: String,
     location: DiagnosticLocation,
@@ -419,11 +462,19 @@ fn expected_linked_field_value(field: &LinkedField<'_>) -> String {
 
 fn validate_object_table_row_count(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
     if table.rows.len() != 1 {
-        return Err(ConfigForgeError::Validation(format!(
-            "object table `{}` must normalize to exactly one logical row, got {}",
-            meta.meta.name,
-            table.rows.len()
-        )));
+        return Err(table_schema_error(
+            format!(
+                "object table `{}` must normalize to exactly one logical row, got {}",
+                meta.meta.name,
+                table.rows.len()
+            ),
+            DiagnosticLocation {
+                table: Some(meta.meta.name.clone()),
+                ..DiagnosticLocation::default()
+            },
+            table.rows.len().to_string(),
+            "exactly one logical row for object table",
+        ));
     }
     Ok(())
 }
@@ -433,18 +484,34 @@ fn validate_object_table_view_row_count(
     table_view: &ExportTableView<'_, '_>,
 ) -> Result<()> {
     if table_view.table.rows.len() != 1 {
-        return Err(ConfigForgeError::Validation(format!(
-            "object table `{}` must normalize to exactly one logical row, got {}",
-            meta.meta.name,
-            table_view.table.rows.len()
-        )));
+        return Err(table_schema_error(
+            format!(
+                "object table `{}` must normalize to exactly one logical row, got {}",
+                meta.meta.name,
+                table_view.table.rows.len()
+            ),
+            DiagnosticLocation {
+                table: Some(meta.meta.name.clone()),
+                ..DiagnosticLocation::default()
+            },
+            table_view.table.rows.len().to_string(),
+            "exactly one logical row for object table",
+        ));
     }
     if table_view.visible_rows.len() > 1 {
-        return Err(ConfigForgeError::Validation(format!(
-            "object table `{}` export view must contain at most one logical row, got {}",
-            meta.meta.name,
-            table_view.visible_rows.len()
-        )));
+        return Err(table_schema_error(
+            format!(
+                "object table `{}` export view must contain at most one logical row, got {}",
+                meta.meta.name,
+                table_view.visible_rows.len()
+            ),
+            DiagnosticLocation {
+                table: Some(meta.meta.name.clone()),
+                ..DiagnosticLocation::default()
+            },
+            table_view.visible_rows.len().to_string(),
+            "at most one visible logical row for object table export view",
+        ));
     }
     Ok(())
 }
@@ -762,19 +829,39 @@ fn validate_fragment_values_for_row(
             continue;
         }
         let Some(fragment) = meta.fragment(fragment_name) else {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` references unknown fragment `{}`",
-                meta.meta.name, row_number, key, fragment_name
-            )));
+            return Err(fragment_value_error(
+                format!(
+                    "table `{}` row {} field `{}` references unknown fragment `{}`",
+                    meta.meta.name, row_number, key, fragment_name
+                ),
+                DiagnosticLocation {
+                    table: Some(meta.meta.name.clone()),
+                    field: Some(key.clone()),
+                    source_row_number: Some(row_number),
+                    ..DiagnosticLocation::default()
+                },
+                fragment_name,
+                "declared fragment on this table",
+            ));
         };
         if !active_fragments
             .iter()
             .any(|active| active == fragment_name)
         {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` belongs to inactive fragment `{}`",
-                meta.meta.name, row_number, key, fragment_name
-            )));
+            return Err(fragment_value_error(
+                format!(
+                    "table `{}` row {} field `{}` belongs to inactive fragment `{}`",
+                    meta.meta.name, row_number, key, fragment_name
+                ),
+                DiagnosticLocation {
+                    table: Some(meta.meta.name.clone()),
+                    field: Some(key.clone()),
+                    source_row_number: Some(row_number),
+                    ..DiagnosticLocation::default()
+                },
+                fragment_name,
+                "active fragment for this row",
+            ));
         }
         if let Some(struct_type) = fragment.struct_type() {
             validate_struct_child_path(
@@ -785,10 +872,20 @@ fn validate_fragment_values_for_row(
                 field_name,
             )?;
         } else if fragment.field(field_name).is_none() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` references unknown fragment field `{}`",
-                meta.meta.name, row_number, key, field_name
-            )));
+            return Err(fragment_value_error(
+                format!(
+                    "table `{}` row {} field `{}` references unknown fragment field `{}`",
+                    meta.meta.name, row_number, key, field_name
+                ),
+                DiagnosticLocation {
+                    table: Some(meta.meta.name.clone()),
+                    field: Some(key.clone()),
+                    source_row_number: Some(row_number),
+                    ..DiagnosticLocation::default()
+                },
+                key,
+                format!("declared field on fragment `{fragment_name}`"),
+            ));
         }
     }
 
@@ -813,10 +910,19 @@ fn validate_fragment_values_for_row(
             if !has_effective_value
                 && visible_required_struct_child_count(struct_type, target_tags) > 0
             {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{}` row {} fragment `{}` is missing required struct payload values",
-                    meta.meta.name, row_number, fragment.meta.name
-                )));
+                return Err(missing_required_field_error(
+                    format!(
+                        "table `{}` row {} fragment `{}` is missing required struct payload values",
+                        meta.meta.name, row_number, fragment.meta.name
+                    ),
+                    DiagnosticLocation {
+                        table: Some(meta.meta.name.clone()),
+                        field: Some(fragment.meta.name.clone()),
+                        source_row_number: Some(row_number),
+                        ..DiagnosticLocation::default()
+                    },
+                    None,
+                ));
             }
             continue;
         }
@@ -831,10 +937,19 @@ fn validate_fragment_values_for_row(
                 fragment_field_key(fragment.meta.name.as_str(), field.meta.name.as_str());
             let value = row.get(&field_path).map(String::as_str).unwrap_or_default();
             if field.meta.required && value.trim().is_empty() {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{}` row {} field `{}` is required",
-                    meta.meta.name, row_number, field_path
-                )));
+                return Err(missing_required_field_error(
+                    format!(
+                        "table `{}` row {} field `{}` is required",
+                        meta.meta.name, row_number, field_path
+                    ),
+                    DiagnosticLocation {
+                        table: Some(meta.meta.name.clone()),
+                        field: Some(field_path),
+                        source_row_number: Some(row_number),
+                        ..DiagnosticLocation::default()
+                    },
+                    Some(value.to_owned()),
+                ));
             }
             if value.trim().is_empty() {
                 continue;
