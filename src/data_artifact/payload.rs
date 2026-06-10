@@ -4,8 +4,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     data::{DataResolver, DataTable, DataValue, ResolvedValue},
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{LinkedTableMeta, TableKind, TargetTags},
 };
 
@@ -56,11 +57,18 @@ fn build_exported_collection_payload(
         .enumerate()
         .map(|(resolved_row_index, row_index)| {
             let resolved_row = resolved_table.rows.get(resolved_row_index).ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "resolved table `{}` is missing row {}",
-                    table_meta.meta.name,
-                    resolved_row_index + 1
-                ))
+                data_payload_error(
+                    &table_meta.meta.name,
+                    None::<&str>,
+                    format!(
+                        "resolved table `{}` is missing row {}",
+                        table_meta.meta.name,
+                        resolved_row_index + 1
+                    ),
+                    format!("resolved row {}", resolved_row_index + 1),
+                    "resolved row for every exported source row",
+                    "Check data normalization and target row filtering before payload export.",
+                )
             })?;
             let mut exported_row = BTreeMap::new();
             for field in &exported_fields {
@@ -104,11 +112,18 @@ fn build_exported_object_payload(
     target_tags: &TargetTags,
 ) -> Result<BTreeMap<String, ExportedValue>> {
     if table.rows.len() != 1 {
-        return Err(ConfigForgeError::Validation(format!(
-            "object table `{}` must normalize to exactly one logical row, got {}",
-            table_meta.meta.name,
-            table.rows.len()
-        )));
+        return Err(data_payload_error(
+            &table_meta.meta.name,
+            None::<&str>,
+            format!(
+                "object table `{}` must normalize to exactly one logical row, got {}",
+                table_meta.meta.name,
+                table.rows.len()
+            ),
+            table.rows.len().to_string(),
+            "exactly one normalized object-table row",
+            "Normalize and validate object table input before runtime payload export.",
+        ));
     }
 
     let Some(row) = table.rows.first() else {
@@ -122,10 +137,17 @@ fn build_exported_object_payload(
     }
     let resolved_table = DataResolver::resolve_table(table_meta, table, Some(target_tags))?;
     let resolved_row = resolved_table.rows.first().ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "resolved object table `{}` is missing singleton row",
-            table_meta.meta.name
-        ))
+        data_payload_error(
+            &table_meta.meta.name,
+            None::<&str>,
+            format!(
+                "resolved object table `{}` is missing singleton row",
+                table_meta.meta.name
+            ),
+            "no resolved singleton row",
+            "resolved singleton row",
+            "Check object table normalization and resolver output before payload export.",
+        )
     })?;
 
     let mut exported_object = BTreeMap::new();
@@ -183,4 +205,31 @@ fn exported_value_from_array_element(
             .collect::<Result<Vec<_>>>()
             .map(ExportedValue::Array),
     }
+}
+
+fn data_payload_error(
+    table: impl Into<String>,
+    field: Option<impl Into<String>>,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation {
+                table: Some(table.into()),
+                field: field.map(Into::into),
+                ..Default::default()
+            },
+        )
+        .with_source("generator.data.payload")
+        .with_domain("generator")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
 }

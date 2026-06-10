@@ -4,9 +4,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     artifact::ArtifactWriteStream,
     data::ResolvedValue,
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{LinkedFieldMeta, LinkedFragmentMeta},
 };
 
@@ -92,20 +93,60 @@ pub(super) fn write_optional_bitmap<W: BinaryWriteTarget>(
 }
 
 pub(super) fn expected_scalar(field: &LinkedFieldMeta<'_>) -> ConfigForgeError {
-    ConfigForgeError::Validation(format!(
-        "binary export field `{}` expected scalar value",
-        field.meta.name
-    ))
+    binary_value_error(
+        Some(field.meta.name.as_str()),
+        format!(
+            "binary export field `{}` expected scalar value",
+            field.meta.name
+        ),
+        "non-scalar runtime value",
+        "scalar runtime value",
+        "Ensure resolved data field values match the linked meta field type before binary export.",
+    )
 }
 
 pub(super) fn ensure_javascript_safe_int(field_name: &str, value: i64) -> Result<()> {
     if (JAVASCRIPT_SAFE_INT_MIN..=JAVASCRIPT_SAFE_INT_MAX).contains(&value) {
         return Ok(());
     }
-    Err(ConfigForgeError::Validation(format!(
-        "binary export field `{}` int value `{}` exceeds JavaScript safe integer range [{}, {}]",
-        field_name, value, JAVASCRIPT_SAFE_INT_MIN, JAVASCRIPT_SAFE_INT_MAX
-    )))
+    Err(binary_value_error(
+        Some(field_name),
+        format!(
+            "binary export field `{}` int value `{}` exceeds JavaScript safe integer range [{}, {}]",
+            field_name, value, JAVASCRIPT_SAFE_INT_MIN, JAVASCRIPT_SAFE_INT_MAX
+        ),
+        value.to_string(),
+        format!(
+            "integer in JavaScript safe range [{}, {}]",
+            JAVASCRIPT_SAFE_INT_MIN, JAVASCRIPT_SAFE_INT_MAX
+        ),
+        "Use an int value that can be represented exactly by generated JavaScript-compatible runtimes.",
+    ))
+}
+
+pub(super) fn binary_value_error(
+    field: Option<impl Into<String>>,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation {
+                field: field.map(Into::into),
+                ..Default::default()
+            },
+        )
+        .with_source("generator.binary.encoder")
+        .with_domain("generator")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
 }
 
 fn set_bit(bitmap: &mut [u8], index: usize) {

@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     data::{ArrayElementValue, DataResolver, DataTable, DataValue, ResolvedValue, ScalarValue},
     meta::{
         EnumMeta, LinkedField, LinkedFieldMeta, LinkedFragmentMeta, LinkedStructType,
@@ -14,7 +14,7 @@ use crate::{
 };
 
 use super::wire::{
-    BinaryWriteTarget, FORMAT_VERSION, HEADER_SIZE, MAGIC, PresenceSlot,
+    BinaryWriteTarget, FORMAT_VERSION, HEADER_SIZE, MAGIC, PresenceSlot, binary_value_error,
     ensure_javascript_safe_int, expected_scalar, fragment_present, write_bytes,
     write_optional_bitmap, write_varuint, zigzag,
 };
@@ -78,11 +78,17 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
         write_varuint(self.out, visible_row_indices.len() as u64)?;
         for (resolved_row_index, row_index) in visible_row_indices.iter().enumerate() {
             let resolved_row = resolved_table.rows.get(resolved_row_index).ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "resolved table `{}` is missing row {}",
-                    self.table_meta.meta.name,
-                    resolved_row_index + 1
-                ))
+                binary_value_error(
+                    None::<&str>,
+                    format!(
+                        "resolved table `{}` is missing row {}",
+                        self.table_meta.meta.name,
+                        resolved_row_index + 1
+                    ),
+                    format!("resolved row {}", resolved_row_index + 1),
+                    "resolved row for every exported source row",
+                    "Check data normalization and target row filtering before binary export.",
+                )
             })?;
             self.write_table_record(
                 resolved_row,
@@ -94,11 +100,17 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
 
     fn write_object(&mut self, table: &DataTable) -> Result<()> {
         if table.rows.len() != 1 {
-            return Err(ConfigForgeError::Validation(format!(
-                "object table `{}` must normalize to exactly one logical row, got {}",
-                self.table_meta.meta.name,
-                table.rows.len()
-            )));
+            return Err(binary_value_error(
+                None::<&str>,
+                format!(
+                    "object table `{}` must normalize to exactly one logical row, got {}",
+                    self.table_meta.meta.name,
+                    table.rows.len()
+                ),
+                table.rows.len().to_string(),
+                "exactly one normalized object-table row",
+                "Normalize and validate object table input before binary export.",
+            ));
         }
 
         let Some(row) = table.rows.first() else {
@@ -110,20 +122,32 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
             .is_row_exported_for(self.target_tags, |field| row.get(field).map(String::as_str))
         {
             if self.has_visible_slots() {
-                return Err(ConfigForgeError::Validation(format!(
-                    "binary export object table `{}` row is filtered out but visible fields/fragments require a singleton record",
-                    self.table_meta.meta.name
-                )));
+                return Err(binary_value_error(
+                    None::<&str>,
+                    format!(
+                        "binary export object table `{}` row is filtered out but visible fields/fragments require a singleton record",
+                        self.table_meta.meta.name
+                    ),
+                    "filtered object row",
+                    "target-visible singleton object row",
+                    "Align row_export rules with visible object-table fields/fragments for this target.",
+                ));
             }
             return Ok(());
         }
         let resolved_table =
             DataResolver::resolve_table(self.table_meta, table, Some(self.target_tags))?;
         let resolved_row = resolved_table.rows.first().ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "resolved object table `{}` is missing singleton row",
-                self.table_meta.meta.name
-            ))
+            binary_value_error(
+                None::<&str>,
+                format!(
+                    "resolved object table `{}` is missing singleton row",
+                    self.table_meta.meta.name
+                ),
+                "no resolved singleton row",
+                "resolved singleton row",
+                "Check object table normalization and resolver output before binary export.",
+            )
         })?;
         if self.has_visible_slots() {
             self.write_table_record(resolved_row, None)?;
@@ -174,10 +198,16 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
             match values.get(&field.meta.name) {
                 Some(value) => self.write_field_value(field, value)?,
                 None if field.meta.required => {
-                    return Err(ConfigForgeError::Validation(format!(
-                        "binary export missing required field `{}.{}`",
-                        self.table_meta.meta.name, field.meta.name
-                    )));
+                    return Err(binary_value_error(
+                        Some(field.meta.name.as_str()),
+                        format!(
+                            "binary export missing required field `{}.{}`",
+                            self.table_meta.meta.name, field.meta.name
+                        ),
+                        "missing field value",
+                        "required resolved field value",
+                        "Ensure validation supplies required field values before binary export.",
+                    ));
                 }
                 None => {}
             }
@@ -187,10 +217,16 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
                 continue;
             }
             let value = values.get(&fragment.meta.name).ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "binary export missing present fragment `{}.{}`",
-                    self.table_meta.meta.name, fragment.meta.name
-                ))
+                binary_value_error(
+                    Some(fragment.meta.name.as_str()),
+                    format!(
+                        "binary export missing present fragment `{}.{}`",
+                        self.table_meta.meta.name, fragment.meta.name
+                    ),
+                    "missing fragment value",
+                    "resolved fragment value when fragment is present",
+                    "Ensure active fragments are resolved before binary export.",
+                )
             })?;
             self.write_fragment_record(fragment, value)?;
         }
@@ -203,10 +239,16 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
         value: &ResolvedValue,
     ) -> Result<()> {
         let DataValue::Struct(children) = &value.value else {
-            return Err(ConfigForgeError::Validation(format!(
-                "binary export expected struct value for fragment `{}`",
-                fragment.meta.name
-            )));
+            return Err(binary_value_error(
+                Some(fragment.meta.name.as_str()),
+                format!(
+                    "binary export expected struct value for fragment `{}`",
+                    fragment.meta.name
+                ),
+                value_shape(value),
+                "struct fragment value",
+                "Ensure resolved fragment payloads match the linked fragment shape.",
+            ));
         };
         self.write_record(
             &fragment.fields,
@@ -235,10 +277,16 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
             match values.get(&field.meta.name) {
                 Some(value) => self.write_field_value(field, value)?,
                 None if field.meta.required => {
-                    return Err(ConfigForgeError::Validation(format!(
-                        "binary export missing required field `{}` in {}",
-                        field.meta.name, context
-                    )));
+                    return Err(binary_value_error(
+                        Some(field.meta.name.as_str()),
+                        format!(
+                            "binary export missing required field `{}` in {}",
+                            field.meta.name, context
+                        ),
+                        "missing field value",
+                        "required resolved field value",
+                        "Ensure validation supplies required nested field values before binary export.",
+                    ));
                 }
                 None => {}
             }
@@ -265,8 +313,12 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
         value: &ResolvedValue,
     ) -> Result<()> {
         let DataValue::Array(elements) = &value.value else {
-            return Err(ConfigForgeError::Validation(
+            return Err(binary_value_error(
+                None::<&str>,
                 "binary export expected list value".to_owned(),
+                value_shape(value),
+                "list runtime value",
+                "Ensure resolved data field values match the linked list field type before binary export.",
             ));
         };
         write_varuint(self.out, elements.len() as u64)?;
@@ -311,8 +363,12 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
         value: &ArrayElementValue,
     ) -> Result<()> {
         let DataValue::Scalar(scalar) = &value.value else {
-            return Err(ConfigForgeError::Validation(
+            return Err(binary_value_error(
+                None::<&str>,
                 "binary export expected scalar list element".to_owned(),
+                array_element_shape(value),
+                "scalar list element",
+                "Ensure resolved list elements match the linked primitive element type before binary export.",
             ));
         };
         self.write_scalar(primitive, scalar, "<list element>")
@@ -332,10 +388,16 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
             }
             (PrimitiveFieldType::Float, ScalarValue::Float(value)) => {
                 if !value.is_finite() {
-                    return Err(ConfigForgeError::Validation(format!(
-                        "binary export field `{}` contains non-finite float `{}`",
-                        field_name, value
-                    )));
+                    return Err(binary_value_error(
+                        Some(field_name),
+                        format!(
+                            "binary export field `{}` contains non-finite float `{}`",
+                            field_name, value
+                        ),
+                        value.to_string(),
+                        "finite float value",
+                        "Use a finite numeric value for binary runtime export.",
+                    ));
                 }
                 self.out.write_binary_bytes(&value.to_le_bytes())?;
                 Ok(())
@@ -351,11 +413,17 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
                 write_bytes(self.out, value.as_bytes())?;
                 Ok(())
             }
-            _ => Err(ConfigForgeError::Validation(format!(
-                "binary export field `{}` has scalar incompatible with `{}`",
-                field_name,
-                primitive.as_str()
-            ))),
+            _ => Err(binary_value_error(
+                Some(field_name),
+                format!(
+                    "binary export field `{}` has scalar incompatible with `{}`",
+                    field_name,
+                    primitive.as_str()
+                ),
+                scalar_shape(scalar),
+                format!("{} scalar", primitive.as_str()),
+                "Ensure resolved scalar values match the linked primitive field type before binary export.",
+            )),
         }
     }
 
@@ -377,8 +445,12 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
         value: &ArrayElementValue,
     ) -> Result<()> {
         let DataValue::Scalar(ScalarValue::Enum(value)) = &value.value else {
-            return Err(ConfigForgeError::Validation(
+            return Err(binary_value_error(
+                None::<&str>,
                 "binary export expected enum list element".to_owned(),
+                array_element_shape(value),
+                "enum list element",
+                "Ensure resolved list elements match the linked enum element type before binary export.",
             ));
         };
         self.write_enum_value(enum_meta, value, "<list element>")
@@ -395,10 +467,16 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
             .iter()
             .position(|enum_value| enum_value.name == value)
             .ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "binary export field `{}` value `{}` is not a member of enum `{}`",
-                    field_name, value, enum_meta.name
-                ))
+                binary_value_error(
+                    Some(field_name),
+                    format!(
+                        "binary export field `{}` value `{}` is not a member of enum `{}`",
+                        field_name, value, enum_meta.name
+                    ),
+                    value.to_string(),
+                    format!("member of enum `{}`", enum_meta.name),
+                    "Ensure enum values are validated against the linked enum before binary export.",
+                )
             })?;
         write_varuint(self.out, ordinal as u64)?;
         Ok(())
@@ -410,10 +488,16 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
         value: &ResolvedValue,
     ) -> Result<()> {
         let DataValue::Struct(children) = &value.value else {
-            return Err(ConfigForgeError::Validation(format!(
-                "binary export expected struct `{}` value",
-                struct_type.meta.name
-            )));
+            return Err(binary_value_error(
+                None::<&str>,
+                format!(
+                    "binary export expected struct `{}` value",
+                    struct_type.meta.name
+                ),
+                value_shape(value),
+                format!("struct `{}` value", struct_type.meta.name),
+                "Ensure resolved data field values match the linked struct field type before binary export.",
+            ));
         };
         self.write_record(
             &struct_type.fields,
@@ -428,10 +512,16 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
         value: &ArrayElementValue,
     ) -> Result<()> {
         let DataValue::Struct(children) = &value.value else {
-            return Err(ConfigForgeError::Validation(format!(
-                "binary export expected struct `{}` list element",
-                struct_type.meta.name
-            )));
+            return Err(binary_value_error(
+                None::<&str>,
+                format!(
+                    "binary export expected struct `{}` list element",
+                    struct_type.meta.name
+                ),
+                array_element_shape(value),
+                format!("struct `{}` list element", struct_type.meta.name),
+                "Ensure resolved list elements match the linked struct element type before binary export.",
+            ));
         };
         self.write_record(
             &struct_type.fields,
@@ -446,8 +536,12 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
         value: &ArrayElementValue,
     ) -> Result<()> {
         let DataValue::Array(elements) = &value.value else {
-            return Err(ConfigForgeError::Validation(
+            return Err(binary_value_error(
+                None::<&str>,
                 "binary export expected nested list element".to_owned(),
+                array_element_shape(value),
+                "nested list element",
+                "Ensure resolved list elements match the linked nested list element type before binary export.",
             ));
         };
         write_varuint(self.out, elements.len() as u64)?;
@@ -455,5 +549,31 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
             self.write_array_element_for_type(element_type, element)?;
         }
         Ok(())
+    }
+}
+
+fn value_shape(value: &ResolvedValue) -> &'static str {
+    data_value_shape(&value.value)
+}
+
+fn array_element_shape(value: &ArrayElementValue) -> &'static str {
+    data_value_shape(&value.value)
+}
+
+fn data_value_shape(value: &DataValue) -> &'static str {
+    match value {
+        DataValue::Scalar(_) => "scalar runtime value",
+        DataValue::Struct(_) => "struct runtime value",
+        DataValue::Array(_) => "list runtime value",
+    }
+}
+
+fn scalar_shape(value: &ScalarValue) -> &'static str {
+    match value {
+        ScalarValue::Int(_) => "int scalar",
+        ScalarValue::Float(_) => "float scalar",
+        ScalarValue::Bool(_) => "bool scalar",
+        ScalarValue::String(_) => "string scalar",
+        ScalarValue::Enum(_) => "enum scalar",
     }
 }

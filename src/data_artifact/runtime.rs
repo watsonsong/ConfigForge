@@ -6,9 +6,10 @@ use std::{collections::BTreeSet, path::Path};
 use rayon::prelude::*;
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     artifact::ArtifactSink,
     data::DataSet,
+    diagnostic::code::{CF_ARTIFACT_PATH_COLLISION, CF_GENERATOR_UNSUPPORTED_DATA_INPUT},
     meta::{LinkedMetaModel, TargetTags},
     runtime_contract::RuntimeDataFile,
 };
@@ -39,16 +40,22 @@ pub(crate) fn export_runtime_data_to_sink(
             .map(|(index, plan)| {
                 let result: Result<RuntimeDataFile> = (|| {
                     let table_meta = linked_meta.table(&plan.table_name).ok_or_else(|| {
-                        ConfigForgeError::Validation(format!(
-                            "linked meta is missing table `{}`",
-                            plan.table_name
-                        ))
+                        runtime_input_error(
+                            &plan.table_name,
+                            format!("linked meta is missing table `{}`", plan.table_name),
+                            &plan.table_name,
+                            "table declared in linked meta",
+                            "Ensure runtime artifact plans are produced from the same linked meta model.",
+                        )
                     })?;
                     let table = data_set.table(&plan.table_name).ok_or_else(|| {
-                        ConfigForgeError::Validation(format!(
-                            "data set is missing table `{}`",
-                            plan.table_name
-                        ))
+                        runtime_input_error(
+                            &plan.table_name,
+                            format!("data set is missing table `{}`", plan.table_name),
+                            &plan.table_name,
+                            "resolved data table for runtime export",
+                            "Ensure data loading and validation completed before runtime data export.",
+                        )
                     })?;
                     let file = RuntimeDataFile {
                         table_name: plan.table_name.clone(),
@@ -106,11 +113,60 @@ fn ensure_unique_runtime_artifact_paths(plans: &[RuntimeArtifactPlan]) -> Result
     let mut paths = BTreeSet::new();
     for plan in plans {
         if !paths.insert(plan.path.clone()) {
-            return Err(ConfigForgeError::Validation(format!(
-                "multiple runtime data artifacts target `{}`",
-                plan.path.display()
-            )));
+            return Err(runtime_path_collision_error(
+                format!(
+                    "multiple runtime data artifacts target `{}`",
+                    plan.path.display()
+                ),
+                plan.path.display().to_string(),
+            ));
         }
     }
     Ok(())
+}
+
+fn runtime_input_error(
+    table: impl Into<String>,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation {
+                table: Some(table.into()),
+                ..Default::default()
+            },
+        )
+        .with_source("generator.data.runtime")
+        .with_domain("generator")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
+}
+
+fn runtime_path_collision_error(
+    message: String,
+    current_value: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_ARTIFACT_PATH_COLLISION,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source("generator.data.runtime")
+        .with_domain("artifact")
+        .with_current_value(current_value)
+        .with_expected("unique runtime artifact path per exported table")
+        .with_hint(
+            "Adjust table names or runtime exporter file naming so output paths are unique.",
+        ),
+    )
 }

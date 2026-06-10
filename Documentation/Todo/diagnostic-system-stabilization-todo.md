@@ -6,7 +6,7 @@
 
 **暂不删除本 TODO，也不把 Diagnostics 标为 Stable。**
 
-原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **236 处 / 63 文件**。这些不全是用户可见错误，但仍覆盖 data artifact、code artifact、generator 私有 option 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
+原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **174 处 / 47 文件**。这些不全是用户可见错误，但仍覆盖 generator 私有错误、部分 artifact/registry fallback 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
 
 已经完成且不再作为 TODO 追踪的内容：
 
@@ -28,6 +28,7 @@
 - Builtin validator config 高频错误已迁移：range / regex / string_length / required_when / compare / sum / monotonic 的 unknown parameter、scope、字段类型、参数组合、条件表达式等配置错误统一输出 `CF_VALIDATION_INVALID_CONFIG` 与 validator source/current/expected/hint。
 - Generator option 高频错误继续迁移：通用 codegen option、language option、Lua table option、data generator option 解析错误已统一使用 `CF_GENERATOR_INVALID_OPTION` / `CF_GENERATOR_UNKNOWN_TYPE` 并补齐 source/current/expected/hint。
 - Code artifact model 高频错误继续迁移：target-visible FK/index shape、unsupported index key、duplicate code model/generated symbol 等错误已使用 `CF_GENERATOR_UNSUPPORTED_DATA_INPUT` 并补齐 table/field/current/expected/hint。
+- Data artifact runtime payload / binary encoder / registry 高频错误继续迁移：payload shape、runtime artifact path conflict、binary runtime type mismatch / unsafe int、data exporter fallback contract 等错误已结构化为 `CF_GENERATOR_UNSUPPORTED_DATA_INPUT` / `CF_ARTIFACT_PATH_COLLISION` 并补齐 source/current/expected/hint。
 
 以下内容已从本 TODO 移除，不再作为 Diagnostics Stable 的阻塞项：
 
@@ -97,8 +98,8 @@ Generator registry 与 artifact writer 已结构化，但具体 generator、code
 
 - [ ] 迁移 generator 私有 option 解析错误到 `CF_GENERATOR_INVALID_OPTION` / `CF_GENERATOR_UNSUPPORTED_OPTION`，补充 task / target / option context。
 - [ ] 迁移 code artifact model / naming / unsupported type / file name 错误，补充 generator source、table / field / type context。
-- [ ] 迁移 data artifact runtime payload / binary encoder / registry 错误，补充 table / field / row / expected runtime type context。
-- [ ] 为每类新增至少一个 producer test 或 CLI JSON test。
+- [x] 迁移 data artifact runtime payload / binary encoder / registry 错误，补充 table / field / row / expected runtime type context。
+- [x] 为每类新增至少一个 producer test 或 CLI JSON test。
 
 ### P2：Stable 收口
 

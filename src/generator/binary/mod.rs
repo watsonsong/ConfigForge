@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     artifact::{ArtifactSink, ArtifactWriteStream},
     data::DataTable,
     data_artifact::{RuntimeTableFormat, export_runtime_data_to_sink, runtime_table_artifacts},
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{LinkedTableMeta, TargetTags},
 };
 
@@ -77,10 +78,21 @@ impl ArtifactGenerator for BinaryDataExporter {
         _input: &GeneratorCommonInput<'_>,
         _sink: &ArtifactSink,
     ) -> Result<()> {
-        Err(ConfigForgeError::Validation(format!(
-            "generator `{}` requires Data-backed artifact input",
-            FORMAT
-        )))
+        Err(ConfigForgeError::from_diagnostic(
+            Diagnostic::new(
+                CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+                DiagnosticSeverity::Error,
+                format!("generator `{}` requires Data-backed artifact input", FORMAT),
+                DiagnosticLocation::default(),
+            )
+            .with_source("generator.binary")
+            .with_domain("generator")
+            .with_current_value("meta-only generator input")
+            .with_expected("meta and data generator input")
+            .with_hint(
+                "Configure the binary export task as a data-backed export with loaded source data.",
+            ),
+        ))
     }
 
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<std::path::PathBuf>> {

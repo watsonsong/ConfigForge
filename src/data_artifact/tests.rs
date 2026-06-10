@@ -10,7 +10,8 @@ use crate::{
     artifact::{ArtifactSink, ArtifactWriteMode, ArtifactWriteStream, ArtifactWriter},
     data::{DataTable, SourceRole},
     diagnostic::code::{
-        CF_DATA_INVALID_TYPE, CF_DATA_SOURCE_SCHEMA_INVALID, CF_GENERATOR_INVALID_OPTION,
+        CF_ARTIFACT_PATH_COLLISION, CF_DATA_INVALID_TYPE, CF_DATA_SOURCE_SCHEMA_INVALID,
+        CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     },
     generator::BinaryDataExporter,
     meta::{LinkedTableMeta, MetaModel, TargetTags},
@@ -319,17 +320,28 @@ fn aggregate_exporter_uses_sink_without_legacy_artifact_fallback() {
     };
     let exporter = CustomAggregateExporter;
 
-    assert!(matches!(
-        exporter.export(
-            std::path::Path::new("out"),
-            &task,
-            &linked,
-            &TargetTags::empty(),
-            &data_set,
-        ),
-        Err(ConfigForgeError::Validation(message))
-            if message.contains("legacy aggregate export fallback")
-    ));
+    let diagnostic = expect_single_diagnostic(
+        exporter
+            .export(
+                std::path::Path::new("out"),
+                &task,
+                &linked,
+                &TargetTags::empty(),
+                &data_set,
+            )
+            .unwrap_err(),
+    );
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNSUPPORTED_DATA_INPUT);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.custom_aggregate.registry")
+    );
+    assert!(
+        diagnostic
+            .message
+            .contains("legacy aggregate export fallback")
+    );
+    assert_eq!(diagnostic.domain.as_deref(), Some("generator"));
 
     let dry_run_dir = tempdir().expect("dry-run dir should exist");
     let dry_run_sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
@@ -480,11 +492,26 @@ fn binary_exporter_rejects_int_outside_javascript_safe_range() {
         .serialize_table(table_meta, &data_table, &TargetTags::empty())
         .expect_err("unsafe JavaScript int should be rejected for bin export");
 
-    assert!(matches!(
-        error,
-        ConfigForgeError::Validation(message)
-            if message.contains("JavaScript safe integer range") && message.contains("id")
-    ));
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNSUPPORTED_DATA_INPUT);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.binary.encoder")
+    );
+    assert_eq!(diagnostic.domain.as_deref(), Some("generator"));
+    assert_eq!(diagnostic.location.field.as_deref(), Some("id"));
+    assert!(diagnostic.message.contains("JavaScript safe integer range"));
+    assert_eq!(
+        diagnostic.current_value.as_deref(),
+        Some("9007199254740992")
+    );
+    assert!(
+        diagnostic
+            .expected
+            .as_deref()
+            .unwrap()
+            .contains("JavaScript safe range")
+    );
 }
 
 #[test]
@@ -665,9 +692,16 @@ fn export_runtime_data_rejects_duplicate_artifact_paths_before_writing() {
     )
     .unwrap_err();
 
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_ARTIFACT_PATH_COLLISION);
+    assert_eq!(diagnostic.source.as_deref(), Some("generator.data.runtime"));
+    assert_eq!(diagnostic.domain.as_deref(), Some("artifact"));
     assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple runtime data artifacts target `same.conflict`"))
+        diagnostic
+            .message
+            .contains("multiple runtime data artifacts target `same.conflict`")
     );
+    assert_eq!(diagnostic.current_value.as_deref(), Some("same.conflict"));
     assert!(!out_dir.path().join("same.conflict").exists());
 }
 

@@ -4,10 +4,11 @@
 use std::path::PathBuf;
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     artifact::{Artifact, ArtifactSink, ArtifactWriteStream},
     data::{DataSet, DataTable},
     data_artifact::TargetDataConfig,
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{LinkedTableMeta, TargetTags},
 };
 
@@ -44,10 +45,15 @@ pub trait RuntimeTableFormat: Send + Sync {
         _table: &DataTable,
         _target_tags: &TargetTags,
     ) -> Result<Vec<u8>> {
-        Err(ConfigForgeError::Validation(format!(
-            "exporter `{}` does not implement legacy serialize_table fallback",
-            self.name()
-        )))
+        Err(data_exporter_contract_error(
+            self.name(),
+            format!(
+                "exporter `{}` does not implement legacy serialize_table fallback",
+                self.name()
+            ),
+            "legacy serialize_table fallback missing",
+            "serialize_table or serialize_table_to_stream implementation",
+        ))
     }
 
     /// Primary artifact serialization API. Runtime table export uses this path
@@ -94,10 +100,15 @@ pub trait AggregateDataExporter: Send + Sync {
         data_set: &DataSet,
     ) -> Result<Vec<Artifact>> {
         let _ = (out_dir, task, linked_meta, target_tags, data_set);
-        Err(ConfigForgeError::Validation(format!(
-            "exporter `{}` does not implement legacy aggregate export fallback",
-            self.name()
-        )))
+        Err(data_exporter_contract_error(
+            self.name(),
+            format!(
+                "exporter `{}` does not implement legacy aggregate export fallback",
+                self.name()
+            ),
+            "legacy aggregate export fallback missing",
+            "export or export_to_sink implementation",
+        ))
     }
 
     fn export_to_sink(
@@ -109,4 +120,25 @@ pub trait AggregateDataExporter: Send + Sync {
         data_set: &DataSet,
         sink: &ArtifactSink,
     ) -> Result<()>;
+}
+
+fn data_exporter_contract_error(
+    exporter: &str,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source(format!("generator.{exporter}.registry"))
+        .with_domain("generator")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint("Implement the streaming export API for runtime data generators."),
+    )
 }
