@@ -14,6 +14,7 @@ use crate::{
     diagnostic::code::{
         CF_ARTIFACT_CASE_INSENSITIVE_COLLISION, CF_ARTIFACT_HARDLINK_ALIAS_COLLISION,
         CF_ARTIFACT_PATH_COLLISION, CF_ARTIFACT_PATH_ESCAPE, CF_ARTIFACT_SYMLINK_ALIAS_COLLISION,
+        CF_ARTIFACT_WRITE_STATE,
     },
 };
 
@@ -173,8 +174,10 @@ impl ArtifactSink {
         let (index, temp_path) = {
             let mut state = self.inner.lock_state();
             if state.closed {
-                return Err(ConfigForgeError::Validation(
+                return Err(artifact_state_error(
                     "artifact sink is already closed".to_owned(),
+                    normalized_path.display().to_string(),
+                    "open artifact sink",
                 ));
             }
             if state.paths.contains_key(&normalized_path)
@@ -203,8 +206,10 @@ impl ArtifactSink {
                 ));
             }
             if state.first_error.is_some() {
-                return Err(ConfigForgeError::Validation(
+                return Err(artifact_state_error(
                     "artifact sink is already failed".to_owned(),
+                    normalized_path.display().to_string(),
+                    "artifact sink without prior write failure",
                 ));
             }
 
@@ -295,10 +300,11 @@ impl ArtifactSink {
                 .map(|(path, _)| path.display().to_string())
                 .collect::<Vec<_>>();
             if !open_paths.is_empty() && state.first_error.is_none() {
-                state.first_error = Some(ConfigForgeError::Validation(format!(
-                    "artifact stream `{}` was not finished",
-                    open_paths[0]
-                )));
+                state.first_error = Some(artifact_state_error(
+                    format!("artifact stream `{}` was not finished", open_paths[0]),
+                    &open_paths[0],
+                    "all artifact streams finished before sink.finish",
+                ));
             }
             let failed_paths = state
                 .paths
@@ -307,10 +313,11 @@ impl ArtifactSink {
                 .map(|(path, _)| path.display().to_string())
                 .collect::<Vec<_>>();
             if !failed_paths.is_empty() && state.first_error.is_none() {
-                state.first_error = Some(ConfigForgeError::Validation(format!(
-                    "artifact `{}` failed before finish",
-                    failed_paths[0]
-                )));
+                state.first_error = Some(artifact_state_error(
+                    format!("artifact `{}` failed before finish", failed_paths[0]),
+                    &failed_paths[0],
+                    "all artifact writes successful before sink.finish",
+                ));
             }
             (
                 state.entries.values().cloned().collect::<Vec<_>>(),
@@ -502,7 +509,11 @@ impl ArtifactSinkInner {
             .paths
             .insert(path.to_path_buf(), ArtifactPathState::Failed);
         if state.first_error.is_none() {
-            state.first_error = Some(ConfigForgeError::Validation(message));
+            state.first_error = Some(artifact_state_error(
+                message,
+                path.display().to_string(),
+                "artifact path can be opened for writing",
+            ));
         }
     }
 
@@ -512,7 +523,11 @@ impl ArtifactSinkInner {
             .paths
             .insert(path.to_path_buf(), ArtifactPathState::Failed);
         if state.first_error.is_none() {
-            state.first_error = Some(ConfigForgeError::Validation(message));
+            state.first_error = Some(artifact_state_error(
+                message,
+                path.display().to_string(),
+                "artifact stream write and finish without IO errors",
+            ));
         }
     }
 
@@ -685,6 +700,25 @@ fn artifact_path_error(
     )
 }
 
+fn artifact_state_error(
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_ARTIFACT_WRITE_STATE,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source("artifact.writer")
+        .with_current_value(current)
+        .with_expected(expected)
+        .with_hint("Finish each artifact stream exactly once and stop using a sink after failure or finish."),
+    )
+}
+
 fn filesystem_aware_path_key(path: &Path) -> Option<PathBuf> {
     let mut suffix = Vec::new();
     let mut ancestor = path;
@@ -831,6 +865,7 @@ mod tests {
     use crate::diagnostic::code::{
         CF_ARTIFACT_CASE_INSENSITIVE_COLLISION, CF_ARTIFACT_HARDLINK_ALIAS_COLLISION,
         CF_ARTIFACT_PATH_COLLISION, CF_ARTIFACT_PATH_ESCAPE, CF_ARTIFACT_SYMLINK_ALIAS_COLLISION,
+        CF_ARTIFACT_WRITE_STATE,
     };
 
     use super::*;
@@ -853,6 +888,10 @@ mod tests {
             diagnostic.current_value
         );
         assert!(diagnostic.expected.is_some());
+    }
+
+    fn assert_artifact_state_diagnostic(error: ConfigForgeError, current_contains: &str) {
+        assert_artifact_diagnostic(error, CF_ARTIFACT_WRITE_STATE, current_contains);
     }
 
     #[test]
@@ -1075,9 +1114,7 @@ mod tests {
 
         let error = sink.finish().unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("failed to open artifact"))
-        );
+        assert_artifact_state_diagnostic(error, "generated.rs");
     }
 
     #[test]
@@ -1099,13 +1136,7 @@ mod tests {
 
         let finish_error = sink.finish().unwrap_err();
 
-        assert!(matches!(
-            finish_error,
-            ConfigForgeError::Validation(message)
-                if message.contains("failed to flush")
-                    && message.contains("injected flush failure")
-                    && !message.contains("dropped before finish")
-        ));
+        assert_artifact_state_diagnostic(finish_error, "generated.rs");
     }
 
     #[test]
@@ -1204,9 +1235,7 @@ mod tests {
 
         let error = sink.finish().unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("dropped before finish"))
-        );
+        assert_artifact_state_diagnostic(error, "generated.rs");
         assert!(!path.exists());
         let out_dir = temp_dir.path().join("out");
         let temp_files = fs::read_dir(out_dir)

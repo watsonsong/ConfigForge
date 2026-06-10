@@ -12,6 +12,7 @@ pub const CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH: &str = "CF_GENERATOR_RUNTIME_C
 
 pub const CF_ARTIFACT_PATH_ESCAPE: &str = "CF_ARTIFACT_PATH_ESCAPE";
 pub const CF_ARTIFACT_PATH_COLLISION: &str = "CF_ARTIFACT_PATH_COLLISION";
+pub const CF_ARTIFACT_WRITE_STATE: &str = "CF_ARTIFACT_WRITE_STATE";
 pub const CF_ARTIFACT_CASE_INSENSITIVE_COLLISION: &str = "CF_ARTIFACT_CASE_INSENSITIVE_COLLISION";
 pub const CF_ARTIFACT_SYMLINK_ALIAS_COLLISION: &str = "CF_ARTIFACT_SYMLINK_ALIAS_COLLISION";
 pub const CF_ARTIFACT_HARDLINK_ALIAS_COLLISION: &str = "CF_ARTIFACT_HARDLINK_ALIAS_COLLISION";
@@ -148,6 +149,16 @@ pub const DIAGNOSTIC_CODE_METADATA: &[DiagnosticCodeMetadata] = &[
         "产物路径冲突",
         "多个 artifact 解析到相同的 normalized 输出路径。",
         Some("调整 export output/file_name，确保每个 artifact 目标路径唯一。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_ARTIFACT_WRITE_STATE,
+        "artifact",
+        "产物写入状态无效",
+        "artifact sink 或 stream 的生命周期状态不允许继续写入或完成。",
+        Some(
+            "检查 artifact stream 是否已 finish，或 sink 是否已因先前错误进入 failed/closed 状态。",
+        ),
         "0.1.0",
     ),
     DiagnosticCodeMetadata::error(
