@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     meta::{ExportCondition, LinkedMetaModel, TargetTags, ValidationSeverity, ValidatorMeta},
 };
 
-use super::common::{is_empty_value, linked_field, required_string, validate_allowed_params};
+use super::common::{
+    is_empty_value, linked_field, required_string, validate_allowed_params, validator_config_error,
+};
 use super::condition::RowCondition;
 use crate::validation::diagnostic::ValidationIssueLocation;
 use crate::validation::registry::{
@@ -32,8 +34,12 @@ impl ValidatorFactory for RequiredWhenValidatorFactory {
         linked_meta: &'meta LinkedMetaModel<'meta>,
     ) -> Result<Box<dyn CompiledValidator<'meta> + 'meta>> {
         let ValidatorLocation::Table { table_name } = location else {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "required_when",
                 "required_when validator must be declared on a table".to_owned(),
+                "field scope",
+                "table scope",
+                "Move the required_when validator to [[tables.validators]].",
             ));
         };
         let table = super::common::linked_table(linked_meta, "required_when", table_name)?;
@@ -162,8 +168,12 @@ impl RequiredWhenConfig {
         let field = required_string(meta, "required_when", "field")?;
         linked_field(table, "required_when", &field)?;
         let Some(when) = meta.params.get("when") else {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "required_when",
                 "validator `required_when` must set parameter `when`".to_owned(),
+                "missing parameter",
+                "when condition table",
+                "Add a `when` table describing the condition for requiring this field.",
             ));
         };
         Ok(Self {

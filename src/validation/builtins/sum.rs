@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     meta::{ExportCondition, LinkedMetaModel, TargetTags, ValidationSeverity, ValidatorMeta},
 };
 
 use super::common::{
     linked_field, optional_bool, optional_number, required_string, scalar_field_kind,
-    validate_allowed_params,
+    validate_allowed_params, validator_config_error,
 };
 use super::table_common::{GroupByConfig, GroupKey, GroupedRows, parse_numeric_value};
 use crate::validation::diagnostic::ValidationIssueLocation;
@@ -35,8 +35,12 @@ impl ValidatorFactory for SumValidatorFactory {
         linked_meta: &'meta LinkedMetaModel<'meta>,
     ) -> Result<Box<dyn CompiledValidator<'meta> + 'meta>> {
         let ValidatorLocation::Table { table_name } = location else {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "sum",
                 "sum validator must be declared on a table".to_owned(),
+                "field scope",
+                "table scope",
+                "Move the sum validator to [[tables.validators]].",
             ));
         };
         let table = super::common::linked_table(linked_meta, "sum", table_name)?;
@@ -205,44 +209,72 @@ impl SumConfig {
         let field = required_string(meta, "sum", "field")?;
         let field_meta = linked_field(table, "sum", &field)?;
         let Some(field_kind) = scalar_field_kind(field_meta) else {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` validator `sum` field `{field}` must be scalar",
-                table.meta.name
-            )));
+            return Err(validator_config_error(
+                "sum",
+                format!(
+                    "table `{}` validator `sum` field `{field}` must be scalar",
+                    table.meta.name
+                ),
+                &field,
+                "numeric scalar field",
+                "Choose an int or float field for sum.",
+            ));
         };
         if !field_kind.is_numeric() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` validator `sum` field `{field}` must be int or float",
-                table.meta.name
-            )));
+            return Err(validator_config_error(
+                "sum",
+                format!(
+                    "table `{}` validator `sum` field `{field}` must be int or float",
+                    table.meta.name
+                ),
+                &field,
+                "int or float field",
+                "Choose a numeric field for sum.",
+            ));
         }
 
         let equals = optional_number(meta, "sum", "equals")?;
         let min = optional_number(meta, "sum", "min")?;
         let max = optional_number(meta, "sum", "max")?;
         if equals.is_some() && (min.is_some() || max.is_some()) {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "sum",
                 "validator `sum` parameter `equals` cannot be combined with `min` or `max`"
                     .to_owned(),
+                "equals with min/max",
+                "equals alone, or min/max without equals",
+                "Remove equals or remove min/max from the validator config.",
             ));
         }
         if equals.is_none() && min.is_none() && max.is_none() {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "sum",
                 "validator `sum` must set `equals` or at least one of `min`/`max`".to_owned(),
+                "missing sum constraint",
+                "equals, min, or max",
+                "Configure a target sum or an allowed sum range.",
             ));
         }
         if let (Some(min), Some(max)) = (min, max) {
             if min > max {
-                return Err(ConfigForgeError::Validation(
+                return Err(validator_config_error(
+                    "sum",
                     "validator `sum` parameter `min` must be less than or equal to `max`"
                         .to_owned(),
+                    format!("min={min}, max={max}"),
+                    "min less than or equal to max",
+                    "Lower min or raise max so the bounds are satisfiable.",
                 ));
             }
         }
         let epsilon = optional_number(meta, "sum", "epsilon")?.unwrap_or(0.0);
         if epsilon < 0.0 {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "sum",
                 "validator `sum` parameter `epsilon` must be non-negative".to_owned(),
+                epsilon.to_string(),
+                "non-negative number",
+                "Use zero or a positive tolerance value.",
             ));
         }
 

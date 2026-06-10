@@ -4,7 +4,8 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
+    diagnostic::code::CF_VALIDATION_INVALID_CONFIG,
     meta::{LinkedMetaModel, ValidatorMeta},
 };
 
@@ -89,7 +90,15 @@ impl ValidatorRegistry {
         self.factories
             .get(kind)
             .map(|factory| factory.as_ref())
-            .ok_or_else(|| ConfigForgeError::Validation(format!("unknown validator kind `{kind}`")))
+            .ok_or_else(|| {
+                validator_config_error(
+                    kind,
+                    format!("unknown validator kind `{kind}`"),
+                    kind,
+                    "registered validator kind",
+                    "Use one of the built-in validator kinds or register a custom validator factory.",
+                )
+            })
     }
 }
 
@@ -170,8 +179,52 @@ fn validate_scope(
         ValidatorLocation::Table { table_name } => format!("table `{table_name}`"),
         ValidatorLocation::DataSet => "data set".to_owned(),
     };
-    Err(ConfigForgeError::Validation(format!(
-        "validator `{}` with scope `{:?}` cannot be declared at {location_name}",
-        validator.kind, scope
-    )))
+    Err(validator_config_error(
+        &validator.kind,
+        format!(
+            "validator `{}` with scope `{:?}` cannot be declared at {location_name}",
+            validator.kind, scope
+        ),
+        declaration_scope(location),
+        expected_scope(scope),
+        "Move the validator declaration to a location that matches the validator scope.",
+    ))
+}
+
+fn declaration_scope(location: ValidatorLocation<'_>) -> &'static str {
+    match location {
+        ValidatorLocation::Field { .. } => "field scope",
+        ValidatorLocation::Table { .. } => "table scope",
+        ValidatorLocation::DataSet => "data set scope",
+    }
+}
+
+fn expected_scope(scope: ValidatorScope) -> &'static str {
+    match scope {
+        ValidatorScope::Field => "field scope",
+        ValidatorScope::Record | ValidatorScope::Table => "table scope",
+        ValidatorScope::DataSet => "data set scope",
+    }
+}
+
+fn validator_config_error(
+    kind: &str,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_VALIDATION_INVALID_CONFIG,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source(format!("validator.{kind}"))
+        .with_domain("validation")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
 }

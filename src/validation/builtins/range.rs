@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     meta::{ExportCondition, LinkedMetaModel, TargetTags, ValidationSeverity, ValidatorMeta},
 };
 
-use super::common::{optional_bool, optional_number, scalar_field_kind, validate_allowed_params};
+use super::common::{
+    optional_bool, optional_number, scalar_field_kind, validate_allowed_params,
+    validator_config_error,
+};
 use crate::validation::diagnostic::ValidationIssueLocation;
 use crate::validation::registry::{
     CompiledValidator, ValidatorFactory, ValidatorLocation, ValidatorScope,
@@ -35,8 +38,12 @@ impl ValidatorFactory for RangeValidatorFactory {
             field_name,
         } = location
         else {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "range",
                 "range validator can only be declared on a field".to_owned(),
+                "table scope",
+                "field scope",
+                "Move the range validator to [[tables.fields.validators]].",
             ));
         };
 
@@ -46,22 +53,40 @@ impl ValidatorFactory for RangeValidatorFactory {
             Some(super::common::ScalarFieldKind::Int) => RangeFieldType::Int,
             Some(super::common::ScalarFieldKind::Float) => RangeFieldType::Float,
             _ => {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{table_name}` field `{field_name}` validator `range` can only be used on int or float fields"
-                )));
+                return Err(validator_config_error(
+                    "range",
+                    format!(
+                        "table `{table_name}` field `{field_name}` validator `range` can only be used on int or float fields"
+                    ),
+                    field_name,
+                    "int or float field",
+                    "Attach range to a numeric scalar field.",
+                ));
             }
         };
         let config = RangeValidatorConfig::compile(meta)?;
         if config.min.is_none() && config.max.is_none() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{table_name}` field `{field_name}` validator `range` must set at least one of `min` or `max`"
-            )));
+            return Err(validator_config_error(
+                "range",
+                format!(
+                    "table `{table_name}` field `{field_name}` validator `range` must set at least one of `min` or `max`"
+                ),
+                "missing bounds",
+                "min or max",
+                "Configure at least one numeric bound.",
+            ));
         }
         if let (Some(min), Some(max)) = (config.min, config.max) {
             if min > max {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{table_name}` field `{field_name}` validator `range` has min greater than max"
-                )));
+                return Err(validator_config_error(
+                    "range",
+                    format!(
+                        "table `{table_name}` field `{field_name}` validator `range` has min greater than max"
+                    ),
+                    format!("min={min}, max={max}"),
+                    "min less than or equal to max",
+                    "Lower min or raise max so the bounds are satisfiable.",
+                ));
             }
         }
 

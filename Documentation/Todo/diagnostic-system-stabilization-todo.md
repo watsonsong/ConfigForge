@@ -6,7 +6,7 @@
 
 **暂不删除本 TODO，也不把 Diagnostics 标为 Stable。**
 
-原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **304 处 / 69 文件**。这些不全是用户可见错误，但仍覆盖 data artifact、code artifact、generator 私有 option、builtin validators 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
+原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **267 处 / 68 文件**。这些不全是用户可见错误，但仍覆盖 data artifact、code artifact、generator 私有 option 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
 
 已经完成且不再作为 TODO 追踪的内容：
 
@@ -25,6 +25,7 @@
 - Data loading / source reading 高频错误已迁移：CSV read/schema/header、source path escape、source plan/provider、override primary key 等已具备 stable code 与 source/table/row context。
 - Data resolver / typed value 高频错误已迁移：enum、scalar/list/struct type、struct JSON cell、expanded struct/list、recursive/nested path、list index 连续性等已具备 stable code 与 table/row/field/current/expected context。
 - Asset resolver 高频错误已迁移：unknown kind/search path、unsupported input mode、path escape、missing file/sidecar、mount/candidate/object name/name prefix/suffix/path prefix/pattern/case-sensitive path 等已具备 stable code 与 current/expected/hint context。
+- Builtin validator config 高频错误已迁移：range / regex / string_length / required_when / compare / sum / monotonic 的 unknown parameter、scope、字段类型、参数组合、条件表达式等配置错误统一输出 `CF_VALIDATION_INVALID_CONFIG` 与 validator source/current/expected/hint。
 
 以下内容已从本 TODO 移除，不再作为 Diagnostics Stable 的阻塞项：
 
@@ -84,8 +85,9 @@ Validation 层 asset reference 与 `src/asset.rs` resolver 规则失败已统一
 当前 `validator.*` / `field.range_violation` 已进入 catalog metadata，但仍属于 legacy 命名体系。
 
 - [ ] 保持现有 `validator.*` 对外兼容的同时，为内置 validators 评估是否需要 `CF_VALIDATION_*` stable code；若继续使用 legacy code，则文档中明确这些 code 已被视为稳定外部契约。
-- [ ] 优先迁移 range / regex / string_length / required_when / compare / sum / monotonic 的 config error 与 runtime violation，补齐 `current_value`、`expected`、`hint`。
-- [ ] 更新 tests，使 validator tests 不只断言自然语言 message。
+- [x] 优先迁移 range / regex / string_length / required_when / compare / sum / monotonic 的 config error，补齐 `current_value`、`expected`、`hint`。
+- [x] 更新 validator config tests，使其断言 code / source / current / expected / hint，而不是只断言自然语言 message。
+- [ ] 评估 runtime violation 是否继续使用既有 `validator.*` / `field.range_violation` 作为稳定外部契约，或迁移到 `CF_VALIDATION_*` catalog code。
 
 ### P1：Generator / artifact 私有 option 与 code/data artifact 错误
 

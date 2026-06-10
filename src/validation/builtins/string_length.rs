@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     meta::{ExportCondition, LinkedMetaModel, TargetTags, ValidationSeverity, ValidatorMeta},
 };
 
 use super::common::{
     optional_bool, optional_string, optional_usize, scalar_field_kind, validate_allowed_params,
+    validator_config_error,
 };
 use crate::validation::diagnostic::ValidationIssueLocation;
 use crate::validation::registry::{
@@ -37,21 +38,37 @@ impl ValidatorFactory for StringLengthValidatorFactory {
             field_name,
         } = location
         else {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "string_length",
                 "string_length validator can only be declared on a field".to_owned(),
+                "table scope",
+                "field scope",
+                "Move the string_length validator to [[tables.fields.validators]].",
             ));
         };
         let table = super::common::linked_table(linked_meta, "string_length", table_name)?;
         let field = super::common::linked_field(table, "string_length", field_name)?;
         let Some(field_kind) = scalar_field_kind(field) else {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{table_name}` field `{field_name}` validator `string_length` can only be used on string, text or asset fields"
-            )));
+            return Err(validator_config_error(
+                "string_length",
+                format!(
+                    "table `{table_name}` field `{field_name}` validator `string_length` can only be used on string, text or asset fields"
+                ),
+                field_name,
+                "string, text, or asset field",
+                "Attach string_length to a string-like scalar field.",
+            ));
         };
         if !field_kind.is_string_like() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{table_name}` field `{field_name}` validator `string_length` can only be used on string, text or asset fields"
-            )));
+            return Err(validator_config_error(
+                "string_length",
+                format!(
+                    "table `{table_name}` field `{field_name}` validator `string_length` can only be used on string, text or asset fields"
+                ),
+                field_name,
+                "string, text, or asset field",
+                "Attach string_length to a string-like scalar field.",
+            ));
         }
 
         let config = StringLengthValidatorConfig::compile(meta)?;
@@ -229,21 +246,33 @@ impl StringLengthValidatorConfig {
         let max = optional_usize(meta, "string_length", "max")?;
         let exact = optional_usize(meta, "string_length", "exact")?;
         if exact.is_some() && (min.is_some() || max.is_some()) {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "string_length",
                 "validator `string_length` parameter `exact` cannot be used with `min` or `max`"
                     .to_owned(),
+                "exact with min/max",
+                "exact alone, or min/max without exact",
+                "Remove exact or remove min/max from the validator config.",
             ));
         }
         if exact.is_none() && min.is_none() && max.is_none() {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "string_length",
                 "validator `string_length` must set at least one of `min`, `max` or `exact`"
                     .to_owned(),
+                "missing bounds",
+                "min, max, or exact",
+                "Configure at least one length bound.",
             ));
         }
         if let (Some(min), Some(max)) = (min, max) {
             if min > max {
-                return Err(ConfigForgeError::Validation(
+                return Err(validator_config_error(
+                    "string_length",
                     "validator `string_length` has min greater than max".to_owned(),
+                    format!("min={min}, max={max}"),
+                    "min less than or equal to max",
+                    "Lower min or raise max so the bounds are satisfiable.",
                 ));
             }
         }
@@ -254,9 +283,15 @@ impl StringLengthValidatorConfig {
             "unicode_scalar" => StringLengthUnit::UnicodeScalar,
             "utf8_bytes" => StringLengthUnit::Utf8Bytes,
             other => {
-                return Err(ConfigForgeError::Validation(format!(
-                    "validator `string_length` parameter `unit` must be `unicode_scalar` or `utf8_bytes`, got `{other}`"
-                )));
+                return Err(validator_config_error(
+                    "string_length",
+                    format!(
+                        "validator `string_length` parameter `unit` must be `unicode_scalar` or `utf8_bytes`, got `{other}`"
+                    ),
+                    other,
+                    "unicode_scalar or utf8_bytes",
+                    "Use one of the supported string length units.",
+                ));
             }
         };
         Ok(Self {

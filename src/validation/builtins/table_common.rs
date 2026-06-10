@@ -6,13 +6,13 @@
 use std::{cmp::Ordering, collections::BTreeMap};
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     meta::{LinkedTableMeta, ValidatorMeta},
 };
 
 use super::common::{
     ScalarFieldKind, compare_values, is_empty_value, linked_field, optional_string_array,
-    scalar_field_kind,
+    scalar_field_kind, validator_config_error,
 };
 use crate::validation::ExportTableView;
 
@@ -33,16 +33,28 @@ impl GroupByConfig {
             .map(|field| {
                 let field_meta = linked_field(table, kind, &field)?;
                 let field_kind = scalar_field_kind(field_meta).ok_or_else(|| {
-                    ConfigForgeError::Validation(format!(
+                    validator_config_error(
+                        kind,
+                        format!(
                         "table `{}` validator `{kind}` group_by field `{field}` must be scalar",
                         table.meta.name
-                    ))
+                        ),
+                        &field,
+                        "stable-key scalar field",
+                        "Use an int, float, bool, string, text, asset, or enum field for group_by.",
+                    )
                 })?;
                 if !field_kind.is_stable_key_capable() {
-                    return Err(ConfigForgeError::Validation(format!(
+                    return Err(validator_config_error(
+                        kind,
+                        format!(
                         "table `{}` validator `{kind}` group_by field `{field}` must be stable-key capable",
                         table.meta.name
-                    )));
+                        ),
+                        &field,
+                        "stable-key scalar field",
+                        "Use a field type with deterministic grouping semantics.",
+                    ));
                 }
                 Ok(GroupField { name: field })
             })
@@ -143,16 +155,28 @@ impl OrderByConfig {
     pub(crate) fn compile(table: &LinkedTableMeta<'_>, kind: &str, field: String) -> Result<Self> {
         let field_meta = linked_field(table, kind, &field)?;
         let field_kind = scalar_field_kind(field_meta).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "table `{}` validator `{kind}` order_by field `{field}` must be scalar",
-                table.meta.name
-            ))
+            validator_config_error(
+                kind,
+                format!(
+                    "table `{}` validator `{kind}` order_by field `{field}` must be scalar",
+                    table.meta.name
+                ),
+                &field,
+                "stable-sort scalar field",
+                "Use an int, float, string, text, asset, or enum field for order_by.",
+            )
         })?;
         if !field_kind.is_stable_sort_capable() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` validator `{kind}` order_by field `{field}` must be stable-sort capable",
-                table.meta.name
-            )));
+            return Err(validator_config_error(
+                kind,
+                format!(
+                    "table `{}` validator `{kind}` order_by field `{field}` must be stable-sort capable",
+                    table.meta.name
+                ),
+                &field,
+                "stable-sort scalar field",
+                "Use a comparable field type for order_by.",
+            ));
         }
         Ok(Self {
             field,
@@ -211,9 +235,13 @@ pub(crate) fn parse_numeric_value(
         if skip_empty {
             return Ok(None);
         }
-        return Err(ConfigForgeError::Validation(format!(
-            "validator `{kind}` field `{field}` value must not be empty"
-        )));
+        return Err(validator_config_error(
+            kind,
+            format!("validator `{kind}` field `{field}` value must not be empty"),
+            "empty value",
+            "finite number",
+            "Fill the numeric field or enable skip_empty if empty values should be ignored.",
+        ));
     }
     value
         .parse::<f64>()
@@ -221,8 +249,12 @@ pub(crate) fn parse_numeric_value(
         .filter(|value| value.is_finite())
         .map(Some)
         .ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "validator `{kind}` field `{field}` value `{value}` must be finite number"
-            ))
+            validator_config_error(
+                kind,
+                format!("validator `{kind}` field `{field}` value `{value}` must be finite number"),
+                value,
+                "finite number",
+                "Use a numeric cell value that can be parsed as a finite float.",
+            )
         })
 }

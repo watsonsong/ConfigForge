@@ -4,12 +4,13 @@
 use regex::Regex;
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     meta::{ExportCondition, LinkedMetaModel, TargetTags, ValidationSeverity, ValidatorMeta},
 };
 
 use super::common::{
     optional_bool, optional_string, required_string, scalar_field_kind, validate_allowed_params,
+    validator_config_error,
 };
 use crate::validation::diagnostic::ValidationIssueLocation;
 use crate::validation::registry::{
@@ -39,21 +40,37 @@ impl ValidatorFactory for RegexValidatorFactory {
             field_name,
         } = location
         else {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "regex",
                 "regex validator can only be declared on a field".to_owned(),
+                "table scope",
+                "field scope",
+                "Move the regex validator to [[tables.fields.validators]].",
             ));
         };
         let table = super::common::linked_table(linked_meta, "regex", table_name)?;
         let field = super::common::linked_field(table, "regex", field_name)?;
         let Some(field_kind) = scalar_field_kind(field) else {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{table_name}` field `{field_name}` validator `regex` can only be used on string, text, asset or enum fields"
-            )));
+            return Err(validator_config_error(
+                "regex",
+                format!(
+                    "table `{table_name}` field `{field_name}` validator `regex` can only be used on string, text, asset or enum fields"
+                ),
+                field_name,
+                "string, text, asset, or enum field",
+                "Attach regex to a regex-compatible scalar field.",
+            ));
         };
         if !field_kind.supports_regex() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{table_name}` field `{field_name}` validator `regex` can only be used on string, text, asset or enum fields"
-            )));
+            return Err(validator_config_error(
+                "regex",
+                format!(
+                    "table `{table_name}` field `{field_name}` validator `regex` can only be used on string, text, asset or enum fields"
+                ),
+                field_name,
+                "string, text, asset, or enum field",
+                "Attach regex to a regex-compatible scalar field.",
+            ));
         }
 
         let config = RegexValidatorConfig::compile(meta)?;
@@ -179,9 +196,15 @@ impl RegexValidatorConfig {
             "full" => RegexMatchMode::Full,
             "search" => RegexMatchMode::Search,
             other => {
-                return Err(ConfigForgeError::Validation(format!(
-                    "validator `regex` parameter `match_mode` must be `full` or `search`, got `{other}`"
-                )));
+                return Err(validator_config_error(
+                    "regex",
+                    format!(
+                        "validator `regex` parameter `match_mode` must be `full` or `search`, got `{other}`"
+                    ),
+                    other,
+                    "full or search",
+                    "Use one of the supported regex match modes.",
+                ));
             }
         };
         let effective_pattern = match match_mode {
@@ -194,9 +217,13 @@ impl RegexValidatorConfig {
             format!("(?i:{effective_pattern})")
         };
         let regex = Regex::new(&effective_pattern).map_err(|error| {
-            ConfigForgeError::Validation(format!(
-                "validator `regex` parameter `pattern` is invalid: {error}"
-            ))
+            validator_config_error(
+                "regex",
+                format!("validator `regex` parameter `pattern` is invalid: {error}"),
+                &pattern,
+                "valid Rust regex pattern",
+                "Fix the regex pattern syntax.",
+            )
         })?;
         Ok(Self {
             pattern,

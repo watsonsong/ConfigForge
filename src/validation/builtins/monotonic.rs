@@ -4,13 +4,13 @@
 use std::cmp::Ordering;
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     meta::{ExportCondition, LinkedMetaModel, TargetTags, ValidationSeverity, ValidatorMeta},
 };
 
 use super::common::{
     compare_values, linked_field, optional_bool, optional_string, required_string,
-    scalar_field_kind, validate_allowed_params,
+    scalar_field_kind, validate_allowed_params, validator_config_error,
 };
 use super::table_common::{GroupByConfig, GroupKey, GroupedRows, OrderByConfig, OrderedRow};
 use crate::validation::diagnostic::ValidationIssueLocation;
@@ -37,8 +37,12 @@ impl ValidatorFactory for MonotonicValidatorFactory {
         linked_meta: &'meta LinkedMetaModel<'meta>,
     ) -> Result<Box<dyn CompiledValidator<'meta> + 'meta>> {
         let ValidatorLocation::Table { table_name } = location else {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "monotonic",
                 "monotonic validator must be declared on a table".to_owned(),
+                "field scope",
+                "table scope",
+                "Move the monotonic validator to [[tables.validators]].",
             ));
         };
         let table = super::common::linked_table(linked_meta, "monotonic", table_name)?;
@@ -239,16 +243,28 @@ impl MonotonicConfig {
         let field = required_string(meta, "monotonic", "field")?;
         let field_meta = linked_field(table, "monotonic", &field)?;
         let field_kind = scalar_field_kind(field_meta).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "table `{}` validator `monotonic` field `{field}` must be scalar",
-                table.meta.name
-            ))
+            validator_config_error(
+                "monotonic",
+                format!(
+                    "table `{}` validator `monotonic` field `{field}` must be scalar",
+                    table.meta.name
+                ),
+                &field,
+                "scalar field",
+                "Choose an int, float, string, text, asset, or enum field.",
+            )
         })?;
         if !field_kind.is_comparable() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` validator `monotonic` field `{field}` must be comparable",
-                table.meta.name
-            )));
+            return Err(validator_config_error(
+                "monotonic",
+                format!(
+                    "table `{}` validator `monotonic` field `{field}` must be comparable",
+                    table.meta.name
+                ),
+                &field,
+                "comparable scalar field",
+                "Use an int, float, string, text, asset, or enum field for monotonic ordering.",
+            ));
         }
         let order_by = OrderByConfig::compile(
             table,
@@ -284,9 +300,13 @@ impl MonotonicDirection {
         match value {
             "increasing" => Ok(Self::Increasing),
             "decreasing" => Ok(Self::Decreasing),
-            _ => Err(ConfigForgeError::Validation(
+            _ => Err(validator_config_error(
+                "monotonic",
                 "validator `monotonic` parameter `direction` must be `increasing` or `decreasing`"
                     .to_owned(),
+                value,
+                "increasing or decreasing",
+                "Use one of the supported monotonic directions.",
             )),
         }
     }

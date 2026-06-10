@@ -5,8 +5,9 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     data::DataRow,
+    diagnostic::code::CF_VALIDATION_INVALID_CONFIG,
     meta::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedTableMeta, PrimitiveFieldType,
         ValidatorMeta,
@@ -72,9 +73,16 @@ pub(super) fn validate_allowed_params(
     let allowed = allowed.iter().copied().collect::<BTreeSet<_>>();
     for key in meta.params.keys() {
         if !allowed.contains(key.as_str()) {
-            return Err(ConfigForgeError::Validation(format!(
-                "validator `{kind}` has unknown parameter `{key}`"
-            )));
+            return Err(validator_config_error(
+                kind,
+                format!("validator `{kind}` has unknown parameter `{key}`"),
+                key,
+                format!(
+                    "one of: {}",
+                    allowed.iter().copied().collect::<Vec<_>>().join(", ")
+                ),
+                "Remove the unknown parameter or fix the parameter spelling.",
+            ));
         }
     }
     Ok(())
@@ -82,9 +90,13 @@ pub(super) fn validate_allowed_params(
 
 pub(super) fn required_string(meta: &ValidatorMeta, kind: &str, key: &str) -> Result<String> {
     optional_string(meta, kind, key)?.ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "validator `{kind}` must set string parameter `{key}`"
-        ))
+        validator_config_error(
+            kind,
+            format!("validator `{kind}` must set string parameter `{key}`"),
+            "missing parameter",
+            format!("string parameter `{key}`"),
+            "Add the required string parameter to the validator config.",
+        )
     })
 }
 
@@ -100,9 +112,13 @@ pub(super) fn optional_string(
         .as_str()
         .map(|value| Some(value.to_owned()))
         .ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "validator `{kind}` parameter `{key}` must be string"
-            ))
+            validator_config_error(
+                kind,
+                format!("validator `{kind}` parameter `{key}` must be string"),
+                value.to_string(),
+                "string",
+                "Use a TOML string value for this validator parameter.",
+            )
         })
 }
 
@@ -116,17 +132,25 @@ pub(super) fn optional_string_array(
         return Ok(None);
     };
     let Some(values) = value.as_array() else {
-        return Err(ConfigForgeError::Validation(format!(
-            "validator `{kind}` parameter `{key}` must be an array of strings"
-        )));
+        return Err(validator_config_error(
+            kind,
+            format!("validator `{kind}` parameter `{key}` must be an array of strings"),
+            value.to_string(),
+            "array of strings",
+            "Use a TOML array containing only string values.",
+        ));
     };
     values
         .iter()
         .map(|value| {
             value.as_str().map(str::to_owned).ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "validator `{kind}` parameter `{key}` must be an array of strings"
-                ))
+                validator_config_error(
+                    kind,
+                    format!("validator `{kind}` parameter `{key}` must be an array of strings"),
+                    value.to_string(),
+                    "string array element",
+                    "Use only TOML string values in this array.",
+                )
             })
         })
         .collect::<Result<Vec<_>>>()
@@ -138,7 +162,13 @@ pub(super) fn optional_bool(meta: &ValidatorMeta, kind: &str, key: &str) -> Resu
         return Ok(None);
     };
     value.as_bool().map(Some).ok_or_else(|| {
-        ConfigForgeError::Validation(format!("validator `{kind}` parameter `{key}` must be bool"))
+        validator_config_error(
+            kind,
+            format!("validator `{kind}` parameter `{key}` must be bool"),
+            value.to_string(),
+            "bool",
+            "Use true or false for this validator parameter.",
+        )
     })
 }
 
@@ -154,9 +184,13 @@ pub(super) fn optional_number(meta: &ValidatorMeta, kind: &str, key: &str) -> Re
             return Ok(Some(value));
         }
     }
-    Err(ConfigForgeError::Validation(format!(
-        "validator `{kind}` parameter `{key}` must be finite integer or float"
-    )))
+    Err(validator_config_error(
+        kind,
+        format!("validator `{kind}` parameter `{key}` must be finite integer or float"),
+        value.to_string(),
+        "finite integer or float",
+        "Use a finite numeric value for this validator parameter.",
+    ))
 }
 
 pub(super) fn optional_usize(meta: &ValidatorMeta, kind: &str, key: &str) -> Result<Option<usize>> {
@@ -164,14 +198,22 @@ pub(super) fn optional_usize(meta: &ValidatorMeta, kind: &str, key: &str) -> Res
         return Ok(None);
     };
     let Some(value) = value.as_integer() else {
-        return Err(ConfigForgeError::Validation(format!(
-            "validator `{kind}` parameter `{key}` must be non-negative integer"
-        )));
+        return Err(validator_config_error(
+            kind,
+            format!("validator `{kind}` parameter `{key}` must be non-negative integer"),
+            value.to_string(),
+            "non-negative integer",
+            "Use a non-negative integer for this validator parameter.",
+        ));
     };
     usize::try_from(value).map(Some).map_err(|_| {
-        ConfigForgeError::Validation(format!(
-            "validator `{kind}` parameter `{key}` must be non-negative integer"
-        ))
+        validator_config_error(
+            kind,
+            format!("validator `{kind}` parameter `{key}` must be non-negative integer"),
+            value.to_string(),
+            "non-negative integer",
+            "Use a non-negative integer for this validator parameter.",
+        )
     })
 }
 
@@ -181,9 +223,13 @@ pub(super) fn linked_table<'meta>(
     table_name: &str,
 ) -> Result<&'meta LinkedTableMeta<'meta>> {
     linked_meta.table(table_name).ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "{validator_kind} validator references unknown table `{table_name}`"
-        ))
+        validator_config_error(
+            validator_kind,
+            format!("{validator_kind} validator references unknown table `{table_name}`"),
+            table_name,
+            "declared table name",
+            "Check the validator table reference and Meta table declarations.",
+        )
     })
 }
 
@@ -193,10 +239,16 @@ pub(super) fn linked_field<'meta>(
     field_name: &str,
 ) -> Result<&'meta LinkedFieldMeta<'meta>> {
     table.field(field_name).ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` {validator_kind} validator references unknown field `{field_name}`",
-            table.meta.name
-        ))
+        validator_config_error(
+            validator_kind,
+            format!(
+                "table `{}` {validator_kind} validator references unknown field `{field_name}`",
+                table.meta.name
+            ),
+            field_name,
+            format!("declared field in table `{}`", table.meta.name),
+            "Check the validator field reference and table field declarations.",
+        )
     })
 }
 
@@ -228,9 +280,13 @@ pub(super) fn literal_to_string(kind: &str, key: &str, value: &toml::Value) -> R
     if let Some(value) = value.as_bool() {
         return Ok(value.to_string());
     }
-    Err(ConfigForgeError::Validation(format!(
-        "validator `{kind}` parameter `{key}` must be string, integer, float or bool"
-    )))
+    Err(validator_config_error(
+        kind,
+        format!("validator `{kind}` parameter `{key}` must be string, integer, float or bool"),
+        value.to_string(),
+        "string, integer, float or bool",
+        "Use a scalar TOML value for this validator parameter.",
+    ))
 }
 
 pub(super) fn literal_array_to_strings(
@@ -239,14 +295,40 @@ pub(super) fn literal_array_to_strings(
     value: &toml::Value,
 ) -> Result<Vec<String>> {
     let Some(values) = value.as_array() else {
-        return Err(ConfigForgeError::Validation(format!(
-            "validator `{kind}` parameter `{key}` must be an array"
-        )));
+        return Err(validator_config_error(
+            kind,
+            format!("validator `{kind}` parameter `{key}` must be an array"),
+            value.to_string(),
+            "array",
+            "Use a TOML array for this validator parameter.",
+        ));
     };
     values
         .iter()
         .map(|value| literal_to_string(kind, key, value))
         .collect()
+}
+
+pub(super) fn validator_config_error(
+    kind: &str,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_VALIDATION_INVALID_CONFIG,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source(format!("validator.{kind}"))
+        .with_domain("validation")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
 }
 
 pub(super) fn row_value<'a>(row: &'a DataRow, field_name: &str) -> &'a str {

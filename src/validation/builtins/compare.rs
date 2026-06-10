@@ -4,13 +4,13 @@
 use std::cmp::Ordering;
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     meta::{ExportCondition, LinkedMetaModel, TargetTags, ValidationSeverity, ValidatorMeta},
 };
 
 use super::common::{
     compare_values, is_empty_value, linked_field, optional_bool, required_string,
-    scalar_field_kind, validate_allowed_params,
+    scalar_field_kind, validate_allowed_params, validator_config_error,
 };
 use crate::validation::diagnostic::ValidationIssueLocation;
 use crate::validation::registry::{
@@ -36,8 +36,12 @@ impl ValidatorFactory for CompareValidatorFactory {
         linked_meta: &'meta LinkedMetaModel<'meta>,
     ) -> Result<Box<dyn CompiledValidator<'meta> + 'meta>> {
         let ValidatorLocation::Table { table_name } = location else {
-            return Err(ConfigForgeError::Validation(
+            return Err(validator_config_error(
+                "compare",
                 "compare validator must be declared on a table".to_owned(),
+                "field scope",
+                "table scope",
+                "Move the compare validator to [[tables.validators]].",
             ));
         };
         let table = super::common::linked_table(linked_meta, "compare", table_name)?;
@@ -222,29 +226,53 @@ impl CompareConfig {
         let left = required_string(meta, "compare", "left")?;
         let right = required_string(meta, "compare", "right")?;
         let op = CompareOp::parse(&required_string(meta, "compare", "op")?).ok_or_else(|| {
-            ConfigForgeError::Validation(
+            validator_config_error(
+                "compare",
                 "validator `compare` parameter `op` must be one of ==, !=, <, <=, >, >=".to_owned(),
+                meta.params
+                    .get("op")
+                    .map_or_else(|| "missing parameter".to_owned(), ToString::to_string),
+                "one of ==, !=, <, <=, >, >=",
+                "Use a supported comparison operator.",
             )
         })?;
         let left_field = linked_field(table, "compare", &left)?;
         let right_field = linked_field(table, "compare", &right)?;
         let left_kind = scalar_field_kind(left_field).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "table `{}` field `{left}` validator `compare` only supports scalar fields",
-                table.meta.name
-            ))
+            validator_config_error(
+                "compare",
+                format!(
+                    "table `{}` field `{left}` validator `compare` only supports scalar fields",
+                    table.meta.name
+                ),
+                &left,
+                "scalar field",
+                "Choose an int, float, string, text, asset, or enum field.",
+            )
         })?;
         let right_kind = scalar_field_kind(right_field).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "table `{}` field `{right}` validator `compare` only supports scalar fields",
-                table.meta.name
-            ))
+            validator_config_error(
+                "compare",
+                format!(
+                    "table `{}` field `{right}` validator `compare` only supports scalar fields",
+                    table.meta.name
+                ),
+                &right,
+                "scalar field",
+                "Choose an int, float, string, text, asset, or enum field.",
+            )
         })?;
         if left_kind != right_kind || !left_kind.is_comparable() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` validator `compare` requires compatible comparable field types",
-                table.meta.name
-            )));
+            return Err(validator_config_error(
+                "compare",
+                format!(
+                    "table `{}` validator `compare` requires compatible comparable field types",
+                    table.meta.name
+                ),
+                format!("{left:?} vs {right:?}"),
+                "matching comparable scalar field types",
+                "Use fields with the same comparable type for both operands.",
+            ));
         }
         Ok(Self {
             left,

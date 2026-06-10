@@ -18,7 +18,7 @@ use crate::{
         DiagnosticLocation,
         code::{
             CF_DATA_DUPLICATE_KEY, CF_DATA_INVALID_ASSET_REF, CF_DATA_INVALID_FOREIGN_KEY,
-            CF_DATA_INVALID_TYPE, CF_DATA_MISSING_REQUIRED_FIELD,
+            CF_DATA_INVALID_TYPE, CF_DATA_MISSING_REQUIRED_FIELD, CF_VALIDATION_INVALID_CONFIG,
         },
     },
 };
@@ -66,6 +66,19 @@ fn validation_report_error<T>(result: Result<T>) -> ValidationReport {
         Err(error) => panic!("expected validation report error, got {error}"),
         Ok(_) => panic!("expected validation report error, got ok"),
     }
+}
+
+fn expect_validator_config_issue<T>(result: Result<T>, source: &str) -> ValidationIssue {
+    let report = validation_report_error(result);
+    assert_eq!(report.issues.len(), 1);
+    let issue = report.issues.into_iter().next().expect("one issue");
+    assert_eq!(issue.code, CF_VALIDATION_INVALID_CONFIG);
+    assert_eq!(issue.validator, source);
+    assert_eq!(issue.domain.as_deref(), Some("validation"));
+    assert!(issue.current_value.is_some());
+    assert!(issue.expected.is_some());
+    assert!(issue.hint.is_some());
+    issue
 }
 
 fn fragment_row_source(source_row_number: usize, fragments: &[&str]) -> RowSourceInfo {
@@ -2711,9 +2724,14 @@ fn range_validator_rejects_unknown_parameter() {
         vec![BTreeMap::from([("level".to_owned(), "5".to_owned())])],
     )]);
 
-    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    let issue = expect_validator_config_issue(
+        validate_data_set(&linked_meta, &data_set),
+        "validator.range",
+    );
 
-    assert!(message.contains("unknown parameter `minn`"));
+    assert!(issue.message.contains("unknown parameter `minn`"));
+    assert_eq!(issue.current_value.as_deref(), Some("minn"));
+    assert!(issue.expected.as_deref().unwrap().contains("min"));
 }
 
 #[test]
@@ -3009,9 +3027,18 @@ fn range_validator_declared_on_table_reports_scope_error() {
         vec![BTreeMap::from([("level".to_owned(), "5".to_owned())])],
     )]);
 
-    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    let issue = expect_validator_config_issue(
+        validate_data_set(&linked_meta, &data_set),
+        "validator.range",
+    );
 
-    assert!(message.contains("cannot be declared at table `items`"));
+    assert!(
+        issue
+            .message
+            .contains("cannot be declared at table `items`")
+    );
+    assert_eq!(issue.current_value.as_deref(), Some("table scope"));
+    assert_eq!(issue.expected.as_deref(), Some("field scope"));
 }
 
 #[test]
@@ -3120,8 +3147,13 @@ fn regex_validator_rejects_invalid_pattern_and_unsupported_field_type() {
         "items",
         vec![BTreeMap::from([("key".to_owned(), "x".to_owned())])],
     )]);
-    let message = validate_error(validate_data_set(&linked_meta, &data_set));
-    assert!(message.contains("parameter `pattern` is invalid"));
+    let issue = expect_validator_config_issue(
+        validate_data_set(&linked_meta, &data_set),
+        "validator.regex",
+    );
+    assert!(issue.message.contains("parameter `pattern` is invalid"));
+    assert_eq!(issue.current_value.as_deref(), Some("["));
+    assert_eq!(issue.expected.as_deref(), Some("valid Rust regex pattern"));
 
     let unsupported_type = MetaModel::from_toml_str(
         r#"
@@ -3144,8 +3176,20 @@ fn regex_validator_rejects_invalid_pattern_and_unsupported_field_type() {
         "items",
         vec![BTreeMap::from([("level".to_owned(), "1".to_owned())])],
     )]);
-    let message = validate_error(validate_data_set(&linked_meta, &data_set));
-    assert!(message.contains("can only be used on string, text, asset or enum fields"));
+    let issue = expect_validator_config_issue(
+        validate_data_set(&linked_meta, &data_set),
+        "validator.regex",
+    );
+    assert!(
+        issue
+            .message
+            .contains("can only be used on string, text, asset or enum fields")
+    );
+    assert_eq!(issue.current_value.as_deref(), Some("level"));
+    assert_eq!(
+        issue.expected.as_deref(),
+        Some("string, text, asset, or enum field")
+    );
 }
 
 #[test]
@@ -3245,8 +3289,16 @@ fn string_length_validator_rejects_ambiguous_config_and_unsupported_type() {
         "items",
         vec![BTreeMap::from([("name".to_owned(), "abc".to_owned())])],
     )]);
-    let message = validate_error(validate_data_set(&linked_meta, &data_set));
-    assert!(message.contains("cannot be used with `min` or `max`"));
+    let issue = expect_validator_config_issue(
+        validate_data_set(&linked_meta, &data_set),
+        "validator.string_length",
+    );
+    assert!(issue.message.contains("cannot be used with `min` or `max`"));
+    assert_eq!(issue.current_value.as_deref(), Some("exact with min/max"));
+    assert_eq!(
+        issue.expected.as_deref(),
+        Some("exact alone, or min/max without exact")
+    );
 
     let unsupported_type = MetaModel::from_toml_str(
         r#"
@@ -3269,8 +3321,20 @@ fn string_length_validator_rejects_ambiguous_config_and_unsupported_type() {
         "items",
         vec![BTreeMap::from([("level".to_owned(), "1".to_owned())])],
     )]);
-    let message = validate_error(validate_data_set(&linked_meta, &data_set));
-    assert!(message.contains("can only be used on string, text or asset fields"));
+    let issue = expect_validator_config_issue(
+        validate_data_set(&linked_meta, &data_set),
+        "validator.string_length",
+    );
+    assert!(
+        issue
+            .message
+            .contains("can only be used on string, text or asset fields")
+    );
+    assert_eq!(issue.current_value.as_deref(), Some("level"));
+    assert_eq!(
+        issue.expected.as_deref(),
+        Some("string, text, or asset field")
+    );
 }
 
 #[test]
@@ -3519,8 +3583,19 @@ fn compare_validator_handles_empty_operands_and_type_errors() {
             ("b".to_owned(), "1".to_owned()),
         ])],
     )]);
-    let message = validate_error(validate_data_set(&linked_meta, &data_set));
-    assert!(message.contains("requires compatible comparable field types"));
+    let issue = expect_validator_config_issue(
+        validate_data_set(&linked_meta, &data_set),
+        "validator.compare",
+    );
+    assert!(
+        issue
+            .message
+            .contains("requires compatible comparable field types")
+    );
+    assert_eq!(
+        issue.expected.as_deref(),
+        Some("matching comparable scalar field types")
+    );
 }
 
 #[test]
@@ -3834,8 +3909,14 @@ fn sum_validator_handles_skip_empty_and_config_errors() {
     )
     .expect("meta should load");
     let linked_meta = invalid_config.link().expect("meta should link");
-    let message = validate_error(validate_data_set(&linked_meta, &data_set));
-    assert!(message.contains("cannot be combined"));
+    let issue =
+        expect_validator_config_issue(validate_data_set(&linked_meta, &data_set), "validator.sum");
+    assert!(issue.message.contains("cannot be combined"));
+    assert_eq!(issue.current_value.as_deref(), Some("equals with min/max"));
+    assert_eq!(
+        issue.expected.as_deref(),
+        Some("equals alone, or min/max without equals")
+    );
 }
 
 #[test]

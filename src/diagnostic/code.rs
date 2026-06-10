@@ -27,6 +27,8 @@ pub const CF_DATA_SOURCE_SCHEMA_INVALID: &str = "CF_DATA_SOURCE_SCHEMA_INVALID";
 pub const CF_DATA_SOURCE_PATH_ESCAPE: &str = "CF_DATA_SOURCE_PATH_ESCAPE";
 pub const CF_DATA_DUPLICATE_HEADER: &str = "CF_DATA_DUPLICATE_HEADER";
 
+pub const CF_VALIDATION_INVALID_CONFIG: &str = "CF_VALIDATION_INVALID_CONFIG";
+
 pub const CF_BUILD_TARGET_NOT_FOUND: &str = "CF_BUILD_TARGET_NOT_FOUND";
 pub const CF_BUILD_INVALID_CONFIG: &str = "CF_BUILD_INVALID_CONFIG";
 pub const CF_BUILD_INVALID_OPTION: &str = "CF_BUILD_INVALID_OPTION";
@@ -298,6 +300,14 @@ pub const DIAGNOSTIC_CODE_METADATA: &[DiagnosticCodeMetadata] = &[
         "项目配置无效",
         "Project Config 中存在重复声明、未知引用或当前不支持的配置值。",
         Some("检查 ConfigForge.toml 中 targets、assets.search_paths 和 asset_kinds 等声明。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_VALIDATION_INVALID_CONFIG,
+        "validation",
+        "校验器配置无效",
+        "内置 validator 的作用域、参数类型、字段引用或规则组合无效。",
+        Some("检查 validator kind、声明位置、参数名和参数值类型。"),
         "0.1.0",
     ),
     DiagnosticCodeMetadata::legacy_error(

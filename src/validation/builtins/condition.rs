@@ -1,10 +1,11 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ConfigForgeError, Result, data::DataRow, meta::LinkedTableMeta};
+use crate::{Result, data::DataRow, meta::LinkedTableMeta};
 
 use super::common::{
     is_empty_value, linked_field, literal_array_to_strings, literal_to_string, row_value,
+    validator_config_error,
 };
 
 pub(super) enum RowCondition {
@@ -21,9 +22,13 @@ impl RowCondition {
         value: &toml::Value,
     ) -> Result<Self> {
         let Some(table_value) = value.as_table() else {
-            return Err(ConfigForgeError::Validation(format!(
-                "validator `{kind}` parameter `when` must be a table"
-            )));
+            return Err(validator_config_error(
+                kind,
+                format!("validator `{kind}` parameter `when` must be a table"),
+                value.to_string(),
+                "condition table",
+                "Use a TOML inline table or table value for `when`.",
+            ));
         };
 
         let composite_keys = ["all", "any", "none"]
@@ -32,20 +37,36 @@ impl RowCondition {
             .collect::<Vec<_>>();
         if !composite_keys.is_empty() {
             if composite_keys.len() != 1 || table_value.len() != 1 {
-                return Err(ConfigForgeError::Validation(format!(
-                    "validator `{kind}` parameter `when` cannot mix composite and leaf conditions"
-                )));
+                return Err(validator_config_error(
+                    kind,
+                    format!(
+                        "validator `{kind}` parameter `when` cannot mix composite and leaf conditions"
+                    ),
+                    table_value.keys().cloned().collect::<Vec<_>>().join(","),
+                    "one composite key or one leaf condition",
+                    "Use only one of `all`, `any`, `none`, or a single leaf condition.",
+                ));
             }
             let key = composite_keys[0];
             let Some(items) = table_value.get(key).and_then(toml::Value::as_array) else {
-                return Err(ConfigForgeError::Validation(format!(
-                    "validator `{kind}` parameter `when.{key}` must be an array"
-                )));
+                return Err(validator_config_error(
+                    kind,
+                    format!("validator `{kind}` parameter `when.{key}` must be an array"),
+                    table_value
+                        .get(key)
+                        .map_or_else(|| "missing value".to_owned(), ToString::to_string),
+                    "array of conditions",
+                    "Provide a non-empty array of nested conditions.",
+                ));
             };
             if items.is_empty() {
-                return Err(ConfigForgeError::Validation(format!(
-                    "validator `{kind}` parameter `when.{key}` must not be empty"
-                )));
+                return Err(validator_config_error(
+                    kind,
+                    format!("validator `{kind}` parameter `when.{key}` must not be empty"),
+                    "empty array",
+                    "non-empty array of conditions",
+                    "Add at least one nested condition.",
+                ));
             }
             let conditions = items
                 .iter()
@@ -97,9 +118,15 @@ impl LeafCondition {
         value: &toml::value::Table,
     ) -> Result<Self> {
         let Some(field) = value.get("field").and_then(toml::Value::as_str) else {
-            return Err(ConfigForgeError::Validation(format!(
-                "validator `{kind}` parameter `when.field` must be string"
-            )));
+            return Err(validator_config_error(
+                kind,
+                format!("validator `{kind}` parameter `when.field` must be string"),
+                value
+                    .get("field")
+                    .map_or_else(|| "missing parameter".to_owned(), ToString::to_string),
+                "field name string",
+                "Set `when.field` to a field name declared on the table.",
+            ));
         };
         linked_field(table, kind, field)?;
 
@@ -115,15 +142,25 @@ impl LeafCondition {
         .filter(|key| value.contains_key(*key))
         .collect::<Vec<_>>();
         if operation_keys.len() != 1 {
-            return Err(ConfigForgeError::Validation(format!(
-                "validator `{kind}` parameter `when` must set exactly one condition operation"
-            )));
+            return Err(validator_config_error(
+                kind,
+                format!(
+                    "validator `{kind}` parameter `when` must set exactly one condition operation"
+                ),
+                operation_keys.join(","),
+                "exactly one condition operation",
+                "Set one of equals, not_equals, in, not_in, is_empty, or not_empty.",
+            ));
         }
         for key in value.keys() {
             if key != "field" && !operation_keys.contains(&key.as_str()) {
-                return Err(ConfigForgeError::Validation(format!(
-                    "validator `{kind}` parameter `when` has unknown key `{key}`"
-                )));
+                return Err(validator_config_error(
+                    kind,
+                    format!("validator `{kind}` parameter `when` has unknown key `{key}`"),
+                    key,
+                    "field or a supported condition operation",
+                    "Remove the unknown condition key or fix its spelling.",
+                ));
             }
         }
         let key = operation_keys[0];
@@ -136,14 +173,22 @@ impl LeafCondition {
             "in" => LeafOperation::In(literal_array_to_strings(kind, "when.in", raw)?),
             "not_in" => LeafOperation::NotIn(literal_array_to_strings(kind, "when.not_in", raw)?),
             "is_empty" => LeafOperation::IsEmpty(raw.as_bool().ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "validator `{kind}` parameter `when.is_empty` must be bool"
-                ))
+                validator_config_error(
+                    kind,
+                    format!("validator `{kind}` parameter `when.is_empty` must be bool"),
+                    raw.to_string(),
+                    "bool",
+                    "Use true or false for `when.is_empty`.",
+                )
             })?),
             "not_empty" => LeafOperation::NotEmpty(raw.as_bool().ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "validator `{kind}` parameter `when.not_empty` must be bool"
-                ))
+                validator_config_error(
+                    kind,
+                    format!("validator `{kind}` parameter `when.not_empty` must be bool"),
+                    raw.to_string(),
+                    "bool",
+                    "Use true or false for `when.not_empty`.",
+                )
             })?),
             _ => unreachable!(),
         };
