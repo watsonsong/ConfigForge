@@ -6,14 +6,20 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     artifact::{Artifact, ArtifactSink},
     data::DataSet,
     data_artifact::{AggregateDataExporter, TargetDataConfig},
+    diagnostic::code::{
+        CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH, CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+    },
     meta::{LinkedMetaModel, TargetTags},
 };
 
-use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements};
+use super::{
+    ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements,
+    artifact_generator::generator_contract_error,
+};
 
 mod extract;
 mod options;
@@ -110,10 +116,13 @@ impl ArtifactGenerator for AssetManifestExporter {
         _input: &GeneratorCommonInput<'_>,
         _sink: &ArtifactSink,
     ) -> Result<()> {
-        Err(ConfigForgeError::Validation(format!(
-            "generator `{}` requires Data-backed artifact input",
-            FORMAT
-        )))
+        Err(generator_contract_error(
+            FORMAT,
+            format!("generator `{FORMAT}` requires Data-backed artifact input"),
+            "meta-only generation call",
+            "data-backed generation input",
+            "Use the generator registry data-backed pipeline for asset_manifest exports.",
+        ))
     }
 
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
@@ -158,10 +167,12 @@ fn render_asset_manifest(
             continue;
         }
         let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "data set is missing table `{}`",
-                table_meta.meta.name
-            ))
+            asset_manifest_input_error(
+                format!("data set is missing table `{}`", table_meta.meta.name),
+                table_meta.meta.name.clone(),
+                "visible table present in prepared data set",
+                "Ensure data loading completed for all target-visible asset manifest tables.",
+            )
         })?;
         extract_table_asset_references(&mut references, table_meta, table, target_tags, &options);
     }
@@ -172,4 +183,46 @@ fn render_asset_manifest(
         AssetManifestFormat::Csv => render_csv_manifest(&entries, &options)?,
     };
     Ok((options.file_name(), content))
+}
+
+fn asset_manifest_input_error(
+    message: impl Into<String>,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source("generator.asset_manifest.input")
+        .with_domain("generator")
+        .with_current_value(current)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
+}
+
+pub(super) fn asset_manifest_render_error(
+    message: impl Into<String>,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source("generator.asset_manifest.render")
+        .with_domain("generator")
+        .with_current_value(current)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
 }

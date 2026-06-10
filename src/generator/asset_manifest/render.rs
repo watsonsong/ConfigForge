@@ -5,10 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::{ConfigForgeError, Result, meta::TargetTags};
+use crate::{Result, meta::TargetTags};
 
 use super::{
-    AssetManifestEntry, AssetReferenceEntry,
+    AssetManifestEntry, AssetReferenceEntry, asset_manifest_render_error,
     options::{AssetManifestCsvMode, AssetManifestOptions},
 };
 
@@ -50,7 +50,12 @@ pub(super) fn render_json_manifest(
         assets: &json_entries,
     };
     let mut output = serde_json::to_string_pretty(&manifest).map_err(|error| {
-        ConfigForgeError::Validation(format!("failed to serialize asset manifest JSON: {error}"))
+        asset_manifest_render_error(
+            format!("failed to serialize asset manifest JSON: {error}"),
+            error.to_string(),
+            "serializable asset manifest JSON payload",
+            "Check asset manifest entries for unsupported JSON serialization data.",
+        )
     })?;
     output.push('\n');
     Ok(output)
@@ -139,10 +144,20 @@ fn render_unreal_csv_manifest(
             .map_err(csv_error)?;
     }
     let bytes = writer.into_inner().map_err(|error| {
-        ConfigForgeError::Validation(format!("failed to finish asset manifest CSV: {error}"))
+        asset_manifest_render_error(
+            format!("failed to finish asset manifest CSV: {error}"),
+            error.to_string(),
+            "completed CSV writer buffer",
+            "Check asset manifest CSV writer output and underlying buffer state.",
+        )
     })?;
     String::from_utf8(bytes).map_err(|error| {
-        ConfigForgeError::Validation(format!("asset manifest CSV is not valid UTF-8: {error}"))
+        asset_manifest_render_error(
+            format!("asset manifest CSV is not valid UTF-8: {error}"),
+            error.to_string(),
+            "UTF-8 asset manifest CSV content",
+            "Check asset manifest CSV serialization for non-UTF-8 bytes.",
+        )
     })
 }
 
@@ -159,15 +174,30 @@ fn render_simple_csv_manifest(entries: &[AssetManifestEntry]) -> Result<String> 
         writer.write_record([asset_ref]).map_err(csv_error)?;
     }
     let bytes = writer.into_inner().map_err(|error| {
-        ConfigForgeError::Validation(format!("failed to finish asset manifest CSV: {error}"))
+        asset_manifest_render_error(
+            format!("failed to finish asset manifest CSV: {error}"),
+            error.to_string(),
+            "completed CSV writer buffer",
+            "Check asset manifest CSV writer output and underlying buffer state.",
+        )
     })?;
     String::from_utf8(bytes).map_err(|error| {
-        ConfigForgeError::Validation(format!("asset manifest CSV is not valid UTF-8: {error}"))
+        asset_manifest_render_error(
+            format!("asset manifest CSV is not valid UTF-8: {error}"),
+            error.to_string(),
+            "UTF-8 asset manifest CSV content",
+            "Check asset manifest CSV serialization for non-UTF-8 bytes.",
+        )
     })
 }
 
-fn csv_error(error: csv::Error) -> ConfigForgeError {
-    ConfigForgeError::Validation(format!("failed to write asset manifest CSV: {error}"))
+fn csv_error(error: csv::Error) -> crate::ConfigForgeError {
+    asset_manifest_render_error(
+        format!("failed to write asset manifest CSV: {error}"),
+        error.to_string(),
+        "writable asset manifest CSV record",
+        "Check asset manifest CSV fields for values accepted by the csv writer.",
+    )
 }
 
 fn sorted_join<'a>(values: impl Iterator<Item = &'a str>) -> String {

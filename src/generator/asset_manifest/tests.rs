@@ -7,8 +7,13 @@ use std::{
 };
 
 use crate::{
+    artifact::{ArtifactWriteMode, ArtifactWriter},
+    code_artifact::tests::expect_single_diagnostic,
     data::{DataSet, DataTable},
     data_artifact::{AggregateDataExporter, TargetDataConfig},
+    diagnostic::code::{
+        CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH, CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+    },
     meta::{MetaModel, TargetTags},
 };
 
@@ -167,4 +172,48 @@ fn exporter_plans_format_specific_default_file_name() {
         paths,
         [PathBuf::from("Generated/Assets/asset_manifest.csv")]
     );
+}
+
+#[test]
+fn generate_to_sink_reports_structured_contract_error() {
+    let exporter = AssetManifestExporter;
+    let linked = linked_meta();
+    let input = crate::generator::GeneratorCommonInput {
+        project: crate::ArtifactProjectInfo::default(),
+        project_root: Path::new(".").to_path_buf(),
+        target_name: "client".to_owned(),
+        target_tags: TargetTags::empty(),
+        meta: &linked,
+        output: PathBuf::from("out"),
+        type_id: FORMAT.to_owned(),
+        task_name: "assets".to_owned(),
+        options: BTreeMap::new(),
+        generated_at: "now".to_owned(),
+    };
+    let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+    let error =
+        <AssetManifestExporter as ArtifactGenerator>::generate_to_sink(&exporter, &input, &sink)
+            .unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.asset_manifest.contract")
+    );
+}
+
+#[test]
+fn missing_table_reports_structured_manifest_input_error() {
+    let linked = linked_meta();
+    let task = task_with_options(BTreeMap::new());
+    let data_set = DataSet::new(Vec::new());
+    let error =
+        render_asset_manifest(&task, &linked, &TargetTags::new(["client"]), &data_set).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNSUPPORTED_DATA_INPUT);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.asset_manifest.input")
+    );
+    assert_eq!(diagnostic.current_value.as_deref(), Some("items"));
 }
