@@ -5,7 +5,9 @@ use std::path::PathBuf;
 
 use crate::{
     ConfigForgeError,
-    diagnostic::code::{CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNKNOWN_TYPE},
+    diagnostic::code::{
+        CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNKNOWN_TYPE, CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+    },
     generator::{
         CSharpCodeGenerator, CppCodeGenerator, CppUnrealCodeGenerator, RustCodeGenerator,
         TypeScriptCodeGenerator, TypeScriptCodegenOptions,
@@ -17,7 +19,7 @@ use crate::{
 use super::ir::{CodeForeignKey, CodeRelationCardinality, relation_key_plan};
 use super::*;
 
-fn expect_single_diagnostic(error: ConfigForgeError) -> crate::Diagnostic {
+pub(crate) fn expect_single_diagnostic(error: ConfigForgeError) -> crate::Diagnostic {
     let ConfigForgeError::ValidationReport(report) = error else {
         panic!("expected structured diagnostic report");
     };
@@ -755,11 +757,20 @@ fn code_model_rejects_visible_foreign_key_to_hidden_target_index() {
     let linked = meta.link().expect("meta should link");
 
     let error = build_code_model(&linked, &TargetTags::new(["client"]), &[]).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNSUPPORTED_DATA_INPUT);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.codegen.model")
+    );
     assert!(
-        error
-            .to_string()
+        diagnostic
+            .message
             .contains("target index `items.by_id` which is not exported")
     );
+    assert_eq!(diagnostic.location.table.as_deref(), Some("monsters"));
+    assert_eq!(diagnostic.current_value.as_deref(), Some("items.by_id"));
+    assert_eq!(diagnostic.expected.as_deref(), Some("target-visible index"));
 }
 
 #[test]
@@ -839,10 +850,22 @@ fn code_model_rejects_visible_foreign_key_to_hidden_source_field() {
     let linked = meta.link().expect("meta should link");
 
     let error = build_code_model(&linked, &TargetTags::new(["client"]), &[]).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNSUPPORTED_DATA_INPUT);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.codegen.model")
+    );
     assert!(
-        error
-            .to_string()
+        diagnostic
+            .message
             .contains("non-exported source field `drop_item_id`")
+    );
+    assert_eq!(diagnostic.location.table.as_deref(), Some("monsters"));
+    assert_eq!(diagnostic.location.field.as_deref(), Some("drop_item_id"));
+    assert_eq!(
+        diagnostic.expected.as_deref(),
+        Some("target-visible source field")
     );
 }
 
@@ -874,8 +897,22 @@ fn code_model_rejects_indexes_referencing_non_exported_fields() {
     let linked = meta.link().expect("meta should link");
     let error = build_code_model(&linked, &TargetTags::new(["client"]), &[]).unwrap_err();
 
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNSUPPORTED_DATA_INPUT);
     assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("primary index `by_id_region` references non-exported field `internal_region`"))
+        diagnostic.message.contains(
+            "primary index `by_id_region` references non-exported field `internal_region`"
+        )
+    );
+    assert_eq!(diagnostic.location.table.as_deref(), Some("items"));
+    assert_eq!(
+        diagnostic.location.field.as_deref(),
+        Some("internal_region")
+    );
+    assert_eq!(diagnostic.current_value.as_deref(), Some("internal_region"));
+    assert_eq!(
+        diagnostic.expected.as_deref(),
+        Some("exported primary index field for current target")
     );
 }
 
@@ -964,8 +1001,24 @@ fn code_model_rejects_unsupported_index_key_types() {
     let linked = meta.link().expect("meta should link");
     let error = build_code_model(&linked, &TargetTags::empty(), &[]).unwrap_err();
 
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNSUPPORTED_DATA_INPUT);
+    assert!(diagnostic.message.contains("unsupported index key type"));
+    assert_eq!(diagnostic.location.table.as_deref(), Some("items"));
+    assert_eq!(diagnostic.location.field.as_deref(), Some("ratio"));
     assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("unsupported index key type"))
+        diagnostic
+            .current_value
+            .as_deref()
+            .unwrap()
+            .contains("Float")
+    );
+    assert!(
+        diagnostic
+            .expected
+            .as_deref()
+            .unwrap()
+            .contains("index key type")
     );
 }
 
@@ -976,9 +1029,23 @@ pub(crate) fn assert_duplicate_generated_identifier(
     scope: &str,
 ) {
     let error = result.expect_err("generator should reject duplicate generated symbols");
-    assert!(
-        matches!(&error, ConfigForgeError::Validation(message) if message.contains(language) && message.contains(identifier) && message.contains(scope)),
-        "unexpected error: {error}"
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNSUPPORTED_DATA_INPUT);
+    let expected_language = language.strip_suffix(" codegen").unwrap_or(language);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some(format!("generator.{expected_language}.naming").as_str())
+    );
+    assert!(diagnostic.message.contains(language));
+    assert!(diagnostic.message.contains(identifier));
+    assert!(diagnostic.message.contains(scope));
+    let expected_current_value = identifier
+        .strip_prefix("duplicate generated identifier `")
+        .and_then(|value| value.strip_suffix('`'))
+        .unwrap_or(identifier);
+    assert_eq!(
+        diagnostic.current_value.as_deref(),
+        Some(expected_current_value)
     );
 }
 

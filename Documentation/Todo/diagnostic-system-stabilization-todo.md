@@ -6,7 +6,7 @@
 
 **暂不删除本 TODO，也不把 Diagnostics 标为 Stable。**
 
-原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **250 处 / 65 文件**。这些不全是用户可见错误，但仍覆盖 data artifact、code artifact、generator 私有 option 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
+原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **236 处 / 63 文件**。这些不全是用户可见错误，但仍覆盖 data artifact、code artifact、generator 私有 option 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
 
 已经完成且不再作为 TODO 追踪的内容：
 
@@ -27,6 +27,7 @@
 - Asset resolver 高频错误已迁移：unknown kind/search path、unsupported input mode、path escape、missing file/sidecar、mount/candidate/object name/name prefix/suffix/path prefix/pattern/case-sensitive path 等已具备 stable code 与 current/expected/hint context。
 - Builtin validator config 高频错误已迁移：range / regex / string_length / required_when / compare / sum / monotonic 的 unknown parameter、scope、字段类型、参数组合、条件表达式等配置错误统一输出 `CF_VALIDATION_INVALID_CONFIG` 与 validator source/current/expected/hint。
 - Generator option 高频错误继续迁移：通用 codegen option、language option、Lua table option、data generator option 解析错误已统一使用 `CF_GENERATOR_INVALID_OPTION` / `CF_GENERATOR_UNKNOWN_TYPE` 并补齐 source/current/expected/hint。
+- Code artifact model 高频错误继续迁移：target-visible FK/index shape、unsupported index key、duplicate code model/generated symbol 等错误已使用 `CF_GENERATOR_UNSUPPORTED_DATA_INPUT` 并补齐 table/field/current/expected/hint。
 
 以下内容已从本 TODO 移除，不再作为 Diagnostics Stable 的阻塞项：
 

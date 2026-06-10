@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{LinkedField, LinkedFragmentPayload, LinkedMetaModel, PrimitiveFieldType, TableKind},
     runtime_contract::{DEFAULT_RUNTIME_DATA_FORMAT, RuntimeDataFile, binary_schema_revision},
 };
@@ -302,10 +303,17 @@ pub(crate) fn build_code_model(
                     if let Some(field_name) = missing_exported_field {
                         if is_primary_index {
                             // Primary indexes are a generated loader contract, so hiding one is an error.
-                            return Err(ConfigForgeError::Validation(format!(
-                                "table `{}` primary index `{}` references non-exported field `{}` for current target",
-                                table_meta.meta.name, index_meta.meta.name, field_name
-                            )));
+                            return Err(code_model_error(
+                                format!(
+                                    "table `{}` primary index `{}` references non-exported field `{}` for current target",
+                                    table_meta.meta.name, index_meta.meta.name, field_name
+                                ),
+                                &table_meta.meta.name,
+                                Some(field_name),
+                                field_name,
+                                "exported primary index field for current target",
+                                "Make the primary index field visible for this target or choose a visible primary index.",
+                            ));
                         }
                         // Secondary indexes can disappear with target-hidden fields without breaking table access.
                         continue;
@@ -401,55 +409,100 @@ fn build_code_foreign_keys(
         }
         // Linking proves the full-model FK shape; IR must still prove the target-visible shape.
         let target_table = meta.table(foreign_key.target_table_name).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "table `{}` foreign key `{}` references unknown target table `{}`",
-                table_meta.meta.name, foreign_key.name, foreign_key.target_table_name
-            ))
+            code_model_error(
+                format!(
+                    "table `{}` foreign key `{}` references unknown target table `{}`",
+                    table_meta.meta.name, foreign_key.name, foreign_key.target_table_name
+                ),
+                &table_meta.meta.name,
+                None::<&str>,
+                foreign_key.target_table_name,
+                "linked target table in code model",
+                "Check the foreign key target table and target filtering rules.",
+            )
         })?;
         if !target_table.meta.is_exported_for(target_tags) {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` foreign key `{}` references target table `{}` which is not exported for current target",
-                table_meta.meta.name, foreign_key.name, foreign_key.target_table_name
-            )));
+            return Err(code_model_error(
+                format!(
+                    "table `{}` foreign key `{}` references target table `{}` which is not exported for current target",
+                    table_meta.meta.name, foreign_key.name, foreign_key.target_table_name
+                ),
+                &table_meta.meta.name,
+                None::<&str>,
+                foreign_key.target_table_name,
+                "target-visible table",
+                "Align the foreign key export_when with the target table visibility.",
+            ));
         }
         let target_index = target_table
             .index(foreign_key.target_index_name)
             .ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "table `{}` foreign key `{}` references unknown target index `{}.{}`",
+                code_model_error(
+                    format!(
+                        "table `{}` foreign key `{}` references unknown target index `{}.{}`",
+                        table_meta.meta.name,
+                        foreign_key.name,
+                        target_table.meta.name,
+                        foreign_key.target_index_name
+                    ),
+                    &table_meta.meta.name,
+                    None::<&str>,
+                    format!(
+                        "{}.{}",
+                        target_table.meta.name, foreign_key.target_index_name
+                    ),
+                    "linked target index in code model",
+                    "Check the foreign key target index and target filtering rules.",
+                )
+            })?;
+        if !target_index.meta.is_exported_for(target_tags) {
+            return Err(code_model_error(
+                format!(
+                    "table `{}` foreign key `{}` references target index `{}.{}` which is not exported for current target",
                     table_meta.meta.name,
                     foreign_key.name,
                     target_table.meta.name,
-                    foreign_key.target_index_name
-                ))
-            })?;
-        if !target_index.meta.is_exported_for(target_tags) {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` foreign key `{}` references target index `{}.{}` which is not exported for current target",
-                table_meta.meta.name,
-                foreign_key.name,
-                target_table.meta.name,
-                target_index.meta.name
-            )));
+                    target_index.meta.name
+                ),
+                &table_meta.meta.name,
+                None::<&str>,
+                format!("{}.{}", target_table.meta.name, target_index.meta.name),
+                "target-visible index",
+                "Align the foreign key export_when with the target index visibility.",
+            ));
         }
         for target_field in &target_index.fields {
             if !target_field.meta.is_exported_for(target_tags) {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{}` foreign key `{}` references non-exported target index field `{}.{}` for current target",
-                    table_meta.meta.name,
-                    foreign_key.name,
-                    target_table.meta.name,
-                    target_field.meta.name
-                )));
+                return Err(code_model_error(
+                    format!(
+                        "table `{}` foreign key `{}` references non-exported target index field `{}.{}` for current target",
+                        table_meta.meta.name,
+                        foreign_key.name,
+                        target_table.meta.name,
+                        target_field.meta.name
+                    ),
+                    &table_meta.meta.name,
+                    None::<&str>,
+                    format!("{}.{}", target_table.meta.name, target_field.meta.name),
+                    "target-visible index field",
+                    "Ensure all target index fields are exported for the same target.",
+                ));
             }
         }
         let mut fields = Vec::new();
         for field in &foreign_key.fields {
             let Some(code_field) = field_index.get(field.meta.name.as_str()).cloned() else {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{}` foreign key `{}` references non-exported source field `{}` for current target",
-                    table_meta.meta.name, foreign_key.name, field.meta.name
-                )));
+                return Err(code_model_error(
+                    format!(
+                        "table `{}` foreign key `{}` references non-exported source field `{}` for current target",
+                        table_meta.meta.name, foreign_key.name, field.meta.name
+                    ),
+                    &table_meta.meta.name,
+                    Some(field.meta.name.as_str()),
+                    field.meta.name.as_str(),
+                    "target-visible source field",
+                    "Align the foreign key export_when with its source field visibility.",
+                ));
             };
             fields.push(code_field);
         }
@@ -495,10 +548,17 @@ fn is_runtime_codegen_field(
 fn validate_index_key_type(table_name: &str, index_name: &str, field: &CodeField) -> Result<()> {
     match field.code_type {
         CodeTypeRef::Float | CodeTypeRef::Struct { .. } | CodeTypeRef::List(_) => {
-            Err(ConfigForgeError::Validation(format!(
-                "table `{table_name}` index `{index_name}` field `{}` uses unsupported index key type `{:?}`",
-                field.name, field.code_type
-            )))
+            Err(code_model_error(
+                format!(
+                    "table `{table_name}` index `{index_name}` field `{}` uses unsupported index key type `{:?}`",
+                    field.name, field.code_type
+                ),
+                table_name,
+                Some(field.name.as_str()),
+                format!("{:?}", field.code_type),
+                "int, bool, string, text, asset, or enum index key type",
+                "Use a stable scalar key type for generated index helpers.",
+            ))
         }
         CodeTypeRef::Int
         | CodeTypeRef::Bool
@@ -542,10 +602,17 @@ pub fn require_non_empty_index_fields(model: &CodeModel) -> Result<()> {
     for table in &model.tables {
         for index in &table.indexes {
             if index.fields.is_empty() {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{}` index `{}` has no codegen fields",
-                    table.name, index.name
-                )));
+                return Err(code_model_error(
+                    format!(
+                        "table `{}` index `{}` has no codegen fields",
+                        table.name, index.name
+                    ),
+                    &table.name,
+                    None::<&str>,
+                    &index.name,
+                    "at least one target-visible index field",
+                    "Ensure the index has fields exported for this target or hide the index.",
+                ));
             }
         }
     }
@@ -561,10 +628,42 @@ fn ensure_model_unique_names<T>(
     for item in items {
         let name = name_of(item);
         if !seen.insert(name) {
-            return Err(ConfigForgeError::Validation(format!(
-                "code model contains duplicate {scope} name `{name}`"
-            )));
+            return Err(code_model_error(
+                format!("code model contains duplicate {scope} name `{name}`"),
+                "<code model>",
+                None::<&str>,
+                name,
+                format!("unique {scope} name"),
+                "Rename the model element so generated code symbols remain unique.",
+            ));
         }
     }
     Ok(())
+}
+
+fn code_model_error(
+    message: String,
+    table: impl Into<String>,
+    field: Option<impl Into<String>>,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation {
+                table: Some(table.into()),
+                field: field.map(Into::into),
+                ..Default::default()
+            },
+        )
+        .with_source("generator.codegen.model")
+        .with_domain("generator")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
 }

@@ -10,7 +10,7 @@ use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
     code_artifact::{
         CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, RuntimeInterfaceMode,
-        tests::{input_for, linked_fixture},
+        tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
     },
     meta::MetaModel,
 };
@@ -749,10 +749,11 @@ fn rejects_text_helper_name_collisions() {
     .expect("meta should parse");
     let input = input_for(&meta, LANGUAGE);
 
-    let error = JavaCodeGenerator.generate(&input).unwrap_err();
-    assert!(
-        matches!(error, ConfigForgeError::Validation(ref message) if message.contains("duplicate generated identifier")),
-        "unexpected error: {error}"
+    assert_duplicate_generated_identifier(
+        JavaCodeGenerator.generate(&input),
+        LANGUAGE,
+        "duplicate generated identifier `nameText`",
+        "table `items` row members",
     );
 }
 
@@ -768,10 +769,11 @@ fn rejects_lazy_game_data_member_collisions() {
     .expect("meta should parse");
     let input = input_for(&meta, LANGUAGE);
 
-    let error = JavaCodeGenerator.generate(&input).unwrap_err();
-    assert!(
-        matches!(error, ConfigForgeError::Validation(ref message) if message.contains("LazyGameData members") && message.contains("duplicate generated identifier")),
-        "unexpected error: {error}"
+    assert_duplicate_generated_identifier(
+        JavaCodeGenerator.generate(&input),
+        LANGUAGE,
+        "duplicate generated identifier `loader`",
+        "LazyGameData members",
     );
 }
 
@@ -846,10 +848,11 @@ fn rejects_duplicate_generated_java_member_names() {
     .expect("meta should parse");
     let input = input_for(&meta, LANGUAGE);
 
-    let error = JavaCodeGenerator.generate(&input).unwrap_err();
-    assert!(
-        matches!(error, ConfigForgeError::Validation(ref message) if message.contains("duplicate generated identifier")),
-        "unexpected error: {error}"
+    assert_duplicate_generated_identifier(
+        JavaCodeGenerator.generate(&input),
+        LANGUAGE,
+        "duplicate generated identifier `displayName`",
+        "table `items` row members",
     );
 }
 

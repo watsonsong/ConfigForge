@@ -26,7 +26,9 @@ use crate::{
     ArtifactProjectInfo, ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity,
     Result,
     artifact::ArtifactSink,
-    diagnostic::code::{CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNKNOWN_TYPE},
+    diagnostic::code::{
+        CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNKNOWN_TYPE, CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+    },
     meta::{LinkedMetaModel, TargetTags},
     runtime_contract::RuntimeDataFile,
 };
@@ -651,10 +653,17 @@ pub(crate) fn ensure_unique_generated_symbols(
     for symbol in symbols {
         let generated = symbol.generated.clone();
         if let Some(previous) = seen.get(&generated) {
-            return Err(ConfigForgeError::Validation(format!(
-                "{language} codegen: duplicate generated identifier `{}` in {scope}; {} `{}` and {} `{}` both map to it",
-                generated, previous.kind, previous.original, symbol.kind, symbol.original
-            )));
+            return Err(generator_option_error(
+                CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+                format!("generator.{language}.naming"),
+                format!(
+                    "{language} codegen: duplicate generated identifier `{}` in {scope}; {} `{}` and {} `{}` both map to it",
+                    generated, previous.kind, previous.original, symbol.kind, symbol.original
+                ),
+                generated,
+                format!("unique generated identifier in {scope}"),
+                "Adjust source names or naming options so generated identifiers are unique.",
+            ));
         }
         seen.insert(generated, symbol);
     }

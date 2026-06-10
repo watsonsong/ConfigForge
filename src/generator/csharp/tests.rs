@@ -11,7 +11,10 @@ use crate::{
     code_artifact::{
         CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, I18nFunctionReturn,
         I18nMode, RuntimeInterfaceMode,
-        tests::{input_for, linked_fixture},
+        tests::{
+            assert_duplicate_generated_identifier, expect_single_diagnostic, input_for,
+            linked_fixture,
+        },
     },
     meta::MetaModel,
 };
@@ -507,9 +510,16 @@ fn rejects_text_helper_name_collisions() {
         let input = input_for(&meta, LANGUAGE);
 
         let error = CSharpCodeGenerator.generate(&input).unwrap_err();
+        let diagnostic = expect_single_diagnostic(error);
         assert!(
-            matches!(error, ConfigForgeError::Validation(ref message) if message.contains("duplicate generated identifier `NameText`") || message.contains("duplicate generated identifier `GetByIdText`")),
-            "unexpected error: {error}"
+            diagnostic
+                .message
+                .contains("duplicate generated identifier `NameText`")
+                || diagnostic
+                    .message
+                    .contains("duplicate generated identifier `GetByIdText`"),
+            "unexpected error: {}",
+            diagnostic.message
         );
     }
 }
@@ -652,12 +662,11 @@ fn rejects_duplicate_generated_csharp_field_names() {
     )
     .expect("meta should parse");
 
-    let error = CSharpCodeGenerator
-        .generate(&input_for(&meta, LANGUAGE))
-        .unwrap_err();
-    assert!(
-        matches!(error, ConfigForgeError::Validation(ref message) if message.contains("duplicate generated identifier `DisplayName`")),
-        "unexpected error: {error}"
+    assert_duplicate_generated_identifier(
+        CSharpCodeGenerator.generate(&input_for(&meta, LANGUAGE)),
+        LANGUAGE,
+        "duplicate generated identifier `DisplayName`",
+        "table `items` row properties",
     );
 }
 
