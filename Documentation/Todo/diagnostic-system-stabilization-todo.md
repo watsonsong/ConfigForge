@@ -6,7 +6,7 @@
 
 **暂不删除本 TODO，也不把 Diagnostics 标为 Stable。**
 
-原因：当前 `src/**/*.rs` 中仍有 `ConfigForgeError::Validation(` **443 处 / 78 文件**。这些不全是用户可见错误，但仍覆盖 asset resolver、data loading、data resolver、typed value、data artifact、code artifact、generator 私有 option、project/build config、builtin validators 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
+原因：当前源文件扫描基线中仍有 `ConfigForgeError::Validation(` **444 处 / 78 文件**。这些不全是用户可见错误，但仍覆盖 asset resolver、data loading、data resolver、typed value、data artifact、code artifact、generator 私有 option、project/build config、builtin validators 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
 
 已经完成且不再作为 TODO 追踪的内容：
 
@@ -20,6 +20,7 @@
 - Generator Registry unknown / ambiguous / health check 与 prepared input 缺失结构化诊断。
 - Artifact path escape / collision / case-insensitive / symlink / hardlink alias 结构化诊断。
 - 核心 table validation 的 type / required / duplicate key / FK / asset reference 结构化诊断。
+- legacy fallback 债务护栏：已有单元测试锁定 `ConfigForgeError::Validation(` 基线，新增裸 fallback 会导致测试失败。
 
 以下内容已从本 TODO 移除，不再作为 Diagnostics Stable 的阻塞项：
 
@@ -39,14 +40,6 @@
 5. 设计状态矩阵才能从 `Implemented MVP` 调整为 `Stable`。
 
 ## 实际剩余 TODO
-
-### P0：建立 legacy 收敛护栏
-
-当前 helper 已经足够顺手，但没有机制阻止继续新增裸字符串错误。
-
-- [ ] 增加 legacy 债务统计测试或脚本，记录 `ConfigForgeError::Validation(` 当前基线；新增使用点必须显式更新 allowlist / debt count。
-- [ ] 在文档 / 代码注释中明确：新的 ConfigForge-produced 业务校验错误必须使用 `Diagnostic` / `DiagnosticReport`，`Validation(String)` 只作为第三方错误包装或尚未迁移 fallback。
-- [ ] 将迁移目标从“全仓库一次性清零”改为“用户可见路径优先 + debt count 单调下降”，避免噪声重构。
 
 ### P0：Project / Build 配置错误结构化
 

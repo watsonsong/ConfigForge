@@ -101,9 +101,13 @@ fn format_diagnostic_report(report: &DiagnosticReport<Diagnostic>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, path::Path};
+
     use crate::diagnostic::{DiagnosticLocation, DiagnosticSeverity};
 
     use super::*;
+
+    const LEGACY_VALIDATION_FALLBACK_BASELINE: usize = 444;
 
     #[test]
     fn structured_error_helpers_create_validation_report_errors() {
@@ -125,5 +129,36 @@ mod tests {
             panic!("expected validation report error");
         };
         assert_eq!(report.diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn legacy_validation_fallback_debt_does_not_increase() {
+        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let count = count_legacy_validation_fallbacks(&source_root);
+
+        assert!(
+            count <= LEGACY_VALIDATION_FALLBACK_BASELINE,
+            "legacy validation fallback count increased: {count} > {LEGACY_VALIDATION_FALLBACK_BASELINE}; use structured diagnostics for new ConfigForge-produced business errors"
+        );
+    }
+
+    fn count_legacy_validation_fallbacks(path: &Path) -> usize {
+        if path.is_dir() {
+            return fs::read_dir(path)
+                .unwrap_or_else(|error| panic!("failed to read `{}`: {error}", path.display()))
+                .map(|entry| {
+                    let entry = entry.expect("source directory entry should be readable");
+                    count_legacy_validation_fallbacks(&entry.path())
+                })
+                .sum();
+        }
+        if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+            return 0;
+        }
+        let content = fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("failed to read `{}`: {error}", path.display()));
+        content
+            .match_indices(concat!("ConfigForgeError", "::", "Validation", "("))
+            .count()
     }
 }
