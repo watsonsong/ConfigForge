@@ -6,7 +6,7 @@
 
 **暂不删除本 TODO，也不把 Diagnostics 标为 Stable。**
 
-原因：当前源文件扫描基线中仍有 `ConfigForgeError::Validation(` **444 处 / 78 文件**。这些不全是用户可见错误，但仍覆盖 asset resolver、data loading、data resolver、typed value、data artifact、code artifact、generator 私有 option、project/build config、builtin validators 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
+原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **417 处 / 75 文件**。这些不全是用户可见错误，但仍覆盖 asset resolver、data loading、data resolver、typed value、data artifact、code artifact、generator 私有 option、builtin validators 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
 
 已经完成且不再作为 TODO 追踪的内容：
 
@@ -21,6 +21,7 @@
 - Artifact path escape / collision / case-insensitive / symlink / hardlink alias 结构化诊断。
 - 核心 table validation 的 type / required / duplicate key / FK / asset reference 结构化诊断。
 - legacy fallback 债务护栏：已有单元测试锁定 `ConfigForgeError::Validation(` 基线，新增裸 fallback 会导致测试失败。
+- Project / Build config 入口层错误已迁移：target 不存在、重复 target / export task name、非法 task name、非法 execution resource flag、Data-dependent target 缺少 `project.input`、CLI validation report 附加任务冲突 / 输出文件名错误等已具备 stable code 与 JSON context。
 
 以下内容已从本 TODO 移除，不再作为 Diagnostics Stable 的阻塞项：
 
@@ -41,13 +42,13 @@
 
 ## 实际剩余 TODO
 
-### P0：Project / Build 配置错误结构化
+### P0：Project / Build 配置错误结构化（已完成）
 
 这些错误会直接阻断 CLI build / validate，是 Stable 前最值得优先迁移的入口层错误。
 
-- [ ] 迁移 target 不存在、重复 target / export task name、非法 task name、非法 resource flag、非法 input/output 配置等 build / project config 错误。
-- [ ] 为 build / project config 错误补充 `source = "build.*"` 或 `project.*`、`target`、`current_value`、`expected`、`hint`。
-- [ ] 为上述路径增加 CLI JSON integration tests，断言 stable code 和 target / option context。
+- [x] 迁移 target 不存在、重复 target / export task name、非法 task name、非法 resource flag、非法 input/output 配置等 build / project config 错误。
+- [x] 为 build / project config 错误补充 `source = "build.*"` 或 `project.*`、`target`、`current_value`、`expected`、`hint`。
+- [x] 为上述路径增加 CLI JSON integration tests，断言 stable code 和 target / option context。
 
 ### P0：Data loading / source reading 错误结构化
 

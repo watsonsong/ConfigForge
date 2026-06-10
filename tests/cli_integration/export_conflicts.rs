@@ -374,3 +374,136 @@ fn unknown_generator_json_diagnostic_has_stable_code_and_target() {
     );
     assert!(!bad_out_dir.exists());
 }
+
+#[test]
+fn missing_target_json_diagnostic_has_stable_code_and_target_context() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        r#"
+            [[targets]]
+            name = "client"
+        "#,
+    )
+    .expect("project config should be written");
+
+    let output = Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .args([
+            "--project",
+            project_path.to_str().expect("path should be utf8"),
+            "--target",
+            "missing",
+            "--diagnostic-format",
+            "json",
+        ])
+        .output()
+        .expect("config-forge should run");
+
+    let json = stderr_json(output);
+    assert_eq!(json["diagnostics"][0]["code"], "CF_BUILD_TARGET_NOT_FOUND");
+    assert_eq!(json["diagnostics"][0]["severity"], "error");
+    assert_eq!(json["diagnostics"][0]["source"], "project.target");
+    assert_eq!(json["diagnostics"][0]["domain"], "build");
+    assert_eq!(json["diagnostics"][0]["target"], "missing");
+    assert_eq!(json["diagnostics"][0]["current_value"], "missing");
+    assert_eq!(json["diagnostics"][0]["expected"], "declared target name");
+}
+
+#[test]
+fn duplicate_export_task_json_diagnostic_has_stable_code_and_task_context() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                imports = [{}]
+
+                [[targets]]
+                name = "client"
+
+                [[targets.exports]]
+                name = "json"
+                output = "{}"
+                type = "json"
+
+                [[targets.exports]]
+                name = "json"
+                output = "{}"
+                type = "messagepack"
+            "#,
+            standard_core_meta_imports(),
+            temp_dir.path().join("out/json").display(),
+            temp_dir.path().join("out/messagepack").display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let output = Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .args([
+            "--project",
+            project_path.to_str().expect("path should be utf8"),
+            "--target",
+            "client",
+            "--diagnostic-format",
+            "json",
+        ])
+        .output()
+        .expect("config-forge should run");
+
+    let json = stderr_json(output);
+    assert_eq!(json["diagnostics"][0]["code"], "CF_BUILD_INVALID_CONFIG");
+    assert_eq!(json["diagnostics"][0]["severity"], "error");
+    assert_eq!(
+        json["diagnostics"][0]["source"],
+        "build.target.exports.name"
+    );
+    assert_eq!(json["diagnostics"][0]["domain"], "build");
+    assert_eq!(json["diagnostics"][0]["target"], "client");
+    assert_eq!(json["diagnostics"][0]["current_value"], "json");
+    assert_eq!(
+        json["diagnostics"][0]["expected"],
+        "unique export task name within target"
+    );
+}
+
+#[test]
+fn duplicate_project_target_json_diagnostic_has_stable_code_and_project_context() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        r#"
+            [[targets]]
+            name = "client"
+
+            [[targets]]
+            name = "client"
+        "#,
+    )
+    .expect("project config should be written");
+
+    let output = Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .args([
+            "--project",
+            project_path.to_str().expect("path should be utf8"),
+            "--target",
+            "client",
+            "--diagnostic-format",
+            "json",
+        ])
+        .output()
+        .expect("config-forge should run");
+
+    let json = stderr_json(output);
+    assert_eq!(json["diagnostics"][0]["code"], "CF_PROJECT_INVALID_CONFIG");
+    assert_eq!(json["diagnostics"][0]["severity"], "error");
+    assert_eq!(json["diagnostics"][0]["source"], "project.targets");
+    assert_eq!(json["diagnostics"][0]["domain"], "project");
+    assert_eq!(json["diagnostics"][0]["current_value"], "client");
+    assert_eq!(json["diagnostics"][0]["expected"], "unique targets.name");
+}

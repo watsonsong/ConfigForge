@@ -6,6 +6,12 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 
+fn stderr_json(output: std::process::Output) -> serde_json::Value {
+    assert!(!output.status.success(), "command should fail");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    serde_json::from_str(&stderr).expect("stderr should be diagnostic JSON")
+}
+
 #[test]
 fn builds_target_with_execution_resource_flags() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
@@ -121,6 +127,43 @@ fn rejects_zero_jobs_flag() {
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("--jobs must be greater than 0"));
+}
+
+#[test]
+fn zero_jobs_json_diagnostic_has_stable_code_and_option_context() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        r#"
+            [[targets]]
+            name = "empty"
+        "#,
+    )
+    .expect("project config should be written");
+
+    let output = Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .args([
+            "--project",
+            project_path.to_str().expect("path should be utf8"),
+            "--target",
+            "empty",
+            "--jobs",
+            "0",
+            "--diagnostic-format",
+            "json",
+        ])
+        .output()
+        .expect("config-forge should run");
+
+    let json = stderr_json(output);
+    assert_eq!(json["diagnostics"][0]["code"], "CF_BUILD_INVALID_OPTION");
+    assert_eq!(json["diagnostics"][0]["severity"], "error");
+    assert_eq!(json["diagnostics"][0]["source"], "--jobs");
+    assert_eq!(json["diagnostics"][0]["domain"], "build");
+    assert_eq!(json["diagnostics"][0]["current_value"], "0");
+    assert_eq!(json["diagnostics"][0]["expected"], "integer in 1..=128");
 }
 
 #[test]
