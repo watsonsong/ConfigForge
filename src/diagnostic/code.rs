@@ -22,6 +22,10 @@ pub const CF_DATA_INVALID_ENUM: &str = "CF_DATA_INVALID_ENUM";
 pub const CF_DATA_INVALID_FOREIGN_KEY: &str = "CF_DATA_INVALID_FOREIGN_KEY";
 pub const CF_DATA_INVALID_ASSET_REF: &str = "CF_DATA_INVALID_ASSET_REF";
 pub const CF_DATA_DUPLICATE_KEY: &str = "CF_DATA_DUPLICATE_KEY";
+pub const CF_DATA_SOURCE_READ_FAILED: &str = "CF_DATA_SOURCE_READ_FAILED";
+pub const CF_DATA_SOURCE_SCHEMA_INVALID: &str = "CF_DATA_SOURCE_SCHEMA_INVALID";
+pub const CF_DATA_SOURCE_PATH_ESCAPE: &str = "CF_DATA_SOURCE_PATH_ESCAPE";
+pub const CF_DATA_DUPLICATE_HEADER: &str = "CF_DATA_DUPLICATE_HEADER";
 
 pub const CF_BUILD_TARGET_NOT_FOUND: &str = "CF_BUILD_TARGET_NOT_FOUND";
 pub const CF_BUILD_INVALID_CONFIG: &str = "CF_BUILD_INVALID_CONFIG";
@@ -214,6 +218,38 @@ pub const DIAGNOSTIC_CODE_METADATA: &[DiagnosticCodeMetadata] = &[
         "唯一性约束冲突",
         "字段或索引要求唯一，但当前数据存在重复 key。",
         Some("修改重复行的 key 字段，或确认 unique/index 配置。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_DATA_SOURCE_READ_FAILED,
+        "data",
+        "源数据读取失败",
+        "CSV 或其他 source provider 读取源文件时发生 IO、解析或行列格式错误。",
+        Some("检查源文件是否存在、CSV 行列数量是否一致，以及文件编码/格式是否正确。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_DATA_SOURCE_SCHEMA_INVALID,
+        "data",
+        "源数据配置或表头无效",
+        "source layout、header row、provider 或 ObjectTable key/value 表头不满足当前读取规则。",
+        Some("检查 Meta 中 source 配置、CSV 表头和 row layout。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_DATA_SOURCE_PATH_ESCAPE,
+        "data",
+        "源数据路径逃逸输入根目录",
+        "source path 解析后不在 project.input / data root 内，或通过文件系统别名逃逸。",
+        Some("使用 data root 内的相对 source path，避免绝对路径、.. 或 symlink alias。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_DATA_DUPLICATE_HEADER,
+        "data",
+        "源数据表头重复",
+        "CSV header row 中存在重复列名，无法稳定映射字段值。",
+        Some("修改重复列名，确保同一 source header row 内每个列名唯一。"),
         "0.1.0",
     ),
     DiagnosticCodeMetadata::error(

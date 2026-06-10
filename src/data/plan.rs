@@ -4,7 +4,8 @@
 use std::path::PathBuf;
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
+    diagnostic::code::CF_DATA_SOURCE_SCHEMA_INVALID,
     meta::{MetaModel, SourceRef, TableKind, TableMeta, TargetTags},
 };
 
@@ -119,25 +120,40 @@ impl SourceReadPlan {
 impl DataSourcePlan {
     pub fn from_table(table: &TableMeta, target_tags: Option<&TargetTags>) -> Result<Vec<Self>> {
         if table.source.is_some() && !table.sources.is_empty() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` declares both legacy `source` and `sources`",
-                table.name
-            )));
+            return Err(source_plan_error(
+                table,
+                format!(
+                    "table `{}` declares both legacy `source` and `sources`",
+                    table.name
+                ),
+                "legacy `source` plus `sources`",
+                "declare either `source` or `sources`, not both",
+            ));
         }
 
         if table.sources.len() > 1 && !table.is_variant_source_mode() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` declares multiple sources, but only polymorphic collection tables with fragments support variant source mode",
-                table.name
-            )));
+            return Err(source_plan_error(
+                table,
+                format!(
+                    "table `{}` declares multiple sources, but only polymorphic collection tables with fragments support variant source mode",
+                    table.name
+                ),
+                "multiple sources",
+                "polymorphic collection table with fragments",
+            ));
         }
 
         for source in &table.sources {
             if source.export_when != crate::meta::ExportCondition::default() {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{}` base source `{}` declares `export_when`, but source-level target filtering is currently supported only for `override_sources`",
-                    table.name, source.path
-                )));
+                return Err(source_plan_error(
+                    table,
+                    format!(
+                        "table `{}` base source `{}` declares `export_when`, but source-level target filtering is currently supported only for `override_sources`",
+                        table.name, source.path
+                    ),
+                    format!("base source `{}` export_when", source.path),
+                    "export_when only on override_sources",
+                ));
             }
         }
 
@@ -145,10 +161,15 @@ impl DataSourcePlan {
         // guard so callers that build a DataLoadPlan from an unvalidated model do
         // not silently load an unsupported ObjectTable source form.
         if table.kind == TableKind::Object && !table.sources.is_empty() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` is an ObjectTable, but ObjectTable Step 1 only supports legacy `source`",
-                table.name
-            )));
+            return Err(source_plan_error(
+                table,
+                format!(
+                    "table `{}` is an ObjectTable, but ObjectTable Step 1 only supports legacy `source`",
+                    table.name
+                ),
+                "ObjectTable `sources`",
+                "legacy `source` for ObjectTable",
+            ));
         }
 
         let primary_key_fields = primary_key_fields_for_overrides(table)?;
@@ -170,10 +191,12 @@ impl DataSourcePlan {
             let source = if let Some(source) = &table.source {
                 source
             } else {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{}` does not declare a source",
-                    table.name
-                )));
+                return Err(source_plan_error(
+                    table,
+                    format!("table `{}` does not declare a source", table.name),
+                    "<missing>",
+                    "table source path",
+                ));
             };
 
             let layout = layout_for_table(table);
@@ -188,10 +211,7 @@ impl DataSourcePlan {
             vec![Self {
                 table_name: table.name.clone(),
                 provider: DataProvider::parse(&source.provider).ok_or_else(|| {
-                    ConfigForgeError::Validation(format!(
-                        "table `{}` source `{}` uses unsupported provider `{}`; only `csv` is supported",
-                        table.name, source.path, source.provider
-                    ))
+                    unsupported_provider_error(&table.name, &source.path, &source.provider)
                 })?,
                 path: PathBuf::from(&source.path),
                 header_row: source.header_row,
@@ -230,10 +250,7 @@ impl DataSourcePlan {
         primary_key_fields: Vec<String>,
     ) -> Result<Self> {
         let provider = DataProvider::parse(&source.provider).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "table `{table_name}` source `{}` uses unsupported provider `{}`; only `csv` is supported",
-                source.path, source.provider
-            ))
+            unsupported_provider_error(table_name, &source.path, &source.provider)
         })?;
 
         Ok(Self {
@@ -256,22 +273,37 @@ fn primary_key_fields_for_overrides(table: &TableMeta) -> Result<Vec<String>> {
         return Ok(Vec::new());
     }
     if table.kind == TableKind::Object {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` is an ObjectTable, but ObjectTable Step 1 does not support `override_sources`",
-            table.name
-        )));
+        return Err(source_plan_error(
+            table,
+            format!(
+                "table `{}` is an ObjectTable, but ObjectTable Step 1 does not support `override_sources`",
+                table.name
+            ),
+            "ObjectTable override_sources",
+            "collection table override_sources",
+        ));
     }
     let primary_index = table.primary_index().ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` declares override_sources, but collection table overrides require a primary index",
-            table.name
-        ))
+        source_plan_error(
+            table,
+            format!(
+                "table `{}` declares override_sources, but collection table overrides require a primary index",
+                table.name
+            ),
+            "override_sources without primary index",
+            "primary index for collection table overrides",
+        )
     })?;
     if primary_index.fields.is_empty() {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` declares override_sources, but primary index `{}` has no fields",
-            table.name, primary_index.name
-        )));
+        return Err(source_plan_error(
+            table,
+            format!(
+                "table `{}` declares override_sources, but primary index `{}` has no fields",
+                table.name, primary_index.name
+            ),
+            format!("primary index `{}` with no fields", primary_index.name),
+            "primary index with at least one field",
+        ));
     }
     Ok(primary_index.fields.clone())
 }
@@ -281,4 +313,54 @@ fn layout_for_table(table: &TableMeta) -> DataSourceLayout {
         TableKind::Object => DataSourceLayout::ObjectKeyValueRows,
         TableKind::Collection => DataSourceLayout::CollectionRecords,
     }
+}
+
+fn source_plan_error(
+    table: &TableMeta,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_DATA_SOURCE_SCHEMA_INVALID,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation {
+                table: Some(table.name.clone()),
+                ..DiagnosticLocation::default()
+            },
+        )
+        .with_source("data.source_plan")
+        .with_domain("data")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint("Check table source / sources / override_sources declarations in Meta."),
+    )
+}
+
+fn unsupported_provider_error(
+    table_name: &str,
+    source_path: &str,
+    provider: &str,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_DATA_SOURCE_SCHEMA_INVALID,
+            DiagnosticSeverity::Error,
+            format!(
+                "table `{table_name}` source `{source_path}` uses unsupported provider `{provider}`; only `csv` is supported"
+            ),
+            DiagnosticLocation {
+                table: Some(table_name.to_owned()),
+                source_path: Some(PathBuf::from(source_path)),
+                ..DiagnosticLocation::default()
+            },
+        )
+        .with_source("data.source_plan")
+        .with_domain("data")
+        .with_current_value(provider)
+        .with_expected("csv")
+        .with_hint("Use provider = \"csv\" for current CSV-first source loading."),
+    )
 }

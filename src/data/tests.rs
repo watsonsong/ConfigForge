@@ -14,7 +14,14 @@ use std::{
 
 use tempfile::tempdir;
 
-use crate::{ConfigForgeError, meta::MetaModel};
+use crate::{
+    ConfigForgeError, Diagnostic,
+    diagnostic::code::{
+        CF_DATA_DUPLICATE_HEADER, CF_DATA_DUPLICATE_KEY, CF_DATA_SOURCE_PATH_ESCAPE,
+        CF_DATA_SOURCE_READ_FAILED, CF_DATA_SOURCE_SCHEMA_INVALID,
+    },
+    meta::MetaModel,
+};
 
 use super::*;
 
@@ -45,6 +52,14 @@ fn plan_source(table_name: &str, path: &str) -> DataSourcePlan {
         role: SourceRole::Base,
         primary_key_fields: Vec::new(),
     }
+}
+
+fn expect_single_diagnostic(error: ConfigForgeError) -> Diagnostic {
+    let ConfigForgeError::ValidationReport(report) = error else {
+        panic!("expected structured diagnostic report");
+    };
+    assert_eq!(report.diagnostics.len(), 1);
+    report.diagnostics.into_iter().next().unwrap()
 }
 
 #[test]
@@ -98,7 +113,10 @@ fn csv_reader_supports_custom_1_based_source_row_layout() {
 fn csv_reader_reports_parse_errors() {
     let error = CsvDataReader::read_table("items", &PathBuf::from("missing.csv")).unwrap_err();
 
-    assert!(matches!(error, ConfigForgeError::ParseCsv { .. }));
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_READ_FAILED);
+    assert_eq!(diagnostic.source.as_deref(), Some("data.csv"));
+    assert_eq!(diagnostic.domain.as_deref(), Some("data"));
 }
 
 #[test]
@@ -108,8 +126,15 @@ fn csv_reader_rejects_duplicate_headers_but_allows_empty_header() {
     fs::write(&duplicate_path, "id,id\nID,ID\n1,2\n").expect("csv should be written");
 
     let error = CsvDataReader::read_table("items", &duplicate_path).unwrap_err();
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate header `id`"))
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_DUPLICATE_HEADER);
+    assert!(diagnostic.message.contains("duplicate header `id`"));
+    assert_eq!(diagnostic.source.as_deref(), Some("data.csv"));
+    assert_eq!(diagnostic.domain.as_deref(), Some("data"));
+    assert_eq!(diagnostic.current_value.as_deref(), Some("id"));
+    assert_eq!(
+        diagnostic.expected.as_deref(),
+        Some("unique CSV header name")
     );
 
     let empty_header_path = dir.path().join("empty_header.csv");
@@ -162,23 +187,23 @@ fn csv_reader_reports_empty_file_and_ragged_rows() {
 
     let empty_path = dir.path().join("empty.csv");
     fs::write(&empty_path, "").expect("csv should be written");
-    assert!(
-        matches!(CsvDataReader::read_table("items", &empty_path).unwrap_err(), ConfigForgeError::Validation(message) if message.contains("no header row"))
-    );
+    let diagnostic =
+        expect_single_diagnostic(CsvDataReader::read_table("items", &empty_path).unwrap_err());
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_SCHEMA_INVALID);
+    assert!(diagnostic.message.contains("no header row"));
+    assert_eq!(diagnostic.source.as_deref(), Some("data.csv"));
 
     let missing_path = dir.path().join("missing.csv");
     fs::write(&missing_path, "id,name\nID,Name\n1\n").expect("csv should be written");
-    assert!(matches!(
-        CsvDataReader::read_table("items", &missing_path).unwrap_err(),
-        ConfigForgeError::ParseCsv { .. }
-    ));
+    let diagnostic =
+        expect_single_diagnostic(CsvDataReader::read_table("items", &missing_path).unwrap_err());
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_READ_FAILED);
 
     let extra_path = dir.path().join("extra.csv");
     fs::write(&extra_path, "id,name\nID,Name\n1,Sword,extra\n").expect("csv should be written");
-    assert!(matches!(
-        CsvDataReader::read_table("items", &extra_path).unwrap_err(),
-        ConfigForgeError::ParseCsv { .. }
-    ));
+    let diagnostic =
+        expect_single_diagnostic(CsvDataReader::read_table("items", &extra_path).unwrap_err());
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_READ_FAILED);
 }
 
 #[test]
@@ -389,8 +414,10 @@ fn csv_reader_rejects_invalid_object_key_value_rows() {
         let error =
             CsvDataReader::read_object_table("game_config", &path, &["max_level".to_owned()])
                 .unwrap_err();
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_DATA_SOURCE_SCHEMA_INVALID);
         assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains(expected_message)),
+            diagnostic.message.contains(expected_message),
             "expected message containing `{expected_message}`"
         );
     }
@@ -401,11 +428,11 @@ fn csv_reader_reports_object_table_ragged_rows() {
     let dir = tempdir().expect("temp dir should exist");
     let missing_path = dir.path().join("missing_value.csv");
     fs::write(&missing_path, "key,title,value\nmax_level\n").expect("csv should be written");
-    assert!(matches!(
+    let diagnostic = expect_single_diagnostic(
         CsvDataReader::read_object_table("game_config", &missing_path, &["max_level".to_owned()])
             .unwrap_err(),
-        ConfigForgeError::ParseCsv { .. }
-    ));
+    );
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_READ_FAILED);
 
     let extra_path = dir.path().join("extra_value.csv");
     fs::write(
@@ -413,11 +440,11 @@ fn csv_reader_reports_object_table_ragged_rows() {
         "key,title,value\nmax_level,最大等级,100,extra\n",
     )
     .expect("csv should be written");
-    assert!(matches!(
+    let diagnostic = expect_single_diagnostic(
         CsvDataReader::read_object_table("game_config", &extra_path, &["max_level".to_owned()])
             .unwrap_err(),
-        ConfigForgeError::ParseCsv { .. }
-    ));
+    );
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_READ_FAILED);
 }
 
 #[test]
@@ -1076,9 +1103,12 @@ fn data_loader_rejects_absolute_source_escape() {
         .load_source(&plan_source("items", &outside.display().to_string()))
         .unwrap_err();
 
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("escapes data root"))
-    );
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_PATH_ESCAPE);
+    assert!(diagnostic.message.contains("escapes data root"));
+    assert_eq!(diagnostic.source.as_deref(), Some("data.loader"));
+    assert_eq!(diagnostic.domain.as_deref(), Some("data"));
+    assert_eq!(diagnostic.location.table.as_deref(), Some("items"));
 }
 
 #[test]
@@ -1091,9 +1121,12 @@ fn data_loader_rejects_parent_source_escape() {
         .load_source(&plan_source("items", "../outside.csv"))
         .unwrap_err();
 
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("escapes data root"))
-    );
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_PATH_ESCAPE);
+    assert!(diagnostic.message.contains("escapes data root"));
+    assert_eq!(diagnostic.source.as_deref(), Some("data.loader"));
+    assert_eq!(diagnostic.domain.as_deref(), Some("data"));
+    assert_eq!(diagnostic.location.table.as_deref(), Some("items"));
 }
 
 #[cfg(unix)]
@@ -1113,9 +1146,12 @@ fn data_loader_rejects_symlink_source_escape() {
         .load_source(&plan_source("items", "linked_items.csv"))
         .unwrap_err();
 
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("filesystem alias"))
-    );
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_PATH_ESCAPE);
+    assert!(diagnostic.message.contains("filesystem alias"));
+    assert_eq!(diagnostic.source.as_deref(), Some("data.loader"));
+    assert_eq!(diagnostic.domain.as_deref(), Some("data"));
+    assert_eq!(diagnostic.location.table.as_deref(), Some("items"));
 }
 
 #[test]
@@ -1134,9 +1170,13 @@ fn data_load_plan_rejects_missing_source() {
 
     let error = DataLoadPlan::from_meta_model(&meta).unwrap_err();
 
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("does not declare a source"))
-    );
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_SCHEMA_INVALID);
+    assert!(diagnostic.message.contains("does not declare a source"));
+    assert_eq!(diagnostic.source.as_deref(), Some("data.source_plan"));
+    assert_eq!(diagnostic.domain.as_deref(), Some("data"));
+    assert_eq!(diagnostic.location.table.as_deref(), Some("items"));
+    assert_eq!(diagnostic.current_value.as_deref(), Some("<missing>"));
 }
 
 #[test]
@@ -1268,8 +1308,13 @@ fn data_load_plan_rejects_unsupported_source_features() {
     for (input, expected_message) in cases {
         let meta: MetaModel = toml::from_str(input).expect("raw meta should deserialize");
         let error = DataLoadPlan::from_meta_model(&meta).unwrap_err();
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_DATA_SOURCE_SCHEMA_INVALID);
+        assert_eq!(diagnostic.source.as_deref(), Some("data.source_plan"));
+        assert_eq!(diagnostic.domain.as_deref(), Some("data"));
+        assert_eq!(diagnostic.location.table.as_deref(), Some("items"));
         assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains(expected_message)),
+            diagnostic.message.contains(expected_message),
             "expected error containing `{expected_message}`"
         );
     }
@@ -1781,8 +1826,16 @@ fn data_loader_rejects_invalid_override_rows() {
         ]));
 
         let error = DataLoader::new(dir.path()).load(&plan).unwrap_err();
+        let diagnostic = expect_single_diagnostic(error);
         assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains(expected_message)),
+            diagnostic.code == CF_DATA_DUPLICATE_KEY
+                || diagnostic.code == CF_DATA_SOURCE_SCHEMA_INVALID
+        );
+        assert_eq!(diagnostic.source.as_deref(), Some("data.loader"));
+        assert_eq!(diagnostic.domain.as_deref(), Some("data"));
+        assert_eq!(diagnostic.location.table.as_deref(), Some("items"));
+        assert!(
+            diagnostic.message.contains(expected_message),
             "expected message containing `{expected_message}`"
         );
     }

@@ -5,6 +5,12 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 
+fn stderr_json(output: std::process::Output) -> serde_json::Value {
+    assert!(!output.status.success(), "command should fail");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    serde_json::from_str(&stderr).expect("stderr should be diagnostic JSON")
+}
+
 #[test]
 fn range_validator_blocks_invalid_data_before_export() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
@@ -133,6 +139,132 @@ fn cli_diagnostic_format_json_emits_machine_readable_diagnostics() {
         diagnostic["diagnostics"][0]["location"]["source_column_name"],
         "level"
     );
+}
+
+#[test]
+fn duplicate_csv_header_json_diagnostic_has_stable_code_and_source_context() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_dir = temp_dir.path().join("data");
+    let data_out_dir = temp_dir.path().join("out/data");
+    fs::create_dir_all(&data_dir).expect("data dir should be created");
+    fs::write(data_dir.join("items.csv"), "id,id\nID,ID\n1,2\n")
+        .expect("items data should be written");
+
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                [project]
+                input = "{}"
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [[targets.exports]]
+                output = "{}"
+                type = "json"
+            "#,
+            data_dir.display(),
+            data_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let output = Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .args([
+            "--project",
+            project_path.to_str().expect("path should be utf8"),
+            "--target",
+            "client",
+            "--diagnostic-format",
+            "json",
+        ])
+        .output()
+        .expect("config-forge should run");
+
+    let json = stderr_json(output);
+    let issue = &json["diagnostics"][0];
+    assert_eq!(issue["code"], "CF_DATA_DUPLICATE_HEADER");
+    assert_eq!(issue["severity"], "error");
+    assert_eq!(issue["source"], "data.csv");
+    assert_eq!(issue["domain"], "data");
+    assert_eq!(issue["current_value"], "id");
+    assert_eq!(issue["expected"], "unique CSV header name");
+    assert_eq!(issue["location"]["source_row_number"], 1);
+    assert_eq!(issue["location"]["source_column_name"], "id");
+}
+
+#[test]
+fn source_path_escape_json_diagnostic_has_stable_code_and_table_context() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_dir = temp_dir.path().join("data");
+    let data_out_dir = temp_dir.path().join("out/data");
+    fs::create_dir_all(&data_dir).expect("data dir should be created");
+    fs::write(temp_dir.path().join("outside.csv"), "id\nID\n1\n")
+        .expect("outside data should be written");
+
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                [project]
+                input = "{}"
+
+                [[tables]]
+                name = "items"
+                source = "../outside.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [[targets.exports]]
+                output = "{}"
+                type = "json"
+            "#,
+            data_dir.display(),
+            data_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let output = Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .args([
+            "--project",
+            project_path.to_str().expect("path should be utf8"),
+            "--target",
+            "client",
+            "--diagnostic-format",
+            "json",
+        ])
+        .output()
+        .expect("config-forge should run");
+
+    let json = stderr_json(output);
+    let issue = &json["diagnostics"][0];
+    assert_eq!(issue["code"], "CF_DATA_SOURCE_PATH_ESCAPE");
+    assert_eq!(issue["severity"], "error");
+    assert_eq!(issue["source"], "data.loader");
+    assert_eq!(issue["domain"], "data");
+    assert_eq!(issue["current_value"], "../outside.csv");
+    assert_eq!(issue["location"]["table"], "items");
 }
 
 #[test]

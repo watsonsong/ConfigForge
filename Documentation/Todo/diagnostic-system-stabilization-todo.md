@@ -6,7 +6,7 @@
 
 **暂不删除本 TODO，也不把 Diagnostics 标为 Stable。**
 
-原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **417 处 / 75 文件**。这些不全是用户可见错误，但仍覆盖 asset resolver、data loading、data resolver、typed value、data artifact、code artifact、generator 私有 option、builtin validators 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
+原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **377 处 / 72 文件**。这些不全是用户可见错误，但仍覆盖 asset resolver、data resolver、typed value、data artifact、code artifact、generator 私有 option、builtin validators 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
 
 已经完成且不再作为 TODO 追踪的内容：
 
@@ -22,6 +22,7 @@
 - 核心 table validation 的 type / required / duplicate key / FK / asset reference 结构化诊断。
 - legacy fallback 债务护栏：已有单元测试锁定 `ConfigForgeError::Validation(` 基线，新增裸 fallback 会导致测试失败。
 - Project / Build config 入口层错误已迁移：target 不存在、重复 target / export task name、非法 task name、非法 execution resource flag、Data-dependent target 缺少 `project.input`、CLI validation report 附加任务冲突 / 输出文件名错误等已具备 stable code 与 JSON context。
+- Data loading / source reading 高频错误已迁移：CSV read/schema/header、source path escape、source plan/provider、override primary key 等已具备 stable code 与 source/table/row context。
 
 以下内容已从本 TODO 移除，不再作为 Diagnostics Stable 的阻塞项：
 
@@ -50,14 +51,14 @@
 - [x] 为 build / project config 错误补充 `source = "build.*"` 或 `project.*`、`target`、`current_value`、`expected`、`hint`。
 - [x] 为上述路径增加 CLI JSON integration tests，断言 stable code 和 target / option context。
 
-### P0：Data loading / source reading 错误结构化
+### P0：Data loading / source reading 错误结构化（已完成）
 
 Data loading 仍有大量用户高频错误使用裸字符串：CSV ragged row、empty file、duplicate header、source missing、source escape、override row invalid、unsupported source feature 等。
 
-- [ ] 为 CSV/source loading 定义并接入 stable code，例如 `CF_DATA_SOURCE_READ_FAILED`、`CF_DATA_SOURCE_SCHEMA_INVALID`、`CF_DATA_SOURCE_PATH_ESCAPE`、`CF_DATA_DUPLICATE_HEADER`（命名以实际实现为准）。
-- [ ] 迁移 CSV parse / ragged / duplicate header / empty file 等错误，填充 `source_path`、`source_row_number`、`source_column_name`、`current_value`、`expected`。
-- [ ] 迁移 data load plan / source path escape / missing source / unsupported provider feature 错误，填充 source path 和 expected source policy。
-- [ ] 增加 CLI JSON 或 unit tests 覆盖上述高频路径。
+- [x] 为 CSV/source loading 定义并接入 stable code：`CF_DATA_SOURCE_READ_FAILED`、`CF_DATA_SOURCE_SCHEMA_INVALID`、`CF_DATA_SOURCE_PATH_ESCAPE`、`CF_DATA_DUPLICATE_HEADER`。
+- [x] 迁移 CSV parse / ragged / duplicate header / empty file 等错误，填充 `source_path`、`source_row_number`、`source_column_name`、`current_value`、`expected`。
+- [x] 迁移 data load plan / source path escape / missing source / unsupported provider feature 错误，填充 source path 和 expected source policy。
+- [x] 增加 CLI JSON 或 unit tests 覆盖上述高频路径。
 
 ### P1：Data resolver / typed value / enum 细分诊断
 
