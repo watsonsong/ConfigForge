@@ -7,9 +7,10 @@ use tempfile::tempdir;
 
 use crate::{
     artifact::{ArtifactContent, ArtifactWriteMode, ArtifactWriter},
-    code_artifact::I18nMode,
+    code_artifact::{I18nMode, tests::expect_single_diagnostic},
     data::{DataSet, DataTable},
     data_artifact::{AggregateDataExporter, TargetDataConfig},
+    diagnostic::code::{CF_ARTIFACT_PATH_COLLISION, CF_GENERATOR_UNSUPPORTED_DATA_INPUT},
     meta::{MetaModel, PrimitiveFieldType, TargetTags},
 };
 
@@ -41,7 +42,15 @@ fn lua_task_with_options(options: BTreeMap<String, toml::Value>) -> TargetDataCo
 #[test]
 fn escapes_lua_strings_and_rejects_non_finite_float() {
     assert_eq!(lua_string("a\n\"b\\c"), r#""a\n\"b\\c""#);
-    assert!(render_scalar("NaN", PrimitiveFieldType::Float).is_err());
+    let error = render_scalar("NaN", PrimitiveFieldType::Float).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNSUPPORTED_DATA_INPUT);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.lua_table.symbols")
+    );
+    assert_eq!(diagnostic.current_value.as_deref(), Some("NaN"));
 }
 
 #[test]
@@ -445,10 +454,14 @@ fn rejects_duplicate_generated_table_files() {
         &TargetTags::empty(),
     )
     .unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
 
-    assert!(
-        matches!(error, crate::ConfigForgeError::Validation(message) if message.contains("table file `item_types.lua`"))
+    assert_eq!(diagnostic.code, CF_ARTIFACT_PATH_COLLISION);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.lua_table.symbols")
     );
+    assert_eq!(diagnostic.current_value.as_deref(), Some("item_types.lua"));
 }
 
 #[test]

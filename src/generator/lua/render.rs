@@ -7,6 +7,9 @@ use crate::{
     ConfigForgeError, Result,
     code_artifact::{I18nFunctionReturn, I18nMode},
     data_artifact::{ExportedTablePayload, ExportedValue},
+    diagnostic::code::{
+        CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH, CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+    },
     meta::{
         LinkedField, LinkedFieldMeta, LinkedForeignKeyMeta, LinkedFragmentPayload, LinkedMetaModel,
         LinkedStructType, LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags,
@@ -14,6 +17,7 @@ use crate::{
 };
 
 use super::{
+    lua_input_error, lua_symbol_error,
     naming::{sanitize_identifier, table_accessor_name, table_require_path, text_helper_name},
     options::LuaTableOptions,
 };
@@ -106,10 +110,15 @@ pub(super) fn render_table_file(
         (TableKind::Object, ExportedTablePayload::Object(object)) => {
             render_object_table(table_meta, object, options, linked_meta, target_tags)
         }
-        _ => Err(ConfigForgeError::Validation(format!(
-            "lua_table payload kind does not match table `{}`",
-            table_meta.meta.name
-        ))),
+        _ => Err(lua_contract_error(
+            format!(
+                "lua_table payload kind does not match table `{}`",
+                table_meta.meta.name
+            ),
+            table_meta.meta.name.clone(),
+            "payload kind matching linked table kind",
+            "Check runtime data preparation before Lua export.",
+        )),
     }
 }
 
@@ -312,18 +321,33 @@ fn render_relation_helpers(
         let target_table = linked_meta
             .table(foreign_key.target_table_name)
             .ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "lua_table foreign key `{}` references unknown target table `{}`",
-                    foreign_key.name, foreign_key.target_table_name
-                ))
+                lua_input_error(
+                    format!(
+                        "lua_table foreign key `{}` references unknown target table `{}`",
+                        foreign_key.name, foreign_key.target_table_name
+                    ),
+                    foreign_key.target_table_name,
+                    "target table present in linked meta model",
+                    "Check foreign key target table visibility before Lua export.",
+                )
             })?;
         let target_index = target_table
             .index(foreign_key.target_index_name)
             .ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "lua_table foreign key `{}` references unknown target index `{}.{}`",
-                    foreign_key.name, foreign_key.target_table_name, foreign_key.target_index_name
-                ))
+                lua_input_error(
+                    format!(
+                        "lua_table foreign key `{}` references unknown target index `{}.{}`",
+                        foreign_key.name,
+                        foreign_key.target_table_name,
+                        foreign_key.target_index_name
+                    ),
+                    format!(
+                        "{}.{}",
+                        foreign_key.target_table_name, foreign_key.target_index_name
+                    ),
+                    "target index present in linked meta model",
+                    "Check foreign key target index visibility before Lua export.",
+                )
             })?;
         let target_accessor = table_accessor_name(target_table);
         let target_index_accessor = sanitize_identifier(&format!("get_{}", target_index.meta.name));
@@ -400,10 +424,15 @@ fn relation_source_exprs(
                     .position(|binding| binding.source_name == field.meta.name)
                     .map(|position| position + 1)
                     .ok_or_else(|| {
-                        ConfigForgeError::Validation(format!(
-                            "lua_table foreign key `{}` references field `{}` that is not exported",
-                            foreign_key.name, field.meta.name
-                        ))
+                        lua_input_error(
+                            format!(
+                                "lua_table foreign key `{}` references field `{}` that is not exported",
+                                foreign_key.name, field.meta.name
+                            ),
+                            format!("{}.{}", table_meta.meta.name, field.meta.name),
+                            "foreign key source field exported for this target",
+                            "Check target tags or foreign key field visibility before Lua export.",
+                        )
                     })?;
                 Ok(format!("row[{index}]"))
             } else {
@@ -450,10 +479,15 @@ fn value_expr_for_field(
     access: RowValueAccess,
 ) -> Result<String> {
     let field = table_meta.field(field_name).ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "lua_table table `{}` references unknown field `{field_name}`",
-            table_meta.meta.name
-        ))
+        lua_input_error(
+            format!(
+                "lua_table table `{}` references unknown field `{field_name}`",
+                table_meta.meta.name
+            ),
+            format!("{}.{}", table_meta.meta.name, field_name),
+            "field present in linked table meta",
+            "Check generated Lua helper field references before export.",
+        )
     })?;
     let lua_name = sanitize_identifier(&field.meta.name);
     Ok(match access {
@@ -486,10 +520,15 @@ fn render_indexes(
                     .position(|binding| binding.source_name == field.meta.name)
                     .map(|position| position + 1)
                     .ok_or_else(|| {
-                        ConfigForgeError::Validation(format!(
-                            "lua_table index `{}` references field `{}` that is not exported",
-                            index.meta.name, field.meta.name
-                        ))
+                        lua_input_error(
+                            format!(
+                                "lua_table index `{}` references field `{}` that is not exported",
+                                index.meta.name, field.meta.name
+                            ),
+                            format!("{}.{}", table_meta.meta.name, field.meta.name),
+                            "index field exported for this target",
+                            "Check target tags or index field visibility before Lua export.",
+                        )
                     })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -673,16 +712,22 @@ fn render_lua_value_for_field(value: &ExportedValue, field: &LinkedField<'_>) ->
             .map(|value| render_lua_value_for_field(value, element))
             .collect::<Result<Vec<_>>>()
             .map(|values| format!("{{ {} }}", values.join(", "))),
-        _ => Err(ConfigForgeError::Validation(
+        _ => Err(lua_contract_error(
             "lua_table value does not match linked field type".to_owned(),
+            exported_value_kind(value),
+            linked_field_kind(field),
+            "Check exported payload construction before Lua rendering.",
         )),
     }
 }
 
 fn render_lua_struct(value: &ExportedValue, fields: &[LinkedFieldMeta<'_>]) -> Result<String> {
     let ExportedValue::Struct(values) = value else {
-        return Err(ConfigForgeError::Validation(
+        return Err(lua_contract_error(
             "lua_table expected struct value".to_owned(),
+            exported_value_kind(value),
+            "struct exported value",
+            "Check struct/fragment payload construction before Lua rendering.",
         ));
     };
     let mut entries = Vec::new();
@@ -702,29 +747,86 @@ fn render_lua_struct(value: &ExportedValue, fields: &[LinkedFieldMeta<'_>]) -> R
 pub(super) fn render_scalar(value: &str, primitive: PrimitiveFieldType) -> Result<String> {
     match primitive {
         PrimitiveFieldType::Int => value.parse::<i64>().map(|_| value.to_owned()).map_err(|_| {
-            ConfigForgeError::Validation(format!("lua_table invalid integer `{value}`"))
+            lua_scalar_error(
+                format!("lua_table invalid integer `{value}`"),
+                value,
+                "integer scalar",
+            )
         }),
         PrimitiveFieldType::Float => {
             let parsed = value.parse::<f64>().map_err(|_| {
-                ConfigForgeError::Validation(format!("lua_table invalid float `{value}`"))
+                lua_scalar_error(
+                    format!("lua_table invalid float `{value}`"),
+                    value,
+                    "finite float scalar",
+                )
             })?;
             if !parsed.is_finite() {
-                return Err(ConfigForgeError::Validation(format!(
-                    "lua_table non-finite float `{value}` cannot be emitted"
-                )));
+                return Err(lua_scalar_error(
+                    format!("lua_table non-finite float `{value}` cannot be emitted"),
+                    value,
+                    "finite float scalar",
+                ));
             }
             Ok(value.to_owned())
         }
         PrimitiveFieldType::Bool => match value {
             "true" | "1" => Ok("true".to_owned()),
             "false" | "0" => Ok("false".to_owned()),
-            _ => Err(ConfigForgeError::Validation(format!(
-                "lua_table invalid bool `{value}`"
-            ))),
+            _ => Err(lua_scalar_error(
+                format!("lua_table invalid bool `{value}`"),
+                value,
+                "boolean scalar (`true`, `false`, `1`, or `0`)",
+            )),
         },
         PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset => {
             Ok(lua_string(value))
         }
+    }
+}
+
+fn lua_scalar_error(
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    lua_symbol_error(
+        CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+        message,
+        current,
+        expected,
+        "Check typed data normalization before Lua export.",
+    )
+}
+
+fn lua_contract_error(
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    lua_symbol_error(
+        CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH,
+        message,
+        current,
+        expected,
+        hint,
+    )
+}
+
+fn exported_value_kind(value: &ExportedValue) -> &'static str {
+    match value {
+        ExportedValue::Scalar(_) => "scalar exported value",
+        ExportedValue::Array(_) => "array exported value",
+        ExportedValue::Struct(_) => "struct exported value",
+    }
+}
+
+fn linked_field_kind(field: &LinkedField<'_>) -> &'static str {
+    match field {
+        LinkedField::Primitive(_) | LinkedField::Enum(_) => "scalar-compatible linked field",
+        LinkedField::Struct(_) => "struct linked field",
+        LinkedField::List(_) => "array linked field",
     }
 }
 
