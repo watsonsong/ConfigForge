@@ -425,7 +425,7 @@ impl CodeArtifactOptions {
     }
 }
 
-fn generator_option_error(
+pub(crate) fn generator_option_error(
     code: &'static str,
     source: impl Into<String>,
     message: String,

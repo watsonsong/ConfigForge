@@ -3,7 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
+use crate::{
+    ConfigForgeError, Result, artifact::ArtifactSink, diagnostic::code::CF_GENERATOR_INVALID_OPTION,
+};
 
 use super::{
     ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
@@ -1701,5 +1703,12 @@ fn java_table_load_expression(
 }
 
 pub(super) fn validation_error(message: String) -> ConfigForgeError {
-    ConfigForgeError::Validation(message)
+    crate::code_artifact::generator_option_error(
+        CF_GENERATOR_INVALID_OPTION,
+        "generator.java.options",
+        message.clone(),
+        message,
+        "valid Java codegen option value",
+        "Check the java export task options and generated identifier settings.",
+    )
 }

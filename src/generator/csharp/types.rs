@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ConfigForgeError, Result};
+use crate::{Result, diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT};
 
 use super::{
     CSharpCodegenOptions, validate_csharp_identifier, validate_csharp_namespace, validation_error,
@@ -350,7 +350,16 @@ impl CSharpNames {
             super::symbols::is_csharp_keyword,
             |identifier| Some(format!("@{identifier}")),
         )
-        .map_err(|message| ConfigForgeError::Validation(format!("csharp codegen: {message}")))
+        .map_err(|message| {
+            crate::code_artifact::generator_option_error(
+                CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+                "generator.csharp.naming",
+                format!("csharp codegen: {message}"),
+                name,
+                "valid C# generated identifier",
+                "Adjust source names or naming options so C# identifiers can be generated.",
+            )
+        })
     }
 }
 

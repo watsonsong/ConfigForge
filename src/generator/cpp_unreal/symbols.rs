@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     code_artifact::{
         CodeField, CodeIndex, CodeTable, CodeTableKind, CodeTypeRef, CodegenOptions,
         ir::CodeForeignKey, naming,
     },
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
 };
 
 use super::CppUnrealCodegenOptions;
@@ -326,7 +327,16 @@ impl<'a> CppUnrealNames<'a> {
             naming::is_cpp_keyword,
             |_| None,
         )
-        .map_err(|message| ConfigForgeError::Validation(format!("cpp_unreal codegen: {message}")))
+        .map_err(|message| {
+            crate::code_artifact::generator_option_error(
+                CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+                "generator.cpp_unreal.naming",
+                format!("cpp_unreal codegen: {message}"),
+                value,
+                "valid Unreal C++ generated identifier",
+                "Adjust source names or naming options so Unreal C++ identifiers can be generated.",
+            )
+        })
     }
 }
 

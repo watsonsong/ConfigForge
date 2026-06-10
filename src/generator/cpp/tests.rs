@@ -6,13 +6,12 @@ use std::fs;
 use tempfile::tempdir;
 
 use crate::{
-    ConfigForgeError,
     artifact::{ArtifactWriteMode, ArtifactWriter},
     code_artifact::{
         CodeExportInput, CodeGenerator, GeneratedFile, RuntimeInterfaceMode,
         tests::{
-            assert_duplicate_generated_identifier, indexed_source_order_fixture, input_for,
-            linked_fixture, source_order_fixture,
+            assert_duplicate_generated_identifier, expect_single_diagnostic,
+            indexed_source_order_fixture, input_for, linked_fixture, source_order_fixture,
         },
     },
     meta::{MetaModel, TargetTags},
@@ -146,9 +145,11 @@ fn parses_and_validates_cpp_runtime_interface_options() {
         .expect("toml value"),
     );
     let error = CppCodeGenerator.generate(&input).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
     assert!(
-        matches!(error, ConfigForgeError::Validation(ref message) if message.contains("runtime_core_header")),
-        "unexpected error: {error}"
+        diagnostic.message.contains("runtime_core_header"),
+        "unexpected error: {}",
+        diagnostic.message
     );
 }
 

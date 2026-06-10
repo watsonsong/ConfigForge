@@ -3,7 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
+use crate::{
+    ConfigForgeError, Result, artifact::ArtifactSink, diagnostic::code::CF_GENERATOR_INVALID_OPTION,
+};
 
 use super::{
     ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField,
@@ -218,9 +220,16 @@ fn validate_runtime_interface_options(options: &CppCodegenOptions) -> Result<()>
 fn validate_optional_single_line(kind: &str, value: &Option<String>) -> Result<()> {
     if let Some(value) = value {
         if value.trim().is_empty() || value.chars().any(char::is_control) {
-            return Err(ConfigForgeError::Validation(format!(
-                "invalid C++ {kind} `{value}`; value must be non-empty and single-line"
-            )));
+            let message =
+                format!("invalid C++ {kind} `{value}`; value must be non-empty and single-line");
+            return Err(crate::code_artifact::generator_option_error(
+                CF_GENERATOR_INVALID_OPTION,
+                "generator.cpp.options",
+                message.clone(),
+                value,
+                format!("non-empty single-line C++ {kind}"),
+                "Check the cpp external runtime interface options.",
+            ));
         }
     }
     Ok(())

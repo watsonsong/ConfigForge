@@ -10,8 +10,8 @@ use crate::{
     code_artifact::{
         CaseStyle, CodeExportInput, CodeGenerator, RuntimeInterfaceMode,
         tests::{
-            assert_duplicate_generated_identifier, indexed_source_order_fixture, input_for,
-            linked_fixture, source_order_fixture,
+            assert_duplicate_generated_identifier, expect_single_diagnostic,
+            indexed_source_order_fixture, input_for, linked_fixture, source_order_fixture,
         },
     },
     meta::{MetaModel, TargetTags},
@@ -114,9 +114,11 @@ fn parses_and_validates_rust_runtime_interface_options() {
         .expect("toml value"),
     );
     let error = RustCodeGenerator.generate(&input).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
     assert!(
-        matches!(error, crate::ConfigForgeError::Validation(ref message) if message.contains("runtime_core_path")),
-        "unexpected error: {error}"
+        diagnostic.message.contains("runtime_core_path"),
+        "unexpected error: {}",
+        diagnostic.message
     );
 }
 

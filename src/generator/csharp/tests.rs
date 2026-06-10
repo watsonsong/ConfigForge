@@ -6,7 +6,6 @@ use std::fs;
 use tempfile::tempdir;
 
 use crate::{
-    ConfigForgeError,
     artifact::{ArtifactWriteMode, ArtifactWriter},
     code_artifact::{
         CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, I18nFunctionReturn,
@@ -94,9 +93,11 @@ fn rejects_invalid_csharp_options() {
         );
 
         let error = CSharpCodeGenerator.generate(&input).unwrap_err();
+        let diagnostic = expect_single_diagnostic(error);
         assert!(
-            matches!(error, ConfigForgeError::Validation(ref message) if message.contains(expected)),
-            "unexpected error for {key}: {error}"
+            diagnostic.message.contains(expected),
+            "unexpected error for {key}: {}",
+            diagnostic.message
         );
     }
 }

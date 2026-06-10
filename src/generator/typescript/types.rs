@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     code_artifact::{
         CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
         CodeTableKind, CodeTypeRef, CodegenOptions, ir::CodeForeignKey, naming,
     },
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
 };
 
 pub(super) struct TypeScriptNames<'a> {
@@ -152,7 +153,14 @@ impl<'a> TypeScriptNames<'a> {
                 |_| None,
             )
             .map_err(|message| {
-                ConfigForgeError::Validation(format!("typescript codegen: {message}"))
+                crate::code_artifact::generator_option_error(
+                    CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+                    "generator.typescript.naming",
+                    format!("typescript codegen: {message}"),
+                    type_name,
+                    "valid TypeScript reader function identifier",
+                    "Adjust source names or naming options so TypeScript reader identifiers can be generated.",
+                )
             });
         }
         self.identifier(&format!("read_{type_name}"), self.options.naming.function)
@@ -286,6 +294,15 @@ impl<'a> TypeScriptNames<'a> {
             naming::is_ts_keyword,
             |_| None,
         )
-        .map_err(|message| ConfigForgeError::Validation(format!("typescript codegen: {message}")))
+        .map_err(|message| {
+            crate::code_artifact::generator_option_error(
+                CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+                "generator.typescript.naming",
+                format!("typescript codegen: {message}"),
+                value,
+                "valid TypeScript generated identifier",
+                "Adjust source names or naming options so TypeScript identifiers can be generated.",
+            )
+        })
     }
 }

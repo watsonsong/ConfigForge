@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     code_artifact::{
         CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
         CodeTableKind, CodeTypeRef, CodegenOptions, ir::CodeForeignKey, naming,
     },
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
 };
 
 pub(super) struct RustNames<'a> {
@@ -266,10 +267,21 @@ impl<'a> RustNames<'a> {
         } else if value_exprs.len() == foreign_key.fields.len() {
             Ok(format!("({})", value_exprs.join(", ")))
         } else {
-            Err(ConfigForgeError::Validation(format!(
-                "rust codegen: foreign key `{}` source field count does not match target index `{}`",
-                foreign_key.name, target_index.name
-            )))
+            Err(crate::code_artifact::generator_option_error(
+                CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+                "generator.rust.relations",
+                format!(
+                    "rust codegen: foreign key `{}` source field count does not match target index `{}`",
+                    foreign_key.name, target_index.name
+                ),
+                format!(
+                    "{} source fields for {} target index fields",
+                    value_exprs.len(),
+                    target_index.fields.len()
+                ),
+                "foreign key source field count matching target index field count",
+                "Check foreign key linked fields and target index declarations before Rust codegen.",
+            ))
         }
     }
 
@@ -281,6 +293,15 @@ impl<'a> RustNames<'a> {
             naming::is_rust_keyword,
             |identifier| Some(format!("r#{identifier}")),
         )
-        .map_err(|message| ConfigForgeError::Validation(format!("rust codegen: {message}")))
+        .map_err(|message| {
+            crate::code_artifact::generator_option_error(
+                CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+                "generator.rust.naming",
+                format!("rust codegen: {message}"),
+                value,
+                "valid Rust generated identifier",
+                "Adjust source names or naming options so Rust identifiers can be generated.",
+            )
+        })
     }
 }

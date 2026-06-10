@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::Result;
+use crate::{Result, diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT};
 
 use super::{
     JavaCodegenOptions,
@@ -433,7 +433,16 @@ impl JavaNames {
         naming::make_identifier(name, style, self.keyword_conflict, is_java_keyword, |_| {
             None
         })
-        .map_err(|message| super::validation_error(format!("java codegen: {message}")))
+        .map_err(|message| {
+            crate::code_artifact::generator_option_error(
+                CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+                "generator.java.naming",
+                format!("java codegen: {message}"),
+                name,
+                "valid Java generated identifier",
+                "Adjust source names or naming options so Java identifiers can be generated.",
+            )
+        })
     }
 }
 

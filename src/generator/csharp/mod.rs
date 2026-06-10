@@ -3,7 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
+use crate::{
+    ConfigForgeError, Result, artifact::ArtifactSink, diagnostic::code::CF_GENERATOR_INVALID_OPTION,
+};
 
 use super::{
     ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField,
@@ -1312,5 +1314,13 @@ fn render_index_lookup_methods(
 }
 
 fn validation_error(message: impl Into<String>) -> ConfigForgeError {
-    ConfigForgeError::Validation(format!("csharp codegen: {}", message.into()))
+    let message = format!("csharp codegen: {}", message.into());
+    crate::code_artifact::generator_option_error(
+        CF_GENERATOR_INVALID_OPTION,
+        "generator.csharp.options",
+        message.clone(),
+        message,
+        "valid C# codegen option value",
+        "Check the csharp export task options and generated identifier settings.",
+    )
 }

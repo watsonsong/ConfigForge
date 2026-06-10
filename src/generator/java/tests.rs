@@ -6,11 +6,13 @@ use std::fs;
 use tempfile::tempdir;
 
 use crate::{
-    ConfigForgeError,
     artifact::{ArtifactWriteMode, ArtifactWriter},
     code_artifact::{
         CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, RuntimeInterfaceMode,
-        tests::{assert_duplicate_generated_identifier, input_for, linked_fixture},
+        tests::{
+            assert_duplicate_generated_identifier, expect_single_diagnostic, input_for,
+            linked_fixture,
+        },
     },
     meta::MetaModel,
 };
@@ -101,9 +103,11 @@ fn rejects_invalid_java_options() {
         );
 
         let error = JavaCodeGenerator.generate(&input).unwrap_err();
+        let diagnostic = expect_single_diagnostic(error);
         assert!(
-            matches!(error, ConfigForgeError::Validation(ref message) if message.contains(expected)),
-            "unexpected error for {key}: {error}"
+            diagnostic.message.contains(expected),
+            "unexpected error for {key}: {}",
+            diagnostic.message
         );
     }
 }
@@ -119,9 +123,11 @@ fn rejects_java_file_name_root_class_mismatch() {
     );
 
     let error = JavaCodeGenerator.generate(&input).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
     assert!(
-        matches!(error, ConfigForgeError::Validation(ref message) if message.contains("must match root_class_name")),
-        "unexpected error: {error}"
+        diagnostic.message.contains("must match root_class_name"),
+        "unexpected error: {}",
+        diagnostic.message
     );
 }
 

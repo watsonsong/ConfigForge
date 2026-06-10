@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     code_artifact::{
         CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
         CodeTableKind, CodeTypeRef, CodegenOptions, ir::CodeForeignKey, naming,
     },
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
 };
 
 pub(super) struct CppNames<'a> {
@@ -400,6 +401,15 @@ impl<'a> CppNames<'a> {
             naming::is_cpp_keyword,
             |_| None,
         )
-        .map_err(|message| ConfigForgeError::Validation(format!("cpp codegen: {message}")))
+        .map_err(|message| {
+            crate::code_artifact::generator_option_error(
+                CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+                "generator.cpp.naming",
+                format!("cpp codegen: {message}"),
+                value,
+                "valid C++ generated identifier",
+                "Adjust source names or naming options so C++ identifiers can be generated.",
+            )
+        })
     }
 }
