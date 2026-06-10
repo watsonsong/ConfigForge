@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::diagnostic::code::CF_GENERATOR_INVALID_OPTION;
 use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
 
 use super::{
@@ -175,16 +176,24 @@ fn cpp_unreal_options(input: &CodeExportInput<'_>) -> Result<CppUnrealCodegenOpt
     validate_api_macro(options.api_macro.as_deref())?;
     validate_type_name_prefix(options.type_name_prefix.as_deref())?;
     if matches!(options.support, CppUnrealSupportLevel::Blueprint) && options.api_macro.is_none() {
-        return Err(ConfigForgeError::Validation(format!(
-            "failed to parse {LANGUAGE} codegen options: api_macro is required when support = \"blueprint\""
-        )));
+        return Err(cpp_unreal_option_error(
+            format!(
+                "failed to parse {LANGUAGE} codegen options: api_macro is required when support = \"blueprint\""
+            ),
+            "missing cpp_unreal.api_macro",
+            "uppercase C++ macro identifier for blueprint support",
+        ));
     }
     if matches!(options.support, CppUnrealSupportLevel::Blueprint)
         && (options.namespace.is_some() || input.target.namespace.is_some())
     {
-        return Err(ConfigForgeError::Validation(format!(
-            "failed to parse {LANGUAGE} codegen options: namespace is not supported when support = \"blueprint\"; use cpp_unreal.type_name_prefix to avoid global reflected type collisions"
-        )));
+        return Err(cpp_unreal_option_error(
+            format!(
+                "failed to parse {LANGUAGE} codegen options: namespace is not supported when support = \"blueprint\"; use cpp_unreal.type_name_prefix to avoid global reflected type collisions"
+            ),
+            "namespace with blueprint support",
+            "no namespace for blueprint support",
+        ));
     }
     Ok(options)
 }
@@ -200,9 +209,13 @@ fn validate_api_macro(api_macro: Option<&str>) -> Result<()> {
                 .first()
                 .is_some_and(|byte| byte.is_ascii_uppercase() || *byte == b'_');
         if !is_valid {
-            return Err(ConfigForgeError::Validation(format!(
-                "failed to parse {LANGUAGE} codegen options: api_macro `{api_macro}` must be an uppercase C++ macro identifier"
-            )));
+            return Err(cpp_unreal_option_error(
+                format!(
+                    "failed to parse {LANGUAGE} codegen options: api_macro `{api_macro}` must be an uppercase C++ macro identifier"
+                ),
+                api_macro,
+                "uppercase C++ macro identifier",
+            ));
         }
     }
     Ok(())
@@ -219,12 +232,31 @@ fn validate_type_name_prefix(type_name_prefix: Option<&str>) -> Result<()> {
                 .first()
                 .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_');
         if !is_valid {
-            return Err(ConfigForgeError::Validation(format!(
-                "failed to parse {LANGUAGE} codegen options: type_name_prefix `{type_name_prefix}` must be a C++ identifier prefix"
-            )));
+            return Err(cpp_unreal_option_error(
+                format!(
+                    "failed to parse {LANGUAGE} codegen options: type_name_prefix `{type_name_prefix}` must be a C++ identifier prefix"
+                ),
+                type_name_prefix,
+                "C++ identifier prefix",
+            ));
         }
     }
     Ok(())
+}
+
+fn cpp_unreal_option_error(
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    crate::code_artifact::generator_option_error(
+        CF_GENERATOR_INVALID_OPTION,
+        "generator.cpp_unreal.options",
+        message,
+        current,
+        expected,
+        "Check the cpp_unreal export task options.",
+    )
 }
 
 fn render_header_file(

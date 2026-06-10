@@ -1,7 +1,10 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ConfigForgeError, Result, code_artifact::ir::relation_key_plan};
+use crate::{
+    ConfigForgeError, Result, code_artifact::ir::relation_key_plan,
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+};
 
 use super::{
     CodeForeignKey, CodeIndex, CodeModel, CodeRelationCardinality, CodeTable, CodeWriterLike,
@@ -330,10 +333,15 @@ pub(super) fn render_row_relation_source(
             }
             CodeRelationCardinality::Many => {
                 let source_field = foreign_key.fields.first().ok_or_else(|| {
-                    ConfigForgeError::Validation(format!(
-                        "cpp_unreal codegen foreign key `{}` has no source fields",
-                        foreign_key.name
-                    ))
+                    codegen_relation_error(
+                        format!(
+                            "cpp_unreal codegen foreign key `{}` has no source fields",
+                            foreign_key.name
+                        ),
+                        foreign_key.name.clone(),
+                        "foreign key with at least one source field",
+                        "Check linked foreign key source field declarations before Unreal C++ codegen.",
+                    )
                 })?;
                 let source_field_name = names.field_name(source_field)?;
                 content.raw_fmt(format_args!(
@@ -457,9 +465,12 @@ fn table_by_name<'a>(model: &'a CodeModel, name: &str) -> Result<&'a CodeTable> 
         .iter()
         .find(|table| table.name == name)
         .ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "cpp_unreal codegen foreign key references unknown target table `{name}`"
-            ))
+            codegen_relation_error(
+                format!("cpp_unreal codegen foreign key references unknown target table `{name}`"),
+                name,
+                "target table present in code model",
+                "Check foreign key target table visibility before Unreal C++ codegen.",
+            )
         })
 }
 
@@ -469,9 +480,30 @@ fn index_by_name<'a>(table: &'a CodeTable, name: &str) -> Result<&'a CodeIndex> 
         .iter()
         .find(|index| index.name == name)
         .ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "cpp_unreal codegen foreign key references unknown target index `{}.{}`",
-                table.name, name
-            ))
+            codegen_relation_error(
+                format!(
+                    "cpp_unreal codegen foreign key references unknown target index `{}.{}`",
+                    table.name, name
+                ),
+                format!("{}.{}", table.name, name),
+                "target index present in code model",
+                "Check foreign key target index visibility before Unreal C++ codegen.",
+            )
         })
+}
+
+fn codegen_relation_error(
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    crate::code_artifact::generator_option_error(
+        CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+        "generator.cpp_unreal.relations",
+        message,
+        current,
+        expected,
+        hint,
+    )
 }

@@ -9,8 +9,9 @@ use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
     code_artifact::{
         CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, GeneratedFile,
-        tests::{input_for, linked_fixture},
+        tests::{expect_single_diagnostic, input_for, linked_fixture},
     },
+    diagnostic::code::CF_GENERATOR_INVALID_OPTION,
 };
 
 use super::{CppUnrealCodeGenerator, CppUnrealCodegenOptions, CppUnrealSupportLevel, LANGUAGE};
@@ -103,8 +104,14 @@ fn rejects_invalid_api_macro() {
     let mut input = input_for(&meta, LANGUAGE);
     input.target = CodeExportTarget::from_task(config, &CppUnrealCodeGenerator).expect("target");
     let error = CppUnrealCodeGenerator.generate(&input).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
 
-    assert!(format!("{error}").contains("api_macro `GameConfigApi`"));
+    assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.cpp_unreal.options")
+    );
+    assert_eq!(diagnostic.current_value.as_deref(), Some("GameConfigApi"));
 }
 
 #[test]
@@ -124,8 +131,17 @@ fn rejects_blueprint_support_without_api_macro() {
     let mut input = input_for(&meta, LANGUAGE);
     input.target = CodeExportTarget::from_task(config, &CppUnrealCodeGenerator).expect("target");
     let error = CppUnrealCodeGenerator.generate(&input).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
 
-    assert!(format!("{error}").contains("api_macro is required"));
+    assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.cpp_unreal.options")
+    );
+    assert_eq!(
+        diagnostic.current_value.as_deref(),
+        Some("missing cpp_unreal.api_macro")
+    );
 }
 
 #[test]
@@ -147,8 +163,17 @@ fn rejects_namespace_in_blueprint_support() {
     let mut input = input_for(&meta, LANGUAGE);
     input.target = CodeExportTarget::from_task(config, &CppUnrealCodeGenerator).expect("target");
     let error = CppUnrealCodeGenerator.generate(&input).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
 
-    assert!(format!("{error}").contains("namespace is not supported"));
+    assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.cpp_unreal.options")
+    );
+    assert_eq!(
+        diagnostic.current_value.as_deref(),
+        Some("namespace with blueprint support")
+    );
 }
 
 #[test]
@@ -168,8 +193,14 @@ fn rejects_invalid_type_name_prefix() {
     let mut input = input_for(&meta, LANGUAGE);
     input.target = CodeExportTarget::from_task(config, &CppUnrealCodeGenerator).expect("target");
     let error = CppUnrealCodeGenerator.generate(&input).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
 
-    assert!(format!("{error}").contains("type_name_prefix `3Game`"));
+    assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.cpp_unreal.options")
+    );
+    assert_eq!(diagnostic.current_value.as_deref(), Some("3Game"));
 }
 
 #[test]
