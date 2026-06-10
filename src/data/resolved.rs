@@ -6,9 +6,9 @@ use std::{collections::BTreeMap, path::PathBuf};
 #[cfg(test)]
 use std::collections::HashMap;
 
-use crate::{ConfigForgeError, Result};
+use crate::{ConfigForgeError, Result, diagnostic::code::CF_DATA_SOURCE_SCHEMA_INVALID};
 
-use super::RowSourceInfo;
+use super::{RowSourceInfo, data_diagnostic_error};
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg(test)]
@@ -77,10 +77,15 @@ impl ResolvedDataSet {
         let mut table_index = HashMap::new();
         for (index, table) in tables.iter().enumerate() {
             if table_index.insert(table.name.clone(), index).is_some() {
-                return Err(ConfigForgeError::Validation(format!(
-                    "resolved data set declares duplicate table `{}`",
-                    table.name
-                )));
+                return Err(resolved_model_error(
+                    format!(
+                        "resolved data set declares duplicate table `{}`",
+                        table.name
+                    ),
+                    &table.name,
+                    "unique table names in resolved data set",
+                    "Check data resolver output table names.",
+                ));
             }
         }
 
@@ -105,12 +110,17 @@ impl ResolvedTable {
     ) -> Result<Self> {
         let name = name.into();
         if rows.len() != row_sources.len() {
-            return Err(ConfigForgeError::Validation(format!(
-                "resolved table `{}` has {} rows but {} row source records",
-                name,
-                rows.len(),
-                row_sources.len()
-            )));
+            return Err(resolved_model_error(
+                format!(
+                    "resolved table `{}` has {} rows but {} row source records",
+                    name,
+                    rows.len(),
+                    row_sources.len()
+                ),
+                format!("{} rows / {} row sources", rows.len(), row_sources.len()),
+                "one row source record per resolved data row",
+                "Fix data resolver row source tracking to match resolved rows.",
+            ));
         }
         Ok(Self {
             name,
@@ -118,6 +128,22 @@ impl ResolvedTable {
             row_sources,
         })
     }
+}
+
+fn resolved_model_error(
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    data_diagnostic_error(
+        CF_DATA_SOURCE_SCHEMA_INVALID,
+        "data.resolved",
+        message,
+        current,
+        expected,
+        hint,
+    )
 }
 
 impl ResolvedValue {

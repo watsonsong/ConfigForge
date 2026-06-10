@@ -17,8 +17,8 @@ use tempfile::tempdir;
 use crate::{
     ConfigForgeError, Diagnostic,
     diagnostic::code::{
-        CF_DATA_DUPLICATE_HEADER, CF_DATA_DUPLICATE_KEY, CF_DATA_SOURCE_PATH_ESCAPE,
-        CF_DATA_SOURCE_READ_FAILED, CF_DATA_SOURCE_SCHEMA_INVALID,
+        CF_BUILD_INVALID_OPTION, CF_DATA_DUPLICATE_HEADER, CF_DATA_DUPLICATE_KEY,
+        CF_DATA_SOURCE_PATH_ESCAPE, CF_DATA_SOURCE_READ_FAILED, CF_DATA_SOURCE_SCHEMA_INVALID,
     },
     meta::MetaModel,
 };
@@ -1457,13 +1457,29 @@ fn data_loader_read_sources_with_pool_reports_first_plan_error() {
         .read_sources_with_reader_and_pool(&plan, &pool, |source| {
             if source.path == std::path::Path::new("first.csv") {
                 thread::sleep(Duration::from_millis(20));
-                return Err(ConfigForgeError::Validation("first failed".to_owned()));
+                return Err(data_diagnostic_error(
+                    CF_DATA_SOURCE_READ_FAILED,
+                    "data.test",
+                    "first failed",
+                    "first.csv",
+                    "readable source",
+                    "test failure",
+                ));
             }
-            Err(ConfigForgeError::Validation("second failed".to_owned()))
+            Err(data_diagnostic_error(
+                CF_DATA_SOURCE_READ_FAILED,
+                "data.test",
+                "second failed",
+                "second.csv",
+                "readable source",
+                "test failure",
+            ))
         })
         .unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
 
-    assert!(matches!(error, ConfigForgeError::Validation(message) if message == "first failed"));
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_READ_FAILED);
+    assert_eq!(diagnostic.message, "first failed");
 }
 
 #[test]
@@ -1573,8 +1589,10 @@ fn async_source_read_shell_reports_first_plan_error_not_completion_order() {
     );
 
     let error = shell.read_sources(&plan, &provider).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
 
-    assert!(matches!(error, ConfigForgeError::Validation(message) if message == "first failed"));
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_READ_FAILED);
+    assert_eq!(diagnostic.message, "first failed");
 }
 
 #[test]
@@ -1596,8 +1614,10 @@ fn async_source_read_shell_stops_scheduling_after_failure() {
     );
 
     let error = shell.read_sources(&plan, &provider).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
 
-    assert!(matches!(error, ConfigForgeError::Validation(message) if message == "fail requested"));
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_READ_FAILED);
+    assert_eq!(diagnostic.message, "fail requested");
     assert_eq!(
         *started.lock().expect("started list should be lockable"),
         vec![PathBuf::from("ok.csv"), PathBuf::from("fail.csv")]
@@ -1611,9 +1631,9 @@ fn source_provider_concurrency_rejects_zero_limits() {
         SourceProviderConcurrency::new(1, 0, 1),
         SourceProviderConcurrency::new(1, 1, 0),
     ] {
-        assert!(
-            matches!(result, Err(ConfigForgeError::Validation(message)) if message.contains("greater than 0"))
-        );
+        let diagnostic = expect_single_diagnostic(result.unwrap_err());
+        assert_eq!(diagnostic.code, CF_BUILD_INVALID_OPTION);
+        assert!(diagnostic.message.contains("greater than 0"));
     }
 }
 
@@ -1661,7 +1681,14 @@ impl SourceProvider for FakeSourceProvider {
             active.fetch_sub(1, Ordering::SeqCst);
         }
         if let Some((_, message)) = self.failures.iter().find(|(path, _)| path == &source.path) {
-            return Err(ConfigForgeError::Validation(message.clone()));
+            return Err(data_diagnostic_error(
+                CF_DATA_SOURCE_READ_FAILED,
+                "data.test",
+                message.clone(),
+                source.path.display().to_string(),
+                "readable source",
+                "test failure",
+            ));
         }
         Ok(DataTable::new(
             source.table_name.clone(),
@@ -1682,10 +1709,10 @@ fn data_set_try_new_rejects_duplicate_table_names() {
 
     assert!(DataSet::has_duplicate_table_names(&tables));
     let error = DataSet::try_new(tables).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
 
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate table `items`"))
-    );
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_SCHEMA_INVALID);
+    assert!(diagnostic.message.contains("duplicate table `items`"));
 }
 
 #[test]

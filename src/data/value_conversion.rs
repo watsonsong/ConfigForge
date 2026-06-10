@@ -1,7 +1,9 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ConfigForgeError, Result};
+use crate::{ConfigForgeError, Result, diagnostic::code::CF_DATA_INVALID_TYPE};
+
+use super::data_diagnostic_error;
 
 pub(crate) fn toml_default_to_json_value(value: &toml::Value) -> serde_json::Value {
     match value {
@@ -28,8 +30,11 @@ pub(crate) fn json_value_to_scalar_cell(value: &serde_json::Value) -> Result<Str
         serde_json::Value::String(value) => Ok(value.clone()),
         serde_json::Value::Number(value) => Ok(value.to_string()),
         serde_json::Value::Bool(value) => Ok(value.to_string()),
-        _ => Err(ConfigForgeError::Validation(
+        _ => Err(data_value_conversion_error(
             "struct scalar field value must be string, number, or bool".to_owned(),
+            json_value_kind(value),
+            "JSON string, number, or bool scalar",
+            "Use scalar JSON values for struct scalar fields.",
         )),
     }
 }
@@ -41,9 +46,14 @@ pub(crate) fn json_value_to_scalar_cell_for_field(
     field_path: &str,
 ) -> Result<String> {
     json_value_to_scalar_cell(value).map_err(|_| {
-        ConfigForgeError::Validation(format!(
-            "table `{table_name}` row {row_number} field `{field_path}` must be a scalar value"
-        ))
+        data_value_conversion_error(
+            format!(
+                "table `{table_name}` row {row_number} field `{field_path}` must be a scalar value"
+            ),
+            json_value_kind(value),
+            "JSON string, number, or bool scalar",
+            "Use scalar JSON values for struct scalar fields.",
+        )
     })
 }
 
@@ -53,8 +63,11 @@ pub(crate) fn json_value_to_cell(value: &serde_json::Value) -> Result<String> {
         serde_json::Value::Number(value) => Ok(value.to_string()),
         serde_json::Value::Bool(value) => Ok(value.to_string()),
         serde_json::Value::Array(_) | serde_json::Value::Object(_) => Ok(value.to_string()),
-        serde_json::Value::Null => Err(ConfigForgeError::Validation(
+        serde_json::Value::Null => Err(data_value_conversion_error(
             "field value must not be null".to_owned(),
+            "null JSON value",
+            "non-null JSON value",
+            "Remove null values or omit optional fields instead.",
         )),
     }
 }
@@ -65,10 +78,42 @@ pub(crate) fn default_value_to_cell(
     default: &toml::Value,
 ) -> Result<String> {
     json_value_to_cell(&toml_default_to_json_value(default)).map_err(|_| {
-        ConfigForgeError::Validation(format!(
-            "table `{table_name}` field `{field_name}` has unsupported default value `{default}`"
-        ))
+        data_value_conversion_error(
+            format!(
+                "table `{table_name}` field `{field_name}` has unsupported default value `{default}`"
+            ),
+            default.to_string(),
+            "default value convertible to a data cell",
+            "Use string, number, bool, array, or table defaults; null-like defaults are not supported.",
+        )
     })
+}
+
+fn data_value_conversion_error(
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    data_diagnostic_error(
+        CF_DATA_INVALID_TYPE,
+        "data.value_conversion",
+        message,
+        current,
+        expected,
+        hint,
+    )
+}
+
+fn json_value_kind(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null JSON value",
+        serde_json::Value::Bool(_) => "bool JSON value",
+        serde_json::Value::Number(_) => "number JSON value",
+        serde_json::Value::String(_) => "string JSON value",
+        serde_json::Value::Array(_) => "array JSON value",
+        serde_json::Value::Object(_) => "object JSON value",
+    }
 }
 
 #[cfg(test)]

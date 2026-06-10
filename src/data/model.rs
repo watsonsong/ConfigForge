@@ -6,7 +6,9 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{ConfigForgeError, Result};
+use crate::{ConfigForgeError, Result, diagnostic::code::CF_DATA_SOURCE_SCHEMA_INVALID};
+
+use super::data_diagnostic_error;
 
 pub type DataRow = BTreeMap<String, String>;
 
@@ -79,10 +81,12 @@ impl DataSet {
         let mut table_index = HashMap::new();
         for (index, table) in tables.iter().enumerate() {
             if table_index.insert(table.name.clone(), index).is_some() {
-                return Err(ConfigForgeError::Validation(format!(
-                    "data set declares duplicate table `{}`",
-                    table.name
-                )));
+                return Err(data_model_error(
+                    format!("data set declares duplicate table `{}`", table.name),
+                    &table.name,
+                    "unique table names in data set",
+                    "Check source read planning and merged source table names.",
+                ));
             }
         }
 
@@ -144,19 +148,9 @@ impl DataTable {
     ) -> Result<Self> {
         let name = name.into();
         if rows.len() != row_sources.len() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` has {} rows but {} row source records",
-                name,
-                rows.len(),
-                row_sources.len()
-            )));
+            return Err(row_source_count_error(&name, rows.len(), row_sources.len()));
         }
-        Ok(Self::new_with_sources_and_cells(
-            name,
-            rows,
-            row_sources,
-            Vec::new(),
-        )?)
+        Self::new_with_sources_and_cells(name, rows, row_sources, Vec::new())
     }
 
     pub fn new_with_sources_and_cells(
@@ -167,20 +161,20 @@ impl DataTable {
     ) -> Result<Self> {
         let name = name.into();
         if rows.len() != row_sources.len() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` has {} rows but {} row source records",
-                name,
-                rows.len(),
-                row_sources.len()
-            )));
+            return Err(row_source_count_error(&name, rows.len(), row_sources.len()));
         }
         if !cell_sources.is_empty() && rows.len() != cell_sources.len() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` has {} rows but {} cell source records",
-                name,
-                rows.len(),
-                cell_sources.len()
-            )));
+            return Err(data_model_error(
+                format!(
+                    "table `{}` has {} rows but {} cell source records",
+                    name,
+                    rows.len(),
+                    cell_sources.len()
+                ),
+                format!("{} rows / {} cell sources", rows.len(), cell_sources.len()),
+                "one cell source record per data row",
+                "Fix source reader cell source tracking to match loaded rows.",
+            ));
         }
         let cell_sources = if cell_sources.is_empty() {
             vec![BTreeMap::new(); rows.len()]
@@ -229,4 +223,33 @@ fn default_row_sources(row_count: usize) -> Vec<RowSourceInfo> {
 
 fn default_cell_sources(row_count: usize) -> Vec<BTreeMap<String, CellSourceInfo>> {
     vec![BTreeMap::new(); row_count]
+}
+
+fn row_source_count_error(
+    table_name: &str,
+    row_count: usize,
+    source_count: usize,
+) -> ConfigForgeError {
+    data_model_error(
+        format!("table `{table_name}` has {row_count} rows but {source_count} row source records"),
+        format!("{row_count} rows / {source_count} row sources"),
+        "one row source record per data row",
+        "Fix source reader row source tracking to match loaded rows.",
+    )
+}
+
+fn data_model_error(
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    data_diagnostic_error(
+        CF_DATA_SOURCE_SCHEMA_INVALID,
+        "data.model",
+        message,
+        current,
+        expected,
+        hint,
+    )
 }

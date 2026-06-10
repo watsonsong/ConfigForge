@@ -3,7 +3,9 @@
 
 use std::{path::PathBuf, sync::mpsc, thread};
 
-use crate::{ConfigForgeError, Result};
+use crate::{ConfigForgeError, Result, diagnostic::code::CF_BUILD_INVALID_OPTION};
+
+use super::data_diagnostic_error;
 
 use super::{
     CsvDataReader, DataProvider, DataSourceLayout, DataSourcePlan, DataTable, RawSourceData,
@@ -61,18 +63,24 @@ impl SourceProviderResource {
 impl SourceProviderConcurrency {
     pub fn new(blocking_local: usize, async_io: usize, network: usize) -> Result<Self> {
         if blocking_local == 0 {
-            return Err(ConfigForgeError::Validation(
+            return Err(source_concurrency_error(
                 "blocking local source concurrency must be greater than 0".to_owned(),
+                "blocking_local=0",
+                "positive blocking local source concurrency",
             ));
         }
         if async_io == 0 {
-            return Err(ConfigForgeError::Validation(
+            return Err(source_concurrency_error(
                 "async source concurrency must be greater than 0".to_owned(),
+                "async_io=0",
+                "positive async source concurrency",
             ));
         }
         if network == 0 {
-            return Err(ConfigForgeError::Validation(
+            return Err(source_concurrency_error(
                 "network source concurrency must be greater than 0".to_owned(),
+                "network=0",
+                "positive network source concurrency",
             ));
         }
         Ok(Self {
@@ -89,6 +97,21 @@ impl SourceProviderConcurrency {
             SourceProviderResource::Network => self.network,
         }
     }
+}
+
+fn source_concurrency_error(
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    data_diagnostic_error(
+        CF_BUILD_INVALID_OPTION,
+        "data.source_provider.concurrency",
+        message,
+        current,
+        expected,
+        "Set source provider concurrency limits to values greater than 0.",
+    )
 }
 
 impl Default for SourceProviderConcurrency {
