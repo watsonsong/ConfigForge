@@ -9,7 +9,9 @@ use crate::{
     ConfigForgeError, Diagnostic, Result,
     artifact::{ArtifactSink, ArtifactWriteMode, ArtifactWriteStream, ArtifactWriter},
     data::{DataTable, SourceRole},
-    diagnostic::code::{CF_DATA_INVALID_TYPE, CF_DATA_SOURCE_SCHEMA_INVALID},
+    diagnostic::code::{
+        CF_DATA_INVALID_TYPE, CF_DATA_SOURCE_SCHEMA_INVALID, CF_GENERATOR_INVALID_OPTION,
+    },
     generator::BinaryDataExporter,
     meta::{LinkedTableMeta, MetaModel, TargetTags},
     runtime_contract::{RuntimeDataFile, binary_schema_revision},
@@ -17,12 +19,41 @@ use crate::{
 
 use super::*;
 
+#[derive(Debug, Default, serde::Deserialize)]
+#[allow(dead_code)]
+struct SampleDataOptions {
+    flag: bool,
+}
+
 fn expect_single_diagnostic(error: ConfigForgeError) -> Diagnostic {
     let ConfigForgeError::ValidationReport(report) = error else {
         panic!("expected structured diagnostic report");
     };
     assert_eq!(report.diagnostics.len(), 1);
     report.diagnostics.into_iter().next().unwrap()
+}
+
+#[test]
+fn target_data_config_parse_options_reports_structured_option_errors() {
+    let config = TargetDataConfig {
+        name: Some("bad".to_owned()),
+        output: PathBuf::from("out"),
+        format: "sample".to_owned(),
+        options: BTreeMap::from([("flag".to_owned(), toml::Value::String("yes".to_owned()))]),
+    };
+
+    let diagnostic = expect_single_diagnostic(
+        config
+            .parse_options::<SampleDataOptions>("sample", "sample")
+            .unwrap_err(),
+    );
+
+    assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
+    assert_eq!(diagnostic.source.as_deref(), Some("generator.sample"));
+    assert_eq!(diagnostic.domain.as_deref(), Some("generator"));
+    assert!(diagnostic.current_value.as_deref().unwrap().contains("yes"));
+    assert_eq!(diagnostic.expected.as_deref(), Some("valid sample options"));
+    assert!(diagnostic.hint.is_some());
 }
 
 struct CustomDataExporter {

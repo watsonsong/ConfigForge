@@ -107,7 +107,7 @@ mod tests {
 
     use super::*;
 
-    const LEGACY_VALIDATION_FALLBACK_BASELINE: usize = 267;
+    const LEGACY_VALIDATION_FALLBACK_BASELINE: usize = 250;
 
     #[test]
     fn structured_error_helpers_create_validation_report_errors() {

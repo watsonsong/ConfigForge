@@ -23,8 +23,10 @@ use std::{collections::BTreeMap, collections::HashMap, path::PathBuf};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
-    ArtifactProjectInfo, ConfigForgeError, Result,
+    ArtifactProjectInfo, ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity,
+    Result,
     artifact::ArtifactSink,
+    diagnostic::code::{CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNKNOWN_TYPE},
     meta::{LinkedMetaModel, TargetTags},
     runtime_contract::RuntimeDataFile,
 };
@@ -224,10 +226,16 @@ where
     options
         .remove(key)
         .map(|value| {
+            let current_value = format!("{key}={value}");
             value.try_into().map_err(|source| {
-                ConfigForgeError::Validation(format!(
-                    "invalid export task option `{key}`: {source}"
-                ))
+                generator_option_error(
+                    CF_GENERATOR_INVALID_OPTION,
+                    "generator.codegen",
+                    format!("invalid export task option `{key}`: {source}"),
+                    current_value,
+                    format!("valid `{key}` option value"),
+                    "Check the export task option type and supported values.",
+                )
             })
         })
         .transpose()
@@ -283,9 +291,16 @@ fn validate_i18n_options(options: I18nOptions) -> Result<I18nOptions> {
     fn validate_optional_code_snippet(kind: &str, value: &Option<String>) -> Result<()> {
         if let Some(value) = value {
             if value.trim().is_empty() || value.chars().any(char::is_control) {
-                return Err(ConfigForgeError::Validation(format!(
-                    "invalid i18n {kind} `{value}`; value must be non-empty and single-line"
-                )));
+                return Err(generator_option_error(
+                    CF_GENERATOR_INVALID_OPTION,
+                    "generator.codegen",
+                    format!(
+                        "invalid i18n {kind} `{value}`; value must be non-empty and single-line"
+                    ),
+                    value,
+                    "non-empty single-line code snippet",
+                    "Remove control characters and provide a valid i18n code snippet.",
+                ));
             }
         }
         Ok(())
@@ -300,8 +315,13 @@ fn validate_i18n_options(options: I18nOptions) -> Result<I18nOptions> {
             validate_optional_code_snippet("typescript_import", &options.typescript_import)?;
             validate_optional_code_snippet("java_import", &options.java_import)?;
             if options.function.is_none() {
-                return Err(ConfigForgeError::Validation(
+                return Err(generator_option_error(
+                    CF_GENERATOR_INVALID_OPTION,
+                    "generator.codegen",
                     "i18n mode `global_function` requires `function`".to_owned(),
+                    "missing i18n.function",
+                    "global function name",
+                    "Set `i18n.function` when using global_function mode.",
                 ));
             }
             Ok(options)
@@ -345,16 +365,30 @@ fn validate_generated_file_name(file_name: &str) -> Result<String> {
     if is_valid {
         Ok(file_name.to_owned())
     } else {
-        Err(ConfigForgeError::Validation(format!(
-            "invalid generated code file name `{file_name}`; file_name must be a single file name without path separators"
-        )))
+        Err(generator_option_error(
+            CF_GENERATOR_INVALID_OPTION,
+            "generator.codegen",
+            format!(
+                "invalid generated code file name `{file_name}`; file_name must be a single file name without path separators"
+            ),
+            file_name,
+            "single file name without path separators",
+            "Use a file name such as `generated.rs`, not a nested or absolute path.",
+        ))
     }
 }
 
 impl CodeArtifactOptions {
     pub fn for_language(language: &str) -> Result<Self> {
         let (canonical, naming, formatting) = language_defaults(language).ok_or_else(|| {
-            ConfigForgeError::Validation(format!("no code generator registered for `{language}`"))
+            generator_option_error(
+                CF_GENERATOR_UNKNOWN_TYPE,
+                "generator.codegen",
+                format!("no code generator registered for `{language}`"),
+                language,
+                "registered code generator language",
+                "Use a supported code generator language such as rust, cpp, cpp_unreal, csharp, java, or typescript.",
+            )
         })?;
         Ok(Self {
             file_header: None,
@@ -375,13 +409,41 @@ impl CodeArtifactOptions {
     {
         match self.language_options.get(language) {
             Some(options) => options.clone().try_into().map_err(|source| {
-                ConfigForgeError::Validation(format!(
-                    "failed to parse {language} codegen options: {source}"
-                ))
+                generator_option_error(
+                    CF_GENERATOR_INVALID_OPTION,
+                    format!("generator.{language}"),
+                    format!("failed to parse {language} codegen options: {source}"),
+                    options.to_string(),
+                    format!("valid {language} codegen options"),
+                    "Check the language-specific codegen option names, types, and values.",
+                )
             }),
             None => Ok(T::default()),
         }
     }
+}
+
+fn generator_option_error(
+    code: &'static str,
+    source: impl Into<String>,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            code,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source(source)
+        .with_domain("generator")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
 }
 
 impl NamingConfig {

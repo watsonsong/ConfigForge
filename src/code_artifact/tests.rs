@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use crate::{
     ConfigForgeError,
+    diagnostic::code::{CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNKNOWN_TYPE},
     generator::{
         CSharpCodeGenerator, CppCodeGenerator, CppUnrealCodeGenerator, RustCodeGenerator,
         TypeScriptCodeGenerator, TypeScriptCodegenOptions,
@@ -15,6 +16,14 @@ use crate::{
 
 use super::ir::{CodeForeignKey, CodeRelationCardinality, relation_key_plan};
 use super::*;
+
+fn expect_single_diagnostic(error: ConfigForgeError) -> crate::Diagnostic {
+    let ConfigForgeError::ValidationReport(report) = error else {
+        panic!("expected structured diagnostic report");
+    };
+    assert_eq!(report.diagnostics.len(), 1);
+    report.diagnostics.into_iter().next().unwrap()
+}
 
 pub(crate) fn linked_fixture() -> MetaModel {
     MetaModel::from_toml_str(
@@ -1097,9 +1106,15 @@ fn rejects_global_i18n_without_function() {
 
     let error = CodeExportTarget::from_task(config, &RustCodeGenerator).unwrap_err();
 
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("requires `function`"))
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
+    assert_eq!(diagnostic.source.as_deref(), Some("generator.codegen"));
+    assert!(diagnostic.message.contains("requires `function`"));
+    assert_eq!(
+        diagnostic.current_value.as_deref(),
+        Some("missing i18n.function")
     );
+    assert_eq!(diagnostic.expected.as_deref(), Some("global function name"));
 }
 
 #[test]
@@ -1169,8 +1184,58 @@ fn rejects_codegen_file_name_with_path_separator() {
 
     let error = CodeExportTarget::from_task(config, &RustCodeGenerator).unwrap_err();
 
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
+    assert_eq!(diagnostic.source.as_deref(), Some("generator.codegen"));
     assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("invalid generated code file name"))
+        diagnostic
+            .message
+            .contains("invalid generated code file name")
+    );
+    assert_eq!(
+        diagnostic.current_value.as_deref(),
+        Some("nested/generated.rs")
+    );
+    assert_eq!(
+        diagnostic.expected.as_deref(),
+        Some("single file name without path separators")
+    );
+}
+
+#[test]
+fn codegen_options_report_structured_language_and_option_errors() {
+    let diagnostic = expect_single_diagnostic(CodegenOptions::for_language("unknown").unwrap_err());
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNKNOWN_TYPE);
+    assert_eq!(diagnostic.source.as_deref(), Some("generator.codegen"));
+    assert_eq!(diagnostic.current_value.as_deref(), Some("unknown"));
+    assert!(
+        diagnostic
+            .expected
+            .as_deref()
+            .unwrap()
+            .contains("registered code generator")
+    );
+
+    let options = CodegenOptions {
+        language_options: std::collections::HashMap::from([(
+            TypeScriptCodeGenerator.language().to_owned(),
+            toml::Value::String("not a table".to_owned()),
+        )]),
+        ..CodegenOptions::for_language(TypeScriptCodeGenerator.language()).expect("defaults")
+    };
+    let diagnostic = expect_single_diagnostic(
+        options
+            .language_options::<TypeScriptCodegenOptions>(TypeScriptCodeGenerator.language())
+            .unwrap_err(),
+    );
+    assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
+    assert_eq!(diagnostic.source.as_deref(), Some("generator.typescript"));
+    assert!(
+        diagnostic
+            .current_value
+            .as_deref()
+            .unwrap()
+            .contains("not a table")
     );
 }
 
