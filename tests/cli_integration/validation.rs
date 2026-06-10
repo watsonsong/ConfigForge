@@ -136,6 +136,99 @@ fn cli_diagnostic_format_json_emits_machine_readable_diagnostics() {
 }
 
 #[test]
+fn asset_missing_json_diagnostic_has_stable_code_and_value_context() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let data_dir = temp_dir.path().join("data");
+    let asset_dir = temp_dir.path().join("assets");
+    let data_out_dir = temp_dir.path().join("out/data");
+    fs::create_dir_all(&data_dir).expect("data dir should be created");
+    fs::create_dir_all(&asset_dir).expect("asset dir should be created");
+    fs::write(
+        data_dir.join("items.csv"),
+        "id,icon\n编号,图标\n1,Missing.png\n",
+    )
+    .expect("items data should be written");
+
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                [project]
+                name = "asset_project"
+                input = "{}"
+
+                [assets]
+                require_existing = true
+
+                [[assets.search_paths]]
+                name = "game"
+                root = "{}"
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "icon"
+                type = "asset"
+                asset_kind = "ui_icon"
+
+                [[asset_kinds]]
+                name = "ui_icon"
+                search_paths = ["game"]
+                extensions = [".png"]
+
+                [[targets]]
+                name = "client"
+                tags = ["client"]
+
+                [[targets.exports]]
+                output = "{}"
+                type = "json"
+            "#,
+            data_dir.display(),
+            asset_dir.display(),
+            data_out_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let output = Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .args([
+            "--project",
+            project_path.to_str().expect("path should be utf8"),
+            "--target",
+            "client",
+            "--diagnostic-format",
+            "json",
+        ])
+        .output()
+        .expect("config-forge should run");
+    assert!(!output.status.success(), "command should fail");
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    let diagnostic: serde_json::Value =
+        serde_json::from_str(&stderr).expect("stderr should be diagnostic JSON");
+    let issue = &diagnostic["diagnostics"][0];
+    assert_eq!(issue["code"], "CF_DATA_INVALID_ASSET_REF");
+    assert_eq!(issue["severity"], "error");
+    assert_eq!(issue["source"], "asset");
+    assert_eq!(issue["target"], "client");
+    assert_eq!(issue["current_value"], "Missing.png");
+    assert_eq!(issue["expected"], "valid `ui_icon` asset reference");
+    assert_eq!(issue["domain"], "data");
+    assert_eq!(issue["location"]["table"], "items");
+    assert_eq!(issue["location"]["field"], "icon");
+}
+
+#[test]
 fn warning_validator_is_visible_but_does_not_block_export() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let data_dir = temp_dir.path().join("data");

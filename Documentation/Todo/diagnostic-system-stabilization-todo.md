@@ -151,7 +151,7 @@ CF_BUILD_EXPORT_TASK_FAILED
 - [ ] 迁移 enum 错误，填充 current enum string / ordinal、expected enum candidates。
 - [ ] 迁移 duplicate key / index 错误，填充 index name、duplicate key value、冲突行号。
 - [ ] 迁移 FK 错误，填充 current key、expected target table / index、source field。
-- [ ] 迁移 asset reference 错误，填充 raw asset ref、expected search path / asset kind rule、canonicalization hint。
+- [x] 迁移 validation asset reference 错误，填充 raw asset ref、expected asset kind rule、canonicalization hint，并在 CLI JSON 中暴露 `CF_DATA_INVALID_ASSET_REF`。（asset resolver 内部仍有 legacy fallback，后续按细粒度 code 继续拆分。）
 - [ ] 迁移 builtin validator 错误，至少填充 validator source、current_value、expected、hint。
 
 交付标准：设计师看到一条 data validation 错误后，不需要阅读源码或猜测上下文，即可知道哪个表、哪行、哪列、当前值、期望值和修复建议。
@@ -184,9 +184,9 @@ CF_BUILD_EXPORT_TASK_FAILED
 
 ## Step 10：建立诊断测试策略与迁移防回归
 
-完成状态（2026-06-10）：已完成当前批次回归防护。新增 CLI JSON integration tests 覆盖 data invalid type、artifact path escape、unknown generator type；既有 unit tests 覆盖 code catalog 唯一性、Diagnostic enrichment、Designer Report renderer enrichment、generator/artifact/data producer structured fields。Asset missing 的结构化 code 仍随 asset producer 迁移后补齐。
+完成状态（2026-06-10）：已完成当前批次回归防护。新增 CLI JSON integration tests 覆盖 data invalid type、artifact path escape、unknown generator type、asset missing；既有 unit tests 覆盖 code catalog 唯一性、Diagnostic enrichment、Designer Report renderer enrichment、generator/artifact/data producer structured fields。
 
-- [x] 新增 diagnostic snapshot / golden tests，覆盖 generator unknown type、invalid option、artifact path escape、path collision、CSV invalid type、FK missing target、asset missing。（当前批次覆盖 generator/artifact/CSV/FK；asset missing 仍为 asset producer 后续迁移项。）
+- [x] 新增 diagnostic snapshot / golden tests，覆盖 generator unknown type、invalid option、artifact path escape、path collision、CSV invalid type、FK missing target、asset missing。（当前批次覆盖 generator/artifact/CSV/FK/asset missing。）
 - [x] 测试断言优先级：code > severity > location > current_value / expected > hint > message。
 - [x] 对 legacy `Validation(String)` 使用点做统计，迁移批次完成后更新数量。
 - [x] 为每个新增 diagnostic code 增加至少一个 producer 测试或 catalog 测试。

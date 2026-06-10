@@ -5,12 +5,15 @@ use crate::{
     ConfigForgeError,
     asset::AssetResolver,
     data::{DataRow, DataTable},
-    diagnostic::DiagnosticLocation,
+    diagnostic::{DiagnosticLocation, code},
     meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags},
     project::AssetsConfig,
 };
 
-use super::{ExportTableView, ValidationIssue, ValidationReport, fragment_field_key};
+use super::{
+    ExportTableView, ValidationIssue, ValidationReport, diagnostic::error_issue_from_result,
+    fragment_field_key,
+};
 
 pub(super) fn validate_assets_for_target(
     meta: &LinkedMetaModel<'_>,
@@ -22,10 +25,12 @@ pub(super) fn validate_assets_for_target(
     let resolver = match AssetResolver::new(meta, assets) {
         Ok(resolver) => resolver,
         Err(error) => {
-            report.push(asset_issue(
-                validation_error_message(error),
+            report.push(asset_issue_from_error(
+                error,
                 DiagnosticLocation::default(),
                 target_tags,
+                None,
+                Some("valid asset resolver configuration".to_owned()),
             ));
             return report;
         }
@@ -48,10 +53,12 @@ pub(super) fn validate_assets_full(
     let resolver = match AssetResolver::new(meta, assets) {
         Ok(resolver) => resolver,
         Err(error) => {
-            report.push(asset_issue(
-                validation_error_message(error),
+            report.push(asset_issue_from_error(
+                error,
                 DiagnosticLocation::default(),
                 &target_tags,
+                None,
+                Some("valid asset resolver configuration".to_owned()),
             ));
             return report;
         }
@@ -268,8 +275,8 @@ fn validate_asset_field_path(
         return;
     }
     if let Err(error) = resolver.resolve_for_target(asset_kind, value, target_tags) {
-        report.push(asset_issue(
-            validation_error_message(error),
+        report.push(asset_issue_from_error(
+            error,
             DiagnosticLocation {
                 table: Some(table_name.to_owned()),
                 field: Some(field_path.to_owned()),
@@ -277,23 +284,54 @@ fn validate_asset_field_path(
                 ..DiagnosticLocation::default()
             },
             target_tags,
+            Some(value.to_owned()),
+            Some(format!("valid `{asset_kind}` asset reference")),
         ));
     }
 }
 
-fn asset_issue(
-    message: String,
+fn asset_issue_from_error(
+    error: ConfigForgeError,
     location: DiagnosticLocation,
     target_tags: &TargetTags,
+    current_value: Option<String>,
+    expected: Option<String>,
 ) -> ValidationIssue {
-    ValidationIssue::error("asset.reference", "asset", message, location)
-        .with_target(target_tags.iter().collect::<Vec<_>>().join(","))
-}
-
-fn validation_error_message(error: ConfigForgeError) -> String {
-    match error {
-        ConfigForgeError::Validation(message) => message,
-        ConfigForgeError::ValidationReport(report) => report.error_messages().join("; "),
-        other => other.to_string(),
+    let mut issue = error_issue_from_result(
+        code::CF_DATA_INVALID_ASSET_REF,
+        "asset",
+        Err(error),
+        location,
+    )
+    .unwrap_or_else(|| {
+        ValidationIssue::error(
+            code::CF_DATA_INVALID_ASSET_REF,
+            "asset",
+            "asset reference validation failed",
+            DiagnosticLocation::default(),
+        )
+    });
+    let target = target_tags.iter().collect::<Vec<_>>().join(",");
+    if !target.is_empty() {
+        issue = issue.with_target(target);
     }
+    if issue.current_value.is_none() {
+        if let Some(current_value) = current_value {
+            issue = issue.with_current_value(current_value);
+        }
+    }
+    if issue.expected.is_none() {
+        if let Some(expected) = expected {
+            issue = issue.with_expected(expected);
+        }
+    }
+    if issue.domain.is_none() {
+        issue = issue.with_domain("data");
+    }
+    if issue.hint.is_none() {
+        issue = issue.with_hint(
+            "Check the asset kind configuration, search paths, and referenced asset value.",
+        );
+    }
+    issue
 }

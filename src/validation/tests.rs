@@ -17,8 +17,8 @@ use crate::{
     diagnostic::{
         DiagnosticLocation,
         code::{
-            CF_DATA_DUPLICATE_KEY, CF_DATA_INVALID_FOREIGN_KEY, CF_DATA_INVALID_TYPE,
-            CF_DATA_MISSING_REQUIRED_FIELD,
+            CF_DATA_DUPLICATE_KEY, CF_DATA_INVALID_ASSET_REF, CF_DATA_INVALID_FOREIGN_KEY,
+            CF_DATA_INVALID_TYPE, CF_DATA_MISSING_REQUIRED_FIELD,
         },
     },
 };
@@ -1621,12 +1621,27 @@ fn target_asset_validation_checks_visible_asset_fields() {
         ),
     );
 
-    assert!(report.issues.iter().any(|issue| {
-        issue.code == "asset.reference"
-            && issue.location.table.as_deref() == Some("items")
-            && issue.location.field.as_deref() == Some("icon")
-            && issue.message.contains("missing file")
-    }));
+    let issue = report
+        .issues
+        .iter()
+        .find(|issue| issue.code == CF_DATA_INVALID_ASSET_REF)
+        .expect("asset validation should emit a structured diagnostic");
+    assert_eq!(issue.location.table.as_deref(), Some("items"));
+    assert_eq!(issue.location.field.as_deref(), Some("icon"));
+    assert_eq!(issue.target.as_deref(), Some("client"));
+    assert_eq!(issue.current_value.as_deref(), Some("Missing.png"));
+    assert_eq!(
+        issue.expected.as_deref(),
+        Some("valid `ui_icon` asset reference")
+    );
+    assert_eq!(issue.domain.as_deref(), Some("data"));
+    assert!(
+        issue
+            .hint
+            .as_deref()
+            .is_some_and(|hint| hint.contains("asset kind"))
+    );
+    assert!(issue.message.contains("missing file"));
     validate_normalized_data_set_for_target_with_assets_and_report(
         &linked_meta,
         &assets,
