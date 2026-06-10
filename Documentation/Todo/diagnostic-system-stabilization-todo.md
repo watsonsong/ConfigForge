@@ -43,38 +43,39 @@
 
 ## Step 1：扩展诊断基础模型
 
-当前状态：`Diagnostic` / `ValidationIssue` 已有 `code`、`severity`、`message`、`location`、`source` / `validator`、`target`、`hint`；尚不能承载 Designer Validation Report 中已经声明的 `current_value`、`expected`、`explanation`、`owner`、`domain`。本步骤可行，且应作为后续 report enrichment 的前置条件。
+完成状态（2026-06-10）：已完成。`Diagnostic` / `ValidationIssue` 已能承载 Designer Validation Report 需要的 enrichment 字段，`DiagnosticEntry` default methods 与 `Diagnostic::from_entry()` 会保留这些字段；`Diagnostic::new()` 仍保留简单入口，并通过 builder-style API 渐进补充上下文。
 
-- [ ] 扩展 `Diagnostic`，增加 `current_value`、`expected`、`explanation`、`domain`、`owner` 等 enrichment 字段。
-- [ ] 扩展 `DiagnosticEntry` default methods，让 `MetaDiagnostic`、`ValidationIssue`、generator / artifact diagnostic 能渐进式接入新字段。
-- [ ] 同步扩展 `ValidationIssue` 或提供从 `ValidationIssue` 到 `Diagnostic` 的 enrichment bridge，避免 `DesignerValidationReport::from_validation_report()` 与 `from_diagnostic_report()` 继续丢失字段。
-- [ ] 为 `Diagnostic` 增加 builder-style API，例如 `with_hint()`、`with_current_value()`、`with_expected()`、`with_explanation()`、`with_source()`、`with_target()`，避免构造函数参数膨胀。
-- [ ] 明确 `Diagnostic.source` 的语义为诊断生产者或模块来源，例如 `generator.java`、`validation.foreign_key`；不要与 `DiagnosticLocation.source_path` 混淆。
-- [ ] 保持现有 `Diagnostic::new()` 的简单入口，减少迁移成本。
+- [x] 扩展 `Diagnostic`，增加 `current_value`、`expected`、`explanation`、`domain`、`owner` 等 enrichment 字段。
+- [x] 扩展 `DiagnosticEntry` default methods，让 `MetaDiagnostic`、`ValidationIssue`、generator / artifact diagnostic 能渐进式接入新字段。
+- [x] 同步扩展 `ValidationIssue` 或提供从 `ValidationIssue` 到 `Diagnostic` 的 enrichment bridge，避免 `DesignerValidationReport::from_validation_report()` 与 `from_diagnostic_report()` 继续丢失字段。
+- [x] 为 `Diagnostic` 增加 builder-style API，例如 `with_hint()`、`with_current_value()`、`with_expected()`、`with_explanation()`、`with_source()`、`with_target()`，避免构造函数参数膨胀。
+- [x] 明确 `Diagnostic.source` 的语义为诊断生产者或模块来源，例如 `generator.java`、`validation.foreign_key`；不要与 `DiagnosticLocation.source_path` 混淆。
+- [x] 保持现有 `Diagnostic::new()` 的简单入口，减少迁移成本。
 
 交付标准：新的诊断模型能够承载 Designer Validation Report 需要的核心字段，且旧的 `DiagnosticEntry` 实现可以通过 default methods 平滑编译。
 
 ## Step 2：扩展 source trace 与 location 模型
 
-当前状态：`DiagnosticLocation` 只有 `source_path`、`table`、`field`、`row_index`、`source_row_number`。列信息是最小 Stable 必需项；sheet/provider 和 generator option 精确定位可先设计为可选字段或后续 P2，避免阻塞基础诊断稳定化。
+完成状态（2026-06-10）：最小 Stable 所需列信息已完成。`DiagnosticLocation` 已包含 `source_column_number`、`source_column_name`、`column_index`，CSV cell source trace 已能传递到 validation issue / diagnostic / CLI JSON / Designer Report；多源 provider / sheet 精确定位仍保留为 P2，不阻塞当前闭环。
 
-- [ ] 给 `DiagnosticLocation` 增加 column 信息：`source_column_number`、`source_column_name`、`column_index`。
+- [x] 给 `DiagnosticLocation` 增加 column 信息：`source_column_number`、`source_column_name`、`column_index`。
 - [ ] 预留多源表格能力：`source_provider`、`source_sheet` 或等价结构，为 XLSX / Lark Sheet / Google Sheet 做准备；该项可作为 P2，不进入最小 Stable 阻塞清单。
-- [ ] 明确 logical location 与 physical source location 的关系：table / field / row_index 属于逻辑定位；source path / row / column / sheet 属于原始输入定位。
-- [ ] 支持 target / export task / generator option 这类非数据行诊断的定位方式；短期可通过 `source`、`target` 和 message 表达，长期再引入独立 `DiagnosticContext`，不要把配置定位强塞进数据行字段。
-- [ ] 更新 location `Display` 格式，确保 CLI 中依然简洁可读。
+- [x] 明确 logical location 与 physical source location 的关系：table / field / row_index 属于逻辑定位；source path / row / column / sheet 属于原始输入定位。
+- [x] 支持 target / export task / generator option 这类非数据行诊断的定位方式；短期可通过 `source`、`target` 和 message 表达，长期再引入独立 `DiagnosticContext`，不要把配置定位强塞进数据行字段。
+- [x] 更新 location `Display` 格式，确保 CLI 中依然简洁可读。
 
 交付标准：CSV 类型错误、FK 错误、asset 错误可以定位到表、字段、源文件、源行和源列；generator 配置错误可以定位到 target / export task / type_id / option。
 
 ## Step 3：建立 Diagnostic Code Catalog
 
-当前状态：诊断 code 是字符串契约，且已有内置 validator 使用 `validator.*` 风格 code。为保持扩展性，本步骤建立 catalog / 常量 / metadata，不引入强制 enum；外部 generator / validator 可以继续提供自定义字符串 code，但内置 code 必须进入 catalog。
+完成状态（2026-06-10）：已完成当前第一批 stable catalog。`src/diagnostic/code.rs` 已提供常量与 metadata，覆盖 Generator / Artifact / Data / Build 的高价值稳定 code，并将既有 `validator.*`、`field.*`、`foreign_key.*`、`asset.reference` 作为 deprecated legacy metadata 收录；后续若要引入 `CF_META_*` 或把内置 validator code 从 legacy 命名迁到 `CF_VALIDATION_*`，应作为新的独立迁移批次处理。
 
-- [ ] 新增诊断码目录，建议放在 `src/diagnostic/code.rs` 或等价模块中。
-- [ ] 定义第一批稳定 code 常量，覆盖 `CF_META_*`、`CF_DATA_*`、`CF_VALIDATION_*`、`CF_ARTIFACT_*`、`CF_GENERATOR_*`、`CF_BUILD_*`、`CF_RUNTIME_CONTRACT_*`；保留 `String` 作为 public storage/API，不强制 enum 化。
-- [ ] 为每个 code 维护 metadata：default severity、domain、title、explanation、default hint、since、deprecated。
-- [ ] 增加 code catalog 单元测试，保证 code 唯一、domain 合法、默认 severity 明确。
-- [ ] 明确新增 code 的 review 规则：优先复用已有 code；只有语义不同才新增 code。
+- [x] 新增诊断码目录，建议放在 `src/diagnostic/code.rs` 或等价模块中。
+- [x] 定义第一批稳定 code 常量，覆盖当前已迁移的 `CF_DATA_*`、`CF_ARTIFACT_*`、`CF_GENERATOR_*`、`CF_BUILD_*`；保留 `String` 作为 public storage/API，不强制 enum 化。
+- [x] 为每个 code 维护 metadata：default severity、domain、title、explanation、default hint、since、deprecated。
+- [x] 增加 code catalog 单元测试，保证 code 唯一、domain 合法、默认 severity 明确。
+- [x] 明确新增 code 的 review 规则：优先复用已有 code；只有语义不同才新增 code。
+- [ ] 后续如需稳定 `CF_META_*` / `CF_VALIDATION_*` 命名空间，另起迁移批次，不影响当前最小 Stable 闭环。
 
 第一批建议 code：
 
@@ -108,49 +109,51 @@ CF_BUILD_EXPORT_TASK_FAILED
 
 ## Step 4：为 `ConfigForgeError` 增加结构化诊断 helper
 
-当前状态：`ConfigForgeError` 已有 `ValidationReport(DiagnosticReport<Diagnostic>)`，但创建单条结构化诊断仍不够顺手；`Validation(String)` 仍是大量模块的 legacy fallback。本步骤可行，重点是降低 producer 迁移成本，而不是删除 legacy variant。
+完成状态（2026-06-10）：已完成。`ConfigForgeError` 已提供单条、多条、整份 report 的结构化 helper；`DiagnosticReport<T>` 已提供常用构造与集合 helper；`Validation(String)` 已标注为 legacy fallback。当前 legacy 债务指标为 444 处 / 79 文件，后续随 producer 迁移逐批下降。
 
-- [ ] 给 `ConfigForgeError` 增加 `from_diagnostic(diagnostic: Diagnostic)` helper。
-- [ ] 给 `ConfigForgeError` 增加 `from_diagnostics(diagnostics: Vec<Diagnostic>)` 或 `diagnostic_report(report)` helper，内部复用现有 `ValidationReport(DiagnosticReport<Diagnostic>)` variant 或后续更名后的通用 report variant。
-- [ ] 给 `DiagnosticReport<T>` 增加常用构造 helper，例如 `from_one()`、`extend()`、`is_empty()`。
-- [ ] 为 `Validation(String)` 加注释，标记为 legacy fallback，只用于尚未迁移的边界错误或第三方错误包装。
-- [ ] 增加使用点统计方式，例如通过 grep / lint 文档化 `ConfigForgeError::Validation(` 数量，作为迁移债务指标。
+- [x] 给 `ConfigForgeError` 增加 `from_diagnostic(diagnostic: Diagnostic)` helper。
+- [x] 给 `ConfigForgeError` 增加 `from_diagnostics(diagnostics: Vec<Diagnostic>)` 或 `diagnostic_report(report)` helper，内部复用现有 `ValidationReport(DiagnosticReport<Diagnostic>)` variant 或后续更名后的通用 report variant。
+- [x] 给 `DiagnosticReport<T>` 增加常用构造 helper，例如 `from_one()`、`extend()`、`is_empty()`。
+- [x] 为 `Validation(String)` 加注释，标记为 legacy fallback，只用于尚未迁移的边界错误或第三方错误包装。
+- [x] 增加使用点统计方式，例如通过 grep / lint 文档化 `ConfigForgeError::Validation(` 数量，作为迁移债务指标。
 
 交付标准：业务模块创建结构化 validation error 的成本低于手写字符串错误；新代码有自然的迁移入口。
 
 ## Step 5：迁移 Generator / Build 边界诊断
 
-当前状态：`validation_report` generator 已注册且 requirements 已能声明 `with_validation_report()`；generator / build 边界仍大量返回 `Validation(String)`。本步骤应聚焦 registry、option parsing、requirements mismatch 和 prepared input 缺失等扩展边界，不需要新增 `validation_report` 类型。
+完成状态（2026-06-10）：核心 Generator / Build 边界已完成结构化迁移。Registry unknown / ambiguous、registry health、prepared input 缺失均已输出稳定 code；`validation_report` generator option 已接入 `CF_GENERATOR_INVALID_OPTION` / `CF_GENERATOR_UNSUPPORTED_OPTION`。其他 generator 的私有 option 解析仍可能存在 legacy fallback，后续随各 generator 单独迁移。
 
-- [ ] 将 unknown generator type 迁移为 `CF_GENERATOR_UNKNOWN_TYPE`。
-- [ ] 将 ambiguous generator registration / alias collision 迁移为 `CF_GENERATOR_AMBIGUOUS_TYPE`。
-- [ ] 将 generator requirements mismatch，例如 MetaOnly 分支执行 Data-backed generator，迁移为结构化 diagnostic。
-- [ ] 将 `PreparedGeneratorInputs` 中缺少 data set / validation report / pool 的错误迁移为 `CF_GENERATOR_UNSUPPORTED_DATA_INPUT` 或更准确 code。
-- [ ] 将 generator option 解析错误统一到 `CF_GENERATOR_INVALID_OPTION` / `CF_GENERATOR_UNSUPPORTED_OPTION`。
-- [ ] 补充 registry 健康检查：builtin `type_id` 唯一、alias 唯一、alias 不与其他 `type_id` 冲突。
+- [x] 将 unknown generator type 迁移为 `CF_GENERATOR_UNKNOWN_TYPE`。
+- [x] 将 ambiguous generator registration / alias collision 迁移为 `CF_GENERATOR_AMBIGUOUS_TYPE`。
+- [x] 将 generator requirements mismatch，例如 MetaOnly 分支执行 Data-backed generator，迁移为结构化 diagnostic。
+- [x] 将 `PreparedGeneratorInputs` 中缺少 data set / validation report / pool 的错误迁移为 `CF_GENERATOR_UNSUPPORTED_DATA_INPUT` 或更准确 code。
+- [x] 将 `validation_report` generator option 解析错误统一到 `CF_GENERATOR_INVALID_OPTION` / `CF_GENERATOR_UNSUPPORTED_OPTION`；其他 generator 私有 option 后续随模块迁移。
+- [x] 补充 registry 健康检查：builtin `type_id` 唯一、alias 唯一、alias 不与其他 `type_id` 冲突。
 
 交付标准：新增 generator 时的接入错误可被 CLI / report / tests 稳定识别，Build 不需要因为新增 generator 增加具体 type 分支。
 
 ## Step 6：迁移 Artifact 安全诊断
 
-- [ ] 将 output root escape 错误迁移为 `CF_ARTIFACT_PATH_ESCAPE`。
-- [ ] 将 normalized path collision 错误迁移为 `CF_ARTIFACT_PATH_COLLISION`。
-- [ ] 将 case-insensitive collision 错误迁移为 `CF_ARTIFACT_CASE_INSENSITIVE_COLLISION`。
-- [ ] 将 symlink alias / hardlink alias collision 错误迁移为专属 code。
-- [ ] 在 diagnostic 中填充 `current_value` 为用户声明的输出路径或冲突路径，`expected` 为 output root 内唯一 normalized artifact path。
-- [ ] 补充 artifact diagnostic tests，断言 code、path、current / expected，而不是只匹配 message。
+完成状态（2026-06-10）：已完成。Artifact writer 的 output root escape、normalized collision、case-insensitive collision、symlink alias、hardlink alias 均已输出结构化 diagnostic，并有 unit / integration tests 断言 stable code 与路径上下文。
+
+- [x] 将 output root escape 错误迁移为 `CF_ARTIFACT_PATH_ESCAPE`。
+- [x] 将 normalized path collision 错误迁移为 `CF_ARTIFACT_PATH_COLLISION`。
+- [x] 将 case-insensitive collision 错误迁移为 `CF_ARTIFACT_CASE_INSENSITIVE_COLLISION`。
+- [x] 将 symlink alias / hardlink alias collision 错误迁移为专属 code。
+- [x] 在 diagnostic 中填充 `current_value` 为用户声明的输出路径或冲突路径，`expected` 为 output root 内唯一 normalized artifact path。
+- [x] 补充 artifact diagnostic tests，断言 code、path、current / expected，而不是只匹配 message。
 
 交付标准：所有 artifact path safety 错误都有稳定 code 和足够路径上下文，便于 CI annotation 和用户定位。
 
 ## Step 7：迁移 Data / Validation 高价值诊断
 
-当前状态：`ValidationIssue` 已作为 validation report 的结构化单元，但 Data loading、typed value、asset 解析等仍有不少 `Validation(String)`。本步骤应按用户可见高频错误分批迁移；CSV column/current/expected 依赖 Step 1/2 的字段先落地。
+当前状态（2026-06-10）：Data / Validation 的高频主流程已迁移一批：CSV/basic table type、required、duplicate key、FK、validation asset reference 已使用 stable code 与 source trace；enum 当前仍走 `CF_DATA_INVALID_TYPE` 类型错误路径，尚未拆出 `CF_DATA_INVALID_ENUM` producer；builtin validators 仍主要保留 `validator.*` legacy code，但已纳入 catalog metadata，后续再逐个迁移。
 
-- [ ] 优先迁移 CSV 类型转换错误，填充 table、field、source_path、source_row_number、source_column_name、current_value、expected。
-- [ ] 迁移 required / missing field 错误，填充字段名、源行、expected requirement。
+- [x] 优先迁移 CSV 类型转换错误，填充 table、field、source_path、source_row_number、source_column_name、current_value、expected。
+- [x] 迁移 required / missing field 错误，填充字段名、源行、expected requirement。
 - [ ] 迁移 enum 错误，填充 current enum string / ordinal、expected enum candidates。
-- [ ] 迁移 duplicate key / index 错误，填充 index name、duplicate key value、冲突行号。
-- [ ] 迁移 FK 错误，填充 current key、expected target table / index、source field。
+- [x] 迁移 duplicate key / index 错误，填充 index name、duplicate key value、冲突行号。
+- [x] 迁移 FK 错误，填充 current key、expected target table / index、source field。
 - [x] 迁移 validation asset reference 错误，填充 raw asset ref、expected asset kind rule、canonicalization hint，并在 CLI JSON 中暴露 `CF_DATA_INVALID_ASSET_REF`。（asset resolver 内部仍有 legacy fallback，后续按细粒度 code 继续拆分。）
 - [ ] 迁移 builtin validator 错误，至少填充 validator source、current_value、expected、hint。
 
@@ -158,14 +161,14 @@ CF_BUILD_EXPORT_TASK_FAILED
 
 ## Step 8：打通 Designer Validation Report enrichment
 
-当前状态：`DesignerValidationReport`、renderers、CLI `--report` 和 build `type = "validation_report"` 已存在；但 report enrichment 当前只从 code catalog 和基础 location 填充，`source_column/current_value/expected/owner/domain` 多数为空或 fallback。本步骤是“贯通字段”，不是“从零实现报告导出”。
+完成状态（2026-06-10）：字段贯通已完成。`DesignerValidationReport` 已从 `DiagnosticReport` / `ValidationReport` 消费 `source_column`、`current_value`、`expected`、`explanation`、`hint`、`domain`、`owner`，HTML / Markdown / JSON / CSV 字段保持一致；CLI `--report` 在 validation 失败时也会尽量写出报告。仅 build `validation_report` 的 `include_warnings`、`include_errors`、`group_by` 仍是独立 option 扩展项。
 
-- [ ] 让 `DesignerValidationReport::from_diagnostic_report()` 消费底层 `Diagnostic` 的 `current_value`、`expected`、`source_column`、`explanation`、`hint`、`domain`、`owner`。
-- [ ] 让 `DesignerValidationReport::from_validation_report()` 同样保留 `ValidationIssue` 侧新增 enrichment，避免 build `validation_report` 走 validation report 路径时丢字段。
-- [ ] 删除或减少 report renderer 中的业务猜测逻辑；renderer 只做格式化。
-- [ ] HTML / Markdown / JSON / CSV 四种输出保持字段一致，空字段有明确 fallback 策略。
-- [ ] 增加 report snapshot / golden tests，覆盖 source column、current / expected、owner / domain。
-- [ ] CLI `--report` 导出的 validation report 在 validation 失败时也能尽量生成包含结构化诊断的报告。
+- [x] 让 `DesignerValidationReport::from_diagnostic_report()` 消费底层 `Diagnostic` 的 `current_value`、`expected`、`source_column`、`explanation`、`hint`、`domain`、`owner`。
+- [x] 让 `DesignerValidationReport::from_validation_report()` 同样保留 `ValidationIssue` 侧新增 enrichment，避免 build `validation_report` 走 validation report 路径时丢字段。
+- [x] 删除或减少 report renderer 中的业务猜测逻辑；renderer 只做格式化。
+- [x] HTML / Markdown / JSON / CSV 四种输出保持字段一致，空字段有明确 fallback 策略。
+- [x] 增加 report snapshot / golden tests，覆盖 source column、current / expected、owner / domain。
+- [x] CLI `--report` 导出的 validation report 在 validation 失败时也能尽量生成包含结构化诊断的报告。
 - [ ] 扩展 build `validation_report` option 时单独处理 `include_warnings`、`include_errors`、`group_by`；这些不是当前字段贯通的前置条件，可放在本步骤末尾或后续独立批次。
 
 交付标准：Designer Validation Report 从“错误列表渲染器”升级为“可用于策划 / QA / CI 分派问题的结构化报告”。
@@ -218,11 +221,11 @@ CF_BUILD_EXPORT_TASK_FAILED
 
 如果只追求最小可接受 Stable，至少完成以下事项：
 
-- [ ] `Diagnostic` 和 `DiagnosticEntry` 支持 current / expected / explanation / owner / domain。
-- [ ] `DiagnosticLocation` 支持 source column。
-- [ ] 建立 diagnostic code catalog，并覆盖 Data / Artifact / Generator 的高价值错误。
-- [ ] 业务 validation 新代码不再新增裸 `Validation(String)`。
-- [ ] Designer Validation Report 能真实展示 source column、current value、expected 和 hint。
-- [ ] 核心诊断测试断言 stable code 和 location，而不是只断言自然语言 message。
+- [x] `Diagnostic` 和 `DiagnosticEntry` 支持 current / expected / explanation / owner / domain。
+- [x] `DiagnosticLocation` 支持 source column。
+- [x] 建立 diagnostic code catalog，并覆盖 Data / Artifact / Generator 的高价值错误。
+- [ ] 业务 validation 新代码不再新增裸 `Validation(String)`。（原则和 helper 已就绪，但尚未加入 lint / CI 级别的新增使用拦截。）
+- [x] Designer Validation Report 能真实展示 source column、current value、expected 和 hint。
+- [x] 核心诊断测试断言 stable code 和 location，而不是只断言自然语言 message。
 
 达到以上闭环后，Diagnostics 才适合从 `Implemented MVP` 调整为 `Stable`。
