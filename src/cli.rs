@@ -7,9 +7,10 @@ use clap::{Parser, ValueEnum};
 use serde::Serialize;
 
 use crate::{
-    ConfigForgeError, Diagnostic,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity,
     artifact::ArtifactWriteMode,
     build::{BuildOptions, ExecutionOptions, build_target_with_trace},
+    diagnostic::code::CF_BUILD_INVALID_OPTION,
     validation::{DesignerReportFormat, ValidationReportExportConfig},
 };
 
@@ -133,16 +134,20 @@ fn run_with_args(cli: Cli) -> anyhow::Result<()> {
         Some(format) => Some(ValidationReportExportConfig {
             format: format.into(),
             output: cli.output.clone().ok_or_else(|| {
-                ConfigForgeError::Validation(
+                cli_option_error(
                     "--output must be set when --report is used".to_owned(),
+                    "--report without --output",
+                    "--output path when --report is used",
                 )
             })?,
             title: cli.report_title.clone(),
         }),
         None => {
             if cli.output.is_some() || cli.report_title.is_some() {
-                return Err(ConfigForgeError::Validation(
+                return Err(cli_option_error(
                     "--output and --report-title require --report".to_owned(),
+                    "--output/--report-title without --report",
+                    "--report format when report output options are provided",
                 )
                 .into());
             }
@@ -186,6 +191,26 @@ fn run_with_args(cli: Cli) -> anyhow::Result<()> {
         println!("target `{}` built", cli.target);
     }
     Ok(())
+}
+
+fn cli_option_error(
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_BUILD_INVALID_OPTION,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source("cli.options")
+        .with_domain("build")
+        .with_current_value(current)
+        .with_expected(expected)
+        .with_hint("Check CLI report-related options."),
+    )
 }
 
 fn write_trace_if_requested(

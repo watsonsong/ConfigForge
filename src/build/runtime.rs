@@ -9,6 +9,10 @@ use crate::{
     artifact::ArtifactSink,
     asset::AssetResolver,
     data::{DataRow, DataSet, DataTable, RawSourceData},
+    diagnostic::code::{
+        CF_ARTIFACT_PATH_COLLISION, CF_BUILD_EXPORT_TASK_FAILED, CF_BUILD_INPUT_REQUIRED,
+        CF_BUILD_INVALID_CONFIG,
+    },
     diagnostic::{Diagnostic, DiagnosticReport},
     generator::{
         GeneratorCommonInput, GeneratorRegistry, GeneratorTaskInput, PreparedGeneratorInputs,
@@ -24,7 +28,7 @@ use crate::{
     },
 };
 
-use super::target::NormalizedExportTask;
+use super::{build_diagnostic_error, target::NormalizedExportTask};
 
 #[derive(Debug)]
 pub(super) struct RuntimeExportOutput {
@@ -76,9 +80,14 @@ fn export_meta_and_data_tasks_with_generator_registry(
         });
     }
     let raw_sources = raw_sources.ok_or_else(|| {
-        ConfigForgeError::Validation(
+        build_diagnostic_error(
+            CF_BUILD_INPUT_REQUIRED,
+            "build.runtime.input",
             "raw source data must be prepared when target declares Data-dependent export tasks"
                 .to_owned(),
+            "missing raw source data",
+            "raw source data for Data-dependent export tasks",
+            "Check build input preparation and generator requirements before runtime export.",
         )
     })?;
 
@@ -220,10 +229,17 @@ fn validation_report_export_config_from_task(
     let title = take_report_string(&mut options, "title")?;
     let unsupported = options.keys().cloned().collect::<Vec<_>>();
     if let Some(key) = unsupported.first() {
-        return Err(ConfigForgeError::Validation(format!(
-            "validation_report export task `{}` has unknown option `{key}`",
-            task.name
-        )));
+        return Err(build_diagnostic_error(
+            CF_BUILD_INVALID_CONFIG,
+            "build.validation_report.options",
+            format!(
+                "validation_report export task `{}` has unknown option `{key}`",
+                task.name
+            ),
+            key,
+            "supported validation_report export task option",
+            "Remove unknown validation_report options or update the exporter schema.",
+        ));
     }
     Ok(ValidationReportExportConfig {
         format,
@@ -247,10 +263,16 @@ fn take_report_string(
     options
         .remove(key)
         .map(|value| {
+            let current_value = format!("{key}={value}");
             value.try_into().map_err(|source| {
-                ConfigForgeError::Validation(format!(
-                    "invalid validation_report option `{key}`: {source}"
-                ))
+                build_diagnostic_error(
+                    CF_BUILD_INVALID_CONFIG,
+                    "build.validation_report.options",
+                    format!("invalid validation_report option `{key}`: {source}"),
+                    current_value,
+                    format!("valid `{key}` option value"),
+                    "Check validation_report export task option types.",
+                )
             })
         })
         .transpose()
@@ -412,10 +434,17 @@ fn export_meta_and_data_task(
 ) -> Result<RuntimeExportTaskOutput> {
     let generator = generator_registry.require_generator(&export_task.type_id)?;
     if !generator.requirements().needs_data {
-        return Err(ConfigForgeError::Validation(format!(
-            "export task `{}` was scheduled with Data, but generator `{}` does not require Data",
-            export_task.name, export_task.type_id
-        )));
+        return Err(build_diagnostic_error(
+            CF_BUILD_EXPORT_TASK_FAILED,
+            "build.runtime.scheduler",
+            format!(
+                "export task `{}` was scheduled with Data, but generator `{}` does not require Data",
+                export_task.name, export_task.type_id
+            ),
+            format!("{}:{}", export_task.name, export_task.type_id),
+            "Meta-only generator scheduled in meta-only branch",
+            "Check generator requirements and target build plan classification.",
+        ));
     }
     generator.generate(
         &GeneratorTaskInput {
@@ -463,10 +492,14 @@ fn ensure_planned_runtime_output_paths(
     for (_, task_paths) in planned_by_task {
         for path in task_paths? {
             if !paths.insert(path.clone()) {
-                return Err(ConfigForgeError::Validation(format!(
-                    "multiple data artifacts target `{}`",
-                    path.display()
-                )));
+                return Err(build_diagnostic_error(
+                    CF_ARTIFACT_PATH_COLLISION,
+                    "build.runtime.output",
+                    format!("multiple data artifacts target `{}`", path.display()),
+                    path.display().to_string(),
+                    "unique planned data artifact output path",
+                    "Adjust export task output or file_name so runtime data artifacts do not collide.",
+                ));
             }
         }
     }
@@ -555,8 +588,13 @@ mod tests {
             _input: &GeneratorCommonInput<'_>,
             _sink: &ArtifactSink,
         ) -> Result<()> {
-            Err(ConfigForgeError::Validation(
+            Err(build_diagnostic_error(
+                CF_BUILD_EXPORT_TASK_FAILED,
+                "build.test.generator",
                 "instrumented aggregate test generator requires data input".to_owned(),
+                "meta-only generation call",
+                "data-backed generation call",
+                "test failure",
             ))
         }
 
@@ -673,8 +711,13 @@ mod tests {
             _input: &GeneratorCommonInput<'_>,
             _sink: &ArtifactSink,
         ) -> Result<()> {
-            Err(ConfigForgeError::Validation(
+            Err(build_diagnostic_error(
+                CF_BUILD_EXPORT_TASK_FAILED,
+                "build.test.generator",
                 "duplicate path test generator requires data input".to_owned(),
+                "meta-only generation call",
+                "data-backed generation call",
+                "test failure",
             ))
         }
 
@@ -754,10 +797,21 @@ mod tests {
             &sink,
         )
         .expect_err("duplicate path should fail during planning");
+        let diagnostic = expect_single_diagnostic(error);
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("multiple data artifacts target `out/same-file.dup`"))
+        assert_eq!(diagnostic.code, CF_ARTIFACT_PATH_COLLISION);
+        assert_eq!(
+            diagnostic.current_value.as_deref(),
+            Some("out/same-file.dup")
         );
+    }
+
+    fn expect_single_diagnostic(error: ConfigForgeError) -> Diagnostic {
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected structured diagnostic report");
+        };
+        assert_eq!(report.diagnostics.len(), 1);
+        report.diagnostics.into_iter().next().unwrap()
     }
 
     fn export_task(name: &str, output: PathBuf) -> NormalizedExportTask {

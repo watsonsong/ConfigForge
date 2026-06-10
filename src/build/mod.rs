@@ -27,7 +27,10 @@ use crate::{
     Result,
     artifact::{ArtifactSink, ArtifactWriter},
     data::{DataLoader, RawSourceData, SourceReadPlan},
-    diagnostic::code::{CF_BUILD_INPUT_REQUIRED, CF_BUILD_INVALID_CONFIG},
+    diagnostic::code::{
+        CF_BUILD_EXPORT_TASK_FAILED, CF_BUILD_INPUT_REQUIRED, CF_BUILD_INVALID_CONFIG,
+        CF_BUILD_INVALID_OPTION,
+    },
     generator::{
         GeneratorCommonInput, GeneratorRegistry, GeneratorRequirements, GeneratorTaskInput,
         PreparedGeneratorInputs,
@@ -69,7 +72,14 @@ fn build_target_inner(
             .thread_name(|index| format!("config-forge-cpu-{index}"))
             .build()
             .map_err(|source| {
-                ConfigForgeError::Validation(format!("failed to create CPU worker pool: {source}"))
+                build_diagnostic_error(
+                    CF_BUILD_INVALID_OPTION,
+                    "build.execution.cpu_pool",
+                    format!("failed to create CPU worker pool: {source}"),
+                    options.execution.jobs.to_string(),
+                    "valid CPU worker pool configuration",
+                    "Check --jobs and local thread pool resource limits.",
+                )
             })
     })?;
     let project = trace.record("load_project", None, || {
@@ -502,6 +512,29 @@ fn build_config_error(
     )
 }
 
+pub(super) fn build_diagnostic_error(
+    code: &'static str,
+    source: impl Into<String>,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            code,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source(source)
+        .with_domain("build")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
+}
+
 fn input_required_error(target_tags: &TargetTags) -> ConfigForgeError {
     let tags = target_tags.iter().collect::<Vec<_>>().join(",");
     ConfigForgeError::from_diagnostic(
@@ -556,8 +589,13 @@ impl BuildDependencyPlan {
     fn single_target_plan(&self) -> Result<&TargetBuildPlan> {
         match self.targets.as_slice() {
             [target] => Ok(target),
-            _ => Err(ConfigForgeError::Validation(
+            _ => Err(build_diagnostic_error(
+                CF_BUILD_INVALID_CONFIG,
+                "build.dependency_plan",
                 "expected exactly one target in build dependency plan".to_owned(),
+                self.targets.len().to_string(),
+                "exactly one target build plan",
+                "Check target build plan construction before executing the pipeline.",
             )),
         }
     }
@@ -658,17 +696,29 @@ fn execute_runtime_export_nodes(
         sink,
     )?;
     if output.task_outputs.len() != export_tasks.len() {
-        return Err(ConfigForgeError::Validation(
+        return Err(build_diagnostic_error(
+            CF_BUILD_EXPORT_TASK_FAILED,
+            "build.runtime.output",
             "runtime exporter returned an unexpected number of task outputs".to_owned(),
+            output.task_outputs.len().to_string(),
+            format!("{} runtime export task outputs", export_tasks.len()),
+            "Check runtime export task scheduling and output aggregation.",
         ));
     }
 
     for ((_, task), task_output) in export_tasks.iter().copied().zip(output.task_outputs) {
         if task_output.export_name != task.name {
-            return Err(ConfigForgeError::Validation(format!(
-                "runtime exporter returned output for `{}` while `{}` was expected",
-                task_output.export_name, task.name
-            )));
+            return Err(build_diagnostic_error(
+                CF_BUILD_EXPORT_TASK_FAILED,
+                "build.runtime.output",
+                format!(
+                    "runtime exporter returned output for `{}` while `{}` was expected",
+                    task_output.export_name, task.name
+                ),
+                task_output.export_name,
+                task.name.clone(),
+                "Check runtime export task output ordering and names.",
+            ));
         }
     }
 
@@ -723,10 +773,17 @@ fn generate_and_write_meta_only_task(
         .generator_registry
         .require_generator(&export_task.type_id)?;
     if generator.requirements().needs_data {
-        return Err(ConfigForgeError::Validation(format!(
-            "target `{}` export task `{}` requires Data but was scheduled in the Meta-only branch",
-            context.target_name, export_task.name
-        )));
+        return Err(build_diagnostic_error(
+            CF_BUILD_EXPORT_TASK_FAILED,
+            "build.meta_only.scheduler",
+            format!(
+                "target `{}` export task `{}` requires Data but was scheduled in the Meta-only branch",
+                context.target_name, export_task.name
+            ),
+            format!("{}:{}", context.target_name, export_task.name),
+            "Data-dependent export task scheduled in runtime branch",
+            "Check generator requirements and target build plan classification.",
+        ));
     }
     let input = GeneratorTaskInput {
         common: build_generator_common_input(context, export_task),
@@ -1163,8 +1220,26 @@ mod tests {
             .build()
             .expect("pool should build");
         let result = join_link_meta_only_and_source_read(
-            || Err(ConfigForgeError::Validation("meta failed".to_owned())),
-            Some(|| Err(ConfigForgeError::Validation("source failed".to_owned()))),
+            || {
+                Err(build_diagnostic_error(
+                    CF_BUILD_EXPORT_TASK_FAILED,
+                    "build.test",
+                    "meta failed".to_owned(),
+                    "meta branch",
+                    "successful meta branch",
+                    "test failure",
+                ))
+            },
+            Some(|| {
+                Err(build_diagnostic_error(
+                    CF_BUILD_EXPORT_TASK_FAILED,
+                    "build.test",
+                    "source failed".to_owned(),
+                    "source branch",
+                    "successful source branch",
+                    "test failure",
+                ))
+            }),
             &pool,
         );
         let error = match result {
@@ -1172,7 +1247,9 @@ mod tests {
             Err(error) => error,
         };
 
-        assert!(matches!(error, ConfigForgeError::Validation(message) if message == "meta failed"));
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_BUILD_EXPORT_TASK_FAILED);
+        assert_eq!(diagnostic.message, "meta failed");
     }
 
     #[test]
@@ -1204,7 +1281,14 @@ mod tests {
             .record("successful_stage", Some("detail".to_owned()), || Ok(7))
             .expect("successful stage should return value");
         let failed = recorder.record::<(), _>("failed_stage", None, || {
-            Err(ConfigForgeError::Validation("boom".to_owned()))
+            Err(build_diagnostic_error(
+                CF_BUILD_EXPORT_TASK_FAILED,
+                "build.test",
+                "boom".to_owned(),
+                "failed stage",
+                "successful stage",
+                "test failure",
+            ))
         });
         let trace = recorder.finish(BuildTrace::new(
             "client",
@@ -1222,6 +1306,14 @@ mod tests {
         assert_eq!(trace.stages[0].detail.as_deref(), Some("detail"));
         assert_eq!(trace.stages[1].name, "failed_stage");
         assert_eq!(trace.stages[1].status, BuildTraceStageStatus::Failed);
+    }
+
+    fn expect_single_diagnostic(error: ConfigForgeError) -> Diagnostic {
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected structured diagnostic report");
+        };
+        assert_eq!(report.diagnostics.len(), 1);
+        report.diagnostics.into_iter().next().unwrap()
     }
 
     #[test]
