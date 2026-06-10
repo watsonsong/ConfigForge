@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
+    diagnostic::code::{CF_DATA_INVALID_ENUM, CF_DATA_INVALID_TYPE},
     meta::{LinkedField, LinkedFieldMeta, PrimitiveFieldType},
 };
 
@@ -64,19 +65,33 @@ pub(crate) fn parse_scalar_for_type(
             {
                 Ok(ScalarValue::Enum(value.to_owned()))
             } else {
-                Err(scalar_value_parse_error(
-                    table_name, row_number, field_path, value,
+                Err(enum_value_parse_error(
+                    table_name, row_number, field_path, enum_meta, value,
                 ))
             }
         }
-        LinkedField::Struct(_) => Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` expected scalar field, got struct type",
-            table_name, row_number, field_path
-        ))),
-        LinkedField::List(_) => Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` expected scalar field, got list type",
-            table_name, row_number, field_path
-        ))),
+        LinkedField::Struct(_) => Err(scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            "struct type",
+            "scalar field type",
+            format!(
+                "table `{}` row {} field `{}` expected scalar field, got struct type",
+                table_name, row_number, field_path
+            ),
+        )),
+        LinkedField::List(_) => Err(scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            "list type",
+            "scalar field type",
+            format!(
+                "table `{}` row {} field `{}` expected scalar field, got list type",
+                table_name, row_number, field_path
+            ),
+        )),
     }
 }
 
@@ -90,10 +105,17 @@ pub(crate) fn parse_list_cell_value(
     source_kind: ValueSourceKind,
 ) -> Result<Vec<ArrayElementValue>> {
     let json: serde_json::Value = serde_json::from_str(value).map_err(|source| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` has invalid list JSON: {}",
-            table_name, row_number, field_path, source
-        ))
+        list_json_error(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            "valid JSON array",
+            format!(
+                "table `{}` row {} field `{}` has invalid list JSON: {}",
+                table_name, row_number, field_path, source
+            ),
+        )
     })?;
     parse_list_json_value(
         table_name,
@@ -116,10 +138,17 @@ pub(crate) fn parse_list_json_value(
     _source_kind: ValueSourceKind,
 ) -> Result<Vec<ArrayElementValue>> {
     let array = value.as_array().ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` must be a JSON array",
-            table_name, row_number, field_path
-        ))
+        list_json_error(
+            table_name,
+            row_number,
+            field_path,
+            value.to_string(),
+            "JSON array",
+            format!(
+                "table `{}` row {} field `{}` must be a JSON array",
+                table_name, row_number, field_path
+            ),
+        )
     })?;
     array
         .iter()
@@ -140,10 +169,17 @@ pub(crate) fn parse_list_json_value(
                 &raw,
             )
             .map_err(|_| {
-                ConfigForgeError::Validation(format!(
-                    "table `{}` row {} field `{}` value `{}` does not match list element type",
-                    table_name, row_number, element_path, raw
-                ))
+                scalar_value_type_error(
+                    table_name,
+                    row_number,
+                    &element_path,
+                    raw.clone(),
+                    format!("list element type `{}`", expected_type_name(element_type)),
+                    format!(
+                        "table `{}` row {} field `{}` value `{}` does not match list element type",
+                        table_name, row_number, element_path, raw
+                    ),
+                )
             })?;
             Ok(ArrayElementValue::scalar(scalar, Some(raw)))
         })
@@ -156,10 +192,17 @@ fn scalar_value_parse_error(
     field_path: &str,
     value: &str,
 ) -> ConfigForgeError {
-    ConfigForgeError::Validation(format!(
-        "table `{}` row {} field `{}` value `{}` does not match scalar type",
-        table_name, row_number, field_path, value
-    ))
+    scalar_value_type_error(
+        table_name,
+        row_number,
+        field_path,
+        value,
+        "scalar type",
+        format!(
+            "table `{}` row {} field `{}` value `{}` does not match scalar type",
+            table_name, row_number, field_path, value
+        ),
+    )
 }
 
 fn scalar_type_error(
@@ -169,15 +212,122 @@ fn scalar_type_error(
     field: &LinkedFieldMeta<'_>,
     value: &str,
 ) -> ConfigForgeError {
-    ConfigForgeError::Validation(format!(
-        "table `{}` row {} field `{}` value `{}` does not match type `{:?}`",
-        table_name, row_number, field_path, value, field.meta.field_type
-    ))
+    scalar_value_type_error(
+        table_name,
+        row_number,
+        field_path,
+        value,
+        format!("{:?}", field.meta.field_type),
+        format!(
+            "table `{}` row {} field `{}` value `{}` does not match type `{:?}`",
+            table_name, row_number, field_path, value, field.meta.field_type
+        ),
+    )
+}
+
+fn enum_value_parse_error(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    enum_meta: &crate::meta::EnumMeta,
+    value: &str,
+) -> ConfigForgeError {
+    let expected = enum_meta
+        .values
+        .iter()
+        .map(|enum_value| enum_value.name.as_str())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_DATA_INVALID_ENUM,
+            DiagnosticSeverity::Error,
+            format!(
+                "table `{}` row {} field `{}` value `{}` is not a valid `{}` enum value",
+                table_name, row_number, field_path, value, enum_meta.name
+            ),
+            data_value_location(table_name, row_number, field_path),
+        )
+        .with_source("data.typed_value")
+        .with_domain("data")
+        .with_current_value(value)
+        .with_expected(format!("one of: {expected}"))
+        .with_hint(format!("Use a declared `{}` enum value.", enum_meta.name)),
+    )
+}
+
+fn list_json_error(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    message: String,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_DATA_INVALID_TYPE,
+            DiagnosticSeverity::Error,
+            message,
+            data_value_location(table_name, row_number, field_path),
+        )
+        .with_source("data.typed_value")
+        .with_domain("data")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint("Use JSON array syntax for list field values."),
+    )
+}
+
+fn scalar_value_type_error(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    message: String,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_DATA_INVALID_TYPE,
+            DiagnosticSeverity::Error,
+            message,
+            data_value_location(table_name, row_number, field_path),
+        )
+        .with_source("data.typed_value")
+        .with_domain("data")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint("Check the cell value against the field type declared in Meta."),
+    )
+}
+
+fn data_value_location(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+) -> DiagnosticLocation {
+    DiagnosticLocation {
+        table: Some(table_name.to_owned()),
+        field: Some(field_path.to_owned()),
+        source_row_number: Some(row_number),
+        ..DiagnosticLocation::default()
+    }
+}
+
+fn expected_type_name(field: &LinkedField<'_>) -> String {
+    match field {
+        LinkedField::Primitive(primitive) => format!("{primitive:?}"),
+        LinkedField::Enum(enum_meta) => format!("enum {}", enum_meta.name),
+        LinkedField::Struct(struct_meta) => format!("struct {}", struct_meta.meta.name),
+        LinkedField::List(_) => "list".to_owned(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::data::DataValue;
+    use crate::diagnostic::code::{CF_DATA_INVALID_ENUM, CF_DATA_INVALID_TYPE};
     use crate::meta::{EnumMeta, EnumValueMeta};
 
     use super::*;
@@ -209,9 +359,21 @@ mod tests {
                 .unwrap(),
             ScalarValue::Enum("rare".to_owned())
         );
-        assert!(
+        let invalid_enum =
             parse_scalar_for_type("items", 1, "rarity", &LinkedField::Enum(&enum_meta), "bad")
-                .is_err()
+                .unwrap_err();
+        let ConfigForgeError::ValidationReport(report) = invalid_enum else {
+            panic!("expected structured enum diagnostic");
+        };
+        assert_eq!(report.diagnostics[0].code, CF_DATA_INVALID_ENUM);
+        assert_eq!(report.diagnostics[0].current_value.as_deref(), Some("bad"));
+        assert_eq!(
+            report.diagnostics[0].location.table.as_deref(),
+            Some("items")
+        );
+        assert_eq!(
+            report.diagnostics[0].location.field.as_deref(),
+            Some("rarity")
         );
     }
 
@@ -297,8 +459,14 @@ mod tests {
             ValueSourceKind::ExplicitCell,
         )
         .unwrap_err();
-        assert!(
-            matches!(invalid, ConfigForgeError::Validation(message) if message.contains("invalid list JSON"))
+        let ConfigForgeError::ValidationReport(report) = invalid else {
+            panic!("expected structured list JSON diagnostic");
+        };
+        assert_eq!(report.diagnostics[0].code, CF_DATA_INVALID_TYPE);
+        assert!(report.diagnostics[0].message.contains("invalid list JSON"));
+        assert_eq!(
+            report.diagnostics[0].current_value.as_deref(),
+            Some("not json")
         );
 
         let non_array = parse_list_cell_value(
@@ -311,8 +479,18 @@ mod tests {
             ValueSourceKind::ExplicitCell,
         )
         .unwrap_err();
+        let ConfigForgeError::ValidationReport(report) = non_array else {
+            panic!("expected structured list JSON diagnostic");
+        };
+        assert_eq!(report.diagnostics[0].code, CF_DATA_INVALID_TYPE);
         assert!(
-            matches!(non_array, ConfigForgeError::Validation(message) if message.contains("must be a JSON array"))
+            report.diagnostics[0]
+                .message
+                .contains("must be a JSON array")
+        );
+        assert_eq!(
+            report.diagnostics[0].expected.as_deref(),
+            Some("JSON array")
         );
     }
 }
