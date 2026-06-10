@@ -6,12 +6,13 @@ use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
 use tempfile::tempdir;
 
 use crate::{
-    ConfigForgeError, Diagnostic, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     artifact::{ArtifactSink, ArtifactWriteMode, ArtifactWriteStream, ArtifactWriter},
     data::{DataTable, SourceRole},
     diagnostic::code::{
         CF_ARTIFACT_PATH_COLLISION, CF_DATA_INVALID_TYPE, CF_DATA_SOURCE_SCHEMA_INVALID,
-        CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+        CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH,
+        CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     },
     generator::BinaryDataExporter,
     meta::{LinkedTableMeta, MetaModel, TargetTags},
@@ -111,8 +112,16 @@ impl RuntimeTableFormat for CustomDataExporter {
         _table: &DataTable,
         _target_tags: &TargetTags,
     ) -> Result<Vec<u8>> {
-        Err(ConfigForgeError::Validation(
-            "legacy serialize_table should not be used by runtime sink export".to_owned(),
+        Err(ConfigForgeError::from_diagnostic(
+            Diagnostic::new(
+                CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH,
+                DiagnosticSeverity::Error,
+                "legacy serialize_table should not be used by runtime sink export",
+                DiagnosticLocation::default(),
+            )
+            .with_source("generator.custom.test")
+            .with_current_value("serialize_table fallback")
+            .with_expected("serialize_table_to_stream path"),
         ))
     }
 

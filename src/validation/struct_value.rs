@@ -14,10 +14,102 @@ use crate::{
             toml_default_to_json_value,
         },
     },
+    diagnostic::{
+        DiagnosticLocation,
+        code::{
+            CF_DATA_INVALID_TYPE, CF_DATA_MISSING_REQUIRED_FIELD, CF_VALIDATION_INVALID_CONFIG,
+        },
+    },
     meta::{
         LinkedField, LinkedFieldMeta, LinkedStructType, LinkedTableMeta, TargetTags, ValueLayout,
     },
 };
+
+fn struct_value_error(
+    code: &'static str,
+    source: &'static str,
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    super::validation_diagnostic_error(
+        code,
+        source,
+        message,
+        DiagnosticLocation {
+            table: Some(table_name.to_owned()),
+            field: Some(field_path.to_owned()),
+            source_row_number: Some(row_number),
+            ..DiagnosticLocation::default()
+        },
+        current,
+        expected,
+        "Check struct/list value layout, expanded paths, and field defaults.",
+    )
+}
+
+fn struct_required_error(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    message: String,
+) -> ConfigForgeError {
+    struct_value_error(
+        CF_DATA_MISSING_REQUIRED_FIELD,
+        "validation.struct.required",
+        table_name,
+        row_number,
+        field_path,
+        message,
+        "missing or empty struct field value",
+        "non-empty required struct child value or configured default",
+    )
+}
+
+fn struct_type_error(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    struct_value_error(
+        CF_DATA_INVALID_TYPE,
+        "validation.struct.type",
+        table_name,
+        row_number,
+        field_path,
+        message,
+        current,
+        expected,
+    )
+}
+
+fn struct_config_error(
+    table_name: &str,
+    field_path: &str,
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    super::validation_diagnostic_error(
+        CF_VALIDATION_INVALID_CONFIG,
+        "validation.struct.config",
+        message,
+        DiagnosticLocation {
+            table: Some(table_name.to_owned()),
+            field: Some(field_path.to_owned()),
+            ..DiagnosticLocation::default()
+        },
+        current,
+        expected,
+        "Check field type layout configuration for struct/list/scalar fields.",
+    )
+}
 
 pub(super) fn validate_struct_field_value_for_row(
     meta: &LinkedTableMeta<'_>,
@@ -41,10 +133,15 @@ pub(super) fn validate_struct_field_value_for_row(
         && !has_effective_value
         && visible_struct_child_count(struct_type, target_tags) > 0
     {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` is required",
-            meta.meta.name, row_number, field.meta.name
-        )));
+        return Err(struct_required_error(
+            meta.meta.name.as_str(),
+            row_number,
+            field.meta.name.as_str(),
+            format!(
+                "table `{}` row {} field `{}` is required",
+                meta.meta.name, row_number, field.meta.name
+            ),
+        ));
     }
     Ok(())
 }
@@ -107,10 +204,15 @@ pub(super) fn validate_struct_occurrence_value(
                     && !child_effective
                     && visible_struct_child_count(nested_struct, target_tags) > 0
                 {
-                    return Err(ConfigForgeError::Validation(format!(
-                        "table `{}` row {} field `{}` is required",
-                        table_name, row_number, child_path
-                    )));
+                    return Err(struct_required_error(
+                        table_name,
+                        row_number,
+                        &child_path,
+                        format!(
+                            "table `{}` row {} field `{}` is required",
+                            table_name, row_number, child_path
+                        ),
+                    ));
                 }
                 has_effective_value |= child_effective;
             }
@@ -118,10 +220,17 @@ pub(super) fn validate_struct_occurrence_value(
                 let indexed_cells = indexed_list_cells(row, &child_path);
                 if let Some(raw) = non_empty_row_value(row, &child_path) {
                     if let Some((_, _, first_indexed_path)) = indexed_cells.first() {
-                        return Err(ConfigForgeError::Validation(format!(
-                            "table `{}` row {} field `{}` mixes list JSON cell with expanded list element path `{}`",
-                            table_name, row_number, child_path, first_indexed_path
-                        )));
+                        return Err(struct_type_error(
+                            table_name,
+                            row_number,
+                            &child_path,
+                            format!(
+                                "table `{}` row {} field `{}` mixes list JSON cell with expanded list element path `{}`",
+                                table_name, row_number, child_path, first_indexed_path
+                            ),
+                            format!("{child_path} and {first_indexed_path}"),
+                            "either list JSON cell or expanded list element paths, not both",
+                        ));
                     }
                     parse_list_cell_value(
                         table_name,
@@ -150,10 +259,15 @@ pub(super) fn validate_struct_occurrence_value(
                 let effective_value =
                     effective_list_cell_value(table_name, row_number, &child_path, child, row)?;
                 if child.meta.required && effective_value.is_none() {
-                    return Err(ConfigForgeError::Validation(format!(
-                        "table `{}` row {} field `{}` is required",
-                        table_name, row_number, child_path
-                    )));
+                    return Err(struct_required_error(
+                        table_name,
+                        row_number,
+                        &child_path,
+                        format!(
+                            "table `{}` row {} field `{}` is required",
+                            table_name, row_number, child_path
+                        ),
+                    ));
                 }
                 if let Some(value) = effective_value {
                     parse_list_cell_value(
@@ -172,10 +286,15 @@ pub(super) fn validate_struct_occurrence_value(
                 let effective_value =
                     effective_scalar_cell_value(table_name, row_number, &child_path, child, row)?;
                 if child.meta.required && effective_value.is_none() {
-                    return Err(ConfigForgeError::Validation(format!(
-                        "table `{}` row {} field `{}` is required",
-                        table_name, row_number, child_path
-                    )));
+                    return Err(struct_required_error(
+                        table_name,
+                        row_number,
+                        &child_path,
+                        format!(
+                            "table `{}` row {} field `{}` is required",
+                            table_name, row_number, child_path
+                        ),
+                    ));
                 }
                 if let Some(value) = effective_value {
                     parse_scalar_field_value(table_name, row_number, &child_path, child, &value)?;
@@ -280,23 +399,44 @@ pub(super) fn validate_struct_child_path(
                 return Ok(());
             }
         }
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` references unknown struct child `{}`",
-            table_name, row_number, full_path, path
-        )));
+        return Err(struct_type_error(
+            table_name,
+            row_number,
+            full_path,
+            format!(
+                "table `{}` row {} field `{}` references unknown struct child `{}`",
+                table_name, row_number, full_path, path
+            ),
+            path,
+            "declared struct child field",
+        ));
     };
 
     let Some(child) = struct_child(struct_type, segment) else {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` references unknown struct child `{}`",
-            table_name, row_number, full_path, segment
-        )));
+        return Err(struct_type_error(
+            table_name,
+            row_number,
+            full_path,
+            format!(
+                "table `{}` row {} field `{}` references unknown struct child `{}`",
+                table_name, row_number, full_path, segment
+            ),
+            segment,
+            "declared struct child field",
+        ));
     };
     let LinkedField::Struct(nested_struct) = &child.linked_field else {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` uses child path but `{}` is not a struct field",
-            table_name, row_number, full_path, segment
-        )));
+        return Err(struct_type_error(
+            table_name,
+            row_number,
+            full_path,
+            format!(
+                "table `{}` row {} field `{}` uses child path but `{}` is not a struct field",
+                table_name, row_number, full_path, segment
+            ),
+            segment,
+            "struct field before nested child path",
+        ));
     };
     validate_struct_child_path(table_name, row_number, full_path, nested_struct, rest)
 }
@@ -329,24 +469,40 @@ pub(super) fn validate_supported_field_type(
 ) -> Result<()> {
     match (&field.linked_field, field.meta.layout) {
         (LinkedField::Struct(_), None) => Ok(()),
-        (LinkedField::Struct(_), Some(_)) => Err(ConfigForgeError::Validation(format!(
-            "table `{}` field `{}` uses struct type `{}` with unsupported layout; struct source layout is decided by source headers or keys",
-            meta.meta.name, field.meta.name, field.meta.field_type
-        ))),
+        (LinkedField::Struct(_), Some(layout)) => Err(struct_config_error(
+            meta.meta.name.as_str(),
+            field.meta.name.as_str(),
+            format!(
+                "table `{}` field `{}` uses struct type `{}` with unsupported layout; struct source layout is decided by source headers or keys",
+                meta.meta.name, field.meta.name, field.meta.field_type
+            ),
+            format!("struct layout {layout:?}"),
+            "struct field without explicit source layout",
+        )),
         (LinkedField::List(_), None | Some(ValueLayout::JsonCell)) => Ok(()),
         (LinkedField::List(_), Some(ValueLayout::ScalarCell | ValueLayout::ExpandedValue)) => {
-            Err(ConfigForgeError::Validation(format!(
-                "table `{}` field `{}` uses unsupported layout; list fields must use JSON cell values in this phase",
-                meta.meta.name, field.meta.name
-            )))
+            Err(struct_config_error(
+                meta.meta.name.as_str(),
+                field.meta.name.as_str(),
+                format!(
+                    "table `{}` field `{}` uses unsupported layout; list fields must use JSON cell values in this phase",
+                    meta.meta.name, field.meta.name
+                ),
+                format!("list layout {:?}", field.meta.layout),
+                "JSON cell layout for list fields",
+            ))
         }
         (_, None | Some(ValueLayout::ScalarCell)) => Ok(()),
-        (_, Some(ValueLayout::JsonCell | ValueLayout::ExpandedValue)) => {
-            Err(ConfigForgeError::Validation(format!(
+        (_, Some(ValueLayout::JsonCell | ValueLayout::ExpandedValue)) => Err(struct_config_error(
+            meta.meta.name.as_str(),
+            field.meta.name.as_str(),
+            format!(
                 "table `{}` field `{}` uses unsupported layout; non-struct fields only support scalar_cell in this phase",
                 meta.meta.name, field.meta.name
-            )))
-        }
+            ),
+            format!("scalar layout {:?}", field.meta.layout),
+            "scalar_cell layout for non-struct fields",
+        )),
     }
 }
 
@@ -411,16 +567,30 @@ fn validate_struct_json_cell(
     target_tags: Option<&TargetTags>,
 ) -> Result<()> {
     let value: serde_json::Value = serde_json::from_str(raw).map_err(|source| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` has invalid struct JSON: {}",
-            table_name, row_number, field_path, source
-        ))
+        struct_type_error(
+            table_name,
+            row_number,
+            field_path,
+            format!(
+                "table `{}` row {} field `{}` has invalid struct JSON: {}",
+                table_name, row_number, field_path, source
+            ),
+            raw,
+            "valid JSON object for struct field",
+        )
     })?;
     let object = value.as_object().ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` must be a JSON object for struct `{}`",
-            table_name, row_number, field_path, struct_type.meta.name
-        ))
+        struct_type_error(
+            table_name,
+            row_number,
+            field_path,
+            format!(
+                "table `{}` row {} field `{}` must be a JSON object for struct `{}`",
+                table_name, row_number, field_path, struct_type.meta.name
+            ),
+            value.to_string(),
+            format!("JSON object for struct `{}`", struct_type.meta.name),
+        )
     })?;
 
     for key in object.keys() {
@@ -429,10 +599,17 @@ fn validate_struct_json_cell(
             .iter()
             .any(|field| field.meta.name == key.as_str())
         {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` contains unknown struct key `{}`",
-                table_name, row_number, field_path, key
-            )));
+            return Err(struct_type_error(
+                table_name,
+                row_number,
+                field_path,
+                format!(
+                    "table `{}` row {} field `{}` contains unknown struct key `{}`",
+                    table_name, row_number, field_path, key
+                ),
+                key,
+                format!("declared key in struct `{}`", struct_type.meta.name),
+            ));
         }
     }
 
@@ -449,10 +626,15 @@ fn validate_struct_json_cell(
         let is_empty = effective_value.map(json_value_is_empty).unwrap_or(true);
 
         if child.meta.required && is_empty {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` is required",
-                table_name, row_number, child_path
-            )));
+            return Err(struct_required_error(
+                table_name,
+                row_number,
+                &child_path,
+                format!(
+                    "table `{}` row {} field `{}` is required",
+                    table_name, row_number, child_path
+                ),
+            ));
         }
         if is_empty {
             continue;
@@ -535,10 +717,17 @@ fn effective_list_cell_value(
         return Ok(None);
     }
     json_value_to_cell(&default_value).map(Some).map_err(|_| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` must be a JSON array",
-            table_name, row_number, field_path
-        ))
+        struct_type_error(
+            table_name,
+            row_number,
+            field_path,
+            format!(
+                "table `{}` row {} field `{}` must be a JSON array",
+                table_name, row_number, field_path
+            ),
+            default_value.to_string(),
+            "JSON array for list field default",
+        )
     })
 }
 
@@ -551,21 +740,35 @@ fn validate_indexed_list_cells(
 ) -> Result<()> {
     for (expected_index, (index, raw, element_path)) in indexed_cells.iter().enumerate() {
         if *index != expected_index {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` has non-contiguous expanded list element path `{}`; expected `{}`",
+            return Err(struct_type_error(
                 table_name,
                 row_number,
                 field_path,
+                format!(
+                    "table `{}` row {} field `{}` has non-contiguous expanded list element path `{}`; expected `{}`",
+                    table_name,
+                    row_number,
+                    field_path,
+                    element_path,
+                    list_element_path(field_path, expected_index)
+                ),
                 element_path,
-                list_element_path(field_path, expected_index)
-            )));
+                list_element_path(field_path, expected_index),
+            ));
         }
         parse_scalar_for_type(table_name, row_number, element_path, element_type, raw).map_err(
             |_| {
-                ConfigForgeError::Validation(format!(
-                    "table `{}` row {} field `{}` value `{}` does not match list element type",
-                    table_name, row_number, element_path, raw
-                ))
+                struct_type_error(
+                    table_name,
+                    row_number,
+                    element_path,
+                    format!(
+                        "table `{}` row {} field `{}` value `{}` does not match list element type",
+                        table_name, row_number, element_path, raw
+                    ),
+                    raw,
+                    "value matching list element type",
+                )
             },
         )?;
     }

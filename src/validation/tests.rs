@@ -15,7 +15,7 @@ use std::{
 use crate::{
     data::{RowSourceInfo, SourceRole},
     diagnostic::{
-        DiagnosticLocation,
+        Diagnostic, DiagnosticLocation, DiagnosticSeverity,
         code::{
             CF_DATA_DUPLICATE_KEY, CF_DATA_INVALID_ASSET_REF, CF_DATA_INVALID_FOREIGN_KEY,
             CF_DATA_INVALID_TYPE, CF_DATA_MISSING_REQUIRED_FIELD, CF_VALIDATION_INVALID_CONFIG,
@@ -1825,13 +1825,34 @@ fn normalize_data_set_with_pool_reports_first_table_error_by_plan_order() {
     let error = normalize_data_set_with_normalizer_and_pool(&data_set, &pool, |table| {
         if table.name == "first" {
             thread::sleep(Duration::from_millis(20));
-            return Err(ConfigForgeError::Validation("first failed".to_owned()));
+            return Err(test_validation_error("first failed", table.name.as_str()));
         }
-        Err(ConfigForgeError::Validation("second failed".to_owned()))
+        Err(test_validation_error("second failed", table.name.as_str()))
     })
     .unwrap_err();
 
-    assert!(matches!(error, ConfigForgeError::Validation(message) if message == "first failed"));
+    let ConfigForgeError::ValidationReport(report) = error else {
+        panic!("expected structured diagnostic report");
+    };
+    assert_eq!(report.diagnostics.len(), 1);
+    assert_eq!(report.diagnostics[0].message, "first failed");
+}
+
+fn test_validation_error(message: &str, table_name: &str) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_VALIDATION_INVALID_CONFIG,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation {
+                table: Some(table_name.to_owned()),
+                ..DiagnosticLocation::default()
+            },
+        )
+        .with_source("validation.test")
+        .with_current_value(table_name)
+        .with_expected("successful test normalizer"),
+    )
 }
 
 #[test]

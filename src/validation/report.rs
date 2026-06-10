@@ -7,7 +7,8 @@ use serde::Serialize;
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity, Result,
-    diagnostic::code::metadata_for, meta::TargetTags,
+    diagnostic::code::{CF_BUILD_EXPORT_TASK_FAILED, CF_BUILD_INVALID_CONFIG, metadata_for},
+    meta::TargetTags,
 };
 
 use super::{ValidationIssue, ValidationReport};
@@ -55,11 +56,43 @@ impl FromStr for DesignerReportFormat {
             "markdown" | "md" => Ok(Self::Markdown),
             "json" => Ok(Self::Json),
             "csv" => Ok(Self::Csv),
-            other => Err(ConfigForgeError::Validation(format!(
-                "unknown validation report format `{other}`; expected html, markdown, json or csv"
-            ))),
+            other => Err(report_config_error(
+                format!(
+                    "unknown validation report format `{other}`; expected html, markdown, json or csv"
+                ),
+                other,
+                "html, markdown, json or csv",
+            )),
         }
     }
+}
+
+fn report_config_error(
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    super::validation_diagnostic_error(
+        CF_BUILD_INVALID_CONFIG,
+        "validation.report.config",
+        message,
+        DiagnosticLocation::default(),
+        current,
+        expected,
+        "Check validation report export format and output options.",
+    )
+}
+
+fn report_render_error(message: String, current: impl Into<String>) -> ConfigForgeError {
+    super::validation_diagnostic_error(
+        CF_BUILD_EXPORT_TASK_FAILED,
+        "validation.report.render",
+        message,
+        DiagnosticLocation::default(),
+        current,
+        "serializable validation report model",
+        "Check validation report data for JSON serialization compatibility.",
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,9 +272,10 @@ pub fn render_designer_validation_report(
         DesignerReportFormat::Html => Ok(render_html(report)),
         DesignerReportFormat::Markdown => Ok(render_markdown(report)),
         DesignerReportFormat::Json => serde_json::to_string_pretty(report).map_err(|source| {
-            ConfigForgeError::Validation(format!(
-                "failed to serialize validation report JSON: {source}"
-            ))
+            report_render_error(
+                format!("failed to serialize validation report JSON: {source}"),
+                "json",
+            )
         }),
         DesignerReportFormat::Csv => Ok(render_csv(report)),
     }
