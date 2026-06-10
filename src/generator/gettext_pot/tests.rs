@@ -7,8 +7,12 @@ use tempfile::tempdir;
 
 use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
+    code_artifact::tests::expect_single_diagnostic,
     data::{DataSet, DataTable},
     data_artifact::TargetDataConfig,
+    diagnostic::code::{
+        CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH, CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+    },
     meta::{MetaModel, TargetTags},
 };
 
@@ -103,4 +107,82 @@ fn export_to_sink_writes_pot_content_directly() {
         .expect("POT artifact should be written");
     assert!(content.contains("msgctxt \"items.name\""));
     assert!(content.contains("msgid \"Iron Ore\""));
+}
+
+#[test]
+fn generate_to_sink_reports_structured_contract_error() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+                [[tables]]
+                name = "items"
+
+                [[tables.fields]]
+                name = "name"
+                type = "text"
+            "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let input = crate::generator::GeneratorCommonInput {
+        project: crate::ArtifactProjectInfo::default(),
+        project_root: PathBuf::from("."),
+        target_name: "client".to_owned(),
+        target_tags: TargetTags::empty(),
+        meta: &linked,
+        output: PathBuf::from("out"),
+        type_id: FORMAT.to_owned(),
+        task_name: "pot".to_owned(),
+        options: BTreeMap::new(),
+        generated_at: "now".to_owned(),
+    };
+    let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+
+    let error = <GettextPotExporter as ArtifactGenerator>::generate_to_sink(
+        &GettextPotExporter,
+        &input,
+        &sink,
+    )
+    .unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.gettext_pot.contract")
+    );
+}
+
+#[test]
+fn missing_table_reports_structured_pot_input_error() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+                [[tables]]
+                name = "items"
+
+                [[tables.fields]]
+                name = "name"
+                type = "text"
+            "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let task = TargetDataConfig {
+        name: Some("pot".to_owned()),
+        output: PathBuf::from("out"),
+        format: FORMAT.to_owned(),
+        options: BTreeMap::new(),
+    };
+    let error = render_pot_export(
+        &task,
+        &linked,
+        &TargetTags::empty(),
+        &DataSet::new(Vec::new()),
+    )
+    .unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNSUPPORTED_DATA_INPUT);
+    assert_eq!(
+        diagnostic.source.as_deref(),
+        Some("generator.gettext_pot.input")
+    );
+    assert_eq!(diagnostic.current_value.as_deref(), Some("items"));
 }

@@ -4,14 +4,18 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     artifact::{Artifact, ArtifactSink},
     data::DataSet,
     data_artifact::{AggregateDataExporter, TargetDataConfig},
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{LinkedMetaModel, TargetTags},
 };
 
-use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements};
+use super::{
+    ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements,
+    artifact_generator::generator_contract_error,
+};
 
 mod extract;
 mod options;
@@ -103,10 +107,13 @@ impl ArtifactGenerator for GettextPotExporter {
         _input: &GeneratorCommonInput<'_>,
         _sink: &ArtifactSink,
     ) -> Result<()> {
-        Err(ConfigForgeError::Validation(format!(
-            "generator `{}` requires Data-backed artifact input",
-            FORMAT
-        )))
+        Err(generator_contract_error(
+            FORMAT,
+            format!("generator `{FORMAT}` requires Data-backed artifact input"),
+            "meta-only generation call",
+            "data-backed generation input",
+            "Use the generator registry data-backed pipeline for gettext_pot exports.",
+        ))
     }
 
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
@@ -151,10 +158,12 @@ fn render_pot_export(
             continue;
         }
         let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "data set is missing table `{}`",
-                table_meta.meta.name
-            ))
+            gettext_pot_extraction_error(
+                format!("data set is missing table `{}`", table_meta.meta.name),
+                table_meta.meta.name.clone(),
+                "visible table present in prepared data set",
+                "Ensure data loading completed for all target-visible gettext_pot tables.",
+            )
         })?;
         entries.extend(extract_table_entries(
             table_meta,
@@ -166,4 +175,25 @@ fn render_pot_export(
     let file_name = options.file_name();
     let content = render_pot(&entries, &options);
     Ok((file_name, content))
+}
+
+pub(super) fn gettext_pot_extraction_error(
+    message: impl Into<String>,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source("generator.gettext_pot.input")
+        .with_domain("generator")
+        .with_current_value(current)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
 }

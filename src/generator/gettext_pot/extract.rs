@@ -4,13 +4,13 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     data::{DataResolver, DataTable, DataValue, ResolvedValue, ScalarValue},
     meta::{LinkedFieldMeta, LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags},
 };
 
 use super::{
-    TextExtractionEntry,
+    TextExtractionEntry, gettext_pot_extraction_error,
     options::{GettextPotOptions, PotContextMode, PotSourceReferenceMode},
 };
 
@@ -54,11 +54,16 @@ fn extract_collection_entries(
     let mut entries = Vec::new();
     for (resolved_row_index, row_index) in visible_row_indices.iter().enumerate() {
         let resolved_row = resolved_table.rows.get(resolved_row_index).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "resolved table `{}` is missing row {}",
-                table_meta.meta.name,
-                resolved_row_index + 1
-            ))
+            gettext_pot_extraction_error(
+                format!(
+                    "resolved table `{}` is missing row {}",
+                    table_meta.meta.name,
+                    resolved_row_index + 1
+                ),
+                format!("{} row {}", table_meta.meta.name, resolved_row_index + 1),
+                "resolved row for every visible source row",
+                "Check gettext_pot extraction input after data resolution.",
+            )
         })?;
         let record_key = record_key(table_meta, table.rows.get(*row_index));
         for field in table_meta
@@ -97,10 +102,15 @@ fn extract_object_entries(
     }
     let resolved_table = DataResolver::resolve_table(table_meta, table, Some(target_tags))?;
     let resolved_row = resolved_table.rows.first().ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "resolved object table `{}` is missing singleton row",
-            table_meta.meta.name
-        ))
+        gettext_pot_extraction_error(
+            format!(
+                "resolved object table `{}` is missing singleton row",
+                table_meta.meta.name
+            ),
+            table_meta.meta.name.clone(),
+            "resolved singleton object table row",
+            "Check gettext_pot extraction input after object table resolution.",
+        )
     })?;
     let mut entries = Vec::new();
     for field in table_meta
@@ -183,8 +193,11 @@ fn extract_field_entry(
 fn scalar_text(value: &ResolvedValue) -> Result<Option<String>> {
     match &value.value {
         DataValue::Scalar(ScalarValue::String(_)) => Ok(value.scalar_export_string()),
-        DataValue::Scalar(_) => Err(ConfigForgeError::Validation(
-            "text field resolved to non-string scalar".to_owned(),
+        DataValue::Scalar(_) => Err(gettext_pot_extraction_error(
+            "text field resolved to non-string scalar",
+            format!("{:?}", value.value),
+            "string scalar for text field",
+            "Check text field type resolution before gettext_pot extraction.",
         )),
         _ => Ok(None),
     }
