@@ -2,11 +2,11 @@
 
 本文记录 ConfigForge 诊断 / 错误处理从当前状态进入 `Stable` 前仍需要收敛的实际事项。当前基础协议、report、CLI JSON、Generator Registry、Artifact path safety、核心 Data validation 已有较完整结构化诊断；但错误处理整体还不能标 Stable，因为仓库仍存在大量 `ConfigForgeError::Validation(String)` fallback，且部分高频用户错误仍依赖自然语言 message。
 
-## 当前结论（2026-06-10）
+## 当前结论（2026-06-11）
 
 **暂不删除本 TODO，也不把 Diagnostics 标为 Stable。**
 
-原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **377 处 / 72 文件**。这些不全是用户可见错误，但仍覆盖 asset resolver、data resolver、typed value、data artifact、code artifact、generator 私有 option、builtin validators 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
+原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **343 处 / 70 文件**。这些不全是用户可见错误，但仍覆盖 asset resolver、data artifact、code artifact、generator 私有 option、builtin validators 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
 
 已经完成且不再作为 TODO 追踪的内容：
 
@@ -23,6 +23,7 @@
 - legacy fallback 债务护栏：已有单元测试锁定 `ConfigForgeError::Validation(` 基线，新增裸 fallback 会导致测试失败。
 - Project / Build config 入口层错误已迁移：target 不存在、重复 target / export task name、非法 task name、非法 execution resource flag、Data-dependent target 缺少 `project.input`、CLI validation report 附加任务冲突 / 输出文件名错误等已具备 stable code 与 JSON context。
 - Data loading / source reading 高频错误已迁移：CSV read/schema/header、source path escape、source plan/provider、override primary key 等已具备 stable code 与 source/table/row context。
+- Data resolver / typed value 高频错误已迁移：enum、scalar/list/struct type、struct JSON cell、expanded struct/list、recursive/nested path、list index 连续性等已具备 stable code 与 table/row/field/current/expected context。
 
 以下内容已从本 TODO 移除，不再作为 Diagnostics Stable 的阻塞项：
 
@@ -62,12 +63,12 @@ Data loading 仍有大量用户高频错误使用裸字符串：CSV ragged row�
 
 ### P1：Data resolver / typed value / enum 细分诊断
 
-核心 table validation 已覆盖 type / required / duplicate / FK，但 enum、struct/list、typed value 细节仍有 legacy fallback 或被折叠到通用 type error。
+核心 table validation 已覆盖 type / required / duplicate / FK；enum、struct/list、typed value 细节已迁移为结构化 diagnostic，后续只保留更细分 code 的非阻塞增强。
 
-- [ ] 将 enum 错误拆为 `CF_DATA_INVALID_ENUM` producer，填充当前枚举字符串 / ordinal 和候选值。
-- [ ] 迁移 struct JSON cell、expanded struct/list、recursive/nested path、list index 连续性等 data resolver 错误，保留 source cell trace。
-- [ ] 迁移 typed value / default value conversion 的用户可见错误，填充当前值和期望类型。
-- [ ] 补充 report / CLI JSON 字段断言，避免新路径只落 message。
+- [x] 将 enum 错误拆为 `CF_DATA_INVALID_ENUM` producer，填充当前枚举字符串和候选值。
+- [x] 迁移 struct JSON cell、expanded struct/list、recursive/nested path、list index 连续性等 data resolver 错误，保留 source/table/row/field trace。
+- [x] 迁移 typed value 的用户可见错误，填充当前值和期望类型。
+- [x] 补充 report / producer 字段断言，避免新路径只落 message。
 
 ### P1：Asset resolver 细粒度结构化
 

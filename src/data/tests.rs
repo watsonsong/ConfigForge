@@ -657,9 +657,12 @@ fn data_resolver_rejects_schema_errors_and_target_filters_hidden_children() {
     let error = DataResolver::new(&linked)
         .resolve_required_tables(&mixed)
         .unwrap_err();
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("mixes struct JSON cell"))
-    );
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_SCHEMA_INVALID);
+    assert_eq!(diagnostic.source.as_deref(), Some("data.resolver"));
+    assert!(diagnostic.message.contains("mixes struct JSON cell"));
+    assert_eq!(diagnostic.location.table.as_deref(), Some("characters"));
+    assert_eq!(diagnostic.location.field.as_deref(), Some("attributes"));
 
     let hidden_only = DataSet::new(vec![DataTable::new(
         "characters",
@@ -917,9 +920,12 @@ fn data_resolver_rejects_typed_fragment_layout_mixing_and_invalid_nested_paths()
     let error = DataResolver::new(&linked)
         .resolve_required_tables(&DataSet::new(vec![mixed]))
         .unwrap_err();
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("mixes struct JSON cell"))
-    );
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_SCHEMA_INVALID);
+    assert_eq!(diagnostic.source.as_deref(), Some("data.resolver"));
+    assert!(diagnostic.message.contains("mixes struct JSON cell"));
+    assert_eq!(diagnostic.location.table.as_deref(), Some("items"));
+    assert_eq!(diagnostic.location.field.as_deref(), Some("attributes"));
 
     let invalid_nested = DataTable::new_with_sources(
         "items",
@@ -933,9 +939,11 @@ fn data_resolver_rejects_typed_fragment_layout_mixing_and_invalid_nested_paths()
     let error = DataResolver::new(&linked)
         .resolve_required_tables(&DataSet::new(vec![invalid_nested]))
         .unwrap_err();
-    assert!(
-        matches!(error, ConfigForgeError::Validation(message) if message.contains("uses child path") && message.contains("scalar"))
-    );
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_SCHEMA_INVALID);
+    assert!(diagnostic.message.contains("uses child path"));
+    assert!(diagnostic.message.contains("scalar"));
+    assert_eq!(diagnostic.current_value.as_deref(), Some("scalar"));
 }
 
 #[test]

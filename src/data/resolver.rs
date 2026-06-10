@@ -4,12 +4,13 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     data::typed_value::{parse_list_cell_value, parse_scalar_field_value, parse_scalar_for_type},
     data::value_conversion::{
         json_value_is_empty, json_value_to_cell, json_value_to_scalar_cell_for_field,
         toml_default_to_json_value,
     },
+    diagnostic::code::{CF_DATA_INVALID_TYPE, CF_DATA_SOURCE_SCHEMA_INVALID},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, LinkedTableMeta,
         TableKind, TargetTags,
@@ -52,10 +53,13 @@ impl<'meta> DataResolver<'meta> {
         let mut tables = Vec::with_capacity(self.meta.tables.len());
         for table_meta in &self.meta.tables {
             let table = data_set.table(&table_meta.meta.name).ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "data set is missing table `{}`",
-                    table_meta.meta.name
-                ))
+                resolver_table_error(
+                    table_meta.meta.name.as_str(),
+                    format!("data set is missing table `{}`", table_meta.meta.name),
+                    "missing table",
+                    "data set table declared by Meta",
+                    "Add source data for the table or remove the table from Meta.",
+                )
             })?;
             tables.push(Self::resolve_table(
                 table_meta,
@@ -87,11 +91,18 @@ impl<'meta> DataResolver<'meta> {
         for row_index in row_indices {
             rows.push(resolve_row(table_meta, table, target_tags, row_index)?);
             let row_source = table.row_source(row_index).cloned().ok_or_else(|| {
-                ConfigForgeError::Validation(format!(
-                    "table `{}` is missing row source for row {}",
-                    table.name,
-                    row_index + 1
-                ))
+                resolver_row_error(
+                    table.name.as_str(),
+                    row_index + 1,
+                    format!(
+                        "table `{}` is missing row source for row {}",
+                        table.name,
+                        row_index + 1
+                    ),
+                    "missing row source",
+                    "row source metadata",
+                    "Load the table through a DataLoader so each row retains source trace.",
+                )
             })?;
             row_sources.push(row_source);
         }
@@ -107,11 +118,14 @@ fn resolve_row(
     row_index: usize,
 ) -> Result<ResolvedRow> {
     let row = table.rows.get(row_index).ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` is missing row {}",
-            table.name,
-            row_index + 1
-        ))
+        resolver_row_error(
+            table.name.as_str(),
+            row_index + 1,
+            format!("table `{}` is missing row {}", table.name, row_index + 1),
+            "missing row",
+            "data row",
+            "Ensure requested row indices are within the table row range.",
+        )
     })?;
     let row_source = table.row_source(row_index);
     let row_number = row_source
@@ -315,10 +329,17 @@ fn resolve_list_cell_value(
     let indexed_cells = indexed_list_cells(context.row, context.field_path)?;
     if let Some(raw) = non_empty_row_value(context.row, context.field_path) {
         if let Some((_, _, first_indexed_path)) = indexed_cells.first() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` mixes list JSON cell with expanded list element path `{}`",
-                context.table_name, context.row_number, context.field_path, first_indexed_path
-            )));
+            return Err(resolver_value_error(
+                context,
+                CF_DATA_SOURCE_SCHEMA_INVALID,
+                format!(
+                    "table `{}` row {} field `{}` mixes list JSON cell with expanded list element path `{}`",
+                    context.table_name, context.row_number, context.field_path, first_indexed_path
+                ),
+                format!("{} and {}", context.field_path, first_indexed_path),
+                "either one list JSON cell or expanded list element cells",
+                "Use only one list source layout for the field in the same row.",
+            ));
         }
         let array = context.parse_list_cell(element_type, raw, ValueSourceKind::ExplicitCell)?;
         return Ok(Some(context.explicit(DataValue::Array(array), raw)));
@@ -342,10 +363,17 @@ fn resolve_list_cell_value(
         return Ok(None);
     }
     let raw = json_value_to_cell(&default_value).map_err(|_| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` must be a JSON array",
-            context.table_name, context.row_number, context.field_path
-        ))
+        resolver_value_error(
+            context,
+            CF_DATA_INVALID_TYPE,
+            format!(
+                "table `{}` row {} field `{}` must be a JSON array",
+                context.table_name, context.row_number, context.field_path
+            ),
+            default_value.to_string(),
+            "JSON array",
+            "Use JSON array syntax for list default values.",
+        )
     })?;
     let array = context.parse_list_cell(element_type, &raw, ValueSourceKind::DefaultValue)?;
     Ok(Some(context.defaulted(DataValue::Array(array), raw)))
@@ -361,14 +389,22 @@ fn parse_indexed_list_cells(
         .enumerate()
         .map(|(expected_index, (index, raw, element_path))| {
             if *index != expected_index {
-                return Err(ConfigForgeError::Validation(format!(
-                    "table `{}` row {} field `{}` has non-contiguous expanded list element path `{}`; expected `{}`",
-                    context.table_name,
-                    context.row_number,
-                    context.field_path,
-                    element_path,
-                    list_element_path(context.field_path, expected_index)
-                )));
+                let expected_path = list_element_path(context.field_path, expected_index);
+                return Err(resolver_value_error(
+                    context,
+                    CF_DATA_SOURCE_SCHEMA_INVALID,
+                    format!(
+                        "table `{}` row {} field `{}` has non-contiguous expanded list element path `{}`; expected `{}`",
+                        context.table_name,
+                        context.row_number,
+                        context.field_path,
+                        element_path,
+                        expected_path
+                    ),
+                    element_path.as_str(),
+                    expected_path,
+                    "Expanded list element paths must start at 0 and be contiguous.",
+                ));
             }
             let scalar = parse_scalar_for_type(
                 context.table_name,
@@ -376,13 +412,7 @@ fn parse_indexed_list_cells(
                 element_path,
                 element_type,
                 raw,
-            )
-            .map_err(|_| {
-                ConfigForgeError::Validation(format!(
-                    "table `{}` row {} field `{}` value `{}` does not match list element type",
-                    context.table_name, context.row_number, element_path, raw
-                ))
-            })?;
+            )?;
             Ok(ArrayElementValue::scalar(scalar, Some(raw.clone())))
         })
         .collect()
@@ -415,10 +445,17 @@ fn resolve_struct_occurrence_value(
 ) -> Result<Option<ResolvedValue>> {
     if let Some(raw) = non_empty_row_value(context.row, context.field_path) {
         let value: serde_json::Value = serde_json::from_str(raw).map_err(|source| {
-            ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` has invalid struct JSON: {}",
-                context.table_name, context.row_number, context.field_path, source
-            ))
+            resolver_value_error(
+                context,
+                CF_DATA_INVALID_TYPE,
+                format!(
+                    "table `{}` row {} field `{}` has invalid struct JSON: {}",
+                    context.table_name, context.row_number, context.field_path, source
+                ),
+                raw,
+                format!("JSON object for struct `{}`", struct_type.meta.name),
+                "Use JSON object syntax or expanded struct child columns, not malformed JSON.",
+            )
         })?;
         let children = resolve_struct_json_value(context, struct_type, &value)?;
         return Ok(Some(context.explicit(DataValue::Struct(children), raw)));
@@ -451,17 +488,31 @@ fn resolve_struct_json_value(
     value: &serde_json::Value,
 ) -> Result<BTreeMap<String, ResolvedValue>> {
     let object = value.as_object().ok_or_else(|| {
-        ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` must be a JSON object for struct `{}`",
-            context.table_name, context.row_number, context.field_path, struct_type.meta.name
-        ))
+        resolver_value_error(
+            context,
+            CF_DATA_INVALID_TYPE,
+            format!(
+                "table `{}` row {} field `{}` must be a JSON object for struct `{}`",
+                context.table_name, context.row_number, context.field_path, struct_type.meta.name
+            ),
+            value.to_string(),
+            format!("JSON object for struct `{}`", struct_type.meta.name),
+            "Use JSON object syntax for struct field values.",
+        )
     })?;
     for key in object.keys() {
         if struct_child(struct_type, key).is_none() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` contains unknown struct key `{}`",
-                context.table_name, context.row_number, context.field_path, key
-            )));
+            return Err(resolver_value_error(
+                context,
+                CF_DATA_SOURCE_SCHEMA_INVALID,
+                format!(
+                    "table `{}` row {} field `{}` contains unknown struct key `{}`",
+                    context.table_name, context.row_number, context.field_path, key
+                ),
+                key.as_str(),
+                format!("known child of struct `{}`", struct_type.meta.name),
+                "Remove the unknown key or declare it as a struct field in Meta.",
+            ));
         }
     }
 
@@ -494,10 +545,17 @@ fn resolve_struct_json_value(
             }
             LinkedField::List(element_type) => {
                 let raw = json_value_to_cell(child_value).map_err(|_| {
-                    ConfigForgeError::Validation(format!(
-                        "table `{}` row {} field `{}` must be a JSON array",
-                        context.table_name, context.row_number, child_path
-                    ))
+                    resolver_value_error(
+                        child_context,
+                        CF_DATA_INVALID_TYPE,
+                        format!(
+                            "table `{}` row {} field `{}` must be a JSON array",
+                            context.table_name, context.row_number, child_path
+                        ),
+                        child_value.to_string(),
+                        "JSON array",
+                        "Use JSON array syntax for list field values.",
+                    )
                 })?;
                 let array = child_context.parse_list_cell(
                     element_type,
@@ -564,10 +622,17 @@ fn struct_occurrence_has_effective_value(
                     continue;
                 }
                 let raw = json_value_to_cell(&default_value).map_err(|_| {
-                    ConfigForgeError::Validation(format!(
-                        "table `{}` row {} field `{}` must be a JSON array",
-                        context.table_name, context.row_number, child_path
-                    ))
+                    resolver_value_error(
+                        child_context,
+                        CF_DATA_INVALID_TYPE,
+                        format!(
+                            "table `{}` row {} field `{}` must be a JSON array",
+                            context.table_name, context.row_number, child_path
+                        ),
+                        default_value.to_string(),
+                        "JSON array",
+                        "Use JSON array syntax for list default values.",
+                    )
                 })?;
                 child_context.parse_list_cell(element_type, &raw, ValueSourceKind::DefaultValue)?;
                 return Ok(true);
@@ -599,7 +664,7 @@ fn validate_source_schema(
     active_fragments: &[String],
 ) -> Result<()> {
     for key in context.row.keys().filter(|key| key.contains('.')) {
-        validate_dotted_source_key(meta, key, context.row_number, active_fragments)?;
+        validate_dotted_source_key(meta, key, context, active_fragments)?;
     }
     if meta.meta.kind == TableKind::Object {
         for key in context.row.keys().filter(|key| !key.contains('.')) {
@@ -607,10 +672,19 @@ fn validate_source_schema(
                 continue;
             }
             if meta.field(key).is_none() {
-                return Err(ConfigForgeError::Validation(format!(
-                    "object table `{}` row {} references unknown field key `{}`",
-                    meta.meta.name, context.row_number, key
-                )));
+                return Err(resolver_schema_error(
+                    meta.meta.name.as_str(),
+                    context.row_number,
+                    Some(key),
+                    context.row_source,
+                    format!(
+                        "object table `{}` row {} references unknown field key `{}`",
+                        meta.meta.name, context.row_number, key
+                    ),
+                    key.as_str(),
+                    "declared object table field key",
+                    "Remove the unknown key or declare the field in Meta.",
+                ));
             }
         }
     }
@@ -621,6 +695,7 @@ fn validate_source_schema(
                 meta.meta.name.as_str(),
                 context.row,
                 context.row_number,
+                context.row_source,
                 field.meta.name.as_str(),
                 struct_type,
             )?;
@@ -637,6 +712,7 @@ fn validate_source_schema(
             meta.meta.name.as_str(),
             context.row,
             context.row_number,
+            context.row_source,
             fragment.meta.name.as_str(),
             struct_type,
         )?;
@@ -655,7 +731,7 @@ fn validate_top_level_source_key(meta: &LinkedTableMeta<'_>, key: &str) -> bool 
 fn validate_dotted_source_key(
     meta: &LinkedTableMeta<'_>,
     key: &str,
-    row_number: usize,
+    context: &ResolveContext<'_>,
     active_fragments: &[String],
 ) -> Result<()> {
     let Some((first_segment, rest)) = key.split_once('.') else {
@@ -664,12 +740,28 @@ fn validate_dotted_source_key(
 
     if let Some(field) = meta.field(first_segment) {
         let LinkedField::Struct(struct_type) = &field.linked_field else {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` uses child path but `{}` is not a struct field",
-                meta.meta.name, row_number, key, first_segment
-            )));
+            return Err(resolver_schema_error(
+                meta.meta.name.as_str(),
+                context.row_number,
+                Some(key),
+                context.row_source,
+                format!(
+                    "table `{}` row {} field `{}` uses child path but `{}` is not a struct field",
+                    meta.meta.name, context.row_number, key, first_segment
+                ),
+                first_segment,
+                "struct field",
+                "Only struct fields can use expanded child paths.",
+            ));
         };
-        validate_struct_child_path(meta.meta.name.as_str(), row_number, key, struct_type, rest)?;
+        validate_struct_child_path(
+            meta.meta.name.as_str(),
+            context.row_number,
+            key,
+            context.row_source,
+            struct_type,
+            rest,
+        )?;
         return Ok(());
     }
 
@@ -678,38 +770,67 @@ fn validate_dotted_source_key(
             .iter()
             .any(|active| active == first_segment)
         {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` belongs to inactive fragment `{}`",
-                meta.meta.name, row_number, key, first_segment
-            )));
+            return Err(resolver_schema_error(
+                meta.meta.name.as_str(),
+                context.row_number,
+                Some(key),
+                context.row_source,
+                format!(
+                    "table `{}` row {} field `{}` belongs to inactive fragment `{}`",
+                    meta.meta.name, context.row_number, key, first_segment
+                ),
+                first_segment,
+                "active source fragment",
+                "Ensure the source row declares the fragment before using its fields.",
+            ));
         }
         if let Some(struct_type) = fragment.struct_type() {
             validate_struct_child_path(
                 meta.meta.name.as_str(),
-                row_number,
+                context.row_number,
                 key,
+                context.row_source,
                 struct_type,
                 rest,
             )?;
         } else if fragment.field(rest).is_none() {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` references unknown fragment field `{}`",
-                meta.meta.name, row_number, key, rest
-            )));
+            return Err(resolver_schema_error(
+                meta.meta.name.as_str(),
+                context.row_number,
+                Some(key),
+                context.row_source,
+                format!(
+                    "table `{}` row {} field `{}` references unknown fragment field `{}`",
+                    meta.meta.name, context.row_number, key, rest
+                ),
+                rest,
+                format!("declared field of fragment `{first_segment}`"),
+                "Remove the unknown fragment field or declare it in Meta.",
+            ));
         }
         return Ok(());
     }
 
-    Err(ConfigForgeError::Validation(format!(
-        "table `{}` row {} field `{}` references unknown dotted field path",
-        meta.meta.name, row_number, key
-    )))
+    Err(resolver_schema_error(
+        meta.meta.name.as_str(),
+        context.row_number,
+        Some(key),
+        context.row_source,
+        format!(
+            "table `{}` row {} field `{}` references unknown dotted field path",
+            meta.meta.name, context.row_number, key
+        ),
+        key,
+        "declared struct field path or active fragment field path",
+        "Check the field path spelling and active fragment configuration.",
+    ))
 }
 
 fn validate_struct_child_path(
     table_name: &str,
     row_number: usize,
     full_path: &str,
+    row_source: Option<&RowSourceInfo>,
     struct_type: &LinkedStructType<'_>,
     path: &str,
 ) -> Result<()> {
@@ -724,31 +845,66 @@ fn validate_struct_child_path(
                 return Ok(());
             }
         }
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` references unknown struct child `{}`",
-            table_name, row_number, full_path, path
-        )));
+        return Err(resolver_schema_error(
+            table_name,
+            row_number,
+            Some(full_path),
+            row_source,
+            format!(
+                "table `{}` row {} field `{}` references unknown struct child `{}`",
+                table_name, row_number, full_path, path
+            ),
+            path,
+            format!("declared child of struct `{}`", struct_type.meta.name),
+            "Remove the unknown child path or declare it in the struct Meta.",
+        ));
     };
 
     let Some(child) = struct_child(struct_type, segment) else {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` references unknown struct child `{}`",
-            table_name, row_number, full_path, segment
-        )));
+        return Err(resolver_schema_error(
+            table_name,
+            row_number,
+            Some(full_path),
+            row_source,
+            format!(
+                "table `{}` row {} field `{}` references unknown struct child `{}`",
+                table_name, row_number, full_path, segment
+            ),
+            segment,
+            format!("declared child of struct `{}`", struct_type.meta.name),
+            "Remove the unknown child path or declare it in the struct Meta.",
+        ));
     };
     let LinkedField::Struct(nested_struct) = &child.linked_field else {
-        return Err(ConfigForgeError::Validation(format!(
-            "table `{}` row {} field `{}` uses child path but `{}` is not a struct field",
-            table_name, row_number, full_path, segment
-        )));
+        return Err(resolver_schema_error(
+            table_name,
+            row_number,
+            Some(full_path),
+            row_source,
+            format!(
+                "table `{}` row {} field `{}` uses child path but `{}` is not a struct field",
+                table_name, row_number, full_path, segment
+            ),
+            segment,
+            "struct field",
+            "Only struct fields can use nested expanded child paths.",
+        ));
     };
-    validate_struct_child_path(table_name, row_number, full_path, nested_struct, rest)
+    validate_struct_child_path(
+        table_name,
+        row_number,
+        full_path,
+        row_source,
+        nested_struct,
+        rest,
+    )
 }
 
 fn validate_struct_layout_mixing_for_row(
     table_name: &str,
     row: &DataRow,
     row_number: usize,
+    row_source: Option<&RowSourceInfo>,
     field_path: &str,
     struct_type: &LinkedStructType<'_>,
 ) -> Result<()> {
@@ -756,10 +912,19 @@ fn validate_struct_layout_mixing_for_row(
     let descendant_path = first_descendant_path(row, field_path);
     if parent_present {
         if let Some(descendant_path) = descendant_path {
-            return Err(ConfigForgeError::Validation(format!(
-                "table `{}` row {} field `{}` mixes struct JSON cell with expanded child path `{}`",
-                table_name, row_number, field_path, descendant_path
-            )));
+            return Err(resolver_schema_error(
+                table_name,
+                row_number,
+                Some(field_path),
+                row_source,
+                format!(
+                    "table `{}` row {} field `{}` mixes struct JSON cell with expanded child path `{}`",
+                    table_name, row_number, field_path, descendant_path
+                ),
+                format!("{} and {}", field_path, descendant_path),
+                "either one struct JSON cell or expanded child fields",
+                "Use only one struct source layout for the field in the same row.",
+            ));
         }
         return Ok(());
     }
@@ -775,6 +940,7 @@ fn validate_struct_layout_mixing_for_row(
                 table_name,
                 row,
                 row_number,
+                row_source,
                 &child_path,
                 nested_struct,
             )?;
@@ -782,6 +948,120 @@ fn validate_struct_layout_mixing_for_row(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+fn resolver_table_error(
+    table_name: &str,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    resolver_diagnostic_error(
+        CF_DATA_SOURCE_SCHEMA_INVALID,
+        message,
+        resolver_location(table_name, None, None, None),
+        current_value,
+        expected,
+        hint,
+    )
+}
+
+fn resolver_row_error(
+    table_name: &str,
+    row_number: usize,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    resolver_diagnostic_error(
+        CF_DATA_SOURCE_SCHEMA_INVALID,
+        message,
+        resolver_location(table_name, Some(row_number), None, None),
+        current_value,
+        expected,
+        hint,
+    )
+}
+
+fn resolver_value_error(
+    context: ValueContext<'_, '_>,
+    code: &'static str,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    resolver_diagnostic_error(
+        code,
+        message,
+        resolver_location(
+            context.table_name,
+            Some(context.row_number),
+            Some(context.field_path),
+            context.row_source,
+        ),
+        current_value,
+        expected,
+        hint,
+    )
+}
+
+fn resolver_schema_error(
+    table_name: &str,
+    row_number: usize,
+    field_path: Option<&str>,
+    row_source: Option<&RowSourceInfo>,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    resolver_diagnostic_error(
+        CF_DATA_SOURCE_SCHEMA_INVALID,
+        message,
+        resolver_location(table_name, Some(row_number), field_path, row_source),
+        current_value,
+        expected,
+        hint,
+    )
+}
+
+fn resolver_diagnostic_error(
+    code: &'static str,
+    message: String,
+    location: DiagnosticLocation,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(code, DiagnosticSeverity::Error, message, location)
+            .with_source("data.resolver")
+            .with_domain("data")
+            .with_current_value(current_value)
+            .with_expected(expected)
+            .with_hint(hint),
+    )
+}
+
+fn resolver_location(
+    table_name: &str,
+    row_number: Option<usize>,
+    field_path: Option<&str>,
+    row_source: Option<&RowSourceInfo>,
+) -> DiagnosticLocation {
+    DiagnosticLocation {
+        source_path: row_source.map(|source| source.source_path.clone()),
+        table: Some(table_name.to_owned()),
+        field: field_path.map(str::to_owned),
+        source_row_number: row_source
+            .map(|source| source.source_row_number)
+            .or(row_number),
+        ..DiagnosticLocation::default()
+    }
 }
 
 fn field_is_visible(field: &LinkedFieldMeta<'_>, target_tags: Option<&TargetTags>) -> bool {

@@ -217,7 +217,7 @@ fn scalar_type_error(
         row_number,
         field_path,
         value,
-        format!("{:?}", field.meta.field_type),
+        expected_type_name(&field.linked_field),
         format!(
             "table `{}` row {} field `{}` value `{}` does not match type `{:?}`",
             table_name, row_number, field_path, value, field.meta.field_type
@@ -317,7 +317,7 @@ fn data_value_location(
 
 fn expected_type_name(field: &LinkedField<'_>) -> String {
     match field {
-        LinkedField::Primitive(primitive) => format!("{primitive:?}"),
+        LinkedField::Primitive(primitive) => primitive.as_str().to_owned(),
         LinkedField::Enum(enum_meta) => format!("enum {}", enum_meta.name),
         LinkedField::Struct(struct_meta) => format!("struct {}", struct_meta.meta.name),
         LinkedField::List(_) => "list".to_owned(),

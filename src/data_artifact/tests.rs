@@ -6,15 +6,24 @@ use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
 use tempfile::tempdir;
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, Result,
     artifact::{ArtifactSink, ArtifactWriteMode, ArtifactWriteStream, ArtifactWriter},
     data::{DataTable, SourceRole},
+    diagnostic::code::{CF_DATA_INVALID_TYPE, CF_DATA_SOURCE_SCHEMA_INVALID},
     generator::BinaryDataExporter,
     meta::{LinkedTableMeta, MetaModel, TargetTags},
     runtime_contract::{RuntimeDataFile, binary_schema_revision},
 };
 
 use super::*;
+
+fn expect_single_diagnostic(error: ConfigForgeError) -> Diagnostic {
+    let ConfigForgeError::ValidationReport(report) = error else {
+        panic!("expected structured diagnostic report");
+    };
+    assert_eq!(report.diagnostics.len(), 1);
+    report.diagnostics.into_iter().next().unwrap()
+}
 
 struct CustomDataExporter {
     seen_tables: Mutex<Vec<String>>,
@@ -1186,9 +1195,15 @@ fn struct_json_cell_export_errors_include_row_and_field_context() {
 
     let error = build_exported_table_payload(table_meta, &invalid_json_table, &TargetTags::empty())
         .unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_INVALID_TYPE);
+    assert_eq!(diagnostic.source.as_deref(), Some("data.resolver"));
     assert!(
-        matches!(&error, ConfigForgeError::Validation(message) if message.contains("table `items` row 1 field `reward` has invalid struct JSON"))
+        diagnostic
+            .message
+            .contains("table `items` row 1 field `reward` has invalid struct JSON")
     );
+    assert_eq!(diagnostic.current_value.as_deref(), Some("not json"));
 
     let unknown_key_table = DataTable::new(
         "items",
@@ -1199,9 +1214,14 @@ fn struct_json_cell_export_errors_include_row_and_field_context() {
     );
     let error = build_exported_table_payload(table_meta, &unknown_key_table, &TargetTags::empty())
         .unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_SCHEMA_INVALID);
     assert!(
-        matches!(&error, ConfigForgeError::Validation(message) if message.contains("field `reward` contains unknown struct key `extra`"))
+        diagnostic
+            .message
+            .contains("field `reward` contains unknown struct key `extra`")
     );
+    assert_eq!(diagnostic.current_value.as_deref(), Some("extra"));
 }
 
 fn read_i64_for_test(bytes: &[u8], offset: &mut usize) -> i64 {
