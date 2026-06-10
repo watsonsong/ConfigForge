@@ -23,9 +23,11 @@ pub use options::{
 };
 
 use crate::{
-    ArtifactProjectInfo, ConfigForgeError, Result,
+    ArtifactProjectInfo, ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity,
+    Result,
     artifact::{ArtifactSink, ArtifactWriter},
     data::{DataLoader, RawSourceData, SourceReadPlan},
+    diagnostic::code::{CF_BUILD_INPUT_REQUIRED, CF_BUILD_INVALID_CONFIG},
     generator::{
         GeneratorCommonInput, GeneratorRegistry, GeneratorRequirements, GeneratorTaskInput,
         PreparedGeneratorInputs,
@@ -134,10 +136,16 @@ fn add_cli_validation_report_task(
         .iter()
         .any(|task| task.name == "cli-validation-report")
     {
-        return Err(ConfigForgeError::Validation(format!(
-            "target `{}` already declares export task `cli-validation-report`",
-            target.name
-        )));
+        return Err(build_config_error(
+            &target.name,
+            format!(
+                "target `{}` already declares export task `cli-validation-report`",
+                target.name
+            ),
+            "build.validation_report.task",
+            "cli-validation-report",
+            "no existing export task named `cli-validation-report`",
+        ));
     }
     let output_dir = report_config
         .output
@@ -150,10 +158,16 @@ fn add_cli_validation_report_task(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "validation report output `{}` must include a valid file name",
-                report_config.output.display()
-            ))
+            build_config_error(
+                &target.name,
+                format!(
+                    "validation report output `{}` must include a valid file name",
+                    report_config.output.display()
+                ),
+                "build.validation_report.output",
+                report_config.output.display().to_string(),
+                "path with a valid file name",
+            )
         })?
         .to_owned();
     let mut options = BTreeMap::from([
@@ -451,12 +465,7 @@ fn source_reader_for_target<'a>(
     target_tags: &TargetTags,
     pool: &'a ThreadPool,
 ) -> Result<Box<dyn FnOnce() -> Result<RawSourceData> + Send + 'a>> {
-    let data_root = data_root.ok_or_else(|| {
-        ConfigForgeError::Validation(
-            "`project.input` must be set when target declares Data-dependent export tasks"
-                .to_owned(),
-        )
-    })?;
+    let data_root = data_root.ok_or_else(|| input_required_error(target_tags))?;
     let source_read_plan = SourceReadPlan::from_tables(
         raw_meta
             .tables
@@ -468,6 +477,47 @@ fn source_reader_for_target<'a>(
     Ok(Box::new(move || {
         DataLoader::new(&data_root).read_sources_with_pool(&source_read_plan, pool)
     }))
+}
+
+fn build_config_error(
+    target_name: &str,
+    message: String,
+    source: &'static str,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_BUILD_INVALID_CONFIG,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source(source)
+        .with_domain("build")
+        .with_target(target_name)
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint("Check target export tasks and build validation report options."),
+    )
+}
+
+fn input_required_error(target_tags: &TargetTags) -> ConfigForgeError {
+    let tags = target_tags.iter().collect::<Vec<_>>().join(",");
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_BUILD_INPUT_REQUIRED,
+            DiagnosticSeverity::Error,
+            "`project.input` must be set when target declares Data-dependent export tasks",
+            DiagnosticLocation::default(),
+        )
+        .with_source("project.input")
+        .with_domain("build")
+        .with_current_value("<unset>")
+        .with_expected("project.input path for Data-dependent export tasks")
+        .with_hint("Set [project].input in ConfigForge.toml or remove Data-dependent export tasks.")
+        .with_target(tags),
+    )
 }
 
 fn build_execution_view_detail(target: &NormalizedTargetConfig, plan: &TargetBuildPlan) -> String {

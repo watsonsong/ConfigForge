@@ -10,7 +10,9 @@ use std::{
 use serde::Deserialize;
 
 use crate::{
-    ArtifactProjectInfo, ConfigForgeError, Result,
+    ArtifactProjectInfo, ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity,
+    Result,
+    diagnostic::code::{CF_BUILD_TARGET_NOT_FOUND, CF_PROJECT_INVALID_CONFIG},
     meta::{AssetKindMeta, EnumMeta, MetaModel, StructMeta, TableMeta},
 };
 
@@ -109,9 +111,7 @@ impl ProjectConfig {
         self.targets
             .iter()
             .find(|target| target.name == target_name)
-            .ok_or_else(|| {
-                ConfigForgeError::Validation(format!("target `{target_name}` not found"))
-            })
+            .ok_or_else(|| target_not_found_error(target_name))
     }
 
     /// Extracts the project-embedded Meta declarations as an unvalidated raw model.
@@ -277,16 +277,23 @@ pub(crate) fn validate_asset_search_paths(search_paths: &[AssetSearchPathConfig]
     let mut seen = BTreeSet::new();
     for search_path in search_paths {
         if !seen.insert(search_path.name.as_str()) {
-            return Err(ConfigForgeError::Validation(format!(
-                "duplicate asset search path `{}`",
-                search_path.name
-            )));
+            return Err(project_config_error(
+                format!("duplicate asset search path `{}`", search_path.name),
+                "project.assets",
+                search_path.name.clone(),
+                "unique assets.search_paths.name",
+            ));
         }
         if search_path.kind != "filesystem" {
-            return Err(ConfigForgeError::Validation(format!(
-                "unsupported asset search path kind `{}` for `{}`; only `filesystem` is supported",
-                search_path.kind, search_path.name
-            )));
+            return Err(project_config_error(
+                format!(
+                    "unsupported asset search path kind `{}` for `{}`; only `filesystem` is supported",
+                    search_path.kind, search_path.name
+                ),
+                "project.assets",
+                search_path.kind.clone(),
+                "filesystem",
+            ));
         }
     }
 
@@ -303,10 +310,15 @@ pub(crate) fn validate_asset_kind_search_path_refs(config: &ProjectConfig) -> Re
     for asset_kind in &config.asset_kinds {
         for search_path in &asset_kind.search_paths {
             if !search_path_names.contains(search_path.as_str()) {
-                return Err(ConfigForgeError::Validation(format!(
-                    "unknown asset search path `{search_path}` referenced by asset kind `{}`",
-                    asset_kind.name
-                )));
+                return Err(project_config_error(
+                    format!(
+                        "unknown asset search path `{search_path}` referenced by asset kind `{}`",
+                        asset_kind.name
+                    ),
+                    "project.asset_kinds",
+                    search_path.clone(),
+                    "declared assets.search_paths.name",
+                ));
             }
         }
     }
@@ -318,10 +330,12 @@ pub(crate) fn validate_unique_target_names(targets: &[TargetConfig]) -> Result<(
     let mut seen = BTreeSet::new();
     for target in targets {
         if !seen.insert(target.name.as_str()) {
-            return Err(ConfigForgeError::Validation(format!(
-                "duplicate target `{}`",
-                target.name
-            )));
+            return Err(project_config_error(
+                format!("duplicate target `{}`", target.name),
+                "project.targets",
+                target.name.clone(),
+                "unique targets.name",
+            ));
         }
     }
 
@@ -338,6 +352,46 @@ impl From<&ProjectConfigMeta> for ArtifactProjectInfo {
     }
 }
 
+fn target_not_found_error(target_name: &str) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_BUILD_TARGET_NOT_FOUND,
+            DiagnosticSeverity::Error,
+            format!("target `{target_name}` not found"),
+            DiagnosticLocation::default(),
+        )
+        .with_source("project.target")
+        .with_domain("build")
+        .with_target(target_name)
+        .with_current_value(target_name)
+        .with_expected("declared target name")
+        .with_hint("Check the CLI --target value and [[targets]].name in ConfigForge.toml."),
+    )
+}
+
+fn project_config_error(
+    message: String,
+    source: &'static str,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_PROJECT_INVALID_CONFIG,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source(source)
+        .with_domain("project")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint(
+            "Check ConfigForge.toml project, assets, asset_kinds, and targets declarations.",
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -346,6 +400,14 @@ mod tests {
     };
 
     use super::*;
+
+    fn expect_single_diagnostic(error: ConfigForgeError) -> Diagnostic {
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected structured diagnostic report");
+        };
+        assert_eq!(report.diagnostics.len(), 1);
+        report.diagnostics.into_iter().next().unwrap()
+    }
 
     #[test]
     fn lexical_normalize_path_collapses_current_and_parent_components() {
@@ -408,9 +470,13 @@ mod tests {
         ])
         .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate target `client`"))
-        );
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_PROJECT_INVALID_CONFIG);
+        assert!(diagnostic.message.contains("duplicate target `client`"));
+        assert_eq!(diagnostic.source.as_deref(), Some("project.targets"));
+        assert_eq!(diagnostic.domain.as_deref(), Some("project"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("client"));
+        assert_eq!(diagnostic.expected.as_deref(), Some("unique targets.name"));
     }
 
     #[test]
@@ -494,8 +560,19 @@ mod tests {
 
         let error = ProjectConfig::from_path(&project_path).unwrap_err();
 
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_PROJECT_INVALID_CONFIG);
         assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate asset search path `game`"))
+            diagnostic
+                .message
+                .contains("duplicate asset search path `game`")
+        );
+        assert_eq!(diagnostic.source.as_deref(), Some("project.assets"));
+        assert_eq!(diagnostic.domain.as_deref(), Some("project"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("game"));
+        assert_eq!(
+            diagnostic.expected.as_deref(),
+            Some("unique assets.search_paths.name")
         );
     }
 
@@ -516,9 +593,17 @@ mod tests {
 
         let error = ProjectConfig::from_path(&project_path).unwrap_err();
 
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_PROJECT_INVALID_CONFIG);
         assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("unsupported asset search path kind `unreal_registry`"))
+            diagnostic
+                .message
+                .contains("unsupported asset search path kind `unreal_registry`")
         );
+        assert_eq!(diagnostic.source.as_deref(), Some("project.assets"));
+        assert_eq!(diagnostic.domain.as_deref(), Some("project"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("unreal_registry"));
+        assert_eq!(diagnostic.expected.as_deref(), Some("filesystem"));
     }
 
     #[test]
@@ -537,8 +622,19 @@ mod tests {
 
         let error = ProjectConfig::from_path(&project_path).unwrap_err();
 
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_PROJECT_INVALID_CONFIG);
         assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("unknown asset search path `missing` referenced by asset kind `ui_icon`"))
+            diagnostic
+                .message
+                .contains("unknown asset search path `missing` referenced by asset kind `ui_icon`")
+        );
+        assert_eq!(diagnostic.source.as_deref(), Some("project.asset_kinds"));
+        assert_eq!(diagnostic.domain.as_deref(), Some("project"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("missing"));
+        assert_eq!(
+            diagnostic.expected.as_deref(),
+            Some("declared assets.search_paths.name")
         );
     }
 

@@ -24,8 +24,12 @@ pub const CF_DATA_INVALID_ASSET_REF: &str = "CF_DATA_INVALID_ASSET_REF";
 pub const CF_DATA_DUPLICATE_KEY: &str = "CF_DATA_DUPLICATE_KEY";
 
 pub const CF_BUILD_TARGET_NOT_FOUND: &str = "CF_BUILD_TARGET_NOT_FOUND";
+pub const CF_BUILD_INVALID_CONFIG: &str = "CF_BUILD_INVALID_CONFIG";
+pub const CF_BUILD_INVALID_OPTION: &str = "CF_BUILD_INVALID_OPTION";
 pub const CF_BUILD_INPUT_REQUIRED: &str = "CF_BUILD_INPUT_REQUIRED";
 pub const CF_BUILD_EXPORT_TASK_FAILED: &str = "CF_BUILD_EXPORT_TASK_FAILED";
+
+pub const CF_PROJECT_INVALID_CONFIG: &str = "CF_PROJECT_INVALID_CONFIG";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiagnosticCodeMetadata {
@@ -221,6 +225,22 @@ pub const DIAGNOSTIC_CODE_METADATA: &[DiagnosticCodeMetadata] = &[
         "0.1.0",
     ),
     DiagnosticCodeMetadata::error(
+        CF_BUILD_INVALID_CONFIG,
+        "build",
+        "构建配置无效",
+        "target export task、validation report 附加任务或 build pipeline 配置不满足构建约束。",
+        Some("检查 target exports、task name、input/data 选项和 validation report 输出路径。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_BUILD_INVALID_OPTION,
+        "build",
+        "构建执行选项无效",
+        "CLI 或构建调用传入的执行资源选项超出允许范围。",
+        Some("检查 --jobs、--io-concurrency、--network-concurrency 或 --serial 参数。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
         CF_BUILD_INPUT_REQUIRED,
         "build",
         "构建输入缺失",
@@ -234,6 +254,14 @@ pub const DIAGNOSTIC_CODE_METADATA: &[DiagnosticCodeMetadata] = &[
         "导出任务失败",
         "某个 export task 执行失败。",
         Some("查看 source/target 与 task name，定位失败的导出任务。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_PROJECT_INVALID_CONFIG,
+        "project",
+        "项目配置无效",
+        "Project Config 中存在重复声明、未知引用或当前不支持的配置值。",
+        Some("检查 ConfigForge.toml 中 targets、assets.search_paths 和 asset_kinds 等声明。"),
         "0.1.0",
     ),
     DiagnosticCodeMetadata::legacy_error(
@@ -430,7 +458,14 @@ mod tests {
 
     use super::*;
 
-    const VALID_DOMAINS: &[&str] = &["artifact", "build", "data", "generator", "validation"];
+    const VALID_DOMAINS: &[&str] = &[
+        "artifact",
+        "build",
+        "data",
+        "generator",
+        "project",
+        "validation",
+    ];
 
     #[test]
     fn diagnostic_code_catalog_has_unique_codes_and_required_metadata() {

@@ -6,8 +6,9 @@ use std::{error::Error, fmt, num::NonZeroUsize, path::Path};
 use serde::Serialize;
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     artifact::{ArtifactWriteMode, ArtifactWriteResult},
+    diagnostic::code::CF_BUILD_INVALID_OPTION,
     validation::ValidationReportExportConfig,
 };
 
@@ -126,27 +127,60 @@ impl ExecutionOptions {
             self.network_concurrency = 1;
         }
         if self.jobs == 0 {
-            return Err(ConfigForgeError::Validation(
+            return Err(build_option_error(
                 "--jobs must be greater than 0".to_owned(),
+                "--jobs",
+                self.jobs.to_string(),
+                "integer in 1..=128",
             ));
         }
         if self.jobs > MAX_JOBS {
-            return Err(ConfigForgeError::Validation(format!(
-                "--jobs must be no greater than {MAX_JOBS}"
-            )));
+            return Err(build_option_error(
+                format!("--jobs must be no greater than {MAX_JOBS}"),
+                "--jobs",
+                self.jobs.to_string(),
+                format!("integer in 1..={MAX_JOBS}"),
+            ));
         }
         if self.io_concurrency == 0 {
-            return Err(ConfigForgeError::Validation(
+            return Err(build_option_error(
                 "--io-concurrency must be greater than 0".to_owned(),
+                "--io-concurrency",
+                self.io_concurrency.to_string(),
+                "positive integer",
             ));
         }
         if self.network_concurrency == 0 {
-            return Err(ConfigForgeError::Validation(
+            return Err(build_option_error(
                 "--network-concurrency must be greater than 0".to_owned(),
+                "--network-concurrency",
+                self.network_concurrency.to_string(),
+                "positive integer",
             ));
         }
         Ok(self)
     }
+}
+
+fn build_option_error(
+    message: String,
+    source: &'static str,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_BUILD_INVALID_OPTION,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source(source)
+        .with_domain("build")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint("Check CLI execution resource flags before starting the build."),
+    )
 }
 
 impl Default for ExecutionOptions {
@@ -169,6 +203,14 @@ impl Default for ExecutionOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn expect_single_diagnostic(error: ConfigForgeError) -> Diagnostic {
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected structured diagnostic report");
+        };
+        assert_eq!(report.diagnostics.len(), 1);
+        report.diagnostics.into_iter().next().unwrap()
+    }
 
     #[test]
     fn execution_options_apply_defaults_overrides_and_serial() {
@@ -201,10 +243,17 @@ mod tests {
             ExecutionOptions::from_cli(None, None, Some(0), false),
         ];
 
-        for error in cases.into_iter().map(Result::unwrap_err) {
-            assert!(
-                matches!(error, ConfigForgeError::Validation(message) if message.contains("greater than 0"))
-            );
+        for (error, source) in cases.into_iter().map(Result::unwrap_err).zip([
+            "--jobs",
+            "--io-concurrency",
+            "--network-concurrency",
+        ]) {
+            let diagnostic = expect_single_diagnostic(error);
+            assert_eq!(diagnostic.code, CF_BUILD_INVALID_OPTION);
+            assert!(diagnostic.message.contains("greater than 0"));
+            assert_eq!(diagnostic.source.as_deref(), Some(source));
+            assert_eq!(diagnostic.domain.as_deref(), Some("build"));
+            assert_eq!(diagnostic.current_value.as_deref(), Some("0"));
         }
     }
 
@@ -212,8 +261,22 @@ mod tests {
     fn execution_options_reject_excessive_jobs() {
         let error = ExecutionOptions::from_cli(Some(MAX_JOBS + 1), None, None, false).unwrap_err();
 
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_BUILD_INVALID_OPTION);
         assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("--jobs must be no greater than"))
+            diagnostic
+                .message
+                .contains("--jobs must be no greater than")
+        );
+        assert_eq!(diagnostic.source.as_deref(), Some("--jobs"));
+        assert_eq!(diagnostic.domain.as_deref(), Some("build"));
+        assert_eq!(
+            diagnostic.current_value.as_deref(),
+            Some((MAX_JOBS + 1).to_string().as_str())
+        );
+        assert_eq!(
+            diagnostic.expected.as_deref(),
+            Some(format!("integer in 1..={MAX_JOBS}").as_str())
         );
     }
 }

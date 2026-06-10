@@ -4,7 +4,8 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
+    diagnostic::code::CF_BUILD_INVALID_CONFIG,
     generator::{GeneratorRegistry, GeneratorRequirements},
     meta::TargetTags,
     project::{TargetConfig, TargetExportConfig},
@@ -69,9 +70,13 @@ fn normalize_export_tasks(
             }
         };
         if !seen.insert(name.clone()) {
-            return Err(ConfigForgeError::Validation(format!(
-                "target `{target_name}` declares duplicate export task `{name}`"
-            )));
+            return Err(build_config_error(
+                target_name,
+                format!("target `{target_name}` declares duplicate export task `{name}`"),
+                "build.target.exports.name",
+                name,
+                "unique export task name within target",
+            ));
         }
         let requirements = registry.requirements(target_name, &export_task.type_id)?;
         validate_export_requirements(target_name, export_task, requirements)?;
@@ -102,9 +107,15 @@ fn validate_export_task_name(target_name: &str, name: &str) -> Result<()> {
     if is_valid {
         Ok(())
     } else {
-        Err(ConfigForgeError::Validation(format!(
-            "target `{target_name}` declares invalid export task name `{name}`; export task names must use ASCII letters, digits, `_` or `-`, and start and end with a letter or digit"
-        )))
+        Err(build_config_error(
+            target_name,
+            format!(
+                "target `{target_name}` declares invalid export task name `{name}`; export task names must use ASCII letters, digits, `_` or `-`, and start and end with a letter or digit"
+            ),
+            "build.target.exports.name",
+            name,
+            "ASCII letters, digits, `_` or `-`, starting and ending with a letter or digit",
+        ))
     }
 }
 
@@ -115,14 +126,20 @@ fn validate_export_requirements(
 ) -> Result<()> {
     validate_no_export_input_option(target_name, export_task)?;
     if !requirements.needs_data && export_task.options.contains_key("data") {
-        return Err(ConfigForgeError::Validation(format!(
-            "target `{target_name}` export task `{}` must not set `data`; `{}` only depends on Meta",
-            export_task
-                .name
-                .as_deref()
-                .unwrap_or(DEFAULT_EXPORT_TASK_NAME),
-            export_task.type_id
-        )));
+        let task_name = export_task
+            .name
+            .as_deref()
+            .unwrap_or(DEFAULT_EXPORT_TASK_NAME);
+        return Err(build_config_error(
+            target_name,
+            format!(
+                "target `{target_name}` export task `{task_name}` must not set `data`; `{}` only depends on Meta",
+                export_task.type_id
+            ),
+            "build.target.exports.data",
+            "data",
+            "omit `data` for Meta-only export tasks",
+        ));
     }
     Ok(())
 }
@@ -132,21 +149,58 @@ fn validate_no_export_input_option(
     export_task: &TargetExportConfig,
 ) -> Result<()> {
     if export_task.options.contains_key("input") {
-        return Err(ConfigForgeError::Validation(format!(
-            "target `{target_name}` export task `{}` must not set `input`; source data root is configured once at `project.input`",
-            export_task
-                .name
-                .as_deref()
-                .unwrap_or(DEFAULT_EXPORT_TASK_NAME)
-        )));
+        let task_name = export_task
+            .name
+            .as_deref()
+            .unwrap_or(DEFAULT_EXPORT_TASK_NAME);
+        return Err(build_config_error(
+            target_name,
+            format!(
+                "target `{target_name}` export task `{task_name}` must not set `input`; source data root is configured once at `project.input`"
+            ),
+            "build.target.exports.input",
+            "input",
+            "configure source data root once at project.input",
+        ));
     }
     Ok(())
+}
+
+fn build_config_error(
+    target_name: &str,
+    message: String,
+    source: &'static str,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_BUILD_INVALID_CONFIG,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation::default(),
+        )
+        .with_source(source)
+        .with_domain("build")
+        .with_target(target_name)
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint("Check target export task declarations in ConfigForge.toml."),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::diagnostic::code::CF_GENERATOR_UNKNOWN_TYPE;
+
+    fn expect_single_diagnostic(error: ConfigForgeError) -> Diagnostic {
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected structured diagnostic report");
+        };
+        assert_eq!(report.diagnostics.len(), 1);
+        report.diagnostics.into_iter().next().unwrap()
+    }
 
     fn export_task(type_id: &str) -> TargetExportConfig {
         TargetExportConfig {
@@ -189,9 +243,16 @@ mod tests {
 
         let error = target.normalize().unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("must not set `input`"))
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_BUILD_INVALID_CONFIG);
+        assert!(diagnostic.message.contains("must not set `input`"));
+        assert_eq!(
+            diagnostic.source.as_deref(),
+            Some("build.target.exports.input")
         );
+        assert_eq!(diagnostic.domain.as_deref(), Some("build"));
+        assert_eq!(diagnostic.target.as_deref(), Some("client"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("input"));
     }
 
     #[test]
@@ -230,9 +291,16 @@ mod tests {
 
         let error = target.normalize().unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("must not set `input`"))
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_BUILD_INVALID_CONFIG);
+        assert!(diagnostic.message.contains("must not set `input`"));
+        assert_eq!(
+            diagnostic.source.as_deref(),
+            Some("build.target.exports.input")
         );
+        assert_eq!(diagnostic.domain.as_deref(), Some("build"));
+        assert_eq!(diagnostic.target.as_deref(), Some("client"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("input"));
     }
 
     #[test]
@@ -246,9 +314,16 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("invalid export task name"))
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_BUILD_INVALID_CONFIG);
+        assert!(diagnostic.message.contains("invalid export task name"));
+        assert_eq!(
+            diagnostic.source.as_deref(),
+            Some("build.target.exports.name")
         );
+        assert_eq!(diagnostic.domain.as_deref(), Some("build"));
+        assert_eq!(diagnostic.target.as_deref(), Some("client"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("bad name"));
     }
 
     #[test]
@@ -270,9 +345,16 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("duplicate export task `json`"))
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_BUILD_INVALID_CONFIG);
+        assert!(diagnostic.message.contains("duplicate export task `json`"));
+        assert_eq!(
+            diagnostic.source.as_deref(),
+            Some("build.target.exports.name")
         );
+        assert_eq!(diagnostic.domain.as_deref(), Some("build"));
+        assert_eq!(diagnostic.target.as_deref(), Some("client"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("json"));
     }
 
     #[test]
