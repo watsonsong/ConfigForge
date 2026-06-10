@@ -6,7 +6,7 @@
 
 **暂不删除本 TODO，也不把 Diagnostics 标为 Stable。**
 
-原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **343 处 / 70 文件**。这些不全是用户可见错误，但仍覆盖 asset resolver、data artifact、code artifact、generator 私有 option、builtin validators 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
+原因：当前源文件扫描中仍有 `ConfigForgeError::Validation(` **304 处 / 69 文件**。这些不全是用户可见错误，但仍覆盖 data artifact、code artifact、generator 私有 option、builtin validators 等路径。只要高频 CLI / build 失败仍可能只返回裸字符串，机器消费方就不能完全依赖 stable code / source trace / current / expected。
 
 已经完成且不再作为 TODO 追踪的内容：
 
@@ -24,6 +24,7 @@
 - Project / Build config 入口层错误已迁移：target 不存在、重复 target / export task name、非法 task name、非法 execution resource flag、Data-dependent target 缺少 `project.input`、CLI validation report 附加任务冲突 / 输出文件名错误等已具备 stable code 与 JSON context。
 - Data loading / source reading 高频错误已迁移：CSV read/schema/header、source path escape、source plan/provider、override primary key 等已具备 stable code 与 source/table/row context。
 - Data resolver / typed value 高频错误已迁移：enum、scalar/list/struct type、struct JSON cell、expanded struct/list、recursive/nested path、list index 连续性等已具备 stable code 与 table/row/field/current/expected context。
+- Asset resolver 高频错误已迁移：unknown kind/search path、unsupported input mode、path escape、missing file/sidecar、mount/candidate/object name/name prefix/suffix/path prefix/pattern/case-sensitive path 等已具备 stable code 与 current/expected/hint context。
 
 以下内容已从本 TODO 移除，不再作为 Diagnostics Stable 的阻塞项：
 
@@ -70,13 +71,13 @@ Data loading 仍有大量用户高频错误使用裸字符串：CSV ragged row�
 - [x] 迁移 typed value 的用户可见错误，填充当前值和期望类型。
 - [x] 补充 report / producer 字段断言，避免新路径只落 message。
 
-### P1：Asset resolver 细粒度结构化
+### P1：Asset resolver 细粒度结构化（已完成）
 
-Validation 层 asset reference 已输出 `CF_DATA_INVALID_ASSET_REF`，但 `src/asset.rs` 内部仍有大量规则失败以裸字符串表达。
+Validation 层 asset reference 与 `src/asset.rs` resolver 规则失败已统一输出 `CF_DATA_INVALID_ASSET_REF`，并保留 rule context。
 
-- [ ] 将 unknown asset kind、unsupported input mode、invalid relative path / escape、mount mismatch、missing file、missing sidecar、prefix/suffix/pattern/object name/case-sensitive path 等 resolver 错误迁移为结构化 diagnostic。
-- [ ] 根据需要拆分 asset diagnostic code；若暂不拆分，至少确保统一 `CF_DATA_INVALID_ASSET_REF` 能保留 `current_value`、`expected`、`hint`。
-- [ ] 增加 resolver unit tests 与 CLI JSON 测试，断言 code / current / expected，而不是只匹配 message。
+- [x] 将 unknown asset kind、unsupported input mode、invalid relative path / escape、mount mismatch、missing file、missing sidecar、prefix/suffix/pattern/object name/case-sensitive path 等 resolver 错误迁移为结构化 diagnostic。
+- [x] 统一使用 `CF_DATA_INVALID_ASSET_REF` 保留 `current_value`、`expected`、`hint`。
+- [x] 更新 resolver unit tests，断言 code / source / current，而不是只匹配 message。
 
 ### P1：Builtin validators 从 legacy code 渐进迁移
 

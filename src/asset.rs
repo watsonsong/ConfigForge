@@ -7,7 +7,8 @@ use std::{
 };
 
 use crate::{
-    ConfigForgeError, Result,
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
+    diagnostic::code::CF_DATA_INVALID_ASSET_REF,
     meta::{
         AssetExtensionPolicy, AssetInputKind, AssetKindMeta, AssetPathStyle, AssetRegexRuleMeta,
         AssetRegexTarget, LinkedMetaModel, TargetTags, ValidationSeverity,
@@ -116,7 +117,12 @@ impl AssetResolver {
         target_tags: &TargetTags,
     ) -> Result<ResolvedAssetRef> {
         let kind = self.effective_kind(asset_kind).ok_or_else(|| {
-            ConfigForgeError::Validation(format!("unknown asset kind `{asset_kind}`"))
+            asset_error(
+                format!("unknown asset kind `{asset_kind}`"),
+                asset_kind,
+                "declared asset kind",
+                "Declare the asset kind in Meta or update the field asset_kind reference.",
+            )
         })?;
         let resolved = self.resolve_with_kind(kind, raw_input)?;
         self.validate_resolved(kind, &resolved, target_tags)?;
@@ -129,10 +135,12 @@ impl AssetResolver {
         raw_input: &str,
     ) -> Result<ResolvedAssetRef> {
         if !matches!(kind.input, AssetInputKind::Path | AssetInputKind::String) {
-            return Err(ConfigForgeError::Validation(format!(
-                "asset kind `{}` uses unsupported input mode",
-                kind.name
-            )));
+            return Err(asset_error(
+                format!("asset kind `{}` uses unsupported input mode", kind.name),
+                format!("{:?}", kind.input),
+                "path or string input mode",
+                "Use path/string asset input for resolver-backed asset references.",
+            ));
         }
         let stripped_input = strip_asset_wrappers(raw_input.trim(), &kind.strip_wrappers);
         match kind.path_style {
@@ -218,10 +226,16 @@ impl AssetResolver {
             })
         } else {
             if !kind.allow_auto_complete {
-                return Err(ConfigForgeError::Validation(format!(
-                    "asset kind `{}` requires a mounted object ref, but `{stripped_input}` is not one",
-                    kind.name
-                )));
+                return Err(asset_kind_error(
+                    kind,
+                    format!(
+                        "asset kind `{}` requires a mounted object ref, but `{stripped_input}` is not one",
+                        kind.name
+                    ),
+                    stripped_input,
+                    "mounted object ref",
+                    "Use the configured mounted object reference format or enable auto-completion.",
+                ));
             }
             let relative_input = asset_relative_path(stripped_input)?;
             let candidates = self.generate_candidates(kind, &relative_input)?;
@@ -231,10 +245,16 @@ impl AssetResolver {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .ok_or_else(|| {
-                    ConfigForgeError::Validation(format!(
-                        "asset kind `{}` cannot derive object name for `{stripped_input}`",
-                        kind.name
-                    ))
+                    asset_kind_error(
+                        kind,
+                        format!(
+                            "asset kind `{}` cannot derive object name for `{stripped_input}`",
+                            kind.name
+                        ),
+                        stripped_input,
+                        "path with file stem",
+                        "Use an asset path that contains a file name stem.",
+                    )
                 })?;
             let object_name = render_object_name(kind.object_name.as_deref(), stem);
             let search_path = self.search_path(&candidate.search_path_id)?;
@@ -271,10 +291,16 @@ impl AssetResolver {
             }
         }
 
-        Err(ConfigForgeError::Validation(format!(
-            "asset kind `{}` input `{input}` does not match any configured mount",
-            kind.name
-        )))
+        Err(asset_kind_error(
+            kind,
+            format!(
+                "asset kind `{}` input `{input}` does not match any configured mount",
+                kind.name
+            ),
+            input,
+            "input under one configured mount",
+            "Check the asset mount prefix and search path configuration.",
+        ))
     }
 
     fn generate_candidates(
@@ -342,7 +368,12 @@ impl AssetResolver {
 
     fn search_path(&self, name: &str) -> Result<&AssetSearchPath> {
         self.search_paths.get(name).ok_or_else(|| {
-            ConfigForgeError::Validation(format!("asset search path `{name}` not found"))
+            asset_error(
+                format!("asset search path `{name}` not found"),
+                name,
+                "declared asset search path",
+                "Declare the search path in project assets.search_paths or remove the reference.",
+            )
         })
     }
 
@@ -357,23 +388,37 @@ impl AssetResolver {
             .or(self.require_existing)
             .unwrap_or(false);
         if require_existing && !resolved.resolved_filesystem_path.is_file() {
-            return Err(ConfigForgeError::Validation(format!(
-                "asset kind `{}` resolved `{}` to missing file `{}`",
-                kind.name,
-                resolved.raw_input,
-                resolved.resolved_filesystem_path.display()
-            )));
+            return Err(resolved_asset_error(
+                kind,
+                resolved,
+                format!(
+                    "asset kind `{}` resolved `{}` to missing file `{}`",
+                    kind.name,
+                    resolved.raw_input,
+                    resolved.resolved_filesystem_path.display()
+                ),
+                resolved.raw_input.as_str(),
+                "existing asset file",
+                "Create the asset file or disable require_existing for this asset kind/search.",
+            ));
         }
 
         for sidecar_template in &kind.require_sidecars {
             let sidecar_path = sidecar_path_from_template(sidecar_template, resolved);
             if !sidecar_path.is_file() {
-                return Err(ConfigForgeError::Validation(format!(
-                    "asset kind `{}` requires missing sidecar `{}` for `{}`",
-                    kind.name,
-                    sidecar_path.display(),
-                    resolved.raw_input
-                )));
+                return Err(resolved_asset_error(
+                    kind,
+                    resolved,
+                    format!(
+                        "asset kind `{}` requires missing sidecar `{}` for `{}`",
+                        kind.name,
+                        sidecar_path.display(),
+                        resolved.raw_input
+                    ),
+                    resolved.raw_input.as_str(),
+                    "existing sidecar file",
+                    "Create the required sidecar file or update require_sidecars.",
+                ));
             }
         }
 
@@ -384,10 +429,17 @@ impl AssetResolver {
                 .iter()
                 .any(|prefix| name.starts_with(prefix))
         {
-            return Err(ConfigForgeError::Validation(format!(
-                "asset kind `{}` name `{name}` does not match required prefixes {:?}",
-                kind.name, kind.name_prefixes
-            )));
+            return Err(resolved_asset_error(
+                kind,
+                resolved,
+                format!(
+                    "asset kind `{}` name `{name}` does not match required prefixes {:?}",
+                    kind.name, kind.name_prefixes
+                ),
+                name.clone(),
+                format!("prefix in {:?}", kind.name_prefixes),
+                "Rename the asset to use an allowed prefix or update name_prefixes.",
+            ));
         }
         if !kind.name_suffixes.is_empty()
             && !kind
@@ -395,10 +447,17 @@ impl AssetResolver {
                 .iter()
                 .any(|suffix| name.ends_with(suffix))
         {
-            return Err(ConfigForgeError::Validation(format!(
-                "asset kind `{}` name `{name}` does not match required suffixes {:?}",
-                kind.name, kind.name_suffixes
-            )));
+            return Err(resolved_asset_error(
+                kind,
+                resolved,
+                format!(
+                    "asset kind `{}` name `{name}` does not match required suffixes {:?}",
+                    kind.name, kind.name_suffixes
+                ),
+                name.clone(),
+                format!("suffix in {:?}", kind.name_suffixes),
+                "Rename the asset to use an allowed suffix or update name_suffixes.",
+            ));
         }
 
         if let Some(template) = kind.object_name.as_deref() {
@@ -406,10 +465,17 @@ impl AssetResolver {
                 let stem = asset_stem(resolved);
                 let expected = render_object_name(Some(template), &stem);
                 if object_name != expected {
-                    return Err(ConfigForgeError::Validation(format!(
-                        "asset kind `{}` object name `{object_name}` must be `{expected}`",
-                        kind.name
-                    )));
+                    return Err(resolved_asset_error(
+                        kind,
+                        resolved,
+                        format!(
+                            "asset kind `{}` object name `{object_name}` must be `{expected}`",
+                            kind.name
+                        ),
+                        object_name,
+                        expected,
+                        "Use the configured object_name template output.",
+                    ));
                 }
             }
         }
@@ -420,10 +486,17 @@ impl AssetResolver {
                 .iter()
                 .any(|prefix| resolved.logical_ref.starts_with(prefix))
         {
-            return Err(ConfigForgeError::Validation(format!(
-                "asset kind `{}` logical ref `{}` is outside allowed prefixes {:?}",
-                kind.name, resolved.logical_ref, kind.allow_path_prefixes
-            )));
+            return Err(resolved_asset_error(
+                kind,
+                resolved,
+                format!(
+                    "asset kind `{}` logical ref `{}` is outside allowed prefixes {:?}",
+                    kind.name, resolved.logical_ref, kind.allow_path_prefixes
+                ),
+                resolved.logical_ref.as_str(),
+                format!("prefix in {:?}", kind.allow_path_prefixes),
+                "Move the asset under an allowed logical prefix or update allow_path_prefixes.",
+            ));
         }
         let deny_rules_enabled = kind.deny_when_tags.is_empty()
             || kind
@@ -436,10 +509,17 @@ impl AssetResolver {
                 .iter()
                 .find(|prefix| resolved.logical_ref.starts_with(prefix.as_str()))
             {
-                return Err(ConfigForgeError::Validation(format!(
-                    "asset kind `{}` logical ref `{}` is denied by prefix `{prefix}`",
-                    kind.name, resolved.logical_ref
-                )));
+                return Err(resolved_asset_error(
+                    kind,
+                    resolved,
+                    format!(
+                        "asset kind `{}` logical ref `{}` is denied by prefix `{prefix}`",
+                        kind.name, resolved.logical_ref
+                    ),
+                    resolved.logical_ref.as_str(),
+                    format!("not under denied prefix `{prefix}`"),
+                    "Move the asset outside the denied prefix or adjust deny_path_prefixes.",
+                ));
             }
             validate_simple_patterns(kind, resolved)?;
         } else {
@@ -475,20 +555,30 @@ fn effective_asset_kind(
     let mut seen = BTreeSet::new();
     loop {
         if !seen.insert(current.name.as_str()) {
-            return Err(ConfigForgeError::Validation(format!(
-                "asset kind extends cycle detected while resolving `{}`",
-                asset_kind.name
-            )));
+            return Err(asset_error(
+                format!(
+                    "asset kind extends cycle detected while resolving `{}`",
+                    asset_kind.name
+                ),
+                asset_kind.name.as_str(),
+                "acyclic asset kind extends chain",
+                "Remove the cycle from asset kind extends declarations.",
+            ));
         }
         chain.push(current);
         let Some(parent) = current.extends.as_deref() else {
             break;
         };
         current = meta.asset_kind(parent).ok_or_else(|| {
-            ConfigForgeError::Validation(format!(
-                "asset kind `{}` extends unknown asset kind `{parent}`",
-                current.name
-            ))
+            asset_error(
+                format!(
+                    "asset kind `{}` extends unknown asset kind `{parent}`",
+                    current.name
+                ),
+                parent,
+                "declared parent asset kind",
+                "Declare the parent asset kind or remove the extends reference.",
+            )
         })?;
     }
 
@@ -610,9 +700,12 @@ fn strip_asset_wrappers<'a>(input: &'a str, wrappers: &[String]) -> String {
 fn asset_relative_path(path: &str) -> Result<PathBuf> {
     let normalized = path.replace('\\', "/");
     if Path::new(&normalized).is_absolute() || normalized.starts_with('/') {
-        return Err(ConfigForgeError::Validation(format!(
-            "asset path `{path}` must be relative"
-        )));
+        return Err(asset_error(
+            format!("asset path `{path}` must be relative"),
+            path,
+            "relative asset path",
+            "Use an asset path relative to its configured search path.",
+        ));
     }
     let trimmed = normalized.trim_matches('/');
     let relative = PathBuf::from(trimmed);
@@ -622,25 +715,35 @@ fn asset_relative_path(path: &str) -> Result<PathBuf> {
 
 fn ensure_relative_asset_path(path: &Path) -> Result<()> {
     if path.as_os_str().is_empty() {
-        return Err(ConfigForgeError::Validation(
+        return Err(asset_error(
             "asset path must be non-empty".to_owned(),
+            "empty path",
+            "non-empty relative asset path",
+            "Provide a non-empty asset reference value.",
         ));
     }
     if path.is_absolute() {
-        return Err(ConfigForgeError::Validation(format!(
-            "asset path `{}` must be relative",
-            path.display()
-        )));
+        return Err(asset_error(
+            format!("asset path `{}` must be relative", path.display()),
+            path.display().to_string(),
+            "relative asset path",
+            "Use an asset path relative to its configured search path.",
+        ));
     }
     for component in path.components() {
         if matches!(
             component,
             Component::ParentDir | Component::Prefix(_) | Component::RootDir
         ) {
-            return Err(ConfigForgeError::Validation(format!(
-                "asset path `{}` must not escape its search path",
-                path.display()
-            )));
+            return Err(asset_error(
+                format!(
+                    "asset path `{}` must not escape its search path",
+                    path.display()
+                ),
+                path.display().to_string(),
+                "relative path without parent/root components",
+                "Remove parent directory or root components from the asset path.",
+            ));
         }
     }
     Ok(())
@@ -665,10 +768,15 @@ fn candidate_relative_paths(
         }
         AssetExtensionPolicy::Forbidden => {
             if has_extension {
-                return Err(ConfigForgeError::Validation(format!(
-                    "asset path `{}` must not include an extension",
-                    relative_input.display()
-                )));
+                return Err(asset_error(
+                    format!(
+                        "asset path `{}` must not include an extension",
+                        relative_input.display()
+                    ),
+                    relative_input.display().to_string(),
+                    "asset path without extension",
+                    "Remove the extension from the asset reference for this asset kind.",
+                ));
             }
             if kind.extensions.is_empty() {
                 Ok(vec![relative_input.to_path_buf()])
@@ -722,14 +830,22 @@ fn select_unique_candidate(
         existing
     };
     match candidates.as_slice() {
-        [] => Err(ConfigForgeError::Validation(format!(
-            "asset kind `{kind_name}` produced no candidates for `{input}`"
-        ))),
+        [] => Err(asset_error(
+            format!("asset kind `{kind_name}` produced no candidates for `{input}`"),
+            input,
+            "at least one asset resolution candidate",
+            "Check asset kind search_paths, base_dirs, extensions, and input path.",
+        )),
         [candidate] => Ok(candidate.clone()),
-        _ => Err(ConfigForgeError::Validation(format!(
-            "asset kind `{kind_name}` resolved `{input}` ambiguously to {} candidates",
-            candidates.len()
-        ))),
+        _ => Err(asset_error(
+            format!(
+                "asset kind `{kind_name}` resolved `{input}` ambiguously to {} candidates",
+                candidates.len()
+            ),
+            input,
+            "exactly one asset resolution candidate",
+            "Narrow asset kind search_paths/base_dirs/extensions or provide a more specific path.",
+        )),
     }
 }
 
@@ -770,16 +886,29 @@ fn validate_simple_patterns(kind: &EffectiveAssetKind, resolved: &ResolvedAssetR
     validate_allow_patterns(kind, resolved)?;
     for pattern in &kind.deny_patterns {
         let regex = regex::Regex::new(pattern).map_err(|source| {
-            ConfigForgeError::Validation(format!(
-                "asset kind `{}` deny pattern `{pattern}` is invalid: {source}",
-                kind.name
-            ))
+            asset_kind_error(
+                kind,
+                format!(
+                    "asset kind `{}` deny pattern `{pattern}` is invalid: {source}",
+                    kind.name
+                ),
+                pattern.as_str(),
+                "valid regex pattern",
+                "Fix the deny pattern regex in Meta.",
+            )
         })?;
         if regex.is_match(&resolved.logical_ref) {
-            return Err(ConfigForgeError::Validation(format!(
-                "asset kind `{}` logical ref `{}` is denied by pattern `{pattern}`",
-                kind.name, resolved.logical_ref
-            )));
+            return Err(resolved_asset_error(
+                kind,
+                resolved,
+                format!(
+                    "asset kind `{}` logical ref `{}` is denied by pattern `{pattern}`",
+                    kind.name, resolved.logical_ref
+                ),
+                resolved.logical_ref.as_str(),
+                format!("not matching deny pattern `{pattern}`"),
+                "Move or rename the asset so it does not match the deny pattern.",
+            ));
         }
     }
     Ok(())
@@ -791,19 +920,32 @@ fn validate_allow_patterns(kind: &EffectiveAssetKind, resolved: &ResolvedAssetRe
     }
     for pattern in &kind.allow_patterns {
         let regex = regex::Regex::new(pattern).map_err(|source| {
-            ConfigForgeError::Validation(format!(
-                "asset kind `{}` allow pattern `{pattern}` is invalid: {source}",
-                kind.name
-            ))
+            asset_kind_error(
+                kind,
+                format!(
+                    "asset kind `{}` allow pattern `{pattern}` is invalid: {source}",
+                    kind.name
+                ),
+                pattern.as_str(),
+                "valid regex pattern",
+                "Fix the allow pattern regex in Meta.",
+            )
         })?;
         if regex.is_match(&resolved.logical_ref) {
             return Ok(());
         }
     }
-    Err(ConfigForgeError::Validation(format!(
-        "asset kind `{}` logical ref `{}` does not match any allow pattern",
-        kind.name, resolved.logical_ref
-    )))
+    Err(resolved_asset_error(
+        kind,
+        resolved,
+        format!(
+            "asset kind `{}` logical ref `{}` does not match any allow pattern",
+            kind.name, resolved.logical_ref
+        ),
+        resolved.logical_ref.as_str(),
+        format!("one allow pattern in {:?}", kind.allow_patterns),
+        "Move or rename the asset so it matches an allow pattern.",
+    ))
 }
 
 fn validate_regex_rules(
@@ -822,10 +964,16 @@ fn validate_regex_rules(
             rule.pattern.clone()
         };
         let regex = regex::Regex::new(&pattern).map_err(|source| {
-            ConfigForgeError::Validation(format!(
-                "asset kind `{}` regex rule `{}` pattern is invalid: {source}",
-                kind.name, rule.name
-            ))
+            asset_kind_error(
+                kind,
+                format!(
+                    "asset kind `{}` regex rule `{}` pattern is invalid: {source}",
+                    kind.name, rule.name
+                ),
+                pattern.as_str(),
+                "valid regex pattern",
+                "Fix the regex rule pattern in Meta.",
+            )
         })?;
         let value = regex_target_value(
             rule.target.unwrap_or(AssetRegexTarget::LogicalRef),
@@ -834,13 +982,18 @@ fn validate_regex_rules(
         let matched = regex.is_match(&value);
         let passes = if rule.invert { !matched } else { matched };
         if !passes && rule.severity == ValidationSeverity::Error {
-            return Err(ConfigForgeError::Validation(
+            return Err(resolved_asset_error(
+                kind,
+                resolved,
                 rule.message.clone().unwrap_or_else(|| {
                     format!(
                         "asset kind `{}` regex rule `{}` failed for `{value}`",
                         kind.name, rule.name
                     )
                 }),
+                value,
+                format!("regex rule `{}` passes", rule.name),
+                "Update the asset reference or relax the regex rule.",
             ));
         }
     }
@@ -886,10 +1039,86 @@ fn validate_case_sensitive_path(path: &Path) -> Result<()> {
             return Ok(());
         }
     }
-    Err(ConfigForgeError::Validation(format!(
-        "asset path `{}` does not match filesystem case",
-        path.display()
-    )))
+    Err(asset_error(
+        format!(
+            "asset path `{}` does not match filesystem case",
+            path.display()
+        ),
+        path.display().to_string(),
+        "path casing matching filesystem entry",
+        "Update the asset reference casing to match the filesystem.",
+    ))
+}
+
+fn asset_kind_error(
+    kind: &EffectiveAssetKind,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    asset_diagnostic_error(
+        message,
+        Some(kind.name.as_str()),
+        None,
+        current_value,
+        expected,
+        hint,
+    )
+}
+
+fn resolved_asset_error(
+    kind: &EffectiveAssetKind,
+    resolved: &ResolvedAssetRef,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    asset_diagnostic_error(
+        message,
+        Some(kind.name.as_str()),
+        Some(resolved.logical_ref.as_str()),
+        current_value,
+        expected,
+        hint,
+    )
+}
+
+fn asset_error(
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    asset_diagnostic_error(message, None, None, current_value, expected, hint)
+}
+
+fn asset_diagnostic_error(
+    message: String,
+    _asset_kind: Option<&str>,
+    target: Option<&str>,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    let diagnostic = Diagnostic::new(
+        CF_DATA_INVALID_ASSET_REF,
+        DiagnosticSeverity::Error,
+        message,
+        DiagnosticLocation::default(),
+    )
+    .with_source("asset.resolver")
+    .with_domain("data")
+    .with_current_value(current_value)
+    .with_expected(expected)
+    .with_hint(hint);
+    let diagnostic = if let Some(target) = target {
+        diagnostic.with_target(target)
+    } else {
+        diagnostic
+    };
+    ConfigForgeError::from_diagnostic(diagnostic)
 }
 
 fn split_mounted_object<'a>(
@@ -960,7 +1189,10 @@ fn path_to_asset_string(path: &Path) -> String {
 mod tests {
     use std::fs;
 
-    use crate::{meta::MetaModel, project::AssetsConfig};
+    use crate::{
+        Diagnostic, diagnostic::code::CF_DATA_INVALID_ASSET_REF, meta::MetaModel,
+        project::AssetsConfig,
+    };
 
     use super::*;
 
@@ -985,6 +1217,21 @@ mod tests {
             kind: "filesystem".to_owned(),
             mount: mount.map(str::to_owned),
         }
+    }
+
+    fn expect_single_diagnostic(error: ConfigForgeError) -> Diagnostic {
+        let ConfigForgeError::ValidationReport(report) = error else {
+            panic!("expected structured diagnostic report");
+        };
+        assert_eq!(report.diagnostics.len(), 1);
+        report.diagnostics.into_iter().next().unwrap()
+    }
+
+    fn expect_asset_diagnostic(error: ConfigForgeError) -> Diagnostic {
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_DATA_INVALID_ASSET_REF);
+        assert_eq!(diagnostic.source.as_deref(), Some("asset.resolver"));
+        diagnostic
     }
 
     #[test]
@@ -1197,9 +1444,9 @@ mod tests {
 
         let error = resolver.resolve("ui_widget", "WBP_Item").unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("ambiguously"))
-        );
+        let diagnostic = expect_asset_diagnostic(error);
+        assert!(diagnostic.message.contains("ambiguously"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("WBP_Item"));
     }
 
     #[test]
@@ -1221,14 +1468,17 @@ mod tests {
         );
 
         let absolute_error = resolver.resolve("ui_icon", "/tmp/Icon.png").unwrap_err();
+        let diagnostic = expect_asset_diagnostic(absolute_error);
         assert!(
-            matches!(absolute_error, ConfigForgeError::Validation(message) if message.contains("must be relative") || message.contains("escape"))
+            diagnostic.message.contains("must be relative")
+                || diagnostic.message.contains("escape")
         );
+        assert_eq!(diagnostic.current_value.as_deref(), Some("/tmp/Icon.png"));
 
         let parent_error = resolver.resolve("ui_icon", "../Icon.png").unwrap_err();
-        assert!(
-            matches!(parent_error, ConfigForgeError::Validation(message) if message.contains("must not escape"))
-        );
+        let diagnostic = expect_asset_diagnostic(parent_error);
+        assert!(diagnostic.message.contains("must not escape"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("../Icon.png"));
     }
 
     #[test]
@@ -1253,9 +1503,9 @@ mod tests {
 
         let error = resolver.resolve("ui_icon", "Missing.png").unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("missing file"))
-        );
+        let diagnostic = expect_asset_diagnostic(error);
+        assert!(diagnostic.message.contains("missing file"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("Missing.png"));
     }
 
     #[test]
@@ -1282,9 +1532,9 @@ mod tests {
 
         let error = resolver.resolve("ui_icon", "Icon_Sword.png").unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("missing sidecar"))
-        );
+        let diagnostic = expect_asset_diagnostic(error);
+        assert!(diagnostic.message.contains("missing sidecar"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("Icon_Sword.png"));
     }
 
     #[test]
@@ -1311,9 +1561,9 @@ mod tests {
 
         let error = resolver.resolve("ui_icon", "BadName.png").unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("required prefixes"))
-        );
+        let diagnostic = expect_asset_diagnostic(error);
+        assert!(diagnostic.message.contains("required prefixes"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("BadName"));
     }
 
     #[test]
@@ -1348,9 +1598,10 @@ mod tests {
             .resolve("unreal_widget_class", "/Game/UI/WBP_Item.WBP_Item")
             .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("object name") && message.contains("WBP_Item_C"))
-        );
+        let diagnostic = expect_asset_diagnostic(error);
+        assert!(diagnostic.message.contains("object name"));
+        assert!(diagnostic.message.contains("WBP_Item_C"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("WBP_Item"));
     }
 
     #[test]
@@ -1388,8 +1639,11 @@ mod tests {
             )
             .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("denied by prefix"))
+        let diagnostic = expect_asset_diagnostic(error);
+        assert!(diagnostic.message.contains("denied by prefix"));
+        assert_eq!(
+            diagnostic.current_value.as_deref(),
+            Some("Dev/Icon_Debug.png")
         );
     }
 
@@ -1422,9 +1676,14 @@ mod tests {
             .expect("allowed pattern should pass");
         let error = resolver.resolve("ui_icon", "Tmp_Icon.png").unwrap_err();
 
+        let diagnostic = expect_asset_diagnostic(error);
         assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("does not match any allow pattern") || message.contains("denied by pattern"))
+            diagnostic
+                .message
+                .contains("does not match any allow pattern")
+                || diagnostic.message.contains("denied by pattern")
         );
+        assert_eq!(diagnostic.current_value.as_deref(), Some("Tmp_Icon.png"));
     }
 
     #[test]
@@ -1461,8 +1720,8 @@ mod tests {
             .resolve_for_target("ui_icon", "Icon_Sword.png", &TargetTags::new(["shipping"]))
             .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigForgeError::Validation(message) if message.contains("shipping icon stem"))
-        );
+        let diagnostic = expect_asset_diagnostic(error);
+        assert!(diagnostic.message.contains("shipping icon stem"));
+        assert_eq!(diagnostic.current_value.as_deref(), Some("Icon_Sword"));
     }
 }

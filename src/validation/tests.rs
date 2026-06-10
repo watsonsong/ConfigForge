@@ -1630,16 +1630,13 @@ fn target_asset_validation_checks_visible_asset_fields() {
     assert_eq!(issue.location.field.as_deref(), Some("icon"));
     assert_eq!(issue.target.as_deref(), Some("client"));
     assert_eq!(issue.current_value.as_deref(), Some("Missing.png"));
-    assert_eq!(
-        issue.expected.as_deref(),
-        Some("valid `ui_icon` asset reference")
-    );
+    assert_eq!(issue.expected.as_deref(), Some("existing asset file"));
     assert_eq!(issue.domain.as_deref(), Some("data"));
     assert!(
         issue
             .hint
             .as_deref()
-            .is_some_and(|hint| hint.contains("asset kind"))
+            .is_some_and(|hint| hint.contains("asset file"))
     );
     assert!(issue.message.contains("missing file"));
     validate_normalized_data_set_for_target_with_assets_and_report(

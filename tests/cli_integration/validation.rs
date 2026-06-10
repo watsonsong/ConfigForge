@@ -351,10 +351,10 @@ fn asset_missing_json_diagnostic_has_stable_code_and_value_context() {
     let issue = &diagnostic["diagnostics"][0];
     assert_eq!(issue["code"], "CF_DATA_INVALID_ASSET_REF");
     assert_eq!(issue["severity"], "error");
-    assert_eq!(issue["source"], "asset");
+    assert_eq!(issue["source"], "asset.resolver");
     assert_eq!(issue["target"], "client");
     assert_eq!(issue["current_value"], "Missing.png");
-    assert_eq!(issue["expected"], "valid `ui_icon` asset reference");
+    assert_eq!(issue["expected"], "existing asset file");
     assert_eq!(issue["domain"], "data");
     assert_eq!(issue["location"]["table"], "items");
     assert_eq!(issue["location"]["field"], "icon");
