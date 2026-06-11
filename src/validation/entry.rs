@@ -159,14 +159,12 @@ fn finish_full_data_set_validation(
     data_set: &DataSet,
     mut report: ValidationReport,
 ) -> Result<ValidationReport> {
-    if let Some(issue) = super::diagnostic::error_issue_from_result(
+    report.extend(super::diagnostic::error_issues_from_result(
         "foreign_key.integrity",
         "foreign_key",
         super::foreign_key::validate_foreign_keys_full(meta, data_set),
         DiagnosticLocation::default(),
-    ) {
-        report.push(issue);
-    }
+    ));
 
     let registry = ValidatorRegistry::with_builtin_validators();
     let plan = CompiledValidationPlan::compile(meta, &registry)?;
@@ -187,14 +185,12 @@ fn finish_full_data_set_validation_with_assets(
     data_set: &DataSet,
     mut report: ValidationReport,
 ) -> Result<ValidationReport> {
-    if let Some(issue) = super::diagnostic::error_issue_from_result(
+    report.extend(super::diagnostic::error_issues_from_result(
         "foreign_key.integrity",
         "foreign_key",
         super::foreign_key::validate_foreign_keys_full(meta, data_set),
         DiagnosticLocation::default(),
-    ) {
-        report.push(issue);
-    }
+    ));
 
     report.append(&mut super::asset::validate_assets_full(
         meta, assets, data_set,
@@ -377,14 +373,16 @@ fn finish_target_data_set_validation(
     assets: Option<&AssetsConfig>,
     mut report: ValidationReport,
 ) -> Result<ValidationReport> {
-    if let Some(issue) = super::diagnostic::error_issue_from_result(
-        "foreign_key.integrity",
-        "foreign_key",
-        super::foreign_key::validate_foreign_keys_for_target(meta, &export_view, target_tags),
-        DiagnosticLocation::default(),
-    ) {
-        report.push(issue.with_target(target_tags.iter().collect::<Vec<_>>().join(",")));
-    }
+    report.extend(
+        super::diagnostic::error_issues_from_result(
+            "foreign_key.integrity",
+            "foreign_key",
+            super::foreign_key::validate_foreign_keys_for_target(meta, &export_view, target_tags),
+            DiagnosticLocation::default(),
+        )
+        .into_iter()
+        .map(|issue| issue.with_target(target_tags.iter().collect::<Vec<_>>().join(","))),
+    );
 
     if let Some(assets) = assets {
         report.append(&mut super::asset::validate_assets_for_target(

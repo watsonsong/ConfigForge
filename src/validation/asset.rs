@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::{
-    ExportTableView, ValidationIssue, ValidationReport, diagnostic::error_issue_from_result,
+    ExportTableView, ValidationIssue, ValidationReport, diagnostic::error_issues_from_result,
     fragment_field_key,
 };
 
@@ -25,7 +25,7 @@ pub(super) fn validate_assets_for_target(
     let resolver = match AssetResolver::new(meta, assets) {
         Ok(resolver) => resolver,
         Err(error) => {
-            report.push(asset_issue_from_error(
+            report.extend(asset_issues_from_error(
                 error,
                 DiagnosticLocation::default(),
                 target_tags,
@@ -53,7 +53,7 @@ pub(super) fn validate_assets_full(
     let resolver = match AssetResolver::new(meta, assets) {
         Ok(resolver) => resolver,
         Err(error) => {
-            report.push(asset_issue_from_error(
+            report.extend(asset_issues_from_error(
                 error,
                 DiagnosticLocation::default(),
                 &target_tags,
@@ -275,7 +275,7 @@ fn validate_asset_field_path(
         return;
     }
     if let Err(error) = resolver.resolve_for_target(asset_kind, value, target_tags) {
-        report.push(asset_issue_from_error(
+        report.extend(asset_issues_from_error(
             error,
             DiagnosticLocation {
                 table: Some(table_name.to_owned()),
@@ -290,48 +290,53 @@ fn validate_asset_field_path(
     }
 }
 
-fn asset_issue_from_error(
+fn asset_issues_from_error(
     error: ConfigForgeError,
     location: DiagnosticLocation,
     target_tags: &TargetTags,
     current_value: Option<String>,
     expected: Option<String>,
-) -> ValidationIssue {
-    let mut issue = error_issue_from_result(
+) -> Vec<ValidationIssue> {
+    let mut issues = error_issues_from_result(
         code::CF_DATA_INVALID_ASSET_REF,
         "asset",
         Err(error),
         location,
-    )
-    .unwrap_or_else(|| {
-        ValidationIssue::error(
+    );
+    if issues.is_empty() {
+        issues.push(ValidationIssue::error(
             code::CF_DATA_INVALID_ASSET_REF,
             "asset",
             "asset reference validation failed",
             DiagnosticLocation::default(),
-        )
-    });
+        ));
+    }
     let target = target_tags.iter().collect::<Vec<_>>().join(",");
-    if !target.is_empty() {
-        issue = issue.with_target(target);
-    }
-    if issue.current_value.is_none() {
-        if let Some(current_value) = current_value {
-            issue = issue.with_current_value(current_value);
-        }
-    }
-    if issue.expected.is_none() {
-        if let Some(expected) = expected {
-            issue = issue.with_expected(expected);
-        }
-    }
-    if issue.domain.is_none() {
-        issue = issue.with_domain("data");
-    }
-    if issue.hint.is_none() {
-        issue = issue.with_hint(
-            "Check the asset kind configuration, search paths, and referenced asset value.",
-        );
-    }
-    issue
+    issues
+        .into_iter()
+        .map(|mut issue| {
+            if !target.is_empty() {
+                issue = issue.with_target(target.clone());
+            }
+            if issue.current_value.is_none() {
+                if let Some(current_value) = &current_value {
+                    issue = issue.with_current_value(current_value.clone());
+                }
+            }
+            if issue.expected.is_none() {
+                if let Some(expected) = &expected {
+                    issue = issue.with_expected(expected.clone());
+                }
+            }
+            if issue.domain.is_none() {
+                issue = issue.with_domain("data");
+            }
+            if issue.hint.is_none() {
+                issue = issue.with_hint(
+                    "Check the asset kind configuration, search paths, and referenced asset value.",
+                );
+            }
+            issue
+        })
+        .collect()
 }

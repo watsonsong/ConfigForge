@@ -31,6 +31,7 @@ use crate::project::{AssetSearchPathConfig, AssetsConfig};
 use crate::{ConfigForgeError, Result};
 
 use super::defaults::normalize_data_set_with_normalizer_and_pool;
+use super::diagnostic::error_issues_from_result;
 use super::*;
 
 fn validate_error(result: Result<()>) -> String {
@@ -79,6 +80,72 @@ fn expect_validator_config_issue<T>(result: Result<T>, source: &str) -> Validati
     assert!(issue.expected.is_some());
     assert!(issue.hint.is_some());
     issue
+}
+
+#[test]
+fn error_issues_from_result_preserves_all_report_diagnostics() {
+    let fallback_location = DiagnosticLocation {
+        table: Some("items".to_owned()),
+        ..DiagnosticLocation::default()
+    };
+    let result = Err(ConfigForgeError::ValidationReport(
+        crate::diagnostic::DiagnosticReport {
+            diagnostics: vec![
+                Diagnostic::new(
+                    "first.issue",
+                    DiagnosticSeverity::Error,
+                    "first failed",
+                    DiagnosticLocation::default(),
+                )
+                .with_source("first_validator")
+                .with_target("client")
+                .with_hint("fix the first value")
+                .with_current_value("bad")
+                .with_expected("good")
+                .with_explanation("first explanation")
+                .with_domain("data")
+                .with_owner("designer"),
+                Diagnostic::new(
+                    "second.issue",
+                    DiagnosticSeverity::Warning,
+                    "second failed",
+                    DiagnosticLocation {
+                        table: Some("classes".to_owned()),
+                        field: Some("id".to_owned()),
+                        ..DiagnosticLocation::default()
+                    },
+                ),
+            ],
+        },
+    ));
+
+    let issues = error_issues_from_result(
+        "fallback.issue",
+        "fallback_validator",
+        result,
+        fallback_location.clone(),
+    );
+
+    assert_eq!(issues.len(), 2);
+    assert_eq!(issues[0].code, "first.issue");
+    assert_eq!(issues[0].severity, DiagnosticSeverity::Error);
+    assert_eq!(issues[0].validator, "first_validator");
+    assert_eq!(issues[0].message, "first failed");
+    assert_eq!(issues[0].location, fallback_location);
+    assert_eq!(issues[0].target.as_deref(), Some("client"));
+    assert_eq!(issues[0].hint.as_deref(), Some("fix the first value"));
+    assert_eq!(issues[0].current_value.as_deref(), Some("bad"));
+    assert_eq!(issues[0].expected.as_deref(), Some("good"));
+    assert_eq!(issues[0].explanation.as_deref(), Some("first explanation"));
+    assert_eq!(issues[0].domain.as_deref(), Some("data"));
+    assert_eq!(issues[0].owner.as_deref(), Some("designer"));
+
+    assert_eq!(issues[1].code, "second.issue");
+    assert_eq!(issues[1].severity, DiagnosticSeverity::Warning);
+    assert_eq!(issues[1].validator, "fallback_validator");
+    assert_eq!(issues[1].message, "second failed");
+    assert_eq!(issues[1].location.table.as_deref(), Some("classes"));
+    assert_eq!(issues[1].location.field.as_deref(), Some("id"));
 }
 
 fn fragment_row_source(source_row_number: usize, fragments: &[&str]) -> RowSourceInfo {

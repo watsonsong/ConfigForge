@@ -13,7 +13,7 @@ use crate::{
     meta::{LinkedField, LinkedFieldMeta, LinkedIndexMeta, LinkedTableMeta, TableKind, TargetTags},
 };
 
-use super::diagnostic::{ValidationReport, error_issue_from_result, validation_error_message};
+use super::diagnostic::{ValidationReport, error_issues_from_result, validation_error_message};
 use super::struct_value::{
     validate_struct_child_path, validate_struct_field_value_for_row,
     validate_struct_occurrence_value, validate_supported_field_type, validate_value_type,
@@ -304,9 +304,7 @@ fn collect_table_check(
     result: Result<()>,
     location: DiagnosticLocation,
 ) {
-    if let Some(issue) = error_issue_from_result(code, validator, result, location) {
-        report.push(issue);
-    }
+    report.extend(error_issues_from_result(code, validator, result, location));
 }
 
 fn field_location(

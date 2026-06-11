@@ -203,46 +203,59 @@ pub(super) fn error_issue_from_message(
     ValidationIssue::error(code, validator, message, location)
 }
 
-pub(super) fn error_issue_from_result(
+pub(super) fn error_issues_from_result(
     code: impl Into<String>,
     validator: impl Into<String>,
     result: Result<()>,
     location: ValidationIssueLocation,
-) -> Option<ValidationIssue> {
+) -> Vec<ValidationIssue> {
     let code = code.into();
     let validator = validator.into();
     let Err(error) = result else {
-        return None;
+        return Vec::new();
     };
     if let ConfigForgeError::ValidationReport(report) = error {
-        if let Some(diagnostic) = report.diagnostics.into_iter().next() {
-            let mut issue = ValidationIssue::error(
-                diagnostic.code,
-                diagnostic.source.unwrap_or_else(|| validator.clone()),
-                diagnostic.message,
-                if diagnostic.location.is_empty() {
-                    location
-                } else {
-                    diagnostic.location
-                },
-            );
-            issue.target = diagnostic.target;
-            issue.hint = diagnostic.hint;
-            issue.current_value = diagnostic.current_value;
-            issue.expected = diagnostic.expected;
-            issue.explanation = diagnostic.explanation;
-            issue.domain = diagnostic.domain;
-            issue.owner = diagnostic.owner;
-            return Some(issue);
-        }
-        return None;
+        return report
+            .diagnostics
+            .into_iter()
+            .map(|diagnostic| validation_issue_from_diagnostic(diagnostic, &validator, &location))
+            .collect();
     }
-    Some(error_issue_from_message(
+    vec![error_issue_from_message(
         code,
         validator,
         validation_error_message(error),
         location,
-    ))
+    )]
+}
+
+fn validation_issue_from_diagnostic(
+    diagnostic: Diagnostic,
+    fallback_validator: &str,
+    fallback_location: &ValidationIssueLocation,
+) -> ValidationIssue {
+    let location = if diagnostic.location.is_empty() {
+        fallback_location.clone()
+    } else {
+        diagnostic.location
+    };
+    let mut issue = ValidationIssue::new(
+        diagnostic.code,
+        diagnostic.severity,
+        diagnostic
+            .source
+            .unwrap_or_else(|| fallback_validator.to_owned()),
+        diagnostic.message,
+        location,
+    );
+    issue.target = diagnostic.target;
+    issue.hint = diagnostic.hint;
+    issue.current_value = diagnostic.current_value;
+    issue.expected = diagnostic.expected;
+    issue.explanation = diagnostic.explanation;
+    issue.domain = diagnostic.domain;
+    issue.owner = diagnostic.owner;
+    issue
 }
 
 pub(super) fn validation_error_message(error: ConfigForgeError) -> String {
