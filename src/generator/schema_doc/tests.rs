@@ -152,6 +152,38 @@ fn builds_schema_doc_with_fields_indexes_relations_and_enrichment() {
 }
 
 #[test]
+fn markdown_renderer_escapes_newlines_tabs_pipes_and_control_chars() {
+    let doc = build_doc(
+        "\
+                [[tables]]\n\
+                name = \"items\"\n\
+                source = \"items.csv\"\n\
+                desc = \"line one\\nline|two\\tindent\"\n\
+\n\
+                [[tables.fields]]\n\
+                name = \"id\"\n\
+                type = \"string\"\n\
+                required = true\n\
+                default = \"bad\\u0007value\"\n\
+                desc = \"field one\\nfield|two\"\n\
+\n\
+                [[tables.fields.validators]]\n\
+                kind = \"regex\"\n\
+                pattern = \"^item\\n(id|name)$\"\n\
+            ",
+        &["client"],
+    );
+    let table = &doc.tables[0];
+    let markdown = render_schema_table_markdown(&doc, table);
+
+    assert!(markdown.contains("line one<br>line\\|two indent"));
+    assert!(markdown.contains("field one<br>field\\|two"));
+    assert!(markdown.contains("bad value"));
+    assert!(!markdown.contains('\u{0007}'));
+    assert!(markdown.contains("regex(pattern=^item<br>(id\\|name)$)"));
+}
+
+#[test]
 fn filters_by_target_and_keeps_docs_only_artifact_paths_deterministic() {
     let doc = build_doc(
         r#"

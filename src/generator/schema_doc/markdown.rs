@@ -60,11 +60,11 @@ pub fn render_schema_table_markdown(doc: &SchemaDoc, table: &SchemaTableDoc) -> 
     let mut out = String::new();
     push_line(
         &mut out,
-        &format!("# {}", escape_markdown_text(&table.name)),
+        &format!("# {}", escape_markdown_block_text(&table.name)),
     );
     push_line(&mut out, "");
     if let Some(description) = &table.description {
-        push_line(&mut out, &escape_markdown_text(description));
+        push_line(&mut out, &escape_markdown_block_text(description));
         push_line(&mut out, "");
     }
     push_line(&mut out, "| Property | Value |");
@@ -270,7 +270,21 @@ fn yes_no(value: bool) -> &'static str {
 }
 
 fn escape_markdown_text(value: &str) -> String {
-    value.replace('\r', "")
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\r' => {}
+            '\n' => escaped.push_str("<br>"),
+            '\t' => escaped.push(' '),
+            ch if ch.is_ascii_control() => escaped.push(' '),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn escape_markdown_block_text(value: &str) -> String {
+    escape_markdown_text(value).replace('|', "\\|")
 }
 
 fn escape_markdown_table_cell(value: &str) -> String {
