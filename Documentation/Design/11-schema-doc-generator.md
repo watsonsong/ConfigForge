@@ -33,7 +33,7 @@ output = "out/docs"
 format = "markdown"
 ```
 
-- 默认生成一个文档目录：
+- 默认 Markdown 生成一个文档目录：
 
 ```text
 out/docs/
@@ -43,7 +43,17 @@ out/docs/
   class_levels.md
 ```
 
-- P1-3 首选输出 Markdown，便于提交 MR、上传 Lark / Confluence、放入 CI artifact 或随版本归档。
+- 也可使用 `format = "html"` 生成自包含静态 HTML 文档：
+
+```text
+out/docs/
+  index.html
+  items.html
+  skills.html
+  class_levels.html
+```
+
+- Markdown 便于提交 MR、上传 Lark / Confluence、放入 CI artifact 或随版本归档；HTML 便于直接浏览，使用内联 CSS，不依赖外部 CDN、外部 CSS 或外部 JS。
 - 文档内容必须来自当前 linked Meta 与当前 target 的 effective target tags，避免和实际 export/codegen 可见性漂移。
 - 每张 table 至少输出 Fields、Indexes、Relations 三个区域。
 - 字段表必须展示字段名、类型、required、default、export visibility、description。
@@ -58,7 +68,7 @@ out/docs/
 - P1-3 不要求在线发布、权限管理、Lark / Confluence API 写入或数据库存储；Markdown 产物可由外部 CI 上传。
 - P1-3 不强制引入新的 Meta schema。已有 `desc`、`required`、`default`、`export_when`、`asset_kind`、FK/index 配置应先被完整利用。
 - P1-3 不保证生成语言级 API 文档；多语言 codegen 注释仍由 codegen backend 控制。
-- JSON Schema、HTML、Mermaid ER 图等作为后续扩展，不阻塞 Markdown MVP。
+- JSON Schema、自定义 schema JSON、Mermaid ER 图和 FK 图当前不支持；本生成器当前只维护 Markdown 与 HTML 两类文档 renderer。
 
 ## 11.3 Export Task 设计
 
@@ -83,10 +93,10 @@ format = "markdown"
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `type` | string | 必填 | 固定为 `schema_doc`。 |
-| `output` | path | 必填 | 输出目录。Markdown MVP 下包含 `index.md` 和每表一个 `*.md`。 |
-| `format` | string | `markdown` | 当前实现支持 `markdown`；后续可支持 `html`、`json_schema`、`mermaid`。 |
-| `index_file` | string | `index.md` | 文档入口文件名，不允许包含路径分隔符。 |
-| `file_name_style` | string | `table_name` | 单表文件命名策略。P1-3 可先固定为 canonical table name + `.md`。 |
+| `output` | path | 必填 | 输出目录。Markdown 下包含 `index.md` 和每表一个 `*.md`；HTML 下包含 `index.html` 和每表一个 `*.html`。 |
+| `format` | string | `markdown` | 当前实现支持 `markdown` / `html`。未知格式显式报错；JSON Schema / Mermaid 不支持。 |
+| `index_file` | string | format-aware：Markdown 为 `index.md`，HTML 为 `index.html` | 文档入口文件名，不允许包含路径分隔符；HTML 模式要求 `.html` 后缀。 |
+| `file_name_style` | string | `table_name` | 单表文件命名策略。当前固定为 canonical table name + format 扩展名（`.md` 或 `.html`）。 |
 | `title` | string | project name 或 `ConfigForge Schema` | index 顶部标题。 |
 | `include_hidden` | bool | `false` | 是否输出当前 target 下不可见的 table/field/index，并标记为 hidden。 |
 | `include_internal` | bool | `false` | 是否输出 `export = false` 的 tool-only/support 字段。 |
@@ -94,7 +104,7 @@ format = "markdown"
 | `include_asset_rules` | bool | `true` | 是否输出 asset kind、路径规则、大小写/命名约束摘要。 |
 | `include_i18n` | bool | `true` | 是否标识会进入 POT 的 `text` 字段。 |
 
-当前 MVP 实现 `format = "markdown"`、`index_file`、`title`；`include_hidden` / `include_internal` / `include_struct_details` / `include_asset_rules` / `include_i18n` 作为模型层选项存在，但尚未开放为 Project Config 配置项。用户在 export task 中设置未支持字段时会显式报错，不能静默忽略。
+当前 MVP 实现 `format = "markdown"` / `format = "html"`、`index_file`、`title`；`include_hidden` / `include_internal` / `include_struct_details` / `include_asset_rules` / `include_i18n` 作为模型层选项存在，但尚未开放为 Project Config 配置项。用户在 export task 中设置未支持字段时会显式报错，不能静默忽略。
 
 ### 11.3.2 与 target tags 的关系
 
@@ -179,6 +189,26 @@ Index 应包含：
 | --- | --- | --- | --- | --- |
 | class_id | classes.id | many-to-one | class | 关联职业 |
 ```
+
+### 11.4.2.1 HTML 输出
+
+`format = "html"` 使用与 Markdown 相同的 `SchemaDoc` normalized model，默认生成多页静态 HTML：一个 `index.html` 与每张可见 table 的 `<table>.html`。HTML renderer 当前使用内联 CSS，不引入外部 JS / CSS / CDN；所有 table name、field path、desc、validator summary、asset rules 等用户可控文本必须 HTML escape。
+
+HTML index 页包含：
+
+- 顶部 metadata：title、project、target、effective tags、generated_at；
+- summary cards：table、field、index、relation、asset field、text field 数量；
+- Tables 总览表：Table、Kind、Description、Fields、Indexes、Relations、Visibility；
+- 可选跨表 sections：Asset fields、Text / POT fields、Relation overview。
+
+HTML 单表页包含：
+
+- 返回 index 链接、table name、description、kind、source、visibility、row_export、primary index；
+- Fields、Indexes、Relations；
+- Assets、Text / POT、Validators 摘要；
+- visibility / severity 等短状态使用 badge 展示。
+
+HTML 输出路径与 Markdown 一样通过 ArtifactSink 统一写入和检查冲突；单表链接只使用同目录相对文件名，例如 `items.html`。
 
 ### 11.4.3 Fields 区域
 
@@ -470,11 +500,21 @@ title = "Client Config Schema"
 - 展示 built-in validators 摘要。
 - 增加 relation overview 和跨表 FK 索引页。
 
-### Phase C：更多输出格式和平台集成
+### Phase C：HTML 输出格式（已实现 MVP）
 
-- HTML 单页或多页文档。
-- JSON Schema 或自定义 schema JSON，供平台消费。
-- Mermaid ER 图和 FK 关系图。
+- 多页静态 HTML：`index.html` 与每表 `<table>.html`。
+- 与 Markdown 共享 `SchemaDoc` normalized model 和 artifact path planning。
+- 内联 CSS、自包含页面、无外部 JS/CSS/CDN。
+- Index 页包含 summary cards、Tables 总览、Asset fields、Text / POT fields、Relation overview。
+- 单表页包含 Fields / Indexes / Relations / Assets / Text-POT / Validators。
+- 对用户可控文本统一 HTML escape。
+- CLI integration 覆盖 docs-only target、dry-run artifact plan 和实际写入。
+
+### Phase D：更多平台集成
+
+- HTML 单页 bundle、搜索、过滤、排序等增强交互。
+- JSON Schema 或自定义 schema JSON 如需支持，需另行设计；当前不支持。
+- Mermaid ER 图和 FK 关系图如需支持，需另行设计；当前不支持。
 - 生成适配 Lark / Confluence 的 Markdown 方言。
 - 支持 owner/domain 或表负责人映射后，在 index 中按负责人分组。
 
@@ -486,11 +526,13 @@ title = "Client Config Schema"
 - target visibility：table hidden、field hidden、index hidden、include_hidden；
 - FK relation：field-level FK、table-level FK、list FK、linked_field；
 - Markdown renderer：表格 escape、空值、中文描述、换行、链接；
+- HTML renderer：HTML escape、静态 shell、index summary、单表 sections、相对链接；
 - path planning：index file、table file、文件名冲突、路径逃逸拒绝。
 
 集成测试：
 
-- `type = "schema_doc"` 生成 `index.md` 与单表文档；
+- `type = "schema_doc" format = "markdown"` 生成 `index.md` 与单表 `.md` 文档；
+- `type = "schema_doc" format = "html"` 生成 `index.html` 与单表 `.html` 文档；
 - docs-only target 不需要 `project.input`；
 - 与 runtime data/codegen export 同 target 时路径冲突能提前报错；
 - target tags 变化会影响文档可见性；
@@ -508,19 +550,19 @@ title = "Client Config Schema"
 
 已实现内容：
 
-- `schema_doc` 已迁入 `src/generator/schema_doc/`，提供 `SchemaDoc` normalized model、`SchemaDocOptions`、`SchemaDocExportConfig`、`SchemaDocFormat`、Markdown renderer 和 ArtifactSink 写入入口。
+- `schema_doc` 已迁入 `src/generator/schema_doc/`，提供 `SchemaDoc` normalized model、`SchemaDocOptions`、`SchemaDocExportConfig`、`SchemaDocFormat`、Markdown / HTML renderer 和 ArtifactSink 写入入口。
 - Build 支持 `[[targets.exports]] type = "schema_doc"`，当前作为注册到 `GeneratorRegistry` 的 direct `ArtifactGenerator` 运行；它读取 linked Meta、Project info 与 target tags 后输出 artifact，不属于 `DataFormatRegistry`，docs-only target 不需要 `project.input`。
-- Markdown MVP 输出 `index.md` 与每张当前 target 可见 table 的 `<table>.md`。
-- 单表文档包含 Fields、Indexes、Relations，并补充 Assets、Text / POT、Validators 摘要。
+- Markdown 输出 `index.md` 与每张当前 target 可见 table 的 `<table>.md`；HTML 输出 `index.html` 与每表 `<table>.html`。
+- 单表文档包含 Fields、Indexes、Relations，并补充 Assets、Text / POT、Validators 摘要；HTML index 额外提供 summary cards、asset/text/relation 跨表 overview。
 - Builder 使用 linked Meta 与 current target tags 计算 table / field / index / FK visibility；默认过滤当前 target 不可见或 `export = false` 的内容。
 - 输出路径通过 `ArtifactSink` 写入，支持 direct / temp-commit / dry-run 的统一 artifact 行为；`index_file` 和 table 文件名会拒绝非法文件名和重复 normalized path。
-- 已有单元测试与 CLI integration tests 覆盖 docs-only target、Markdown 输出、target filtering、unknown format、artifact 写入和路径规划。
+- 已有单元测试与 CLI integration tests 覆盖 docs-only target、Markdown / HTML 输出、target filtering、unknown format、artifact 写入、dry-run plan 和路径规划。
 
 当前边界：
 
-- 当前只支持 `format = "markdown"`；`html`、`json_schema`、`mermaid` 尚未实现并会报错。
+- 当前只支持 `format = "markdown"` 与 `format = "html"`；`json_schema`、`mermaid` 不支持并会报错。
 - export task 当前只开放 `format`、`index_file`、`title`；`include_hidden`、`include_internal`、`include_struct_details`、`include_asset_rules`、`include_i18n` 尚未开放到 Project Config。
 - Asset rules 摘要只展示可静态解析的 `extensions`、prefix/suffix、require existing、allow/deny path 等基础规则，不读取实际资源引用。
 - Text / POT 摘要只标记当前 target 可见 `text` 字段理论上会被 POT exporter 处理，不读取具体文本值。
-- Struct / fragment 子字段已有基础展开；复杂平台化输出、owner/domain 分组、ER 图和 Lark / Confluence 发布仍是后续扩展。
-- 当后续新增 JSON Schema、Mermaid ER、HTML docs 等“只读 Meta 并输出 artifact”的任务时，优先按统一 artifact generator + requirements + doc facet 扩展，而不是在 build 中增加特殊分支，也不要继续把非代码文档任务塞进 code-specific `CodeGenerator` trait。
+- Struct / fragment 子字段已有基础展开；复杂平台化输出、owner/domain 分组、HTML 单页 bundle / 交互搜索、ER 图和 Lark / Confluence 发布仍是后续扩展。
+- 当后续新增 JSON Schema、Mermaid ER 等“只读 Meta 并输出 artifact”的任务时，优先按统一 artifact generator + requirements + doc facet 扩展，而不是在 build 中增加特殊分支，也不要继续把非代码文档任务塞进 code-specific `CodeGenerator` trait。

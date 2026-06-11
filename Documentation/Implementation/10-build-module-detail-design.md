@@ -215,8 +215,8 @@ pub struct BuildTraceStage {
 - language generator 从 `GeneratorCommonInput` 派生 `CodeExportInput`，包含 linked meta、target tags、project 信息、project root、target name、target generator config、空 runtime data file list、generated_at；这个转换属于 generator / code artifact toolkit 细节，不属于 Build 调度分支逻辑。
 - 传给 CodeModel 的 target tags 必须是 effective target tags，而不是仅 Project Config 中的 target tags；否则 CLI `--tag s1` 影响了 runtime data override，却没有同步影响 table/field/index codegen 过滤，会造成 schema 与数据不一致。
 - MetaOnly generator export task 可以并行生成，并统一通过 `ArtifactGenerator::generate_to_sink()` 直接写入 shared `ArtifactSink`；全局路径冲突由 artifact 模块在 `create()` / convenience write API 中统一检查，dry-run / finish entries 由 sink 按 normalized path 稳定输出。
-- `schema_doc` 的 generator language/type id 为 `schema_doc`，当前支持 `format = "markdown"`、`index_file`、`title`，未知格式或未知选项显式报错；它基于 linked Meta 构建 `SchemaDoc` normalized model，并通过 Markdown renderer 写出 `index.md` 和每表 `<table>.md`。
-- 未来 JSON Schema、Mermaid ER、HTML docs 等如果仍是“只读 Meta 并输出 artifact”，优先按统一 artifact generator + requirements + doc facet 扩展，而不是在 build 中增加特殊分支，也不要继续把非代码文档任务塞进 code-specific `CodeGenerator` trait。
+- `schema_doc` 的 generator language/type id 为 `schema_doc`，当前支持 `format = "markdown"` / `format = "html"`、`index_file`、`title`，未知格式或未知选项显式报错；它基于 linked Meta 构建 `SchemaDoc` normalized model，并通过 Markdown renderer 写出 `index.md` 和每表 `<table>.md`，或通过 HTML renderer 写出 `index.html` 和每表 `<table>.html`。
+- 未来 JSON Schema、Mermaid ER 等如果仍是“只读 Meta 并输出 artifact”，优先按统一 artifact generator + requirements + doc facet 扩展，而不是在 build 中增加特殊分支，也不要继续把非代码文档任务塞进 code-specific `CodeGenerator` trait。
 
 当前 generator 抽象：
 
@@ -243,7 +243,7 @@ Build-facing registry 只暴露 `require_generator(type_id) -> &dyn ArtifactGene
 - `CodeArtifactOptions` / `CodeWriter` / naming / formatting / keyword conflict：供 Rust/C++/TypeScript/Java/C# 和 Lua 这类 code-like generator 复用。
 - `RuntimeTableDataFacet`：供 JSON / MessagePack / bin 这类 per-table runtime data generator 复用。
 - `AggregateArtifactFacet`：供 POT / Asset Manifest / Lua 等跨表产物复用。
-- `DocArtifactFacet`：供 `schema_doc`、JSON Schema、Mermaid ER、HTML docs 等文档/结构说明产物复用。
+- `DocArtifactFacet`：供 `schema_doc` 以及未来可能新增的 JSON Schema、Mermaid ER 等文档/结构说明产物复用；当前 `schema_doc` 已在同一 generator 内支持 Markdown / HTML renderer。
 
 Lua 是该模型的关键校验用例：它 requirements 包含 Meta + Data，但输出形态明显是 code-like artifact，因此应复用 code artifact options，而不应因为需要 Data 就被排除在 code 能力之外。
 
