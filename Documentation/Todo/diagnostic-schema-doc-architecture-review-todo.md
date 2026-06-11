@@ -19,7 +19,7 @@
 
 ## 本轮执行范围
 
-### [ ] Step 1：修复 Schema Doc Markdown escaping
+### [x] Step 1：修复 Schema Doc Markdown escaping
 
 问题：
 
@@ -28,19 +28,19 @@
 
 实现项：
 
-- [ ] 将 `\n` 归一化为 `<br>` 或空格。
-- [ ] 将 `\t` 归一化为空格。
-- [ ] 移除或替换除换行 / tab 外的 ASCII 控制字符。
-- [ ] 保留 table cell 中 `| -> \|` 的行为。
-- [ ] 增加测试覆盖 desc 换行、validator summary 中 `|` + 换行、default string 控制字符。
+- [x] 将 `\n` 归一化为 `<br>` 或空格。
+- [x] 将 `\t` 归一化为空格。
+- [x] 移除或替换除换行 / tab 外的 ASCII 控制字符。
+- [x] 保留 table cell 中 `| -> \|` 的行为。
+- [x] 增加测试覆盖 desc 换行、validator summary 中 `|` + 换行、default string 控制字符。
 
 验证：
 
-- [ ] `cargo test schema_doc`
+- [x] `cargo test schema_doc`
 
-建议提交：`fix(schema_doc): harden markdown escaping`
+已提交：`66a79d5 fix(schema_doc): harden markdown escaping`
 
-### [ ] Step 2：为 `SchemaDocGenerator` 实现 `plan_artifacts()`
+### [x] Step 2：为 `SchemaDocGenerator` 实现 `plan_artifacts()`
 
 问题：
 
@@ -50,18 +50,18 @@
 
 实现项：
 
-- [ ] 复用 `schema_doc_export_config_from_options()` 和 `schema_doc_output_paths()`。
-- [ ] 为 Markdown 返回 `index.md` + 每表 `.md`。
-- [ ] 为 HTML 返回 `index.html` + 每表 `.html`。
-- [ ] 补单元测试，确保 Markdown / HTML plan 与实际输出路径一致。
+- [x] 复用 `schema_doc_export_config_from_options()` 和 `schema_doc_output_paths()`。
+- [x] 为 Markdown 返回 `index.md` + 每表 `.md`。
+- [x] 为 HTML 返回 `index.html` + 每表 `.html`。
+- [x] 补单元测试，确保 Markdown / HTML plan 与实际输出路径一致。
 
 验证：
 
-- [ ] `cargo test schema_doc`
+- [x] `cargo test schema_doc`
 
-建议提交：`feat(schema_doc): plan schema doc artifacts`
+已提交：`6620b4c fix(schema_doc): plan generator output artifacts`
 
-### [ ] Step 3：修复 `error_issue_from_result` 丢多条 diagnostic
+### [x] Step 3：修复 `error_issue_from_result` 丢多条 diagnostic
 
 问题：
 
@@ -70,16 +70,16 @@
 
 实现项：
 
-- [ ] 将转换逻辑调整为可返回多条 `ValidationIssue`。
-- [ ] 调整调用方，确保多条 issue 全部 append，且顺序稳定。
-- [ ] 增加单元测试：构造包含多条 diagnostic 的 `DiagnosticReport`，验证转换后不丢失。
+- [x] 将转换逻辑调整为可返回多条 `ValidationIssue`。
+- [x] 调整调用方，确保多条 issue 全部 append，且顺序稳定。
+- [x] 增加单元测试：构造包含多条 diagnostic 的 `DiagnosticReport`，验证转换后不丢失。
 
 验证：
 
-- [ ] `cargo test validation`
-- [ ] `cargo test schema_doc`
+- [x] `cargo test validation`
+- [x] `cargo test schema_doc`
 
-建议提交：`fix(validation): preserve all diagnostics in issue conversion`
+已提交：`5fd464e fix(validation): preserve all diagnostics in issue conversion`
 
 ## 本轮暂不执行但保留判断的事项
 
@@ -97,3 +97,8 @@
 - Schema Doc Markdown / HTML renderer 输出均不会因用户文本破坏文档结构。
 - Schema Doc 的 artifact planning 与其他 generator 行为一致。
 - ValidationReport 中的多条结构化 diagnostic 不会在转换到 `ValidationIssue` 时丢失。
+
+## 本轮执行结果
+
+- 已完成 3 个本轮高性价比问题修复，并分别通过对应单元测试验证后提交。
+- 每步完成后复核当前实现，未发现需要扩大本轮范围的额外架构改动。
