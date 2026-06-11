@@ -311,6 +311,84 @@ fn renders_static_html_shell_and_escapes_user_text() {
 }
 
 #[test]
+fn renders_html_index_metadata_summary_and_cross_table_sections() {
+    let doc = build_doc(
+        r#"
+                [[asset_kinds]]
+                name = "ui_icon"
+                extensions = [".png", ".webp"]
+                name_prefixes = ["UI_"]
+
+                [[tables]]
+                name = "classes"
+                source = "classes.csv"
+                desc = "职业表"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.indexes]]
+                name = "primary"
+                fields = ["id"]
+                unique = true
+                primary = true
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+                desc = "道具表"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "name"
+                type = "text"
+                export_when = { any = ["client"] }
+
+                [[tables.fields]]
+                name = "icon"
+                type = "asset"
+                asset_kind = "ui_icon"
+                export_when = { any = ["client"] }
+
+                [[tables.fields]]
+                name = "class_id"
+                type = "int"
+                foreign_key = { target_table = "classes", target_index = "primary", linked_field = "class" }
+
+                [[tables.indexes]]
+                name = "primary"
+                fields = ["id"]
+                unique = true
+                primary = true
+            "#,
+        &["client"],
+    );
+    let html =
+        render_schema_doc_index_html(&doc, &["classes.html".to_owned(), "items.html".to_owned()]);
+
+    assert!(html.contains("<dt>Project</dt><dd>demo</dd>"));
+    assert!(html.contains("<dt>Target</dt><dd>client</dd>"));
+    assert!(html.contains("<dt>Tags</dt><dd>client</dd>"));
+    assert!(html.contains("<span>Tables</span>"));
+    assert!(html.contains("<span>Fields</span>"));
+    assert!(html.contains("<a href=\"items.html\"><code>items</code></a>"));
+    assert!(html.contains("<th>Indexes</th><th>Relations</th>"));
+    assert!(html.contains("<h2>Asset fields</h2>"));
+    assert!(html.contains("<code>icon</code>"));
+    assert!(html.contains("extensions .png/.webp, prefix UI_"));
+    assert!(html.contains("<h2>Text / POT fields</h2>"));
+    assert!(html.contains("<code>name</code>"));
+    assert!(html.contains("<h2>Relation overview</h2>"));
+    assert!(html.contains("<code>classes.id</code>"));
+}
+
+#[test]
 fn rejects_invalid_schema_doc_options_and_duplicate_paths() {
     let error = schema_doc_export_config_from_options(
         PathBuf::from("out"),
