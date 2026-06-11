@@ -5,7 +5,7 @@ use std::fs;
 
 use super::*;
 use super::{link::link_meta_model, validate::validate_meta_model};
-use crate::ConfigForgeError;
+use crate::{ConfigForgeError, Diagnostic};
 use tempfile::tempdir;
 
 fn parse(input: &str) -> MetaModel {
@@ -15,8 +15,44 @@ fn parse(input: &str) -> MetaModel {
 fn diagnostics(input: &str) -> Vec<MetaDiagnostic> {
     match MetaModel::from_toml_str(input) {
         Ok(model) => validate_meta_model(&model),
-        Err(ConfigForgeError::MetaValidation(diagnostics)) => diagnostics,
+        Err(ConfigForgeError::MetaValidation(report)) => report
+            .diagnostics
+            .into_iter()
+            .map(meta_diagnostic_from_diagnostic)
+            .collect(),
         Err(error) => panic!("unexpected error: {error}"),
+    }
+}
+
+fn meta_diagnostic_from_diagnostic(diagnostic: Diagnostic) -> MetaDiagnostic {
+    let code = match diagnostic.code.as_str() {
+        "DuplicateTableName" => MetaDiagnosticCode::DuplicateTableName,
+        "DuplicateEnumName" => MetaDiagnosticCode::DuplicateEnumName,
+        "DuplicateStructName" => MetaDiagnosticCode::DuplicateStructName,
+        "DuplicateEnumValueName" => MetaDiagnosticCode::DuplicateEnumValueName,
+        "DuplicateFieldName" => MetaDiagnosticCode::DuplicateFieldName,
+        "DuplicateIndexName" => MetaDiagnosticCode::DuplicateIndexName,
+        "DuplicateTypeName" => MetaDiagnosticCode::DuplicateTypeName,
+        "ReservedTypeName" => MetaDiagnosticCode::ReservedTypeName,
+        "MissingFieldReference" => MetaDiagnosticCode::MissingFieldReference,
+        "InvalidPrimaryIndex" => MetaDiagnosticCode::InvalidPrimaryIndex,
+        "PrimaryIndexMismatch" => MetaDiagnosticCode::PrimaryIndexMismatch,
+        "EmptyIndexFields" => MetaDiagnosticCode::EmptyIndexFields,
+        "UnknownFieldType" => MetaDiagnosticCode::UnknownFieldType,
+        "InvalidDefaultValue" => MetaDiagnosticCode::InvalidDefaultValue,
+        "InvalidSourceDeclaration" => MetaDiagnosticCode::InvalidSourceDeclaration,
+        "InvalidValidatorConfig" => MetaDiagnosticCode::InvalidValidatorConfig,
+        "InvalidForeignKeyDeclaration" => MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+        "DuplicateAssetKindName" => MetaDiagnosticCode::DuplicateAssetKindName,
+        "InvalidAssetKindDeclaration" => MetaDiagnosticCode::InvalidAssetKindDeclaration,
+        "UnsupportedFeature" => MetaDiagnosticCode::UnsupportedFeature,
+        code => panic!("unknown meta diagnostic code `{code}`"),
+    };
+    MetaDiagnostic {
+        code,
+        severity: diagnostic.severity,
+        message: diagnostic.message,
+        location: diagnostic.location,
     }
 }
 
@@ -752,6 +788,7 @@ fn link_rejects_semantically_invalid_foreign_keys() {
         panic!("expected meta validation diagnostics");
     };
     let messages = diagnostics
+        .diagnostics
         .iter()
         .map(|diagnostic| diagnostic.message.as_str())
         .collect::<Vec<_>>()

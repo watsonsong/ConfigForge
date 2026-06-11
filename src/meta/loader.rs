@@ -5,7 +5,7 @@ use std::{fs, path::Path};
 
 use crate::{ConfigForgeError, Result};
 
-use super::MetaModel;
+use super::{MetaModel, meta_diagnostics_to_report};
 
 impl MetaModel {
     /// Parses a TOML Meta document and validates it before returning the owned raw model.
@@ -94,7 +94,9 @@ fn merge_models(models: Vec<MetaModel>) -> MetaModel {
 
 fn finish_loading_model(model: MetaModel) -> Result<MetaModel> {
     if let Err(diagnostics) = model.link() {
-        return Err(ConfigForgeError::MetaValidation(diagnostics));
+        return Err(ConfigForgeError::MetaValidation(
+            meta_diagnostics_to_report(diagnostics),
+        ));
     }
     Ok(model)
 }

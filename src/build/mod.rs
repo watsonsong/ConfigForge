@@ -414,7 +414,10 @@ fn execute_export_pipeline<'meta>(
     } = context;
     let ((linked_meta, meta_only_output), raw_sources) = join_link_meta_only_and_source_read(
         || {
-            let linked_meta = raw_meta.link().map_err(ConfigForgeError::MetaValidation)?;
+            let linked_meta = raw_meta
+                .link()
+                .map_err(crate::meta::meta_diagnostics_to_report)
+                .map_err(ConfigForgeError::MetaValidation)?;
             let meta_only_context = MetaOnlyGeneratorContext {
                 project_root,
                 project_info,
@@ -1154,7 +1157,9 @@ mod tests {
                 }
                 thread::sleep(Duration::from_millis(40));
                 Ok((
-                    meta.link().map_err(ConfigForgeError::MetaValidation)?,
+                    meta.link()
+                        .map_err(crate::meta::meta_diagnostics_to_report)
+                        .map_err(ConfigForgeError::MetaValidation)?,
                     empty_branch_output(),
                 ))
             },
@@ -1191,7 +1196,10 @@ mod tests {
         let ((linked_meta, _meta_only_output), raw_sources) = join_link_meta_only_and_source_read(
             || {
                 thread::sleep(Duration::from_millis(20));
-                let linked_meta = meta.link().map_err(ConfigForgeError::MetaValidation)?;
+                let linked_meta = meta
+                    .link()
+                    .map_err(crate::meta::meta_diagnostics_to_report)
+                    .map_err(ConfigForgeError::MetaValidation)?;
                 if !source_finished_for_meta_only.load(Ordering::SeqCst) {
                     meta_only_observed_source_unfinished_for_meta_only
                         .store(true, Ordering::SeqCst);

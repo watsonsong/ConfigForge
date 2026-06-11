@@ -250,9 +250,7 @@ fn render_error_json(error: &anyhow::Error) -> serde_json::Result<String> {
 
 fn diagnostics_from_config_error(error: &ConfigForgeError) -> Vec<Diagnostic> {
     match error {
-        ConfigForgeError::MetaValidation(diagnostics) => {
-            diagnostics.iter().map(Diagnostic::from_entry).collect()
-        }
+        ConfigForgeError::MetaValidation(report) => report.diagnostics.clone(),
         ConfigForgeError::ValidationReport(report) => report.diagnostics.clone(),
         _ => Vec::new(),
     }
@@ -270,7 +268,9 @@ mod tests {
     use serde_json::Value;
 
     use crate::{
-        Diagnostic, DiagnosticLocation, DiagnosticSeverity, diagnostic::code::CF_DATA_INVALID_TYPE,
+        Diagnostic, DiagnosticLocation, DiagnosticSeverity,
+        diagnostic::code::CF_DATA_INVALID_TYPE,
+        meta::{MetaDiagnostic, MetaDiagnosticCode, meta_diagnostics_to_report},
     };
 
     use super::*;
@@ -313,5 +313,33 @@ mod tests {
             output["diagnostics"][0]["location"]["source_column_name"],
             "level"
         );
+    }
+
+    #[test]
+    fn json_error_output_preserves_meta_validation_diagnostics() {
+        let mut meta_diagnostic = MetaDiagnostic::new(
+            MetaDiagnosticCode::DuplicateTableName,
+            "duplicate table `items`",
+        );
+        meta_diagnostic.location.table = Some("items".to_owned());
+        let error: anyhow::Error =
+            ConfigForgeError::MetaValidation(meta_diagnostics_to_report(vec![meta_diagnostic]))
+                .into();
+
+        let json = render_error_json(&error).expect("json should render");
+        let output: Value = serde_json::from_str(&json).expect("json should parse");
+
+        assert_eq!(output["status"], "error");
+        assert_eq!(
+            output["message"],
+            "meta validation failed: Error DuplicateTableName: duplicate table `items` (table `items`)"
+        );
+        assert_eq!(output["diagnostics"][0]["code"], "DuplicateTableName");
+        assert_eq!(output["diagnostics"][0]["severity"], "error");
+        assert_eq!(
+            output["diagnostics"][0]["message"],
+            "duplicate table `items`"
+        );
+        assert_eq!(output["diagnostics"][0]["location"]["table"], "items");
     }
 }

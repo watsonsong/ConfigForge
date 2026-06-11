@@ -7,6 +7,7 @@ mod loader;
 mod model;
 mod validate;
 
+pub(crate) use diagnostic::meta_diagnostics_to_report;
 pub use diagnostic::{MetaDiagnostic, MetaDiagnosticCode};
 #[allow(unused_imports)]
 pub use model::{

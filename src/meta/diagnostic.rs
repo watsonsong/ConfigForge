@@ -4,7 +4,8 @@
 use std::fmt;
 
 use crate::diagnostic::{
-    DiagnosticEntry, DiagnosticLocation, DiagnosticSeverity, format_diagnostic,
+    Diagnostic, DiagnosticEntry, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity,
+    format_diagnostic,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -23,6 +24,17 @@ impl MetaDiagnostic {
             message: message.into(),
             location: DiagnosticLocation::default(),
         }
+    }
+}
+
+pub(crate) fn meta_diagnostics_to_report(
+    diagnostics: Vec<MetaDiagnostic>,
+) -> DiagnosticReport<Diagnostic> {
+    DiagnosticReport {
+        diagnostics: diagnostics
+            .into_iter()
+            .map(|diagnostic| Diagnostic::from_entry(&diagnostic))
+            .collect(),
     }
 }
 
