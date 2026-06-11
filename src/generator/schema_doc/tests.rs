@@ -389,6 +389,89 @@ fn renders_html_index_metadata_summary_and_cross_table_sections() {
 }
 
 #[test]
+fn renders_html_table_sections_for_schema_details() {
+    let doc = build_doc(
+        r#"
+                [[asset_kinds]]
+                name = "ui_icon"
+                extensions = [".png"]
+
+                [[tables]]
+                name = "classes"
+                source = "classes.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.indexes]]
+                name = "primary"
+                fields = ["id"]
+                unique = true
+                primary = true
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+                desc = "道具表"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "name"
+                type = "text"
+                required = true
+
+                [[tables.fields]]
+                name = "icon"
+                type = "asset"
+                asset_kind = "ui_icon"
+
+                [[tables.fields]]
+                name = "class_id"
+                type = "int"
+                foreign_key = { target_table = "classes", target_index = "primary", linked_field = "class" }
+
+                [[tables.fields.validators]]
+                kind = "range"
+                min = 1
+                max = 999
+
+                [[tables.indexes]]
+                name = "primary"
+                fields = ["id"]
+                unique = true
+                primary = true
+            "#,
+        &["client"],
+    );
+    let table = doc
+        .tables
+        .iter()
+        .find(|table| table.name == "items")
+        .expect("items table");
+    let html = render_schema_table_html(&doc, table, "index.html");
+
+    assert!(html.contains("<a href=\"index.html\">← Back to index</a>"));
+    assert!(html.contains("<h2>Fields</h2>"));
+    assert!(html.contains("<h2>Indexes</h2>"));
+    assert!(html.contains("<code>primary</code>"));
+    assert!(html.contains("<h2>Relations</h2>"));
+    assert!(html.contains("<code>classes.id</code>"));
+    assert!(html.contains("<code>class</code>"));
+    assert!(html.contains("<h2>Assets</h2>"));
+    assert!(html.contains("<code>ui_icon</code>"));
+    assert!(html.contains("<h2>Text / POT</h2>"));
+    assert!(html.contains("<code>name</code>"));
+    assert!(html.contains("<h2>Validators</h2>"));
+    assert!(html.contains("range(max=999, min=1)"));
+}
+
+#[test]
 fn rejects_invalid_schema_doc_options_and_duplicate_paths() {
     let error = schema_doc_export_config_from_options(
         PathBuf::from("out"),

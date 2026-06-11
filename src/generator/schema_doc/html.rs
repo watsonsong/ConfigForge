@@ -262,7 +262,174 @@ pub fn render_schema_table_html(
     push_line(&mut body, "</tbody>");
     push_line(&mut body, "</table>");
     push_line(&mut body, "</section>");
+    push_table_indexes(&mut body, table);
+    push_table_relations(&mut body, table);
+    push_table_assets(&mut body, table);
+    push_table_text_fields(&mut body, table);
+    push_table_validators(&mut body, table);
     render_page(&page_title, &body)
+}
+
+fn push_table_indexes(body: &mut String, table: &SchemaTableDoc) {
+    push_line(body, "<section>");
+    push_line(body, "<h2>Indexes</h2>");
+    if table.indexes.is_empty() {
+        push_line(body, "<p class=\"muted\">No indexes.</p>");
+    } else {
+        push_line(body, "<table>");
+        push_line(
+            body,
+            "<thead><tr><th>Name</th><th>Fields</th><th>Unique</th><th>Primary</th><th>Export</th><th>Description</th></tr></thead>",
+        );
+        push_line(body, "<tbody>");
+        for index in &table.indexes {
+            push_line(
+                body,
+                &format!(
+                    "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                    escape_html(&index.name),
+                    code_list(&index.fields),
+                    yes_no(index.unique),
+                    yes_no(index.primary),
+                    badge(&index.visibility),
+                    display_html(index.description.as_deref()),
+                ),
+            );
+        }
+        push_line(body, "</tbody>");
+        push_line(body, "</table>");
+    }
+    push_line(body, "</section>");
+}
+
+fn push_table_relations(body: &mut String, table: &SchemaTableDoc) {
+    push_line(body, "<section>");
+    push_line(body, "<h2>Relations</h2>");
+    if table.relations.is_empty() {
+        push_line(body, "<p class=\"muted\">No relations.</p>");
+    } else {
+        push_line(body, "<table>");
+        push_line(
+            body,
+            "<thead><tr><th>Field</th><th>Target</th><th>Cardinality</th><th>Linked Helper</th><th>Export</th><th>Description</th></tr></thead>",
+        );
+        push_line(body, "<tbody>");
+        for relation in &table.relations {
+            push_line(
+                body,
+                &format!(
+                    "<tr><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                    escape_html(&relation.field),
+                    escape_html(&relation.target),
+                    escape_html(&relation.cardinality),
+                    display_code(relation.linked_helper.as_deref()),
+                    badge(&relation.visibility),
+                    display_html(relation.description.as_deref()),
+                ),
+            );
+        }
+        push_line(body, "</tbody>");
+        push_line(body, "</table>");
+    }
+    push_line(body, "</section>");
+}
+
+fn push_table_assets(body: &mut String, table: &SchemaTableDoc) {
+    if table.asset_fields.is_empty() {
+        return;
+    }
+    push_line(body, "<section>");
+    push_line(body, "<h2>Assets</h2>");
+    push_line(body, "<table>");
+    push_line(
+        body,
+        "<thead><tr><th>Field</th><th>Asset Kind</th><th>Required</th><th>Export</th><th>Rules</th></tr></thead>",
+    );
+    push_line(body, "<tbody>");
+    for asset in &table.asset_fields {
+        push_line(
+            body,
+            &format!(
+                "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                escape_html(&asset.field),
+                display_code(asset.asset_kind.as_deref()),
+                yes_no(asset.required),
+                badge(&asset.visibility),
+                display_html(asset.rules.as_deref()),
+            ),
+        );
+    }
+    push_line(body, "</tbody>");
+    push_line(body, "</table>");
+    push_line(body, "</section>");
+}
+
+fn push_table_text_fields(body: &mut String, table: &SchemaTableDoc) {
+    if table.text_fields.is_empty() {
+        return;
+    }
+    push_line(body, "<section>");
+    push_line(body, "<h2>Text / POT</h2>");
+    push_line(body, "<table>");
+    push_line(
+        body,
+        "<thead><tr><th>Field</th><th>Export</th><th>POT</th></tr></thead>",
+    );
+    push_line(body, "<tbody>");
+    for text in &table.text_fields {
+        push_line(
+            body,
+            &format!(
+                "<tr><td><code>{}</code></td><td>{}</td><td>{}</td></tr>",
+                escape_html(&text.field),
+                badge(&text.visibility),
+                yes_no(text.enters_pot),
+            ),
+        );
+    }
+    push_line(body, "</tbody>");
+    push_line(body, "</table>");
+    push_line(body, "</section>");
+}
+
+fn push_table_validators(body: &mut String, table: &SchemaTableDoc) {
+    let validators = table
+        .validators
+        .iter()
+        .chain(
+            table
+                .fields
+                .iter()
+                .flat_map(|field| field.validators.iter()),
+        )
+        .collect::<Vec<_>>();
+    if validators.is_empty() {
+        return;
+    }
+    push_line(body, "<section>");
+    push_line(body, "<h2>Validators</h2>");
+    push_line(body, "<table>");
+    push_line(
+        body,
+        "<thead><tr><th>Scope</th><th>Name</th><th>Summary</th><th>Severity</th><th>Description</th></tr></thead>",
+    );
+    push_line(body, "<tbody>");
+    for validator in validators {
+        push_line(
+            body,
+            &format!(
+                "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                escape_html(&validator.scope),
+                escape_html(&validator.name),
+                escape_html(&validator.summary),
+                badge(&validator.severity),
+                display_html(validator.description.as_deref()),
+            ),
+        );
+    }
+    push_line(body, "</tbody>");
+    push_line(body, "</table>");
+    push_line(body, "</section>");
 }
 
 pub(super) fn escape_html(value: &str) -> String {
@@ -314,6 +481,24 @@ fn display_html(value: Option<&str>) -> String {
 
 fn badge(value: &str) -> String {
     format!("<span class=\"badge\">{}</span>", escape_html(value))
+}
+
+fn code_list(values: &[String]) -> String {
+    if values.is_empty() {
+        return "<span class=\"muted\">-</span>".to_owned();
+    }
+    values
+        .iter()
+        .map(|value| format!("<code>{}</code>", escape_html(value)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn display_code(value: Option<&str>) -> String {
+    value
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("<code>{}</code>", escape_html(value)))
+        .unwrap_or_else(|| "<span class=\"muted\">-</span>".to_owned())
 }
 
 fn display_list_or_dash(values: &[String]) -> String {
