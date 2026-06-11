@@ -19,6 +19,7 @@ use super::{
         render_schema_doc_artifacts, schema_doc_export_config_from_options,
         schema_doc_output_paths, write_schema_doc_to_sink,
     },
+    html::{escape_html, render_schema_doc_index_html, render_schema_table_html},
     model::{SchemaDocMetadata, SchemaTableDoc},
     render_schema_doc_index_markdown, render_schema_table_markdown,
 };
@@ -262,6 +263,51 @@ fn renders_markdown_artifact_list_from_shared_output_plan() {
     );
     assert!(artifacts[0].content.contains("[items](items.md)"));
     assert!(artifacts[1].content.contains("# items"));
+}
+
+#[test]
+fn renders_static_html_shell_and_escapes_user_text() {
+    assert_eq!(escape_html("&<>\"'"), "&amp;&lt;&gt;&quot;&#39;".to_owned());
+
+    let doc = build_doc(
+        r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+                desc = "<script>alert('x')</script>"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                desc = "field <script>bad()</script>"
+            "#,
+        &["client"],
+    );
+    let table = &doc.tables[0];
+    let index_html = render_schema_doc_index_html(&doc, &["items.html".to_owned()]);
+    let table_html = render_schema_table_html(&doc, table, "index.html");
+
+    assert!(index_html.contains("<!doctype html>"));
+    assert!(index_html.contains("<html lang=\"zh-CN\">"));
+    assert!(index_html.contains("<meta charset=\"utf-8\">"));
+    assert!(index_html.contains("<style>"));
+    assert!(index_html.contains("<title>demo Schema</title>"));
+    assert!(index_html.contains("items.html"));
+
+    assert!(!table_html.contains("<script>"));
+    assert!(table_html.contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;"));
+    assert!(table_html.contains("field &lt;script&gt;bad()&lt;/script&gt;"));
+
+    let config = SchemaDocExportConfig {
+        format: SchemaDocFormat::Html,
+        output: PathBuf::from("out/docs"),
+        index_file: "index.html".to_owned(),
+        title: None,
+    };
+    let artifacts = render_schema_doc_artifacts(&doc, &config).expect("html artifacts render");
+    assert_eq!(artifacts[0].path, PathBuf::from("out/docs/index.html"));
+    assert_eq!(artifacts[1].path, PathBuf::from("out/docs/items.html"));
+    assert!(artifacts[0].content.contains("<!doctype html>"));
 }
 
 #[test]

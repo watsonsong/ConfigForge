@@ -13,6 +13,7 @@ use crate::{
 };
 
 use super::{
+    html::{render_schema_doc_index_html, render_schema_table_html},
     markdown::{render_schema_doc_index_markdown, render_schema_table_markdown},
     model::{SchemaDoc, SchemaTableDoc},
 };
@@ -101,13 +102,20 @@ pub fn render_schema_doc_artifacts(
             }
             Ok(artifacts)
         }
-        SchemaDocFormat::Html => Err(schema_doc_option_error(
-            CF_GENERATOR_UNSUPPORTED_OPTION,
-            "format",
-            "schema_doc html renderer is not implemented yet",
-            "html",
-            "implemented schema_doc renderer",
-        )),
+        SchemaDocFormat::Html => {
+            let mut artifacts = Vec::with_capacity(1 + doc.tables.len());
+            artifacts.push(SchemaDocRenderedArtifact {
+                path: paths.index_path,
+                content: render_schema_doc_index_html(doc, &paths.table_file_names),
+            });
+            for (table, path) in doc.tables.iter().zip(paths.table_paths) {
+                artifacts.push(SchemaDocRenderedArtifact {
+                    path,
+                    content: render_schema_table_html(doc, table, &config.index_file),
+                });
+            }
+            Ok(artifacts)
+        }
     }
 }
 

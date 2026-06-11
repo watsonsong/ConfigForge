@@ -3,6 +3,7 @@
 
 mod build;
 mod format;
+mod html;
 mod markdown;
 mod model;
 
