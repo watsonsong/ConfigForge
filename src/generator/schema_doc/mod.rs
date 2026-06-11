@@ -10,13 +10,17 @@ mod model;
 #[cfg(test)]
 mod tests;
 
+use std::path::PathBuf;
+
 use crate::{
     Result,
     artifact::ArtifactSink,
     generator::{ArtifactGenerator, GeneratorCommonInput, GeneratorRequirements},
 };
 
-use format::{schema_doc_export_config_from_options, write_schema_doc_to_sink};
+use format::{
+    schema_doc_export_config_from_options, schema_doc_output_paths, write_schema_doc_to_sink,
+};
 
 pub use format::{SchemaDocExportConfig, SchemaDocFormat};
 pub use markdown::{render_schema_doc_index_markdown, render_schema_table_markdown};
@@ -40,23 +44,37 @@ impl ArtifactGenerator for SchemaDocGenerator {
     ) -> Result<()> {
         let config =
             schema_doc_export_config_from_options(input.output.clone(), input.options.clone())?;
-        let doc = SchemaDoc::from_meta(
-            input.meta,
-            &input.project,
-            SchemaDocOptions {
-                title: config.title.clone(),
-                project_name: input.project.name.clone(),
-                project_path: Some(input.project_root.clone()),
-                target: Some(input.target_name.clone()),
-                target_tags: input.target_tags.clone(),
-                generated_at: input.generated_at.clone(),
-                include_hidden: false,
-                include_internal: false,
-                include_struct_details: true,
-                include_asset_rules: true,
-                include_i18n: true,
-            },
-        );
+        let doc = schema_doc_from_input(input, config.title.clone());
         write_schema_doc_to_sink(&doc, &config, sink)
     }
+
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
+        let config =
+            schema_doc_export_config_from_options(input.output.clone(), input.options.clone())?;
+        let doc = schema_doc_from_input(input, config.title.clone());
+        let paths = schema_doc_output_paths(&doc, &config)?;
+        Ok(std::iter::once(paths.index_path)
+            .chain(paths.table_paths)
+            .collect())
+    }
+}
+
+fn schema_doc_from_input(input: &GeneratorCommonInput<'_>, title: Option<String>) -> SchemaDoc {
+    SchemaDoc::from_meta(
+        input.meta,
+        &input.project,
+        SchemaDocOptions {
+            title,
+            project_name: input.project.name.clone(),
+            project_path: Some(input.project_root.clone()),
+            target: Some(input.target_name.clone()),
+            target_tags: input.target_tags.clone(),
+            generated_at: input.generated_at.clone(),
+            include_hidden: false,
+            include_internal: false,
+            include_struct_details: true,
+            include_asset_rules: true,
+            include_i18n: true,
+        },
+    )
 }

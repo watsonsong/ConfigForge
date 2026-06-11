@@ -10,11 +10,12 @@ use crate::{
     diagnostic::code::{
         CF_ARTIFACT_PATH_COLLISION, CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNSUPPORTED_OPTION,
     },
+    generator::{ArtifactGenerator, GeneratorCommonInput},
     meta::{MetaModel, TargetTags},
 };
 
 use super::{
-    SchemaDoc, SchemaDocExportConfig, SchemaDocFormat, SchemaDocOptions,
+    SchemaDoc, SchemaDocExportConfig, SchemaDocFormat, SchemaDocGenerator, SchemaDocOptions,
     format::{
         render_schema_doc_artifacts, schema_doc_export_config_from_options,
         schema_doc_output_paths, write_schema_doc_to_sink,
@@ -48,6 +49,13 @@ fn build_doc(input: &str, tags: &[&str]) -> SchemaDoc {
             include_i18n: true,
         },
     )
+}
+
+fn linked_meta(input: &str) -> crate::meta::LinkedMetaModel<'static> {
+    let meta = Box::leak(Box::new(
+        MetaModel::from_toml_str(input).expect("meta should parse"),
+    ));
+    meta.link().expect("meta should link")
 }
 
 #[test]
@@ -295,6 +303,62 @@ fn renders_markdown_artifact_list_from_shared_output_plan() {
     );
     assert!(artifacts[0].content.contains("[items](items.md)"));
     assert!(artifacts[1].content.contains("# items"));
+}
+
+#[test]
+fn schema_doc_generator_plans_markdown_and_html_artifacts() {
+    let meta = linked_meta(
+        r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+            "#,
+    );
+    let base_input = GeneratorCommonInput {
+        meta: &meta,
+        target_tags: TargetTags::new(["client"]),
+        project: ArtifactProjectInfo {
+            name: Some("demo".to_owned()),
+            desc: None,
+            copyright: None,
+        },
+        project_root: PathBuf::from("."),
+        target_name: "client".to_owned(),
+        task_name: "schema".to_owned(),
+        type_id: "schema_doc".to_owned(),
+        output: PathBuf::from("out/docs"),
+        options: BTreeMap::new(),
+        generated_at: "2026-06-07T00:00:00Z".to_owned(),
+    };
+
+    let markdown_paths = SchemaDocGenerator
+        .plan_artifacts(&base_input)
+        .expect("markdown paths should plan");
+    assert_eq!(
+        markdown_paths,
+        vec![
+            PathBuf::from("out/docs/index.md"),
+            PathBuf::from("out/docs/items.md")
+        ]
+    );
+
+    let mut html_input = base_input.clone();
+    html_input.options =
+        BTreeMap::from([("format".to_owned(), toml::Value::String("html".to_owned()))]);
+    let html_paths = SchemaDocGenerator
+        .plan_artifacts(&html_input)
+        .expect("html paths should plan");
+    assert_eq!(
+        html_paths,
+        vec![
+            PathBuf::from("out/docs/index.html"),
+            PathBuf::from("out/docs/items.html")
+        ]
+    );
 }
 
 #[test]
