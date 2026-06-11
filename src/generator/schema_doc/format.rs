@@ -74,14 +74,32 @@ pub fn write_schema_doc_to_sink(
     config: &SchemaDocExportConfig,
     sink: &ArtifactSink,
 ) -> Result<()> {
+    let artifacts = render_schema_doc_artifacts(doc, config)?;
+    for artifact in artifacts {
+        sink.write_text(artifact.path, artifact.content)?;
+    }
+    Ok(())
+}
+
+pub fn render_schema_doc_artifacts(
+    doc: &SchemaDoc,
+    config: &SchemaDocExportConfig,
+) -> Result<Vec<SchemaDocRenderedArtifact>> {
+    let paths = schema_doc_output_paths(doc, config)?;
     match config.format {
         SchemaDocFormat::Markdown => {
-            let paths = schema_doc_output_paths(doc, config)?;
-            sink.write_text(&paths.index_path, render_schema_doc_index_markdown(doc))?;
+            let mut artifacts = Vec::with_capacity(1 + doc.tables.len());
+            artifacts.push(SchemaDocRenderedArtifact {
+                path: paths.index_path,
+                content: render_schema_doc_index_markdown(doc),
+            });
             for (table, path) in doc.tables.iter().zip(paths.table_paths) {
-                sink.write_text(path, render_schema_table_markdown(doc, table))?;
+                artifacts.push(SchemaDocRenderedArtifact {
+                    path,
+                    content: render_schema_table_markdown(doc, table),
+                });
             }
-            Ok(())
+            Ok(artifacts)
         }
         SchemaDocFormat::Html => Err(schema_doc_option_error(
             CF_GENERATOR_UNSUPPORTED_OPTION,
@@ -91,6 +109,12 @@ pub fn write_schema_doc_to_sink(
             "implemented schema_doc renderer",
         )),
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaDocRenderedArtifact {
+    pub path: PathBuf,
+    pub content: String,
 }
 
 pub fn schema_doc_output_paths(
@@ -104,18 +128,21 @@ pub fn schema_doc_output_paths(
         return Err(schema_doc_path_collision_error(&index_path));
     }
     let mut table_paths = Vec::with_capacity(doc.tables.len());
+    let mut table_file_names = Vec::with_capacity(doc.tables.len());
     for table in &doc.tables {
         let file_name = table_file_name(table, config.format);
         validate_file_name(&file_name, "schema_doc table file")?;
-        let path = lexical_normalize_path(&config.output.join(file_name));
+        let path = lexical_normalize_path(&config.output.join(&file_name));
         if !seen.insert(path.clone()) {
             return Err(schema_doc_path_collision_error(&path));
         }
+        table_file_names.push(file_name);
         table_paths.push(path);
     }
     Ok(SchemaDocOutputPaths {
         index_path,
         table_paths,
+        table_file_names,
     })
 }
 
@@ -123,6 +150,7 @@ pub fn schema_doc_output_paths(
 pub struct SchemaDocOutputPaths {
     pub index_path: PathBuf,
     pub table_paths: Vec<PathBuf>,
+    pub table_file_names: Vec<String>,
 }
 
 pub(super) fn table_file_name(table: &SchemaTableDoc, format: SchemaDocFormat) -> String {

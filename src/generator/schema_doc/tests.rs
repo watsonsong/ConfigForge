@@ -16,7 +16,8 @@ use crate::{
 use super::{
     SchemaDoc, SchemaDocExportConfig, SchemaDocFormat, SchemaDocOptions,
     format::{
-        schema_doc_export_config_from_options, schema_doc_output_paths, write_schema_doc_to_sink,
+        render_schema_doc_artifacts, schema_doc_export_config_from_options,
+        schema_doc_output_paths, write_schema_doc_to_sink,
     },
     model::{SchemaDocMetadata, SchemaTableDoc},
     render_schema_doc_index_markdown, render_schema_table_markdown,
@@ -186,6 +187,7 @@ fn filters_by_target_and_keeps_docs_only_artifact_paths_deterministic() {
     let paths = schema_doc_output_paths(&doc, &config).expect("paths should plan");
     assert_eq!(paths.index_path, PathBuf::from("out/docs/index.md"));
     assert_eq!(paths.table_paths, vec![PathBuf::from("out/docs/items.md")]);
+    assert_eq!(paths.table_file_names, vec!["items.md"]);
 }
 
 #[test]
@@ -218,7 +220,48 @@ fn parses_html_schema_doc_format_and_uses_html_defaults() {
     );
     let paths = schema_doc_output_paths(&doc, &html_config).expect("html paths should plan");
     assert_eq!(paths.index_path, PathBuf::from("out/docs/index.html"));
-    assert_eq!(paths.table_paths, vec![PathBuf::from("out/docs/items.html")]);
+    assert_eq!(
+        paths.table_paths,
+        vec![PathBuf::from("out/docs/items.html")]
+    );
+    assert_eq!(paths.table_file_names, vec!["items.html"]);
+}
+
+#[test]
+fn renders_markdown_artifact_list_from_shared_output_plan() {
+    let doc = build_doc(
+        r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+            "#,
+        &["client"],
+    );
+    let config = SchemaDocExportConfig {
+        format: SchemaDocFormat::Markdown,
+        output: PathBuf::from("out/docs"),
+        index_file: "index.md".to_owned(),
+        title: None,
+    };
+
+    let artifacts = render_schema_doc_artifacts(&doc, &config).expect("artifacts should render");
+    let paths = artifacts
+        .iter()
+        .map(|artifact| artifact.path.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        paths,
+        vec![
+            PathBuf::from("out/docs/index.md"),
+            PathBuf::from("out/docs/items.md")
+        ]
+    );
+    assert!(artifacts[0].content.contains("[items](items.md)"));
+    assert!(artifacts[1].content.contains("# items"));
 }
 
 #[test]
@@ -251,7 +294,10 @@ fn rejects_invalid_schema_doc_options_and_duplicate_paths() {
     let diagnostic = expect_single_diagnostic(error);
     assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
     assert_eq!(diagnostic.current_value.as_deref(), Some("index.md"));
-    assert_eq!(diagnostic.expected.as_deref(), Some("plain .html file name"));
+    assert_eq!(
+        diagnostic.expected.as_deref(),
+        Some("plain .html file name")
+    );
 
     let doc = SchemaDoc {
         metadata: SchemaDocMetadata {
