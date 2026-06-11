@@ -20,12 +20,14 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchemaDocFormat {
     Markdown,
+    Html,
 }
 
 impl SchemaDocFormat {
     pub fn extension(self) -> &'static str {
         match self {
             Self::Markdown => "md",
+            Self::Html => "html",
         }
     }
 }
@@ -34,6 +36,7 @@ impl fmt::Display for SchemaDocFormat {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Markdown => "markdown",
+            Self::Html => "html",
         })
     }
 }
@@ -44,12 +47,15 @@ impl FromStr for SchemaDocFormat {
     fn from_str(value: &str) -> Result<Self> {
         match value {
             "markdown" | "md" => Ok(Self::Markdown),
+            "html" => Ok(Self::Html),
             other => Err(schema_doc_option_error(
                 CF_GENERATOR_UNSUPPORTED_OPTION,
                 "format",
-                format!("unsupported schema_doc format `{other}`; supported formats: markdown"),
+                format!(
+                    "unsupported schema_doc format `{other}`; supported formats: markdown, html"
+                ),
                 other,
-                "markdown",
+                "markdown or html",
             )),
         }
     }
@@ -77,6 +83,13 @@ pub fn write_schema_doc_to_sink(
             }
             Ok(())
         }
+        SchemaDocFormat::Html => Err(schema_doc_option_error(
+            CF_GENERATOR_UNSUPPORTED_OPTION,
+            "format",
+            "schema_doc html renderer is not implemented yet",
+            "html",
+            "implemented schema_doc renderer",
+        )),
     }
 }
 
@@ -84,7 +97,7 @@ pub fn schema_doc_output_paths(
     doc: &SchemaDoc,
     config: &SchemaDocExportConfig,
 ) -> Result<SchemaDocOutputPaths> {
-    validate_file_name(&config.index_file, "schema_doc index_file")?;
+    validate_index_file_name(&config.index_file, config.format)?;
     let index_path = lexical_normalize_path(&config.output.join(&config.index_file));
     let mut seen = std::collections::BTreeSet::new();
     if !seen.insert(index_path.clone()) {
@@ -138,6 +151,20 @@ pub(super) fn validate_file_name(value: &str, label: &str) -> Result<()> {
     }
 }
 
+fn validate_index_file_name(value: &str, format: SchemaDocFormat) -> Result<()> {
+    validate_file_name(value, "schema_doc index_file")?;
+    if format == SchemaDocFormat::Html && !value.ends_with(".html") {
+        return Err(schema_doc_option_error(
+            CF_GENERATOR_INVALID_OPTION,
+            "index_file",
+            format!("schema_doc html index_file `{value}` must use the .html extension"),
+            value,
+            "plain .html file name",
+        ));
+    }
+    Ok(())
+}
+
 pub fn schema_doc_export_config_from_options(
     output: PathBuf,
     mut options: BTreeMap<String, toml::Value>,
@@ -148,7 +175,7 @@ pub fn schema_doc_export_config_from_options(
         .unwrap_or(SchemaDocFormat::Markdown);
     let index_file = take_schema_doc_string(&mut options, "index_file")?
         .unwrap_or_else(|| format!("index.{}", format.extension()));
-    validate_file_name(&index_file, "schema_doc index_file")?;
+    validate_index_file_name(&index_file, format)?;
     let title = take_schema_doc_string(&mut options, "title")?;
     let unsupported = options.keys().cloned().collect::<Vec<_>>();
     if let Some(key) = unsupported.first() {

@@ -7,7 +7,9 @@ use crate::{
     ArtifactProjectInfo,
     artifact::{ArtifactWriteMode, ArtifactWriter},
     code_artifact::tests::expect_single_diagnostic,
-    diagnostic::code::{CF_ARTIFACT_PATH_COLLISION, CF_GENERATOR_UNSUPPORTED_OPTION},
+    diagnostic::code::{
+        CF_ARTIFACT_PATH_COLLISION, CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNSUPPORTED_OPTION,
+    },
     meta::{MetaModel, TargetTags},
 };
 
@@ -187,10 +189,43 @@ fn filters_by_target_and_keeps_docs_only_artifact_paths_deterministic() {
 }
 
 #[test]
+fn parses_html_schema_doc_format_and_uses_html_defaults() {
+    let html_config = schema_doc_export_config_from_options(
+        PathBuf::from("out/docs"),
+        BTreeMap::from([("format".to_owned(), toml::Value::String("html".to_owned()))]),
+    )
+    .expect("html config should parse");
+    assert_eq!(html_config.format, SchemaDocFormat::Html);
+    assert_eq!(html_config.index_file, "index.html");
+
+    let markdown_config =
+        schema_doc_export_config_from_options(PathBuf::from("out/docs"), BTreeMap::new())
+            .expect("default markdown config should parse");
+    assert_eq!(markdown_config.format, SchemaDocFormat::Markdown);
+    assert_eq!(markdown_config.index_file, "index.md");
+
+    let doc = build_doc(
+        r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+            "#,
+        &["client"],
+    );
+    let paths = schema_doc_output_paths(&doc, &html_config).expect("html paths should plan");
+    assert_eq!(paths.index_path, PathBuf::from("out/docs/index.html"));
+    assert_eq!(paths.table_paths, vec![PathBuf::from("out/docs/items.html")]);
+}
+
+#[test]
 fn rejects_invalid_schema_doc_options_and_duplicate_paths() {
     let error = schema_doc_export_config_from_options(
         PathBuf::from("out"),
-        BTreeMap::from([("format".to_owned(), toml::Value::String("html".to_owned()))]),
+        BTreeMap::from([("format".to_owned(), toml::Value::String("pdf".to_owned()))]),
     )
     .unwrap_err();
     let diagnostic = expect_single_diagnostic(error);
@@ -199,8 +234,24 @@ fn rejects_invalid_schema_doc_options_and_duplicate_paths() {
         diagnostic.source.as_deref(),
         Some("generator.schema_doc.options")
     );
-    assert_eq!(diagnostic.current_value.as_deref(), Some("html"));
-    assert_eq!(diagnostic.expected.as_deref(), Some("markdown"));
+    assert_eq!(diagnostic.current_value.as_deref(), Some("pdf"));
+    assert_eq!(diagnostic.expected.as_deref(), Some("markdown or html"));
+
+    let error = schema_doc_export_config_from_options(
+        PathBuf::from("out"),
+        BTreeMap::from([
+            ("format".to_owned(), toml::Value::String("html".to_owned())),
+            (
+                "index_file".to_owned(),
+                toml::Value::String("index.md".to_owned()),
+            ),
+        ]),
+    )
+    .unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
+    assert_eq!(diagnostic.current_value.as_deref(), Some("index.md"));
+    assert_eq!(diagnostic.expected.as_deref(), Some("plain .html file name"));
 
     let doc = SchemaDoc {
         metadata: SchemaDocMetadata {

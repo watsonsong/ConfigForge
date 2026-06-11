@@ -146,7 +146,7 @@ fn schema_doc_rejects_unknown_format() {
                 [[targets.exports]]
                 output = "{}"
                 type = "schema_doc"
-                format = "html"
+                format = "pdf"
             "#,
             temp_dir.path().join("out/docs").display()
         ),

@@ -1,217 +1,215 @@
-# Schema / Table 文档生成器实现 TODO
+# Schema Doc HTML 输出格式实现 TODO
 
-本文把 [`Design/11-schema-doc-generator.md`](../Design/11-schema-doc-generator.md) 中的 P1-3 Schema / Table 文档生成器设计拆成可独立开发、验证和提交的实现步骤。当前实现状态是：Step 1～9 的 Markdown MVP 已完成，`type = "schema_doc"` MetaOnly export task、`SchemaDoc` normalized model、Markdown renderer、artifact path planning / `ArtifactSink` 写入、target-aware visibility、asset / POT / validator / FK / index / struct 摘要以及标准工程端到端 fixture 均已落地。本文后续只作为“已完成记录 + 剩余高级扩展”使用；当前状态说明以 canonical Design 和 Implementation 文档为准。
+本文替代旧版 Schema / Table 文档生成器实现 TODO。旧版 Markdown MVP 已完成，不再在本文追踪；后续目标收敛为：在现有 `schema_doc` MetaOnly export task 和 `SchemaDoc` normalized model 基础上，新增 **HTML 输出格式**。
 
-## 总体原则
+明确不做：
 
-- 每个 Step 必须能独立编译、独立测试、独立提交。
-- `schema_doc` 是 **MetaOnly** export task，不读取数据、不执行 data validation、不依赖 `project.input`。
-- 文档内容必须来自 linked Meta、Project config 和当前 target effective tags；不能用另一套可见性规则解释 table / field / index。
-- Markdown / HTML / JSON Schema / Mermaid 等未来 renderer 必须共享同一个 normalized documentation model，避免各 renderer 自行解释 Meta。
-- P1-3 MVP 只实现 Markdown；未实现的 format 或配置项必须显式报错，不能静默忽略。
-- 输出顺序必须 deterministic：table、field、index、FK 默认保持 Meta/link 后的稳定顺序；跨表摘要按固定 key 排序。
-- 所有输出路径必须纳入 ArtifactSink / artifact conflict check；文件名必须拒绝 path separator、parent escape 和重复 normalized path。
-- Markdown renderer 必须转义 `|`、换行等破坏表格的字符；空值统一显示 `-`。
-- 文档状态必须始终区分“目标态设计”和“当前实现边界”：实现完成前保持 `Planned / Not implemented`。
+- 不支持 JSON Schema / 自定义 schema JSON。
+- 不支持 Mermaid ER 图或 FK 图。
+- 不新增新的 build 分支或独立 export type；继续使用 `type = "schema_doc"`，通过 `format = "html"` 选择 renderer。
 
-## [x] Step 1：建立 SchemaDoc 核心模型与 builder 骨架
+## 当前基线
 
-目标：引入面向文档生成的 normalized model，把 Project / LinkedMeta / TargetTags 转成稳定、可测试、可被多 renderer 复用的数据结构。
+- `schema_doc` 已位于 `src/generator/schema_doc/`。
+- 当前已支持 `format = "markdown"`，生成 `index.md` 与每表 `*.md`。
+- 已有 `SchemaDoc` normalized model、`SchemaDocOptions`、`SchemaDocExportConfig`、`SchemaDocFormat`、Markdown renderer 和 ArtifactSink 写入入口。
+- Build 已支持 `[[targets.exports]] type = "schema_doc"`，且 schema doc 是 MetaOnly generator，不读取 source data，不依赖 `project.input`。
+- 标准工程已有 docs-only target / fixture 覆盖 Markdown MVP。
 
-范围：
+## 目标行为
 
-- 在合适模块下新增 schema doc 子模块；当前已迁入 `src/generator/schema_doc/`，作为 MetaOnly artifact generator，保持依赖方向不反向污染 `meta` / `validation` / code artifact toolkit。
-- 定义 `SchemaDoc`、`SchemaDocMetadata`、`SchemaTableDoc`、`SchemaFieldDoc`、`SchemaIndexDoc`、`SchemaRelationDoc`、`SchemaDocOptions` 等核心结构。
-- 从 Project / target / LinkedMeta 中填充 project name、project path、target、target tags、generated_at、table name、table kind、desc、source summary、field path、type display、required、default、export visibility 等基础信息。
-- 先支持 CollectionTable / ObjectTable 的 table-level summary；复杂 struct/list/fragment 可先以字段 type display 表达，不展开详情。
-- 明确缺失字段表现：desc / default / source / primary index 不存在时用 `None` 或 `-`，不能编造内容。
+用户可在 target export task 中声明：
 
-验收：
+```toml
+[[targets.exports]]
+name = "schema_html"
+type = "schema_doc"
+output = "out/schema-html"
+format = "html"
+title = "Game Config Schema"
+index_file = "index.html"
+```
 
-- 单元测试覆盖空 Meta、单表、多表、ObjectTable、带 desc/default/required 的字段。
-- 单元测试覆盖 builder 输出顺序 deterministic。
-- 不接入 `GeneratorRegistry`，不写任何文件产物。
+生成输出：
 
-建议提交：`feat(schema-doc): add schema documentation model`
+```text
+out/schema-html/
+  index.html
+  items.html
+  skills.html
+  class_levels.html
+```
 
-## [x] Step 2：实现 target-aware 可见性摘要
+HTML 输出必须满足：
 
-目标：让 SchemaDoc 准确展示当前 target 下 table、field、index 的导出可见性，为 client-only / server-only / all / hidden / internal 奠定基础。
+1. 与 Markdown 共用同一个 `SchemaDoc` normalized model。
+2. 输出为静态 HTML 文件，不依赖外部 CDN、外部 CSS、外部 JS。
+3. 默认生成多页文档：一个 index 页 + 每表一个详情页。
+4. 内容覆盖 Markdown MVP 已有信息：project / target / tags、table summary、fields、indexes、relations、asset/text/validator/struct/list 摘要。
+5. 路径、文件名、表/字段顺序 deterministic。
+6. 所有用户输入文本、desc、字段名、路径等必须 HTML escape。
 
-范围：
+## [ ] Step 1：收敛格式契约与配置解析
 
-- 复用现有 target tags / export_when / export=false 判断逻辑，避免重新实现一套不一致规则。
-- 为 table / field / index 填充 `visibility` 展示值：`all`、tag 列表、`hidden`、`internal` 等。
-- 支持 `include_hidden` / `include_internal` 选项的模型层过滤语义；如果本 Step 暂不开放配置，也要在 model tests 中固化默认行为。
-- table `row_export` 不扫描数据，只在 table summary 中标记是否存在 row-level filtering。
-- index 引用隐藏字段、index 自身隐藏、ObjectTable 不支持 index 等场景需要有明确展示或过滤策略。
+目标：把 `html` 作为 `SchemaDocFormat` 的正式支持值，并明确它和 Markdown 的文件扩展 / 默认入口文件差异。
 
-验收：
+实现项：
 
-- 单元测试覆盖 table hidden、field hidden、export=false internal field、index hidden、row_export summary。
-- 同一 Meta 在不同 target tags 下输出不同 visibility，但顺序稳定。
-- 未实现配置项如果进入公开解析层，必须显式报错。
+- [ ] 扩展 `SchemaDocFormat`，新增 `Html`。
+- [ ] 解析 `format = "html"`，未知格式继续输出结构化 diagnostic。
+- [ ] 当 `format = "html"` 且用户未配置 `index_file` 时，默认入口文件使用 `index.html`。
+- [ ] 保持 Markdown 默认行为不变：`format = "markdown"` 默认 `index.md`。
+- [ ] 校验 `index_file`：仍不允许路径分隔符；HTML 模式建议或要求 `.html` 后缀。
+- [ ] 单表文件名在 HTML 模式下使用 `<table>.html`，Markdown 模式继续使用 `<table>.md`。
 
-建议提交：`feat(schema-doc): summarize target visibility`
+测试项：
 
-## [x] Step 3：实现 Fields / Indexes / Relations 文档数据
+- [ ] unit test：`format = "html"` 能解析为 `SchemaDocFormat::Html`。
+- [ ] unit test：HTML / Markdown 默认 index 文件不同。
+- [ ] unit test：非法 HTML index 文件名仍报稳定 diagnostic code 和 current / expected。
 
-目标：补齐单表文档 MVP 的三大核心区块：Fields、Indexes、Relations。
+建议提交：`feat(schema_doc): parse html output format`
 
-范围：
+## [ ] Step 2：抽象 renderer 输出规划
 
-- Fields：输出 field path、type display、required、default、export visibility、description。
-- Indexes：输出 index name、fields、unique、primary、export visibility。
-- Relations：把 field-level FK、table-level FK、ObjectTable 作为 FK source、list scalar FK 归一为 `SchemaRelationDoc`。
-- Relation target 展示为 `target_table.target_field` 或 `target_table(index_name)`；linked helper 展示 `linked_field`，缺失显示 `-`。
-- Cardinality 使用面向文档的稳定枚举或字符串：`many-to-one`、`one-to-one`、`list-to-many` 等；不确定时使用保守 fallback。
+目标：避免 HTML renderer 复制 Markdown 的 artifact path 规划逻辑；让格式差异集中在 renderer / extension / entry file。
 
-验收：
+实现项：
 
-- 单元测试覆盖 primary/unique/non-unique index、复合 index、field-level FK、table-level FK、list FK、linked_field。
-- ObjectTable 无 index 时输出空 indexes，而不是 panic。
-- target hidden FK target/index 的处理符合 Step 2 可见性策略。
+- [ ] 梳理当前 Markdown 写入入口，提取共享的 artifact planning helper。
+- [ ] 让 renderer 返回统一的 `SchemaDocRenderedArtifact` 列表，包含 relative path 与 bytes/string content。
+- [ ] 或保留现有写入结构，但把“index + table pages”的路径生成封装成 format-aware helper。
+- [ ] 确保 artifact path collision / path escape 仍由现有 ArtifactSink / artifact path 机制兜底。
+- [ ] 确保 HTML table 页面链接使用相对路径，不产生绝对路径或平台相关分隔符。
 
-建议提交：`feat(schema-doc): collect fields indexes and relations`
+测试项：
 
-## [x] Step 4：实现 Markdown renderer
+- [ ] unit test：HTML 输出计划包含 `index.html` 和每表 `.html`。
+- [ ] unit test：Markdown 输出计划仍包含 `index.md` 和每表 `.md`。
+- [ ] unit test：HTML table link 与 artifact path 一致。
 
-目标：先落地最重要、最容易集成到 MR / Lark / Confluence / CI artifact 的 Markdown 输出。
+建议提交：`refactor(schema_doc): share document artifact planning`
 
-范围：
+## [ ] Step 3：实现 HTML escape 与基础模板
 
-- 新增 Markdown renderer，共享 Step 1~3 的 normalized `SchemaDoc` model。
-- 输出 `index.md` 内容：title、project、target、tags、generated_at、table 列表和 summary。
-- 输出单表 Markdown 内容：table title/desc、properties、Fields、Indexes、Relations。
-- Markdown table escape：处理 `|`、换行、`\r`、多行 desc、反引号等易破坏表格的内容。
-- 空字段统一显示 `-`；布尔值使用 `yes` / `no`。
-- 链接使用相对路径，如 `[items](items.md)`。
+目标：先实现安全、可读、无外部依赖的静态 HTML，不做复杂交互。
 
-验收：
+实现项：
 
-- 单元测试覆盖 index renderer、单表 renderer、空表、无 index / 无 relations、中文描述、Markdown escape。
-- 输出顺序 deterministic，可用于 snapshot/golden 测试。
-- 不接入 build/export task；renderer 可由测试直接调用。
+- [ ] 新增 HTML renderer 模块，例如 `src/generator/schema_doc/html.rs`。
+- [ ] 实现最小 HTML escape helper，覆盖 `&`、`<`、`>`、`"`、`'`。
+- [ ] 实现通用页面骨架：`<!doctype html>`、`<html lang="zh-CN">`、`<meta charset="utf-8">`、`<title>`。
+- [ ] 内联一份小型 CSS，保证表格、badge、code、目录、summary card 可读。
+- [ ] 不引入外部 JS；如需要折叠，优先使用 `<details>/<summary>`。
+- [ ] 所有 Meta desc、table name、field name、validator summary、asset kind 等文本统一走 escape。
 
-建议提交：`feat(schema-doc): render markdown documentation`
+测试项：
 
-## [x] Step 5：实现输出路径规划与 ArtifactSink 写入
+- [ ] unit test：HTML escape 覆盖特殊字符与引号。
+- [ ] unit test：table / field desc 中的 `<script>` 会被 escape，不会原样输出为标签。
+- [ ] snapshot 或关键字段断言：HTML 包含 doctype、charset、内联 style、标题。
 
-目标：把 SchemaDoc Markdown renderer 变成可写入 artifact 的内部能力，并接入路径冲突检查所需的 output planning。
+建议提交：`feat(schema_doc): add static html renderer shell`
 
-范围：
+## [ ] Step 4：实现 HTML Index 页
 
-- 定义 `SchemaDocFormat`，P1-3 只支持 `markdown`。
-- 定义 `SchemaDocExportConfig`，至少包含 `output`、`format`、`index_file`、`title`。
-- 实现输出规划：`index.md` + 每张可见 table 的 `<table>.md`。
-- 文件名策略先使用 canonical table name + `.md`；拒绝 table 文件名冲突、路径分隔符、parent escape。
-- 使用 `ArtifactSink` 写入所有文档，支持 direct / temp_commit / dry_run 统一行为。
+目标：HTML index 页作为 Schema 文档入口，覆盖 Markdown index 的信息并提升可读性。
 
-验收：
+实现项：
 
-- 单元测试覆盖文件名规划、index_file 非纯文件名、table 文件名冲突、normalized path conflict、空文档输出。
-- dry-run 下能返回 artifact plan，不实际写文件。
-- 不接入 Project config export task 解析。
+- [ ] 顶部 header：title、project、target、effective tags、generated_at。
+- [ ] Summary cards：table 数、field 数、index 数、relation 数、asset/text 字段数。
+- [ ] Tables 总览表：Table、Kind、Description、Fields、Indexes、Relations、Visibility。
+- [ ] Table 名称链接到对应 `<table>.html`。
+- [ ] 可选 sections：Asset fields、Text/POT fields、Relation overview，复用现有 model 中的摘要信息。
+- [ ] 对 hidden / target-specific visibility 使用 badge 展示，例如 `all`、`client`、`server`、`hidden`。
 
-建议提交：`feat(schema-doc): plan and write markdown artifacts`
+测试项：
 
-## [x] Step 6：接入 GeneratorRegistry / build target planning
+- [ ] unit test：index HTML 包含 project / target / tags。
+- [ ] unit test：index HTML 表格链接到单表 HTML 文件。
+- [ ] unit test：asset/text/relation 摘要字段出现在 index HTML。
 
-目标：让用户可以在 `[[targets.exports]]` 中声明 `type = "schema_doc"`，并把它作为 MetaOnly export task 纳入 build orchestration。
+建议提交：`feat(schema_doc): render html index page`
 
-范围：
+## [ ] Step 5：实现 HTML 单表详情页
 
-- 在 generator requirements planning 中声明 `schema_doc` 不需要 Data，因此进入 MetaOnly 分支。
-- 解析 `schema_doc` export task 选项：`format`、`index_file`、`title`；暂未实现选项显式报错。
-- 在 MetaOnly 分支中构建 SchemaDoc 并写入 artifact。
-- 输出路径纳入现有 artifact conflict check，与 codegen/runtime data/validation_report 等任务互相检测冲突。
-- docs-only target 不要求 `project.input`。
+目标：单表页覆盖 Markdown 单表文档全部内容，并用 HTML 结构提升浏览效率。
 
-验收：
+实现项：
 
-- Build integration tests 覆盖合法 `schema_doc` 生成 `index.md` 与单表 `.md`。
-- 覆盖 docs-only target 无 `project.input` 也可生成文档。
-- 覆盖未知 format、未知 option、缺 output、路径冲突等错误路径。
-- 现有 runtime data/codegen build 行为不回退。
+- [ ] 页面顶部：返回 index 链接、table name、description、kind、visibility、source、row_export、primary index。
+- [ ] Fields section：字段表展示 Field、Type、Required、Default、Export、Description。
+- [ ] Field detail：展示 enum values、validator summary、asset kind/rules、text/POT 标记、struct/list element summary。
+- [ ] Indexes section：展示 index name、fields、unique、primary、ordered/preserve source order、visibility。
+- [ ] Relations section：展示 source field、target table/index/fields、cardinality、linked helper、allow_empty、visibility。
+- [ ] ObjectTable、fragment、struct/list 等特殊语义用 callout 或 badge 展示，避免只靠纯文本说明。
 
-建议提交：`feat(build): add schema_doc export task`
+测试项：
 
-## [x] Step 7：补充 asset / text(POT) / validator 摘要
+- [ ] unit test：单表 HTML 包含 Fields / Indexes / Relations sections。
+- [ ] unit test：struct/list/enum/asset/text 字段摘要可渲染。
+- [ ] unit test：FK relation 链接或文本包含 target table/index。
 
-目标：覆盖用户痛点中的 asset、POT 和规则说明，让文档不仅展示字段列表，还能解释字段用途和约束。
+建议提交：`feat(schema_doc): render html table pages`
 
-范围：
+## [ ] Step 6：Build / CLI 集成测试
 
-- Asset：识别 `asset` 字段，展示 `asset_kind`，并从 Meta/Project asset kind 中提取可静态展示的规则摘要。
-- Text/POT：识别当前 target 可见的 `text` 字段，标记理论上会被 `gettext_pot` / `pot` 聚合 exporter 抽取。
-- Validators：展示内置 validators 的简短摘要，例如 range、regex、string_length、required_when、compare、sum、monotonic。
-- 单表文档增加 `Assets`、`Text / POT`、`Validators` 或字段扩展列/详情块。
-- 保持不读取数据：不列出具体 asset reference 或 text value。
+目标：验证 `type = "schema_doc" format = "html"` 在真实 build 中生成预期 artifact。
 
-验收：
+实现项：
 
-- 单元测试覆盖 asset kind、无 asset kind 错误由 Meta validate 负责、text 字段 target filtering、内置 validator 摘要。
-- Markdown 输出包含 Assets / Text-POT 摘要，并在无相关字段时稳定显示或省略（策略固定）。
-- 与 Asset Manifest / POT exporter 的职责边界在注释或文档中清晰。
+- [ ] 在 schema_doc 相关 unit / integration 测试中增加 HTML 模式。
+- [ ] 标准工程或专用 fixture 增加一个 HTML docs target，或在现有 docs target 测试中临时覆盖 format。
+- [ ] 验证 docs-only target 不读取 data、不要求 `project.input`。
+- [ ] 验证 `--dry-run` artifact plan 中包含 HTML 文件。
+- [ ] 验证实际 build 后 `index.html` 和至少一个 table `.html` 存在且内容包含核心字段。
 
-建议提交：`feat(schema-doc): document assets text and validators`
+测试项：
 
-## [x] Step 8：补充 struct / list / fragment 展开说明
+- [ ] `cargo test schema_doc` 或等价 focused tests。
+- [ ] CLI integration：HTML schema docs target 成功构建。
+- [ ] 全量 `cargo test` 通过。
 
-目标：让复杂字段的文档更接近用户实际表结构，解释 struct/list/fragment 的书写和导出形态。
+建议提交：`test(schema_doc): cover html schema docs export`
 
-范围：
+## [ ] Step 7：同步设计与实现文档状态
 
-- 对 named struct 字段输出子字段列表或嵌套详情表。
-- 对 list 字段输出 element type display；标量数组 FK 需要在 Relations 中体现。
-- 对 fragment / polymorphic variant source mode 输出 variant/fragment 结构摘要。
-- 对 ObjectTable 中 struct expanded value 的 source path 规则增加说明。
-- `include_struct_details` 选项控制是否展开；未实现公开选项前可默认展开。
+目标：HTML 支持落地后，canonical 文档不再说 HTML 是泛泛“后续扩展”，而是明确当前支持 Markdown + HTML，且 JSON/Mermaid 不在近期目标内。
 
-验收：
+实现项：
 
-- 单元测试覆盖 nested struct、list scalar、list enum、fragment-scoped fields、ObjectTable expanded value。
-- Markdown 输出复杂字段仍保持可读，表格不被嵌套内容破坏。
-- 不改变 runtime export/codegen 语义。
+- [ ] 更新 `Documentation/Design/11-schema-doc-generator.md`：
+  - [ ] `format` 支持值改为 `markdown` / `html`。
+  - [ ] 输出结构增加 HTML 模式说明。
+  - [ ] 非目标明确 JSON Schema / Mermaid 不支持。
+- [ ] 更新 `Documentation/Design/README.md` schema / table docs 状态边界。
+- [ ] 更新相关 Implementation 文档中 `schema_doc` 当前支持格式描述。
+- [ ] 如 HTML 阅读版仍对外使用，更新 `Documentation/Design/html/index.html` 中 Schema / Table Docs 状态摘要；否则明确 canonical Markdown 为准。
 
-建议提交：`feat(schema-doc): expand complex field documentation`
+测试项：
 
-## [x] Step 9：端到端 fixtures、文档状态和 HTML 阅读版更新
+- [ ] 文档 grep 不再出现“Schema Doc 当前仅支持 Markdown，HTML / JSON Schema / Mermaid 仍是后续扩展”这类过期表述。
+- [ ] 保留“不支持 JSON Schema / Mermaid”的明确说明。
 
-目标：把 Schema / Table 文档生成器从功能闭环推进到可维护状态，并同步用户面文档状态。
+建议提交：`docs(schema_doc): document html schema docs support`
 
-范围：
+## 验收标准
 
-- 在标准工程或专用 fixture 中增加 `schema_doc` export task 示例。
-- 增加端到端测试覆盖 Markdown artifact 内容、target filtering、docs-only target、artifact conflict。
-- 更新 `Documentation/Design/11-schema-doc-generator.md` 当前状态，从 `Planned / Not implemented` 调整为 `Implemented MVP` 或 `Partial`，并准确列出实现边界。
-- 更新 `Documentation/Design/README.md` 状态矩阵、`Documentation/Design/html/index.html`、`Documentation/README.md`、`AGENTS.md` 中相关描述。
-- 如新增模块或 exporter trait，更新对应 Implementation 文档，尤其是 exporter/build 模块边界。
+完成后应满足：
 
-验收：
+- [ ] `schema_doc format = "markdown"` 行为完全兼容现有输出。
+- [ ] `schema_doc format = "html"` 生成 `index.html` 和每表 `.html`。
+- [ ] HTML 输出为自包含静态文件，无外部 CSS/JS 依赖。
+- [ ] HTML 内容覆盖 Markdown MVP 的核心 schema 信息。
+- [ ] 所有用户可控文本均 escape。
+- [ ] JSON Schema / Mermaid 不作为本轮目标进入代码或配置支持。
+- [ ] focused tests 与 `cargo test` 通过。
 
-- `cargo fmt`、相关单元测试、CLI/build integration tests、必要的 `cargo test` 通过。
-- Design / README / HTML 阅读版状态一致。
-- TODO 文档中已完成步骤可逐步标记；全部完成后判断是否删除或归档本 TODO。
+## 后续不在本文追踪的增强
 
-建议提交：`docs(schema-doc): document implemented schema docs MVP`
-
-## [ ] Step 10：后续格式扩展预留（HTML / JSON Schema / Mermaid）
-
-目标：在 Markdown MVP 稳定后，为后续平台消费和图形化关系文档扩展留出清晰边界。
-
-范围：
-
-- 评估是否新增 `html` renderer：多页/单页、自包含 CSS、无需外部 CDN。
-- 评估 `json_schema` 或自定义 schema JSON：供平台、Lark bot、Confluence 同步器消费。
-- 评估 Mermaid ER 图：从 `SchemaRelationDoc` 生成 table/FK graph。
-- 评估 Lark / Confluence Markdown 方言：链接、表格、折叠区块适配。
-- 明确这些扩展是否作为同一个 `schema_doc` format，或拆成 `schema_graph` / `schema_json` 等独立 type。
-
-验收：
-
-- 形成后续设计或 TODO，不影响 Markdown MVP 的稳定契约。
-- 如果实现任一格式，必须复用 `SchemaDoc` normalized model，并补齐 renderer 单测。
-- 未实现格式继续显式报错。
-
-建议提交：`docs(schema-doc): plan advanced documentation formats`
+- 搜索、过滤、排序等交互能力。
+- 单页 HTML bundle 模式。
+- 暗色主题 / 打印样式。
+- Lark / Confluence 发布集成。
+- JSON Schema、schema JSON、Mermaid ER 图。
