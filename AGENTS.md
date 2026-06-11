@@ -30,7 +30,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
    - [`Documentation/Design/08-asset-validation-and-manifest.md`](Documentation/Design/08-asset-validation-and-manifest.md) — Asset 引用校验、asset kind、target-aware 资源策略、导出补齐和 Asset Manifest。
    - [`Documentation/Design/09-builtin-validators.md`](Documentation/Design/09-builtin-validators.md) — 游戏常用内置 validators 设计，包括 regex、string_length、sum、monotonic、required_when、compare 与 range 增强方向。
    - [`Documentation/Design/10-designer-validation-report.md`](Documentation/Design/10-designer-validation-report.md) — 面向策划 / QA / CI 平台的 Designer Validation Report 设计与当前实现边界，包括 CLI/build 报告导出入口、HTML/Markdown/JSON/CSV 输出和 issue enrichment。
-   - [`Documentation/Design/11-schema-doc-generator.md`](Documentation/Design/11-schema-doc-generator.md) — 面向策划 / QA / 服务端 / 客户端协作的 Schema / Table 文档生成器提案，包括 `schema_doc` export task、Markdown 文档、target-aware 可见性、index/FK/asset/POT 摘要。
+   - [`Documentation/Design/11-schema-doc-generator.md`](Documentation/Design/11-schema-doc-generator.md) — 面向策划 / QA / 服务端 / 客户端协作的 Schema / Table 文档生成器提案，包括 `schema_doc` export task、Markdown / HTML 文档、target-aware 可见性、index/FK/asset/POT 摘要。
 5. For implementation changes, read [`Documentation/Implementation/01-module-outline.md`](Documentation/Implementation/01-module-outline.md) first, then the module document that matches the source area being changed.
 6. For engineering practice, use [`Documentation/Tech/`](Documentation/Tech/):
    - [`Documentation/Tech/development-environment.md`](Documentation/Tech/development-environment.md) — required Rust core toolchain, optional cross-language harness tools, runtime adapter dependencies, and local/full-CI environment guidance.
