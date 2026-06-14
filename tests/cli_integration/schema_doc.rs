@@ -380,3 +380,50 @@ fn schema_doc_rejects_unknown_format() {
         .failure()
         .stderr(predicate::str::contains("unsupported schema_doc format"));
 }
+
+#[test]
+fn schema_doc_path_conflict_fails_before_writing_files() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let out_dir = temp_dir.path().join("out/conflict");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                [project]
+                name = "schema_project"
+
+                [[tables]]
+                name = "index"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[targets]]
+                name = "conflict"
+
+                [[targets.exports]]
+                output = "{}"
+                type = "schema_doc"
+                format = "markdown"
+            "#,
+            out_dir.display(),
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "conflict",
+    ]);
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("schema_doc output path"));
+    assert!(!out_dir.join("index.md").exists());
+}

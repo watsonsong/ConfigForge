@@ -1581,6 +1581,22 @@ fn rejects_invalid_schema_doc_options_and_duplicate_paths() {
         Some("plain .html file name")
     );
 
+    let error = schema_doc_export_config_from_options(
+        PathBuf::from("out"),
+        BTreeMap::from([(
+            "index_file".to_owned(),
+            toml::Value::String("../index.md".to_owned()),
+        )]),
+    )
+    .unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
+    assert_eq!(diagnostic.current_value.as_deref(), Some("../index.md"));
+    assert_eq!(
+        diagnostic.expected.as_deref(),
+        Some("plain file name without path separators")
+    );
+
     let doc = SchemaDoc {
         metadata: SchemaDocMetadata {
             title: "Schema".to_owned(),
@@ -1639,6 +1655,59 @@ fn rejects_invalid_schema_doc_options_and_duplicate_paths() {
         diagnostic
             .current_value
             .is_some_and(|value| value.contains("index.md"))
+    );
+
+    let bad_table_doc = SchemaDoc {
+        metadata: SchemaDocMetadata {
+            title: "Schema".to_owned(),
+            project_name: None,
+            project_path: None,
+            target: None,
+            target_tags: Vec::new(),
+            generated_at: "now".to_owned(),
+            config_forge_version: "test".to_owned(),
+        },
+        relationship_graph: super::model::SchemaRelationshipGraph {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        },
+        source_graph: SchemaSourceGraph {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        },
+        tables: vec![SchemaTableDoc {
+            name: "../items".to_owned(),
+            kind: "CollectionTable".to_owned(),
+            description: None,
+            source_summary: None,
+            visibility: "all".to_owned(),
+            row_export_summary: "no".to_owned(),
+            primary_index: None,
+            fields: Vec::new(),
+            indexes: Vec::new(),
+            relations: Vec::new(),
+            incoming_relations: Vec::new(),
+            fragment_graph: None,
+            asset_fields: Vec::new(),
+            text_fields: Vec::new(),
+            validators: Vec::new(),
+        }],
+    };
+    let error = schema_doc_output_paths(&bad_table_doc, &config).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
+    assert_eq!(diagnostic.current_value.as_deref(), Some("../items.md"));
+
+    let mut duplicate_doc = bad_table_doc.clone();
+    duplicate_doc.tables[0].name = "items".to_owned();
+    duplicate_doc.tables.push(duplicate_doc.tables[0].clone());
+    let error = schema_doc_output_paths(&duplicate_doc, &config).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_ARTIFACT_PATH_COLLISION);
+    assert!(
+        diagnostic
+            .current_value
+            .is_some_and(|value| value.contains("items.md"))
     );
 }
 
