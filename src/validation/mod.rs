@@ -8,6 +8,7 @@ mod defaults;
 mod diagnostic;
 mod entry;
 mod foreign_key;
+pub(crate) mod key_policy;
 mod registry;
 mod report;
 mod struct_value;

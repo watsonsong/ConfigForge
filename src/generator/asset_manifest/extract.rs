@@ -9,6 +9,7 @@ use crate::{
         LinkedField, LinkedFieldMeta, LinkedStructType, LinkedTableMeta, PrimitiveFieldType,
         TableKind, TargetTags,
     },
+    validation::key_policy::raw_record_key_or_row_fallback,
 };
 
 use super::{AssetManifestEntry, AssetReferenceEntry, options::AssetManifestOptions};
@@ -70,7 +71,7 @@ fn extract_row_asset_references(
     target_tags: &TargetTags,
     options: &AssetManifestOptions,
 ) {
-    let record_key = record_key(table_meta, table, row_index, row);
+    let record_key = raw_record_key_or_row_fallback(table_meta, table, row_index, row);
     let source = source_location(table, row_index).filter(|_| options.include_source_location);
     for field in table_meta
         .fields
@@ -235,36 +236,6 @@ pub(super) fn build_manifest_entries(
             referenced_by: referenced_by.into_iter().collect(),
         })
         .collect()
-}
-
-fn record_key(
-    table_meta: &LinkedTableMeta<'_>,
-    table: &DataTable,
-    row_index: usize,
-    row: &DataRow,
-) -> String {
-    match table_meta.meta.kind {
-        TableKind::Object => "<object>".to_owned(),
-        TableKind::Collection => table_meta
-            .primary_index()
-            .and_then(|index| {
-                index
-                    .fields
-                    .iter()
-                    .map(|field| {
-                        row.get(&field.meta.name)
-                            .map(|value| format!("{}={value}", field.meta.name))
-                    })
-                    .collect::<Option<Vec<_>>>()
-            })
-            .map(|parts| parts.join(","))
-            .unwrap_or_else(|| {
-                table
-                    .row_source(row_index)
-                    .map(|source| format!("row={}", source.source_row_number))
-                    .unwrap_or_else(|| format!("row={}", row_index + 1))
-            }),
-    }
 }
 
 fn source_location(table: &DataTable, row_index: usize) -> Option<String> {

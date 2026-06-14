@@ -14,7 +14,10 @@ use crate::{
     },
 };
 
-use crate::validation::ExportTableView;
+use crate::validation::{
+    ExportTableView,
+    key_policy::{KeyPolicy, key_value_for_view},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ScalarFieldKind {
@@ -357,15 +360,12 @@ pub(super) fn field_value(
     visible_row_index: usize,
     field_name: &str,
 ) -> String {
-    table_view
-        .resolved_value(visible_row_index, field_name)
-        .and_then(|value| value.scalar_export_string())
-        .or_else(|| {
-            table_view
-                .raw_cell(visible_row_index, field_name)
-                .map(str::to_owned)
-        })
-        .unwrap_or_default()
+    key_value_for_view(
+        KeyPolicy::ScalarExport,
+        table_view,
+        visible_row_index,
+        field_name,
+    )
 }
 
 pub(super) fn is_empty_value(value: &str) -> bool {

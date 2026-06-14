@@ -17,6 +17,7 @@ use crate::{
 };
 
 use super::diagnostic::{ValidationReport, error_issues_from_result, validation_error_message};
+use super::key_policy::raw_cell_key;
 use super::struct_value::{
     validate_struct_child_path, validate_struct_field_value_for_resolved_row,
     validate_struct_field_value_for_row, validate_struct_occurrence_value,
@@ -511,15 +512,7 @@ fn validate_index_uniqueness(
 
     let mut seen = HashSet::new();
     for (row_index, row) in table.rows.iter().enumerate() {
-        let key = index
-            .fields
-            .iter()
-            .map(|field| {
-                row.get(&field.meta.name)
-                    .map(String::as_str)
-                    .unwrap_or_default()
-            })
-            .collect::<Vec<_>>();
+        let key = raw_cell_key(row, &index.fields);
         if !seen.insert(key.clone()) {
             let message = format!(
                 "table `{}` row {} index `{}` duplicates unique key `{:?}`",
@@ -562,15 +555,7 @@ fn validate_index_uniqueness_view(
         let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
             continue;
         };
-        let key = index
-            .fields
-            .iter()
-            .map(|field| {
-                row.get(&field.meta.name)
-                    .map(String::as_str)
-                    .unwrap_or_default()
-            })
-            .collect::<Vec<_>>();
+        let key = raw_cell_key(row, &index.fields);
         if !seen.insert(key.clone()) {
             let row_number = visible_row
                 .source_row_number

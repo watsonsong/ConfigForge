@@ -149,7 +149,7 @@ resolved value 或显式 raw string。
 - 旧 raw-only case 不发生 silent behavior change；需要变更的行为在 Design/Implementation 中补充说明。
 - 运行 `cargo test validation::builtins` 与相关 CLI validation tests。
 
-## [ ] Step 4：单独处理 FK、index、record key 的 key policy
+## [x] Step 4：单独处理 FK、index、record key 的 key policy
 
 目标：把“数据值验证”与“key 字符串语义”分开，避免将 FK/index key 机械迁移成 typed canonical
 value 导致兼容性问题。

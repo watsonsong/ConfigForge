@@ -7,6 +7,7 @@ use crate::{
     Result,
     data::{DataResolver, DataTable, DataValue, ResolvedValue, ScalarValue},
     meta::{LinkedFieldMeta, LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags},
+    validation::key_policy::raw_record_key,
 };
 
 use super::{
@@ -65,7 +66,7 @@ fn extract_collection_entries(
                 "Check gettext_pot extraction input after data resolution.",
             )
         })?;
-        let record_key = record_key(table_meta, table.rows.get(*row_index));
+        let record_key = raw_record_key(table_meta, table.rows.get(*row_index));
         for field in table_meta
             .fields
             .iter()
@@ -201,23 +202,6 @@ fn scalar_text(value: &ResolvedValue) -> Result<Option<String>> {
         )),
         _ => Ok(None),
     }
-}
-
-fn record_key(
-    table_meta: &LinkedTableMeta<'_>,
-    row: Option<&BTreeMap<String, String>>,
-) -> Option<String> {
-    let row = row?;
-    let index = table_meta.primary_index()?;
-    let parts = index
-        .fields
-        .iter()
-        .map(|field| {
-            row.get(&field.meta.name)
-                .map(|value| format!("{}={}", field.meta.name, value))
-        })
-        .collect::<Option<Vec<_>>>()?;
-    Some(parts.join(","))
 }
 
 fn msgctxt(table: &str, field_path: &str, mode: PotContextMode) -> Option<String> {

@@ -19,7 +19,10 @@ use crate::{
     },
 };
 
-use super::{ExportTableView, ExportValidationView};
+use super::{
+    ExportTableView, ExportValidationView,
+    key_policy::{raw_cell_key, raw_cell_value},
+};
 
 fn foreign_key_error(
     source_table_meta: &LinkedTableMeta<'_>,
@@ -401,14 +404,14 @@ impl ForeignKeyTargetKeySet {
             let field = &target_index.fields[0];
             let mut keys = HashSet::new();
             for_each_target_row(target_table, target_table_view, |row| {
-                keys.insert(foreign_key_field_value(row, field));
+                keys.insert(raw_cell_value(row, &field.meta.name));
             });
             return Self::Single(keys);
         }
 
         let mut keys = HashSet::new();
         for_each_target_row(target_table, target_table_view, |row| {
-            keys.insert(foreign_key_row_key(row, &target_index.fields));
+            keys.insert(raw_cell_key(row, &target_index.fields));
         });
         Self::Composite(keys)
     }
@@ -532,7 +535,7 @@ fn validate_single_foreign_key_row(
     foreign_key: &LinkedForeignKeyMeta<'_>,
     target_keys: &ForeignKeyTargetKeySet,
 ) -> Result<()> {
-    let key = foreign_key_field_value(row, &foreign_key.fields[0]);
+    let key = raw_cell_value(row, &foreign_key.fields[0].meta.name);
     if key.trim().is_empty() {
         if foreign_key.allow_empty {
             return Ok(());
@@ -578,7 +581,7 @@ fn validate_composite_foreign_key_row(
     foreign_key: &LinkedForeignKeyMeta<'_>,
     target_keys: &ForeignKeyTargetKeySet,
 ) -> Result<()> {
-    let key = foreign_key_row_key(row, &foreign_key.fields);
+    let key = raw_cell_key(row, &foreign_key.fields);
     let empty_count = key.iter().filter(|value| value.trim().is_empty()).count();
     // All-empty keys can mean "no relationship"; partial composite keys are always ambiguous.
     if empty_count == key.len() {
@@ -787,21 +790,6 @@ fn foreign_key_list_source_field<'a, 'meta>(
         .fields
         .iter()
         .find(|field| matches!(field.linked_field, LinkedField::List(_)))
-}
-
-fn foreign_key_field_value(row: &DataRow, field: &LinkedFieldMeta<'_>) -> String {
-    row.get(&field.meta.name)
-        .map(String::as_str)
-        .unwrap_or_default()
-        .to_owned()
-}
-
-fn foreign_key_row_key(row: &DataRow, fields: &[LinkedFieldMeta<'_>]) -> Vec<String> {
-    // FK keys preserve raw cell strings to avoid target-dependent typed canonicalization surprises.
-    fields
-        .iter()
-        .map(|field| foreign_key_field_value(row, field))
-        .collect()
 }
 
 #[cfg(test)]
