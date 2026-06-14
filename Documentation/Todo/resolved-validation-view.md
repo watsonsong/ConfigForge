@@ -171,7 +171,7 @@ value 导致兼容性问题。
 - index / record key diagnostics 仍指向正确 cell。
 - 运行 `cargo test validation::foreign_key`、`cargo test --test cli_integration target_filtering fixture_exports`。
 
-## [ ] Step 5：收敛 asset validation、report、manifest/POT/binary 的 raw 剩余点
+## [x] Step 5：收敛 asset validation、report、manifest/POT/binary 的 raw 剩余点
 
 目标：让 data-backed 产物与 report enrichment 共享 resolved view / source trace，不再各自重复解释 raw
 cell。

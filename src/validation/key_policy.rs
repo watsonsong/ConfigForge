@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    data::{DataRow, DataTable},
-    meta::{LinkedFieldMeta, LinkedTableMeta, TableKind},
+    data::{DataRow, DataTable, DataValue, ResolvedRow, ResolvedValue},
+    meta::{LinkedFieldMeta, LinkedTableMeta, TableKind, TargetTags},
 };
 
 use super::ExportTableView;
@@ -51,6 +51,67 @@ pub(crate) fn raw_cell_value(row: &DataRow, field_name: &str) -> String {
         .map(String::as_str)
         .unwrap_or_default()
         .to_owned()
+}
+
+pub(crate) fn scalar_export_value(
+    resolved_value: Option<&ResolvedValue>,
+    raw_cell: Option<&str>,
+) -> String {
+    resolved_value
+        .and_then(|value| value.scalar_export_string())
+        .or_else(|| raw_cell.map(str::to_owned))
+        .unwrap_or_default()
+}
+
+pub(crate) fn resolved_path_value<'a>(
+    resolved_row: Option<&'a ResolvedRow>,
+    field_path: &str,
+) -> Option<&'a ResolvedValue> {
+    let row = resolved_row?;
+    if let Some(value) = row.get(field_path) {
+        return Some(value);
+    }
+
+    let mut segments = field_path.split('.');
+    let first = segments.next()?;
+    let mut value = row.get(first)?;
+    for segment in segments {
+        let DataValue::Struct(children) = &value.value else {
+            return None;
+        };
+        value = children.get(segment)?;
+    }
+    Some(value)
+}
+
+pub(crate) fn target_visible_row_indices(
+    table_meta: &LinkedTableMeta<'_>,
+    table: &DataTable,
+    target_tags: &TargetTags,
+) -> Vec<usize> {
+    match table_meta.meta.kind {
+        TableKind::Collection => table
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                table_meta
+                    .meta
+                    .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
+            })
+            .map(|(row_index, _)| row_index)
+            .collect(),
+        TableKind::Object => table
+            .rows
+            .first()
+            .filter(|row| {
+                table_meta
+                    .meta
+                    .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
+            })
+            .map(|_| vec![0])
+            .unwrap_or_default(),
+    }
 }
 
 pub(crate) fn raw_record_key(

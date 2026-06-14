@@ -8,6 +8,7 @@ use crate::{
     data::{ArrayElementValue, DataResolver, DataTable, DataValue, ResolvedValue, VectorValue},
     diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{LinkedField, LinkedFieldMeta, LinkedTableMeta, TableKind, TargetTags},
+    validation::key_policy::target_visible_row_indices,
 };
 
 use super::{ExportedTable, ExportedTablePayload, ExportedValue, model::ExportedTableMeta};
@@ -30,17 +31,7 @@ fn build_exported_collection_payload(
     table: &DataTable,
     target_tags: &TargetTags,
 ) -> Result<ExportedTable> {
-    let visible_row_indices = table
-        .rows
-        .iter()
-        .enumerate()
-        .filter(|(_, row)| {
-            table_meta
-                .meta
-                .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
-        })
-        .map(|(row_index, _)| row_index)
-        .collect::<Vec<_>>();
+    let visible_row_indices = target_visible_row_indices(table_meta, table, target_tags);
     let resolved_table = DataResolver::resolve_table_rows(
         table_meta,
         table,
@@ -157,13 +148,7 @@ fn build_exported_object_payload(
         ));
     }
 
-    let Some(row) = table.rows.first() else {
-        return Ok(BTreeMap::new());
-    };
-    if !table_meta
-        .meta
-        .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
-    {
+    if target_visible_row_indices(table_meta, table, target_tags).is_empty() {
         return Ok(BTreeMap::new());
     }
     let resolved_table = DataResolver::resolve_table(table_meta, table, Some(target_tags))?;

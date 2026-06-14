@@ -15,6 +15,8 @@ use crate::{
 
 use rayon::prelude::*;
 
+use super::key_policy;
+
 pub struct ValidationContext<'meta, 'data> {
     pub linked_meta: &'meta LinkedMetaModel<'meta>,
     pub target_tags: Option<TargetTags>,
@@ -277,6 +279,14 @@ impl<'meta, 'data> ExportTableView<'meta, 'data> {
             .and_then(|row| row.get(field_name))
     }
 
+    pub fn resolved_path_value(
+        &self,
+        visible_row_index: usize,
+        field_path: &str,
+    ) -> Option<&ResolvedValue> {
+        key_policy::resolved_path_value(self.visible_resolved_row(visible_row_index), field_path)
+    }
+
     pub fn raw_cell(&self, visible_row_index: usize, field_path: &str) -> Option<&'data str> {
         self.visible_raw_row(visible_row_index)
             .and_then(|row| row.get(field_path).map(String::as_str))
@@ -290,7 +300,7 @@ impl<'meta, 'data> ExportTableView<'meta, 'data> {
         let visible_row = self.visible_rows.get(visible_row_index)?;
         let cell_source = self.table.cell_source(visible_row.row_index, field_path);
         let resolved_trace = self
-            .resolved_value(visible_row_index, field_path)
+            .resolved_path_value(visible_row_index, field_path)
             .map(|value| &value.source);
         if cell_source.is_none() && resolved_trace.is_none() {
             return None;

@@ -14,6 +14,7 @@ use crate::{
         LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags,
     },
     runtime_contract::binary_schema_revision,
+    validation::key_policy::target_visible_row_indices,
 };
 
 use super::wire::{
@@ -59,19 +60,8 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
     }
 
     fn write_collection(&mut self, table: &DataTable) -> Result<()> {
-        let visible_row_indices = table
-            .rows
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| {
-                self.table_meta
-                    .meta
-                    .is_row_exported_for(self.target_tags, |field| {
-                        row.get(field).map(String::as_str)
-                    })
-            })
-            .map(|(row_index, _)| row_index)
-            .collect::<Vec<_>>();
+        let visible_row_indices =
+            target_visible_row_indices(self.table_meta, table, self.target_tags);
         let resolved_table = DataResolver::resolve_table_rows(
             self.table_meta,
             table,
@@ -116,14 +106,7 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
             ));
         }
 
-        let Some(row) = table.rows.first() else {
-            return Ok(());
-        };
-        if !self
-            .table_meta
-            .meta
-            .is_row_exported_for(self.target_tags, |field| row.get(field).map(String::as_str))
-        {
+        if target_visible_row_indices(self.table_meta, table, self.target_tags).is_empty() {
             if self.has_visible_slots() {
                 return Err(binary_value_error(
                     None::<&str>,

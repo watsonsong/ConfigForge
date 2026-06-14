@@ -7,7 +7,7 @@ use crate::{
     Result,
     data::{DataResolver, DataTable, DataValue, ResolvedValue, ScalarValue},
     meta::{LinkedFieldMeta, LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags},
-    validation::key_policy::raw_record_key,
+    validation::key_policy::{raw_record_key, target_visible_row_indices},
 };
 
 use super::{
@@ -35,17 +35,7 @@ fn extract_collection_entries(
     target_tags: &TargetTags,
     options: &GettextPotOptions,
 ) -> Result<Vec<TextExtractionEntry>> {
-    let visible_row_indices = table
-        .rows
-        .iter()
-        .enumerate()
-        .filter(|(_, row)| {
-            table_meta
-                .meta
-                .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
-        })
-        .map(|(row_index, _)| row_index)
-        .collect::<Vec<_>>();
+    let visible_row_indices = target_visible_row_indices(table_meta, table, target_tags);
     let resolved_table = DataResolver::resolve_table_rows(
         table_meta,
         table,
@@ -92,13 +82,7 @@ fn extract_object_entries(
     target_tags: &TargetTags,
     options: &GettextPotOptions,
 ) -> Result<Vec<TextExtractionEntry>> {
-    let Some(row) = table.rows.first() else {
-        return Ok(Vec::new());
-    };
-    if !table_meta
-        .meta
-        .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
-    {
+    if target_visible_row_indices(table_meta, table, target_tags).is_empty() {
         return Ok(Vec::new());
     }
     let resolved_table = DataResolver::resolve_table(table_meta, table, Some(target_tags))?;

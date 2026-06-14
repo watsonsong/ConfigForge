@@ -4,12 +4,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    data::{DataRow, DataTable},
+    data::{DataResolver, DataRow, DataTable, ResolvedRow},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedStructType, LinkedTableMeta, PrimitiveFieldType,
         TableKind, TargetTags,
     },
-    validation::key_policy::raw_record_key_or_row_fallback,
+    validation::key_policy::{
+        raw_record_key_or_row_fallback, resolved_path_value, scalar_export_value,
+        target_visible_row_indices,
+    },
 };
 
 use super::{AssetManifestEntry, AssetReferenceEntry, options::AssetManifestOptions};
@@ -21,38 +24,47 @@ pub(super) fn extract_table_asset_references(
     target_tags: &TargetTags,
     options: &AssetManifestOptions,
 ) {
+    let visible_row_indices = target_visible_row_indices(table_meta, table, target_tags);
+    let resolved_table = DataResolver::resolve_table_rows(
+        table_meta,
+        table,
+        Some(target_tags),
+        visible_row_indices.iter().copied(),
+    )
+    .ok();
+
     match table_meta.meta.kind {
         TableKind::Collection => {
-            for (row_index, row) in table.rows.iter().enumerate() {
-                if !table_meta
-                    .meta
-                    .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
-                {
+            for (visible_row_index, row_index) in visible_row_indices.iter().enumerate() {
+                let Some(row) = table.rows.get(*row_index) else {
                     continue;
-                }
+                };
                 extract_row_asset_references(
                     references,
                     table_meta,
                     table,
-                    row_index,
+                    *row_index,
                     row,
+                    resolved_table
+                        .as_ref()
+                        .and_then(|resolved_table| resolved_table.rows.get(visible_row_index)),
                     target_tags,
                     options,
                 );
             }
         }
         TableKind::Object => {
-            if let Some(row) = table.rows.first() {
-                if table_meta
-                    .meta
-                    .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
-                {
+            if !visible_row_indices.is_empty() {
+                if let Some(row) = table.rows.first() {
                     extract_row_asset_references(
                         references,
                         table_meta,
                         table,
                         0,
                         row,
+                        resolved_table
+                            .as_ref()
+                            .and_then(|resolved_table| resolved_table.rows.first()),
                         target_tags,
                         options,
                     );
@@ -68,6 +80,7 @@ fn extract_row_asset_references(
     table: &DataTable,
     row_index: usize,
     row: &DataRow,
+    resolved_row: Option<&ResolvedRow>,
     target_tags: &TargetTags,
     options: &AssetManifestOptions,
 ) {
@@ -82,6 +95,7 @@ fn extract_row_asset_references(
             references,
             table_meta.meta.name.as_str(),
             row,
+            resolved_row,
             field.meta.name.as_str(),
             field,
             &record_key,
@@ -104,6 +118,7 @@ fn extract_row_asset_references(
             let context = AssetExtractionContext {
                 table_name: table_meta.meta.name.as_str(),
                 row,
+                resolved_row,
                 record_key: &record_key,
                 source: source.as_deref(),
                 target_tags,
@@ -124,6 +139,7 @@ fn extract_row_asset_references(
                     references,
                     table_meta.meta.name.as_str(),
                     row,
+                    resolved_row,
                     &field_path,
                     field,
                     &record_key,
@@ -138,6 +154,7 @@ fn extract_row_asset_references(
 struct AssetExtractionContext<'a> {
     table_name: &'a str,
     row: &'a DataRow,
+    resolved_row: Option<&'a ResolvedRow>,
     record_key: &'a str,
     source: Option<&'a str>,
     target_tags: &'a TargetTags,
@@ -162,6 +179,7 @@ fn extract_struct_asset_fields(
                 references,
                 context.table_name,
                 context.row,
+                context.resolved_row,
                 &field_path,
                 field,
                 context.record_key,
@@ -175,6 +193,7 @@ fn extract_asset_field_path(
     references: &mut Vec<AssetManifestEntry>,
     table_name: &str,
     row: &DataRow,
+    resolved_row: Option<&ResolvedRow>,
     field_path: &str,
     field: &LinkedFieldMeta<'_>,
     record_key: &str,
@@ -186,9 +205,10 @@ fn extract_asset_field_path(
     let Some(asset_kind) = field.meta.asset_kind.as_deref() else {
         return;
     };
-    let Some(value) = row.get(field_path).map(String::as_str) else {
-        return;
-    };
+    let value = scalar_export_value(
+        resolved_path_value(resolved_row, field_path),
+        raw_cell(row, field_path),
+    );
     let path = value.trim();
     if path.is_empty() {
         return;
@@ -203,6 +223,10 @@ fn extract_asset_field_path(
             source: source.map(ToOwned::to_owned),
         }],
     });
+}
+
+fn raw_cell<'a>(row: &'a DataRow, field_path: &str) -> Option<&'a str> {
+    row.get(field_path).map(String::as_str)
 }
 
 pub(super) fn build_manifest_entries(

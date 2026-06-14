@@ -4,15 +4,17 @@
 use crate::{
     ConfigForgeError,
     asset::AssetResolver,
-    data::{DataRow, DataTable},
+    data::{DataResolver, DataRow, DataTable, ResolvedRow},
     diagnostic::{DiagnosticLocation, code},
     meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags},
     project::AssetsConfig,
 };
 
 use super::{
-    ExportTableView, ValidationIssue, ValidationReport, diagnostic::error_issues_from_result,
+    ExportTableView, ValidationIssue, ValidationReport,
+    diagnostic::error_issues_from_result,
     fragment_field_key,
+    key_policy::{resolved_path_value, scalar_export_value},
 };
 
 pub(super) fn validate_assets_for_target(
@@ -68,14 +70,19 @@ pub(super) fn validate_assets_full(
         let Some(table) = data_set.table(&table_meta.meta.name) else {
             continue;
         };
+        let resolved_table = DataResolver::resolve_table(table_meta, table, None).ok();
         for (row_index, row) in table.rows.iter().enumerate() {
             let row_number = row_number(table, row_index);
+            let resolved_row = resolved_table
+                .as_ref()
+                .and_then(|resolved_table| resolved_table.rows.get(row_index));
             for field in &table_meta.fields {
                 validate_asset_field_path(
                     &resolver,
                     &target_tags,
                     table_meta.meta.name.as_str(),
                     row,
+                    resolved_row,
                     row_number,
                     field.meta.name.as_str(),
                     field,
@@ -96,6 +103,7 @@ pub(super) fn validate_assets_full(
                         &target_tags,
                         table_meta.meta.name.as_str(),
                         row,
+                        resolved_row,
                         row_number,
                         fragment.meta.name.as_str(),
                         struct_type,
@@ -112,6 +120,7 @@ pub(super) fn validate_assets_full(
                             &target_tags,
                             table_meta.meta.name.as_str(),
                             row,
+                            resolved_row,
                             row_number,
                             &field_path,
                             field,
@@ -132,10 +141,11 @@ fn validate_table_assets(
     target_tags: &TargetTags,
     report: &mut ValidationReport,
 ) {
-    for visible_row in &table_view.visible_rows {
+    for (visible_row_index, visible_row) in table_view.visible_rows.iter().enumerate() {
         let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
             continue;
         };
+        let resolved_row = table_view.visible_resolved_row(visible_row_index);
         let row_number = visible_row
             .source_row_number
             .unwrap_or(visible_row.row_index + 1);
@@ -151,6 +161,7 @@ fn validate_table_assets(
                 target_tags,
                 table_view.meta.meta.name.as_str(),
                 row,
+                resolved_row,
                 row_number,
                 field.meta.name.as_str(),
                 field,
@@ -176,6 +187,7 @@ fn validate_table_assets(
                     target_tags,
                     table_view.meta.meta.name.as_str(),
                     row,
+                    resolved_row,
                     row_number,
                     fragment.meta.name.as_str(),
                     struct_type,
@@ -193,6 +205,7 @@ fn validate_table_assets(
                         target_tags,
                         table_view.meta.meta.name.as_str(),
                         row,
+                        resolved_row,
                         row_number,
                         &field_path,
                         field,
@@ -216,6 +229,7 @@ fn validate_struct_asset_fields(
     target_tags: &TargetTags,
     table_name: &str,
     row: &DataRow,
+    resolved_row: Option<&ResolvedRow>,
     row_number: usize,
     parent_path: &str,
     struct_type: &LinkedStructType<'_>,
@@ -232,6 +246,7 @@ fn validate_struct_asset_fields(
                 target_tags,
                 table_name,
                 row,
+                resolved_row,
                 row_number,
                 &field_path,
                 child_struct,
@@ -242,6 +257,7 @@ fn validate_struct_asset_fields(
                 target_tags,
                 table_name,
                 row,
+                resolved_row,
                 row_number,
                 &field_path,
                 field,
@@ -256,6 +272,7 @@ fn validate_asset_field_path(
     target_tags: &TargetTags,
     table_name: &str,
     row: &DataRow,
+    resolved_row: Option<&ResolvedRow>,
     row_number: usize,
     field_path: &str,
     field: &LinkedFieldMeta<'_>,
@@ -270,11 +287,14 @@ fn validate_asset_field_path(
     let Some(asset_kind) = field.meta.asset_kind.as_deref() else {
         return;
     };
-    let value = row.get(field_path).map(String::as_str).unwrap_or_default();
+    let value = scalar_export_value(
+        resolved_path_value(resolved_row, field_path),
+        raw_cell(row, field_path),
+    );
     if value.trim().is_empty() {
         return;
     }
-    if let Err(error) = resolver.resolve_for_target(asset_kind, value, target_tags) {
+    if let Err(error) = resolver.resolve_for_target(asset_kind, &value, target_tags) {
         report.extend(asset_issues_from_error(
             error,
             DiagnosticLocation {
@@ -284,10 +304,14 @@ fn validate_asset_field_path(
                 ..DiagnosticLocation::default()
             },
             target_tags,
-            Some(value.to_owned()),
+            Some(value),
             Some(format!("valid `{asset_kind}` asset reference")),
         ));
     }
+}
+
+fn raw_cell<'a>(row: &'a DataRow, field_path: &str) -> Option<&'a str> {
+    row.get(field_path).map(String::as_str)
 }
 
 fn asset_issues_from_error(

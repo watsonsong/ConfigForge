@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticSeverity, Result,
-    data::{DataResolver, DataRow, DataTable, ResolvedTable},
+    data::{DataResolver, DataRow, DataTable, ResolvedRow, ResolvedTable},
     diagnostic::{
         DiagnosticLocation,
         code::{CF_DATA_DUPLICATE_KEY, CF_DATA_INVALID_TYPE, CF_DATA_MISSING_REQUIRED_FIELD},
@@ -17,7 +17,7 @@ use crate::{
 };
 
 use super::diagnostic::{ValidationReport, error_issues_from_result, validation_error_message};
-use super::key_policy::raw_cell_key;
+use super::key_policy::{raw_cell_key, resolved_path_value, scalar_export_value};
 use super::struct_value::{
     validate_struct_child_path, validate_struct_field_value_for_resolved_row,
     validate_struct_field_value_for_row, validate_struct_occurrence_value,
@@ -107,7 +107,7 @@ pub fn validate_normalized_table_with_report(
         &mut report,
         "fragment.value",
         "fragment",
-        validate_fragment_values(meta, table, None),
+        validate_fragment_values(meta, table, resolved_table.as_ref(), None),
         DiagnosticLocation {
             table: Some(meta.meta.name.clone()),
             ..DiagnosticLocation::default()
@@ -899,6 +899,7 @@ fn is_expanded_vector_component(field: &LinkedFieldMeta<'_>, component: &str) ->
 fn validate_fragment_values(
     meta: &LinkedTableMeta<'_>,
     table: &DataTable,
+    resolved_table: Option<&ResolvedTable>,
     target_tags: Option<&TargetTags>,
 ) -> Result<()> {
     for (row_index, row) in table.rows.iter().enumerate() {
@@ -911,7 +912,14 @@ fn validate_fragment_values(
             .map(|source| source.fragments.as_slice())
             .unwrap_or(&[]);
 
-        validate_fragment_values_for_row(meta, row, row_number, active_fragments, target_tags)?;
+        validate_fragment_values_for_row(
+            meta,
+            row,
+            resolved_table.and_then(|resolved_table| resolved_table.rows.get(row_index)),
+            row_number,
+            active_fragments,
+            target_tags,
+        )?;
     }
     Ok(())
 }
@@ -921,7 +929,7 @@ fn validate_fragment_values_view(
     table_view: &ExportTableView<'_, '_>,
     target_tags: Option<&TargetTags>,
 ) -> Result<()> {
-    for visible_row in &table_view.visible_rows {
+    for (visible_row_index, visible_row) in table_view.visible_rows.iter().enumerate() {
         let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
             continue;
         };
@@ -934,7 +942,14 @@ fn validate_fragment_values_view(
             .map(|source| source.fragments.as_slice())
             .unwrap_or(&[]);
 
-        validate_fragment_values_for_row(meta, row, row_number, active_fragments, target_tags)?;
+        validate_fragment_values_for_row(
+            meta,
+            row,
+            table_view.visible_resolved_row(visible_row_index),
+            row_number,
+            active_fragments,
+            target_tags,
+        )?;
     }
     Ok(())
 }
@@ -942,6 +957,7 @@ fn validate_fragment_values_view(
 fn validate_fragment_values_for_row(
     meta: &LinkedTableMeta<'_>,
     row: &DataRow,
+    resolved_row: Option<&ResolvedRow>,
     row_number: usize,
     active_fragments: &[String],
     target_tags: Option<&TargetTags>,
@@ -1066,7 +1082,10 @@ fn validate_fragment_values_for_row(
             validate_supported_field_type(meta, field)?;
             let field_path =
                 fragment_field_key(fragment.meta.name.as_str(), field.meta.name.as_str());
-            let value = row.get(&field_path).map(String::as_str).unwrap_or_default();
+            let value = scalar_export_value(
+                resolved_path_value(resolved_row, &field_path),
+                row.get(&field_path).map(String::as_str),
+            );
             if field.meta.required && value.trim().is_empty() {
                 return Err(missing_required_field_error(
                     format!(
@@ -1079,7 +1098,7 @@ fn validate_fragment_values_for_row(
                         source_row_number: Some(row_number),
                         ..DiagnosticLocation::default()
                     },
-                    Some(value.to_owned()),
+                    Some(value.clone()),
                 ));
             }
             if value.trim().is_empty() {
@@ -1091,7 +1110,7 @@ fn validate_fragment_values_for_row(
             {
                 continue;
             }
-            validate_value_type_at_row_number(meta, field, value, row_number, target_tags)?;
+            validate_value_type_at_row_number(meta, field, &value, row_number, target_tags)?;
         }
     }
     Ok(())
