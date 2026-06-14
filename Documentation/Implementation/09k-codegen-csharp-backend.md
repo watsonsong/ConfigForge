@@ -98,7 +98,7 @@ public sealed partial class ItemsRow
 
 ### Builtin value type mapping
 
-C# backend 规划支持 `profile` + `type_mappings`：
+C# backend 规划支持 `profile` + `type_mappings`。内置 profile 包括 `dotnet`、`unity`、`godot`；Cocos Creator 主要走 TypeScript backend，不作为 C# profile：
 
 ```toml
 [[targets.exports]]
@@ -121,15 +121,15 @@ vector3_int = "Vector3Int"
 
 默认映射：
 
-| Builtin type | `dotnet` profile | `unity` profile | 构造表达式 |
-| --- | --- | --- | --- |
-| `color` | generated `ConfigForgeColor` | `UnityEngine.Color` | `new T(r, g, b, a)`；Unity Color 需要 normalized float。 |
-| `vector2` | `System.Numerics.Vector2` | `UnityEngine.Vector2` | `new T(x, y)` |
-| `vector3` | `System.Numerics.Vector3` | `UnityEngine.Vector3` | `new T(x, y, z)` |
-| `vector4` | `System.Numerics.Vector4` | `UnityEngine.Vector4` | `new T(x, y, z, w)` |
-| `vector2_int` | generated `ConfigForgeVector2Int` | `UnityEngine.Vector2Int` | `new T(x, y)` |
-| `vector3_int` | generated `ConfigForgeVector3Int` | `UnityEngine.Vector3Int` | `new T(x, y, z)` |
-| `vector4_int` | generated `ConfigForgeVector4Int` | generated `ConfigForgeVector4Int` | `new T(x, y, z, w)` |
+| Builtin type | `dotnet` profile | `unity` profile | `godot` profile | 构造表达式 |
+| --- | --- | --- | --- | --- |
+| `color` | generated `ConfigForgeColor` | `UnityEngine.Color` | `Godot.Color` | `new T(r, g, b, a)`；Unity/Godot Color 需要 normalized float。 |
+| `vector2` | `System.Numerics.Vector2` | `UnityEngine.Vector2` | `Godot.Vector2` | `new T(x, y)` |
+| `vector3` | `System.Numerics.Vector3` | `UnityEngine.Vector3` | `Godot.Vector3` | `new T(x, y, z)` |
+| `vector4` | `System.Numerics.Vector4` | `UnityEngine.Vector4` | `Godot.Vector4` | `new T(x, y, z, w)` |
+| `vector2_int` | generated `ConfigForgeVector2Int` | `UnityEngine.Vector2Int` | `Godot.Vector2I` | `new T(x, y)` |
+| `vector3_int` | generated `ConfigForgeVector3Int` | `UnityEngine.Vector3Int` | `Godot.Vector3I` | `new T(x, y, z)` |
+| `vector4_int` | generated `ConfigForgeVector4Int` | generated `ConfigForgeVector4Int` | generated `ConfigForgeVector4Int` | `new T(x, y, z, w)` |
 
 解析与生成规则：
 
@@ -137,7 +137,7 @@ vector3_int = "Vector3Int"
 - `color_channel = "byte"` 的 source 值在 data resolve 阶段可保持 byte canonical，但生成 Unity `Color` 时必须输出/读取 normalized `float`；若 runtime exporter 仍输出 byte，则 C# decode 构造表达式负责除以 `255.0f`。该策略必须由 CodeModel field option 或 runtime schema 明确传入，不能由类型名猜测。
 - 外部自定义类型只在已知 positional constructor 兼容时允许直接配置。若类型需要 `FromRgba`、`Create` 等工厂，后续扩展 `type_mappings.<type>.factory`；MVP 不猜测未知 factory。
 - fallback generated value type 使用 `readonly partial struct`，字段为 get-only property；这些类型必须进入 symbol collision 检查，并受 `access_modifier` 约束。
-- Unity profile 不生成 `ScriptableObject`、`MonoBehaviour`、`JsonUtility` 绑定；profile 只影响类型映射、using、nullable/AOT 友好实现细节。
+- Unity profile 不生成 `ScriptableObject`、`MonoBehaviour`、`JsonUtility` 绑定；Godot profile 不生成 `Resource` / `Node` 绑定。profile 只影响类型映射、using、nullable/AOT 友好实现细节。
 
 ## Runtime reader contract
 

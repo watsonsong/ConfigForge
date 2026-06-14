@@ -497,6 +497,21 @@ pub enum BuiltinConstructorPolicy {
 4. schema docs 和 validation report 应展示 Meta builtin type 与 source format；可附带当前 export task 的 generated type mapping，但不能把 mapping 写回 Meta。
 5. symbol collision 检查需要覆盖 generated fallback value type 名称，例如 `ConfigForgeColor`、`ConfigForgeVector4Int`，避免和业务 Meta 类型或 generated table/row 名冲突。
 
+推荐 profile 矩阵：
+
+| Generator | Profile | 默认 mapping 重点 |
+| --- | --- | --- |
+| `csharp` | `dotnet` | `System.Numerics.Vector2/3/4`；Color、int vector fallback。 |
+| `csharp` | `unity` | `UnityEngine.Color`、`Vector2/3/4`、`Vector2Int/Vector3Int`。 |
+| `csharp` | `godot` | `Godot.Color`、`Vector2/3/4`、`Vector2I/Vector3I`。 |
+| `cpp_unreal` | `unreal` | `FLinearColor`、`FVector2D`、`FVector`、`FVector4`、`FIntPoint`、`FIntVector`。 |
+| `cpp` | `standard` | generated POD fallback；允许自研引擎通过 type mapping 覆盖。 |
+| `typescript` | `standard` | generated structural readonly object type。 |
+| `typescript` | `cocos_creator` | `Color`、`Vec2`、`Vec3`、`Vec4`，配合 import from `cc`。 |
+| `java` | `standard` | generated immutable value class。 |
+
+不在 MVP 中承诺完整 engine runtime adapter：Unity / Unreal / Cocos / Godot profile 首先保证 generated API 类型与构造表达式稳定；具体从包、Resources、Addressables、Godot Resource、Cocos asset bundle 等加载 runtime data 的 adapter 可在 runtime integration 计划中分别实现。
+
 ### 9.5.2 Foreign Key Relation CodeModel
 
 `linked_field` 功能要求 CodeModel 不只知道“有一个 FK”，还要知道生成 helper 与 cache 的最小必要信息。IR 构建步骤：

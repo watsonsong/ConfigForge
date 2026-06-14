@@ -56,6 +56,7 @@
 - 在 `CodeField` 或 field options 中携带 `color_space`、`color_channel`、`vector_components`、`unit` 等生成所需信息。
 - 增加 builtin type mapping 的通用结构与 symbol collision 检查。
 - 更新 Rust / TypeScript / C++ / Java backend 的默认 fallback 类型策略，至少能生成自带 value struct/class/interface，不阻塞非 C# target。
+- 梳理并实现 profile 默认矩阵：C# `dotnet/unity/godot`、Unreal C++ `unreal`、TypeScript `standard/cocos_creator`、C++ `standard`、Java `standard`。profile 第一阶段只影响 generated API 类型、构造表达式和 import/include，不承诺 engine runtime adapter。
 - Snapshot 测试覆盖所有语言的 fallback mapping。
 
 ## Step 7. C# .NET / Unity profile
@@ -68,6 +69,13 @@
 - `unity` 默认：`UnityEngine.Color`、`Vector2/3/4`、`Vector2Int/Vector3Int`，`Vector4Int` fallback。
 - 生成 parser 构造表达式：`new Vector3(x, y, z)`、`new Color(r, g, b, a)`；必要时处理 byte -> normalized conversion。
 - dotnet harness 编译 generated fallback types；Unity profile 做 source assertion，后续可增加 Unity compiler/harness。
+
+## Step 7b. Unreal / Cocos / Godot profile
+
+- `cpp_unreal` 增加/确认 `profile = "unreal"`，默认映射到 `FLinearColor`、`FVector2D`、`FVector`、`FVector4`、`FIntPoint`、`FIntVector`，Blueprint support 下确保 `UPROPERTY` 类型可反射。
+- `typescript` 增加 `profile = "standard" | "cocos_creator"`；Cocos Creator profile 默认映射 `Color`、`Vec2`、`Vec3`、`Vec4` 并生成 `import { Color, Vec2, Vec3, Vec4 } from "cc"` 或用户配置 import。
+- `csharp profile = "godot"` 默认映射 `Godot.Color`、`Vector2/3/4`、`Vector2I/Vector3I`。
+- 通用 C++ / Java 默认 generated fallback，允许项目后续通过 `type_mappings` 指向自研引擎或 Android/LibGDX 数学库。
 
 ## Step 8. 标准工程 fixture 与文档同步
 

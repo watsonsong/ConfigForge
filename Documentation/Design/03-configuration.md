@@ -574,7 +574,7 @@ Lua table 必须读取 `project.input` 中的数据，基于 Meta 与 target-awa
 
 `color`、`vector2`、`vector3`、`vector4` 及其 int 变体是 Meta 层的语言无关 builtin value type。Project Config 不改变它们的 schema 身份，而是在 codegen export task 上声明目标语言 / 引擎 profile 和类型映射。这样同一份 Meta 与 Data 可以同时生成通用 .NET、Unity、C++、Unreal 或自研引擎代码，而无需在业务 Meta 中写入 `UnityEngine.Vector3`、`System.Numerics.Vector3` 等平台类型名。
 
-标准游戏工程推荐同时保留 runtime data 与多个代码 target，例如客户端 Unity、服务端 .NET 工具和设计文档共用同一份数据：
+标准游戏工程推荐同时保留 runtime data 与多个代码 target，例如客户端 Unity / Unreal / Cocos Creator / Godot、服务端 .NET 工具和设计文档共用同一份数据：
 
 ```toml
 [project]
@@ -607,6 +607,70 @@ vector3 = "UnityEngine.Vector3"
 vector4 = "UnityEngine.Vector4"
 vector2_int = "UnityEngine.Vector2Int"
 vector3_int = "UnityEngine.Vector3Int"
+
+[[targets]]
+name = "client_unreal"
+tags = ["client", "shipping", "unreal"]
+
+[[targets.exports]]
+name = "bin"
+type = "bin"
+output = "Generated/Data/Unreal"
+
+[[targets.exports]]
+name = "unreal_cpp"
+type = "cpp_unreal"
+output = "Generated/Code/Unreal"
+
+[targets.exports.cpp_unreal]
+support = "blueprint"
+profile = "unreal"
+api_macro = "REFERENCEGAME_API"
+type_name_prefix = "ReferenceGame"
+
+[[targets]]
+name = "client_cocos"
+tags = ["client", "shipping", "cocos"]
+
+[[targets.exports]]
+name = "json"
+type = "json"
+output = "Generated/Data/Cocos"
+
+[[targets.exports]]
+name = "cocos_ts"
+type = "typescript"
+output = "Generated/Code/Cocos"
+module_name = "referenceGameConfig"
+
+[targets.exports.typescript]
+profile = "cocos_creator"
+
+[[targets]]
+name = "client_godot"
+tags = ["client", "shipping", "godot"]
+
+[[targets.exports]]
+name = "json"
+type = "json"
+output = "Generated/Data/Godot"
+
+[[targets.exports]]
+name = "godot_csharp"
+type = "csharp"
+output = "Generated/Code/Godot"
+namespace = "ReferenceGame.Config"
+
+[targets.exports.csharp]
+profile = "godot"
+
+[targets.exports.csharp.type_mappings]
+color = "Godot.Color"
+vector2 = "Godot.Vector2"
+vector3 = "Godot.Vector3"
+vector4 = "Godot.Vector4"
+vector2_int = "Godot.Vector2I"
+vector3_int = "Godot.Vector3I"
 
 [[targets]]
 name = "server_dotnet"
@@ -650,17 +714,32 @@ C# backend 的规划字段：
 | `[targets.exports.csharp.type_mappings]` | profile 默认 | builtin value type 到目标 C# 类型名的覆盖表。值必须是目标语言原样类型名，可含 namespace，例如 `UnityEngine.Vector3`。 |
 | `[targets.exports.csharp.using]` | `[]` | 可选 using 列表。若类型映射使用 fully qualified name，可不配置；若配置短类型名则应补充 using。 |
 
+跨语言 profile 语义：
+
+| Generator | Profile | 目标生态 | Builtin mapping 默认策略 |
+| --- | --- | --- | --- |
+| `csharp` | `dotnet` | .NET runtime / 服务端 / 工具链 | `System.Numerics.Vector2/3/4`，Color 与 int vector fallback generated value type。 |
+| `csharp` | `unity` | Unity C# | `UnityEngine.Color`、`Vector2/3/4`、`Vector2Int/Vector3Int`，`Vector4Int` fallback。 |
+| `csharp` | `godot` | Godot C# | `Godot.Color`、`Vector2/3/4`、`Vector2I/Vector3I`，`Vector4Int` fallback。 |
+| `cpp_unreal` | `unreal` | Unreal C++ / Blueprint | `FLinearColor`、`FVector2D`、`FVector`、`FVector4`、`FIntPoint`、`FIntVector`，Blueprint support 下生成可反射字段。 |
+| `cpp` | `standard` | 通用 C++ runtime / 自研引擎 | fallback generated POD struct；用户可通过 `type_mappings` 指向引擎数学库。 |
+| `typescript` | `standard` | Web / Node / 通用 TS | fallback readonly object type，例如 `{ x: number; y: number; z: number }`。 |
+| `typescript` | `cocos_creator` | Cocos Creator TypeScript | `Color`、`Vec2`、`Vec3`、`Vec4`，通过 import / type mapping 指向 `cc` 模块。 |
+| `java` | `standard` | JVM / Android 工具链 | fallback generated value class；Android / LibGDX 等可后续通过 type mapping 接入。 |
+
+profile 只能提供默认 mapping、构造表达式和 import/include 约定；不能改变 Meta builtin type 的语义和 runtime data canonical shape。没有明确 runtime adapter 的生态（例如 Cocos Creator / Godot）第一阶段可以先生成 typed API 与 source assertion，runtime loader adapter 作为后续扩展独立落地。
+
 默认映射建议：
 
-| Builtin type | `profile = "dotnet"` | `profile = "unity"` |
-| --- | --- | --- |
-| `color` | generated `ConfigForgeColor` 或用户显式映射 | `UnityEngine.Color` |
-| `vector2` | `System.Numerics.Vector2` | `UnityEngine.Vector2` |
-| `vector3` | `System.Numerics.Vector3` | `UnityEngine.Vector3` |
-| `vector4` | `System.Numerics.Vector4` | `UnityEngine.Vector4` |
-| `vector2_int` | generated `ConfigForgeVector2Int` 或用户显式映射 | `UnityEngine.Vector2Int` |
-| `vector3_int` | generated `ConfigForgeVector3Int` 或用户显式映射 | `UnityEngine.Vector3Int` |
-| `vector4_int` | generated `ConfigForgeVector4Int` 或用户显式映射 | generated `ConfigForgeVector4Int` 或用户显式映射 |
+| Builtin type | `csharp/dotnet` | `csharp/unity` | `csharp/godot` | `cpp_unreal/unreal` | `typescript/cocos_creator` |
+| --- | --- | --- | --- | --- | --- |
+| `color` | generated `ConfigForgeColor` 或用户显式映射 | `UnityEngine.Color` | `Godot.Color` | `FLinearColor` | `Color` |
+| `vector2` | `System.Numerics.Vector2` | `UnityEngine.Vector2` | `Godot.Vector2` | `FVector2D` | `Vec2` |
+| `vector3` | `System.Numerics.Vector3` | `UnityEngine.Vector3` | `Godot.Vector3` | `FVector` | `Vec3` |
+| `vector4` | `System.Numerics.Vector4` | `UnityEngine.Vector4` | `Godot.Vector4` | `FVector4` | `Vec4` |
+| `vector2_int` | generated `ConfigForgeVector2Int` 或用户显式映射 | `UnityEngine.Vector2Int` | `Godot.Vector2I` | `FIntPoint` | generated fallback |
+| `vector3_int` | generated `ConfigForgeVector3Int` 或用户显式映射 | `UnityEngine.Vector3Int` | `Godot.Vector3I` | `FIntVector` | generated fallback |
+| `vector4_int` | generated `ConfigForgeVector4Int` 或用户显式映射 | generated fallback | generated fallback | generated fallback | generated fallback |
 
 type mapping 只影响生成代码的 public API 与 decode 构造表达式；runtime data canonical shape 仍由 Meta 字段类型和数据 exporter 决定。若用户映射到外部类型，backend 必须知道如何构造该类型；内置 profile 只内置常见构造规则（例如 `new Vector3(x, y, z)`、`new Color(r, g, b, a)`）。无法识别构造规则的外部类型必须额外声明 factory/constructor policy，或退回 generated value struct/class。
 
