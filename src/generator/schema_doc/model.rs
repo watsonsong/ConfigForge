@@ -8,7 +8,7 @@ use crate::{
     meta::{LinkedMetaModel, TargetTags},
 };
 
-use super::build::table_doc;
+use super::build::{apply_incoming_relations, relationship_graph, source_graph, table_doc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaDocOptions {
@@ -29,6 +29,8 @@ pub struct SchemaDocOptions {
 pub struct SchemaDoc {
     pub metadata: SchemaDocMetadata,
     pub tables: Vec<SchemaTableDoc>,
+    pub relationship_graph: SchemaRelationshipGraph,
+    pub source_graph: SchemaSourceGraph,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +56,8 @@ pub struct SchemaTableDoc {
     pub fields: Vec<SchemaFieldDoc>,
     pub indexes: Vec<SchemaIndexDoc>,
     pub relations: Vec<SchemaRelationDoc>,
+    pub incoming_relations: Vec<SchemaRelationEdgeDoc>,
+    pub fragment_graph: Option<SchemaFragmentGraphDoc>,
     pub asset_fields: Vec<SchemaAssetFieldDoc>,
     pub text_fields: Vec<SchemaTextFieldDoc>,
     pub validators: Vec<SchemaValidatorDoc>,
@@ -85,11 +89,97 @@ pub struct SchemaIndexDoc {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaRelationDoc {
     pub field: String,
+    pub target_table: String,
+    pub target_index: String,
     pub target: String,
     pub cardinality: String,
+    pub allow_empty: bool,
     pub linked_helper: Option<String>,
     pub description: Option<String>,
     pub visibility: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaRelationshipGraph {
+    pub nodes: Vec<SchemaTableNodeDoc>,
+    pub edges: Vec<SchemaRelationEdgeDoc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaTableNodeDoc {
+    pub table: String,
+    pub kind: String,
+    pub description: Option<String>,
+    pub source_summary: Option<String>,
+    pub primary_index: Option<String>,
+    pub field_count: usize,
+    pub index_count: usize,
+    pub relation_count: usize,
+    pub visibility: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaRelationEdgeDoc {
+    pub source_table: String,
+    pub source_field: String,
+    pub target_table: String,
+    pub target_index: String,
+    pub target_display: String,
+    pub cardinality: String,
+    pub allow_empty: bool,
+    pub linked_helper: Option<String>,
+    pub visibility: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaSourceGraph {
+    pub nodes: Vec<SchemaSourceNodeDoc>,
+    pub edges: Vec<SchemaSourceTableEdgeDoc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaSourceNodeDoc {
+    pub path: String,
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaSourceTableEdgeDoc {
+    pub source_path: String,
+    pub provider: String,
+    pub table: String,
+    pub role: String,
+    pub fragments: Vec<String>,
+    pub layout: String,
+    pub visibility: String,
+    pub header_row: usize,
+    pub data_start_row: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaFragmentGraphDoc {
+    pub table: String,
+    pub base_fields: Vec<String>,
+    pub fragments: Vec<SchemaFragmentDoc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaFragmentDoc {
+    pub name: String,
+    pub description: Option<String>,
+    pub visibility: String,
+    pub payload: String,
+    pub source_hints: Vec<String>,
+    pub fields: Vec<SchemaFragmentFieldDoc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaFragmentFieldDoc {
+    pub path: String,
+    pub type_display: String,
+    pub visibility: String,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,11 +239,19 @@ impl SchemaDoc {
             generated_at: options.generated_at.clone(),
             config_forge_version: env!("CARGO_PKG_VERSION").to_owned(),
         };
-        let tables = linked_meta
+        let mut tables = linked_meta
             .tables
             .iter()
             .filter_map(|table| table_doc(linked_meta, table, &options))
-            .collect();
-        Self { metadata, tables }
+            .collect::<Vec<_>>();
+        let relationship_graph = relationship_graph(&tables);
+        apply_incoming_relations(&mut tables, &relationship_graph.edges);
+        let source_graph = source_graph(linked_meta, &tables, &options);
+        Self {
+            metadata,
+            tables,
+            relationship_graph,
+            source_graph,
+        }
     }
 }

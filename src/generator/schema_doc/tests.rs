@@ -21,7 +21,7 @@ use super::{
         schema_doc_output_paths, write_schema_doc_to_sink,
     },
     html::{escape_html, render_schema_doc_index_html, render_schema_table_html},
-    model::{SchemaDocMetadata, SchemaTableDoc},
+    model::{SchemaDocMetadata, SchemaSourceGraph, SchemaTableDoc},
     render_schema_doc_index_markdown, render_schema_table_markdown,
 };
 
@@ -178,6 +178,8 @@ fn builds_schema_doc_with_fields_indexes_relations_and_enrichment() {
     assert_eq!(items.fields.len(), 7);
     assert_eq!(items.indexes[0].name, "primary");
     assert_eq!(items.relations[0].target, "classes.id");
+    assert_eq!(items.relations[0].target_table, "classes");
+    assert_eq!(items.relations[0].target_index, "primary");
     assert_eq!(
         items.asset_fields[0].rules.as_deref(),
         Some("extensions .png/.webp, prefix UI_")
@@ -201,13 +203,171 @@ fn builds_schema_doc_with_fields_indexes_relations_and_enrichment() {
             .iter()
             .any(|field| !field.validators.is_empty())
     );
+    assert_eq!(doc.relationship_graph.nodes.len(), 2);
+    assert_eq!(doc.relationship_graph.edges.len(), 1);
+    assert_eq!(doc.relationship_graph.edges[0].source_table, "items");
+    assert_eq!(doc.relationship_graph.edges[0].target_table, "classes");
+    assert_eq!(doc.source_graph.nodes.len(), 2);
+    assert_eq!(doc.source_graph.edges.len(), 2);
+    assert!(doc.source_graph.edges.iter().any(|edge| {
+        edge.source_path == "items.csv"
+            && edge.table == "items"
+            && edge.role == "base"
+            && edge.layout == "collection records"
+    }));
+    let classes = doc
+        .tables
+        .iter()
+        .find(|table| table.name == "classes")
+        .unwrap();
+    assert_eq!(classes.incoming_relations.len(), 1);
+    assert_eq!(classes.incoming_relations[0].source_table, "items");
 
     let markdown = render_schema_table_markdown(&doc, items);
     let index_markdown = render_schema_doc_index_markdown(&doc);
     assert!(index_markdown.contains("道具\\|表"));
+    assert!(index_markdown.contains("## Source map"));
+    assert!(
+        index_markdown
+            .contains("| items.csv | csv | items | base | - | collection records | all |")
+    );
+    assert!(index_markdown.contains("## Relationship overview"));
+    assert!(
+        index_markdown
+            .contains("| items | class_id | classes | primary | many-to-one | yes | class | all |")
+    );
+    assert!(markdown.contains("## Related tables"));
+    assert!(markdown.contains("### Outgoing relations"));
     assert!(markdown.contains("## Assets"));
     assert!(markdown.contains("## Text / POT"));
     assert!(markdown.contains("range(max=999, min=1)"));
+}
+
+#[test]
+fn source_graph_captures_variant_overrides_and_object_table_layout() {
+    let doc = build_doc(
+        r#"
+                [[tables]]
+                name = "game_rules"
+                kind = "object"
+                source = "game_rules.csv"
+
+                [[tables.fields]]
+                name = "key"
+                type = "string"
+
+                [[tables.fields]]
+                name = "value"
+                type = "string"
+
+                [[tables]]
+                name = "items"
+                polymorphic = true
+                sources = [
+                    { provider = "csv", path = "materials.csv", fragments = ["stack"] },
+                    { provider = "csv", path = "weapons.csv", fragments = ["attributes", "skill"] },
+                    { provider = "csv", path = "armors.csv", fragments = ["attributes"] },
+                ]
+                override_sources = [
+                    { provider = "csv", path = "materials_s1.csv", fragments = ["stack"], export_when = { any = ["s1"] } },
+                ]
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "name"
+                type = "string"
+
+                [[tables.indexes]]
+                name = "primary"
+                fields = ["id"]
+                unique = true
+                primary = true
+
+                [[tables.fragments]]
+                name = "stack"
+
+                [[tables.fragments.fields]]
+                name = "max_stack"
+                type = "int"
+
+                [[tables.fragments]]
+                name = "attributes"
+
+                [[tables.fragments.fields]]
+                name = "attack"
+                type = "int"
+
+                [[tables.fragments]]
+                name = "skill"
+
+                [[tables.fragments.fields]]
+                name = "skill_id"
+                type = "string"
+            "#,
+        &["client", "s1"],
+    );
+
+    assert_eq!(doc.source_graph.edges.len(), 5);
+    assert!(doc.source_graph.edges.iter().any(|edge| {
+        edge.source_path == "materials.csv"
+            && edge.table == "items"
+            && edge.fragments == vec!["stack".to_owned()]
+            && edge.role == "base"
+    }));
+    assert!(doc.source_graph.edges.iter().any(|edge| {
+        edge.source_path == "materials_s1.csv"
+            && edge.table == "items"
+            && edge.role == "override"
+            && edge.visibility == "s1"
+    }));
+    assert!(doc.source_graph.edges.iter().any(|edge| {
+        edge.source_path == "game_rules.csv"
+            && edge.table == "game_rules"
+            && edge.layout == "key/value rows"
+            && edge.data_start_row == 2
+    }));
+    let items = doc
+        .tables
+        .iter()
+        .find(|table| table.name == "items")
+        .expect("items table");
+    let fragment_graph = items.fragment_graph.as_ref().expect("fragment graph");
+    assert_eq!(fragment_graph.base_fields, vec!["id", "name"]);
+    assert_eq!(fragment_graph.fragments.len(), 3);
+    assert!(fragment_graph.fragments.iter().any(|fragment| {
+        fragment.name == "stack"
+            && fragment.fields[0].path == "max_stack"
+            && fragment.source_hints
+                == vec![
+                    "materials.csv (base)".to_owned(),
+                    "materials_s1.csv (override)".to_owned(),
+                ]
+    }));
+
+    let markdown = render_schema_doc_index_markdown(&doc);
+    assert!(
+        markdown
+            .contains("| materials.csv | csv | items | base | stack | collection records | all |")
+    );
+    assert!(markdown.contains(
+        "| weapons.csv | csv | items | base | attributes, skill | collection records | all |"
+    ));
+    assert!(markdown.contains(
+        "| materials_s1.csv | csv | items | override | stack | collection records | s1 |"
+    ));
+    assert!(
+        markdown
+            .contains("| game_rules.csv | csv | game_rules | base | - | key/value rows | all |")
+    );
+    let table_markdown = render_schema_table_markdown(&doc, items);
+    assert!(table_markdown.contains("## Fragments"));
+    assert!(table_markdown.contains(
+        "| stack | inline fields | max_stack | materials.csv (base), materials_s1.csv (override) | all | - |"
+    ));
 }
 
 #[test]
@@ -519,9 +679,26 @@ fn renders_html_index_metadata_summary_and_cross_table_sections() {
     let html =
         render_schema_doc_index_html(&doc, &["classes.html".to_owned(), "items.html".to_owned()]);
 
-    assert!(html.contains("<dt>Project</dt><dd>demo</dd>"));
-    assert!(html.contains("<dt>Target</dt><dd>client</dd>"));
-    assert!(html.contains("<dt>Tags</dt><dd>client</dd>"));
+    assert!(html.contains(
+        "<span class=\"meta-key\">Project</span>: <span class=\"meta-value\">demo</span>"
+    ));
+    assert!(html.contains(
+        "<span class=\"meta-key\">Target</span>: <span class=\"meta-value\">client</span>"
+    ));
+    assert!(html.contains(
+        "<span class=\"meta-key\">Tags</span>: <span class=\"meta-value\">client</span>"
+    ));
+    assert!(html.contains("<nav class=\"quick-links\" aria-label=\"Quick links\">"));
+    assert!(html.contains("<section id=\"tables\">"));
+    assert!(html.contains("<section id=\"relationship-graph\">"));
+    assert!(html.contains("<section id=\"source-map\">"));
+    assert!(html.contains("<span class=\"node source-node\"><code>items.csv</code></span>"));
+    assert!(html.contains("source → table"));
+    assert!(html.contains("primary = default unique row identity"));
+    assert!(html.contains("asset field → asset manifest exporter"));
+    assert!(html.contains("text field → gettext_pot"));
+    assert!(html.contains("actual asset refs are not read by schema_doc"));
+    assert!(html.contains("actual text values are not read by schema_doc"));
     assert!(html.contains("<span>Tables</span>"));
     assert!(html.contains("<span>Fields</span>"));
     assert!(html.contains("<a href=\"items.html\"><code>items</code></a>"));
@@ -604,15 +781,28 @@ fn renders_html_table_sections_for_schema_details() {
     let html = render_schema_table_html(&doc, table, "index.html");
 
     assert!(html.contains("<a href=\"index.html\">← Back to index</a>"));
+    assert!(html.contains("<header id=\"overview\" class=\"card hero\">"));
+    assert!(html.contains("<section id=\"neighborhood\">"));
+    assert!(html.contains("<section id=\"source-map\">"));
+    assert!(html.contains("<span class=\"node source-node\"><code>items.csv</code></span>"));
+    assert!(
+        html.contains("<a class=\"node table-node\" href=\"#overview\"><code>items</code></a>")
+    );
+    assert!(html.contains("<section id=\"fragments\">"));
     assert!(html.contains("<h2>Fields</h2>"));
+    assert!(html.contains("<section id=\"fields\">"));
     assert!(html.contains("<h2>Indexes</h2>"));
+    assert!(html.contains("<section id=\"indexes\">"));
     assert!(html.contains("<code>primary</code>"));
     assert!(html.contains("<h2>Relations</h2>"));
+    assert!(html.contains("allow_empty = optional reference"));
     assert!(html.contains("<code>classes.id</code>"));
     assert!(html.contains("<code>class</code>"));
     assert!(html.contains("<h2>Assets</h2>"));
+    assert!(html.contains("asset field → asset manifest exporter"));
     assert!(html.contains("<code>ui_icon</code>"));
     assert!(html.contains("<h2>Text / POT</h2>"));
+    assert!(html.contains("text field → gettext_pot"));
     assert!(html.contains("<code>name</code>"));
     assert!(html.contains("<h2>Validators</h2>"));
     assert!(html.contains("range(max=999, min=1)"));
@@ -663,6 +853,14 @@ fn rejects_invalid_schema_doc_options_and_duplicate_paths() {
             generated_at: "now".to_owned(),
             config_forge_version: "test".to_owned(),
         },
+        relationship_graph: super::model::SchemaRelationshipGraph {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        },
+        source_graph: SchemaSourceGraph {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        },
         tables: vec![SchemaTableDoc {
             name: "index".to_owned(),
             kind: "CollectionTable".to_owned(),
@@ -674,6 +872,8 @@ fn rejects_invalid_schema_doc_options_and_duplicate_paths() {
             fields: Vec::new(),
             indexes: Vec::new(),
             relations: Vec::new(),
+            incoming_relations: Vec::new(),
+            fragment_graph: None,
             asset_fields: Vec::new(),
             text_fields: Vec::new(),
             validators: Vec::new(),

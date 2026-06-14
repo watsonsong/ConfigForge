@@ -53,6 +53,64 @@ pub fn render_schema_doc_index_markdown(doc: &SchemaDoc) -> String {
             ),
         );
     }
+    push_line(&mut out, "");
+    push_line(&mut out, "## Source map");
+    push_line(&mut out, "");
+    if doc.source_graph.edges.is_empty() {
+        push_line(&mut out, "No sources.");
+    } else {
+        push_line(
+            &mut out,
+            "| Source | Provider | Table | Role | Fragments | Layout | Visibility |",
+        );
+        push_line(&mut out, "| --- | --- | --- | --- | --- | --- | --- |");
+        for edge in &doc.source_graph.edges {
+            push_line(
+                &mut out,
+                &format!(
+                    "| {} | {} | {} | {} | {} | {} | {} |",
+                    escape_markdown_table_cell(&edge.source_path),
+                    escape_markdown_table_cell(&edge.provider),
+                    escape_markdown_table_cell(&edge.table),
+                    escape_markdown_table_cell(&edge.role),
+                    escape_markdown_table_cell(&display_list_or_dash(&edge.fragments)),
+                    escape_markdown_table_cell(&edge.layout),
+                    escape_markdown_table_cell(&edge.visibility),
+                ),
+            );
+        }
+    }
+    push_line(&mut out, "");
+    push_line(&mut out, "## Relationship overview");
+    push_line(&mut out, "");
+    if doc.relationship_graph.edges.is_empty() {
+        push_line(&mut out, "No relations.");
+    } else {
+        push_line(
+            &mut out,
+            "| Source Table | Field | Target Table | Target Index | Cardinality | Allow Empty | Helper | Export |",
+        );
+        push_line(
+            &mut out,
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        );
+        for edge in &doc.relationship_graph.edges {
+            push_line(
+                &mut out,
+                &format!(
+                    "| {} | {} | {} | {} | {} | {} | {} | {} |",
+                    escape_markdown_table_cell(&edge.source_table),
+                    escape_markdown_table_cell(&edge.source_field),
+                    escape_markdown_table_cell(&edge.target_table),
+                    escape_markdown_table_cell(&edge.target_index),
+                    escape_markdown_table_cell(&edge.cardinality),
+                    yes_no(edge.allow_empty),
+                    display_cell(edge.linked_helper.as_deref()),
+                    escape_markdown_table_cell(&edge.visibility),
+                ),
+            );
+        }
+    }
     out
 }
 
@@ -75,6 +133,105 @@ pub fn render_schema_table_markdown(doc: &SchemaDoc, table: &SchemaTableDoc) -> 
     push_kv(&mut out, "Visibility", Some(&table.visibility));
     push_kv(&mut out, "Row export", Some(&table.row_export_summary));
     push_kv(&mut out, "Primary index", table.primary_index.as_deref());
+    push_line(&mut out, "");
+
+    push_line(&mut out, "## Related tables");
+    push_line(&mut out, "");
+    if table.relations.is_empty() && table.incoming_relations.is_empty() {
+        push_line(&mut out, "No related tables.");
+    } else {
+        if !table.relations.is_empty() {
+            push_line(&mut out, "### Outgoing relations");
+            push_line(&mut out, "");
+            push_line(
+                &mut out,
+                "| Field | Target Table | Target Index | Cardinality | Allow Empty | Helper | Export |",
+            );
+            push_line(&mut out, "| --- | --- | --- | --- | --- | --- | --- |");
+            for relation in &table.relations {
+                push_line(
+                    &mut out,
+                    &format!(
+                        "| {} | {} | {} | {} | {} | {} | {} |",
+                        escape_markdown_table_cell(&relation.field),
+                        escape_markdown_table_cell(&relation.target_table),
+                        escape_markdown_table_cell(&relation.target_index),
+                        escape_markdown_table_cell(&relation.cardinality),
+                        yes_no(relation.allow_empty),
+                        display_cell(relation.linked_helper.as_deref()),
+                        escape_markdown_table_cell(&relation.visibility),
+                    ),
+                );
+            }
+            push_line(&mut out, "");
+        }
+        if !table.incoming_relations.is_empty() {
+            push_line(&mut out, "### Incoming relations");
+            push_line(&mut out, "");
+            push_line(
+                &mut out,
+                "| Source Table | Field | Target Index | Cardinality | Allow Empty | Helper | Export |",
+            );
+            push_line(&mut out, "| --- | --- | --- | --- | --- | --- | --- |");
+            for relation in &table.incoming_relations {
+                push_line(
+                    &mut out,
+                    &format!(
+                        "| {} | {} | {} | {} | {} | {} | {} |",
+                        escape_markdown_table_cell(&relation.source_table),
+                        escape_markdown_table_cell(&relation.source_field),
+                        escape_markdown_table_cell(&relation.target_index),
+                        escape_markdown_table_cell(&relation.cardinality),
+                        yes_no(relation.allow_empty),
+                        display_cell(relation.linked_helper.as_deref()),
+                        escape_markdown_table_cell(&relation.visibility),
+                    ),
+                );
+            }
+            push_line(&mut out, "");
+        }
+    }
+
+    push_line(&mut out, "## Fragments");
+    push_line(&mut out, "");
+    if let Some(fragment_graph) = &table.fragment_graph {
+        push_line(
+            &mut out,
+            &format!(
+                "Base table fields: {}.",
+                escape_markdown_block_text(&display_list_or_dash(&fragment_graph.base_fields))
+            ),
+        );
+        push_line(&mut out, "");
+        push_line(
+            &mut out,
+            "| Fragment | Payload | Fields | Sources | Visibility | Description |",
+        );
+        push_line(&mut out, "| --- | --- | --- | --- | --- | --- |");
+        for fragment in &fragment_graph.fragments {
+            push_line(
+                &mut out,
+                &format!(
+                    "| {} | {} | {} | {} | {} | {} |",
+                    escape_markdown_table_cell(&fragment.name),
+                    escape_markdown_table_cell(&fragment.payload),
+                    escape_markdown_table_cell(
+                        &fragment
+                            .fields
+                            .iter()
+                            .map(|field| field.path.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    escape_markdown_table_cell(&display_list_or_dash(&fragment.source_hints)),
+                    escape_markdown_table_cell(&fragment.visibility),
+                    display_cell(fragment.description.as_deref()),
+                ),
+            );
+        }
+    } else {
+        push_line(&mut out, "No fragments.");
+    }
     push_line(&mut out, "");
 
     push_line(&mut out, "## Fields");
@@ -134,17 +291,18 @@ pub fn render_schema_table_markdown(doc: &SchemaDoc, table: &SchemaTableDoc) -> 
     } else {
         push_line(
             &mut out,
-            "| Field | Target | Cardinality | Linked Helper | Export | Description |",
+            "| Field | Target | Cardinality | Allow Empty | Linked Helper | Export | Description |",
         );
-        push_line(&mut out, "| --- | --- | --- | --- | --- | --- |");
+        push_line(&mut out, "| --- | --- | --- | --- | --- | --- | --- |");
         for relation in &table.relations {
             push_line(
                 &mut out,
                 &format!(
-                    "| {} | {} | {} | {} | {} | {} |",
+                    "| {} | {} | {} | {} | {} | {} | {} |",
                     escape_markdown_table_cell(&relation.field),
                     escape_markdown_table_cell(&relation.target),
                     escape_markdown_table_cell(&relation.cardinality),
+                    yes_no(relation.allow_empty),
                     display_cell(relation.linked_helper.as_deref()),
                     escape_markdown_table_cell(&relation.visibility),
                     display_cell(relation.description.as_deref()),

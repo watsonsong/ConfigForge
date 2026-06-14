@@ -103,8 +103,9 @@ format = "markdown"
 | `include_struct_details` | bool | `true` | 是否展开 struct / fragment 字段结构说明。 |
 | `include_asset_rules` | bool | `true` | 是否输出 asset kind、路径规则、大小写/命名约束摘要。 |
 | `include_i18n` | bool | `true` | 是否标识会进入 POT 的 `text` 字段。 |
+| `include_diagrams` / `diagram_detail` / `diagram_format` | - | 未开放 | 当前关系图、source map、fragment composition、Index/FK 与 Asset/Text flow 图例默认随 Markdown / HTML 输出启用，不提供额外配置开关。 |
 
-当前 MVP 实现 `format = "markdown"` / `format = "html"`、`index_file`、`title`；`include_hidden` / `include_internal` / `include_struct_details` / `include_asset_rules` / `include_i18n` 作为模型层选项存在，但尚未开放为 Project Config 配置项。用户在 export task 中设置未支持字段时会显式报错，不能静默忽略。
+当前 MVP 实现 `format = "markdown"` / `format = "html"`、`index_file`、`title`；`include_hidden` / `include_internal` / `include_struct_details` / `include_asset_rules` / `include_i18n` 作为模型层选项存在，但尚未开放为 Project Config 配置项。HTML/CSS 图例与 Markdown 结构摘要默认启用，暂不开放 `include_diagrams`、`diagram_detail` 或 `diagram_format`，以避免配置面过早膨胀。用户在 export task 中设置未支持字段时会显式报错，不能静默忽略。
 
 ### 11.3.2 与 target tags 的关系
 
@@ -199,16 +200,116 @@ HTML index 页包含：
 - 顶部 metadata：title、project、target、effective tags、generated_at；
 - summary cards：table、field、index、relation、asset field、text field 数量；
 - Tables 总览表：Table、Kind、Description、Fields、Indexes、Relations、Visibility；
-- 可选跨表 sections：Asset fields、Text / POT fields、Relation overview。
+- Relationship graph、Source map；
+- 可选跨表 sections：Asset fields、Text / POT fields、Relation overview，并在相关区域展示 Index/FK contract 与 Asset/Text flow legend。
 
 HTML 单表页包含：
 
 - 返回 index 链接、table name、description、kind、source、visibility、row_export、primary index；
+- Table neighborhood、Source map、Fragment composition；
 - Fields、Indexes、Relations；
 - Assets、Text / POT、Validators 摘要；
 - visibility / severity 等短状态使用 badge 展示。
 
 HTML 输出路径与 Markdown 一样通过 ArtifactSink 统一写入和检查冲突；单表链接只使用同目录相对文件名，例如 `items.html`。
+
+### 11.4.2.2 HTML 阅读体验优化方向
+
+HTML 是更适合“快速浏览、跨表跳转、给非程序同学解释结构”的格式，因此后续优化不应只把 Markdown 表格换成 HTML 表格，还应提供更清晰的信息层级和视觉提示。
+
+页面开头 summary 区建议从当前简单 `dl` 逐步升级为“紧凑元信息条 + 统计卡片 + 关键关系入口”：
+
+- 元信息条使用单行或响应式横排展示，避免 `Project` 与 `standard_reference_game` 这类 key/value 被默认块级布局拆成上下两行。推荐渲染为 `Project: standard_reference_game`、`Target: client`、`Tags: client, shipping` 这种 inline item；小屏幕下允许自然换行，但同一 key/value 内部应保持不拆行。
+- `Generated at`、tool version 等审计信息视觉权重应低于 Project / Target / Tags，可使用 muted text，避免干扰阅读主线。
+- summary cards 除数量外应提供解释性 subtitle，例如 `Relations: foreign-key helpers`、`Asset fields: schema-level asset refs`，让非工程用户知道统计口径。
+- 单表页开头应先回答“这张表是什么、从哪里来、和谁有关”：table name、desc、kind、source、primary index、outgoing relation count、incoming relation count、fragment count 应尽量集中在首屏。
+- 页内锚点建议固定为 `#fields`、`#indexes`、`#relations`、`#assets`、`#text-pot`、`#validators`，summary 区提供快速跳转 chips。
+
+推荐的 HTML summary 信息结构：
+
+```text
+Header
+  Title
+  Meta bar
+    Project: standard_reference_game   Target: client   Tags: client   Generated: 2026-06-14T...
+  Summary cards
+    Tables / Fields / Indexes / Relations / Asset fields / Text fields
+  Quick links
+    Tables | Relationship graph | Source map | Assets | Text/POT
+```
+
+样式约束：
+
+- 保持静态、自包含、无外部 JS/CSS/CDN；优先使用 CSS grid/flex 完成响应式排版。
+- key/value 使用 `.meta-bar`、`.meta-item`、`.meta-key`、`.meta-value` 等语义化 class；`white-space: nowrap` 可用于避免同一 key/value 内部换行。
+- 如果未来增加可折叠区域，应优先使用原生 `<details>/<summary>`，避免引入脚本依赖。
+- 所有链接、badge、节点标题、边标签仍必须 HTML escape。
+
+### 11.4.2.3 面向人类理解的图例与关系可视化
+
+Schema Doc 后续应提供一组“可读图例”（legend / diagram），帮助读者在不打开 Meta TOML 的情况下快速理解表与表、表与 source、表与 fragment、字段与 FK helper 的关系。这些图例属于 schema-level 结构图，不读取具体数据行。
+
+推荐优先实现以下辅助功能：
+
+1. **全局表关系图（Schema Relationship Graph）**
+   - 节点：table；节点内展示 table kind、主要 source、字段数、primary index。
+   - 边：foreign key；边标签展示 `source_field -> target_table.target_index`，并标记 cardinality：`many-to-one`、`list-to-many`、`object-to-one` 等。
+   - 方向：从 FK source table 指向 target table。
+   - 视觉编码：CollectionTable / ObjectTable 使用不同节点样式；hidden / target-filtered relation 使用虚线或灰色；list FK 使用双线或 `[]` 标记。
+   - 用途：快速回答“这张表依赖哪些表”“删除/修改某个 index 会影响谁”。
+
+2. **单表上下游关系图（Table Neighborhood Graph）**
+   - 每张单表页展示当前 table 周边一跳关系：outgoing FK、incoming FK、self-reference。
+   - 当前 table 高亮居中；被引用表和引用当前表的 source table 分列展示。
+   - 每条边链接到对应 table 页面和 relation 行锚点。
+   - 对于 `items.rarity -> rarity_levels.by_id` 这类关系，应能直观看到 `items` 通过 `rarity_id` 依赖 `rarity_levels`，并显示 generated helper 名称 `rarity`。
+
+3. **Source Map（数据来源图）**
+   - 节点：table 与 source file/provider。
+   - 边：source feeds table；边标签展示 fragments / override source / export_when。
+   - 支持展示 polymorphic table：例如 `materials.csv`、`weapons.csv`、`armors.csv` 都汇入 `items`，并在边上标记 active fragments：`stack`、`attributes`、`skill`。
+   - ObjectTable source 使用独立样式，提示它是 key/value rows，不是普通 collection rows。
+   - 用途：快速回答“这张表由哪些 CSV 组成”“某个 fragment 来源在哪个文件”。
+
+4. **Fragment Composition 图**
+   - 节点：base table、fragment、fragment fields。
+   - 表达 fragment 是“条件存在的结构片段”，而不是独立 table。
+   - 对 polymorphic item 表尤其有价值：读者能看到 `items` 基础字段与 `stack` / `attributes` / `skill` fragment 的组成关系。
+   - 可用紧凑卡片表达：`items` base card + fragment cards，每个 fragment card 列出字段数量和关键字段。
+
+5. **Index & FK Contract 图例**
+   - 在关系表旁增加 legend，解释 `primary`、`unique`、`target_index`、`linked_field/helper`、`allow_empty`、`list FK` 等概念。
+   - 在 relation 行中用 badge 标记：`primary target`、`generated helper`、`list source`、`optional source`。
+   - 用途：减少非程序读者对 `by_id`、`by_class_level` 等 index 名称的理解成本。
+
+6. **Asset / Text Flow 图例**
+   - Asset field flow：`table.field(asset_kind) -> asset manifest exporter`，说明 schema doc 只列字段规则，不列实际资源引用。
+   - Text/POT flow：`text field -> gettext_pot`，说明哪些字段理论上进入 POT。
+   - 用途：帮助策划、美术、LOC 同学理解资源校验和本地化抽取边界。
+
+图形渲染建议分层推进：
+
+- **Phase 1：HTML/CSS 图例**。不引入 graph layout，只用卡片、箭头、两列/三列布局表达一跳关系和 source composition；实现成本低且 deterministic。
+- **Phase 2：内联 SVG 图**。由 SchemaDoc model 生成节点/边并使用简单稳定布局（按 table order 分层或网格排列），输出内联 SVG；仍保持自包含、可复制、无外部依赖。
+- **Phase 3：可选 Mermaid / DOT 导出**。如果团队需要复杂 ER 图，可在后续设计新的 `schema_doc` 子格式或 `diagram_format` 选项；必须明确 Mermaid/DOT 是额外 artifact 或 fenced block，不影响默认 HTML 离线可读性。
+
+图例的数据模型不应由 renderer 直接扫描 `SchemaTableDoc` 字符串拼接，建议在 builder 层补充结构化视图：
+
+```text
+SchemaDoc
+  relationship_graph
+    nodes[]: table_name, kind, source_summary, visibility, file_name
+    edges[]: source_table, source_field, target_table, target_index, cardinality, linked_helper, visibility
+  source_graph
+    table_nodes[]
+    source_nodes[]: provider, path, row_layout, export_when
+    edges[]: source_path -> table_name, fragments[], override, visibility
+  fragment_graphs[]
+    table_name
+    fragments[]: name, fields[], visibility, source_paths[]
+```
+
+这些结构化图模型可同时服务 HTML 图例、Markdown 文本图、未来 Mermaid/DOT 导出与测试断言，避免每个 renderer 重新解释 Meta。
 
 ### 11.4.3 Fields 区域
 

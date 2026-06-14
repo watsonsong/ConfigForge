@@ -73,6 +73,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 - [`Implementation/11-foreign-key-detail-design.md`](Implementation/11-foreign-key-detail-design.md) — Foreign key raw/link model, referential-integrity validation, target semantics, codegen staging, and test plan.
 - [`Implementation/12-struct-expanded-value-detail-design.md`](Implementation/12-struct-expanded-value-detail-design.md) — Struct source layout auto detection and expanded CSV field-path layout for CollectionTable/ObjectTable, validation/export plan, and test plan.
 - [`Implementation/13-runtime-binary-format-detail-design.md`](Implementation/13-runtime-binary-format-detail-design.md) — Implemented `bin` runtime data packed binary format, schema revision, encoding rules, artifact generator / code artifact / reader integration, and compliance fixtures.
+- [`Implementation/14-schema-doc-html-relationship-diagrams.md`](Implementation/14-schema-doc-html-relationship-diagrams.md) — Schema Doc HTML reading experience, compact metadata bar, relationship diagrams, source map, fragment composition, and normalized graph model implementation plan.
 
 ## Technical Practice Set
 

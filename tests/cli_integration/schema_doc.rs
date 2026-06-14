@@ -118,7 +118,7 @@ fn schema_doc_export_writes_index_and_table_markdown_without_data_input() {
     assert!(index.contains("[items](items.md)"));
     assert!(items.contains("| name | text | yes | - | client | 道具名 |"));
     assert!(!items.contains("server_note"));
-    assert!(items.contains("| class_id | classes.id | many-to-one | class | all | - |"));
+    assert!(items.contains("| class_id | classes.id | many-to-one | yes | class | all | - |"));
     assert!(items.contains("## Assets"));
     assert!(items.contains("## Text / POT"));
     assert!(items.contains("range(max=999, min=1)"));
