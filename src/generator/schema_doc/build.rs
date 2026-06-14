@@ -558,6 +558,14 @@ fn source_edge_doc(
     options: &SchemaDocOptions,
 ) -> SchemaSourceTableEdgeDoc {
     let source_visible = source.export_when.matches(&options.target_tags);
+    let table_visible = table.meta.is_exported_for(&options.target_tags);
+    let visibility = if !table.meta.export {
+        "internal".to_owned()
+    } else if !table_visible {
+        "hidden".to_owned()
+    } else {
+        export_visibility(true, &source.export_when, source_visible)
+    };
     SchemaSourceTableEdgeDoc {
         source_path: source.path.clone(),
         provider: source.provider.clone(),
@@ -565,7 +573,7 @@ fn source_edge_doc(
         role: role.to_owned(),
         fragments: source.fragments.clone(),
         layout: source_layout_display(table),
-        visibility: export_visibility(true, &source.export_when, source_visible),
+        visibility,
         header_row: source.header_row,
         data_start_row: object_table_data_start_row(table, source),
     }

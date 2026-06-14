@@ -192,9 +192,9 @@ pub fn render_schema_table_markdown(doc: &SchemaDoc, table: &SchemaTableDoc) -> 
         }
     }
 
-    push_line(&mut out, "## Fragments");
-    push_line(&mut out, "");
     if let Some(fragment_graph) = &table.fragment_graph {
+        push_line(&mut out, "## Fragments");
+        push_line(&mut out, "");
         push_line(
             &mut out,
             &format!(
@@ -229,10 +229,8 @@ pub fn render_schema_table_markdown(doc: &SchemaDoc, table: &SchemaTableDoc) -> 
                 ),
             );
         }
-    } else {
-        push_line(&mut out, "No fragments.");
+        push_line(&mut out, "");
     }
-    push_line(&mut out, "");
 
     push_line(&mut out, "## Fields");
     push_line(&mut out, "");

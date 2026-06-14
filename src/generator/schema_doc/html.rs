@@ -551,13 +551,11 @@ pub fn render_schema_table_html(
 }
 
 fn push_table_fragments(body: &mut String, table: &SchemaTableDoc) {
-    push_line(body, "<section id=\"fragments\">");
-    push_line(body, "<h2>Fragment composition</h2>");
     let Some(fragment_graph) = &table.fragment_graph else {
-        push_line(body, "<p class=\"muted\">No fragments.</p>");
-        push_line(body, "</section>");
         return;
     };
+    push_line(body, "<section id=\"fragments\">");
+    push_line(body, "<h2>Fragment composition</h2>");
     push_line(body, "<div class=\"fragment-grid\">");
     push_line(
         body,

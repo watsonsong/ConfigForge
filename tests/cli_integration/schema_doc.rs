@@ -250,6 +250,96 @@ fn schema_doc_export_writes_html_docs_and_dry_run_plan_without_data_input() {
 }
 
 #[test]
+fn schema_doc_include_options_expose_hidden_internal_content() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let default_dir = temp_dir.path().join("out/default-docs");
+    let full_dir = temp_dir.path().join("out/full-docs");
+    let project_path = temp_dir.path().join("ConfigForge.toml");
+    fs::write(
+        &project_path,
+        format!(
+            r#"
+                [project]
+                name = "schema_project"
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.fields]]
+                name = "server_note"
+                type = "string"
+                export_when = {{ any = ["server"] }}
+
+                [[tables.fields]]
+                name = "internal_note"
+                type = "string"
+                export = false
+
+                [[tables]]
+                name = "server_items"
+                source = "server_items.csv"
+                export_when = {{ any = ["server"] }}
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[targets]]
+                name = "client_docs"
+                tags = ["client"]
+
+                [[targets.exports]]
+                name = "default_schema_doc"
+                output = "{}"
+                type = "schema_doc"
+                format = "markdown"
+
+                [[targets.exports]]
+                name = "full_schema_doc"
+                output = "{}"
+                type = "schema_doc"
+                format = "html"
+                include_hidden = true
+                include_internal = true
+            "#,
+            default_dir.display(),
+            full_dir.display()
+        ),
+    )
+    .expect("project config should be written");
+
+    let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    cmd.args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client_docs",
+    ]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("target `client_docs` built"));
+
+    let default_items =
+        fs::read_to_string(default_dir.join("items.md")).expect("default items doc");
+    assert!(!default_items.contains("server_note"));
+    assert!(!default_items.contains("internal_note"));
+    assert!(!default_dir.join("server_items.md").exists());
+
+    let full_index = fs::read_to_string(full_dir.join("index.html")).expect("full index doc");
+    let full_items = fs::read_to_string(full_dir.join("items.html")).expect("full items doc");
+    assert!(full_index.contains("server_items.html"));
+    assert!(full_index.contains("<span class=\"badge\">hidden</span>"));
+    assert!(full_items.contains("server_note"));
+    assert!(full_items.contains("internal_note"));
+    assert!(full_items.contains("<span class=\"badge\">internal</span>"));
+}
+
+#[test]
 fn schema_doc_rejects_unknown_format() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let project_path = temp_dir.path().join("ConfigForge.toml");

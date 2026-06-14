@@ -51,15 +51,8 @@ fn schema_doc_does_not_depend_on_project_module() {
 }
 
 fn build_doc(input: &str, tags: &[&str]) -> SchemaDoc {
-    let meta = MetaModel::from_toml_str(input).expect("meta should parse");
-    let linked = meta.link().expect("meta should link");
-    SchemaDoc::from_meta(
-        &linked,
-        &ArtifactProjectInfo {
-            name: Some("demo".to_owned()),
-            desc: None,
-            copyright: None,
-        },
+    build_doc_with_options(
+        input,
         SchemaDocOptions {
             title: None,
             project_name: None,
@@ -74,6 +67,36 @@ fn build_doc(input: &str, tags: &[&str]) -> SchemaDoc {
             include_i18n: true,
         },
     )
+}
+
+fn build_doc_with_options(input: &str, options: SchemaDocOptions) -> SchemaDoc {
+    let meta = MetaModel::from_toml_str(input).expect("meta should parse");
+    let linked = meta.link().expect("meta should link");
+    SchemaDoc::from_meta(
+        &linked,
+        &ArtifactProjectInfo {
+            name: Some("demo".to_owned()),
+            desc: None,
+            copyright: None,
+        },
+        options,
+    )
+}
+
+fn schema_doc_options(tags: &[&str]) -> SchemaDocOptions {
+    SchemaDocOptions {
+        title: None,
+        project_name: None,
+        project_path: None,
+        target: Some("client".to_owned()),
+        target_tags: TargetTags::new(tags.iter().copied()),
+        generated_at: "2026-06-07T00:00:00Z".to_owned(),
+        include_hidden: false,
+        include_internal: false,
+        include_struct_details: true,
+        include_asset_rules: true,
+        include_i18n: true,
+    }
 }
 
 fn linked_meta(input: &str) -> crate::meta::LinkedMetaModel<'static> {
@@ -445,6 +468,454 @@ fn filters_by_target_and_keeps_docs_only_artifact_paths_deterministic() {
     assert_eq!(paths.index_path, PathBuf::from("out/docs/index.md"));
     assert_eq!(paths.table_paths, vec![PathBuf::from("out/docs/items.md")]);
     assert_eq!(paths.table_file_names, vec!["items.md"]);
+}
+
+#[test]
+fn schema_doc_filters_and_includes_hidden_internal_content() {
+    let input = r#"
+                [[asset_kinds]]
+                name = "ui_icon"
+                extensions = [".png"]
+
+                [[structs]]
+                name = "Reward"
+
+                [[structs.fields]]
+                name = "amount"
+                type = "int"
+
+                [[tables]]
+                name = "classes"
+                source = "classes.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.indexes]]
+                name = "primary"
+                fields = ["id"]
+                unique = true
+                primary = true
+
+                [[tables]]
+                name = "server_classes"
+                source = "server_classes.csv"
+                export_when = { any = ["server"] }
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.indexes]]
+                name = "primary"
+                fields = ["id"]
+                unique = true
+                primary = true
+
+                [[tables]]
+                name = "support_table"
+                source = "support.csv"
+                export = false
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+                polymorphic = true
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "name"
+                type = "text"
+
+                [[tables.fields]]
+                name = "icon"
+                type = "asset"
+                asset_kind = "ui_icon"
+
+                [[tables.fields]]
+                name = "reward"
+                type = "Reward"
+
+                [[tables.fields]]
+                name = "class_id"
+                type = "int"
+                foreign_key = { target_table = "classes", target_index = "primary", linked_field = "class" }
+
+                [[tables.fields]]
+                name = "server_note"
+                type = "string"
+                export_when = { any = ["server"] }
+
+                [[tables.fields.validators]]
+                kind = "regex"
+                pattern = "^server"
+
+                [[tables.fields]]
+                name = "server_icon"
+                type = "asset"
+                asset_kind = "ui_icon"
+                export_when = { any = ["server"] }
+
+                [[tables.fields]]
+                name = "server_class_id"
+                type = "int"
+                export_when = { any = ["server"] }
+                foreign_key = { target_table = "server_classes", target_index = "primary", linked_field = "server_class", export_when = { any = ["server"] } }
+
+                [[tables.fields]]
+                name = "internal_note"
+                type = "string"
+                export = false
+
+                [[tables.fields.validators]]
+                kind = "regex"
+                pattern = "^internal"
+
+                [[tables.fields]]
+                name = "internal_text"
+                type = "text"
+                export = false
+
+                [[tables.fields]]
+                name = "internal_class_id"
+                type = "int"
+                export = false
+                foreign_key = { target_table = "classes", target_index = "primary", linked_field = "internal_class", export = false }
+
+                [[tables.indexes]]
+                name = "primary"
+                fields = ["id"]
+                unique = true
+                primary = true
+
+                [[tables.indexes]]
+                name = "by_server_note"
+                fields = ["server_note"]
+                export_when = { any = ["server"] }
+
+                [[tables.indexes]]
+                name = "by_internal_note"
+                fields = ["internal_note"]
+                export = false
+
+                [[tables.fragments]]
+                name = "visible_fragment"
+
+                [[tables.fragments.fields]]
+                name = "visible_fragment_field"
+                type = "int"
+
+                [[tables.fragments]]
+                name = "server_fragment"
+                export_when = { any = ["server"] }
+
+                [[tables.fragments.fields]]
+                name = "server_fragment_field"
+                type = "int"
+
+                [[tables.fragments]]
+                name = "internal_fragment"
+                export = false
+
+                [[tables.fragments.fields]]
+                name = "internal_fragment_field"
+                type = "int"
+            "#;
+
+    let default_doc = build_doc(input, &["client"]);
+    assert_eq!(
+        default_doc
+            .tables
+            .iter()
+            .map(|table| table.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["classes", "items"]
+    );
+    assert_eq!(default_doc.relationship_graph.nodes.len(), 2);
+    assert_eq!(default_doc.relationship_graph.edges.len(), 1);
+    assert!(
+        !default_doc
+            .source_graph
+            .edges
+            .iter()
+            .any(|edge| edge.source_path == "server_classes.csv"
+                || edge.source_path == "support.csv")
+    );
+    let items = default_doc
+        .tables
+        .iter()
+        .find(|table| table.name == "items")
+        .expect("items table");
+    assert!(!items.fields.iter().any(|field| field.path == "server_note"));
+    assert!(
+        !items
+            .fields
+            .iter()
+            .any(|field| field.path == "internal_note")
+    );
+    assert!(
+        !items
+            .indexes
+            .iter()
+            .any(|index| index.name == "by_server_note")
+    );
+    assert!(
+        !items
+            .indexes
+            .iter()
+            .any(|index| index.name == "by_internal_note")
+    );
+    assert!(
+        !items
+            .relations
+            .iter()
+            .any(|relation| relation.field == "server_class_id")
+    );
+    assert!(
+        !items
+            .relations
+            .iter()
+            .any(|relation| relation.field == "internal_class_id")
+    );
+    assert!(
+        !items
+            .asset_fields
+            .iter()
+            .any(|field| field.field == "server_icon")
+    );
+    assert!(
+        !items
+            .text_fields
+            .iter()
+            .any(|field| field.field == "internal_text")
+    );
+    assert!(
+        !items
+            .fragment_graph
+            .as_ref()
+            .expect("visible fragment graph")
+            .fragments
+            .iter()
+            .any(|fragment| fragment.name == "server_fragment"
+                || fragment.name == "internal_fragment")
+    );
+
+    let mut include_options = schema_doc_options(&["client"]);
+    include_options.include_hidden = true;
+    include_options.include_internal = true;
+    let included_doc = build_doc_with_options(input, include_options);
+    assert_eq!(
+        included_doc
+            .tables
+            .iter()
+            .map(|table| (table.name.as_str(), table.visibility.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("classes", "all"),
+            ("server_classes", "hidden"),
+            ("support_table", "internal"),
+            ("items", "all"),
+        ]
+    );
+    assert_eq!(included_doc.relationship_graph.nodes.len(), 4);
+    assert!(
+        included_doc
+            .source_graph
+            .edges
+            .iter()
+            .any(|edge| edge.source_path == "server_classes.csv" && edge.visibility == "hidden")
+    );
+    assert!(
+        included_doc
+            .source_graph
+            .edges
+            .iter()
+            .any(|edge| edge.source_path == "support.csv" && edge.table == "support_table")
+    );
+    let items = included_doc
+        .tables
+        .iter()
+        .find(|table| table.name == "items")
+        .expect("items table");
+    assert!(
+        items
+            .fields
+            .iter()
+            .any(|field| field.path == "server_note" && field.visibility == "hidden")
+    );
+    assert!(
+        items
+            .fields
+            .iter()
+            .any(|field| field.path == "internal_note" && field.visibility == "internal")
+    );
+    assert!(
+        items
+            .indexes
+            .iter()
+            .any(|index| index.name == "by_server_note" && index.visibility == "hidden")
+    );
+    assert!(
+        items
+            .indexes
+            .iter()
+            .any(|index| index.name == "by_internal_note" && index.visibility == "internal")
+    );
+    assert!(
+        items
+            .relations
+            .iter()
+            .any(|relation| relation.field == "server_class_id" && relation.visibility == "hidden")
+    );
+    assert!(
+        items
+            .relations
+            .iter()
+            .any(|relation| relation.field == "internal_class_id"
+                && relation.visibility == "internal")
+    );
+    assert!(
+        items
+            .fields
+            .iter()
+            .find(|field| field.path == "server_note")
+            .is_some_and(|field| !field.validators.is_empty())
+    );
+    assert!(
+        items
+            .fields
+            .iter()
+            .find(|field| field.path == "internal_note")
+            .is_some_and(|field| !field.validators.is_empty())
+    );
+    assert!(
+        items
+            .asset_fields
+            .iter()
+            .any(|field| field.field == "server_icon")
+    );
+    assert!(
+        items
+            .text_fields
+            .iter()
+            .all(|field| field.field != "internal_text")
+    );
+    assert!(
+        items
+            .fragment_graph
+            .as_ref()
+            .expect("fragment graph")
+            .fragments
+            .iter()
+            .any(|fragment| fragment.name == "server_fragment" && fragment.visibility == "hidden")
+    );
+    assert!(
+        items
+            .fragment_graph
+            .as_ref()
+            .expect("fragment graph")
+            .fragments
+            .iter()
+            .any(|fragment| fragment.name == "internal_fragment"
+                && fragment.visibility == "internal")
+    );
+
+    let markdown = render_schema_table_markdown(&included_doc, items);
+    assert!(markdown.contains("| server_note | string | no | - | hidden | - |"));
+    assert!(markdown.contains("| internal_note | string | no | - | internal | - |"));
+    assert!(markdown.contains("server_class_id"));
+    assert!(markdown.contains("server_class"));
+    let html = render_schema_table_html(&included_doc, items, "index.html");
+    assert!(html.contains("<span class=\"badge\">hidden</span>"));
+    assert!(html.contains("<span class=\"badge\">internal</span>"));
+}
+
+#[test]
+fn schema_doc_detail_toggles_hide_struct_asset_rules_and_i18n_sections() {
+    let input = r#"
+                [[asset_kinds]]
+                name = "ui_icon"
+                extensions = [".png"]
+
+                [[structs]]
+                name = "Reward"
+
+                [[structs.fields]]
+                name = "amount"
+                type = "int"
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+                polymorphic = true
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.fields]]
+                name = "name"
+                type = "text"
+
+                [[tables.fields]]
+                name = "icon"
+                type = "asset"
+                asset_kind = "ui_icon"
+
+                [[tables.fields]]
+                name = "reward"
+                type = "Reward"
+
+                [[tables.fragments]]
+                name = "bonus"
+
+                [[tables.fragments.fields]]
+                name = "bonus_value"
+                type = "int"
+            "#;
+    let mut options = schema_doc_options(&["client"]);
+    options.include_struct_details = false;
+    options.include_asset_rules = false;
+    options.include_i18n = false;
+    let doc = build_doc_with_options(input, options);
+    let items = &doc.tables[0];
+
+    assert!(items.fields.iter().any(|field| field.path == "reward"));
+    assert!(
+        !items
+            .fields
+            .iter()
+            .any(|field| field.path == "reward.amount")
+    );
+    assert!(
+        !items
+            .fields
+            .iter()
+            .any(|field| field.path == "bonus.bonus_value")
+    );
+    assert!(items.fragment_graph.is_none());
+    assert_eq!(items.asset_fields[0].asset_kind.as_deref(), Some("ui_icon"));
+    assert!(items.asset_fields[0].rules.is_none());
+    assert!(items.text_fields.is_empty());
+
+    let markdown = render_schema_table_markdown(&doc, items);
+    assert!(!markdown.contains("## Fragments"));
+    assert!(markdown.contains("| icon | ui_icon | no | all | - |"));
+    assert!(!markdown.contains("## Text / POT"));
+    let html = render_schema_table_html(&doc, items, "index.html");
+    assert!(!html.contains("<section id=\"fragments\">"));
+    assert!(!html.contains("<h2>Text / POT</h2>"));
 }
 
 #[test]
@@ -844,7 +1315,6 @@ fn renders_html_table_sections_for_schema_details() {
     assert!(
         html.contains("<a class=\"node table-node\" href=\"#overview\"><code>items</code></a>")
     );
-    assert!(html.contains("<section id=\"fragments\">"));
     assert!(html.contains("<h2>Fields</h2>"));
     assert!(html.contains("<section id=\"fields\">"));
     assert!(html.contains("<h2>Indexes</h2>"));
