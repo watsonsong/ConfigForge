@@ -4,7 +4,13 @@
 [[tables]]
 name = "game_rules"
 kind = "object"
-source = "game_rules.csv"
+sources = [
+    { provider = "csv", path = "game_rules_gameplay.csv" },
+    { provider = "csv", path = "game_rules_economy.csv" },
+]
+override_sources = [
+    { provider = "csv", path = "game_rules_s1.csv", export_when = { any = ["s1"] } },
+]
 desc = "全局游戏规则对象表，维护新账号初始资源、默认职业、出生点、逻辑网格和开关类参数。对象表以 key/value 形式存储，适合少量全局配置。"
 
 [[tables.fields]]

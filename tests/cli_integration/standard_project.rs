@@ -214,7 +214,9 @@ fn standard_project_builds_unity_and_dotnet_csharp_targets() {
 #[test]
 fn cli_extra_tag_enables_s1_material_override_source() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let data_out_dir = temp_dir.path().join("out/data");
+    let json_out_dir = temp_dir.path().join("out/data/json");
+    let msgpack_out_dir = temp_dir.path().join("out/data/msgpack");
+    let binary_out_dir = temp_dir.path().join("out/data/binary");
     let project_path = temp_dir.path().join("ConfigForge.toml");
     fs::write(
         &project_path,
@@ -232,10 +234,20 @@ fn cli_extra_tag_enables_s1_material_override_source() {
                 [[targets.exports]]
                 output = "{}"
                 type = "json"
+
+                [[targets.exports]]
+                output = "{}"
+                type = "messagepack"
+
+                [[targets.exports]]
+                output = "{}"
+                type = "bin"
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            data_out_dir.display(),
+            json_out_dir.display(),
+            msgpack_out_dir.display(),
+            binary_out_dir.display(),
         ),
     )
     .expect("project config should be written");
@@ -255,7 +267,7 @@ fn cli_extra_tag_enables_s1_material_override_source() {
         .stdout(predicate::str::contains("target `client` built"));
 
     let items_json =
-        fs::read_to_string(data_out_dir.join("items.json")).expect("items json should exist");
+        fs::read_to_string(json_out_dir.join("items.json")).expect("items json should exist");
     let items: serde_json::Value =
         serde_json::from_str(&items_json).expect("items json should parse");
     let oak = items["rows"]
@@ -267,6 +279,22 @@ fn cli_extra_tag_enables_s1_material_override_source() {
     assert_eq!(oak["name"], "Oak Wood");
     assert_eq!(oak["price"], "5");
     assert_eq!(oak["stack"]["max_stack"], "999");
+
+    let game_rules_json = fs::read_to_string(json_out_dir.join("game_rules.json"))
+        .expect("game rules json should exist");
+    let game_rules: serde_json::Value =
+        serde_json::from_str(&game_rules_json).expect("game rules json should parse");
+    assert_eq!(game_rules["starter_gold"], "750");
+    assert_eq!(game_rules["starter_reward"]["gold"], "750");
+    assert_eq!(game_rules["max_player_level"], "60");
+
+    let game_rules_msgpack = fs::read(msgpack_out_dir.join("game_rules.msgpack"))
+        .expect("game rules messagepack should exist");
+    let game_rules_msgpack: serde_json::Value =
+        rmp_serde::from_slice(&game_rules_msgpack).expect("game rules messagepack should parse");
+    assert_eq!(game_rules_msgpack["starter_gold"], "750");
+    assert_eq!(game_rules_msgpack["starter_reward"]["gold"], "750");
+    assert!(binary_out_dir.join("game_rules.bin").exists());
 }
 
 #[test]

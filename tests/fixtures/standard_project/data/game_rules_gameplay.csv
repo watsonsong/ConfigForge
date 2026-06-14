@@ -1,10 +1,8 @@
 key,title,value
 max_player_level,最大玩家等级,60
-starter_gold,初始金币,500
 default_class_id,默认职业,1
 starter_item_ids,初始道具列表,"[2001,2002]"
 starter_reward.xp,初始固定奖励经验,0
-starter_reward.gold,初始固定奖励金币,500
 starter_reward.item_ids[0],初始固定奖励道具 0,2001
 starter_reward.item_ids[1],初始固定奖励道具 1,2002
 spawn_position,出生点,"1.5,2.5,3.5"

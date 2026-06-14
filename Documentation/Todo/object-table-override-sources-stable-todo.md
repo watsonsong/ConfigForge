@@ -129,14 +129,14 @@
 
 ### Step 6 — 标准工程与 CLI 集成覆盖
 
-- [ ] 在 `tests/fixtures/standard_project` 增加一个 ObjectTable split source 示例，例如基础全局配置拆成 `gameplay.csv` + `economy.csv`。
-- [ ] 增加一个 tag-gated ObjectTable override 示例，例如 `global_s1.csv` 只覆盖某个 season 参数。
-- [ ] 更新 CLI integration：
-  - [ ] 默认 target 不应用 tag-gated ObjectTable override。
-  - [ ] `--tag s1` 或对应 target tags 下应用 ObjectTable override。
-  - [ ] runtime JSON / MessagePack / bin payload 均包含 final object 值。
-  - [ ] 生成代码读取 ObjectTable 字段时得到 final value。
-- [ ] 如 schema docs source graph 已展示 source edges，补充 ObjectTable multi-source / override edge snapshot 或断言。
+- [x] 在 `tests/fixtures/standard_project` 增加一个 ObjectTable split source 示例，例如基础全局配置拆成 `gameplay.csv` + `economy.csv`。
+- [x] 增加一个 tag-gated ObjectTable override 示例，例如 `global_s1.csv` 只覆盖某个 season 参数。
+- [x] 更新 CLI integration：
+  - [x] 默认 target 不应用 tag-gated ObjectTable override。
+  - [x] `--tag s1` 或对应 target tags 下应用 ObjectTable override。
+  - [x] runtime JSON / MessagePack / bin payload 均包含 final object 值。
+  - [x] 生成代码读取 ObjectTable 字段时得到 final value。
+- [x] 如 schema docs source graph 已展示 source edges，补充 ObjectTable multi-source / override edge snapshot 或断言。
 
 验收：标准工程证明该能力能从 Meta、DataLoadPlan、DataLoader、Validation、Export、Codegen runtime harness 全链路工作。
 
