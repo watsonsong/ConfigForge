@@ -1,8 +1,6 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-#![allow(dead_code)]
-
 mod artifact_generator;
 mod asset_manifest;
 mod binary;

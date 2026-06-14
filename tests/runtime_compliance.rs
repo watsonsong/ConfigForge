@@ -1080,9 +1080,8 @@ fn run_binary_success_cases() {
             expect_bool(scalar, "enabled_bool")
         );
         assert_eq!(reader.as_string().unwrap(), expect_str(scalar, "name"));
-        assert_eq!(
-            binary_optional_present(reader, "nullable"),
-            false,
+        assert!(
+            !binary_optional_present(reader, "nullable"),
             "binary should encode null optional field as absent"
         );
         end_binary_record(reader);

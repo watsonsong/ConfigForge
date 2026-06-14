@@ -156,9 +156,16 @@ impl ArtifactSink {
                 }
             },
             ArtifactWriteMode::TempCommit => {
-                let temp_path = temp_path
-                    .clone()
-                    .expect("temp path should exist in temp-commit mode");
+                let Some(temp_path) = temp_path.clone() else {
+                    return Err(artifact_state_error(
+                        format!(
+                            "artifact `{}` is missing a temporary path in temp-commit mode",
+                            normalized_path.display()
+                        ),
+                        "missing temp path",
+                        "temp-commit artifact streams must have an allocated temporary path",
+                    ));
+                };
                 match open_file_for_write(&temp_path) {
                     Ok(file) => ArtifactWriteTarget::File(file),
                     Err(error) => {
@@ -401,7 +408,7 @@ impl ArtifactSinkInner {
     fn lock_state(&self) -> std::sync::MutexGuard<'_, ArtifactSinkState> {
         self.state
             .lock()
-            .expect("artifact sink state lock should not be poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn mark_path_finished(

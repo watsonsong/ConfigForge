@@ -207,7 +207,7 @@ impl LeafCondition {
             LeafOperation::In(expected) => expected.iter().any(|expected| expected == value),
             LeafOperation::NotIn(expected) => expected.iter().all(|expected| expected != value),
             LeafOperation::IsEmpty(expected) => is_empty_value(value) == *expected,
-            LeafOperation::NotEmpty(expected) => !is_empty_value(value) == *expected,
+            LeafOperation::NotEmpty(expected) => is_empty_value(value) != *expected,
         }
     }
 }

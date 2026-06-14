@@ -68,10 +68,10 @@ fn collect_rust_files(path: &Path, files: &mut Vec<std::path::PathBuf>) {
         }
         return;
     }
-    if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
-        if path.file_name().and_then(|name| name.to_str()) != Some("tests.rs") {
-            files.push(path.to_path_buf());
-        }
+    if path.extension().and_then(|extension| extension.to_str()) == Some("rs")
+        && path.file_name().and_then(|name| name.to_str()) != Some("tests.rs")
+    {
+        files.push(path.to_path_buf());
     }
 }
 

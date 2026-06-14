@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(test)]
 use std::collections::BTreeMap;
 
 use crate::{
@@ -64,6 +65,7 @@ impl GeneratorRegistry {
         Ok(generator)
     }
 
+    #[cfg(test)]
     pub(crate) fn validate_health(&self) -> Result<()> {
         let mut owners = BTreeMap::<&'static str, &'static str>::new();
         for generator in &self.generators {

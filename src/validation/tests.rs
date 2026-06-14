@@ -100,9 +100,9 @@ fn validation_outcome_preserves_error_report_before_error_gate() {
     let outcome = report.into_outcome();
 
     assert!(outcome.is_blocking());
-    assert_eq!(outcome.report().issues, [issue.clone()]);
+    assert_eq!(outcome.report().issues, std::slice::from_ref(&issue));
     let preserved_report = outcome.clone().into_report();
-    assert_eq!(preserved_report.issues, [issue.clone()]);
+    assert_eq!(preserved_report.issues, std::slice::from_ref(&issue));
     let diagnostic_report = match outcome.into_result() {
         Err(ConfigForgeError::ValidationReport(report)) => report,
         Err(error) => panic!("expected validation report error, got {error}"),

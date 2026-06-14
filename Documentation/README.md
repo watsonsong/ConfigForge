@@ -91,6 +91,8 @@ Use the implementation documents after product behavior has been confirmed in `D
 - [`DevLogs/phase-0002.md`](DevLogs/phase-0002.md) — second raw phase log covering runtime helpers, module boundary cleanup, Artifact Writer, dry-run/write-mode, and documentation maintenance through 2026-05-24.
 - [`DevLogs/phase-0003.md`](DevLogs/phase-0003.md) — third raw phase log covering runtime loading semantics, export task concurrency, artifact write bounds, and build traceability through 2026-05-31.
 - [`DevLogs/phase-0004.md`](DevLogs/phase-0004.md) — fourth raw phase log covering sink-first artifacts/codegen, Unreal C++ / C# / Java backend expansion, C# / Java runtime readers, and cross-language testing guidance through 2026-06-07.
+- [`DevLogs/phase-0005.md`](DevLogs/phase-0005.md) — fifth raw phase log covering schema docs stabilization and builtin Color / Vector value types through 2026-06-14.
+- [`DevLogs/phase-0006.md`](DevLogs/phase-0006.md) — sixth raw phase log covering ObjectTable multi-source / override source stabilization through 2026-06-14.
 
 ## Todo / Task Lists
 

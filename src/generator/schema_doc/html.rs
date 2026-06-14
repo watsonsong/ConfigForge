@@ -307,10 +307,11 @@ fn push_relation_edge_card(
         .as_deref()
         .map(|helper| badge(&format!("helper: {helper}")))
         .unwrap_or_default();
-    let optional = edge
-        .allow_empty
-        .then(|| badge("allow_empty"))
-        .unwrap_or_default();
+    let optional = if edge.allow_empty {
+        badge("allow_empty")
+    } else {
+        String::new()
+    };
     push_line(
         body,
         &format!(

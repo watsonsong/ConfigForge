@@ -572,7 +572,7 @@ Lua table 必须读取 `project.input` 中的数据，基于 Meta 与 target-awa
 
 当前不引入通用配置 schema version 或自动兼容机制。表、字段、enum、struct 等定义依赖稳定字符串 `name` 作为长期身份；如果未来启用 Protobuf，则通过显式 `field_number` 和对应 schema evolution 策略处理二进制格式兼容。
 
-### 3.5.3 Builtin value type 与引擎类型映射（规划）
+### 3.5.3 Builtin value type 与引擎类型映射（当前能力与扩展方向）
 
 `color`、`vector2`、`vector3`、`vector4` 及其 int 变体是 Meta 层的语言无关 builtin value type。Project Config 不改变它们的 schema 身份，而是在 codegen export task 上声明目标语言 / 引擎 profile 和类型映射。这样同一份 Meta 与 Data 可以同时生成通用 .NET、Unity、C++、Unreal 或自研引擎代码，而无需在业务 Meta 中写入 `UnityEngine.Vector3`、`System.Numerics.Vector3` 等平台类型名。
 

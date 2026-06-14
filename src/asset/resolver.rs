@@ -531,8 +531,15 @@ fn effective_asset_kind(
         })?;
     }
 
-    let mut effective =
-        EffectiveAssetKind::from_raw(chain.pop().expect("asset kind chain is non-empty"));
+    let Some(root) = chain.pop() else {
+        return Err(asset_error(
+            format!("asset kind `{}` could not be resolved", asset_kind.name),
+            asset_kind.name.as_str(),
+            "asset kind inheritance chain",
+            "Declare the asset kind before using it.",
+        ));
+    };
+    let mut effective = EffectiveAssetKind::from_raw(root);
     while let Some(child) = chain.pop() {
         effective.apply_child(child);
     }
@@ -630,7 +637,7 @@ fn append_non_empty(target: &mut Vec<String>, source: &[String]) {
     }
 }
 
-fn strip_asset_wrappers<'a>(input: &'a str, wrappers: &[String]) -> String {
+fn strip_asset_wrappers(input: &str, wrappers: &[String]) -> String {
     for wrapper in wrappers {
         let Some((prefix, suffix)) = wrapper.split_once("{value}") else {
             continue;
