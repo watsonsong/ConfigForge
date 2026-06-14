@@ -50,6 +50,26 @@ pub struct CppCodegenOptions {
     pub runtime_core_header: Option<String>,
     #[serde(default)]
     pub runtime_core_namespace: Option<String>,
+    #[serde(default)]
+    pub type_mappings: CppTypeMappings,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CppTypeMappings {
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub vector2: Option<String>,
+    #[serde(default)]
+    pub vector3: Option<String>,
+    #[serde(default)]
+    pub vector4: Option<String>,
+    #[serde(default)]
+    pub vector2_int: Option<String>,
+    #[serde(default)]
+    pub vector3_int: Option<String>,
+    #[serde(default)]
+    pub vector4_int: Option<String>,
 }
 
 pub(crate) struct CppCodeGenerator;
@@ -82,7 +102,7 @@ impl CodeGenerator for CppCodeGenerator {
             .options
             .language_options::<CppCodegenOptions>(LANGUAGE)?;
         validate_runtime_interface_options(&cpp_options)?;
-        let names = CppNames::new(&input.target.options);
+        let names = CppNames::new(&input.target.options, &cpp_options);
         validate_generated_symbols(&model, &names)?;
         let mut header = super::CodeWriter::new(input.target.options.formatting);
         let namespace = cpp_options
@@ -132,7 +152,7 @@ impl CodeGenerator for CppCodeGenerator {
             .options
             .language_options::<CppCodegenOptions>(LANGUAGE)?;
         validate_runtime_interface_options(&cpp_options)?;
-        let names = CppNames::new(&input.target.options);
+        let names = CppNames::new(&input.target.options, &cpp_options);
         validate_generated_symbols(&model, &names)?;
         let namespace = cpp_options
             .namespace
@@ -213,7 +233,52 @@ fn validate_runtime_interface_options(options: &CppCodegenOptions) -> Result<()>
         validate_optional_single_line("runtime_core_header", &options.runtime_core_header)?;
         validate_optional_single_line("runtime_core_namespace", &options.runtime_core_namespace)?;
     }
+    validate_type_mappings(&options.type_mappings)?;
     Ok(())
+}
+
+fn validate_type_mappings(mappings: &CppTypeMappings) -> Result<()> {
+    for (key, value) in [
+        ("type_mappings.color", &mappings.color),
+        ("type_mappings.vector2", &mappings.vector2),
+        ("type_mappings.vector3", &mappings.vector3),
+        ("type_mappings.vector4", &mappings.vector4),
+        ("type_mappings.vector2_int", &mappings.vector2_int),
+        ("type_mappings.vector3_int", &mappings.vector3_int),
+        ("type_mappings.vector4_int", &mappings.vector4_int),
+    ] {
+        if let Some(value) = value {
+            validate_cpp_type_reference(key, value)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_cpp_type_reference(option: &str, value: &str) -> Result<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.contains(';')
+        || trimmed.contains('(')
+        || trimmed.contains(')')
+        || trimmed.contains('#')
+        || trimmed.chars().any(char::is_whitespace)
+    {
+        return Err(validation_error(format!(
+            "invalid {option} `{value}`; expected a C++ type reference"
+        )));
+    }
+    Ok(())
+}
+
+fn validation_error(message: String) -> ConfigForgeError {
+    crate::code_artifact::generator_option_error(
+        CF_GENERATOR_INVALID_OPTION,
+        "generator.cpp.options",
+        message,
+        "cpp",
+        "valid C++ generator option",
+        "Check the cpp generator language options.",
+    )
 }
 
 fn validate_optional_single_line(kind: &str, value: &Option<String>) -> Result<()> {
@@ -642,7 +707,7 @@ fn render_source_file(
         content.raw_fmt(format_args!("namespace {namespace} {{\n\n"));
     }
 
-    render_reader_helpers_source(&mut content);
+    render_reader_helpers_source(&mut content, names.cpp_options());
     for code_enum in &model.enums {
         render_enum_reader_source(&mut content, code_enum, names)?;
     }

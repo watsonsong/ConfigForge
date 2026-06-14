@@ -77,10 +77,10 @@ fn render_markdown(report: &DesignerValidationReport) -> String {
     }
 
     output.push_str("\n## Issues\n\n");
-    output.push_str("| ID | Severity | Code | Table | Field | Source row | Source column | Current | Expected | Message | Hint |\n| --- | --- | --- | --- | --- | ---: | --- | --- | --- | --- | --- |\n");
+    output.push_str("| ID | Severity | Code | Table | Field | Source row | Source column | Current | Expected | Schema | Message | Hint |\n| --- | --- | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- |\n");
     for issue in &report.issues {
         output.push_str(&format!(
-            "| {} | {} | `{}` | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| {} | {} | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             issue.id,
             severity_label(issue.severity),
             escape_markdown(&issue.code),
@@ -93,6 +93,7 @@ fn render_markdown(report: &DesignerValidationReport) -> String {
             escape_markdown(issue.source_column.as_deref().unwrap_or("")),
             escape_markdown(issue.current_value.as_deref().unwrap_or("")),
             escape_markdown(issue.expected.as_deref().unwrap_or("")),
+            escape_markdown(&issue.schema_metadata.join("; ")),
             escape_markdown(&issue.message),
             escape_markdown(issue.hint.as_deref().unwrap_or("")),
         ));
@@ -118,6 +119,7 @@ fn render_csv(report: &DesignerValidationReport) -> String {
         "source_path",
         "current_value",
         "expected",
+        "schema_metadata",
         "explanation",
         "target",
         "owner",
@@ -148,6 +150,7 @@ fn render_csv(report: &DesignerValidationReport) -> String {
             issue.source_path.clone().unwrap_or_default(),
             issue.current_value.clone().unwrap_or_default(),
             issue.expected.clone().unwrap_or_default(),
+            issue.schema_metadata.join("; "),
             issue.explanation.clone().unwrap_or_default(),
             issue.target.clone().unwrap_or_default(),
             issue.owner.clone(),
@@ -205,14 +208,14 @@ fn render_html(report: &DesignerValidationReport) -> String {
         "<div class=\"card\"><h2>{}</h2><p>Owners</p></div>",
         report.summary.owners_with_issues
     ));
-    output.push_str("</section><h2>Issues</h2><table><thead><tr><th>ID</th><th>Severity</th><th>Code</th><th>Location</th><th>Current</th><th>Expected</th><th>Message</th><th>Hint</th></tr></thead><tbody>");
+    output.push_str("</section><h2>Issues</h2><table><thead><tr><th>ID</th><th>Severity</th><th>Code</th><th>Location</th><th>Current</th><th>Expected</th><th>Schema</th><th>Message</th><th>Hint</th></tr></thead><tbody>");
     for issue in &report.issues {
         let severity_class = match issue.severity {
             DiagnosticSeverity::Error => "sev-error",
             DiagnosticSeverity::Warning => "sev-warning",
         };
         output.push_str(&format!(
-            "<tr><td>{}</td><td class=\"{}\">{}</td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            "<tr><td>{}</td><td class=\"{}\">{}</td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             escape_html(&issue.id),
             severity_class,
             severity_label(issue.severity),
@@ -220,6 +223,7 @@ fn render_html(report: &DesignerValidationReport) -> String {
             escape_html(&format_issue_location(issue)),
             escape_html(issue.current_value.as_deref().unwrap_or("")),
             escape_html(issue.expected.as_deref().unwrap_or("")),
+            escape_html(&issue.schema_metadata.join("; ")),
             escape_html(&issue.message),
             escape_html(issue.hint.as_deref().unwrap_or("")),
         ));

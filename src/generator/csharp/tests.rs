@@ -127,6 +127,69 @@ fn emits_unity_and_godot_profile_builtin_mappings() {
 }
 
 #[test]
+fn csharp_type_mappings_and_usings_override_builtin_profiles() {
+    let meta = builtin_value_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str(
+            r#"
+                using = ["Game.Math"]
+
+                [type_mappings]
+                color = "Game.Math.ColorRgba"
+                vector3 = "Game.Math.Float3"
+                vector2_int = "Game.Math.Int2"
+            "#,
+        )
+        .expect("toml value"),
+    );
+
+    let files = CSharpCodeGenerator.generate(&input).expect("csharp code");
+    let content = &files[0].content;
+
+    assert!(content.contains("using Game.Math;"));
+    assert!(content.contains("public Game.Math.ColorRgba Tint { get; init; }"));
+    assert!(content.contains("public Game.Math.Float3 Position { get; init; }"));
+    assert!(content.contains("public Game.Math.Int2 Grid { get; init; }"));
+}
+
+#[test]
+fn csharp_unity_profile_normalizes_byte_color_channels() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "themes"
+            source = "themes.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "string"
+            required = true
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_channel = "byte"
+            required = true
+        "#,
+    )
+    .expect("meta should parse");
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str("profile = \"unity\"").expect("toml value"),
+    );
+
+    let files = CSharpCodeGenerator.generate(&input).expect("csharp code");
+    let content = &files[0].content;
+
+    assert!(content.contains(
+        "new UnityEngine.Color((float)(r / 255.0), (float)(g / 255.0), (float)(b / 255.0), (float)(a / 255.0))"
+    ));
+}
+
+#[test]
 fn rejects_invalid_csharp_options() {
     for (key, value, expected) in [
         ("namespace", "1.Bad", "invalid namespace"),
@@ -134,11 +197,14 @@ fn rejects_invalid_csharp_options() {
         ("class_name", "class", "invalid class_name"),
         ("lazy_class_name", "1Lazy", "invalid lazy_class_name"),
         ("runtime_namespace", "1.Bad", "invalid namespace"),
+        ("using", "[\"Bad;Namespace\"]", "invalid using"),
     ] {
         let meta = linked_fixture();
         let mut input = input_for(&meta, LANGUAGE);
         let toml = if key == "runtime_namespace" {
             format!("runtime_interface = \"external\"\n{key} = {value:?}")
+        } else if key == "using" {
+            format!("{key} = {value}")
         } else {
             format!("{key} = {value:?}")
         };

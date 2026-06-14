@@ -28,8 +28,9 @@ fn export_validation_report_to_sink(
     sink: &ArtifactSink,
 ) -> Result<()> {
     let config = validation_report_export_config_from_input(input)?;
-    let mut report = DesignerValidationReport::from_validation_report(
+    let mut report = DesignerValidationReport::from_validation_report_with_schema(
         validation_report,
+        input.meta,
         DesignerReportOptions {
             title: None,
             project_name: input.project.name.clone(),

@@ -10,11 +10,12 @@ use crate::{
 };
 
 use super::{
-    ValidationContext, ValidationIssue, ValidationReport,
+    ValidationContext, ValidationIssue, ValidationReport, builtins::color::ColorValidatorFactory,
     builtins::compare::CompareValidatorFactory, builtins::monotonic::MonotonicValidatorFactory,
     builtins::range::RangeValidatorFactory, builtins::regex::RegexValidatorFactory,
     builtins::required_when::RequiredWhenValidatorFactory,
     builtins::string_length::StringLengthValidatorFactory, builtins::sum::SumValidatorFactory,
+    builtins::vector::VectorValidatorFactory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +73,8 @@ impl ValidatorRegistry {
     pub fn with_builtin_validators() -> Self {
         let mut registry = Self::new();
         registry.register(RangeValidatorFactory);
+        registry.register(ColorValidatorFactory);
+        registry.register(VectorValidatorFactory);
         registry.register(RegexValidatorFactory);
         registry.register(StringLengthValidatorFactory);
         registry.register(RequiredWhenValidatorFactory);

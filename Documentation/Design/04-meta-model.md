@@ -552,7 +552,7 @@ Meta 导出机制使用 `export`、`export_when` 与 `row_export`；以下字段
 | `int_range` / `float_range` | 范围。 |
 | `rect` / `bounds3` | 区域和包围盒。 |
 
-> 当前实现状态：Planned / Not implemented。当前代码尚未支持 `color`、`vector2`、`vector3`、`vector4` 及其 int 变体；它们在本文中作为下一阶段 builtin value type 设计。当前项目若需要这类值，只能临时用 named struct / string 建模，但不应把 `Color`、`Vector3` 等引擎类型名直接写入 Meta 作为长期 schema。
+> 当前实现状态：Implemented MVP。当前代码已支持 `color`、`vector2`、`vector3`、`vector4` 及其 int 变体的 Meta 声明、数据解析、runtime artifact 输出、schema doc 展示、validation report schema metadata、builtin validator 与主流 codegen mapping。项目仍不应把 `Color`、`Vector3` 等引擎类型名直接写入 Meta；目标语言 / 引擎类型属于 codegen target mapping。
 
 确认规则：
 

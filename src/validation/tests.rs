@@ -3169,6 +3169,183 @@ fn range_validator_rejects_empty_value_when_disallowed() {
 }
 
 #[test]
+fn vector_validator_checks_components_magnitude_and_custom_names() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "spawns"
+            source = "spawns.csv"
+
+            [[tables.fields]]
+            name = "position"
+            type = "vector3"
+            vector_format = "tuple"
+            vector_components = ["right", "up", "forward"]
+
+            [[tables.fields.validators]]
+            kind = "vector"
+            name = "position_bounds"
+            components = ["up"]
+            min = -1
+            max = 1
+            magnitude_max = 4.9
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "spawns",
+        vec![BTreeMap::from([(
+            "position".to_owned(),
+            "3,4,0".to_owned(),
+        )])],
+    )]);
+
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+
+    assert!(message.contains("component `up` exceeds max `1`"));
+}
+
+#[test]
+fn vector_validator_checks_magnitude_when_components_pass() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "spawns"
+            source = "spawns.csv"
+
+            [[tables.fields]]
+            name = "position"
+            type = "vector3"
+            vector_format = "tuple"
+
+            [[tables.fields.validators]]
+            kind = "vector"
+            max = 10
+            magnitude_max = 4.9
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "spawns",
+        vec![BTreeMap::from([(
+            "position".to_owned(),
+            "3,4,0".to_owned(),
+        )])],
+    )]);
+
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+
+    assert!(message.contains("magnitude `5` exceeds max `4.9`"));
+}
+
+#[test]
+fn color_validator_checks_alpha_channel_bounds_and_metadata() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "themes"
+            source = "themes.csv"
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_format = "rgba_tuple"
+            color_channel = "normalized"
+            color_space = "srgb"
+
+            [[tables.fields.validators]]
+            kind = "color"
+            channels = ["r", "g", "b"]
+            min = 0.0
+            max = 1.0
+            alpha_min = 0.5
+            channel = "normalized"
+            space = "srgb"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "themes",
+        vec![BTreeMap::from([(
+            "tint".to_owned(),
+            "0.2,0.3,0.4,0.1".to_owned(),
+        )])],
+    )]);
+
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+
+    assert!(message.contains("alpha is below min `0.5`"));
+}
+
+#[test]
+fn color_and_vector_validators_reject_unknown_or_invalid_config() {
+    let vector_meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "spawns"
+            source = "spawns.csv"
+
+            [[tables.fields]]
+            name = "position"
+            type = "vector2"
+            vector_format = "tuple"
+
+            [[tables.fields.validators]]
+            kind = "vector"
+            components = ["missing"]
+            max = 1
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = vector_meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "spawns",
+        vec![BTreeMap::from([("position".to_owned(), "0,0".to_owned())])],
+    )]);
+    let issue = expect_validator_config_issue(
+        validate_data_set(&linked_meta, &data_set),
+        "validator.vector",
+    );
+    assert!(issue.message.contains("unknown component `missing`"));
+
+    let color_meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "themes"
+            source = "themes.csv"
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_format = "hex_rgba"
+            color_channel = "byte"
+
+            [[tables.fields.validators]]
+            kind = "color"
+            alpha_min = 128
+            channel = "normalized"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = color_meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "themes",
+        vec![BTreeMap::from([(
+            "tint".to_owned(),
+            "#FFFFFFFF".to_owned(),
+        )])],
+    )]);
+    let issue = expect_validator_config_issue(
+        validate_data_set(&linked_meta, &data_set),
+        "validator.color",
+    );
+    assert!(issue.message.contains("expects color_channel `normalized`"));
+}
+
+#[test]
 fn range_validator_does_not_panic_on_fractional_int_when_run_directly() {
     let meta = MetaModel::from_toml_str(
         r#"

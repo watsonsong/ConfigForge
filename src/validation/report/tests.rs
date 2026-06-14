@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     Diagnostic, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity,
-    meta::{TargetTags, ValidationSeverity},
+    meta::{MetaModel, TargetTags, ValidationSeverity},
     validation::{ValidationIssue, ValidationReport},
 };
 use std::path::PathBuf;
@@ -213,10 +213,93 @@ fn renderers_include_structured_enrichment_fields() {
             "id,severity,blocking,code,friendly_title,message,hint,table,field,row_index,source_row_number,source_column"
         ));
     assert!(csv.contains(",level,"));
-    assert!(csv.contains(",abc,integer,parse as integer,"));
+    assert!(csv.contains(",abc,integer,,parse as integer,"));
 
     let html = render_designer_validation_report(&report, DesignerReportFormat::Html).unwrap();
     assert!(html.contains("abc"));
     assert!(html.contains("integer"));
     assert!(html.contains("column level"));
+}
+
+#[test]
+fn validation_report_with_schema_includes_builtin_metadata() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "themes"
+            source = "themes.csv"
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_format = "hex_rgba"
+            color_channel = "byte"
+            color_space = "srgb"
+
+            [[tables.fields]]
+            name = "position"
+            type = "vector3"
+            vector_format = "tuple"
+            vector_components = ["right", "up", "forward"]
+            unit = "meter"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let mut validation = ValidationReport::new();
+    let mut color_issue = issue("custom.color", ValidationSeverity::Error, "themes", 2);
+    color_issue.location.field = Some("tint".to_owned());
+    validation.push(color_issue);
+    let mut vector_issue = issue("custom.vector", ValidationSeverity::Error, "themes", 2);
+    vector_issue.location.field = Some("position".to_owned());
+    validation.push(vector_issue);
+
+    let report = DesignerValidationReport::from_validation_report_with_schema(
+        &validation,
+        &linked_meta,
+        options(),
+    );
+
+    let color_issue = report
+        .issues
+        .iter()
+        .find(|issue| issue.field.as_deref() == Some("tint"))
+        .expect("color issue");
+    let vector_issue = report
+        .issues
+        .iter()
+        .find(|issue| issue.field.as_deref() == Some("position"))
+        .expect("vector issue");
+
+    assert!(
+        color_issue
+            .schema_metadata
+            .contains(&"type=color(format=hex_rgba)".to_owned())
+    );
+    assert!(
+        color_issue
+            .schema_metadata
+            .contains(&"channel=byte".to_owned())
+    );
+    assert!(
+        vector_issue
+            .schema_metadata
+            .contains(&"components=right/up/forward".to_owned())
+    );
+    assert!(
+        vector_issue
+            .schema_metadata
+            .contains(&"unit=meter".to_owned())
+    );
+
+    let markdown =
+        render_designer_validation_report(&report, DesignerReportFormat::Markdown).unwrap();
+    assert!(markdown.contains("Schema"));
+    assert!(markdown.contains("channel=byte"));
+    let csv = render_designer_validation_report(&report, DesignerReportFormat::Csv).unwrap();
+    assert!(csv.contains("schema_metadata"));
+    assert!(csv.contains("components=right/up/forward"));
+    let html = render_designer_validation_report(&report, DesignerReportFormat::Html).unwrap();
+    assert!(html.contains("Schema"));
+    assert!(html.contains("unit=meter"));
 }

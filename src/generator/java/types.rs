@@ -4,7 +4,7 @@
 use crate::{Result, diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT};
 
 use super::{
-    JavaCodegenOptions,
+    JavaCodegenOptions, JavaTypeMappings,
     symbols::{is_java_keyword, validate_java_identifier, validate_java_package},
 };
 use crate::code_artifact::{
@@ -21,6 +21,7 @@ pub(super) struct JavaNames {
     lazy_game_data_class_name: String,
     naming: NamingConfig,
     keyword_conflict: KeywordConflictPolicy,
+    type_mappings: JavaTypeMappings,
 }
 
 impl JavaNames {
@@ -68,6 +69,7 @@ impl JavaNames {
             lazy_game_data_class_name,
             naming: input.target.options.naming.clone(),
             keyword_conflict: input.target.options.keyword_conflict,
+            type_mappings: options.type_mappings.clone(),
         })
     }
 
@@ -238,10 +240,10 @@ impl JavaNames {
             CodeTypeRef::Bool if required => "boolean".to_owned(),
             CodeTypeRef::Bool => "Boolean".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
-            CodeTypeRef::Color => "ConfigForgeColor".to_owned(),
+            CodeTypeRef::Color => self.java_color_type(),
             CodeTypeRef::Vector {
                 dimension, element, ..
-            } => java_vector_type(*dimension, *element),
+            } => self.java_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("{}[]", self.java_array_element_type(element)?),
         })
@@ -253,10 +255,10 @@ impl JavaNames {
             CodeTypeRef::Float => "Double".to_owned(),
             CodeTypeRef::Bool => "Boolean".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
-            CodeTypeRef::Color => "ConfigForgeColor".to_owned(),
+            CodeTypeRef::Color => self.java_color_type(),
             CodeTypeRef::Vector {
                 dimension, element, ..
-            } => java_vector_type(*dimension, *element),
+            } => self.java_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("{}[]", self.java_array_element_type(element)?),
         })
@@ -385,7 +387,7 @@ impl JavaNames {
                 dimension, element, ..
             } => format!(
                 "ConfigForgeRuntimeReader::read{}Value",
-                java_vector_type(*dimension, *element)
+                java_vector_reader_suffix(*dimension, *element)
             ),
             CodeTypeRef::Enum { name } => format!(
                 "ConfigForgeRuntimeReader::{}",
@@ -416,14 +418,16 @@ impl JavaNames {
                 "ConfigForgeRuntimeReader.readObjectList({reader}, String[]::new, ConfigForgeRuntimeReader::readStringValue)"
             ),
             CodeTypeRef::Color => format!(
-                "ConfigForgeRuntimeReader.readObjectList({reader}, ConfigForgeColor[]::new, ConfigForgeRuntimeReader::readColorValue)"
+                "ConfigForgeRuntimeReader.readObjectList({reader}, {}[]::new, ConfigForgeRuntimeReader::readColorValue)",
+                self.java_color_type()
             ),
             CodeTypeRef::Vector {
                 dimension, element, ..
             } => {
-                let type_name = java_vector_type(*dimension, *element);
+                let type_name = self.java_vector_type(*dimension, *element);
+                let reader_suffix = java_vector_reader_suffix(*dimension, *element);
                 format!(
-                    "ConfigForgeRuntimeReader.readObjectList({reader}, {type_name}[]::new, ConfigForgeRuntimeReader::read{type_name}Value)"
+                    "ConfigForgeRuntimeReader.readObjectList({reader}, {type_name}[]::new, ConfigForgeRuntimeReader::read{reader_suffix}Value)"
                 )
             }
             CodeTypeRef::Enum { name } => format!(
@@ -451,10 +455,10 @@ impl JavaNames {
             CodeTypeRef::Float => "double".to_owned(),
             CodeTypeRef::Bool => "boolean".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
-            CodeTypeRef::Color => "ConfigForgeColor".to_owned(),
+            CodeTypeRef::Color => self.java_color_type(),
             CodeTypeRef::Vector {
                 dimension, element, ..
-            } => java_vector_type(*dimension, *element),
+            } => self.java_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("{}[]", self.java_array_element_type(element)?),
         })
@@ -475,6 +479,32 @@ impl JavaNames {
             )
         })
     }
+
+    pub(super) fn java_color_type(&self) -> String {
+        self.type_mappings
+            .color
+            .clone()
+            .unwrap_or_else(|| "ConfigForgeColor".to_owned())
+    }
+
+    pub(super) fn java_vector_type(
+        &self,
+        dimension: usize,
+        element: CodeVectorElementType,
+    ) -> String {
+        let mapped = match (dimension, element) {
+            (2, CodeVectorElementType::Float) => self.type_mappings.vector2.as_ref(),
+            (3, CodeVectorElementType::Float) => self.type_mappings.vector3.as_ref(),
+            (4, CodeVectorElementType::Float) => self.type_mappings.vector4.as_ref(),
+            (2, CodeVectorElementType::Int) => self.type_mappings.vector2_int.as_ref(),
+            (3, CodeVectorElementType::Int) => self.type_mappings.vector3_int.as_ref(),
+            (4, CodeVectorElementType::Int) => self.type_mappings.vector4_int.as_ref(),
+            _ => None,
+        };
+        mapped
+            .cloned()
+            .unwrap_or_else(|| java_vector_reader_suffix(dimension, element))
+    }
 }
 
 fn suffixed_name(name: String, suffix: &str) -> String {
@@ -485,7 +515,10 @@ fn suffixed_name(name: String, suffix: &str) -> String {
     }
 }
 
-fn java_vector_type(dimension: usize, element: CodeVectorElementType) -> String {
+pub(super) fn java_vector_reader_suffix(
+    dimension: usize,
+    element: CodeVectorElementType,
+) -> String {
     let suffix = match element {
         CodeVectorElementType::Float => "",
         CodeVectorElementType::Int => "Int",

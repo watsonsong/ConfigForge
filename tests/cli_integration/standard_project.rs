@@ -169,6 +169,49 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
 }
 
 #[test]
+fn standard_project_builds_unity_and_dotnet_csharp_targets() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let fixture_root = absolute_fixture_path("");
+    let project_path = std::path::Path::new(&fixture_root).join("ConfigForge.toml");
+    let client_unity_out = std::path::Path::new(&fixture_root).join("out/client_code/unity");
+    let server_dotnet_out = std::path::Path::new(&fixture_root).join("out/server_code/dotnet");
+
+    let mut client_unity_cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    client_unity_cmd.current_dir(temp_dir.path()).args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "client_unity",
+    ]);
+    client_unity_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target `client_unity` built"));
+    let unity_code = fs::read_to_string(client_unity_out.join("reference_game_config.cs"))
+        .expect("unity csharp output should exist");
+    assert!(unity_code.contains("UnityEngine.Color StandardColor"));
+    assert!(unity_code.contains("UnityEngine.Vector3 SpawnPosition"));
+    assert!(unity_code.contains("UnityEngine.Vector2Int GridSize"));
+
+    let mut server_dotnet_cmd = Command::cargo_bin("config-forge").expect("binary should build");
+    server_dotnet_cmd.current_dir(temp_dir.path()).args([
+        "--project",
+        project_path.to_str().expect("path should be utf8"),
+        "--target",
+        "server_dotnet",
+    ]);
+    server_dotnet_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target `server_dotnet` built"));
+    let dotnet_code = fs::read_to_string(server_dotnet_out.join("reference_game_config.cs"))
+        .expect("dotnet csharp output should exist");
+    assert!(dotnet_code.contains("readonly struct ConfigForgeColor"));
+    assert!(dotnet_code.contains("System.Numerics.Vector3 SpawnPosition"));
+    assert!(dotnet_code.contains("ConfigForgeVector2Int GridSize"));
+}
+
+#[test]
 fn cli_extra_tag_enables_s1_material_override_source() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let data_out_dir = temp_dir.path().join("out/data");

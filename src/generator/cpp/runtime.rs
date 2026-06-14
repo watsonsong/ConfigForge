@@ -1,9 +1,9 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::code_artifact::{CodeWriterLike, RuntimeInterfaceMode};
+use crate::code_artifact::{CodeVectorElementType, CodeWriterLike, RuntimeInterfaceMode};
 
-use super::CppCodegenOptions;
+use super::{CppCodegenOptions, types::cpp_vector_reader_suffix};
 
 const DEFAULT_RUNTIME_CORE_HEADER: &str = "config_forge/runtime/reader.hpp";
 const DEFAULT_RUNTIME_CORE_NAMESPACE: &str = "config_forge_runtime";
@@ -101,7 +101,10 @@ fn render_external_runtime_interfaces(
     content.raw_fmt(format_args!("using {namespace}::IRuntimeDataReader;\n\n"));
 }
 
-pub(super) fn render_reader_helpers_source(content: &mut impl CodeWriterLike) {
+pub(super) fn render_reader_helpers_source(
+    content: &mut impl CodeWriterLike,
+    options: &CppCodegenOptions,
+) {
     content.raw(concat!(
         "namespace {\n\n",
         "class ReaderScope {\n",
@@ -159,70 +162,45 @@ pub(super) fn render_reader_helpers_source(content: &mut impl CodeWriterLike) {
         "std::optional<std::string> ReadOptionalString(IRuntimeDataReader& reader, const std::string& name) {\n",
         "    return OptionalField(reader, name, [](IRuntimeDataReader& value) { return value.AsString(); });\n",
         "}\n\n",
-        "ConfigForgeColor ReadColor(IRuntimeDataReader& reader) {\n",
-        "    reader.BeginRecord(0);\n",
-        "    try {\n",
-        "        auto value = ConfigForgeColor{\n",
-        "            ReadRequiredDouble(reader, \"r\"),\n",
-        "            ReadRequiredDouble(reader, \"g\"),\n",
-        "            ReadRequiredDouble(reader, \"b\"),\n",
-        "            ReadRequiredDouble(reader, \"a\")\n",
-        "        };\n",
-        "        reader.EndRecord();\n",
-        "        return value;\n",
-        "    } catch (...) {\n",
-        "        reader.EndRecord();\n",
-        "        throw;\n",
-        "    }\n",
-        "}\n\n",
-        "ConfigForgeColor ReadRequiredColor(IRuntimeDataReader& reader, const std::string& name) {\n",
-        "    return RequiredField(reader, name, [](IRuntimeDataReader& value) { return ReadColor(value); });\n",
-        "}\n\n",
-        "std::optional<ConfigForgeColor> ReadOptionalColor(IRuntimeDataReader& reader, const std::string& name) {\n",
-        "    return OptionalField(reader, name, [](IRuntimeDataReader& value) { return ReadColor(value); });\n",
-        "}\n\n",
-        "ConfigForgeVector2 ReadConfigForgeVector2(IRuntimeDataReader& reader) {\n",
-        "    reader.BeginRecord(0);\n",
-        "    try { auto value = ConfigForgeVector2{ReadRequiredDouble(reader, \"x\"), ReadRequiredDouble(reader, \"y\")}; reader.EndRecord(); return value; }\n",
-        "    catch (...) { reader.EndRecord(); throw; }\n",
-        "}\n\n",
-        "ConfigForgeVector3 ReadConfigForgeVector3(IRuntimeDataReader& reader) {\n",
-        "    reader.BeginRecord(0);\n",
-        "    try { auto value = ConfigForgeVector3{ReadRequiredDouble(reader, \"x\"), ReadRequiredDouble(reader, \"y\"), ReadRequiredDouble(reader, \"z\")}; reader.EndRecord(); return value; }\n",
-        "    catch (...) { reader.EndRecord(); throw; }\n",
-        "}\n\n",
-        "ConfigForgeVector4 ReadConfigForgeVector4(IRuntimeDataReader& reader) {\n",
-        "    reader.BeginRecord(0);\n",
-        "    try { auto value = ConfigForgeVector4{ReadRequiredDouble(reader, \"x\"), ReadRequiredDouble(reader, \"y\"), ReadRequiredDouble(reader, \"z\"), ReadRequiredDouble(reader, \"w\")}; reader.EndRecord(); return value; }\n",
-        "    catch (...) { reader.EndRecord(); throw; }\n",
-        "}\n\n",
-        "ConfigForgeVector2Int ReadConfigForgeVector2Int(IRuntimeDataReader& reader) {\n",
-        "    reader.BeginRecord(0);\n",
-        "    try { auto value = ConfigForgeVector2Int{static_cast<std::int64_t>(ReadRequiredDouble(reader, \"x\")), static_cast<std::int64_t>(ReadRequiredDouble(reader, \"y\"))}; reader.EndRecord(); return value; }\n",
-        "    catch (...) { reader.EndRecord(); throw; }\n",
-        "}\n\n",
-        "ConfigForgeVector3Int ReadConfigForgeVector3Int(IRuntimeDataReader& reader) {\n",
-        "    reader.BeginRecord(0);\n",
-        "    try { auto value = ConfigForgeVector3Int{static_cast<std::int64_t>(ReadRequiredDouble(reader, \"x\")), static_cast<std::int64_t>(ReadRequiredDouble(reader, \"y\")), static_cast<std::int64_t>(ReadRequiredDouble(reader, \"z\"))}; reader.EndRecord(); return value; }\n",
-        "    catch (...) { reader.EndRecord(); throw; }\n",
-        "}\n\n",
-        "ConfigForgeVector4Int ReadConfigForgeVector4Int(IRuntimeDataReader& reader) {\n",
-        "    reader.BeginRecord(0);\n",
-        "    try { auto value = ConfigForgeVector4Int{static_cast<std::int64_t>(ReadRequiredDouble(reader, \"x\")), static_cast<std::int64_t>(ReadRequiredDouble(reader, \"y\")), static_cast<std::int64_t>(ReadRequiredDouble(reader, \"z\")), static_cast<std::int64_t>(ReadRequiredDouble(reader, \"w\"))}; reader.EndRecord(); return value; }\n",
-        "    catch (...) { reader.EndRecord(); throw; }\n",
-        "}\n\n",
-        "ConfigForgeVector2 ReadRequiredConfigForgeVector2(IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name, [](IRuntimeDataReader& value) { return ReadConfigForgeVector2(value); }); }\n",
-        "ConfigForgeVector3 ReadRequiredConfigForgeVector3(IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name, [](IRuntimeDataReader& value) { return ReadConfigForgeVector3(value); }); }\n",
-        "ConfigForgeVector4 ReadRequiredConfigForgeVector4(IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name, [](IRuntimeDataReader& value) { return ReadConfigForgeVector4(value); }); }\n",
-        "ConfigForgeVector2Int ReadRequiredConfigForgeVector2Int(IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name, [](IRuntimeDataReader& value) { return ReadConfigForgeVector2Int(value); }); }\n",
-        "ConfigForgeVector3Int ReadRequiredConfigForgeVector3Int(IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name, [](IRuntimeDataReader& value) { return ReadConfigForgeVector3Int(value); }); }\n",
-        "ConfigForgeVector4Int ReadRequiredConfigForgeVector4Int(IRuntimeDataReader& reader, const std::string& name) { return RequiredField(reader, name, [](IRuntimeDataReader& value) { return ReadConfigForgeVector4Int(value); }); }\n\n",
-        "std::optional<ConfigForgeVector2> ReadOptionalConfigForgeVector2(IRuntimeDataReader& reader, const std::string& name) { return OptionalField(reader, name, [](IRuntimeDataReader& value) { return ReadConfigForgeVector2(value); }); }\n",
-        "std::optional<ConfigForgeVector3> ReadOptionalConfigForgeVector3(IRuntimeDataReader& reader, const std::string& name) { return OptionalField(reader, name, [](IRuntimeDataReader& value) { return ReadConfigForgeVector3(value); }); }\n",
-        "std::optional<ConfigForgeVector4> ReadOptionalConfigForgeVector4(IRuntimeDataReader& reader, const std::string& name) { return OptionalField(reader, name, [](IRuntimeDataReader& value) { return ReadConfigForgeVector4(value); }); }\n",
-        "std::optional<ConfigForgeVector2Int> ReadOptionalConfigForgeVector2Int(IRuntimeDataReader& reader, const std::string& name) { return OptionalField(reader, name, [](IRuntimeDataReader& value) { return ReadConfigForgeVector2Int(value); }); }\n",
-        "std::optional<ConfigForgeVector3Int> ReadOptionalConfigForgeVector3Int(IRuntimeDataReader& reader, const std::string& name) { return OptionalField(reader, name, [](IRuntimeDataReader& value) { return ReadConfigForgeVector3Int(value); }); }\n",
-        "std::optional<ConfigForgeVector4Int> ReadOptionalConfigForgeVector4Int(IRuntimeDataReader& reader, const std::string& name) { return OptionalField(reader, name, [](IRuntimeDataReader& value) { return ReadConfigForgeVector4Int(value); }); }\n\n",
+    ));
+    render_color_reader(content, options);
+    render_vector_reader(
+        content,
+        options,
+        2,
+        CodeVectorElementType::Float,
+        &["x", "y"],
+    );
+    render_vector_reader(
+        content,
+        options,
+        3,
+        CodeVectorElementType::Float,
+        &["x", "y", "z"],
+    );
+    render_vector_reader(
+        content,
+        options,
+        4,
+        CodeVectorElementType::Float,
+        &["x", "y", "z", "w"],
+    );
+    render_vector_reader(content, options, 2, CodeVectorElementType::Int, &["x", "y"]);
+    render_vector_reader(
+        content,
+        options,
+        3,
+        CodeVectorElementType::Int,
+        &["x", "y", "z"],
+    );
+    render_vector_reader(
+        content,
+        options,
+        4,
+        CodeVectorElementType::Int,
+        &["x", "y", "z", "w"],
+    );
+    content.raw(concat!(
         "template <typename F>\n",
         "auto ReadList(IRuntimeDataReader& reader, F convert) -> std::vector<decltype(convert(std::declval<IRuntimeDataReader&>()))> {\n",
         "    using Value = decltype(convert(std::declval<IRuntimeDataReader&>()));\n",
@@ -251,4 +229,97 @@ pub(super) fn render_reader_helpers_source(content: &mut impl CodeWriterLike) {
         "    return OptionalField(reader, name, [&](IRuntimeDataReader& value) { return ReadList(value, convert); });\n",
         "}\n\n",
     ));
+}
+
+fn render_color_reader(content: &mut impl CodeWriterLike, options: &CppCodegenOptions) {
+    let color_type = options
+        .type_mappings
+        .color
+        .as_deref()
+        .unwrap_or("ConfigForgeColor");
+    content.raw_fmt(format_args!(
+        concat!(
+            "{color_type} ReadColor(IRuntimeDataReader& reader) {{\n",
+            "    reader.BeginRecord(0);\n",
+            "    try {{\n",
+            "        auto value = {color_type}{{\n",
+            "            ReadRequiredDouble(reader, \"r\"),\n",
+            "            ReadRequiredDouble(reader, \"g\"),\n",
+            "            ReadRequiredDouble(reader, \"b\"),\n",
+            "            ReadRequiredDouble(reader, \"a\")\n",
+            "        }};\n",
+            "        reader.EndRecord();\n",
+            "        return value;\n",
+            "    }} catch (...) {{\n",
+            "        reader.EndRecord();\n",
+            "        throw;\n",
+            "    }}\n",
+            "}}\n\n",
+            "{color_type} ReadRequiredColor(IRuntimeDataReader& reader, const std::string& name) {{\n",
+            "    return RequiredField(reader, name, [](IRuntimeDataReader& value) {{ return ReadColor(value); }});\n",
+            "}}\n\n",
+            "std::optional<{color_type}> ReadOptionalColor(IRuntimeDataReader& reader, const std::string& name) {{\n",
+            "    return OptionalField(reader, name, [](IRuntimeDataReader& value) {{ return ReadColor(value); }});\n",
+            "}}\n\n",
+        ),
+        color_type = color_type,
+    ));
+}
+
+fn render_vector_reader(
+    content: &mut impl CodeWriterLike,
+    options: &CppCodegenOptions,
+    dimension: usize,
+    element: CodeVectorElementType,
+    fields: &[&str],
+) {
+    let suffix = cpp_vector_reader_suffix(dimension, element);
+    let vector_type = cpp_vector_type(options, dimension, element);
+    content.raw_fmt(format_args!(
+        "{vector_type} Read{suffix}(IRuntimeDataReader& reader) {{\n"
+    ));
+    content.raw("    reader.BeginRecord(0);\n");
+    content.raw("    try { auto value = ");
+    content.raw(&vector_type);
+    content.raw("{");
+    for (index, field) in fields.iter().enumerate() {
+        if index > 0 {
+            content.raw(", ");
+        }
+        if matches!(element, CodeVectorElementType::Int) {
+            content.raw_fmt(format_args!(
+                "static_cast<std::int64_t>(ReadRequiredDouble(reader, {field:?}))"
+            ));
+        } else {
+            content.raw_fmt(format_args!("ReadRequiredDouble(reader, {field:?})"));
+        }
+    }
+    content.raw("}; reader.EndRecord(); return value; }\n");
+    content.raw("    catch (...) { reader.EndRecord(); throw; }\n");
+    content.raw("}\n\n");
+    content.raw_fmt(format_args!(
+        "{vector_type} ReadRequired{suffix}(IRuntimeDataReader& reader, const std::string& name) {{ return RequiredField(reader, name, [](IRuntimeDataReader& value) {{ return Read{suffix}(value); }}); }}\n"
+    ));
+    content.raw_fmt(format_args!(
+        "std::optional<{vector_type}> ReadOptional{suffix}(IRuntimeDataReader& reader, const std::string& name) {{ return OptionalField(reader, name, [](IRuntimeDataReader& value) {{ return Read{suffix}(value); }}); }}\n\n"
+    ));
+}
+
+fn cpp_vector_type(
+    options: &CppCodegenOptions,
+    dimension: usize,
+    element: CodeVectorElementType,
+) -> String {
+    let mapped = match (dimension, element) {
+        (2, CodeVectorElementType::Float) => options.type_mappings.vector2.as_ref(),
+        (3, CodeVectorElementType::Float) => options.type_mappings.vector3.as_ref(),
+        (4, CodeVectorElementType::Float) => options.type_mappings.vector4.as_ref(),
+        (2, CodeVectorElementType::Int) => options.type_mappings.vector2_int.as_ref(),
+        (3, CodeVectorElementType::Int) => options.type_mappings.vector3_int.as_ref(),
+        (4, CodeVectorElementType::Int) => options.type_mappings.vector4_int.as_ref(),
+        _ => None,
+    };
+    mapped
+        .cloned()
+        .unwrap_or_else(|| cpp_vector_reader_suffix(dimension, element))
 }

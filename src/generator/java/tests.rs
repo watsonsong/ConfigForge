@@ -43,6 +43,10 @@ fn export_target_from_task_reads_java_options() {
             runtime_interface = "external"
             runtime_package = "configforge.runtime"
             emit_runtime_adapters = true
+
+            [java.type_mappings]
+            color = "com.badlogic.gdx.graphics.Color"
+            vector3 = "com.badlogic.gdx.math.Vector3"
         "#,
     )
     .expect("config should parse");
@@ -74,6 +78,14 @@ fn export_target_from_task_reads_java_options() {
         Some("configforge.runtime")
     );
     assert!(options.emit_runtime_adapters);
+    assert_eq!(
+        options.type_mappings.color.as_deref(),
+        Some("com.badlogic.gdx.graphics.Color")
+    );
+    assert_eq!(
+        options.type_mappings.vector3.as_deref(),
+        Some("com.badlogic.gdx.math.Vector3")
+    );
 }
 
 #[test]
@@ -110,6 +122,64 @@ fn rejects_invalid_java_options() {
             diagnostic.message
         );
     }
+}
+
+#[test]
+fn java_type_mappings_override_builtin_value_types() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "effects"
+            source = "effects.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "string"
+            required = true
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_channel = "normalized"
+            required = true
+
+            [[tables.fields]]
+            name = "position"
+            type = "vector3"
+            required = true
+
+            [[tables.fields]]
+            name = "grid"
+            type = "vector2_int"
+            required = true
+        "#,
+    )
+    .expect("meta should parse");
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str(
+            r#"
+                [type_mappings]
+                color = "com.badlogic.gdx.graphics.Color"
+                vector3 = "com.badlogic.gdx.math.Vector3"
+                vector2_int = "android.graphics.Point"
+            "#,
+        )
+        .expect("toml value"),
+    );
+
+    let files = JavaCodeGenerator.generate(&input).expect("java code");
+    let content = &files[0].content;
+
+    assert!(content.contains("private final com.badlogic.gdx.graphics.Color tint;"));
+    assert!(content.contains("private final com.badlogic.gdx.math.Vector3 position;"));
+    assert!(content.contains("private final android.graphics.Point grid;"));
+    assert!(content.contains("static com.badlogic.gdx.graphics.Color readColorValue"));
+    assert!(content.contains("return new com.badlogic.gdx.graphics.Color("));
+    assert!(content.contains("static com.badlogic.gdx.math.Vector3 readConfigForgeVector3Value"));
+    assert!(content.contains("return new com.badlogic.gdx.math.Vector3("));
+    assert!(content.contains("static android.graphics.Point readConfigForgeVector2IntValue"));
 }
 
 #[test]

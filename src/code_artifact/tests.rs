@@ -16,7 +16,9 @@ use crate::{
     runtime_contract::RuntimeDataFile,
 };
 
-use super::ir::{CodeForeignKey, CodeRelationCardinality, relation_key_plan};
+use super::ir::{
+    CodeBuiltinFieldOptions, CodeForeignKey, CodeRelationCardinality, relation_key_plan,
+};
 use super::*;
 
 pub(crate) fn expect_single_diagnostic(error: ConfigForgeError) -> crate::Diagnostic {
@@ -323,6 +325,15 @@ fn code_model_preserves_builtin_color_and_vector_type_metadata() {
     };
 
     assert_eq!(field_type("tint"), &CodeTypeRef::Color);
+    let tint = effects
+        .fields
+        .iter()
+        .find(|field| field.name == "tint")
+        .expect("tint field should exist");
+    assert!(matches!(
+        tint.builtin_options,
+        Some(CodeBuiltinFieldOptions::Color(_))
+    ));
     assert_eq!(
         field_type("position"),
         &CodeTypeRef::Vector {
@@ -331,6 +342,15 @@ fn code_model_preserves_builtin_color_and_vector_type_metadata() {
             components: vec!["right".to_owned(), "up".to_owned(), "forward".to_owned()],
         }
     );
+    let position = effects
+        .fields
+        .iter()
+        .find(|field| field.name == "position")
+        .expect("position field should exist");
+    let Some(CodeBuiltinFieldOptions::Vector(vector_options)) = &position.builtin_options else {
+        panic!("position should carry vector builtin options");
+    };
+    assert_eq!(vector_options.components, vec!["right", "up", "forward"]);
     assert_eq!(
         model.structs[0].fields[0].code_type,
         CodeTypeRef::Vector {
@@ -522,18 +542,21 @@ fn relation_key_plan_centralizes_optional_empty_semantics() {
     let required = CodeField {
         name: "class".to_owned(),
         code_type: CodeTypeRef::String,
+        builtin_options: None,
         desc: None,
         required: true,
     };
     let optional_level = CodeField {
         name: "level".to_owned(),
         code_type: CodeTypeRef::Int,
+        builtin_options: None,
         desc: None,
         required: false,
     };
     let optional_variant = CodeField {
         name: "variant".to_owned(),
         code_type: CodeTypeRef::String,
+        builtin_options: None,
         desc: None,
         required: false,
     };
@@ -1236,6 +1259,7 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
         TypeScriptCodegenOptions {
             profile: Default::default(),
             readonly_fields: true,
+            cocos_import: None,
         }
     );
 }

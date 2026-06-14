@@ -154,6 +154,65 @@ fn parses_and_validates_cpp_runtime_interface_options() {
 }
 
 #[test]
+fn cpp_type_mappings_override_builtin_value_types() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "effects"
+            source = "effects.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "string"
+            required = true
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_channel = "normalized"
+            required = true
+
+            [[tables.fields]]
+            name = "position"
+            type = "vector3"
+            required = true
+
+            [[tables.fields]]
+            name = "grid"
+            type = "vector2_int"
+            required = true
+        "#,
+    )
+    .expect("meta should parse");
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str(
+            r#"
+                [type_mappings]
+                color = "Engine::Color"
+                vector3 = "Engine::Vec3"
+                vector2_int = "Engine::Int2"
+            "#,
+        )
+        .expect("toml value"),
+    );
+
+    let files = CppCodeGenerator.generate(&input).expect("cpp code");
+    let header = generated_content(&files, "generated.hpp");
+    let source = generated_content(&files, "generated.cpp");
+
+    assert!(header.contains("Engine::Color tint;"));
+    assert!(header.contains("Engine::Vec3 position;"));
+    assert!(header.contains("Engine::Int2 grid;"));
+    assert!(source.contains("Engine::Color ReadColor"));
+    assert!(source.contains("auto value = Engine::Color{"));
+    assert!(source.contains("Engine::Vec3 ReadConfigForgeVector3"));
+    assert!(source.contains("auto value = Engine::Vec3{"));
+    assert!(source.contains("Engine::Int2 ReadConfigForgeVector2Int"));
+}
+
+#[test]
 fn generate_to_sink_matches_legacy_generate_output() {
     let meta = linked_fixture();
     let temp_dir = tempdir().expect("temp dir");

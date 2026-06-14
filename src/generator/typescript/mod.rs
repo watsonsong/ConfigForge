@@ -42,6 +42,8 @@ pub struct TypeScriptCodegenOptions {
     pub profile: TypeScriptProfile,
     #[serde(default)]
     pub readonly_fields: bool,
+    #[serde(default)]
+    pub cocos_import: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -178,7 +180,7 @@ fn render_typescript_code(
     write_file_header(generator, content, input);
     content.newline();
     render_ts_i18n_import(&mut content, &input.target.options.i18n);
-    render_typescript_profile_imports(&mut content, typescript_options.profile);
+    render_typescript_profile_imports(&mut content, &typescript_options);
     content.raw("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;\n\n");
     render_runtime_reader_interfaces(&mut content);
     render_runtime_reader_helpers(&mut content);
@@ -612,10 +614,14 @@ fn render_typescript_code(
 
 fn render_typescript_profile_imports(
     content: &mut impl CodeWriterLike,
-    profile: TypeScriptProfile,
+    options: &TypeScriptCodegenOptions,
 ) {
-    if matches!(profile, TypeScriptProfile::CocosCreator) {
-        content.raw("import { Color, Vec2, Vec3, Vec4 } from \"cc\";\n\n");
+    if matches!(options.profile, TypeScriptProfile::CocosCreator) {
+        let import_path = options.cocos_import.as_deref().unwrap_or("cc");
+        content.raw_fmt(format_args!(
+            "import {{ Color, Vec2, Vec3, Vec4 }} from {:?};\n\n",
+            import_path
+        ));
     }
 }
 

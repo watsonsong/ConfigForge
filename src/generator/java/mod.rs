@@ -4,7 +4,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ConfigForgeError, Result, artifact::ArtifactSink, diagnostic::code::CF_GENERATOR_INVALID_OPTION,
+    ConfigForgeError, Result, artifact::ArtifactSink, code_artifact::CodeVectorElementType,
+    diagnostic::code::CF_GENERATOR_INVALID_OPTION,
 };
 
 use super::{
@@ -20,7 +21,7 @@ mod symbols;
 mod types;
 
 use symbols::{validate_generated_symbols, validate_java_package};
-use types::JavaNames;
+use types::{JavaNames, java_vector_reader_suffix};
 
 #[cfg(test)]
 mod tests;
@@ -47,6 +48,26 @@ pub struct JavaCodegenOptions {
     pub runtime_package: Option<String>,
     #[serde(default)]
     pub emit_runtime_adapters: bool,
+    #[serde(default)]
+    pub type_mappings: JavaTypeMappings,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct JavaTypeMappings {
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub vector2: Option<String>,
+    #[serde(default)]
+    pub vector3: Option<String>,
+    #[serde(default)]
+    pub vector4: Option<String>,
+    #[serde(default)]
+    pub vector2_int: Option<String>,
+    #[serde(default)]
+    pub vector3_int: Option<String>,
+    #[serde(default)]
+    pub vector4_int: Option<String>,
 }
 
 impl Default for JavaCodegenOptions {
@@ -61,6 +82,7 @@ impl Default for JavaCodegenOptions {
             runtime_interface: RuntimeInterfaceMode::Inline,
             runtime_package: None,
             emit_runtime_adapters: false,
+            type_mappings: JavaTypeMappings::default(),
         }
     }
 }
@@ -253,7 +275,7 @@ fn render_java_code(
     content.raw("    private ");
     content.raw_fmt(format_args!("{}() {{}}\n\n", names.root_class_name()));
     render_java_i18n_prelude(content, &input.target.options.i18n);
-    render_builtin_value_types(content);
+    render_builtin_value_types(content, options);
     render_runtime_contract(content, &model.enums, &names)?;
     if options.emit_runtime_adapters {
         render_standard_runtime_adapters(content);
@@ -271,6 +293,39 @@ fn validate_runtime_interface_options(options: &JavaCodegenOptions) -> Result<()
         if let Some(package) = &options.runtime_package {
             validate_java_package(package)?;
         }
+    }
+    validate_type_mappings(&options.type_mappings)?;
+    Ok(())
+}
+
+fn validate_type_mappings(mappings: &JavaTypeMappings) -> Result<()> {
+    for (key, value) in [
+        ("type_mappings.color", &mappings.color),
+        ("type_mappings.vector2", &mappings.vector2),
+        ("type_mappings.vector3", &mappings.vector3),
+        ("type_mappings.vector4", &mappings.vector4),
+        ("type_mappings.vector2_int", &mappings.vector2_int),
+        ("type_mappings.vector3_int", &mappings.vector3_int),
+        ("type_mappings.vector4_int", &mappings.vector4_int),
+    ] {
+        if let Some(value) = value {
+            validate_java_type_reference(key, value)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_java_type_reference(option: &str, value: &str) -> Result<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.contains(';')
+        || trimmed.contains('(')
+        || trimmed.contains(')')
+        || trimmed.chars().any(char::is_whitespace)
+    {
+        return Err(validation_error(format!(
+            "invalid {option} `{value}`; expected a Java type reference"
+        )));
     }
     Ok(())
 }
@@ -301,7 +356,7 @@ fn render_java_i18n_prelude(content: &mut impl CodeWriterLike, i18n: &I18nOption
     }
 }
 
-fn render_builtin_value_types(content: &mut impl CodeWriterLike) {
+fn render_builtin_value_types(content: &mut impl CodeWriterLike, options: &JavaCodegenOptions) {
     content.raw(concat!(
         "    public static final class ConfigForgeColor {\n",
         "        private final double r;\n",
@@ -331,6 +386,16 @@ fn render_builtin_value_types(content: &mut impl CodeWriterLike) {
         "long",
         &["x", "y", "z", "w"],
     );
+    render_custom_type_constructor_note(content, options);
+}
+
+fn render_custom_type_constructor_note(
+    content: &mut impl CodeWriterLike,
+    options: &JavaCodegenOptions,
+) {
+    if options.type_mappings != JavaTypeMappings::default() {
+        content.raw("    // Custom builtin type mappings are expected to expose compatible constructors.\n\n");
+    }
 }
 
 fn render_builtin_vector_type(
@@ -412,7 +477,7 @@ fn render_runtime_contract(
     content.raw("        static double readFloatValue(ConfigForgeRuntimeDataReader reader) { return reader.readFloat(); }\n");
     content.raw("        static boolean readBoolValue(ConfigForgeRuntimeDataReader reader) { return reader.readBool(); }\n");
     content.raw("        static String readStringValue(ConfigForgeRuntimeDataReader reader) { return reader.readString(); }\n\n");
-    render_builtin_value_readers(content);
+    render_builtin_value_readers(content, names);
     content.raw("        static <T extends Comparable<T>> int compareValues(T left, T right) { return left.compareTo(right); }\n\n");
     for code_enum in enums {
         let type_name = names.type_name(&code_enum.name)?;
@@ -582,70 +647,99 @@ fn render_runtime_list_reader(
     content.raw("        }\n\n");
 }
 
-fn render_builtin_value_readers(content: &mut impl CodeWriterLike) {
-    content.raw(concat!(
-        "        static ConfigForgeColor readColorValue(ConfigForgeRuntimeDataReader reader) {\n",
-        "            reader.beginRecord(0);\n",
-        "            try {\n",
-        "                return new ConfigForgeColor(\n",
-        "                    readRequiredField(reader, \"r\", ConfigForgeRuntimeReader::readFloatValue),\n",
-        "                    readRequiredField(reader, \"g\", ConfigForgeRuntimeReader::readFloatValue),\n",
-        "                    readRequiredField(reader, \"b\", ConfigForgeRuntimeReader::readFloatValue),\n",
-        "                    readRequiredField(reader, \"a\", ConfigForgeRuntimeReader::readFloatValue)\n",
-        "                );\n",
-        "            } finally {\n",
-        "                reader.endRecord();\n",
-        "            }\n",
-        "        }\n\n",
-    ));
-    render_builtin_vector_reader(content, "ConfigForgeVector2", "readFloatValue", &["x", "y"]);
+fn render_builtin_value_readers(content: &mut impl CodeWriterLike, names: &JavaNames) {
+    render_color_reader(content, names);
     render_builtin_vector_reader(
         content,
-        "ConfigForgeVector3",
-        "readFloatValue",
-        &["x", "y", "z"],
-    );
-    render_builtin_vector_reader(
-        content,
-        "ConfigForgeVector4",
-        "readFloatValue",
-        &["x", "y", "z", "w"],
-    );
-    render_builtin_vector_reader(
-        content,
-        "ConfigForgeVector2Int",
+        names,
+        2,
+        CodeVectorElementType::Float,
         "readFloatValue",
         &["x", "y"],
     );
     render_builtin_vector_reader(
         content,
-        "ConfigForgeVector3Int",
+        names,
+        3,
+        CodeVectorElementType::Float,
         "readFloatValue",
         &["x", "y", "z"],
     );
     render_builtin_vector_reader(
         content,
-        "ConfigForgeVector4Int",
+        names,
+        4,
+        CodeVectorElementType::Float,
+        "readFloatValue",
+        &["x", "y", "z", "w"],
+    );
+    render_builtin_vector_reader(
+        content,
+        names,
+        2,
+        CodeVectorElementType::Int,
+        "readFloatValue",
+        &["x", "y"],
+    );
+    render_builtin_vector_reader(
+        content,
+        names,
+        3,
+        CodeVectorElementType::Int,
+        "readFloatValue",
+        &["x", "y", "z"],
+    );
+    render_builtin_vector_reader(
+        content,
+        names,
+        4,
+        CodeVectorElementType::Int,
         "readFloatValue",
         &["x", "y", "z", "w"],
     );
 }
 
+fn render_color_reader(content: &mut impl CodeWriterLike, names: &JavaNames) {
+    let type_name = names.java_color_type();
+    content.raw_fmt(format_args!(
+        concat!(
+            "        static {type_name} readColorValue(ConfigForgeRuntimeDataReader reader) {{\n",
+            "            reader.beginRecord(0);\n",
+            "            try {{\n",
+            "                return new {type_name}(\n",
+            "                    readRequiredField(reader, \"r\", ConfigForgeRuntimeReader::readFloatValue),\n",
+            "                    readRequiredField(reader, \"g\", ConfigForgeRuntimeReader::readFloatValue),\n",
+            "                    readRequiredField(reader, \"b\", ConfigForgeRuntimeReader::readFloatValue),\n",
+            "                    readRequiredField(reader, \"a\", ConfigForgeRuntimeReader::readFloatValue)\n",
+            "                );\n",
+            "            }} finally {{\n",
+            "                reader.endRecord();\n",
+            "            }}\n",
+            "        }}\n\n",
+        ),
+        type_name = type_name,
+    ));
+}
+
 fn render_builtin_vector_reader(
     content: &mut impl CodeWriterLike,
-    type_name: &str,
+    names: &JavaNames,
+    dimension: usize,
+    element: CodeVectorElementType,
     read_method: &str,
     fields: &[&str],
 ) {
+    let type_name = names.java_vector_type(dimension, element);
+    let reader_suffix = java_vector_reader_suffix(dimension, element);
     content.raw_fmt(format_args!(
-        "        static {type_name} read{type_name}Value(ConfigForgeRuntimeDataReader reader) {{\n"
+        "        static {type_name} read{reader_suffix}Value(ConfigForgeRuntimeDataReader reader) {{\n"
     ));
     content.raw("            reader.beginRecord(0);\n");
     content.raw("            try {\n");
     content.raw_fmt(format_args!("                return new {type_name}(\n"));
     for (index, field) in fields.iter().enumerate() {
         let comma = if index + 1 == fields.len() { "" } else { "," };
-        let expression = if type_name.ends_with("Int") {
+        let expression = if matches!(element, CodeVectorElementType::Int) {
             format!(
                 "readRequiredField(reader, {field:?}, ConfigForgeRuntimeReader::{read_method}).longValue()"
             )
@@ -740,6 +834,7 @@ fn render_java_types(
                 code_type: CodeTypeRef::Struct {
                     name: names.fragment_payload_type_name(table, fragment)?,
                 },
+                builtin_options: None,
                 desc: fragment.desc.clone(),
                 required: false,
             });

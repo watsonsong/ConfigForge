@@ -289,20 +289,15 @@ pub struct FieldMeta {
     pub unit: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ColorFormat {
     HexRgb,
+    #[default]
     HexRgba,
     RgbTuple,
     RgbaTuple,
     Object,
-}
-
-impl Default for ColorFormat {
-    fn default() -> Self {
-        Self::HexRgba
-    }
 }
 
 impl ColorFormat {
@@ -333,17 +328,12 @@ impl ColorChannel {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ColorSpace {
+    #[default]
     Srgb,
     Linear,
-}
-
-impl Default for ColorSpace {
-    fn default() -> Self {
-        Self::Srgb
-    }
 }
 
 impl ColorSpace {
@@ -355,17 +345,12 @@ impl ColorSpace {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ColorAlphaPolicy {
+    #[default]
     Required,
     DefaultOpaque,
-}
-
-impl Default for ColorAlphaPolicy {
-    fn default() -> Self {
-        Self::Required
-    }
 }
 
 impl ColorAlphaPolicy {
@@ -377,19 +362,14 @@ impl ColorAlphaPolicy {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VectorFormat {
+    #[default]
     Tuple,
     Array,
     Object,
     Expanded,
-}
-
-impl Default for VectorFormat {
-    fn default() -> Self {
-        Self::Tuple
-    }
 }
 
 impl VectorFormat {

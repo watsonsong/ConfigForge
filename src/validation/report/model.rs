@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity, Result,
     diagnostic::code::{CF_BUILD_INVALID_CONFIG, metadata_for},
-    meta::TargetTags,
+    meta::{LinkedFieldMeta, LinkedMetaModel, PrimitiveFieldType, TargetTags},
     validation::{ValidationIssue, ValidationReport},
 };
 
@@ -158,6 +158,7 @@ pub struct DesignerValidationIssue {
     pub source_column: Option<String>,
     pub current_value: Option<String>,
     pub expected: Option<String>,
+    pub schema_metadata: Vec<String>,
     pub target: Option<String>,
     pub export_visibility: String,
     pub owner: String,
@@ -173,7 +174,27 @@ impl DesignerValidationReport {
         source_issues.sort_by(compare_validation_issues_for_report);
 
         let metadata = ReportMetadata::from_options(options);
-        let issues = enrich_issues(source_issues);
+        let issues = enrich_issues(source_issues, None);
+        let summary = summarize_issues(&issues);
+        let groups = build_groups(&issues);
+        Self {
+            metadata,
+            summary,
+            groups,
+            issues,
+        }
+    }
+
+    pub fn from_validation_report_with_schema(
+        validation_report: &ValidationReport,
+        linked_meta: &LinkedMetaModel<'_>,
+        options: DesignerReportOptions,
+    ) -> Self {
+        let mut source_issues = validation_report.issues.clone();
+        source_issues.sort_by(compare_validation_issues_for_report);
+
+        let metadata = ReportMetadata::from_options(options);
+        let issues = enrich_issues(source_issues, Some(linked_meta));
         let summary = summarize_issues(&issues);
         let groups = build_groups(&issues);
         Self {
@@ -252,13 +273,16 @@ impl ReportMetadata {
     }
 }
 
-fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationIssue> {
+fn enrich_issues(
+    source_issues: Vec<ValidationIssue>,
+    linked_meta: Option<&LinkedMetaModel<'_>>,
+) -> Vec<DesignerValidationIssue> {
     let mut error_index = 0usize;
     let mut warning_index = 0usize;
     source_issues
         .into_iter()
         .map(|issue| {
-            let severity = DiagnosticSeverity::from(issue.severity);
+            let severity = issue.severity;
             let id = match severity {
                 DiagnosticSeverity::Error => {
                     error_index += 1;
@@ -291,6 +315,7 @@ fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationI
                 .or_else(|| catalog.map(|info| info.domain.to_owned()))
                 .unwrap_or_else(|| UNCATEGORIZED_DOMAIN.to_owned());
             let source_column = source_column_label(&issue.location);
+            let schema_metadata = schema_metadata_for_issue(&issue, linked_meta);
 
             DesignerValidationIssue {
                 id,
@@ -314,6 +339,7 @@ fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationI
                 source_column,
                 current_value: issue.current_value,
                 expected: issue.expected,
+                schema_metadata,
                 target: issue.target,
                 export_visibility: "visible".to_owned(),
                 owner,
@@ -321,6 +347,71 @@ fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationI
             }
         })
         .collect()
+}
+
+fn schema_metadata_for_issue(
+    issue: &ValidationIssue,
+    linked_meta: Option<&LinkedMetaModel<'_>>,
+) -> Vec<String> {
+    let Some(linked_meta) = linked_meta else {
+        return Vec::new();
+    };
+    let (Some(table_name), Some(field_name)) = (
+        issue.location.table.as_deref(),
+        issue.location.field.as_deref(),
+    ) else {
+        return Vec::new();
+    };
+    let Some(table) = linked_meta.table(table_name) else {
+        return Vec::new();
+    };
+    let Some(field) = table.field(field_name) else {
+        return Vec::new();
+    };
+    builtin_schema_metadata(field)
+}
+
+fn builtin_schema_metadata(field: &LinkedFieldMeta<'_>) -> Vec<String> {
+    let Some(primitive) = field.primitive_type() else {
+        return Vec::new();
+    };
+    match primitive {
+        PrimitiveFieldType::Color => vec![
+            format!(
+                "type=color(format={})",
+                field.meta.color_format.unwrap_or_default().as_str()
+            ),
+            format!(
+                "channel={}",
+                field
+                    .meta
+                    .color_channel
+                    .map(|channel| channel.as_str())
+                    .unwrap_or("<missing>")
+            ),
+            format!(
+                "space={}",
+                field.meta.color_space.unwrap_or_default().as_str()
+            ),
+            format!(
+                "alpha={}",
+                field.meta.color_alpha.unwrap_or_default().as_str()
+            ),
+        ],
+        primitive if primitive.vector_dimension().is_some() => vec![
+            format!(
+                "type={}(format={})",
+                primitive.as_str(),
+                field.meta.vector_format.unwrap_or_default().as_str()
+            ),
+            format!(
+                "components={}",
+                field.meta.vector_component_names().join("/")
+            ),
+            format!("unit={}", field.meta.unit.as_deref().unwrap_or("-")),
+        ],
+        _ => Vec::new(),
+    }
 }
 
 fn source_column_label(location: &DiagnosticLocation) -> Option<String> {
@@ -412,7 +503,7 @@ fn compare_validation_issues_for_report(
     right: &ValidationIssue,
 ) -> std::cmp::Ordering {
     (
-        DiagnosticSeverity::from(left.severity),
+        left.severity,
         left.location.table.as_deref(),
         left.location
             .source_path
@@ -425,7 +516,7 @@ fn compare_validation_issues_for_report(
         left.message.as_str(),
     )
         .cmp(&(
-            DiagnosticSeverity::from(right.severity),
+            right.severity,
             right.location.table.as_deref(),
             right
                 .location

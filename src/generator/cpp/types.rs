@@ -11,13 +11,23 @@ use crate::{
     diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
 };
 
+use super::CppCodegenOptions;
+
 pub(super) struct CppNames<'a> {
     options: &'a CodegenOptions,
+    cpp_options: &'a CppCodegenOptions,
 }
 
 impl<'a> CppNames<'a> {
-    pub(super) fn new(options: &'a CodegenOptions) -> Self {
-        Self { options }
+    pub(super) fn new(options: &'a CodegenOptions, cpp_options: &'a CppCodegenOptions) -> Self {
+        Self {
+            options,
+            cpp_options,
+        }
+    }
+
+    pub(super) fn cpp_options(&self) -> &CppCodegenOptions {
+        self.cpp_options
     }
 
     pub(super) fn type_name(&self, name: &str) -> Result<String> {
@@ -177,10 +187,15 @@ impl<'a> CppNames<'a> {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 "std::string".to_owned()
             }
-            CodeTypeRef::Color => "ConfigForgeColor".to_owned(),
+            CodeTypeRef::Color => self
+                .cpp_options
+                .type_mappings
+                .color
+                .clone()
+                .unwrap_or_else(|| "ConfigForgeColor".to_owned()),
             CodeTypeRef::Vector {
                 dimension, element, ..
-            } => cpp_vector_type(*dimension, *element),
+            } => self.cpp_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("std::vector<{}>", self.cpp_type(element)?),
         })
@@ -210,7 +225,7 @@ impl<'a> CppNames<'a> {
                     dimension, element, ..
                 } => format!(
                     "ReadRequired{}(reader, {source_name})",
-                    cpp_vector_type(*dimension, *element)
+                    cpp_vector_reader_suffix(*dimension, *element)
                 ),
                 CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                     let type_name = self.type_name(name)?;
@@ -252,7 +267,7 @@ impl<'a> CppNames<'a> {
                 dimension, element, ..
             } => format!(
                 "ReadOptional{}(reader, {source_name})",
-                cpp_vector_type(*dimension, *element)
+                cpp_vector_reader_suffix(*dimension, *element)
             ),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                 let type_name = self.type_name(name)?;
@@ -293,7 +308,10 @@ impl<'a> CppNames<'a> {
             CodeTypeRef::Color => "ReadColor(value)".to_owned(),
             CodeTypeRef::Vector {
                 dimension, element, ..
-            } => format!("Read{}(value)", cpp_vector_type(*dimension, *element)),
+            } => format!(
+                "Read{}(value)",
+                cpp_vector_reader_suffix(*dimension, *element)
+            ),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                 format!(
                     "{}(value)",
@@ -435,9 +453,28 @@ impl<'a> CppNames<'a> {
             )
         })
     }
+
+    pub(super) fn cpp_vector_type(
+        &self,
+        dimension: usize,
+        element: CodeVectorElementType,
+    ) -> String {
+        let mapped = match (dimension, element) {
+            (2, CodeVectorElementType::Float) => self.cpp_options.type_mappings.vector2.as_ref(),
+            (3, CodeVectorElementType::Float) => self.cpp_options.type_mappings.vector3.as_ref(),
+            (4, CodeVectorElementType::Float) => self.cpp_options.type_mappings.vector4.as_ref(),
+            (2, CodeVectorElementType::Int) => self.cpp_options.type_mappings.vector2_int.as_ref(),
+            (3, CodeVectorElementType::Int) => self.cpp_options.type_mappings.vector3_int.as_ref(),
+            (4, CodeVectorElementType::Int) => self.cpp_options.type_mappings.vector4_int.as_ref(),
+            _ => None,
+        };
+        mapped
+            .cloned()
+            .unwrap_or_else(|| cpp_vector_reader_suffix(dimension, element))
+    }
 }
 
-fn cpp_vector_type(dimension: usize, element: CodeVectorElementType) -> String {
+pub(super) fn cpp_vector_reader_suffix(dimension: usize, element: CodeVectorElementType) -> String {
     let suffix = match element {
         CodeVectorElementType::Float => "",
         CodeVectorElementType::Int => "Int",

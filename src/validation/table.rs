@@ -811,9 +811,9 @@ fn field_has_effective_value(row: &DataRow, field: &LinkedFieldMeta<'_>) -> bool
 
 fn expanded_vector_component_paths(field: &LinkedFieldMeta<'_>) -> Vec<String> {
     if field.meta.vector_format != Some(VectorFormat::Expanded)
-        || !field
+        || field
             .primitive_type()
-            .is_some_and(|primitive| primitive.vector_dimension().is_some())
+            .is_none_or(|primitive| primitive.vector_dimension().is_none())
     {
         return Vec::new();
     }

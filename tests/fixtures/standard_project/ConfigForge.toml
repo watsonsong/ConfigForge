@@ -205,6 +205,22 @@ access_modifier = "public"
 emit_runtime_adapters = true
 
 [[targets]]
+name = "client_unity"
+tags = ["client"]
+
+[[targets.exports]]
+type = "csharp"
+output = "out/client_code/unity"
+file_name = "reference_game_config"
+namespace = "ReferenceGame.Config.Unity"
+
+[targets.exports.csharp]
+profile = "unity"
+nullable = true
+access_modifier = "public"
+emit_runtime_adapters = true
+
+[[targets]]
 name = "server"
 tags = ["server"]
 
@@ -233,3 +249,19 @@ type = "schema_doc"
 output = "out/server_docs"
 format = "markdown"
 title = "Server Schema Documentation"
+
+[[targets]]
+name = "server_dotnet"
+tags = ["server"]
+
+[[targets.exports]]
+type = "csharp"
+output = "out/server_code/dotnet"
+file_name = "reference_game_config"
+namespace = "ReferenceGame.Config.Server"
+
+[targets.exports.csharp]
+profile = "dotnet"
+nullable = true
+access_modifier = "public"
+emit_runtime_adapters = true

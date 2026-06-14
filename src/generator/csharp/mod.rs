@@ -48,6 +48,28 @@ pub struct CSharpCodegenOptions {
     pub runtime_namespace: Option<String>,
     #[serde(default)]
     pub emit_runtime_adapters: bool,
+    #[serde(default)]
+    pub type_mappings: CSharpTypeMappings,
+    #[serde(default)]
+    pub using: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CSharpTypeMappings {
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub vector2: Option<String>,
+    #[serde(default)]
+    pub vector3: Option<String>,
+    #[serde(default)]
+    pub vector4: Option<String>,
+    #[serde(default)]
+    pub vector2_int: Option<String>,
+    #[serde(default)]
+    pub vector3_int: Option<String>,
+    #[serde(default)]
+    pub vector4_int: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -72,6 +94,8 @@ impl Default for CSharpCodegenOptions {
             runtime_interface: RuntimeInterfaceMode::Inline,
             runtime_namespace: None,
             emit_runtime_adapters: false,
+            type_mappings: CSharpTypeMappings::default(),
+            using: Vec::new(),
         }
     }
 }
@@ -219,6 +243,7 @@ fn render_csharp_code(
         content.raw("#nullable enable\n\n");
     }
     content.raw("using System;\nusing System.Collections.Generic;\n");
+    render_custom_csharp_usings(content, &options.using);
     render_csharp_i18n_using(content, &input.target.options.i18n);
     content.raw("\n");
     content.raw_fmt(format_args!("namespace {}\n{{\n", names.namespace()));
@@ -439,7 +464,53 @@ fn validate_runtime_interface_options(options: &CSharpCodegenOptions) -> Result<
             validate_csharp_namespace(namespace)?;
         }
     }
+    validate_type_mappings(&options.type_mappings)?;
+    for using in &options.using {
+        validate_csharp_using(using)?;
+    }
     Ok(())
+}
+
+fn validate_type_mappings(mappings: &CSharpTypeMappings) -> Result<()> {
+    for (key, value) in [
+        ("type_mappings.color", &mappings.color),
+        ("type_mappings.vector2", &mappings.vector2),
+        ("type_mappings.vector3", &mappings.vector3),
+        ("type_mappings.vector4", &mappings.vector4),
+        ("type_mappings.vector2_int", &mappings.vector2_int),
+        ("type_mappings.vector3_int", &mappings.vector3_int),
+        ("type_mappings.vector4_int", &mappings.vector4_int),
+    ] {
+        if let Some(value) = value {
+            validate_csharp_type_reference(key, value)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_csharp_type_reference(option: &str, value: &str) -> Result<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.contains(';')
+        || trimmed.contains('(')
+        || trimmed.contains(')')
+        || trimmed.chars().any(char::is_whitespace)
+    {
+        return Err(validation_error(format!(
+            "invalid {option} `{value}`; expected a C# type reference"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_csharp_using(value: &str) -> Result<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.contains(';') || trimmed.starts_with("using ") {
+        return Err(validation_error(format!(
+            "invalid using `{value}`; expected a namespace without `using` or semicolon"
+        )));
+    }
+    validate_csharp_namespace(trimmed)
 }
 
 fn csharp_table_data_type(table: &super::CodeTable, names: &CSharpNames) -> Result<String> {
@@ -770,6 +841,12 @@ fn render_csharp_i18n_using(content: &mut impl CodeWriterLike, i18n: &I18nOption
         } else {
             content.raw_fmt(format_args!("using {trimmed};\n"));
         }
+    }
+}
+
+fn render_custom_csharp_usings(content: &mut impl CodeWriterLike, usings: &[String]) {
+    for using in usings {
+        content.raw_fmt(format_args!("using {};\n", using.trim()));
     }
 }
 

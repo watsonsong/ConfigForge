@@ -8,7 +8,10 @@ use std::path::PathBuf;
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
-    meta::{LinkedField, LinkedFragmentPayload, LinkedMetaModel, PrimitiveFieldType, TableKind},
+    meta::{
+        ColorAlphaPolicy, ColorChannel, ColorFormat, ColorSpace, LinkedField,
+        LinkedFragmentPayload, LinkedMetaModel, PrimitiveFieldType, TableKind, VectorFormat,
+    },
     runtime_contract::{DEFAULT_RUNTIME_DATA_FORMAT, RuntimeDataFile, binary_schema_revision},
 };
 
@@ -79,8 +82,30 @@ pub(crate) enum CodeFragmentPayload {
 pub(crate) struct CodeField {
     pub name: String,
     pub code_type: CodeTypeRef,
+    pub builtin_options: Option<CodeBuiltinFieldOptions>,
     pub desc: Option<String>,
     pub required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CodeBuiltinFieldOptions {
+    Color(CodeColorOptions),
+    Vector(CodeVectorOptions),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CodeColorOptions {
+    pub format: ColorFormat,
+    pub channel: ColorChannel,
+    pub space: ColorSpace,
+    pub alpha: ColorAlphaPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CodeVectorOptions {
+    pub format: VectorFormat,
+    pub components: Vec<String>,
+    pub unit: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -591,9 +616,32 @@ fn code_field_from_linked(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<Co
     Ok(CodeField {
         name: field.meta.name.clone(),
         code_type: code_type_from_field(field)?,
+        builtin_options: builtin_options_from_field(field),
         desc: field.meta.desc.clone(),
         required: field.meta.required,
     })
+}
+
+fn builtin_options_from_field(
+    field: &crate::meta::LinkedFieldMeta<'_>,
+) -> Option<CodeBuiltinFieldOptions> {
+    let primitive = field.primitive_type()?;
+    if primitive == PrimitiveFieldType::Color {
+        return Some(CodeBuiltinFieldOptions::Color(CodeColorOptions {
+            format: field.meta.color_format.unwrap_or_default(),
+            channel: field.meta.color_channel?,
+            space: field.meta.color_space.unwrap_or_default(),
+            alpha: field.meta.color_alpha.unwrap_or_default(),
+        }));
+    }
+    if primitive.vector_dimension().is_some() {
+        return Some(CodeBuiltinFieldOptions::Vector(CodeVectorOptions {
+            format: field.meta.vector_format.unwrap_or_default(),
+            components: field.meta.vector_component_names(),
+            unit: field.meta.unit.clone(),
+        }));
+    }
+    None
 }
 
 fn code_type_from_field(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<CodeTypeRef> {

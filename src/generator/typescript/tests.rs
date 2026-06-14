@@ -29,6 +29,7 @@ fn emits_async_loader_and_maps() {
         toml::Value::try_from(TypeScriptCodegenOptions {
             profile: Default::default(),
             readonly_fields: true,
+            cocos_import: None,
         })
         .expect("typescript options"),
     );
@@ -250,6 +251,22 @@ fn emits_builtin_value_types_and_cocos_profile_mappings() {
     assert!(cocos_content.contains("grid: ConfigForgeVector2Int;"));
     assert!(cocos_content.contains("readColor(value, (r, g, b, a) => new Color(r, g, b, a))"));
     assert!(cocos_content.contains("readConfigForgeVector3(value, [\"right\", \"up\", \"forward\"], (v1, v2, v3) => new Vec3(v1, v2, v3))"));
+
+    let mut custom_cocos_input = input_for(&meta, LANGUAGE);
+    custom_cocos_input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str("profile = \"cocos_creator\"\ncocos_import = \"db://assets/scripts/cocos\"")
+            .expect("toml value"),
+    );
+
+    let custom_cocos = TypeScriptCodeGenerator
+        .generate(&custom_cocos_input)
+        .expect("custom cocos typescript code");
+    let custom_cocos_content = &custom_cocos[0].content;
+    assert!(
+        custom_cocos_content
+            .contains("import { Color, Vec2, Vec3, Vec4 } from \"db://assets/scripts/cocos\";")
+    );
 }
 
 #[test]

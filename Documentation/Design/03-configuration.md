@@ -713,6 +713,9 @@ C# backend 的规划字段：
 | `[targets.exports.csharp].profile` | `dotnet` | C# runtime profile。`dotnet` 只假设 BCL / `System.Numerics` 可用；`unity` 允许映射到 `UnityEngine.*` 类型并生成 Unity/AOT 友好的构造代码。 |
 | `[targets.exports.csharp.type_mappings]` | profile 默认 | builtin value type 到目标 C# 类型名的覆盖表。值必须是目标语言原样类型名，可含 namespace，例如 `UnityEngine.Vector3`。 |
 | `[targets.exports.csharp.using]` | `[]` | 可选 using 列表。若类型映射使用 fully qualified name，可不配置；若配置短类型名则应补充 using。 |
+| `[targets.exports.cpp.type_mappings]` | generated fallback | builtin value type 到目标 C++ 类型名的覆盖表，例如 `Engine::Vec3`。映射类型需支持 generated reader 使用的 positional constructor / aggregate 初始化。 |
+| `[targets.exports.java.type_mappings]` | generated fallback | builtin value type 到目标 Java 类型名的覆盖表，例如 `com.badlogic.gdx.math.Vector3` 或 Android math 类型。映射类型需支持 generated reader 使用的 positional constructor。 |
+| `[targets.exports.typescript].cocos_import` | `"cc"` | `profile = "cocos_creator"` 时 Cocos `Color` / `Vec*` 的 import path，可覆盖为项目内 re-export 模块。 |
 
 跨语言 profile 语义：
 
@@ -724,8 +727,8 @@ C# backend 的规划字段：
 | `cpp_unreal` | `unreal` | Unreal C++ / Blueprint | `FLinearColor`、`FVector2D`、`FVector`、`FVector4`、`FIntPoint`、`FIntVector`，Blueprint support 下生成可反射字段。 |
 | `cpp` | `standard` | 通用 C++ runtime / 自研引擎 | fallback generated POD struct；用户可通过 `type_mappings` 指向引擎数学库。 |
 | `typescript` | `standard` | Web / Node / 通用 TS | fallback readonly object type，例如 `{ x: number; y: number; z: number }`。 |
-| `typescript` | `cocos_creator` | Cocos Creator TypeScript | `Color`、`Vec2`、`Vec3`、`Vec4`，通过 import / type mapping 指向 `cc` 模块。 |
-| `java` | `standard` | JVM / Android 工具链 | fallback generated value class；Android / LibGDX 等可后续通过 type mapping 接入。 |
+| `typescript` | `cocos_creator` | Cocos Creator TypeScript | `Color`、`Vec2`、`Vec3`、`Vec4`，默认从 `cc` import，可通过 `cocos_import` 指向项目 re-export 模块。 |
+| `java` | `standard` | JVM / Android 工具链 | fallback generated value class；Android / LibGDX 等可通过 `type_mappings` 接入。 |
 
 profile 只能提供默认 mapping、构造表达式和 import/include 约定；不能改变 Meta builtin type 的语义和 runtime data canonical shape。没有明确 runtime adapter 的生态（例如 Cocos Creator / Godot）第一阶段可以先生成 typed API 与 source assertion，runtime loader adapter 作为后续扩展独立落地。
 

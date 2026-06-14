@@ -4,8 +4,8 @@
 use crate::{Result, diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT};
 
 use super::{
-    CSharpCodegenOptions, CSharpProfile, validate_csharp_identifier, validate_csharp_namespace,
-    validation_error,
+    CSharpCodegenOptions, CSharpProfile, CSharpTypeMappings, validate_csharp_identifier,
+    validate_csharp_namespace, validation_error,
 };
 use crate::code_artifact::{
     CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
@@ -22,6 +22,7 @@ pub(super) struct CSharpNames {
     keyword_conflict: KeywordConflictPolicy,
     nullable: bool,
     profile: CSharpProfile,
+    type_mappings: CSharpTypeMappings,
 }
 
 impl CSharpNames {
@@ -63,6 +64,7 @@ impl CSharpNames {
             keyword_conflict: input.target.options.keyword_conflict,
             nullable: options.nullable,
             profile: options.profile,
+            type_mappings: options.type_mappings.clone(),
         })
     }
 
@@ -312,7 +314,7 @@ impl CSharpNames {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 "ConfigForgeRuntimeReader.ReadStringValue".to_owned()
             }
-            CodeTypeRef::Color => self.read_color_function(),
+            CodeTypeRef::Color => self.read_color_function(None),
             CodeTypeRef::Vector {
                 dimension,
                 element,
@@ -331,6 +333,9 @@ impl CSharpNames {
     }
 
     fn csharp_color_type(&self) -> String {
+        if let Some(mapped) = &self.type_mappings.color {
+            return mapped.clone();
+        }
         match self.profile {
             CSharpProfile::Dotnet => "ConfigForgeColor".to_owned(),
             CSharpProfile::Unity => "UnityEngine.Color".to_owned(),
@@ -339,6 +344,9 @@ impl CSharpNames {
     }
 
     fn csharp_vector_type(&self, dimension: usize, element: CodeVectorElementType) -> String {
+        if let Some(mapped) = self.mapped_vector_type(dimension, element) {
+            return mapped.clone();
+        }
         match (self.profile, dimension, element) {
             (CSharpProfile::Dotnet, 2, CodeVectorElementType::Float) => {
                 "System.Numerics.Vector2".to_owned()
@@ -374,11 +382,46 @@ impl CSharpNames {
         }
     }
 
-    fn read_color_function(&self) -> String {
+    fn read_color_function(&self, field: Option<&CodeField>) -> String {
+        if self.type_mappings.color.is_some() {
+            return "ConfigForgeRuntimeReader.ReadColorValue".to_owned();
+        }
+        let normalize_byte = field
+            .and_then(|field| field.builtin_options.as_ref())
+            .and_then(|options| match options {
+                crate::code_artifact::CodeBuiltinFieldOptions::Color(color) => Some(color.channel),
+                _ => None,
+            })
+            == Some(crate::meta::ColorChannel::Byte);
+        let convert = if normalize_byte {
+            "(float)(r / 255.0), (float)(g / 255.0), (float)(b / 255.0), (float)(a / 255.0)"
+        } else {
+            "(float)r, (float)g, (float)b, (float)a"
+        };
         match self.profile {
             CSharpProfile::Dotnet => "ConfigForgeRuntimeReader.ReadColorValue".to_owned(),
-            CSharpProfile::Unity => "reader => ConfigForgeRuntimeReader.ReadColorValue(reader, (r, g, b, a) => new UnityEngine.Color((float)r, (float)g, (float)b, (float)a))".to_owned(),
-            CSharpProfile::Godot => "reader => ConfigForgeRuntimeReader.ReadColorValue(reader, (r, g, b, a) => new Godot.Color((float)r, (float)g, (float)b, (float)a))".to_owned(),
+            CSharpProfile::Unity => format!(
+                "reader => ConfigForgeRuntimeReader.ReadColorValue(reader, (r, g, b, a) => new UnityEngine.Color({convert}))"
+            ),
+            CSharpProfile::Godot => format!(
+                "reader => ConfigForgeRuntimeReader.ReadColorValue(reader, (r, g, b, a) => new Godot.Color({convert}))"
+            ),
+        }
+    }
+
+    fn mapped_vector_type(
+        &self,
+        dimension: usize,
+        element: CodeVectorElementType,
+    ) -> Option<&String> {
+        match (dimension, element) {
+            (2, CodeVectorElementType::Float) => self.type_mappings.vector2.as_ref(),
+            (3, CodeVectorElementType::Float) => self.type_mappings.vector3.as_ref(),
+            (4, CodeVectorElementType::Float) => self.type_mappings.vector4.as_ref(),
+            (2, CodeVectorElementType::Int) => self.type_mappings.vector2_int.as_ref(),
+            (3, CodeVectorElementType::Int) => self.type_mappings.vector3_int.as_ref(),
+            (4, CodeVectorElementType::Int) => self.type_mappings.vector4_int.as_ref(),
+            _ => None,
         }
     }
 
@@ -451,7 +494,10 @@ impl CSharpNames {
         Ok(format!(
             "ConfigForgeRuntimeReader.{helper}(reader, {:?}, {})",
             field.name,
-            self.read_value_function(&field.code_type)?
+            match &field.code_type {
+                CodeTypeRef::Color => self.read_color_function(Some(field)),
+                _ => self.read_value_function(&field.code_type)?,
+            }
         ))
     }
 
