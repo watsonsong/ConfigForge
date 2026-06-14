@@ -4,7 +4,7 @@
 use crate::{
     Result,
     code_artifact::{
-        CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriterLike,
+        CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriterLike, ReaderShapePlan,
         ir::CodeRelationCardinality,
     },
 };
@@ -94,14 +94,15 @@ fn render_read_from_reader_body(
     type_name: &str,
     names: &RustNames<'_>,
 ) -> Result<()> {
-    let fragment_count = table.map(|table| table.fragments.len()).unwrap_or(0);
-    let optional_slot_count =
-        fields.iter().filter(|field| !field.required).count() + fragment_count;
+    let reader_shape = table
+        .map(ReaderShapePlan::for_table)
+        .unwrap_or_else(|| ReaderShapePlan::for_fields(fields));
     content.raw(
         "    fn read_from_reader<R: RuntimeDataReader>(reader: &R) -> RuntimeDataResult<Self> {\n",
     );
     content.raw_fmt(format_args!(
-        "        reader.begin_record({optional_slot_count})?;\n"
+        "        reader.begin_record({})?;\n",
+        reader_shape.optional_slot_count
     ));
     content.raw("        let value = Self {\n");
     for field in fields {
@@ -112,7 +113,7 @@ fn render_read_from_reader_body(
         ));
     }
     if let Some(table) = table {
-        for fragment in &table.fragments {
+        for fragment in reader_shape.fragments {
             let field_name = names.field_name(&fragment.name)?;
             let payload_type = names.fragment_payload_type_name(table, fragment)?;
             content.raw_fmt(format_args!(

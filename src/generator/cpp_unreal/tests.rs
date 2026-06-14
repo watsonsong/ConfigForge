@@ -725,11 +725,18 @@ fn emits_relation_text_and_lazy_helpers() {
         )
     );
     assert!(source.contains("auto TargetTableResult = Data.GetItems();"));
+    assert!(source.contains(
+        "if (!TargetTableResult.IsOk() || TargetTableResult.Value == nullptr) { return nullptr; }"
+    ));
     assert!(source.contains("return TargetTableResult.Value->GetById(DefaultItemId);"));
     assert!(source.contains(
         "TArray<const FItemsRow*> FGameConfigRow::GetStarterItems(const IConfigForgeGameDataAccess& Data) const"
     ));
+    assert!(source.contains(
+        "if (!TargetTableResult.IsOk() || TargetTableResult.Value == nullptr) { return Result; }"
+    ));
     assert!(source.contains("const auto* Row = TargetTableResult.Value->GetById(Key);"));
+    assert!(source.contains("if (Row != nullptr) { Result.Add(Row); }"));
     assert!(
         source.contains("void FGameConfigRow::Link(const IConfigForgeGameDataAccess& Data) const")
     );

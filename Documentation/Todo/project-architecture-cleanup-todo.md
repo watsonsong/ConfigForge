@@ -193,27 +193,27 @@ ConfigForge 当前主干方向整体正确：
 - `refactor(build): split pipeline helpers`
 - `refactor(artifact): split writer path logic`
 
-### [ ] Step 7：抽取多语言 generator 共享 plan
+### [x] Step 7：抽取多语言 generator 共享 plan
 
 目的：降低 Rust / TypeScript / C++ / Unreal / C# / Java generator 的重复逻辑，并统一 relation / reader 语义。
 
 实现项：
 
-- [ ] 抽取语言无关 `ReaderShapePlan` / `ReaderFieldPlan`，先覆盖 Rust / TypeScript / C++ reader 中 optional slot、enum、struct、fragment、row reader 的共同结构。
-- [ ] 抽取 naming / type mapping 的 shared plan，语言层只处理 casing、keyword、type syntax 差异。
-- [ ] 抽取 relation plan，统一 required / optional key、partial empty、many relation、missing target 策略。
-- [ ] 明确 Unreal C++ relation missing target 行为是否应与 Rust / TypeScript / C++ 一致；若保留差异，文档和测试必须说明原因。
-- [ ] 抽取 language generator `ArtifactGenerator` glue，减少新增语言时的样板代码。
+- [x] 抽取语言无关 `ReaderShapePlan`，覆盖 Rust / TypeScript / C++ / C# / Java reader 中 optional slot、struct、fragment、row reader 的共同结构。
+- [x] 评估 naming / type mapping shared plan：当前语言间差异主要集中在各自 names/types 子模块，未发现适合本 step 低风险抽取的稳定共享结构，保留后续按语言能力增量接入。
+- [x] 复用已有 `relation_key_plan`，统一 required / optional key、partial empty 语义。
+- [x] 明确 Unreal C++ relation missing target 保留宽松指针/空数组语义，并用测试覆盖其与 Rust / TypeScript / C++ 的差异。
+- [x] 抽取 language generator `ArtifactGenerator` glue，减少新增语言时的样板代码。
 
 验证：
 
-- [ ] `cargo test generator::rust`
-- [ ] `cargo test generator::typescript`
-- [ ] `cargo test generator::cpp`
-- [ ] `cargo test generator::cpp_unreal`
-- [ ] `cargo test generator::csharp`
-- [ ] `cargo test generator::java`
-- [ ] 相关 runtime compliance tests
+- [x] `cargo test generator::rust`
+- [x] `cargo test generator::typescript`
+- [x] `cargo test generator::cpp`
+- [x] `cargo test generator::cpp_unreal`
+- [x] `cargo test generator::csharp`
+- [x] `cargo test generator::java`
+- [x] 相关 runtime compliance tests
 
 可独立提交建议：
 

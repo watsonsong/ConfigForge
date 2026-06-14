@@ -3,6 +3,7 @@
 
 pub(crate) mod ir;
 pub(crate) mod naming;
+mod reader_plan;
 mod writer;
 
 #[cfg(test)]
@@ -11,6 +12,7 @@ pub(crate) use self::ir::{
     CodeEnum, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel, CodeStruct,
     CodeTable, CodeTableKind, CodeTypeRef, build_code_model,
 };
+pub(crate) use reader_plan::ReaderShapePlan;
 #[cfg(test)]
 pub(crate) use writer::CodeWriter;
 pub use writer::{

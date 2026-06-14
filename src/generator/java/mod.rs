@@ -11,7 +11,7 @@ use super::{
     ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeTable, CodeTableKind,
     CodeTypeRef, CodeWriterConfig, CodeWriterLike, GeneratorCommonInput, GeneratorRequirements,
-    I18nFunctionReturn, I18nMode, I18nOptions, NamingConfig, RuntimeInterfaceMode,
+    I18nFunctionReturn, I18nMode, I18nOptions, NamingConfig, ReaderShapePlan, RuntimeInterfaceMode,
     build_code_model,
     ir::{CodeRelationCardinality, require_non_empty_index_fields},
 };
@@ -150,8 +150,7 @@ impl ArtifactGenerator for JavaCodeGenerator {
         input: &GeneratorCommonInput<'_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
-        let code_input = input.code_export_input(self)?;
-        CodeGenerator::generate_to_sink(self, &code_input, sink)
+        super::generate_code_artifact_to_sink(self, input, sink)
     }
 }
 
@@ -624,12 +623,13 @@ fn render_read_method(
     fields: &[CodeField],
     names: &JavaNames,
 ) -> Result<()> {
-    let optional_slot_count = fields.iter().filter(|field| !field.required).count();
+    let reader_shape = ReaderShapePlan::for_fields(fields);
     content.raw_fmt(format_args!(
         "    private static {type_name} {method_name}(ConfigForgeRuntimeDataReader reader) {{\n"
     ));
     content.raw_fmt(format_args!(
-        "        reader.beginRecord({optional_slot_count});\n        try {{\n            return new {type_name}(\n"
+        "        reader.beginRecord({});\n        try {{\n            return new {type_name}(\n",
+        reader_shape.optional_slot_count
     ));
     for (index, field) in fields.iter().enumerate() {
         let comma = if index + 1 == fields.len() { "" } else { "," };
@@ -764,19 +764,19 @@ fn render_row_read_method(
 ) -> Result<()> {
     let row_type = names.row_type_name(&table.name)?;
     let method_name = names.read_type_function_name(&format!("{}_row", table.name))?;
-    let optional_slot_count =
-        table.fields.iter().filter(|field| !field.required).count() + table.fragments.len();
+    let reader_shape = ReaderShapePlan::for_table(table);
     content.raw_fmt(format_args!(
         "    private static {row_type} {method_name}(ConfigForgeRuntimeDataReader reader) {{\n"
     ));
     content.raw_fmt(format_args!(
-        "        reader.beginRecord({optional_slot_count});\n        try {{\n            return new {row_type}(\n"
+        "        reader.beginRecord({});\n        try {{\n            return new {row_type}(\n",
+        reader_shape.optional_slot_count
     ));
     let mut expressions = Vec::new();
     for field in &table.fields {
         expressions.push(names.read_field_expression(field)?);
     }
-    for fragment in &table.fragments {
+    for fragment in reader_shape.fragments {
         expressions.push(format!(
             "ConfigForgeRuntimeReader.readOptionalField(reader, {:?}, {}::{})",
             fragment.name,

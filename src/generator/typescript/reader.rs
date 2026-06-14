@@ -3,7 +3,9 @@
 
 use crate::{
     Result,
-    code_artifact::{CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriterLike},
+    code_artifact::{
+        CodeEnum, CodeField, CodeFragment, CodeStruct, CodeTable, CodeWriterLike, ReaderShapePlan,
+    },
 };
 
 use super::{
@@ -83,14 +85,15 @@ fn render_reader_function_body(
     names: &TypeScriptNames<'_>,
 ) -> Result<()> {
     let function_name = names.reader_function_name(type_name)?;
-    let fragment_count = table.map(|table| table.fragments.len()).unwrap_or(0);
-    let optional_slot_count =
-        fields.iter().filter(|field| !field.required).count() + fragment_count;
+    let reader_shape = table
+        .map(ReaderShapePlan::for_table)
+        .unwrap_or_else(|| ReaderShapePlan::for_fields(fields));
     content.raw_fmt(format_args!(
         "function {function_name}(reader: RuntimeDataReader): {type_name} {{\n"
     ));
     content.raw_fmt(format_args!(
-        "  reader.beginRecord?.({optional_slot_count});\n"
+        "  reader.beginRecord?.({});\n",
+        reader_shape.optional_slot_count
     ));
     content.raw_fmt(format_args!("  const value: {type_name} = {{\n"));
     for field in fields {
@@ -101,7 +104,7 @@ fn render_reader_function_body(
         ));
     }
     if let Some(table) = table {
-        for fragment in &table.fragments {
+        for fragment in reader_shape.fragments {
             let field_name = names.field_name(&fragment.name)?;
             let payload_type = names.fragment_payload_type_name(table, fragment)?;
             let reader_function = names.reader_function_name(&payload_type)?;

@@ -11,8 +11,8 @@ use super::{
     ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeModel, CodeTableKind, CodeWriterConfig, CodeWriterLike,
     GeneratorCommonInput, GeneratorRequirements, I18nFunctionReturn, I18nMode, I18nOptions,
-    NamingConfig, RuntimeInterfaceMode, build_code_model, ir::CodeRelationCardinality,
-    ir::require_non_empty_index_fields,
+    NamingConfig, ReaderShapePlan, RuntimeInterfaceMode, build_code_model,
+    ir::CodeRelationCardinality, ir::require_non_empty_index_fields,
 };
 
 mod symbols;
@@ -144,8 +144,7 @@ impl ArtifactGenerator for CSharpCodeGenerator {
         input: &GeneratorCommonInput<'_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
-        let code_input = input.code_export_input(self)?;
-        CodeGenerator::generate_to_sink(self, &code_input, sink)
+        super::generate_code_artifact_to_sink(self, input, sink)
     }
 }
 
@@ -718,9 +717,10 @@ fn render_read_method(
     fields: &[CodeField],
     names: &CSharpNames,
 ) -> Result<()> {
-    let optional_slot_count = fields.iter().filter(|field| !field.required).count();
+    let reader_shape = ReaderShapePlan::for_fields(fields);
     content.raw_fmt(format_args!(
-        "    internal static partial class {type_name}Reader\n    {{\n        public static {type_name} Read(IConfigForgeRuntimeDataReader reader)\n        {{\n            reader.BeginRecord({optional_slot_count});\n            try\n            {{\n                return new {type_name}\n                {{\n"
+        "    internal static partial class {type_name}Reader\n    {{\n        public static {type_name} Read(IConfigForgeRuntimeDataReader reader)\n        {{\n            reader.BeginRecord({});\n            try\n            {{\n                return new {type_name}\n                {{\n",
+        reader_shape.optional_slot_count
     ));
     for field in fields {
         content.raw_fmt(format_args!(
@@ -974,10 +974,10 @@ fn render_row_read_method(
     table: &super::CodeTable,
     names: &CSharpNames,
 ) -> Result<()> {
-    let optional_slot_count =
-        table.fields.iter().filter(|field| !field.required).count() + table.fragments.len();
+    let reader_shape = ReaderShapePlan::for_table(table);
     content.raw_fmt(format_args!(
-        "    internal static partial class {type_name}Reader\n    {{\n        public static {type_name} Read(IConfigForgeRuntimeDataReader reader)\n        {{\n            reader.BeginRecord({optional_slot_count});\n            try\n            {{\n                return new {type_name}\n                {{\n"
+        "    internal static partial class {type_name}Reader\n    {{\n        public static {type_name} Read(IConfigForgeRuntimeDataReader reader)\n        {{\n            reader.BeginRecord({});\n            try\n            {{\n                return new {type_name}\n                {{\n",
+        reader_shape.optional_slot_count
     ));
     for field in &table.fields {
         content.raw_fmt(format_args!(
@@ -986,7 +986,7 @@ fn render_row_read_method(
             names.read_field_expression(field)?
         ));
     }
-    for fragment in &table.fragments {
+    for fragment in reader_shape.fragments {
         let payload_type = names.fragment_payload_type_name(table, fragment)?;
         content.raw_fmt(format_args!(
             "                    {} = ConfigForgeRuntimeReader.ReadOptionalClassField(reader, {:?}, {}Reader.Read) ?? new {}(),\n",

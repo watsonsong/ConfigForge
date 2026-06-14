@@ -104,8 +104,7 @@ impl ArtifactGenerator for RustCodeGenerator {
         input: &GeneratorCommonInput<'_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
-        let code_input = input.code_export_input(self)?;
-        CodeGenerator::generate_to_sink(self, &code_input, sink)
+        super::generate_code_artifact_to_sink(self, input, sink)
     }
 }
 

@@ -9,9 +9,18 @@ use crate::{
 };
 
 use super::{
-    GeneratorCommonInput, GeneratorDataInput, GeneratorDescriptor, GeneratorRequirements,
-    GeneratorTaskInput, GeneratorValidationReportInput,
+    CodeGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorDescriptor,
+    GeneratorRequirements, GeneratorTaskInput, GeneratorValidationReportInput,
 };
+
+pub(crate) fn generate_code_artifact_to_sink(
+    generator: &dyn CodeGenerator,
+    input: &GeneratorCommonInput<'_>,
+    sink: &ArtifactSink,
+) -> Result<()> {
+    let code_input = input.code_export_input(generator)?;
+    generator.generate_to_sink(&code_input, sink)
+}
 
 pub(crate) trait ArtifactGenerator: Send + Sync {
     fn type_id(&self) -> &'static str;
