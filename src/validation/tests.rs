@@ -34,6 +34,16 @@ use super::defaults::normalize_data_set_with_normalizer_and_pool;
 use super::diagnostic::error_issues_from_result;
 use super::*;
 
+fn memory_cell_source(column_index: usize, column_name: &str) -> CellSourceInfo {
+    CellSourceInfo {
+        source_path: PathBuf::from("<memory>"),
+        source_row_number: 1,
+        source_column_number: column_index + 1,
+        source_column_name: column_name.to_owned(),
+        column_index,
+    }
+}
+
 fn validate_error(result: Result<()>) -> String {
     match result.unwrap_err() {
         ConfigForgeError::Validation(message) => message,
@@ -137,6 +147,112 @@ fn validation_outcome_warning_only_is_not_blocking() {
     assert!(!outcome.is_blocking());
     let returned_report = outcome.into_result().expect("warning-only outcome passes");
     assert_eq!(returned_report.issues, [issue]);
+}
+
+#[test]
+fn export_validation_view_caches_resolved_rows_and_bridges_cell_sources() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            row_export = { excluded_tags_field = "excluded_tags" }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "name"
+            type = "string"
+            default = "Unknown"
+
+            [[tables.fields]]
+            name = "server_note"
+            type = "string"
+            export_when = { any = ["server"] }
+
+            [[tables.fields]]
+            name = "excluded_tags"
+            type = "string"
+            export = false
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let rows = vec![
+        BTreeMap::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("excluded_tags".to_owned(), "".to_owned()),
+        ]),
+        BTreeMap::from([
+            ("id".to_owned(), "2".to_owned()),
+            ("name".to_owned(), "Hidden".to_owned()),
+            ("excluded_tags".to_owned(), "client".to_owned()),
+        ]),
+    ];
+    let row_sources = vec![fragment_row_source(1, &[]), fragment_row_source(2, &[])];
+    let cell_sources = vec![
+        BTreeMap::from([
+            ("id".to_owned(), memory_cell_source(0, "id")),
+            (
+                "excluded_tags".to_owned(),
+                memory_cell_source(1, "excluded_tags"),
+            ),
+        ]),
+        BTreeMap::from([
+            ("id".to_owned(), memory_cell_source(0, "id")),
+            ("name".to_owned(), memory_cell_source(1, "name")),
+            (
+                "excluded_tags".to_owned(),
+                memory_cell_source(2, "excluded_tags"),
+            ),
+        ]),
+    ];
+    let table = DataTable::new_with_sources_and_cells("items", rows, row_sources, cell_sources)
+        .expect("table should be built");
+    let data_set = DataSet::new(vec![table]);
+
+    let view =
+        ExportValidationView::for_target(&linked_meta, &data_set, &TargetTags::new(["client"]))
+            .expect("target view should build");
+    let table_view = view.table("items").expect("items view should exist");
+
+    assert_eq!(table_view.visible_rows.len(), 1);
+    assert!(table_view.is_field_visible("id"));
+    assert!(table_view.is_field_visible("name"));
+    assert!(!table_view.is_field_visible("server_note"));
+    assert_eq!(table_view.raw_cell(0, "id"), Some("1"));
+    assert_eq!(
+        table_view
+            .visible_resolved_row(0)
+            .expect("resolved row should exist")
+            .len(),
+        2
+    );
+    assert_eq!(
+        table_view
+            .resolved_value(0, "name")
+            .and_then(|value| value.scalar_export_string())
+            .as_deref(),
+        Some("Unknown")
+    );
+    let id_source = table_view.field_source(0, "id").expect("id source");
+    assert_eq!(
+        id_source
+            .resolved_trace
+            .expect("resolved source trace")
+            .raw_value
+            .as_deref(),
+        Some("1")
+    );
+    assert_eq!(
+        id_source
+            .cell_source
+            .expect("cell source should be bridged")
+            .source_column_name,
+        "id"
+    );
 }
 
 #[test]

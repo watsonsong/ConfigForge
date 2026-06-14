@@ -165,7 +165,7 @@ pub(super) fn validate_normalized_table_view_with_report(
         );
     }
 
-    if !report.has_error() {
+    if !report.has_error() && table_view.resolved_table().is_none() {
         let visible_row_indices = table_view
             .visible_rows
             .iter()

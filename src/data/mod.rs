@@ -26,7 +26,7 @@ pub use self::provider::{
 };
 pub use self::resolved::{
     ArrayElementValue, ColorValue, DataValue, ResolvedRow, ResolvedTable, ResolvedValue,
-    ScalarValue, ValueSourceKind, VectorValue,
+    ScalarValue, ValueSourceKind, ValueSourceTrace, VectorValue,
 };
 pub use self::resolver::DataResolver;
 

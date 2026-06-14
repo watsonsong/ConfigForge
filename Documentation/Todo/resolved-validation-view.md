@@ -55,7 +55,7 @@ source trace 桥接，再逐类迁移规则。
 4. Asset / report / runtime export 不再重复解释 raw cell；需要 raw key 语义的地方必须显式
    命名并记录 policy。
 
-## [ ] Step 1：引入 resolved validation view，先不改变规则语义
+## [x] Step 1：引入 resolved validation view，先不改变规则语义
 
 目标：让 ValidationContext 同时携带 raw view 与 resolved view，建立后续迁移的稳定数据面。
 
@@ -186,4 +186,3 @@ cell。
 - 所有 Step checkbox 已按实际提交状态更新。
 - canonical docs 能独立说明当前实现。
 - `cargo test` 通过后提交文档清理。
-

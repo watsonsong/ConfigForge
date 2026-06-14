@@ -905,7 +905,8 @@ mod tests {
             row_index: 0,
             source_row_number: Some(1),
         }];
-        let table_view = ExportTableView::new(table_meta, &table, visible_fields, visible_rows);
+        let table_view =
+            ExportTableView::new(table_meta, &table, visible_fields, visible_rows, None);
         let mut cache = ForeignKeyTargetKeyCache::new(ForeignKeyTargetViewScope::Target);
 
         let keys = cache.get_or_build("items", &table, by_id, Some(&table_view));

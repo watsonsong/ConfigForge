@@ -5,7 +5,10 @@ use std::collections::BTreeSet;
 
 use crate::{
     Result,
-    data::{DataSet, DataTable},
+    data::{
+        CellSourceInfo, DataResolver, DataSet, DataTable, ResolvedRow, ResolvedTable,
+        ResolvedValue, ValueSourceTrace,
+    },
     diagnostic::{DiagnosticLocation, code::CF_DATA_SOURCE_SCHEMA_INVALID},
     meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
 };
@@ -52,10 +55,22 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
                             .iter()
                             .map(|field| field.meta.name.as_str())
                             .collect();
-                        let visible_rows = (0..table.rows.len())
+                        let visible_rows: Vec<VisibleRow> = (0..table.rows.len())
                             .map(|row_index| visible_row_for(table, row_index))
                             .collect();
-                        ExportTableView::new(table_meta, table, visible_fields, visible_rows)
+                        let resolved_table = resolved_table_for(
+                            table_meta,
+                            table,
+                            None,
+                            visible_rows.iter().map(|row| row.row_index),
+                        );
+                        ExportTableView::new(
+                            table_meta,
+                            table,
+                            visible_fields,
+                            visible_rows,
+                            resolved_table,
+                        )
                     })
                 })
                 .collect(),
@@ -82,7 +97,7 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
                 .filter(|field| field.meta.is_exported_for(target_tags))
                 .map(|field| field.meta.name.as_str())
                 .collect();
-            let visible_rows = table
+            let visible_rows: Vec<VisibleRow> = table
                 .rows
                 .iter()
                 .enumerate()
@@ -93,11 +108,18 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
                 })
                 .map(|(row_index, _)| visible_row_for(table, row_index))
                 .collect();
+            let resolved_table = resolved_table_for(
+                table_meta,
+                table,
+                Some(target_tags),
+                visible_rows.iter().map(|row| row.row_index),
+            );
             tables.push(ExportTableView::new(
                 table_meta,
                 table,
                 visible_fields,
                 visible_rows,
+                resolved_table,
             ));
         }
 
@@ -160,7 +182,7 @@ fn target_table_view<'meta, 'data>(
         .filter(|field| field.meta.is_exported_for(target_tags))
         .map(|field| field.meta.name.as_str())
         .collect();
-    let visible_rows = table
+    let visible_rows: Vec<VisibleRow> = table
         .rows
         .iter()
         .enumerate()
@@ -171,11 +193,18 @@ fn target_table_view<'meta, 'data>(
         })
         .map(|(row_index, _)| visible_row_for(table, row_index))
         .collect();
+    let resolved_table = resolved_table_for(
+        table_meta,
+        table,
+        Some(target_tags),
+        visible_rows.iter().map(|row| row.row_index),
+    );
     Ok(Some(ExportTableView::new(
         table_meta,
         table,
         visible_fields,
         visible_rows,
+        resolved_table,
     )))
 }
 
@@ -199,6 +228,7 @@ pub struct ExportTableView<'meta, 'data> {
     pub table: &'data DataTable,
     pub visible_fields: BTreeSet<&'meta str>,
     pub visible_rows: Vec<VisibleRow>,
+    resolved_table: Option<ResolvedTable>,
 }
 
 impl<'meta, 'data> ExportTableView<'meta, 'data> {
@@ -207,18 +237,83 @@ impl<'meta, 'data> ExportTableView<'meta, 'data> {
         table: &'data DataTable,
         visible_fields: BTreeSet<&'meta str>,
         visible_rows: Vec<VisibleRow>,
+        resolved_table: Option<ResolvedTable>,
     ) -> Self {
         Self {
             meta,
             table,
             visible_fields,
             visible_rows,
+            resolved_table,
         }
     }
 
     pub fn is_field_visible(&self, field_name: &str) -> bool {
         self.visible_fields.contains(field_name)
     }
+
+    pub fn resolved_table(&self) -> Option<&ResolvedTable> {
+        self.resolved_table.as_ref()
+    }
+
+    pub fn visible_raw_row(&self, visible_row_index: usize) -> Option<&'data crate::data::DataRow> {
+        self.visible_rows
+            .get(visible_row_index)
+            .and_then(|visible_row| self.table.rows.get(visible_row.row_index))
+    }
+
+    pub fn visible_resolved_row(&self, visible_row_index: usize) -> Option<&ResolvedRow> {
+        self.resolved_table
+            .as_ref()
+            .and_then(|resolved_table| resolved_table.rows.get(visible_row_index))
+    }
+
+    pub fn resolved_value(
+        &self,
+        visible_row_index: usize,
+        field_name: &str,
+    ) -> Option<&ResolvedValue> {
+        self.visible_resolved_row(visible_row_index)
+            .and_then(|row| row.get(field_name))
+    }
+
+    pub fn raw_cell(&self, visible_row_index: usize, field_path: &str) -> Option<&'data str> {
+        self.visible_raw_row(visible_row_index)
+            .and_then(|row| row.get(field_path).map(String::as_str))
+    }
+
+    pub fn field_source(
+        &self,
+        visible_row_index: usize,
+        field_path: &str,
+    ) -> Option<ResolvedFieldSource<'_>> {
+        let visible_row = self.visible_rows.get(visible_row_index)?;
+        let cell_source = self.table.cell_source(visible_row.row_index, field_path);
+        let resolved_trace = self
+            .resolved_value(visible_row_index, field_path)
+            .map(|value| &value.source);
+        if cell_source.is_none() && resolved_trace.is_none() {
+            return None;
+        }
+        Some(ResolvedFieldSource {
+            resolved_trace,
+            cell_source,
+        })
+    }
+}
+
+pub struct ResolvedFieldSource<'data> {
+    pub resolved_trace: Option<&'data ValueSourceTrace>,
+    pub cell_source: Option<&'data CellSourceInfo>,
+}
+
+fn resolved_table_for(
+    table_meta: &LinkedTableMeta<'_>,
+    table: &DataTable,
+    target_tags: Option<&TargetTags>,
+    row_indices: impl IntoIterator<Item = usize>,
+) -> Option<ResolvedTable> {
+    DataResolver::resolve_table_rows(table_meta, table, target_tags, row_indices).ok()
 }
 
 pub fn visible_row_for(table: &DataTable, row_index: usize) -> VisibleRow {
