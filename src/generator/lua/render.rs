@@ -782,6 +782,13 @@ pub(super) fn render_scalar(value: &str, primitive: PrimitiveFieldType) -> Resul
         PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset => {
             Ok(lua_string(value))
         }
+        PrimitiveFieldType::Color
+        | PrimitiveFieldType::Vector2
+        | PrimitiveFieldType::Vector3
+        | PrimitiveFieldType::Vector4
+        | PrimitiveFieldType::Vector2Int
+        | PrimitiveFieldType::Vector3Int
+        | PrimitiveFieldType::Vector4Int => Ok(lua_string(value)),
     }
 }
 

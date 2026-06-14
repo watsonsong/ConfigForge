@@ -4,9 +4,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    AssetKindMeta, FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode, MetaModel,
-    PrimitiveFieldType, TableKind, TableMeta, ValidatorMeta, ValueLayout, list_element_type_name,
-    model::normalize_tag,
+    AssetKindMeta, ColorFormat, FieldMeta, FragmentMeta, MetaDiagnostic, MetaDiagnosticCode,
+    MetaModel, PrimitiveFieldType, TableKind, TableMeta, ValidatorMeta, ValueLayout,
+    list_element_type_name, model::normalize_tag,
 };
 
 pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
@@ -59,6 +59,7 @@ fn validate_struct_meta(
         validate_deprecated_field_export_flags(&owner, field, diagnostics);
         validate_unsupported_field_options(&owner, field, diagnostics);
         validate_asset_field_options(model, &owner, field, diagnostics);
+        validate_builtin_value_field_options(&owner, field, diagnostics);
         validate_field_layout(model, &owner, field, diagnostics);
         validate_default_value(model, &owner, field, diagnostics);
     }
@@ -372,6 +373,11 @@ fn validate_table_meta(
         validate_unsupported_field_options(&format!("table `{}`", table.name), field, diagnostics);
         validate_asset_field_options(
             model,
+            &format!("table `{}`", table.name),
+            field,
+            diagnostics,
+        );
+        validate_builtin_value_field_options(
             &format!("table `{}`", table.name),
             field,
             diagnostics,
@@ -951,6 +957,7 @@ fn validate_fragment_meta(
         validate_deprecated_field_export_flags(&owner, field, diagnostics);
         validate_unsupported_field_options(&owner, field, diagnostics);
         validate_asset_field_options(model, &owner, field, diagnostics);
+        validate_builtin_value_field_options(&owner, field, diagnostics);
         validate_field_layout(model, &owner, field, diagnostics);
         validate_default_value(model, &owner, field, diagnostics);
     }
@@ -1081,6 +1088,86 @@ fn validate_asset_field_options(
                 field.name
             ),
         ));
+    }
+}
+
+fn validate_builtin_value_field_options(
+    owner: &str,
+    field: &FieldMeta,
+    diagnostics: &mut Vec<MetaDiagnostic>,
+) {
+    if field.has_color_options() && !field.is_color_scalar() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "{owner} field `{}` declares color options, but only type `color` fields may use them",
+                field.name
+            ),
+        ));
+    }
+    if field.has_vector_options() && field.vector_dimension().is_none() {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnsupportedFeature,
+            format!(
+                "{owner} field `{}` declares vector options, but only vector2/vector3/vector4/vector*_int fields may use them",
+                field.name
+            ),
+        ));
+    }
+
+    if field.is_color_scalar() {
+        if field.color_channel.is_none() {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "{owner} field `{}` uses type `color` but does not declare `color_channel`; set it to `byte` or `normalized`",
+                    field.name
+                ),
+            ));
+        }
+        if matches!(
+            field.color_format,
+            Some(ColorFormat::HexRgb | ColorFormat::RgbTuple)
+        ) && field.color_alpha.is_none()
+        {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "{owner} field `{}` uses RGB color format without alpha; set `alpha = \"default_opaque\"` or use an RGBA format",
+                    field.name
+                ),
+            ));
+        }
+    }
+
+    if let Some(dimension) = field.vector_dimension() {
+        if let Some(components) = &field.vector_components {
+            if components.len() != dimension {
+                diagnostics.push(MetaDiagnostic::new(
+                    MetaDiagnosticCode::UnsupportedFeature,
+                    format!(
+                        "{owner} field `{}` declares {} vector components but type `{}` requires {}",
+                        field.name,
+                        components.len(),
+                        field.field_type,
+                        dimension
+                    ),
+                ));
+            }
+            let mut seen = BTreeSet::new();
+            for component in components {
+                if component.trim().is_empty() || !seen.insert(component.as_str()) {
+                    diagnostics.push(MetaDiagnostic::new(
+                        MetaDiagnosticCode::UnsupportedFeature,
+                        format!(
+                            "{owner} field `{}` declares invalid vector_components; component names must be non-empty and unique",
+                            field.name
+                        ),
+                    ));
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -1250,6 +1337,8 @@ fn validate_default_value(
             Some(
                 PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset,
             ) => default.as_str().is_some(),
+            Some(primitive) if primitive.is_builtin_value_type() => default.as_str().is_some(),
+            Some(_) => false,
             None => {
                 if model.struct_meta(&field.field_type).is_some() {
                     return;
@@ -1290,6 +1379,8 @@ fn default_value_matches_type(model: &MetaModel, field_type: &str, default: &tom
         Some(PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset) => {
             default.as_str().is_some()
         }
+        Some(primitive) if primitive.is_builtin_value_type() => default.as_str().is_some(),
+        Some(_) => false,
         None => model.enum_meta(field_type).is_some_and(|enum_meta| {
             default.as_str().is_some_and(|default_value| {
                 enum_meta

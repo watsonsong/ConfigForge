@@ -586,6 +586,15 @@ fn code_type_from_linked(field: &LinkedField<'_>) -> Result<CodeTypeRef> {
         LinkedField::Primitive(PrimitiveFieldType::String) => CodeTypeRef::String,
         LinkedField::Primitive(PrimitiveFieldType::Text) => CodeTypeRef::Text,
         LinkedField::Primitive(PrimitiveFieldType::Asset) => CodeTypeRef::Asset,
+        LinkedField::Primitive(
+            PrimitiveFieldType::Color
+            | PrimitiveFieldType::Vector2
+            | PrimitiveFieldType::Vector3
+            | PrimitiveFieldType::Vector4
+            | PrimitiveFieldType::Vector2Int
+            | PrimitiveFieldType::Vector3Int
+            | PrimitiveFieldType::Vector4Int,
+        ) => CodeTypeRef::String,
         LinkedField::Enum(enum_meta) => CodeTypeRef::Enum {
             name: enum_meta.name.clone(),
         },

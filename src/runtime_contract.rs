@@ -130,6 +130,13 @@ fn write_type_signature(out: &mut Vec<u8>, field: &LinkedField<'_>, target_tags:
                 PrimitiveFieldType::String => 3,
                 PrimitiveFieldType::Text => 4,
                 PrimitiveFieldType::Asset => 5,
+                PrimitiveFieldType::Color => 6,
+                PrimitiveFieldType::Vector2 => 7,
+                PrimitiveFieldType::Vector3 => 8,
+                PrimitiveFieldType::Vector4 => 9,
+                PrimitiveFieldType::Vector2Int => 10,
+                PrimitiveFieldType::Vector3Int => 11,
+                PrimitiveFieldType::Vector4Int => 12,
             });
         }
         LinkedField::Enum(enum_meta) => {

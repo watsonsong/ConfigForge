@@ -57,6 +57,28 @@ pub(crate) fn parse_scalar_for_type(
         LinkedField::Primitive(
             PrimitiveFieldType::String | PrimitiveFieldType::Text | PrimitiveFieldType::Asset,
         ) => Ok(ScalarValue::String(value.to_owned())),
+        LinkedField::Primitive(
+            primitive @ (PrimitiveFieldType::Color
+            | PrimitiveFieldType::Vector2
+            | PrimitiveFieldType::Vector3
+            | PrimitiveFieldType::Vector4
+            | PrimitiveFieldType::Vector2Int
+            | PrimitiveFieldType::Vector3Int
+            | PrimitiveFieldType::Vector4Int),
+        ) => Err(scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            format!("{} builtin value", primitive.as_str()),
+            format!(
+                "table `{}` row {} field `{}` expected builtin value parser for `{}`",
+                table_name,
+                row_number,
+                field_path,
+                primitive.as_str()
+            ),
+        )),
         LinkedField::Enum(enum_meta) => {
             if enum_meta
                 .values

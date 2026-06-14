@@ -273,6 +273,84 @@ pub struct FieldMeta {
     pub unique: bool,
     #[serde(default)]
     pub foreign_key: Option<FieldForeignKeyMeta>,
+    #[serde(default, rename = "color_format")]
+    pub color_format: Option<ColorFormat>,
+    #[serde(default, rename = "color_channel")]
+    pub color_channel: Option<ColorChannel>,
+    #[serde(default, rename = "color_space")]
+    pub color_space: Option<ColorSpace>,
+    #[serde(default, rename = "alpha")]
+    pub color_alpha: Option<ColorAlphaPolicy>,
+    #[serde(default, rename = "vector_format")]
+    pub vector_format: Option<VectorFormat>,
+    #[serde(default, rename = "vector_components")]
+    pub vector_components: Option<Vec<String>>,
+    #[serde(default)]
+    pub unit: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ColorFormat {
+    HexRgb,
+    HexRgba,
+    RgbTuple,
+    RgbaTuple,
+    Object,
+}
+
+impl Default for ColorFormat {
+    fn default() -> Self {
+        Self::HexRgba
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ColorChannel {
+    Byte,
+    Normalized,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ColorSpace {
+    Srgb,
+    Linear,
+}
+
+impl Default for ColorSpace {
+    fn default() -> Self {
+        Self::Srgb
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ColorAlphaPolicy {
+    Required,
+    DefaultOpaque,
+}
+
+impl Default for ColorAlphaPolicy {
+    fn default() -> Self {
+        Self::Required
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorFormat {
+    Tuple,
+    Array,
+    Object,
+    Expanded,
+}
+
+impl Default for VectorFormat {
+    fn default() -> Self {
+        Self::Tuple
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -581,6 +659,25 @@ impl FieldMeta {
 
     pub fn is_asset_scalar(&self) -> bool {
         self.primitive_type() == Some(PrimitiveFieldType::Asset)
+    }
+
+    pub fn is_color_scalar(&self) -> bool {
+        self.primitive_type() == Some(PrimitiveFieldType::Color)
+    }
+
+    pub fn vector_dimension(&self) -> Option<usize> {
+        self.primitive_type()?.vector_dimension()
+    }
+
+    pub fn has_color_options(&self) -> bool {
+        self.color_format.is_some()
+            || self.color_channel.is_some()
+            || self.color_space.is_some()
+            || self.color_alpha.is_some()
+    }
+
+    pub fn has_vector_options(&self) -> bool {
+        self.vector_format.is_some() || self.vector_components.is_some() || self.unit.is_some()
     }
 
     pub fn foreign_key_scalar_type_name(&self) -> &str {

@@ -839,6 +839,21 @@ fn accepts_canonical_and_legacy_primitive_field_types() {
             asset_kind = "generic_asset"
 
             [[tables.fields]]
+            name = "color_value"
+            type = "color"
+            color_channel = "byte"
+
+            [[tables.fields]]
+            name = "position"
+            type = "vector3"
+            vector_components = ["x", "y", "z"]
+            unit = "meter"
+
+            [[tables.fields]]
+            name = "grid_position"
+            type = "vector2_int"
+
+            [[tables.fields]]
             name = "int_list"
             type = "int[]"
 
@@ -880,6 +895,30 @@ fn accepts_canonical_and_legacy_primitive_field_types() {
         table.field("asset_value").unwrap().primitive_type(),
         Some(PrimitiveFieldType::Asset)
     );
+    assert_eq!(
+        table.field("color_value").unwrap().primitive_type(),
+        Some(PrimitiveFieldType::Color)
+    );
+    assert_eq!(
+        table.field("color_value").unwrap().color_channel,
+        Some(ColorChannel::Byte)
+    );
+    assert_eq!(
+        table.field("position").unwrap().primitive_type(),
+        Some(PrimitiveFieldType::Vector3)
+    );
+    assert_eq!(
+        table
+            .field("position")
+            .unwrap()
+            .vector_components
+            .as_deref(),
+        Some(&["x".to_owned(), "y".to_owned(), "z".to_owned()][..])
+    );
+    assert_eq!(
+        table.field("grid_position").unwrap().primitive_type(),
+        Some(PrimitiveFieldType::Vector2Int)
+    );
     assert_eq!(table.field("int_list").unwrap().primitive_type(), None);
     assert_eq!(
         table
@@ -888,6 +927,60 @@ fn accepts_canonical_and_legacy_primitive_field_types() {
             .foreign_key_scalar_type_name(),
         "int"
     );
+}
+
+#[test]
+fn validates_builtin_value_field_options() {
+    let diagnostics = diagnostics(
+        r#"
+            [[enums]]
+            name = "color"
+
+            [[tables]]
+            name = "types"
+            source = "types.csv"
+
+            [[tables.fields]]
+            name = "bad_color_option"
+            type = "string"
+            color_format = "hex_rgba"
+
+            [[tables.fields]]
+            name = "missing_channel"
+            type = "color"
+
+            [[tables.fields]]
+            name = "rgb_without_alpha_policy"
+            type = "color"
+            color_channel = "byte"
+            color_format = "hex_rgb"
+
+            [[tables.fields]]
+            name = "bad_vector_option"
+            type = "int"
+            vector_format = "tuple"
+
+            [[tables.fields]]
+            name = "bad_components"
+            type = "vector3"
+            vector_components = ["x", "x"]
+        "#,
+    );
+
+    let messages = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(messages.contains("custom type `color` conflicts with a primitive field type"));
+    assert!(messages.contains("declares color options, but only type `color` fields may use them"));
+    assert!(messages.contains("does not declare `color_channel`"));
+    assert!(messages.contains("uses RGB color format without alpha"));
+    assert!(messages.contains(
+        "declares vector options, but only vector2/vector3/vector4/vector*_int fields may use them"
+    ));
+    assert!(messages.contains("declares 2 vector components but type `vector3` requires 3"));
+    assert!(messages.contains("component names must be non-empty and unique"));
 }
 
 #[test]
@@ -1106,6 +1199,15 @@ fn primitive_field_type_names_are_canonical() {
     assert_eq!(PrimitiveFieldType::String.as_str(), "string");
     assert_eq!(PrimitiveFieldType::Text.as_str(), "text");
     assert_eq!(PrimitiveFieldType::Asset.as_str(), "asset");
+    assert_eq!(PrimitiveFieldType::Color.as_str(), "color");
+    assert_eq!(PrimitiveFieldType::Vector2.as_str(), "vector2");
+    assert_eq!(PrimitiveFieldType::Vector3.as_str(), "vector3");
+    assert_eq!(PrimitiveFieldType::Vector4.as_str(), "vector4");
+    assert_eq!(PrimitiveFieldType::Vector2Int.as_str(), "vector2_int");
+    assert_eq!(PrimitiveFieldType::Vector3Int.as_str(), "vector3_int");
+    assert_eq!(PrimitiveFieldType::Vector4Int.as_str(), "vector4_int");
+    assert_eq!(PrimitiveFieldType::Vector3.vector_dimension(), Some(3));
+    assert!(PrimitiveFieldType::Vector3Int.is_int_vector());
     assert_eq!(PrimitiveFieldType::parse("unknown"), None);
 }
 

@@ -14,9 +14,9 @@ pub use linked::{
 };
 pub use raw::{
     AssetExtensionPolicy, AssetInputKind, AssetKindMeta, AssetPathStyle, AssetRegexRuleMeta,
-    AssetRegexTarget, EnumMeta, EnumValueMeta, FieldForeignKeyMeta, FieldMeta,
-    ForeignKeyDeclarationSite, ForeignKeyMeta, FragmentMeta, IndexMeta, MetaModel,
-    ResolvedForeignKeyMeta, SourceRef, StructMeta, TableMeta, ValidatorMeta,
-    list_element_type_name,
+    AssetRegexTarget, ColorAlphaPolicy, ColorChannel, ColorFormat, ColorSpace, EnumMeta,
+    EnumValueMeta, FieldForeignKeyMeta, FieldMeta, ForeignKeyDeclarationSite, ForeignKeyMeta,
+    FragmentMeta, IndexMeta, MetaModel, ResolvedForeignKeyMeta, SourceRef, StructMeta, TableMeta,
+    ValidatorMeta, VectorFormat, list_element_type_name,
 };
 pub use types::{PrimitiveFieldType, TableKind, ValidationSeverity, ValueLayout};

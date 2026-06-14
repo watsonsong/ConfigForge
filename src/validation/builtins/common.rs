@@ -261,6 +261,15 @@ pub(super) fn scalar_field_kind(field: &LinkedFieldMeta<'_>) -> Option<ScalarFie
         LinkedField::Primitive(PrimitiveFieldType::Text) => Some(ScalarFieldKind::Text),
         LinkedField::Primitive(PrimitiveFieldType::Asset) => Some(ScalarFieldKind::Asset),
         LinkedField::Enum(_) => Some(ScalarFieldKind::Enum),
+        LinkedField::Primitive(
+            PrimitiveFieldType::Color
+            | PrimitiveFieldType::Vector2
+            | PrimitiveFieldType::Vector3
+            | PrimitiveFieldType::Vector4
+            | PrimitiveFieldType::Vector2Int
+            | PrimitiveFieldType::Vector3Int
+            | PrimitiveFieldType::Vector4Int,
+        ) => None,
         LinkedField::Struct(_) | LinkedField::List(_) => None,
     }
 }
