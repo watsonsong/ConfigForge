@@ -1357,6 +1357,76 @@ fn renders_static_html_shell_and_escapes_user_text() {
 }
 
 #[test]
+fn schema_doc_output_quality_uses_relative_links_and_stable_labels() {
+    let doc = build_doc(
+        r#"
+                [[tables]]
+                name = "classes"
+                source = "classes.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.indexes]]
+                name = "primary"
+                fields = ["id"]
+                unique = true
+                primary = true
+
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+                required = true
+
+                [[tables.fields]]
+                name = "class_id"
+                type = "int"
+                foreign_key = { target_table = "classes", target_index = "primary", linked_field = "class", allow_empty = true }
+            "#,
+        &["client"],
+    );
+    let items = doc
+        .tables
+        .iter()
+        .find(|table| table.name == "items")
+        .expect("items table");
+    let index_markdown = render_schema_doc_index_markdown(&doc);
+    let table_markdown = render_schema_table_markdown(&doc, items);
+    let index_html =
+        render_schema_doc_index_html(&doc, &["classes.html".to_owned(), "items.html".to_owned()]);
+    let table_html = render_schema_table_html(&doc, items, "index.html");
+
+    assert!(index_markdown.contains("[items](items.md)"));
+    assert!(
+        table_markdown.contains("| class_id | classes.id | many-to-one | yes | class | all | - |")
+    );
+    assert!(
+        index_markdown
+            .contains("| items | class_id | classes | primary | many-to-one | yes | class | all |")
+    );
+    assert!(!index_markdown.contains("many:one"));
+    assert!(!table_markdown.contains("many:one"));
+
+    for html in [&index_html, &table_html] {
+        assert!(html.contains("<style>"));
+        assert!(!html.contains("<script"));
+        assert!(!html.contains("http://"));
+        assert!(!html.contains("https://"));
+        assert!(!html.contains("rel=\"stylesheet\""));
+    }
+    assert!(index_html.contains("<a href=\"items.html\"><code>items</code></a>"));
+    assert!(table_html.contains("<a href=\"index.html\">← Back to index</a>"));
+    assert!(table_html.contains("many-to-one"));
+    assert!(table_html.contains("allow_empty = optional reference"));
+}
+
+#[test]
 fn renders_html_index_metadata_summary_and_cross_table_sections() {
     let doc = build_doc(
         r#"
