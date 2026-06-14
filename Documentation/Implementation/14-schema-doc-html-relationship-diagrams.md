@@ -335,7 +335,7 @@ Markdown 不要求复杂图形，但不应丢失结构信息。建议：
 
 ## 14.8 配置与 artifact 输出
 
-当前 Project Config 只开放 `format`、`index_file`、`title`。图例优化默认启用，不新增 `include_diagrams` / `diagram_detail` / `diagram_format` 配置，避免配置面过早膨胀；用户设置未知 option 仍显式报错。
+当前 Project Config 稳定开放 `format`、`index_file`、`title`、`include_hidden`、`include_internal`、`include_struct_details`、`include_asset_rules`、`include_i18n`。图例优化默认启用，不新增 `include_diagrams` / `diagram_detail` / `diagram_format` 配置，避免配置面过早膨胀；用户设置未知 option 仍显式报错。
 
 后续如需要控制，可增加：
 
@@ -357,21 +357,21 @@ Artifact 输出仍是：
 
 单元测试：
 
-- builder：构建 global relationship graph，覆盖普通 FK、list FK、ObjectTable FK、自引用、target-hidden relation。
-- builder：构建 incoming relation，确保目标表能看到引用自己的 source tables。
-- builder：构建 source graph，覆盖 single source、multi-source polymorphic table、override source、fragment edge。
-- builder：构建 fragment graph，覆盖 fragment 字段、target visibility、source hints。
-- HTML renderer：meta bar 中 `Project: standard_reference_game` 不被 `<dt>/<dd>` 分裂；用户文本仍 HTML escape。
-- HTML renderer：relationship graph / source map / fragment composition 输出 stable anchors、relative links、legend badges。
-- Markdown renderer：relation overview / source map 的表格 escape 与 deterministic order。
-- path planning：diagram section 不新增 artifact path；现有 output conflict 测试不变。
+- builder 已覆盖 global relationship graph，包括普通 FK、list FK、ObjectTable FK、自引用、target-hidden relation。
+- builder 已覆盖 incoming relation，确保目标表能看到引用自己的 source tables。
+- builder 已覆盖 source graph，包括 single source、multi-source polymorphic table、override source、fragment edge。
+- builder 已覆盖 fragment graph，包括 fragment 字段、target visibility、source hints，以及 `include_struct_details = false` 时隐藏 fragment section。
+- HTML renderer 已覆盖 meta bar 中 `Project: standard_reference_game` 不被 `<dt>/<dd>` 分裂；用户文本仍 HTML escape。
+- HTML renderer 已覆盖 relationship graph / source map / fragment composition 输出 stable anchors、relative links、legend badges，且无外部 JS/CSS/CDN。
+- Markdown renderer 已覆盖 relation overview / source map 的表格 escape 与 deterministic order。
+- path planning 已覆盖 diagram section 不新增 artifact path；现有 output conflict 测试保持有效。
 
 集成测试：
 
 - `schema_doc format = "html"` docs-only target 生成 index 与 table 页面，并包含 `relationship-graph`、`source-map` anchor。
-- standard fixture：HTML schema docs 能显示 `items -> rarity_levels` FK、`materials.csv/weapons.csv/armors.csv -> items` source map、`stack/attributes/skill` fragment composition。
-- target filtering：server/client target 下 hidden field / relation 不进入默认图例。
-- dry-run artifact plan：仍只包含 index + per-table docs，不因 inline diagrams 增加额外 artifact。
+- standard fixture 已覆盖 HTML schema docs 显示 `items -> rarity_levels` FK、`materials.csv/weapons.csv/armors.csv -> items` source map、`stack/attributes/skill` fragment composition。
+- target filtering 已覆盖 server/client target 下 hidden field / relation 不进入默认图例，并覆盖显式 `include_hidden` / `include_internal` 输出差异。
+- dry-run artifact plan 仍只包含 index + per-table docs，不因 inline diagrams 增加额外 artifact。
 
 可视回归：
 
@@ -380,23 +380,23 @@ Artifact 输出仍是：
 
 ## 14.10 分阶段落地建议
 
-1. **Phase 1：HTML summary 与 anchors**
+1. **Phase 1：HTML summary 与 anchors（已完成）**
    - 将 `<dl>` metadata 改为 `.meta-bar`。
    - 增加 quick links 与固定 section anchors。
    - 补充 HTML renderer 单元测试。
 
-2. **Phase 2：Relationship graph model + HTML/CSS 图例**
+2. **Phase 2：Relationship graph model + HTML/CSS 图例（已完成）**
    - 在 model/build 中新增 relationship graph 与 incoming relation。
    - HTML index 输出全局关系图；table 页输出 neighborhood graph。
    - Markdown 输出 relation overview。
 
-3. **Phase 3：Source map + Fragment composition**
+3. **Phase 3：Source map + Fragment composition（已完成）**
    - 扩展 source graph / fragment graph 模型。
    - HTML 输出 source map 与 fragment cards。
    - standard fixture integration 覆盖 polymorphic `items` 表。
 
-4. **Phase 4：Legend polish 与可选 SVG/Mermaid 预研**
-   - 完善 Index & FK Contract、Asset/Text Flow legend。
-   - 如 HTML/CSS card 无法满足复杂项目可读性，再设计 inline SVG 或 Mermaid/DOT 可选输出。
+4. **Phase 4：Legend polish（已完成）与可选 SVG/Mermaid 预研（后续扩展）**
+   - 已完善 Index & FK Contract、Asset/Text Flow legend。
+   - 如 HTML/CSS card 无法满足复杂项目可读性，再设计 inline SVG 或 Mermaid/DOT 可选输出；该方向不属于当前 Stable 必备范围。
 
 每个 phase 应独立提交，并在提交前运行 `cargo fmt`、相关 unit tests 和 `cargo test --test cli_integration schema_doc` 或完整 `cargo test`。

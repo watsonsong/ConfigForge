@@ -583,32 +583,32 @@ title = "Client Config Schema"
 
 ## 11.10 实现分期建议
 
-### Phase A：Markdown MVP（已实现 MVP）
+### Phase A：Markdown 输出（已稳定）
 
 - 新增 `schema_doc` export type，dependency 为 MetaOnly。
 - 构建 `SchemaDoc` normalized model。
 - 输出 `index.md` 和每张可见 table 的 `*.md`。
 - 覆盖 Fields / Indexes / Relations 基础表格。
 - 支持 target-aware table/field/index visibility。
-- 单元测试覆盖 Markdown escape、文件名冲突、docs-only target、target filtering。
+- 单元测试覆盖 Markdown escape、文件名冲突、docs-only target、target filtering、hidden/internal include 口径与 deterministic order。
 
-### Phase B：资产、POT 与复杂类型增强
+### Phase B：资产、POT 与复杂类型增强（已稳定）
 
 - 展示 asset kind 规则摘要。
 - 标记 text 字段是否会进入 POT。
 - 展开 struct / fragment / list 字段结构。
 - 展示 built-in validators 摘要。
-- 增加 relation overview 和跨表 FK 索引页。
+- 增加 relation overview、source map、fragment composition 和跨表 FK 索引页。
 
-### Phase C：HTML 输出格式（已实现 MVP）
+### Phase C：HTML 输出格式（已稳定）
 
 - 多页静态 HTML：`index.html` 与每表 `<table>.html`。
 - 与 Markdown 共享 `SchemaDoc` normalized model 和 artifact path planning。
 - 内联 CSS、自包含页面、无外部 JS/CSS/CDN。
 - Index 页包含 summary cards、Tables 总览、Asset fields、Text / POT fields、Relation overview。
-- 单表页包含 Fields / Indexes / Relations / Assets / Text-POT / Validators。
+- 单表页包含 Fields / Indexes / Relations / Assets / Text-POT / Validators，以及 table neighborhood、source map、fragment composition、Index/FK Contract、Asset/Text Flow legend。
 - 对用户可控文本统一 HTML escape。
-- CLI integration 覆盖 docs-only target、dry-run artifact plan 和实际写入。
+- CLI integration 覆盖 docs-only target、dry-run artifact plan、temp-commit/direct 写入、path conflict 和实际写入。
 
 ### Phase D：更多平台集成
 
@@ -620,12 +620,13 @@ title = "Client Config Schema"
 
 单元测试：
 
-- SchemaDoc builder：空 Meta、单表、多表、ObjectTable、struct/list、asset/text 字段；
-- target visibility：table hidden、field hidden、index hidden、include_hidden；
-- FK relation：field-level FK、table-level FK、list FK、linked_field；
-- Markdown renderer：表格 escape、空值、中文描述、换行、链接；
-- HTML renderer：HTML escape、静态 shell、index summary、单表 sections、相对链接；
-- path planning：index file、table file、文件名冲突、路径逃逸拒绝。
+- SchemaDoc builder 已覆盖空 Meta、单表、多表、ObjectTable、struct/list、asset/text 字段；
+- target visibility 已覆盖 table hidden、field hidden、index hidden、relation hidden、`export = false` internal 内容，以及 `include_hidden` / `include_internal` 开启后的稳定标记；
+- FK relation 已覆盖 field-level FK、table-level FK、list FK、linked_field、自引用与 ObjectTable source；
+- deterministic order 已覆盖大型 schema 的 table、relationship graph、source graph、table neighborhood、fragment graph 与相对链接；
+- Markdown renderer 已覆盖表格 escape、空值、中文描述、换行、链接、hidden/internal 文案和 detail toggle；
+- HTML renderer 已覆盖 HTML escape、自包含静态 shell、index summary、单表 sections、相对链接、legend badges、无外部 JS/CSS/CDN；
+- path planning 已覆盖 index file、table file、文件名冲突、路径逃逸拒绝和 table/index 输出冲突。
 
 集成测试：
 
@@ -633,28 +634,31 @@ title = "Client Config Schema"
 - `type = "schema_doc" format = "html"` 生成 `index.html` 与单表 `.html` 文档；
 - docs-only target 不需要 `project.input`；
 - 与 runtime data/codegen export 同 target 时路径冲突能提前报错；
-- target tags 变化会影响文档可见性；
-- dry-run / temp-commit 写入模式下 artifact plan 与实际写入一致。
+- target tags 变化会影响文档可见性，`include_hidden` / `include_internal` 可显式输出 hidden/internal 内容；
+- dry-run / temp-commit / direct 写入模式下 artifact plan 与实际写入一致。
 
 文档回归：
 
-- 标准工程 fixture 增加 schema_doc export task 示例；
-- Design / Implementation / HTML 阅读版在实现后同步状态；
-- Markdown golden/snapshot 使用固定 generated_at 或忽略时间字段。
+- 标准工程 fixture 已纳入 Markdown / HTML schema_doc export task 示例；
+- 标准工程输出回归覆盖 relationship overview、source map、fragment composition、Asset/Text flow legend；
+- Design / Implementation 文档同步标记 Markdown / HTML schema docs 为 Stable；
+- `generated_at` 是唯一允许随构建时间变化的字段；测试断言主体内容和稳定路径，不把 JSON Schema / Mermaid 等后续格式作为 Stable 前置条件。
 
 ## 11.12 当前状态
 
-当前实现状态：**Implemented MVP**。
+当前实现状态：**Stable**。
 
 已实现内容：
 
 - `schema_doc` 已迁入 `src/generator/schema_doc/`，提供 `SchemaDoc` normalized model、`SchemaDocOptions`、`SchemaDocExportConfig`、`SchemaDocFormat`、Markdown / HTML renderer 和 ArtifactSink 写入入口。
 - Build 支持 `[[targets.exports]] type = "schema_doc"`，当前作为注册到 `GeneratorRegistry` 的 direct `ArtifactGenerator` 运行；它读取 linked Meta、Project info 与 target tags 后输出 artifact，不属于 `DataFormatRegistry`，docs-only target 不需要 `project.input`。
 - Markdown 输出 `index.md` 与每张当前 target 可见 table 的 `<table>.md`；HTML 输出 `index.html` 与每表 `<table>.html`。
-- 单表文档包含 Fields、Indexes、Relations，并补充 Assets、Text / POT、Validators 摘要；HTML index 额外提供 summary cards、asset/text/relation 跨表 overview。
-- Builder 使用 linked Meta 与 current target tags 计算 table / field / index / FK visibility；默认过滤当前 target 不可见或 `export = false` 的内容。
+- 单表文档包含 Fields、Indexes、Relations，并补充 Assets、Text / POT、Validators、Source map、Fragments 摘要；HTML index 额外提供 summary cards、asset/text/relation 跨表 overview，HTML table 页提供 relationship/source/fragment 等纯静态图例。
+- Builder 使用 linked Meta 与 current target tags 计算 table / field / index / FK visibility；默认过滤当前 target 不可见或 `export = false` 的内容。`include_hidden` / `include_internal` 开启后，对应 table / field / index / relation / source / fragment / asset / text / validator 内容进入 normalized model 并标记 hidden/internal，renderer 不重新解释 Meta。
+- `SchemaDocExportConfig` 稳定开放 `format`、`index_file`、`title`、`include_hidden`、`include_internal`、`include_struct_details`、`include_asset_rules`、`include_i18n`；未开放的 `include_diagrams` / `diagram_detail` / `diagram_format` 等字段会作为 unknown option 显式报错。
+- deterministic 输出已纳入回归：table、field、index、relation、source graph、relationship graph、table neighborhood、fragment graph 和相对链接顺序稳定；`generated_at` 是唯一允许随时间变化的字段。
 - 输出路径通过 `ArtifactSink` 写入，支持 direct / temp-commit / dry-run 的统一 artifact 行为；`index_file` 和 table 文件名会拒绝非法文件名和重复 normalized path。
-- 已有单元测试与 CLI integration tests 覆盖 docs-only target、Markdown / HTML 输出、target filtering、unknown format、artifact 写入、dry-run plan 和路径规划。
+- 单元测试、CLI integration tests 和标准工程 fixture 回归覆盖 docs-only target、Markdown / HTML 输出、target filtering、hidden/internal include、unknown format/option、artifact 写入、dry-run plan、路径规划、fixture relationship/source/fragment 图例和输出质量约束。
 
 当前边界：
 
@@ -664,10 +668,7 @@ title = "Client Config Schema"
 - Text / POT 摘要只标记当前 target 可见 `text` 字段理论上会被 POT exporter 处理，不读取具体文本值。
 - Struct / fragment 子字段已有基础展开；复杂平台化输出、owner/domain 分组、HTML 单页 bundle / 交互搜索、ER 图和 Lark / Confluence 发布仍是后续扩展。
 
-进入 Stable 前建议完成：
+Stable 后续扩展方向：
 
-- 明确并测试 Project Config 配置面：要么开放 `include_hidden`、`include_internal`、`include_struct_details`、`include_asset_rules`、`include_i18n`，要么将这些仅保留为内部默认策略并在文档中固定为当前契约；无论哪种方式，unknown option 行为都应有 integration 覆盖。
-- 补齐 target-hidden / internal 内容的文档口径测试：包括 hidden table、hidden field、hidden index、hidden FK、`export = false` support field 在默认策略下被过滤，在未来显式开启后标记为 hidden/internal。
-- 强化大型 schema 的可读性与确定性：relationship/source/fragment 图在多表、多 FK、自引用、复合 index、ObjectTable source 场景下保持声明顺序、同目录相对链接和稳定 HTML anchors。
-- 将 schema_doc 的 artifact 输出纳入标准 fixture 的稳定回归检查：覆盖 Markdown 与 HTML 中 `items -> rarity_levels`、`game_rules -> items/classes`、`materials/weapons/armors -> items`、`stack/attributes/skill` fragment composition、Asset/Text flow legend。
-- 明确 HTML/CSS card diagram 为 Stable 默认图例形态；内联 SVG、搜索、过滤、排序、Lark / Confluence 方言、owner/domain 分组作为后续增强，不阻塞 Stable。
+- JSON Schema、Mermaid、DOT、ER 图导出、内联 SVG、HTML 单页 bundle、搜索、过滤、排序等属于新增格式或阅读体验增强，不改变当前 Markdown / HTML 多页静态文档 Stable 契约。
+- Lark / Confluence 方言发布、owner/domain 分组、读取真实数据后的 asset reference / text value 清单可作为独立 feature 推进；当前 schema_doc 保持只读 Meta / Project / TargetTags，不读取 source/runtime data。
