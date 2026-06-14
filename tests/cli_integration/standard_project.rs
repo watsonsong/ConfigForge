@@ -599,12 +599,59 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(meta_schema_index.contains("[rarity_levels](rarity_levels.md)"));
     assert!(meta_schema_index.contains("[game_rules](game_rules.md)"));
     assert!(meta_schema_index.contains("[items](items.md)"));
+    assert!(
+        meta_schema_index
+            .contains("| materials.csv | csv | items | base | stack | collection records | all |")
+    );
+    assert!(meta_schema_index.contains("| game_rules | starter_item_ids | items | by_id | list-to-many | no | starter_items | all |"));
+
+    let meta_schema_items = fs::read_to_string(fixture_root.join("out/schema_docs/items.md"))
+        .expect("standard fixture meta schema items doc should be readable");
+    assert!(meta_schema_items.contains("## Fragments"));
+    assert!(
+        meta_schema_items
+            .contains("| stack | inline fields | max_stack | materials.csv (base) | all |")
+    );
+    assert!(
+        meta_schema_items.contains(
+            "| rarity_id | rarity_levels.rarity_id | many-to-one | no | rarity | all | - |"
+        )
+    );
+
+    let meta_schema_game_rules =
+        fs::read_to_string(fixture_root.join("out/schema_docs/game_rules.md"))
+            .expect("standard fixture meta schema game_rules doc should be readable");
+    assert!(!meta_schema_game_rules.contains("## Fragments"));
+    assert!(!meta_schema_game_rules.contains("No fragments."));
+    assert!(
+        meta_schema_game_rules.contains(
+            "| starter_item_ids | items.id | list-to-many | no | starter_items | all | - |"
+        )
+    );
 
     let meta_schema_html_index =
         fs::read_to_string(fixture_root.join("out/schema_docs_html/index.html"))
             .expect("standard fixture HTML schema index should be readable");
     assert!(meta_schema_html_index.contains("Reference Game Meta Schema Documentation"));
     assert!(meta_schema_html_index.contains("rarity_levels.html"));
+    assert!(meta_schema_html_index.contains("<section id=\"relationship-graph\">"));
+    assert!(meta_schema_html_index.contains("<a href=\"items.html\"><code>items</code></a>"));
+    assert!(meta_schema_html_index.contains("<code>starter_item_ids</code>"));
+    assert!(meta_schema_html_index.contains("list-to-many"));
+    assert!(meta_schema_html_index.contains("fragments: stack"));
+
+    let meta_schema_html_items =
+        fs::read_to_string(fixture_root.join("out/schema_docs_html/items.html"))
+            .expect("standard fixture HTML schema items doc should be readable");
+    assert!(meta_schema_html_items.contains("<h2>Fragment composition</h2>"));
+    assert!(meta_schema_html_items.contains("<code>stack</code>"));
+    assert!(meta_schema_html_items.contains("not independent table"));
+
+    let meta_schema_html_game_rules =
+        fs::read_to_string(fixture_root.join("out/schema_docs_html/game_rules.html"))
+            .expect("standard fixture HTML schema game_rules doc should be readable");
+    assert!(!meta_schema_html_game_rules.contains("<section id=\"fragments\">"));
+    assert!(!meta_schema_html_game_rules.contains("No fragments."));
 
     let asset_manifest_json =
         fs::read_to_string(fixture_root.join("out/client_assets/client_assets.json"))
