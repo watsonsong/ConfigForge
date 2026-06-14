@@ -674,20 +674,6 @@ fn validate_object_table_restrictions(table: &TableMeta, diagnostics: &mut Vec<M
     }
 
     let owner = format!("table `{}`", table.name);
-    if !table.sources.is_empty() {
-        diagnostics.push(MetaDiagnostic::new(
-            MetaDiagnosticCode::UnsupportedFeature,
-            format!(
-                "{owner} is an ObjectTable, but ObjectTable Step 1 only supports legacy `source`"
-            ),
-        ));
-    }
-    if !table.override_sources.is_empty() {
-        diagnostics.push(MetaDiagnostic::new(
-            MetaDiagnosticCode::UnsupportedFeature,
-            format!("{owner} is an ObjectTable, but ObjectTable Step 1 does not support `override_sources`"),
-        ));
-    }
     if table.row_export.is_some() {
         diagnostics.push(MetaDiagnostic::new(
             MetaDiagnosticCode::UnsupportedFeature,
@@ -1210,7 +1196,10 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
         ));
     }
 
-    if table.sources.len() > 1 && !table.is_variant_source_mode() {
+    if table.kind == TableKind::Collection
+        && table.sources.len() > 1
+        && !table.is_variant_source_mode()
+    {
         diagnostics.push(MetaDiagnostic::new(
             MetaDiagnosticCode::UnsupportedFeature,
             format!(

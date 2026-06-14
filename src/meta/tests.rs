@@ -196,8 +196,6 @@ fn rejects_object_table_step1_unsupported_features_except_foreign_keys() {
             name = "game_config"
             kind = "object"
             source = "game_config.csv"
-            sources = [{ provider = "csv", path = "extra.csv" }]
-            override_sources = [{ provider = "csv", path = "override.csv" }]
             row_export = { required_tags_field = "tags" }
             primary_index = "by_id"
             preserve_source_order = true
@@ -244,8 +242,6 @@ fn rejects_object_table_step1_unsupported_features_except_foreign_keys() {
         .join("\n");
 
     for expected in [
-        "only supports legacy `source`",
-        "does not support `override_sources`",
         "does not support `row_export`",
         "does not support fragments",
         "does not support indexes",
@@ -259,6 +255,41 @@ fn rejects_object_table_step1_unsupported_features_except_foreign_keys() {
             "missing diagnostic `{expected}` in\n{messages}"
         );
     }
+}
+
+#[test]
+fn accepts_object_table_sources_and_override_sources() {
+    let meta = parse(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            sources = [
+                { provider = "csv", path = "gameplay.csv" },
+                { provider = "csv", path = "economy.csv" },
+            ]
+            override_sources = [
+                { provider = "csv", path = "game_config_s1.csv", export_when = { any = ["s1"] } },
+            ]
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+
+            [[tables.fields]]
+            name = "gold_multiplier"
+            type = "float"
+        "#,
+    );
+
+    assert!(validate_meta_model(&meta).is_empty());
+    let table = meta.table("game_config").expect("table should exist");
+    assert_eq!(table.kind, TableKind::Object);
+    assert_eq!(table.sources.len(), 2);
+    assert_eq!(table.sources[0].path, "gameplay.csv");
+    assert_eq!(table.sources[1].path, "economy.csv");
+    assert_eq!(table.override_sources.len(), 1);
+    assert_eq!(table.override_sources[0].path, "game_config_s1.csv");
 }
 
 #[test]
@@ -1904,20 +1935,6 @@ fn rejects_base_source_export_when_until_target_specific_base_sources_are_suppor
 #[test]
 fn rejects_multi_source_outside_variant_source_mode() {
     let cases = [
-        r#"
-            [[tables]]
-            name = "items"
-            kind = "object"
-            polymorphic = true
-            sources = [
-                { provider = "csv", path = "items.csv" },
-                { provider = "csv", path = "items-extra.csv" },
-            ]
-
-            [[tables.fields]]
-            name = "id"
-            type = "int"
-        "#,
         r#"
             [[tables]]
             name = "items"

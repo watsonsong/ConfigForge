@@ -63,16 +63,16 @@
 
 ### Step 2 — 放开 Meta validate 的 ObjectTable source 声明
 
-- [ ] 修改 `validate_object_table_restrictions()`：不再因为 ObjectTable 声明 `sources` / `override_sources` 报 unsupported。
-- [ ] 保留 ObjectTable 对 row_export / fragments / indexes / primary_index / preserve_source_order / polymorphic / unique field indexes 的限制。
-- [ ] 修改 `validate_source_declaration()`：ObjectTable `sources.len() > 1` 不再走 CollectionTable variant source mode 限制；CollectionTable 的多 source 限制保持不变。
-- [ ] 继续拒绝 ObjectTable base `sources[].export_when`。
-- [ ] 增加 Meta unit tests：
-  - [ ] ObjectTable accepts single `sources = [...]`。
-  - [ ] ObjectTable accepts multiple `sources = [...]`。
-  - [ ] ObjectTable accepts `override_sources = [...]`。
-  - [ ] ObjectTable base source `export_when` still unsupported。
-  - [ ] CollectionTable 非 variant 多 source 限制不回退。
+- [x] 修改 `validate_object_table_restrictions()`：不再因为 ObjectTable 声明 `sources` / `override_sources` 报 unsupported。
+- [x] 保留 ObjectTable 对 row_export / fragments / indexes / primary_index / preserve_source_order / polymorphic / unique field indexes 的限制。
+- [x] 修改 `validate_source_declaration()`：ObjectTable `sources.len() > 1` 不再走 CollectionTable variant source mode 限制；CollectionTable 的多 source 限制保持不变。
+- [x] 继续拒绝 ObjectTable base `sources[].export_when`。
+- [x] 增加 Meta unit tests：
+  - [x] ObjectTable accepts single `sources = [...]`。
+  - [x] ObjectTable accepts multiple `sources = [...]`。
+  - [x] ObjectTable accepts `override_sources = [...]`。
+  - [x] ObjectTable base source `export_when` still unsupported。
+  - [x] CollectionTable 非 variant 多 source 限制不回退。
 
 验收：Meta 能加载并 link 包含 ObjectTable `sources` / `override_sources` 的模型，且既有 unsupported 约束不被放宽。
 
