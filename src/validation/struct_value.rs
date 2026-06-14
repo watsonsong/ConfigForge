@@ -4,7 +4,7 @@
 use crate::{
     ConfigForgeError, Result,
     data::{
-        DataRow, ValueSourceKind,
+        DataRow, DataValue, ResolvedValue, ValueSourceKind,
         typed_value::{
             parse_list_cell_value, parse_list_json_value, parse_scalar_field_value,
             parse_scalar_for_type,
@@ -144,6 +144,120 @@ pub(super) fn validate_struct_field_value_for_row(
             ),
         ));
     }
+    Ok(())
+}
+
+pub(super) fn validate_struct_field_value_for_resolved_row(
+    meta: &LinkedTableMeta<'_>,
+    row_number: usize,
+    field: &LinkedFieldMeta<'_>,
+    resolved_value: Option<&ResolvedValue>,
+    target_tags: Option<&TargetTags>,
+) -> Result<()> {
+    let LinkedField::Struct(struct_type) = &field.linked_field else {
+        return Ok(());
+    };
+
+    if let Some(resolved_value) = resolved_value {
+        validate_resolved_struct_value(
+            meta.meta.name.as_str(),
+            row_number,
+            field.meta.name.as_str(),
+            struct_type,
+            resolved_value,
+            target_tags,
+        )?;
+        return Ok(());
+    }
+
+    if field.meta.required && visible_struct_child_count(struct_type, target_tags) > 0 {
+        return Err(struct_required_error(
+            meta.meta.name.as_str(),
+            row_number,
+            field.meta.name.as_str(),
+            format!(
+                "table `{}` row {} field `{}` is required",
+                meta.meta.name, row_number, field.meta.name
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_resolved_struct_value(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    struct_type: &LinkedStructType<'_>,
+    resolved_value: &ResolvedValue,
+    target_tags: Option<&TargetTags>,
+) -> Result<()> {
+    let DataValue::Struct(children) = &resolved_value.value else {
+        return Err(struct_type_error(
+            table_name,
+            row_number,
+            field_path,
+            format!(
+                "table `{}` row {} field `{}` must be a JSON object for struct `{}`",
+                table_name, row_number, field_path, struct_type.meta.name
+            ),
+            resolved_value
+                .source
+                .raw_value
+                .clone()
+                .unwrap_or_else(|| resolved_value.source.raw_field_path.clone()),
+            format!("JSON object for struct `{}`", struct_type.meta.name),
+        ));
+    };
+
+    for child in struct_type
+        .fields
+        .iter()
+        .filter(|child| child_is_visible(child, target_tags))
+    {
+        let child_path = format!("{field_path}.{}", child.meta.name);
+        let child_value = children.get(&child.meta.name);
+        match &child.linked_field {
+            LinkedField::Struct(nested_struct) => {
+                if let Some(child_value) = child_value {
+                    validate_resolved_struct_value(
+                        table_name,
+                        row_number,
+                        &child_path,
+                        nested_struct,
+                        child_value,
+                        target_tags,
+                    )?;
+                } else if child.meta.required
+                    && visible_struct_child_count(nested_struct, target_tags) > 0
+                {
+                    return Err(struct_required_error(
+                        table_name,
+                        row_number,
+                        &child_path,
+                        format!(
+                            "table `{}` row {} field `{}` is required",
+                            table_name, row_number, child_path
+                        ),
+                    ));
+                }
+            }
+            _ => {
+                if child.meta.required && child_value.is_none() {
+                    return Err(struct_required_error(
+                        table_name,
+                        row_number,
+                        &child_path,
+                        format!(
+                            "table `{}` row {} field `{}` is required",
+                            table_name, row_number, child_path
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 

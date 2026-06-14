@@ -103,7 +103,7 @@ table view 在基础字段校验阶段再次解释 raw cell。
 - `cargo test --test cli_integration validation` 通过。
 - 后续 Step 2b 继续迁移 full table path、struct/list occurrence helpers 与 raw helper 收敛。
 
-## [ ] Step 2b：迁移基础 full table / struct-list validation
+## [x] Step 2b：迁移基础 full table / struct-list validation
 
 目标：把已经由 DataResolver 统一解释的类型、默认值、struct/list/vector/color 基础校验迁到
 resolved value，减少 validation 重复解析 raw cell。

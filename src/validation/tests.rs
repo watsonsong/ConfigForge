@@ -13,7 +13,7 @@ use std::{
 };
 
 use crate::{
-    data::{CellSourceInfo, RowSourceInfo, SourceRole},
+    data::{CellSourceInfo, DataValue, RowSourceInfo, SourceRole, ValueSourceKind},
     diagnostic::{
         Diagnostic, DiagnosticLocation, DiagnosticSeverity,
         code::{
@@ -253,6 +253,141 @@ fn export_validation_view_caches_resolved_rows_and_bridges_cell_sources() {
             .source_column_name,
         "id"
     );
+}
+
+#[test]
+fn export_validation_view_keeps_nested_default_and_explicit_source_trace() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "count"
+            type = "int"
+            default = 1
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "reward"
+            type = "Reward"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let rows = vec![
+        BTreeMap::new(),
+        BTreeMap::from([("reward.count".to_owned(), "5".to_owned())]),
+    ];
+    let row_sources = vec![fragment_row_source(1, &[]), fragment_row_source(2, &[])];
+    let cell_sources = vec![
+        BTreeMap::new(),
+        BTreeMap::from([(
+            "reward.count".to_owned(),
+            memory_cell_source(0, "reward.count"),
+        )]),
+    ];
+    let table = DataTable::new_with_sources_and_cells("items", rows, row_sources, cell_sources)
+        .expect("table should be built");
+    let data_set = DataSet::new(vec![table]);
+
+    let view = ExportValidationView::full(&linked_meta, &data_set);
+    let table_view = view.table("items").expect("items view should exist");
+
+    let default_reward = table_view
+        .resolved_value(0, "reward")
+        .expect("default-backed struct should resolve");
+    let DataValue::Struct(default_children) = &default_reward.value else {
+        panic!("reward should resolve to struct");
+    };
+    let default_count = default_children
+        .get("count")
+        .expect("default count should resolve");
+    assert_eq!(default_count.source.kind, ValueSourceKind::DefaultValue);
+    assert_eq!(default_count.source.raw_field_path, "reward.count");
+    assert_eq!(default_count.source.raw_value.as_deref(), Some("1"));
+
+    let explicit_reward = table_view
+        .resolved_value(1, "reward")
+        .expect("explicit-backed struct should resolve");
+    let DataValue::Struct(explicit_children) = &explicit_reward.value else {
+        panic!("reward should resolve to struct");
+    };
+    let explicit_count = explicit_children
+        .get("count")
+        .expect("explicit count should resolve");
+    assert_eq!(explicit_count.source.kind, ValueSourceKind::ExplicitCell);
+    assert_eq!(explicit_count.source.raw_field_path, "reward.count");
+    assert_eq!(explicit_count.source.raw_value.as_deref(), Some("5"));
+}
+
+#[test]
+fn export_validation_view_keeps_expanded_list_element_source_trace() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Reward"
+
+            [[structs.fields]]
+            name = "item_ids"
+            type = "int[]"
+
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "reward"
+            type = "Reward"
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let rows = vec![BTreeMap::from([
+        ("reward.item_ids[0]".to_owned(), "2001".to_owned()),
+        ("reward.item_ids[1]".to_owned(), "2002".to_owned()),
+    ])];
+    let row_sources = vec![fragment_row_source(1, &[])];
+    let cell_sources = vec![BTreeMap::from([
+        (
+            "reward.item_ids[0]".to_owned(),
+            memory_cell_source(0, "reward.item_ids[0]"),
+        ),
+        (
+            "reward.item_ids[1]".to_owned(),
+            memory_cell_source(1, "reward.item_ids[1]"),
+        ),
+    ])];
+    let table = DataTable::new_with_sources_and_cells("items", rows, row_sources, cell_sources)
+        .expect("table should be built");
+    let data_set = DataSet::new(vec![table]);
+
+    let view = ExportValidationView::full(&linked_meta, &data_set);
+    let table_view = view.table("items").expect("items view should exist");
+    let reward = table_view
+        .resolved_value(0, "reward")
+        .expect("struct should resolve");
+    let DataValue::Struct(children) = &reward.value else {
+        panic!("reward should resolve to struct");
+    };
+    let item_ids = children
+        .get("item_ids")
+        .expect("expanded list should resolve");
+
+    assert_eq!(item_ids.source.kind, ValueSourceKind::ExplicitCell);
+    assert_eq!(item_ids.source.raw_field_path, "reward.item_ids");
+    assert_eq!(
+        item_ids.source.raw_value.as_deref(),
+        Some("reward.item_ids[0],reward.item_ids[1]")
+    );
+    let DataValue::Array(elements) = &item_ids.value else {
+        panic!("item_ids should resolve to array");
+    };
+    assert_eq!(elements[0].raw_value.as_deref(), Some("2001"));
+    assert_eq!(elements[1].raw_value.as_deref(), Some("2002"));
 }
 
 #[test]

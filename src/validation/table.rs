@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticSeverity, Result,
-    data::{DataResolver, DataRow, DataTable},
+    data::{DataResolver, DataRow, DataTable, ResolvedTable},
     diagnostic::{
         DiagnosticLocation,
         code::{CF_DATA_DUPLICATE_KEY, CF_DATA_INVALID_TYPE, CF_DATA_MISSING_REQUIRED_FIELD},
@@ -18,9 +18,10 @@ use crate::{
 
 use super::diagnostic::{ValidationReport, error_issues_from_result, validation_error_message};
 use super::struct_value::{
-    validate_struct_child_path, validate_struct_field_value_for_row,
-    validate_struct_occurrence_value, validate_supported_field_type, validate_value_type,
-    validate_value_type_at_row_number, visible_required_struct_child_count,
+    validate_struct_child_path, validate_struct_field_value_for_resolved_row,
+    validate_struct_field_value_for_row, validate_struct_occurrence_value,
+    validate_supported_field_type, validate_value_type, validate_value_type_at_row_number,
+    visible_required_struct_child_count,
 };
 use super::{ExportTableView, fragment_field_key};
 
@@ -37,16 +38,22 @@ pub fn validate_normalized_table_with_report(
     table: &DataTable,
 ) -> ValidationReport {
     let mut report = ValidationReport::new();
-    collect_table_check(
-        &mut report,
-        "table.resolve",
-        "type",
-        DataResolver::resolve_table(meta, table, None).map(|_| ()),
-        DiagnosticLocation {
-            table: Some(meta.meta.name.clone()),
-            ..DiagnosticLocation::default()
-        },
-    );
+    let resolved_table = match DataResolver::resolve_table(meta, table, None) {
+        Ok(resolved_table) => Some(resolved_table),
+        Err(error) => {
+            collect_table_check(
+                &mut report,
+                "table.resolve",
+                "type",
+                Err(error),
+                DiagnosticLocation {
+                    table: Some(meta.meta.name.clone()),
+                    ..DiagnosticLocation::default()
+                },
+            );
+            None
+        }
+    };
 
     for field in &meta.fields {
         let location = field_location(meta, field, None);
@@ -61,14 +68,14 @@ pub fn validate_normalized_table_with_report(
             &mut report,
             "field.required",
             "required",
-            validate_field_presence(meta, table, field),
+            validate_field_presence(meta, table, resolved_table.as_ref(), field),
             location.clone(),
         );
         collect_table_check(
             &mut report,
             "field.type",
             "type",
-            validate_field_values(meta, table, field),
+            validate_field_values(meta, table, resolved_table.as_ref(), field),
             location.clone(),
         );
         collect_table_check(
@@ -618,6 +625,7 @@ fn validate_index_key_fields(
 fn validate_field_presence(
     meta: &LinkedTableMeta<'_>,
     table: &DataTable,
+    resolved_table: Option<&ResolvedTable>,
     field: &LinkedFieldMeta<'_>,
 ) -> Result<()> {
     if matches!(&field.linked_field, LinkedField::Struct(_)) {
@@ -627,7 +635,12 @@ fn validate_field_presence(
         return Ok(());
     }
 
-    let present = table.rows.iter().all(|row| field_has_source(row, field));
+    let present = table.rows.iter().enumerate().all(|(row_index, row)| {
+        let resolved_value = resolved_table
+            .and_then(|resolved_table| resolved_table.rows.get(row_index))
+            .and_then(|row| row.get(&field.meta.name));
+        field_has_source(row, resolved_value, field)
+    });
     if !present {
         let message = format!(
             "table `{}` is missing field `{}`",
@@ -654,14 +667,25 @@ fn validate_field_presence_view(
         return Ok(());
     }
 
-    let present = table_view.visible_rows.iter().all(|visible_row| {
+    let present =
         table_view
-            .table
-            .rows
-            .get(visible_row.row_index)
-            .map(|row| field_has_source(row, field))
-            .unwrap_or(false)
-    });
+            .visible_rows
+            .iter()
+            .enumerate()
+            .all(|(visible_row_index, visible_row)| {
+                table_view
+                    .table
+                    .rows
+                    .get(visible_row.row_index)
+                    .map(|row| {
+                        field_has_source(
+                            row,
+                            table_view.resolved_value(visible_row_index, &field.meta.name),
+                            field,
+                        )
+                    })
+                    .unwrap_or(false)
+            });
     if !present {
         let message = format!(
             "table `{}` is missing field `{}`",
@@ -679,18 +703,35 @@ fn validate_field_presence_view(
 fn validate_field_values(
     meta: &LinkedTableMeta<'_>,
     table: &DataTable,
+    resolved_table: Option<&ResolvedTable>,
     field: &LinkedFieldMeta<'_>,
 ) -> Result<()> {
     for (row_index, row) in table.rows.iter().enumerate() {
         if matches!(&field.linked_field, LinkedField::Struct(_)) {
-            validate_struct_field_value_for_row(meta, row, row_index + 1, field, None)?;
+            let resolved_value = resolved_table
+                .and_then(|resolved_table| resolved_table.rows.get(row_index))
+                .and_then(|row| row.get(&field.meta.name));
+            if resolved_table.is_some() {
+                validate_struct_field_value_for_resolved_row(
+                    meta,
+                    row_index + 1,
+                    field,
+                    resolved_value,
+                    None,
+                )?;
+            } else {
+                validate_struct_field_value_for_row(meta, row, row_index + 1, field, None)?;
+            }
             continue;
         }
+        let resolved_value = resolved_table
+            .and_then(|resolved_table| resolved_table.rows.get(row_index))
+            .and_then(|row| row.get(&field.meta.name));
         let value = row
             .get(&field.meta.name)
             .map(String::as_str)
             .unwrap_or_default();
-        let has_value = field_has_effective_value(row, field);
+        let has_value = field_has_effective_value(row, resolved_value, field);
         if field.meta.required && value.trim().is_empty() {
             if has_value {
                 continue;
@@ -716,6 +757,10 @@ fn validate_field_values(
             .primitive_type()
             .is_some_and(|primitive| primitive.is_builtin_value_type())
         {
+            continue;
+        }
+
+        if resolved_value.is_some() {
             continue;
         }
 
@@ -746,14 +791,25 @@ fn validate_field_values_view(
             .source_row_number
             .unwrap_or(visible_row.row_index + 1);
         if matches!(&field.linked_field, LinkedField::Struct(_)) {
-            validate_struct_field_value_for_row(meta, row, row_number, field, target_tags)?;
+            let resolved_value = table_view.resolved_value(visible_row_index, &field.meta.name);
+            if table_view.resolved_table().is_some() {
+                validate_struct_field_value_for_resolved_row(
+                    meta,
+                    row_number,
+                    field,
+                    resolved_value,
+                    target_tags,
+                )?;
+            } else {
+                validate_struct_field_value_for_row(meta, row, row_number, field, target_tags)?;
+            }
             continue;
         }
         let value = table_view
             .raw_cell(visible_row_index, &field.meta.name)
             .unwrap_or_default();
         let resolved_value = table_view.resolved_value(visible_row_index, &field.meta.name);
-        let has_value = resolved_value.is_some() || field_has_effective_value(row, field);
+        let has_value = field_has_effective_value(row, resolved_value, field);
         if field.meta.required && value.trim().is_empty() {
             if has_value {
                 continue;
@@ -798,17 +854,28 @@ fn validate_field_values_view(
     Ok(())
 }
 
-fn field_has_source(row: &DataRow, field: &LinkedFieldMeta<'_>) -> bool {
-    row.contains_key(&field.meta.name)
+fn field_has_source(
+    row: &DataRow,
+    resolved_value: Option<&crate::data::ResolvedValue>,
+    field: &LinkedFieldMeta<'_>,
+) -> bool {
+    resolved_value.is_some()
+        || row.contains_key(&field.meta.name)
         || field.meta.default.is_some()
         || expanded_vector_component_paths(field)
             .iter()
             .any(|path| row.contains_key(path))
 }
 
-fn field_has_effective_value(row: &DataRow, field: &LinkedFieldMeta<'_>) -> bool {
-    row.get(&field.meta.name)
-        .is_some_and(|value| !value.trim().is_empty())
+fn field_has_effective_value(
+    row: &DataRow,
+    resolved_value: Option<&crate::data::ResolvedValue>,
+    field: &LinkedFieldMeta<'_>,
+) -> bool {
+    resolved_value.is_some()
+        || row
+            .get(&field.meta.name)
+            .is_some_and(|value| !value.trim().is_empty())
         || field.meta.default.is_some()
         || expanded_vector_component_paths(field)
             .iter()
