@@ -317,7 +317,7 @@
         <h2>2. 预期解决的问题</h2>
         <div class="grid grid-2">
           <div class="card"><h3>表结构与运行时代码脱节</h3><p>Meta 描述逻辑结构，工具生成 runtime data 和类型感知代码，避免多处重复维护 schema。</p></div>
-          <div class="card"><h3>多人协作和多源拆分</h3><p>一个逻辑表可以读取多个 <code>sources</code>。当前已支持 polymorphic variant source mode；CollectionTable CSV <code>override_sources</code> 已支持按 primary index 整行覆盖。</p></div>
+          <div class="card"><h3>多人协作和多源拆分</h3><p>一个逻辑表可以读取多个 <code>sources</code>。当前已支持 polymorphic variant source mode、ObjectTable CSV split merge，以及 CollectionTable / ObjectTable CSV <code>override_sources</code>。</p></div>
           <div class="card"><h3>发布包数据裁剪</h3><p>Target tags 通过 <code>export_when</code> 和 <code>row_export</code> 派生 ExportView，使 client/server、shipping/debug、地区、渠道等目标只导出需要的数据。</p></div>
           <div class="card"><h3>表内表间一致性</h3><p>统一检查字段类型、默认值、唯一索引、外键、资源引用和集合级业务规则。</p></div>
         </div>
@@ -376,7 +376,8 @@
           <tbody>
             <tr><td>Project / Meta loading</td><td><span class="tag green">Stable</span></td><td>支持 Project imports、Meta merge、link + validate；XML 仅为历史/目标态示例，当前未实现。</td></tr>
             <tr><td>CSV source provider</td><td><span class="tag green">Stable</span></td><td>当前唯一可执行 provider；XLSX、Lark Sheet、Google Sheet 是 planned。</td></tr>
-            <tr><td>ObjectTable</td><td><span class="tag green">Stable</span></td><td>支持 CSV <code>key,value</code> 常量表、单 object runtime payload，并可作为 FK source 引用 CollectionTable unique / primary index；多源、override、作为 FK target 暂不支持。</td></tr>
+            <tr><td><code>sources</code> / <code>override_sources</code></td><td><span class="tag green">Stable</span></td><td>CSV CollectionTable 支持 variant source append 与 primary-index override；CSV ObjectTable 支持 base source field-path split merge 与 override exact field-path patch。base source <code>export_when</code>、override insert/upsert、非 CSV provider 仍未实现。</td></tr>
+            <tr><td>ObjectTable</td><td><span class="tag green">Stable</span></td><td>支持 CSV <code>key,value</code> 常量表、单 object runtime payload、多个 CSV base source 按 field path split merge、CSV override source 按 exact field path patch，并可作为 FK source 引用 CollectionTable unique / primary index；作为 FK target 暂不支持。</td></tr>
             <tr><td>Struct fields / expanded value</td><td><span class="tag green">Stable</span></td><td>支持 named struct、JSON cell、source-driven expanded value、recursive nested struct、target-aware child filtering 和 child default；map 与 struct child validators 待后续。</td></tr>
             <tr><td>Foreign keys</td><td><span class="tag green">Stable</span></td><td>支持 field/table-level FK、link、Meta validate、target-aware referential integrity 和 CodeModel IR；source table 可为 CollectionTable 或 ObjectTable，target table 必须是 CollectionTable unique / primary index。</td></tr>
             <tr><td>Runtime data export</td><td><span class="tag green">Stable</span></td><td>支持 JSON、MessagePack、bin table data generator 与 gettext POT、Lua、Asset Manifest 等 aggregate / mixed generator；runtime data 会在导出前使用 asset resolver 物化 canonical asset string。内置 data-backed generators 已直接注册到 GeneratorRegistry，更多格式仍可后续扩展。</td></tr>
@@ -384,7 +385,7 @@
             <tr><td>Code artifact generators</td><td><span class="tag orange">Implemented MVP</span></td><td>支持 Rust / TypeScript / C++ 基础生成、loader/repository helpers 和 target-aware IR。</td></tr>
             <tr><td>Diagnostics</td><td><span class="tag green">Stable</span></td><td><code>src/diagnostic/</code> 已提供 severity、location（含 source column）、entry formatting、report aggregation、code catalog、crate error facade、CLI JSON 输出和 legacy fallback 债务护栏；Project / Build / CLI、Data loading / resolver / validation、Asset resolver、Artifact writer、Generator registry / option / code artifact / data artifact 等高价值错误已迁移为结构化 code/source/location/current/expected/hint。</td></tr>
             <tr><td>Designer Validation Report</td><td><span class="tag orange">Implemented MVP</span></td><td>已基于 ValidationReport / DiagnosticReport 实现 HTML / Markdown / JSON / CSV 报告、CLI <code>--report</code> 导出和 build <code>validation_report</code> 附加产物；owner/domain 映射、current value / expected enrichment 和部分 build 选项仍是后续增强。详见 <a href="../10-designer-validation-report.md">10-designer-validation-report.md</a>。</td></tr>
-            <tr><td>Schema / Table Docs</td><td><span class="tag orange">Implemented MVP</span></td><td>已实现 <code>type = "schema_doc"</code> MetaOnly export task，可生成 Markdown（<code>index.md</code> + 每表 <code>.md</code>）或 HTML（<code>index.html</code> + 每表 <code>.html</code>）文档，展示 fields、indexes、relations、target visibility、asset/POT/validator 摘要；当前支持 <code>format = "markdown"</code> / <code>format = "html"</code>，JSON Schema / Mermaid 不支持。详见 <a href="../11-schema-doc-generator.md">11-schema-doc-generator.md</a>。</td></tr>
+            <tr><td>Schema / Table Docs</td><td><span class="tag green">Stable</span></td><td>已实现 <code>type = "schema_doc"</code> MetaOnly export task，可生成 Markdown（<code>index.md</code> + 每表 <code>.md</code>）或 HTML（<code>index.html</code> + 每表 <code>.html</code>）文档，展示 fields、indexes、relations、target visibility、asset/POT/validator 摘要，以及 HTML relationship/source/fragment 图例；JSON Schema、Mermaid/DOT、搜索过滤和发布集成仍为后续扩展。详见 <a href="../11-schema-doc-generator.md">11-schema-doc-generator.md</a>。</td></tr>
           </tbody>
         </table>
       </section>
@@ -472,7 +473,7 @@ message = "技能资源必须是 /Game/Skills/GA_Name.GA_Name_C 格式。"</code
       <section id="meta">
         <h2>6. Meta 模型</h2>
         <div class="grid grid-3">
-          <div class="card"><h3>ObjectTable</h3><p>导出一个常量对象，常用于全局配置。当前实现使用 CSV <code>key,value</code> 行式 source 并输出单 object；可作为 FK source，但不能作为 FK target。</p></div>
+          <div class="card"><h3>ObjectTable</h3><p>导出一个常量对象，常用于全局配置。当前实现使用 CSV <code>key,value</code> 行式 source 并输出单 object；支持多 base source split merge 与 override field-path patch；可作为 FK source，但不能作为 FK target。</p></div>
           <div class="card"><h3>CollectionTable</h3><p>导出多条记录。可定义 index、primary index、<code>row_export</code>，并支持 source order 数组访问。</p></div>
           <div class="card"><h3>Polymorphic Fragment</h3><p>使用 composition 表达多态记录；当前只支持 variant source mode，不支持按 ID 拼接 fragment。</p></div>
         </div>
@@ -540,7 +541,7 @@ match = "any"
         <h2>8. 多源与覆盖</h2>
         <div class="grid grid-2">
           <div class="card"><h3>Base sources：variant source mode</h3><p>当前支持 polymorphic CollectionTable 多个 CSV source 追加 records；每个 source 可声明 active fragments，且必须贡献完整 record。</p></div>
-          <div class="card"><h3>Override sources：CollectionTable CSV</h3><p>设计上不使用 priority，列表越靠后越晚应用；当前支持 CollectionTable CSV 按 primary index 整行覆盖，ObjectTable override 仍显式拒绝。</p></div>
+          <div class="card"><h3>Override sources：CSV</h3><p>设计上不使用 priority，列表越靠后越晚应用；当前支持 CollectionTable CSV 按 primary index 整行覆盖，并支持 ObjectTable CSV 按 exact field path patch 已存在字段。</p></div>
         </div>
         <pre><code>sources = [
   { provider = "csv", path = "items_base.csv" },
@@ -625,7 +626,7 @@ override_sources = [
         <div class="grid grid-2">
           <div class="card"><h3>Project imports</h3><p>Project Config 支持顶层 <code>imports</code> 递归导入配置片段；Meta 文件本身不再声明 imports。</p></div>
           <div class="card"><h3>Source provider</h3><p><code>csv</code> 是当前稳定 provider；<code>xlsx</code>、<code>lark_sheet</code>、<code>google_sheet</code> 是明确 planned provider，不再设计 <code>local_file</code>。</p></div>
-          <div class="card"><h3>Override 顺序</h3><p><code>override_sources</code> 不定义 priority，按列表顺序应用；当前已支持 CollectionTable CSV 整行覆盖，后声明的 override 覆盖先声明的结果。</p></div>
+          <div class="card"><h3>Override 顺序</h3><p><code>override_sources</code> 不定义 priority，按列表顺序应用；当前已支持 CollectionTable CSV 整行覆盖与 ObjectTable CSV field-path patch，后声明的 override 覆盖先声明的结果。</p></div>
           <div class="card"><h3>Primary Index</h3><p>取消 primary_key，仅保留 primary_index 或 <code>primary = true</code>。</p></div>
           <div class="card"><h3>Default / Required</h3><p>缺值时先用 default；required 且无值、无 default 才报错。</p></div>
           <div class="card"><h3>Target Tags</h3><p>Target 使用 <code>tags</code> 描述导出上下文；表、字段、索引用 <code>export_when</code> 匹配，collection 行用 <code>row_export</code> 控制。</p></div>

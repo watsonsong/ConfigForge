@@ -356,7 +356,7 @@ pub enum TableKind {
 
 - `Object`：可以没有 index。
 - `Collection`：可以定义 index；override 等后续逻辑会依赖 primary index。
-- ObjectTable Step 1 的过程文档已并入模块文档。当前 Meta 层限制 ObjectTable 不能声明 indexes / primary_index / row_export / fragments，也不能使用 `sources` / `override_sources`；ObjectTable 可以声明 field-level/table-level foreign keys 作为 source，但 FK target 必须是 CollectionTable unique / primary index。ObjectTable source layout 详见 `05-data-module-detail-design.md`。
+- ObjectTable 的过程文档已并入模块文档。当前 Meta 层限制 ObjectTable 不能声明 indexes / primary_index / row_export / fragments / preserve_source_order / polymorphic / unique field indexes；允许 `source`、CSV `sources` 和 CSV `override_sources`，其中 base `sources[].export_when` 仍显式 unsupported。ObjectTable 可以声明 field-level/table-level foreign keys 作为 source，但 FK target 必须是 CollectionTable unique / primary index。ObjectTable source layout 详见 `05-data-module-detail-design.md`。
 
 ### 4.5.7 `FieldMeta`
 
@@ -862,7 +862,7 @@ pub enum MetaDiagnosticCode {
 - table `primary_index` 必须引用存在的 index。
 - table `primary_index` 指向的 index 必须 unique。
 - 多个 `primary = true` 或 `primary_index` 与 `primary = true` 冲突时产生 `PrimaryIndexMismatch`。
-- ObjectTable Step 1 不支持 indexes / primary_index / row_export / fragments / multi-source declarations；ObjectTable 可以声明 table-level `foreign_keys` 或 field-level `foreign_key` 作为 FK source。
+- ObjectTable 不支持 indexes / primary_index / row_export / fragments / preserve_source_order / polymorphic / unique field indexes；支持 CSV `sources` / `override_sources`，但 base `sources[].export_when` 仍显式 unsupported。ObjectTable 可以声明 table-level `foreign_keys` 或 field-level `foreign_key` 作为 FK source。
 - 任意 table 的 foreign key target 不能指向 ObjectTable。
 - `linked_field` raw name 非空、在同一 source table 内唯一、不能与 source table common field name 或 fragment name 直接重复。
 - 字段级 FK 的 `linked_field` 与 table-level FK 的 `linked_field` 使用同一 source table scope 检查重复；同一字段不能同时通过字段级 FK 和 table-level FK 生成同名 relation helper。

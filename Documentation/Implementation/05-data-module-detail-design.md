@@ -27,7 +27,7 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 4. 在 Meta Link 完成后，由 Data Resolver 使用 `LinkedMetaModel<'meta>` + raw `DataSet` 解析 JSON cell / expanded path / default / target visibility，得到结构化 `ResolvedDataSet` 或 target-specific resolved view；runtime export 主路径已消费 resolved value。
 5. Validation 仍处于迁移中：source schema 与 value resolve 已通过 resolver 统一，required/type/index/FK 等主流程仍保留部分 raw `DataRow` 逻辑，后续应迁移到 `validate_resolved_*`。
 
-当前阶段已实现 CSV source、DataSet、target-aware validation/export 的基础流程，并已按 **variant source mode** 支持 polymorphic fragments：polymorphic CollectionTable 可声明多个 CSV sources，每个 source 追加完整 records 并声明 active fragments。`override_sources` 的最小落地范围已实现为 CollectionTable CSV 整行覆盖：按 primary index 匹配 base row，在匹配 effective target tags 时替换该 row，服务赛季/热修类临时覆盖。ObjectTable CSV multi-source / override 的 Stable 迁移计划已固定：多个 base source 以 field path 互斥方式 split merge 为 singleton object，override source 以 exact field path patch 已存在字段。
+当前阶段已实现 CSV source、DataSet、target-aware validation/export 的基础流程，并已按 **variant source mode** 支持 polymorphic fragments：polymorphic CollectionTable 可声明多个 CSV sources，每个 source 追加完整 records 并声明 active fragments。`override_sources` 已稳定支持 CSV CollectionTable 整行覆盖：按 primary index 匹配 base row，在匹配 effective target tags 时替换该 row，服务赛季/热修类临时覆盖。ObjectTable CSV multi-source / override 也已稳定支持：多个 base source 以 field path 互斥方式 split merge 为 singleton object，override source 以 exact field path patch 已存在字段。
 
 仍不实现：
 
@@ -37,7 +37,7 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 - array / map 的 typed parse；
 - source location 精确到单元格的诊断。
 
-这些能力在 Meta validate 阶段应显式报 unsupported，避免 Data 阶段静默忽略。CollectionTable CSV `override_sources` 不再属于 unsupported，但必须要求目标表拥有 primary index，且 override row 必须能匹配已存在 base row。ObjectTable CSV `sources` / `override_sources` 推进到 Stable 时仍不改变非 CSV provider、base source `export_when`、override insert/upsert 的 unsupported 状态。
+这些能力在 Meta validate 阶段应显式报 unsupported，避免 Data 阶段静默忽略。CollectionTable CSV `override_sources` 必须要求目标表拥有 primary index，且 override row 必须能匹配已存在 base row。ObjectTable CSV `sources` / `override_sources` 已进入 Stable，但仍不改变非 CSV provider、base source `export_when`、override insert/upsert 的 unsupported 状态。
 
 设计判断：不建议把 Meta-aware 解析下沉到 `CsvDataReader`。CSV / Xlsx / Lark 等 reader 只负责语法读取、raw string 和 source location；struct source layout、default、target visibility、fragment active set 和 typed scalar parsing 都需要 linked meta 与 target context，更适合放在 Data Load 之后的 resolver 阶段。Validation / Exporter 应收敛为共享 resolver，避免两边重复解释 JSON 字符串和 dotted path。
 
@@ -262,7 +262,7 @@ pub enum ScalarValue {
 - raw field path，例如 `attributes.attack`；
 - source kind：explicit cell、default、computed/empty object；
 - source row / source path；
-- 对 ObjectTable，未来应支持 key-level source row number，而不是仅有 singleton logical row。
+- 对 ObjectTable，cell source 已记录 key-level source path / row number；field-level validation 应优先使用 cell source，singleton logical row source 仅作为 fallback trace。
 
 Resolved 后，无论 source 是：
 
@@ -341,7 +341,7 @@ Runtime data exporter 的 canonical 输出策略应由 data artifact toolkit 统
 
 - 已实现 `ResolvedDataSet` / `DataResolver` 基础类型、shared typed scalar parse、shared list JSON cell parse、struct JSON cell / expanded value 统一解析、source schema 校验、target-aware row resolve、active fragment resolve、runtime export 主路径消费 resolved value。
 - 过渡中：Validation 仍保留 raw `DataRow` 上的 required/type/enum/index/FK 主流程，但 type/enum/list element/FK list element conversion 已复用 data typed value helper；后续应迁移到 `validate_resolved_*` 让更多规则直接消费 `ResolvedValue/DataValue`。
-- 未实现：typed fragment payload（例如 `attributes` fragment 直接复用 `AttributeSet`）、field group/base table schema 复用、asset existence/text POT special export、ObjectTable key-level source trace、expanded array/map path。
+- 未实现：typed fragment payload（例如 `attributes` fragment 直接复用 `AttributeSet`）、field group/base table schema 复用、asset existence/text POT special export、expanded array/map path。
 
 注意：是否在 resolver 阶段把 scalar parse 成 `Int/Float/Bool` 需要结合现有 runtime scalar string contract 决定。短期可以先在 resolver 内保留 typed parse 结果与 raw string，runtime export 仍输出 string；长期如果 runtime artifact 改为 typed scalar，可直接复用 `ScalarValue`。
 
@@ -398,7 +398,7 @@ pub enum DataSourceLayout {
 - `fields` 是 ObjectTable 的 top-level field 名称快照，用于后续 key 校验和 source trace 增强；CollectionTable 可为空。
 - `role` 区分 base `source` / `sources` 与 `override_sources`。
 - `primary_key_fields` 是当前 table primary index 的字段列表快照，仅在 `role = Override` 时用于 DataLoader 定位被覆盖 row；base source 可为空或携带同一份信息以便统一构造 per-table key map。字段路径保持 raw source header 使用的 field path 字符串，例如 `id` 或未来复合 key `region,id` 对应 `Vec<["region", "id"]>`。
-- variant source mode 下，polymorphic collection table 可以拥有多个 `DataSourcePlan`；非 polymorphic table 仍只允许一个 source。为了避免把普通 append mode 与未来通用 multi-source merge 混淆，多 source 必须由至少一个 source 的非空 `fragments` 声明驱动。
+- variant source mode 下，polymorphic collection table 可以拥有多个 `DataSourcePlan`；ObjectTable 可以拥有多个 `ObjectKeyValueRows` base source 并 split merge 为 singleton object。为了避免把普通 CollectionTable append mode 与未来通用 multi-source merge 混淆，CollectionTable 多 source 必须由至少一个 source 的非空 `fragments` 声明驱动。
 
 ### 5.5.3 `SourceReadPlan` / `DataLoadPlan`
 
@@ -438,9 +438,9 @@ impl DataLoadPlan {
 - `DataLoadPlan` 当前作为兼容层包装 `SourceReadPlan`；旧调用可以继续使用 `DataLoadPlan::from_*` 与 `DataLoader::load()`，新调度应优先使用 `SourceReadPlan` + `DataLoader::read_sources*()` 表达 raw source read 节点。
 - variant source mode 下，`SourceReadPlan` 需要展开 table 的每个 `SourceRef`，为同一 `table_name` 生成多个 `DataSourcePlan`，并保留 source 声明顺序。
 - `override_sources` 展开为 `role = Override` 的 `DataSourcePlan`，并排在该 table 的 base sources 之后；多个 override source 保持声明顺序。`target_tags` 存在时，`export_when` 不匹配的 override source 不进入 plan，因此不会被读取。
-- `SourceReadPlan::from_tables` 只做 source declaration 的轻量契约检查和搬运：provider 必须支持；多个 sources 只允许 `TableMeta::is_variant_source_mode()` 为 true 的表；base source 不允许声明 `export_when`。fragment 是否存在、字段是否属于 fragment 等 schema 合法性由 Meta validation/link 负责。
+- `SourceReadPlan::from_tables` 只做 source declaration 的轻量契约检查和搬运：provider 必须支持；CollectionTable 多个 sources 只允许 `TableMeta::is_variant_source_mode()` 为 true 的表，ObjectTable 多个 sources 则生成 `ObjectKeyValueRows` split-merge 计划；base source 不允许声明 `export_when`。fragment 是否存在、字段是否属于 fragment 等 schema 合法性由 Meta validation/link 负责。
 - CollectionTable override source 必须有可用于匹配的 primary index。由于 `SourceReadPlan` 只持有 raw `TableMeta`，它需要根据 `primary_index` 在 `TableMeta.indexes` 中找到对应 index 并复制 `fields` 到 `primary_key_fields`；primary index 是否唯一、字段是否存在由 Meta link/validation 负责，但 SourceReadPlan 找不到 index 声明时也应 fail-fast。
-- ObjectTable override source、非 CSV override source、以及缺 primary index 的 CollectionTable override source 必须 fail-fast，不能静默忽略。
+- 非 CSV override source、以及缺 primary index 的 CollectionTable override source 必须 fail-fast，不能静默忽略；ObjectTable override source 不需要 primary index，而是以 exact field path patch 已存在字段。
 - provider 是否支持属于 source declaration 的基础结构检查，可以由 Meta validation fail-fast，也可以由 SourceReadPlan parse 时返回错误；除 provider parse 以外，SourceReadPlan 不应理解 fragment schema 语义。
 - 因此流程上可以在 raw Meta load/merge 完成后：
   - 一边做 `MetaModel::link()` / Meta validate；
@@ -538,10 +538,10 @@ DataTable rows:
 - exporter 可以在 `TableKind::Object` 分支上选择 object payload shape。
 - codegen IR 仍只需要识别 table kind，不需要理解 CSV 物理布局。
 
-当前限制与 Stable 迁移语义：
+当前限制与 Stable 语义：
 
-- ObjectTable `source = "...csv"` 保持兼容；Stable 目标允许 `sources = [...]` 表示多个 CSV key/value source 为同一个 singleton object 提供互斥 field path。
-- ObjectTable `override_sources = [...]` 的 Stable 目标是 field-path-level patch：只替换 override source 中出现的 exact field path，不隐式删除 sibling path，也不新增 base 中不存在的 field path。
+- ObjectTable `source = "...csv"` 保持兼容；`sources = [...]` 表示多个 CSV key/value source 为同一个 singleton object 提供互斥 field path。base source 间重复 field path 报错，并提示改用 `override_sources` 表达替换。
+- ObjectTable `override_sources = [...]` 是 field-path-level patch：只替换 override source 中出现的 exact field path，不隐式删除 sibling path，也不新增 base 中不存在的 field path；找不到 target field path 时 fail-fast。
 - ObjectTable 不支持 fragments / row_export / indexes；ObjectTable 可作为 foreign key source，归一化后的 singleton logical row 会进入 FK 校验，但不能作为 foreign key target。相关限制由 Meta / Validation 模块维护。
 - ObjectTable key-level source trace 是 Stable 关键要求：field-level validation 应优先使用 cell source，使被 override 字段定位到 override source 的真实 key row；singleton row source 只能作为 fallback trace。
 
@@ -813,7 +813,7 @@ Resolved 层落地后，诊断模型需要同时支持 raw source 与 resolved v
 - resolve error：type parse、enum value、JSON/expanded mixing、inactive fragment、default 不可转换；
 - validation error：required、range、foreign key、unique index、target-aware visibility conflict。
 
-为了避免 resolved 后丢失定位信息，`ResolvedValue` 必须携带 `ValueSourceTrace`。ObjectTable 的 `key,value` source 还需要 key-level source map，否则 singleton logical row 只能报 row 1，不能指向真实 CSV key 行；这可以作为 resolved 层的 source trace 能力补齐。
+为了避免 resolved 后丢失定位信息，`ResolvedValue` 必须携带 `ValueSourceTrace`。ObjectTable 的 `key,value` source 在 raw `DataTable` 中已经通过 cell source 保留 key-level source path / row number；resolved 层应继续传递该 trace，避免回退到 singleton logical row 的 fallback location。
 
 ## 5.10 测试计划
 

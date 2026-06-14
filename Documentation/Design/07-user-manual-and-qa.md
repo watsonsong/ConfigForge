@@ -136,9 +136,9 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 ### 添加 override source
 
 1. 在表中添加 `override_sources`。
-2. CollectionTable 必须有 primary index。
-3. override source 行必须能提供完整 primary key。
-4. 后声明的 override source 覆盖先声明的结果。
+2. CollectionTable 必须有 primary index，override source 行必须能提供完整 primary key，并且只能覆盖已存在的 base row。
+3. ObjectTable override source 使用 `key,value` / `key,title,value` 布局，只能按 exact field path 覆盖 base materialized object 已存在的字段。
+4. 后声明的 override source 覆盖先声明的结果；可用 `override_sources[].export_when` 绑定赛季、热修或灰度 tag。
 
 ### 添加 shipping 过滤
 
@@ -184,6 +184,8 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 - 多 base sources 正常合并。
 - base sources unique index 冲突。
 - ObjectTable override field path 成功。
+- ObjectTable base sources 重复 field path 报错。
+- ObjectTable override field path 找不到 base target 报错。
 - CollectionTable override 整行替换成功。
 - override source 找不到 base row 报错。
 - 后声明 override source 覆盖先声明结果。

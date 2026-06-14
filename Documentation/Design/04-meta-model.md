@@ -143,7 +143,7 @@ start_item,初始物品,"{""id"":""1"",""count"":""10""}"
 - 即使 source 只有 header、没有数据行，也必须归一化为一个 empty logical row `{}`，确保 required/default 在单对象上执行。
 - table-level `export/export_when` 和 field-level `export/export_when` 对 ObjectTable 生效；table 可见但所有字段被过滤时导出 `{}`。
 - ObjectTable Step 1 不支持 index、primary index、row_export、作为 foreign key target、variant source fragments；可以作为 foreign key source，字段值引用 CollectionTable 的 unique / primary index。
-- ObjectTable Step 1 只支持 `source = "...csv"`，不支持 `sources` / `override_sources`；后续应以 field path 为覆盖粒度扩展。
+- ObjectTable 支持 `source = "...csv"` 的兼容单 source 写法，也支持 CSV `sources` 以互斥 field path split merge 为一个 singleton object，并支持 CSV `override_sources` 按 exact field path patch 已存在字段。
 - ObjectTable 当前支持 struct field path 展开和标量 list element-level path 展开；仍不支持独立明细子表或跨格区域式展开。
 
 Step 1 推荐 Meta：
@@ -971,9 +971,9 @@ linked_field = "item"
 
 ## 4.13 Multi-source 与 Override
 
-> 实现状态：Partial。当前版本已支持 fragment variant source mode 这一受限多源能力：polymorphic CollectionTable 可声明多个 CSV `sources`，但至少一个 source 必须声明 `fragments`；同时已支持 CollectionTable CSV `override_sources` 按 primary index 匹配整行覆盖，并支持 source-level `export_when` 按 effective target tags 启用。ObjectTable CSV multi-source / override 的 Stable 目标语义已固定为 base split merge + field-path-level override patch，正在按 `Documentation/Todo/object-table-override-sources-stable-todo.md` 推进。base source `export_when`、通用 CollectionTable split merge 与非 `csv` provider 仍会在 Meta 校验或 DataLoadPlan 构造阶段报错，避免静默忽略。
+> 实现状态：Stable（限 CSV provider 的已定义子集）。当前版本已支持 fragment variant source mode 这一受限多源能力：polymorphic CollectionTable 可声明多个 CSV `sources`，但至少一个 source 必须声明 `fragments`；同时已支持 CollectionTable CSV `override_sources` 按 primary index 匹配整行覆盖，并支持 source-level `export_when` 按 effective target tags 启用。ObjectTable CSV multi-source / override 已稳定支持 base split merge + field-path-level override patch。base source `export_when`、通用 CollectionTable split merge 与非 `csv` provider 仍会在 Meta 校验或 DataLoadPlan 构造阶段报错，避免静默忽略。
 
-本节的 multi-source split merge / override 是通用多源能力，仍为 Reserved。下一节的 polymorphic variant source mode 是多源能力的受限子集：仅允许 `polymorphic = true` 的 CollectionTable 声明多个 variant sources，且每个 source 追加完整 records，不提供通用 split merge、ObjectTable 多源合并或 override 语义。
+本节的 multi-source split merge / override 已稳定落地 CSV ObjectTable 与 CollectionTable primary-index override 这两个子集。通用 CollectionTable split merge 仍为 Reserved；下一节的 polymorphic variant source mode 是 CollectionTable 多源能力的受限子集：仅允许 `polymorphic = true` 的 CollectionTable 声明多个 variant sources，且每个 source 追加完整 records。
 
 Base `sources` 用于 split merge：
 

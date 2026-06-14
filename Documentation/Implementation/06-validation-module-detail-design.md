@@ -85,11 +85,12 @@ Meta validation 阶段限制：
 - ObjectTable 不能声明 fragments。
 - ObjectTable 可以声明 table-level `foreign_keys` 或 field-level `foreign_key` 作为 FK source。
 - FK target 不能指向 ObjectTable。
-- ObjectTable Step 1 只支持单个 `source` 属性；该属性可使用 legacy 字符串或带 `header_row` / `data_start_row` 的 source object，不能声明 `sources` 或 `override_sources`。
+- ObjectTable 支持 legacy `source` 字符串 / object，也支持 CSV `sources` 与 CSV `override_sources`；base `sources[].export_when` 仍显式 unsupported。
 
 Data validation 阶段规则：
 
 - ObjectTable 必须归一化为一个 logical row。
+- 多个 ObjectTable base source 必须已按互斥 field path split merge，匹配 effective target tags 的 override source 必须已按 exact field path patch 后再进入 validation。
 - required/default/type/enum/field validator 复用现有字段规则。
 - struct JSON cell 与 expanded value 由 DataResolver 统一解析。
 - index / unique / row_export / fragment validation 对 ObjectTable 跳过或在 Meta 阶段禁止；FK source validation 对 ObjectTable singleton logical row 生效。

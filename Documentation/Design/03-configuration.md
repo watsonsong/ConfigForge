@@ -161,7 +161,7 @@ Source declaration 描述 provider 和定位信息。
 | `lark_sheet` | Planned / Not implemented，Lark/飞书表格 | `uri` 或 provider-specific id，通常需要 `auth_ref` |
 | `google_sheet` | Planned / Not implemented，Google Sheet | `uri` 或 sheet id，通常需要 `auth_ref` |
 
-当前实现状态以 `Documentation/Design/README.md` 的状态矩阵为准：CSV provider 已稳定支持；同一逻辑表的多 CSV source 按声明顺序追加 records 已稳定，主要服务 polymorphic variant source mode；`override_sources` 已支持 CollectionTable CSV 整行覆盖，并允许通过 source-level `export_when` 绑定到 effective target tags，用于赛季、热修或灰度包的临时覆盖。非 CSV provider、ObjectTable override 和 base source `export_when` 仍会显式拒绝或不提供入口。
+当前实现状态以 `Documentation/Design/README.md` 的状态矩阵为准：CSV provider 已稳定支持；同一逻辑表的多 CSV source 已稳定支持 CollectionTable variant source append 与 ObjectTable field-path split merge；`override_sources` 已支持 CollectionTable CSV 整行覆盖和 ObjectTable CSV exact field path patch，并允许通过 source-level `export_when` 绑定到 effective target tags，用于赛季、热修或灰度包的临时覆盖。非 CSV provider、通用 CollectionTable split merge 和 base source `export_when` 仍会显式拒绝或不提供入口。
 
 CollectionTable CSV source 使用 source-level 行布局参数决定哪一行是机器可读 header、哪一行开始进入数据。`header_row` 和 `data_start_row` 都是 **1-based** 行号，默认值为 `header_row = 1`、`data_start_row = 3`；因此第 2 行默认保留给策划标题、字段说明或其它可读提示，不进入导出数据。`data_start_row` 必须大于 `header_row`。ObjectTable 是按行组织的 `key,value` 常量表，因此标题说明默认使用额外列而不是额外行：可写成 `key,title,value`，其中 `title` 列仅供策划阅读，实际值仍来自 `value` 列。Source sheet 允许出现空行和空列。未映射到 field path 的行/列不会进入导出结果，可用于策划注释、公式中间结果或视觉分隔。
 
@@ -185,7 +185,7 @@ source = "items.csv"
 
 语义：根据文件后缀推断为 `{ provider = "csv", path = "items.csv", header_row = 1, data_start_row = 3 }`。
 
-多 source（Stable，限同一逻辑表多个 CSV source 按声明顺序 append records，主要服务 polymorphic variant source mode）：
+多 source（Stable，限 CSV provider；CollectionTable variant source mode 按声明顺序 append records，ObjectTable 按互斥 field path split merge 为 singleton object）：
 
 ```toml
 sources = [
@@ -194,7 +194,7 @@ sources = [
 ]
 ```
 
-Override sources（Implemented MVP，当前限 CollectionTable CSV 整行覆盖）：
+Override sources（Stable，限 CSV provider；CollectionTable 按 primary index 整行覆盖，ObjectTable 按 exact field path patch 已存在字段）：
 
 ```toml
 override_sources = [
@@ -234,6 +234,8 @@ override_sources = [
 ```
 
 当 effective target tags 包含 `s1` 时，`materials_s1.csv` 中 `id = 2002` 的完整 row 覆盖 base `materials.csv` 中相同 primary index 的 row；未包含 `s1` 时该 override source 完全不生效，Oak 仍使用 base 售价 3。
+
+ObjectTable 的多个 base source 使用相同 `key,value` / `key,title,value` CSV 布局，并合并为一个 singleton object；不同 base source 中的 field path 必须互斥。ObjectTable override source 是 patch：只替换 override source 中出现的 exact field path，且只能覆盖 base materialized object 已存在的 field path；找不到目标 field path 时失败，避免把 override source 误用为 append/upsert source。
 
 ## 3.5 Target Config
 

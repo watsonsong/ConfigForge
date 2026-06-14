@@ -376,13 +376,13 @@ CSV reader 可继续原样读取 headers，不需要理解 meta。主要变化�
 
 推荐采用 A：所有 key/path 的 schema 合法性下沉到 resolver / validation，因为它依赖 linked struct schema；loader 只检查 key 非空、完整 key/path 不重复、header 为 `key,value`。不含 `.` 的 top-level unknown key 也由 resolver / validation 报错，以保持 ObjectTable 与未来 Sheet provider 的 source adapter 行为一致。
 
-key schema 下沉会带来诊断精度风险。因此 ObjectTable field source map 是 resolver 阶段的重要补充：`read_object_table()` 在生成 singleton logical row 时，未来应同时记录每个 key/path 的 source row number；resolver / validation 对 ObjectTable 的 unknown path、type、required 等错误优先使用该映射输出真实 CSV row。如果短期不改 `DataTable` public shape，可先增加可选 sidecar map 或 ObjectTable 专用 source map。
+key schema 下沉会带来诊断精度风险。因此 ObjectTable field source map 是 resolver 阶段的重要补充：`read_object_table()` 在生成 singleton logical row 时会记录每个 key/path 的 source path / row number；resolver / validation 对 ObjectTable 的 unknown path、type、required 等错误优先使用该 cell source 输出真实 CSV row，而不是 singleton row 的 fallback location。
 
 实施方案 A 时：
 
 - ObjectTable loader 允许 `key` 中出现 `.`。
 - 仅检查 key 非空、完整 key/path 不重复、header 为 `key,value`。
-- 对所有 key，只做 duplicate/source row 记录，schema 检查交给 unified row key classifier；source row 记录后续应进入 ObjectTable field source map。
+- 对所有 key，只做 duplicate/source row 记录，schema 检查交给 unified row key classifier；source row 记录进入 ObjectTable cell source map，供后续 validation / resolver 诊断使用。
 
 ## 12.8 Validation 修改
 
@@ -593,7 +593,7 @@ type = "int"
 当前 source-driven expanded values 已支持：Meta 约束、ObjectTable dotted key 放行、source schema validation、recursive nested struct、JSON/expanded mixing error、target-aware child filtering、child default、JSON/MessagePack export shape 与回归测试。计划按 Data resolver 方向演进：
 
 1. 抽 `StructOccurrenceEvaluator`：把 validation/export 中关于 JSON cell、expanded path、default、empty cell、target visibility、nested occurrence 的判断集中到同一个 helper。
-2. 为 ObjectTable 增加 key/path -> source row number 的 sidecar source map，并让 evaluator / validation 使用真实 CSV key 行输出诊断。
+2. 继续让 ObjectTable key/path -> source row number 的 cell source trace 贯通 resolver / validation，确保诊断使用真实 CSV key 行输出。
 3. 引入最小 `DataValue::Scalar(String) | DataValue::Struct(...)`，让 evaluator 输出结构化 value；runtime exporter 改为优先消费该结构。
 4. 引入 `ResolvedDataSet` / `ResolvedExportView`：按 target tags 生成结构化视图，Validation 和 Exporter 不再直接解释 raw `DataRow`。
 5. 将现有 validation 迁移为 resolved validation：required/type/enum/range/foreign key/unique 读取 `DataValue` 和 `ValueSourceTrace`。
