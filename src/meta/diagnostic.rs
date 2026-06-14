@@ -46,7 +46,7 @@ impl fmt::Display for MetaDiagnostic {
 
 impl DiagnosticEntry for MetaDiagnostic {
     fn code(&self) -> String {
-        format!("{:?}", self.code)
+        self.code.stable_code().to_owned()
     }
 
     fn severity(&self) -> DiagnosticSeverity {

@@ -5,7 +5,7 @@ use std::fs;
 
 use super::*;
 use super::{link::link_meta_model, validate::validate_meta_model};
-use crate::{ConfigForgeError, Diagnostic};
+use crate::{ConfigForgeError, Diagnostic, diagnostic::code::*};
 use tempfile::tempdir;
 
 fn parse(input: &str) -> MetaModel {
@@ -26,26 +26,26 @@ fn diagnostics(input: &str) -> Vec<MetaDiagnostic> {
 
 fn meta_diagnostic_from_diagnostic(diagnostic: Diagnostic) -> MetaDiagnostic {
     let code = match diagnostic.code.as_str() {
-        "DuplicateTableName" => MetaDiagnosticCode::DuplicateTableName,
-        "DuplicateEnumName" => MetaDiagnosticCode::DuplicateEnumName,
-        "DuplicateStructName" => MetaDiagnosticCode::DuplicateStructName,
-        "DuplicateEnumValueName" => MetaDiagnosticCode::DuplicateEnumValueName,
-        "DuplicateFieldName" => MetaDiagnosticCode::DuplicateFieldName,
-        "DuplicateIndexName" => MetaDiagnosticCode::DuplicateIndexName,
-        "DuplicateTypeName" => MetaDiagnosticCode::DuplicateTypeName,
-        "ReservedTypeName" => MetaDiagnosticCode::ReservedTypeName,
-        "MissingFieldReference" => MetaDiagnosticCode::MissingFieldReference,
-        "InvalidPrimaryIndex" => MetaDiagnosticCode::InvalidPrimaryIndex,
-        "PrimaryIndexMismatch" => MetaDiagnosticCode::PrimaryIndexMismatch,
-        "EmptyIndexFields" => MetaDiagnosticCode::EmptyIndexFields,
-        "UnknownFieldType" => MetaDiagnosticCode::UnknownFieldType,
-        "InvalidDefaultValue" => MetaDiagnosticCode::InvalidDefaultValue,
-        "InvalidSourceDeclaration" => MetaDiagnosticCode::InvalidSourceDeclaration,
-        "InvalidValidatorConfig" => MetaDiagnosticCode::InvalidValidatorConfig,
-        "InvalidForeignKeyDeclaration" => MetaDiagnosticCode::InvalidForeignKeyDeclaration,
-        "DuplicateAssetKindName" => MetaDiagnosticCode::DuplicateAssetKindName,
-        "InvalidAssetKindDeclaration" => MetaDiagnosticCode::InvalidAssetKindDeclaration,
-        "UnsupportedFeature" => MetaDiagnosticCode::UnsupportedFeature,
+        CF_META_DUPLICATE_TABLE_NAME => MetaDiagnosticCode::DuplicateTableName,
+        CF_META_DUPLICATE_ENUM_NAME => MetaDiagnosticCode::DuplicateEnumName,
+        CF_META_DUPLICATE_STRUCT_NAME => MetaDiagnosticCode::DuplicateStructName,
+        CF_META_DUPLICATE_ENUM_VALUE_NAME => MetaDiagnosticCode::DuplicateEnumValueName,
+        CF_META_DUPLICATE_FIELD_NAME => MetaDiagnosticCode::DuplicateFieldName,
+        CF_META_DUPLICATE_INDEX_NAME => MetaDiagnosticCode::DuplicateIndexName,
+        CF_META_DUPLICATE_TYPE_NAME => MetaDiagnosticCode::DuplicateTypeName,
+        CF_META_RESERVED_TYPE_NAME => MetaDiagnosticCode::ReservedTypeName,
+        CF_META_MISSING_FIELD_REFERENCE => MetaDiagnosticCode::MissingFieldReference,
+        CF_META_INVALID_PRIMARY_INDEX => MetaDiagnosticCode::InvalidPrimaryIndex,
+        CF_META_PRIMARY_INDEX_MISMATCH => MetaDiagnosticCode::PrimaryIndexMismatch,
+        CF_META_EMPTY_INDEX_FIELDS => MetaDiagnosticCode::EmptyIndexFields,
+        CF_META_UNKNOWN_FIELD_TYPE => MetaDiagnosticCode::UnknownFieldType,
+        CF_META_INVALID_DEFAULT_VALUE => MetaDiagnosticCode::InvalidDefaultValue,
+        CF_META_INVALID_SOURCE_DECLARATION => MetaDiagnosticCode::InvalidSourceDeclaration,
+        CF_META_INVALID_VALIDATOR_CONFIG => MetaDiagnosticCode::InvalidValidatorConfig,
+        CF_META_INVALID_FOREIGN_KEY_DECLARATION => MetaDiagnosticCode::InvalidForeignKeyDeclaration,
+        CF_META_DUPLICATE_ASSET_KIND_NAME => MetaDiagnosticCode::DuplicateAssetKindName,
+        CF_META_INVALID_ASSET_KIND_DECLARATION => MetaDiagnosticCode::InvalidAssetKindDeclaration,
+        CF_META_UNSUPPORTED_FEATURE => MetaDiagnosticCode::UnsupportedFeature,
         code => panic!("unknown meta diagnostic code `{code}`"),
     };
     MetaDiagnostic {

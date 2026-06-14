@@ -98,22 +98,24 @@
 
 - `feat(meta): map diagnostics to stable catalog codes`
 
-### [ ] Step 4：切换 Meta diagnostic 输出为 stable code，并更新 CLI JSON 测试
+### [x] Step 4：切换 Meta diagnostic 输出为 stable code，并更新 CLI JSON 测试
 
 目的：完成 Meta diagnostic 纳入 unified code catalog 的对外切换，让 human / JSON 输出使用稳定机器码。
 
 实现项：
 
-- [ ] 将 `DiagnosticEntry for MetaDiagnostic::code()` 从 Debug 字符串改为 Step 3 的 stable code。
-- [ ] 更新 Meta loader / build / CLI 测试中对 code 字符串的断言。
-- [ ] 更新 `json_error_output_preserves_meta_validation_diagnostics`，断言 JSON code 为 `CF_META_DUPLICATE_TABLE_NAME` 一类 stable code，同时保留 location / message 断言。
-- [ ] 检查 human error 文案变化是否可接受；若需要保留可读性，可通过 title/message 而不是 code 兼容。
+- [x] 将 `DiagnosticEntry for MetaDiagnostic::code()` 从 Debug 字符串改为 Step 3 的 stable code。
+- [x] 更新 Meta loader / build / CLI 测试中对 code 字符串的断言。
+- [x] 更新 `json_error_output_preserves_meta_validation_diagnostics`，断言 JSON code 为 `CF_META_DUPLICATE_TABLE_NAME` 一类 stable code，同时保留 location / message 断言。
+- [x] 检查 human error 文案变化是否可接受；本步接受 human error code 从 enum Debug 字符串变为 stable machine code，后续可由 report/catalog title 提升可读性。
 
 验证：
 
-- [ ] `cargo test meta`
-- [ ] `cargo test cli`
-- [ ] `cargo test diagnostic`
+- [x] `cargo test meta`
+- [x] `cargo test cli`
+- [x] `cargo test diagnostic`
+
+后续计划复核：Step 4 已完成 user-visible code 切换；Step 5 继续补齐 source/domain/hint/explanation，Step 6 需同步文档中的 CLI JSON code 说明。
 
 可独立提交建议：
 

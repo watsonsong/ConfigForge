@@ -269,7 +269,7 @@ mod tests {
 
     use crate::{
         Diagnostic, DiagnosticLocation, DiagnosticSeverity,
-        diagnostic::code::CF_DATA_INVALID_TYPE,
+        diagnostic::code::{CF_DATA_INVALID_TYPE, CF_META_DUPLICATE_TABLE_NAME},
         meta::{MetaDiagnostic, MetaDiagnosticCode, meta_diagnostics_to_report},
     };
 
@@ -332,9 +332,12 @@ mod tests {
         assert_eq!(output["status"], "error");
         assert_eq!(
             output["message"],
-            "meta validation failed: Error DuplicateTableName: duplicate table `items` (table `items`)"
+            "meta validation failed: Error CF_META_DUPLICATE_TABLE_NAME: duplicate table `items` (table `items`)"
         );
-        assert_eq!(output["diagnostics"][0]["code"], "DuplicateTableName");
+        assert_eq!(
+            output["diagnostics"][0]["code"],
+            CF_META_DUPLICATE_TABLE_NAME
+        );
         assert_eq!(output["diagnostics"][0]["severity"], "error");
         assert_eq!(
             output["diagnostics"][0]["message"],
