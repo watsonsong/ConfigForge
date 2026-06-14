@@ -386,6 +386,107 @@ fn allows_missing_optional_field_without_default() {
 }
 
 #[test]
+fn validates_builtin_values_through_resolver_and_report_trace() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "effects"
+            source = "effects.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "spawn_position"
+            type = "vector3"
+            vector_format = "expanded"
+            required = true
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_format = "hex_rgb"
+            color_channel = "byte"
+            alpha = "default_opaque"
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table_meta = linked.table("effects").expect("table should exist");
+    let table = crate::data::DataTable::new_with_sources(
+        "effects",
+        vec![crate::data::DataRow::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("spawn_position.x".to_owned(), "1".to_owned()),
+            ("spawn_position.z".to_owned(), "3".to_owned()),
+            ("tint".to_owned(), "#336699".to_owned()),
+        ])],
+        vec![RowSourceInfo {
+            source_index: 0,
+            source_path: PathBuf::from("effects.csv"),
+            source_row_number: 7,
+            fragments: Vec::new(),
+            source_role: SourceRole::Base,
+            replaces: None,
+        }],
+    )
+    .expect("table should build");
+
+    let report = super::table::validate_normalized_table_with_report(table_meta, &table);
+
+    assert!(report.has_error());
+    assert!(report.issues.iter().any(|issue| {
+        issue.code == CF_DATA_INVALID_TYPE
+            && issue.location.table.as_deref() == Some("effects")
+            && issue.location.field.as_deref() == Some("spawn_position")
+            && issue.location.source_row_number == Some(7)
+            && issue.message.contains("incomplete expanded vector")
+    }));
+}
+
+#[test]
+fn rejects_builtin_value_fields_as_unique_index_keys() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "effects"
+            source = "effects.csv"
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_format = "hex_rgba"
+            color_channel = "normalized"
+
+            [[tables.indexes]]
+            name = "by_tint"
+            fields = ["tint"]
+            unique = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table_meta = linked.table("effects").expect("table should exist");
+    let table = crate::data::DataTable::new(
+        "effects",
+        vec![crate::data::DataRow::from([(
+            "tint".to_owned(),
+            "0.1,0.2,0.3,1.0".to_owned(),
+        )])],
+    );
+
+    let report = super::table::validate_normalized_table_with_report(table_meta, &table);
+
+    assert!(report.has_error());
+    assert!(report.issues.iter().any(|issue| {
+        issue.code == CF_DATA_INVALID_TYPE
+            && issue.location.field.as_deref() == Some("tint")
+            && issue.message.contains("unsupported builtin value key type")
+    }));
+}
+
+#[test]
 fn validates_enum_values() {
     let enum_meta = EnumMeta {
         name: "ItemRarity".to_owned(),

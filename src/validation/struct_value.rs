@@ -22,6 +22,7 @@ use crate::{
     },
     meta::{
         LinkedField, LinkedFieldMeta, LinkedStructType, LinkedTableMeta, TargetTags, ValueLayout,
+        VectorFormat,
     },
 };
 
@@ -425,6 +426,9 @@ pub(super) fn validate_struct_child_path(
             "declared struct child field",
         ));
     };
+    if is_expanded_vector_component(child, rest) {
+        return Ok(());
+    }
     let LinkedField::Struct(nested_struct) = &child.linked_field else {
         return Err(struct_type_error(
             table_name,
@@ -455,6 +459,19 @@ fn child_is_visible(field: &LinkedFieldMeta<'_>, target_tags: Option<&TargetTags
     target_tags
         .map(|target_tags| field.meta.is_exported_for(target_tags))
         .unwrap_or(true)
+}
+
+fn is_expanded_vector_component(field: &LinkedFieldMeta<'_>, component: &str) -> bool {
+    field.meta.vector_format == Some(VectorFormat::Expanded)
+        && field
+            .primitive_type()
+            .is_some_and(|primitive| primitive.vector_dimension().is_some())
+        && !component.contains('.')
+        && field
+            .meta
+            .vector_component_names()
+            .iter()
+            .any(|name| name == component)
 }
 
 fn non_empty_row_value<'a>(row: &'a DataRow, field_path: &str) -> Option<&'a str> {

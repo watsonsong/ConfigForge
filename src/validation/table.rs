@@ -10,7 +10,10 @@ use crate::{
         DiagnosticLocation,
         code::{CF_DATA_DUPLICATE_KEY, CF_DATA_INVALID_TYPE, CF_DATA_MISSING_REQUIRED_FIELD},
     },
-    meta::{LinkedField, LinkedFieldMeta, LinkedIndexMeta, LinkedTableMeta, TableKind, TargetTags},
+    meta::{
+        LinkedField, LinkedFieldMeta, LinkedIndexMeta, LinkedTableMeta, TableKind, TargetTags,
+        VectorFormat,
+    },
 };
 
 use super::diagnostic::{ValidationReport, error_issues_from_result, validation_error_message};
@@ -159,6 +162,30 @@ pub(super) fn validate_normalized_table_view_with_report(
             "unique",
             validate_field_uniqueness_view(meta, table_view, field),
             location,
+        );
+    }
+
+    if !report.has_error() {
+        let visible_row_indices = table_view
+            .visible_rows
+            .iter()
+            .map(|row| row.row_index)
+            .collect::<Vec<_>>();
+        collect_table_check(
+            &mut report,
+            "table.resolve",
+            "type",
+            DataResolver::resolve_table_rows(
+                meta,
+                table_view.table,
+                target_tags,
+                visible_row_indices.iter().copied(),
+            )
+            .map(|_| ()),
+            DiagnosticLocation {
+                table: Some(meta.meta.name.clone()),
+                ..DiagnosticLocation::default()
+            },
         );
     }
 
@@ -472,6 +499,8 @@ fn validate_index_uniqueness(
         return Ok(());
     }
 
+    validate_index_key_fields(meta, index)?;
+
     let mut seen = HashSet::new();
     for (row_index, row) in table.rows.iter().enumerate() {
         let key = index
@@ -518,6 +547,8 @@ fn validate_index_uniqueness_view(
         return Ok(());
     }
 
+    validate_index_key_fields(meta, index)?;
+
     let mut seen = HashSet::new();
     for visible_row in &table_view.visible_rows {
         let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
@@ -556,6 +587,33 @@ fn validate_index_uniqueness_view(
     Ok(())
 }
 
+fn validate_index_key_fields(
+    meta: &LinkedTableMeta<'_>,
+    index: &LinkedIndexMeta<'_>,
+) -> Result<()> {
+    for field in &index.fields {
+        if field
+            .primitive_type()
+            .is_some_and(|primitive| primitive.is_builtin_value_type())
+        {
+            return Err(table_schema_error(
+                format!(
+                    "table `{}` index `{}` field `{}` uses unsupported builtin value key type `{}`",
+                    meta.meta.name, index.meta.name, field.meta.name, field.meta.field_type
+                ),
+                DiagnosticLocation {
+                    table: Some(meta.meta.name.clone()),
+                    field: Some(field.meta.name.clone()),
+                    ..DiagnosticLocation::default()
+                },
+                field.meta.field_type.clone(),
+                "scalar field key type with stable equality semantics",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_field_presence(
     meta: &LinkedTableMeta<'_>,
     table: &DataTable,
@@ -568,10 +626,7 @@ fn validate_field_presence(
         return Ok(());
     }
 
-    let present = table
-        .rows
-        .iter()
-        .all(|row| row.contains_key(&field.meta.name));
+    let present = table.rows.iter().all(|row| field_has_source(row, field));
     if !present {
         let message = format!(
             "table `{}` is missing field `{}`",
@@ -603,7 +658,7 @@ fn validate_field_presence_view(
             .table
             .rows
             .get(visible_row.row_index)
-            .map(|row| row.contains_key(&field.meta.name))
+            .map(|row| field_has_source(row, field))
             .unwrap_or(false)
     });
     if !present {
@@ -634,7 +689,11 @@ fn validate_field_values(
             .get(&field.meta.name)
             .map(String::as_str)
             .unwrap_or_default();
+        let has_value = field_has_effective_value(row, field);
         if field.meta.required && value.trim().is_empty() {
+            if has_value {
+                continue;
+            }
             let message = format!(
                 "table `{}` row {} field `{}` is required",
                 meta.meta.name,
@@ -648,7 +707,14 @@ fn validate_field_values(
             ));
         }
 
-        if value.trim().is_empty() {
+        if value.trim().is_empty() && !has_value {
+            continue;
+        }
+
+        if field
+            .primitive_type()
+            .is_some_and(|primitive| primitive.is_builtin_value_type())
+        {
             continue;
         }
 
@@ -685,7 +751,11 @@ fn validate_field_values_view(
             .get(&field.meta.name)
             .map(String::as_str)
             .unwrap_or_default();
+        let has_value = field_has_effective_value(row, field);
         if field.meta.required && value.trim().is_empty() {
+            if has_value {
+                continue;
+            }
             let message = format!(
                 "table `{}` row {} field `{}` is required",
                 meta.meta.name, row_number, field.meta.name
@@ -697,7 +767,14 @@ fn validate_field_values_view(
             ));
         }
 
-        if value.trim().is_empty() {
+        if value.trim().is_empty() && !has_value {
+            continue;
+        }
+
+        if field
+            .primitive_type()
+            .is_some_and(|primitive| primitive.is_builtin_value_type())
+        {
             continue;
         }
 
@@ -713,6 +790,52 @@ fn validate_field_values_view(
         )?;
     }
     Ok(())
+}
+
+fn field_has_source(row: &DataRow, field: &LinkedFieldMeta<'_>) -> bool {
+    row.contains_key(&field.meta.name)
+        || field.meta.default.is_some()
+        || expanded_vector_component_paths(field)
+            .iter()
+            .any(|path| row.contains_key(path))
+}
+
+fn field_has_effective_value(row: &DataRow, field: &LinkedFieldMeta<'_>) -> bool {
+    row.get(&field.meta.name)
+        .is_some_and(|value| !value.trim().is_empty())
+        || field.meta.default.is_some()
+        || expanded_vector_component_paths(field)
+            .iter()
+            .any(|path| row.get(path).is_some_and(|value| !value.trim().is_empty()))
+}
+
+fn expanded_vector_component_paths(field: &LinkedFieldMeta<'_>) -> Vec<String> {
+    if field.meta.vector_format != Some(VectorFormat::Expanded)
+        || !field
+            .primitive_type()
+            .is_some_and(|primitive| primitive.vector_dimension().is_some())
+    {
+        return Vec::new();
+    }
+    field
+        .meta
+        .vector_component_names()
+        .into_iter()
+        .map(|component| format!("{}.{}", field.meta.name, component))
+        .collect()
+}
+
+fn is_expanded_vector_component(field: &LinkedFieldMeta<'_>, component: &str) -> bool {
+    field.meta.vector_format == Some(VectorFormat::Expanded)
+        && field
+            .primitive_type()
+            .is_some_and(|primitive| primitive.vector_dimension().is_some())
+        && !component.contains('.')
+        && field
+            .meta
+            .vector_component_names()
+            .iter()
+            .any(|name| name == component)
 }
 
 fn validate_fragment_values(
@@ -772,7 +895,10 @@ fn validate_fragment_values_for_row(
         if matches!(
             meta.field(fragment_name).map(|field| &field.linked_field),
             Some(LinkedField::Struct(_))
-        ) {
+        ) || meta
+            .field(fragment_name)
+            .is_some_and(|field| is_expanded_vector_component(field, field_name))
+        {
             continue;
         }
         let Some(fragment) = meta.fragment(fragment_name) else {
@@ -899,6 +1025,12 @@ fn validate_fragment_values_for_row(
                 ));
             }
             if value.trim().is_empty() {
+                continue;
+            }
+            if field
+                .primitive_type()
+                .is_some_and(|primitive| primitive.is_builtin_value_type())
+            {
                 continue;
             }
             validate_value_type_at_row_number(meta, field, value, row_number, target_tags)?;
