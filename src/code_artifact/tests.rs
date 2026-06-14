@@ -271,6 +271,77 @@ fn builds_code_model_with_types_tables_and_indexes() {
 }
 
 #[test]
+fn code_model_preserves_builtin_color_and_vector_type_metadata() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "SpawnPoint"
+
+            [[structs.fields]]
+            name = "grid"
+            type = "vector2_int"
+
+            [[tables]]
+            name = "effects"
+            source = "effects.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "string"
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_channel = "normalized"
+
+            [[tables.fields]]
+            name = "position"
+            type = "vector3"
+            vector_components = ["right", "up", "forward"]
+
+            [[tables.fields]]
+            name = "spawn"
+            type = "SpawnPoint"
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+
+    let model = build_code_model(&linked, &TargetTags::empty(), &[]).expect("model");
+    let effects = model
+        .tables
+        .iter()
+        .find(|table| table.name == "effects")
+        .expect("effects table should exist");
+    let field_type = |name: &str| {
+        effects
+            .fields
+            .iter()
+            .find(|field| field.name == name)
+            .map(|field| &field.code_type)
+            .expect("field should exist")
+    };
+
+    assert_eq!(field_type("tint"), &CodeTypeRef::Color);
+    assert_eq!(
+        field_type("position"),
+        &CodeTypeRef::Vector {
+            dimension: 3,
+            element: CodeVectorElementType::Float,
+            components: vec!["right".to_owned(), "up".to_owned(), "forward".to_owned()],
+        }
+    );
+    assert_eq!(
+        model.structs[0].fields[0].code_type,
+        CodeTypeRef::Vector {
+            dimension: 2,
+            element: CodeVectorElementType::Int,
+            components: vec!["x".to_owned(), "y".to_owned()],
+        }
+    );
+}
+
+#[test]
 fn code_model_preserves_source_order_opt_in() {
     let meta = source_order_fixture();
     let input = input_for(&meta, RustCodeGenerator.language());

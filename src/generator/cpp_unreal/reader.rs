@@ -106,6 +106,11 @@ fn render_value_read(
         CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
             content.raw_fmt(format_args!("{indent}{target} = Reader.AsString();\n"));
         }
+        CodeTypeRef::Color | CodeTypeRef::Vector { .. } => {
+            content.raw_fmt(format_args!(
+                "{indent}// Builtin object value reader generation is implemented by profile-specific runtime mappings.\n"
+            ));
+        }
         CodeTypeRef::Enum { name } => {
             content.raw_fmt(format_args!(
                 "{indent}switch (Reader.ReadEnumIndex(TArray<FString>{{"

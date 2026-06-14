@@ -219,6 +219,10 @@ impl<'a> CppUnrealNames<'a> {
             CodeTypeRef::Float => "double".to_owned(),
             CodeTypeRef::Bool => "bool".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "FString".to_owned(),
+            CodeTypeRef::Color => "FLinearColor".to_owned(),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => unreal_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } => self.enum_type_name(name)?,
             CodeTypeRef::Struct { name } => self.struct_type_name(name)?,
             CodeTypeRef::List(inner) => format!("TArray<{}>", self.cpp_type(inner)?),
@@ -337,6 +341,21 @@ impl<'a> CppUnrealNames<'a> {
                 "Adjust source names or naming options so Unreal C++ identifiers can be generated.",
             )
         })
+    }
+}
+
+fn unreal_vector_type(
+    dimension: usize,
+    element: crate::code_artifact::CodeVectorElementType,
+) -> String {
+    match (dimension, element) {
+        (2, crate::code_artifact::CodeVectorElementType::Float) => "FVector2D".to_owned(),
+        (3, crate::code_artifact::CodeVectorElementType::Float) => "FVector".to_owned(),
+        (4, crate::code_artifact::CodeVectorElementType::Float) => "FVector4".to_owned(),
+        (2, crate::code_artifact::CodeVectorElementType::Int) => "FIntPoint".to_owned(),
+        (3, crate::code_artifact::CodeVectorElementType::Int) => "FIntVector".to_owned(),
+        (4, crate::code_artifact::CodeVectorElementType::Int) => "FIntVector4".to_owned(),
+        _ => "FVector".to_owned(),
     }
 }
 

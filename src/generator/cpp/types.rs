@@ -5,7 +5,8 @@ use crate::{
     Result,
     code_artifact::{
         CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
-        CodeTableKind, CodeTypeRef, CodegenOptions, ir::CodeForeignKey, naming,
+        CodeTableKind, CodeTypeRef, CodeVectorElementType, CodegenOptions, ir::CodeForeignKey,
+        naming,
     },
     diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
 };
@@ -176,6 +177,10 @@ impl<'a> CppNames<'a> {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 "std::string".to_owned()
             }
+            CodeTypeRef::Color => "ConfigForgeColor".to_owned(),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => cpp_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("std::vector<{}>", self.cpp_type(element)?),
         })
@@ -200,6 +205,13 @@ impl<'a> CppNames<'a> {
                 CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                     format!("ReadRequiredString(reader, {source_name})")
                 }
+                CodeTypeRef::Color => format!("ReadRequiredColor(reader, {source_name})"),
+                CodeTypeRef::Vector {
+                    dimension, element, ..
+                } => format!(
+                    "ReadRequired{}(reader, {source_name})",
+                    cpp_vector_type(*dimension, *element)
+                ),
                 CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                     let type_name = self.type_name(name)?;
                     let reader_function = self.reader_function_name(&type_name)?;
@@ -235,6 +247,13 @@ impl<'a> CppNames<'a> {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 format!("ReadOptionalString(reader, {source_name})")
             }
+            CodeTypeRef::Color => format!("ReadOptionalColor(reader, {source_name})"),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => format!(
+                "ReadOptional{}(reader, {source_name})",
+                cpp_vector_type(*dimension, *element)
+            ),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                 let type_name = self.type_name(name)?;
                 let reader_function = self.reader_function_name(&type_name)?;
@@ -271,6 +290,10 @@ impl<'a> CppNames<'a> {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 "value.AsString()".to_owned()
             }
+            CodeTypeRef::Color => "ReadColor(value)".to_owned(),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => format!("Read{}(value)", cpp_vector_type(*dimension, *element)),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                 format!(
                     "{}(value)",
@@ -412,4 +435,12 @@ impl<'a> CppNames<'a> {
             )
         })
     }
+}
+
+fn cpp_vector_type(dimension: usize, element: CodeVectorElementType) -> String {
+    let suffix = match element {
+        CodeVectorElementType::Float => "",
+        CodeVectorElementType::Int => "Int",
+    };
+    format!("ConfigForgeVector{dimension}{suffix}")
 }

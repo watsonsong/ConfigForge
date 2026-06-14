@@ -152,9 +152,25 @@ pub(crate) enum CodeTypeRef {
     String,
     Text,
     Asset,
-    Enum { name: String },
-    Struct { name: String },
+    Color,
+    Vector {
+        dimension: usize,
+        element: CodeVectorElementType,
+        components: Vec<String>,
+    },
+    Enum {
+        name: String,
+    },
+    Struct {
+        name: String,
+    },
     List(Box<CodeTypeRef>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CodeVectorElementType {
+    Float,
+    Int,
 }
 
 #[cfg(test)]
@@ -547,19 +563,21 @@ fn is_runtime_codegen_field(
 
 fn validate_index_key_type(table_name: &str, index_name: &str, field: &CodeField) -> Result<()> {
     match field.code_type {
-        CodeTypeRef::Float | CodeTypeRef::Struct { .. } | CodeTypeRef::List(_) => {
-            Err(code_model_error(
-                format!(
-                    "table `{table_name}` index `{index_name}` field `{}` uses unsupported index key type `{:?}`",
-                    field.name, field.code_type
-                ),
-                table_name,
-                Some(field.name.as_str()),
-                format!("{:?}", field.code_type),
-                "int, bool, string, text, asset, or enum index key type",
-                "Use a stable scalar key type for generated index helpers.",
-            ))
-        }
+        CodeTypeRef::Float
+        | CodeTypeRef::Color
+        | CodeTypeRef::Vector { .. }
+        | CodeTypeRef::Struct { .. }
+        | CodeTypeRef::List(_) => Err(code_model_error(
+            format!(
+                "table `{table_name}` index `{index_name}` field `{}` uses unsupported index key type `{:?}`",
+                field.name, field.code_type
+            ),
+            table_name,
+            Some(field.name.as_str()),
+            format!("{:?}", field.code_type),
+            "int, bool, string, text, asset, or enum index key type",
+            "Use a stable scalar key type for generated index helpers.",
+        )),
         CodeTypeRef::Int
         | CodeTypeRef::Bool
         | CodeTypeRef::String
@@ -572,10 +590,27 @@ fn validate_index_key_type(table_name: &str, index_name: &str, field: &CodeField
 fn code_field_from_linked(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<CodeField> {
     Ok(CodeField {
         name: field.meta.name.clone(),
-        code_type: code_type_from_linked(&field.linked_field)?,
+        code_type: code_type_from_field(field)?,
         desc: field.meta.desc.clone(),
         required: field.meta.required,
     })
+}
+
+fn code_type_from_field(field: &crate::meta::LinkedFieldMeta<'_>) -> Result<CodeTypeRef> {
+    match &field.linked_field {
+        LinkedField::Primitive(primitive) if primitive.vector_dimension().is_some() => {
+            Ok(CodeTypeRef::Vector {
+                dimension: primitive.vector_dimension().unwrap_or(4),
+                element: if primitive.is_int_vector() {
+                    CodeVectorElementType::Int
+                } else {
+                    CodeVectorElementType::Float
+                },
+                components: field.meta.vector_component_names(),
+            })
+        }
+        _ => code_type_from_linked(&field.linked_field),
+    }
 }
 
 fn code_type_from_linked(field: &LinkedField<'_>) -> Result<CodeTypeRef> {
@@ -586,15 +621,23 @@ fn code_type_from_linked(field: &LinkedField<'_>) -> Result<CodeTypeRef> {
         LinkedField::Primitive(PrimitiveFieldType::String) => CodeTypeRef::String,
         LinkedField::Primitive(PrimitiveFieldType::Text) => CodeTypeRef::Text,
         LinkedField::Primitive(PrimitiveFieldType::Asset) => CodeTypeRef::Asset,
+        LinkedField::Primitive(PrimitiveFieldType::Color) => CodeTypeRef::Color,
         LinkedField::Primitive(
-            PrimitiveFieldType::Color
-            | PrimitiveFieldType::Vector2
+            primitive @ (PrimitiveFieldType::Vector2
             | PrimitiveFieldType::Vector3
             | PrimitiveFieldType::Vector4
             | PrimitiveFieldType::Vector2Int
             | PrimitiveFieldType::Vector3Int
-            | PrimitiveFieldType::Vector4Int,
-        ) => CodeTypeRef::String,
+            | PrimitiveFieldType::Vector4Int),
+        ) => CodeTypeRef::Vector {
+            dimension: primitive.vector_dimension().unwrap_or(4),
+            element: if primitive.is_int_vector() {
+                CodeVectorElementType::Int
+            } else {
+                CodeVectorElementType::Float
+            },
+            components: default_vector_components(primitive.vector_dimension().unwrap_or(4)),
+        },
         LinkedField::Enum(enum_meta) => CodeTypeRef::Enum {
             name: enum_meta.name.clone(),
         },
@@ -605,6 +648,14 @@ fn code_type_from_linked(field: &LinkedField<'_>) -> Result<CodeTypeRef> {
             CodeTypeRef::List(Box::new(code_type_from_linked(element_type)?))
         }
     })
+}
+
+fn default_vector_components(dimension: usize) -> Vec<String> {
+    ["x", "y", "z", "w"]
+        .into_iter()
+        .take(dimension)
+        .map(str::to_owned)
+        .collect()
 }
 
 pub fn require_non_empty_index_fields(model: &CodeModel) -> Result<()> {

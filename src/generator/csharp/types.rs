@@ -8,7 +8,8 @@ use super::{
 };
 use crate::code_artifact::{
     CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
-    CodeTypeRef, KeywordConflictPolicy, NamingConfig, ir::CodeForeignKey, naming,
+    CodeTypeRef, CodeVectorElementType, KeywordConflictPolicy, NamingConfig, ir::CodeForeignKey,
+    naming,
 };
 
 pub(super) struct CSharpNames {
@@ -268,6 +269,10 @@ impl CSharpNames {
             CodeTypeRef::Float => "double".to_owned(),
             CodeTypeRef::Bool => "bool".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "string".to_owned(),
+            CodeTypeRef::Color => "ConfigForgeColor".to_owned(),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => csharp_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("{}[]", self.csharp_type(element)?),
         })
@@ -287,7 +292,12 @@ impl CSharpNames {
     pub(super) fn is_value_type(&self, code_type: &CodeTypeRef) -> bool {
         matches!(
             code_type,
-            CodeTypeRef::Int | CodeTypeRef::Float | CodeTypeRef::Bool | CodeTypeRef::Enum { .. }
+            CodeTypeRef::Int
+                | CodeTypeRef::Float
+                | CodeTypeRef::Bool
+                | CodeTypeRef::Color
+                | CodeTypeRef::Vector { .. }
+                | CodeTypeRef::Enum { .. }
         )
     }
 
@@ -299,6 +309,13 @@ impl CSharpNames {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 "ConfigForgeRuntimeReader.ReadStringValue".to_owned()
             }
+            CodeTypeRef::Color => "ConfigForgeRuntimeReader.ReadColorValue".to_owned(),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => format!(
+                "ConfigForgeRuntimeReader.Read{}Value",
+                csharp_vector_type(*dimension, *element)
+            ),
             CodeTypeRef::Enum { name } => format!(
                 "ConfigForgeRuntimeReader.Read{}Value",
                 self.type_name(name)?
@@ -369,4 +386,12 @@ fn suffixed_name(name: String, suffix: &str) -> String {
     } else {
         format!("{name}{suffix}")
     }
+}
+
+fn csharp_vector_type(dimension: usize, element: CodeVectorElementType) -> String {
+    let suffix = match element {
+        CodeVectorElementType::Float => "",
+        CodeVectorElementType::Int => "Int",
+    };
+    format!("ConfigForgeVector{dimension}{suffix}")
 }

@@ -5,7 +5,8 @@ use crate::{
     Result,
     code_artifact::{
         CaseStyle, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
-        CodeTableKind, CodeTypeRef, CodegenOptions, ir::CodeForeignKey, naming,
+        CodeTableKind, CodeTypeRef, CodeVectorElementType, CodegenOptions, ir::CodeForeignKey,
+        naming,
     },
     diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
 };
@@ -121,6 +122,10 @@ impl<'a> RustNames<'a> {
             CodeTypeRef::Float => "f64".to_owned(),
             CodeTypeRef::Bool => "bool".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
+            CodeTypeRef::Color => "ConfigForgeColor".to_owned(),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => rust_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("Vec<{}>", self.rust_type(element)?),
         })
@@ -145,6 +150,13 @@ impl<'a> RustNames<'a> {
                 CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                     format!("read_required_string(reader, {source_name})?")
                 }
+                CodeTypeRef::Color => format!("read_required_color(reader, {source_name})?"),
+                CodeTypeRef::Vector {
+                    dimension, element, ..
+                } => format!(
+                    "read_required_{}(reader, {source_name})?",
+                    rust_vector_reader_suffix(*dimension, *element)
+                ),
                 CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                     let type_name = self.type_name(name)?;
                     format!(
@@ -165,6 +177,13 @@ impl<'a> RustNames<'a> {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 format!("read_optional_string(reader, {source_name})?")
             }
+            CodeTypeRef::Color => format!("read_optional_color(reader, {source_name})?"),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => format!(
+                "read_optional_{}(reader, {source_name})?",
+                rust_vector_reader_suffix(*dimension, *element)
+            ),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                 let type_name = self.type_name(name)?;
                 format!(
@@ -186,6 +205,13 @@ impl<'a> RustNames<'a> {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 "value.as_string()".to_owned()
             }
+            CodeTypeRef::Color => "read_color(value)".to_owned(),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => format!(
+                "read_{}(value)",
+                rust_vector_reader_suffix(*dimension, *element)
+            ),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                 format!("{}::read_from_reader(value)", self.type_name(name)?)
             }
@@ -304,4 +330,20 @@ impl<'a> RustNames<'a> {
             )
         })
     }
+}
+
+fn rust_vector_type(dimension: usize, element: CodeVectorElementType) -> String {
+    let suffix = match element {
+        CodeVectorElementType::Float => "",
+        CodeVectorElementType::Int => "Int",
+    };
+    format!("ConfigForgeVector{dimension}{suffix}")
+}
+
+fn rust_vector_reader_suffix(dimension: usize, element: CodeVectorElementType) -> String {
+    let suffix = match element {
+        CodeVectorElementType::Float => String::new(),
+        CodeVectorElementType::Int => "_int".to_owned(),
+    };
+    format!("vector{dimension}{suffix}")
 }

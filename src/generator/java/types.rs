@@ -9,7 +9,8 @@ use super::{
 };
 use crate::code_artifact::{
     CaseStyle, CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
-    CodeTypeRef, KeywordConflictPolicy, NamingConfig, ir::CodeForeignKey, naming,
+    CodeTypeRef, CodeVectorElementType, KeywordConflictPolicy, NamingConfig, ir::CodeForeignKey,
+    naming,
 };
 
 pub(super) struct JavaNames {
@@ -237,6 +238,10 @@ impl JavaNames {
             CodeTypeRef::Bool if required => "boolean".to_owned(),
             CodeTypeRef::Bool => "Boolean".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
+            CodeTypeRef::Color => "ConfigForgeColor".to_owned(),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => java_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("{}[]", self.java_array_element_type(element)?),
         })
@@ -248,6 +253,10 @@ impl JavaNames {
             CodeTypeRef::Float => "Double".to_owned(),
             CodeTypeRef::Bool => "Boolean".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
+            CodeTypeRef::Color => "ConfigForgeColor".to_owned(),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => java_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("{}[]", self.java_array_element_type(element)?),
         })
@@ -371,6 +380,13 @@ impl JavaNames {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 "ConfigForgeRuntimeReader::readStringValue".to_owned()
             }
+            CodeTypeRef::Color => "ConfigForgeRuntimeReader::readColorValue".to_owned(),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => format!(
+                "ConfigForgeRuntimeReader::read{}Value",
+                java_vector_type(*dimension, *element)
+            ),
             CodeTypeRef::Enum { name } => format!(
                 "ConfigForgeRuntimeReader::{}",
                 self.read_enum_function_name(name)?
@@ -399,6 +415,17 @@ impl JavaNames {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => format!(
                 "ConfigForgeRuntimeReader.readObjectList({reader}, String[]::new, ConfigForgeRuntimeReader::readStringValue)"
             ),
+            CodeTypeRef::Color => format!(
+                "ConfigForgeRuntimeReader.readObjectList({reader}, ConfigForgeColor[]::new, ConfigForgeRuntimeReader::readColorValue)"
+            ),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => {
+                let type_name = java_vector_type(*dimension, *element);
+                format!(
+                    "ConfigForgeRuntimeReader.readObjectList({reader}, {type_name}[]::new, ConfigForgeRuntimeReader::read{type_name}Value)"
+                )
+            }
             CodeTypeRef::Enum { name } => format!(
                 "ConfigForgeRuntimeReader.readObjectList({reader}, {}[]::new, ConfigForgeRuntimeReader::{})",
                 self.type_name(name)?,
@@ -424,6 +451,10 @@ impl JavaNames {
             CodeTypeRef::Float => "double".to_owned(),
             CodeTypeRef::Bool => "boolean".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "String".to_owned(),
+            CodeTypeRef::Color => "ConfigForgeColor".to_owned(),
+            CodeTypeRef::Vector {
+                dimension, element, ..
+            } => java_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("{}[]", self.java_array_element_type(element)?),
         })
@@ -452,4 +483,12 @@ fn suffixed_name(name: String, suffix: &str) -> String {
     } else {
         format!("{name}{suffix}")
     }
+}
+
+fn java_vector_type(dimension: usize, element: CodeVectorElementType) -> String {
+    let suffix = match element {
+        CodeVectorElementType::Float => "",
+        CodeVectorElementType::Int => "Int",
+    };
+    format!("ConfigForgeVector{dimension}{suffix}")
 }

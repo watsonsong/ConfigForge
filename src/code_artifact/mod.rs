@@ -10,7 +10,7 @@ mod writer;
 pub use self::ir::GeneratedFile;
 pub(crate) use self::ir::{
     CodeEnum, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeModel, CodeStruct,
-    CodeTable, CodeTableKind, CodeTypeRef, build_code_model,
+    CodeTable, CodeTableKind, CodeTypeRef, CodeVectorElementType, build_code_model,
 };
 pub(crate) use reader_plan::ReaderShapePlan;
 #[cfg(test)]
