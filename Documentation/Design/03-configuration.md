@@ -468,9 +468,9 @@ readonly_fields = true
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `name` | 单 export task 可省略，规范化为 `default`；多 task 省略时默认使用 `type` | 当前 target 内稳定唯一的 export task 名称。 |
-| `type` | 必填 | exporter ID。当前支持 `json`、`messagepack` / `msgpack`、`bin` / `binary`、`gettext_pot` / `pot`、`lua_table` / `lua`、`rust`、`cpp` / `c++`、`typescript` / `ts`。 |
+| `type` | 必填 | generator type ID。当前内置 type 包括 `json`、`messagepack` / `msgpack`、`bin` / `binary`、`gettext_pot` / `pot`、`lua_table` / `lua`、`asset_manifest` / `assets`、`schema_doc`、`validation_report`、`rust`、`cpp` / `c++`、`cpp_unreal`、`typescript` / `ts`、`csharp`、`java`。当前权威注册清单以 `GeneratorRegistry::with_builtin_generators()` 为准。 |
 | `output` | 必填 | 产物输出目录。相对路径以 project root 或所在 import 片段目录为基准。 |
-| exporter 专属字段 | 未设置 | 专属配置直接摊平在对应 `[[targets.exports]]` 下，例如 `type = "gettext_pot"` 可配置 `domain`、`file_name`；`type = "lua_table"` 可配置 `module_name`、`root_file`、`row_layout`、`lazy_require`；codegen 可配置 `file_name`、`module_name`、`namespace`、`i18n`、`naming`、`formatting` 等。 |
+| generator 专属字段 | 未设置 | 专属配置直接摊平在对应 `[[targets.exports]]` 下，例如 `type = "gettext_pot"` 可配置 `domain`、`file_name`；`type = "lua_table"` 可配置 `module_name`、`root_file`、`row_layout`、`lazy_require`；code-like generator 可配置 `file_name`、`module_name`、`namespace`、`i18n`、`naming`、`formatting` 等。 |
 
 Export task 继承所在 target 的 effective target tags；当前没有 `[[targets.exports]].tags` 字段。CLI extra tags 对同一 target 下所有 export task 一致生效，因此同一个构建里的 JSON / MessagePack / bin / Lua 输出和格式无关 codegen 必须基于同一组 effective target tags。
 
@@ -553,20 +553,20 @@ Lua table 必须读取 `project.input` 中的数据，基于 Meta 与 target-awa
 - 若配置中的命名策略导致同一作用域生成名冲突，必须在写文件前报错。
 - 同一 target 下多个 export task 的输出路径不能互相覆盖。
 
-推荐 runtime / aggregate / embedded data exporter type：
+推荐 runtime / aggregate / embedded data generator type：
 
 | Type | 状态 | 说明 |
 | --- | --- | --- |
 | `json` | 第一阶段默认 | 易调试，适合 Web/TS 和通用场景。 |
 | `messagepack` | 第一阶段支持 | 紧凑二进制格式，适合包体和加载性能更敏感的 runtime。 |
 | `bin` | 第一阶段支持 | ConfigForge 私有紧密二进制 runtime data export type。 |
-| `gettext_pot` / `pot` | 第一阶段支持 | 聚合 exporter，从 target 可见 `text` 字段抽取 POT。 |
-| `lua_table` / `lua` | 第一阶段支持 | 内嵌数据 exporter；Lua 中代码和数据合一，作为 MetaAndData export task 生成 root facade 和每表 `.lua` 文件。 |
+| `gettext_pot` / `pot` | 第一阶段支持 | 聚合 data-backed generator，从 target 可见 `text` 字段抽取 POT。 |
+| `lua_table` / `lua` | 第一阶段支持 | 内嵌数据 generator；Lua 中代码和数据合一，作为 MetaAndData export task 生成 root facade 和每表 `.lua` 文件。 |
 | `yaml` | 可扩展 | 可读性高，但运行时解析成本需谨慎。 |
 | `sqlite` | 可扩展 | 适合查询型运行时。 |
 | `protobuf` | 未来设计 | 当前不要求实现；未来需要字段级 `field_number`。 |
 
-不使用模糊的 `custom`。项目自定义格式必须注册明确的 exporter ID / type ID。
+不使用模糊的 `custom`。项目自定义格式必须注册明确的 generator type ID。
 
 当前不引入通用配置 schema version 或自动兼容机制。表、字段、enum、struct 等定义依赖稳定字符串 `name` 作为长期身份；如果未来启用 Protobuf，则通过显式 `field_number` 和对应 schema evolution 策略处理二进制格式兼容。
 

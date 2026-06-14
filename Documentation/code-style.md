@@ -40,8 +40,9 @@
 - `meta` owns schema definitions, Load-then-Link, linked views, and Meta structural diagnostics.
 - `data` owns source loading, CSV readers, raw `DataSet`, row source trace, and Meta-aware resolving.
 - `validation` owns correctness checks, target-aware validation views, `ValidationReport`, and validator registry.
-- `exporter` owns runtime data export contracts, export type registry, JSON / MessagePack payloads, and future export type plugins.
-- `codegen` owns language-neutral CodeModel IR and built-in generated-code backends; backend list and capabilities are tracked in `Documentation/Implementation/09-codegen-module-detail-design.md`.
+- `generator` owns the build-facing artifact generator registry, generator requirements, concrete built-in generators, and dispatch facade. Concrete runtime data, aggregate data, report, doc, and code-like outputs live under `src/generator/<type_id>/`.
+- `data_artifact` owns the data artifact toolkit: runtime payload models, table serialization helpers, binary layout helpers, aggregate data artifact facets, and data-backed generator support utilities. It is not the build-facing registry.
+- `code_artifact` owns the code artifact toolkit: language-neutral CodeModel IR, code writer, naming / formatting / keyword handling, and reusable code-like artifact options. Concrete language generators live under `src/generator/<type_id>/`; backend list and capabilities are tracked in `Documentation/Implementation/09-codegen-module-detail-design.md`.
 - `build` owns project build orchestration, target normalization, generator requirements branch pipeline execution, and artifact scheduling/writes.
 - `cli` owns command-line parsing and user-facing messages. It should call `build` rather than orchestrating lower-level modules directly.
 - Future plugin or executor modules should follow the one-way dependency rules in `Documentation/Implementation/01-module-outline.md`.
@@ -84,7 +85,7 @@
   - `refactor(scope): restructure code without changing behavior`
   - `perf(scope): improve performance without changing behavior`
   - `chore(scope): update tooling, build configuration, or maintenance files`
-- Use an optional scope when it clarifies the affected area, such as `meta`, `data`, `validation`, `export`, `codegen`, `fragment`, `foreign-key`, `tasks`, or `targets`.
+- Use an optional scope when it clarifies the affected area, such as `meta`, `data`, `validation`, `generator`, `data-artifact`, `code-artifact`, `fragment`, `foreign-key`, `tasks`, or `targets`.
 - Keep the subject specific and action-oriented. Prefer `feat(fragment): implement variant source fragments end-to-end` over vague messages such as `fix`, `update`, or `modify code`.
 - Keep the subject within roughly 72 characters when practical.
 - Add a body for non-trivial commits. The body should explain what changed and why, not just repeat the subject.

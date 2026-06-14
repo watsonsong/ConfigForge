@@ -11,7 +11,7 @@
 | `name` | 稳定 target 名称。 |
 | `exports` | 当前 target 下的导出任务列表。每个任务通过 `type` 选择 artifact generator；generator registry 根据该 generator 声明的 input requirements 决定只依赖 Meta，还是同时依赖 Meta + Data。 |
 
-Project-level `name` / `desc` / `copyright` 可被 target 的代码生成器、schema exporter 或 manifest exporter 用于生成文件头。Codegen export task 可以通过 `file_header` 模板覆盖默认文件头。
+Project-level `name` / `desc` / `copyright` 可被 target 的 code-like、schema doc、manifest 等 generator 用于生成文件头。Code-like export task 可以通过 `file_header` 模板覆盖默认文件头。
 
 路径解析语义：
 
@@ -54,7 +54,7 @@ deduplicate = true
 | 字段 | 说明 |
 | --- | --- |
 | `name` | 当前 target 内唯一的 export task 名称。单 export task 可省略并由实现填入默认名；多 export task 省略时默认使用 `type`。 |
-| `output` | 产物输出目录。运行时表数据会在该目录下按表名生成文件；POT / manifest 这类聚合格式会在该目录下按格式选项规划一个或多个文件；codegen 会在该目录生成语言文件。 |
+| `output` | 产物输出目录。运行时表数据会在该目录下按表名生成文件；POT / manifest 这类聚合格式会在该目录下按格式选项规划一个或多个文件；code-like generator 会在该目录生成语言文件。 |
 | `type` | generator 类型 ID。运行时格式支持 `json`、`messagepack` 和 `bin`；聚合/内嵌数据格式支持 `gettext_pot` / alias `pot`、`lua_table` / alias `lua`；文档生成支持 `schema_doc`；代码生成支持的内置 backend、type id、alias 和输出形态见 [`09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix`](../Implementation/09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)。 |
 | generator 专属字段 | 可选。格式专属选项直接摊平在对应 `[[targets.exports]]` 下，例如 `type = "gettext_pot"` 的 `domain`、`file_name`、`source_reference`、`include_translator_comments`、`deduplicate`。 |
 
@@ -173,12 +173,12 @@ Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `typ
 - CLI 诊断使用 export type ID；生成代码不再包含格式枚举。
 - 如需兼容 `msgpack` 简写，可作为解析别名，但文档和生成产物统一输出 `messagepack`。
 
-当前内置聚合 / 内嵌数据 export type：
+当前内置聚合 / 内嵌数据 generator type：
 
 | Type | 说明 |
 | --- | --- |
-| `gettext_pot` / `pot` | Gettext POT 聚合 exporter；从当前 target 可见 `text` 字段抽取待翻译模板。 |
-| `lua_table` / `lua` | Lua 内嵌数据 exporter；代码和数据合一，作为 MetaAndData export task 读取 source data，并生成 root facade + 每表一个 `.lua` 文件。 |
+| `gettext_pot` / `pot` | Gettext POT 聚合 data-backed generator；从当前 target 可见 `text` 字段抽取待翻译模板。 |
+| `lua_table` / `lua` | Lua 内嵌数据 generator；代码和数据合一，作为 MetaAndData export task 读取 source data，并生成 root facade + 每表一个 `.lua` 文件。 |
 
 未来可扩展但当前不实现：
 
@@ -432,7 +432,7 @@ ConfigForge 提供标准 RuntimeDataReader / RuntimeDataLoader adapter 作为可
 
 POT、Asset Manifest、Schema Doc 等辅助产物不再引入独立的 `targets.special_exporters` 配置层，而是明确作为 `[[targets.exports]]` 的一种 `type`。这样 TOML 结构保持简单：`target.exports` 统一表示“当前 target 要生成的产物”，由 generator requirements 区分 MetaOnly 与 MetaAndData 调度路径。
 
-非运行时 data exporter 与 runtime data exporter 的定位不同：runtime data 面向游戏运行时加载；POT、资源清单、审计索引等面向本地化、资源打包、工具链或文档流程。它们共享同一个 Meta / Data / ExportView 语义，但非运行时 data exporter 可以读取被 runtime payload 隐藏、同时又被 exporter policy 显式允许的辅助字段，例如 text translator comment 或 asset bundle tag。无论是否读取辅助字段，都必须遵守 target tags、table/field visibility、`row_export` 和 artifact path conflict 规则。
+辅助产物 generator 与 runtime data generator 的定位不同：runtime data 面向游戏运行时加载；POT、资源清单、审计索引等 data-backed auxiliary generator 面向本地化、资源打包、工具链流程，Schema Doc 这类 MetaOnly doc generator 面向文档协作流程。Data-backed auxiliary generator 共享同一个 Meta / Data / ExportView 语义，并可以读取被 runtime payload 隐藏、同时又被 generator policy 显式允许的辅助字段，例如 text translator comment 或 asset bundle tag；MetaOnly doc generator 只读取 linked Meta、Project context 与 effective tags，不读取 Data。无论是否读取 Data，都必须遵守 target tags、table/field visibility 和 artifact path conflict 规则。
 
 目标态配置继续使用 target 内的 `[[targets.exports]]` 数组表。示例：
 
@@ -458,8 +458,8 @@ deduplicate = true
 | --- | --- |
 | `name` | 当前 target 内唯一的 export task 名称，用于诊断和 artifact key。 |
 | `output` | 数据产物输出目录。聚合格式如果只产生一个文件，应通过格式选项或默认规则确定文件名。 |
-| `type` | exporter 类型 ID，例如 `gettext_pot`、`asset_manifest`。禁止使用模糊 `custom`。 |
-| exporter 专属字段 | 直接摊平在当前 `[[targets.exports]]` 下，例如 `domain`、`file_name`、`source_reference`。 |
+| `type` | generator 类型 ID，例如 `gettext_pot`、`asset_manifest`、`schema_doc`。禁止使用模糊 `custom`。 |
+| generator 专属字段 | 直接摊平在当前 `[[targets.exports]]` 下，例如 `domain`、`file_name`、`source_reference`。 |
 
 所有 export task 产物，无论是 runtime table data、POT / manifest 还是 codegen，都必须一起进入 artifact plan，最终由 Artifact Writer 统一检查路径冲突并写入。当前实现的冲突检查是 lexical path level：会折叠 `.` / `..`，但不会解析 symlink，也不会按大小写不敏感文件系统折叠 path key；平台增强策略见 Implementation / Tech 文档。
 

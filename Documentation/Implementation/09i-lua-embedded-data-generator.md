@@ -7,7 +7,7 @@
 ## Related docs
 
 - [`09-codegen-module-detail-design.md`](09-codegen-module-detail-design.md) — code artifact toolkit 总览和专题索引。
-- [`08-exporter-module-detail-design.md`](08-exporter-module-detail-design.md) — Data exporter contract、format registry 与 runtime data artifact 输出。
+- [`08-exporter-module-detail-design.md`](08-exporter-module-detail-design.md) — data artifact toolkit 与 runtime data artifact 输出。
 - [`09f-codegen-core-model-and-options.md`](09f-codegen-core-model-and-options.md) — 当前 format-agnostic codegen 输入输出模型。
 - [`../Design/06-export-cli.md`](../Design/06-export-cli.md) — 用户可见的导出、Lua table format 与 CLI 行为。
 - [`01-module-outline.md`](01-module-outline.md) — Rust 模块边界与依赖方向。
@@ -45,8 +45,8 @@ src/generator/lua/
 
 原因：
 
-- `exporter` 已经允许依赖 `meta`、`data`、`artifact` 和 `diagnostic`，适合消费 target-aware resolved data；
-- 现有 `codegen` 文档明确约束 Rust/C++/TypeScript codegen 只依赖 Meta 和 target tags，不绑定任何 MetaAndData export task；
+- `generator` 中的 concrete data-backed generator 可以依赖 `meta`、`data`、`artifact` 和 `diagnostic`，适合消费 target-aware resolved data；
+- 现有 `code_artifact` 文档明确约束 Rust/C++/TypeScript 这类 format-agnostic language generator 只依赖 Meta 和 target tags，不绑定任何 MetaAndData export task；
 - Lua 的输出既是运行时数据，又包含访问 API，因此语义上更接近 MetaAndData export type，而不是纯代码 stub。
 
 当前模块边界：`lua_table` 作为 `src/generator/lua/` 内的 concrete generator 实现，继续复用 aggregate artifact 的路径规划和 sink 写出能力；`GeneratorRegistry` 直接注册为 `requirements = Meta + Data` 的 build-facing `ArtifactGenerator`。Lua 基础代码文本选项复用 `code_artifact::CodeArtifactOptions`（file header、i18n、naming / formatting 等通用能力），但 data input 只通过 task generator contract 注入；不引入 `code_artifact -> data` 或 `code_artifact -> build` 依赖。
@@ -63,7 +63,7 @@ ProjectConfig::from_path
   -> ArtifactWriter
 ```
 
-这保持现有单向依赖：`exporter -> meta/data/artifact`，不需要 `codegen -> data`，也不需要让 `codegen` 反向依赖 `exporter`。
+这保持现有单向依赖：concrete generator 组合 `data_artifact` / `code_artifact` toolkit，不需要 `code_artifact -> data`，也不需要让 `code_artifact` 反向依赖 `data_artifact`。
 
 ## 9i.3 配置模型
 

@@ -1,22 +1,22 @@
 # 07. Artifact 模块详细设计
 
-本文档描述 `src/artifact/` 模块的实现边界。Artifact 模块负责统一管理 ConfigForge 的所有文件制品：runtime data、generated code、未来 POT / asset manifest 等聚合 data export 输出。Exporter 和 Codegen 只负责生成制品内容与相对目标路径；Build 负责创建统一的 Artifact 写入协调器，由协调器打开每个 artifact 的写入流，并执行路径冲突检查、dry-run、direct 写入或 temp-commit 写入。
+本文档描述 `src/artifact/` 模块的实现边界。Artifact 模块负责统一管理 ConfigForge 的所有文件制品：runtime data、generated code、POT / asset manifest 等聚合 data artifact、schema / validation report 等辅助输出。Artifact generator 和对应 toolkit 只负责生成制品内容与相对目标路径；Build 负责创建统一的 Artifact 写入协调器，由协调器打开每个 artifact 的写入流，并执行路径冲突检查、dry-run、direct 写入或 temp-commit 写入。
 
 ## 7.1 设计目标
 
 Artifact 模块需要解决：
 
-1. 统一 runtime data 与 generated code 的制品模型，避免 exporter / codegen 各自定义写文件流程。
+1. 统一 runtime data、generated code、report/doc/manifest 等制品模型，避免 generator / toolkit 各自定义写文件流程。
 2. 通过中心协调器集中占用输出路径并检查冲突，覆盖跨 export task、runtime data 与 generated code 之间的冲突。
 3. 支持 `dry-run`：完整执行配置加载、Meta link、data load、validation、serialization/codegen 和路径规划，但不写入最终文件。
 4. 支持 `direct` 与 `temp-commit` 两种写入策略，并支持 `dry-run` 写入计划。
 5. 生成稳定的写入结果：路径稳定排序、bytes/文本内容统一表达。
-6. 保持模块依赖方向简单：artifact 是底层服务模块，不依赖 exporter、codegen、build、project、data、validation。
+6. 保持模块依赖方向简单：artifact 是底层服务模块，不依赖 generator、data_artifact、code_artifact、build、project、data、validation。
 
 非目标：
 
-- 不决定哪些 runtime data / codegen task 应该执行；task 编排属于 `build`。
-- 不理解 Meta、DataSet、TargetTags 或运行时格式；语义生成属于 exporter / codegen。
+- 不决定哪些 runtime data / code-like / report / doc task 应该执行；task 编排属于 `build`。
+- 不理解 Meta、DataSet、TargetTags 或运行时格式；语义生成属于 artifact generator 及其 data_artifact / code_artifact toolkit。
 - 不负责 CLI 参数解析；CLI 只把 dry-run / write mode 传给 build options。
 - 第一阶段不实现远端上传、增量缓存、分布式 artifact store。
 
@@ -64,7 +64,7 @@ impl ArtifactContent {
 }
 ```
 
-Codegen 可以返回 `Text`，runtime data exporter 可以返回 `Binary`。Artifact Writer 不关心文本编码转换之外的业务语义；文本统一以 UTF-8 写入。
+Code-like generator 可以返回 `Text`，runtime data generator 可以返回 `Binary`。Artifact Writer 不关心文本编码转换之外的业务语义；文本统一以 UTF-8 写入。
 
 ### 7.3.3 `ArtifactWriteMode`
 
@@ -95,7 +95,7 @@ pub struct ArtifactWriteResult {
 
 ### 7.3.5 `ArtifactSink`
 
-streaming 化的主入口是中心协调器 `ArtifactSink`，而不是让 exporter / codegen 自行持有文件句柄或绕过 artifact 模块写文件：
+streaming 化的主入口是中心协调器 `ArtifactSink`，而不是让 generator / toolkit 自行持有文件句柄或绕过 artifact 模块写文件：
 
 ```rust
 pub struct ArtifactSink { /* private */ }

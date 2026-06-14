@@ -62,19 +62,19 @@ pub struct CodeExportTarget {
 
 `CodeExportTarget` 不应直接由 CLI 硬编码构造；正式流程应来自 Project Config 的 `[[targets.exports]] type = "rust" / "cpp" / "typescript"`。生成代码必须保持格式无关：CodeModel 只依赖 Meta 和 target tags，table data file 常量使用逻辑表名（例如 `items`），实际解析 JSON / MessagePack / bin 由运行时传入的 loader / reader 实现决定。
 
-### 9.4.2.1 Data export format 与 codegen 关系
+### 9.4.2.1 Data artifact generator 与 code artifact 关系
 
 解析规则：
 
-- Project Config 中 `[[targets.exports]] type = "json"` 选择 JSON exporter。
-- Project Config 中 `[[targets.exports]] type = "messagepack"` 选择 MessagePack exporter。
-- Project Config 中 `[[targets.exports]] type = "bin"` 选择私有紧密二进制 exporter。
-- Project Config 中 `[[targets.exports]] type = "gettext_pot"` / `"asset_manifest"` 等聚合格式仍属于 MetaAndData export task，但不产生 generated runtime loader 直接消费的 table data。Asset Manifest 已实现为聚合 exporter；CSV 输出通过 `type = "asset_manifest"` + `format = "csv"` 表达。
+- Project Config 中 `[[targets.exports]] type = "json"` 选择 JSON data-backed generator。
+- Project Config 中 `[[targets.exports]] type = "messagepack"` 选择 MessagePack data-backed generator。
+- Project Config 中 `[[targets.exports]] type = "bin"` 选择私有紧密二进制 data-backed generator。
+- Project Config 中 `[[targets.exports]] type = "gettext_pot"` / `"asset_manifest"` 等聚合格式仍属于 MetaAndData export task，但不产生 generated runtime loader 直接消费的 table data。Asset Manifest 已实现为聚合 data-backed generator；CSV 输出通过 `type = "asset_manifest"` + `format = "csv"` 表达。
 - Project Config 中 `[[targets.exports]] type = "lua_table"` 属于 data-backed mixed generator：它会直接生成 Lua 数据+访问代码合一产物，必须依赖当前 target 的 resolved data；不要把它接入当前只服务 format-agnostic language backend 的 `CodeGenerator` trait。长期应让它通过 code artifact facet 复用文件头、命名、格式化等通用代码生成选项。
 - 可兼容解析 `"msgpack"` 为 MessagePack，但错误信息、文档、生成代码和 manifest 中统一使用规范名 `messagepack`。
 - Project Config 使用 `[[targets.exports]]` 数组表表达所有导出任务；format-agnostic codegen 只关心 Meta 和 target tags，不绑定任意 MetaAndData export task。更抽象的 artifact generator 模型会通过 requirements 声明是否需要 Data，而不是把 `CodeGenerator` 固定继承到 MetaOnly 分支。
 
-Project Config 层模型（`TargetConfig` 是 project-level 聚合结构；build 会按 exporter contract 把统一 export task 适配为 exporter / codegen 模块内部配置）：
+Project Config 层模型（`TargetConfig` 是 project-level 聚合结构；build 会按 generator requirements 把统一 export task 适配为具体 generator / code artifact toolkit 内部配置）：
 
 ```rust
 pub struct TargetConfig {
@@ -123,7 +123,7 @@ pub struct NormalizedExportTask {
 
 文件规划规则：
 
-| Format | 文件后缀 | exporter 写出方式 | 生成代码读取方式 |
+| Format | 文件后缀 | generator 写出方式 | 生成代码读取方式 |
 | --- | --- | --- | --- |
 | `Json` | `.json` | `serde_json::to_writer_pretty` 通过 shared sink 写出 payload envelope。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 打开 JSON payload 为通用 reader；生成代码读取 rows 并构造 typed rows。 |
 | `MessagePack` | `.msgpack` | `rmp-serde` writer API 通过 shared sink 写出同一 payload envelope 的 MessagePack bytes。 | `RuntimeDataLoader` 根据 `DATA_FILE` / `DataFile` / `dataFile` 打开 MessagePack payload 为通用 reader；生成代码读取 rows 并构造 typed rows。 |

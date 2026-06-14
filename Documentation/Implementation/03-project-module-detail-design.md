@@ -87,9 +87,9 @@ pub struct TargetConfig {
 
 `TargetConfig` 是 project-level 聚合结构，可以引用：
 
-- `TargetExportConfig`：统一 export task 配置，包含 `name`、`type`、`output` 与 flattened exporter 专属选项。
+- `TargetExportConfig`：统一 export task 配置，包含 `name`、`type`、`output` 与 flattened generator 专属选项。
 
-Project 模块只解析和归一化配置，不根据 `type` 判断 task 依赖，也不执行 exporter 或 codegen。`TargetExportConfig` 会在 Build 归一化阶段转换为 `NormalizedExportTask`。
+Project 模块只解析和归一化配置，不根据 `type` 判断 task 依赖，也不执行 artifact generator 或 code artifact renderer。`TargetExportConfig` 会在 Build 归一化阶段转换为 `NormalizedExportTask`。
 
 Target 本身只保存 Project Config 中声明的静态 `tags`。CLI 传入的额外 tags 不写回 `ProjectConfig`，而是在 Build 归一化阶段与 target tags 合并成 effective target tags。这样同一个 `ProjectConfig` 可以被不同 CLI 上下文复用，例如常规 shipping 构建与 `--tag s1` 赛季构建不会互相污染。
 

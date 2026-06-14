@@ -117,9 +117,9 @@ file_name = "client-validation.html"
 | `format` | string | `html` | `html` / `markdown` / `json` / `csv`。 |
 | `file_name` | string | `validation-report.<ext>` | 输出文件名。CSV 当前为单文件模式。 |
 | `title` | string | 自动标题 | 覆盖报告标题。 |
-| `include_warnings` | bool | 未实现 | 当前始终包含 warning。 |
-| `include_errors` | bool | 未实现 | 当前始终包含 error。 |
-| `group_by` | string[] | 未实现 | 当前固定输出 severity、table、owner、domain、code 分组。 |
+| `include_warnings` | bool | Reserved / 未开放 | 当前 Project Config 不接受该字段；设置后会作为 unknown option 报错。当前始终包含 warning。 |
+| `include_errors` | bool | Reserved / 未开放 | 当前 Project Config 不接受该字段；设置后会作为 unknown option 报错。当前始终包含 error。 |
+| `group_by` | string[] | Reserved / 未开放 | 当前 Project Config 不接受该字段；设置后会作为 unknown option 报错。当前固定输出 severity、table、owner、domain、code 分组。 |
 
 Build 语义：
 

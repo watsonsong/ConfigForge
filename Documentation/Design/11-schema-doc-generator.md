@@ -96,7 +96,7 @@ format = "markdown"
 | `output` | path | 必填 | 输出目录。Markdown 下包含 `index.md` 和每表一个 `*.md`；HTML 下包含 `index.html` 和每表一个 `*.html`。 |
 | `format` | string | `markdown` | 当前实现支持 `markdown` / `html`。未知格式显式报错；JSON Schema / Mermaid 不支持。 |
 | `index_file` | string | format-aware：Markdown 为 `index.md`，HTML 为 `index.html` | 文档入口文件名，不允许包含路径分隔符；HTML 模式要求 `.html` 后缀。 |
-| `file_name_style` | string | `table_name` | 单表文件命名策略。当前固定为 canonical table name + format 扩展名（`.md` 或 `.html`）。 |
+| `file_name_style` | string | Reserved / 未开放 | 单表文件命名策略的未来选项。当前 Project Config 不接受该字段；设置后会作为 unknown option 报错。当前固定为 canonical table name + format 扩展名（`.md` 或 `.html`）。 |
 | `title` | string | project name 或 `ConfigForge Schema` | index 顶部标题。 |
 | `include_hidden` | bool | `false` | 是否输出当前 target 下不可见的 table/field/index，并标记为 hidden。 |
 | `include_internal` | bool | `false` | 是否输出 `export = false` 的 tool-only/support 字段。 |
