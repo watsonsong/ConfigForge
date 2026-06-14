@@ -126,7 +126,7 @@ resolved value，减少 validation 重复解析 raw cell。
 - 标准 fixture 与 validation 集成测试通过：`cargo test --test cli_integration validation standard_project`。
 - 新增针对 default vs explicit cell source、expanded list element source 的回归测试。
 
-## [ ] Step 3：迁移 built-in validators 到 resolved-aware accessors
+## [x] Step 3：迁移 built-in validators 到 resolved-aware accessors
 
 目标：让 built-in validators 不再直接从 `DataRow` 解释值，而是通过统一 accessor 获取 typed
 resolved value 或显式 raw string。

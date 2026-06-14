@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::common::{
-    compare_values, linked_field, optional_bool, optional_string, required_string,
+    compare_values, field_value, linked_field, optional_bool, optional_string, required_string,
     scalar_field_kind, validate_allowed_params, validator_config_error,
 };
 use super::table_common::{GroupByConfig, GroupKey, GroupedRows, OrderByConfig, OrderedRow};
@@ -152,13 +152,7 @@ impl<'meta> MonotonicValidator<'meta> {
         table_view: &crate::validation::ExportTableView<'_, '_>,
         ordered: OrderedRow,
     ) -> MonotonicRow {
-        let value = table_view
-            .table
-            .rows
-            .get(ordered.row_index)
-            .and_then(|row| row.get(&self.config.field))
-            .cloned()
-            .unwrap_or_default();
+        let value = field_value(table_view, ordered.visible_row_index, &self.config.field);
         MonotonicRow {
             order_value: ordered.order_value.clone(),
             value,

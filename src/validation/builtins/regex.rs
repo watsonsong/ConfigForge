@@ -9,8 +9,8 @@ use crate::{
 };
 
 use super::common::{
-    optional_bool, optional_string, required_string, scalar_field_kind, validate_allowed_params,
-    validator_config_error,
+    field_value, optional_bool, optional_string, required_string, scalar_field_kind,
+    validate_allowed_params, validator_config_error,
 };
 use crate::validation::diagnostic::ValidationIssueLocation;
 use crate::validation::registry::{
@@ -116,14 +116,12 @@ impl<'meta> CompiledValidator<'meta> for RegexValidator<'meta> {
             return;
         }
 
-        for visible_row in &table_view.visible_rows {
-            let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
+        for (visible_row_index, visible_row) in table_view.visible_rows.iter().enumerate() {
+            if table_view.table.rows.get(visible_row.row_index).is_none() {
                 continue;
-            };
-            let value = row
-                .get(self.field_name)
-                .map(String::as_str)
-                .unwrap_or_default();
+            }
+            let value = field_value(table_view, visible_row_index, self.field_name);
+            let value = value.as_str();
             if value.trim().is_empty() && self.config.allow_empty {
                 continue;
             }

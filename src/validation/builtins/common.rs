@@ -6,13 +6,15 @@ use std::collections::BTreeSet;
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
-    data::DataRow,
+    data::DataValue,
     diagnostic::code::CF_VALIDATION_INVALID_CONFIG,
     meta::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedTableMeta, PrimitiveFieldType,
         ValidatorMeta,
     },
 };
+
+use crate::validation::ExportTableView;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ScalarFieldKind {
@@ -340,8 +342,30 @@ pub(super) fn validator_config_error(
     )
 }
 
-pub(super) fn row_value<'a>(row: &'a DataRow, field_name: &str) -> &'a str {
-    row.get(field_name).map(String::as_str).unwrap_or_default()
+pub(super) fn resolved_data_value<'a>(
+    table_view: &'a ExportTableView<'_, '_>,
+    visible_row_index: usize,
+    field_name: &str,
+) -> Option<&'a DataValue> {
+    table_view
+        .resolved_value(visible_row_index, field_name)
+        .map(|value| &value.value)
+}
+
+pub(super) fn field_value(
+    table_view: &ExportTableView<'_, '_>,
+    visible_row_index: usize,
+    field_name: &str,
+) -> String {
+    table_view
+        .resolved_value(visible_row_index, field_name)
+        .and_then(|value| value.scalar_export_string())
+        .or_else(|| {
+            table_view
+                .raw_cell(visible_row_index, field_name)
+                .map(str::to_owned)
+        })
+        .unwrap_or_default()
 }
 
 pub(super) fn is_empty_value(value: &str) -> bool {

@@ -3,7 +3,7 @@
 
 use crate::{
     Result,
-    data::{VectorValue, typed_value::parse_vector_field_value},
+    data::{DataValue, VectorValue, typed_value::parse_vector_field_value},
     meta::{ExportCondition, LinkedMetaModel, TargetTags, ValidationSeverity, ValidatorMeta},
     validation::diagnostic::ValidationIssueLocation,
     validation::registry::{
@@ -13,8 +13,8 @@ use crate::{
 };
 
 use super::common::{
-    is_empty_value, linked_field, linked_table, optional_bool, optional_number,
-    optional_string_array, row_value, validate_allowed_params, validator_config_error,
+    field_value, is_empty_value, linked_field, linked_table, optional_bool, optional_number,
+    optional_string_array, resolved_data_value, validate_allowed_params, validator_config_error,
 };
 
 pub struct VectorValidatorFactory;
@@ -123,15 +123,18 @@ impl<'meta> CompiledValidator<'meta> for VectorValidator<'meta> {
             return;
         }
 
-        for visible_row in &table_view.visible_rows {
-            let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
-                continue;
-            };
-            let value = row_value(row, self.field_name);
-            if is_empty_value(value) && self.config.allow_empty {
+        for (visible_row_index, visible_row) in table_view.visible_rows.iter().enumerate() {
+            if table_view.table.rows.get(visible_row.row_index).is_none() {
                 continue;
             }
-            if is_empty_value(value) {
+            let value = field_value(table_view, visible_row_index, self.field_name);
+            let value = value.as_str();
+            let resolved_value =
+                resolved_data_value(table_view, visible_row_index, self.field_name);
+            if resolved_value.is_none() && is_empty_value(value) && self.config.allow_empty {
+                continue;
+            }
+            if resolved_value.is_none() && is_empty_value(value) {
                 issues.push(self.issue(
                     ctx,
                     visible_row.row_index,
@@ -140,17 +143,23 @@ impl<'meta> CompiledValidator<'meta> for VectorValidator<'meta> {
                 ));
                 continue;
             }
-            let row_number = visible_row
-                .source_row_number
-                .unwrap_or(visible_row.row_index + 1);
-            let Ok(parsed) = parse_vector_field_value(
-                self.table_name,
-                row_number,
-                self.field_name,
-                self.field,
-                value,
-            ) else {
-                continue;
+            let parsed = match resolved_value {
+                Some(DataValue::Vector(vector)) => vector.clone(),
+                _ => {
+                    let row_number = visible_row
+                        .source_row_number
+                        .unwrap_or(visible_row.row_index + 1);
+                    let Ok(parsed) = parse_vector_field_value(
+                        self.table_name,
+                        row_number,
+                        self.field_name,
+                        self.field,
+                        value,
+                    ) else {
+                        continue;
+                    };
+                    parsed
+                }
             };
             let components = vector_components_as_f64(&parsed);
             if components.len() != self.dimension {

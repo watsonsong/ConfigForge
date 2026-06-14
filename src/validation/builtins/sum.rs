@@ -7,7 +7,7 @@ use crate::{
 };
 
 use super::common::{
-    linked_field, optional_bool, optional_number, required_string, scalar_field_kind,
+    field_value, linked_field, optional_bool, optional_number, required_string, scalar_field_kind,
     validate_allowed_params, validator_config_error,
 };
 use super::table_common::{GroupByConfig, GroupKey, GroupedRows, parse_numeric_value};
@@ -86,14 +86,15 @@ impl<'meta> CompiledValidator<'meta> for SumValidator<'meta> {
         for (group_key, rows) in grouped_rows.iter() {
             let mut actual = 0.0;
             for grouped_row in rows {
-                let Some(row) = table_view.table.rows.get(grouped_row.row_index) else {
+                if table_view.table.rows.get(grouped_row.row_index).is_none() {
                     continue;
-                };
-                let value = row
-                    .get(&self.config.field)
-                    .map(String::as_str)
-                    .unwrap_or_default();
-                match parse_numeric_value("sum", &self.config.field, value, self.config.skip_empty)
+                }
+                let value = field_value(
+                    table_view,
+                    grouped_row.visible_row_index,
+                    &self.config.field,
+                );
+                match parse_numeric_value("sum", &self.config.field, &value, self.config.skip_empty)
                 {
                     Ok(Some(value)) => actual += value,
                     Ok(None) => {}

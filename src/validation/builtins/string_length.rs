@@ -7,8 +7,8 @@ use crate::{
 };
 
 use super::common::{
-    optional_bool, optional_string, optional_usize, scalar_field_kind, validate_allowed_params,
-    validator_config_error,
+    field_value, optional_bool, optional_string, optional_usize, scalar_field_kind,
+    validate_allowed_params, validator_config_error,
 };
 use crate::validation::diagnostic::ValidationIssueLocation;
 use crate::validation::registry::{
@@ -114,14 +114,12 @@ impl<'meta> CompiledValidator<'meta> for StringLengthValidator<'meta> {
             return;
         }
 
-        for visible_row in &table_view.visible_rows {
-            let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
+        for (visible_row_index, visible_row) in table_view.visible_rows.iter().enumerate() {
+            if table_view.table.rows.get(visible_row.row_index).is_none() {
                 continue;
-            };
-            let raw_value = row
-                .get(self.field_name)
-                .map(String::as_str)
-                .unwrap_or_default();
+            }
+            let raw_value = field_value(table_view, visible_row_index, self.field_name);
+            let raw_value = raw_value.as_str();
             if raw_value.trim().is_empty() && self.config.allow_empty {
                 continue;
             }

@@ -3,7 +3,7 @@
 
 use crate::{
     Result,
-    data::{ColorValue, typed_value::parse_color_field_value},
+    data::{ColorValue, DataValue, typed_value::parse_color_field_value},
     meta::{
         ColorChannel, ColorSpace, ExportCondition, LinkedMetaModel, PrimitiveFieldType, TargetTags,
         ValidationSeverity, ValidatorMeta,
@@ -16,8 +16,9 @@ use crate::{
 };
 
 use super::common::{
-    is_empty_value, linked_field, linked_table, optional_bool, optional_number, optional_string,
-    optional_string_array, row_value, validate_allowed_params, validator_config_error,
+    field_value, is_empty_value, linked_field, linked_table, optional_bool, optional_number,
+    optional_string, optional_string_array, resolved_data_value, validate_allowed_params,
+    validator_config_error,
 };
 
 pub struct ColorValidatorFactory;
@@ -127,15 +128,18 @@ impl<'meta> CompiledValidator<'meta> for ColorValidator<'meta> {
             return;
         }
 
-        for visible_row in &table_view.visible_rows {
-            let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
-                continue;
-            };
-            let value = row_value(row, self.field_name);
-            if is_empty_value(value) && self.config.allow_empty {
+        for (visible_row_index, visible_row) in table_view.visible_rows.iter().enumerate() {
+            if table_view.table.rows.get(visible_row.row_index).is_none() {
                 continue;
             }
-            if is_empty_value(value) {
+            let value = field_value(table_view, visible_row_index, self.field_name);
+            let value = value.as_str();
+            let resolved_value =
+                resolved_data_value(table_view, visible_row_index, self.field_name);
+            if resolved_value.is_none() && is_empty_value(value) && self.config.allow_empty {
+                continue;
+            }
+            if resolved_value.is_none() && is_empty_value(value) {
                 issues.push(self.issue(
                     ctx,
                     visible_row.row_index,
@@ -144,17 +148,23 @@ impl<'meta> CompiledValidator<'meta> for ColorValidator<'meta> {
                 ));
                 continue;
             }
-            let row_number = visible_row
-                .source_row_number
-                .unwrap_or(visible_row.row_index + 1);
-            let Ok(parsed) = parse_color_field_value(
-                self.table_name,
-                row_number,
-                self.field_name,
-                self.field,
-                value,
-            ) else {
-                continue;
+            let parsed = match resolved_value {
+                Some(DataValue::Color(color)) => color.clone(),
+                _ => {
+                    let row_number = visible_row
+                        .source_row_number
+                        .unwrap_or(visible_row.row_index + 1);
+                    let Ok(parsed) = parse_color_field_value(
+                        self.table_name,
+                        row_number,
+                        self.field_name,
+                        self.field,
+                        value,
+                    ) else {
+                        continue;
+                    };
+                    parsed
+                }
             };
             if let Some(violation) = self.config.channel_violation(&parsed) {
                 issues.push(self.issue(

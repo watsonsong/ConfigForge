@@ -7,7 +7,8 @@ use crate::{
 };
 
 use super::common::{
-    is_empty_value, linked_field, required_string, validate_allowed_params, validator_config_error,
+    field_value, is_empty_value, linked_field, required_string, validate_allowed_params,
+    validator_config_error,
 };
 use super::condition::RowCondition;
 use crate::validation::diagnostic::ValidationIssueLocation;
@@ -84,17 +85,15 @@ impl<'meta> CompiledValidator<'meta> for RequiredWhenValidator<'meta> {
             issues.push(self.config_issue(ctx));
             return;
         }
-        for visible_row in &table_view.visible_rows {
-            let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
-                continue;
-            };
-            if !self.config.when.matches(row) {
+        for (visible_row_index, visible_row) in table_view.visible_rows.iter().enumerate() {
+            if table_view.table.rows.get(visible_row.row_index).is_none() {
                 continue;
             }
-            let value = row
-                .get(&self.config.field)
-                .map(String::as_str)
-                .unwrap_or_default();
+            if !self.config.when.matches(table_view, visible_row_index) {
+                continue;
+            }
+            let value = field_value(table_view, visible_row_index, &self.config.field);
+            let value = value.as_str();
             if is_empty_value(value) {
                 issues.push(self.missing_issue(
                     ctx,

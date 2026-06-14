@@ -3553,6 +3553,63 @@ fn vector_validator_checks_magnitude_when_components_pass() {
 }
 
 #[test]
+fn built_in_validators_use_resolved_defaults_and_expanded_values() {
+    let range_meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+
+            [[tables.fields]]
+            name = "score"
+            type = "int"
+            default = 5
+
+            [[tables.fields.validators]]
+            kind = "range"
+            min = 10
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = range_meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new("items", vec![BTreeMap::new()])]);
+
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    assert!(message.contains("score` value is below min `10`"));
+
+    let vector_meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "spawns"
+            source = "spawns.csv"
+
+            [[tables.fields]]
+            name = "position"
+            type = "vector3"
+            vector_format = "expanded"
+
+            [[tables.fields.validators]]
+            kind = "vector"
+            components = ["x"]
+            max = 2
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = vector_meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![DataTable::new(
+        "spawns",
+        vec![BTreeMap::from([
+            ("position.x".to_owned(), "3".to_owned()),
+            ("position.y".to_owned(), "0".to_owned()),
+            ("position.z".to_owned(), "0".to_owned()),
+        ])],
+    )]);
+
+    let message = validate_error(validate_data_set(&linked_meta, &data_set));
+    assert!(message.contains("component `x` exceeds max `2`"));
+}
+
+#[test]
 fn color_validator_checks_alpha_channel_bounds_and_metadata() {
     let meta = MetaModel::from_toml_str(
         r#"

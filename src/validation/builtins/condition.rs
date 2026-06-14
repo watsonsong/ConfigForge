@@ -1,12 +1,13 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{Result, data::DataRow, meta::LinkedTableMeta};
+use crate::{Result, meta::LinkedTableMeta};
 
 use super::common::{
-    is_empty_value, linked_field, literal_array_to_strings, literal_to_string, row_value,
+    field_value, is_empty_value, linked_field, literal_array_to_strings, literal_to_string,
     validator_config_error,
 };
+use crate::validation::ExportTableView;
 
 pub(super) enum RowCondition {
     Leaf(LeafCondition),
@@ -87,12 +88,22 @@ impl RowCondition {
         )?))
     }
 
-    pub(super) fn matches(&self, row: &DataRow) -> bool {
+    pub(super) fn matches(
+        &self,
+        table_view: &ExportTableView<'_, '_>,
+        visible_row_index: usize,
+    ) -> bool {
         match self {
-            Self::Leaf(leaf) => leaf.matches(row),
-            Self::All(children) => children.iter().all(|child| child.matches(row)),
-            Self::Any(children) => children.iter().any(|child| child.matches(row)),
-            Self::None(children) => children.iter().all(|child| !child.matches(row)),
+            Self::Leaf(leaf) => leaf.matches(table_view, visible_row_index),
+            Self::All(children) => children
+                .iter()
+                .all(|child| child.matches(table_view, visible_row_index)),
+            Self::Any(children) => children
+                .iter()
+                .any(|child| child.matches(table_view, visible_row_index)),
+            Self::None(children) => children
+                .iter()
+                .all(|child| !child.matches(table_view, visible_row_index)),
         }
     }
 }
@@ -199,8 +210,9 @@ impl LeafCondition {
         })
     }
 
-    fn matches(&self, row: &DataRow) -> bool {
-        let value = row_value(row, &self.field);
+    fn matches(&self, table_view: &ExportTableView<'_, '_>, visible_row_index: usize) -> bool {
+        let value = field_value(table_view, visible_row_index, &self.field);
+        let value = value.as_str();
         match &self.operation {
             LeafOperation::Equals(expected) => value == expected,
             LeafOperation::NotEquals(expected) => value != expected,

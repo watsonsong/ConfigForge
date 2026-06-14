@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::common::{
-    compare_values, is_empty_value, linked_field, optional_bool, required_string,
+    compare_values, field_value, is_empty_value, linked_field, optional_bool, required_string,
     scalar_field_kind, validate_allowed_params, validator_config_error,
 };
 use crate::validation::diagnostic::ValidationIssueLocation;
@@ -82,18 +82,14 @@ impl<'meta> CompiledValidator<'meta> for CompareValidator<'meta> {
         let Some(table_view) = ctx.export_view.table(self.table_name) else {
             return;
         };
-        for visible_row in &table_view.visible_rows {
-            let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
+        for (visible_row_index, visible_row) in table_view.visible_rows.iter().enumerate() {
+            if table_view.table.rows.get(visible_row.row_index).is_none() {
                 continue;
-            };
-            let left = row
-                .get(&self.config.left)
-                .map(String::as_str)
-                .unwrap_or_default();
-            let right = row
-                .get(&self.config.right)
-                .map(String::as_str)
-                .unwrap_or_default();
+            }
+            let left = field_value(table_view, visible_row_index, &self.config.left);
+            let right = field_value(table_view, visible_row_index, &self.config.right);
+            let left = left.as_str();
+            let right = right.as_str();
             if is_empty_value(left) || is_empty_value(right) {
                 if self.config.skip_if_either_empty {
                     continue;

@@ -11,8 +11,8 @@ use crate::{
 };
 
 use super::common::{
-    ScalarFieldKind, compare_values, is_empty_value, linked_field, optional_string_array,
-    scalar_field_kind, validator_config_error,
+    ScalarFieldKind, compare_values, field_value, is_empty_value, linked_field,
+    optional_string_array, scalar_field_kind, validator_config_error,
 };
 use crate::validation::ExportTableView;
 
@@ -62,7 +62,11 @@ impl GroupByConfig {
         Ok(Self { fields })
     }
 
-    pub(crate) fn key_for(&self, row: &crate::data::DataRow) -> GroupKey {
+    pub(crate) fn key_for(
+        &self,
+        table_view: &ExportTableView<'_, '_>,
+        visible_row_index: usize,
+    ) -> GroupKey {
         if self.fields.is_empty() {
             return GroupKey::WholeTable;
         }
@@ -71,7 +75,7 @@ impl GroupByConfig {
                 .iter()
                 .map(|field| GroupKeyPart {
                     field: field.name.clone(),
-                    value: row.get(&field.name).cloned().unwrap_or_default(),
+                    value: field_value(table_view, visible_row_index, &field.name),
                 })
                 .collect(),
         )
@@ -119,14 +123,15 @@ impl GroupedRows {
         group_by: &GroupByConfig,
     ) -> Self {
         let mut groups = BTreeMap::new();
-        for visible_row in &table_view.visible_rows {
-            let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
+        for (visible_row_index, visible_row) in table_view.visible_rows.iter().enumerate() {
+            if table_view.table.rows.get(visible_row.row_index).is_none() {
                 continue;
-            };
+            }
             groups
-                .entry(group_by.key_for(row))
+                .entry(group_by.key_for(table_view, visible_row_index))
                 .or_insert_with(Vec::new)
                 .push(GroupedRow {
+                    visible_row_index,
                     row_index: visible_row.row_index,
                     source_row_number: visible_row.source_row_number,
                 });
@@ -141,6 +146,7 @@ impl GroupedRows {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GroupedRow {
+    pub(crate) visible_row_index: usize,
     pub(crate) row_index: usize,
     pub(crate) source_row_number: Option<usize>,
 }
@@ -200,9 +206,10 @@ impl OrderByConfig {
         let mut rows = rows
             .iter()
             .filter_map(|grouped_row| {
-                let row = table_view.table.rows.get(grouped_row.row_index)?;
-                let value = row.get(&self.field).cloned().unwrap_or_default();
+                table_view.table.rows.get(grouped_row.row_index)?;
+                let value = field_value(table_view, grouped_row.visible_row_index, &self.field);
                 Some(OrderedRow {
+                    visible_row_index: grouped_row.visible_row_index,
                     row_index: grouped_row.row_index,
                     source_row_number: grouped_row.source_row_number,
                     order_value: value,
@@ -220,6 +227,7 @@ impl OrderByConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OrderedRow {
+    pub(crate) visible_row_index: usize,
     pub(crate) row_index: usize,
     pub(crate) source_row_number: Option<usize>,
     pub(crate) order_value: String,
