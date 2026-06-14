@@ -4,7 +4,7 @@
 
 ## 当前状态判断
 
-该 review 项的核心解耦已经完成，当前不应再按“仍存在反向依赖”推进大改，而应把后续工作收敛为**防回归 + Meta stable diagnostic code catalog + 文档同步**三个方向。
+该 review 项的核心解耦和 Meta stable diagnostic code catalog 迁移均已完成，当前状态已收敛为**防回归已固化 + 文档已同步 + 后续观察**。
 
 关键依据：
 
@@ -15,11 +15,11 @@
 - CLI JSON 输出已经只识别 `ConfigForgeError::MetaValidation(report)` / `ValidationReport(report)` 的通用 report，不再需要知道 `MetaDiagnostic` 的 payload 结构，见 `src/cli.rs:251`。
 - 已有执行记录 [`diagnostic-meta-dependency-decoupling-todo.md`](diagnostic-meta-dependency-decoupling-todo.md) 标记解耦完成，并记录通过 `cargo fmt`、`cargo test meta`、`cargo test cli`、`cargo test validation`、`cargo test diagnostic`。
 
-仍需处理的尾项：
+已处理的尾项：
 
-- Meta diagnostic 尚未纳入 unified code catalog；当前 `MetaDiagnostic::code()` 仍返回 enum 的 Debug 字符串，见 `src/meta/diagnostic.rs:47`。
-- `src/diagnostic/code.rs` 的 catalog 还没有 `meta` domain，`VALID_DOMAINS` 也未包含 `meta`，见 `src/diagnostic/code.rs:518`。
-- `Documentation/Implementation/02-diagnostic-module-detail-design.md:164` 仍描述 `MetaValidation(Vec<MetaDiagnostic>)`，与当前代码不一致。
+- Meta diagnostic 已纳入 unified code catalog；`MetaDiagnostic::code()` 输出 `CF_META_*` stable code，catalog 覆盖全部当前 `MetaDiagnosticCode` 变体。
+- CLI JSON 中 Meta validation diagnostic 已包含 stable code、`source = "meta.validate"`、`domain = "meta"`、catalog hint / explanation。
+- `Documentation/Implementation/02-diagnostic-module-detail-design.md` 已同步 `MetaValidation(DiagnosticReport<Diagnostic>)` 和 Meta catalog 说明。
 
 ## 专题目标
 
@@ -144,21 +144,23 @@
 
 - `feat(meta): enrich diagnostics from code catalog`
 
-### [ ] Step 6：同步 Implementation 文档与迁移记录
+### [x] Step 6：同步 Implementation 文档与迁移记录
 
 目的：移除文档中残留的旧 payload 描述，避免后续开发者误以为 `diagnostic::error` 可以引用具体业务诊断类型。
 
 实现项：
 
-- [ ] 更新 `Documentation/Implementation/02-diagnostic-module-detail-design.md`，将 `MetaValidation(Vec<MetaDiagnostic>)` 改为 `MetaValidation(DiagnosticReport<Diagnostic>)`。
-- [ ] 在 Diagnostic 文档中补充 Meta stable code catalog 的状态与迁移规则。
-- [ ] 如 Step 4 改变了 CLI JSON code，更新相关设计文档对 code 稳定性的说明。
+- [x] 更新 `Documentation/Implementation/02-diagnostic-module-detail-design.md`，将 `MetaValidation(Vec<MetaDiagnostic>)` 改为 `MetaValidation(DiagnosticReport<Diagnostic>)`。
+- [x] 在 Diagnostic 文档中补充 Meta stable code catalog 的状态与迁移规则。
+- [x] 如 Step 4 改变了 CLI JSON code，更新相关设计文档对 code 稳定性的说明。
 
 验证：
 
-- [ ] `cargo test diagnostic`
-- [ ] `cargo test meta`
-- [ ] `cargo test cli`
+- [x] `cargo test diagnostic`
+- [x] `cargo test meta`
+- [x] `cargo test cli`
+
+后续计划复核：本专题计划中的 6 个步骤已全部完成；不再需要新增步骤。后续如要进一步区分 `meta.link` / `meta.validate` source，可另开低优先级专题，不影响当前目标完成。
 
 可独立提交建议：
 

@@ -161,7 +161,7 @@ pub type Result<T> = std::result::Result<T, ConfigForgeError>;
 | --- | --- |
 | 文件读写失败 | `ReadFile` / `WriteFile` |
 | TOML 解析失败 | `ParseMeta` / `ParseProject` |
-| Meta 结构诊断 | `MetaValidation(Vec<MetaDiagnostic>)` |
+| Meta 结构诊断 | `MetaValidation(DiagnosticReport<Diagnostic>)` |
 | CSV 解析失败 | `ParseCsv` |
 | Runtime data 序列化失败 | `Serialize` / `SerializeMessagePack` |
 | Legacy 裸业务错误 | `Validation(String)`，仅作为尚未迁移边界的 fallback |
@@ -183,6 +183,7 @@ pub type Result<T> = std::result::Result<T, ConfigForgeError>;
 
 - Generator / Build 边界：unknown type、ambiguous type、invalid / unsupported option、unsupported data input、runtime contract mismatch。
 - Artifact path safety：path escape、normalized collision、case-insensitive collision、symlink alias collision、hardlink alias collision。
+- Meta 结构诊断：`CF_META_*` stable codes 覆盖 `MetaDiagnosticCode` 的所有当前变体；Meta 内部仍保留 `MetaDiagnosticCode` enum，边界输出通过 `stable_code()` 转为 catalog code，并使用 `source = "meta.validate"`、`domain = "meta"`、catalog explanation / hint enrich JSON payload。
 - Data high-value validation：invalid type、missing required field、invalid enum、invalid foreign key、invalid asset ref、duplicate key。
 - Build：target not found、input required、export task failed。
 - Legacy validator/data code：`field.range_violation`、`validator.*`、`field.*`、`foreign_key.*`、`asset.reference` 等以 deprecated metadata 形式保留，保证报告层能继续给出 title/explanation/hint fallback。
@@ -227,6 +228,16 @@ worker task
       "source": "validation.type",
       "current_value": "abc",
       "expected": "int"
+    },
+    {
+      "code": "CF_META_DUPLICATE_TABLE_NAME",
+      "severity": "error",
+      "message": "...",
+      "location": { "table": "items" },
+      "source": "meta.validate",
+      "domain": "meta",
+      "hint": "...",
+      "explanation": "..."
     }
   ]
 }
