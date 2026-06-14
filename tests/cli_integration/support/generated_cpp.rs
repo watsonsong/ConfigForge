@@ -76,7 +76,18 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                     throw std::runtime_error("unexpected int64");
                 }
 
-                double AsDouble() const override { return static_cast<double>(AsInt64()); }
+                double AsDouble() const override {
+                    if (path_ == "game_rules" && ParentField() == "ambient_tint" && CurrentField() == "r") { return 51.0; }
+                    if (path_ == "game_rules" && ParentField() == "ambient_tint" && CurrentField() == "g") { return 102.0; }
+                    if (path_ == "game_rules" && ParentField() == "ambient_tint" && CurrentField() == "b") { return 153.0; }
+                    if (path_ == "game_rules" && ParentField() == "ambient_tint" && CurrentField() == "a") { return 255.0; }
+                    if (path_ == "game_rules" && ParentField() == "spawn_position" && CurrentField() == "x") { return 1.5; }
+                    if (path_ == "game_rules" && ParentField() == "spawn_position" && CurrentField() == "y") { return 2.5; }
+                    if (path_ == "game_rules" && ParentField() == "spawn_position" && CurrentField() == "z") { return 3.5; }
+                    if (path_ == "game_rules" && ParentField() == "grid_size" && CurrentField() == "x") { return 16.0; }
+                    if (path_ == "game_rules" && ParentField() == "grid_size" && CurrentField() == "y") { return 9.0; }
+                    return static_cast<double>(AsInt64());
+                }
 
                 bool AsBool() const override {
                     if (path_ == "game_rules" && CurrentField() == "pvp_enabled") { return true; }
@@ -107,6 +118,11 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 const std::string& CurrentField() const {
                     static const std::string root;
                     return fields_.empty() ? root : fields_.back();
+                }
+
+                const std::string& ParentField() const {
+                    static const std::string root;
+                    return fields_.size() < 2 ? root : fields_[fields_.size() - 2];
                 }
 
                 std::string path_;
@@ -145,6 +161,9 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 rules.starter_item_ids = {2001, 2002};
                 rules.starter_reward.gold = 500;
                 rules.starter_reward.item_ids = {2001, 2002};
+                rules.ambient_tint = ConfigForgeColor{51.0, 102.0, 153.0, 255.0};
+                rules.spawn_position = ConfigForgeVector3{1.5, 2.5, 3.5};
+                rules.grid_size = ConfigForgeVector2Int{16, 9};
                 rules.stamina_cap = 120;
                 rules.daily_reset_hour = 5;
                 rules.pvp_enabled = true;
@@ -169,6 +188,15 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 }
                 if (data.GameRules().starter_reward.gold != 500 || data.GameRules().starter_reward.item_ids.size() != 2) {
                     return 7;
+                }
+                if (data.GameRules().ambient_tint.r != 51.0 || data.GameRules().ambient_tint.g != 102.0 || data.GameRules().ambient_tint.b != 153.0 || data.GameRules().ambient_tint.a != 255.0) {
+                    return 8;
+                }
+                if (data.GameRules().spawn_position.x != 1.5 || data.GameRules().spawn_position.y != 2.5 || data.GameRules().spawn_position.z != 3.5) {
+                    return 9;
+                }
+                if (data.GameRules().grid_size.x != 16 || data.GameRules().grid_size.y != 9) {
+                    return 10;
                 }
                 return 0;
             }

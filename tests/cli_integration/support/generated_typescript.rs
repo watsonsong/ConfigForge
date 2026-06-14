@@ -121,6 +121,15 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     if (this.path === "game_rules" && this.currentField() === "gold") { return 500; }
                     if (this.path === "game_rules" && this.currentField() === "starter_reward.item_ids[0]") { return 2001; }
                     if (this.path === "game_rules" && this.currentField() === "starter_reward.item_ids[1]") { return 2002; }
+                    if (this.path === "game_rules" && this.parentField() === "ambient_tint" && this.currentField() === "r") { return 51; }
+                    if (this.path === "game_rules" && this.parentField() === "ambient_tint" && this.currentField() === "g") { return 102; }
+                    if (this.path === "game_rules" && this.parentField() === "ambient_tint" && this.currentField() === "b") { return 153; }
+                    if (this.path === "game_rules" && this.parentField() === "ambient_tint" && this.currentField() === "a") { return 255; }
+                    if (this.path === "game_rules" && this.parentField() === "spawn_position" && this.currentField() === "x") { return 1.5; }
+                    if (this.path === "game_rules" && this.parentField() === "spawn_position" && this.currentField() === "y") { return 2.5; }
+                    if (this.path === "game_rules" && this.parentField() === "spawn_position" && this.currentField() === "z") { return 3.5; }
+                    if (this.path === "game_rules" && this.parentField() === "grid_size" && this.currentField() === "x") { return 16; }
+                    if (this.path === "game_rules" && this.parentField() === "grid_size" && this.currentField() === "y") { return 9; }
                     if (this.path === "game_rules" && this.currentField() === "stamina_cap") { return 120; }
                     if (this.path === "game_rules" && this.currentField() === "daily_reset_hour") { return 5; }
                     throw new Error("unexpected number");
@@ -138,6 +147,10 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
 
                 private currentField(): string {
                     return this.fields[this.fields.length - 1] ?? "";
+                }
+
+                private parentField(): string {
+                    return this.fields[this.fields.length - 2] ?? "";
                 }
             }
 
@@ -168,6 +181,15 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 }
                 if (data.gameRules.starterReward.gold !== 500 || data.gameRules.starterReward.itemIds.length !== 2) {
                     throw new Error("generated TypeScript fixed reward field failed");
+                }
+                if (data.gameRules.ambientTint.r !== 51 || data.gameRules.ambientTint.g !== 102 || data.gameRules.ambientTint.b !== 153 || data.gameRules.ambientTint.a !== 255) {
+                    throw new Error("generated TypeScript color field failed");
+                }
+                if (data.gameRules.spawnPosition.x !== 1.5 || data.gameRules.spawnPosition.y !== 2.5 || data.gameRules.spawnPosition.z !== 3.5) {
+                    throw new Error("generated TypeScript vector field failed");
+                }
+                if (data.gameRules.gridSize.x !== 16 || data.gameRules.gridSize.y !== 9) {
+                    throw new Error("generated TypeScript int vector field failed");
                 }
             }
 

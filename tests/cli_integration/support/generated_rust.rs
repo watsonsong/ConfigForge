@@ -56,6 +56,12 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                     fn current_field(&self) -> Option<&'static str> {{
                         self.fields.borrow().last().copied()
                     }}
+
+                    fn parent_field(&self) -> Option<&'static str> {{
+                        let fields = self.fields.borrow();
+                        fields.len().checked_sub(2).and_then(|index| fields.get(index).copied())
+                    }}
+
                     fn enter_field(&self, name: &'static str) -> RuntimeDataResult<bool> {{
                         let field = match name {{
                             "rows" => "rows",
@@ -70,6 +76,16 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                             "xp" => "xp",
                             "gold" => "gold",
                             "item_ids" => "item_ids",
+                            "ambient_tint" => "ambient_tint",
+                            "spawn_position" => "spawn_position",
+                            "grid_size" => "grid_size",
+                            "r" => "r",
+                            "g" => "g",
+                            "b" => "b",
+                            "a" => "a",
+                            "x" => "x",
+                            "y" => "y",
+                            "z" => "z",
                             "stamina_cap" => "stamina_cap",
                             "daily_reset_hour" => "daily_reset_hour",
                             "pvp_enabled" => "pvp_enabled",
@@ -156,7 +172,20 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                         }}
                     }}
 
-                    fn as_f64(&self) -> RuntimeDataResult<f64> {{ Ok(self.as_i64()? as f64) }}
+                    fn as_f64(&self) -> RuntimeDataResult<f64> {{
+                        match (self.path, self.parent_field(), self.current_field()) {{
+                            ("game_rules", Some("ambient_tint"), Some("r")) => Ok(51.0),
+                            ("game_rules", Some("ambient_tint"), Some("g")) => Ok(102.0),
+                            ("game_rules", Some("ambient_tint"), Some("b")) => Ok(153.0),
+                            ("game_rules", Some("ambient_tint"), Some("a")) => Ok(255.0),
+                            ("game_rules", Some("spawn_position"), Some("x")) => Ok(1.5),
+                            ("game_rules", Some("spawn_position"), Some("y")) => Ok(2.5),
+                            ("game_rules", Some("spawn_position"), Some("z")) => Ok(3.5),
+                            ("game_rules", Some("grid_size"), Some("x")) => Ok(16.0),
+                            ("game_rules", Some("grid_size"), Some("y")) => Ok(9.0),
+                            _ => Ok(self.as_i64()? as f64),
+                        }}
+                    }}
 
                     fn as_bool(&self) -> RuntimeDataResult<bool> {{
                         if self.path == "game_rules" && self.current_field() == Some("pvp_enabled") {{ Ok(true) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected bool")) }}
@@ -216,13 +245,22 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                     assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2002]);
                     assert_eq!(data.game_rules.starter_reward.gold, 500);
                     assert_eq!(data.game_rules.starter_reward.item_ids, vec![2001, 2002]);
+                    assert_eq!(data.game_rules.ambient_tint.r, 51.0);
+                    assert_eq!(data.game_rules.ambient_tint.g, 102.0);
+                    assert_eq!(data.game_rules.ambient_tint.b, 153.0);
+                    assert_eq!(data.game_rules.ambient_tint.a, 255.0);
+                    assert_eq!(data.game_rules.spawn_position.x, 1.5);
+                    assert_eq!(data.game_rules.spawn_position.y, 2.5);
+                    assert_eq!(data.game_rules.spawn_position.z, 3.5);
+                    assert_eq!(data.game_rules.grid_size.x, 16);
+                    assert_eq!(data.game_rules.grid_size.y, 9);
                     assert!(data.game_rules.pvp_enabled);
                 }}
 
                 {serde_assertion}
             "#,
             serde_assertion = if derive_serde {
-                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, stack: None, attributes: None, skill: None }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, default_class_id: 1, starter_item_ids: vec![2001], starter_reward: FixedReward { xp: 0, gold: 500, item_ids: vec![2001] }, stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true, default_class_link: RefCell::new(LinkCache::default()), starter_items_link: RefCell::new(LinkListCache::default()) }).unwrap();\n}"
+                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, stack: None, attributes: None, skill: None }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, default_class_id: 1, starter_item_ids: vec![2001], starter_reward: FixedReward { xp: 0, gold: 500, item_ids: vec![2001] }, ambient_tint: ConfigForgeColor { r: 51.0, g: 102.0, b: 153.0, a: 255.0 }, spawn_position: ConfigForgeVector3 { x: 1.5, y: 2.5, z: 3.5 }, grid_size: ConfigForgeVector2Int { x: 16, y: 9 }, stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true, default_class_link: RefCell::new(LinkCache::default()), starter_items_link: RefCell::new(LinkListCache::default()) }).unwrap();\n}"
             } else {
                 ""
             }
