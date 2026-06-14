@@ -1202,6 +1202,66 @@ fn source_read_plan_filters_override_sources_without_linked_meta() {
 }
 
 #[test]
+fn data_load_plan_builds_object_table_sources_and_overrides() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            sources = [
+                { provider = "csv", path = "gameplay.csv" },
+                { provider = "csv", path = "economy.csv", header_row = 2, data_start_row = 4 },
+            ]
+            override_sources = [
+                { provider = "csv", path = "game_config_s1.csv", export_when = { any = ["s1"] } },
+                { provider = "csv", path = "game_config_dev.csv", export_when = { any = ["dev"] } },
+            ]
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+
+            [[tables.fields]]
+            name = "gold_multiplier"
+            type = "float"
+        "#,
+    )
+    .expect("meta should load");
+    let s1_tags = crate::meta::TargetTags::new(["s1"]);
+
+    let plan = DataLoadPlan::from_tables(&meta.tables, Some(&s1_tags))
+        .expect("ObjectTable source plan should build");
+
+    assert_eq!(plan.sources().len(), 3);
+    assert_eq!(plan.sources()[0].path, PathBuf::from("gameplay.csv"));
+    assert_eq!(
+        plan.sources()[0].layout,
+        DataSourceLayout::ObjectKeyValueRows
+    );
+    assert_eq!(plan.sources()[0].data_start_row, 2);
+    assert_eq!(
+        plan.sources()[0].fields,
+        vec!["max_level", "gold_multiplier"]
+    );
+    assert_eq!(plan.sources()[0].role, SourceRole::Base);
+    assert!(plan.sources()[0].primary_key_fields.is_empty());
+    assert_eq!(plan.sources()[1].path, PathBuf::from("economy.csv"));
+    assert_eq!(plan.sources()[1].header_row, 2);
+    assert_eq!(plan.sources()[1].data_start_row, 4);
+    assert_eq!(
+        plan.sources()[1].layout,
+        DataSourceLayout::ObjectKeyValueRows
+    );
+    assert_eq!(plan.sources()[2].path, PathBuf::from("game_config_s1.csv"));
+    assert_eq!(plan.sources()[2].role, SourceRole::Override);
+    assert_eq!(
+        plan.sources()[2].layout,
+        DataSourceLayout::ObjectKeyValueRows
+    );
+    assert!(plan.sources()[2].primary_key_fields.is_empty());
+}
+
+#[test]
 fn data_loader_read_sources_returns_raw_source_data_before_normalize() {
     let dir = tempdir().expect("temp dir should exist");
     fs::write(dir.path().join("items.csv"), "id,name\nID,Name\n1,Sword\n").expect("items csv");
@@ -1343,23 +1403,6 @@ fn data_load_plan_rejects_unsupported_source_features() {
                 type = "int"
             "#,
             "multiple sources",
-        ),
-        (
-            r#"
-                [[tables]]
-                name = "items"
-                kind = "object"
-                polymorphic = true
-                sources = [
-                    { provider = "csv", path = "items.csv" },
-                    { provider = "csv", path = "items-extra.csv" },
-                ]
-
-                [[tables.fields]]
-                name = "id"
-                type = "int"
-            "#,
-            "variant source mode",
         ),
         (
             r#"

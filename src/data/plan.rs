@@ -131,7 +131,10 @@ impl DataSourcePlan {
             ));
         }
 
-        if table.sources.len() > 1 && !table.is_variant_source_mode() {
+        if table.kind == TableKind::Collection
+            && table.sources.len() > 1
+            && !table.is_variant_source_mode()
+        {
             return Err(source_plan_error(
                 table,
                 format!(
@@ -157,21 +160,6 @@ impl DataSourcePlan {
             }
         }
 
-        // Meta validation is the primary source-shape check; keep this defensive
-        // guard so callers that build a DataLoadPlan from an unvalidated model do
-        // not silently load an unsupported ObjectTable source form.
-        if table.kind == TableKind::Object && !table.sources.is_empty() {
-            return Err(source_plan_error(
-                table,
-                format!(
-                    "table `{}` is an ObjectTable, but ObjectTable Step 1 only supports legacy `source`",
-                    table.name
-                ),
-                "ObjectTable `sources`",
-                "legacy `source` for ObjectTable",
-            ));
-        }
-
         let primary_key_fields = primary_key_fields_for_overrides(table)?;
 
         let mut plans = if !table.sources.is_empty() {
@@ -180,7 +168,7 @@ impl DataSourcePlan {
                 .iter()
                 .map(|source| {
                     Self::from_source_ref(
-                        &table.name,
+                        table,
                         source,
                         SourceRole::Base,
                         primary_key_fields.clone(),
@@ -233,7 +221,7 @@ impl DataSourcePlan {
                 continue;
             }
             plans.push(Self::from_source_ref(
-                &table.name,
+                table,
                 source,
                 SourceRole::Override,
                 primary_key_fields.clone(),
@@ -244,24 +232,36 @@ impl DataSourcePlan {
     }
 
     fn from_source_ref(
-        table_name: &str,
+        table: &TableMeta,
         source: &SourceRef,
         role: SourceRole,
         primary_key_fields: Vec<String>,
     ) -> Result<Self> {
         let provider = DataProvider::parse(&source.provider).ok_or_else(|| {
-            unsupported_provider_error(table_name, &source.path, &source.provider)
+            unsupported_provider_error(&table.name, &source.path, &source.provider)
         })?;
+        let layout = layout_for_table(table);
+        let data_start_row = if matches!(layout, DataSourceLayout::ObjectKeyValueRows)
+            && source.data_start_row == 3
+        {
+            2
+        } else {
+            source.data_start_row
+        };
 
         Ok(Self {
-            table_name: table_name.to_owned(),
+            table_name: table.name.clone(),
             provider,
             path: PathBuf::from(&source.path),
             header_row: source.header_row,
-            data_start_row: source.data_start_row,
+            data_start_row,
             fragments: source.fragments.clone(),
-            layout: DataSourceLayout::CollectionRecords,
-            fields: Vec::new(),
+            layout,
+            fields: table
+                .fields
+                .iter()
+                .map(|field| field.name.clone())
+                .collect(),
             role,
             primary_key_fields,
         })
@@ -273,15 +273,7 @@ fn primary_key_fields_for_overrides(table: &TableMeta) -> Result<Vec<String>> {
         return Ok(Vec::new());
     }
     if table.kind == TableKind::Object {
-        return Err(source_plan_error(
-            table,
-            format!(
-                "table `{}` is an ObjectTable, but ObjectTable Step 1 does not support `override_sources`",
-                table.name
-            ),
-            "ObjectTable override_sources",
-            "collection table override_sources",
-        ));
+        return Ok(Vec::new());
     }
     let primary_index = table.primary_index().ok_or_else(|| {
         source_plan_error(

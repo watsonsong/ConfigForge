@@ -78,15 +78,15 @@
 
 ### Step 3 — 扩展 DataLoadPlan 支持 ObjectTable source refs
 
-- [ ] 让 `DataSourcePlan::from_source_ref()` 或等价构造函数接收 table kind / layout / fields，不再默认 `CollectionRecords`。
-- [ ] 移除 `DataSourcePlan::from_table()` 中拒绝 ObjectTable `sources` 的防御性 guard，改为为每个 ObjectTable source 生成 `layout = ObjectKeyValueRows`。
-- [ ] 调整 `primary_key_fields_for_overrides()`：ObjectTable override 不需要 primary key fields，不应报错；CollectionTable override 仍必须有 primary index。
-- [ ] 为 ObjectTable source ref 应用默认 `data_start_row = 2` 规则，与 legacy `source` 行为一致。
-- [ ] 增加 Data plan tests：
-  - [ ] ObjectTable multiple sources produce multiple `DataSourcePlan` entries with `ObjectKeyValueRows`。
-  - [ ] ObjectTable override source role is `Override` and has empty primary key fields。
-  - [ ] ObjectTable `override_sources[].export_when` filtering works with target tags。
-  - [ ] ObjectTable base `sources[].export_when` still fails fast。
+- [x] 让 `DataSourcePlan::from_source_ref()` 或等价构造函数接收 table kind / layout / fields，不再默认 `CollectionRecords`。
+- [x] 移除 `DataSourcePlan::from_table()` 中拒绝 ObjectTable `sources` 的防御性 guard，改为为每个 ObjectTable source 生成 `layout = ObjectKeyValueRows`。
+- [x] 调整 `primary_key_fields_for_overrides()`：ObjectTable override 不需要 primary key fields，不应报错；CollectionTable override 仍必须有 primary index。
+- [x] 为 ObjectTable source ref 应用默认 `data_start_row = 2` 规则，与 legacy `source` 行为一致。
+- [x] 增加 Data plan tests：
+  - [x] ObjectTable multiple sources produce multiple `DataSourcePlan` entries with `ObjectKeyValueRows`。
+  - [x] ObjectTable override source role is `Override` and has empty primary key fields。
+  - [x] ObjectTable `override_sources[].export_when` filtering works with target tags。
+  - [x] ObjectTable base `sources[].export_when` still fails fast。
 
 验收：不读取文件时，source discovery 已能正确表达 ObjectTable base / override source 序列和布局。
 
