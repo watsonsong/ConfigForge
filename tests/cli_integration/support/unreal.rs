@@ -57,6 +57,58 @@ pub(crate) fn write_cpp_unreal_core_minimal_shim(shim_dir: &std::path::Path) {
             #define UFUNCTION(...)
             #define GENERATED_BODY()
             using FString = std::string;
+            struct FLinearColor {
+                float R;
+                float G;
+                float B;
+                float A;
+                FLinearColor() : R(0), G(0), B(0), A(1) {}
+                FLinearColor(float InR, float InG, float InB, float InA) : R(InR), G(InG), B(InB), A(InA) {}
+            };
+            struct FVector2D {
+                float X;
+                float Y;
+                FVector2D() : X(0), Y(0) {}
+                FVector2D(float InX, float InY) : X(InX), Y(InY) {}
+            };
+            struct FVector {
+                float X;
+                float Y;
+                float Z;
+                FVector() : X(0), Y(0), Z(0) {}
+                FVector(float InX, float InY, float InZ) : X(InX), Y(InY), Z(InZ) {}
+                static const FVector ZeroVector;
+            };
+            inline const FVector FVector::ZeroVector = FVector();
+            struct FVector4 {
+                float X;
+                float Y;
+                float Z;
+                float W;
+                FVector4() : X(0), Y(0), Z(0), W(0) {}
+                FVector4(float InX, float InY, float InZ, float InW) : X(InX), Y(InY), Z(InZ), W(InW) {}
+            };
+            struct FIntPoint {
+                int32 X;
+                int32 Y;
+                FIntPoint() : X(0), Y(0) {}
+                FIntPoint(int32 InX, int32 InY) : X(InX), Y(InY) {}
+            };
+            struct FIntVector {
+                int32 X;
+                int32 Y;
+                int32 Z;
+                FIntVector() : X(0), Y(0), Z(0) {}
+                FIntVector(int32 InX, int32 InY, int32 InZ) : X(InX), Y(InY), Z(InZ) {}
+            };
+            struct FIntVector4 {
+                int32 X;
+                int32 Y;
+                int32 Z;
+                int32 W;
+                FIntVector4() : X(0), Y(0), Z(0), W(0) {}
+                FIntVector4(int32 InX, int32 InY, int32 InZ, int32 InW) : X(InX), Y(InY), Z(InZ), W(InW) {}
+            };
             inline uint32 HashCombine(uint32 Left, uint32 Right) { return Left ^ (Right + 0x9e3779b9U + (Left << 6) + (Left >> 2)); }
             template <typename T>
             uint32 GetTypeHash(const T& Value) { return static_cast<uint32>(std::hash<T>{}(Value)); }

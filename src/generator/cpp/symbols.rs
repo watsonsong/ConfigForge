@@ -24,6 +24,25 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CppNames<'_>
             "IRuntimeDataLoader",
         ),
         GeneratedSymbol::new("facade interface", "GameDataAccess", "GameDataAccess"),
+        GeneratedSymbol::new("builtin struct", "ConfigForgeColor", "ConfigForgeColor"),
+        GeneratedSymbol::new("builtin struct", "ConfigForgeVector2", "ConfigForgeVector2"),
+        GeneratedSymbol::new("builtin struct", "ConfigForgeVector3", "ConfigForgeVector3"),
+        GeneratedSymbol::new("builtin struct", "ConfigForgeVector4", "ConfigForgeVector4"),
+        GeneratedSymbol::new(
+            "builtin struct",
+            "ConfigForgeVector2Int",
+            "ConfigForgeVector2Int",
+        ),
+        GeneratedSymbol::new(
+            "builtin struct",
+            "ConfigForgeVector3Int",
+            "ConfigForgeVector3Int",
+        ),
+        GeneratedSymbol::new(
+            "builtin struct",
+            "ConfigForgeVector4Int",
+            "ConfigForgeVector4Int",
+        ),
         GeneratedSymbol::new("facade", "GameData", "GameData"),
         GeneratedSymbol::new("facade", "LazyGameData", "LazyGameData"),
     ];

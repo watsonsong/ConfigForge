@@ -161,7 +161,31 @@ pub trait RuntimeDataLoader {
 
 pub(super) fn render_runtime_reader_helpers(content: &mut impl CodeWriterLike) {
     content.raw(
-        r#"fn with_required_field<R: RuntimeDataReader, T>(
+        r#"#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigForgeColor {
+    pub r: f64,
+    pub g: f64,
+    pub b: f64,
+    pub a: f64,
+}
+
+macro_rules! config_forge_vector_type {
+    ($name:ident, $type:ty, $($field:ident),+) => {
+        #[derive(Debug, Clone, PartialEq)]
+        pub struct $name {
+            $(pub $field: $type,)+
+        }
+    };
+}
+
+config_forge_vector_type!(ConfigForgeVector2, f64, x, y);
+config_forge_vector_type!(ConfigForgeVector3, f64, x, y, z);
+config_forge_vector_type!(ConfigForgeVector4, f64, x, y, z, w);
+config_forge_vector_type!(ConfigForgeVector2Int, i64, x, y);
+config_forge_vector_type!(ConfigForgeVector3Int, i64, x, y, z);
+config_forge_vector_type!(ConfigForgeVector4Int, i64, x, y, z, w);
+
+fn with_required_field<R: RuntimeDataReader, T>(
     reader: &R,
     name: &'static str,
     read: impl FnOnce(&R) -> RuntimeDataResult<T>,
@@ -222,6 +246,91 @@ fn read_optional_bool<R: RuntimeDataReader>(reader: &R, name: &'static str) -> R
 fn read_optional_string<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<Option<String>> {
     with_optional_field(reader, name, |value| value.as_string())
 }
+
+fn read_color<R: RuntimeDataReader>(reader: &R) -> RuntimeDataResult<ConfigForgeColor> {
+    reader.begin_record(0)?;
+    let result = (|| {
+        Ok(ConfigForgeColor {
+            r: read_required_f64(reader, "r")?,
+            g: read_required_f64(reader, "g")?,
+            b: read_required_f64(reader, "b")?,
+            a: read_required_f64(reader, "a")?,
+        })
+    })();
+    match (result, reader.end_record()) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+    }
+}
+
+fn read_required_color<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<ConfigForgeColor> {
+    with_required_field(reader, name, read_color)
+}
+
+fn read_optional_color<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<Option<ConfigForgeColor>> {
+    with_optional_field(reader, name, read_color)
+}
+
+macro_rules! config_forge_vector_readers {
+    ($read:ident, $read_required:ident, $read_optional:ident, $name:ident, $component_read:ident, $($field:ident),+) => {
+        fn $read<R: RuntimeDataReader>(reader: &R) -> RuntimeDataResult<$name> {
+            reader.begin_record(0)?;
+            let result = (|| {
+                Ok($name {
+                    $($field: $component_read(reader, stringify!($field))?,)+
+                })
+            })();
+            match (result, reader.end_record()) {
+                (Ok(value), Ok(())) => Ok(value),
+                (Err(error), _) => Err(error),
+                (Ok(_), Err(error)) => Err(error),
+            }
+        }
+
+        fn $read_required<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<$name> {
+            with_required_field(reader, name, $read)
+        }
+
+        fn $read_optional<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<Option<$name>> {
+            with_optional_field(reader, name, $read)
+        }
+    };
+}
+
+config_forge_vector_readers!(read_vector2, read_required_vector2, read_optional_vector2, ConfigForgeVector2, read_required_f64, x, y);
+config_forge_vector_readers!(read_vector3, read_required_vector3, read_optional_vector3, ConfigForgeVector3, read_required_f64, x, y, z);
+config_forge_vector_readers!(read_vector4, read_required_vector4, read_optional_vector4, ConfigForgeVector4, read_required_f64, x, y, z, w);
+
+macro_rules! config_forge_int_vector_readers {
+    ($read:ident, $read_required:ident, $read_optional:ident, $name:ident, $($field:ident),+) => {
+        fn $read<R: RuntimeDataReader>(reader: &R) -> RuntimeDataResult<$name> {
+            reader.begin_record(0)?;
+            let result = (|| {
+                Ok($name {
+                    $($field: read_required_f64(reader, stringify!($field))? as i64,)+
+                })
+            })();
+            match (result, reader.end_record()) {
+                (Ok(value), Ok(())) => Ok(value),
+                (Err(error), _) => Err(error),
+                (Ok(_), Err(error)) => Err(error),
+            }
+        }
+
+        fn $read_required<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<$name> {
+            with_required_field(reader, name, $read)
+        }
+
+        fn $read_optional<R: RuntimeDataReader>(reader: &R, name: &'static str) -> RuntimeDataResult<Option<$name>> {
+            with_optional_field(reader, name, $read)
+        }
+    };
+}
+
+config_forge_int_vector_readers!(read_vector2_int, read_required_vector2_int, read_optional_vector2_int, ConfigForgeVector2Int, x, y);
+config_forge_int_vector_readers!(read_vector3_int, read_required_vector3_int, read_optional_vector3_int, ConfigForgeVector3Int, x, y, z);
+config_forge_int_vector_readers!(read_vector4_int, read_required_vector4_int, read_optional_vector4_int, ConfigForgeVector4Int, x, y, z, w);
 
 fn read_list<R: RuntimeDataReader, T>(reader: &R, read: impl Fn(&R) -> RuntimeDataResult<T>) -> RuntimeDataResult<Vec<T>> {
     let len = reader.read_list_len()?;

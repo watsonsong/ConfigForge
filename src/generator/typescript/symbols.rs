@@ -18,6 +18,25 @@ pub(super) fn validate_generated_symbols(
     let mut type_symbols = vec![
         GeneratedSymbol::new("interface", "RuntimeDataLoader", "RuntimeDataLoader"),
         GeneratedSymbol::new("interface", "RuntimeDataReader", "RuntimeDataReader"),
+        GeneratedSymbol::new("interface", "ConfigForgeColor", "ConfigForgeColor"),
+        GeneratedSymbol::new("interface", "ConfigForgeVector2", "ConfigForgeVector2"),
+        GeneratedSymbol::new("interface", "ConfigForgeVector3", "ConfigForgeVector3"),
+        GeneratedSymbol::new("interface", "ConfigForgeVector4", "ConfigForgeVector4"),
+        GeneratedSymbol::new(
+            "interface",
+            "ConfigForgeVector2Int",
+            "ConfigForgeVector2Int",
+        ),
+        GeneratedSymbol::new(
+            "interface",
+            "ConfigForgeVector3Int",
+            "ConfigForgeVector3Int",
+        ),
+        GeneratedSymbol::new(
+            "interface",
+            "ConfigForgeVector4Int",
+            "ConfigForgeVector4Int",
+        ),
         GeneratedSymbol::new("class", "GameData", "GameData"),
         GeneratedSymbol::new("class", "LazyGameData", "LazyGameData"),
     ];

@@ -132,6 +132,17 @@ int main() {
         data.GameRules().starter_reward.item_ids[0] != 2001 || data.GameRules().starter_reward.item_ids[1] != 2002) {
         throw std::runtime_error("object table fixed reward field load failed");
     }
+    if (data.GameRules().ambient_tint.r != 51.0 || data.GameRules().ambient_tint.g != 102.0 ||
+        data.GameRules().ambient_tint.b != 153.0 || data.GameRules().ambient_tint.a != 255.0) {
+        throw std::runtime_error("object table color field load failed");
+    }
+    if (data.GameRules().spawn_position.x != 1.5 || data.GameRules().spawn_position.y != 2.5 ||
+        data.GameRules().spawn_position.z != 3.5) {
+        throw std::runtime_error("object table vector field load failed");
+    }
+    if (data.GameRules().grid_size.x != 16 || data.GameRules().grid_size.y != 9) {
+        throw std::runtime_error("object table int vector field load failed");
+    }
     const cfg::ClassesRow& default_class = data.GameRules().GetDefaultClass(data);
     if (default_class.class_id != 1) {
         throw std::runtime_error("object table single relation failed");

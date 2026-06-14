@@ -107,6 +107,15 @@ async function main(): Promise<void> {
     if (binaryData.gameRules.starterReward.gold !== 500 || binaryData.gameRules.starterReward.itemIds.join(",") !== "2001,2002") {
       throw new Error("binary object table fixed reward field load failed");
     }
+    if (binaryData.gameRules.ambientTint.r !== 51 || binaryData.gameRules.ambientTint.g !== 102 || binaryData.gameRules.ambientTint.b !== 153 || binaryData.gameRules.ambientTint.a !== 255) {
+      throw new Error("binary object table color field load failed");
+    }
+    if (binaryData.gameRules.spawnPosition.x !== 1.5 || binaryData.gameRules.spawnPosition.y !== 2.5 || binaryData.gameRules.spawnPosition.z !== 3.5) {
+      throw new Error("binary object table vector field load failed");
+    }
+    if (binaryData.gameRules.gridSize.x !== 16 || binaryData.gameRules.gridSize.y !== 9) {
+      throw new Error("binary object table int vector field load failed");
+    }
     if (binaryData.gameRules.defaultClass(binaryData).classId !== 1) {
       throw new Error("binary object table single relation failed");
     }
@@ -182,6 +191,15 @@ async function main(): Promise<void> {
   }
   if (data.gameRules.starterReward.gold !== 500 || data.gameRules.starterReward.itemIds.join(",") !== "2001,2002") {
     throw new Error("object table fixed reward field load failed");
+  }
+  if (data.gameRules.ambientTint.r !== 51 || data.gameRules.ambientTint.g !== 102 || data.gameRules.ambientTint.b !== 153 || data.gameRules.ambientTint.a !== 255) {
+    throw new Error("object table color field load failed");
+  }
+  if (data.gameRules.spawnPosition.x !== 1.5 || data.gameRules.spawnPosition.y !== 2.5 || data.gameRules.spawnPosition.z !== 3.5) {
+    throw new Error("object table vector field load failed");
+  }
+  if (data.gameRules.gridSize.x !== 16 || data.gameRules.gridSize.y !== 9) {
+    throw new Error("object table int vector field load failed");
   }
   if (data.gameRules.defaultClass(data).classId !== 1) {
     throw new Error("object table single relation failed");

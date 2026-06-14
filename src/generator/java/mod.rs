@@ -253,6 +253,7 @@ fn render_java_code(
     content.raw("    private ");
     content.raw_fmt(format_args!("{}() {{}}\n\n", names.root_class_name()));
     render_java_i18n_prelude(content, &input.target.options.i18n);
+    render_builtin_value_types(content);
     render_runtime_contract(content, &model.enums, &names)?;
     if options.emit_runtime_adapters {
         render_standard_runtime_adapters(content);
@@ -298,6 +299,71 @@ fn render_java_i18n_prelude(content: &mut impl CodeWriterLike, i18n: &I18nOption
             "    public interface TextTranslator {\n        String translate(String context, String text);\n    }\n\n",
         );
     }
+}
+
+fn render_builtin_value_types(content: &mut impl CodeWriterLike) {
+    content.raw(concat!(
+        "    public static final class ConfigForgeColor {\n",
+        "        private final double r;\n",
+        "        private final double g;\n",
+        "        private final double b;\n",
+        "        private final double a;\n\n",
+        "        public ConfigForgeColor(double r, double g, double b, double a) { this.r = r; this.g = g; this.b = b; this.a = a; }\n",
+        "        public double r() { return r; }\n",
+        "        public double g() { return g; }\n",
+        "        public double b() { return b; }\n",
+        "        public double a() { return a; }\n",
+        "    }\n\n",
+    ));
+    render_builtin_vector_type(content, "ConfigForgeVector2", "double", &["x", "y"]);
+    render_builtin_vector_type(content, "ConfigForgeVector3", "double", &["x", "y", "z"]);
+    render_builtin_vector_type(
+        content,
+        "ConfigForgeVector4",
+        "double",
+        &["x", "y", "z", "w"],
+    );
+    render_builtin_vector_type(content, "ConfigForgeVector2Int", "long", &["x", "y"]);
+    render_builtin_vector_type(content, "ConfigForgeVector3Int", "long", &["x", "y", "z"]);
+    render_builtin_vector_type(
+        content,
+        "ConfigForgeVector4Int",
+        "long",
+        &["x", "y", "z", "w"],
+    );
+}
+
+fn render_builtin_vector_type(
+    content: &mut impl CodeWriterLike,
+    type_name: &str,
+    java_type: &str,
+    fields: &[&str],
+) {
+    content.raw_fmt(format_args!(
+        "    public static final class {type_name} {{\n"
+    ));
+    for field in fields {
+        content.raw_fmt(format_args!("        private final {java_type} {field};\n"));
+    }
+    content.raw("\n");
+    content.raw_fmt(format_args!("        public {type_name}("));
+    for (index, field) in fields.iter().enumerate() {
+        if index > 0 {
+            content.raw(", ");
+        }
+        content.raw_fmt(format_args!("{java_type} {field}"));
+    }
+    content.raw(") {");
+    for field in fields {
+        content.raw_fmt(format_args!(" this.{field} = {field};"));
+    }
+    content.raw(" }\n");
+    for field in fields {
+        content.raw_fmt(format_args!(
+            "        public {java_type} {field}() {{ return {field}; }}\n"
+        ));
+    }
+    content.raw("    }\n\n");
 }
 
 fn render_runtime_contract(
@@ -346,6 +412,7 @@ fn render_runtime_contract(
     content.raw("        static double readFloatValue(ConfigForgeRuntimeDataReader reader) { return reader.readFloat(); }\n");
     content.raw("        static boolean readBoolValue(ConfigForgeRuntimeDataReader reader) { return reader.readBool(); }\n");
     content.raw("        static String readStringValue(ConfigForgeRuntimeDataReader reader) { return reader.readString(); }\n\n");
+    render_builtin_value_readers(content);
     content.raw("        static <T extends Comparable<T>> int compareValues(T left, T right) { return left.compareTo(right); }\n\n");
     for code_enum in enums {
         let type_name = names.type_name(&code_enum.name)?;
@@ -512,6 +579,85 @@ fn render_runtime_list_reader(
     content.raw("                }\n");
     content.raw("            }\n");
     content.raw("            return values;\n");
+    content.raw("        }\n\n");
+}
+
+fn render_builtin_value_readers(content: &mut impl CodeWriterLike) {
+    content.raw(concat!(
+        "        static ConfigForgeColor readColorValue(ConfigForgeRuntimeDataReader reader) {\n",
+        "            reader.beginRecord(0);\n",
+        "            try {\n",
+        "                return new ConfigForgeColor(\n",
+        "                    readRequiredField(reader, \"r\", ConfigForgeRuntimeReader::readFloatValue),\n",
+        "                    readRequiredField(reader, \"g\", ConfigForgeRuntimeReader::readFloatValue),\n",
+        "                    readRequiredField(reader, \"b\", ConfigForgeRuntimeReader::readFloatValue),\n",
+        "                    readRequiredField(reader, \"a\", ConfigForgeRuntimeReader::readFloatValue)\n",
+        "                );\n",
+        "            } finally {\n",
+        "                reader.endRecord();\n",
+        "            }\n",
+        "        }\n\n",
+    ));
+    render_builtin_vector_reader(content, "ConfigForgeVector2", "readFloatValue", &["x", "y"]);
+    render_builtin_vector_reader(
+        content,
+        "ConfigForgeVector3",
+        "readFloatValue",
+        &["x", "y", "z"],
+    );
+    render_builtin_vector_reader(
+        content,
+        "ConfigForgeVector4",
+        "readFloatValue",
+        &["x", "y", "z", "w"],
+    );
+    render_builtin_vector_reader(
+        content,
+        "ConfigForgeVector2Int",
+        "readFloatValue",
+        &["x", "y"],
+    );
+    render_builtin_vector_reader(
+        content,
+        "ConfigForgeVector3Int",
+        "readFloatValue",
+        &["x", "y", "z"],
+    );
+    render_builtin_vector_reader(
+        content,
+        "ConfigForgeVector4Int",
+        "readFloatValue",
+        &["x", "y", "z", "w"],
+    );
+}
+
+fn render_builtin_vector_reader(
+    content: &mut impl CodeWriterLike,
+    type_name: &str,
+    read_method: &str,
+    fields: &[&str],
+) {
+    content.raw_fmt(format_args!(
+        "        static {type_name} read{type_name}Value(ConfigForgeRuntimeDataReader reader) {{\n"
+    ));
+    content.raw("            reader.beginRecord(0);\n");
+    content.raw("            try {\n");
+    content.raw_fmt(format_args!("                return new {type_name}(\n"));
+    for (index, field) in fields.iter().enumerate() {
+        let comma = if index + 1 == fields.len() { "" } else { "," };
+        let expression = if type_name.ends_with("Int") {
+            format!(
+                "readRequiredField(reader, {field:?}, ConfigForgeRuntimeReader::{read_method}).longValue()"
+            )
+        } else {
+            format!("readRequiredField(reader, {field:?}, ConfigForgeRuntimeReader::{read_method})")
+        };
+        content.raw_fmt(format_args!("                    {expression}{comma}\n"));
+    }
+    content.raw("                );\n");
+    content.raw("            } finally {\n");
+    content.raw("                reader.endRecord();\n");
+    content.raw("            }\n");
     content.raw("        }\n\n");
 }
 

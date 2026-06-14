@@ -35,6 +35,30 @@ required = true
 desc = "新玩家默认初始固定奖励，用一个字段同时表达金币、经验和内嵌道具列表。"
 
 [[tables.fields]]
+name = "ambient_tint"
+type = "color"
+color_format = "hex_rgb"
+color_channel = "byte"
+color_space = "srgb"
+alpha = "default_opaque"
+required = true
+desc = "客户端场景默认环境颜色，覆盖内置 Color 类型导出。"
+
+[[tables.fields]]
+name = "spawn_position"
+type = "vector3"
+vector_format = "tuple"
+required = true
+desc = "新角色默认出生点，覆盖内置 Vector3 类型导出。"
+
+[[tables.fields]]
+name = "grid_size"
+type = "vector2_int"
+vector_format = "array"
+required = true
+desc = "默认逻辑网格尺寸，覆盖内置 Vector2Int 类型导出。"
+
+[[tables.fields]]
 name = "stamina_cap"
 type = "int"
 required = true

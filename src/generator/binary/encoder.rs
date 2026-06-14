@@ -5,7 +5,10 @@ use std::collections::BTreeMap;
 
 use crate::{
     Result,
-    data::{ArrayElementValue, DataResolver, DataTable, DataValue, ResolvedValue, ScalarValue},
+    data::{
+        ArrayElementValue, ColorValue, DataResolver, DataTable, DataValue, ResolvedValue,
+        ScalarValue, VectorValue,
+    },
     meta::{
         EnumMeta, LinkedField, LinkedFieldMeta, LinkedFragmentMeta, LinkedStructType,
         LinkedTableMeta, PrimitiveFieldType, TableKind, TargetTags,
@@ -351,10 +354,64 @@ impl<'a, 'meta, W: BinaryWriteTarget> BinaryEncoder<'a, 'meta, W> {
         field: &LinkedFieldMeta<'meta>,
         value: &ResolvedValue,
     ) -> Result<()> {
+        if matches!(primitive, PrimitiveFieldType::Color) {
+            let DataValue::Color(color) = &value.value else {
+                return Err(binary_value_error(
+                    Some(field.meta.name.as_str()),
+                    format!(
+                        "binary export field `{}` expected color value",
+                        field.meta.name
+                    ),
+                    value_shape(value),
+                    "color runtime value",
+                    "Ensure resolved data field values match the linked color field type before binary export.",
+                ));
+            };
+            return self.write_color(color);
+        }
+        if primitive.vector_dimension().is_some() {
+            let DataValue::Vector(vector) = &value.value else {
+                return Err(binary_value_error(
+                    Some(field.meta.name.as_str()),
+                    format!(
+                        "binary export field `{}` expected vector value",
+                        field.meta.name
+                    ),
+                    value_shape(value),
+                    "vector runtime value",
+                    "Ensure resolved data field values match the linked vector field type before binary export.",
+                ));
+            };
+            return self.write_vector(vector);
+        }
         let DataValue::Scalar(scalar) = &value.value else {
             return Err(expected_scalar(field));
         };
         self.write_scalar(primitive, scalar, field.meta.name.as_str())
+    }
+
+    fn write_color(&mut self, color: &ColorValue) -> Result<()> {
+        for component in [color.r, color.g, color.b, color.a] {
+            self.out.write_binary_bytes(&component.to_le_bytes())?;
+        }
+        Ok(())
+    }
+
+    fn write_vector(&mut self, vector: &VectorValue) -> Result<()> {
+        match vector {
+            VectorValue::Float(values) => {
+                for component in values {
+                    self.out.write_binary_bytes(&component.to_le_bytes())?;
+                }
+            }
+            VectorValue::Int(values) => {
+                for component in values {
+                    self.out
+                        .write_binary_bytes(&(*component as f64).to_le_bytes())?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn write_primitive_array_element(
