@@ -93,6 +93,9 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     if (this.path === "items" && this.currentField() === "rows") {
                         return 1;
                     }
+                    if (this.path === "rarity_levels" && this.currentField() === "rows") {
+                        return 1;
+                    }
                     if ((this.path === "classes" || this.path === "class_levels" || this.path === "quests" || this.path === "loot_pools") && this.currentField() === "rows") {
                         return 0;
                     }
@@ -112,7 +115,9 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
 
                 private numberValue(): number {
                     if (this.path === "items" && this.currentField() === "id") { return 1; }
+                    if (this.path === "items" && this.currentField() === "rarity_id") { return 2; }
                     if (this.path === "items" && this.currentField() === "price") { return 10; }
+                    if (this.path === "rarity_levels" && this.currentField() === "rarity_id") { return 2; }
                     if (this.path === "game_rules" && this.currentField() === "max_player_level") { return 60; }
                     if (this.path === "game_rules" && this.currentField() === "starter_gold") { return 500; }
                     if (this.path === "game_rules" && this.currentField() === "default_class_id") { return 1; }
@@ -121,10 +126,10 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                     if (this.path === "game_rules" && this.currentField() === "gold") { return 500; }
                     if (this.path === "game_rules" && this.currentField() === "starter_reward.item_ids[0]") { return 2001; }
                     if (this.path === "game_rules" && this.currentField() === "starter_reward.item_ids[1]") { return 2002; }
-                    if (this.path === "game_rules" && this.parentField() === "ambient_tint" && this.currentField() === "r") { return 51; }
-                    if (this.path === "game_rules" && this.parentField() === "ambient_tint" && this.currentField() === "g") { return 102; }
-                    if (this.path === "game_rules" && this.parentField() === "ambient_tint" && this.currentField() === "b") { return 153; }
-                    if (this.path === "game_rules" && this.parentField() === "ambient_tint" && this.currentField() === "a") { return 255; }
+                    if (this.path === "rarity_levels" && this.parentField() === "standard_color" && this.currentField() === "r") { return 255; }
+                    if (this.path === "rarity_levels" && this.parentField() === "standard_color" && this.currentField() === "g") { return 255; }
+                    if (this.path === "rarity_levels" && this.parentField() === "standard_color" && this.currentField() === "b") { return 255; }
+                    if (this.path === "rarity_levels" && this.parentField() === "standard_color" && this.currentField() === "a") { return 255; }
                     if (this.path === "game_rules" && this.parentField() === "spawn_position" && this.currentField() === "x") { return 1.5; }
                     if (this.path === "game_rules" && this.parentField() === "spawn_position" && this.currentField() === "y") { return 2.5; }
                     if (this.path === "game_rules" && this.parentField() === "spawn_position" && this.currentField() === "z") { return 3.5; }
@@ -142,6 +147,8 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
 
                 asString(): string {
                     if (this.path === "items" && this.currentField() === "name") { return "Potion"; }
+                    if (this.path === "rarity_levels" && this.currentField() === "name") { return "Common"; }
+                    if (this.path === "rarity_levels" && this.currentField() === "background_icon") { return "assets/icons/rarity/common.png"; }
                     throw new Error("unexpected string");
                 }
 
@@ -156,7 +163,7 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
 
             const loader: RuntimeDataLoader = {
                 open(path: string): RuntimeDataReader {
-                    if (path === "items" || path === "classes" || path === "class_levels" || path === "quests" || path === "loot_pools" || path === "game_rules") {
+                    if (path === "items" || path === "rarity_levels" || path === "classes" || path === "class_levels" || path === "quests" || path === "loot_pools" || path === "game_rules") {
                         return new MockReader(path);
                     }
                     throw new Error(`unexpected path: ${path}`);
@@ -168,6 +175,9 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 const item = data.items.getById(1);
                 if (!item || item.name !== "Potion") {
                     throw new Error("generated TypeScript query failed");
+                }
+                if (item.rarityId !== 2) {
+                    throw new Error("generated TypeScript item rarity id failed");
                 }
                 const translated = itemsNameText(item, (context, msgid) => context === "items.name" && msgid === "Potion" ? "Potion CN" : undefined);
                 if (translated !== "Potion CN") {
@@ -182,8 +192,9 @@ pub(crate) fn verify_generated_typescript(generated_dir: &std::path::Path) {
                 if (data.gameRules.starterReward.gold !== 500 || data.gameRules.starterReward.itemIds.length !== 2) {
                     throw new Error("generated TypeScript fixed reward field failed");
                 }
-                if (data.gameRules.ambientTint.r !== 51 || data.gameRules.ambientTint.g !== 102 || data.gameRules.ambientTint.b !== 153 || data.gameRules.ambientTint.a !== 255) {
-                    throw new Error("generated TypeScript color field failed");
+                const rarity = data.rarityLevels.getById(2);
+                if (!rarity || rarity.rarityId !== 2 || rarity.standardColor.r !== 255 || rarity.backgroundIcon !== "assets/icons/rarity/common.png") {
+                    throw new Error("generated TypeScript rarity table failed");
                 }
                 if (data.gameRules.spawnPosition.x !== 1.5 || data.gameRules.spawnPosition.y !== 2.5 || data.gameRules.spawnPosition.z !== 3.5) {
                     throw new Error("generated TypeScript vector field failed");

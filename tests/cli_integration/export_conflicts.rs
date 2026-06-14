@@ -208,7 +208,7 @@ fn artifact_path_escape_json_diagnostic_has_stable_code_and_paths() {
     assert!(
         json["diagnostics"][0]["current_value"]
             .as_str()
-            .is_some_and(|value| value.contains("items.json"))
+            .is_some_and(|value| value.contains(".json"))
     );
     assert!(
         json["diagnostics"][0]["expected"]

@@ -25,6 +25,13 @@ output = "out/schema_docs"
 format = "markdown"
 title = "Reference Game Meta Schema Documentation"
 
+[[targets.exports]]
+name = "meta_schema_doc_html"
+type = "schema_doc"
+output = "out/schema_docs_html"
+format = "html"
+title = "Reference Game Meta Schema Documentation"
+
 [[targets]]
 name = "client"
 tags = ["client"]

@@ -266,8 +266,19 @@ fn binary_fixture_loader_from_env() -> FsBinaryRuntimeDataLoader {
 fn assert_standard_data(data: &GameData) {
     let item = data.items.get_by_id(2001).expect("item id should be indexed");
     assert_eq!(item.price, 5);
+    assert_eq!(item.rarity_id, 2);
     assert_eq!(item.name_text(), "铁矿石");
     assert_eq!(item.stack().expect("stack fragment").max_stack, 999);
+    let item_rarity = item.rarity(data).expect("item rarity relation should resolve");
+    assert_eq!(item_rarity.rarity_id, 2);
+    assert_eq!(item_rarity.name_text(), "普通");
+    assert_eq!(item_rarity.standard_color.r, 255.0);
+    assert_eq!(item_rarity.standard_color.g, 255.0);
+    assert_eq!(item_rarity.standard_color.b, 255.0);
+    assert_eq!(item_rarity.background_icon, "assets/icons/rarity/common.png");
+    let epic = data.rarity_levels.get_by_id(5).expect("rarity id index");
+    assert_eq!(epic.rarity_id, 5);
+    assert_eq!(epic.standard_color.r, 163.0);
     assert!(data.items.get_by_id(404).is_none());
 
     let class_level = data
@@ -282,10 +293,6 @@ fn assert_standard_data(data: &GameData) {
     assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2002]);
     assert_eq!(data.game_rules.starter_reward.gold, 500);
     assert_eq!(data.game_rules.starter_reward.item_ids, vec![2001, 2002]);
-    assert_eq!(data.game_rules.ambient_tint.r, 51.0);
-    assert_eq!(data.game_rules.ambient_tint.g, 102.0);
-    assert_eq!(data.game_rules.ambient_tint.b, 153.0);
-    assert_eq!(data.game_rules.ambient_tint.a, 255.0);
     assert_eq!(data.game_rules.spawn_position.x, 1.5);
     assert_eq!(data.game_rules.spawn_position.y, 2.5);
     assert_eq!(data.game_rules.spawn_position.z, 3.5);
@@ -331,8 +338,20 @@ fn assert_standard_lazy_data(data: &impl GameDataAccess) {
     let items = data.items().expect("items table should load lazily");
     let item = items.get_by_id(2001).expect("item id should be indexed");
     assert_eq!(item.price, 5);
+    assert_eq!(item.rarity_id, 2);
     assert_eq!(item.name_text(), "铁矿石");
     assert_eq!(item.stack().expect("stack fragment").max_stack, 999);
+    let item_rarity = item.rarity(data).expect("item rarity relation should resolve lazily");
+    assert_eq!(item_rarity.rarity_id, 2);
+    assert_eq!(item_rarity.name_text(), "普通");
+    assert_eq!(item_rarity.standard_color.a, 255.0);
+    assert_eq!(item_rarity.background_icon, "assets/icons/rarity/common.png");
+    let rare = data
+        .rarity_levels()
+        .expect("rarity levels should load lazily")
+        .get_by_id(4)
+        .expect("rarity id index should resolve lazily");
+    assert_eq!(rare.rarity_id, 4);
     assert!(items.get_by_id(404).is_none());
 
     let class_level = data
@@ -349,10 +368,6 @@ fn assert_standard_lazy_data(data: &impl GameDataAccess) {
     assert_eq!(game_rules.starter_item_ids, vec![2001, 2002]);
     assert_eq!(game_rules.starter_reward.gold, 500);
     assert_eq!(game_rules.starter_reward.item_ids, vec![2001, 2002]);
-    assert_eq!(game_rules.ambient_tint.r, 51.0);
-    assert_eq!(game_rules.ambient_tint.g, 102.0);
-    assert_eq!(game_rules.ambient_tint.b, 153.0);
-    assert_eq!(game_rules.ambient_tint.a, 255.0);
     assert_eq!(game_rules.spawn_position.x, 1.5);
     assert_eq!(game_rules.spawn_position.y, 2.5);
     assert_eq!(game_rules.spawn_position.z, 3.5);

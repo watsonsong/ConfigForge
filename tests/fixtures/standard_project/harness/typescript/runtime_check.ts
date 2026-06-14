@@ -91,8 +91,15 @@ async function main(): Promise<void> {
   if (binaryLoader) {
     const binaryData = await GameData.load(binaryLoader);
     const binaryItem = binaryData.items.getById(2001);
-    if (!binaryItem || binaryItem.name !== "Iron Ore" || binaryItem.stack?.maxStack !== 999) {
+    if (!binaryItem || binaryItem.name !== "Iron Ore" || binaryItem.rarityId !== 2 || binaryItem.stack?.maxStack !== 999) {
       throw new Error("binary single-field item index query failed");
+    }
+    const binaryItemRarity = binaryItem.rarity(binaryData);
+    if (binaryItemRarity.rarityId !== 2 || binaryItemRarity.standardColor.r !== 255 || binaryItemRarity.backgroundIcon !== "assets/icons/rarity/common.png") {
+      throw new Error("binary item rarity relation failed");
+    }
+    if (binaryData.rarityLevels.getById(5)?.rarityId !== 5) {
+      throw new Error("binary rarity id index failed");
     }
     const binaryClassLevel = binaryData.classLevels.getByClassLevel(1, 2);
     if (!binaryClassLevel || binaryClassLevel.attributes.maxHealth !== 145) {
@@ -106,9 +113,6 @@ async function main(): Promise<void> {
     }
     if (binaryData.gameRules.starterReward.gold !== 500 || binaryData.gameRules.starterReward.itemIds.join(",") !== "2001,2002") {
       throw new Error("binary object table fixed reward field load failed");
-    }
-    if (binaryData.gameRules.ambientTint.r !== 51 || binaryData.gameRules.ambientTint.g !== 102 || binaryData.gameRules.ambientTint.b !== 153 || binaryData.gameRules.ambientTint.a !== 255) {
-      throw new Error("binary object table color field load failed");
     }
     if (binaryData.gameRules.spawnPosition.x !== 1.5 || binaryData.gameRules.spawnPosition.y !== 2.5 || binaryData.gameRules.spawnPosition.z !== 3.5) {
       throw new Error("binary object table vector field load failed");
@@ -171,8 +175,15 @@ async function main(): Promise<void> {
   const data = await GameData.load(loader);
 
   const item = data.items.getById(2001);
-  if (!item || item.name !== "Iron Ore" || item.stack?.maxStack !== 999) {
+  if (!item || item.name !== "Iron Ore" || item.rarityId !== 2 || item.stack?.maxStack !== 999) {
     throw new Error("single-field item index query failed");
+  }
+  const itemRarity = item.rarity(data);
+  if (itemRarity.rarityId !== 2 || itemRarity.nameText() !== "普通" || itemRarity.standardColor.r !== 255 || itemRarity.backgroundIcon !== "assets/icons/rarity/common.png") {
+    throw new Error("item rarity relation failed");
+  }
+  if (data.rarityLevels.getById(5)?.rarityId !== 5) {
+    throw new Error("rarity id index failed");
   }
   if (data.items.getById(404)) {
     throw new Error("missing item index query should return undefined");
@@ -191,9 +202,6 @@ async function main(): Promise<void> {
   }
   if (data.gameRules.starterReward.gold !== 500 || data.gameRules.starterReward.itemIds.join(",") !== "2001,2002") {
     throw new Error("object table fixed reward field load failed");
-  }
-  if (data.gameRules.ambientTint.r !== 51 || data.gameRules.ambientTint.g !== 102 || data.gameRules.ambientTint.b !== 153 || data.gameRules.ambientTint.a !== 255) {
-    throw new Error("object table color field load failed");
   }
   if (data.gameRules.spawnPosition.x !== 1.5 || data.gameRules.spawnPosition.y !== 2.5 || data.gameRules.spawnPosition.z !== 3.5) {
     throw new Error("object table vector field load failed");

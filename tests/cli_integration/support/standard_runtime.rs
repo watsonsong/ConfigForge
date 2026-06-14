@@ -725,9 +725,11 @@ static void CheckRuntime(IConfigForgeRuntimeDataLoader loader, string label)
 {
     var data = GameData.Load(loader);
     Check(data.Items.GetById(2001)?.Name == "Iron Ore", label + ": eager item lookup failed");
+    Check(data.Items.GetById(2001)?.Rarity(data).RarityId == 2, label + ": item rarity relation failed");
+    Check(data.RarityLevels.GetById(5)?.RarityId == 5, label + ": rarity id index failed");
+    Check(data.RarityLevels.GetById(2)?.StandardColor.R == 255.0, label + ": rarity color field load failed");
     Check(data.GameRules.DefaultClass(data).Name == "Warrior", label + ": relation lookup failed");
     Check(data.GameRules.StarterItems(data).Count == 2, label + ": list relation lookup failed");
-    Check(data.GameRules.AmbientTint.R == 51.0 && data.GameRules.AmbientTint.A == 255.0, label + ": color field load failed");
     Check(data.GameRules.SpawnPosition.X == 1.5 && data.GameRules.SpawnPosition.Z == 3.5, label + ": vector field load failed");
     Check(data.GameRules.GridSize.X == 16 && data.GameRules.GridSize.Y == 9, label + ": int vector field load failed");
     Check(data.Items.GetById(2001)?.NameText(new TestTranslator()) == "铁矿石", label + ": text helper translation failed");
@@ -743,7 +745,7 @@ static void CheckLazyRuntime(ICountingRuntimeDataLoader loader, string label)
     Check(loader.OpenCount == 1, label + ": lazy cache should avoid duplicate load");
     var eagerFromLazy = lazy.PreloadAll();
     Check(eagerFromLazy.GameRules.DefaultClass(eagerFromLazy).Name == "Warrior", label + ": preload relation failed");
-    Check(eagerFromLazy.GameRules.AmbientTint.B == 153.0, label + ": preload color field failed");
+    Check(eagerFromLazy.RarityLevels.GetById(2)?.StandardColor.B == 255.0, label + ": preload rarity color field failed");
     Check(eagerFromLazy.GameRules.SpawnPosition.Y == 2.5, label + ": preload vector field failed");
 }
 
@@ -1032,9 +1034,11 @@ public final class RuntimeCheck {
     static void checkRuntime(ReferenceGameConfig.ConfigForgeRuntimeDataLoader loader, String label) {
         ReferenceGameConfig.GameData data = ReferenceGameConfig.GameData.load(loader);
         check(data.getItems().getById(2001).getName().equals("Iron Ore"), label + ": eager item lookup failed");
+        check(data.getItems().getById(2001).rarity(data).getRarityId() == 2, label + ": item rarity relation failed");
+        check(data.getRarityLevels().getById(5).getRarityId() == 5, label + ": rarity id index failed");
+        check(data.getRarityLevels().getById(2).getStandardColor().r() == 255.0, label + ": rarity color field load failed");
         check(data.getGameRules().defaultClass(data).getName().equals("Warrior"), label + ": relation lookup failed");
         check(data.getGameRules().starterItems(data).size() == 2, label + ": list relation lookup failed");
-        check(data.getGameRules().getAmbientTint().r() == 51.0 && data.getGameRules().getAmbientTint().a() == 255.0, label + ": color field load failed");
         check(data.getGameRules().getSpawnPosition().x() == 1.5 && data.getGameRules().getSpawnPosition().z() == 3.5, label + ": vector field load failed");
         check(data.getGameRules().getGridSize().x() == 16 && data.getGameRules().getGridSize().y() == 9, label + ": int vector field load failed");
         check(data.getItems().getById(2001).nameText(new TestTranslator()).equals("铁矿石"), label + ": text helper translation failed");
@@ -1049,7 +1053,7 @@ public final class RuntimeCheck {
         check(lazyLoader.openCount() == 1, label + ": lazy cache should avoid duplicate load");
         ReferenceGameConfig.GameData eagerFromLazy = lazy.preloadAll();
         check(eagerFromLazy.getGameRules().defaultClass(eagerFromLazy).getName().equals("Warrior"), label + ": preload relation failed");
-        check(eagerFromLazy.getGameRules().getAmbientTint().b() == 153.0, label + ": preload color field failed");
+        check(eagerFromLazy.getRarityLevels().getById(2).getStandardColor().b() == 255.0, label + ": preload rarity color field failed");
         check(eagerFromLazy.getGameRules().getSpawnPosition().y() == 2.5, label + ": preload vector field failed");
     }
 

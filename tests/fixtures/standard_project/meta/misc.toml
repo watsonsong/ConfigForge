@@ -5,44 +5,39 @@
 name = "game_rules"
 kind = "object"
 source = "game_rules.csv"
+desc = "全局游戏规则对象表，维护新账号初始资源、默认职业、出生点、逻辑网格和开关类参数。对象表以 key/value 形式存储，适合少量全局配置。"
 
 [[tables.fields]]
 name = "max_player_level"
 type = "int"
 required = true
+desc = "玩家可达到的最大等级上限，用于经验、任务和角色成长系统的边界控制。"
 
 [[tables.fields]]
 name = "starter_gold"
 type = "int"
 required = true
+desc = "新账号创建时发放的初始金币数量。"
 
 [[tables.fields]]
 name = "default_class_id"
 type = "int"
 required = true
 foreign_key = { name = "default_class", target_table = "classes", target_index = "by_id", linked_field = "default_class" }
+desc = "新角色默认职业 ID，引用 classes.by_id，并在生成代码中提供 default_class 关系访问器。"
 
 [[tables.fields]]
 name = "starter_item_ids"
 type = "int[]"
 required = true
 foreign_key = { name = "starter_item", target_table = "items", target_index = "by_id", linked_field = "starter_items" }
+desc = "新账号默认发放的道具 ID 列表，引用 items.by_id，并在生成代码中提供 starter_items 关系访问器。"
 
 [[tables.fields]]
 name = "starter_reward"
 type = "FixedReward"
 required = true
 desc = "新玩家默认初始固定奖励，用一个字段同时表达金币、经验和内嵌道具列表。"
-
-[[tables.fields]]
-name = "ambient_tint"
-type = "color"
-color_format = "hex_rgb"
-color_channel = "byte"
-color_space = "srgb"
-alpha = "default_opaque"
-required = true
-desc = "客户端场景默认环境颜色，覆盖内置 Color 类型导出。"
 
 [[tables.fields]]
 name = "spawn_position"
@@ -62,13 +57,16 @@ desc = "默认逻辑网格尺寸，覆盖内置 Vector2Int 类型导出。"
 name = "stamina_cap"
 type = "int"
 required = true
+desc = "角色体力上限，用于行动、采集或战斗消耗系统。"
 
 [[tables.fields]]
 name = "daily_reset_hour"
 type = "int"
 required = true
+desc = "每日刷新小时，采用 0-23 的服务器本地小时值。"
 
 [[tables.fields]]
 name = "pvp_enabled"
 type = "bool"
 required = true
+desc = "PVP 功能开关，便于测试布尔字段导出和运行时读取。"

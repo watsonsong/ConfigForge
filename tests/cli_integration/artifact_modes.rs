@@ -64,7 +64,7 @@ fn dry_run_serial_and_parallel_outputs_match() {
     ]);
 
     assert_eq!(serial_stdout, parallel_stdout);
-    assert!(serial_stdout.contains("artifact plan (8 entries):"));
+    assert!(serial_stdout.contains("artifact plan (9 entries):"));
     assert!(!data_out_dir.join("items.json").exists());
     assert!(!rust_out_dir.join("generated.rs").exists());
 }
@@ -210,7 +210,7 @@ fn dry_run_builds_plan_without_writing_artifacts() {
 
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("artifact plan (8 entries):"))
+        .stdout(predicate::str::contains("artifact plan (9 entries):"))
         .stdout(predicate::str::contains("items.json"))
         .stdout(predicate::str::contains("game_rules.json"))
         .stdout(predicate::str::contains("generated.rs"))

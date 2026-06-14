@@ -67,3 +67,31 @@ msgstr "铁甲"
 msgctxt "items.name"
 msgid "Mage Robe"
 msgstr "法师长袍"
+
+msgctxt "rarity_levels.name"
+msgid "Poor"
+msgstr "粗糙"
+
+msgctxt "rarity_levels.name"
+msgid "Common"
+msgstr "普通"
+
+msgctxt "rarity_levels.name"
+msgid "Uncommon"
+msgstr "精良"
+
+msgctxt "rarity_levels.name"
+msgid "Rare"
+msgstr "稀有"
+
+msgctxt "rarity_levels.name"
+msgid "Epic"
+msgstr "史诗"
+
+msgctxt "rarity_levels.name"
+msgid "Legendary"
+msgstr "传说"
+
+msgctxt "rarity_levels.name"
+msgid "Artifact"
+msgstr "暗金"

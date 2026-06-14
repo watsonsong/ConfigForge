@@ -1,0 +1,9 @@
+rarity_id,name,standard_color,background_icon
+稀有度ID,名称,标准颜色,背景图标
+1,Poor,#808080,assets/icons/rarity/poor.png
+2,Common,#FFFFFF,assets/icons/rarity/common.png
+3,Uncommon,#1EFF00,assets/icons/rarity/uncommon.png
+4,Rare,#0070DD,assets/icons/rarity/rare.png
+5,Epic,#A335EE,assets/icons/rarity/epic.png
+6,Legendary,#FF8000,assets/icons/rarity/legendary.png
+7,Artifact,#E6CC80,assets/icons/rarity/artifact.png

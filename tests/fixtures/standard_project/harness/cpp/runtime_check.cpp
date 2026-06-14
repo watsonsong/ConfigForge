@@ -106,11 +106,21 @@ int main() {
     cfg::GameData data = cfg::GameData::Load(loader);
 
     const cfg::ItemsRow* item = data.Items().GetById(2001);
-    if (item == nullptr || item->name != "Iron Ore" || item->price != 5) {
+    if (item == nullptr || item->name != "Iron Ore" || item->price != 5 || item->rarity_id != 2) {
         throw std::runtime_error("single-field item index query failed");
     }
     if (!item->stack.has_value() || item->stack->max_stack != 999) {
         throw std::runtime_error("fragment payload load failed");
+    }
+    const cfg::RarityLevelsRow& item_rarity = item->GetRarity(data);
+    if (item_rarity.rarity_id != 2 || item_rarity.NameText() != "普通" ||
+        item_rarity.standard_color.r != 255.0 || item_rarity.standard_color.g != 255.0 ||
+        item_rarity.standard_color.b != 255.0 || item_rarity.background_icon != "assets/icons/rarity/common.png") {
+        throw std::runtime_error("item rarity relation failed");
+    }
+    const cfg::RarityLevelsRow* epic = data.RarityLevels().GetById(5);
+    if (epic == nullptr || epic->rarity_id != 5 || epic->standard_color.r != 163.0) {
+        throw std::runtime_error("rarity id index failed");
     }
     if (data.Items().GetById(404) != nullptr) {
         throw std::runtime_error("missing item index query should return null");
@@ -131,10 +141,6 @@ int main() {
     if (data.GameRules().starter_reward.gold != 500 || data.GameRules().starter_reward.item_ids.size() != 2 ||
         data.GameRules().starter_reward.item_ids[0] != 2001 || data.GameRules().starter_reward.item_ids[1] != 2002) {
         throw std::runtime_error("object table fixed reward field load failed");
-    }
-    if (data.GameRules().ambient_tint.r != 51.0 || data.GameRules().ambient_tint.g != 102.0 ||
-        data.GameRules().ambient_tint.b != 153.0 || data.GameRules().ambient_tint.a != 255.0) {
-        throw std::runtime_error("object table color field load failed");
     }
     if (data.GameRules().spawn_position.x != 1.5 || data.GameRules().spawn_position.y != 2.5 ||
         data.GameRules().spawn_position.z != 3.5) {
@@ -175,7 +181,7 @@ int main() {
 #endif
     cfg::LazyGameData lazy_data(lazy_loader);
     const cfg::ItemsRow* lazy_item = lazy_data.Items().GetById(2001);
-    if (lazy_item == nullptr || lazy_item->id != 2001) {
+    if (lazy_item == nullptr || lazy_item->id != 2001 || lazy_item->GetRarity(lazy_data).rarity_id != 2) {
         throw std::runtime_error("lazy item table load failed");
     }
     if (lazy_data.GameRules().default_class_id != 1) {

@@ -395,6 +395,11 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(
         fixture_root
+            .join("out/client_data/json/rarity_levels.json")
+            .exists()
+    );
+    assert!(
+        fixture_root
             .join("out/client_data/binary/items.bin")
             .exists()
     );
@@ -457,6 +462,16 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(fixture_root.join("out/client_docs/quests.md").exists());
     assert!(fixture_root.join("out/server_docs/index.md").exists());
     assert!(fixture_root.join("out/schema_docs/index.md").exists());
+    assert!(
+        fixture_root
+            .join("out/schema_docs_html/index.html")
+            .exists()
+    );
+    assert!(
+        fixture_root
+            .join("out/schema_docs_html/rarity_levels.html")
+            .exists()
+    );
     assert!(fixture_root.join("out/schema_docs/game_rules.md").exists());
     assert!(
         fixture_root
@@ -537,6 +552,8 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
         .expect("standard fixture POT should be readable");
     assert!(pot.contains("msgctxt \"items.name\""));
     assert!(pot.contains("msgid \"Iron Ore\""));
+    assert!(pot.contains("msgctxt \"rarity_levels.name\""));
+    assert!(pot.contains("msgid \"Common\""));
     assert!(pot.contains("msgctxt \"classes.description\""));
     assert!(pot.contains("msgctxt \"quests.title\""));
     assert!(pot.contains("msgid \"First Steps\""));
@@ -550,6 +567,7 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     let schema_index = fs::read_to_string(fixture_root.join("out/client_docs/index.md"))
         .expect("standard fixture schema index should be readable");
     assert!(schema_index.contains("Client Schema Documentation"));
+    assert!(schema_index.contains("[rarity_levels](rarity_levels.md)"));
     assert!(schema_index.contains("[quests](quests.md)"));
     assert!(schema_index.contains("[loot_pools](loot_pools.md)"));
 
@@ -565,6 +583,12 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(game_rules_doc.contains("starter_reward"));
     assert!(game_rules_doc.contains("FixedReward"));
 
+    let rarity_doc = fs::read_to_string(fixture_root.join("out/client_docs/rarity_levels.md"))
+        .expect("standard fixture rarity_levels doc should be readable");
+    assert!(rarity_doc.contains("道具稀有度品质表"));
+    assert!(rarity_doc.contains("standard_color"));
+    assert!(rarity_doc.contains("background_icon"));
+
     let server_schema_index = fs::read_to_string(fixture_root.join("out/server_docs/index.md"))
         .expect("standard fixture server schema index should be readable");
     assert!(server_schema_index.contains("Server Schema Documentation"));
@@ -572,8 +596,15 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     let meta_schema_index = fs::read_to_string(fixture_root.join("out/schema_docs/index.md"))
         .expect("standard fixture meta schema index should be readable");
     assert!(meta_schema_index.contains("Reference Game Meta Schema Documentation"));
+    assert!(meta_schema_index.contains("[rarity_levels](rarity_levels.md)"));
     assert!(meta_schema_index.contains("[game_rules](game_rules.md)"));
     assert!(meta_schema_index.contains("[items](items.md)"));
+
+    let meta_schema_html_index =
+        fs::read_to_string(fixture_root.join("out/schema_docs_html/index.html"))
+            .expect("standard fixture HTML schema index should be readable");
+    assert!(meta_schema_html_index.contains("Reference Game Meta Schema Documentation"));
+    assert!(meta_schema_html_index.contains("rarity_levels.html"));
 
     let asset_manifest_json =
         fs::read_to_string(fixture_root.join("out/client_assets/client_assets.json"))
@@ -586,6 +617,11 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
             .iter()
             .any(|asset| asset["path"] == "/Game/Skills/GA_Slash.GA_Slash_C")
     }));
+    assert!(asset_manifest["assets"].as_array().is_some_and(|assets| {
+        assets
+            .iter()
+            .any(|asset| asset["path"] == "assets/icons/rarity/common.png")
+    }));
 
     let asset_manifest_csv =
         fs::read_to_string(fixture_root.join("out/client_assets/client_assets.csv"))
@@ -595,12 +631,14 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
             .starts_with("Name,AssetRef,AssetKind,ReferencedBy,Tables,Fields,RecordKeys,Sources\n")
     );
     assert!(asset_manifest_csv.contains("/Game/Skills/GA_Slash.GA_Slash_C"));
+    assert!(asset_manifest_csv.contains("assets/icons/rarity/common.png"));
 
     let simple_asset_manifest_csv =
         fs::read_to_string(fixture_root.join("out/client_assets/client_assets_simple.csv"))
             .expect("standard fixture simple asset manifest CSV should be readable");
     assert!(simple_asset_manifest_csv.starts_with("AssetRef\n"));
     assert!(simple_asset_manifest_csv.contains("/Game/Skills/GA_Slash.GA_Slash_C"));
+    assert!(simple_asset_manifest_csv.contains("assets/icons/rarity/common.png"));
     assert!(!simple_asset_manifest_csv.contains("ReferencedBy"));
     assert!(!simple_asset_manifest_csv.contains("items["));
 

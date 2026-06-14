@@ -66,7 +66,10 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                         let field = match name {{
                             "rows" => "rows",
                             "id" => "id",
+                            "rarity_id" => "rarity_id",
                             "name" => "name",
+                            "standard_color" => "standard_color",
+                            "background_icon" => "background_icon",
                             "price" => "price",
                             "max_player_level" => "max_player_level",
                             "starter_gold" => "starter_gold",
@@ -76,7 +79,6 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                             "xp" => "xp",
                             "gold" => "gold",
                             "item_ids" => "item_ids",
-                            "ambient_tint" => "ambient_tint",
                             "spawn_position" => "spawn_position",
                             "grid_size" => "grid_size",
                             "r" => "r",
@@ -97,7 +99,7 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                     }}
 
                     fn len(&self) -> RuntimeDataResult<usize> {{
-                        if self.path == "items" && self.current_field() == Some("rows") {{ Ok(1) }} else if matches!(self.path, "classes" | "class_levels" | "character_surnames" | "character_male_given_names" | "character_female_given_names" | "quests" | "loot_pools") && self.current_field() == Some("rows") {{ Ok(0) }} else if self.path == "game_rules" && matches!(self.current_field(), Some("starter_item_ids" | "item_ids")) {{ Ok(2) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
+                        if self.path == "items" && self.current_field() == Some("rows") {{ Ok(1) }} else if self.path == "rarity_levels" && self.current_field() == Some("rows") {{ Ok(1) }} else if matches!(self.path, "classes" | "class_levels" | "character_surnames" | "character_male_given_names" | "character_female_given_names" | "quests" | "loot_pools") && self.current_field() == Some("rows") {{ Ok(0) }} else if self.path == "game_rules" && matches!(self.current_field(), Some("starter_item_ids" | "item_ids")) {{ Ok(2) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected len")) }}
                     }}
                 }}
 
@@ -117,6 +119,9 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
 
                     fn enter_index(&self, index: usize) -> RuntimeDataResult<()> {{
                         if self.path == "items" && self.current_field() == Some("rows") && index == 0 {{
+                            self.fields.borrow_mut().push("");
+                            Ok(())
+                        }} else if self.path == "rarity_levels" && self.current_field() == Some("rows") && index == 0 {{
                             self.fields.borrow_mut().push("");
                             Ok(())
                         }} else if self.path == "game_rules" && self.current_field() == Some("starter_item_ids") && index < 2 {{
@@ -156,7 +161,9 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                     fn as_i64(&self) -> RuntimeDataResult<i64> {{
                         match (self.path, self.current_field()) {{
                             ("items", Some("id")) => Ok(1),
+                            ("items", Some("rarity_id")) => Ok(2),
                             ("items", Some("price")) => Ok(10),
+                            ("rarity_levels", Some("rarity_id")) => Ok(2),
                             ("game_rules", Some("max_player_level")) => Ok(60),
                             ("game_rules", Some("starter_gold")) => Ok(500),
                             ("game_rules", Some("default_class_id")) => Ok(1),
@@ -174,10 +181,10 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
 
                     fn as_f64(&self) -> RuntimeDataResult<f64> {{
                         match (self.path, self.parent_field(), self.current_field()) {{
-                            ("game_rules", Some("ambient_tint"), Some("r")) => Ok(51.0),
-                            ("game_rules", Some("ambient_tint"), Some("g")) => Ok(102.0),
-                            ("game_rules", Some("ambient_tint"), Some("b")) => Ok(153.0),
-                            ("game_rules", Some("ambient_tint"), Some("a")) => Ok(255.0),
+                            ("rarity_levels", Some("standard_color"), Some("r")) => Ok(255.0),
+                            ("rarity_levels", Some("standard_color"), Some("g")) => Ok(255.0),
+                            ("rarity_levels", Some("standard_color"), Some("b")) => Ok(255.0),
+                            ("rarity_levels", Some("standard_color"), Some("a")) => Ok(255.0),
                             ("game_rules", Some("spawn_position"), Some("x")) => Ok(1.5),
                             ("game_rules", Some("spawn_position"), Some("y")) => Ok(2.5),
                             ("game_rules", Some("spawn_position"), Some("z")) => Ok(3.5),
@@ -192,7 +199,12 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                     }}
 
                     fn as_string(&self) -> RuntimeDataResult<String> {{
-                        if self.path == "items" && self.current_field() == Some("name") {{ Ok("Potion".to_owned()) }} else {{ Err(RuntimeDataError::type_mismatch("unexpected string")) }}
+                        match (self.path, self.current_field()) {{
+                            ("items", Some("name")) => Ok("Potion".to_owned()),
+                            ("rarity_levels", Some("name")) => Ok("Common".to_owned()),
+                            ("rarity_levels", Some("background_icon")) => Ok("assets/icons/rarity/common.png".to_owned()),
+                            _ => Err(RuntimeDataError::type_mismatch("unexpected string")),
+                        }}
                     }}
 
                     fn schema_revision(&self) -> Option<u64> {{ None }}
@@ -209,6 +221,7 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                     fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {{
                         match path {{
                             "items" => Ok(MockReader::root("items")),
+                            "rarity_levels" => Ok(MockReader::root("rarity_levels")),
                             "classes" => Ok(MockReader::root("classes")),
                             "class_levels" => Ok(MockReader::root("class_levels")),
                             "character_surnames" => Ok(MockReader::root("character_surnames")),
@@ -238,17 +251,18 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                     let data = GameData::load(&MockLoader).expect("generated data should load");
                     let item = data.items.get_by_id(1).expect("item should be indexed");
                     assert_eq!(item.name, "Potion");
+                    assert_eq!(item.rarity_id, 2);
                     assert_eq!(item.name_text(&MockTranslator), "药水");
+                    let rarity = data.rarity_levels.get_by_id(2).expect("rarity should be indexed");
+                    assert_eq!(rarity.rarity_id, 2);
+                    assert_eq!(rarity.standard_color.r, 255.0);
+                    assert_eq!(rarity.background_icon, "assets/icons/rarity/common.png");
                     assert_eq!(data.game_rules.max_player_level, 60);
                     assert!(data.items.get_by_id(404).is_none());
                     assert_eq!(data.game_rules.default_class_id, 1);
                     assert_eq!(data.game_rules.starter_item_ids, vec![2001, 2002]);
                     assert_eq!(data.game_rules.starter_reward.gold, 500);
                     assert_eq!(data.game_rules.starter_reward.item_ids, vec![2001, 2002]);
-                    assert_eq!(data.game_rules.ambient_tint.r, 51.0);
-                    assert_eq!(data.game_rules.ambient_tint.g, 102.0);
-                    assert_eq!(data.game_rules.ambient_tint.b, 153.0);
-                    assert_eq!(data.game_rules.ambient_tint.a, 255.0);
                     assert_eq!(data.game_rules.spawn_position.x, 1.5);
                     assert_eq!(data.game_rules.spawn_position.y, 2.5);
                     assert_eq!(data.game_rules.spawn_position.z, 3.5);
@@ -260,7 +274,7 @@ pub(crate) fn verify_generated_rust_crate(generated_dir: &std::path::Path, deriv
                 {serde_assertion}
             "#,
             serde_assertion = if derive_serde {
-                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), price: 10, stack: None, attributes: None, skill: None }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, default_class_id: 1, starter_item_ids: vec![2001], starter_reward: FixedReward { xp: 0, gold: 500, item_ids: vec![2001] }, ambient_tint: ConfigForgeColor { r: 51.0, g: 102.0, b: 153.0, a: 255.0 }, spawn_position: ConfigForgeVector3 { x: 1.5, y: 2.5, z: 3.5 }, grid_size: ConfigForgeVector2Int { x: 16, y: 9 }, stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true, default_class_link: RefCell::new(LinkCache::default()), starter_items_link: RefCell::new(LinkListCache::default()) }).unwrap();\n}"
+                "#[test]\nfn generated_rows_support_serde() {\n    let _ = serde_json::to_string(&ItemsRow { id: 1, name: \"Potion\".to_owned(), rarity_id: 2, price: 10, stack: None, attributes: None, skill: None, rarity_link: RefCell::new(LinkCache::default()) }).unwrap();\n    let _ = serde_json::to_string(&RarityLevelsRow { rarity_id: 2, name: \"Common\".to_owned(), standard_color: ConfigForgeColor { r: 255.0, g: 255.0, b: 255.0, a: 255.0 }, background_icon: \"assets/icons/rarity/common.png\".to_owned() }).unwrap();\n    let _ = serde_json::to_string(&GameRulesRow { max_player_level: 60, starter_gold: 500, default_class_id: 1, starter_item_ids: vec![2001], starter_reward: FixedReward { xp: 0, gold: 500, item_ids: vec![2001] }, spawn_position: ConfigForgeVector3 { x: 1.5, y: 2.5, z: 3.5 }, grid_size: ConfigForgeVector2Int { x: 16, y: 9 }, stamina_cap: 120, daily_reset_hour: 5, pvp_enabled: true, default_class_link: RefCell::new(LinkCache::default()), starter_items_link: RefCell::new(LinkListCache::default()) }).unwrap();\n}"
             } else {
                 ""
             }
@@ -317,10 +331,12 @@ pub(crate) fn verify_generated_rust_global_i18n(generated_dir: &std::path::Path)
                 let row = ItemsRow {
                     id: 1,
                     name: "Potion".to_owned(),
+                    rarity_id: 2,
                     price: 10,
                     stack: None,
                     attributes: None,
                     skill: None,
+                    rarity_link: std::cell::Cell::new(LinkCache::default()),
                 };
                 assert_eq!(row.name_text(), "Potion CN");
             }

@@ -24,6 +24,10 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                         fields_.push_back("");
                         return;
                     }
+                    if (path_ == "rarity_levels" && CurrentField() == "rows" && index == 0) {
+                        fields_.push_back("");
+                        return;
+                    }
                     if (path_ == "game_rules" && CurrentField() == "starter_item_ids" && index < 2) {
                         fields_.push_back("");
                         return;
@@ -44,6 +48,9 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                     if (path_ == "items" && CurrentField() == "rows") {
                         return 1;
                     }
+                    if (path_ == "rarity_levels" && CurrentField() == "rows") {
+                        return 1;
+                    }
                     if ((path_ == "classes" || path_ == "class_levels" || path_ == "character_surnames" || path_ == "character_male_given_names" || path_ == "character_female_given_names" || path_ == "quests" || path_ == "loot_pools") && CurrentField() == "rows") {
                         return 0;
                     }
@@ -62,7 +69,9 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
 
                 std::int64_t AsInt64() const override {
                     if (path_ == "items" && CurrentField() == "id") { return 1; }
+                    if (path_ == "items" && CurrentField() == "rarity_id") { return 2; }
                     if (path_ == "items" && CurrentField() == "price") { return 10; }
+                    if (path_ == "rarity_levels" && CurrentField() == "rarity_id") { return 2; }
                     if (path_ == "game_rules" && CurrentField() == "max_player_level") { return 60; }
                     if (path_ == "game_rules" && CurrentField() == "starter_gold") { return 500; }
                     if (path_ == "game_rules" && CurrentField() == "default_class_id") { return 1; }
@@ -77,10 +86,10 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 }
 
                 double AsDouble() const override {
-                    if (path_ == "game_rules" && ParentField() == "ambient_tint" && CurrentField() == "r") { return 51.0; }
-                    if (path_ == "game_rules" && ParentField() == "ambient_tint" && CurrentField() == "g") { return 102.0; }
-                    if (path_ == "game_rules" && ParentField() == "ambient_tint" && CurrentField() == "b") { return 153.0; }
-                    if (path_ == "game_rules" && ParentField() == "ambient_tint" && CurrentField() == "a") { return 255.0; }
+                    if (path_ == "rarity_levels" && ParentField() == "standard_color" && CurrentField() == "r") { return 255.0; }
+                    if (path_ == "rarity_levels" && ParentField() == "standard_color" && CurrentField() == "g") { return 255.0; }
+                    if (path_ == "rarity_levels" && ParentField() == "standard_color" && CurrentField() == "b") { return 255.0; }
+                    if (path_ == "rarity_levels" && ParentField() == "standard_color" && CurrentField() == "a") { return 255.0; }
                     if (path_ == "game_rules" && ParentField() == "spawn_position" && CurrentField() == "x") { return 1.5; }
                     if (path_ == "game_rules" && ParentField() == "spawn_position" && CurrentField() == "y") { return 2.5; }
                     if (path_ == "game_rules" && ParentField() == "spawn_position" && CurrentField() == "z") { return 3.5; }
@@ -96,6 +105,8 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
 
                 std::string AsString() const override {
                     if (path_ == "items" && CurrentField() == "name") { return "Potion"; }
+                    if (path_ == "rarity_levels" && CurrentField() == "name") { return "Common"; }
+                    if (path_ == "rarity_levels" && CurrentField() == "background_icon") { return "assets/icons/rarity/common.png"; }
                     throw std::runtime_error("unexpected string");
                 }
 
@@ -132,7 +143,7 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
             class MockLoader final : public IRuntimeDataLoader {
             public:
                 std::unique_ptr<IRuntimeDataReader> Open(const std::string& path) override {
-                    if (path == "items" || path == "classes" || path == "class_levels" || path == "character_surnames" || path == "character_male_given_names" || path == "character_female_given_names" || path == "quests" || path == "loot_pools" || path == "game_rules") {
+                    if (path == "items" || path == "rarity_levels" || path == "classes" || path == "class_levels" || path == "character_surnames" || path == "character_male_given_names" || path == "character_female_given_names" || path == "quests" || path == "loot_pools" || path == "game_rules") {
                         return std::make_unique<MockReader>(path);
                     }
                     throw std::runtime_error("unexpected path");
@@ -143,6 +154,7 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 ItemsRow row{};
                 row.id = 1;
                 row.name = "Potion";
+                row.rarity_id = 2;
                 row.price = 10;
                 TextTranslator translator = [](const char* context, const std::string& msgid) -> std::optional<std::string> {
                     if (std::string(context) == "items.name" && msgid == "Potion") {
@@ -161,7 +173,6 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 rules.starter_item_ids = {2001, 2002};
                 rules.starter_reward.gold = 500;
                 rules.starter_reward.item_ids = {2001, 2002};
-                rules.ambient_tint = ConfigForgeColor{51.0, 102.0, 153.0, 255.0};
                 rules.spawn_position = ConfigForgeVector3{1.5, 2.5, 3.5};
                 rules.grid_size = ConfigForgeVector2Int{16, 9};
                 rules.stamina_cap = 120;
@@ -177,6 +188,10 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 if (item == nullptr || item->name != "Potion") {
                     return 2;
                 }
+                const RarityLevelsRow* rarity = data.RarityLevels().GetById(2);
+                if (rarity == nullptr || rarity->rarity_id != 2 || rarity->standard_color.r != 255.0 || rarity->background_icon != "assets/icons/rarity/common.png") {
+                    return 11;
+                }
                 if (data.Items().GetById(404) != nullptr) {
                     return 3;
                 }
@@ -188,9 +203,6 @@ pub(crate) fn verify_generated_cpp_runtime(generated_dir: &std::path::Path) {
                 }
                 if (data.GameRules().starter_reward.gold != 500 || data.GameRules().starter_reward.item_ids.size() != 2) {
                     return 7;
-                }
-                if (data.GameRules().ambient_tint.r != 51.0 || data.GameRules().ambient_tint.g != 102.0 || data.GameRules().ambient_tint.b != 153.0 || data.GameRules().ambient_tint.a != 255.0) {
-                    return 8;
                 }
                 if (data.GameRules().spawn_position.x != 1.5 || data.GameRules().spawn_position.y != 2.5 || data.GameRules().spawn_position.z != 3.5) {
                     return 9;

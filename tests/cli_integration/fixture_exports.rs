@@ -69,7 +69,21 @@ fn builds_target_from_project_config() {
         .stdout(predicate::str::contains("target `client` built"));
 
     assert!(data_out_dir.join("items.json").exists());
+    assert!(data_out_dir.join("rarity_levels.json").exists());
     assert!(data_out_dir.join("game_rules.json").exists());
+    let rarity_levels_json = fs::read_to_string(data_out_dir.join("rarity_levels.json"))
+        .expect("rarity levels json should exist");
+    let rarity_levels: serde_json::Value =
+        serde_json::from_str(&rarity_levels_json).expect("rarity levels json should parse");
+    let common = rarity_levels["rows"]
+        .as_array()
+        .expect("rarity levels should export rows")
+        .iter()
+        .find(|row| row["rarity_id"] == "2")
+        .expect("common rarity should exist");
+    assert_eq!(common["name"], "Common");
+    assert_eq!(common["standard_color"]["r"], 255.0);
+    assert_eq!(common["background_icon"], "assets/icons/rarity/common.png");
     let game_rules_json = fs::read_to_string(data_out_dir.join("game_rules.json"))
         .expect("game rules json should exist");
     let game_rules: serde_json::Value =
@@ -95,6 +109,7 @@ fn builds_target_from_project_config() {
     let cpp_source = fs::read_to_string(cpp_out_dir.join("generated.cpp")).expect("cpp source");
     let ts_code = fs::read_to_string(ts_out_dir.join("generated.ts")).expect("ts code");
     assert!(rust_code.contains("pub struct ItemsRow"));
+    assert!(rust_code.contains("pub struct RarityLevelsRow"));
     assert!(rust_code.contains("pub struct GameRulesRow"));
     assert!(rust_code.contains("pub trait RuntimeDataReader"));
     assert!(!rust_code.contains("pub use config_forge_runtime_reader_core"));
@@ -103,6 +118,7 @@ fn builds_target_from_project_config() {
     assert!(rust_code.contains("pub trait TextTranslator"));
     assert!(rust_code.contains("pub fn name_text"));
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"items\""));
+    assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"rarity_levels\""));
     assert!(rust_code.contains("pub const DATA_FILE: &'static str = \"game_rules\""));
     assert!(!rust_code.contains("RuntimeDataFormat"));
     assert!(rust_code.contains("pub fn get_by_id"));
@@ -112,6 +128,7 @@ fn builds_target_from_project_config() {
     assert!(cpp_code.contains("using TextTranslator"));
     assert!(cpp_code.contains("std::string NameText"));
     assert!(cpp_code.contains("static constexpr const char* DataFile = \"items\""));
+    assert!(cpp_code.contains("static constexpr const char* DataFile = \"rarity_levels\""));
     assert!(
         cpp_code
             .contains("virtual std::unique_ptr<IRuntimeDataReader> Open(const std::string& path)")
@@ -128,6 +145,7 @@ fn builds_target_from_project_config() {
     assert!(ts_code.contains("export type TextTranslator"));
     assert!(ts_code.contains("export function itemsNameText"));
     assert!(ts_code.contains("static readonly dataFile = \"items\""));
+    assert!(ts_code.contains("static readonly dataFile = \"rarity_levels\""));
     assert!(ts_code.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader"));
     assert!(!ts_code.contains("export class GameRulesTable"));
     assert!(!ts_code.contains("RuntimeDataFormat"));

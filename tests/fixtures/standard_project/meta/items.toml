@@ -9,21 +9,76 @@ desc = "战斗属性集合，可用于装备、角色职业等级等配置。"
 name = "max_health"
 type = "int"
 default = 0
+desc = "最大生命值加成，用于装备和职业成长等战斗属性配置。"
 
 [[structs.fields]]
 name = "max_stamina"
 type = "int"
 default = 0
+desc = "最大耐力值加成，影响闪避、冲刺或技能消耗相关玩法。"
 
 [[structs.fields]]
 name = "attack"
 type = "int"
 default = 0
+desc = "攻击力加成，用于武器、装备或职业等级带来的输出能力。"
 
 [[structs.fields]]
 name = "defence"
 type = "int"
 default = 0
+desc = "防御力加成，用于护甲、装备或职业等级带来的减伤能力。"
+
+[[tables]]
+name = "rarity_levels"
+kind = "collection"
+primary_index = "by_id"
+source = "rarity_levels.csv"
+desc = "道具稀有度品质表，统一维护普通、精良、稀有等品质的本地化展示名、标准品质颜色和背景图标资源。道具表通过 rarity_id 引用该表，避免各道具源重复填写展示规则。"
+
+[[tables.fields]]
+name = "rarity_id"
+type = "int"
+required = true
+desc = "稀有度等级 ID。数值越大通常代表品质越高，同时作为道具表 rarity_id 的外键目标。"
+
+[[tables.fields]]
+name = "name"
+type = "text"
+required = true
+export_when = { any = ["client"] }
+desc = "面向玩家展示的稀有度名称，导出到 gettext POT 以支持多语言本地化。"
+
+[[tables.fields]]
+name = "standard_color"
+type = "color"
+color_format = "hex_rgb"
+color_channel = "byte"
+color_space = "srgb"
+alpha = "default_opaque"
+required = true
+desc = "稀有度标准展示颜色，使用 sRGB 8-bit RGBA 表示；覆盖灰、白、绿、蓝、紫、金、暗金等常见品质色。"
+
+[[tables.fields]]
+name = "background_icon"
+type = "asset"
+asset_kind = "rarity_background_icon"
+required = true
+export_when = { any = ["client"] }
+desc = "稀有度背景 Icon，用于背包格子、掉落提示和奖励弹窗等 UI 场景。"
+
+[[asset_kinds]]
+name = "rarity_background_icon"
+input = "path"
+path_style = "relative"
+extension_policy = "required"
+extensions = [".png"]
+
+[[tables.indexes]]
+name = "by_id"
+fields = ["rarity_id"]
+unique = true
+primary = true
 
 [[tables]]
 name = "items"
@@ -44,17 +99,27 @@ desc = "统一道具运行时表。materials/weapons/armors 是同一 items 表�
 name = "id"
 type = "int"
 required = true
+desc = "全局唯一道具 ID，作为背包、奖励、掉落和任务引用道具的主键。"
 
 [[tables.fields]]
 name = "name"
 type = "text"
 required = true
 export_when = { any = ["client"] }
+desc = "道具展示名称，参与客户端代码生成和 gettext 本地化导出。"
+
+[[tables.fields]]
+name = "rarity_id"
+type = "int"
+required = true
+foreign_key = { name = "rarity", target_table = "rarity_levels", target_index = "by_id", linked_field = "rarity" }
+desc = "道具所属稀有度品质，引用 rarity_levels.rarity_id 以获得本地化品质名、标准颜色和背景图标。"
 
 [[tables.fields]]
 name = "price"
 type = "int"
 required = true
+desc = "基础出售价格或系统估值，用于商店、回收和奖励价值计算。"
 
 [[tables.fragments]]
 name = "stack"
@@ -64,6 +129,7 @@ desc = "材料可堆叠信息。"
 name = "max_stack"
 type = "int"
 required = true
+desc = "材料类道具的最大堆叠数量；非材料道具不激活 stack fragment。"
 
 [[tables.fragments]]
 name = "attributes"
@@ -81,6 +147,7 @@ type = "asset"
 asset_kind = "unreal_skill_class"
 required = true
 export_when = { any = ["client"] }
+desc = "武器装备后授予玩家的 Unreal Gameplay Ability 蓝图类资源。"
 
 [[asset_kinds]]
 name = "unreal_skill_class"
