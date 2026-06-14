@@ -5,7 +5,10 @@ use std::collections::BTreeMap;
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
-    data::typed_value::{parse_list_cell_value, parse_scalar_field_value, parse_scalar_for_type},
+    data::typed_value::{
+        parse_color_field_value, parse_list_cell_value, parse_scalar_field_value,
+        parse_scalar_for_type, parse_vector_field_value,
+    },
     data::value_conversion::{
         json_value_is_empty, json_value_to_cell, json_value_to_scalar_cell_for_field,
         toml_default_to_json_value,
@@ -13,7 +16,7 @@ use crate::{
     diagnostic::code::{CF_DATA_INVALID_TYPE, CF_DATA_SOURCE_SCHEMA_INVALID},
     meta::{
         LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, LinkedTableMeta,
-        TableKind, TargetTags,
+        PrimitiveFieldType, TableKind, TargetTags, VectorFormat,
     },
 };
 
@@ -223,6 +226,34 @@ impl<'a, 'path> ValueContext<'a, 'path> {
         )
     }
 
+    fn parse_color_field(
+        &self,
+        field: &LinkedFieldMeta<'_>,
+        raw: &str,
+    ) -> Result<crate::data::ColorValue> {
+        parse_color_field_value(
+            self.table_name,
+            self.row_number,
+            self.field_path,
+            field,
+            raw,
+        )
+    }
+
+    fn parse_vector_field(
+        &self,
+        field: &LinkedFieldMeta<'_>,
+        raw: &str,
+    ) -> Result<crate::data::VectorValue> {
+        parse_vector_field_value(
+            self.table_name,
+            self.row_number,
+            self.field_path,
+            field,
+            raw,
+        )
+    }
+
     fn parse_list_cell(
         &self,
         element_type: &LinkedField<'_>,
@@ -317,8 +348,107 @@ fn resolve_field_value(
     match &field.linked_field {
         LinkedField::Struct(struct_type) => resolve_struct_occurrence_value(context, struct_type),
         LinkedField::List(element_type) => resolve_list_cell_value(context, element_type, field),
+        LinkedField::Primitive(PrimitiveFieldType::Color) => {
+            resolve_color_cell_value(context, field)
+        }
+        LinkedField::Primitive(
+            PrimitiveFieldType::Vector2
+            | PrimitiveFieldType::Vector3
+            | PrimitiveFieldType::Vector4
+            | PrimitiveFieldType::Vector2Int
+            | PrimitiveFieldType::Vector3Int
+            | PrimitiveFieldType::Vector4Int,
+        ) => resolve_vector_cell_value(context, field),
         _ => resolve_scalar_cell_value(context, field),
     }
+}
+
+fn resolve_color_cell_value(
+    context: ValueContext<'_, '_>,
+    field: &LinkedFieldMeta<'_>,
+) -> Result<Option<ResolvedValue>> {
+    if let Some(raw) = non_empty_row_value(context.row, context.field_path) {
+        let color = context.parse_color_field(field, raw)?;
+        return Ok(Some(context.explicit(DataValue::Color(color), raw)));
+    }
+
+    let Some(default) = field.meta.default.as_ref() else {
+        return Ok(None);
+    };
+    let default_value = toml_default_to_json_value(default);
+    if json_value_is_empty(&default_value) {
+        return Ok(None);
+    }
+    let raw = json_value_to_cell(&default_value).map_err(|_| {
+        resolver_value_error(
+            context,
+            CF_DATA_INVALID_TYPE,
+            format!(
+                "table `{}` row {} field `{}` must be a color cell value",
+                context.table_name, context.row_number, context.field_path
+            ),
+            default_value.to_string(),
+            "string, numeric array, or object color value",
+            "Use a default value that matches the field color_format.",
+        )
+    })?;
+    let color = context.parse_color_field(field, &raw)?;
+    Ok(Some(context.defaulted(DataValue::Color(color), raw)))
+}
+
+fn resolve_vector_cell_value(
+    context: ValueContext<'_, '_>,
+    field: &LinkedFieldMeta<'_>,
+) -> Result<Option<ResolvedValue>> {
+    if let Some(raw) = non_empty_row_value(context.row, context.field_path) {
+        if let Some(expanded_path) = first_vector_component_cell(context, field) {
+            return Err(resolver_value_error(
+                context,
+                CF_DATA_SOURCE_SCHEMA_INVALID,
+                format!(
+                    "table `{}` row {} field `{}` mixes vector cell with expanded vector component path `{}`",
+                    context.table_name, context.row_number, context.field_path, expanded_path
+                ),
+                format!("{} and {}", context.field_path, expanded_path),
+                "either one vector cell or expanded vector component cells",
+                "Use only one vector source layout for the field in the same row.",
+            ));
+        }
+        let vector = context.parse_vector_field(field, raw)?;
+        return Ok(Some(context.explicit(DataValue::Vector(vector), raw)));
+    }
+
+    if field.meta.vector_format == Some(VectorFormat::Expanded) {
+        if let Some((raw, paths)) = expanded_vector_raw_value(context, field)? {
+            let vector = context.parse_vector_field(field, &raw)?;
+            return Ok(Some(
+                context.explicit(DataValue::Vector(vector), paths.join(",")),
+            ));
+        }
+    }
+
+    let Some(default) = field.meta.default.as_ref() else {
+        return Ok(None);
+    };
+    let default_value = toml_default_to_json_value(default);
+    if json_value_is_empty(&default_value) {
+        return Ok(None);
+    }
+    let raw = json_value_to_cell(&default_value).map_err(|_| {
+        resolver_value_error(
+            context,
+            CF_DATA_INVALID_TYPE,
+            format!(
+                "table `{}` row {} field `{}` must be a vector cell value",
+                context.table_name, context.row_number, context.field_path
+            ),
+            default_value.to_string(),
+            "string, numeric array, or object vector value",
+            "Use a default value that matches the field vector_format.",
+        )
+    })?;
+    let vector = context.parse_vector_field(field, &raw)?;
+    Ok(Some(context.defaulted(DataValue::Vector(vector), raw)))
 }
 
 fn resolve_list_cell_value(
@@ -572,6 +702,31 @@ fn resolve_struct_json_value(
                     child_context.explicit(DataValue::Array(array), raw)
                 }
             }
+            LinkedField::Primitive(PrimitiveFieldType::Color) => {
+                let raw = json_value_to_cell(child_value)?;
+                let color = child_context.parse_color_field(child, &raw)?;
+                if source_is_default {
+                    child_context.defaulted(DataValue::Color(color), raw)
+                } else {
+                    child_context.explicit(DataValue::Color(color), raw)
+                }
+            }
+            LinkedField::Primitive(
+                PrimitiveFieldType::Vector2
+                | PrimitiveFieldType::Vector3
+                | PrimitiveFieldType::Vector4
+                | PrimitiveFieldType::Vector2Int
+                | PrimitiveFieldType::Vector3Int
+                | PrimitiveFieldType::Vector4Int,
+            ) => {
+                let raw = json_value_to_cell(child_value)?;
+                let vector = child_context.parse_vector_field(child, &raw)?;
+                if source_is_default {
+                    child_context.defaulted(DataValue::Vector(vector), raw)
+                } else {
+                    child_context.explicit(DataValue::Vector(vector), raw)
+                }
+            }
             _ => {
                 let raw = child_context.json_value_to_scalar_cell(child_value)?;
                 let scalar = child_context.parse_scalar_field(child, &raw)?;
@@ -638,7 +793,9 @@ fn struct_occurrence_has_effective_value(
                 return Ok(true);
             }
             _ => {
-                if non_empty_row_value(context.row, &child_path).is_some() {
+                if non_empty_row_value(context.row, &child_path).is_some()
+                    || first_vector_component_cell(child_context, child).is_some()
+                {
                     return Ok(true);
                 }
                 let Some(default) = child.meta.default.as_ref() else {
@@ -648,8 +805,34 @@ fn struct_occurrence_has_effective_value(
                 if json_value_is_empty(&default_value) {
                     continue;
                 }
-                let raw = child_context.json_value_to_scalar_cell(&default_value)?;
-                child_context.parse_scalar_field(child, &raw)?;
+                let raw = match child.primitive_type() {
+                    Some(PrimitiveFieldType::Color)
+                    | Some(PrimitiveFieldType::Vector2)
+                    | Some(PrimitiveFieldType::Vector3)
+                    | Some(PrimitiveFieldType::Vector4)
+                    | Some(PrimitiveFieldType::Vector2Int)
+                    | Some(PrimitiveFieldType::Vector3Int)
+                    | Some(PrimitiveFieldType::Vector4Int) => json_value_to_cell(&default_value)?,
+                    _ => child_context.json_value_to_scalar_cell(&default_value)?,
+                };
+                match child.primitive_type() {
+                    Some(PrimitiveFieldType::Color) => {
+                        child_context.parse_color_field(child, &raw)?;
+                    }
+                    Some(
+                        PrimitiveFieldType::Vector2
+                        | PrimitiveFieldType::Vector3
+                        | PrimitiveFieldType::Vector4
+                        | PrimitiveFieldType::Vector2Int
+                        | PrimitiveFieldType::Vector3Int
+                        | PrimitiveFieldType::Vector4Int,
+                    ) => {
+                        child_context.parse_vector_field(child, &raw)?;
+                    }
+                    _ => {
+                        child_context.parse_scalar_field(child, &raw)?;
+                    }
+                }
                 return Ok(true);
             }
         }
@@ -739,6 +922,9 @@ fn validate_dotted_source_key(
     };
 
     if let Some(field) = meta.field(first_segment) {
+        if is_expanded_vector_component(field, rest) {
+            return Ok(());
+        }
         let LinkedField::Struct(struct_type) = &field.linked_field else {
             return Err(resolver_schema_error(
                 meta.meta.name.as_str(),
@@ -875,6 +1061,9 @@ fn validate_struct_child_path(
             "Remove the unknown child path or declare it in the struct Meta.",
         ));
     };
+    if is_expanded_vector_component(child, rest) {
+        return Ok(());
+    }
     let LinkedField::Struct(nested_struct) = &child.linked_field else {
         return Err(resolver_schema_error(
             table_name,
@@ -1078,6 +1267,82 @@ fn struct_child<'meta>(
         .fields
         .iter()
         .find(|field| field.meta.name == name)
+}
+
+fn expanded_vector_raw_value(
+    context: ValueContext<'_, '_>,
+    field: &LinkedFieldMeta<'_>,
+) -> Result<Option<(String, Vec<String>)>> {
+    let components = field.meta.vector_component_names();
+    let mut raw_values = Vec::with_capacity(components.len());
+    let mut paths = Vec::with_capacity(components.len());
+    let mut has_component = false;
+    for component in &components {
+        let path = format!("{}.{}", context.field_path, component);
+        paths.push(path.clone());
+        if let Some(raw) = non_empty_row_value(context.row, &path) {
+            has_component = true;
+            raw_values.push(raw.to_owned());
+        } else {
+            raw_values.push(String::new());
+        }
+    }
+    if !has_component {
+        return Ok(None);
+    }
+    if let Some((missing_index, missing_path)) = raw_values
+        .iter()
+        .zip(paths.iter())
+        .enumerate()
+        .find_map(|(index, (raw, path))| raw.is_empty().then_some((index, path)))
+    {
+        return Err(resolver_value_error(
+            context,
+            CF_DATA_INVALID_TYPE,
+            format!(
+                "table `{}` row {} field `{}` has incomplete expanded vector; missing component `{}`",
+                context.table_name,
+                context.row_number,
+                context.field_path,
+                components[missing_index]
+            ),
+            missing_path.as_str(),
+            format!("non-empty expanded vector component `{missing_path}`"),
+            "Provide all vector component columns or leave the vector field empty.",
+        ));
+    }
+    Ok(Some((raw_values.join(","), paths)))
+}
+
+fn first_vector_component_cell(
+    context: ValueContext<'_, '_>,
+    field: &LinkedFieldMeta<'_>,
+) -> Option<String> {
+    if field.meta.vector_format != Some(VectorFormat::Expanded) {
+        return None;
+    }
+    field
+        .meta
+        .vector_component_names()
+        .into_iter()
+        .find_map(|component| {
+            let path = format!("{}.{}", context.field_path, component);
+            non_empty_row_value(context.row, &path).map(|_| path)
+        })
+}
+
+fn is_expanded_vector_component(field: &LinkedFieldMeta<'_>, component: &str) -> bool {
+    field.meta.vector_format == Some(VectorFormat::Expanded)
+        && field
+            .primitive_type()
+            .and_then(|primitive| primitive.vector_dimension())
+            .is_some()
+        && !component.contains('.')
+        && field
+            .meta
+            .vector_component_names()
+            .iter()
+            .any(|name| name == component)
 }
 
 fn first_descendant_path<'a>(row: &'a DataRow, field_path: &str) -> Option<&'a str> {

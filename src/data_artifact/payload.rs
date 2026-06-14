@@ -170,6 +170,10 @@ fn exported_value_from_resolved(value: &ResolvedValue) -> Result<ExportedValue> 
         DataValue::Scalar(_) => Ok(ExportedValue::Scalar(
             value.scalar_export_string().unwrap_or_default(),
         )),
+        DataValue::Color(color) => Ok(ExportedValue::NumberArray(vec![
+            color.r, color.g, color.b, color.a,
+        ])),
+        DataValue::Vector(vector) => Ok(ExportedValue::NumberArray(vector_export_numbers(vector))),
         DataValue::Struct(children) => children
             .iter()
             .map(|(field_name, child)| {
@@ -192,6 +196,10 @@ fn exported_value_from_array_element(
         DataValue::Scalar(_) => Ok(ExportedValue::Scalar(
             value.scalar_export_string().unwrap_or_default(),
         )),
+        DataValue::Color(color) => Ok(ExportedValue::NumberArray(vec![
+            color.r, color.g, color.b, color.a,
+        ])),
+        DataValue::Vector(vector) => Ok(ExportedValue::NumberArray(vector_export_numbers(vector))),
         DataValue::Struct(children) => children
             .iter()
             .map(|(field_name, child)| {
@@ -204,6 +212,13 @@ fn exported_value_from_array_element(
             .map(exported_value_from_array_element)
             .collect::<Result<Vec<_>>>()
             .map(ExportedValue::Array),
+    }
+}
+
+fn vector_export_numbers(vector: &crate::data::VectorValue) -> Vec<f64> {
+    match vector {
+        crate::data::VectorValue::Float(values) => values.clone(),
+        crate::data::VectorValue::Int(values) => values.iter().map(|value| *value as f64).collect(),
     }
 }
 

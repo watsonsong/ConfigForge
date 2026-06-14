@@ -18,7 +18,8 @@ use crate::{
     ConfigForgeError, Diagnostic,
     diagnostic::code::{
         CF_BUILD_INVALID_OPTION, CF_DATA_DUPLICATE_HEADER, CF_DATA_DUPLICATE_KEY,
-        CF_DATA_SOURCE_PATH_ESCAPE, CF_DATA_SOURCE_READ_FAILED, CF_DATA_SOURCE_SCHEMA_INVALID,
+        CF_DATA_INVALID_TYPE, CF_DATA_SOURCE_PATH_ESCAPE, CF_DATA_SOURCE_READ_FAILED,
+        CF_DATA_SOURCE_SCHEMA_INVALID,
     },
     meta::MetaModel,
 };
@@ -543,6 +544,131 @@ fn data_resolver_resolves_expanded_structs_with_typed_scalars_and_defaults() {
             .as_deref(),
         Some("1")
     );
+}
+
+#[test]
+fn data_resolver_resolves_color_and_vector_builtin_values() {
+    let meta = MetaModel::from_toml_str(
+        r##"
+            [[tables]]
+            name = "effects"
+            source = "effects.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_format = "hex_rgb"
+            color_channel = "byte"
+            color_space = "srgb"
+            alpha = "default_opaque"
+
+            [[tables.fields]]
+            name = "spawn_position"
+            type = "vector3"
+            vector_format = "expanded"
+            vector_components = ["x", "y", "z"]
+            unit = "cm"
+
+            [[tables.fields]]
+            name = "grid"
+            type = "vector2_int"
+            vector_format = "array"
+            default = "[4,5]"
+        "##,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table = DataTable::new(
+        "effects",
+        vec![DataRow::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("tint".to_owned(), "#336699".to_owned()),
+            ("spawn_position.x".to_owned(), "1.5".to_owned()),
+            ("spawn_position.y".to_owned(), "2.5".to_owned()),
+            ("spawn_position.z".to_owned(), "3.5".to_owned()),
+        ])],
+    );
+    let data_set = DataSet::new(vec![table]);
+
+    let resolved = DataResolver::new(&linked)
+        .resolve_required_tables(&data_set)
+        .expect("data should resolve");
+    let row = &resolved.table("effects").expect("table should exist").rows[0];
+
+    let DataValue::Color(tint) = &row["tint"].value else {
+        panic!("tint should resolve as color");
+    };
+    assert_eq!(tint.r, 0x33 as f64);
+    assert_eq!(tint.g, 0x66 as f64);
+    assert_eq!(tint.b, 0x99 as f64);
+    assert_eq!(tint.a, 255.0);
+    assert_eq!(tint.channel, crate::meta::ColorChannel::Byte);
+    assert_eq!(tint.color_space, crate::meta::ColorSpace::Srgb);
+    assert_eq!(row["tint"].source.raw_value.as_deref(), Some("#336699"));
+
+    assert_eq!(
+        row["spawn_position"].value,
+        DataValue::Vector(VectorValue::Float(vec![1.5, 2.5, 3.5]))
+    );
+    assert_eq!(
+        row["spawn_position"].source.raw_value.as_deref(),
+        Some("spawn_position.x,spawn_position.y,spawn_position.z")
+    );
+    assert_eq!(
+        row["grid"].value,
+        DataValue::Vector(VectorValue::Int(vec![4, 5]))
+    );
+    assert_eq!(row["grid"].source.kind, ValueSourceKind::DefaultValue);
+}
+
+#[test]
+fn data_resolver_rejects_invalid_builtin_value_layouts() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "effects"
+            source = "effects.csv"
+
+            [[tables.fields]]
+            name = "spawn_position"
+            type = "vector3"
+            vector_format = "expanded"
+        "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+
+    let incomplete = DataSet::new(vec![DataTable::new(
+        "effects",
+        vec![DataRow::from([
+            ("spawn_position.x".to_owned(), "1".to_owned()),
+            ("spawn_position.z".to_owned(), "3".to_owned()),
+        ])],
+    )]);
+    let error = DataResolver::new(&linked)
+        .resolve_required_tables(&incomplete)
+        .unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_INVALID_TYPE);
+    assert!(diagnostic.message.contains("incomplete expanded vector"));
+
+    let mixed = DataSet::new(vec![DataTable::new(
+        "effects",
+        vec![DataRow::from([
+            ("spawn_position".to_owned(), "1,2,3".to_owned()),
+            ("spawn_position.x".to_owned(), "1".to_owned()),
+        ])],
+    )]);
+    let error = DataResolver::new(&linked)
+        .resolve_required_tables(&mixed)
+        .unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_DATA_SOURCE_SCHEMA_INVALID);
+    assert!(diagnostic.message.contains("mixes vector cell"));
 }
 
 #[test]

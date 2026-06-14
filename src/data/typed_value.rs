@@ -4,11 +4,14 @@
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
     diagnostic::code::{CF_DATA_INVALID_ENUM, CF_DATA_INVALID_TYPE},
-    meta::{LinkedField, LinkedFieldMeta, PrimitiveFieldType},
+    meta::{
+        ColorAlphaPolicy, ColorChannel, ColorFormat, LinkedField, LinkedFieldMeta,
+        PrimitiveFieldType, VectorFormat,
+    },
 };
 
 use super::{
-    ArrayElementValue, RowSourceInfo, ScalarValue, ValueSourceKind,
+    ArrayElementValue, ColorValue, RowSourceInfo, ScalarValue, ValueSourceKind, VectorValue,
     value_conversion::json_value_to_scalar_cell_for_field,
 };
 
@@ -206,6 +209,362 @@ pub(crate) fn parse_list_json_value(
             Ok(ArrayElementValue::scalar(scalar, Some(raw)))
         })
         .collect()
+}
+
+pub(crate) fn parse_color_field_value(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    field: &LinkedFieldMeta<'_>,
+    value: &str,
+) -> Result<ColorValue> {
+    let channel = field.meta.color_channel.ok_or_else(|| {
+        scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            "color_channel byte or normalized",
+            format!("table `{table_name}` row {row_number} field `{field_path}` cannot parse color without color_channel"),
+        )
+    })?;
+    let format = field.meta.color_format.unwrap_or_default();
+    let alpha = field.meta.color_alpha.unwrap_or_default();
+    let components = match format {
+        ColorFormat::HexRgb | ColorFormat::HexRgba => parse_hex_color(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            matches!(format, ColorFormat::HexRgba),
+            alpha,
+        )?,
+        ColorFormat::RgbTuple | ColorFormat::RgbaTuple => parse_tuple_numbers(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            if matches!(format, ColorFormat::RgbaTuple) {
+                4
+            } else {
+                3
+            },
+        )?,
+        ColorFormat::Object => parse_object_components(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            &["r", "g", "b", "a"],
+            alpha,
+        )?,
+    };
+    let (r, g, b, a) = color_components_with_alpha(
+        table_name, row_number, field_path, value, components, channel, alpha,
+    )?;
+    Ok(ColorValue {
+        r,
+        g,
+        b,
+        a,
+        channel,
+        color_space: field.meta.color_space.unwrap_or_default(),
+    })
+}
+
+pub(crate) fn parse_vector_field_value(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    field: &LinkedFieldMeta<'_>,
+    value: &str,
+) -> Result<VectorValue> {
+    let primitive = field.primitive_type().ok_or_else(|| {
+        scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            "vector field type",
+            format!(
+                "table `{table_name}` row {row_number} field `{field_path}` is not a vector field"
+            ),
+        )
+    })?;
+    let dimension = primitive.vector_dimension().ok_or_else(|| {
+        scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            "vector field type",
+            format!(
+                "table `{table_name}` row {row_number} field `{field_path}` is not a vector field"
+            ),
+        )
+    })?;
+    let format = field.meta.vector_format.unwrap_or_default();
+    let numbers = match format {
+        VectorFormat::Tuple | VectorFormat::Expanded => {
+            parse_tuple_numbers(table_name, row_number, field_path, value, dimension)?
+        }
+        VectorFormat::Array => {
+            parse_json_array_numbers(table_name, row_number, field_path, value, dimension)?
+        }
+        VectorFormat::Object => {
+            parse_vector_object_numbers(table_name, row_number, field_path, field, value)?
+        }
+    };
+    if primitive.is_int_vector() {
+        numbers
+            .into_iter()
+            .map(|number| {
+                if number.fract() == 0.0 {
+                    Ok(number as i64)
+                } else {
+                    Err(scalar_value_type_error(
+                        table_name,
+                        row_number,
+                        field_path,
+                        value,
+                        "integer vector components",
+                        format!("table `{table_name}` row {row_number} field `{field_path}` has non-integer vector component"),
+                    ))
+                }
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(VectorValue::Int)
+    } else {
+        Ok(VectorValue::Float(numbers))
+    }
+}
+
+fn parse_hex_color(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    value: &str,
+    has_alpha: bool,
+    alpha: ColorAlphaPolicy,
+) -> Result<Vec<f64>> {
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    let expected_len = if has_alpha { 8 } else { 6 };
+    if hex.len() != expected_len || !hex.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return Err(scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            format!("#{:0<width$}", "", width = expected_len),
+            format!(
+                "table `{table_name}` row {row_number} field `{field_path}` has invalid hex color"
+            ),
+        ));
+    }
+    let mut components = (0..expected_len)
+        .step_by(2)
+        .map(|offset| u8::from_str_radix(&hex[offset..offset + 2], 16).map(|v| v as f64))
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|_| scalar_value_type_error(table_name, row_number, field_path, value, "hex color", format!("table `{table_name}` row {row_number} field `{field_path}` has invalid hex color")))?;
+    if !has_alpha && matches!(alpha, ColorAlphaPolicy::DefaultOpaque) {
+        components.push(255.0);
+    }
+    Ok(components)
+}
+
+fn parse_tuple_numbers(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    value: &str,
+    expected_len: usize,
+) -> Result<Vec<f64>> {
+    if value.trim_start().starts_with('[') {
+        return parse_json_array_numbers(table_name, row_number, field_path, value, expected_len);
+    }
+    let parts = value.split(',').map(str::trim).collect::<Vec<_>>();
+    if parts.len() != expected_len {
+        return Err(scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            format!("{expected_len} numeric components"),
+            format!(
+                "table `{table_name}` row {row_number} field `{field_path}` has wrong component count"
+            ),
+        ));
+    }
+    parts
+        .into_iter()
+        .map(|part| parse_finite_number(table_name, row_number, field_path, value, part))
+        .collect()
+}
+
+fn parse_json_array_numbers(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    value: &str,
+    expected_len: usize,
+) -> Result<Vec<f64>> {
+    let json: serde_json::Value = serde_json::from_str(value).map_err(|_| scalar_value_type_error(table_name, row_number, field_path, value, "JSON numeric array", format!("table `{table_name}` row {row_number} field `{field_path}` has invalid numeric array")))?;
+    let Some(array) = json.as_array() else {
+        return Err(scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            "JSON numeric array",
+            format!(
+                "table `{table_name}` row {row_number} field `{field_path}` must be a JSON array"
+            ),
+        ));
+    };
+    if array.len() != expected_len {
+        return Err(scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            format!("{expected_len} numeric components"),
+            format!(
+                "table `{table_name}` row {row_number} field `{field_path}` has wrong component count"
+            ),
+        ));
+    }
+    array
+        .iter()
+        .map(|item| item.as_f64().filter(|n| n.is_finite()).ok_or_else(|| scalar_value_type_error(table_name, row_number, field_path, value, "finite numeric components", format!("table `{table_name}` row {row_number} field `{field_path}` has non-numeric component"))))
+        .collect()
+}
+
+fn parse_vector_object_numbers(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    field: &LinkedFieldMeta<'_>,
+    value: &str,
+) -> Result<Vec<f64>> {
+    let components = field.meta.vector_component_names();
+    let alpha = ColorAlphaPolicy::Required;
+    parse_object_components(
+        table_name,
+        row_number,
+        field_path,
+        value,
+        &components.iter().map(String::as_str).collect::<Vec<_>>(),
+        alpha,
+    )
+}
+
+fn parse_object_components(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    value: &str,
+    names: &[&str],
+    alpha: ColorAlphaPolicy,
+) -> Result<Vec<f64>> {
+    let json: serde_json::Value = serde_json::from_str(value).map_err(|_| scalar_value_type_error(table_name, row_number, field_path, value, "JSON object", format!("table `{table_name}` row {row_number} field `{field_path}` has invalid object value")))?;
+    let Some(object) = json.as_object() else {
+        return Err(scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            "JSON object",
+            format!(
+                "table `{table_name}` row {row_number} field `{field_path}` must be a JSON object"
+            ),
+        ));
+    };
+    let mut components = Vec::new();
+    for name in names {
+        if *name == "a"
+            && !object.contains_key(*name)
+            && matches!(alpha, ColorAlphaPolicy::DefaultOpaque)
+        {
+            continue;
+        }
+        let Some(component) = object
+            .get(*name)
+            .and_then(serde_json::Value::as_f64)
+            .filter(|n| n.is_finite())
+        else {
+            return Err(scalar_value_type_error(
+                table_name,
+                row_number,
+                field_path,
+                value,
+                format!("finite numeric component `{name}`"),
+                format!(
+                    "table `{table_name}` row {row_number} field `{field_path}` missing or invalid component `{name}`"
+                ),
+            ));
+        };
+        components.push(component);
+    }
+    Ok(components)
+}
+
+fn parse_finite_number(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    full_value: &str,
+    value: &str,
+) -> Result<f64> {
+    value.parse::<f64>().ok().filter(|n| n.is_finite()).ok_or_else(|| scalar_value_type_error(table_name, row_number, field_path, full_value, "finite numeric component", format!("table `{table_name}` row {row_number} field `{field_path}` has invalid numeric component `{value}`")))
+}
+
+fn color_components_with_alpha(
+    table_name: &str,
+    row_number: usize,
+    field_path: &str,
+    value: &str,
+    mut components: Vec<f64>,
+    channel: ColorChannel,
+    alpha: ColorAlphaPolicy,
+) -> Result<(f64, f64, f64, f64)> {
+    if components.len() == 3 && matches!(alpha, ColorAlphaPolicy::DefaultOpaque) {
+        components.push(match channel {
+            ColorChannel::Byte => 255.0,
+            ColorChannel::Normalized => 1.0,
+        });
+    }
+    if components.len() != 4 {
+        return Err(scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            "RGBA color components",
+            format!(
+                "table `{table_name}` row {row_number} field `{field_path}` has incomplete color value"
+            ),
+        ));
+    }
+    let max = match channel {
+        ColorChannel::Byte => 255.0,
+        ColorChannel::Normalized => 1.0,
+    };
+    if components
+        .iter()
+        .any(|component| *component < 0.0 || *component > max)
+    {
+        return Err(scalar_value_type_error(
+            table_name,
+            row_number,
+            field_path,
+            value,
+            format!("color channels in 0..{max}"),
+            format!(
+                "table `{table_name}` row {row_number} field `{field_path}` color component is out of range"
+            ),
+        ));
+    }
+    Ok((components[0], components[1], components[2], components[3]))
 }
 
 fn scalar_value_parse_error(

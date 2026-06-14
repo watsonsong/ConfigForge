@@ -6,7 +6,11 @@ use std::{collections::BTreeMap, path::PathBuf};
 #[cfg(test)]
 use std::collections::HashMap;
 
-use crate::{ConfigForgeError, Result, diagnostic::code::CF_DATA_SOURCE_SCHEMA_INVALID};
+use crate::{
+    ConfigForgeError, Result,
+    diagnostic::code::CF_DATA_SOURCE_SCHEMA_INVALID,
+    meta::{ColorChannel, ColorSpace},
+};
 
 use super::{RowSourceInfo, data_diagnostic_error};
 
@@ -41,8 +45,26 @@ pub struct ArrayElementValue {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DataValue {
     Scalar(ScalarValue),
+    Color(ColorValue),
+    Vector(VectorValue),
     Struct(BTreeMap<String, ResolvedValue>),
     Array(Vec<ArrayElementValue>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColorValue {
+    pub r: f64,
+    pub g: f64,
+    pub b: f64,
+    pub a: f64,
+    pub channel: ColorChannel,
+    pub color_space: ColorSpace,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VectorValue {
+    Float(Vec<f64>),
+    Int(Vec<i64>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

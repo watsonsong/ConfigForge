@@ -563,6 +563,8 @@ fn array_element_shape(value: &ArrayElementValue) -> &'static str {
 fn data_value_shape(value: &DataValue) -> &'static str {
     match value {
         DataValue::Scalar(_) => "scalar runtime value",
+        DataValue::Color(_) => "color runtime value",
+        DataValue::Vector(_) => "vector runtime value",
         DataValue::Struct(_) => "struct runtime value",
         DataValue::Array(_) => "list runtime value",
     }

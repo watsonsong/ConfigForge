@@ -704,6 +704,18 @@ fn render_lua_value_for_field(value: &ExportedValue, field: &LinkedField<'_>) ->
             render_scalar(value, *primitive)
         }
         (ExportedValue::Scalar(value), LinkedField::Enum(_)) => Ok(lua_string(value)),
+        (ExportedValue::NumberArray(values), LinkedField::Primitive(primitive))
+            if primitive.is_builtin_value_type() =>
+        {
+            Ok(format!(
+                "{{ {} }}",
+                values
+                    .iter()
+                    .map(|value| value.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        }
         (ExportedValue::Struct(_), LinkedField::Struct(struct_type)) => {
             render_lua_struct(value, &struct_type.fields)
         }
@@ -824,6 +836,7 @@ fn lua_contract_error(
 fn exported_value_kind(value: &ExportedValue) -> &'static str {
     match value {
         ExportedValue::Scalar(_) => "scalar exported value",
+        ExportedValue::NumberArray(_) => "number array exported value",
         ExportedValue::Array(_) => "array exported value",
         ExportedValue::Struct(_) => "struct exported value",
     }

@@ -25,8 +25,8 @@ pub use self::provider::{
     SourceProviderConcurrency, SourceProviderResource,
 };
 pub use self::resolved::{
-    ArrayElementValue, DataValue, ResolvedRow, ResolvedTable, ResolvedValue, ScalarValue,
-    ValueSourceKind,
+    ArrayElementValue, ColorValue, DataValue, ResolvedRow, ResolvedTable, ResolvedValue,
+    ScalarValue, ValueSourceKind, VectorValue,
 };
 pub use self::resolver::DataResolver;
 

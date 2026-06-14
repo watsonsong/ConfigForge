@@ -719,6 +719,12 @@ impl FieldMeta {
         self.primitive_type()?.vector_dimension()
     }
 
+    pub fn vector_component_names(&self) -> Vec<String> {
+        self.vector_components
+            .clone()
+            .unwrap_or_else(|| default_vector_component_names(self.vector_dimension().unwrap_or(4)))
+    }
+
     pub fn has_color_options(&self) -> bool {
         self.color_format.is_some()
             || self.color_channel.is_some()
@@ -737,6 +743,14 @@ impl FieldMeta {
     pub fn is_exported_for(&self, target: &TargetTags) -> bool {
         self.export && self.export_when.matches(target)
     }
+}
+
+pub fn default_vector_component_names(dimension: usize) -> Vec<String> {
+    ["x", "y", "z", "w"]
+        .into_iter()
+        .take(dimension)
+        .map(str::to_owned)
+        .collect()
 }
 
 pub fn list_element_type_name(field_type: &str) -> Option<&str> {
