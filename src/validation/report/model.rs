@@ -1,0 +1,448 @@
+// Copyright (c) 2026 ConfigForge contributors
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{collections::BTreeMap, fmt, path::PathBuf, str::FromStr};
+
+use serde::Serialize;
+
+use crate::{
+    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity, Result,
+    diagnostic::code::{CF_BUILD_INVALID_CONFIG, metadata_for},
+    meta::TargetTags,
+    validation::{ValidationIssue, ValidationReport},
+};
+
+const UNASSIGNED_OWNER: &str = "<unassigned>";
+const UNCATEGORIZED_DOMAIN: &str = "<uncategorized>";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesignerReportFormat {
+    Html,
+    Markdown,
+    Json,
+    Csv,
+}
+
+impl DesignerReportFormat {
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Html => "html",
+            Self::Markdown => "md",
+            Self::Json => "json",
+            Self::Csv => "csv",
+        }
+    }
+}
+
+impl fmt::Display for DesignerReportFormat {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Html => "html",
+            Self::Markdown => "markdown",
+            Self::Json => "json",
+            Self::Csv => "csv",
+        })
+    }
+}
+
+impl FromStr for DesignerReportFormat {
+    type Err = ConfigForgeError;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "html" => Ok(Self::Html),
+            "markdown" | "md" => Ok(Self::Markdown),
+            "json" => Ok(Self::Json),
+            "csv" => Ok(Self::Csv),
+            other => Err(report_config_error(
+                format!(
+                    "unknown validation report format `{other}`; expected html, markdown, json or csv"
+                ),
+                other,
+                "html, markdown, json or csv",
+            )),
+        }
+    }
+}
+
+fn report_config_error(
+    message: String,
+    current: impl Into<String>,
+    expected: impl Into<String>,
+) -> ConfigForgeError {
+    super::super::validation_diagnostic_error(
+        CF_BUILD_INVALID_CONFIG,
+        "validation.report.config",
+        message,
+        DiagnosticLocation::default(),
+        current,
+        expected,
+        "Check validation report export format and output options.",
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesignerReportOptions {
+    pub title: Option<String>,
+    pub project_name: Option<String>,
+    pub project_path: Option<PathBuf>,
+    pub target: Option<String>,
+    pub target_tags: TargetTags,
+    pub generated_at: String,
+    pub input_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidationReportExportConfig {
+    pub format: DesignerReportFormat,
+    pub output: PathBuf,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DesignerValidationReport {
+    pub metadata: ReportMetadata,
+    pub summary: ReportSummary,
+    pub groups: Vec<IssueGroup>,
+    pub issues: Vec<DesignerValidationIssue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReportMetadata {
+    pub title: String,
+    pub project_name: Option<String>,
+    pub project_path: Option<String>,
+    pub target: Option<String>,
+    pub target_tags: Vec<String>,
+    pub generated_at: String,
+    pub config_forge_version: String,
+    pub input_root: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReportSummary {
+    pub error_count: usize,
+    pub warning_count: usize,
+    pub blocking: bool,
+    pub tables_with_issues: usize,
+    pub owners_with_issues: usize,
+    pub filtered_context_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IssueGroup {
+    pub kind: String,
+    pub key: String,
+    pub error_count: usize,
+    pub warning_count: usize,
+    pub issue_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DesignerValidationIssue {
+    pub id: String,
+    pub severity: DiagnosticSeverity,
+    pub blocking: bool,
+    pub code: String,
+    pub validator: String,
+    pub message: String,
+    pub friendly_title: String,
+    pub explanation: Option<String>,
+    pub hint: Option<String>,
+    pub table: Option<String>,
+    pub field: Option<String>,
+    pub row_index: Option<usize>,
+    pub source_row_number: Option<usize>,
+    pub source_path: Option<String>,
+    pub source_column: Option<String>,
+    pub current_value: Option<String>,
+    pub expected: Option<String>,
+    pub target: Option<String>,
+    pub export_visibility: String,
+    pub owner: String,
+    pub domain: String,
+}
+
+impl DesignerValidationReport {
+    pub fn from_validation_report(
+        validation_report: &ValidationReport,
+        options: DesignerReportOptions,
+    ) -> Self {
+        let mut source_issues = validation_report.issues.clone();
+        source_issues.sort_by(compare_validation_issues_for_report);
+
+        let metadata = ReportMetadata::from_options(options);
+        let issues = enrich_issues(source_issues);
+        let summary = summarize_issues(&issues);
+        let groups = build_groups(&issues);
+        Self {
+            metadata,
+            summary,
+            groups,
+            issues,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn from_diagnostic_report(
+        diagnostic_report: &DiagnosticReport<Diagnostic>,
+        options: DesignerReportOptions,
+    ) -> Self {
+        let validation_report = ValidationReport {
+            issues: diagnostic_report
+                .diagnostics
+                .iter()
+                .map(|diagnostic| ValidationIssue {
+                    code: diagnostic.code.clone(),
+                    severity: diagnostic.severity,
+                    message: diagnostic.message.clone(),
+                    location: diagnostic.location.clone(),
+                    validator: diagnostic
+                        .source
+                        .clone()
+                        .unwrap_or_else(|| "diagnostic".to_owned()),
+                    target: diagnostic.target.clone(),
+                    hint: diagnostic.hint.clone(),
+                    current_value: diagnostic.current_value.clone(),
+                    expected: diagnostic.expected.clone(),
+                    explanation: diagnostic.explanation.clone(),
+                    domain: diagnostic.domain.clone(),
+                    owner: diagnostic.owner.clone(),
+                })
+                .collect(),
+        };
+        Self::from_validation_report(&validation_report, options)
+    }
+
+    pub fn status_label(&self) -> &'static str {
+        if self.summary.blocking {
+            "BLOCKED"
+        } else if self.summary.warning_count > 0 {
+            "PASS WITH WARNINGS"
+        } else {
+            "PASS"
+        }
+    }
+}
+
+impl ReportMetadata {
+    fn from_options(options: DesignerReportOptions) -> Self {
+        let target_label = options.target.as_deref().unwrap_or("<full>");
+        let title = options.title.unwrap_or_else(|| {
+            let project = options.project_name.as_deref().unwrap_or("ConfigForge");
+            format!("{project} validation report: {target_label}")
+        });
+        Self {
+            title,
+            project_name: options.project_name,
+            project_path: options
+                .project_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            target: options.target,
+            target_tags: options.target_tags.iter().map(str::to_owned).collect(),
+            generated_at: options.generated_at,
+            config_forge_version: env!("CARGO_PKG_VERSION").to_owned(),
+            input_root: options
+                .input_root
+                .as_ref()
+                .map(|path| path.display().to_string()),
+        }
+    }
+}
+
+fn enrich_issues(source_issues: Vec<ValidationIssue>) -> Vec<DesignerValidationIssue> {
+    let mut error_index = 0usize;
+    let mut warning_index = 0usize;
+    source_issues
+        .into_iter()
+        .map(|issue| {
+            let severity = DiagnosticSeverity::from(issue.severity);
+            let id = match severity {
+                DiagnosticSeverity::Error => {
+                    error_index += 1;
+                    format!("E{error_index:04}")
+                }
+                DiagnosticSeverity::Warning => {
+                    warning_index += 1;
+                    format!("W{warning_index:04}")
+                }
+            };
+            let catalog = metadata_for(&issue.code);
+            let friendly_title = catalog
+                .map(|info| info.title.to_owned())
+                .unwrap_or_else(|| issue.message.clone());
+            let explanation = issue
+                .explanation
+                .clone()
+                .or_else(|| catalog.map(|info| info.explanation.to_owned()));
+            let hint = issue
+                .hint
+                .clone()
+                .or_else(|| catalog.and_then(|info| info.default_hint.map(str::to_owned)));
+            let owner = issue
+                .owner
+                .clone()
+                .unwrap_or_else(|| UNASSIGNED_OWNER.to_owned());
+            let domain = issue
+                .domain
+                .clone()
+                .or_else(|| catalog.map(|info| info.domain.to_owned()))
+                .unwrap_or_else(|| UNCATEGORIZED_DOMAIN.to_owned());
+            let source_column = source_column_label(&issue.location);
+
+            DesignerValidationIssue {
+                id,
+                severity,
+                blocking: severity == DiagnosticSeverity::Error,
+                code: issue.code,
+                validator: issue.validator,
+                message: issue.message,
+                friendly_title,
+                explanation,
+                hint,
+                table: issue.location.table,
+                field: issue.location.field,
+                row_index: issue.location.row_index,
+                source_row_number: issue.location.source_row_number,
+                source_path: issue
+                    .location
+                    .source_path
+                    .as_ref()
+                    .map(|path| path.display().to_string()),
+                source_column,
+                current_value: issue.current_value,
+                expected: issue.expected,
+                target: issue.target,
+                export_visibility: "visible".to_owned(),
+                owner,
+                domain,
+            }
+        })
+        .collect()
+}
+
+fn source_column_label(location: &DiagnosticLocation) -> Option<String> {
+    location
+        .source_column_name
+        .clone()
+        .or_else(|| {
+            location
+                .source_column_number
+                .map(|column| column.to_string())
+        })
+        .or_else(|| location.column_index.map(|column| (column + 1).to_string()))
+}
+
+fn summarize_issues(issues: &[DesignerValidationIssue]) -> ReportSummary {
+    let error_count = issues
+        .iter()
+        .filter(|issue| issue.severity == DiagnosticSeverity::Error)
+        .count();
+    let warning_count = issues.len() - error_count;
+    let tables = issues
+        .iter()
+        .filter_map(|issue| issue.table.as_deref())
+        .collect::<std::collections::BTreeSet<_>>();
+    let owners = issues
+        .iter()
+        .map(|issue| issue.owner.as_str())
+        .filter(|owner| *owner != UNASSIGNED_OWNER)
+        .collect::<std::collections::BTreeSet<_>>();
+    ReportSummary {
+        error_count,
+        warning_count,
+        blocking: error_count > 0,
+        tables_with_issues: tables.len(),
+        owners_with_issues: owners.len(),
+        filtered_context_count: issues
+            .iter()
+            .filter(|issue| issue.export_visibility != "visible")
+            .count(),
+    }
+}
+
+fn build_groups(issues: &[DesignerValidationIssue]) -> Vec<IssueGroup> {
+    let mut groups = Vec::new();
+    append_groups(&mut groups, "severity", issues, |issue| {
+        severity_label(issue.severity).to_owned()
+    });
+    append_groups(&mut groups, "table", issues, |issue| {
+        issue
+            .table
+            .clone()
+            .unwrap_or_else(|| "<unknown>".to_owned())
+    });
+    append_groups(&mut groups, "owner", issues, |issue| issue.owner.clone());
+    append_groups(&mut groups, "domain", issues, |issue| issue.domain.clone());
+    append_groups(&mut groups, "code", issues, |issue| issue.code.clone());
+    groups
+}
+
+fn append_groups(
+    groups: &mut Vec<IssueGroup>,
+    kind: &str,
+    issues: &[DesignerValidationIssue],
+    key_for: impl Fn(&DesignerValidationIssue) -> String,
+) {
+    let mut by_key: BTreeMap<String, Vec<&DesignerValidationIssue>> = BTreeMap::new();
+    for issue in issues {
+        by_key.entry(key_for(issue)).or_default().push(issue);
+    }
+    for (key, issues) in by_key {
+        groups.push(IssueGroup {
+            kind: kind.to_owned(),
+            key,
+            error_count: issues
+                .iter()
+                .filter(|issue| issue.severity == DiagnosticSeverity::Error)
+                .count(),
+            warning_count: issues
+                .iter()
+                .filter(|issue| issue.severity == DiagnosticSeverity::Warning)
+                .count(),
+            issue_ids: issues.iter().map(|issue| issue.id.clone()).collect(),
+        });
+    }
+}
+
+fn compare_validation_issues_for_report(
+    left: &ValidationIssue,
+    right: &ValidationIssue,
+) -> std::cmp::Ordering {
+    (
+        DiagnosticSeverity::from(left.severity),
+        left.location.table.as_deref(),
+        left.location
+            .source_path
+            .as_ref()
+            .map(|path| path.as_os_str()),
+        left.location.source_row_number,
+        left.location.row_index,
+        left.location.field.as_deref(),
+        left.code.as_str(),
+        left.message.as_str(),
+    )
+        .cmp(&(
+            DiagnosticSeverity::from(right.severity),
+            right.location.table.as_deref(),
+            right
+                .location
+                .source_path
+                .as_ref()
+                .map(|path| path.as_os_str()),
+            right.location.source_row_number,
+            right.location.row_index,
+            right.location.field.as_deref(),
+            right.code.as_str(),
+            right.message.as_str(),
+        ))
+}
+
+pub(super) fn severity_label(severity: DiagnosticSeverity) -> &'static str {
+    match severity {
+        DiagnosticSeverity::Error => "error",
+        DiagnosticSeverity::Warning => "warning",
+    }
+}

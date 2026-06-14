@@ -1,21 +1,14 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{
-    collections::BTreeMap,
-    fs,
-    path::Path,
-    path::PathBuf,
-    time::Instant,
-    time::{SystemTime, UNIX_EPOCH},
-};
-
-use rayon::ThreadPool;
-use rayon::prelude::*;
+use std::{collections::BTreeMap, fs, path::Path, path::PathBuf};
 
 mod options;
+mod pipeline;
+mod plan;
 mod runtime;
 mod target;
+mod trace;
 
 pub use options::{
     BuildErrorWithTrace, BuildOptions, BuildOutput, BuildTrace, BuildTraceStage,
@@ -25,22 +18,18 @@ pub use options::{
 use crate::{
     ArtifactProjectInfo, ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity,
     Result,
-    artifact::{ArtifactSink, ArtifactWriter},
-    data::{DataLoader, RawSourceData, SourceReadPlan},
-    diagnostic::code::{
-        CF_BUILD_EXPORT_TASK_FAILED, CF_BUILD_INPUT_REQUIRED, CF_BUILD_INVALID_CONFIG,
-        CF_BUILD_INVALID_OPTION,
-    },
-    generator::{
-        GeneratorCommonInput, GeneratorCommonInputContext, GeneratorRegistry,
-        GeneratorRequirements, GeneratorTaskInput, PreparedGeneratorInputs,
-    },
-    meta::{LinkedMetaModel, MetaModel, TargetTags},
+    artifact::ArtifactWriter,
+    diagnostic::code::{CF_BUILD_INPUT_REQUIRED, CF_BUILD_INVALID_CONFIG, CF_BUILD_INVALID_OPTION},
+    generator::GeneratorRequirements,
+    meta::TargetTags,
     project::ProjectConfig,
 };
 
-use runtime::export_meta_and_data_tasks;
+use pipeline::{TargetPipelineExecutionContext, execute_target_pipeline};
 use target::{NormalizedExportTask, NormalizedTargetConfig};
+use trace::BuildTraceRecorder;
+#[cfg(test)]
+use trace::generated_at;
 
 pub fn build_target(options: BuildOptions<'_>) -> Result<BuildOutput> {
     build_target_with_trace(options).map_err(|error| error.error)
@@ -215,287 +204,6 @@ impl BuildOutputWithoutTrace {
     }
 }
 
-struct TargetPipelineExecutionContext<'a, 'meta> {
-    project_root: &'a Path,
-    project_info: &'a ArtifactProjectInfo,
-    assets: &'a crate::project::AssetsConfig,
-    target: &'a NormalizedTargetConfig,
-    target_tags: &'a TargetTags,
-    raw_meta: &'meta MetaModel,
-    data_root: Option<&'a Path>,
-    pool: &'a ThreadPool,
-    sink: &'a ArtifactSink,
-    trace: &'a mut BuildTraceRecorder,
-}
-
-struct BuildInputPreparation<'a> {
-    read_sources: Option<Box<dyn FnOnce() -> Result<RawSourceData> + Send + 'a>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct BuildDependencyPlan {
-    targets: Vec<TargetBuildPlan>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TargetBuildPlan {
-    target_name: String,
-    effective_tags: Vec<String>,
-    requires_meta: bool,
-    data_dependency: Option<DataDependencyKey>,
-    meta_only_exports: Vec<usize>,
-    meta_and_data_exports: Vec<usize>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DataDependencyKey {
-    input: Option<PathBuf>,
-    effective_tags: Vec<String>,
-}
-
-struct TargetPipelineOutput {
-    warnings: Vec<String>,
-}
-
-struct ExportBranchOutput {
-    warnings: Vec<String>,
-}
-
-fn execute_target_pipeline(
-    context: TargetPipelineExecutionContext<'_, '_>,
-) -> Result<TargetPipelineOutput> {
-    let dependency_plan = context.trace.record("plan_dependencies", None, || {
-        Ok(BuildDependencyPlan::for_target(
-            context.target,
-            context.data_root,
-            context.target_tags,
-        ))
-    })?;
-    let target_plan = dependency_plan.single_target_plan()?;
-    let execution_view_detail = build_execution_view_detail(context.target, target_plan);
-    context
-        .trace
-        .record("build_execution_view", Some(execution_view_detail), || {
-            Ok(())
-        })?;
-    let meta_and_data_exports = target_plan.meta_and_data_export_tasks(context.target);
-    let meta_only_exports = target_plan.meta_only_export_tasks(context.target);
-    let mut prepared_inputs = context.trace.record("prepare_build_inputs", None, || {
-        prepare_build_inputs(
-            context.raw_meta,
-            target_plan,
-            context.target_tags,
-            context.data_root,
-            context.pool,
-        )
-    })?;
-
-    let generated_at = generated_at();
-    let generator_registry = GeneratorRegistry::with_builtin_generators();
-
-    let (runtime_output, meta_only_output) = context.trace.record("run_exporters", None, || {
-        execute_export_pipeline(ExportPipelineContext {
-            raw_meta: context.raw_meta,
-            read_sources: prepared_inputs.read_sources.take(),
-            runtime_exports: &meta_and_data_exports,
-            meta_only_exports: &meta_only_exports,
-            project_root: context.project_root,
-            project_info: context.project_info,
-            target_name: &context.target.name,
-            assets: context.assets,
-            target_tags: context.target_tags,
-            generated_at: &generated_at,
-            generator_registry: &generator_registry,
-            pool: context.pool,
-            sink: context.sink,
-        })
-    })?;
-    let warnings = context
-        .trace
-        .record("collect_export_diagnostics", None, || {
-            let mut warnings = runtime_output.warnings;
-            warnings.extend(meta_only_output.warnings);
-            Ok(warnings)
-        })?;
-
-    Ok(TargetPipelineOutput { warnings })
-}
-
-struct BuildTraceRecorder {
-    started_at: Instant,
-    stages: Vec<BuildTraceStage>,
-}
-
-impl BuildTraceRecorder {
-    fn new() -> Self {
-        Self {
-            started_at: Instant::now(),
-            stages: Vec::new(),
-        }
-    }
-
-    fn record<T, F>(&mut self, name: &str, detail: Option<String>, operation: F) -> Result<T>
-    where
-        F: FnOnce() -> Result<T>,
-    {
-        let started_at_ms = self.started_at.elapsed().as_millis();
-        let stage_started = Instant::now();
-        let result = operation();
-        let duration_ms = stage_started.elapsed().as_millis();
-        let status = if result.is_ok() {
-            BuildTraceStageStatus::Succeeded
-        } else {
-            BuildTraceStageStatus::Failed
-        };
-        self.stages.push(BuildTraceStage {
-            name: name.to_owned(),
-            started_at_ms,
-            duration_ms,
-            status,
-            detail,
-        });
-        result
-    }
-
-    fn finish(self, mut trace: BuildTrace) -> BuildTrace {
-        trace.total_duration_ms = self.started_at.elapsed().as_millis();
-        trace.stages = self.stages;
-        trace
-    }
-}
-
-fn prepare_build_inputs<'a>(
-    raw_meta: &MetaModel,
-    target_plan: &TargetBuildPlan,
-    target_tags: &TargetTags,
-    data_root: Option<&Path>,
-    pool: &'a ThreadPool,
-) -> Result<BuildInputPreparation<'a>> {
-    let read_sources = target_plan
-        .requires_data()
-        .then(|| source_reader_for_target(raw_meta, data_root, target_tags, pool))
-        .transpose()?;
-    Ok(BuildInputPreparation { read_sources })
-}
-
-struct ExportPipelineContext<'a, 'meta> {
-    raw_meta: &'meta MetaModel,
-    read_sources: Option<Box<dyn FnOnce() -> Result<RawSourceData> + Send + 'a>>,
-    runtime_exports: &'a [(usize, &'a NormalizedExportTask)],
-    meta_only_exports: &'a [(usize, &'a NormalizedExportTask)],
-    project_root: &'a Path,
-    project_info: &'a ArtifactProjectInfo,
-    target_name: &'a str,
-    assets: &'a crate::project::AssetsConfig,
-    target_tags: &'a TargetTags,
-    generated_at: &'a str,
-    generator_registry: &'a GeneratorRegistry,
-    pool: &'a ThreadPool,
-    sink: &'a ArtifactSink,
-}
-
-fn execute_export_pipeline<'meta>(
-    context: ExportPipelineContext<'_, 'meta>,
-) -> Result<(ExportBranchOutput, ExportBranchOutput)> {
-    let ExportPipelineContext {
-        raw_meta,
-        read_sources,
-        runtime_exports,
-        meta_only_exports,
-        project_root,
-        project_info,
-        target_name,
-        assets,
-        target_tags,
-        generated_at,
-        generator_registry,
-        pool,
-        sink,
-    } = context;
-    let ((linked_meta, meta_only_output), raw_sources) = join_link_meta_only_and_source_read(
-        || {
-            let linked_meta = raw_meta
-                .link()
-                .map_err(crate::meta::meta_diagnostics_to_report)
-                .map_err(ConfigForgeError::MetaValidation)?;
-            let meta_only_context = MetaOnlyGeneratorContext {
-                project_root,
-                project_info,
-                target_name,
-                target_tags,
-                linked_meta: &linked_meta,
-                generated_at,
-                generator_registry,
-                sink,
-            };
-            let meta_only_output =
-                execute_meta_only_generator_nodes(&meta_only_context, meta_only_exports, pool)?;
-            Ok((linked_meta, meta_only_output))
-        },
-        read_sources,
-        pool,
-    )?;
-
-    let runtime_output = execute_runtime_export_nodes(
-        raw_sources.as_ref(),
-        runtime_exports,
-        &linked_meta,
-        assets,
-        target_tags,
-        project_root,
-        project_info,
-        target_name,
-        generated_at,
-        generator_registry,
-        pool,
-        sink,
-    )?;
-    Ok((runtime_output, meta_only_output))
-}
-
-fn join_link_meta_only_and_source_read<'meta, LinkMetaOnlyFn, SourceFn>(
-    link_and_generate_meta_only: LinkMetaOnlyFn,
-    read_sources: Option<SourceFn>,
-    pool: &ThreadPool,
-) -> Result<(
-    (LinkedMetaModel<'meta>, ExportBranchOutput),
-    Option<RawSourceData>,
-)>
-where
-    LinkMetaOnlyFn: FnOnce() -> Result<(LinkedMetaModel<'meta>, ExportBranchOutput)> + Send,
-    SourceFn: FnOnce() -> Result<RawSourceData> + Send,
-{
-    if let Some(read_sources) = read_sources {
-        let (link_meta_only_result, source_result) =
-            pool.install(|| rayon::join(link_and_generate_meta_only, read_sources));
-        let link_meta_only = link_meta_only_result?;
-        let raw_sources = source_result?;
-        Ok((link_meta_only, Some(raw_sources)))
-    } else {
-        Ok((link_and_generate_meta_only()?, None))
-    }
-}
-
-fn source_reader_for_target<'a>(
-    raw_meta: &MetaModel,
-    data_root: Option<&Path>,
-    target_tags: &TargetTags,
-    pool: &'a ThreadPool,
-) -> Result<Box<dyn FnOnce() -> Result<RawSourceData> + Send + 'a>> {
-    let data_root = data_root.ok_or_else(|| input_required_error(target_tags))?;
-    let source_read_plan = SourceReadPlan::from_tables(
-        raw_meta
-            .tables
-            .iter()
-            .filter(|table| table.is_exported_for(target_tags)),
-        Some(target_tags),
-    )?;
-    let data_root = data_root.to_path_buf();
-    Ok(Box::new(move || {
-        DataLoader::new(&data_root).read_sources_with_pool(&source_read_plan, pool)
-    }))
-}
-
 fn build_config_error(
     target_name: &str,
     message: String,
@@ -542,7 +250,7 @@ pub(super) fn build_diagnostic_error(
     )
 }
 
-fn input_required_error(target_tags: &TargetTags) -> ConfigForgeError {
+pub(super) fn input_required_error(target_tags: &TargetTags) -> ConfigForgeError {
     let tags = target_tags.iter().collect::<Vec<_>>().join(",");
     ConfigForgeError::from_diagnostic(
         Diagnostic::new(
@@ -560,302 +268,6 @@ fn input_required_error(target_tags: &TargetTags) -> ConfigForgeError {
     )
 }
 
-fn build_execution_view_detail(target: &NormalizedTargetConfig, plan: &TargetBuildPlan) -> String {
-    let data_mode = if plan.requires_data() {
-        "with_data"
-    } else {
-        "meta_only"
-    };
-    let exports = plan
-        .export_indices_in_declaration_order()
-        .iter()
-        .map(|index| target.exports[*index].name.as_str())
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "target={}, mode={}, meta_only_exports={}, meta_and_data_exports={}, exports=[{}]",
-        plan.target_name,
-        data_mode,
-        plan.meta_only_exports.len(),
-        plan.meta_and_data_exports.len(),
-        exports
-    )
-}
-
-impl BuildDependencyPlan {
-    fn for_target(
-        target: &NormalizedTargetConfig,
-        data_root: Option<&Path>,
-        target_tags: &TargetTags,
-    ) -> Self {
-        Self {
-            targets: vec![TargetBuildPlan::new(target, data_root, target_tags)],
-        }
-    }
-
-    fn single_target_plan(&self) -> Result<&TargetBuildPlan> {
-        match self.targets.as_slice() {
-            [target] => Ok(target),
-            _ => Err(build_diagnostic_error(
-                CF_BUILD_INVALID_CONFIG,
-                "build.dependency_plan",
-                "expected exactly one target in build dependency plan".to_owned(),
-                self.targets.len().to_string(),
-                "exactly one target build plan",
-                "Check target build plan construction before executing the pipeline.",
-            )),
-        }
-    }
-}
-
-impl TargetBuildPlan {
-    fn new(
-        target: &NormalizedTargetConfig,
-        data_root: Option<&Path>,
-        target_tags: &TargetTags,
-    ) -> Self {
-        let effective_tags = target_tags.iter().map(str::to_owned).collect::<Vec<_>>();
-        let mut meta_only_exports = Vec::new();
-        let mut meta_and_data_exports = Vec::new();
-        for (index, task) in target.exports.iter().enumerate() {
-            if task.requirements.needs_data {
-                meta_and_data_exports.push(index);
-            } else {
-                meta_only_exports.push(index);
-            }
-        }
-        let requires_meta = !target.exports.is_empty();
-        let data_dependency = (!meta_and_data_exports.is_empty()).then(|| DataDependencyKey {
-            input: data_root.map(Path::to_path_buf),
-            effective_tags: effective_tags.clone(),
-        });
-        Self {
-            target_name: target.name.clone(),
-            effective_tags,
-            requires_meta,
-            data_dependency,
-            meta_only_exports,
-            meta_and_data_exports,
-        }
-    }
-
-    fn requires_data(&self) -> bool {
-        self.data_dependency.is_some()
-    }
-
-    fn meta_only_export_tasks<'a>(
-        &'a self,
-        target: &'a NormalizedTargetConfig,
-    ) -> Vec<(usize, &'a NormalizedExportTask)> {
-        self.export_tasks_by_indices(target, &self.meta_only_exports)
-    }
-
-    fn meta_and_data_export_tasks<'a>(
-        &'a self,
-        target: &'a NormalizedTargetConfig,
-    ) -> Vec<(usize, &'a NormalizedExportTask)> {
-        self.export_tasks_by_indices(target, &self.meta_and_data_exports)
-    }
-
-    fn export_tasks_by_indices<'a>(
-        &'a self,
-        target: &'a NormalizedTargetConfig,
-        indices: &[usize],
-    ) -> Vec<(usize, &'a NormalizedExportTask)> {
-        indices
-            .iter()
-            .map(|index| (*index, &target.exports[*index]))
-            .collect()
-    }
-
-    fn export_indices_in_declaration_order(&self) -> Vec<usize> {
-        let mut indices =
-            Vec::with_capacity(self.meta_only_exports.len() + self.meta_and_data_exports.len());
-        indices.extend(self.meta_only_exports.iter().copied());
-        indices.extend(self.meta_and_data_exports.iter().copied());
-        indices.sort_unstable();
-        indices
-    }
-}
-
-fn execute_runtime_export_nodes(
-    raw_sources: Option<&RawSourceData>,
-    export_tasks: &[(usize, &NormalizedExportTask)],
-    linked_meta: &crate::meta::LinkedMetaModel<'_>,
-    assets: &crate::project::AssetsConfig,
-    target_tags: &TargetTags,
-    project_root: &Path,
-    project_info: &ArtifactProjectInfo,
-    target_name: &str,
-    generated_at: &str,
-    generator_registry: &GeneratorRegistry,
-    pool: &ThreadPool,
-    sink: &ArtifactSink,
-) -> Result<ExportBranchOutput> {
-    let meta_and_data_tasks = export_tasks
-        .iter()
-        .map(|(_, task)| *task)
-        .collect::<Vec<_>>();
-    let output = export_meta_and_data_tasks(
-        raw_sources,
-        &meta_and_data_tasks,
-        linked_meta,
-        assets,
-        target_tags,
-        project_root,
-        project_info,
-        target_name,
-        generated_at,
-        generator_registry,
-        pool,
-        sink,
-    )?;
-    if output.task_outputs.len() != export_tasks.len() {
-        return Err(build_diagnostic_error(
-            CF_BUILD_EXPORT_TASK_FAILED,
-            "build.runtime.output",
-            "runtime exporter returned an unexpected number of task outputs".to_owned(),
-            output.task_outputs.len().to_string(),
-            format!("{} runtime export task outputs", export_tasks.len()),
-            "Check runtime export task scheduling and output aggregation.",
-        ));
-    }
-
-    for ((_, task), task_output) in export_tasks.iter().copied().zip(output.task_outputs) {
-        if task_output.export_name != task.name {
-            return Err(build_diagnostic_error(
-                CF_BUILD_EXPORT_TASK_FAILED,
-                "build.runtime.output",
-                format!(
-                    "runtime exporter returned output for `{}` while `{}` was expected",
-                    task_output.export_name, task.name
-                ),
-                task_output.export_name,
-                task.name.clone(),
-                "Check runtime export task output ordering and names.",
-            ));
-        }
-    }
-
-    Ok(ExportBranchOutput {
-        warnings: output.warnings,
-    })
-}
-
-fn execute_meta_only_generator_nodes(
-    context: &MetaOnlyGeneratorContext<'_, '_>,
-    export_tasks: &[(usize, &NormalizedExportTask)],
-    pool: &ThreadPool,
-) -> Result<ExportBranchOutput> {
-    let mut generated_by_task = pool.install(|| {
-        export_tasks
-            .par_iter()
-            .map(|(index, export_task)| {
-                (
-                    *index,
-                    generate_and_write_meta_only_task(context, export_task),
-                )
-            })
-            .collect::<Vec<_>>()
-    });
-    generated_by_task.sort_by_key(|(index, _)| *index);
-    for (_, result) in generated_by_task {
-        result?;
-    }
-
-    Ok(ExportBranchOutput {
-        warnings: Vec::new(),
-    })
-}
-
-struct MetaOnlyGeneratorContext<'a, 'meta> {
-    project_root: &'a Path,
-    project_info: &'a ArtifactProjectInfo,
-    target_name: &'a str,
-    target_tags: &'a TargetTags,
-    linked_meta: &'meta crate::meta::LinkedMetaModel<'meta>,
-    generated_at: &'a str,
-    generator_registry: &'a GeneratorRegistry,
-    sink: &'a ArtifactSink,
-}
-
-fn generate_and_write_meta_only_task(
-    context: &MetaOnlyGeneratorContext<'_, '_>,
-    export_task: &NormalizedExportTask,
-) -> Result<()> {
-    debug_assert!(!export_task.requirements.needs_data);
-    let generator = context
-        .generator_registry
-        .require_generator(&export_task.type_id)?;
-    if generator.requirements().needs_data {
-        return Err(build_diagnostic_error(
-            CF_BUILD_EXPORT_TASK_FAILED,
-            "build.meta_only.scheduler",
-            format!(
-                "target `{}` export task `{}` requires Data but was scheduled in the Meta-only branch",
-                context.target_name, export_task.name
-            ),
-            format!("{}:{}", context.target_name, export_task.name),
-            "Data-dependent export task scheduled in runtime branch",
-            "Check generator requirements and target build plan classification.",
-        ));
-    }
-    let input = GeneratorTaskInput {
-        common: build_generator_common_input(context, export_task),
-        prepared: PreparedGeneratorInputs::MetaOnly,
-    };
-    generator.generate(&input, context.sink)
-}
-
-fn build_generator_common_input<'meta>(
-    context: &MetaOnlyGeneratorContext<'_, 'meta>,
-    task: &NormalizedExportTask,
-) -> GeneratorCommonInput<'meta> {
-    GeneratorCommonInput::from_task_context(
-        GeneratorCommonInputContext {
-            linked_meta: context.linked_meta,
-            target_tags: context.target_tags,
-            project_root: context.project_root,
-            project_info: context.project_info,
-            target_name: context.target_name,
-            generated_at: context.generated_at,
-        },
-        &task.name,
-        &task.type_id,
-        &task.output,
-        &task.options,
-    )
-}
-
-fn generated_at() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default();
-    let days = (seconds / 86_400) as i64;
-    let seconds_of_day = seconds % 86_400;
-    let (year, month, day) = civil_from_unix_days(days);
-    let hour = seconds_of_day / 3_600;
-    let minute = seconds_of_day % 3_600 / 60;
-    let second = seconds_of_day % 60;
-    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
-}
-
-fn civil_from_unix_days(days: i64) -> (i32, u32, u32) {
-    let days = days + 719_468;
-    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
-    let day_of_era = days - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_piece = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_piece + 2) / 5 + 1;
-    let month = month_piece + if month_piece < 10 { 3 } else { -9 };
-    let year = year + i64::from(month <= 2);
-    (year as i32, month as u32, day as u32)
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -866,12 +278,19 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use crate::artifact::{ArtifactWriteMode, ArtifactWriter};
+    use crate::artifact::{ArtifactSink, ArtifactWriteMode, ArtifactWriter};
     use crate::data::{DataSet, RawSourceData};
+    use crate::diagnostic::code::CF_BUILD_EXPORT_TASK_FAILED;
     use crate::diagnostic::code::CF_GENERATOR_UNKNOWN_TYPE;
-    use crate::generator::ArtifactGenerator;
+    use crate::generator::{ArtifactGenerator, GeneratorCommonInput, GeneratorRegistry};
     use crate::meta::MetaModel;
 
+    use super::pipeline::{
+        ExportBranchOutput, MetaOnlyGeneratorContext, generate_and_write_meta_only_task,
+        join_link_meta_only_and_source_read, prepare_build_inputs,
+    };
+    use super::plan::{DataDependencyKey, TargetBuildPlan, build_execution_view_detail};
+    use super::trace::civil_from_unix_days;
     use super::*;
 
     #[test]

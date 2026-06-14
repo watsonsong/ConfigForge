@@ -170,22 +170,22 @@ ConfigForge 当前主干方向整体正确：
 
 - `refactor(api): narrow public facade boundaries`
 
-### [ ] Step 6：拆分高风险大文件（不改行为）
+### [x] Step 6：拆分高风险大文件（不改行为）
 
 目的：降低单文件维护复杂度，先做 mechanical split，避免与功能修改混杂。
 
 实现项：
 
-- [ ] 拆分 `src/validation/report.rs` 为 model / enrich / group / render/html / render/markdown / render/csv 等子模块。
-- [ ] 拆分 `src/build/mod.rs` 的 trace、pipeline、MetaOnly branch、CLI validation report task 注入、时间 helper。
-- [ ] 拆分 `src/artifact/mod.rs` 的 writer/sink、path conflict、temp commit、diagnostics。
-- [ ] 拆分 `src/asset.rs` 的 resolver、policy、path candidates、diagnostics。
-- [ ] 每次只拆一个文件，保持 public facade 不变或仅做 crate 内重导出。
+- [x] 拆分 `src/validation/report.rs` 为 model / enrich / group / render/html / render/markdown / render/csv 等子模块。
+- [x] 拆分 `src/build/mod.rs` 的 trace、pipeline、MetaOnly branch、CLI validation report task 注入、时间 helper。
+- [x] 拆分 `src/artifact/mod.rs` 的 writer/sink、path conflict、temp commit、diagnostics。
+- [x] 拆分 `src/asset.rs` 的 resolver、policy、path candidates、diagnostics。
+- [x] 每次只拆一个文件，保持 public facade 不变或仅做 crate 内重导出。
 
 验证：
 
-- [ ] 每个拆分批次运行对应 `cargo test <module>`
-- [ ] 拆完全部后运行 `cargo test`
+- [x] 每个拆分批次运行对应 `cargo test <module>`
+- [x] 拆完全部后运行 `cargo test`
 
 可独立提交建议：
 

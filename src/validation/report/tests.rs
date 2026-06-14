@@ -1,0 +1,222 @@
+use super::*;
+use crate::{
+    Diagnostic, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity,
+    meta::{TargetTags, ValidationSeverity},
+    validation::{ValidationIssue, ValidationReport},
+};
+use std::path::PathBuf;
+
+fn options() -> DesignerReportOptions {
+    DesignerReportOptions {
+        title: None,
+        project_name: Some("demo".to_owned()),
+        project_path: Some(PathBuf::from("ConfigForge.toml")),
+        target: Some("client".to_owned()),
+        target_tags: TargetTags::new(["client".to_owned(), "shipping".to_owned()]),
+        generated_at: "2026-06-07T00:00:00Z".to_owned(),
+        input_root: Some(PathBuf::from("Data")),
+    }
+}
+
+fn issue(code: &str, severity: ValidationSeverity, table: &str, row: usize) -> ValidationIssue {
+    ValidationIssue::new(
+        code,
+        severity,
+        "validator",
+        format!("message for {code}"),
+        DiagnosticLocation {
+            source_path: Some(PathBuf::from(format!("{table}.csv"))),
+            table: Some(table.to_owned()),
+            field: Some("value".to_owned()),
+            row_index: Some(row - 2),
+            source_row_number: Some(row),
+            ..DiagnosticLocation::default()
+        },
+    )
+}
+
+#[test]
+fn validation_report_enrichment_uses_issue_fields() {
+    let mut validation = ValidationReport::new();
+    validation.push(
+        issue("custom.code", ValidationSeverity::Error, "items", 2)
+            .with_hint("fix the value")
+            .with_current_value("abc")
+            .with_expected("integer")
+            .with_explanation("value must parse as an integer")
+            .with_domain("items")
+            .with_owner("systems"),
+    );
+
+    let report = DesignerValidationReport::from_validation_report(&validation, options());
+
+    let issue = &report.issues[0];
+    assert_eq!(issue.current_value.as_deref(), Some("abc"));
+    assert_eq!(issue.expected.as_deref(), Some("integer"));
+    assert_eq!(
+        issue.explanation.as_deref(),
+        Some("value must parse as an integer")
+    );
+    assert_eq!(issue.hint.as_deref(), Some("fix the value"));
+    assert_eq!(issue.domain, "items");
+    assert_eq!(issue.owner, "systems");
+}
+
+#[test]
+fn diagnostic_report_enrichment_survives_report_conversion() {
+    let diagnostic = Diagnostic::new(
+        "custom.code",
+        DiagnosticSeverity::Error,
+        "invalid value",
+        DiagnosticLocation::default(),
+    )
+    .with_source("validation.custom")
+    .with_current_value("bad")
+    .with_expected("good")
+    .with_explanation("custom explanation")
+    .with_domain("custom-domain")
+    .with_owner("custom-owner");
+    let diagnostics = DiagnosticReport {
+        diagnostics: vec![diagnostic],
+    };
+
+    let report = DesignerValidationReport::from_diagnostic_report(&diagnostics, options());
+
+    let issue = &report.issues[0];
+    assert_eq!(issue.validator, "validation.custom");
+    assert_eq!(issue.current_value.as_deref(), Some("bad"));
+    assert_eq!(issue.expected.as_deref(), Some("good"));
+    assert_eq!(issue.explanation.as_deref(), Some("custom explanation"));
+    assert_eq!(issue.domain, "custom-domain");
+    assert_eq!(issue.owner, "custom-owner");
+}
+
+#[test]
+fn builds_empty_report() {
+    let report =
+        DesignerValidationReport::from_validation_report(&ValidationReport::new(), options());
+
+    assert_eq!(report.summary.error_count, 0);
+    assert_eq!(report.summary.warning_count, 0);
+    assert_eq!(report.status_label(), "PASS");
+    assert!(report.issues.is_empty());
+}
+
+#[test]
+fn assigns_stable_ids_after_deterministic_sort() {
+    let mut validation = ValidationReport::new();
+    validation.push(issue(
+        "validator.regex_mismatch",
+        ValidationSeverity::Warning,
+        "z",
+        3,
+    ));
+    validation.push(issue(
+        "validator.sum_mismatch",
+        ValidationSeverity::Error,
+        "a",
+        4,
+    ));
+    validation.push(issue(
+        "validator.compare_failed",
+        ValidationSeverity::Error,
+        "a",
+        3,
+    ));
+
+    let report = DesignerValidationReport::from_validation_report(&validation, options());
+
+    assert_eq!(report.summary.error_count, 2);
+    assert_eq!(report.summary.warning_count, 1);
+    assert_eq!(report.issues[0].id, "E0001");
+    assert_eq!(report.issues[0].code, "validator.compare_failed");
+    assert_eq!(report.issues[1].id, "E0002");
+    assert_eq!(report.issues[2].id, "W0001");
+}
+
+#[test]
+fn uses_catalog_and_issue_hint_priority() {
+    let mut validation = ValidationReport::new();
+    let mut known = issue(
+        "validator.regex_mismatch",
+        ValidationSeverity::Error,
+        "items",
+        2,
+    );
+    known.hint = Some("custom hint".to_owned());
+    validation.push(known);
+    validation.push(issue(
+        "unknown.code",
+        ValidationSeverity::Warning,
+        "items",
+        3,
+    ));
+
+    let report = DesignerValidationReport::from_validation_report(&validation, options());
+
+    assert_eq!(report.issues[0].friendly_title, "文本格式不符合命名规则");
+    assert_eq!(report.issues[0].hint.as_deref(), Some("custom hint"));
+    assert_eq!(report.issues[1].friendly_title, "message for unknown.code");
+    assert_eq!(report.issues[1].hint, None);
+}
+
+#[test]
+fn renders_all_formats_with_escaping() {
+    let mut validation = ValidationReport::new();
+    let mut item = issue(
+        "validator.regex_mismatch",
+        ValidationSeverity::Error,
+        "items",
+        2,
+    );
+    item.message = "bad | <value>\nnext".to_owned();
+    validation.push(item);
+    let report = DesignerValidationReport::from_validation_report(&validation, options());
+
+    let json = render_designer_validation_report(&report, DesignerReportFormat::Json).unwrap();
+    assert!(json.contains("\"metadata\""));
+    assert!(json.contains("validator.regex_mismatch"));
+
+    let markdown =
+        render_designer_validation_report(&report, DesignerReportFormat::Markdown).unwrap();
+    assert!(markdown.contains("bad \\| <value><br>next"));
+
+    let csv = render_designer_validation_report(&report, DesignerReportFormat::Csv).unwrap();
+    assert!(csv.starts_with("id,severity,blocking,code"));
+    assert!(csv.contains('"'));
+
+    let html = render_designer_validation_report(&report, DesignerReportFormat::Html).unwrap();
+    assert!(html.contains("&lt;value&gt;"));
+    assert!(!html.contains("https://"));
+}
+
+#[test]
+fn renderers_include_structured_enrichment_fields() {
+    let mut validation = ValidationReport::new();
+    validation.push(
+        issue("custom.code", ValidationSeverity::Error, "items", 2)
+            .with_current_value("abc")
+            .with_expected("integer"),
+    );
+    validation.issues[0].location.source_column_name = Some("level".to_owned());
+    validation.issues[0].explanation = Some("parse as integer".to_owned());
+    let report = DesignerValidationReport::from_validation_report(&validation, options());
+
+    let markdown =
+        render_designer_validation_report(&report, DesignerReportFormat::Markdown).unwrap();
+    assert!(markdown.contains("Source column"));
+    assert!(markdown.contains("abc"));
+    assert!(markdown.contains("integer"));
+
+    let csv = render_designer_validation_report(&report, DesignerReportFormat::Csv).unwrap();
+    assert!(csv.starts_with(
+            "id,severity,blocking,code,friendly_title,message,hint,table,field,row_index,source_row_number,source_column"
+        ));
+    assert!(csv.contains(",level,"));
+    assert!(csv.contains(",abc,integer,parse as integer,"));
+
+    let html = render_designer_validation_report(&report, DesignerReportFormat::Html).unwrap();
+    assert!(html.contains("abc"));
+    assert!(html.contains("integer"));
+    assert!(html.contains("column level"));
+}
