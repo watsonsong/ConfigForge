@@ -25,7 +25,7 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 2. 支持按表加载 CSV，得到与 Meta 生命周期无关的 owned `DataSet`。
 3. Data 加载阶段不依赖 `LinkedMetaModel<'meta>`，只依赖可拥有的加载计划，因此可以与 Meta Link / Meta Validate 在流程上并行。
 4. 在 Meta Link 完成后，由 Data Resolver 使用 `LinkedMetaModel<'meta>` + raw `DataSet` 解析 JSON cell / expanded path / default / target visibility，得到结构化 `ResolvedDataSet` 或 target-specific resolved view；runtime export 主路径已消费 resolved value。
-5. Validation 仍处于迁移中：source schema 与 value resolve 已通过 resolver 统一，required/type/index/FK 等主流程仍保留部分 raw `DataRow` 逻辑，后续应迁移到 `validate_resolved_*`。
+5. Validation / Exporter 已通过 `ExportValidationView` 和 shared visible-row helper 消费 target resolved rows。required/type/struct/list/color/vector、built-in validators、asset validation、POT、Asset Manifest 和 binary payload 均优先读取 resolved value；FK、unique/index key 与 record key 保留显式 raw cell policy。
 
 当前阶段已实现 CSV source、DataSet、target-aware validation/export 的基础流程，并已按 **variant source mode** 支持 polymorphic fragments：polymorphic CollectionTable 可声明多个 CSV sources，每个 source 追加完整 records 并声明 active fragments。`override_sources` 已稳定支持 CSV CollectionTable 整行覆盖：按 primary index 匹配 base row，在匹配 effective target tags 时替换该 row，服务赛季/热修类临时覆盖。ObjectTable CSV multi-source / override 也已稳定支持：多个 base source 以 field path 互斥方式 split merge 为 singleton object，override source 以 exact field path patch 已存在字段。
 
@@ -212,7 +212,7 @@ pub type DataRow = BTreeMap<String, String>;
 - 值保持原始字符串。Raw DataRow 是 source-neutral 的事实层，不表达 typed value、默认值、target visibility 或 nested object。
 - 后续 resolver 可在此基础上生成结构化值；Validation / Exporter 不应长期直接从 raw `DataRow` 重复解释 struct JSON cell 和 dotted path。
 
-### 5.4.5 `ResolvedDataSet` / `DataValue`（已实现 MVP，继续迁移）
+### 5.4.5 `ResolvedDataSet` / `DataValue`（已实现并作为 Validation / Export 共享语义层）
 
 `ResolvedDataSet` 是 raw `DataSet` 之后的 Meta-aware 解析结果。它不替代 raw `DataSet`，而是与 raw source snapshot 并存：raw 层用于诊断、inspect、debug、source diff；resolved 层用于 validation/export 共享同一套结构化语义。
 
@@ -257,11 +257,12 @@ pub enum ScalarValue {
 }
 ```
 
-`ValueSourceTrace` 至少需要表达：
+`ValueSourceTrace` 当前表达：
 
 - raw field path，例如 `attributes.attack`；
 - source kind：explicit cell、default、computed/empty object；
 - source row / source path；
+- raw value；
 - 对 ObjectTable，cell source 已记录 key-level source path / row number；field-level validation 应优先使用 cell source，singleton logical row source 仅作为 fallback trace。
 
 Resolved 后，无论 source 是：
@@ -337,11 +338,13 @@ pub enum VectorValue {
 
 Runtime data exporter 的 canonical 输出策略应由 data artifact toolkit 统一完成，而不是各 exporter 重新解析 raw cell：JSON / MessagePack 第一阶段建议输出 object shape（Color：`r/g/b/a`；Vector：按 components 输出 `x/y/z/w` 或用户指定 component 名），`bin` 使用 schema-aware positional layout。是否把 Color byte 通道导出为 normalized float 是 export policy；解析层只保证 raw source 合法并保存 canonical numeric value。
 
-当前实现状态与差距：
+当前实现状态与边界：
 
 - 已实现 `ResolvedDataSet` / `DataResolver` 基础类型、shared typed scalar parse、shared list JSON cell parse、struct JSON cell / expanded value 统一解析、source schema 校验、target-aware row resolve、active fragment resolve、runtime export 主路径消费 resolved value。
-- 过渡中：Validation 仍保留 raw `DataRow` 上的 required/type/enum/index/FK 主流程，但 type/enum/list element/FK list element conversion 已复用 data typed value helper；后续应迁移到 `validate_resolved_*` 让更多规则直接消费 `ResolvedValue/DataValue`。
-- 未实现：typed fragment payload（例如 `attributes` fragment 直接复用 `AttributeSet`）、field group/base table schema 复用、asset existence/text POT special export、expanded array/map path。
+- Validation target view 缓存 `ResolvedTable`，通过 `resolved_value()` / `resolved_path_value()` / `field_source()` / `raw_cell()` 提供统一 accessor。基础 table validation、struct occurrence、built-in validators、asset validation 和 fragment field validation 已优先消费 resolved value；resolver 不可用时保留 raw fallback 以便报告原始解析错误。
+- data-backed exporter 已收敛：runtime payload和 binary 使用 target resolved rows；POT / Asset Manifest 复用 target visible-row helper；POT / Asset Manifest 的数据值读取 resolved scalar export string，record key 走 raw key policy。
+- raw `DataRow` 仍是必要 companion：row_export predicate、source trace / cell source、inspect/debug、FK/index/record key raw semantics 都依赖 raw 层。不要把 raw 层删除或机械改成 typed canonical key。
+- 未实现：typed fragment payload（例如 `attributes` fragment 直接复用 `AttributeSet`）、field group/base table schema 复用、expanded array/map path、POT fragment / struct child text 深度抽取。
 
 注意：是否在 resolver 阶段把 scalar parse 成 `Int/Float/Bool` 需要结合现有 runtime scalar string contract 决定。短期可以先在 resolver 内保留 typed parse 结果与 raw string，runtime export 仍输出 string；长期如果 runtime artifact 改为 typed scalar，可直接复用 `ScalarValue`。
 
@@ -670,18 +673,18 @@ MetaModel::from_path(meta_path)
 阶段 B：Data load
   DataLoader::new(data_root).read_sources(&source_read_plan) -> RawSourceData
 
-阶段 C：Data resolve
+阶段 C：Data resolve / target view materialization
   normalize_data_set(&linked_meta, raw_sources.as_data_set()) -> normalized DataSet
-  DataResolver::new(&linked_meta).resolve(normalized_data_set, target_tags?) -> ResolvedDataSet / ResolvedExportView
+  DataResolver::resolve_table_rows(table_meta, table, target_tags?, visible_row_indices) -> ResolvedTable
 
 阶段 D：Data validation
-  validate_resolved_data_set(&linked_meta, &resolved_data_set)
+  validate_normalized_data_set* uses ExportValidationView(raw + resolved companion)
 
 阶段 E：Export
-  exporter consumes ResolvedDataSet / ResolvedExportView
+  data-backed exporter consumes target resolved rows plus explicit raw key/source helpers
 ```
 
-当前计划是以 `SourceReadPlan -> DataLoader -> RawSourceData -> normalize_data_set -> DataResolver -> ResolvedDataSet` 作为 Data 模块主链路。`DataLoadPlan` 仍保留为兼容 facade。顺序执行示例：
+当前主链路是 `SourceReadPlan -> DataLoader -> RawSourceData/DataSet -> normalize_data_set -> ExportValidationView/DataResolver -> Validation/Exporter`。`DataLoadPlan` 仍保留为兼容 facade。顺序执行示例：
 
 ```rust
 let meta = MetaModel::from_path(meta_path)?;
@@ -689,8 +692,8 @@ let source_read_plan = SourceReadPlan::from_meta_model(&meta)?;
 let linked_meta = meta.link().map_err(ConfigForgeError::MetaValidation)?;
 let raw_sources = DataLoader::new(data_root).read_sources(&source_read_plan)?;
 let normalized = normalize_data_set(&linked_meta, raw_sources.as_data_set())?;
-let resolved = DataResolver::new(&linked_meta).resolve(&normalized, None)?;
-validate_resolved_data_set(&linked_meta, &resolved)?;
+let view = ExportValidationView::full(&linked_meta, &normalized);
+validate_normalized_data_set_with_report(&linked_meta, &normalized)?;
 ```
 
 未来并行化时，`linked_meta` 和 `data_set` 的构造可以拆成两个任务，因为：
@@ -731,9 +734,9 @@ Validation 使用 evaluator 结果做 required/type/enum/validator 报错；Expo
 
 将 evaluator 的输出从 struct-only 扩展为 `DataValue::Scalar` / `DataValue::Struct`，并让 runtime exporter 优先消费 `DataValue`。
 
-**Phase 3：Validation 迁移到 `ResolvedDataSet`。**
+**Phase 3：Validation / Export 迁移到 resolved companion（已落地）。**
 
-Validation 不再直接读 raw `DataRow`，而是读取 resolved row。RawDataSet 仍保留用于 source diagnostic、inspect、debug、reload 和 diff。
+Validation 不再把 raw `DataRow` 作为默认值解释入口，而是通过 `ExportTableView` 的 resolved companion 读取 `ResolvedValue`。RawDataSet 仍保留用于 source diagnostic、inspect、debug、reload、diff、row_export predicate 以及 raw key policy。Exporter 侧 runtime payload、binary、POT 和 Asset Manifest 已共享 target visible rows / resolved value / raw key helper。
 
 **Phase 4：支持 array/map 与更多 source path。**
 
@@ -747,23 +750,24 @@ Validation 不再直接读 raw `DataRow`，而是读取 resolved row。RawDataSe
 pub fn validate_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()>;
 ```
 
-Data 模块落地后已有数据集级入口。引入 resolved 层后建议增加 resolved validation 入口，并保留 raw validation 作为兼容 facade：
+Data 模块落地后已有数据集级入口。当前 implementation 选择不暴露独立 public `ResolvedDataSet` validation API，而是在 `ExportValidationView` 内缓存 target/full resolved companion，并保留 raw `DataSet` 作为 source/key companion：
 
 ```rust
-pub fn validate_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataSet) -> Result<()>;
-pub fn validate_resolved_data_set(
-    meta: &LinkedMetaModel<'_>,
-    data_set: &ResolvedDataSet,
-) -> Result<()>;
+pub struct ExportTableView<'meta, 'data> {
+    pub meta: &'meta LinkedTableMeta<'meta>,
+    pub table: &'data DataTable,
+    pub visible_fields: BTreeSet<&'meta str>,
+    pub visible_rows: Vec<VisibleRow>,
+    resolved_table: Option<ResolvedTable>,
+}
 ```
 
-长期职责：
+职责边界：
 
-1. 遍历 `meta.tables`。
-2. 在 `ResolvedDataSet` 中按 table name 查找 `ResolvedTable`。
-3. 缺失表时报错。
-4. 对每张表调用 resolved table validation。
-5. required/type/enum/range 等规则读取 `DataValue` 和 source trace，不再重复解析 raw JSON / dotted path。
+1. `ExportValidationView::full()` / `for_target()` 负责构建可见 table/field/row，并调用 `DataResolver::resolve_table_rows()` 缓存与 visible rows 对齐的 `ResolvedTable`。
+2. `resolved_value()` 读取顶层字段；`resolved_path_value()` 读取 dotted path，支持 fragment object / struct child；`raw_cell()` 只表示显式 raw 语义；`field_source()` 桥接 resolved trace 与 raw cell source。
+3. required/type/enum/range、asset、built-in validators、fragment field values 读取 `DataValue` / scalar export string 和 source trace，不再重复解析 raw JSON / dotted path。
+4. FK、unique/index key、record key 使用 `validation::key_policy`，默认 raw key 与 resolved scalar export key 明确区分。
 
 ### 5.8.4 Exporter API 调整
 
@@ -779,7 +783,7 @@ pub fn validate_project(meta_path: &Path, data_dir: &Path) -> Result<()> {
 }
 ```
 
-`export_project` 同理，应先得到 `RawSourceData`，再按 target 生成 `ResolvedExportView`。构建 `SourceReadPlan` 时可以先用当前 target 的 `TargetTags` 过滤整表 `export_when`，避免加载不会导出的表；写出 runtime data 时继续按同一组 tags 过滤字段和 `row_export` 行。长期 exporter 只负责 `DataValue -> JSON/MessagePack/future binary`，不再理解 source layout、default、target visibility 或 nested struct boundary。
+`export_project` 同理，应先得到 normalized raw `DataSet`，再按 target 生成 resolved rows。构建 `SourceReadPlan` 时可以先用当前 target 的 `TargetTags` 过滤整表 `export_when`，避免加载不会导出的表；写出 runtime data 时继续按同一组 tags 过滤字段和 `row_export` 行。当前 JSON / MessagePack / Lua / binary payload 已主要负责 `DataValue -> artifact`；POT / Asset Manifest 作为聚合 data exporter 复用 shared visible-row helper 和 resolved scalar export string，不再自行解释 default、struct expanded path 或 target visibility。record key 与 FK/index key 仍使用 raw policy helper。
 
 ## 5.9 错误与诊断边界
 
@@ -814,6 +818,8 @@ Resolved 层落地后，诊断模型需要同时支持 raw source 与 resolved v
 - validation error：required、range、foreign key、unique index、target-aware visibility conflict。
 
 为了避免 resolved 后丢失定位信息，`ResolvedValue` 必须携带 `ValueSourceTrace`。ObjectTable 的 `key,value` source 在 raw `DataTable` 中已经通过 cell source 保留 key-level source path / row number；resolved 层应继续传递该 trace，避免回退到 singleton logical row 的 fallback location。
+
+Validation report enrichment 的输入是 `ValidationIssue.location`，而不是 raw row lookup。生产 issue 的规则应在发生错误时通过 `field_source()` / resolved trace / cell source 填好 `DiagnosticLocation`；report renderer 只负责把 table、field、source path、source row、source column、current_value、expected 等结构化字段展示出来。
 
 ## 5.10 测试计划
 

@@ -509,7 +509,7 @@ pub struct ValidationContext<'meta, 'data> {
 
 这里刻意区分 `'meta` 与 `'data`：`LinkedMetaModel<'meta>` 借用自 `MetaModel`，而 `DataSet` 是数据加载后的 owned 数据，不应被迫与 meta 共享同一生命周期。`TargetTags` 可以由 context 持有 owned value；如果实现希望避免 clone，也可增加独立 `'ctx` 生命周期并使用 `Option<&'ctx TargetTags>`，但不能把它绑定到 `'meta`。
 
-`ExportValidationView` 第一阶段可以是轻量借用视图，不必复制所有数据：
+`ExportValidationView` 是 target/full validation 的统一数据面：它借用 raw `DataTable` 以保留 source trace、row source、cell source 与 raw key 语义，同时缓存与 visible rows 对齐的 `ResolvedTable` 作为默认值/类型/struct/list-aware 的值读取入口。
 
 ```rust
 pub struct ExportValidationView<'meta, 'data> {
@@ -521,6 +521,7 @@ pub struct ExportTableView<'meta, 'data> {
     pub table: &'data DataTable,
     pub visible_fields: BTreeSet<&'meta str>,
     pub visible_rows: Vec<VisibleRow>,
+    resolved_table: Option<ResolvedTable>,
 }
 
 pub struct VisibleRow {
@@ -531,7 +532,16 @@ pub struct VisibleRow {
 
 `VisibleRow.row_index` 始终指向原始 `DataTable.rows` 下标，诊断中的 row 也应优先使用原始 source row number，而不是过滤后视图中的第 N 行。短期实现如果还没有 source location，可以先只填 `row_index`，但语义必须保持“原始数据行”而非“可见行序号”。
 
-当前已经有 `validate_normalized_data_set_for_target` 的 target-aware 逻辑，后续可以把其中的 table/field/row 过滤收敛到 `ExportValidationView`。
+当前 accessor 边界：
+
+- `visible_raw_row(visible_row_index)`：返回 raw row，仅用于 source trace、raw key policy 或兼容 fallback；
+- `visible_resolved_row(visible_row_index)`：返回与 visible row 对齐的 resolved row；
+- `resolved_value(visible_row_index, field_name)`：读取顶层 resolved field；
+- `resolved_path_value(visible_row_index, field_path)`：读取 dotted path，支持 fragment object / nested struct child；
+- `raw_cell(visible_row_index, field_path)`：显式 raw cell 读取；
+- `field_source(visible_row_index, field_path)`：桥接 resolved `ValueSourceTrace` 与 raw `DataTable::cell_source()`。
+
+`ExportValidationView::for_target()` / `for_target_with_pool()` 使用同一套 visible-row 构造与 `DataResolver::resolve_table_rows()`，保证 table validation、FK、registry validators、asset validation、POT/Asset Manifest/binary exporter 对 target filtering 的理解一致。
 
 ### 6.4.4 ValidatorRegistry
 
@@ -737,9 +747,9 @@ Validator 执行时必须明确输入视图：
 | validator | 默认输入 | 说明 |
 | --- | --- | --- |
 | required/type/enum/range | 当前 target visible fields + visible rows | 不导出的字段不校验。 |
-| unique | 当前 target visible rows | `row_export` 排除行不参与 duplicate 检查。 |
-| referential_integrity（由 foreign key 关系生成） | 当前 target source/target visible rows | target 中被过滤的记录默认不可引用。 |
-| asset/text | 当前 target visible rows | 被过滤行不阻塞当前 target。 |
+| unique | 当前 target visible rows + raw key policy | `row_export` 排除行不参与 duplicate 检查；key 默认使用 raw cell。 |
+| referential_integrity（由 foreign key 关系生成） | 当前 target source/target visible rows + raw key policy | target 中被过滤的记录默认不可引用；`"01"` 与 `"1"` 不被 typed canonicalization 合并。 |
+| asset/text | 当前 target visible rows + resolved scalar export string | 被过滤行不阻塞当前 target；default/expanded/override 值通过 resolved view 读取。 |
 
 Validator 自身也支持 `export_when`：
 
@@ -757,6 +767,8 @@ export_when = { any = ["client"] }
 validator.meta.export_when.matches(target_tags)
 && validator 所在 table/field 在当前 view 可见
 ```
+
+值读取策略：field/record/table validators 默认通过 `builtins::common::field_value()` 读取 resolved scalar export string，并以 raw cell fallback 保持兼容；需要 raw semantics 的 key 构造必须通过 `validation::key_policy` 中的 helper，不能直接在 validator 中散落 `row.get()`。当前 key policy 包括 `RawCell`、`ScalarExport` 与预留的 `TypedCanonical`；FK、unique/index、record key 继续使用 raw policy，built-in group/order/value comparison 可使用 scalar export policy。
 
 目标态 Validation 入口应显式表达当前视图模式，避免 CLI / CI / QA 在未指定 target 时得到不稳定结果。当前代码尚未引入统一 `ValidationMode` enum，而是通过 `validate_data_set*` 与 `validate_data_set_for_target*` 两组入口区分 full dataset 与 target-aware 校验：
 
@@ -828,6 +840,7 @@ impl ValidationOutcome {
 - `ValidationReport::into_result()` 将 error report 桥接为 `ConfigForgeError::ValidationReport`；老的 `ConfigForgeError::Validation(String)` 仍可由更底层单项 helper 产生，但不再作为 validation 汇总模型。
 - `DesignerValidationReport::from_validation_report()` 是 validation_report artifact 的主转换入口；`from_diagnostic_report()` 仅用于需要把通用 `DiagnosticReport<Diagnostic>` 临时适配为 Designer Validation Report 的非主路径场景，不应作为 build validation failure fallback 的数据来源。
 - `error_issue_from_result()` 遇到 `ConfigForgeError::ValidationReport` 时会拆出第一条 `Diagnostic` 并保留 code、location、target、hint、current_value、expected、explanation、domain、owner，避免 table-local check 通过 legacy error bridge 时丢失结构化字段。
+- Designer report enrichment 不回查 raw row 补 location；producer 必须通过 `field_source()` / cell source / resolved trace 在 `ValidationIssue.location` 中填好 source path、source row、source column、table、field。Report renderer 只展示结构化字段，并可根据 schema metadata 补充人类可读说明。
 - warning issue 保留在 report 中，不阻断构建；只要存在 error，依赖对应 data validation 的 export 被阻断。
 - report 合并使用局部 report + `append()` / `extend()`，再调用 `sort_by_stable_key()`，避免未来并行 validation 受任务完成顺序影响。stable key 当前为 `(severity, target, table, row_index, source_row_number, field, validator, code, message)`。
 

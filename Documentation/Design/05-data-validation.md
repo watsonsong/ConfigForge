@@ -33,6 +33,8 @@ ExportView 是针对某个 target tags 派生的视图。
 
 常规 runtime data exporter、POT / asset manifest 等聚合 data exporter 和 target-specific validation 默认读取 ExportView。
 
+当前实现中的 Validation ExportView 同时保存 raw 与 resolved 两个 companion：raw `DataTable` / `VisibleRow` 负责 source trace、cell source、row_export predicate 以及明确要求 raw string 语义的 key；`ResolvedTable` / `ResolvedRow` 负责 default-aware、target-aware、struct/list/color/vector-aware 的值读取。Validation 和 data-backed exporter 优先通过 resolved accessor 消费 `ResolvedValue`，只有 FK、unique/index key、record key 等明确声明 raw policy 的路径继续读取 raw cell。
+
 ## 5.2 ExportView 过滤规则
 
 表、字段和 override source 使用 `export_when` 匹配 effective target tags；collection 行使用 `row_export` 匹配数据行中的 tags。
@@ -159,6 +161,8 @@ Data validation 的高频错误应输出稳定 diagnostic code，而不是只依
 
 CSV reader 在 `DataTable.cell_sources` 中保存 per-cell source trace：`source_row_number`、`source_column_number`、`source_column_name` 与 `column_index`。Validation 构造 `DiagnosticLocation` 时应优先使用该 cell trace，因此 Designer Validation Report 和 CLI JSON 可以直接定位到“源文件 / 源行 / 源列 / 逻辑表 / 字段”。
 
+Resolved value 通过 `ValueSourceTrace` 保存 raw field path、source kind（explicit cell / default / computed empty object）、source path、source row 与 raw value。`ExportTableView::field_source()` 负责把 resolved trace 与 raw cell source 统一暴露给 validation；Designer Validation Report enrichment 不再回查 raw row，而是展示 `ValidationIssue.location` 中已经填充的 source path / row / column / field 信息。ObjectTable 的 key-level cell source 和 override source trace 也遵循同一策略：字段级诊断优先使用具体 cell source，logical singleton row source 仅作为 fallback。
+
 测试断言优先级固定为：stable code > severity > location/source trace > current_value / expected > hint > message 片段。message 可继续面向用户优化，不应作为 CI 判断的唯一依据。
 
 ### 5.5.2 Fragment 字段 Required / Default
@@ -271,6 +275,8 @@ runtime payload 应固定 fragment 表达方式。第一阶段推荐直接用 fr
 
 默认 FK 在当前验证视图中解析。因此 shipping target 中被过滤掉的目标记录不会作为 shipping ExportView 中的可引用对象，除非 target policy 明确要求使用 Full DataSet 解析。
 
+FK、unique/index key 与 record key 的字符串语义按显式 key policy 管理。当前兼容策略是：FK 与 index uniqueness 使用 raw cell key，避免把业务上不同的 raw key（例如 `"01"` 与 `"1"`）通过 typed canonicalization 合并；built-in validator 的 group/order key 和需要 default-aware 的值比较使用 resolved scalar export string；typed canonical key 仅作为未来新能力保留，不能在未设计确认时替换现有 raw key 行为。
+
 FK 上的 `linked_field` 不引入新的数据校验规则；它只是要求生成代码为已校验通过的 FK 关系生成关联访问和缓存 API。Validation 仍只检查 source fields、target table/index、类型兼容、empty/partial key 与 target record 是否存在。若某个 target 中 FK 因 `export_when` 不匹配、source/target 字段不可见或 target row 被 `row_export` 过滤而不进入 ExportView，则对应 `linked_field` helper 也不得进入该 target 的 generated API。换言之，`linked_field` 的可见性完全继承 FK 本身在当前 ExportView 中的可见性，不应让运行时代码访问到当前 target 未导出的表、字段或行。
 
 生成代码的 lazy relation getter 可以在运行时做防御性检查，但不替代导出前 validation：如果 validated artifact 中 relation lookup 失败，通常表示 runtime data 与 generated code 版本不匹配、手工篡改了数据文件，或业务跳过了 validation。此时 generated helper 应返回错误 / throw，而不是把缺失目标当成 optional empty。只有 `allow_empty = true` 且 source key 全空时才是合法空关系。
@@ -285,9 +291,9 @@ Asset 字段当前由 `asset_kind` + Project `[assets]` 驱动校验，至少检
 - asset_kind 合法；
 - 如果 Project 配置了 filesystem search path 且全局 / kind 未关闭存在性校验，则检查资源存在。
 
-Asset existence 默认对 ExportView 执行。被 target filter 排除的记录，其 asset 不阻塞该 target 导出，也不进入 asset manifest。
+Asset existence 默认对 ExportView 执行。被 target filter 排除的记录，其 asset 不阻塞该 target 导出，也不进入 asset manifest。asset ref 的读取使用 resolved scalar export string，并以 raw cell fallback 兼容旧输入；因此 default asset ref、ObjectTable override cell 和 struct/fragment expanded asset field 与普通 runtime payload 使用同一套解析语义。Asset Manifest 的引用路径使用同样的 resolved asset value，record key 则继续走显式 raw record-key policy。
 
-当前实现状态：P0-1 已实现 asset ref 校验、导出补齐和 Asset Manifest。`asset` 字段必须声明 `asset_kind`；Meta 顶层 `[[asset_kinds]]` 支持 `extends` 继承；Project `[assets]` / `[[assets.search_paths]]` 提供 filesystem search path；validation 只检查当前 target ExportView 中可见且非空的 asset 字段；runtime JSON / MessagePack / bin 导出前会通过同一 resolver 把可补齐引用物化为 canonical asset string。标准参考工程已用 `meta/common.toml` 存放公共 Unreal 基础规则，并用伪造 `.uasset` fixture 覆盖存在性校验，同时在 client target 中导出 `asset_manifest` JSON 与 CSV 清单。Asset Manifest exporter 作为同级聚合 data exporter 接入，支持 deterministic JSON 与 Unreal DataTable 兼容 CSV。目标态细节见 [`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)。
+当前实现状态：P0-1 已实现 asset ref 校验、导出补齐和 Asset Manifest。`asset` 字段必须声明 `asset_kind`；Meta 顶层 `[[asset_kinds]]` 支持 `extends` 继承；Project `[assets]` / `[[assets.search_paths]]` 提供 filesystem search path；validation 只检查当前 target ExportView 中可见且非空的 asset 字段；runtime JSON / MessagePack / bin 导出前会通过同一 resolver 把可补齐引用物化为 canonical asset string。标准参考工程已用 `meta/common.toml` 存放公共 Unreal 基础规则，并用伪造 `.uasset` fixture 覆盖存在性校验，同时在 client target 中导出 `asset_manifest` JSON 与 CSV 清单。Asset Manifest exporter 作为同级聚合 data exporter 接入，支持 deterministic JSON 与 Unreal DataTable 兼容 CSV，并复用 target visible-row helper、resolved asset value helper 和 raw record-key policy。目标态细节见 [`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)。
 
 ### Text
 
@@ -308,11 +314,13 @@ POT / text 相关校验目标态应补充：
 - 如果启用 plural / gender / select 等高级国际化类型，应由对应 field type 或 validator 明确承担结构校验，不应把 primitive `text` 的语义无限扩张。
 - target-aware validation 只检查当前 ExportView 中可见 text；被 `row_export`、`export_when` 或 fragment visibility 排除的文本不产生 POT 条目，也不产生 POT 相关错误。
 
-当前实现状态：`text` 仍按 string-like scalar 解析和 runtime data 导出；已实现 `type = "gettext_pot"` 的首版聚合 exporter，按当前 target 可见 table / row / field 抽取 primitive `text` 原文作为 `msgid`，支持 `table.field` context、source location / record key reference、field `desc` 与自动 table/field/record translator comment、以及 `(msgctxt, msgid)` 去重。国际化 key/context 显式列、placeholder / plural 诊断、fragment / struct child text 深度抽取和外部 catalog 导入仍属于后续扩展。标准参考游戏 fixture 中 item/class name、class description 等字段用于表达目标语义：客户端需要 text，服务器通常不需要；target ExportView 过滤后，server target 不应输出这些字段，也不应把它们送入未来 POT / text validation。
+当前实现状态：`text` 仍按 string-like scalar 解析和 runtime data 导出；已实现 `type = "gettext_pot"` 的首版聚合 exporter，按当前 target 可见 table / row / field 抽取 primitive `text` 原文作为 `msgid`，支持 `table.field` context、source location / raw record key reference、field `desc` 与自动 table/field/record translator comment、以及 `(msgctxt, msgid)` 去重。POT exporter 已复用 target visible-row helper，并从 resolved text value 读取 msgid 与 source reference；国际化 key/context 显式列、placeholder / plural 诊断、fragment / struct child text 深度抽取和外部 catalog 导入仍属于后续扩展。标准参考游戏 fixture 中 item/class name、class description 等字段用于表达目标语义：客户端需要 text，服务器通常不需要；target ExportView 过滤后，server target 不应输出这些字段，也不应把它们送入未来 POT / text validation。
 
 ## 5.10 聚合 Data Exporter 输入
 
 POT、asset manifest 等聚合 data exporter 默认读取 target 的 ExportView，而不是 Full DataSet。
+
+data-backed 产物的输入策略如下：runtime JSON / MessagePack / Lua / binary payload 读取 `DataResolver::resolve_table_rows()` 的 target resolved rows；POT 和 Asset Manifest 与 binary 共享 target visible-row helper，避免各自重复实现 `row_export`；POT/Asset Manifest 的数据值读取 resolved scalar export string，record key 保留 raw key policy。这样 default、expanded struct/fragment、override source trace 和 target filtering 在 validation 与 export 间保持一致。
 
 影响：
 
