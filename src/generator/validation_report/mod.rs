@@ -11,7 +11,7 @@ use crate::{
 
 use super::{
     ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorDescriptor,
-    GeneratorRequirements,
+    GeneratorRequirements, GeneratorValidationReportInput,
 };
 
 mod config;
@@ -22,7 +22,7 @@ use super::artifact_generator::generator_contract_error;
 
 pub(super) struct ValidationReportGenerator;
 
-pub(crate) fn export_validation_report_to_sink(
+fn export_validation_report_to_sink(
     input: &GeneratorCommonInput<'_>,
     validation_report: &ValidationReport,
     sink: &ArtifactSink,
@@ -77,6 +77,14 @@ impl ArtifactGenerator for ValidationReportGenerator {
     fn generate_with_data_to_sink(
         &self,
         input: &GeneratorDataInput<'_, '_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        export_validation_report_to_sink(&input.common, input.validation_report, sink)
+    }
+
+    fn generate_with_validation_report_to_sink(
+        &self,
+        input: &GeneratorValidationReportInput<'_, '_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
         export_validation_report_to_sink(&input.common, input.validation_report, sink)

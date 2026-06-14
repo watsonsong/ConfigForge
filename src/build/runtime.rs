@@ -14,7 +14,7 @@ use crate::{
     },
     generator::{
         GeneratorCommonInput, GeneratorCommonInputContext, GeneratorRegistry, GeneratorTaskInput,
-        PreparedGeneratorInputs, export_validation_report_to_sink,
+        PreparedGeneratorInputs,
     },
     meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags},
     path_util::lexical_normalize_path,
@@ -131,6 +131,7 @@ fn export_meta_and_data_tasks_with_generator_registry(
             generated_at,
             validation_outcome.report(),
             sink,
+            generator_registry,
         )?;
         return Err(ConfigForgeError::ValidationReport(
             validation_outcome.into_report().into_diagnostic_report(),
@@ -194,27 +195,27 @@ fn export_validation_report_tasks(
     generated_at: &str,
     validation_report: &crate::validation::ValidationReport,
     sink: &ArtifactSink,
+    generator_registry: &GeneratorRegistry,
 ) -> Result<()> {
-    let report_tasks = export_tasks
+    for task in export_tasks
         .iter()
         .copied()
-        .filter(|task| task.type_id == "validation_report")
-        .collect::<Vec<_>>();
-    if report_tasks.is_empty() {
-        return Ok(());
-    }
-    for task in report_tasks {
-        export_validation_report_to_sink(
-            &generator_common_input(
-                task,
-                linked_meta,
-                target_tags,
-                project_root,
-                project_info,
-                target_name,
-                generated_at,
-            ),
-            validation_report,
+        .filter(|task| task.requirements.needs_validation_report)
+    {
+        let generator = generator_registry.require_generator(&task.type_id)?;
+        generator.generate(
+            &GeneratorTaskInput {
+                common: generator_common_input(
+                    task,
+                    linked_meta,
+                    target_tags,
+                    project_root,
+                    project_info,
+                    target_name,
+                    generated_at,
+                ),
+                prepared: PreparedGeneratorInputs::ValidationReportOnly { validation_report },
+            },
             sink,
         )?;
     }

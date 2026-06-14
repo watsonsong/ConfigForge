@@ -10,7 +10,7 @@ use crate::{
 
 use super::{
     GeneratorCommonInput, GeneratorDataInput, GeneratorDescriptor, GeneratorRequirements,
-    GeneratorTaskInput,
+    GeneratorTaskInput, GeneratorValidationReportInput,
 };
 
 pub(crate) trait ArtifactGenerator: Send + Sync {
@@ -52,11 +52,37 @@ pub(crate) trait ArtifactGenerator: Send + Sync {
         ))
     }
 
+    fn generate_with_validation_report_to_sink(
+        &self,
+        input: &GeneratorValidationReportInput<'_, '_>,
+        sink: &ArtifactSink,
+    ) -> Result<()> {
+        let _ = (input, sink);
+        Err(generator_contract_error(
+            self.type_id(),
+            format!(
+                "generator `{}` does not support validation-report-only artifact generation",
+                self.type_id()
+            ),
+            "validation-report-only generation call",
+            "data-backed generation pipeline",
+            "Route validation-report-only fallback only to generators that declare validation report support.",
+        ))
+    }
+
     fn plan_task_artifacts(&self, input: &GeneratorTaskInput<'_, '_>) -> Result<Vec<PathBuf>> {
         self.plan_artifacts(&input.common)
     }
 
     fn generate(&self, input: &GeneratorTaskInput<'_, '_>, sink: &ArtifactSink) -> Result<()> {
+        if input.prepared.is_validation_report_only() && self.requirements().needs_validation_report
+        {
+            let report_input = GeneratorValidationReportInput {
+                common: input.common.clone(),
+                validation_report: input.prepared.validation_report(self.type_id())?,
+            };
+            return self.generate_with_validation_report_to_sink(&report_input, sink);
+        }
         if self.requirements().needs_data {
             let data_input = GeneratorDataInput {
                 common: input.common.clone(),

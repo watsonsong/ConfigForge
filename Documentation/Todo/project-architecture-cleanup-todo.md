@@ -125,23 +125,23 @@ ConfigForge 当前主干方向整体正确：
 
 - `refactor(generator): share option and input helpers`
 
-### [ ] Step 4：收敛 validation_report 失败路径到 registry 输入模型
+### [x] Step 4：收敛 validation_report 失败路径到 registry 输入模型
 
 目的：减少 Build 对具体 generator type 的特判，让失败路径也尽量通过统一 `ArtifactGenerator` facade。
 
 实现项：
 
-- [ ] 设计 `PreparedGeneratorInputs::ValidationReportOnly` 或等价 input，表达 validation error 后可用 `ValidationReport` 但不可用 validated export `DataSet` 的状态。
-- [ ] 让 `validation_report` generator 支持该 input；Build 不再直接调用 `export_validation_report_to_sink()`。
-- [ ] 将 `export_validation_report_to_sink` 降为 `generator/validation_report` 私有 helper，移除 `src/generator/mod.rs` 的 re-export。
-- [ ] Build 仍可筛选“失败时允许写出”的 tasks，但应基于 requirements/capability，而不是硬编码 `type_id == "validation_report"`；如短期保留硬编码，需文档化并增加防扩散测试。
-- [ ] 保持 validation error 继续阻断其他 data-backed generator。
+- [x] 设计 `PreparedGeneratorInputs::ValidationReportOnly` 或等价 input，表达 validation error 后可用 `ValidationReport` 但不可用 validated export `DataSet` 的状态。
+- [x] 让 `validation_report` generator 支持该 input；Build 不再直接调用 `export_validation_report_to_sink()`。
+- [x] 将 `export_validation_report_to_sink` 降为 `generator/validation_report` 私有 helper，移除 `src/generator/mod.rs` 的 re-export。
+- [x] Build 仍可筛选“失败时允许写出”的 tasks，但应基于 requirements/capability，而不是硬编码 `type_id == "validation_report"`；如短期保留硬编码，需文档化并增加防扩散测试。
+- [x] 保持 validation error 继续阻断其他 data-backed generator。
 
 验证：
 
-- [ ] `cargo test build`
-- [ ] `cargo test cli_integration validation`
-- [ ] `cargo test validation_report`
+- [x] `cargo test build`
+- [x] `cargo test --test cli_integration validation`
+- [x] `cargo test validation_report`
 
 可独立提交建议：
 

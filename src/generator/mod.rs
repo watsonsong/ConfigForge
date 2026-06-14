@@ -23,6 +23,12 @@ mod schema_doc;
 mod typescript;
 mod validation_report;
 
+pub(crate) use crate::code_artifact::{
+    CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
+    CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTableKind,
+    CodeTypeRef, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn, I18nMode, I18nOptions,
+    NamingConfig, RuntimeInterfaceMode, build_code_model, ir,
+};
 pub(crate) use artifact_generator::ArtifactGenerator;
 pub use binary::BinaryDataExporter;
 #[cfg(test)]
@@ -36,7 +42,7 @@ pub(crate) use csharp::CSharpCodeGenerator;
 pub use csharp::CSharpCodegenOptions;
 pub(crate) use input::{
     GeneratorCommonInput, GeneratorCommonInputContext, GeneratorDataInput, GeneratorTaskInput,
-    PreparedGeneratorInputs,
+    GeneratorValidationReportInput, PreparedGeneratorInputs,
 };
 pub use java::JavaCodegenOptions;
 pub use json::JsonDataExporter;
@@ -55,14 +61,6 @@ pub use schema_doc::{
 #[cfg(test)]
 pub(crate) use typescript::TypeScriptCodeGenerator;
 pub use typescript::TypeScriptCodegenOptions;
-pub(crate) use validation_report::export_validation_report_to_sink;
-
-pub(crate) use crate::code_artifact::{
-    CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
-    CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTableKind,
-    CodeTypeRef, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn, I18nMode, I18nOptions,
-    NamingConfig, RuntimeInterfaceMode, build_code_model, ir,
-};
 
 #[cfg(test)]
 pub(crate) use crate::code_artifact::{CodeWriter, GeneratedFile};

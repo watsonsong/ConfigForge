@@ -45,6 +45,11 @@ pub(crate) struct GeneratorDataInput<'a, 'meta> {
     pub(crate) pool: &'a ThreadPool,
 }
 
+pub(crate) struct GeneratorValidationReportInput<'a, 'meta> {
+    pub(crate) common: GeneratorCommonInput<'meta>,
+    pub(crate) validation_report: &'a ValidationReport,
+}
+
 impl GeneratorCommonInput<'_> {
     pub(crate) fn target_data_config(&self) -> TargetDataConfig {
         TargetDataConfig {
@@ -124,17 +129,22 @@ pub(crate) enum PreparedGeneratorInputs<'a> {
         validation_report: &'a ValidationReport,
         pool: &'a ThreadPool,
     },
+    ValidationReportOnly {
+        validation_report: &'a ValidationReport,
+    },
 }
 
 impl<'a> PreparedGeneratorInputs<'a> {
     pub(crate) fn data_set(&self, generator_type: &str) -> Result<&'a DataSet> {
         match self {
             Self::MetaAndData { data_set, .. } => Ok(*data_set),
-            Self::Planning | Self::MetaOnly => Err(unsupported_data_input_error(
-                generator_type,
-                self.kind_label(),
-                "Data-backed artifact input",
-            )),
+            Self::Planning | Self::MetaOnly | Self::ValidationReportOnly { .. } => {
+                Err(unsupported_data_input_error(
+                    generator_type,
+                    self.kind_label(),
+                    "Data-backed artifact input",
+                ))
+            }
         }
     }
 
@@ -143,6 +153,7 @@ impl<'a> PreparedGeneratorInputs<'a> {
             Self::MetaAndData {
                 validation_report, ..
             } => Ok(*validation_report),
+            Self::ValidationReportOnly { validation_report } => Ok(*validation_report),
             Self::Planning | Self::MetaOnly => Err(unsupported_data_input_error(
                 generator_type,
                 self.kind_label(),
@@ -154,12 +165,18 @@ impl<'a> PreparedGeneratorInputs<'a> {
     pub(crate) fn pool(&self, generator_type: &str) -> Result<&'a ThreadPool> {
         match self {
             Self::MetaAndData { pool, .. } => Ok(*pool),
-            Self::Planning | Self::MetaOnly => Err(unsupported_data_input_error(
-                generator_type,
-                self.kind_label(),
-                "Data-backed artifact input",
-            )),
+            Self::Planning | Self::MetaOnly | Self::ValidationReportOnly { .. } => {
+                Err(unsupported_data_input_error(
+                    generator_type,
+                    self.kind_label(),
+                    "Data-backed artifact input",
+                ))
+            }
         }
+    }
+
+    pub(crate) fn is_validation_report_only(&self) -> bool {
+        matches!(self, Self::ValidationReportOnly { .. })
     }
 
     fn kind_label(&self) -> &'static str {
@@ -167,6 +184,7 @@ impl<'a> PreparedGeneratorInputs<'a> {
             Self::Planning => "Planning",
             Self::MetaOnly => "MetaOnly",
             Self::MetaAndData { .. } => "MetaAndData",
+            Self::ValidationReportOnly { .. } => "ValidationReportOnly",
         }
     }
 }
