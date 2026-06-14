@@ -5,10 +5,11 @@ use std::collections::BTreeMap;
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
-    data::{ArrayElementValue, DataResolver, DataTable, DataValue, ResolvedValue, VectorValue},
+    data::{
+        ArrayElementValue, DataResolver, DataRow, DataTable, DataValue, ResolvedValue, VectorValue,
+    },
     diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{LinkedField, LinkedFieldMeta, LinkedTableMeta, TableKind, TargetTags},
-    validation::key_policy::target_visible_row_indices,
 };
 
 use super::{ExportedTable, ExportedTablePayload, ExportedValue, model::ExportedTableMeta};
@@ -95,6 +96,38 @@ fn build_exported_collection_payload(
         },
         rows,
     })
+}
+
+fn target_visible_row_indices(
+    table_meta: &LinkedTableMeta<'_>,
+    table: &DataTable,
+    target_tags: &TargetTags,
+) -> Vec<usize> {
+    match table_meta.meta.kind {
+        TableKind::Collection => table
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row_is_exported(table_meta, row, target_tags))
+            .map(|(row_index, _)| row_index)
+            .collect(),
+        TableKind::Object => table
+            .rows
+            .first()
+            .filter(|row| row_is_exported(table_meta, row, target_tags))
+            .map(|_| vec![0])
+            .unwrap_or_default(),
+    }
+}
+
+fn row_is_exported(
+    table_meta: &LinkedTableMeta<'_>,
+    row: &DataRow,
+    target_tags: &TargetTags,
+) -> bool {
+    table_meta
+        .meta
+        .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
 }
 
 fn exported_value_from_fragment(
