@@ -242,24 +242,24 @@ ConfigForge 当前主干方向整体正确：
 
 - `refactor(runtime): share reader path validation`
 
-### [ ] Step 9：补强模块边界自动化回归
+### [x] Step 9：补强模块边界自动化回归
 
 目的：把 architecture review 结论固化为测试，防止后续继续扩大依赖面。
 
 实现项：
 
-- [ ] 增加 diagnostic 边界 guard：`src/diagnostic/**/*.rs` 不依赖 meta/data/validation/generator/build。
-- [ ] 增加 validation 边界 guard：`src/validation/**/*.rs` 不依赖 code_artifact/data_artifact/generator/build。
-- [ ] 增加 code_artifact 边界 guard：`src/code_artifact/**/*.rs` 不依赖 data/data_artifact/validation/generator/build。
-- [ ] 增加 data_artifact production guard：不依赖 validation/generator/build。
-- [ ] 增加 schema_doc guard：不依赖 data/validation/code_artifact/data_artifact/build/project。
-- [ ] 将边界规则与 `Documentation/Implementation/01-module-outline.md` 保持同步。
+- [x] 增加 diagnostic 边界 guard：`src/diagnostic/**/*.rs` 不依赖 meta/data/validation/generator/build。
+- [x] 增加 validation 边界 guard：`src/validation/**/*.rs` 不依赖 code_artifact/data_artifact/generator/build。
+- [x] 增加 code_artifact 边界 guard：`src/code_artifact/**/*.rs` 不依赖 data/data_artifact/validation/generator/build。
+- [x] 增加 data_artifact production guard：不依赖 validation/generator/build。
+- [x] 增加 schema_doc guard：不依赖 data/validation/code_artifact/data_artifact/build/project。
+- [x] 将边界规则与 `Documentation/Implementation/01-module-outline.md` 保持同步。
 
 验证：
 
-- [ ] `cargo test architecture`
-- [ ] `cargo test diagnostic`
-- [ ] `cargo test validation`
+- [x] `cargo test architecture`
+- [x] `cargo test diagnostic`
+- [x] `cargo test validation`
 
 可独立提交建议：
 
