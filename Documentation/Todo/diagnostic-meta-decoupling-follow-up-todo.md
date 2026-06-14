@@ -56,20 +56,22 @@
 
 - `test(diagnostic): guard against meta dependency regression`
 
-### [ ] Step 2：在 unified catalog 中登记 Meta stable codes（暂不切换输出）
+### [x] Step 2：在 unified catalog 中登记 Meta stable codes（暂不切换输出）
 
 目的：先把 catalog 基础设施补齐，降低后续切换 `MetaDiagnostic::code()` 的风险。
 
 实现项：
 
-- [ ] 在 `src/diagnostic/code.rs` 增加 `CF_META_*` stable code 常量，覆盖 `MetaDiagnosticCode` 当前所有变体。
-- [ ] 在 `DIAGNOSTIC_CODE_METADATA` 中登记 metadata，domain 使用 `meta`。
-- [ ] 将 `meta` 加入 catalog 测试允许的 domain 集合。
-- [ ] 增加 catalog 测试，断言至少包含 DuplicateTableName / UnknownFieldType / InvalidValidatorConfig 等高频 Meta code。
+- [x] 在 `src/diagnostic/code.rs` 增加 `CF_META_*` stable code 常量，覆盖 `MetaDiagnosticCode` 当前所有变体。
+- [x] 在 `DIAGNOSTIC_CODE_METADATA` 中登记 metadata，domain 使用 `meta`。
+- [x] 将 `meta` 加入 catalog 测试允许的 domain 集合。
+- [x] 增加 catalog 测试，断言至少包含 DuplicateTableName / UnknownFieldType / InvalidValidatorConfig 等高频 Meta code。
 
 验证：
 
-- [ ] `cargo test diagnostic`
+- [x] `cargo test diagnostic`
+
+后续计划复核：Step 2 只新增 catalog 常量与 metadata，尚未改变 Meta diagnostic 对外 code；Step 3～Step 6 仍按原计划推进。
 
 可独立提交建议：
 

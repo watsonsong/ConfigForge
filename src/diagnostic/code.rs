@@ -30,6 +30,27 @@ pub const CF_DATA_DUPLICATE_HEADER: &str = "CF_DATA_DUPLICATE_HEADER";
 
 pub const CF_VALIDATION_INVALID_CONFIG: &str = "CF_VALIDATION_INVALID_CONFIG";
 
+pub const CF_META_DUPLICATE_TABLE_NAME: &str = "CF_META_DUPLICATE_TABLE_NAME";
+pub const CF_META_DUPLICATE_ENUM_NAME: &str = "CF_META_DUPLICATE_ENUM_NAME";
+pub const CF_META_DUPLICATE_STRUCT_NAME: &str = "CF_META_DUPLICATE_STRUCT_NAME";
+pub const CF_META_DUPLICATE_ENUM_VALUE_NAME: &str = "CF_META_DUPLICATE_ENUM_VALUE_NAME";
+pub const CF_META_DUPLICATE_FIELD_NAME: &str = "CF_META_DUPLICATE_FIELD_NAME";
+pub const CF_META_DUPLICATE_INDEX_NAME: &str = "CF_META_DUPLICATE_INDEX_NAME";
+pub const CF_META_DUPLICATE_TYPE_NAME: &str = "CF_META_DUPLICATE_TYPE_NAME";
+pub const CF_META_RESERVED_TYPE_NAME: &str = "CF_META_RESERVED_TYPE_NAME";
+pub const CF_META_MISSING_FIELD_REFERENCE: &str = "CF_META_MISSING_FIELD_REFERENCE";
+pub const CF_META_INVALID_PRIMARY_INDEX: &str = "CF_META_INVALID_PRIMARY_INDEX";
+pub const CF_META_PRIMARY_INDEX_MISMATCH: &str = "CF_META_PRIMARY_INDEX_MISMATCH";
+pub const CF_META_EMPTY_INDEX_FIELDS: &str = "CF_META_EMPTY_INDEX_FIELDS";
+pub const CF_META_UNKNOWN_FIELD_TYPE: &str = "CF_META_UNKNOWN_FIELD_TYPE";
+pub const CF_META_INVALID_DEFAULT_VALUE: &str = "CF_META_INVALID_DEFAULT_VALUE";
+pub const CF_META_INVALID_SOURCE_DECLARATION: &str = "CF_META_INVALID_SOURCE_DECLARATION";
+pub const CF_META_INVALID_VALIDATOR_CONFIG: &str = "CF_META_INVALID_VALIDATOR_CONFIG";
+pub const CF_META_INVALID_FOREIGN_KEY_DECLARATION: &str = "CF_META_INVALID_FOREIGN_KEY_DECLARATION";
+pub const CF_META_DUPLICATE_ASSET_KIND_NAME: &str = "CF_META_DUPLICATE_ASSET_KIND_NAME";
+pub const CF_META_INVALID_ASSET_KIND_DECLARATION: &str = "CF_META_INVALID_ASSET_KIND_DECLARATION";
+pub const CF_META_UNSUPPORTED_FEATURE: &str = "CF_META_UNSUPPORTED_FEATURE";
+
 pub const CF_BUILD_TARGET_NOT_FOUND: &str = "CF_BUILD_TARGET_NOT_FOUND";
 pub const CF_BUILD_INVALID_CONFIG: &str = "CF_BUILD_INVALID_CONFIG";
 pub const CF_BUILD_INVALID_OPTION: &str = "CF_BUILD_INVALID_OPTION";
@@ -321,6 +342,166 @@ pub const DIAGNOSTIC_CODE_METADATA: &[DiagnosticCodeMetadata] = &[
         Some("检查 validator kind、声明位置、参数名和参数值类型。"),
         "0.1.0",
     ),
+    DiagnosticCodeMetadata::error(
+        CF_META_DUPLICATE_TABLE_NAME,
+        "meta",
+        "Meta 表名重复",
+        "Meta 中声明了重复的 table name，导致后续 link 和导出无法稳定解析表引用。",
+        Some("检查 [[tables]] 的 name，确保同一 MetaModel 内全局唯一。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_DUPLICATE_ENUM_NAME,
+        "meta",
+        "Meta 枚举名重复",
+        "Meta 中声明了重复的 enum name，导致字段类型解析存在歧义。",
+        Some("检查 [[enums]] 的 name，确保类型名全局唯一。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_DUPLICATE_STRUCT_NAME,
+        "meta",
+        "Meta 结构体名重复",
+        "Meta 中声明了重复的 struct name，导致字段类型解析存在歧义。",
+        Some("检查 [[structs]] 的 name，确保类型名全局唯一。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_DUPLICATE_ENUM_VALUE_NAME,
+        "meta",
+        "Meta 枚举值名重复",
+        "同一 enum 中存在重复的 value name，导致数据枚举值无法唯一解析。",
+        Some("检查 enum values，确保每个 value name 在所属 enum 内唯一。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_DUPLICATE_FIELD_NAME,
+        "meta",
+        "Meta 字段名重复",
+        "同一 table 或 struct 中存在重复字段名，导致数据列映射或类型展开存在歧义。",
+        Some("检查 fields.name，确保字段名在所属对象内唯一。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_DUPLICATE_INDEX_NAME,
+        "meta",
+        "Meta 索引名重复",
+        "同一 table 中存在重复 index name，导致生成查询接口和约束校验存在歧义。",
+        Some("检查 indexes.name，确保索引名在所属 table 内唯一。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_DUPLICATE_TYPE_NAME,
+        "meta",
+        "Meta 类型名重复",
+        "enum、struct、table 或内置类型之间存在重复或冲突的类型名。",
+        Some("检查所有自定义类型名称，并避免与内置 primitive 类型重名。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_RESERVED_TYPE_NAME,
+        "meta",
+        "Meta 使用保留类型名",
+        "Meta 自定义类型使用了 ConfigForge 保留或内置的类型名。",
+        Some("重命名自定义 enum、struct 或 table，避免使用 primitive / reserved 类型名。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_MISSING_FIELD_REFERENCE,
+        "meta",
+        "Meta 字段引用缺失",
+        "index、primary key、foreign key、validator 或 source layout 引用了不存在的字段。",
+        Some("检查相关 fields 列表或 field path，确保引用的字段已在 table/struct 中声明。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_INVALID_PRIMARY_INDEX,
+        "meta",
+        "Meta 主索引无效",
+        "CollectionTable 的 primary index 声明不满足主键约束或引用了非法字段。",
+        Some("检查 primary_index 与 indexes 声明，确保主索引字段存在且可作为唯一主键。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_PRIMARY_INDEX_MISMATCH,
+        "meta",
+        "Meta 主索引不一致",
+        "primary index 与表字段或索引声明不一致，无法建立稳定的主键语义。",
+        Some("检查 primary_index 名称、字段列表以及 indexes 中对应索引声明。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_EMPTY_INDEX_FIELDS,
+        "meta",
+        "Meta 索引字段为空",
+        "index 未声明任何字段，无法参与唯一性检查或生成查询接口。",
+        Some("为 index.fields 至少配置一个字段，或删除无效 index。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_UNKNOWN_FIELD_TYPE,
+        "meta",
+        "Meta 字段类型未知",
+        "字段声明的 field_type 既不是内置 primitive，也不是已声明的 enum 或 struct。",
+        Some("检查字段 type 拼写，或先声明对应 enum / struct。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_INVALID_DEFAULT_VALUE,
+        "meta",
+        "Meta 默认值无效",
+        "字段 default 无法按字段类型解析，或 default 与字段约束不兼容。",
+        Some("检查 default 字符串是否符合字段类型、枚举值或复合值格式。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_INVALID_SOURCE_DECLARATION,
+        "meta",
+        "Meta source 声明无效",
+        "table 或 field 的 source layout、provider、路径或列映射配置不满足读取约束。",
+        Some("检查 source 配置、ObjectTable layout、header row 和 field path。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_INVALID_VALIDATOR_CONFIG,
+        "meta",
+        "Meta validator 配置无效",
+        "validator 的 kind、作用域、字段引用或参数组合不满足内置校验器要求。",
+        Some("检查 validator kind、params、字段引用和 table/field 作用域。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_INVALID_FOREIGN_KEY_DECLARATION,
+        "meta",
+        "Meta foreign key 声明无效",
+        "foreign key 的 from/to 字段、目标表、目标索引或 target-aware 规则不满足结构约束。",
+        Some("检查 foreign_keys 配置、引用表和字段是否存在，并确认字段数量与类型匹配。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_DUPLICATE_ASSET_KIND_NAME,
+        "meta",
+        "Meta asset kind 名重复",
+        "Meta 中声明了重复的 asset kind name，导致 asset 字段规则无法唯一解析。",
+        Some("检查 asset_kinds.name，确保每个 asset kind 全局唯一。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_INVALID_ASSET_KIND_DECLARATION,
+        "meta",
+        "Meta asset kind 声明无效",
+        "asset kind 的继承、路径规则、扩展名策略或正则规则不满足结构约束。",
+        Some("检查 asset_kinds 的 extends、search_paths、extensions、regex_rules 等配置。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_UNSUPPORTED_FEATURE,
+        "meta",
+        "Meta 使用未支持特性",
+        "Meta 声明了当前版本尚未支持或当前组合下不可用的配置能力。",
+        Some("查看对应配置项是否已实现，或调整为当前版本支持的声明方式。"),
+        "0.1.0",
+    ),
     DiagnosticCodeMetadata::legacy_error(
         "field.range_violation",
         "validation",
@@ -520,6 +701,7 @@ mod tests {
         "build",
         "data",
         "generator",
+        "meta",
         "project",
         "validation",
     ];
@@ -555,6 +737,18 @@ mod tests {
         assert_eq!(
             metadata_for(CF_DATA_INVALID_TYPE).map(|metadata| metadata.title),
             Some("字段类型解析失败")
+        );
+        assert_eq!(
+            metadata_for(CF_META_DUPLICATE_TABLE_NAME).map(|metadata| metadata.domain),
+            Some("meta")
+        );
+        assert_eq!(
+            metadata_for(CF_META_UNKNOWN_FIELD_TYPE).map(|metadata| metadata.title),
+            Some("Meta 字段类型未知")
+        );
+        assert_eq!(
+            metadata_for(CF_META_INVALID_VALIDATOR_CONFIG).map(|metadata| metadata.domain),
+            Some("meta")
         );
         assert!(metadata_for("field.type").is_some_and(|metadata| metadata.deprecated));
         assert!(metadata_for("validator.sum_mismatch").is_some_and(|metadata| metadata.deprecated));
