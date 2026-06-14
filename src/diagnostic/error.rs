@@ -131,6 +131,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn diagnostic_module_does_not_depend_on_meta_module() {
+        let diagnostic_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("diagnostic");
+        let forbidden_markers = [
+            concat!("crate", "::", "meta"),
+            concat!("super", "::", "meta"),
+            concat!("Meta", "Diagnostic"),
+        ];
+
+        assert_no_forbidden_markers(&diagnostic_root, &forbidden_markers);
+    }
+
     fn count_legacy_validation_fallbacks(path: &Path) -> usize {
         if path.is_dir() {
             return fs::read_dir(path)
@@ -149,5 +163,30 @@ mod tests {
         content
             .match_indices(concat!("ConfigForgeError", "::", "Validation", "("))
             .count()
+    }
+
+    fn assert_no_forbidden_markers(path: &Path, forbidden_markers: &[&str]) {
+        if path.is_dir() {
+            for entry in fs::read_dir(path)
+                .unwrap_or_else(|error| panic!("failed to read `{}`: {error}", path.display()))
+            {
+                let entry = entry.expect("source directory entry should be readable");
+                assert_no_forbidden_markers(&entry.path(), forbidden_markers);
+            }
+            return;
+        }
+        if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+            return;
+        }
+
+        let content = fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("failed to read `{}`: {error}", path.display()));
+        for marker in forbidden_markers {
+            assert!(
+                !content.contains(marker),
+                "diagnostic module must not depend on meta marker `{marker}` in `{}`",
+                path.display()
+            );
+        }
     }
 }
