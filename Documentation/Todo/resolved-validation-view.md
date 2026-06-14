@@ -83,7 +83,27 @@ source trace 桥接，再逐类迁移规则。
   cell source 对齐。
 - 运行 `cargo test validation` 与 `cargo test --test cli_integration validation`。
 
-## [ ] Step 2：迁移基础 table/type/required/default-aware validation
+## [x] Step 2a：迁移 target table 标量字段 type/required/default-aware validation
+
+目标：先让 target validation 的普通字段校验消费 Step 1 缓存的 resolved value，避免 target
+table view 在基础字段校验阶段再次解释 raw cell。
+
+范围：
+
+- `ExportTableView` 的 `resolved_value` / `raw_cell` accessor 成为 target field validation 的入口。
+- `validate_field_values_view` 对非 struct 字段优先信任 resolved value：
+  - resolved value 存在时，type/default/expanded vector 等解释已经由 DataResolver 完成；
+  - raw value 仍用于保持既有 missing-required diagnostic 的 current value；
+  - resolver 不可用时保留旧 raw path fallback。
+- `validate_normalized_table_view_with_report` 不再对已有 resolved table 的 view 重复运行 resolver。
+
+验收：
+
+- `cargo test validation::` 通过。
+- `cargo test --test cli_integration validation` 通过。
+- 后续 Step 2b 继续迁移 full table path、struct/list occurrence helpers 与 raw helper 收敛。
+
+## [ ] Step 2b：迁移基础 full table / struct-list validation
 
 目标：把已经由 DataResolver 统一解释的类型、默认值、struct/list/vector/color 基础校验迁到
 resolved value，减少 validation 重复解析 raw cell。

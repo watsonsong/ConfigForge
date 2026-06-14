@@ -737,8 +737,9 @@ fn validate_field_values_view(
     field: &LinkedFieldMeta<'_>,
     target_tags: Option<&TargetTags>,
 ) -> Result<()> {
-    for visible_row in &table_view.visible_rows {
-        let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
+    for visible_row_index in 0..table_view.visible_rows.len() {
+        let visible_row = &table_view.visible_rows[visible_row_index];
+        let Some(row) = table_view.visible_raw_row(visible_row_index) else {
             continue;
         };
         let row_number = visible_row
@@ -748,11 +749,11 @@ fn validate_field_values_view(
             validate_struct_field_value_for_row(meta, row, row_number, field, target_tags)?;
             continue;
         }
-        let value = row
-            .get(&field.meta.name)
-            .map(String::as_str)
+        let value = table_view
+            .raw_cell(visible_row_index, &field.meta.name)
             .unwrap_or_default();
-        let has_value = field_has_effective_value(row, field);
+        let resolved_value = table_view.resolved_value(visible_row_index, &field.meta.name);
+        let has_value = resolved_value.is_some() || field_has_effective_value(row, field);
         if field.meta.required && value.trim().is_empty() {
             if has_value {
                 continue;
@@ -776,6 +777,10 @@ fn validate_field_values_view(
             .primitive_type()
             .is_some_and(|primitive| primitive.is_builtin_value_type())
         {
+            continue;
+        }
+
+        if resolved_value.is_some() {
             continue;
         }
 
