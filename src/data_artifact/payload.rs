@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
-    data::{DataResolver, DataTable, DataValue, ResolvedValue},
+    data::{ArrayElementValue, DataResolver, DataTable, DataValue, ResolvedValue, VectorValue},
     diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
-    meta::{LinkedTableMeta, TableKind, TargetTags},
+    meta::{LinkedField, LinkedFieldMeta, LinkedTableMeta, TableKind, TargetTags},
 };
 
 use super::{ExportedTable, ExportedTablePayload, ExportedValue, model::ExportedTableMeta};
@@ -73,7 +73,7 @@ fn build_exported_collection_payload(
             let mut exported_row = BTreeMap::new();
             for field in &exported_fields {
                 if let Some(value) = resolved_row.get(&field.meta.name) {
-                    let value = exported_value_from_resolved(value)?;
+                    let value = exported_value_from_resolved(value, &field.linked_field, field)?;
                     exported_row.insert(field.meta.name.clone(), value);
                 }
             }
@@ -89,7 +89,7 @@ fn build_exported_collection_payload(
                     if let Some(value) = resolved_row.get(fragment.meta.name.as_str()) {
                         exported_row.insert(
                             fragment.meta.name.clone(),
-                            exported_value_from_resolved(value)?,
+                            exported_value_from_fragment(value, fragment)?,
                         );
                     }
                 }
@@ -104,6 +104,37 @@ fn build_exported_collection_payload(
         },
         rows,
     })
+}
+
+fn exported_value_from_fragment(
+    value: &ResolvedValue,
+    fragment: &crate::meta::LinkedFragmentMeta<'_>,
+) -> Result<ExportedValue> {
+    let DataValue::Struct(children) = &value.value else {
+        return Err(data_payload_error(
+            "<unknown>",
+            Some(fragment.meta.name.as_str()),
+            format!(
+                "resolved fragment `{}` is not a struct value",
+                fragment.meta.name
+            ),
+            "non-struct resolved fragment value",
+            "struct resolved fragment value",
+            "Check resolver and fragment payload shape alignment.",
+        ));
+    };
+    fragment
+        .fields
+        .iter()
+        .filter_map(|field| children.get(&field.meta.name).map(|child| (field, child)))
+        .map(|(field, child)| {
+            Ok((
+                field.meta.name.clone(),
+                exported_value_from_resolved(child, &field.linked_field, field)?,
+            ))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()
+        .map(ExportedValue::Struct)
 }
 
 fn build_exported_object_payload(
@@ -157,7 +188,7 @@ fn build_exported_object_payload(
         .filter(|field| field.meta.is_exported_for(target_tags))
     {
         if let Some(value) = resolved_row.get(&field.meta.name) {
-            let value = exported_value_from_resolved(value)?;
+            let value = exported_value_from_resolved(value, &field.linked_field, field)?;
             exported_object.insert(field.meta.name.clone(), value);
         }
     }
@@ -165,60 +196,145 @@ fn build_exported_object_payload(
     Ok(exported_object)
 }
 
-fn exported_value_from_resolved(value: &ResolvedValue) -> Result<ExportedValue> {
+fn exported_value_from_resolved(
+    value: &ResolvedValue,
+    field_type: &LinkedField<'_>,
+    field: &LinkedFieldMeta<'_>,
+) -> Result<ExportedValue> {
     match &value.value {
         DataValue::Scalar(_) => Ok(ExportedValue::Scalar(
             value.scalar_export_string().unwrap_or_default(),
         )),
-        DataValue::Color(color) => Ok(ExportedValue::NumberArray(vec![
-            color.r, color.g, color.b, color.a,
-        ])),
-        DataValue::Vector(vector) => Ok(ExportedValue::NumberArray(vector_export_numbers(vector))),
-        DataValue::Struct(children) => children
-            .iter()
-            .map(|(field_name, child)| {
-                Ok((field_name.clone(), exported_value_from_resolved(child)?))
-            })
-            .collect::<Result<BTreeMap<_, _>>>()
-            .map(ExportedValue::Struct),
+        DataValue::Color(color) => Ok(ExportedValue::Struct(BTreeMap::from([
+            ("r".to_owned(), ExportedValue::Number(color.r)),
+            ("g".to_owned(), ExportedValue::Number(color.g)),
+            ("b".to_owned(), ExportedValue::Number(color.b)),
+            ("a".to_owned(), ExportedValue::Number(color.a)),
+        ]))),
+        DataValue::Vector(vector) => Ok(ExportedValue::Struct(vector_export_object(vector, field))),
+        DataValue::Struct(children) => {
+            let LinkedField::Struct(struct_type) = field_type else {
+                return Err(data_payload_error(
+                    "<unknown>",
+                    Some(field.meta.name.as_str()),
+                    format!(
+                        "resolved field `{}` is a struct but linked field type is not struct",
+                        field.meta.name
+                    ),
+                    "struct resolved value",
+                    "struct linked field type",
+                    "Check resolver and payload field shape alignment.",
+                ));
+            };
+            struct_type
+                .fields
+                .iter()
+                .filter_map(|child_field| {
+                    children
+                        .get(&child_field.meta.name)
+                        .map(|child| (child_field, child))
+                })
+                .map(|(child_field, child)| {
+                    Ok((
+                        child_field.meta.name.clone(),
+                        exported_value_from_resolved(
+                            child,
+                            &child_field.linked_field,
+                            child_field,
+                        )?,
+                    ))
+                })
+                .collect::<Result<BTreeMap<_, _>>>()
+                .map(ExportedValue::Struct)
+        }
         DataValue::Array(elements) => elements
             .iter()
-            .map(exported_value_from_array_element)
+            .map(|element| exported_value_from_array_element(element, field_type))
             .collect::<Result<Vec<_>>>()
             .map(ExportedValue::Array),
     }
 }
 
 fn exported_value_from_array_element(
-    value: &crate::data::ArrayElementValue,
+    value: &ArrayElementValue,
+    field_type: &LinkedField<'_>,
 ) -> Result<ExportedValue> {
     match &value.value {
         DataValue::Scalar(_) => Ok(ExportedValue::Scalar(
             value.scalar_export_string().unwrap_or_default(),
         )),
-        DataValue::Color(color) => Ok(ExportedValue::NumberArray(vec![
-            color.r, color.g, color.b, color.a,
-        ])),
-        DataValue::Vector(vector) => Ok(ExportedValue::NumberArray(vector_export_numbers(vector))),
-        DataValue::Struct(children) => children
-            .iter()
-            .map(|(field_name, child)| {
-                Ok((field_name.clone(), exported_value_from_resolved(child)?))
-            })
-            .collect::<Result<BTreeMap<_, _>>>()
-            .map(ExportedValue::Struct),
+        DataValue::Color(color) => Ok(ExportedValue::Struct(BTreeMap::from([
+            ("r".to_owned(), ExportedValue::Number(color.r)),
+            ("g".to_owned(), ExportedValue::Number(color.g)),
+            ("b".to_owned(), ExportedValue::Number(color.b)),
+            ("a".to_owned(), ExportedValue::Number(color.a)),
+        ]))),
+        DataValue::Vector(_) => Err(data_payload_error(
+            "<unknown>",
+            None::<&str>,
+            "runtime payload cannot export vector list element without field component metadata"
+                .to_owned(),
+            "vector list element",
+            "scalar list element",
+            "Use top-level or struct vector fields until builtin list element metadata is modeled.",
+        )),
+        DataValue::Struct(children) => {
+            let LinkedField::Struct(struct_type) = field_type else {
+                return Err(data_payload_error(
+                    "<unknown>",
+                    None::<&str>,
+                    "resolved list element is a struct but linked element type is not struct"
+                        .to_owned(),
+                    "struct resolved value",
+                    "struct linked element type",
+                    "Check resolver and payload list element shape alignment.",
+                ));
+            };
+            struct_type
+                .fields
+                .iter()
+                .filter_map(|child_field| {
+                    children
+                        .get(&child_field.meta.name)
+                        .map(|child| (child_field, child))
+                })
+                .map(|(child_field, child)| {
+                    Ok((
+                        child_field.meta.name.clone(),
+                        exported_value_from_resolved(
+                            child,
+                            &child_field.linked_field,
+                            child_field,
+                        )?,
+                    ))
+                })
+                .collect::<Result<BTreeMap<_, _>>>()
+                .map(ExportedValue::Struct)
+        }
         DataValue::Array(elements) => elements
             .iter()
-            .map(exported_value_from_array_element)
+            .map(|element| exported_value_from_array_element(element, field_type))
             .collect::<Result<Vec<_>>>()
             .map(ExportedValue::Array),
     }
 }
 
-fn vector_export_numbers(vector: &crate::data::VectorValue) -> Vec<f64> {
+fn vector_export_object(
+    vector: &VectorValue,
+    field: &LinkedFieldMeta<'_>,
+) -> BTreeMap<String, ExportedValue> {
+    let components = field.meta.vector_component_names();
     match vector {
-        crate::data::VectorValue::Float(values) => values.clone(),
-        crate::data::VectorValue::Int(values) => values.iter().map(|value| *value as f64).collect(),
+        VectorValue::Float(values) => components
+            .into_iter()
+            .zip(values.iter())
+            .map(|(component, value)| (component, ExportedValue::Number(*value)))
+            .collect(),
+        VectorValue::Int(values) => components
+            .into_iter()
+            .zip(values.iter())
+            .map(|(component, value)| (component, ExportedValue::Number(*value as f64)))
+            .collect(),
     }
 }
 

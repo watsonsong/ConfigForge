@@ -704,17 +704,10 @@ fn render_lua_value_for_field(value: &ExportedValue, field: &LinkedField<'_>) ->
             render_scalar(value, *primitive)
         }
         (ExportedValue::Scalar(value), LinkedField::Enum(_)) => Ok(lua_string(value)),
-        (ExportedValue::NumberArray(values), LinkedField::Primitive(primitive))
+        (ExportedValue::Struct(values), LinkedField::Primitive(primitive))
             if primitive.is_builtin_value_type() =>
         {
-            Ok(format!(
-                "{{ {} }}",
-                values
-                    .iter()
-                    .map(|value| value.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))
+            render_lua_object(values)
         }
         (ExportedValue::Struct(_), LinkedField::Struct(struct_type)) => {
             render_lua_struct(value, &struct_type.fields)
@@ -754,6 +747,22 @@ fn render_lua_struct(value: &ExportedValue, fields: &[LinkedFieldMeta<'_>]) -> R
         }
     }
     Ok(format!("{{ {} }}", entries.join(", ")))
+}
+
+fn render_lua_object(values: &BTreeMap<String, ExportedValue>) -> Result<String> {
+    values
+        .iter()
+        .map(|(name, value)| match value {
+            ExportedValue::Number(number) => Ok(format!("{name} = {number}")),
+            _ => Err(lua_contract_error(
+                "lua_table expected builtin value object to contain numbers".to_owned(),
+                exported_value_kind(value),
+                "number exported value",
+                "Check builtin payload construction before Lua rendering.",
+            )),
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(|entries| format!("{{ {} }}", entries.join(", ")))
 }
 
 pub(super) fn render_scalar(value: &str, primitive: PrimitiveFieldType) -> Result<String> {
@@ -836,7 +845,7 @@ fn lua_contract_error(
 fn exported_value_kind(value: &ExportedValue) -> &'static str {
     match value {
         ExportedValue::Scalar(_) => "scalar exported value",
-        ExportedValue::NumberArray(_) => "number array exported value",
+        ExportedValue::Number(_) => "number exported value",
         ExportedValue::Array(_) => "array exported value",
         ExportedValue::Struct(_) => "struct exported value",
     }
