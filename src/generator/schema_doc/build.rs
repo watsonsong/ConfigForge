@@ -23,7 +23,11 @@ pub(super) fn table_doc(
     options: &SchemaDocOptions,
 ) -> Option<SchemaTableDoc> {
     let table_visible = table.meta.is_exported_for(&options.target_tags);
-    if !table_visible && !options.include_hidden {
+    if !is_documented_exportable(
+        table.meta.export,
+        table.meta.export_when.matches(&options.target_tags),
+        options,
+    ) {
         return None;
     }
     let fields = field_docs(table, options);
@@ -91,6 +95,9 @@ fn fragment_graph_doc(
     table: &LinkedTableMeta<'_>,
     options: &SchemaDocOptions,
 ) -> Option<SchemaFragmentGraphDoc> {
+    if !options.include_struct_details {
+        return None;
+    }
     let fragments = table
         .fragments
         .iter()
@@ -118,7 +125,11 @@ fn fragment_doc(
     options: &SchemaDocOptions,
 ) -> Option<SchemaFragmentDoc> {
     let fragment_visible = fragment.meta.is_exported_for(&options.target_tags);
-    if !fragment_visible && !options.include_hidden {
+    if !is_documented_exportable(
+        fragment.meta.export,
+        fragment.meta.export_when.matches(&options.target_tags),
+        options,
+    ) {
         return None;
     }
     let mut fields = Vec::new();
@@ -168,8 +179,23 @@ fn collect_fragment_field_doc(
 }
 
 fn is_documented_field(field: &LinkedFieldMeta<'_>, options: &SchemaDocOptions) -> bool {
-    let field_visible = field.meta.is_exported_for(&options.target_tags);
-    (field_visible || options.include_hidden) && (field.meta.export || options.include_internal)
+    is_documented_exportable(
+        field.meta.export,
+        field.meta.export_when.matches(&options.target_tags),
+        options,
+    )
+}
+
+fn is_documented_exportable(
+    export: bool,
+    export_when_matches: bool,
+    options: &SchemaDocOptions,
+) -> bool {
+    if !export {
+        options.include_internal
+    } else {
+        export_when_matches || options.include_hidden
+    }
 }
 
 fn fragment_payload_display(fragment: &LinkedFragmentMeta<'_>) -> String {
@@ -232,7 +258,11 @@ fn field_docs(table: &LinkedTableMeta<'_>, options: &SchemaDocOptions) -> Vec<Sc
     }
     if options.include_struct_details {
         for fragment in &table.fragments {
-            if !fragment.meta.is_exported_for(&options.target_tags) && !options.include_hidden {
+            if !is_documented_exportable(
+                fragment.meta.export,
+                fragment.meta.export_when.matches(&options.target_tags),
+                options,
+            ) {
                 continue;
             }
             for field in &fragment.fields {
@@ -250,10 +280,7 @@ fn collect_field_doc(
     options: &SchemaDocOptions,
 ) {
     let field_visible = field.meta.is_exported_for(&options.target_tags);
-    if !field_visible && !options.include_hidden {
-        return;
-    }
-    if !field.meta.export && !options.include_internal {
+    if !is_documented_field(field, options) {
         return;
     }
     let path = prefix
@@ -313,12 +340,16 @@ fn index_docs(
         .indexes
         .iter()
         .filter_map(|index| {
-            let index_visible = index.meta.is_exported_for(&options.target_tags)
-                && index
-                    .fields
-                    .iter()
-                    .all(|field| visible_fields.contains(field.meta.name.as_str()));
-            if !index_visible && !options.include_hidden {
+            let fields_documented = index
+                .fields
+                .iter()
+                .all(|field| visible_fields.contains(field.meta.name.as_str()));
+            let index_export_matches = index.meta.export_when.matches(&options.target_tags);
+            let index_visible =
+                index.meta.is_exported_for(&options.target_tags) && fields_documented;
+            if !fields_documented
+                || !is_documented_exportable(index.meta.export, index_export_matches, options)
+            {
                 return None;
             }
             Some(SchemaIndexDoc {
@@ -357,18 +388,35 @@ fn relation_docs(
         .foreign_keys
         .iter()
         .filter_map(|foreign_key| {
+            let target_table_documented = linked_meta
+                .table(foreign_key.target_table_name)
+                .is_some_and(|target_table| {
+                    is_documented_exportable(
+                        target_table.meta.export,
+                        target_table.meta.export_when.matches(&options.target_tags),
+                        options,
+                    )
+                });
             let target_table_visible = linked_meta
                 .table(foreign_key.target_table_name)
                 .is_some_and(|target_table| {
                     target_table.meta.is_exported_for(&options.target_tags)
                 });
+            let source_fields_documented = foreign_key
+                .fields
+                .iter()
+                .all(|field| visible_fields.contains(field.meta.name.as_str()));
             let relation_visible = foreign_key.is_exported_for(&options.target_tags)
                 && target_table_visible
-                && foreign_key
-                    .fields
-                    .iter()
-                    .all(|field| visible_fields.contains(field.meta.name.as_str()));
-            if !relation_visible && !options.include_hidden {
+                && source_fields_documented;
+            if !target_table_documented
+                || !source_fields_documented
+                || !is_documented_exportable(
+                    foreign_key.export,
+                    foreign_key.export_when.matches(&options.target_tags),
+                    options,
+                )
+            {
                 return None;
             }
             Some(SchemaRelationDoc {

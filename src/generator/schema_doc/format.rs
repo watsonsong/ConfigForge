@@ -69,6 +69,11 @@ pub struct SchemaDocExportConfig {
     pub output: PathBuf,
     pub index_file: String,
     pub title: Option<String>,
+    pub include_hidden: bool,
+    pub include_internal: bool,
+    pub include_struct_details: bool,
+    pub include_asset_rules: bool,
+    pub include_i18n: bool,
 }
 
 pub fn write_schema_doc_to_sink(
@@ -217,6 +222,21 @@ pub fn schema_doc_export_config_from_options(
         .unwrap_or_else(|| format!("index.{}", format.extension()));
     validate_index_file_name(&index_file, format)?;
     let title = parser.take_string("title", "schema_doc")?;
+    let include_hidden = parser
+        .take_bool("include_hidden", "schema_doc")?
+        .unwrap_or(false);
+    let include_internal = parser
+        .take_bool("include_internal", "schema_doc")?
+        .unwrap_or(false);
+    let include_struct_details = parser
+        .take_bool("include_struct_details", "schema_doc")?
+        .unwrap_or(true);
+    let include_asset_rules = parser
+        .take_bool("include_asset_rules", "schema_doc")?
+        .unwrap_or(true);
+    let include_i18n = parser
+        .take_bool("include_i18n", "schema_doc")?
+        .unwrap_or(true);
     parser.reject_unknown(
         |key| format!("schema_doc export task has unknown option `{key}`"),
         "supported schema_doc option",
@@ -227,6 +247,11 @@ pub fn schema_doc_export_config_from_options(
         output,
         index_file,
         title,
+        include_hidden,
+        include_internal,
+        include_struct_details,
+        include_asset_rules,
+        include_i18n,
     })
 }
 

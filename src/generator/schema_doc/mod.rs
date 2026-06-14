@@ -45,14 +45,14 @@ impl ArtifactGenerator for SchemaDocGenerator {
     ) -> Result<()> {
         let config =
             schema_doc_export_config_from_options(input.output.clone(), input.options.clone())?;
-        let doc = schema_doc_from_input(input, config.title.clone());
+        let doc = schema_doc_from_input(input, &config);
         write_schema_doc_to_sink(&doc, &config, sink)
     }
 
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
         let config =
             schema_doc_export_config_from_options(input.output.clone(), input.options.clone())?;
-        let doc = schema_doc_from_input(input, config.title.clone());
+        let doc = schema_doc_from_input(input, &config);
         let paths = schema_doc_output_paths(&doc, &config)?;
         Ok(std::iter::once(paths.index_path)
             .chain(paths.table_paths)
@@ -60,22 +60,25 @@ impl ArtifactGenerator for SchemaDocGenerator {
     }
 }
 
-fn schema_doc_from_input(input: &GeneratorCommonInput<'_>, title: Option<String>) -> SchemaDoc {
+fn schema_doc_from_input(
+    input: &GeneratorCommonInput<'_>,
+    config: &SchemaDocExportConfig,
+) -> SchemaDoc {
     SchemaDoc::from_meta(
         input.meta,
         &input.project,
         SchemaDocOptions {
-            title,
+            title: config.title.clone(),
             project_name: input.project.name.clone(),
             project_path: Some(input.project_root.clone()),
             target: Some(input.target_name.clone()),
             target_tags: input.target_tags.clone(),
             generated_at: input.generated_at.clone(),
-            include_hidden: false,
-            include_internal: false,
-            include_struct_details: true,
-            include_asset_rules: true,
-            include_i18n: true,
+            include_hidden: config.include_hidden,
+            include_internal: config.include_internal,
+            include_struct_details: config.include_struct_details,
+            include_asset_rules: config.include_asset_rules,
+            include_i18n: config.include_i18n,
         },
     )
 }

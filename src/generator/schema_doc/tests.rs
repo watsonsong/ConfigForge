@@ -435,6 +435,11 @@ fn filters_by_target_and_keeps_docs_only_artifact_paths_deterministic() {
         output: PathBuf::from("out/docs"),
         index_file: "index.md".to_owned(),
         title: None,
+        include_hidden: false,
+        include_internal: false,
+        include_struct_details: true,
+        include_asset_rules: true,
+        include_i18n: true,
     };
     let paths = schema_doc_output_paths(&doc, &config).expect("paths should plan");
     assert_eq!(paths.index_path, PathBuf::from("out/docs/index.md"));
@@ -451,6 +456,47 @@ fn parses_html_schema_doc_format_and_uses_html_defaults() {
     .expect("html config should parse");
     assert_eq!(html_config.format, SchemaDocFormat::Html);
     assert_eq!(html_config.index_file, "index.html");
+    assert!(!html_config.include_hidden);
+    assert!(!html_config.include_internal);
+    assert!(html_config.include_struct_details);
+    assert!(html_config.include_asset_rules);
+    assert!(html_config.include_i18n);
+
+    let configured = schema_doc_export_config_from_options(
+        PathBuf::from("out/docs"),
+        BTreeMap::from([
+            ("include_hidden".to_owned(), toml::Value::Boolean(true)),
+            ("include_internal".to_owned(), toml::Value::Boolean(true)),
+            (
+                "include_struct_details".to_owned(),
+                toml::Value::Boolean(false),
+            ),
+            (
+                "include_asset_rules".to_owned(),
+                toml::Value::Boolean(false),
+            ),
+            ("include_i18n".to_owned(), toml::Value::Boolean(false)),
+        ]),
+    )
+    .expect("schema_doc include options should parse");
+    assert!(configured.include_hidden);
+    assert!(configured.include_internal);
+    assert!(!configured.include_struct_details);
+    assert!(!configured.include_asset_rules);
+    assert!(!configured.include_i18n);
+
+    let error = schema_doc_export_config_from_options(
+        PathBuf::from("out/docs"),
+        BTreeMap::from([(
+            "include_hidden".to_owned(),
+            toml::Value::String("yes".to_owned()),
+        )]),
+    )
+    .unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert_eq!(diagnostic.code, CF_GENERATOR_INVALID_OPTION);
+    assert_eq!(diagnostic.current_value.as_deref(), Some("include_hidden"));
+    assert_eq!(diagnostic.expected.as_deref(), Some("boolean value"));
 
     let markdown_config =
         schema_doc_export_config_from_options(PathBuf::from("out/docs"), BTreeMap::new())
@@ -498,6 +544,11 @@ fn renders_markdown_artifact_list_from_shared_output_plan() {
         output: PathBuf::from("out/docs"),
         index_file: "index.md".to_owned(),
         title: None,
+        include_hidden: false,
+        include_internal: false,
+        include_struct_details: true,
+        include_asset_rules: true,
+        include_i18n: true,
     };
 
     let artifacts = render_schema_doc_artifacts(&doc, &config).expect("artifacts should render");
@@ -610,6 +661,11 @@ fn renders_static_html_shell_and_escapes_user_text() {
         output: PathBuf::from("out/docs"),
         index_file: "index.html".to_owned(),
         title: None,
+        include_hidden: false,
+        include_internal: false,
+        include_struct_details: true,
+        include_asset_rules: true,
+        include_i18n: true,
     };
     let artifacts = render_schema_doc_artifacts(&doc, &config).expect("html artifacts render");
     assert_eq!(artifacts[0].path, PathBuf::from("out/docs/index.html"));
@@ -884,6 +940,11 @@ fn rejects_invalid_schema_doc_options_and_duplicate_paths() {
         output: PathBuf::from("out"),
         index_file: "index.md".to_owned(),
         title: None,
+        include_hidden: false,
+        include_internal: false,
+        include_struct_details: true,
+        include_asset_rules: true,
+        include_i18n: true,
     };
     let error = schema_doc_output_paths(&doc, &config).unwrap_err();
     let diagnostic = expect_single_diagnostic(error);
@@ -919,6 +980,11 @@ fn writes_markdown_artifacts_to_sink() {
         output: temp_dir.path().join("docs"),
         index_file: "index.md".to_owned(),
         title: None,
+        include_hidden: false,
+        include_internal: false,
+        include_struct_details: true,
+        include_asset_rules: true,
+        include_i18n: true,
     };
     let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
     write_schema_doc_to_sink(&doc, &config, &sink).expect("write docs");

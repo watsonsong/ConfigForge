@@ -68,7 +68,7 @@ out/docs/
 - P1-3 不要求在线发布、权限管理、Lark / Confluence API 写入或数据库存储；Markdown 产物可由外部 CI 上传。
 - P1-3 不强制引入新的 Meta schema。已有 `desc`、`required`、`default`、`export_when`、`asset_kind`、FK/index 配置应先被完整利用。
 - P1-3 不保证生成语言级 API 文档；多语言 codegen 注释仍由 codegen backend 控制。
-- JSON Schema、自定义 schema JSON、Mermaid ER 图和 FK 图当前不支持；本生成器当前只维护 Markdown 与 HTML 两类文档 renderer。
+- 本生成器当前只维护 Markdown 与 HTML 两类文档 renderer；其它输出格式不属于当前 schema / table docs 契约。
 
 ## 11.3 Export Task 设计
 
@@ -94,7 +94,7 @@ format = "markdown"
 | --- | --- | --- | --- |
 | `type` | string | 必填 | 固定为 `schema_doc`。 |
 | `output` | path | 必填 | 输出目录。Markdown 下包含 `index.md` 和每表一个 `*.md`；HTML 下包含 `index.html` 和每表一个 `*.html`。 |
-| `format` | string | `markdown` | 当前实现支持 `markdown` / `html`。未知格式显式报错；JSON Schema / Mermaid 不支持。 |
+| `format` | string | `markdown` | 当前实现支持 `markdown` / `html`。未知格式显式报错。 |
 | `index_file` | string | format-aware：Markdown 为 `index.md`，HTML 为 `index.html` | 文档入口文件名，不允许包含路径分隔符；HTML 模式要求 `.html` 后缀。 |
 | `file_name_style` | string | Reserved / 未开放 | 单表文件命名策略的未来选项。当前 Project Config 不接受该字段；设置后会作为 unknown option 报错。当前固定为 canonical table name + format 扩展名（`.md` 或 `.html`）。 |
 | `title` | string | project name 或 `ConfigForge Schema` | index 顶部标题。 |
@@ -105,7 +105,7 @@ format = "markdown"
 | `include_i18n` | bool | `true` | 是否标识会进入 POT 的 `text` 字段。 |
 | `include_diagrams` / `diagram_detail` / `diagram_format` | - | 未开放 | 当前关系图、source map、fragment composition、Index/FK 与 Asset/Text flow 图例默认随 Markdown / HTML 输出启用，不提供额外配置开关。 |
 
-当前 MVP 实现 `format = "markdown"` / `format = "html"`、`index_file`、`title`；`include_hidden` / `include_internal` / `include_struct_details` / `include_asset_rules` / `include_i18n` 作为模型层选项存在，但尚未开放为 Project Config 配置项。HTML/CSS 图例与 Markdown 结构摘要默认启用，暂不开放 `include_diagrams`、`diagram_detail` 或 `diagram_format`，以避免配置面过早膨胀。用户在 export task 中设置未支持字段时会显式报错，不能静默忽略。
+当前实现支持 `format = "markdown"` / `format = "html"`、`index_file`、`title`、`include_hidden`、`include_internal`、`include_struct_details`、`include_asset_rules`、`include_i18n`。HTML/CSS 图例与 Markdown 结构摘要默认启用，暂不开放 `include_diagrams`、`diagram_detail` 或 `diagram_format`，以避免配置面过早膨胀。用户在 export task 中设置未支持字段时会显式报错，不能静默忽略。
 
 ### 11.3.2 与 target tags 的关系
 
@@ -290,8 +290,7 @@ Schema Doc 后续应提供一组“可读图例”（legend / diagram），帮�
 图形渲染建议分层推进：
 
 - **Phase 1：HTML/CSS 图例**。不引入 graph layout，只用卡片、箭头、两列/三列布局表达一跳关系和 source composition；实现成本低且 deterministic。
-- **Phase 2：内联 SVG 图**。由 SchemaDoc model 生成节点/边并使用简单稳定布局（按 table order 分层或网格排列），输出内联 SVG；仍保持自包含、可复制、无外部依赖。
-- **Phase 3：可选 Mermaid / DOT 导出**。如果团队需要复杂 ER 图，可在后续设计新的 `schema_doc` 子格式或 `diagram_format` 选项；必须明确 Mermaid/DOT 是额外 artifact 或 fenced block，不影响默认 HTML 离线可读性。
+- **Phase 2：内联 SVG 图（可选增强）**。如果 HTML/CSS card 在大型项目中可读性不足，可由 SchemaDoc model 生成节点/边并使用简单稳定布局（按 table order 分层或网格排列）输出内联 SVG；仍保持自包含、可复制、无外部依赖。该能力不作为进入 Stable 的前置条件。
 
 图例的数据模型不应由 renderer 直接扫描 `SchemaTableDoc` 字符串拼接，建议在 builder 层补充结构化视图：
 
@@ -309,7 +308,7 @@ SchemaDoc
     fragments[]: name, fields[], visibility, source_paths[]
 ```
 
-这些结构化图模型可同时服务 HTML 图例、Markdown 文本图、未来 Mermaid/DOT 导出与测试断言，避免每个 renderer 重新解释 Meta。
+这些结构化图模型可同时服务 HTML 图例、Markdown 文本图与测试断言，避免每个 renderer 重新解释 Meta。
 
 ### 11.4.3 Fields 区域
 
@@ -401,7 +400,7 @@ Markdown 是 P1-3 默认格式。
 
 ## 11.6 数据模型建议
 
-实现层建议先构建 normalized documentation model，再由 renderer 输出，避免 Markdown / HTML / JSON Schema 各自解释 Meta：
+实现层建议先构建 normalized documentation model，再由 Markdown / HTML renderer 输出，避免不同 renderer 各自解释 Meta：
 
 ```text
 SchemaDoc
@@ -614,8 +613,6 @@ title = "Client Config Schema"
 ### Phase D：更多平台集成
 
 - HTML 单页 bundle、搜索、过滤、排序等增强交互。
-- JSON Schema 或自定义 schema JSON 如需支持，需另行设计；当前不支持。
-- Mermaid ER 图和 FK 关系图如需支持，需另行设计；当前不支持。
 - 生成适配 Lark / Confluence 的 Markdown 方言。
 - 支持 owner/domain 或表负责人映射后，在 index 中按负责人分组。
 
@@ -661,9 +658,16 @@ title = "Client Config Schema"
 
 当前边界：
 
-- 当前只支持 `format = "markdown"` 与 `format = "html"`；`json_schema`、`mermaid` 不支持并会报错。
-- export task 当前只开放 `format`、`index_file`、`title`；`include_hidden`、`include_internal`、`include_struct_details`、`include_asset_rules`、`include_i18n` 尚未开放到 Project Config。
+- 当前只支持 `format = "markdown"` 与 `format = "html"`；未知格式会显式报错。
+- export task 当前开放 `format`、`index_file`、`title`、`include_hidden`、`include_internal`、`include_struct_details`、`include_asset_rules`、`include_i18n`；其他未支持字段会作为 unknown option 显式报错。
 - Asset rules 摘要只展示可静态解析的 `extensions`、prefix/suffix、require existing、allow/deny path 等基础规则，不读取实际资源引用。
 - Text / POT 摘要只标记当前 target 可见 `text` 字段理论上会被 POT exporter 处理，不读取具体文本值。
 - Struct / fragment 子字段已有基础展开；复杂平台化输出、owner/domain 分组、HTML 单页 bundle / 交互搜索、ER 图和 Lark / Confluence 发布仍是后续扩展。
-- 当后续新增 JSON Schema、Mermaid ER 等“只读 Meta 并输出 artifact”的任务时，优先按统一 artifact generator + requirements + doc facet 扩展，而不是在 build 中增加特殊分支，也不要继续把非代码文档任务塞进 code-specific `CodeGenerator` trait。
+
+进入 Stable 前建议完成：
+
+- 明确并测试 Project Config 配置面：要么开放 `include_hidden`、`include_internal`、`include_struct_details`、`include_asset_rules`、`include_i18n`，要么将这些仅保留为内部默认策略并在文档中固定为当前契约；无论哪种方式，unknown option 行为都应有 integration 覆盖。
+- 补齐 target-hidden / internal 内容的文档口径测试：包括 hidden table、hidden field、hidden index、hidden FK、`export = false` support field 在默认策略下被过滤，在未来显式开启后标记为 hidden/internal。
+- 强化大型 schema 的可读性与确定性：relationship/source/fragment 图在多表、多 FK、自引用、复合 index、ObjectTable source 场景下保持声明顺序、同目录相对链接和稳定 HTML anchors。
+- 将 schema_doc 的 artifact 输出纳入标准 fixture 的稳定回归检查：覆盖 Markdown 与 HTML 中 `items -> rarity_levels`、`game_rules -> items/classes`、`materials/weapons/armors -> items`、`stack/attributes/skill` fragment composition、Asset/Text flow legend。
+- 明确 HTML/CSS card diagram 为 Stable 默认图例形态；内联 SVG、搜索、过滤、排序、Lark / Confluence 方言、owner/domain 分组作为后续增强，不阻塞 Stable。

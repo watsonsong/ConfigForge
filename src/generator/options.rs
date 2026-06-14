@@ -41,6 +41,15 @@ impl GeneratorOptionParser {
         )
     }
 
+    pub(crate) fn take_bool(&mut self, key: &str, message_prefix: &str) -> Result<Option<bool>> {
+        self.take_value_with(
+            key,
+            |key, source| format!("invalid {message_prefix} option `{key}`: {source}"),
+            |key, _| key.to_owned(),
+            "boolean value".to_owned(),
+        )
+    }
+
     pub(crate) fn take_value_with<T>(
         &mut self,
         key: &str,
