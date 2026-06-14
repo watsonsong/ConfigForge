@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::{
     Result,
     artifact::ArtifactSink,
-    validation::{DesignerReportOptions, DesignerValidationReport},
+    validation::{DesignerReportOptions, DesignerValidationReport, ValidationReport},
 };
 
 use super::{
@@ -21,6 +21,31 @@ use config::validation_report_export_config_from_input;
 use super::artifact_generator::generator_contract_error;
 
 pub(super) struct ValidationReportGenerator;
+
+pub(crate) fn export_validation_report_to_sink(
+    input: &GeneratorCommonInput<'_>,
+    validation_report: &ValidationReport,
+    sink: &ArtifactSink,
+) -> Result<()> {
+    let config = validation_report_export_config_from_input(input)?;
+    let mut report = DesignerValidationReport::from_validation_report(
+        validation_report,
+        DesignerReportOptions {
+            title: None,
+            project_name: input.project.name.clone(),
+            project_path: Some(input.project_root.clone()),
+            target: Some(input.target_name.clone()),
+            target_tags: input.target_tags.clone(),
+            generated_at: input.generated_at.clone(),
+            input_root: None,
+        },
+    );
+    if let Some(title) = config.title {
+        report.metadata.title = title;
+    }
+    let content = crate::validation::render_designer_validation_report(&report, config.format)?;
+    sink.write_text(config.output, content)
+}
 
 impl ArtifactGenerator for ValidationReportGenerator {
     fn type_id(&self) -> &'static str {
@@ -54,24 +79,7 @@ impl ArtifactGenerator for ValidationReportGenerator {
         input: &GeneratorDataInput<'_, '_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
-        let config = validation_report_export_config_from_input(&input.common)?;
-        let mut report = DesignerValidationReport::from_validation_report(
-            input.validation_report,
-            DesignerReportOptions {
-                title: None,
-                project_name: input.common.project.name.clone(),
-                project_path: Some(input.common.project_root.clone()),
-                target: Some(input.common.target_name.clone()),
-                target_tags: input.common.target_tags.clone(),
-                generated_at: input.common.generated_at.clone(),
-                input_root: None,
-            },
-        );
-        if let Some(title) = config.title {
-            report.metadata.title = title;
-        }
-        let content = crate::validation::render_designer_validation_report(&report, config.format)?;
-        sink.write_text(config.output, content)
+        export_validation_report_to_sink(&input.common, input.validation_report, sink)
     }
 
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {

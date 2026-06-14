@@ -13,6 +13,9 @@ use crate::{
     diagnostic::code::{
         CF_DATA_DUPLICATE_KEY, CF_DATA_SOURCE_PATH_ESCAPE, CF_DATA_SOURCE_SCHEMA_INVALID,
     },
+    path_util::{
+        filesystem_aware_path_key, filesystem_path_is_within_root, lexical_normalize_path,
+    },
 };
 
 use super::{
@@ -151,55 +154,6 @@ fn resolve_source_path(data_root: &Path, source: &DataSourcePlan) -> Result<Path
         ));
     }
     Ok(joined)
-}
-
-fn filesystem_path_is_within_root(path: &Path, root: &Path) -> bool {
-    let root_key = filesystem_aware_path_key(root).unwrap_or_else(|| root.to_path_buf());
-    let path_key = filesystem_aware_path_key(path).unwrap_or_else(|| path.to_path_buf());
-    path_key == root_key || path_key.starts_with(root_key)
-}
-
-fn filesystem_aware_path_key(path: &Path) -> Option<PathBuf> {
-    let mut suffix = Vec::new();
-    let mut ancestor = path;
-    while !ancestor.exists() {
-        let file_name = ancestor.file_name()?;
-        suffix.push(file_name.to_owned());
-        ancestor = ancestor.parent()?;
-    }
-    let mut key = ancestor.canonicalize().ok()?;
-    for component in suffix.iter().rev() {
-        key.push(component);
-    }
-    Some(lexical_normalize_path(&key))
-}
-
-fn lexical_normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => match normalized.components().next_back() {
-                Some(std::path::Component::Normal(_)) => {
-                    normalized.pop();
-                }
-                Some(std::path::Component::ParentDir) | None => {
-                    if !path.has_root() {
-                        normalized.push(component.as_os_str());
-                    }
-                }
-                Some(std::path::Component::Prefix(_))
-                | Some(std::path::Component::RootDir)
-                | Some(std::path::Component::CurDir) => {}
-            },
-            std::path::Component::Prefix(_)
-            | std::path::Component::RootDir
-            | std::path::Component::Normal(_) => {
-                normalized.push(component.as_os_str());
-            }
-        }
-    }
-    normalized
 }
 
 pub(crate) fn merge_loaded_sources(

@@ -9,7 +9,7 @@ use crate::{
     diagnostic::code::{
         CF_ARTIFACT_PATH_COLLISION, CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNSUPPORTED_OPTION,
     },
-    project::lexical_normalize_path,
+    path_util::lexical_normalize_path,
 };
 
 use super::{

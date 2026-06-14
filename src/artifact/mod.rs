@@ -5,7 +5,7 @@ use std::{
     collections::BTreeMap,
     fs::{self, File},
     io::{self, Write},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -16,6 +16,7 @@ use crate::{
         CF_ARTIFACT_PATH_COLLISION, CF_ARTIFACT_PATH_ESCAPE, CF_ARTIFACT_SYMLINK_ALIAS_COLLISION,
         CF_ARTIFACT_WRITE_STATE,
     },
+    path_util::{filesystem_aware_path_key, lexical_normalize_path, path_is_within_root},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -601,10 +602,6 @@ fn normalize_artifact_path(output_root: Option<&Path>, path: &Path) -> Result<Pa
     Ok(normalized_path)
 }
 
-fn path_is_within_root(path: &Path, root: &Path) -> bool {
-    path == root || path.starts_with(root)
-}
-
 fn filesystem_path_is_within_root(path: &Path, root: &Path) -> bool {
     let root_key = filesystem_aware_path_key(root).unwrap_or_else(|| root.to_path_buf());
     let path_key = filesystem_aware_path_key(path).unwrap_or_else(|| path.to_path_buf());
@@ -719,21 +716,6 @@ fn artifact_state_error(
     )
 }
 
-fn filesystem_aware_path_key(path: &Path) -> Option<PathBuf> {
-    let mut suffix = Vec::new();
-    let mut ancestor = path;
-    while !ancestor.exists() {
-        let file_name = ancestor.file_name()?;
-        suffix.push(file_name.to_owned());
-        ancestor = ancestor.parent()?;
-    }
-    let mut key = ancestor.canonicalize().ok()?;
-    for component in suffix.iter().rev() {
-        key.push(component);
-    }
-    Some(lexical_normalize_path(&key))
-}
-
 #[cfg(unix)]
 fn existing_file_identity_key(path: &Path) -> Option<PathBuf> {
     use std::os::unix::fs::MetadataExt;
@@ -831,31 +813,6 @@ fn temp_path_for(path: &Path, index: usize) -> PathBuf {
         std::process::id()
     );
     path.with_file_name(temp_name)
-}
-
-fn lexical_normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => match normalized.components().next_back() {
-                Some(Component::Normal(_)) => {
-                    normalized.pop();
-                }
-                Some(Component::ParentDir) | None => {
-                    if !path.has_root() {
-                        normalized.push(component.as_os_str());
-                    }
-                }
-                Some(Component::Prefix(_)) | Some(Component::RootDir) | Some(Component::CurDir) => {
-                }
-            },
-            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
-                normalized.push(component.as_os_str());
-            }
-        }
-    }
-    normalized
 }
 
 #[cfg(test)]

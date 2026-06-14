@@ -197,6 +197,7 @@ impl DesignerValidationReport {
         }
     }
 
+    #[allow(dead_code)]
     pub fn from_diagnostic_report(
         diagnostic_report: &DiagnosticReport<Diagnostic>,
         options: DesignerReportOptions,

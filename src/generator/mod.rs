@@ -52,6 +52,7 @@ pub use schema_doc::{
 #[cfg(test)]
 pub(crate) use typescript::TypeScriptCodeGenerator;
 pub use typescript::TypeScriptCodegenOptions;
+pub(crate) use validation_report::export_validation_report_to_sink;
 
 pub(crate) use crate::code_artifact::{
     CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,

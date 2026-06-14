@@ -4,7 +4,7 @@
 use std::{
     collections::BTreeSet,
     fs,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 use serde::Deserialize;
@@ -14,6 +14,7 @@ use crate::{
     Result,
     diagnostic::code::{CF_BUILD_TARGET_NOT_FOUND, CF_PROJECT_INVALID_CONFIG},
     meta::{AssetKindMeta, EnumMeta, MetaModel, StructMeta, TableMeta},
+    path_util::lexical_normalize_path,
 };
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -200,31 +201,6 @@ fn normalize_config_path(base_dir: &Path, path: &Path) -> PathBuf {
     lexical_normalize_path(&resolved)
 }
 
-pub(crate) fn lexical_normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => match normalized.components().next_back() {
-                Some(Component::Normal(_)) => {
-                    normalized.pop();
-                }
-                Some(Component::ParentDir) | None => {
-                    if !path.has_root() {
-                        normalized.push(component.as_os_str());
-                    }
-                }
-                Some(Component::Prefix(_)) | Some(Component::RootDir) | Some(Component::CurDir) => {
-                }
-            },
-            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
-                normalized.push(component.as_os_str());
-            }
-        }
-    }
-    normalized
-}
-
 fn merge_project_configs(fragments: Vec<ProjectConfig>) -> ProjectConfig {
     let mut merged = ProjectConfig {
         imports: Vec::new(),
@@ -394,10 +370,7 @@ fn project_config_error(
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-    };
+    use std::{fs, path::Path};
 
     use super::*;
 
@@ -407,30 +380,6 @@ mod tests {
         };
         assert_eq!(report.diagnostics.len(), 1);
         report.diagnostics.into_iter().next().unwrap()
-    }
-
-    #[test]
-    fn lexical_normalize_path_collapses_current_and_parent_components() {
-        assert_eq!(
-            lexical_normalize_path(Path::new("out/./data/sub/../items.json")),
-            PathBuf::from("out/data/items.json")
-        );
-    }
-
-    #[test]
-    fn lexical_normalize_path_preserves_leading_parent_components() {
-        assert_eq!(
-            lexical_normalize_path(Path::new("../../data/../meta")),
-            PathBuf::from("../../meta")
-        );
-    }
-
-    #[test]
-    fn lexical_normalize_path_keeps_absolute_root_when_parent_escapes() {
-        assert_eq!(
-            lexical_normalize_path(Path::new("/../tmp/./data/..")),
-            PathBuf::from("/tmp")
-        );
     }
 
     #[test]

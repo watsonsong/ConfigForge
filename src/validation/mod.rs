@@ -19,7 +19,11 @@ pub use context::{
 pub use defaults::{
     apply_field_defaults, normalize_data_set, normalize_data_set_with_pool, normalize_table,
 };
+#[allow(unused_imports)]
+pub use diagnostic::ValidationOutcome;
 pub use diagnostic::{ValidationIssue, ValidationIssueLocation, ValidationReport};
+#[allow(unused_imports)]
+pub use entry::validate_normalized_data_set_for_target_with_assets_outcome_and_pool;
 pub use entry::{
     validate_data_set, validate_data_set_for_target, validate_data_set_for_target_with_report,
     validate_data_set_with_report, validate_normalized_data_set,

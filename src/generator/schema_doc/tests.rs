@@ -25,6 +25,31 @@ use super::{
     render_schema_doc_index_markdown, render_schema_table_markdown,
 };
 
+#[test]
+fn schema_doc_does_not_depend_on_project_module() {
+    for (path, source) in [
+        (
+            "src/generator/schema_doc/format.rs",
+            include_str!("format.rs"),
+        ),
+        ("src/generator/schema_doc/html.rs", include_str!("html.rs")),
+        (
+            "src/generator/schema_doc/markdown.rs",
+            include_str!("markdown.rs"),
+        ),
+        (
+            "src/generator/schema_doc/model.rs",
+            include_str!("model.rs"),
+        ),
+        ("src/generator/schema_doc/mod.rs", include_str!("mod.rs")),
+    ] {
+        assert!(
+            !source.contains("crate::project") && !source.contains("project::"),
+            "{path} should not depend on the project module"
+        );
+    }
+}
+
 fn build_doc(input: &str, tags: &[&str]) -> SchemaDoc {
     let meta = MetaModel::from_toml_str(input).expect("meta should parse");
     let linked = meta.link().expect("meta should link");

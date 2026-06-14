@@ -12,6 +12,7 @@ mod data_artifact;
 mod diagnostic;
 mod generator;
 mod meta;
+mod path_util;
 mod project;
 mod runtime_contract;
 mod validation;

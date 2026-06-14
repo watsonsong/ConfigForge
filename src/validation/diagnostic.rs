@@ -34,6 +34,11 @@ pub struct ValidationReport {
     pub issues: Vec<ValidationIssue>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidationOutcome {
+    pub report: ValidationReport,
+}
+
 impl ValidationReport {
     pub fn new() -> Self {
         Self { issues: Vec::new() }
@@ -67,14 +72,12 @@ impl ValidationReport {
         self.as_diagnostic_report().error_messages()
     }
 
-    pub fn into_result(self) -> Result<()> {
-        if !self.has_error() {
-            return Ok(());
-        }
+    pub fn into_outcome(self) -> ValidationOutcome {
+        ValidationOutcome { report: self }
+    }
 
-        Err(ConfigForgeError::ValidationReport(
-            self.into_diagnostic_report(),
-        ))
+    pub fn into_result(self) -> Result<()> {
+        self.into_outcome().into_unit_result()
     }
 
     pub fn into_diagnostic_report(self) -> DiagnosticReport<Diagnostic> {
@@ -91,6 +94,34 @@ impl ValidationReport {
         DiagnosticReport {
             diagnostics: self.issues.iter().collect(),
         }
+    }
+}
+
+impl ValidationOutcome {
+    pub fn is_blocking(&self) -> bool {
+        self.report.has_error()
+    }
+
+    pub fn report(&self) -> &ValidationReport {
+        &self.report
+    }
+
+    pub fn into_report(self) -> ValidationReport {
+        self.report
+    }
+
+    pub fn into_result(self) -> Result<ValidationReport> {
+        if !self.is_blocking() {
+            return Ok(self.report);
+        }
+
+        Err(ConfigForgeError::ValidationReport(
+            self.report.into_diagnostic_report(),
+        ))
+    }
+
+    pub fn into_unit_result(self) -> Result<()> {
+        self.into_result().map(|_| ())
     }
 }
 

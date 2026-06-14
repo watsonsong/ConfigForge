@@ -69,7 +69,8 @@ Typed value 解析不在 Validation 模块内重复实现。Validation 需要验
 - `validate_data_set_for_target_with_report()`：target-aware 校验并返回 `ValidationReport`。
 - `validate_normalized_data_set_with_report_and_pool()`：在已 normalized 的 full `DataSet` 上把 table-local 基础校验按 table 分发到 Rayon CPU pool，按 Meta table 顺序合并局部 report，再执行 full FK / registry validators 并按 stable key 排序。
 - `validate_normalized_data_set_for_target_with_report_and_pool()`：并行构建 target `ExportValidationView`，再按 visible target table 并行执行 target-aware table validation；局部 report 按 ExportView table order 合并后继续执行 target FK / registry validators，并按 stable key 排序。
-- `DesignerValidationReport::from_validation_report()` / `from_diagnostic_report()`：把 validation/diagnostic 结果转换成人类与平台共用的 normalized report model，供 HTML / Markdown / JSON / CSV renderer 复用。
+- `validate_normalized_data_set_for_target_with_assets_outcome_and_pool()`：build runtime 使用的 target-aware outcome 入口；它在存在 error 时也返回携带原始 `ValidationReport` 的 `ValidationOutcome`，由 build 先写 `validation_report` artifact，再桥接为 `ConfigForgeError::ValidationReport` 阻断其他 data-backed export。
+- `DesignerValidationReport::from_validation_report()`：validation_report generator 主路径，把原始 `ValidationReport` 转换成人类与平台共用的 normalized report model，供 HTML / Markdown / JSON / CSV renderer 复用。`from_diagnostic_report()` 仅保留为通用 diagnostic report adapter / 测试辅助，不作为 validation_report artifact 主路径。
 - `normalize_data_set()`：串行应用 default，产出后续校验和导出共享的 normalized data。
 - `normalize_data_set_with_pool()`：按 table 并行执行 `normalize_table()`，再按输入 DataSet table 顺序稳定 merge；用于 build 主流程的 CPU pool。
 
@@ -797,20 +798,34 @@ pub struct ValidationReport {
     pub issues: Vec<ValidationIssue>,
 }
 
+pub struct ValidationOutcome {
+    pub report: ValidationReport,
+}
+
 impl ValidationReport {
     pub fn has_error(&self) -> bool;
     pub fn into_result(self) -> Result<()>;
+    pub fn into_outcome(self) -> ValidationOutcome;
     pub fn sort_by_stable_key(&mut self);
+}
+
+impl ValidationOutcome {
+    pub fn is_blocking(&self) -> bool;
+    pub fn report(&self) -> &ValidationReport;
+    pub fn into_report(self) -> ValidationReport;
+    pub fn into_result(self) -> Result<ValidationReport>;
 }
 ```
 
 桥接策略：
 
 - `validate_data_set()` / `validate_data_set_for_target()` 等兼容入口返回 `Result<()>`，但内部先调用 `*_with_report()` 收集完整 report，再由 `into_result()` 判断是否存在 error。
+- `ValidationOutcome` 表达“validation 总是产生 report，error gate 只是 outcome 状态”。`*_outcome_*` 入口不因 validation issue error 立即丢失原始 `ValidationIssue`，便于 build failure fallback 使用与成功路径相同的 report-backed renderer。
 - `validate_normalized_table_with_report()`、`validate_normalized_table_for_target_with_report()`、`validate_data_set_with_report()` 与 `validate_data_set_for_target_with_report()` 会尽量收集同一层级内所有 issue，而不是遇到第一条 required/type/enum/unique/FK 错误立即返回。
 - `validate_normalized_data_set_with_report_and_pool()` 让每个 table-local full validation task 返回局部 `ValidationReport`；coordination 层按 Meta table declaration order append，然后继续执行 dataset-level FK 与 registry validators，最后调用 `sort_by_stable_key()`。因此 `--jobs 1` / `--jobs N` 不应改变 report 内容或排序。
 - `validate_normalized_data_set_for_target_with_report_and_pool()` 先用 `ExportValidationView::for_target_with_pool()` 并行构建 target table views，再让每个 visible table view 返回局部 report；coordination 层按 target view table order append，然后继续执行 target FK 与 registry validators。
 - `ValidationReport::into_result()` 将 error report 桥接为 `ConfigForgeError::ValidationReport`；老的 `ConfigForgeError::Validation(String)` 仍可由更底层单项 helper 产生，但不再作为 validation 汇总模型。
+- `DesignerValidationReport::from_validation_report()` 是 validation_report artifact 的主转换入口；`from_diagnostic_report()` 仅用于需要把通用 `DiagnosticReport<Diagnostic>` 临时适配为 Designer Validation Report 的非主路径场景，不应作为 build validation failure fallback 的数据来源。
 - `error_issue_from_result()` 遇到 `ConfigForgeError::ValidationReport` 时会拆出第一条 `Diagnostic` 并保留 code、location、target、hint、current_value、expected、explanation、domain、owner，避免 table-local check 通过 legacy error bridge 时丢失结构化字段。
 - warning issue 保留在 report 中，不阻断构建；只要存在 error，依赖对应 data validation 的 export 被阻断。
 - report 合并使用局部 report + `append()` / `extend()`，再调用 `sort_by_stable_key()`，避免未来并行 validation 受任务完成顺序影响。stable key 当前为 `(severity, target, table, row_index, source_row_number, field, validator, code, message)`。

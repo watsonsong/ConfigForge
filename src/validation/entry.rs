@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Result,
+    Result,
     data::{DataSet, DataTable},
     diagnostic::DiagnosticLocation,
     meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
@@ -14,7 +14,7 @@ use rayon::prelude::*;
 use super::{
     context::{ExportValidationView, ValidationContext},
     defaults::{normalize_data_set, normalize_table},
-    diagnostic::{ValidationReport, error_issue_from_message},
+    diagnostic::{ValidationOutcome, ValidationReport, error_issue_from_message},
     registry::{CompiledValidationPlan, ValidatorRegistry},
     table::{
         validate_normalized_table, validate_normalized_table_for_target,
@@ -293,7 +293,24 @@ pub fn validate_normalized_data_set_for_target_with_assets_report_and_pool(
     data_set: &DataSet,
     pool: &rayon::ThreadPool,
 ) -> Result<ValidationReport> {
-    validate_normalized_data_set_for_target_with_table_view_validator_assets_and_pool(
+    validate_normalized_data_set_for_target_with_assets_outcome_and_pool(
+        meta,
+        assets,
+        target_tags,
+        data_set,
+        pool,
+    )
+    .and_then(ValidationOutcome::into_result)
+}
+
+pub fn validate_normalized_data_set_for_target_with_assets_outcome_and_pool(
+    meta: &LinkedMetaModel<'_>,
+    assets: &AssetsConfig,
+    target_tags: &TargetTags,
+    data_set: &DataSet,
+    pool: &rayon::ThreadPool,
+) -> Result<ValidationOutcome> {
+    validate_normalized_data_set_for_target_with_table_view_validator_assets_outcome_and_pool(
         meta,
         assets,
         target_tags,
@@ -330,14 +347,14 @@ pub(crate) fn validate_normalized_data_set_for_target_with_table_view_validator_
     finish_target_data_set_validation(meta, target_tags, data_set, export_view, None, report)
 }
 
-pub(crate) fn validate_normalized_data_set_for_target_with_table_view_validator_assets_and_pool(
+pub(crate) fn validate_normalized_data_set_for_target_with_table_view_validator_assets_outcome_and_pool(
     meta: &LinkedMetaModel<'_>,
     assets: &AssetsConfig,
     target_tags: &TargetTags,
     data_set: &DataSet,
     pool: &rayon::ThreadPool,
     table_view_validator: impl Fn(&super::ExportTableView<'_, '_>) -> ValidationReport + Sync,
-) -> Result<ValidationReport> {
+) -> Result<ValidationOutcome> {
     let export_view =
         ExportValidationView::for_target_with_pool(meta, data_set, target_tags, pool)?;
     let mut table_reports = pool.install(|| {
@@ -355,7 +372,7 @@ pub(crate) fn validate_normalized_data_set_for_target_with_table_view_validator_
         report.append(&mut table_report);
     }
 
-    finish_target_data_set_validation(
+    finish_target_data_set_validation_outcome(
         meta,
         target_tags,
         data_set,
@@ -371,8 +388,27 @@ fn finish_target_data_set_validation(
     data_set: &DataSet,
     export_view: ExportValidationView<'_, '_>,
     assets: Option<&AssetsConfig>,
-    mut report: ValidationReport,
+    report: ValidationReport,
 ) -> Result<ValidationReport> {
+    finish_target_data_set_validation_outcome(
+        meta,
+        target_tags,
+        data_set,
+        export_view,
+        assets,
+        report,
+    )
+    .and_then(ValidationOutcome::into_result)
+}
+
+fn finish_target_data_set_validation_outcome(
+    meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    data_set: &DataSet,
+    export_view: ExportValidationView<'_, '_>,
+    assets: Option<&AssetsConfig>,
+    mut report: ValidationReport,
+) -> Result<ValidationOutcome> {
     report.extend(
         super::diagnostic::error_issues_from_result(
             "foreign_key.integrity",
@@ -398,16 +434,11 @@ fn finish_target_data_set_validation(
     let context = ValidationContext::new(meta, Some(target_tags.clone()), data_set, export_view);
     report.append(&mut plan.run(&context));
     report.sort_by_stable_key();
-    report_into_result(report)
+    Ok(report.into_outcome())
 }
 
 fn report_into_result(report: ValidationReport) -> Result<ValidationReport> {
-    if report.has_error() {
-        return Err(ConfigForgeError::ValidationReport(
-            report.clone().into_diagnostic_report(),
-        ));
-    }
-    Ok(report)
+    report.into_outcome().into_result()
 }
 
 pub fn validate_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {

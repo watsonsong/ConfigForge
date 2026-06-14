@@ -83,6 +83,63 @@ fn expect_validator_config_issue<T>(result: Result<T>, source: &str) -> Validati
 }
 
 #[test]
+fn validation_outcome_preserves_error_report_before_error_gate() {
+    let issue = ValidationIssue::error(
+        "table.missing",
+        "required",
+        "data set is missing table `items`",
+        DiagnosticLocation {
+            table: Some("items".to_owned()),
+            ..DiagnosticLocation::default()
+        },
+    )
+    .with_hint("add items.csv");
+    let mut report = ValidationReport::new();
+    report.push(issue.clone());
+
+    let outcome = report.into_outcome();
+
+    assert!(outcome.is_blocking());
+    assert_eq!(outcome.report().issues, [issue.clone()]);
+    let preserved_report = outcome.clone().into_report();
+    assert_eq!(preserved_report.issues, [issue.clone()]);
+    let diagnostic_report = match outcome.into_result() {
+        Err(ConfigForgeError::ValidationReport(report)) => report,
+        Err(error) => panic!("expected validation report error, got {error}"),
+        Ok(_) => panic!("expected blocking validation outcome"),
+    };
+    assert_eq!(diagnostic_report.diagnostics.len(), 1);
+    assert_eq!(diagnostic_report.diagnostics[0].code, issue.code);
+    assert_eq!(
+        diagnostic_report.diagnostics[0].location.table.as_deref(),
+        Some("items")
+    );
+    assert_eq!(
+        diagnostic_report.diagnostics[0].hint.as_deref(),
+        Some("add items.csv")
+    );
+}
+
+#[test]
+fn validation_outcome_warning_only_is_not_blocking() {
+    let issue = ValidationIssue::new(
+        "validator.warning",
+        ValidationSeverity::Warning,
+        "custom_validator",
+        "warning only",
+        DiagnosticLocation::default(),
+    );
+    let mut report = ValidationReport::new();
+    report.push(issue.clone());
+
+    let outcome = report.into_outcome();
+
+    assert!(!outcome.is_blocking());
+    let returned_report = outcome.into_result().expect("warning-only outcome passes");
+    assert_eq!(returned_report.issues, [issue]);
+}
+
+#[test]
 fn error_issues_from_result_preserves_all_report_diagnostics() {
     let fallback_location = DiagnosticLocation {
         table: Some("items".to_owned()),
@@ -2236,6 +2293,106 @@ fn target_view_validation_with_pool_sorts_merged_reports_stably() {
             .map(|issue| issue.location.table.as_deref())
             .collect::<Vec<_>>(),
         vec![Some("a_fast"), Some("z_slow")]
+    );
+}
+
+#[test]
+fn target_validation_outcome_matches_report_backed_error_gate() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            primary_index = "by_id"
+            row_export = { excluded_tags_field = "exclude_tags" }
+
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables.fields]]
+            name = "exclude_tags"
+            type = "string"
+            export = false
+
+            [[tables.indexes]]
+            name = "by_id"
+            fields = ["id"]
+            unique = true
+            primary = true
+
+            [[tables]]
+            name = "monsters"
+            source = "monsters.csv"
+
+            [[tables.fields]]
+            name = "drop_item_id"
+            type = "int"
+            foreign_key = { name = "drop_item", target_table = "items" }
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let data_set = DataSet::new(vec![
+        DataTable::new(
+            "items",
+            vec![
+                BTreeMap::from([
+                    ("id".to_owned(), "1".to_owned()),
+                    ("exclude_tags".to_owned(), String::new()),
+                ]),
+                BTreeMap::from([
+                    ("id".to_owned(), "2".to_owned()),
+                    ("exclude_tags".to_owned(), "client".to_owned()),
+                ]),
+            ],
+        ),
+        DataTable::new(
+            "monsters",
+            vec![BTreeMap::from([(
+                "drop_item_id".to_owned(),
+                "2".to_owned(),
+            )])],
+        ),
+    ]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .expect("pool should build");
+    let target_tags = TargetTags::new(["client"]);
+
+    let legacy_report = validation_report_error(
+        validate_normalized_data_set_for_target_with_assets_report_and_pool(
+            &linked_meta,
+            &AssetsConfig::default(),
+            &target_tags,
+            &data_set,
+            &pool,
+        ),
+    );
+    let outcome = validate_normalized_data_set_for_target_with_assets_outcome_and_pool(
+        &linked_meta,
+        &AssetsConfig::default(),
+        &target_tags,
+        &data_set,
+        &pool,
+    )
+    .expect("outcome should preserve validation report");
+
+    assert!(outcome.is_blocking());
+    assert_eq!(outcome.report().issues, legacy_report.issues);
+    assert_eq!(
+        outcome
+            .report()
+            .issues
+            .iter()
+            .map(|issue| (&issue.code, issue.location.table.as_deref()))
+            .collect::<Vec<_>>(),
+        legacy_report
+            .issues
+            .iter()
+            .map(|issue| (&issue.code, issue.location.table.as_deref()))
+            .collect::<Vec<_>>()
     );
 }
 

@@ -5,26 +5,23 @@ use rayon::{ThreadPool, prelude::*};
 use std::collections::BTreeSet;
 
 use crate::{
-    ConfigForgeError, Result,
+    ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::ArtifactSink,
     asset::AssetResolver,
     data::{DataRow, DataSet, DataTable, RawSourceData},
     diagnostic::code::{
         CF_ARTIFACT_PATH_COLLISION, CF_BUILD_EXPORT_TASK_FAILED, CF_BUILD_INPUT_REQUIRED,
-        CF_BUILD_INVALID_CONFIG,
     },
-    diagnostic::{Diagnostic, DiagnosticReport},
     generator::{
         GeneratorCommonInput, GeneratorRegistry, GeneratorTaskInput, PreparedGeneratorInputs,
+        export_validation_report_to_sink,
     },
     meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags},
+    path_util::lexical_normalize_path,
     project::AssetsConfig,
-    project::lexical_normalize_path,
     validation::{
-        DesignerReportFormat, DesignerReportOptions, DesignerValidationReport,
-        ValidationReportExportConfig, normalize_data_set_with_pool,
-        render_designer_validation_report,
-        validate_normalized_data_set_for_target_with_assets_report_and_pool,
+        normalize_data_set_with_pool,
+        validate_normalized_data_set_for_target_with_assets_outcome_and_pool,
     },
 };
 
@@ -47,6 +44,10 @@ pub(super) fn export_meta_and_data_tasks(
     linked_meta: &LinkedMetaModel<'_>,
     assets: &AssetsConfig,
     target_tags: &TargetTags,
+    project_root: &std::path::Path,
+    project_info: &ArtifactProjectInfo,
+    target_name: &str,
+    generated_at: &str,
     generator_registry: &GeneratorRegistry,
     pool: &ThreadPool,
     sink: &ArtifactSink,
@@ -57,6 +58,10 @@ pub(super) fn export_meta_and_data_tasks(
         linked_meta,
         assets,
         target_tags,
+        project_root,
+        project_info,
+        target_name,
+        generated_at,
         generator_registry,
         pool,
         sink,
@@ -69,6 +74,10 @@ fn export_meta_and_data_tasks_with_generator_registry(
     linked_meta: &LinkedMetaModel<'_>,
     assets: &AssetsConfig,
     target_tags: &TargetTags,
+    project_root: &std::path::Path,
+    project_info: &ArtifactProjectInfo,
+    target_name: &str,
+    generated_at: &str,
     generator_registry: &GeneratorRegistry,
     pool: &ThreadPool,
     sink: &ArtifactSink,
@@ -95,32 +104,39 @@ fn export_meta_and_data_tasks_with_generator_registry(
         export_tasks,
         linked_meta,
         target_tags,
+        project_root,
+        project_info,
+        target_name,
+        generated_at,
         generator_registry,
         pool,
     )?;
 
     let data_set = normalize_data_set_with_pool(linked_meta, raw_sources.as_data_set(), pool)?;
-    let validation_result = validate_normalized_data_set_for_target_with_assets_report_and_pool(
+    let validation_outcome = validate_normalized_data_set_for_target_with_assets_outcome_and_pool(
         linked_meta,
         assets,
         target_tags,
         &data_set,
         pool,
-    );
-    let validation_report = match validation_result {
-        Ok(report) => report,
-        Err(ConfigForgeError::ValidationReport(diagnostic_report)) => {
-            export_validation_report_tasks_from_diagnostics(
-                export_tasks,
-                linked_meta,
-                target_tags,
-                &diagnostic_report,
-                sink,
-            )?;
-            return Err(ConfigForgeError::ValidationReport(diagnostic_report));
-        }
-        Err(error) => return Err(error),
-    };
+    )?;
+    if validation_outcome.is_blocking() {
+        export_validation_report_tasks(
+            export_tasks,
+            linked_meta,
+            target_tags,
+            project_root,
+            project_info,
+            target_name,
+            generated_at,
+            validation_outcome.report(),
+            sink,
+        )?;
+        return Err(ConfigForgeError::ValidationReport(
+            validation_outcome.into_report().into_diagnostic_report(),
+        ));
+    }
+    let validation_report = validation_outcome.into_report();
     let mut warnings = Vec::new();
     warnings.extend(validation_report.warning_messages());
     let export_data_set = canonicalize_asset_refs(linked_meta, assets, target_tags, &data_set)?;
@@ -135,6 +151,10 @@ fn export_meta_and_data_tasks_with_generator_registry(
                         export_task,
                         linked_meta,
                         target_tags,
+                        project_root,
+                        project_info,
+                        target_name,
+                        generated_at,
                         &export_data_set,
                         &validation_report,
                         pool,
@@ -164,11 +184,15 @@ fn export_meta_and_data_tasks_with_generator_registry(
     })
 }
 
-fn export_validation_report_tasks_from_diagnostics(
+fn export_validation_report_tasks(
     export_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
-    diagnostic_report: &DiagnosticReport<Diagnostic>,
+    project_root: &std::path::Path,
+    project_info: &ArtifactProjectInfo,
+    target_name: &str,
+    generated_at: &str,
+    validation_report: &crate::validation::ValidationReport,
     sink: &ArtifactSink,
 ) -> Result<()> {
     let report_tasks = export_tasks
@@ -179,103 +203,22 @@ fn export_validation_report_tasks_from_diagnostics(
     if report_tasks.is_empty() {
         return Ok(());
     }
-    let report = DesignerValidationReport::from_diagnostic_report(
-        diagnostic_report,
-        designer_report_options(linked_meta, target_tags),
-    );
     for task in report_tasks {
-        write_report_task(task, &report, sink)?;
+        export_validation_report_to_sink(
+            &generator_common_input(
+                task,
+                linked_meta,
+                target_tags,
+                project_root,
+                project_info,
+                target_name,
+                generated_at,
+            ),
+            validation_report,
+            sink,
+        )?;
     }
     Ok(())
-}
-
-fn designer_report_options(
-    linked_meta: &LinkedMetaModel<'_>,
-    target_tags: &TargetTags,
-) -> DesignerReportOptions {
-    let _ = linked_meta;
-    DesignerReportOptions {
-        title: None,
-        project_name: None,
-        project_path: None,
-        target: None,
-        target_tags: target_tags.clone(),
-        generated_at: super::generated_at(),
-        input_root: None,
-    }
-}
-
-fn write_report_task(
-    task: &NormalizedExportTask,
-    report: &DesignerValidationReport,
-    sink: &ArtifactSink,
-) -> Result<()> {
-    let config = validation_report_export_config_from_task(task)?;
-    let mut report = report.clone();
-    if let Some(title) = &config.title {
-        report.metadata.title = title.clone();
-    }
-    let content = render_designer_validation_report(&report, config.format)?;
-    sink.write_text(config.output, content)
-}
-
-fn validation_report_export_config_from_task(
-    task: &NormalizedExportTask,
-) -> Result<ValidationReportExportConfig> {
-    let mut options = task.options.clone();
-    let format = take_report_format(&mut options)?.unwrap_or(DesignerReportFormat::Html);
-    let file_name = take_report_string(&mut options, "file_name")?
-        .unwrap_or_else(|| format!("validation-report.{}", format.extension()));
-    let title = take_report_string(&mut options, "title")?;
-    let unsupported = options.keys().cloned().collect::<Vec<_>>();
-    if let Some(key) = unsupported.first() {
-        return Err(build_diagnostic_error(
-            CF_BUILD_INVALID_CONFIG,
-            "build.validation_report.options",
-            format!(
-                "validation_report export task `{}` has unknown option `{key}`",
-                task.name
-            ),
-            key,
-            "supported validation_report export task option",
-            "Remove unknown validation_report options or update the exporter schema.",
-        ));
-    }
-    Ok(ValidationReportExportConfig {
-        format,
-        output: task.output.join(file_name),
-        title,
-    })
-}
-
-fn take_report_format(
-    options: &mut std::collections::BTreeMap<String, toml::Value>,
-) -> Result<Option<DesignerReportFormat>> {
-    take_report_string(options, "format")?
-        .map(|value| value.parse())
-        .transpose()
-}
-
-fn take_report_string(
-    options: &mut std::collections::BTreeMap<String, toml::Value>,
-    key: &str,
-) -> Result<Option<String>> {
-    options
-        .remove(key)
-        .map(|value| {
-            let current_value = format!("{key}={value}");
-            value.try_into().map_err(|source| {
-                build_diagnostic_error(
-                    CF_BUILD_INVALID_CONFIG,
-                    "build.validation_report.options",
-                    format!("invalid validation_report option `{key}`: {source}"),
-                    current_value,
-                    format!("valid `{key}` option value"),
-                    "Check validation_report export task option types.",
-                )
-            })
-        })
-        .transpose()
 }
 
 fn canonicalize_asset_refs(
@@ -426,6 +369,10 @@ fn export_meta_and_data_task(
     export_task: &NormalizedExportTask,
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
+    project_root: &std::path::Path,
+    project_info: &ArtifactProjectInfo,
+    target_name: &str,
+    generated_at: &str,
     data_set: &crate::data::DataSet,
     validation_report: &crate::validation::ValidationReport,
     pool: &ThreadPool,
@@ -446,9 +393,18 @@ fn export_meta_and_data_task(
             "Check generator requirements and target build plan classification.",
         ));
     }
+    let common = generator_common_input(
+        export_task,
+        linked_meta,
+        target_tags,
+        project_root,
+        project_info,
+        target_name,
+        generated_at,
+    );
     generator.generate(
         &GeneratorTaskInput {
-            common: generator_common_input(export_task, linked_meta, target_tags),
+            common,
             prepared: PreparedGeneratorInputs::MetaAndData {
                 data_set,
                 validation_report,
@@ -466,6 +422,10 @@ fn ensure_planned_runtime_output_paths(
     export_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
+    project_root: &std::path::Path,
+    project_info: &ArtifactProjectInfo,
+    target_name: &str,
+    generated_at: &str,
     generator_registry: &GeneratorRegistry,
     pool: &ThreadPool,
 ) -> Result<()> {
@@ -481,6 +441,10 @@ fn ensure_planned_runtime_output_paths(
                         export_task,
                         linked_meta,
                         target_tags,
+                        project_root,
+                        project_info,
+                        target_name,
+                        generated_at,
                         generator_registry,
                     ),
                 )
@@ -510,12 +474,24 @@ fn plan_runtime_output_paths_for_task(
     export_task: &NormalizedExportTask,
     linked_meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
+    project_root: &std::path::Path,
+    project_info: &ArtifactProjectInfo,
+    target_name: &str,
+    generated_at: &str,
     generator_registry: &GeneratorRegistry,
 ) -> Result<Vec<std::path::PathBuf>> {
     generator_registry
         .require_generator(&export_task.type_id)?
         .plan_task_artifacts(&GeneratorTaskInput {
-            common: generator_common_input(export_task, linked_meta, target_tags),
+            common: generator_common_input(
+                export_task,
+                linked_meta,
+                target_tags,
+                project_root,
+                project_info,
+                target_name,
+                generated_at,
+            ),
             prepared: PreparedGeneratorInputs::Planning,
         })?
         .into_iter()
@@ -527,18 +503,22 @@ fn generator_common_input<'meta>(
     export_task: &NormalizedExportTask,
     linked_meta: &'meta LinkedMetaModel<'meta>,
     target_tags: &TargetTags,
+    project_root: &std::path::Path,
+    project_info: &ArtifactProjectInfo,
+    target_name: &str,
+    generated_at: &str,
 ) -> GeneratorCommonInput<'meta> {
     GeneratorCommonInput {
         meta: linked_meta,
         target_tags: target_tags.clone(),
-        project: crate::ArtifactProjectInfo::default(),
-        project_root: std::path::PathBuf::new(),
-        target_name: String::new(),
+        project: project_info.clone(),
+        project_root: project_root.to_path_buf(),
+        target_name: target_name.to_owned(),
         task_name: export_task.name.clone(),
         type_id: export_task.type_id.clone(),
-        output: export_task.output.clone(),
+        output: project_root.join(&export_task.output),
         options: export_task.options.clone(),
-        generated_at: super::generated_at(),
+        generated_at: generated_at.to_owned(),
     }
 }
 
@@ -556,6 +536,7 @@ mod tests {
     };
 
     use crate::{
+        Diagnostic,
         artifact::{ArtifactWriteMode, ArtifactWriter},
         data::{DataSet, DataTable, RawSourceData},
         generator::{
@@ -665,6 +646,10 @@ mod tests {
             &linked_meta,
             &AssetsConfig::default(),
             &TargetTags::empty(),
+            std::path::Path::new(""),
+            &ArtifactProjectInfo::default(),
+            "",
+            &crate::build::generated_at(),
             &generator_registry,
             &pool,
             &sink,
@@ -792,6 +777,10 @@ mod tests {
             &linked_meta,
             &AssetsConfig::default(),
             &TargetTags::empty(),
+            std::path::Path::new(""),
+            &ArtifactProjectInfo::default(),
+            "",
+            &crate::build::generated_at(),
             &generator_registry,
             &pool,
             &sink,

@@ -80,23 +80,23 @@ ConfigForge 当前主干方向整体正确：
 
 - `docs(architecture): align generator terminology`
 
-### [ ] Step 2：下沉并统一路径规范化 helper
+### [x] Step 2：下沉并统一路径规范化 helper
 
 目的：消除 Project / Data / Artifact / SchemaDoc 对路径 normalize 的重复实现，并修复 `schema_doc -> project` 边界侵蚀。
 
 实现项：
 
-- [ ] 新增或选择一个底层 path helper 归属，例如 `src/path_util.rs` 或 `artifact` 下的 path 子模块；该模块不能依赖 `project`、`data`、`generator`、`build`。
-- [ ] 将 `lexical_normalize_path` 从 `project`、`data::loader`、`artifact` 重复实现迁入共享 helper。
-- [ ] 将 `schema_doc` 从 `crate::project::lexical_normalize_path` 改为依赖共享 helper。
-- [ ] 梳理 `filesystem_path_is_within_root`、filesystem-aware key、case-fold conflict key 的平台策略，至少保证 Data Loader 与 Artifact Writer 文档化差异；能统一则统一。
-- [ ] 增加边界回归测试：`src/generator/schema_doc/**/*.rs` 不应包含 `crate::project`。
+- [x] 新增或选择一个底层 path helper 归属，例如 `src/path_util.rs` 或 `artifact` 下的 path 子模块；该模块不能依赖 `project`、`data`、`generator`、`build`。
+- [x] 将 `lexical_normalize_path` 从 `project`、`data::loader`、`artifact` 重复实现迁入共享 helper。
+- [x] 将 `schema_doc` 从 `crate::project::lexical_normalize_path` 改为依赖共享 helper。
+- [x] 梳理 `filesystem_path_is_within_root`、filesystem-aware key、case-fold conflict key 的平台策略，至少保证 Data Loader 与 Artifact Writer 文档化差异；能统一则统一。
+- [x] 增加边界回归测试：`src/generator/schema_doc/**/*.rs` 不应包含 `crate::project`。
 
 验证：
 
-- [ ] `cargo test artifact`
-- [ ] `cargo test data`
-- [ ] `cargo test schema_doc`
+- [x] `cargo test artifact`
+- [x] `cargo test data`
+- [x] `cargo test schema_doc`
 
 可独立提交建议：
 
