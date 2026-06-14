@@ -27,18 +27,17 @@ Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据�
 4. 在 Meta Link 完成后，由 Data Resolver 使用 `LinkedMetaModel<'meta>` + raw `DataSet` 解析 JSON cell / expanded path / default / target visibility，得到结构化 `ResolvedDataSet` 或 target-specific resolved view；runtime export 主路径已消费 resolved value。
 5. Validation 仍处于迁移中：source schema 与 value resolve 已通过 resolver 统一，required/type/index/FK 等主流程仍保留部分 raw `DataRow` 逻辑，后续应迁移到 `validate_resolved_*`。
 
-当前阶段已实现 CSV source、DataSet、target-aware validation/export 的基础流程，并已按 **variant source mode** 支持 polymorphic fragments：polymorphic CollectionTable 可声明多个 CSV sources，每个 source 追加完整 records 并声明 active fragments。`override_sources` 的最小落地范围已实现为 CollectionTable CSV 整行覆盖：按 primary index 匹配 base row，在匹配 effective target tags 时替换该 row，服务赛季/热修类临时覆盖。
+当前阶段已实现 CSV source、DataSet、target-aware validation/export 的基础流程，并已按 **variant source mode** 支持 polymorphic fragments：polymorphic CollectionTable 可声明多个 CSV sources，每个 source 追加完整 records 并声明 active fragments。`override_sources` 的最小落地范围已实现为 CollectionTable CSV 整行覆盖：按 primary index 匹配 base row，在匹配 effective target tags 时替换该 row，服务赛季/热修类临时覆盖。ObjectTable CSV multi-source / override 的 Stable 迁移计划已固定：多个 base source 以 field path 互斥方式 split merge 为 singleton object，override source 以 exact field path patch 已存在字段。
 
 仍不实现：
 
 - fragment join mode；
-- ObjectTable `override_sources`；
 - override insert 策略；
 - 非 CSV provider；
 - array / map 的 typed parse；
 - source location 精确到单元格的诊断。
 
-这些能力在 Meta validate 阶段应显式报 unsupported，避免 Data 阶段静默忽略。CollectionTable CSV `override_sources` 不再属于 unsupported，但必须要求目标表拥有 primary index，且 override row 必须能匹配已存在 base row。
+这些能力在 Meta validate 阶段应显式报 unsupported，避免 Data 阶段静默忽略。CollectionTable CSV `override_sources` 不再属于 unsupported，但必须要求目标表拥有 primary index，且 override row 必须能匹配已存在 base row。ObjectTable CSV `sources` / `override_sources` 推进到 Stable 时仍不改变非 CSV provider、base source `export_when`、override insert/upsert 的 unsupported 状态。
 
 设计判断：不建议把 Meta-aware 解析下沉到 `CsvDataReader`。CSV / Xlsx / Lark 等 reader 只负责语法读取、raw string 和 source location；struct source layout、default、target visibility、fragment active set 和 typed scalar parsing 都需要 linked meta 与 target context，更适合放在 Data Load 之后的 resolver 阶段。Validation / Exporter 应收敛为共享 resolver，避免两边重复解释 JSON 字符串和 dotted path。
 
@@ -539,11 +538,12 @@ DataTable rows:
 - exporter 可以在 `TableKind::Object` 分支上选择 object payload shape。
 - codegen IR 仍只需要识别 table kind，不需要理解 CSV 物理布局。
 
-当前限制：
+当前限制与 Stable 迁移语义：
 
-- ObjectTable Step 1 只支持单个 `source` 属性；该属性可使用 legacy 字符串 `source = "...csv"`，也可使用带 `header_row` / `data_start_row` 的 source object。不支持 `sources` / `override_sources`。
+- ObjectTable `source = "...csv"` 保持兼容；Stable 目标允许 `sources = [...]` 表示多个 CSV key/value source 为同一个 singleton object 提供互斥 field path。
+- ObjectTable `override_sources = [...]` 的 Stable 目标是 field-path-level patch：只替换 override source 中出现的 exact field path，不隐式删除 sibling path，也不新增 base 中不存在的 field path。
 - ObjectTable 不支持 fragments / row_export / indexes；ObjectTable 可作为 foreign key source，归一化后的 singleton logical row 会进入 FK 校验，但不能作为 foreign key target。相关限制由 Meta / Validation 模块维护。
-- ObjectTable key-level source trace 仍需后续增强；当前 singleton logical row 会损失真实 key 行定位的一部分精度。
+- ObjectTable key-level source trace 是 Stable 关键要求：field-level validation 应优先使用 cell source，使被 override 字段定位到 override source 的真实 key row；singleton row source 只能作为 fallback trace。
 
 错误映射：
 
@@ -611,6 +611,8 @@ DataSet::try_new(pending_tables in first-seen table order)
 - Override row 找不到 base key 时报错，不 append 新 row。未来如果要允许 insert，必须新增显式策略，例如 `on_missing = "insert"`，不能改变默认语义。
 - DataLoader 不做 fragment field required/default；Validation 阶段根据 `row_sources[row_index].fragments` 决定应用哪些 fragment schemas。
 - 如果某个 source 读取失败，错误需要包含 source path；如果后续引入 source ordinal，可在 Data diagnostic 中补充。
+- ObjectTable base merge 需要把多个 singleton row 合并为一个 singleton object；base source 间重复 field path 应报错，并提示把替换值放到 `override_sources`。
+- ObjectTable override merge 需要以 exact field path 替换已存在 value 与 cell source；找不到 base field path 应报错，避免把 patch source 误用为 append/upsert。
 
 S1 Oak 覆盖示例在 DataLoader 中的 materialization 结果：
 

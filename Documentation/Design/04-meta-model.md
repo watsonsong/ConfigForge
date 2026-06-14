@@ -971,7 +971,7 @@ linked_field = "item"
 
 ## 4.13 Multi-source 与 Override
 
-> 实现状态：Partial。当前版本已支持 fragment variant source mode 这一受限多源能力：polymorphic CollectionTable 可声明多个 CSV `sources`，但至少一个 source 必须声明 `fragments`；同时已支持 CollectionTable CSV `override_sources` 按 primary index 匹配整行覆盖，并支持 source-level `export_when` 按 effective target tags 启用。ObjectTable 多源/override、base source `export_when`、通用 split merge 与非 `csv` provider 仍会在 Meta 校验或 DataLoadPlan 构造阶段报错，避免静默忽略。
+> 实现状态：Partial。当前版本已支持 fragment variant source mode 这一受限多源能力：polymorphic CollectionTable 可声明多个 CSV `sources`，但至少一个 source 必须声明 `fragments`；同时已支持 CollectionTable CSV `override_sources` 按 primary index 匹配整行覆盖，并支持 source-level `export_when` 按 effective target tags 启用。ObjectTable CSV multi-source / override 的 Stable 目标语义已固定为 base split merge + field-path-level override patch，正在按 `Documentation/Todo/object-table-override-sources-stable-todo.md` 推进。base source `export_when`、通用 CollectionTable split merge 与非 `csv` provider 仍会在 Meta 校验或 DataLoadPlan 构造阶段报错，避免静默忽略。
 
 本节的 multi-source split merge / override 是通用多源能力，仍为 Reserved。下一节的 polymorphic variant source mode 是多源能力的受限子集：仅允许 `polymorphic = true` 的 CollectionTable 声明多个 variant sources，且每个 source 追加完整 records，不提供通用 split merge、ObjectTable 多源合并或 override 语义。
 
@@ -980,6 +980,7 @@ Base `sources` 用于 split merge：
 - CollectionTable：多个 source 的 records 追加为一个集合。
 - ObjectTable：多个 source 提供同一对象的不同字段。
 - 唯一索引冲突在最终组合视图中检查。
+- ObjectTable 多个 base source 中的 field path 默认必须互斥；重复 field path 应报 source schema error，并提示如需替换应使用 `override_sources`。
 
 `override_sources` 用于覆盖：
 
@@ -988,6 +989,7 @@ Base `sources` 用于 split merge：
 - 按列表顺序应用，不使用 priority。
 - `override_sources[].export_when` 使用 effective target tags 匹配，未匹配的 override source 视为不存在。该能力用于赛季、热修、地区灰度等临时覆盖；例如 `materials_s1.csv` 只在包含 `s1` tag 的构建中覆盖 Oak 材料售价。
 - CollectionTable override source 必须提供 primary index 所需字段，并且默认只能覆盖已存在的 base row；找不到 base row 应报错，避免把覆盖表误用为追加表。
+- ObjectTable override source 是 patch：只替换 override source 中出现的 exact field path 的 value 与 cell source；未出现的 sibling path 保持原值。默认只能覆盖已存在的 base field path，找不到目标 field path 应报错；未来若需要新增 field path，必须引入显式 upsert 策略。
 
 ## 4.14 Polymorphic Fragment
 
