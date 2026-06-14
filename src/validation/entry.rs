@@ -13,13 +13,10 @@ use rayon::prelude::*;
 
 use super::{
     context::{ExportValidationView, ValidationContext},
-    defaults::{normalize_data_set, normalize_table},
+    defaults::normalize_data_set,
     diagnostic::{ValidationOutcome, ValidationReport, error_issue_from_message},
     registry::{CompiledValidationPlan, ValidatorRegistry},
-    table::{
-        validate_normalized_table, validate_normalized_table_for_target,
-        validate_normalized_table_view_with_report, validate_normalized_table_with_report,
-    },
+    table::{validate_normalized_table_view_with_report, validate_normalized_table_with_report},
 };
 
 pub fn validate_data_set(meta: &LinkedMetaModel<'_>, data_set: &DataSet) -> Result<()> {
@@ -441,16 +438,8 @@ fn report_into_result(report: ValidationReport) -> Result<ValidationReport> {
     report.into_outcome().into_result()
 }
 
-pub fn validate_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
-    let table = normalize_table(meta, table)?;
-    validate_normalized_table(meta, &table)
-}
-
-pub fn validate_table_for_target(
-    meta: &LinkedTableMeta<'_>,
-    target_tags: &TargetTags,
-    table: &DataTable,
-) -> Result<()> {
-    let table = normalize_table(meta, table)?;
-    validate_normalized_table_for_target(meta, target_tags, &table)
+#[cfg(test)]
+pub(crate) fn validate_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
+    let table = super::defaults::normalize_table(meta, table)?;
+    super::table::validate_normalized_table(meta, &table)
 }

@@ -90,6 +90,16 @@ pub(crate) fn linked_fixture() -> MetaModel {
     .expect("fixture meta should parse")
 }
 
+#[test]
+fn maps_language_to_default_module_name() {
+    assert_eq!(default_module_name("rust"), Some("config_forge_generated"));
+    assert_eq!(default_module_name("cpp"), Some("config_forge_generated"));
+    assert_eq!(
+        default_module_name("typescript"),
+        Some("configForgeGenerated")
+    );
+}
+
 pub(crate) fn source_order_fixture() -> MetaModel {
     MetaModel::from_toml_str(
         r#"

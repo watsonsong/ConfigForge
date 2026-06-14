@@ -19,7 +19,7 @@ use super::{
 
 pub const FORMAT: &str = "json";
 
-pub struct JsonDataExporter;
+pub(crate) struct JsonDataExporter;
 
 impl RuntimeTableFormat for JsonDataExporter {
     fn name(&self) -> &'static str {

@@ -29,7 +29,7 @@ use render::{field_bindings, render_root, render_table_file, row_helper_names};
 
 pub const FORMAT: &str = "lua_table";
 
-pub struct LuaTableExporter;
+pub(crate) struct LuaTableExporter;
 
 impl AggregateDataExporter for LuaTableExporter {
     fn name(&self) -> &'static str {

@@ -904,6 +904,59 @@ fn struct_expanded_value_exports_defaults_and_omits_empty_optional_occurrence() 
 }
 
 #[test]
+fn collection_table_payload_omits_non_runtime_fields_and_full_meta() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+                [[tables]]
+                name = "items"
+                source = "items.csv"
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.fields]]
+                name = "debug_note"
+                type = "string"
+                export_when = { any = ["debug"] }
+
+                [[tables.fields]]
+                name = "validator_flag"
+                type = "bool"
+                export_when = { any = ["validator"] }
+
+                [[tables.fields]]
+                name = "internal_value"
+                type = "string"
+                export = false
+            "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table_meta = linked.table("items").expect("linked table");
+    let table = DataTable::new(
+        "items",
+        vec![BTreeMap::from([
+            ("id".to_owned(), "1".to_owned()),
+            ("debug_note".to_owned(), "debug".to_owned()),
+            ("validator_flag".to_owned(), "true".to_owned()),
+            ("internal_value".to_owned(), "secret".to_owned()),
+        ])],
+    );
+
+    let payload = build_exported_table_payload(table_meta, &table, &TargetTags::empty())
+        .expect("payload should build");
+    let value = serde_json::to_value(payload).expect("payload should serialize");
+
+    assert_eq!(value["meta"]["name"], "items");
+    assert!(value["meta"].get("fields").is_none());
+    assert_eq!(value["rows"][0]["id"], "1");
+    assert!(value["rows"][0].get("debug_note").is_none());
+    assert!(value["rows"][0].get("validator_flag").is_none());
+    assert!(value["rows"][0].get("internal_value").is_none());
+}
+
+#[test]
 fn object_table_exports_single_object_and_filters_fields() {
     let meta = MetaModel::from_toml_str(
         r#"

@@ -13,9 +13,7 @@ mod report;
 mod struct_value;
 mod table;
 
-pub use context::{
-    ExportTableView, ExportValidationView, ValidationContext, VisibleRow, visible_row_for,
-};
+pub use context::{ExportTableView, ExportValidationView, ValidationContext, VisibleRow};
 pub use defaults::{
     apply_field_defaults, normalize_data_set, normalize_data_set_with_pool, normalize_table,
 };
@@ -24,6 +22,8 @@ pub use diagnostic::ValidationOutcome;
 pub use diagnostic::{ValidationIssue, ValidationIssueLocation, ValidationReport};
 #[allow(unused_imports)]
 pub use entry::validate_normalized_data_set_for_target_with_assets_outcome_and_pool;
+#[cfg(test)]
+pub(crate) use entry::validate_table;
 pub use entry::{
     validate_data_set, validate_data_set_for_target, validate_data_set_for_target_with_report,
     validate_data_set_with_report, validate_normalized_data_set,
@@ -33,7 +33,7 @@ pub use entry::{
     validate_normalized_data_set_for_target_with_report,
     validate_normalized_data_set_for_target_with_report_and_pool,
     validate_normalized_data_set_with_assets_and_report,
-    validate_normalized_data_set_with_report_and_pool, validate_table, validate_table_for_target,
+    validate_normalized_data_set_with_report_and_pool,
 };
 pub use registry::{
     CompiledValidationPlan, CompiledValidator, ValidatorFactory, ValidatorRegistry,
@@ -42,7 +42,6 @@ pub use report::{
     DesignerReportFormat, DesignerReportOptions, DesignerValidationReport,
     ValidationReportExportConfig, render_designer_validation_report,
 };
-pub use table::{validate_normalized_table, validate_normalized_table_for_target};
 
 #[cfg(test)]
 use crate::data::{DataSet, DataTable};

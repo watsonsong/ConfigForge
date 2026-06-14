@@ -23,6 +23,7 @@ use super::RuntimeArtifactPlan;
 pub trait RuntimeTableFormat: Send + Sync {
     fn name(&self) -> &'static str;
 
+    #[allow(dead_code)]
     fn aliases(&self) -> &'static [&'static str] {
         &[]
     }
@@ -69,6 +70,7 @@ pub trait RuntimeTableFormat: Send + Sync {
         stream.write_all_artifact(&bytes)
     }
 
+    #[allow(dead_code)]
     fn matches(&self, format: &str) -> bool {
         self.name() == format || self.aliases().contains(&format)
     }

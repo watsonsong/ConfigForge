@@ -22,7 +22,7 @@ use encoder::BinaryEncoder;
 
 pub const FORMAT: &str = "bin";
 
-pub struct BinaryDataExporter;
+pub(crate) struct BinaryDataExporter;
 
 impl RuntimeTableFormat for BinaryDataExporter {
     fn name(&self) -> &'static str {

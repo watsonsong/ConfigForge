@@ -493,7 +493,8 @@ impl Default for I18nOptions {
     }
 }
 
-pub fn default_module_name(language: &str) -> Option<&'static str> {
+#[cfg(test)]
+pub(crate) fn default_module_name(language: &str) -> Option<&'static str> {
     language_defaults(language).map(|(canonical, _, _)| match canonical {
         "typescript" => "configForgeGenerated",
         "csharp" => "ConfigForge.Generated",

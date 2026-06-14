@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticSeverity, Result,
@@ -19,9 +19,13 @@ use super::struct_value::{
     validate_struct_occurrence_value, validate_supported_field_type, validate_value_type,
     validate_value_type_at_row_number, visible_required_struct_child_count,
 };
-use super::{ExportTableView, fragment_field_key, visible_row_for};
+use super::{ExportTableView, fragment_field_key};
 
-pub fn validate_normalized_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
+#[cfg(test)]
+pub(crate) fn validate_normalized_table(
+    meta: &LinkedTableMeta<'_>,
+    table: &DataTable,
+) -> Result<()> {
     validate_normalized_table_with_report(meta, table).into_result()
 }
 
@@ -112,61 +116,6 @@ pub fn validate_normalized_table_with_report(
         );
     }
 
-    report.sort_by_stable_key();
-    report
-}
-
-pub fn validate_normalized_table_for_target(
-    meta: &LinkedTableMeta<'_>,
-    target_tags: &TargetTags,
-    table: &DataTable,
-) -> Result<()> {
-    validate_normalized_table_for_target_with_report(meta, target_tags, table).into_result()
-}
-
-pub fn validate_normalized_table_for_target_with_report(
-    meta: &LinkedTableMeta<'_>,
-    target_tags: &TargetTags,
-    table: &DataTable,
-) -> ValidationReport {
-    let visible_fields = meta
-        .fields
-        .iter()
-        .filter(|field| field.meta.is_exported_for(target_tags))
-        .map(|field| field.meta.name.as_str())
-        .collect::<BTreeSet<_>>();
-    let visible_rows = table
-        .rows
-        .iter()
-        .enumerate()
-        .filter(|(_, row)| {
-            meta.meta
-                .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
-        })
-        .map(|(row_index, _)| visible_row_for(table, row_index))
-        .collect::<Vec<_>>();
-    let mut report = ValidationReport::new();
-    collect_table_check(
-        &mut report,
-        "table.resolve",
-        "type",
-        DataResolver::resolve_table_rows(
-            meta,
-            table,
-            Some(target_tags),
-            visible_rows.iter().map(|row| row.row_index),
-        )
-        .map(|_| ()),
-        DiagnosticLocation {
-            table: Some(meta.meta.name.clone()),
-            ..DiagnosticLocation::default()
-        },
-    );
-    let table_view = ExportTableView::new(meta, table, visible_fields, visible_rows);
-    report.append(&mut validate_normalized_table_view_with_report(
-        &table_view,
-        Some(target_tags),
-    ));
     report.sort_by_stable_key();
     report
 }

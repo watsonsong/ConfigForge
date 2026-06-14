@@ -19,7 +19,7 @@ use super::{
 
 pub const FORMAT: &str = "messagepack";
 
-pub struct MessagePackDataExporter;
+pub(crate) struct MessagePackDataExporter;
 
 impl RuntimeTableFormat for MessagePackDataExporter {
     fn name(&self) -> &'static str {

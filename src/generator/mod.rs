@@ -30,7 +30,8 @@ pub(crate) use crate::code_artifact::{
     NamingConfig, RuntimeInterfaceMode, build_code_model, ir,
 };
 pub(crate) use artifact_generator::ArtifactGenerator;
-pub use binary::BinaryDataExporter;
+#[cfg(test)]
+pub(crate) use binary::BinaryDataExporter;
 #[cfg(test)]
 pub(crate) use cpp::CppCodeGenerator;
 pub use cpp::CppCodegenOptions;
@@ -45,19 +46,13 @@ pub(crate) use input::{
     GeneratorValidationReportInput, PreparedGeneratorInputs,
 };
 pub use java::JavaCodegenOptions;
-pub use json::JsonDataExporter;
-pub use lua::LuaTableExporter;
-pub use messagepack::MessagePackDataExporter;
 pub(crate) use options::GeneratorOptionParser;
 pub(crate) use registry::GeneratorRegistry;
 pub(crate) use requirements::{GeneratorDescriptor, GeneratorRequirements};
 #[cfg(test)]
 pub(crate) use rust::RustCodeGenerator;
 pub use rust::RustCodegenOptions;
-pub use schema_doc::{
-    SchemaDoc, SchemaDocExportConfig, SchemaDocFormat, SchemaDocOptions,
-    render_schema_doc_index_markdown, render_schema_table_markdown,
-};
+pub use schema_doc::{SchemaDoc, SchemaDocExportConfig, SchemaDocFormat, SchemaDocOptions};
 #[cfg(test)]
 pub(crate) use typescript::TypeScriptCodeGenerator;
 pub use typescript::TypeScriptCodegenOptions;

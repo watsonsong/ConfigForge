@@ -23,7 +23,8 @@ use format::{
 };
 
 pub use format::{SchemaDocExportConfig, SchemaDocFormat};
-pub use markdown::{render_schema_doc_index_markdown, render_schema_table_markdown};
+#[cfg(test)]
+pub(crate) use markdown::{render_schema_doc_index_markdown, render_schema_table_markdown};
 pub use model::{SchemaDoc, SchemaDocOptions};
 
 pub(crate) struct SchemaDocGenerator;

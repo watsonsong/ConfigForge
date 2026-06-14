@@ -147,24 +147,24 @@ ConfigForge 当前主干方向整体正确：
 
 - `refactor(build): route validation report fallback through generator input`
 
-### [ ] Step 5：收窄 public facade 与测试越界依赖
+### [x] Step 5：收窄 public facade 与测试越界依赖
 
 目的：降低 crate public API 面积，避免外部和测试代码依赖内部 toolkit 细节。
 
 实现项：
 
-- [ ] 盘点 `src/lib.rs` public re-export，按 “外部稳定 API / crate 内部 / 测试辅助 / 迁移期兼容” 分类。
-- [ ] 优先收窄 concrete exporter structs、renderer helper、table-level validation helper、toolkit facet 中不需要对外承诺的 re-export。
-- [ ] 将 Build 中直接测试 `code_artifact::default_module_name` 的用例迁到 code artifact 或 language generator 测试。
-- [ ] 将 Build 中直接测试 `data_artifact::build_exported_table_payload` 的用例迁到 data artifact 测试。
-- [ ] 保留或增强 Build production guard，确保 production `src/build/*.rs` 不直接调度 `code_artifact` / `data_artifact` toolkit。
+- [x] 盘点 `src/lib.rs` public re-export，按 “外部稳定 API / crate 内部 / 测试辅助 / 迁移期兼容” 分类。
+- [x] 优先收窄 concrete exporter structs、renderer helper、table-level validation helper、toolkit facet 中不需要对外承诺的 re-export。
+- [x] 将 Build 中直接测试 `code_artifact::default_module_name` 的用例迁到 code artifact 或 language generator 测试。
+- [x] 将 Build 中直接测试 `data_artifact::build_exported_table_payload` 的用例迁到 data artifact 测试。
+- [x] 保留或增强 Build production guard，确保 production `src/build/*.rs` 不直接调度 `code_artifact` / `data_artifact` toolkit。
 
 验证：
 
-- [ ] `cargo test build`
-- [ ] `cargo test code_artifact`
-- [ ] `cargo test data_artifact`
-- [ ] `cargo test`
+- [x] `cargo test build`
+- [x] `cargo test code_artifact`
+- [x] `cargo test data_artifact`
+- [x] `cargo test`
 
 可独立提交建议：
 

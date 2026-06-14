@@ -35,7 +35,7 @@ pub use code_artifact::{
     CaseStyle, CheckedStreamingCodeWriter, CodeArtifactOptions, CodeExportInput, CodeExportProject,
     CodeExportTarget, CodeWriterConfig, CodeWriterLike, CodegenOptions, CodegenTaskConfig,
     I18nFunctionReturn, I18nMode, I18nOptions, IndentStyle, KeywordConflictPolicy, NamingConfig,
-    PartialCodeWriterConfig, PartialNamingConfig, StreamingCodeWriter, default_module_name,
+    PartialCodeWriterConfig, PartialNamingConfig, StreamingCodeWriter,
 };
 pub use data::{
     AsyncSourceReadShell, CsvDataReader, DataLoadPlan, DataLoader, DataProvider, DataRow, DataSet,
@@ -43,20 +43,15 @@ pub use data::{
     RemoteProviderPolicy, RowSourceInfo, SourceProvider, SourceProviderConcurrency,
     SourceProviderResource, SourceReadPlan,
 };
-pub use data_artifact::{
-    ExportedTable, ExportedTablePayload, ExportedValue, RuntimeArtifactPlan, RuntimeTableFormat,
-    TargetDataConfig,
-};
+pub use data_artifact::{ExportedTable, ExportedTablePayload, ExportedValue, RuntimeArtifactPlan};
 pub use diagnostic::{
     ConfigForgeError, Diagnostic, DiagnosticEntry, DiagnosticLocation, DiagnosticReport,
     DiagnosticSeverity, Result,
 };
 pub use generator::{
-    BinaryDataExporter, CSharpCodegenOptions, CppCodegenOptions, CppUnrealCodegenOptions,
-    CppUnrealSupportLevel, JavaCodegenOptions, JsonDataExporter, LuaTableExporter,
-    MessagePackDataExporter, RustCodegenOptions, SchemaDoc, SchemaDocExportConfig, SchemaDocFormat,
-    SchemaDocOptions, TypeScriptCodegenOptions, render_schema_doc_index_markdown,
-    render_schema_table_markdown,
+    CSharpCodegenOptions, CppCodegenOptions, CppUnrealCodegenOptions, CppUnrealSupportLevel,
+    JavaCodegenOptions, RustCodegenOptions, SchemaDoc, SchemaDocExportConfig, SchemaDocFormat,
+    SchemaDocOptions, TypeScriptCodegenOptions,
 };
 pub use meta::{
     EnumMeta, EnumValueMeta, ExportCondition, FieldForeignKeyMeta, FieldMeta,
@@ -83,8 +78,7 @@ pub use validation::{
     validate_normalized_data_set_for_target_with_report,
     validate_normalized_data_set_for_target_with_report_and_pool,
     validate_normalized_data_set_with_assets_and_report,
-    validate_normalized_data_set_with_report_and_pool, validate_normalized_table,
-    validate_normalized_table_for_target, validate_table, validate_table_for_target,
+    validate_normalized_data_set_with_report_and_pool,
 };
 
 pub fn run_cli() -> anyhow::Result<()> {
