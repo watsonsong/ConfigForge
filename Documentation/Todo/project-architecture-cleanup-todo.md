@@ -220,23 +220,23 @@ ConfigForge 当前主干方向整体正确：
 - `refactor(generator): share reader shape planning`
 - `refactor(generator): share relation planning`
 
-### [ ] Step 8：统一 runtime reader 路径与加载策略
+### [x] Step 8：统一 runtime reader 路径与加载策略
 
 目的：让 JSON / MessagePack / binary runtime reader 对 logical path、root escape、file size 等基础行为一致。
 
 实现项：
 
-- [ ] 比较 `runtime/rust/serde_json_reader`、`serde_msgpack_reader`、`binary_reader` 中 `open_reader` / `safe_join` / `check_file_size` 行为。
-- [ ] 抽取 shared runtime loader/path helper 到 `reader_core` 或独立共享模块。
-- [ ] 明确是否允许不逃逸 root 的 `a/../b` logical path；三种 reader 必须一致或文档化差异。
-- [ ] 补充 runtime compliance 覆盖 path traversal、non-escaping parent dir、file size limit。
+- [x] 比较 `runtime/rust/serde_json_reader`、`serde_msgpack_reader`、`binary_reader` 中 `open_reader` / `safe_join` / `check_file_size` 行为。
+- [x] 抽取 shared runtime loader/path helper 到 `reader_core`。
+- [x] 明确允许不逃逸 root 的 `a/../b` logical path，三种 reader 统一通过 `reader_core` 归一化。
+- [x] 补充 runtime compliance 覆盖 path traversal、non-escaping parent dir、file size limit。
 
 验证：
 
-- [ ] `cargo test -p config-forge-runtime-reader-core`
-- [ ] `cargo test runtime_compliance`
-- [ ] `cargo test csharp_java_runtime_compliance`
-- [ ] `cargo test typescript_runtime_compliance`
+- [x] `cargo test -p config-forge-runtime-reader-core`
+- [x] `cargo test runtime_compliance`
+- [x] `cargo test csharp_java_runtime_compliance`
+- [x] `cargo test typescript_runtime_compliance`
 
 可独立提交建议：
 

@@ -1,15 +1,11 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{
-    cell::RefCell,
-    fs,
-    path::{Component, Path, PathBuf},
-    rc::Rc,
-};
+use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 use config_forge_runtime_reader_core::{
     RuntimeDataError, RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult, RuntimeDecodeLimits,
+    read_runtime_file,
 };
 
 pub struct BinaryRuntimeDataReader {
@@ -286,20 +282,9 @@ impl RuntimeDataLoader for FsBinaryRuntimeDataLoader {
     type Reader = BinaryRuntimeDataReader;
 
     fn open(&self, path: &str) -> RuntimeDataResult<Self::Reader> {
-        let full_path = safe_join(&self.root, &with_extension(path, "bin"))?;
-        check_file_size(&full_path, self.limits)?;
-        let bytes = fs::read(&full_path)
-            .map_err(|source| RuntimeDataError::io(full_path.display().to_string(), source))?;
+        let bytes = read_runtime_file(&self.root, path, "bin", self.limits)?;
         BinaryRuntimeDataReader::from_bytes_with_limits(bytes, self.limits)
     }
-}
-
-fn check_file_size(path: &Path, limits: RuntimeDecodeLimits) -> RuntimeDataResult<()> {
-    let metadata = fs::metadata(path)
-        .map_err(|source| RuntimeDataError::io(path.display().to_string(), source))?;
-    let size = usize::try_from(metadata.len())
-        .map_err(|_| RuntimeDataError::decode("runtime file bytes exceed usize"))?;
-    limits.check_file_bytes(size)
 }
 
 fn read_varuint(state: &mut BinaryState) -> RuntimeDataResult<u64> {
@@ -346,46 +331,11 @@ fn validate_optional_bitmap(bitmap: &[u8], optional_slot_count: usize) -> Runtim
     Ok(())
 }
 
-fn safe_join(root: &Path, relative: &str) -> RuntimeDataResult<PathBuf> {
-    let path = Path::new(relative);
-    if path.is_absolute() {
-        return Err(RuntimeDataError::invalid_path(format!(
-            "runtime data path `{relative}` must be relative"
-        )));
-    }
-    let mut result = PathBuf::from(root);
-    for component in path.components() {
-        match component {
-            Component::Normal(part) => result.push(part),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                return Err(RuntimeDataError::invalid_path(format!(
-                    "runtime data path `{relative}` escapes data root"
-                )));
-            }
-            Component::RootDir | Component::Prefix(_) => {
-                return Err(RuntimeDataError::invalid_path(format!(
-                    "runtime data path `{relative}` must be relative"
-                )));
-            }
-        }
-    }
-    Ok(result)
-}
-
-fn with_extension(logical_path: &str, extension: &str) -> String {
-    if Path::new(logical_path).extension().is_some() {
-        logical_path.to_owned()
-    } else {
-        format!("{logical_path}.{extension}")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{RuntimeDataLoader, RuntimeDataReader};
-    use std::{env, process};
+    use std::{env, fs, process};
 
     #[test]
     fn binary_reader_reads_header_records_and_scalars() {
@@ -503,6 +453,11 @@ mod tests {
             .unwrap();
         assert_eq!(reader.schema_revision(), Some(9));
         assert_eq!(reader.read_row_count().unwrap(), 0);
+
+        let reader = FsBinaryRuntimeDataLoader::new(&dir)
+            .open("nested/../items")
+            .unwrap();
+        assert_eq!(reader.schema_revision(), Some(9));
 
         fs::remove_dir_all(&dir).expect("temp runtime data dir should be removed");
     }

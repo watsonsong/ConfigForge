@@ -1,6 +1,11 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use std::{
+    fs,
+    path::{Component, Path, PathBuf},
+};
+
 pub const CONFIG_FORGE_READER_CONTRACT_VERSION: &str = "1.0";
 pub const SUPPORTED_CONFIG_FORGE_READER_CONTRACT: &str = "^1.0";
 
@@ -149,6 +154,70 @@ impl std::fmt::Display for RuntimeDataError {
 
 impl std::error::Error for RuntimeDataError {}
 
+pub fn read_runtime_file(
+    root: &Path,
+    logical_path: &str,
+    default_extension: &str,
+    limits: RuntimeDecodeLimits,
+) -> RuntimeDataResult<Vec<u8>> {
+    let full_path = safe_join_runtime_path(
+        root,
+        &logical_path_with_extension(logical_path, default_extension),
+    )?;
+    check_runtime_file_size(&full_path, limits)?;
+    let bytes = fs::read(&full_path)
+        .map_err(|source| RuntimeDataError::io(full_path.display().to_string(), source))?;
+    limits.check_file_bytes(bytes.len())?;
+    Ok(bytes)
+}
+
+pub fn check_runtime_file_size(path: &Path, limits: RuntimeDecodeLimits) -> RuntimeDataResult<()> {
+    let metadata = fs::metadata(path)
+        .map_err(|source| RuntimeDataError::io(path.display().to_string(), source))?;
+    let size = usize::try_from(metadata.len())
+        .map_err(|_| RuntimeDataError::decode("runtime file bytes exceed usize"))?;
+    limits.check_file_bytes(size)
+}
+
+pub fn safe_join_runtime_path(root: &Path, logical_path: &str) -> RuntimeDataResult<PathBuf> {
+    let path = Path::new(logical_path);
+    if path.is_absolute() {
+        return Err(RuntimeDataError::invalid_path(format!(
+            "runtime data path must be relative: {logical_path}"
+        )));
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return Err(RuntimeDataError::invalid_path(format!(
+                        "runtime data path escapes data root: {logical_path}"
+                    )));
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(RuntimeDataError::invalid_path(format!(
+                    "unsupported runtime data path: {logical_path}"
+                )));
+            }
+        }
+    }
+
+    Ok(root.join(normalized))
+}
+
+pub fn logical_path_with_extension(logical_path: &str, extension: &str) -> String {
+    if Path::new(logical_path).extension().is_some() {
+        logical_path.to_owned()
+    } else {
+        format!("{logical_path}.{extension}")
+    }
+}
+
 impl From<String> for RuntimeDataError {
     fn from(message: String) -> Self {
         Self::decode(message)
@@ -191,7 +260,7 @@ pub trait RuntimeDataLoader {
 mod tests {
     use super::*;
     use serde_json::Value;
-    use std::{cell::RefCell, fs, path::Path, rc::Rc};
+    use std::{cell::RefCell, env, fs, path::Path, process, rc::Rc};
 
     struct LenOnlyReader {
         len: usize,
@@ -292,6 +361,66 @@ mod tests {
             .expect_err("row count should be limited");
         assert!(row_error.message.contains("row count"));
         assert_eq!(reader.read_list_len().expect("list length should pass"), 3);
+    }
+
+    #[test]
+    fn runtime_path_helper_normalizes_without_escaping_root() {
+        let root = Path::new("/runtime/root");
+
+        assert_eq!(
+            safe_join_runtime_path(root, "nested/../items.json").unwrap(),
+            root.join("items.json")
+        );
+        assert!(
+            safe_join_runtime_path(root, "../items.json")
+                .unwrap_err()
+                .message
+                .contains("escapes")
+        );
+        assert!(
+            safe_join_runtime_path(root, "/tmp/items.json")
+                .unwrap_err()
+                .message
+                .contains("relative")
+        );
+    }
+
+    #[test]
+    fn runtime_file_reader_applies_extension_and_size_limit() {
+        let dir = env::temp_dir().join(format!(
+            "config_forge_reader_core_file_test_{}",
+            process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp runtime data dir should be created");
+        fs::write(dir.join("items.json"), b"{}").expect("payload should be written");
+
+        assert_eq!(
+            read_runtime_file(
+                &dir,
+                "nested/../items",
+                "json",
+                RuntimeDecodeLimits::default()
+            )
+            .unwrap(),
+            b"{}"
+        );
+        assert!(
+            read_runtime_file(
+                &dir,
+                "items",
+                "json",
+                RuntimeDecodeLimits {
+                    max_file_bytes: 1,
+                    ..RuntimeDecodeLimits::default()
+                }
+            )
+            .unwrap_err()
+            .message
+            .contains("runtime file bytes")
+        );
+
+        fs::remove_dir_all(&dir).expect("temp runtime data dir should be removed");
     }
 
     #[derive(Debug)]

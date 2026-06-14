@@ -1,18 +1,14 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{
-    cell::RefCell,
-    fs,
-    path::{Component, Path, PathBuf},
-    rc::Rc,
-};
+use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 use serde_json::Value;
 
 pub use config_forge_runtime_reader_core::SUPPORTED_CONFIG_FORGE_READER_CONTRACT;
 use config_forge_runtime_reader_core::{
     RuntimeDataError, RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult, RuntimeDecodeLimits,
+    read_runtime_file,
 };
 
 #[derive(Debug)]
@@ -257,23 +253,11 @@ impl FsJsonRuntimeDataLoader {
     }
 
     pub fn open_reader(&self, path: &str) -> RuntimeDataResult<JsonValueReader> {
-        let full_path = safe_join(&self.data_dir, &with_extension(path, "json"))?;
-        check_file_size(&full_path, self.limits)?;
-        let bytes = fs::read(&full_path)
-            .map_err(|error| RuntimeDataError::io(full_path.display().to_string(), error))?;
-        self.limits.check_file_bytes(bytes.len())?;
+        let bytes = read_runtime_file(&self.data_dir, path, "json", self.limits)?;
         let value = serde_json::from_slice(&bytes)
             .map_err(|error| RuntimeDataError::decode(error.to_string()))?;
         Ok(JsonValueReader::with_limits(value, self.limits))
     }
-}
-
-fn check_file_size(path: &Path, limits: RuntimeDecodeLimits) -> RuntimeDataResult<()> {
-    let metadata = fs::metadata(path)
-        .map_err(|source| RuntimeDataError::io(path.display().to_string(), source))?;
-    let size = usize::try_from(metadata.len())
-        .map_err(|_| RuntimeDataError::decode("runtime file bytes exceed usize"))?;
-    limits.check_file_bytes(size)
 }
 
 impl RuntimeDataLoader for FsJsonRuntimeDataLoader {
@@ -284,49 +268,10 @@ impl RuntimeDataLoader for FsJsonRuntimeDataLoader {
     }
 }
 
-fn safe_join(root: &Path, logical_path: &str) -> RuntimeDataResult<PathBuf> {
-    let path = Path::new(logical_path);
-    if path.is_absolute() {
-        return Err(RuntimeDataError::invalid_path(format!(
-            "runtime data path must be relative: {logical_path}"
-        )));
-    }
-
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Normal(part) => normalized.push(part),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if !normalized.pop() {
-                    return Err(RuntimeDataError::invalid_path(format!(
-                        "runtime data path escapes data root: {logical_path}"
-                    )));
-                }
-            }
-            _ => {
-                return Err(RuntimeDataError::invalid_path(format!(
-                    "unsupported runtime data path: {logical_path}"
-                )));
-            }
-        }
-    }
-
-    Ok(root.join(normalized))
-}
-
-fn with_extension(logical_path: &str, extension: &str) -> String {
-    if Path::new(logical_path).extension().is_some() {
-        logical_path.to_owned()
-    } else {
-        format!("{logical_path}.{extension}")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{env, process};
+    use std::{env, fs, process};
 
     #[test]
     fn fs_json_loader_opens_payload() {
@@ -351,6 +296,11 @@ mod tests {
         reader.exit().unwrap();
         reader.exit().unwrap();
         reader.exit().unwrap();
+
+        let reader = FsJsonRuntimeDataLoader::new(&dir)
+            .open("nested/../items")
+            .unwrap();
+        assert!(reader.enter_field("rows").unwrap());
 
         fs::remove_dir_all(&dir).expect("temp runtime data dir should be removed");
     }
