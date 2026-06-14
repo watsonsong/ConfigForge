@@ -305,11 +305,32 @@ impl Default for ColorFormat {
     }
 }
 
+impl ColorFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::HexRgb => "hex_rgb",
+            Self::HexRgba => "hex_rgba",
+            Self::RgbTuple => "rgb_tuple",
+            Self::RgbaTuple => "rgba_tuple",
+            Self::Object => "object",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ColorChannel {
     Byte,
     Normalized,
+}
+
+impl ColorChannel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Byte => "byte",
+            Self::Normalized => "normalized",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -322,6 +343,15 @@ pub enum ColorSpace {
 impl Default for ColorSpace {
     fn default() -> Self {
         Self::Srgb
+    }
+}
+
+impl ColorSpace {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Srgb => "srgb",
+            Self::Linear => "linear",
+        }
     }
 }
 
@@ -338,6 +368,15 @@ impl Default for ColorAlphaPolicy {
     }
 }
 
+impl ColorAlphaPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::DefaultOpaque => "default_opaque",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VectorFormat {
@@ -350,6 +389,17 @@ pub enum VectorFormat {
 impl Default for VectorFormat {
     fn default() -> Self {
         Self::Tuple
+    }
+}
+
+impl VectorFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Tuple => "tuple",
+            Self::Array => "array",
+            Self::Object => "object",
+            Self::Expanded => "expanded",
+        }
     }
 }
 

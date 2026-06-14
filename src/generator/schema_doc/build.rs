@@ -335,7 +335,47 @@ fn field_type_display(field: &LinkedFieldMeta<'_>) -> String {
             return format!("asset({asset_kind})");
         }
     }
+    if matches!(
+        field.linked_field.primitive_type(),
+        Some(PrimitiveFieldType::Color)
+    ) {
+        return color_type_display(field);
+    }
+    if field
+        .linked_field
+        .primitive_type()
+        .and_then(|primitive| primitive.vector_dimension())
+        .is_some()
+    {
+        return vector_type_display(field, &display);
+    }
     display
+}
+
+fn color_type_display(field: &LinkedFieldMeta<'_>) -> String {
+    let format = field.meta.color_format.unwrap_or_default().as_str();
+    let channel = field
+        .meta
+        .color_channel
+        .map(|channel| channel.as_str())
+        .unwrap_or("unspecified_channel");
+    let color_space = field.meta.color_space.unwrap_or_default().as_str();
+    let alpha = field.meta.color_alpha.unwrap_or_default().as_str();
+    format!("color(format={format}, channel={channel}, space={color_space}, alpha={alpha})")
+}
+
+fn vector_type_display(field: &LinkedFieldMeta<'_>, base: &str) -> String {
+    let mut parts = vec![format!(
+        "format={}",
+        field.meta.vector_format.unwrap_or_default().as_str()
+    )];
+    if let Some(components) = &field.meta.vector_components {
+        parts.push(format!("components={}", components.join("/")));
+    }
+    if let Some(unit) = &field.meta.unit {
+        parts.push(format!("unit={unit}"));
+    }
+    format!("{base}({})", parts.join(", "))
 }
 
 fn linked_field_type_display(field: &LinkedField<'_>) -> String {

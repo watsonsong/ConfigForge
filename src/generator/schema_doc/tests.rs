@@ -133,6 +133,20 @@ fn builds_schema_doc_with_fields_indexes_relations_and_enrichment() {
                 export_when = { any = ["client"] }
 
                 [[tables.fields]]
+                name = "tint"
+                type = "color"
+                color_format = "hex_rgba"
+                color_channel = "byte"
+                color_space = "srgb"
+
+                [[tables.fields]]
+                name = "spawn_position"
+                type = "vector3"
+                vector_format = "tuple"
+                vector_components = ["x", "y", "z"]
+                unit = "meter"
+
+                [[tables.fields]]
                 name = "tags"
                 type = "string"
 
@@ -161,7 +175,7 @@ fn builds_schema_doc_with_fields_indexes_relations_and_enrichment() {
         .iter()
         .find(|table| table.name == "items")
         .unwrap();
-    assert_eq!(items.fields.len(), 5);
+    assert_eq!(items.fields.len(), 7);
     assert_eq!(items.indexes[0].name, "primary");
     assert_eq!(items.relations[0].target, "classes.id");
     assert_eq!(
@@ -169,6 +183,18 @@ fn builds_schema_doc_with_fields_indexes_relations_and_enrichment() {
         Some("extensions .png/.webp, prefix UI_")
     );
     assert_eq!(items.text_fields[0].field, "name");
+    assert!(items.fields.iter().any(|field| {
+        field.path == "tint"
+            && field
+                .type_display
+                .contains("color(format=hex_rgba, channel=byte, space=srgb")
+    }));
+    assert!(items.fields.iter().any(|field| {
+        field.path == "spawn_position"
+            && field
+                .type_display
+                .contains("vector3(format=tuple, components=x/y/z, unit=meter)")
+    }));
     assert!(
         items
             .fields
