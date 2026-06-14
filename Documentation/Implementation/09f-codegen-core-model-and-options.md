@@ -431,16 +431,29 @@ pub enum CodeTypeRef {
     String,
     Text,
     Asset,
+    Color,
+    Vector { dimension: u8, scalar: CodeVectorScalar },
     Enum { name: String },
     Struct { name: String },
 }
+
+pub enum CodeVectorScalar {
+    Float,
+    Int,
+}
 ```
+
+Color / Vector 是 CodeModel 中的一等 builtin value type，不应在 IR 层降级为 generated named struct，也不应透传 Unity / Unreal / System.Numerics 等 engine-specific 类型名：
+
+- `CodeTypeRef::Color` 表达 canonical RGBA 逻辑值；channel range、color space 和 alpha policy 来自字段 option，可通过 `CodeField.value_options` 或等价结构保留给 schema docs、runtime decode 和 constructor mapping。
+- `CodeTypeRef::Vector { dimension, scalar }` 表达 `vector2/3/4` 与 `vector*_int`；`dimension` 必须为 2、3、4，`scalar` 区分 float / int。字段级 component names 和 unit 是 field options，不改变类型身份。
+- list 元素第一阶段仍建议只支持现有 scalar/enum 范围；若后续允许 `vector3[]` 或 `color[]`，应显式扩展 list element type，而不是把 builtin value type 编码成 string。
 
 目标语言生成器只负责：
 
 - 根据 `CodegenOptions.naming` 把 Meta name 转换成目标语言标识符；
 - 根据 `KeywordConflictPolicy` 处理关键字冲突；
-- 把 `CodeTypeRef` 映射为语言类型；
+- 把 `CodeTypeRef` 映射为语言类型；Color / Vector 通过语言 profile 与 `type_mappings` 决定 public API 类型和 decode 构造表达式，不能由 Meta 名称直接决定；
 - 渲染语法；
 - 渲染 loader / repository / index API；
 - 依据 table access policy 决定是否渲染 public row sequence API；`preserve_source_order = true` 才生成 row count / row_at / rows，indexed table 默认只生成 lookup；
@@ -458,7 +471,33 @@ Foreign key 对 CodeModel 的要求：
 - `CodeRelationCardinality::One` 表示非 list、非空 FK；`OptionalOne` 表示允许全空的 FK；`Many` 表示当前已支持的单 list source field FK，getter 返回与 source list 顺序一致的 target rows。若 list FK 也允许空 list，空 list 返回空集合，不等价于 optional one 的 empty relation。
 - `CodeForeignKey.fields` 必须按 Meta 中声明的 source field 顺序保存，复合 key helper 按此顺序组装 key；目标 index fields 的顺序由 `target_index` 对应 `CodeIndex.fields` 决定，构建索引和 lookup 必须使用同一 key order。
 
-### 9.5.1 Foreign Key Relation CodeModel
+### 9.5.1 Builtin Value Type Mapping
+
+Codegen core 增加语言无关 type mapping 输入，供具体 backend 使用：
+
+```rust
+pub struct BuiltinTypeMapping {
+    pub type_name: String,
+    pub constructor: BuiltinConstructorPolicy,
+    pub imports: Vec<String>,
+}
+
+pub enum BuiltinConstructorPolicy {
+    Positional,
+    NamedFactory { function: String },
+    GeneratedValueType,
+}
+```
+
+设计约束：
+
+1. `type_name` 是目标语言源代码中的类型名，不参与 Meta link，也不影响 runtime data schema。
+2. backend 可以提供 profile 默认值，例如 C# `unity` profile 把 `vector3` 映射为 `UnityEngine.Vector3`，`dotnet` profile 把 `vector3` 映射为 `System.Numerics.Vector3`。
+3. 若 mapping 指向外部类型，backend 必须知道如何从 canonical components 构造它；未知外部类型不得猜测构造函数，必须要求显式 factory/constructor policy 或生成 ConfigForge 自带 value type。
+4. schema docs 和 validation report 应展示 Meta builtin type 与 source format；可附带当前 export task 的 generated type mapping，但不能把 mapping 写回 Meta。
+5. symbol collision 检查需要覆盖 generated fallback value type 名称，例如 `ConfigForgeColor`、`ConfigForgeVector4Int`，避免和业务 Meta 类型或 generated table/row 名冲突。
+
+### 9.5.2 Foreign Key Relation CodeModel
 
 `linked_field` 功能要求 CodeModel 不只知道“有一个 FK”，还要知道生成 helper 与 cache 的最小必要信息。IR 构建步骤：
 

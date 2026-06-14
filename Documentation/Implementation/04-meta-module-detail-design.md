@@ -379,6 +379,56 @@ pub struct FieldMeta {
     pub field_number: Option<u32>,
     pub unique: bool,
     pub foreign_key: Option<FieldForeignKeyMeta>,
+    pub color: Option<ColorFieldOptions>,
+    pub vector: Option<VectorFieldOptions>,
+}
+
+pub struct ColorFieldOptions {
+    pub format: ColorFormat,
+    pub channel: ColorChannel,
+    pub color_space: ColorSpace,
+    pub alpha: ColorAlphaPolicy,
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum ColorFormat {
+    HexRgb,
+    HexRgba,
+    RgbTuple,
+    RgbaTuple,
+    Object,
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum ColorChannel {
+    Byte,
+    Normalized,
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum ColorSpace {
+    Srgb,
+    Linear,
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum ColorAlphaPolicy {
+    Required,
+    DefaultOpaque,
+}
+
+pub struct VectorFieldOptions {
+    pub format: VectorFormat,
+    pub components: Vec<String>,
+    pub unit: Option<String>,
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum VectorFormat {
+    Tuple,
+    Array,
+    Object,
+    Expanded,
 }
 ```
 
@@ -393,6 +443,10 @@ pub struct FieldMeta {
 - `tool_only`、`filter_field`、`validator_only` 已由 target tags 机制替代；当前仅保留为 `Option<bool>` 以便检测用户仍在使用并输出 `UnsupportedFeature` 诊断，不再参与导出判断。
 - `unique` 是内置便捷字段；当前基础 validation 会直接校验 single-field unique，codegen 也会生成对应 single-field unique index。复合唯一性建议优先通过 `IndexMeta { unique = true }` 表达；未来也可迁移为 implicit validator。
 - `foreign_key` 是字段级 FK 语法糖，只适用于单 source field 引用目标表单字段 unique / primary index；加载后会在 link 阶段转换为与 table-level `ForeignKeyMeta` 等价的 linked relation。字段级 FK 可以声明 `linked_field` 以驱动 codegen 生成关联 helper。
+- `color` / `vector` 是 builtin value type 的 typed option 容器。TOML 用户侧仍采用摊平字段（例如 `color_format = "hex_rgba"`、`vector_format = "tuple"`），Meta loader 在反序列化 / normalize 阶段归并为 typed option；只允许对应 `field_type = "color"` 或 `field_type` 属于 `vector2/vector3/vector4/vector*_int` 时出现。
+- Color option 默认：`format = HexRgba`、`color_space = Srgb`、`alpha = Required`；`channel` 必须由用户显式声明为 `Byte` 或 `Normalized`。`ColorChannel` 不支持 `Auto`，hex 格式固定按 byte 解析；tuple / object 必须根据 `channel` 判定范围。
+- Vector option 默认：`format = Tuple`、`components` 由类型维度派生（2D: `x/y`，3D: `x/y/z`，4D: `x/y/z/w`），`unit = None`。`components.len()` 必须与 vector 维度一致且组件名在同一字段内唯一。
+- Link 阶段应把 builtin value type 解析为 `LinkedFieldType::BuiltinValue(BuiltinValueType)` 或等价结构，不允许用户定义同名 enum/struct 覆盖 builtin 类型名。字段 option 的结构合法性在 Meta validate 阶段诊断；source cell 的数值合法性在 DataResolver / Validation 阶段诊断。
 
 ### 4.5.8 `ValidatorMeta`
 

@@ -306,13 +306,43 @@ Typed value 解析规则集中在 `src/data/typed_value.rs`：
 
 - `parse_scalar_field_value()` / `parse_scalar_for_type()` 负责 primitive 与 enum 的字符串单元格到 `ScalarValue` 转换；bool、finite float、enum value membership 等规则只在这里定义。
 - `parse_list_cell_value()` 负责把 list JSON cell 解析为 JSON array 后委托 `parse_list_json_value()`；后者逐元素复用 scalar 转换规则，并在错误发生时按需生成 `field[index]` 形式的诊断路径。成功解析后的 scalar list element 使用 `ArrayElementValue` 保存 `DataValue + raw_value`，不再为每个元素常驻完整 `ResolvedValue`、source trace 和 duplicated field path string。
+- Planned：`parse_color_field_value()` 负责 `color` builtin value 的 source cell 解析，输入为 `ColorFieldOptions` 和 raw cell。hex 格式解析 `#RRGGBB` / `#RRGGBBAA`；tuple 格式接受逗号分隔或 JSON array；object 格式接受 JSON object。解析后生成 canonical RGBA 值，并保留 source channel、color space 和 raw string 以便诊断与文档输出。`color_channel = "byte"` 时数值范围为 `0..255`；`normalized` 时范围为 `0.0..1.0`；`alpha = "default_opaque"` 时可补默认 alpha，否则缺失 alpha 报错。
+- Planned：`parse_vector_field_value()` 负责 `vector2` / `vector3` / `vector4` / `vector*_int`。tuple / array / object 由单 cell 解析；`vector_format = "expanded"` 由 resolver 在 source schema 阶段把 `field.x`、`field.y`、`field.z` 等列或 ObjectTable key 行收集成一个逻辑值，再委托 typed helper 做维度、finite float、整数性和缺失组件检查。
 - `DataResolver`、struct value validation 和 list foreign-key validation 共用这些 helper。默认值是否生效、空值是否跳过由调用方基于字段语义决定；一旦需要解析 typed scalar/list element，必须进入该共享路径。
+
+Color / Vector 的 `DataValue` 规划形态：
+
+```rust
+pub enum DataValue {
+    Scalar(ScalarValue),
+    List(Vec<ArrayElementValue>),
+    Struct(BTreeMap<String, ResolvedValue>),
+    Color(ColorValue),
+    Vector(VectorValue),
+}
+
+pub struct ColorValue {
+    pub r: f64,
+    pub g: f64,
+    pub b: f64,
+    pub a: f64,
+    pub channel: ColorChannel,
+    pub color_space: ColorSpace,
+}
+
+pub enum VectorValue {
+    Float { components: Vec<f64> },
+    Int { components: Vec<i64> },
+}
+```
+
+Runtime data exporter 的 canonical 输出策略应由 data artifact toolkit 统一完成，而不是各 exporter 重新解析 raw cell：JSON / MessagePack 第一阶段建议输出 object shape（Color：`r/g/b/a`；Vector：按 components 输出 `x/y/z/w` 或用户指定 component 名），`bin` 使用 schema-aware positional layout。是否把 Color byte 通道导出为 normalized float 是 export policy；解析层只保证 raw source 合法并保存 canonical numeric value。
 
 当前实现状态与差距：
 
 - 已实现 `ResolvedDataSet` / `DataResolver` 基础类型、shared typed scalar parse、shared list JSON cell parse、struct JSON cell / expanded value 统一解析、source schema 校验、target-aware row resolve、active fragment resolve、runtime export 主路径消费 resolved value。
 - 过渡中：Validation 仍保留 raw `DataRow` 上的 required/type/enum/index/FK 主流程，但 type/enum/list element/FK list element conversion 已复用 data typed value helper；后续应迁移到 `validate_resolved_*` 让更多规则直接消费 `ResolvedValue/DataValue`。
-- 未实现：typed fragment payload（例如 `attributes` fragment 直接复用 `AttributeSet`）、field group/base table schema 复用、asset existence/text POT special export、ObjectTable key-level source trace、expanded array/map path。
+- 未实现：Color / Vector builtin value parse and export、typed fragment payload（例如 `attributes` fragment 直接复用 `AttributeSet`）、field group/base table schema 复用、asset existence/text POT special export、ObjectTable key-level source trace、expanded array/map path。
 
 注意：是否在 resolver 阶段把 scalar parse 成 `Int/Float/Bool` 需要结合现有 runtime scalar string contract 决定。短期可以先在 resolver 内保留 typed parse 结果与 raw string，runtime export 仍输出 string；长期如果 runtime artifact 改为 typed scalar，可直接复用 `ScalarValue`。
 

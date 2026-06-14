@@ -544,21 +544,99 @@ Meta 导出机制使用 `export`、`export_when` 与 `row_export`；以下字段
 
 | 类型 | 含义 |
 | --- | --- |
-| `color_rgb` / `color_rgba` | 颜色。 |
+| `color` | 颜色值。逻辑通道固定为 RGBA；是否允许省略 alpha、source channel 范围与默认 alpha 由字段选项决定。 |
 | `vector2` / `vector3` / `vector4` | 浮点向量。 |
-| `vector2_int` / `vector3_int` | 整数向量。 |
+| `vector2_int` / `vector3_int` / `vector4_int` | 整数向量。 |
 | `rotation` | Euler 旋转。 |
 | `datetime` / `date` / `time` / `duration` | 时间相关值。 |
 | `int_range` / `float_range` | 范围。 |
 | `rect` / `bounds3` | 区域和包围盒。 |
 
+> 当前实现状态：Planned / Not implemented。当前代码尚未支持 `color`、`vector2`、`vector3`、`vector4` 及其 int 变体；它们在本文中作为下一阶段 builtin value type 设计。当前项目若需要这类值，只能临时用 named struct / string 建模，但不应把 `Color`、`Vector3` 等引擎类型名直接写入 Meta 作为长期 schema。
+
 确认规则：
 
 - `vector3` 等数学类型优先作为 builtin value type。
 - 项目不应使用 named struct 重新定义同名 builtin 类型。
-- `color_channel` 必须显式为 `byte` 或 `normalized`，禁止 `auto`。
+- `color_channel` 必须显式为 `byte` 或 `normalized`，禁止 `auto`。`byte` 表示 source 中数值通道范围为 `0..255`；`normalized` 表示 source 中数值通道范围为 `0.0..1.0`。
 - `rotation_unit` 推荐默认 `degrees`，可字段级或项目级配置。
 - local datetime 如果要表示 instant，必须声明 timezone policy。
+
+### 4.9.1 Color 原始数据表达
+
+`color` 是语言和引擎无关的逻辑值，canonical 语义为 RGBA 四通道。Meta 不保存 `UnityEngine.Color`、`System.Drawing.Color`、`FLinearColor` 等目标类型名；这些属于 codegen target type mapping。
+
+字段配置示例：
+
+```toml
+[[tables.fields]]
+name = "tint"
+type = "color"
+required = false
+color_format = "hex_rgba"
+color_channel = "byte"
+default = "#FFFFFFFF"
+desc = "UI 展示叠色。"
+```
+
+建议字段级选项：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `color_format` | `hex_rgba` | source cell 的颜色写法。可选 `hex_rgb`、`hex_rgba`、`rgb_tuple`、`rgba_tuple`、`object`。 |
+| `color_channel` | 必填 | `rgb_tuple` / `rgba_tuple` / `object` 中数值通道的范围，必须为 `byte` 或 `normalized`。hex 写法天然是 byte，但仍建议显式声明以避免团队误读。 |
+| `color_space` | `srgb` | 颜色空间。可选 `srgb` / `linear`。导出与生成代码是否转换由 target policy 决定；默认只记录语义，不隐式转换。 |
+| `alpha` | `required` | 是否允许省略 alpha。可选 `required` / `default_opaque`。`hex_rgb` / `rgb_tuple` 通常配合 `default_opaque`。 |
+
+source cell 推荐写法：
+
+| `color_format` | 示例 | 说明 |
+| --- | --- | --- |
+| `hex_rgb` | `#FFAA00` | RGB hex，alpha 由 `alpha = "default_opaque"` 补为 1。 |
+| `hex_rgba` | `#FFAA00CC` | RGBA hex。 |
+| `rgb_tuple` | `255,170,0` 或 `[255,170,0]` | tuple / JSON array；通道范围由 `color_channel` 决定。 |
+| `rgba_tuple` | `255,170,0,204` 或 `[255,170,0,204]` | tuple / JSON array；通道范围由 `color_channel` 决定。 |
+| `object` | `{ "r": 1.0, "g": 0.5, "b": 0.0, "a": 1.0 }` | JSON object，适合 ObjectTable 或需要可读字段名的 CSV cell。 |
+
+Runtime data canonical 建议：JSON / MessagePack 使用 object shape：`{"r":...,"g":...,"b":...,"a":...}`，数值按 `color_channel` 和 target export option 决定是否输出 normalized；`bin` 使用 schema-aware packed channel layout。生成代码读取 canonical RGBA 后再映射为目标语言 / 引擎类型。
+
+### 4.9.2 Vector 原始数据表达
+
+`vector2` / `vector3` / `vector4` 表示浮点向量；`vector*_int` 表示整数向量。字段可声明 source 写法和维度别名，但 canonical 维度由类型决定。
+
+```toml
+[[tables.fields]]
+name = "spawn_position"
+type = "vector3"
+required = true
+vector_format = "tuple"
+vector_components = ["x", "y", "z"]
+desc = "场景出生点，单位米。"
+```
+
+建议字段级选项：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `vector_format` | `tuple` | source cell 写法。可选 `tuple`、`array`、`object`、`expanded`。 |
+| `vector_components` | 类型默认 | 组件名，`vector2` 默认 `x/y`，`vector3` 默认 `x/y/z`，`vector4` 默认 `x/y/z/w`。颜色不要复用 vector 表达。 |
+| `unit` | 无 | 可选业务单位说明，例如 `meter`、`centimeter`、`degree`。只进入 schema/doc，不隐式转换，除非 target policy 显式要求。 |
+
+source cell 推荐写法：
+
+| `vector_format` | CollectionTable 示例 | ObjectTable 示例 | 说明 |
+| --- | --- | --- | --- |
+| `tuple` | `1.0,2.0,3.0` | `spawn_position,出生点,"1.0,2.0,3.0"` | 人读最短写法，按维度顺序解析。 |
+| `array` | `[1.0,2.0,3.0]` | `spawn_position,出生点,"[1.0,2.0,3.0]"` | JSON array，适合工具自动生成。 |
+| `object` | `{"x":1.0,"y":2.0,"z":3.0}` | `spawn_position,出生点,"{...}"` | JSON object，字段名清晰。 |
+| `expanded` | 列：`spawn_position.x` / `.y` / `.z` | 行：`spawn_position.x` / `.y` / `.z` | 与 struct expanded value 相同方向，适合表格编辑。 |
+
+解析规则：
+
+- 维度数量必须与类型匹配；`vector3` 不接受 2 或 4 个组件。
+- 浮点向量要求 finite float；整数向量要求整数并拒绝小数。
+- 空值语义遵守普通 optional/default 规则；部分组件缺失视为该字段值不完整，除非未来显式支持 component-level default。
+- `expanded` 与 parent cell 不能混用，混用错误沿用 struct expanded value 的诊断口径。
 
 ### Enum
 

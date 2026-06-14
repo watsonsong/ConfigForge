@@ -22,7 +22,7 @@ C# backend 已实现为独立 codegen type：`csharp`（alias：`cs`），内部
 ### 目标
 
 - 复用现有 `CodeModel`、target tags、runtime data file 逻辑 table name 和 shared `ArtifactSink` 写入路径。
-- 默认生成 idiomatic C# 代码，面向 .NET 8 / .NET Standard 2.1 兼容语法子集；如需 Unity 可后续增加 profile option。
+- 默认生成 idiomatic C# 代码，面向 .NET 8 / .NET Standard 2.1 兼容语法子集；通过 `profile = "dotnet" | "unity"` 控制 builtin value type 的默认映射和 Unity/AOT 友好代码形态。
 - 不把 JSON / MessagePack / binary 解码库写死进生成代码；生成代码只依赖 `IConfigForgeRuntimeDataReader` / `IConfigForgeRuntimeDataLoader`。
 - 通过只读 repository API 暴露配置，避免生成代码在加载后被业务误改导致 index / relation cache 不一致。
 - 与其他 backend 保持相同语义：validation 在导出前完成，运行时 helper 只做 data/code mismatch 的防御性错误处理。
@@ -47,6 +47,9 @@ C# backend 已实现为独立 codegen type：`csharp`（alias：`cs`），内部
 | `lazy_class_name` | `LazyGameData` | lazy facade 名称。 |
 | `emit_partial` | `true` | 顶层 row/table/facade 是否生成 `partial`，便于业务扩展。 |
 | `file_name` | 通用 file name | 输出文件名，默认 `generated.cs`。 |
+| `profile` | `dotnet` | C# 目标运行环境。`dotnet` 不依赖 Unity；`unity` 允许内置映射到 `UnityEngine.Color/Vector*` 并生成 Unity 兼容构造表达式。 |
+| `type_mappings` | profile 默认 | builtin value type 到 C# 类型名的覆盖表，key 包括 `color`、`vector2`、`vector3`、`vector4`、`vector2_int`、`vector3_int`、`vector4_int`。 |
+| `using` | `[]` | 额外 using namespace；当 `type_mappings` 使用 fully-qualified type name 时可省略。 |
 
 无效 namespace、非法 identifier、非法 access modifier 应在 `CSharpCodeGenerator.generate_to_sink()` 前通过 validation diagnostic 报错。
 
@@ -67,6 +70,9 @@ C# backend 已实现为独立 codegen type：`csharp`（alias：`cs`），内部
 | `float` | `double` |
 | `bool` | `bool` |
 | `string` / `text` / `asset` | `string` |
+| `color` | profile / `type_mappings` 指定类型；默认见下文 |
+| `vector2` / `vector3` / `vector4` | profile / `type_mappings` 指定类型；默认见下文 |
+| `vector2_int` / `vector3_int` / `vector4_int` | profile / `type_mappings` 指定类型；默认见下文 |
 | enum | generated enum type |
 | struct | generated value class / readonly record struct（第一阶段推荐 class 以避免 nested optional/copy 复杂性） |
 | `list<T>` | `T[]` |
@@ -89,6 +95,49 @@ public sealed partial class ItemsRow
 - 对 Unity / AOT 场景比 record 的 compiler-generated 语义更可控。
 - optional reference type 可自然表达为 `string?`。
 - relation cache 可作为 private mutable field 放在 row object 内，不影响 public data shape。
+
+### Builtin value type mapping
+
+C# backend 规划支持 `profile` + `type_mappings`：
+
+```toml
+[[targets.exports]]
+type = "csharp"
+output = "Generated/Code/Unity"
+namespace = "ReferenceGame.Config"
+
+[targets.exports.csharp]
+profile = "unity"
+using = ["UnityEngine"]
+
+[targets.exports.csharp.type_mappings]
+color = "Color"
+vector2 = "Vector2"
+vector3 = "Vector3"
+vector4 = "Vector4"
+vector2_int = "Vector2Int"
+vector3_int = "Vector3Int"
+```
+
+默认映射：
+
+| Builtin type | `dotnet` profile | `unity` profile | 构造表达式 |
+| --- | --- | --- | --- |
+| `color` | generated `ConfigForgeColor` | `UnityEngine.Color` | `new T(r, g, b, a)`；Unity Color 需要 normalized float。 |
+| `vector2` | `System.Numerics.Vector2` | `UnityEngine.Vector2` | `new T(x, y)` |
+| `vector3` | `System.Numerics.Vector3` | `UnityEngine.Vector3` | `new T(x, y, z)` |
+| `vector4` | `System.Numerics.Vector4` | `UnityEngine.Vector4` | `new T(x, y, z, w)` |
+| `vector2_int` | generated `ConfigForgeVector2Int` | `UnityEngine.Vector2Int` | `new T(x, y)` |
+| `vector3_int` | generated `ConfigForgeVector3Int` | `UnityEngine.Vector3Int` | `new T(x, y, z)` |
+| `vector4_int` | generated `ConfigForgeVector4Int` | generated `ConfigForgeVector4Int` | `new T(x, y, z, w)` |
+
+解析与生成规则：
+
+- Generated parser 从 `IConfigForgeRuntimeDataReader` 读取 canonical Color / Vector components，再调用 mapping 对应构造表达式。reader contract 需要扩展 `ReadColor` / `ReadVector*`，或生成器以 field enter + primitive read 组合读取 object/positional layout；第一阶段推荐在 generated parser 内组合 primitive read，避免 reader interface 为每种 builtin value type 膨胀。
+- `color_channel = "byte"` 的 source 值在 data resolve 阶段可保持 byte canonical，但生成 Unity `Color` 时必须输出/读取 normalized `float`；若 runtime exporter 仍输出 byte，则 C# decode 构造表达式负责除以 `255.0f`。该策略必须由 CodeModel field option 或 runtime schema 明确传入，不能由类型名猜测。
+- 外部自定义类型只在已知 positional constructor 兼容时允许直接配置。若类型需要 `FromRgba`、`Create` 等工厂，后续扩展 `type_mappings.<type>.factory`；MVP 不猜测未知 factory。
+- fallback generated value type 使用 `readonly partial struct`，字段为 get-only property；这些类型必须进入 symbol collision 检查，并受 `access_modifier` 约束。
+- Unity profile 不生成 `ScriptableObject`、`MonoBehaviour`、`JsonUtility` 绑定；profile 只影响类型映射、using、nullable/AOT 友好实现细节。
 
 ## Runtime reader contract
 
@@ -293,6 +342,7 @@ src/generator/csharp/
 - 默认生成 `.cs` 文件名和 file header。
 - enum / struct / row / ObjectTable / CollectionTable snapshot。
 - 类型映射覆盖 primitive、list、optional、enum、struct、text、asset。
+- Builtin value type mapping 覆盖 `color`、`vector2/3/4`、`vector*_int`，包括 `dotnet` fallback type、`unity` `UnityEngine.*` 构造表达式、用户覆盖类型名和 using。
 - unique / non-unique / ordered / compound index source 断言。
 - relation helper、`IGameDataAccess`、`LinkAll`、`LazyGameData` source 断言。
 - `text` generic / global_function helper source 断言。

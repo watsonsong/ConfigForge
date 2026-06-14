@@ -570,6 +570,179 @@ Lua table 必须读取 `project.input` 中的数据，基于 Meta 与 target-awa
 
 当前不引入通用配置 schema version 或自动兼容机制。表、字段、enum、struct 等定义依赖稳定字符串 `name` 作为长期身份；如果未来启用 Protobuf，则通过显式 `field_number` 和对应 schema evolution 策略处理二进制格式兼容。
 
+### 3.5.3 Builtin value type 与引擎类型映射（规划）
+
+`color`、`vector2`、`vector3`、`vector4` 及其 int 变体是 Meta 层的语言无关 builtin value type。Project Config 不改变它们的 schema 身份，而是在 codegen export task 上声明目标语言 / 引擎 profile 和类型映射。这样同一份 Meta 与 Data 可以同时生成通用 .NET、Unity、C++、Unreal 或自研引擎代码，而无需在业务 Meta 中写入 `UnityEngine.Vector3`、`System.Numerics.Vector3` 等平台类型名。
+
+标准游戏工程推荐同时保留 runtime data 与多个代码 target，例如客户端 Unity、服务端 .NET 工具和设计文档共用同一份数据：
+
+```toml
+[project]
+name = "ReferenceGame"
+input = "Data"
+
+[[targets]]
+name = "client_unity"
+tags = ["client", "shipping", "unity"]
+
+[[targets.exports]]
+name = "msgpack"
+type = "messagepack"
+output = "Generated/Data/Client"
+
+[[targets.exports]]
+name = "unity_csharp"
+type = "csharp"
+output = "Generated/Code/Unity"
+namespace = "ReferenceGame.Config"
+
+[targets.exports.csharp]
+profile = "unity"
+nullable = true
+
+[targets.exports.csharp.type_mappings]
+color = "UnityEngine.Color"
+vector2 = "UnityEngine.Vector2"
+vector3 = "UnityEngine.Vector3"
+vector4 = "UnityEngine.Vector4"
+vector2_int = "UnityEngine.Vector2Int"
+vector3_int = "UnityEngine.Vector3Int"
+
+[[targets]]
+name = "server_dotnet"
+tags = ["server", "shipping", "dotnet"]
+
+[[targets.exports]]
+name = "json"
+type = "json"
+output = "Generated/Data/Server"
+
+[[targets.exports]]
+name = "dotnet_csharp"
+type = "csharp"
+output = "Generated/Code/DotNet"
+namespace = "ReferenceGame.Config"
+
+[targets.exports.csharp]
+profile = "dotnet"
+
+[targets.exports.csharp.type_mappings]
+color = "ReferenceGame.Math.RgbaColor"
+vector2 = "System.Numerics.Vector2"
+vector3 = "System.Numerics.Vector3"
+vector4 = "System.Numerics.Vector4"
+
+[[targets]]
+name = "schema_docs"
+tags = ["client", "server", "docs"]
+
+[[targets.exports]]
+name = "schema"
+type = "schema_doc"
+output = "Generated/Docs/Schema"
+```
+
+C# backend 的规划字段：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `[targets.exports.csharp].profile` | `dotnet` | C# runtime profile。`dotnet` 只假设 BCL / `System.Numerics` 可用；`unity` 允许映射到 `UnityEngine.*` 类型并生成 Unity/AOT 友好的构造代码。 |
+| `[targets.exports.csharp.type_mappings]` | profile 默认 | builtin value type 到目标 C# 类型名的覆盖表。值必须是目标语言原样类型名，可含 namespace，例如 `UnityEngine.Vector3`。 |
+| `[targets.exports.csharp.using]` | `[]` | 可选 using 列表。若类型映射使用 fully qualified name，可不配置；若配置短类型名则应补充 using。 |
+
+默认映射建议：
+
+| Builtin type | `profile = "dotnet"` | `profile = "unity"` |
+| --- | --- | --- |
+| `color` | generated `ConfigForgeColor` 或用户显式映射 | `UnityEngine.Color` |
+| `vector2` | `System.Numerics.Vector2` | `UnityEngine.Vector2` |
+| `vector3` | `System.Numerics.Vector3` | `UnityEngine.Vector3` |
+| `vector4` | `System.Numerics.Vector4` | `UnityEngine.Vector4` |
+| `vector2_int` | generated `ConfigForgeVector2Int` 或用户显式映射 | `UnityEngine.Vector2Int` |
+| `vector3_int` | generated `ConfigForgeVector3Int` 或用户显式映射 | `UnityEngine.Vector3Int` |
+| `vector4_int` | generated `ConfigForgeVector4Int` 或用户显式映射 | generated `ConfigForgeVector4Int` 或用户显式映射 |
+
+type mapping 只影响生成代码的 public API 与 decode 构造表达式；runtime data canonical shape 仍由 Meta 字段类型和数据 exporter 决定。若用户映射到外部类型，backend 必须知道如何构造该类型；内置 profile 只内置常见构造规则（例如 `new Vector3(x, y, z)`、`new Color(r, g, b, a)`）。无法识别构造规则的外部类型必须额外声明 factory/constructor policy，或退回 generated value struct/class。
+
+引入 Color/Vector 字段的标准 Meta 片段示例：
+
+```toml
+[[tables]]
+name = "ui_themes"
+kind = "object"
+source = "ui_themes.csv"
+desc = "客户端 UI 主题色与动效参数。"
+
+[[tables.fields]]
+name = "primary_color"
+type = "color"
+color_format = "hex_rgba"
+color_channel = "byte"
+color_space = "srgb"
+default = "#FFFFFFFF"
+desc = "主按钮颜色。"
+
+[[tables.fields]]
+name = "danger_color"
+type = "color"
+color_format = "rgba_tuple"
+color_channel = "normalized"
+default = "1.0,0.2,0.1,1.0"
+desc = "危险操作颜色。"
+
+[[tables.fields]]
+name = "toast_offset"
+type = "vector2"
+vector_format = "expanded"
+unit = "pixel"
+desc = "Toast 相对锚点偏移。"
+
+[[tables]]
+name = "spawn_points"
+kind = "collection"
+source = "spawn_points.csv"
+primary_index = "by_id"
+desc = "关卡出生点。"
+
+[[tables.fields]]
+name = "id"
+type = "int"
+required = true
+unique = true
+
+[[tables.fields]]
+name = "scene"
+type = "string"
+required = true
+
+[[tables.fields]]
+name = "position"
+type = "vector3"
+required = true
+vector_format = "tuple"
+unit = "meter"
+
+[[tables.fields]]
+name = "rotation_euler"
+type = "vector3"
+required = true
+vector_format = "tuple"
+unit = "degree"
+
+[[tables.fields]]
+name = "gizmo_color"
+type = "color"
+color_format = "hex_rgb"
+alpha = "default_opaque"
+export_when = { any = ["debug"] }
+
+[[tables.indexes]]
+name = "by_id"
+fields = ["id"]
+unique = true
+primary = true
+```
+
 ## 3.6 Target Tags 与导出条件配置
 
 表、字段和索引都可以声明 `export_when`，用于按 target tags 生成导出视图。`export_when` 是结构化条件，不使用字符串表达式。
