@@ -332,7 +332,7 @@ mod tests {
         assert_eq!(output["status"], "error");
         assert_eq!(
             output["message"],
-            "meta validation failed: Error CF_META_DUPLICATE_TABLE_NAME: duplicate table `items` (table `items`)"
+            "meta validation failed: meta.validate: Error CF_META_DUPLICATE_TABLE_NAME: duplicate table `items` (table `items`) [检查 [[tables]] 的 name，确保同一 MetaModel 内全局唯一。]"
         );
         assert_eq!(
             output["diagnostics"][0]["code"],
@@ -342,6 +342,16 @@ mod tests {
         assert_eq!(
             output["diagnostics"][0]["message"],
             "duplicate table `items`"
+        );
+        assert_eq!(output["diagnostics"][0]["source"], "meta.validate");
+        assert_eq!(output["diagnostics"][0]["domain"], "meta");
+        assert_eq!(
+            output["diagnostics"][0]["hint"],
+            "检查 [[tables]] 的 name，确保同一 MetaModel 内全局唯一。"
+        );
+        assert_eq!(
+            output["diagnostics"][0]["explanation"],
+            "Meta 中声明了重复的 table name，导致后续 link 和导出无法稳定解析表引用。"
         );
         assert_eq!(output["diagnostics"][0]["location"]["table"], "items");
     }

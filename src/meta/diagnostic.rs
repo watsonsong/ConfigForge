@@ -4,7 +4,8 @@
 use std::fmt;
 
 use crate::diagnostic::{
-    Diagnostic, DiagnosticEntry, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity, code::*,
+    Diagnostic, DiagnosticEntry, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity,
+    code::{self, *},
     format_diagnostic,
 };
 
@@ -59,6 +60,22 @@ impl DiagnosticEntry for MetaDiagnostic {
 
     fn location(&self) -> &DiagnosticLocation {
         &self.location
+    }
+
+    fn source(&self) -> Option<&str> {
+        Some("meta.validate")
+    }
+
+    fn hint(&self) -> Option<&str> {
+        code::metadata_for(self.code.stable_code()).and_then(|metadata| metadata.default_hint)
+    }
+
+    fn explanation(&self) -> Option<&str> {
+        code::metadata_for(self.code.stable_code()).map(|metadata| metadata.explanation)
+    }
+
+    fn domain(&self) -> Option<&str> {
+        Some("meta")
     }
 }
 

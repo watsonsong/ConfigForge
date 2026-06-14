@@ -121,22 +121,24 @@
 
 - `refactor(meta): emit stable diagnostic codes`
 
-### [ ] Step 5：为 Meta diagnostics 补齐 source / domain / hint fallback
+### [x] Step 5：为 Meta diagnostics 补齐 source / domain / hint fallback
 
 目的：利用 unified catalog 让 Meta validation 的 CLI JSON 与 validation/report 类诊断具备相同 enrichment 质量。
 
 实现项：
 
-- [ ] 在 `DiagnosticEntry for MetaDiagnostic` 中返回 `source = "meta.validate"` 或按 link / validate 阶段细分 source。
-- [ ] 返回 `domain = "meta"`。
-- [ ] 通过 `diagnostic::code::metadata_for(self.code.stable_code())` 提供 explanation / hint fallback，或在转换 helper 中统一补齐。
-- [ ] 增加单元测试覆盖 Meta validation JSON 输出中的 source / domain / hint / explanation。
+- [x] 在 `DiagnosticEntry for MetaDiagnostic` 中返回 `source = "meta.validate"` 或按 link / validate 阶段细分 source。
+- [x] 返回 `domain = "meta"`。
+- [x] 通过 `diagnostic::code::metadata_for(self.code.stable_code())` 提供 explanation / hint fallback，或在转换 helper 中统一补齐。
+- [x] 增加单元测试覆盖 Meta validation JSON 输出中的 source / domain / hint / explanation。
 
 验证：
 
-- [ ] `cargo test meta`
-- [ ] `cargo test cli`
-- [ ] `cargo test diagnostic`
+- [x] `cargo test meta`
+- [x] `cargo test cli`
+- [x] `cargo test diagnostic`
+
+后续计划复核：Step 5 已补齐 JSON enrichment；Step 6 需同步 Implementation 文档中错误 payload、catalog 覆盖范围和 Meta JSON 输出字段说明。
 
 可独立提交建议：
 
