@@ -919,6 +919,218 @@ fn schema_doc_detail_toggles_hide_struct_asset_rules_and_i18n_sections() {
 }
 
 #[test]
+fn schema_doc_large_graph_order_and_rendered_paths_are_deterministic() {
+    let input = r#"
+                [[tables]]
+                name = "classes"
+                source = "classes.csv"
+
+                [[tables.fields]]
+                name = "class_id"
+                type = "int"
+
+                [[tables.indexes]]
+                name = "by_id"
+                fields = ["class_id"]
+                unique = true
+                primary = true
+
+                [[tables]]
+                name = "quests"
+                source = "quests.csv"
+
+                [[tables.fields]]
+                name = "quest_id"
+                type = "int"
+
+                [[tables.fields]]
+                name = "required_class_id"
+                type = "int"
+                foreign_key = { target_table = "classes", target_index = "by_id", linked_field = "required_class", allow_empty = true }
+
+                [[tables.fields]]
+                name = "prerequisite_quest_ids"
+                type = "list<int>"
+                foreign_key = { target_table = "quests", target_index = "primary", linked_field = "prerequisite_quests", allow_empty = true }
+
+                [[tables.indexes]]
+                name = "primary"
+                fields = ["quest_id"]
+                unique = true
+                primary = true
+
+                [[tables]]
+                name = "game_rules"
+                kind = "object"
+                source = "game_rules.csv"
+
+                [[tables.fields]]
+                name = "default_class_id"
+                type = "int"
+                foreign_key = { target_table = "classes", target_index = "by_id", linked_field = "default_class" }
+
+                [[tables.fields]]
+                name = "featured_quest_ids"
+                type = "list<int>"
+                foreign_key = { target_table = "quests", target_index = "primary", linked_field = "featured_quests" }
+
+                [[tables]]
+                name = "items"
+                polymorphic = true
+                sources = [
+                    { provider = "csv", path = "materials.csv", fragments = ["stack"] },
+                    { provider = "csv", path = "weapons.csv", fragments = ["stats", "skill"] },
+                ]
+                override_sources = [
+                    { provider = "csv", path = "weapons_s1.csv", fragments = ["stats", "skill"], export_when = { any = ["s1"] } },
+                ]
+
+                [[tables.fields]]
+                name = "id"
+                type = "int"
+
+                [[tables.indexes]]
+                name = "primary"
+                fields = ["id"]
+                unique = true
+                primary = true
+
+                [[tables.fragments]]
+                name = "stack"
+
+                [[tables.fragments.fields]]
+                name = "max_stack"
+                type = "int"
+
+                [[tables.fragments]]
+                name = "stats"
+
+                [[tables.fragments.fields]]
+                name = "attack"
+                type = "int"
+
+                [[tables.fragments]]
+                name = "skill"
+
+                [[tables.fragments.fields]]
+                name = "skill_id"
+                type = "int"
+            "#;
+    let doc_a = build_doc(input, &["client", "s1"]);
+    let doc_b = build_doc(input, &["client", "s1"]);
+
+    let table_names = doc_a
+        .tables
+        .iter()
+        .map(|table| table.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        table_names,
+        vec!["classes", "quests", "game_rules", "items"]
+    );
+    assert_eq!(
+        doc_a
+            .relationship_graph
+            .nodes
+            .iter()
+            .map(|node| node.table.as_str())
+            .collect::<Vec<_>>(),
+        table_names
+    );
+    assert_eq!(
+        doc_a
+            .relationship_graph
+            .edges
+            .iter()
+            .map(|edge| {
+                (
+                    edge.source_table.as_str(),
+                    edge.source_field.as_str(),
+                    edge.target_table.as_str(),
+                    edge.cardinality.as_str(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            ("quests", "required_class_id", "classes", "many-to-one"),
+            ("quests", "prerequisite_quest_ids", "quests", "list-to-many",),
+            ("game_rules", "default_class_id", "classes", "many-to-one"),
+            ("game_rules", "featured_quest_ids", "quests", "list-to-many",),
+        ]
+    );
+    assert_eq!(
+        doc_a
+            .source_graph
+            .edges
+            .iter()
+            .map(|edge| (
+                edge.source_path.as_str(),
+                edge.table.as_str(),
+                edge.role.as_str()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("classes.csv", "classes", "base"),
+            ("quests.csv", "quests", "base"),
+            ("game_rules.csv", "game_rules", "base"),
+            ("materials.csv", "items", "base"),
+            ("weapons.csv", "items", "base"),
+            ("weapons_s1.csv", "items", "override"),
+        ]
+    );
+    let quests = doc_a
+        .tables
+        .iter()
+        .find(|table| table.name == "quests")
+        .expect("quests table");
+    assert_eq!(quests.incoming_relations.len(), 2);
+    assert_eq!(quests.incoming_relations[0].source_table, "quests");
+    assert_eq!(quests.incoming_relations[1].source_table, "game_rules");
+    let items = doc_a
+        .tables
+        .iter()
+        .find(|table| table.name == "items")
+        .expect("items table");
+    let fragment_graph = items.fragment_graph.as_ref().expect("fragment graph");
+    assert_eq!(
+        fragment_graph
+            .fragments
+            .iter()
+            .map(|fragment| fragment.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["stack", "stats", "skill"]
+    );
+
+    let config = SchemaDocExportConfig {
+        format: SchemaDocFormat::Html,
+        output: PathBuf::from("out/docs"),
+        index_file: "index.html".to_owned(),
+        title: None,
+        include_hidden: false,
+        include_internal: false,
+        include_struct_details: true,
+        include_asset_rules: true,
+        include_i18n: true,
+    };
+    let artifacts_a = render_schema_doc_artifacts(&doc_a, &config).expect("render a");
+    let artifacts_b = render_schema_doc_artifacts(&doc_b, &config).expect("render b");
+    assert_eq!(artifacts_a, artifacts_b);
+    assert_eq!(
+        artifacts_a
+            .iter()
+            .map(|artifact| artifact.path.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            PathBuf::from("out/docs/index.html"),
+            PathBuf::from("out/docs/classes.html"),
+            PathBuf::from("out/docs/quests.html"),
+            PathBuf::from("out/docs/game_rules.html"),
+            PathBuf::from("out/docs/items.html"),
+        ]
+    );
+}
+
+#[test]
 fn parses_html_schema_doc_format_and_uses_html_defaults() {
     let html_config = schema_doc_export_config_from_options(
         PathBuf::from("out/docs"),
