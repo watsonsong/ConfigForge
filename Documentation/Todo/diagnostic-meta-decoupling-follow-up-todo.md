@@ -77,20 +77,22 @@
 
 - `feat(diagnostic): register stable meta diagnostic codes`
 
-### [ ] Step 3：在 Meta 模块内建立 enum 到 stable code 的完整映射
+### [x] Step 3：在 Meta 模块内建立 enum 到 stable code 的完整映射
 
 目的：把“Meta 内部 enum”与“外部 stable code string”的转换留在 `meta` 模块，保持依赖方向为 `meta -> diagnostic`。
 
 实现项：
 
-- [ ] 为 `MetaDiagnosticCode` 增加 `stable_code()` 或等价 helper，返回 Step 2 中的 `CF_META_*` 常量。
-- [ ] 增加 exhaustive unit test，确保每个 `MetaDiagnosticCode` 变体都有 stable code 映射，且映射 code 存在于 catalog。
-- [ ] 暂不修改 `DiagnosticEntry for MetaDiagnostic::code()` 的对外输出，保证此步无 user-visible 行为变更。
+- [x] 为 `MetaDiagnosticCode` 增加 `stable_code()` 或等价 helper，返回 Step 2 中的 `CF_META_*` 常量。
+- [x] 增加 exhaustive unit test，确保每个 `MetaDiagnosticCode` 变体都有 stable code 映射，且映射 code 存在于 catalog。
+- [x] 暂不修改 `DiagnosticEntry for MetaDiagnostic::code()` 的对外输出，保证此步无 user-visible 行为变更。
 
 验证：
 
-- [ ] `cargo test meta`
-- [ ] `cargo test diagnostic`
+- [x] `cargo test meta`
+- [x] `cargo test diagnostic`
+
+后续计划复核：Step 3 只建立 Meta 内部 enum 到 catalog code 的映射，尚未切换 CLI/human 输出；Step 4～Step 6 仍按原计划推进。
 
 可独立提交建议：
 
