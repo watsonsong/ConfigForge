@@ -106,10 +106,15 @@ fn render_value_read(
         CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
             content.raw_fmt(format_args!("{indent}{target} = Reader.AsString();\n"));
         }
-        CodeTypeRef::Color | CodeTypeRef::Vector { .. } => {
-            content.raw_fmt(format_args!(
-                "{indent}// Builtin object value reader generation is implemented by profile-specific runtime mappings.\n"
-            ));
+        CodeTypeRef::Color => {
+            render_color_read(content, target, indent);
+        }
+        CodeTypeRef::Vector {
+            dimension,
+            element,
+            components,
+        } => {
+            render_vector_read(content, target, *dimension, *element, components, indent);
         }
         CodeTypeRef::Enum { name } => {
             content.raw_fmt(format_args!(
@@ -163,6 +168,111 @@ fn render_value_read(
         }
     }
     Ok(())
+}
+
+fn render_color_read(content: &mut impl CodeWriterLike, target: &str, indent: &str) {
+    content.raw_fmt(format_args!("{indent}{{\n"));
+    content.raw_fmt(format_args!(
+        "{indent}    Reader.EnterRequiredField(TEXT(\"r\"));\n"
+    ));
+    content.raw_fmt(format_args!(
+        "{indent}    const double R = Reader.AsDouble();\n"
+    ));
+    content.raw_fmt(format_args!("{indent}    Reader.ExitField();\n"));
+    content.raw_fmt(format_args!(
+        "{indent}    Reader.EnterRequiredField(TEXT(\"g\"));\n"
+    ));
+    content.raw_fmt(format_args!(
+        "{indent}    const double G = Reader.AsDouble();\n"
+    ));
+    content.raw_fmt(format_args!("{indent}    Reader.ExitField();\n"));
+    content.raw_fmt(format_args!(
+        "{indent}    Reader.EnterRequiredField(TEXT(\"b\"));\n"
+    ));
+    content.raw_fmt(format_args!(
+        "{indent}    const double B = Reader.AsDouble();\n"
+    ));
+    content.raw_fmt(format_args!("{indent}    Reader.ExitField();\n"));
+    content.raw_fmt(format_args!(
+        "{indent}    Reader.EnterRequiredField(TEXT(\"a\"));\n"
+    ));
+    content.raw_fmt(format_args!(
+        "{indent}    const double A = Reader.AsDouble();\n"
+    ));
+    content.raw_fmt(format_args!("{indent}    Reader.ExitField();\n"));
+    content.raw_fmt(format_args!("{indent}    {target} = FLinearColor(static_cast<float>(R), static_cast<float>(G), static_cast<float>(B), static_cast<float>(A));\n"));
+    content.raw_fmt(format_args!("{indent}}}\n"));
+}
+
+fn render_vector_read(
+    content: &mut impl CodeWriterLike,
+    target: &str,
+    dimension: usize,
+    element: crate::code_artifact::CodeVectorElementType,
+    components: &[String],
+    indent: &str,
+) {
+    content.raw_fmt(format_args!("{indent}{{\n"));
+    for (index, component) in components.iter().enumerate().take(dimension) {
+        content.raw_fmt(format_args!(
+            "{indent}    Reader.EnterRequiredField(TEXT({component:?}));\n"
+        ));
+        content.raw_fmt(format_args!(
+            "{indent}    const double V{} = Reader.AsDouble();\n",
+            index + 1
+        ));
+        content.raw_fmt(format_args!("{indent}    Reader.ExitField();\n"));
+    }
+    content.raw_fmt(format_args!(
+        "{indent}    {target} = {};\n",
+        unreal_vector_constructor(dimension, element)
+    ));
+    content.raw_fmt(format_args!("{indent}}}\n"));
+}
+
+fn unreal_vector_constructor(
+    dimension: usize,
+    element: crate::code_artifact::CodeVectorElementType,
+) -> String {
+    let value = |index: usize| match element {
+        crate::code_artifact::CodeVectorElementType::Float => {
+            format!("static_cast<float>(V{index})")
+        }
+        crate::code_artifact::CodeVectorElementType::Int => format!("static_cast<int32>(V{index})"),
+    };
+    match (dimension, element) {
+        (2, crate::code_artifact::CodeVectorElementType::Float) => {
+            format!("FVector2D({}, {})", value(1), value(2))
+        }
+        (3, crate::code_artifact::CodeVectorElementType::Float) => {
+            format!("FVector({}, {}, {})", value(1), value(2), value(3))
+        }
+        (4, crate::code_artifact::CodeVectorElementType::Float) => {
+            format!(
+                "FVector4({}, {}, {}, {})",
+                value(1),
+                value(2),
+                value(3),
+                value(4)
+            )
+        }
+        (2, crate::code_artifact::CodeVectorElementType::Int) => {
+            format!("FIntPoint({}, {})", value(1), value(2))
+        }
+        (3, crate::code_artifact::CodeVectorElementType::Int) => {
+            format!("FIntVector({}, {}, {})", value(1), value(2), value(3))
+        }
+        (4, crate::code_artifact::CodeVectorElementType::Int) => {
+            format!(
+                "FIntVector4({}, {}, {}, {})",
+                value(1),
+                value(2),
+                value(3),
+                value(4)
+            )
+        }
+        _ => "FVector::ZeroVector".to_owned(),
+    }
 }
 
 fn result_variable_name(target: &str) -> String {

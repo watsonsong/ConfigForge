@@ -29,6 +29,49 @@ export interface RuntimeDataLoader {
   open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;
 }
 
+export interface ConfigForgeColor {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
+export interface ConfigForgeVector2 {
+  x: number;
+  y: number;
+}
+
+export interface ConfigForgeVector3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface ConfigForgeVector4 {
+  x: number;
+  y: number;
+  z: number;
+  w: number;
+}
+
+export interface ConfigForgeVector2Int {
+  x: number;
+  y: number;
+}
+
+export interface ConfigForgeVector3Int {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface ConfigForgeVector4Int {
+  x: number;
+  y: number;
+  z: number;
+  w: number;
+}
+
 function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   return typeof (value as { then?: unknown }).then === "function";
 }
@@ -121,6 +164,58 @@ function readOptionalBool(reader: RuntimeDataReader, name: string): boolean | un
 
 function readOptionalString(reader: RuntimeDataReader, name: string): string | undefined {
   return optionalField(reader, name, (value) => value.asString());
+}
+
+function readColor<T = ConfigForgeColor>(reader: RuntimeDataReader, create: (r: number, g: number, b: number, a: number) => T = (r, g, b, a) => ({ r, g, b, a } as T)): T {
+  reader.beginRecord(0);
+  try {
+    const r = readRequiredFloat64(reader, "r");
+    const g = readRequiredFloat64(reader, "g");
+    const b = readRequiredFloat64(reader, "b");
+    const a = readRequiredFloat64(reader, "a");
+    return create(r, g, b, a);
+  } finally {
+    reader.endRecord();
+  }
+}
+
+function readVectorComponents(reader: RuntimeDataReader, components: readonly string[]): number[] {
+  reader.beginRecord(0);
+  try {
+    return components.map((component) => readRequiredFloat64(reader, component));
+  } finally {
+    reader.endRecord();
+  }
+}
+
+function readConfigForgeVector2<T = ConfigForgeVector2>(reader: RuntimeDataReader, components: readonly string[] = ["x", "y"], create: (x: number, y: number) => T = (x, y) => ({ x, y } as T)): T {
+  const [x, y] = readVectorComponents(reader, components);
+  return create(x, y);
+}
+
+function readConfigForgeVector3<T = ConfigForgeVector3>(reader: RuntimeDataReader, components: readonly string[] = ["x", "y", "z"], create: (x: number, y: number, z: number) => T = (x, y, z) => ({ x, y, z } as T)): T {
+  const [x, y, z] = readVectorComponents(reader, components);
+  return create(x, y, z);
+}
+
+function readConfigForgeVector4<T = ConfigForgeVector4>(reader: RuntimeDataReader, components: readonly string[] = ["x", "y", "z", "w"], create: (x: number, y: number, z: number, w: number) => T = (x, y, z, w) => ({ x, y, z, w } as T)): T {
+  const [x, y, z, w] = readVectorComponents(reader, components);
+  return create(x, y, z, w);
+}
+
+function readConfigForgeVector2Int<T = ConfigForgeVector2Int>(reader: RuntimeDataReader, components: readonly string[] = ["x", "y"], create: (x: number, y: number) => T = (x, y) => ({ x, y } as T)): T {
+  const [x, y] = readVectorComponents(reader, components);
+  return create(Math.trunc(x), Math.trunc(y));
+}
+
+function readConfigForgeVector3Int<T = ConfigForgeVector3Int>(reader: RuntimeDataReader, components: readonly string[] = ["x", "y", "z"], create: (x: number, y: number, z: number) => T = (x, y, z) => ({ x, y, z } as T)): T {
+  const [x, y, z] = readVectorComponents(reader, components);
+  return create(Math.trunc(x), Math.trunc(y), Math.trunc(z));
+}
+
+function readConfigForgeVector4Int<T = ConfigForgeVector4Int>(reader: RuntimeDataReader, components: readonly string[] = ["x", "y", "z", "w"], create: (x: number, y: number, z: number, w: number) => T = (x, y, z, w) => ({ x, y, z, w } as T)): T {
+  const [x, y, z, w] = readVectorComponents(reader, components);
+  return create(Math.trunc(x), Math.trunc(y), Math.trunc(z), Math.trunc(w));
 }
 
 function readList<T>(reader: RuntimeDataReader, convert: (value: RuntimeDataReader) => T): T[] {

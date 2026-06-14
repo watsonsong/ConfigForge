@@ -39,7 +39,17 @@ pub const LANGUAGE: &str = "typescript";
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TypeScriptCodegenOptions {
     #[serde(default)]
+    pub profile: TypeScriptProfile,
+    #[serde(default)]
     pub readonly_fields: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TypeScriptProfile {
+    #[default]
+    Standard,
+    CocosCreator,
 }
 
 pub(crate) struct TypeScriptCodeGenerator;
@@ -163,11 +173,12 @@ fn render_typescript_code(
         .target
         .options
         .language_options::<TypeScriptCodegenOptions>(LANGUAGE)?;
-    let names = TypeScriptNames::new(&input.target.options);
+    let names = TypeScriptNames::new(&input.target.options, typescript_options.profile);
     validate_generated_symbols(&model, &names)?;
     write_file_header(generator, content, input);
     content.newline();
     render_ts_i18n_import(&mut content, &input.target.options.i18n);
+    render_typescript_profile_imports(&mut content, typescript_options.profile);
     content.raw("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;\n\n");
     render_runtime_reader_interfaces(&mut content);
     render_runtime_reader_helpers(&mut content);
@@ -597,6 +608,15 @@ fn render_typescript_code(
     }
 
     Ok(())
+}
+
+fn render_typescript_profile_imports(
+    content: &mut impl CodeWriterLike,
+    profile: TypeScriptProfile,
+) {
+    if matches!(profile, TypeScriptProfile::CocosCreator) {
+        content.raw("import { Color, Vec2, Vec3, Vec4 } from \"cc\";\n\n");
+    }
 }
 
 fn render_ts_text_helpers(

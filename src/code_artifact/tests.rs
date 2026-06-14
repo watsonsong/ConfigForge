@@ -1234,6 +1234,7 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
             .language_options::<TypeScriptCodegenOptions>(TypeScriptCodeGenerator.language())
             .expect("typescript options should parse"),
         TypeScriptCodegenOptions {
+            profile: Default::default(),
             readonly_fields: true,
         }
     );

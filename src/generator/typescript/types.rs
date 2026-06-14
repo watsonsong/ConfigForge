@@ -9,15 +9,17 @@ use crate::{
         naming,
     },
     diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+    generator::typescript::TypeScriptProfile,
 };
 
 pub(super) struct TypeScriptNames<'a> {
     options: &'a CodegenOptions,
+    profile: TypeScriptProfile,
 }
 
 impl<'a> TypeScriptNames<'a> {
-    pub(super) fn new(options: &'a CodegenOptions) -> Self {
-        Self { options }
+    pub(super) fn new(options: &'a CodegenOptions, profile: TypeScriptProfile) -> Self {
+        Self { options, profile }
     }
 
     pub(super) fn type_name(&self, name: &str) -> Result<String> {
@@ -127,10 +129,10 @@ impl<'a> TypeScriptNames<'a> {
             CodeTypeRef::Int | CodeTypeRef::Float => "number".to_owned(),
             CodeTypeRef::Bool => "boolean".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "string".to_owned(),
-            CodeTypeRef::Color => "ConfigForgeColor".to_owned(),
+            CodeTypeRef::Color => self.ts_color_type(),
             CodeTypeRef::Vector {
                 dimension, element, ..
-            } => ts_vector_type(*dimension, *element),
+            } => self.ts_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("{}[]", self.ts_type(element)?),
         })
@@ -181,13 +183,12 @@ impl<'a> TypeScriptNames<'a> {
                 CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                     format!("readRequiredString(reader, {source_name})")
                 }
-                CodeTypeRef::Color => format!("readRequiredColor(reader, {source_name})"),
+                CodeTypeRef::Color => self.read_required_color_expr(&source_name),
                 CodeTypeRef::Vector {
-                    dimension, element, ..
-                } => format!(
-                    "readRequired{}(reader, {source_name})",
-                    ts_vector_type(*dimension, *element)
-                ),
+                    dimension,
+                    element,
+                    components,
+                } => self.read_required_vector_expr(*dimension, *element, components, &source_name),
                 CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                     let type_name = self.type_name(name)?;
                     let reader_function = self.reader_function_name(&type_name)?;
@@ -209,13 +210,12 @@ impl<'a> TypeScriptNames<'a> {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 format!("readOptionalString(reader, {source_name})")
             }
-            CodeTypeRef::Color => format!("readOptionalColor(reader, {source_name})"),
+            CodeTypeRef::Color => self.read_optional_color_expr(&source_name),
             CodeTypeRef::Vector {
-                dimension, element, ..
-            } => format!(
-                "readOptional{}(reader, {source_name})",
-                ts_vector_type(*dimension, *element)
-            ),
+                dimension,
+                element,
+                components,
+            } => self.read_optional_vector_expr(*dimension, *element, components, &source_name),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                 let type_name = self.type_name(name)?;
                 let reader_function = self.reader_function_name(&type_name)?;
@@ -236,10 +236,12 @@ impl<'a> TypeScriptNames<'a> {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 "value.asString()".to_owned()
             }
-            CodeTypeRef::Color => "readColor(value)".to_owned(),
+            CodeTypeRef::Color => self.read_color_expr("value"),
             CodeTypeRef::Vector {
-                dimension, element, ..
-            } => format!("read{}(value)", ts_vector_type(*dimension, *element)),
+                dimension,
+                element,
+                components,
+            } => self.read_vector_expr(*dimension, *element, components, "value"),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => {
                 let type_name = self.type_name(name)?;
                 let reader_function = self.reader_function_name(&type_name)?;
@@ -328,12 +330,121 @@ impl<'a> TypeScriptNames<'a> {
             )
         })
     }
+
+    fn ts_color_type(&self) -> String {
+        match self.profile {
+            TypeScriptProfile::Standard => "ConfigForgeColor".to_owned(),
+            TypeScriptProfile::CocosCreator => "Color".to_owned(),
+        }
+    }
+
+    fn ts_vector_type(&self, dimension: usize, element: CodeVectorElementType) -> String {
+        match (self.profile, dimension, element) {
+            (TypeScriptProfile::CocosCreator, 2, CodeVectorElementType::Float) => "Vec2".to_owned(),
+            (TypeScriptProfile::CocosCreator, 3, CodeVectorElementType::Float) => "Vec3".to_owned(),
+            (TypeScriptProfile::CocosCreator, 4, CodeVectorElementType::Float) => "Vec4".to_owned(),
+            _ => ts_fallback_vector_type(dimension, element),
+        }
+    }
+
+    fn read_required_color_expr(&self, source_name: &str) -> String {
+        format!(
+            "requiredField(reader, {source_name}, (value) => {})",
+            self.read_color_expr("value")
+        )
+    }
+
+    fn read_optional_color_expr(&self, source_name: &str) -> String {
+        format!(
+            "optionalField(reader, {source_name}, (value) => {})",
+            self.read_color_expr("value")
+        )
+    }
+
+    fn read_color_expr(&self, reader: &str) -> String {
+        match self.profile {
+            TypeScriptProfile::Standard => format!("readColor({reader})"),
+            TypeScriptProfile::CocosCreator => {
+                format!("readColor({reader}, (r, g, b, a) => new Color(r, g, b, a))")
+            }
+        }
+    }
+
+    fn read_required_vector_expr(
+        &self,
+        dimension: usize,
+        element: CodeVectorElementType,
+        components: &[String],
+        source_name: &str,
+    ) -> String {
+        format!(
+            "requiredField(reader, {source_name}, (value) => {})",
+            self.read_vector_expr(dimension, element, components, "value")
+        )
+    }
+
+    fn read_optional_vector_expr(
+        &self,
+        dimension: usize,
+        element: CodeVectorElementType,
+        components: &[String],
+        source_name: &str,
+    ) -> String {
+        format!(
+            "optionalField(reader, {source_name}, (value) => {})",
+            self.read_vector_expr(dimension, element, components, "value")
+        )
+    }
+
+    fn read_vector_expr(
+        &self,
+        dimension: usize,
+        element: CodeVectorElementType,
+        components: &[String],
+        reader: &str,
+    ) -> String {
+        let helper = format!("read{}", ts_fallback_vector_type(dimension, element));
+        let component_array = ts_string_array(components);
+        let Some(constructor) = self.vector_constructor(dimension, element) else {
+            return format!("{helper}({reader}, {component_array})");
+        };
+        format!("{helper}({reader}, {component_array}, {constructor})")
+    }
+
+    fn vector_constructor(
+        &self,
+        dimension: usize,
+        element: CodeVectorElementType,
+    ) -> Option<String> {
+        if !matches!(self.profile, TypeScriptProfile::CocosCreator)
+            || !matches!(element, CodeVectorElementType::Float)
+            || !(2..=4).contains(&dimension)
+        {
+            return None;
+        }
+        let args = (0..dimension)
+            .map(|index| format!("v{}", index + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!("({args}) => new Vec{dimension}({args})"))
+    }
 }
 
-fn ts_vector_type(dimension: usize, element: CodeVectorElementType) -> String {
+fn ts_fallback_vector_type(dimension: usize, element: CodeVectorElementType) -> String {
     let suffix = match element {
         CodeVectorElementType::Float => "",
         CodeVectorElementType::Int => "Int",
     };
     format!("ConfigForgeVector{dimension}{suffix}")
+}
+
+fn ts_string_array(values: &[String]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| format!("{value:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }

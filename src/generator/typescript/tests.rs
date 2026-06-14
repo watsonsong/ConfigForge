@@ -27,6 +27,7 @@ fn emits_async_loader_and_maps() {
     input.target.options.language_options.insert(
         LANGUAGE.to_owned(),
         toml::Value::try_from(TypeScriptCodegenOptions {
+            profile: Default::default(),
             readonly_fields: true,
         })
         .expect("typescript options"),
@@ -213,6 +214,42 @@ fn emits_optional_scalar_and_struct_field_types() {
         content.contains("optionalField(reader, \"payload\", (value) => readRewardInfo(value))")
     );
     assert!(!content.contains("readRewardInfoBinary"));
+}
+
+#[test]
+fn emits_builtin_value_types_and_cocos_profile_mappings() {
+    let meta = builtin_value_fixture();
+
+    let standard = TypeScriptCodeGenerator
+        .generate(&input_for(&meta, LANGUAGE))
+        .expect("standard typescript code");
+    let standard_content = &standard[0].content;
+    assert!(standard_content.contains("export interface ConfigForgeColor"));
+    assert!(standard_content.contains("tint: ConfigForgeColor;"));
+    assert!(standard_content.contains("position: ConfigForgeVector3;"));
+    assert!(standard_content.contains("grid: ConfigForgeVector2Int;"));
+    assert!(standard_content.contains("readColor(value)"));
+    assert!(
+        standard_content
+            .contains("readConfigForgeVector3(value, [\"right\", \"up\", \"forward\"])")
+    );
+
+    let mut cocos_input = input_for(&meta, LANGUAGE);
+    cocos_input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str("profile = \"cocos_creator\"").expect("toml value"),
+    );
+
+    let cocos = TypeScriptCodeGenerator
+        .generate(&cocos_input)
+        .expect("cocos typescript code");
+    let cocos_content = &cocos[0].content;
+    assert!(cocos_content.contains("import { Color, Vec2, Vec3, Vec4 } from \"cc\";"));
+    assert!(cocos_content.contains("tint: Color;"));
+    assert!(cocos_content.contains("position: Vec3;"));
+    assert!(cocos_content.contains("grid: ConfigForgeVector2Int;"));
+    assert!(cocos_content.contains("readColor(value, (r, g, b, a) => new Color(r, g, b, a))"));
+    assert!(cocos_content.contains("readConfigForgeVector3(value, [\"right\", \"up\", \"forward\"], (v1, v2, v3) => new Vec3(v1, v2, v3))"));
 }
 
 #[test]
@@ -563,6 +600,47 @@ fn optional_field_fixture() -> MetaModel {
             fields = ["id"]
             unique = true
             primary = true
+        "#,
+    )
+    .expect("meta should load")
+}
+
+fn builtin_value_fixture() -> MetaModel {
+    MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "SpawnPoint"
+
+            [[structs.fields]]
+            name = "grid"
+            type = "vector2_int"
+            required = true
+
+            [[tables]]
+            name = "effects"
+            source = "effects.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "string"
+            required = true
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_channel = "normalized"
+            required = true
+
+            [[tables.fields]]
+            name = "position"
+            type = "vector3"
+            vector_components = ["right", "up", "forward"]
+            required = true
+
+            [[tables.fields]]
+            name = "spawn"
+            type = "SpawnPoint"
+            required = true
         "#,
     )
     .expect("meta should load")

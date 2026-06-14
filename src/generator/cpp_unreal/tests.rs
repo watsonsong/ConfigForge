@@ -12,6 +12,7 @@ use crate::{
         tests::{expect_single_diagnostic, input_for, linked_fixture},
     },
     diagnostic::code::CF_GENERATOR_INVALID_OPTION,
+    meta::MetaModel,
 };
 
 use super::{CppUnrealCodeGenerator, CppUnrealCodegenOptions, CppUnrealSupportLevel, LANGUAGE};
@@ -505,6 +506,64 @@ fn emits_header_and_source_skeleton() {
         )
     );
     assert!(source.contains("TConfigForgeResult<FGameData> FGameData::Load"));
+}
+
+#[test]
+fn emits_unreal_builtin_color_and_vector_mappings() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "SpawnPoint"
+
+            [[structs.fields]]
+            name = "grid"
+            type = "vector2_int"
+            required = true
+
+            [[tables]]
+            name = "effects"
+            source = "effects.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "string"
+            required = true
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_channel = "normalized"
+            required = true
+
+            [[tables.fields]]
+            name = "position"
+            type = "vector3"
+            vector_components = ["right", "up", "forward"]
+            required = true
+
+            [[tables.fields]]
+            name = "spawn"
+            type = "SpawnPoint"
+            required = true
+        "#,
+    )
+    .expect("meta should parse");
+
+    let files = CppUnrealCodeGenerator
+        .generate(&input_for(&meta, LANGUAGE))
+        .expect("cpp_unreal code");
+    let header = generated_content(&files, "generated.h");
+    let source = generated_content(&files, "generated.cpp");
+
+    assert!(header.contains("FLinearColor Tint;"));
+    assert!(header.contains("FVector Position;"));
+    assert!(header.contains("FIntPoint Grid;"));
+    assert!(source.contains("Value.Tint = FLinearColor(static_cast<float>(R), static_cast<float>(G), static_cast<float>(B), static_cast<float>(A));"));
+    assert!(source.contains("Reader.EnterRequiredField(TEXT(\"right\"));"));
+    assert!(source.contains("Value.Position = FVector(static_cast<float>(V1), static_cast<float>(V2), static_cast<float>(V3));"));
+    assert!(
+        source.contains("Value.Grid = FIntPoint(static_cast<int32>(V1), static_cast<int32>(V2));")
+    );
 }
 
 #[test]
