@@ -18,6 +18,13 @@ pub(super) fn validate_generated_symbols(model: &CodeModel, names: &CSharpNames)
             "ConfigForgeRuntimeException",
             "ConfigForgeRuntimeException",
         ),
+        GeneratedSymbol::new("struct", "ConfigForgeColor", "ConfigForgeColor"),
+        GeneratedSymbol::new("struct", "ConfigForgeVector2", "ConfigForgeVector2"),
+        GeneratedSymbol::new("struct", "ConfigForgeVector3", "ConfigForgeVector3"),
+        GeneratedSymbol::new("struct", "ConfigForgeVector4", "ConfigForgeVector4"),
+        GeneratedSymbol::new("struct", "ConfigForgeVector2Int", "ConfigForgeVector2Int"),
+        GeneratedSymbol::new("struct", "ConfigForgeVector3Int", "ConfigForgeVector3Int"),
+        GeneratedSymbol::new("struct", "ConfigForgeVector4Int", "ConfigForgeVector4Int"),
         GeneratedSymbol::new("class", "GameData", names.game_data_class_name()),
         GeneratedSymbol::new("class", "LazyGameData", names.lazy_game_data_class_name()),
     ];

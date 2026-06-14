@@ -4,7 +4,8 @@
 use crate::{Result, diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT};
 
 use super::{
-    CSharpCodegenOptions, validate_csharp_identifier, validate_csharp_namespace, validation_error,
+    CSharpCodegenOptions, CSharpProfile, validate_csharp_identifier, validate_csharp_namespace,
+    validation_error,
 };
 use crate::code_artifact::{
     CodeExportInput, CodeField, CodeFragment, CodeFragmentPayload, CodeIndex, CodeTable,
@@ -20,6 +21,7 @@ pub(super) struct CSharpNames {
     naming: NamingConfig,
     keyword_conflict: KeywordConflictPolicy,
     nullable: bool,
+    profile: CSharpProfile,
 }
 
 impl CSharpNames {
@@ -60,6 +62,7 @@ impl CSharpNames {
             naming: input.target.options.naming.clone(),
             keyword_conflict: input.target.options.keyword_conflict,
             nullable: options.nullable,
+            profile: options.profile,
         })
     }
 
@@ -269,10 +272,10 @@ impl CSharpNames {
             CodeTypeRef::Float => "double".to_owned(),
             CodeTypeRef::Bool => "bool".to_owned(),
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => "string".to_owned(),
-            CodeTypeRef::Color => "ConfigForgeColor".to_owned(),
+            CodeTypeRef::Color => self.csharp_color_type(),
             CodeTypeRef::Vector {
                 dimension, element, ..
-            } => csharp_vector_type(*dimension, *element),
+            } => self.csharp_vector_type(*dimension, *element),
             CodeTypeRef::Enum { name } | CodeTypeRef::Struct { name } => self.type_name(name)?,
             CodeTypeRef::List(element) => format!("{}[]", self.csharp_type(element)?),
         })
@@ -309,13 +312,12 @@ impl CSharpNames {
             CodeTypeRef::String | CodeTypeRef::Text | CodeTypeRef::Asset => {
                 "ConfigForgeRuntimeReader.ReadStringValue".to_owned()
             }
-            CodeTypeRef::Color => "ConfigForgeRuntimeReader.ReadColorValue".to_owned(),
+            CodeTypeRef::Color => self.read_color_function(),
             CodeTypeRef::Vector {
-                dimension, element, ..
-            } => format!(
-                "ConfigForgeRuntimeReader.Read{}Value",
-                csharp_vector_type(*dimension, *element)
-            ),
+                dimension,
+                element,
+                components,
+            } => self.read_vector_function(*dimension, *element, components),
             CodeTypeRef::Enum { name } => format!(
                 "ConfigForgeRuntimeReader.Read{}Value",
                 self.type_name(name)?
@@ -325,6 +327,116 @@ impl CSharpNames {
                 "reader => ConfigForgeRuntimeReader.ReadListValue(reader, {})",
                 self.read_value_function(element)?
             ),
+        })
+    }
+
+    fn csharp_color_type(&self) -> String {
+        match self.profile {
+            CSharpProfile::Dotnet => "ConfigForgeColor".to_owned(),
+            CSharpProfile::Unity => "UnityEngine.Color".to_owned(),
+            CSharpProfile::Godot => "Godot.Color".to_owned(),
+        }
+    }
+
+    fn csharp_vector_type(&self, dimension: usize, element: CodeVectorElementType) -> String {
+        match (self.profile, dimension, element) {
+            (CSharpProfile::Dotnet, 2, CodeVectorElementType::Float) => {
+                "System.Numerics.Vector2".to_owned()
+            }
+            (CSharpProfile::Dotnet, 3, CodeVectorElementType::Float) => {
+                "System.Numerics.Vector3".to_owned()
+            }
+            (CSharpProfile::Dotnet, 4, CodeVectorElementType::Float) => {
+                "System.Numerics.Vector4".to_owned()
+            }
+            (CSharpProfile::Unity, 2, CodeVectorElementType::Float) => {
+                "UnityEngine.Vector2".to_owned()
+            }
+            (CSharpProfile::Unity, 3, CodeVectorElementType::Float) => {
+                "UnityEngine.Vector3".to_owned()
+            }
+            (CSharpProfile::Unity, 4, CodeVectorElementType::Float) => {
+                "UnityEngine.Vector4".to_owned()
+            }
+            (CSharpProfile::Unity, 2, CodeVectorElementType::Int) => {
+                "UnityEngine.Vector2Int".to_owned()
+            }
+            (CSharpProfile::Unity, 3, CodeVectorElementType::Int) => {
+                "UnityEngine.Vector3Int".to_owned()
+            }
+            (CSharpProfile::Godot, 2, CodeVectorElementType::Float) => "Godot.Vector2".to_owned(),
+            (CSharpProfile::Godot, 3, CodeVectorElementType::Float) => "Godot.Vector3".to_owned(),
+            (CSharpProfile::Godot, 4, CodeVectorElementType::Float) => "Godot.Vector4".to_owned(),
+            (CSharpProfile::Godot, 2, CodeVectorElementType::Int) => "Godot.Vector2I".to_owned(),
+            (CSharpProfile::Godot, 3, CodeVectorElementType::Int) => "Godot.Vector3I".to_owned(),
+            (CSharpProfile::Godot, 4, CodeVectorElementType::Int) => "Godot.Vector4I".to_owned(),
+            _ => csharp_fallback_vector_type(dimension, element),
+        }
+    }
+
+    fn read_color_function(&self) -> String {
+        match self.profile {
+            CSharpProfile::Dotnet => "ConfigForgeRuntimeReader.ReadColorValue".to_owned(),
+            CSharpProfile::Unity => "reader => ConfigForgeRuntimeReader.ReadColorValue(reader, (r, g, b, a) => new UnityEngine.Color((float)r, (float)g, (float)b, (float)a))".to_owned(),
+            CSharpProfile::Godot => "reader => ConfigForgeRuntimeReader.ReadColorValue(reader, (r, g, b, a) => new Godot.Color((float)r, (float)g, (float)b, (float)a))".to_owned(),
+        }
+    }
+
+    fn read_vector_function(
+        &self,
+        dimension: usize,
+        element: CodeVectorElementType,
+        components: &[String],
+    ) -> String {
+        let helper = format!(
+            "Read{}Value",
+            csharp_fallback_vector_type(dimension, element)
+        );
+        let component_array = csharp_string_array(components);
+        let Some(constructor) = self.vector_constructor(dimension, element) else {
+            return format!(
+                "reader => ConfigForgeRuntimeReader.{helper}(reader, {component_array})"
+            );
+        };
+        format!(
+            "reader => ConfigForgeRuntimeReader.{helper}(reader, {component_array}, {constructor})"
+        )
+    }
+
+    fn vector_constructor(
+        &self,
+        dimension: usize,
+        element: CodeVectorElementType,
+    ) -> Option<String> {
+        let cast = match element {
+            CodeVectorElementType::Float => "(float)",
+            CodeVectorElementType::Int => "(int)",
+        };
+        let args = (0..dimension)
+            .map(|index| format!("{cast}v{}", index + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let parameters = (0..dimension)
+            .map(|index| format!("v{}", index + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(match (self.profile, dimension, element) {
+            (CSharpProfile::Dotnet, 2..=4, CodeVectorElementType::Float) => {
+                format!("({parameters}) => new System.Numerics.Vector{dimension}({args})")
+            }
+            (CSharpProfile::Unity, 2..=4, CodeVectorElementType::Float) => {
+                format!("({parameters}) => new UnityEngine.Vector{dimension}({args})")
+            }
+            (CSharpProfile::Unity, 2..=3, CodeVectorElementType::Int) => {
+                format!("({parameters}) => new UnityEngine.Vector{dimension}Int({args})")
+            }
+            (CSharpProfile::Godot, 2..=4, CodeVectorElementType::Float) => {
+                format!("({parameters}) => new Godot.Vector{dimension}({args})")
+            }
+            (CSharpProfile::Godot, 2..=4, CodeVectorElementType::Int) => {
+                format!("({parameters}) => new Godot.Vector{dimension}I({args})")
+            }
+            _ => return None,
         })
     }
 
@@ -388,10 +500,21 @@ fn suffixed_name(name: String, suffix: &str) -> String {
     }
 }
 
-fn csharp_vector_type(dimension: usize, element: CodeVectorElementType) -> String {
+fn csharp_fallback_vector_type(dimension: usize, element: CodeVectorElementType) -> String {
     let suffix = match element {
         CodeVectorElementType::Float => "",
         CodeVectorElementType::Int => "Int",
     };
     format!("ConfigForgeVector{dimension}{suffix}")
+}
+
+fn csharp_string_array(values: &[String]) -> String {
+    format!(
+        "new[] {{ {} }}",
+        values
+            .iter()
+            .map(|value| format!("{value:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }

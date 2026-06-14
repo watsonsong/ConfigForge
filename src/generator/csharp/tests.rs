@@ -35,6 +35,7 @@ fn export_target_from_task_reads_csharp_options() {
             namespace = "Demo.Shared"
 
             [csharp]
+            profile = "unity"
             namespace = "Demo.Generated"
             nullable = false
             access_modifier = "internal"
@@ -54,6 +55,7 @@ fn export_target_from_task_reads_csharp_options() {
         .expect("csharp options");
 
     assert_eq!(target.namespace.as_deref(), Some("Demo.Shared"));
+    assert_eq!(options.profile, super::CSharpProfile::Unity);
     assert_eq!(options.namespace.as_deref(), Some("Demo.Generated"));
     assert!(!options.nullable);
     assert_eq!(options.access_modifier, "internal");
@@ -69,6 +71,59 @@ fn export_target_from_task_reads_csharp_options() {
         Some("ConfigForge.Runtime")
     );
     assert!(options.emit_runtime_adapters);
+}
+
+#[test]
+fn emits_builtin_value_types_and_dotnet_profile_mappings() {
+    let meta = builtin_value_fixture();
+    let input = input_for(&meta, LANGUAGE);
+
+    let files = CSharpCodeGenerator.generate(&input).expect("csharp code");
+    let content = &files[0].content;
+
+    assert!(content.contains("public readonly struct ConfigForgeColor"));
+    assert!(content.contains("public readonly struct ConfigForgeVector2Int"));
+    assert!(content.contains("public ConfigForgeColor Tint { get; init; }"));
+    assert!(content.contains("public System.Numerics.Vector3 Position { get; init; }"));
+    assert!(content.contains("public ConfigForgeVector2Int Grid { get; init; }"));
+    assert!(content.contains("ReadColorValue(reader"));
+    assert!(content.contains("ReadConfigForgeVector3Value(reader, new[] { \"right\", \"up\", \"forward\" }, (v1, v2, v3) => new System.Numerics.Vector3((float)v1, (float)v2, (float)v3))"));
+}
+
+#[test]
+fn emits_unity_and_godot_profile_builtin_mappings() {
+    let meta = builtin_value_fixture();
+    let mut unity_input = input_for(&meta, LANGUAGE);
+    unity_input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str("profile = \"unity\"").expect("toml value"),
+    );
+
+    let unity = CSharpCodeGenerator
+        .generate(&unity_input)
+        .expect("unity csharp code");
+    let unity_content = &unity[0].content;
+    assert!(unity_content.contains("public UnityEngine.Color Tint { get; init; }"));
+    assert!(unity_content.contains("public UnityEngine.Vector3 Position { get; init; }"));
+    assert!(unity_content.contains("public UnityEngine.Vector2Int Grid { get; init; }"));
+    assert!(
+        unity_content.contains("new UnityEngine.Color((float)r, (float)g, (float)b, (float)a)")
+    );
+
+    let mut godot_input = input_for(&meta, LANGUAGE);
+    godot_input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str("profile = \"godot\"").expect("toml value"),
+    );
+
+    let godot = CSharpCodeGenerator
+        .generate(&godot_input)
+        .expect("godot csharp code");
+    let godot_content = &godot[0].content;
+    assert!(godot_content.contains("public Godot.Color Tint { get; init; }"));
+    assert!(godot_content.contains("public Godot.Vector3 Position { get; init; }"));
+    assert!(godot_content.contains("public Godot.Vector2I Grid { get; init; }"));
+    assert!(godot_content.contains("new Godot.Color((float)r, (float)g, (float)b, (float)a)"));
 }
 
 #[test]
@@ -732,6 +787,47 @@ fn generate_to_sink_matches_legacy_generate_output() {
         fs::read_to_string(&legacy[0].path).expect("streamed csharp file"),
         legacy[0].content
     );
+}
+
+fn builtin_value_fixture() -> MetaModel {
+    MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "SpawnPoint"
+
+            [[structs.fields]]
+            name = "grid"
+            type = "vector2_int"
+            required = true
+
+            [[tables]]
+            name = "effects"
+            source = "effects.csv"
+
+            [[tables.fields]]
+            name = "id"
+            type = "string"
+            required = true
+
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_channel = "normalized"
+            required = true
+
+            [[tables.fields]]
+            name = "position"
+            type = "vector3"
+            vector_components = ["right", "up", "forward"]
+            required = true
+
+            [[tables.fields]]
+            name = "spawn"
+            type = "SpawnPoint"
+            required = true
+        "#,
+    )
+    .expect("meta should parse")
 }
 
 fn csharp_type_mapping_fixture() -> MetaModel {

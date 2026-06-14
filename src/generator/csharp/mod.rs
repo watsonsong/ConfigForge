@@ -29,6 +29,8 @@ pub const LANGUAGE: &str = "csharp";
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CSharpCodegenOptions {
     #[serde(default)]
+    pub profile: CSharpProfile,
+    #[serde(default)]
     pub namespace: Option<String>,
     #[serde(default = "default_nullable")]
     pub nullable: bool,
@@ -48,9 +50,19 @@ pub struct CSharpCodegenOptions {
     pub emit_runtime_adapters: bool,
 }
 
+#[derive(Debug, Default, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CSharpProfile {
+    #[default]
+    Dotnet,
+    Unity,
+    Godot,
+}
+
 impl Default for CSharpCodegenOptions {
     fn default() -> Self {
         Self {
+            profile: CSharpProfile::default(),
             namespace: None,
             nullable: default_nullable(),
             access_modifier: default_access_modifier(),
@@ -525,11 +537,13 @@ fn render_runtime_contract(
     content.raw("    public sealed class ConfigForgeRuntimeException : Exception\n    {\n");
     content.raw("        public ConfigForgeRuntimeException(string message) : base(message) { }\n");
     content.raw("    }\n\n");
+    render_builtin_value_types(content);
     content.raw("    internal static class ConfigForgeRuntimeReader\n    {\n");
     content.raw("        public static long ReadIntValue(IConfigForgeRuntimeDataReader reader) => reader.ReadInt();\n");
     content.raw("        public static double ReadFloatValue(IConfigForgeRuntimeDataReader reader) => reader.ReadFloat();\n");
     content.raw("        public static bool ReadBoolValue(IConfigForgeRuntimeDataReader reader) => reader.ReadBool();\n");
     content.raw("        public static string ReadStringValue(IConfigForgeRuntimeDataReader reader) => reader.ReadString();\n\n");
+    render_builtin_value_read_helpers(content);
     for code_enum in enums {
         let type_name = names.type_name(&code_enum.name)?;
         content.raw_fmt(format_args!(
@@ -558,6 +572,87 @@ fn render_runtime_contract(
     content.raw("        public static int UpperBound<TKey>((TKey Key, int RowIndex)[] entries, TKey key)\n        {\n            var comparer = Comparer<TKey>.Default;\n            var low = 0;\n            var high = entries.Length;\n            while (low < high)\n            {\n                var mid = low + ((high - low) / 2);\n                if (comparer.Compare(entries[mid].Key, key) <= 0)\n                {\n                    low = mid + 1;\n                }\n                else\n                {\n                    high = mid;\n                }\n            }\n            return low;\n        }\n");
     content.raw("    }\n\n");
     Ok(())
+}
+
+fn render_builtin_value_types(content: &mut impl CodeWriterLike) {
+    content.raw("    public readonly struct ConfigForgeColor\n    {\n        public ConfigForgeColor(double r, double g, double b, double a)\n        {\n            R = r;\n            G = g;\n            B = b;\n            A = a;\n        }\n\n        public double R { get; }\n        public double G { get; }\n        public double B { get; }\n        public double A { get; }\n    }\n\n");
+    for dimension in 2..=4 {
+        render_vector_value_type(content, dimension, false);
+        render_vector_value_type(content, dimension, true);
+    }
+}
+
+fn render_vector_value_type(content: &mut impl CodeWriterLike, dimension: usize, int_vector: bool) {
+    let suffix = if int_vector { "Int" } else { "" };
+    let value_type = if int_vector { "long" } else { "double" };
+    let type_name = format!("ConfigForgeVector{dimension}{suffix}");
+    let parameters = (0..dimension)
+        .map(|index| format!("{value_type} v{}", index + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+    content.raw_fmt(format_args!(
+        "    public readonly struct {type_name}\n    {{\n        public {type_name}({parameters})\n        {{\n"
+    ));
+    for index in 0..dimension {
+        let property = ["X", "Y", "Z", "W"][index];
+        content.raw_fmt(format_args!("            {property} = v{};\n", index + 1));
+    }
+    content.raw("        }\n\n");
+    for index in 0..dimension {
+        let property = ["X", "Y", "Z", "W"][index];
+        content.raw_fmt(format_args!(
+            "        public {value_type} {property} {{ get; }}\n"
+        ));
+    }
+    content.raw("    }\n\n");
+}
+
+fn render_builtin_value_read_helpers(content: &mut impl CodeWriterLike) {
+    content.raw("        public static ConfigForgeColor ReadColorValue(IConfigForgeRuntimeDataReader reader)\n        {\n            return ReadColorValue(reader, (r, g, b, a) => new ConfigForgeColor(r, g, b, a));\n        }\n\n        public static T ReadColorValue<T>(IConfigForgeRuntimeDataReader reader, Func<double, double, double, double, T> create)\n        {\n            reader.BeginRecord(0);\n            try\n            {\n                var r = ReadRequiredField(reader, \"r\", ReadFloatValue);\n                var g = ReadRequiredField(reader, \"g\", ReadFloatValue);\n                var b = ReadRequiredField(reader, \"b\", ReadFloatValue);\n                var a = ReadRequiredField(reader, \"a\", ReadFloatValue);\n                return create(r, g, b, a);\n            }\n            finally\n            {\n                reader.EndRecord();\n            }\n        }\n\n");
+    for dimension in 2..=4 {
+        render_vector_read_helper(content, dimension, false);
+        render_vector_read_helper(content, dimension, true);
+    }
+}
+
+fn render_vector_read_helper(
+    content: &mut impl CodeWriterLike,
+    dimension: usize,
+    int_vector: bool,
+) {
+    let suffix = if int_vector { "Int" } else { "" };
+    let type_name = format!("ConfigForgeVector{dimension}{suffix}");
+    let helper_name = format!("Read{type_name}Value");
+    let fallback_args = (0..dimension)
+        .map(|index| {
+            if int_vector {
+                format!("(long)v{}", index + 1)
+            } else {
+                format!("v{}", index + 1)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let generic_type = std::iter::repeat_n("double", dimension)
+        .chain(std::iter::once("T"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let component_reads = (0..dimension)
+        .map(|index| {
+            format!(
+                "                var v{} = ReadRequiredField(reader, components[{}], ReadFloatValue);\n",
+                index + 1,
+                index
+            )
+        })
+        .collect::<String>();
+    let create_args = (0..dimension)
+        .map(|index| format!("v{}", index + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+    content.raw_fmt(format_args!(
+        "        public static {type_name} {helper_name}(IConfigForgeRuntimeDataReader reader, IReadOnlyList<string> components)\n        {{\n            return {helper_name}(reader, components, ({create_args}) => new {type_name}({fallback_args}));\n        }}\n\n        public static T {helper_name}<T>(IConfigForgeRuntimeDataReader reader, IReadOnlyList<string> components, Func<{generic_type}> create)\n        {{\n            if (components.Count != {dimension})\n            {{\n                throw new ConfigForgeRuntimeException(\"Vector component count mismatch.\");\n            }}\n            reader.BeginRecord(0);\n            try\n            {{\n{component_reads}                return create({create_args});\n            }}\n            finally\n            {{\n                reader.EndRecord();\n            }}\n        }}\n\n"
+    ));
 }
 
 fn render_standard_runtime_adapters(content: &mut impl CodeWriterLike) {
