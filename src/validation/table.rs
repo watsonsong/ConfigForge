@@ -300,6 +300,7 @@ fn field_location(
             location.source_row_number = Some(row_source.source_row_number);
         }
         if let Some(cell_source) = table.cell_source(row_index, &field.meta.name) {
+            location.source_path = Some(cell_source.source_path.clone());
             location.source_row_number = Some(cell_source.source_row_number);
             location.source_column_number = Some(cell_source.source_column_number);
             location.source_column_name = Some(cell_source.source_column_name.clone());

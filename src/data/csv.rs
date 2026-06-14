@@ -81,6 +81,7 @@ impl CsvDataReader {
                 row_cell_sources.insert(
                     header.clone(),
                     CellSourceInfo {
+                        source_path: path.to_path_buf(),
                         source_row_number,
                         source_column_number: column_index + 1,
                         source_column_name: header.clone(),
@@ -224,6 +225,7 @@ impl CsvDataReader {
             row_cell_sources.insert(
                 key.to_owned(),
                 CellSourceInfo {
+                    source_path: path.to_path_buf(),
                     source_row_number: row_number,
                     source_column_number: value_column_index + 1,
                     source_column_name: "value".to_owned(),

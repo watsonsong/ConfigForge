@@ -98,6 +98,7 @@ fn csv_reader_reads_header_and_records() {
     let name_source = table
         .cell_source(1, "name")
         .expect("name cell source should be tracked");
+    assert_eq!(name_source.source_path, csv_path);
     assert_eq!(name_source.source_row_number, 4);
     assert_eq!(name_source.source_column_number, 2);
     assert_eq!(name_source.column_index, 1);
@@ -361,6 +362,7 @@ fn csv_reader_reads_object_key_value_rows_as_one_logical_row() {
     let start_gold_source = table
         .cell_source(0, "start_gold")
         .expect("object table field source should be tracked");
+    assert_eq!(start_gold_source.source_path, csv_path);
     assert_eq!(start_gold_source.source_row_number, 3);
     assert_eq!(start_gold_source.source_column_number, 3);
     assert_eq!(start_gold_source.column_index, 2);
@@ -2078,6 +2080,13 @@ fn data_loader_applies_object_table_override_field_patch() {
     assert_eq!(
         table.rows[0].get("feature_flags[0]").map(String::as_str),
         Some("a")
+    );
+    assert_eq!(
+        table
+            .cell_source(0, "max_level")
+            .expect("override cell source should exist")
+            .source_path,
+        PathBuf::from("game_s1.csv")
     );
     assert_eq!(
         table

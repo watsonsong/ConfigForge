@@ -13,7 +13,7 @@ use std::{
 };
 
 use crate::{
-    data::{RowSourceInfo, SourceRole},
+    data::{CellSourceInfo, RowSourceInfo, SourceRole},
     diagnostic::{
         Diagnostic, DiagnosticLocation, DiagnosticSeverity,
         code::{
@@ -2702,6 +2702,67 @@ fn object_table_field_type_enum_and_struct_errors_still_apply() {
             "expected `{expected_message}` in `{message}`"
         );
     }
+}
+
+#[test]
+fn object_table_validation_uses_override_cell_source_location() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "game_config"
+            kind = "object"
+            sources = [{ provider = "csv", path = "gameplay.csv" }]
+            override_sources = [{ provider = "csv", path = "game_s1.csv" }]
+
+            [[tables.fields]]
+            name = "max_level"
+            type = "int"
+            required = true
+        "#,
+    )
+    .expect("meta should load");
+    let linked_meta = meta.link().expect("meta should link");
+    let table_meta = linked_meta.table("game_config").expect("linked table");
+    let table = DataTable::new_with_sources_and_cells(
+        "game_config",
+        vec![BTreeMap::from([(
+            "max_level".to_owned(),
+            "oops".to_owned(),
+        )])],
+        vec![RowSourceInfo {
+            source_index: 0,
+            source_path: PathBuf::from("gameplay.csv"),
+            source_row_number: 2,
+            fragments: Vec::new(),
+            source_role: SourceRole::Base,
+            replaces: None,
+        }],
+        vec![BTreeMap::from([(
+            "max_level".to_owned(),
+            CellSourceInfo {
+                source_path: PathBuf::from("game_s1.csv"),
+                source_row_number: 4,
+                source_column_number: 3,
+                source_column_name: "value".to_owned(),
+                column_index: 2,
+            },
+        )])],
+    )
+    .expect("object table should build");
+
+    let report = validation_report_error(validate_table(table_meta, &table));
+    let issue = report
+        .issues
+        .iter()
+        .find(|issue| issue.code == CF_DATA_INVALID_TYPE && issue.validator == "validation.type")
+        .expect("invalid type issue should be reported");
+    assert_eq!(
+        issue.location.source_path,
+        Some(PathBuf::from("game_s1.csv"))
+    );
+    assert_eq!(issue.location.source_row_number, Some(4));
+    assert_eq!(issue.location.source_column_number, Some(3));
+    assert_eq!(issue.location.source_column_name.as_deref(), Some("value"));
 }
 
 #[test]

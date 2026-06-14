@@ -113,17 +113,17 @@
 
 ### Step 5 — 对齐 validation / export / runtime payload
 
-- [ ] 审计 validation field lookup 是否优先使用 `DataTable::cell_source()`；对 ObjectTable 被覆盖字段，诊断 source path / row number 应指向 override source。
-- [ ] 覆盖 required/default/type/enum/struct/list/color/vector/FK 校验在 ObjectTable multi-source materialized row 上的行为。
-- [ ] 确认 target-aware field filtering 在 merge 后执行，不要求每个 source 单独满足 required。
-- [ ] 确认 JSON / MessagePack / bin / Lua runtime payload 对 ObjectTable singleton object 不需要额外改动。
-- [ ] 增加 validation / artifact tests：
-  - [ ] required field 可由第二个 base source 提供。
-  - [ ] override source 的 invalid value 诊断定位到 override key row。
-  - [ ] struct expanded child path 跨 base source 合并后可通过校验。
-  - [ ] list expanded element path 跨 base source 合并后连续性校验仍正确。
-  - [ ] ObjectTable FK source 字段由 override source 覆盖后按最终值做引用完整性校验。
-  - [ ] runtime export 输出 final object，不输出 per-source 中间态。
+- [x] 审计 validation field lookup 是否优先使用 `DataTable::cell_source()`；对 ObjectTable 被覆盖字段，诊断 source path / row number 应指向 override source。
+- [x] 覆盖 required/default/type/enum/struct/list/color/vector/FK 校验在 ObjectTable multi-source materialized row 上的行为。
+- [x] 确认 target-aware field filtering 在 merge 后执行，不要求每个 source 单独满足 required。
+- [x] 确认 JSON / MessagePack / bin / Lua runtime payload 对 ObjectTable singleton object 不需要额外改动。
+- [x] 增加 validation / artifact tests：
+  - [x] required field 可由第二个 base source 提供。
+  - [x] override source 的 invalid value 诊断定位到 override key row。
+  - [x] struct expanded child path 跨 base source 合并后可通过校验。
+  - [x] list expanded element path 跨 base source 合并后连续性校验仍正确。
+  - [x] ObjectTable FK source 字段由 override source 覆盖后按最终值做引用完整性校验。
+  - [x] runtime export 输出 final object，不输出 per-source 中间态。
 
 验收：所有下游模块只看到 ObjectTable 的最终 materialized object，不需要知道其来自单 source 还是多 source。
 

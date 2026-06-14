@@ -43,6 +43,7 @@ pub struct RowSourceInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellSourceInfo {
+    pub source_path: PathBuf,
     pub source_row_number: usize,
     pub source_column_number: usize,
     pub source_column_name: String,

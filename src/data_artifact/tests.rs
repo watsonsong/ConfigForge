@@ -1019,6 +1019,45 @@ fn object_table_exports_single_object_and_filters_fields() {
 }
 
 #[test]
+fn object_table_payload_uses_materialized_override_view() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+                [[tables]]
+                name = "game_config"
+                kind = "object"
+                sources = [{ provider = "csv", path = "gameplay.csv" }]
+                override_sources = [{ provider = "csv", path = "game_s1.csv" }]
+
+                [[tables.fields]]
+                name = "max_level"
+                type = "int"
+
+                [[tables.fields]]
+                name = "gold_multiplier"
+                type = "float"
+            "#,
+    )
+    .expect("meta should load");
+    let linked = meta.link().expect("meta should link");
+    let table_meta = linked.table("game_config").expect("linked table");
+    let table = DataTable::new(
+        "game_config",
+        vec![BTreeMap::from([
+            ("max_level".to_owned(), "80".to_owned()),
+            ("gold_multiplier".to_owned(), "1.5".to_owned()),
+        ])],
+    );
+
+    let payload = build_exported_table_payload(table_meta, &table, &TargetTags::empty())
+        .expect("payload should build");
+    let value = serde_json::to_value(payload).expect("payload should serialize");
+
+    assert_eq!(value["max_level"], "80");
+    assert_eq!(value["gold_multiplier"], "1.5");
+    assert!(value.get("rows").is_none());
+}
+
+#[test]
 fn object_table_only_header_exports_empty_or_default_object() {
     let meta = MetaModel::from_toml_str(
         r#"

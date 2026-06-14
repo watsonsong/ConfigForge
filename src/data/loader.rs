@@ -226,6 +226,7 @@ impl PendingTable {
                 .get(row_index)
                 .cloned()
                 .unwrap_or_default();
+            let cell_sources = retag_cell_sources(cell_sources, source);
             let source_row_number = table
                 .row_sources
                 .get(row_index)
@@ -275,6 +276,7 @@ impl PendingTable {
                 .get(row_index)
                 .cloned()
                 .unwrap_or_default();
+            let cell_sources = retag_cell_sources(cell_sources, source);
             let source_row_number = table
                 .row_sources
                 .get(row_index)
@@ -331,6 +333,7 @@ impl PendingTable {
         table: DataTable,
     ) -> Result<()> {
         let (row, source_row_number, cell_sources) = object_singleton_parts(table, source)?;
+        let cell_sources = retag_cell_sources(cell_sources, source);
         if self.rows.is_empty() {
             self.rows.push(DataRow::new());
             self.cell_sources.push(BTreeMap::new());
@@ -371,6 +374,7 @@ impl PendingTable {
         table: DataTable,
     ) -> Result<()> {
         let (row, source_row_number, cell_sources) = object_singleton_parts(table, source)?;
+        let cell_sources = retag_cell_sources(cell_sources, source);
         if self.rows.is_empty() {
             self.rows.push(DataRow::new());
             self.cell_sources.push(BTreeMap::new());
@@ -460,6 +464,16 @@ fn object_singleton_parts(
         .unwrap_or(source.data_start_row);
     let cell_sources = cell_sources.into_iter().next().unwrap_or_default();
     Ok((row, source_row_number, cell_sources))
+}
+
+fn retag_cell_sources(
+    mut cell_sources: BTreeMap<String, CellSourceInfo>,
+    source: &DataSourcePlan,
+) -> BTreeMap<String, CellSourceInfo> {
+    for cell_source in cell_sources.values_mut() {
+        cell_source.source_path = source.path.clone();
+    }
+    cell_sources
 }
 
 fn primary_key_for_row(
