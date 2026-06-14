@@ -5,13 +5,16 @@ use std::{fs, process::Command as StdCommand};
 
 use super::{assert_command_success, require_tool_or_skip};
 
-pub(crate) fn verify_standard_generated_cpp_unreal_runtime(fixture_root: &std::path::Path) {
+pub(crate) fn verify_standard_generated_cpp_unreal_runtime(
+    _fixture_root: &std::path::Path,
+    output_root: &std::path::Path,
+) {
     if require_tool_or_skip("standard generated cpp_unreal syntax test", "c++").is_none() {
         return;
     }
 
     let temp_dir = tempfile::tempdir().expect("cpp_unreal harness temp dir should be created");
-    let generated_dir = fixture_root.join("out/client_code/cpp_unreal");
+    let generated_dir = output_root.join("client_code/cpp_unreal");
     write_cpp_unreal_core_minimal_shim(temp_dir.path());
 
     let output = StdCommand::new("c++")

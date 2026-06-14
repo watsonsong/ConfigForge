@@ -171,15 +171,17 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
 #[test]
 fn standard_project_builds_unity_and_dotnet_csharp_targets() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let fixture_root = absolute_fixture_path("");
-    let project_path = std::path::Path::new(&fixture_root).join("ConfigForge.toml");
-    let client_unity_out = std::path::Path::new(&fixture_root).join("out/client_code/unity");
-    let server_dotnet_out = std::path::Path::new(&fixture_root).join("out/server_code/dotnet");
+    let standard_project = write_temp_standard_project_config(temp_dir.path());
+    let client_unity_out = standard_project.output_root.join("client_code/unity");
+    let server_dotnet_out = standard_project.output_root.join("server_code/dotnet");
 
     let mut client_unity_cmd = Command::cargo_bin("config-forge").expect("binary should build");
     client_unity_cmd.current_dir(temp_dir.path()).args([
         "--project",
-        project_path.to_str().expect("path should be utf8"),
+        standard_project
+            .project_path
+            .to_str()
+            .expect("path should be utf8"),
         "--target",
         "client_unity",
     ]);
@@ -196,7 +198,10 @@ fn standard_project_builds_unity_and_dotnet_csharp_targets() {
     let mut server_dotnet_cmd = Command::cargo_bin("config-forge").expect("binary should build");
     server_dotnet_cmd.current_dir(temp_dir.path()).args([
         "--project",
-        project_path.to_str().expect("path should be utf8"),
+        standard_project
+            .project_path
+            .to_str()
+            .expect("path should be utf8"),
         "--target",
         "server_dotnet",
     ]);
@@ -413,15 +418,11 @@ fn source_order_ordinals_follow_target_visible_rows() {
 
 #[test]
 fn standard_project_generated_code_loads_exported_runtime_data() {
-    let project_path = std::env::current_dir()
-        .expect("current dir")
-        .join("tests/fixtures/standard_project/ConfigForge.toml");
-    let fixture_root = project_path.parent().expect("standard project root");
-    let fixture_out_dir = fixture_root.join("out");
-    if fixture_out_dir.exists() {
-        fs::remove_dir_all(&fixture_out_dir)
-            .expect("stale standard project out dir should be removed");
-    }
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let standard_project = write_temp_standard_project_config(temp_dir.path());
+    let fixture_root = standard_project.fixture_root.as_path();
+    let output_root = standard_project.output_root.as_path();
+    let project_path = standard_project.project_path.as_path();
 
     let mut client_cmd = Command::cargo_bin("config-forge").expect("binary should build");
     client_cmd.args([
@@ -459,167 +460,139 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
         .success()
         .stdout(predicate::str::contains("target `schema_docs` built"));
 
+    assert!(output_root.join("client_data/json/items.json").exists());
     assert!(
-        fixture_root
-            .join("out/client_data/json/items.json")
+        output_root
+            .join("client_data/json/rarity_levels.json")
+            .exists()
+    );
+    assert!(output_root.join("client_data/binary/items.bin").exists());
+    assert!(
+        output_root
+            .join("client_data/msgpack/items.msgpack")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_data/json/rarity_levels.json")
+        output_root
+            .join("client_data/json/character_surnames.json")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_data/binary/items.bin")
+        output_root
+            .join("client_data/json/character_male_given_names.json")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_data/msgpack/items.msgpack")
+        output_root
+            .join("client_data/json/character_female_given_names.json")
+            .exists()
+    );
+    assert!(output_root.join("client_data/json/quests.json").exists());
+    assert!(
+        output_root
+            .join("client_data/json/loot_pools.json")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_data/json/character_surnames.json")
+        output_root
+            .join("client_i18n/reference_game_config.pot")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_data/json/character_male_given_names.json")
+        output_root
+            .join("client_assets/client_assets.json")
+            .exists()
+    );
+    assert!(output_root.join("client_assets/client_assets.csv").exists());
+    assert!(
+        output_root
+            .join("client_assets/client_assets_simple.csv")
+            .exists()
+    );
+    assert!(output_root.join("client_reports/validation.html").exists());
+    assert!(output_root.join("client_docs/index.md").exists());
+    assert!(output_root.join("client_docs/quests.md").exists());
+    assert!(output_root.join("server_docs/index.md").exists());
+    assert!(output_root.join("schema_docs/index.md").exists());
+    assert!(output_root.join("schema_docs_html/index.html").exists());
+    assert!(
+        output_root
+            .join("schema_docs_html/rarity_levels.html")
+            .exists()
+    );
+    assert!(output_root.join("schema_docs/game_rules.md").exists());
+    assert!(
+        output_root
+            .join("client_lua/reference_game_config/init.lua")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_data/json/character_female_given_names.json")
+        output_root
+            .join("client_lua/reference_game_config/items.lua")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_data/json/quests.json")
+        output_root
+            .join("server_data/msgpack/items.msgpack")
+            .exists()
+    );
+    assert!(output_root.join("server_data/binary/items.bin").exists());
+    assert!(
+        output_root
+            .join("client_code/rust/reference_game_config.rs")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_data/json/loot_pools.json")
+        output_root
+            .join("client_code/rust_external/reference_game_config.rs")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_i18n/reference_game_config.pot")
+        output_root
+            .join("client_code/typescript/reference_game_config.ts")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_assets/client_assets.json")
+        output_root
+            .join("client_code/cpp/reference_game_config.hpp")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_assets/client_assets.csv")
+        output_root
+            .join("client_code/cpp/reference_game_config.cpp")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_assets/client_assets_simple.csv")
+        output_root
+            .join("client_code/cpp_external/reference_game_config.hpp")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_reports/validation.html")
-            .exists()
-    );
-    assert!(fixture_root.join("out/client_docs/index.md").exists());
-    assert!(fixture_root.join("out/client_docs/quests.md").exists());
-    assert!(fixture_root.join("out/server_docs/index.md").exists());
-    assert!(fixture_root.join("out/schema_docs/index.md").exists());
-    assert!(
-        fixture_root
-            .join("out/schema_docs_html/index.html")
+        output_root
+            .join("client_code/cpp_unreal/reference_game_config.h")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/schema_docs_html/rarity_levels.html")
-            .exists()
-    );
-    assert!(fixture_root.join("out/schema_docs/game_rules.md").exists());
-    assert!(
-        fixture_root
-            .join("out/client_lua/reference_game_config/init.lua")
+        output_root
+            .join("client_code/cpp_unreal/reference_game_config.cpp")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/client_lua/reference_game_config/items.lua")
+        output_root
+            .join("client_code/csharp/reference_game_config.cs")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/server_data/msgpack/items.msgpack")
+        output_root
+            .join("client_code/java/ReferenceGameConfig.java")
             .exists()
     );
     assert!(
-        fixture_root
-            .join("out/server_data/binary/items.bin")
+        output_root
+            .join("server_code/rust/reference_game_config.rs")
             .exists()
     );
-    assert!(
-        fixture_root
-            .join("out/client_code/rust/reference_game_config.rs")
-            .exists()
-    );
-    assert!(
-        fixture_root
-            .join("out/client_code/rust_external/reference_game_config.rs")
-            .exists()
-    );
-    assert!(
-        fixture_root
-            .join("out/client_code/typescript/reference_game_config.ts")
-            .exists()
-    );
-    assert!(
-        fixture_root
-            .join("out/client_code/cpp/reference_game_config.hpp")
-            .exists()
-    );
-    assert!(
-        fixture_root
-            .join("out/client_code/cpp/reference_game_config.cpp")
-            .exists()
-    );
-    assert!(
-        fixture_root
-            .join("out/client_code/cpp_external/reference_game_config.hpp")
-            .exists()
-    );
-    assert!(
-        fixture_root
-            .join("out/client_code/cpp_unreal/reference_game_config.h")
-            .exists()
-    );
-    assert!(
-        fixture_root
-            .join("out/client_code/cpp_unreal/reference_game_config.cpp")
-            .exists()
-    );
-    assert!(
-        fixture_root
-            .join("out/client_code/csharp/reference_game_config.cs")
-            .exists()
-    );
-    assert!(
-        fixture_root
-            .join("out/client_code/java/ReferenceGameConfig.java")
-            .exists()
-    );
-    assert!(
-        fixture_root
-            .join("out/server_code/rust/reference_game_config.rs")
-            .exists()
-    );
-    let pot = fs::read_to_string(fixture_root.join("out/client_i18n/reference_game_config.pot"))
+    let pot = fs::read_to_string(output_root.join("client_i18n/reference_game_config.pot"))
         .expect("standard fixture POT should be readable");
     assert!(pot.contains("msgctxt \"items.name\""));
     assert!(pot.contains("msgid \"Iron Ore\""));
@@ -629,42 +602,41 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(pot.contains("msgctxt \"quests.title\""));
     assert!(pot.contains("msgid \"First Steps\""));
 
-    let validation_report =
-        fs::read_to_string(fixture_root.join("out/client_reports/validation.html"))
-            .expect("standard fixture validation report should be readable");
+    let validation_report = fs::read_to_string(output_root.join("client_reports/validation.html"))
+        .expect("standard fixture validation report should be readable");
     assert!(validation_report.contains("PASS"));
     assert!(validation_report.contains("<h2>0</h2><p>Errors</p>"));
 
-    let schema_index = fs::read_to_string(fixture_root.join("out/client_docs/index.md"))
+    let schema_index = fs::read_to_string(output_root.join("client_docs/index.md"))
         .expect("standard fixture schema index should be readable");
     assert!(schema_index.contains("Client Schema Documentation"));
     assert!(schema_index.contains("[rarity_levels](rarity_levels.md)"));
     assert!(schema_index.contains("[quests](quests.md)"));
     assert!(schema_index.contains("[loot_pools](loot_pools.md)"));
 
-    let quests_doc = fs::read_to_string(fixture_root.join("out/client_docs/quests.md"))
+    let quests_doc = fs::read_to_string(output_root.join("client_docs/quests.md"))
         .expect("standard fixture quests doc should be readable");
     assert!(quests_doc.contains("FixedReward"));
     assert!(quests_doc.contains("required_class_id | classes.class_id"));
     assert!(quests_doc.contains("item_ids"));
     assert!(quests_doc.contains("monotonic"));
 
-    let game_rules_doc = fs::read_to_string(fixture_root.join("out/client_docs/game_rules.md"))
+    let game_rules_doc = fs::read_to_string(output_root.join("client_docs/game_rules.md"))
         .expect("standard fixture game_rules doc should be readable");
     assert!(game_rules_doc.contains("starter_reward"));
     assert!(game_rules_doc.contains("FixedReward"));
 
-    let rarity_doc = fs::read_to_string(fixture_root.join("out/client_docs/rarity_levels.md"))
+    let rarity_doc = fs::read_to_string(output_root.join("client_docs/rarity_levels.md"))
         .expect("standard fixture rarity_levels doc should be readable");
     assert!(rarity_doc.contains("道具稀有度品质表"));
     assert!(rarity_doc.contains("standard_color"));
     assert!(rarity_doc.contains("background_icon"));
 
-    let server_schema_index = fs::read_to_string(fixture_root.join("out/server_docs/index.md"))
+    let server_schema_index = fs::read_to_string(output_root.join("server_docs/index.md"))
         .expect("standard fixture server schema index should be readable");
     assert!(server_schema_index.contains("Server Schema Documentation"));
 
-    let meta_schema_index = fs::read_to_string(fixture_root.join("out/schema_docs/index.md"))
+    let meta_schema_index = fs::read_to_string(output_root.join("schema_docs/index.md"))
         .expect("standard fixture meta schema index should be readable");
     assert!(meta_schema_index.contains("Reference Game Meta Schema Documentation"));
     assert!(meta_schema_index.contains("[rarity_levels](rarity_levels.md)"));
@@ -676,7 +648,7 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
     assert!(meta_schema_index.contains("| game_rules | starter_item_ids | items | by_id | list-to-many | no | starter_items | all |"));
 
-    let meta_schema_items = fs::read_to_string(fixture_root.join("out/schema_docs/items.md"))
+    let meta_schema_items = fs::read_to_string(output_root.join("schema_docs/items.md"))
         .expect("standard fixture meta schema items doc should be readable");
     assert!(meta_schema_items.contains("## Fragments"));
     assert!(
@@ -689,9 +661,8 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
         )
     );
 
-    let meta_schema_game_rules =
-        fs::read_to_string(fixture_root.join("out/schema_docs/game_rules.md"))
-            .expect("standard fixture meta schema game_rules doc should be readable");
+    let meta_schema_game_rules = fs::read_to_string(output_root.join("schema_docs/game_rules.md"))
+        .expect("standard fixture meta schema game_rules doc should be readable");
     assert!(!meta_schema_game_rules.contains("## Fragments"));
     assert!(!meta_schema_game_rules.contains("No fragments."));
     assert!(
@@ -701,7 +672,7 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     );
 
     let meta_schema_html_index =
-        fs::read_to_string(fixture_root.join("out/schema_docs_html/index.html"))
+        fs::read_to_string(output_root.join("schema_docs_html/index.html"))
             .expect("standard fixture HTML schema index should be readable");
     assert!(meta_schema_html_index.contains("Reference Game Meta Schema Documentation"));
     assert!(meta_schema_html_index.contains("rarity_levels.html"));
@@ -712,20 +683,20 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(meta_schema_html_index.contains("fragments: stack"));
 
     let meta_schema_html_items =
-        fs::read_to_string(fixture_root.join("out/schema_docs_html/items.html"))
+        fs::read_to_string(output_root.join("schema_docs_html/items.html"))
             .expect("standard fixture HTML schema items doc should be readable");
     assert!(meta_schema_html_items.contains("<h2>Fragment composition</h2>"));
     assert!(meta_schema_html_items.contains("<code>stack</code>"));
     assert!(meta_schema_html_items.contains("not independent table"));
 
     let meta_schema_html_game_rules =
-        fs::read_to_string(fixture_root.join("out/schema_docs_html/game_rules.html"))
+        fs::read_to_string(output_root.join("schema_docs_html/game_rules.html"))
             .expect("standard fixture HTML schema game_rules doc should be readable");
     assert!(!meta_schema_html_game_rules.contains("<section id=\"fragments\">"));
     assert!(!meta_schema_html_game_rules.contains("No fragments."));
 
     let asset_manifest_json =
-        fs::read_to_string(fixture_root.join("out/client_assets/client_assets.json"))
+        fs::read_to_string(output_root.join("client_assets/client_assets.json"))
             .expect("standard fixture asset manifest JSON should be readable");
     let asset_manifest: serde_json::Value = serde_json::from_str(&asset_manifest_json)
         .expect("standard fixture asset manifest JSON should parse");
@@ -742,7 +713,7 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     }));
 
     let asset_manifest_csv =
-        fs::read_to_string(fixture_root.join("out/client_assets/client_assets.csv"))
+        fs::read_to_string(output_root.join("client_assets/client_assets.csv"))
             .expect("standard fixture asset manifest CSV should be readable");
     assert!(
         asset_manifest_csv
@@ -752,7 +723,7 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(asset_manifest_csv.contains("assets/icons/rarity/common.png"));
 
     let simple_asset_manifest_csv =
-        fs::read_to_string(fixture_root.join("out/client_assets/client_assets_simple.csv"))
+        fs::read_to_string(output_root.join("client_assets/client_assets_simple.csv"))
             .expect("standard fixture simple asset manifest CSV should be readable");
     assert!(simple_asset_manifest_csv.starts_with("AssetRef\n"));
     assert!(simple_asset_manifest_csv.contains("/Game/Skills/GA_Slash.GA_Slash_C"));
@@ -761,7 +732,7 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(!simple_asset_manifest_csv.contains("items["));
 
     let rust_code =
-        fs::read_to_string(fixture_root.join("out/client_code/rust/reference_game_config.rs"))
+        fs::read_to_string(output_root.join("client_code/rust/reference_game_config.rs"))
             .expect("standard fixture Rust code should be readable");
     assert!(rust_code.contains("pub fn rows(&self) -> &[CharacterSurnamesRow]"));
     assert!(rust_code.contains("pub fn rows(&self) -> &[CharacterMaleGivenNamesRow]"));
@@ -769,23 +740,21 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(!rust_code.contains("pub fn rows(&self) -> &[ItemsRow]"));
     assert!(!rust_code.contains("pub use config_forge_runtime_reader_core"));
 
-    let external_rust_code = fs::read_to_string(
-        fixture_root.join("out/client_code/rust_external/reference_game_config.rs"),
-    )
-    .expect("standard fixture external Rust code should be readable");
+    let external_rust_code =
+        fs::read_to_string(output_root.join("client_code/rust_external/reference_game_config.rs"))
+            .expect("standard fixture external Rust code should be readable");
     assert!(external_rust_code.contains("pub use config_forge_runtime_reader_core::{"));
     assert!(!external_rust_code.contains("pub trait RuntimeDataReader"));
 
-    let cpp_external_code = fs::read_to_string(
-        fixture_root.join("out/client_code/cpp_external/reference_game_config.hpp"),
-    )
-    .expect("standard fixture external C++ header should be readable");
+    let cpp_external_code =
+        fs::read_to_string(output_root.join("client_code/cpp_external/reference_game_config.hpp"))
+            .expect("standard fixture external C++ header should be readable");
     assert!(cpp_external_code.contains("#include \"config_forge/runtime/reader.hpp\""));
     assert!(cpp_external_code.contains("using config_forge_runtime::IRuntimeDataReader;"));
     assert!(!cpp_external_code.contains("class IRuntimeDataReader"));
 
     let java_code =
-        fs::read_to_string(fixture_root.join("out/client_code/java/ReferenceGameConfig.java"))
+        fs::read_to_string(output_root.join("client_code/java/ReferenceGameConfig.java"))
             .expect("standard fixture Java code should be readable");
     assert!(java_code.contains("package referencegame.config;"));
     assert!(java_code.contains("public final class ReferenceGameConfig"));
@@ -795,7 +764,7 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     ));
 
     let csharp_code =
-        fs::read_to_string(fixture_root.join("out/client_code/csharp/reference_game_config.cs"))
+        fs::read_to_string(output_root.join("client_code/csharp/reference_game_config.cs"))
             .expect("standard fixture C# code should be readable");
     assert!(
         csharp_code
@@ -805,5 +774,5 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
         "ConfigForgeMessagePackRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader"
     ));
 
-    verify_standard_generated_runtime_harnesses(fixture_root);
+    verify_standard_generated_runtime_harnesses(fixture_root, output_root);
 }

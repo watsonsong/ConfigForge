@@ -15,7 +15,7 @@ pub(crate) struct GeneratedRuntimeHarness {
     pub(crate) test_name: &'static str,
     pub(crate) required_tools: &'static [&'static str],
     pub(crate) network_policy: &'static str,
-    pub(crate) runner: fn(&std::path::Path),
+    pub(crate) runner: fn(&std::path::Path, &std::path::Path),
 }
 
 pub(crate) fn standard_generated_runtime_harnesses() -> &'static [GeneratedRuntimeHarness] {
@@ -72,7 +72,10 @@ pub(crate) fn standard_generated_runtime_harnesses() -> &'static [GeneratedRunti
     ]
 }
 
-pub(crate) fn verify_standard_generated_runtime_harnesses(fixture_root: &std::path::Path) {
+pub(crate) fn verify_standard_generated_runtime_harnesses(
+    fixture_root: &std::path::Path,
+    output_root: &std::path::Path,
+) {
     let mut executed = 0usize;
     let mut skipped = 0usize;
     let mut failed = Vec::new();
@@ -87,7 +90,7 @@ pub(crate) fn verify_standard_generated_runtime_harnesses(fixture_root: &std::pa
         );
         let skips_before = skipped_optional_test_count();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            (harness.runner)(fixture_root);
+            (harness.runner)(fixture_root, output_root);
         }));
         if result.is_err() {
             failed.push(harness.test_name);
@@ -111,7 +114,10 @@ pub(crate) fn verify_standard_generated_runtime_harnesses(fixture_root: &std::pa
     );
 }
 
-pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::Path) {
+pub(crate) fn verify_standard_generated_rust_runtime(
+    fixture_root: &std::path::Path,
+    output_root: &std::path::Path,
+) {
     let temp_dir = tempfile::tempdir().expect("rust harness temp dir should be created");
     let harness_dir = fixture_root.join("harness/rust");
     let harness_cargo_toml = fs::read_to_string(harness_dir.join("Cargo.toml"))
@@ -150,7 +156,7 @@ pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::P
         .expect("rust harness Cargo.toml should be written");
 
         fs::copy(
-            fixture_root.join("out/client_code/rust/reference_game_config.rs"),
+            output_root.join("client_code/rust/reference_game_config.rs"),
             temp_dir.path().join("generated.rs"),
         )
         .expect("generated Rust JSON code should be copied into harness");
@@ -162,15 +168,12 @@ pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::P
                 "CARGO_TARGET_DIR",
                 temp_dir.path().join(format!("target-{edition}-json")),
             )
-            .env("JSON_DATA_DIR", fixture_root.join("out/client_data/json"))
+            .env("JSON_DATA_DIR", output_root.join("client_data/json"))
             .env(
                 "I18N_MO",
                 fixture_root.join("i18n/zh_CN/reference_game_config.mo"),
             )
-            .env(
-                "MSGPACK_DATA_DIR",
-                fixture_root.join("out/client_data/msgpack"),
-            )
+            .env("MSGPACK_DATA_DIR", output_root.join("client_data/msgpack"))
             .output()
             .expect("standard generated Rust JSON runtime test should run");
         assert_command_success(
@@ -178,7 +181,7 @@ pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::P
             &format!("standard generated Rust JSON runtime test ({edition})"),
         );
         fs::copy(
-            fixture_root.join("out/client_code/rust/reference_game_config.rs"),
+            output_root.join("client_code/rust/reference_game_config.rs"),
             temp_dir.path().join("generated.rs"),
         )
         .expect("generated Rust MessagePack code should be copied into harness");
@@ -192,15 +195,12 @@ pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::P
                     .path()
                     .join(format!("target-{edition}-messagepack")),
             )
-            .env("JSON_DATA_DIR", fixture_root.join("out/client_data/json"))
+            .env("JSON_DATA_DIR", output_root.join("client_data/json"))
             .env(
                 "I18N_MO",
                 fixture_root.join("i18n/zh_CN/reference_game_config.mo"),
             )
-            .env(
-                "MSGPACK_DATA_DIR",
-                fixture_root.join("out/client_data/msgpack"),
-            )
+            .env("MSGPACK_DATA_DIR", output_root.join("client_data/msgpack"))
             .output()
             .expect("standard generated Rust MessagePack runtime test should run");
         assert_command_success(
@@ -209,7 +209,7 @@ pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::P
         );
 
         fs::copy(
-            fixture_root.join("out/client_code/rust/reference_game_config.rs"),
+            output_root.join("client_code/rust/reference_game_config.rs"),
             temp_dir.path().join("generated.rs"),
         )
         .expect("generated Rust code should be copied into binary harness");
@@ -221,7 +221,7 @@ pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::P
                 "CARGO_TARGET_DIR",
                 temp_dir.path().join(format!("target-{edition}-binary")),
             )
-            .env("BIN_DATA_DIR", fixture_root.join("out/client_data/binary"))
+            .env("BIN_DATA_DIR", output_root.join("client_data/binary"))
             .env(
                 "I18N_MO",
                 fixture_root.join("i18n/zh_CN/reference_game_config.mo"),
@@ -236,7 +236,7 @@ pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::P
         fs::write(temp_dir.path().join("lib.rs"), RUST_EXTERNAL_HARNESS)
             .expect("external Rust harness lib.rs should be written");
         fs::copy(
-            fixture_root.join("out/client_code/rust_external/reference_game_config.rs"),
+            output_root.join("client_code/rust_external/reference_game_config.rs"),
             temp_dir.path().join("generated.rs"),
         )
         .expect("generated external Rust code should be copied into harness");
@@ -248,7 +248,7 @@ pub(crate) fn verify_standard_generated_rust_runtime(fixture_root: &std::path::P
                 "CARGO_TARGET_DIR",
                 temp_dir.path().join(format!("target-{edition}-external")),
             )
-            .env("JSON_DATA_DIR", fixture_root.join("out/client_data/json"))
+            .env("JSON_DATA_DIR", output_root.join("client_data/json"))
             .output()
             .expect("standard generated external Rust runtime test should run");
         assert_command_success(
@@ -281,7 +281,10 @@ fn generated_external_rust_loads_exported_json() {
 }
 "#;
 
-pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Path) {
+pub(crate) fn verify_standard_generated_cpp_runtime(
+    fixture_root: &std::path::Path,
+    output_root: &std::path::Path,
+) {
     if skip_language_or_continue("standard generated C++ runtime test", "cpp") {
         return;
     }
@@ -291,8 +294,8 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
 
     let temp_dir = tempfile::tempdir().expect("cpp harness temp dir should be created");
     let runtime_cpp_dir = fixture_root.join("../../../runtime/cpp");
-    let generated_cpp_dir = fixture_root.join("out/client_code/cpp");
-    let generated_external_cpp_dir = fixture_root.join("out/client_code/cpp_external");
+    let generated_cpp_dir = output_root.join("client_code/cpp");
+    let generated_external_cpp_dir = output_root.join("client_code/cpp_external");
     let harness_cpp_dir = fixture_root.join("harness/cpp");
     let harness_cpp = fixture_root.join("harness/cpp/runtime_check.cpp");
     let generated_cpp = generated_cpp_dir.join("reference_game_config.cpp");
@@ -462,7 +465,7 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
     assert_command_success(output, "standard generated C++ CMake build");
 
     let output = StdCommand::new(build_dir.join("standard_runtime_check"))
-        .env("DATA_DIR", fixture_root.join("out/client_data/json"))
+        .env("DATA_DIR", output_root.join("client_data/json"))
         .env("I18N_LOCALE_DIR", &gettext_locale_dir)
         .env("LANGUAGE", "zh_CN")
         .env(
@@ -474,7 +477,7 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
     assert_command_success(output, "standard generated C++ runtime test");
 
     let output = StdCommand::new(build_dir.join("standard_external_runtime_check"))
-        .env("DATA_DIR", fixture_root.join("out/client_data/json"))
+        .env("DATA_DIR", output_root.join("client_data/json"))
         .env("I18N_LOCALE_DIR", &gettext_locale_dir)
         .env("LANGUAGE", "zh_CN")
         .env(
@@ -486,7 +489,7 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
     assert_command_success(output, "standard generated external C++ runtime test");
 
     let output = StdCommand::new(build_dir.join("standard_binary_runtime_check"))
-        .env("DATA_DIR", fixture_root.join("out/client_data/binary"))
+        .env("DATA_DIR", output_root.join("client_data/binary"))
         .env("I18N_LOCALE_DIR", &gettext_locale_dir)
         .env("LANGUAGE", "zh_CN")
         .env(
@@ -507,7 +510,10 @@ pub(crate) fn verify_standard_generated_cpp_runtime(fixture_root: &std::path::Pa
         .expect("C++ MessagePack adapter namespace check should run");
     assert_command_success(output, "C++ MessagePack adapter namespace check run");
 }
-pub(crate) fn verify_standard_generated_typescript_runtime(fixture_root: &std::path::Path) {
+pub(crate) fn verify_standard_generated_typescript_runtime(
+    fixture_root: &std::path::Path,
+    output_root: &std::path::Path,
+) {
     if skip_language_or_continue("standard generated TypeScript runtime test", "typescript") {
         return;
     }
@@ -555,7 +561,7 @@ pub(crate) fn verify_standard_generated_typescript_runtime(fixture_root: &std::p
     )
     .expect("TypeScript tsconfig should be copied");
     fs::copy(
-        fixture_root.join("out/client_code/typescript/reference_game_config.ts"),
+        output_root.join("client_code/typescript/reference_game_config.ts"),
         temp_dir.path().join("generated.ts"),
     )
     .expect("generated TypeScript code should be copied into harness");
@@ -613,8 +619,8 @@ pub(crate) fn verify_standard_generated_typescript_runtime(fixture_root: &std::p
 
     let output = StdCommand::new("node")
         .arg(temp_dir.path().join("dist/runtime_check.js"))
-        .env("DATA_DIR", fixture_root.join("out/client_data/json"))
-        .env("BIN_DATA_DIR", fixture_root.join("out/client_data/binary"))
+        .env("DATA_DIR", output_root.join("client_data/json"))
+        .env("BIN_DATA_DIR", output_root.join("client_data/binary"))
         .env(
             "I18N_MO",
             fixture_root.join("i18n/zh_CN/reference_game_config.mo"),
@@ -623,7 +629,10 @@ pub(crate) fn verify_standard_generated_typescript_runtime(fixture_root: &std::p
         .expect("standard generated TypeScript runtime test should run");
     assert_command_success(output, "standard generated TypeScript runtime test");
 }
-pub(crate) fn verify_standard_generated_lua_runtime(fixture_root: &std::path::Path) {
+pub(crate) fn verify_standard_generated_lua_runtime(
+    fixture_root: &std::path::Path,
+    output_root: &std::path::Path,
+) {
     if skip_language_or_continue("standard generated Lua runtime test", "lua") {
         return;
     }
@@ -636,13 +645,16 @@ pub(crate) fn verify_standard_generated_lua_runtime(fixture_root: &std::path::Pa
 
     let output = StdCommand::new(&lua_probe.command)
         .arg(fixture_root.join("harness/lua/runtime_check.lua"))
-        .env("LUA_CONFIG_ROOT", fixture_root.join("out/client_lua"))
+        .env("LUA_CONFIG_ROOT", output_root.join("client_lua"))
         .output()
         .expect("standard generated Lua runtime test should run");
     assert_command_success(output, "standard generated Lua runtime test");
 }
 
-pub(crate) fn verify_standard_generated_csharp_runtime(fixture_root: &std::path::Path) {
+pub(crate) fn verify_standard_generated_csharp_runtime(
+    fixture_root: &std::path::Path,
+    output_root: &std::path::Path,
+) {
     if skip_language_or_continue("standard generated C# runtime test", "csharp") {
         return;
     }
@@ -653,7 +665,7 @@ pub(crate) fn verify_standard_generated_csharp_runtime(fixture_root: &std::path:
     let temp_dir = tempfile::tempdir().expect("csharp harness temp dir should be created");
     let project_dir = temp_dir.path();
     fs::copy(
-        fixture_root.join("out/client_code/csharp/reference_game_config.cs"),
+        output_root.join("client_code/csharp/reference_game_config.cs"),
         project_dir.join("ReferenceGameConfig.cs"),
     )
     .expect("generated C# code should be copied into harness");
@@ -921,18 +933,18 @@ sealed class BinaryRuntimeDataReaderAdapter : IConfigForgeRuntimeDataReader
     let output = StdCommand::new("dotnet")
         .args(["run", "--project"])
         .arg(project_dir.join("ConfigForgeCSharpHarness.csproj"))
-        .env("DATA_DIR", fixture_root.join("out/client_data/json"))
-        .env(
-            "MSGPACK_DATA_DIR",
-            fixture_root.join("out/client_data/msgpack"),
-        )
-        .env("BIN_DATA_DIR", fixture_root.join("out/client_data/binary"))
+        .env("DATA_DIR", output_root.join("client_data/json"))
+        .env("MSGPACK_DATA_DIR", output_root.join("client_data/msgpack"))
+        .env("BIN_DATA_DIR", output_root.join("client_data/binary"))
         .output()
         .expect("standard generated C# runtime test should run");
     assert_command_success(output, "standard generated C# runtime test");
 }
 
-pub(crate) fn verify_standard_generated_java_runtime(fixture_root: &std::path::Path) {
+pub(crate) fn verify_standard_generated_java_runtime(
+    fixture_root: &std::path::Path,
+    output_root: &std::path::Path,
+) {
     if skip_language_or_continue("standard generated Java runtime test", "java") {
         return;
     }
@@ -957,7 +969,7 @@ pub(crate) fn verify_standard_generated_java_runtime(fixture_root: &std::path::P
         .expect("Java binary runtime package dir should be created");
     fs::create_dir_all(&class_dir).expect("Java class dir should be created");
     fs::copy(
-        fixture_root.join("out/client_code/java/ReferenceGameConfig.java"),
+        output_root.join("client_code/java/ReferenceGameConfig.java"),
         package_dir.join("ReferenceGameConfig.java"),
     )
     .expect("generated Java code should be copied into harness");
@@ -1253,12 +1265,9 @@ public final class RuntimeCheck {
         .arg("-cp")
         .arg(&class_dir)
         .arg("RuntimeCheck")
-        .env("DATA_DIR", fixture_root.join("out/client_data/json"))
-        .env(
-            "MSGPACK_DATA_DIR",
-            fixture_root.join("out/client_data/msgpack"),
-        )
-        .env("BIN_DATA_DIR", fixture_root.join("out/client_data/binary"))
+        .env("DATA_DIR", output_root.join("client_data/json"))
+        .env("MSGPACK_DATA_DIR", output_root.join("client_data/msgpack"))
+        .env("BIN_DATA_DIR", output_root.join("client_data/binary"))
         .output()
         .expect("standard generated Java runtime test should run");
     assert_command_success(output, "standard generated Java runtime test");
