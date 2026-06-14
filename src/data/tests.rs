@@ -55,6 +55,15 @@ fn plan_source(table_name: &str, path: &str) -> DataSourcePlan {
     }
 }
 
+fn object_plan_source(table_name: &str, path: &str) -> DataSourcePlan {
+    DataSourcePlan {
+        layout: DataSourceLayout::ObjectKeyValueRows,
+        data_start_row: 2,
+        fields: vec!["max_level".to_owned(), "gold_multiplier".to_owned()],
+        ..plan_source(table_name, path)
+    }
+}
+
 fn expect_single_diagnostic(error: ConfigForgeError) -> Diagnostic {
     let ConfigForgeError::ValidationReport(report) = error else {
         panic!("expected structured diagnostic report");
@@ -1984,6 +1993,209 @@ fn data_loader_applies_override_rows_by_primary_key() {
     assert_eq!(replaced.source_index, 0);
     assert_eq!(replaced.source_path, PathBuf::from("materials.csv"));
     assert_eq!(replaced.source_row_number, 4);
+}
+
+#[test]
+fn data_loader_merges_object_table_base_sources() {
+    let dir = tempdir().expect("temp dir should exist");
+    fs::write(
+        dir.path().join("gameplay.csv"),
+        "key,title,value\nmax_level,Max Level,60\n",
+    )
+    .expect("gameplay csv");
+    fs::write(
+        dir.path().join("economy.csv"),
+        "key,title,value\ngold_multiplier,Gold Multiplier,1.5\n",
+    )
+    .expect("economy csv");
+    let plan = DataLoadPlan::new(SourceReadPlan::new(vec![
+        object_plan_source("game_config", "gameplay.csv"),
+        object_plan_source("game_config", "economy.csv"),
+    ]));
+
+    let data_set = DataLoader::new(dir.path())
+        .load(&plan)
+        .expect("object sources should merge");
+    let table = data_set
+        .table("game_config")
+        .expect("game_config table should exist");
+
+    assert_eq!(table.rows.len(), 1);
+    assert_eq!(
+        table.rows[0].get("max_level").map(String::as_str),
+        Some("60")
+    );
+    assert_eq!(
+        table.rows[0].get("gold_multiplier").map(String::as_str),
+        Some("1.5")
+    );
+    assert_eq!(
+        table.row_sources[0].source_path,
+        PathBuf::from("gameplay.csv")
+    );
+    assert_eq!(
+        table
+            .cell_source(0, "gold_multiplier")
+            .expect("cell source should exist")
+            .source_row_number,
+        2
+    );
+}
+
+#[test]
+fn data_loader_applies_object_table_override_field_patch() {
+    let dir = tempdir().expect("temp dir should exist");
+    fs::write(
+        dir.path().join("gameplay.csv"),
+        "key,title,value\nmax_level,Max Level,60\nfeature_flags[0],Feature A,a\nfeature_flags[1],Feature B,b\n",
+    )
+    .expect("gameplay csv");
+    fs::write(
+        dir.path().join("game_s1.csv"),
+        "key,title,value\nmax_level,Max Level,70\n",
+    )
+    .expect("override csv");
+    let plan = DataLoadPlan::new(SourceReadPlan::new(vec![
+        object_plan_source("game_config", "gameplay.csv"),
+        DataSourcePlan {
+            role: SourceRole::Override,
+            ..object_plan_source("game_config", "game_s1.csv")
+        },
+    ]));
+
+    let data_set = DataLoader::new(dir.path())
+        .load(&plan)
+        .expect("object override should patch");
+    let table = data_set
+        .table("game_config")
+        .expect("game_config table should exist");
+
+    assert_eq!(table.rows.len(), 1);
+    assert_eq!(
+        table.rows[0].get("max_level").map(String::as_str),
+        Some("70")
+    );
+    assert_eq!(
+        table.rows[0].get("feature_flags[0]").map(String::as_str),
+        Some("a")
+    );
+    assert_eq!(
+        table
+            .cell_source(0, "max_level")
+            .expect("override cell source should exist")
+            .source_row_number,
+        2
+    );
+}
+
+#[test]
+fn data_loader_applies_later_object_table_override_last() {
+    let dir = tempdir().expect("temp dir should exist");
+    fs::write(
+        dir.path().join("gameplay.csv"),
+        "key,title,value\nmax_level,Max Level,60\n",
+    )
+    .expect("gameplay csv");
+    fs::write(
+        dir.path().join("game_s1.csv"),
+        "key,title,value\nmax_level,Max Level,70\n",
+    )
+    .expect("first override csv");
+    fs::write(
+        dir.path().join("game_hotfix.csv"),
+        "key,title,value\nmax_level,Max Level,80\n",
+    )
+    .expect("second override csv");
+    let plan = DataLoadPlan::new(SourceReadPlan::new(vec![
+        object_plan_source("game_config", "gameplay.csv"),
+        DataSourcePlan {
+            role: SourceRole::Override,
+            ..object_plan_source("game_config", "game_s1.csv")
+        },
+        DataSourcePlan {
+            role: SourceRole::Override,
+            ..object_plan_source("game_config", "game_hotfix.csv")
+        },
+    ]));
+
+    let data_set = DataLoader::new(dir.path())
+        .load(&plan)
+        .expect("later object override should win");
+    let table = data_set.table("game_config").unwrap();
+
+    assert_eq!(
+        table.rows[0].get("max_level").map(String::as_str),
+        Some("80")
+    );
+    assert_eq!(
+        table.cell_source(0, "max_level").unwrap().source_row_number,
+        2
+    );
+}
+
+#[test]
+fn data_loader_keeps_empty_object_table_singleton_row() {
+    let dir = tempdir().expect("temp dir should exist");
+    fs::write(dir.path().join("empty.csv"), "key,title,value\n").expect("empty csv");
+    let plan = DataLoadPlan::new(SourceReadPlan::new(vec![object_plan_source(
+        "game_config",
+        "empty.csv",
+    )]));
+
+    let data_set = DataLoader::new(dir.path())
+        .load(&plan)
+        .expect("empty object table should load");
+    let table = data_set.table("game_config").unwrap();
+
+    assert_eq!(table.rows.len(), 1);
+    assert!(table.rows[0].is_empty());
+}
+
+#[test]
+fn data_loader_rejects_invalid_object_table_merge_sources() {
+    let cases = [
+        (
+            "base_a.csv",
+            "key,title,value\nmax_level,Max Level,60\n",
+            "base_b.csv",
+            "key,title,value\nmax_level,Max Level,70\n",
+            SourceRole::Base,
+            CF_DATA_DUPLICATE_KEY,
+            "duplicates ObjectTable field path",
+        ),
+        (
+            "base.csv",
+            "key,title,value\nmax_level,Max Level,60\n",
+            "override.csv",
+            "key,title,value\ngold_multiplier,Gold Multiplier,1.5\n",
+            SourceRole::Override,
+            CF_DATA_SOURCE_SCHEMA_INVALID,
+            "does not contain that field path",
+        ),
+    ];
+
+    for (base_path, base_content, patch_path, patch_content, role, code, expected_message) in cases
+    {
+        let dir = tempdir().expect("temp dir should exist");
+        fs::write(dir.path().join(base_path), base_content).expect("base csv");
+        fs::write(dir.path().join(patch_path), patch_content).expect("patch csv");
+        let plan = DataLoadPlan::new(SourceReadPlan::new(vec![
+            object_plan_source("game_config", base_path),
+            DataSourcePlan {
+                role,
+                ..object_plan_source("game_config", patch_path)
+            },
+        ]));
+
+        let error = DataLoader::new(dir.path()).load(&plan).unwrap_err();
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, code);
+        assert_eq!(diagnostic.source.as_deref(), Some("data.loader"));
+        assert_eq!(diagnostic.domain.as_deref(), Some("data"));
+        assert!(diagnostic.message.contains(expected_message));
+        assert_eq!(diagnostic.location.table.as_deref(), Some("game_config"));
+        assert_eq!(diagnostic.location.source_row_number, Some(2));
+    }
 }
 
 #[test]

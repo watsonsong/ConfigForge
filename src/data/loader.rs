@@ -198,9 +198,19 @@ impl PendingTable {
         source: &DataSourcePlan,
         table: DataTable,
     ) -> Result<()> {
-        match source.role {
-            SourceRole::Base => self.append_base_rows(source_index, source, table),
-            SourceRole::Override => self.apply_override_rows(source_index, source, table),
+        match (source.layout, source.role) {
+            (DataSourceLayout::CollectionRecords, SourceRole::Base) => {
+                self.append_base_rows(source_index, source, table)
+            }
+            (DataSourceLayout::CollectionRecords, SourceRole::Override) => {
+                self.apply_override_rows(source_index, source, table)
+            }
+            (DataSourceLayout::ObjectKeyValueRows, SourceRole::Base) => {
+                self.merge_object_base(source_index, source, table)
+            }
+            (DataSourceLayout::ObjectKeyValueRows, SourceRole::Override) => {
+                self.apply_object_override(source_index, source, table)
+            }
         }
     }
 
@@ -313,6 +323,143 @@ impl PendingTable {
         }
         Ok(())
     }
+
+    fn merge_object_base(
+        &mut self,
+        source_index: usize,
+        source: &DataSourcePlan,
+        table: DataTable,
+    ) -> Result<()> {
+        let (row, source_row_number, cell_sources) = object_singleton_parts(table, source)?;
+        if self.rows.is_empty() {
+            self.rows.push(DataRow::new());
+            self.cell_sources.push(BTreeMap::new());
+            self.row_sources.push(RowSourceInfo {
+                source_index,
+                source_path: source.path.clone(),
+                source_row_number,
+                fragments: source.fragments.clone(),
+                source_role: SourceRole::Base,
+                replaces: None,
+            });
+        }
+
+        for (field_path, value) in row {
+            if self.rows[0].contains_key(&field_path) {
+                let duplicate_row_number = cell_sources
+                    .get(&field_path)
+                    .map(|cell| cell.source_row_number)
+                    .unwrap_or(source_row_number);
+                return Err(object_duplicate_key_error(
+                    source,
+                    duplicate_row_number,
+                    &field_path,
+                ));
+            }
+            if let Some(cell_source) = cell_sources.get(&field_path).cloned() {
+                self.cell_sources[0].insert(field_path.clone(), cell_source);
+            }
+            self.rows[0].insert(field_path, value);
+        }
+        Ok(())
+    }
+
+    fn apply_object_override(
+        &mut self,
+        source_index: usize,
+        source: &DataSourcePlan,
+        table: DataTable,
+    ) -> Result<()> {
+        let (row, source_row_number, cell_sources) = object_singleton_parts(table, source)?;
+        if self.rows.is_empty() {
+            self.rows.push(DataRow::new());
+            self.cell_sources.push(BTreeMap::new());
+            self.row_sources.push(RowSourceInfo {
+                source_index,
+                source_path: source.path.clone(),
+                source_row_number,
+                fragments: source.fragments.clone(),
+                source_role: SourceRole::Override,
+                replaces: None,
+            });
+        }
+
+        for (field_path, value) in row {
+            if !self.rows[0].contains_key(&field_path) {
+                let missing_row_number = cell_sources
+                    .get(&field_path)
+                    .map(|cell| cell.source_row_number)
+                    .unwrap_or(source_row_number);
+                return Err(object_source_schema_error(
+                    source,
+                    Some(missing_row_number),
+                    format!(
+                        "table `{}` override source `{}` field path `{}` cannot be applied because the base ObjectTable does not contain that field path",
+                        source.table_name,
+                        source.path.display(),
+                        field_path
+                    ),
+                    field_path,
+                    "existing base ObjectTable field path",
+                    "Move new ObjectTable keys to base sources, or add an explicit upsert policy before using override_sources to add keys.",
+                ));
+            }
+            if let Some(cell_source) = cell_sources.get(&field_path).cloned() {
+                self.cell_sources[0].insert(field_path.clone(), cell_source);
+            }
+            self.rows[0].insert(field_path, value);
+        }
+        Ok(())
+    }
+}
+
+fn object_singleton_parts(
+    table: DataTable,
+    source: &DataSourcePlan,
+) -> Result<(DataRow, usize, BTreeMap<String, CellSourceInfo>)> {
+    let DataTable {
+        rows,
+        row_sources,
+        cell_sources,
+        ..
+    } = table;
+    let row_count = rows.len();
+    let mut rows = rows.into_iter();
+    let row = rows.next().ok_or_else(|| {
+        object_source_schema_error(
+            source,
+            None,
+            format!(
+                "table `{}` source `{}` produced no ObjectTable singleton row",
+                source.table_name,
+                source.path.display()
+            ),
+            "0 rows",
+            "one ObjectTable singleton row",
+            "Check ObjectTable CSV reader output.",
+        )
+    })?;
+    if row_count != 1 {
+        return Err(object_source_schema_error(
+            source,
+            None,
+            format!(
+                "table `{}` source `{}` produced {} rows for ObjectTable key/value layout",
+                source.table_name,
+                source.path.display(),
+                row_count
+            ),
+            format!("{row_count} rows"),
+            "one ObjectTable singleton row",
+            "Check ObjectTable source layout and reader output.",
+        ));
+    }
+    let source_row_number = row_sources
+        .first()
+        .map(|source| source.source_row_number)
+        .unwrap_or(source.data_start_row);
+    let cell_sources = cell_sources.into_iter().next().unwrap_or_default();
+    Ok((row, source_row_number, cell_sources))
 }
 
 fn primary_key_for_row(
@@ -419,6 +566,34 @@ fn source_schema_error(
     )
 }
 
+fn object_source_schema_error(
+    source: &DataSourcePlan,
+    source_row_number: Option<usize>,
+    message: String,
+    current_value: impl Into<String>,
+    expected: impl Into<String>,
+    hint: impl Into<String>,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_DATA_SOURCE_SCHEMA_INVALID,
+            DiagnosticSeverity::Error,
+            message,
+            DiagnosticLocation {
+                source_path: Some(source.path.clone()),
+                table: Some(source.table_name.clone()),
+                source_row_number,
+                ..DiagnosticLocation::default()
+            },
+        )
+        .with_source("data.loader")
+        .with_domain("data")
+        .with_current_value(current_value)
+        .with_expected(expected)
+        .with_hint(hint),
+    )
+}
+
 fn source_duplicate_key_error(
     source: &DataSourcePlan,
     source_row_number: usize,
@@ -442,5 +617,36 @@ fn source_duplicate_key_error(
         .with_current_value(current_value)
         .with_expected("unique base primary key before override_sources")
         .with_hint("Remove duplicate base rows or adjust the primary index."),
+    )
+}
+
+fn object_duplicate_key_error(
+    source: &DataSourcePlan,
+    source_row_number: usize,
+    field_path: &str,
+) -> ConfigForgeError {
+    ConfigForgeError::from_diagnostic(
+        Diagnostic::new(
+            CF_DATA_DUPLICATE_KEY,
+            DiagnosticSeverity::Error,
+            format!(
+                "table `{}` source `{}` row {} duplicates ObjectTable field path `{}` from an earlier base source",
+                source.table_name,
+                source.path.display(),
+                source_row_number,
+                field_path
+            ),
+            DiagnosticLocation {
+                source_path: Some(source.path.clone()),
+                table: Some(source.table_name.clone()),
+                source_row_number: Some(source_row_number),
+                ..DiagnosticLocation::default()
+            },
+        )
+        .with_source("data.loader")
+        .with_domain("data")
+        .with_current_value(field_path)
+        .with_expected("unique ObjectTable field path across base sources")
+        .with_hint("Move replacement values to override_sources instead of duplicating base ObjectTable keys."),
     )
 }

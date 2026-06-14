@@ -92,22 +92,22 @@
 
 ### Step 4 — 实现 ObjectTable materialization merge
 
-- [ ] 在 `PendingTable::apply_source()` 按 `DataSourceLayout` 或新的 table materialization kind 分流 CollectionTable 与 ObjectTable。
-- [ ] ObjectTable base merge：把每个 source 读出的 singleton row 合并到同一个 singleton row。
-- [ ] ObjectTable base duplicate field path 报错，诊断指向后出现的 source/key 行，并提示使用 override_sources。
-- [ ] ObjectTable override merge：遍历 override singleton row 中的 field path，替换已存在 field path 的 value 与 `CellSourceInfo`。
-- [ ] ObjectTable override missing target field path 报错，诊断指向 override source/key 行。
-- [ ] 支持多个 override source 顺序覆盖，最后一个匹配 source 生效。
-- [ ] 空 ObjectTable source 保持 singleton row，不因 merge 后无 key 而丢失 table。
-- [ ] 增加 DataLoader unit tests：
-  - [ ] two ObjectTable base sources with disjoint keys merge into one row。
-  - [ ] duplicate base key across sources fails。
-  - [ ] override partially patches one key and preserves other keys。
-  - [ ] override missing base key fails。
-  - [ ] later override wins。
-  - [ ] override filtered by target tags does not read/apply。
-  - [ ] cell source for patched key points to override file row。
-  - [ ] empty object source still yields one singleton row。
+- [x] 在 `PendingTable::apply_source()` 按 `DataSourceLayout` 或新的 table materialization kind 分流 CollectionTable 与 ObjectTable。
+- [x] ObjectTable base merge：把每个 source 读出的 singleton row 合并到同一个 singleton row。
+- [x] ObjectTable base duplicate field path 报错，诊断指向后出现的 source/key 行，并提示使用 override_sources。
+- [x] ObjectTable override merge：遍历 override singleton row 中的 field path，替换已存在 field path 的 value 与 `CellSourceInfo`。
+- [x] ObjectTable override missing target field path 报错，诊断指向 override source/key 行。
+- [x] 支持多个 override source 顺序覆盖，最后一个匹配 source 生效。
+- [x] 空 ObjectTable source 保持 singleton row，不因 merge 后无 key 而丢失 table。
+- [x] 增加 DataLoader unit tests：
+  - [x] two ObjectTable base sources with disjoint keys merge into one row。
+  - [x] duplicate base key across sources fails。
+  - [x] override partially patches one key and preserves other keys。
+  - [x] override missing base key fails。
+  - [x] later override wins。
+  - [x] override filtered by target tags does not read/apply。
+  - [x] cell source for patched key points to override file row。
+  - [x] empty object source still yields one singleton row。
 
 验收：DataSet 对 ObjectTable 始终只有一条 logical row，且该 row 是按 base split merge + override patch materialized 后的最终视图。
 
