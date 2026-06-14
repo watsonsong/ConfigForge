@@ -102,24 +102,24 @@ ConfigForge 当前主干方向整体正确：
 
 - `refactor(path): share lexical path normalization`
 
-### [ ] Step 3：抽取 generator option parser 与 common input 构造
+### [x] Step 3：抽取 generator option parser 与 common input 构造
 
 目的：减少 schema_doc / validation_report / code artifact option parsing 重复，并避免 Build 分支分别构造 common input 后漂移。
 
 实现项：
 
-- [ ] 抽取轻量 `GeneratorOptionParser` 或等价 helper，支持 `take_string`、typed parse、unknown option 检查、统一 diagnostic source/current/expected。
-- [ ] 迁移 `src/generator/schema_doc/format.rs` 与 `src/generator/validation_report/config.rs` 的 option parsing。
-- [ ] 评估 `src/code_artifact/mod.rs` 中 code artifact option parsing 是否可以复用同一 helper。
-- [ ] 在 build 层抽取 `GeneratorCommonInput` 构造 helper，替换 `src/build/mod.rs` 与 `src/build/runtime.rs` 的重复构造函数。
-- [ ] 保持 CLI `--report` 注入 task 与 Project Config 显式 task 的错误 code/source 稳定。
+- [x] 抽取轻量 `GeneratorOptionParser` 或等价 helper，支持 `take_string`、typed parse、unknown option 检查、统一 diagnostic source/current/expected。
+- [x] 迁移 `src/generator/schema_doc/format.rs` 与 `src/generator/validation_report/config.rs` 的 option parsing。
+- [x] 评估 `src/code_artifact/mod.rs` 中 code artifact option parsing 是否可以复用同一 helper。
+- [x] 在 build 层抽取 `GeneratorCommonInput` 构造 helper，替换 `src/build/mod.rs` 与 `src/build/runtime.rs` 的重复构造函数。
+- [x] 保持 CLI `--report` 注入 task 与 Project Config 显式 task 的错误 code/source 稳定。
 
 验证：
 
-- [ ] `cargo test generator`
-- [ ] `cargo test schema_doc`
-- [ ] `cargo test validation_report`
-- [ ] `cargo test build`
+- [x] `cargo test generator`
+- [x] `cargo test schema_doc`
+- [x] `cargo test validation_report`
+- [x] `cargo test build`
 
 可独立提交建议：
 

@@ -1,15 +1,11 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::BTreeMap, path::PathBuf};
+use std::path::PathBuf;
 
-use crate::{
-    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
-    diagnostic::code::{CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNSUPPORTED_OPTION},
-    validation::DesignerReportFormat,
-};
+use crate::{Result, validation::DesignerReportFormat};
 
-use super::super::GeneratorCommonInput;
+use super::super::{GeneratorCommonInput, GeneratorOptionParser};
 
 pub(super) struct ValidationReportGeneratorConfig {
     pub(super) format: DesignerReportFormat,
@@ -20,72 +16,31 @@ pub(super) struct ValidationReportGeneratorConfig {
 pub(super) fn validation_report_export_config_from_input(
     input: &GeneratorCommonInput<'_>,
 ) -> Result<ValidationReportGeneratorConfig> {
-    let mut options = input.options.clone();
-    let format = take_optional_string(input, &mut options, "format")?
+    let mut parser =
+        GeneratorOptionParser::new(input.options.clone(), "generator.validation_report")
+            .with_target(input.target_name.clone());
+    let format = parser
+        .take_string("format", "validation_report")?
         .map(|value| value.parse())
         .transpose()?
         .unwrap_or(DesignerReportFormat::Html);
-    let file_name = take_optional_string(input, &mut options, "file_name")?
+    let file_name = parser
+        .take_string("file_name", "validation_report")?
         .unwrap_or_else(|| format!("validation-report.{}", format.extension()));
-    let title = take_optional_string(input, &mut options, "title")?;
-    let unsupported = options.keys().cloned().collect::<Vec<_>>();
-    if let Some(key) = unsupported.first() {
-        return Err(validation_report_option_error(
-            CF_GENERATOR_UNSUPPORTED_OPTION,
-            input,
-            key,
+    let title = parser.take_string("title", "validation_report")?;
+    parser.reject_unknown(
+        |key| {
             format!(
                 "validation_report export task `{}` has unknown option `{key}`",
                 input.task_name
-            ),
-            "supported validation_report option",
-        ));
-    }
+            )
+        },
+        "supported validation_report option",
+        None,
+    )?;
     Ok(ValidationReportGeneratorConfig {
         format,
         output: input.output.join(file_name),
         title,
     })
-}
-
-fn take_optional_string(
-    input: &GeneratorCommonInput<'_>,
-    options: &mut BTreeMap<String, toml::Value>,
-    key: &str,
-) -> Result<Option<String>> {
-    options
-        .remove(key)
-        .map(|value| {
-            value.try_into().map_err(|source| {
-                validation_report_option_error(
-                    CF_GENERATOR_INVALID_OPTION,
-                    input,
-                    key,
-                    format!("invalid validation_report option `{key}`: {source}"),
-                    "string value",
-                )
-            })
-        })
-        .transpose()
-}
-
-fn validation_report_option_error(
-    code: &'static str,
-    input: &GeneratorCommonInput<'_>,
-    key: &str,
-    message: String,
-    expected: impl Into<String>,
-) -> ConfigForgeError {
-    ConfigForgeError::from_diagnostic(
-        Diagnostic::new(
-            code,
-            DiagnosticSeverity::Error,
-            message,
-            DiagnosticLocation::default(),
-        )
-        .with_source("generator.validation_report")
-        .with_target(input.target_name.clone())
-        .with_current_value(key)
-        .with_expected(expected),
-    )
 }

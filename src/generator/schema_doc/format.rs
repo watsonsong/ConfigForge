@@ -13,6 +13,7 @@ use crate::{
 };
 
 use super::{
+    super::GeneratorOptionParser,
     html::{render_schema_doc_index_html, render_schema_table_html},
     markdown::{render_schema_doc_index_markdown, render_schema_table_markdown},
     model::{SchemaDoc, SchemaTableDoc},
@@ -203,52 +204,30 @@ fn validate_index_file_name(value: &str, format: SchemaDocFormat) -> Result<()> 
 
 pub fn schema_doc_export_config_from_options(
     output: PathBuf,
-    mut options: BTreeMap<String, toml::Value>,
+    options: BTreeMap<String, toml::Value>,
 ) -> Result<SchemaDocExportConfig> {
-    let format = take_schema_doc_string(&mut options, "format")?
+    let mut parser = GeneratorOptionParser::new(options, "generator.schema_doc.options");
+    let format = parser
+        .take_string("format", "schema_doc")?
         .map(|value| value.parse())
         .transpose()?
         .unwrap_or(SchemaDocFormat::Markdown);
-    let index_file = take_schema_doc_string(&mut options, "index_file")?
+    let index_file = parser
+        .take_string("index_file", "schema_doc")?
         .unwrap_or_else(|| format!("index.{}", format.extension()));
     validate_index_file_name(&index_file, format)?;
-    let title = take_schema_doc_string(&mut options, "title")?;
-    let unsupported = options.keys().cloned().collect::<Vec<_>>();
-    if let Some(key) = unsupported.first() {
-        return Err(schema_doc_option_error(
-            CF_GENERATOR_UNSUPPORTED_OPTION,
-            key,
-            format!("schema_doc export task has unknown option `{key}`"),
-            key,
-            "supported schema_doc option",
-        ));
-    }
+    let title = parser.take_string("title", "schema_doc")?;
+    parser.reject_unknown(
+        |key| format!("schema_doc export task has unknown option `{key}`"),
+        "supported schema_doc option",
+        None,
+    )?;
     Ok(SchemaDocExportConfig {
         format,
         output,
         index_file,
         title,
     })
-}
-
-fn take_schema_doc_string(
-    options: &mut BTreeMap<String, toml::Value>,
-    key: &str,
-) -> Result<Option<String>> {
-    options
-        .remove(key)
-        .map(|value| {
-            value.try_into().map_err(|source| {
-                schema_doc_option_error(
-                    CF_GENERATOR_INVALID_OPTION,
-                    key,
-                    format!("invalid schema_doc option `{key}`: {source}"),
-                    key,
-                    "string value",
-                )
-            })
-        })
-        .transpose()
 }
 
 fn schema_doc_option_error(

@@ -13,8 +13,8 @@ use crate::{
         CF_ARTIFACT_PATH_COLLISION, CF_BUILD_EXPORT_TASK_FAILED, CF_BUILD_INPUT_REQUIRED,
     },
     generator::{
-        GeneratorCommonInput, GeneratorRegistry, GeneratorTaskInput, PreparedGeneratorInputs,
-        export_validation_report_to_sink,
+        GeneratorCommonInput, GeneratorCommonInputContext, GeneratorRegistry, GeneratorTaskInput,
+        PreparedGeneratorInputs, export_validation_report_to_sink,
     },
     meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags},
     path_util::lexical_normalize_path,
@@ -508,18 +508,20 @@ fn generator_common_input<'meta>(
     target_name: &str,
     generated_at: &str,
 ) -> GeneratorCommonInput<'meta> {
-    GeneratorCommonInput {
-        meta: linked_meta,
-        target_tags: target_tags.clone(),
-        project: project_info.clone(),
-        project_root: project_root.to_path_buf(),
-        target_name: target_name.to_owned(),
-        task_name: export_task.name.clone(),
-        type_id: export_task.type_id.clone(),
-        output: project_root.join(&export_task.output),
-        options: export_task.options.clone(),
-        generated_at: generated_at.to_owned(),
-    }
+    GeneratorCommonInput::from_task_context(
+        GeneratorCommonInputContext {
+            linked_meta,
+            target_tags,
+            project_root,
+            project_info,
+            target_name,
+            generated_at,
+        },
+        &export_task.name,
+        &export_task.type_id,
+        &export_task.output,
+        &export_task.options,
+    )
 }
 
 #[cfg(test)]

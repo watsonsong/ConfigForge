@@ -57,6 +57,27 @@ impl GeneratorCommonInput<'_> {
 }
 
 impl<'meta> GeneratorCommonInput<'meta> {
+    pub(crate) fn from_task_context(
+        context: GeneratorCommonInputContext<'_, 'meta>,
+        task_name: &str,
+        type_id: &str,
+        output: &std::path::Path,
+        options: &BTreeMap<String, toml::Value>,
+    ) -> Self {
+        Self {
+            meta: context.linked_meta,
+            target_tags: context.target_tags.clone(),
+            project: context.project_info.clone(),
+            project_root: context.project_root.to_path_buf(),
+            target_name: context.target_name.to_owned(),
+            task_name: task_name.to_owned(),
+            type_id: type_id.to_owned(),
+            output: context.project_root.join(output),
+            options: options.clone(),
+            generated_at: context.generated_at.to_owned(),
+        }
+    }
+
     pub(crate) fn code_export_input(
         &self,
         generator: &dyn CodeGenerator,
@@ -78,6 +99,16 @@ impl<'meta> GeneratorCommonInput<'meta> {
             generated_at: self.generated_at.clone(),
         })
     }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct GeneratorCommonInputContext<'a, 'meta> {
+    pub(crate) linked_meta: &'meta LinkedMetaModel<'meta>,
+    pub(crate) target_tags: &'a TargetTags,
+    pub(crate) project_root: &'a std::path::Path,
+    pub(crate) project_info: &'a ArtifactProjectInfo,
+    pub(crate) target_name: &'a str,
+    pub(crate) generated_at: &'a str,
 }
 
 pub(crate) struct GeneratorTaskInput<'a, 'meta> {

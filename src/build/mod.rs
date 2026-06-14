@@ -32,8 +32,8 @@ use crate::{
         CF_BUILD_INVALID_OPTION,
     },
     generator::{
-        GeneratorCommonInput, GeneratorRegistry, GeneratorRequirements, GeneratorTaskInput,
-        PreparedGeneratorInputs,
+        GeneratorCommonInput, GeneratorCommonInputContext, GeneratorRegistry,
+        GeneratorRequirements, GeneratorTaskInput, PreparedGeneratorInputs,
     },
     meta::{LinkedMetaModel, MetaModel, TargetTags},
     project::ProjectConfig,
@@ -811,18 +811,20 @@ fn build_generator_common_input<'meta>(
     context: &MetaOnlyGeneratorContext<'_, 'meta>,
     task: &NormalizedExportTask,
 ) -> GeneratorCommonInput<'meta> {
-    GeneratorCommonInput {
-        meta: context.linked_meta,
-        target_tags: context.target_tags.clone(),
-        project: context.project_info.clone(),
-        project_root: context.project_root.to_path_buf(),
-        target_name: context.target_name.to_owned(),
-        task_name: task.name.clone(),
-        type_id: task.type_id.clone(),
-        output: context.project_root.join(&task.output),
-        options: task.options.clone(),
-        generated_at: context.generated_at.to_owned(),
-    }
+    GeneratorCommonInput::from_task_context(
+        GeneratorCommonInputContext {
+            linked_meta: context.linked_meta,
+            target_tags: context.target_tags,
+            project_root: context.project_root,
+            project_info: context.project_info,
+            target_name: context.target_name,
+            generated_at: context.generated_at,
+        },
+        &task.name,
+        &task.type_id,
+        &task.output,
+        &task.options,
+    )
 }
 
 fn generated_at() -> String {

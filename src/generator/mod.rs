@@ -15,6 +15,7 @@ mod java;
 mod json;
 mod lua;
 mod messagepack;
+mod options;
 mod registry;
 mod requirements;
 mod rust;
@@ -34,12 +35,14 @@ pub use cpp_unreal::{CppUnrealCodegenOptions, CppUnrealSupportLevel};
 pub(crate) use csharp::CSharpCodeGenerator;
 pub use csharp::CSharpCodegenOptions;
 pub(crate) use input::{
-    GeneratorCommonInput, GeneratorDataInput, GeneratorTaskInput, PreparedGeneratorInputs,
+    GeneratorCommonInput, GeneratorCommonInputContext, GeneratorDataInput, GeneratorTaskInput,
+    PreparedGeneratorInputs,
 };
 pub use java::JavaCodegenOptions;
 pub use json::JsonDataExporter;
 pub use lua::LuaTableExporter;
 pub use messagepack::MessagePackDataExporter;
+pub(crate) use options::GeneratorOptionParser;
 pub(crate) use registry::GeneratorRegistry;
 pub(crate) use requirements::{GeneratorDescriptor, GeneratorRequirements};
 #[cfg(test)]
