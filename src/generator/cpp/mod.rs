@@ -4,7 +4,13 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ConfigForgeError, Result, artifact::ArtifactSink, diagnostic::code::CF_GENERATOR_INVALID_OPTION,
+    ConfigForgeError, Result,
+    artifact::ArtifactSink,
+    code_artifact::runtime_interface::{
+        RuntimeInterfaceManifest,
+        runtime_interface_manifest_path as shared_runtime_interface_manifest_path,
+    },
+    diagnostic::code::CF_GENERATOR_INVALID_OPTION,
 };
 
 use super::{
@@ -151,7 +157,7 @@ impl CodeGenerator for CppCodeGenerator {
         ) {
             files.push(super::GeneratedFile {
                 path: runtime_interface_manifest_path(input),
-                content: cpp_runtime_interface_manifest(&cpp_options),
+                content: cpp_runtime_interface_manifest(&cpp_options)?,
             });
         }
         Ok(files)
@@ -227,7 +233,8 @@ impl CodeGenerator for CppCodeGenerator {
                 manifest_stream,
                 CodeWriterConfig::default().with_indent_width(2),
             );
-            manifest.raw(cpp_runtime_interface_manifest(&cpp_options));
+            let manifest_content = cpp_runtime_interface_manifest(&cpp_options)?;
+            manifest.raw(&manifest_content);
             let manifest_stream =
                 manifest
                     .finish()
@@ -288,13 +295,10 @@ fn validate_runtime_interface_options(options: &CppCodegenOptions) -> Result<()>
 }
 
 fn runtime_interface_manifest_path(input: &CodeExportInput<'_>) -> std::path::PathBuf {
-    input
-        .target
-        .out_dir
-        .join("config_forge_runtime_interface.json")
+    shared_runtime_interface_manifest_path(&input.target.out_dir)
 }
 
-fn cpp_runtime_interface_manifest(options: &CppCodegenOptions) -> String {
+fn cpp_runtime_interface_manifest(options: &CppCodegenOptions) -> Result<String> {
     let runtime_core_header = options
         .runtime_core_header
         .as_deref()
@@ -303,21 +307,10 @@ fn cpp_runtime_interface_manifest(options: &CppCodegenOptions) -> String {
         .runtime_core_namespace
         .as_deref()
         .unwrap_or("config_forge_runtime");
-    format!(
-        concat!(
-            "{{\n",
-            "  \"contract\": \"config_forge_runtime_reader\",\n",
-            "  \"contract_version\": \"1.0\",\n",
-            "  \"required_contract\": \"^1.0\",\n",
-            "  \"language\": \"cpp\",\n",
-            "  \"emit\": \"reference\",\n",
-            "  \"runtime_interface\": \"external\",\n",
-            "  \"runtime_core_header\": {:?},\n",
-            "  \"runtime_core_namespace\": {:?}\n",
-            "}}\n"
-        ),
-        runtime_core_header, runtime_core_namespace
-    )
+    RuntimeInterfaceManifest::reference(LANGUAGE)
+        .with_language_field("runtime_core_header", runtime_core_header)
+        .with_language_field("runtime_core_namespace", runtime_core_namespace)
+        .to_json_pretty()
 }
 
 fn validate_type_mappings(mappings: &CppTypeMappings) -> Result<()> {

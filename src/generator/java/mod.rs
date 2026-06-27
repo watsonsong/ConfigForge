@@ -4,7 +4,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ConfigForgeError, Result, artifact::ArtifactSink, code_artifact::CodeVectorElementType,
+    ConfigForgeError, Result,
+    artifact::ArtifactSink,
+    code_artifact::CodeVectorElementType,
+    code_artifact::runtime_interface::{
+        REQUIRED_RUNTIME_READER_CONTRACT, RUNTIME_READER_CONTRACT_VERSION,
+    },
     diagnostic::code::CF_GENERATOR_INVALID_OPTION,
 };
 
@@ -448,10 +453,12 @@ fn render_runtime_contract(
     enums: &[CodeEnum],
     names: &JavaNames,
 ) -> Result<()> {
-    content.raw("    public static final String CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";\n");
-    content.raw(
-        "    public static final String REQUIRED_CONFIG_FORGE_READER_CONTRACT = \"^1.0\";\n\n",
-    );
+    content.raw_fmt(format_args!(
+        "    public static final String CONFIG_FORGE_READER_CONTRACT_VERSION = {RUNTIME_READER_CONTRACT_VERSION:?};\n"
+    ));
+    content.raw_fmt(format_args!(
+        "    public static final String REQUIRED_CONFIG_FORGE_READER_CONTRACT = {REQUIRED_RUNTIME_READER_CONTRACT:?};\n\n"
+    ));
     content.raw("    public interface ConfigForgeRuntimeDataLoader {\n");
     content.raw("        ConfigForgeRuntimeDataReader open(String path);\n");
     content.raw("    }\n\n");

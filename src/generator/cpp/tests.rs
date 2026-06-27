@@ -17,6 +17,7 @@ use crate::{
     meta::{MetaModel, TargetTags},
     runtime_contract::RuntimeDataFile,
 };
+use serde_json::Value;
 
 use super::{CppCodeGenerator, CppCodegenOptions, LANGUAGE};
 
@@ -143,8 +144,14 @@ fn parses_and_validates_cpp_runtime_interface_options() {
     assert!(content.contains("using config_forge_runtime::IRuntimeDataReader;"));
     assert!(!content.contains("class IRuntimeDataReader"));
     let manifest = generated_content(&files, "config_forge_runtime_interface.json");
-    assert!(manifest.contains("\"emit\": \"reference\""));
-    assert!(manifest.contains("\"runtime_core_header\": \"config_forge/runtime/reader.hpp\""));
+    assert_runtime_manifest(
+        manifest,
+        "cpp",
+        &[
+            ("runtime_core_header", "config_forge/runtime/reader.hpp"),
+            ("runtime_core_namespace", "config_forge_runtime"),
+        ],
+    );
 
     input.target.options.language_options.insert(
         LANGUAGE.to_owned(),
@@ -182,6 +189,28 @@ fn parses_and_validates_cpp_runtime_interface_options() {
         "unexpected error: {}",
         diagnostic.message
     );
+}
+
+fn assert_runtime_manifest(content: &str, language: &str, fields: &[(&str, &str)]) {
+    let manifest: Value = serde_json::from_str(content).expect("runtime manifest should be JSON");
+    assert_eq!(
+        manifest["contract"],
+        crate::code_artifact::runtime_interface::RUNTIME_READER_CONTRACT
+    );
+    assert_eq!(
+        manifest["contract_version"],
+        crate::code_artifact::runtime_interface::RUNTIME_READER_CONTRACT_VERSION
+    );
+    assert_eq!(
+        manifest["required_contract"],
+        crate::code_artifact::runtime_interface::REQUIRED_RUNTIME_READER_CONTRACT
+    );
+    assert_eq!(manifest["language"], language);
+    assert_eq!(manifest["emit"], "reference");
+    assert_eq!(manifest["runtime_interface"], "external");
+    for (key, value) in fields {
+        assert_eq!(manifest[*key], *value, "manifest field {key}");
+    }
 }
 
 #[test]

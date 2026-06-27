@@ -4,7 +4,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ConfigForgeError, Result, artifact::ArtifactSink, diagnostic::code::CF_GENERATOR_INVALID_OPTION,
+    ConfigForgeError, Result,
+    artifact::ArtifactSink,
+    code_artifact::runtime_interface::{
+        REQUIRED_RUNTIME_READER_CONTRACT, RUNTIME_READER_CONTRACT_VERSION,
+    },
+    diagnostic::code::CF_GENERATOR_INVALID_OPTION,
 };
 
 use super::{
@@ -594,8 +599,12 @@ fn render_runtime_contract(
     names: &CSharpNames,
 ) -> Result<()> {
     content.raw("    public static class ConfigForgeRuntimeContract\n    {\n");
-    content.raw("        public const string ConfigForgeReaderContractVersion = \"1.0\";\n");
-    content.raw("        public const string RequiredConfigForgeReaderContract = \"^1.0\";\n");
+    content.raw_fmt(format_args!(
+        "        public const string ConfigForgeReaderContractVersion = {RUNTIME_READER_CONTRACT_VERSION:?};\n"
+    ));
+    content.raw_fmt(format_args!(
+        "        public const string RequiredConfigForgeReaderContract = {REQUIRED_RUNTIME_READER_CONTRACT:?};\n"
+    ));
     content.raw("    }\n\n");
     content.raw("    public interface IConfigForgeRuntimeDataLoader\n    {\n");
     content.raw("        IConfigForgeRuntimeDataReader Open(string path);\n");

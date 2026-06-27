@@ -3,7 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigForgeError, Result, artifact::ArtifactSink};
+use crate::{
+    ConfigForgeError, Result,
+    artifact::ArtifactSink,
+    code_artifact::runtime_interface::{
+        REQUIRED_RUNTIME_READER_CONTRACT, RUNTIME_READER_CONTRACT_VERSION,
+    },
+};
 
 use super::{
     ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField,
@@ -184,8 +190,12 @@ fn render_typescript_code(
     content.newline();
     render_ts_i18n_import(&mut content, &input.target.options.i18n);
     render_typescript_profile_imports(&mut content, &typescript_options);
-    content.raw("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;\n\n");
-    content.raw("export const REQUIRED_CONFIG_FORGE_READER_CONTRACT = \"^1.0\" as const;\n\n");
+    content.raw_fmt(format_args!(
+        "export const CONFIG_FORGE_READER_CONTRACT_VERSION = {RUNTIME_READER_CONTRACT_VERSION:?} as const;\n\n"
+    ));
+    content.raw_fmt(format_args!(
+        "export const REQUIRED_CONFIG_FORGE_READER_CONTRACT = {REQUIRED_RUNTIME_READER_CONTRACT:?} as const;\n\n"
+    ));
     render_runtime_reader_interfaces(&mut content);
     render_runtime_reader_helpers(&mut content);
     render_ts_i18n_prelude(&mut content, &input.target.options.i18n);

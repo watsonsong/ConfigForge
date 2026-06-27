@@ -4,7 +4,12 @@
 use crate::support::*;
 use assert_cmd::Command;
 use predicates::prelude::*;
+use serde_json::Value;
 use std::fs;
+
+const RUNTIME_READER_CONTRACT: &str = "config_forge_runtime_reader";
+const RUNTIME_READER_CONTRACT_VERSION: &str = "1.0";
+const REQUIRED_RUNTIME_READER_CONTRACT: &str = "^1.0";
 
 #[test]
 fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() {
@@ -749,8 +754,11 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
         output_root.join("client_code/rust_external/config_forge_runtime_interface.json"),
     )
     .expect("standard fixture external Rust runtime manifest should be readable");
-    assert!(external_rust_manifest.contains("\"language\": \"rust\""));
-    assert!(external_rust_manifest.contains("\"emit\": \"reference\""));
+    assert_runtime_manifest(
+        &external_rust_manifest,
+        "rust",
+        &[("runtime_core_path", "config_forge_runtime_reader_core")],
+    );
 
     let cpp_external_code =
         fs::read_to_string(output_root.join("client_code/cpp_external/reference_game_config.hpp"))
@@ -762,10 +770,13 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
         output_root.join("client_code/cpp_external/config_forge_runtime_interface.json"),
     )
     .expect("standard fixture external C++ runtime manifest should be readable");
-    assert!(cpp_external_manifest.contains("\"language\": \"cpp\""));
-    assert!(
-        cpp_external_manifest
-            .contains("\"runtime_core_header\": \"config_forge/runtime/reader.hpp\"")
+    assert_runtime_manifest(
+        &cpp_external_manifest,
+        "cpp",
+        &[
+            ("runtime_core_header", "config_forge/runtime/reader.hpp"),
+            ("runtime_core_namespace", "config_forge_runtime"),
+        ],
     );
 
     let java_code =
@@ -790,4 +801,23 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     ));
 
     verify_standard_generated_runtime_harnesses(fixture_root, output_root);
+}
+
+fn assert_runtime_manifest(content: &str, language: &str, fields: &[(&str, &str)]) {
+    let manifest: Value = serde_json::from_str(content).expect("runtime manifest should parse");
+    assert_eq!(manifest["contract"], RUNTIME_READER_CONTRACT);
+    assert_eq!(
+        manifest["contract_version"],
+        RUNTIME_READER_CONTRACT_VERSION
+    );
+    assert_eq!(
+        manifest["required_contract"],
+        REQUIRED_RUNTIME_READER_CONTRACT
+    );
+    assert_eq!(manifest["language"], language);
+    assert_eq!(manifest["emit"], "reference");
+    assert_eq!(manifest["runtime_interface"], "external");
+    for (key, value) in fields {
+        assert_eq!(manifest[*key], *value, "manifest field {key}");
+    }
 }

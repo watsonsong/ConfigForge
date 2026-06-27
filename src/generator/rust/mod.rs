@@ -4,7 +4,13 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ConfigForgeError, Result, artifact::ArtifactSink, diagnostic::code::CF_GENERATOR_INVALID_OPTION,
+    ConfigForgeError, Result,
+    artifact::ArtifactSink,
+    code_artifact::runtime_interface::{
+        RuntimeInterfaceManifest,
+        runtime_interface_manifest_path as shared_runtime_interface_manifest_path,
+    },
+    diagnostic::code::CF_GENERATOR_INVALID_OPTION,
 };
 
 use super::{
@@ -86,7 +92,7 @@ impl CodeGenerator for RustCodeGenerator {
         ) {
             files.push(super::GeneratedFile {
                 path: runtime_interface_manifest_path(input),
-                content: rust_runtime_interface_manifest(&rust_options),
+                content: rust_runtime_interface_manifest(&rust_options)?,
             });
         }
         Ok(files)
@@ -123,7 +129,8 @@ impl CodeGenerator for RustCodeGenerator {
                 manifest_stream,
                 CodeWriterConfig::default().with_indent_width(2),
             );
-            manifest.raw(rust_runtime_interface_manifest(&rust_options));
+            let manifest_content = rust_runtime_interface_manifest(&rust_options)?;
+            manifest.raw(&manifest_content);
             let manifest_stream =
                 manifest
                     .finish()
@@ -164,31 +171,17 @@ fn rust_output_path(input: &CodeExportInput<'_>) -> std::path::PathBuf {
 }
 
 fn runtime_interface_manifest_path(input: &CodeExportInput<'_>) -> std::path::PathBuf {
-    input
-        .target
-        .out_dir
-        .join("config_forge_runtime_interface.json")
+    shared_runtime_interface_manifest_path(&input.target.out_dir)
 }
 
-fn rust_runtime_interface_manifest(options: &RustCodegenOptions) -> String {
+fn rust_runtime_interface_manifest(options: &RustCodegenOptions) -> Result<String> {
     let runtime_core_path = options
         .runtime_core_path
         .as_deref()
         .unwrap_or("config_forge_runtime_reader_core");
-    format!(
-        concat!(
-            "{{\n",
-            "  \"contract\": \"config_forge_runtime_reader\",\n",
-            "  \"contract_version\": \"1.0\",\n",
-            "  \"required_contract\": \"^1.0\",\n",
-            "  \"language\": \"rust\",\n",
-            "  \"emit\": \"reference\",\n",
-            "  \"runtime_interface\": \"external\",\n",
-            "  \"runtime_core_path\": {:?}\n",
-            "}}\n"
-        ),
-        runtime_core_path
-    )
+    RuntimeInterfaceManifest::reference(LANGUAGE)
+        .with_language_field("runtime_core_path", runtime_core_path)
+        .to_json_pretty()
 }
 
 fn write_file_header(

@@ -17,6 +17,7 @@ use crate::{
     meta::{MetaModel, TargetTags},
     runtime_contract::RuntimeDataFile,
 };
+use serde_json::Value;
 
 use super::{LANGUAGE, RustCodeGenerator, RustCodegenOptions};
 
@@ -116,10 +117,10 @@ fn parses_and_validates_rust_runtime_interface_options() {
             .and_then(|name| name.to_str()),
         Some("config_forge_runtime_interface.json")
     );
-    assert!(
-        external_files[1]
-            .content
-            .contains("\"runtime_core_path\": \"crate::runtime\"")
+    assert_runtime_manifest(
+        &external_files[1].content,
+        "rust",
+        &[("runtime_core_path", "crate::runtime")],
     );
 
     input.target.options.language_options.insert(
@@ -158,6 +159,28 @@ fn parses_and_validates_rust_runtime_interface_options() {
         "unexpected error: {}",
         diagnostic.message
     );
+}
+
+fn assert_runtime_manifest(content: &str, language: &str, fields: &[(&str, &str)]) {
+    let manifest: Value = serde_json::from_str(content).expect("runtime manifest should be JSON");
+    assert_eq!(
+        manifest["contract"],
+        crate::code_artifact::runtime_interface::RUNTIME_READER_CONTRACT
+    );
+    assert_eq!(
+        manifest["contract_version"],
+        crate::code_artifact::runtime_interface::RUNTIME_READER_CONTRACT_VERSION
+    );
+    assert_eq!(
+        manifest["required_contract"],
+        crate::code_artifact::runtime_interface::REQUIRED_RUNTIME_READER_CONTRACT
+    );
+    assert_eq!(manifest["language"], language);
+    assert_eq!(manifest["emit"], "reference");
+    assert_eq!(manifest["runtime_interface"], "external");
+    for (key, value) in fields {
+        assert_eq!(manifest[*key], *value, "manifest field {key}");
+    }
 }
 
 #[test]

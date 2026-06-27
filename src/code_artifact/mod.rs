@@ -4,6 +4,7 @@
 pub(crate) mod ir;
 pub(crate) mod naming;
 mod reader_plan;
+pub(crate) mod runtime_interface;
 mod writer;
 
 #[cfg(test)]

@@ -1,7 +1,10 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::code_artifact::{CodeWriterLike, RuntimeInterfaceMode};
+use crate::code_artifact::{
+    CodeWriterLike, RuntimeInterfaceMode,
+    runtime_interface::{REQUIRED_RUNTIME_READER_CONTRACT, RUNTIME_READER_CONTRACT_VERSION},
+};
 
 use super::RustCodegenOptions;
 
@@ -29,18 +32,21 @@ fn render_external_runtime_reader_contract(
     RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult,
 }};
 
-pub const REQUIRED_CONFIG_FORGE_READER_CONTRACT: &str = "^1.0";
+pub const REQUIRED_CONFIG_FORGE_READER_CONTRACT: &str = "{REQUIRED_RUNTIME_READER_CONTRACT}";
 
 "#
     ));
 }
 
 fn render_inline_runtime_reader_contract(content: &mut impl CodeWriterLike) {
+    content.raw_fmt(format_args!(
+        "pub const CONFIG_FORGE_READER_CONTRACT_VERSION: &str = {RUNTIME_READER_CONTRACT_VERSION:?};\n"
+    ));
+    content.raw_fmt(format_args!(
+        "pub const REQUIRED_CONFIG_FORGE_READER_CONTRACT: &str = {REQUIRED_RUNTIME_READER_CONTRACT:?};\n\n"
+    ));
     content.raw(
-        r#"pub const CONFIG_FORGE_READER_CONTRACT_VERSION: &str = "1.0";
-pub const REQUIRED_CONFIG_FORGE_READER_CONTRACT: &str = "^1.0";
-
-pub type RuntimeDataResult<T> = Result<T, RuntimeDataError>;
+        r#"pub type RuntimeDataResult<T> = Result<T, RuntimeDataError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeDataErrorKind {

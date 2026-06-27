@@ -1,7 +1,10 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::code_artifact::{CodeVectorElementType, CodeWriterLike, RuntimeInterfaceMode};
+use crate::code_artifact::{
+    CodeVectorElementType, CodeWriterLike, RuntimeInterfaceMode,
+    runtime_interface::{REQUIRED_RUNTIME_READER_CONTRACT, RUNTIME_READER_CONTRACT_VERSION},
+};
 
 use super::{CppCodegenOptions, types::cpp_vector_reader_suffix};
 
@@ -32,9 +35,12 @@ pub(super) fn render_runtime_interfaces(
         return;
     }
 
-    content.raw("inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";\n\n");
-    content
-        .raw("inline constexpr const char* REQUIRED_CONFIG_FORGE_READER_CONTRACT = \"^1.0\";\n\n");
+    content.raw_fmt(format_args!(
+        "inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = {RUNTIME_READER_CONTRACT_VERSION:?};\n\n"
+    ));
+    content.raw_fmt(format_args!(
+        "inline constexpr const char* REQUIRED_CONFIG_FORGE_READER_CONTRACT = {REQUIRED_RUNTIME_READER_CONTRACT:?};\n\n"
+    ));
     content.raw(concat!(
         "enum class RuntimeDataErrorKind {\n",
         "    Io,\n",
