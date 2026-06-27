@@ -49,12 +49,12 @@ function withExtension(logicalPath, extension) {
 }
 function safeJoin(resolvedRoot, logicalPath) {
     if (pathModule.isAbsolute(logicalPath)) {
-        throw new Error(`runtime data path must be relative: ${logicalPath}`);
+        throw runtime_reader_core_1.RuntimeDataError.invalidPath(`runtime data path must be relative: ${logicalPath}`, { logicalPath });
     }
     const resolvedPath = pathModule.resolve(resolvedRoot, logicalPath);
     const relative = pathModule.relative(resolvedRoot, resolvedPath);
     if (relative.startsWith("..") || pathModule.isAbsolute(relative)) {
-        throw new Error(`runtime data path escapes data root: ${logicalPath}`);
+        throw runtime_reader_core_1.RuntimeDataError.invalidPath(`runtime data path escapes data root: ${logicalPath}`, { logicalPath, resourcePath: resolvedPath });
     }
     return resolvedPath;
 }

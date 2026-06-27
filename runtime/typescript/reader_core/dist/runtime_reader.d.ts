@@ -1,4 +1,26 @@
 export declare const SUPPORTED_CONFIG_FORGE_READER_CONTRACT: "^1.0";
+export type RuntimeDataErrorKind = "Io" | "Decode" | "SchemaMismatch" | "TypeMismatch" | "NotFound" | "Unsupported" | "InvalidPath";
+export interface RuntimeDataErrorContext {
+    path?: string;
+    logicalPath?: string;
+    resourcePath?: string;
+    expected?: string;
+    actual?: string;
+}
+export declare class RuntimeDataError extends Error {
+    readonly kind: RuntimeDataErrorKind;
+    readonly context: RuntimeDataErrorContext;
+    constructor(kind: RuntimeDataErrorKind, message: string, context?: RuntimeDataErrorContext, options?: {
+        cause?: unknown;
+    });
+    static io(message: string, cause?: unknown, context?: RuntimeDataErrorContext): RuntimeDataError;
+    static decode(message: string, context?: RuntimeDataErrorContext): RuntimeDataError;
+    static schemaMismatch(message: string, context?: RuntimeDataErrorContext): RuntimeDataError;
+    static typeMismatch(message: string, context?: RuntimeDataErrorContext): RuntimeDataError;
+    static notFound(message: string, context?: RuntimeDataErrorContext): RuntimeDataError;
+    static unsupported(message: string, context?: RuntimeDataErrorContext): RuntimeDataError;
+    static invalidPath(message: string, context?: RuntimeDataErrorContext): RuntimeDataError;
+}
 export interface RuntimeDataReaderLike {
     enterRequiredField(name: string): void;
     enterOptionalField(name: string): boolean;

@@ -53,6 +53,19 @@ Runtime compliance runner 验证具体 reader adapter 对通用 contract 的解�
 | C# JSON / MessagePack / Binary | 多格式 | .NET SDK | 已由 `tests/csharp_java_runtime_compliance.rs` 覆盖标准 reader；Binary 覆盖 shared logical success cases、bad magic、unsupported version、truncated header/body、wrong schema revision、invalid optional bitmap、invalid enum ordinal、huge length prefix、not exhausted 与 record/row boundary；template metadata/version/contract range 由 compliance 断言。standard_project 继续覆盖三格式 smoke。 | 增加更多 shared binary negative corpus。 |
 | Java JSON / MessagePack / Binary | 多格式 | JDK | 已由 `tests/csharp_java_runtime_compliance.rs` 覆盖标准 reader；Binary 覆盖 shared logical success cases、bad magic、unsupported version、truncated header/body、wrong schema revision、invalid optional bitmap、invalid enum ordinal、huge length prefix、not exhausted 与 record/row boundary；template metadata/version/contract range 由 compliance 断言。standard_project 继续覆盖三格式 smoke。 | 增加更多 shared binary negative corpus。 |
 
+## Runtime helper release gate
+
+standard runtime helpers 进入 Stable 后，release / full CI 应额外覆盖 package/template metadata 与安装 smoke：
+
+| Gate | 命令 / 入口 | 说明 |
+| --- | --- | --- |
+| Metadata drift | `cargo test --test runtime_helper_release_metadata` | 断言 generated code contract constants、Rust/TypeScript/C++ package metadata、C# / Java template version、supported contract range 与 distribution mode 一致。 |
+| Rust reader core package | `cargo package --manifest-path runtime/rust/reader_core/Cargo.toml --allow-dirty` | 验证可独立打包并从 package tarball 编译。 |
+| Rust adapter package file-list | `cargo package --manifest-path runtime/rust/{serde_json_reader,serde_msgpack_reader,binary_reader}/Cargo.toml --list` | 验证 adapter crate 打包文件集合。正式 registry verification 需先发布 `config-forge-runtime-reader-core = 0.1.0`，再按 core → adapters 顺序执行。 |
+| TypeScript packages | `npm pack runtime/typescript/<package> --dry-run` | 覆盖 `reader_core`、JSON、MessagePack、binary、node-fs 包的 `exports` / `types` / 文件列表。若 source 改动影响 dist，先运行对应 `tsc --project tsconfig.build.json`。 |
+| C++ install / find_package | `cmake -S runtime/cpp -B <build> -DCONFIG_FORGE_RUNTIME_BUILD_TESTS=ON && cmake --build <build> && ctest --test-dir <build> --output-on-failure` | 覆盖 binary reader smoke、compliance 与 downstream `find_package(ConfigForgeRuntime 0.1 REQUIRED CONFIG)` consumer build。 |
+| C# / Java templates | `cargo test --test csharp_java_runtime_compliance` | 编译 copyable templates，并断言 template version、supported contract range、distribution mode 和 JSON / MessagePack / binary reader 语义。 |
+
 ## Platform filesystem edge matrix
 
 Artifact Writer 的 path containment 与 conflict key 需要在真实平台文件系统上验证；相关语义见 [`platform-filesystem-semantics.md`](platform-filesystem-semantics.md)。这些测试属于 Rust core test suite，不依赖跨语言工具。
