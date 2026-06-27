@@ -11,9 +11,8 @@ use crate::{
     diagnostic::code::CF_DATA_INVALID_ASSET_REF,
     meta::{
         AssetExtensionPolicy, AssetInputKind, AssetKindMeta, AssetPathStyle, AssetRegexTarget,
-        LinkedMetaModel, TargetTags, ValidationSeverity,
+        AssetSearchPathConfig, AssetsConfig, LinkedMetaModel, TargetTags, ValidationSeverity,
     },
-    project::{AssetSearchPathConfig, AssetsConfig},
 };
 
 use super::model::{AssetCandidate, AssetSearchPath, EffectiveAssetKind, ResolvedAssetRef};

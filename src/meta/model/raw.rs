@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -20,6 +20,32 @@ pub struct MetaModel {
     pub tables: Vec<TableMeta>,
     #[serde(default)]
     pub asset_kinds: Vec<AssetKindMeta>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct AssetsConfig {
+    #[serde(default)]
+    pub case_sensitive: Option<bool>,
+    #[serde(default)]
+    pub require_existing: Option<bool>,
+    #[serde(default)]
+    pub root: Option<PathBuf>,
+    #[serde(default)]
+    pub search_paths: Vec<AssetSearchPathConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct AssetSearchPathConfig {
+    pub name: String,
+    pub root: PathBuf,
+    #[serde(default = "default_asset_search_path_kind")]
+    pub kind: String,
+    #[serde(default)]
+    pub mount: Option<String>,
+}
+
+fn default_asset_search_path_kind() -> String {
+    "filesystem".to_owned()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

@@ -5,8 +5,7 @@ use crate::{
     Result,
     data::{DataSet, DataTable},
     diagnostic::DiagnosticLocation,
-    meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
-    project::AssetsConfig,
+    meta::{AssetsConfig, LinkedMetaModel, LinkedTableMeta, TargetTags},
 };
 
 use rayon::prelude::*;

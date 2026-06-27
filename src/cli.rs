@@ -8,10 +8,11 @@ use serde::Serialize;
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity,
-    artifact::ArtifactWriteMode,
-    build::{BuildOptions, ExecutionOptions, build_target_with_trace},
+    build::{
+        ArtifactWriteMode, BuildOptions, DesignerReportFormat, ExecutionOptions,
+        ValidationReportExportConfig, build_target_with_trace,
+    },
     diagnostic::code::CF_BUILD_INVALID_OPTION,
-    validation::{DesignerReportFormat, ValidationReportExportConfig},
 };
 
 #[derive(Debug, Parser)]

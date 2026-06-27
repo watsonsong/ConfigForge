@@ -10,6 +10,10 @@ mod runtime;
 mod target;
 mod trace;
 
+pub use crate::{
+    artifact::ArtifactWriteMode,
+    validation::{DesignerReportFormat, ValidationReportExportConfig},
+};
 pub use options::{
     BuildErrorWithTrace, BuildOptions, BuildOutput, BuildTrace, BuildTraceStage,
     BuildTraceStageStatus, ExecutionOptions,

@@ -60,20 +60,20 @@
 
 ### TODO
 
-- [ ] 扩展 `tests/architecture.rs` 的 forbidden dependency 表，覆盖 `meta`、`data`、`asset`、`artifact`、`artifact_info`、`runtime_contract`、`project`、`build`、`cli`。
-- [ ] 增加 `runtime_contract` guard：禁止依赖 `data`、`validation`、`data_artifact`、`code_artifact`、`generator`、`project`、`build`。
-- [ ] 增加 `artifact` guard：禁止依赖 `meta`、`data`、`validation`、`data_artifact`、`code_artifact`、`generator`、`project`、`build`。
-- [ ] 增加 `asset` guard：禁止依赖 `data`、`validation`、`data_artifact`、`code_artifact`、`generator`、`build`。
-- [ ] 增加 `project` guard：禁止依赖 `build`，并避免依赖 toolkit 内部 task config。
-- [ ] 增加 `cli` guard：只能依赖 `build` 与诊断/错误展示相关底层类型。
-- [ ] 评估当前 string-based `crate::<module>` 检查是否足够；如误报/漏报明显，改进 grouped import / absolute path 检测。
-- [ ] 若发现现有代码违反约束，先判断是实现需要修正还是文档依赖图需要更新。
+- [x] 扩展 `tests/architecture.rs` 的 forbidden dependency 表，覆盖 `meta`、`data`、`asset`、`artifact`、`artifact_info`、`runtime_contract`、`project`、`build`、`cli`。
+- [x] 增加 `runtime_contract` guard：禁止依赖 `data`、`validation`、`data_artifact`、`code_artifact`、`generator`、`project`、`build`。
+- [x] 增加 `artifact` guard：禁止依赖 `meta`、`data`、`validation`、`data_artifact`、`code_artifact`、`generator`、`project`、`build`。
+- [x] 增加 `asset` guard：禁止依赖 `data`、`validation`、`data_artifact`、`code_artifact`、`generator`、`build`。
+- [x] 增加 `project` guard：禁止依赖 `build`，并避免依赖 toolkit 内部 task config。
+- [x] 增加 `cli` guard：只能依赖 `build` 与诊断/错误展示相关底层类型。
+- [x] 评估当前 string-based `crate::<module>` 检查是否足够；如误报/漏报明显，改进 grouped import / absolute path 检测。
+- [x] 若发现现有代码违反约束，先判断是实现需要修正还是文档依赖图需要更新。
 
 ### 验收
 
-- [ ] `cargo test --test architecture` 通过。
-- [ ] `tests/architecture.rs` 覆盖 `01-module-outline.md` 中所有关键依赖方向。
-- [ ] 生产代码新增反向依赖会被测试捕捉。
+- [x] `cargo test --test architecture` 通过。
+- [x] `tests/architecture.rs` 覆盖 `01-module-outline.md` 中所有关键依赖方向。
+- [x] 生产代码新增反向依赖会被测试捕捉。
 
 ## P1-5：修正 structured runtime error 的跨语言 code 暴露不一致
 

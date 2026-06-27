@@ -6,8 +6,9 @@ use crate::{
     asset::AssetResolver,
     data::{DataResolver, DataRow, DataTable, ResolvedRow},
     diagnostic::{DiagnosticLocation, code},
-    meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags},
-    project::AssetsConfig,
+    meta::{
+        AssetsConfig, LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags,
+    },
 };
 
 use super::{

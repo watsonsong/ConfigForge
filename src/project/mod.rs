@@ -17,6 +17,8 @@ use crate::{
     path_util::lexical_normalize_path,
 };
 
+pub use crate::meta::{AssetSearchPathConfig, AssetsConfig};
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ProjectConfig {
     #[serde(default)]
@@ -35,32 +37,6 @@ pub struct ProjectConfig {
     pub asset_kinds: Vec<AssetKindMeta>,
     #[serde(default)]
     pub targets: Vec<TargetConfig>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
-pub struct AssetsConfig {
-    #[serde(default)]
-    pub case_sensitive: Option<bool>,
-    #[serde(default)]
-    pub require_existing: Option<bool>,
-    #[serde(default)]
-    pub root: Option<PathBuf>,
-    #[serde(default)]
-    pub search_paths: Vec<AssetSearchPathConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct AssetSearchPathConfig {
-    pub name: String,
-    pub root: PathBuf,
-    #[serde(default = "default_asset_search_path_kind")]
-    pub kind: String,
-    #[serde(default)]
-    pub mount: Option<String>,
-}
-
-fn default_asset_search_path_kind() -> String {
-    "filesystem".to_owned()
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -177,7 +153,7 @@ fn normalize_project_config_paths(config: &mut ProjectConfig, base_dir: &Path) {
             config.assets.search_paths.push(AssetSearchPathConfig {
                 name: "default".to_owned(),
                 root: root.clone(),
-                kind: default_asset_search_path_kind(),
+                kind: "filesystem".to_owned(),
                 mount: None,
             });
         }
