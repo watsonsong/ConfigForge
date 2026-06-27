@@ -1259,6 +1259,7 @@ fn parses_codegen_task_config_and_merges_naming_defaults() {
         TypeScriptCodegenOptions {
             profile: Default::default(),
             readonly_fields: true,
+            runtime_interface_emit: RuntimeInterfaceEmit::Copy,
             cocos_import: None,
         }
     );

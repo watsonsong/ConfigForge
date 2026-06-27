@@ -29,6 +29,8 @@ fn render_external_runtime_reader_contract(
     RuntimeDataLoader, RuntimeDataReader, RuntimeDataResult,
 }};
 
+pub const REQUIRED_CONFIG_FORGE_READER_CONTRACT: &str = "^1.0";
+
 "#
     ));
 }
@@ -36,6 +38,7 @@ fn render_external_runtime_reader_contract(
 fn render_inline_runtime_reader_contract(content: &mut impl CodeWriterLike) {
     content.raw(
         r#"pub const CONFIG_FORGE_READER_CONTRACT_VERSION: &str = "1.0";
+pub const REQUIRED_CONFIG_FORGE_READER_CONTRACT: &str = "^1.0";
 
 pub type RuntimeDataResult<T> = Result<T, RuntimeDataError>;
 

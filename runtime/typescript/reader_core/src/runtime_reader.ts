@@ -3,6 +3,66 @@
 
 export const SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0" as const;
 
+export type RuntimeDataErrorKind =
+  | "Io"
+  | "Decode"
+  | "SchemaMismatch"
+  | "TypeMismatch"
+  | "NotFound"
+  | "Unsupported"
+  | "InvalidPath";
+
+export interface RuntimeDataErrorContext {
+  path?: string;
+  logicalPath?: string;
+  resourcePath?: string;
+  expected?: string;
+  actual?: string;
+}
+
+export class RuntimeDataError extends Error {
+  readonly kind: RuntimeDataErrorKind;
+  readonly context: RuntimeDataErrorContext;
+
+  constructor(kind: RuntimeDataErrorKind, message: string, context: RuntimeDataErrorContext = {}, options?: { cause?: unknown }) {
+    super(message);
+    this.name = "RuntimeDataError";
+    this.kind = kind;
+    this.context = context;
+    if (options && "cause" in options) {
+      (this as Error & { cause?: unknown }).cause = options.cause;
+    }
+  }
+
+  static io(message: string, cause?: unknown, context: RuntimeDataErrorContext = {}): RuntimeDataError {
+    return new RuntimeDataError("Io", message, context, { cause });
+  }
+
+  static decode(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError {
+    return new RuntimeDataError("Decode", message, context);
+  }
+
+  static schemaMismatch(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError {
+    return new RuntimeDataError("SchemaMismatch", message, context);
+  }
+
+  static typeMismatch(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError {
+    return new RuntimeDataError("TypeMismatch", message, context);
+  }
+
+  static notFound(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError {
+    return new RuntimeDataError("NotFound", message, context);
+  }
+
+  static unsupported(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError {
+    return new RuntimeDataError("Unsupported", message, context);
+  }
+
+  static invalidPath(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError {
+    return new RuntimeDataError("InvalidPath", message, context);
+  }
+}
+
 export interface RuntimeDataReaderLike {
   enterRequiredField(name: string): void;
   enterOptionalField(name: string): boolean;
@@ -55,10 +115,10 @@ export function normalizeRuntimeDecodeLimits(
 
 export function checkRuntimeDecodeLimit(label: string, actual: number, limit: number): void {
   if (!Number.isSafeInteger(actual) || actual < 0) {
-    throw new Error(`${label} must be a non-negative safe integer`);
+    throw RuntimeDataError.decode(`${label} must be a non-negative safe integer`, { expected: "non-negative safe integer", actual: String(actual) });
   }
   if (actual > limit) {
-    throw new Error(`${label} ${actual} exceeds decode limit ${limit}`);
+    throw RuntimeDataError.decode(`${label} ${actual} exceeds decode limit ${limit}`, { expected: `<= ${limit}`, actual: String(actual) });
   }
 }
 
@@ -101,7 +161,7 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
   enterIndex(index: number): void {
     const value = this.currentValue();
     if (!Array.isArray(value) || index < 0 || index >= value.length) {
-      throw new Error(`missing array index ${index}`);
+      throw RuntimeDataError.notFound(`missing array index ${index}`, { expected: "array index", actual: runtimeTypeOf(value) });
     }
     this.checkNestingDepth(this.stack.length);
     this.stack.push(value[index]);
@@ -109,7 +169,7 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
 
   exit(): void {
     if (this.stack.length <= 1) {
-      throw new Error("runtime reader cursor stack underflow");
+      throw RuntimeDataError.decode("runtime reader cursor stack underflow");
     }
     this.stack.pop();
   }
@@ -122,12 +182,12 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
     if (value !== null && typeof value === "object") {
       return Object.keys(value).length;
     }
-    throw new Error("reader value is not array/object");
+    throw RuntimeDataError.typeMismatch("reader value is not array/object", { expected: "array/object", actual: runtimeTypeOf(value) });
   }
 
   enterRequiredField(name: string): void {
     if (!this.enterField(name)) {
-      throw new Error(`missing required field ${name}`);
+      throw RuntimeDataError.notFound(`missing required field ${name}`, { expected: `field ${name}`, actual: "missing/null" });
     }
   }
 
@@ -155,7 +215,7 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
     const value = this.asString();
     const index = variants.indexOf(value);
     if (index < 0) {
-      throw new Error(`unknown enum value ${value}`);
+      throw RuntimeDataError.decode(`unknown enum value ${value}`, { expected: variants.join(" | "), actual: value });
     }
     return index;
   }
@@ -177,17 +237,17 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
       parsed = value;
     } else if (typeof value === "string") {
       if (value.trim().length === 0) {
-        throw new Error("expected non-empty number-like string");
+        throw RuntimeDataError.typeMismatch("expected non-empty number-like string", { expected: "number-like string", actual: "empty string" });
       }
       parsed = Number(value);
     } else {
-      throw new Error(`expected number-like value, got ${String(value)}`);
+      throw RuntimeDataError.typeMismatch(`expected number-like value, got ${String(value)}`, { expected: "number-like value", actual: runtimeTypeOf(value) });
     }
     if (!Number.isFinite(parsed)) {
-      throw new Error(`expected finite number-like value, got ${String(value)}`);
+      throw RuntimeDataError.typeMismatch(`expected finite number-like value, got ${String(value)}`, { expected: "finite number-like value", actual: String(value) });
     }
     if (!Number.isSafeInteger(parsed)) {
-      throw new Error(`expected safe integer-like value, got ${String(value)}`);
+      throw RuntimeDataError.decode(`expected safe integer-like value, got ${String(value)}`, { expected: "safe integer-like value", actual: String(value) });
     }
     return parsed;
   }
@@ -209,7 +269,7 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
         return false;
       }
     }
-    throw new Error(`expected bool-like value, got ${String(value)}`);
+    throw RuntimeDataError.decode(`expected bool-like value, got ${String(value)}`, { expected: "bool-like value", actual: String(value) });
   }
 
   asString(): string {
@@ -218,7 +278,7 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
       checkRuntimeDecodeLimit("string byte length", utf8ByteLength(value), this.limits.maxStringBytes);
       return value;
     }
-    throw new Error(`expected string value, got ${String(value)}`);
+    throw RuntimeDataError.typeMismatch(`expected string value, got ${String(value)}`, { expected: "string", actual: runtimeTypeOf(value) });
   }
 
   ensureExhausted(): void {
@@ -231,14 +291,14 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
       parsed = value;
     } else if (typeof value === "string") {
       if (value.trim().length === 0) {
-        throw new Error("expected non-empty number-like string");
+        throw RuntimeDataError.typeMismatch("expected non-empty number-like string", { expected: "number-like string", actual: "empty string" });
       }
       parsed = Number(value);
     } else {
-      throw new Error(`expected number-like value, got ${String(value)}`);
+      throw RuntimeDataError.typeMismatch(`expected number-like value, got ${String(value)}`, { expected: "number-like value", actual: runtimeTypeOf(value) });
     }
     if (!Number.isFinite(parsed)) {
-      throw new Error(`expected finite number-like value, got ${String(value)}`);
+      throw RuntimeDataError.typeMismatch(`expected finite number-like value, got ${String(value)}`, { expected: "finite number-like value", actual: String(value) });
     }
     return parsed;
   }
@@ -255,9 +315,19 @@ export class RuntimeValueReader implements RuntimeDataReaderLike {
 function normalizeLimit(label: string, value: number | undefined, fallback: number): number {
   const resolved = value ?? fallback;
   if (!Number.isSafeInteger(resolved) || resolved < 0) {
-    throw new Error(`${label} must be a non-negative safe integer`);
+    throw RuntimeDataError.decode(`${label} must be a non-negative safe integer`, { expected: "non-negative safe integer", actual: String(resolved) });
   }
   return resolved;
+}
+
+function runtimeTypeOf(value: unknown): string {
+  if (value === null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  return typeof value;
 }
 
 function utf8ByteLength(value: string): number {

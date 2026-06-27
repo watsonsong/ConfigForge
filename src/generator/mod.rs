@@ -25,7 +25,8 @@ pub(crate) use crate::code_artifact::{
     CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeStruct, CodeTable, CodeTableKind,
     CodeTypeRef, CodeWriterConfig, CodeWriterLike, I18nFunctionReturn, I18nMode, I18nOptions,
-    NamingConfig, ReaderShapePlan, RuntimeInterfaceMode, build_code_model, ir,
+    NamingConfig, ReaderShapePlan, RuntimeInterfaceEmit, RuntimeInterfaceMode, build_code_model,
+    ir,
 };
 pub(crate) use artifact_generator::{ArtifactGenerator, generate_code_artifact_to_sink};
 #[cfg(test)]

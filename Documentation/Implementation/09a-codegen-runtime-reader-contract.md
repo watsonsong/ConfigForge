@@ -14,6 +14,7 @@
 - Eager `GameData` 与 table-level `LazyGameData` 已实现 MVP。
 - TypeScript 已提供 async 与 sync loading API；sync API 要求 loader 同步返回 reader。C# / Java 当前提供同步 `Load` / `load` 和 `LazyGameData` API。
 - Generated code 使用逻辑 table name；真实 artifact path、后缀和格式由 loader / reader 映射。
+- Generated code 声明 reader contract version 和 required contract range（当前 `1.0` / `^1.0`）；external runtime interface 模式引用稳定 core crate/header 时仍保留 generated required range，供 manifest、构建脚本或业务启动检查使用。
 
 ## Lazy loading state machine
 
@@ -57,6 +58,28 @@ Reader 基础语义：
 - 当 exporter 输出字符串 cell 时，推荐 generated parser helper 兼容 string-to-int、string-to-float、string-to-bool；reader 也可以直接在 `as_*` 中兼容字符串，但跨语言一致性以 generated parser 规则为准。
 - missing 与 null 必须区分：missing 表示字段不存在；null 表示字段存在但值为空。required 字段 missing 或 null 都应由 generated parser 报错；optional field / optional fragment missing 时得到 `None` / `undefined`；null 是否允许作为 optional empty value 由生成器策略统一决定，第一阶段建议将 null 等价为 optional empty，但对 required 字段仍报错。
 - 错误上下文由 generated parser 包装 table、file、row index、field path；reader 只需要报告底层类型/格式错误。
+
+## Contract version 与 structured runtime error
+
+Runtime reader contract 与具体 runtime helper package/template 版本分离维护：
+
+| 常量 / 字段 | 语义 | 当前值 |
+| --- | --- | --- |
+| `CONFIG_FORGE_READER_CONTRACT_VERSION` | generated parser 编译时采用的 reader contract 版本。 | `1.0` |
+| `REQUIRED_CONFIG_FORGE_READER_CONTRACT` | generated parser 要求 adapter 支持的 contract range。 | `^1.0` |
+| `SUPPORTED_CONFIG_FORGE_READER_CONTRACT` | adapter / template 声明自身支持的 contract range。 | `^1.0` |
+
+当 reader / loader method signature、required/null、scalar conversion、record/list boundary 或错误语义发生破坏性变更时，contract major 必须升级；adapter package/template patch/minor 升级不能破坏同一 major contract。`runtime_interface_emit = "reference"` 生成的 manifest 必须写入 `contract_version` 和 `required_contract`，以便业务构建脚本或启动流程校验 adapter 是否兼容。
+
+标准 runtime error 必须具备稳定机器可读分类：
+
+- Rust：`RuntimeDataError { kind: RuntimeDataErrorKind, ... }`，实现 `std::error::Error`。
+- TypeScript：`RuntimeDataError extends Error`，包含 `kind` 和 context。
+- C++：`RuntimeDataError : std::runtime_error`，包含 `RuntimeDataErrorKind`。
+- C#：`ConfigForgeRuntimeException : Exception`，包含 `Kind`、`Code`、`Path`。
+- Java：`ConfigForgeRuntimeException extends RuntimeException`，包含 `kind()`、`code()`、`path()`。
+
+跨语言 baseline kind 为 `Io`、`Decode`、`SchemaMismatch`、`TypeMismatch`、`NotFound`、`Unsupported`、`InvalidPath`。Reader/loader adapter 应在 transport、decode、schema、type conversion 和 cursor path 错误处抛结构化错误；generated parser 后续可继续补充 table、row index、field path 等业务上下文。Compliance negative corpus 断言 `kind/code/path`，错误 message 只作为辅助 keyword。
 
 ## 抽象加载器设计
 

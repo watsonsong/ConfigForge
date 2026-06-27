@@ -11,7 +11,8 @@ use super::{
     ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeWriterConfig, CodeWriterLike, GeneratorCommonInput,
     GeneratorRequirements, I18nFunctionReturn, I18nMode, I18nOptions, NamingConfig,
-    RuntimeInterfaceMode, build_code_model, ir::require_non_empty_index_fields,
+    RuntimeInterfaceEmit, RuntimeInterfaceMode, build_code_model,
+    ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -41,6 +42,8 @@ pub struct RustCodegenOptions {
     #[serde(default)]
     pub runtime_interface: RuntimeInterfaceMode,
     #[serde(default)]
+    pub runtime_interface_emit: RuntimeInterfaceEmit,
+    #[serde(default)]
     pub runtime_core_path: Option<String>,
 }
 
@@ -69,10 +72,24 @@ impl CodeGenerator for RustCodeGenerator {
     fn generate(&self, input: &CodeExportInput<'_>) -> Result<Vec<super::GeneratedFile>> {
         let mut content = super::CodeWriter::new(input.target.options.formatting);
         render_rust_code(self, &mut content, input)?;
-        Ok(vec![super::GeneratedFile {
+        let rust_options = input
+            .target
+            .options
+            .language_options::<RustCodegenOptions>(LANGUAGE)?;
+        let mut files = vec![super::GeneratedFile {
             path: rust_output_path(input),
             content: content.finish(),
-        }])
+        }];
+        if matches!(
+            rust_options.runtime_interface_emit,
+            RuntimeInterfaceEmit::Reference
+        ) {
+            files.push(super::GeneratedFile {
+                path: runtime_interface_manifest_path(input),
+                content: rust_runtime_interface_manifest(&rust_options),
+            });
+        }
+        Ok(files)
     }
 
     fn generate_to_sink(&self, input: &CodeExportInput<'_>, sink: &ArtifactSink) -> Result<()> {
@@ -86,7 +103,38 @@ impl CodeGenerator for RustCodeGenerator {
                 path: output_path,
                 source,
             })?;
-        stream.finish().map(|_| ())
+        stream.finish().map(|_| ())?;
+
+        if matches!(
+            input
+                .target
+                .options
+                .language_options::<RustCodegenOptions>(LANGUAGE)?
+                .runtime_interface_emit,
+            RuntimeInterfaceEmit::Reference
+        ) {
+            let rust_options = input
+                .target
+                .options
+                .language_options::<RustCodegenOptions>(LANGUAGE)?;
+            let manifest_path = runtime_interface_manifest_path(input);
+            let manifest_stream = sink.create(manifest_path.clone())?;
+            let mut manifest = CheckedStreamingCodeWriter::new(
+                manifest_stream,
+                CodeWriterConfig::default().with_indent_width(2),
+            );
+            manifest.raw(rust_runtime_interface_manifest(&rust_options));
+            let manifest_stream =
+                manifest
+                    .finish()
+                    .map_err(|source| ConfigForgeError::WriteFile {
+                        path: manifest_path,
+                        source,
+                    })?;
+            manifest_stream.finish()?;
+        }
+
+        Ok(())
     }
 }
 
@@ -113,6 +161,34 @@ fn rust_output_path(input: &CodeExportInput<'_>) -> std::path::PathBuf {
         .target
         .out_dir
         .join(input.target.single_file_name("generated", "rs"))
+}
+
+fn runtime_interface_manifest_path(input: &CodeExportInput<'_>) -> std::path::PathBuf {
+    input
+        .target
+        .out_dir
+        .join("config_forge_runtime_interface.json")
+}
+
+fn rust_runtime_interface_manifest(options: &RustCodegenOptions) -> String {
+    let runtime_core_path = options
+        .runtime_core_path
+        .as_deref()
+        .unwrap_or("config_forge_runtime_reader_core");
+    format!(
+        concat!(
+            "{{\n",
+            "  \"contract\": \"config_forge_runtime_reader\",\n",
+            "  \"contract_version\": \"1.0\",\n",
+            "  \"required_contract\": \"^1.0\",\n",
+            "  \"language\": \"rust\",\n",
+            "  \"emit\": \"reference\",\n",
+            "  \"runtime_interface\": \"external\",\n",
+            "  \"runtime_core_path\": {:?}\n",
+            "}}\n"
+        ),
+        runtime_core_path
+    )
 }
 
 fn write_file_header(
@@ -496,6 +572,20 @@ fn render_rust_code(
 fn validate_runtime_interface_options(options: &RustCodegenOptions) -> Result<()> {
     if matches!(options.runtime_interface, RuntimeInterfaceMode::External) {
         validate_optional_runtime_path("runtime_core_path", &options.runtime_core_path)?;
+    }
+    if matches!(
+        options.runtime_interface_emit,
+        RuntimeInterfaceEmit::Reference
+    ) && !matches!(options.runtime_interface, RuntimeInterfaceMode::External)
+    {
+        return Err(crate::code_artifact::generator_option_error(
+            CF_GENERATOR_INVALID_OPTION,
+            "generator.rust.options",
+            "rust runtime_interface_emit=reference requires runtime_interface=external".to_owned(),
+            "runtime_interface_emit=reference",
+            "runtime_interface=external",
+            "Set rust.runtime_interface to external when referencing a packaged runtime reader contract.",
+        ));
     }
     Ok(())
 }

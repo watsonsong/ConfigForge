@@ -420,7 +420,7 @@ ConfigForge 提供标准 RuntimeDataReader / RuntimeDataLoader adapter 作为可
 5. **依赖显式可选且局部化**：不同语言/格式 adapter 可以依赖不同三方库，但依赖只能出现在对应 adapter 包、模块或 CMake target 内，不能泄漏到 generated code 的 public API。
 6. **测试与项目复用同源**：集成测试 harness 应优先复用标准 adapter 或其 fixture 包装，避免测试中长期维护一套与真实接入方不同的 reader 语义。
 
-标准 adapter 必须声明 reader contract 版本与支持范围，并对 ConfigForge Runtime Value、missing/null、scalar conversion 和错误上下文语义保持一致。具体 adapter 矩阵、目录布局、语言包形态、C++ CMake target、三方依赖策略和 compliance runner 由 Implementation / Tech 文档维护，避免 Design 文档承载易变工程细节。
+标准 adapter 必须声明 reader contract 版本、required/supported contract range、package/template version 与 distribution mode，并对 ConfigForge Runtime Value、missing/null、scalar conversion 和结构化错误语义保持一致。Generated code 声明自身 reader contract version 与 required range；Rust / C++ 可通过 `runtime_interface = "external"` + `runtime_interface_emit = "reference"` 输出 dependency manifest，C# / Java 当前保持 copyable template，`reference` 模式给出明确诊断并提示使用 `copy`。具体 adapter 矩阵、目录布局、语言包形态、C++ CMake target、三方依赖策略、生产接入示例、release checklist 和 compliance runner 由 Implementation / Tech 文档维护，避免 Design 文档承载易变工程细节。
 
 工程细节入口：
 

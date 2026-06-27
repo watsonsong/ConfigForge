@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-`runtime/` 下标准 adapters 是 generated code 的辅助接入层，不是每次 codegen 的必然输出。核心 generated code 只依赖 loader/reader contract；标准 adapters 提供可复用的 JSON / MessagePack / `bin` reader 和常用 transport loader。当前 Rust 已有 `runtime/rust/reader_core` crate skeleton，TypeScript 已有 workspace package skeleton，C++ runtime helper 已有可通过 CMake 引入的 interface targets；这些仍处于仓库内模板 / 未发布包状态，尚未承诺稳定 crates.io / npm / installed CMake package 兼容性。C++ 三方依赖与 CMake 策略以 [`../Tech/cpp-runtime-dependencies.md`](../Tech/cpp-runtime-dependencies.md) 为准。
+`runtime/` 下标准 adapters 是 generated code 的辅助接入层，不是每次 codegen 的必然输出。核心 generated code 只依赖 loader/reader contract；标准 adapters 提供可复用的 JSON / MessagePack / `bin` reader 和常用 transport loader。当前 Rust 已有 `runtime/rust/reader_core` / JSON / MessagePack / binary Cargo packages，TypeScript 已有 core / JSON / MessagePack / binary / node-fs workspace packages，C++ runtime helper 已有 core header、adapter interface targets、install/export config 与 `find_package` smoke；C# / Java 保持 JSON / MessagePack / binary copyable templates。它们均声明 package/template version、reader contract version / supported range 和 distribution mode；发布形态仍是 preview package / copyable template，尚未承诺正式 crates.io / npm / NuGet / Maven 稳定发布。C++ 三方依赖与 CMake 策略以 [`../Tech/cpp-runtime-dependencies.md`](../Tech/cpp-runtime-dependencies.md) 为准。
 
 ## 标准 runtime helper 工程结构
 
@@ -32,21 +32,42 @@ Core purity 原则：要么某语言暂时不提供独立 core library，让 gen
 
 标准 adapter 不能只对齐接口形状，还必须对齐 reader contract 版本、value model、missing/null、scalar conversion 和错误上下文。当前 contract 版本定义为 `1.0`；后续所有 generated code 与 adapter 都应声明支持的 contract version。
 
-建议 generated code 输出常量：
+generated code 输出常量：
 
 ```rust
 pub const CONFIG_FORGE_READER_CONTRACT_VERSION: &str = "1.0";
+pub const REQUIRED_CONFIG_FORGE_READER_CONTRACT: &str = "^1.0";
 ```
 
 ```ts
 export const CONFIG_FORGE_READER_CONTRACT_VERSION = "1.0" as const;
+export const REQUIRED_CONFIG_FORGE_READER_CONTRACT = "^1.0" as const;
 ```
 
 ```cpp
 inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = "1.0";
+inline constexpr const char* REQUIRED_CONFIG_FORGE_READER_CONTRACT = "^1.0";
 ```
 
 adapter 也声明支持范围，例如 `SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0"`。当 codegen `emit = "copy"` 时，应把 adapter 支持范围写入复制文件头或 adapter manifest；当 `emit = "reference"` 时，应在生成 manifest / 诊断中说明所需 adapter 包或 CMake target 的 contract range。
+
+`runtime_interface_emit = "reference"` 当前由 Rust / C++ 生成 `config_forge_runtime_interface.json` manifest，包含 `contract_version`、`required_contract`、language、runtime core crate path 或 C++ core header/namespace。TypeScript 已保留 `runtime_interface_emit` option，但 external import 形态尚未稳定，因此 `reference` 诊断为 unsupported；C# / Java 继续推荐 copyable template，`reference` 诊断提示使用 `copy`。
+
+### Structured runtime error baseline
+
+标准 adapters 和 generated inline/external contract 使用统一 error kind/code baseline，避免用户解析错误字符串：
+
+| Kind | 典型来源 |
+| --- | --- |
+| `Io` | transport loader 文件/资源读取失败。 |
+| `Decode` | JSON / MessagePack / `bin` payload 损坏、varint/escape/格式错误。 |
+| `SchemaMismatch` | binary schema revision 或 payload shape 与 generated code 不兼容。 |
+| `TypeMismatch` | scalar conversion 失败、范围溢出、对不兼容 runtime value 读取目标类型。 |
+| `NotFound` | logical data path 或 required field 缺失。 |
+| `Unsupported` | MessagePack bin/ext、non-string map key 等 contract 不支持值。 |
+| `InvalidPath` | path traversal、enter index 越界、对 scalar 取 field/list length。 |
+
+语言映射：Rust `RuntimeDataErrorKind` + `RuntimeDataError`；TypeScript `RuntimeDataError extends Error`；C++ `RuntimeDataError` + `RuntimeDataErrorKind`；C# `ConfigForgeRuntimeException.Kind/Code/Path`；Java `ConfigForgeRuntimeException.kind()/code()/path()`。Compliance negative cases 断言 normalized `kind` / `code` / path，message 只作为辅助 keyword。
 
 Contract version bump 规则：
 
@@ -113,14 +134,14 @@ missing/null 语义：
 | `runtime/java/messagepack_reader` | Java MessagePack reader template | 已有 JDK-only MessagePack subset parser / reader 与 fs loader，覆盖当前 JSON 同构 named payload；standard_project harness 已同时验证 JSON / MessagePack。 |
 | `runtime/java/binary_reader` | Java binary reader template | 已有 JDK-only schema-aware `bin` reader 与 fs loader，覆盖 CFGB header、schema revision、record boundary、optional bitmap、enum ordinal 和 exhausted check；standard_project harness 已验证 Binary。 |
 
-当前结论：standard runtime helpers 已达到基础 MVP，并且契约层 / 包装形态已经进入“可稳定引用的预发布形态”。仓库已经具备标准 reader 源码、统一 reader contract、跨语言首批 compliance runner、standard_project 端到端 smoke，以及默认不强迫 generated core 依赖具体 JSON / MessagePack / Binary adapter 的边界。Rust crate、TypeScript workspace package、C++ CMake install / `find_package`、C# / Java copyable template 都已声明版本和 supported reader contract range。这里仍标为 MVP，而非 Stable，原因是 structured error taxonomy、最小生产接入示例、generated `emit = "reference"` 提示和 full package 发布流程仍未全部收口。
+当前结论：standard runtime helpers 已达到 stable-ready preview。仓库已经具备标准 reader 源码、统一 reader contract、跨语言 compliance runner、standard_project 端到端 smoke，以及默认不强迫 generated core 依赖具体 JSON / MessagePack / Binary adapter 的边界。Rust crate、TypeScript workspace package、C++ CMake install / `find_package`、C# / Java copyable template 都已声明版本和 supported reader contract range；structured error taxonomy、生产接入示例、generated `runtime_interface_emit = "reference"` manifest / diagnostic 和 release checklist 已收口。这里仍标为 preview，而非正式 Stable package，是因为 crates.io/npm/NuGet/Maven 发布与外部 registry 兼容承诺尚未执行。
 
-推进到初步稳定阶段前，主要缺口是：
+后续发布前仍需按 checklist 执行的工作是：
 
-1. `tests/fixtures/runtime_reader_compliance/` 已有首批 canonical payload / expected 文件，并通过 `tests/runtime_compliance.rs` 覆盖 Rust JSON / MessagePack / Binary adapters，通过 `tests/typescript_runtime_compliance.rs` 覆盖 TypeScript JSON / MessagePack / Binary adapters，通过 `runtime/cpp/compliance_test.cpp` 覆盖 C++ RapidJSON / msgpack-cxx / binary adapters，通过 `tests/csharp_java_runtime_compliance.rs` 覆盖 C# / Java JSON / MessagePack / Binary 标准 reader。Binary happy-path 已由 schema-derived materializer 在 Rust reference runner 中覆盖；各语言 runner 已扩展到同一批 logical cases。后续缺口集中在结构化 error expected schema、更多格式特有 negative corpus 共享化，以及 loader / path traversal / decode limit 的矩阵化。
-2. Rust `reader_core`、`binary_reader`、`serde_json_reader`、`serde_msgpack_reader` 已补齐 Cargo metadata 和 package-level tests；TypeScript workspace packages 已补齐 CommonJS `exports` / `types` / `sideEffects` / contract range。generated code 默认仍内联 / 声明本地 contract，未默认依赖稳定 Rust crate 或 npm package；后续需要补 `emit = "reference"` 的 dependency 提示和最小生产接入示例。
-3. C++ generated inline `IRuntimeDataReader` 已移除 `ReadArrayLength`、`ReadOptionalPresent`、`ReadNext*`、`ReadEnumOrdinal` 等非 generated-facing helper；并提供 `runtime/cpp/core/include/config_forge/runtime/reader.hpp` 与 `runtime_interface = "external"` opt-in，生产项目可逐步从 generated-header-bound 迁移到 stable core header。CMake install / export set / version config 与 `find_package(ConfigForgeRuntime 0.1 REQUIRED CONFIG)` smoke test 已落地；后续主要补 external interface 的生产示例和版本兼容说明。
-4. C# / Java JSON、MessagePack 与 Binary reader 已沉淀为 copyable template，并接入首批 runtime compliance runner；本阶段选择不发布 NuGet / Maven，而是在 template 中声明 version、contract range 和 `copyable-template` distribution mode。Jackson / Gson / Android / Newtonsoft.Json 等生态 adapter 暂不作为稳定 baseline。
+1. `tests/fixtures/runtime_reader_compliance/` 已有 canonical payload / expected 文件，并通过 `tests/runtime_compliance.rs`、`tests/typescript_runtime_compliance.rs`、`runtime/cpp/compliance_test.cpp`、`tests/csharp_java_runtime_compliance.rs` 覆盖 Rust / TypeScript / C++ / C# / Java 的 JSON、MessagePack 和 binary 标准 reader。后续可以继续扩充更多格式特有负例，但当前 stable-ready baseline 已覆盖 success、scalar/path/enum/type mismatch、loader path traversal、decode limits 与 binary malformed corpus。
+2. Rust `reader_core`、`binary_reader`、`serde_json_reader`、`serde_msgpack_reader` 已补齐 Cargo metadata 和 package-level tests；TypeScript workspace packages 已补齐 CommonJS `exports` / `types` / `sideEffects` / contract range。发布前需执行 registry dry-run（Rust `cargo package --dry-run`、TypeScript `npm pack --dry-run`），但 generated code 默认仍可 inline，不强制依赖外部 registry。
+3. C++ generated inline `IRuntimeDataReader` 已移除非 generated-facing helper；`runtime/cpp/core/include/config_forge/runtime/reader.hpp`、`runtime_interface = "external"`、CMake install/export/version config、`find_package(ConfigForgeRuntime 0.1 REQUIRED CONFIG)` smoke test 与 `runtime_interface_emit = "reference"` manifest 均已落地。
+4. C# / Java JSON、MessagePack 与 Binary reader 已沉淀为 copyable template，并接入 runtime compliance runner；本阶段选择不发布 NuGet / Maven，而是在 template 中声明 version、contract range 和 `copyable-template` distribution mode。Jackson / Gson / Android / Newtonsoft.Json 等生态 adapter 暂不作为稳定 baseline。
 
 因此 runtime loader 工程化按“两层稳定 + 多 adapter 可选”的方向推进：
 
@@ -228,11 +249,11 @@ Codegen 策略：
 - 可选 `runtime_interface = "external"`：generated Rust `use config_forge_runtime_reader_core::{RuntimeDataLoader, RuntimeDataReader, ...}`，adapter crate 可直接实现 trait。
 - external 模式必须在生成 manifest / 诊断中声明 core crate version 与 `SUPPORTED_CONFIG_FORGE_READER_CONTRACT` 范围。
 
-当前状态：Rust JSON / MessagePack / binary runners 已通过 compliance；`reader_core` package-level tests 直接读取共享 compliance fixture；standard_project Rust harness 覆盖 inline 与 external interface smoke。稳定发布前仍需补生产接入示例、crate docs、feature 边界，以及 error 类型和 trait 方法的 breaking-change review。
+当前状态：Rust JSON / MessagePack / binary runners 已通过 compliance；`reader_core` package-level tests 直接读取共享 compliance fixture；standard_project Rust harness 覆盖 inline 与 external interface smoke；`runtime_interface_emit = "reference"` 已输出 runtime dependency manifest。正式发布前只剩 registry/package 级 dry-run、crate docs/API polish 与外部发布流程确认，不再阻塞仓库内 stable-ready baseline。
 
 #### Phase R3：TypeScript stable npm packages
 
-TypeScript 可以最早形成稳定 npm 包，因为 generated interface 是结构化类型，不需要 nominal trait 绑定。当前 workspace packages 已补齐 package metadata、CommonJS `exports` / `types`、`sideEffects` 和 reader contract range，可作为 workspace/path package 直接引用；正式 npm 发布前仍需补生产接入示例和发布流程。
+TypeScript 可以最早形成稳定 npm 包，因为 generated interface 是结构化类型，不需要 nominal trait 绑定。当前 workspace packages 已补齐 package metadata、CommonJS `exports` / `types`、`sideEffects` 和 reader contract range，可作为 workspace/path package 直接引用；生产接入示例和 release checklist 已在文档中收口，正式 npm 发布前只剩 `npm pack --dry-run` / registry 发布流程确认。
 
 推荐包：
 
@@ -244,7 +265,7 @@ TypeScript 可以最早形成稳定 npm 包，因为 generated interface 是结�
 | `@config-forge/runtime-reader-binary` | `bin` reader。 | 依赖 core。 |
 | `@config-forge/runtime-loader-node-fs` | Node fs transport，可注入 decoder。 | 依赖 core，不依赖具体格式。 |
 
-当前状态：使用 TypeScript 5.9.3 对五个 workspace package 逐 package typecheck + build 验证通过；compliance runner 覆盖 JSON、MessagePack、binary。package `exports` 明确当前只支持 CommonJS `require`，未来如增加 ESM 应作为显式 package boundary 变更处理。正式发布前置条件剩余：npm publish 流程、README/API docs、生产接入示例，以及 generated `emit = "reference"` 的依赖提示。
+当前状态：使用 TypeScript 5.9.3 对五个 workspace package 逐 package typecheck + build 验证通过；compliance runner 覆盖 JSON、MessagePack、binary。package `exports` 明确当前只支持 CommonJS `require`，未来如增加 ESM 应作为显式 package boundary 变更处理。`runtime_interface_emit = "reference"` 当前诊断为 unsupported，避免在 external import 形态稳定前生成不可执行依赖提示；正式发布前只剩 npm publish / README/API docs polish。
 
 #### Phase R4：C++ stable interface header
 
@@ -261,7 +282,7 @@ TypeScript 可以最早形成稳定 npm 包，因为 generated interface 是结�
   - `external`：generated code include `config_forge/runtime/reader.hpp`，并使用 core target 的接口类型。
 - 迁移期 adapter 可同时支持 generated-header-bound 和 external interface；新生产文档推荐 external。
 
-当前状态：C++ RapidJSON / msgpack-cxx / binary compliance 通过；standard_project C++ harness 覆盖 external interface smoke；CMake install / `find_package` 能重新找到 core 与 binary reader target。后续需继续补更多格式特有 negative cases 和生产接入示例。
+当前状态：C++ RapidJSON / msgpack-cxx / binary compliance 通过；standard_project C++ harness 覆盖 external interface smoke；CMake install / `find_package` 能重新找到 core 与 binary reader target；`runtime_interface_emit = "reference"` 已输出 CMake/header dependency manifest。后续可继续扩展格式特有 negative cases，但仓库内 stable-ready baseline 已具备生产接入示例和 release checklist。
 
 #### Phase R5：C# / Java package 形态评估
 

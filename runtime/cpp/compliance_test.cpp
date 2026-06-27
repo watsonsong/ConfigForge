@@ -212,6 +212,11 @@ void RunJsonCompatibleErrorCases(const ReaderFactory& reader_for, const std::str
     ExpectFailure(adapter + " int_overflow", [&]() { (void)ReadInt(*scalar, {Field("rows"), Index(0), Field("overflow_int")}); }, "");
     ExpectFailure(adapter + " invalid_bool_string", [&]() { (void)ReadBool(*scalar, {Field("rows"), Index(0), Field("invalid_bool")}); }, "bool");
     ExpectFailure(adapter + " non_finite_float_string", [&]() { (void)ReadDouble(*scalar, {Field("rows"), Index(0), Field("non_finite_float")}); }, "finite");
+    ExpectFailure(adapter + " list_length_on_scalar", [&]() { (void)ReadListLength(*scalar, {Field("rows"), Index(0), Field("id")}); }, "array");
+    ExpectFailure(adapter + " string_type_mismatch", [&]() { (void)ReadString(*scalar, {Field("rows"), Index(0), Field("enabled_bool")}); }, "string");
+    ExpectFailure(adapter + " unknown_enum_value", [&]() {
+        WithPath(*scalar, {Field("rows"), Index(0), Field("name")}, [&]() { return scalar->ReadEnumIndex({"Sword", "Shield"}); });
+    }, "unknown enum");
 }
 
 #if defined(CONFIG_FORGE_RUNTIME_COMPLIANCE_RAPIDJSON) || defined(CONFIG_FORGE_RUNTIME_COMPLIANCE_MSGPACKC)

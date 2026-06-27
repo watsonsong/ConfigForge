@@ -7,6 +7,38 @@ import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 
+
+
+enum ConfigForgeRuntimeErrorKind {
+    Io,
+    Decode,
+    SchemaMismatch,
+    TypeMismatch,
+    NotFound,
+    Unsupported,
+    InvalidPath
+}
+
+class ConfigForgeRuntimeException extends RuntimeException {
+    private final ConfigForgeRuntimeErrorKind kind;
+    private final String path;
+
+    ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, String message) {
+        super(message);
+        this.kind = kind;
+        this.path = null;
+    }
+
+    ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, String message, Throwable cause) {
+        super(message, cause);
+        this.kind = kind;
+        this.path = null;
+    }
+
+    ConfigForgeRuntimeErrorKind kind() { return kind; }
+    String code() { return "CF_RT_" + kind.name().toUpperCase(java.util.Locale.ROOT); }
+    String path() { return path; }
+}
 public class ConfigForgeMessagePackRuntimeDataReader {
     public static final String TEMPLATE_VERSION = "0.1.0";
     public static final String SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0";
@@ -23,7 +55,7 @@ public class ConfigForgeMessagePackRuntimeDataReader {
         if (current instanceof Map && ((Map<?, ?>) current).containsKey(name) && ((Map<?, ?>) current).get(name) != null) {
             stack.push(((Map<?, ?>) current).get(name));
         } else {
-            throw new IllegalStateException("missing required field " + name);
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.NotFound, "missing required field " + name);
         }
     }
 
@@ -67,7 +99,7 @@ public class ConfigForgeMessagePackRuntimeDataReader {
     public int readListLength() {
         Object current = stack.peek();
         if (!(current instanceof List)) {
-            throw new IllegalStateException("expected MessagePack array, got " + typeName(current));
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.TypeMismatch, "expected MessagePack array, got " + typeName(current));
         }
         return ((List<?>) current).size();
     }
@@ -93,7 +125,7 @@ public class ConfigForgeMessagePackRuntimeDataReader {
                 return index;
             }
         }
-        throw new IllegalStateException("unknown enum value: " + value);
+        throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "unknown enum value: " + value);
     }
 
     public void ensureExhausted() {
@@ -107,7 +139,7 @@ public class ConfigForgeMessagePackRuntimeDataReader {
         if (value instanceof String) {
             return Long.parseLong((String) value);
         }
-        throw new IllegalStateException("expected int-like value, got " + typeName(value));
+        throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.TypeMismatch, "expected int-like value, got " + typeName(value));
     }
 
     public double readFloat() {
@@ -118,11 +150,11 @@ public class ConfigForgeMessagePackRuntimeDataReader {
         if (value instanceof String) {
             double parsed = Double.parseDouble((String) value);
             if (!Double.isFinite(parsed)) {
-                throw new IllegalStateException("expected finite float-like value");
+                throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.TypeMismatch, "expected finite float-like value");
             }
             return parsed;
         }
-        throw new IllegalStateException("expected finite float-like value, got " + typeName(value));
+        throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.TypeMismatch, "expected finite float-like value, got " + typeName(value));
     }
 
     public boolean readBool() {
@@ -145,7 +177,7 @@ public class ConfigForgeMessagePackRuntimeDataReader {
                 return false;
             }
         }
-        throw new IllegalStateException("expected bool-like value, got " + typeName(value));
+        throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "expected bool-like value, got " + typeName(value));
     }
 
     public String readString() {
@@ -153,7 +185,7 @@ public class ConfigForgeMessagePackRuntimeDataReader {
         if (value instanceof String) {
             return (String) value;
         }
-        throw new IllegalStateException("expected string value, got " + typeName(value));
+        throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.TypeMismatch, "expected string value, got " + typeName(value));
     }
 
     private static String typeName(Object value) {

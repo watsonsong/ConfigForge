@@ -12,8 +12,8 @@ use super::{
     ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeEnum, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeIndex, CodeModel, CodeTable, CodeTableKind,
     CodeTypeRef, CodeWriterConfig, CodeWriterLike, GeneratorCommonInput, GeneratorRequirements,
-    I18nFunctionReturn, I18nMode, I18nOptions, NamingConfig, ReaderShapePlan, RuntimeInterfaceMode,
-    build_code_model,
+    I18nFunctionReturn, I18nMode, I18nOptions, NamingConfig, ReaderShapePlan, RuntimeInterfaceEmit,
+    RuntimeInterfaceMode, build_code_model,
     ir::{CodeRelationCardinality, require_non_empty_index_fields},
 };
 
@@ -44,6 +44,8 @@ pub struct JavaCodegenOptions {
     pub emit_final: bool,
     #[serde(default)]
     pub runtime_interface: RuntimeInterfaceMode,
+    #[serde(default)]
+    pub runtime_interface_emit: RuntimeInterfaceEmit,
     #[serde(default)]
     pub runtime_package: Option<String>,
     #[serde(default)]
@@ -80,6 +82,7 @@ impl Default for JavaCodegenOptions {
             access_modifier: default_access_modifier(),
             emit_final: default_emit_final(),
             runtime_interface: RuntimeInterfaceMode::Inline,
+            runtime_interface_emit: RuntimeInterfaceEmit::Copy,
             runtime_package: None,
             emit_runtime_adapters: false,
             type_mappings: JavaTypeMappings::default(),
@@ -289,6 +292,15 @@ fn render_java_code(
 }
 
 fn validate_runtime_interface_options(options: &JavaCodegenOptions) -> Result<()> {
+    if matches!(
+        options.runtime_interface_emit,
+        RuntimeInterfaceEmit::Reference
+    ) {
+        return Err(validation_error(
+            "runtime_interface_emit=reference is not supported for Java yet; use copy or none"
+                .to_owned(),
+        ));
+    }
     if matches!(options.runtime_interface, RuntimeInterfaceMode::External) {
         if let Some(package) = &options.runtime_package {
             validate_java_package(package)?;
@@ -436,6 +448,10 @@ fn render_runtime_contract(
     enums: &[CodeEnum],
     names: &JavaNames,
 ) -> Result<()> {
+    content.raw("    public static final String CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";\n");
+    content.raw(
+        "    public static final String REQUIRED_CONFIG_FORGE_READER_CONTRACT = \"^1.0\";\n\n",
+    );
     content.raw("    public interface ConfigForgeRuntimeDataLoader {\n");
     content.raw("        ConfigForgeRuntimeDataReader open(String path);\n");
     content.raw("    }\n\n");
@@ -459,11 +475,17 @@ fn render_runtime_contract(
     content.raw("        boolean readBool();\n");
     content.raw("        String readString();\n");
     content.raw("    }\n\n");
+    content.raw("    public enum ConfigForgeRuntimeErrorKind {\n        Io,\n        Decode,\n        SchemaMismatch,\n        TypeMismatch,\n        NotFound,\n        Unsupported,\n        InvalidPath\n    }\n\n");
     content.raw(
         "    public static final class ConfigForgeRuntimeException extends RuntimeException {\n",
     );
-    content.raw("        public ConfigForgeRuntimeException(String message) { super(message); }\n");
-    content.raw("        public ConfigForgeRuntimeException(String message, Throwable cause) { super(message, cause); }\n");
+    content.raw("        private final ConfigForgeRuntimeErrorKind kind;\n");
+    content.raw("        public ConfigForgeRuntimeException(String message) { this(ConfigForgeRuntimeErrorKind.Decode, message); }\n");
+    content.raw("        public ConfigForgeRuntimeException(String message, Throwable cause) { this(ConfigForgeRuntimeErrorKind.Decode, message, cause); }\n");
+    content.raw("        public ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, String message) { super(message); this.kind = kind; }\n");
+    content.raw("        public ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, String message, Throwable cause) { super(message, cause); this.kind = kind; }\n");
+    content.raw("        public ConfigForgeRuntimeErrorKind kind() { return kind; }\n");
+    content.raw("        public String code() { return \"CF_RT_\" + kind.name().toUpperCase(java.util.Locale.ROOT); }\n");
     content.raw("    }\n\n");
     content.raw("    private interface ConfigForgeValueReader<T> {\n");
     content.raw("        T read(ConfigForgeRuntimeDataReader reader);\n");

@@ -38,7 +38,7 @@ pub(super) fn render_enum_reader_function(
         ));
     }
     content.raw_fmt(format_args!(
-        "    default: throw new Error('unknown {} enum index');\n",
+        "    default: throw RuntimeDataError.decode('unknown {} enum index');\n",
         code_enum.name
     ));
     content.raw("  }\n");

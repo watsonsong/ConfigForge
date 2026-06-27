@@ -8,10 +8,10 @@ use tempfile::tempdir;
 use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
     code_artifact::{
-        CodeExportInput, CodeGenerator,
+        CodeExportInput, CodeGenerator, RuntimeInterfaceEmit,
         tests::{
-            assert_duplicate_generated_identifier, indexed_source_order_fixture, input_for,
-            linked_fixture, source_order_fixture,
+            assert_duplicate_generated_identifier, expect_single_diagnostic,
+            indexed_source_order_fixture, input_for, linked_fixture, source_order_fixture,
         },
     },
     meta::{MetaModel, TargetTags},
@@ -29,6 +29,7 @@ fn emits_async_loader_and_maps() {
         toml::Value::try_from(TypeScriptCodegenOptions {
             profile: Default::default(),
             readonly_fields: true,
+            runtime_interface_emit: RuntimeInterfaceEmit::Copy,
             cocos_import: None,
         })
         .expect("typescript options"),
@@ -43,6 +44,9 @@ fn emits_async_loader_and_maps() {
     assert!(content.contains("export interface RuntimeDataReader"));
     assert!(
         content.contains("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;")
+    );
+    assert!(
+        content.contains("export const REQUIRED_CONFIG_FORGE_READER_CONTRACT = \"^1.0\" as const;")
     );
     assert!(
         content.contains("open(path: string): Promise<RuntimeDataReader> | RuntimeDataReader;")
@@ -85,6 +89,29 @@ fn emits_async_loader_and_maps() {
     assert!(content.contains("getById(id: number): ItemsRow | undefined"));
     assert!(content.contains("findByRarity(rarity: ItemRarity): readonly ItemsRow[]"));
     assert!(content.contains("Duplicate unique index key for ItemsTable.by_id"));
+}
+
+#[test]
+fn reference_runtime_emit_reports_unsupported() {
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str(
+            r#"
+                runtime_interface_emit = "reference"
+            "#,
+        )
+        .expect("toml value"),
+    );
+
+    let error = TypeScriptCodeGenerator.generate(&input).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert!(
+        diagnostic.message.contains("not supported yet"),
+        "unexpected error: {}",
+        diagnostic.message
+    );
 }
 
 #[test]

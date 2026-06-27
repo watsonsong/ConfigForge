@@ -10,6 +10,38 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+
+
+enum ConfigForgeRuntimeErrorKind {
+    Io,
+    Decode,
+    SchemaMismatch,
+    TypeMismatch,
+    NotFound,
+    Unsupported,
+    InvalidPath
+}
+
+class ConfigForgeRuntimeException extends RuntimeException {
+    private final ConfigForgeRuntimeErrorKind kind;
+    private final String path;
+
+    ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, String message) {
+        super(message);
+        this.kind = kind;
+        this.path = null;
+    }
+
+    ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, String message, Throwable cause) {
+        super(message, cause);
+        this.kind = kind;
+        this.path = null;
+    }
+
+    ConfigForgeRuntimeErrorKind kind() { return kind; }
+    String code() { return "CF_RT_" + kind.name().toUpperCase(java.util.Locale.ROOT); }
+    String path() { return path; }
+}
 public class ConfigForgeBinaryRuntimeDataReader {
     public static final String TEMPLATE_VERSION = "0.1.0";
     public static final String SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0";
@@ -51,7 +83,7 @@ public class ConfigForgeBinaryRuntimeDataReader {
 
     public void enterRow(int index) {
         if (index != nextRowIndex) {
-            throw new IllegalStateException("binary reader rows must be read sequentially: expected " + nextRowIndex + ", got " + index);
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.InvalidPath, "binary reader rows must be read sequentially: expected " + nextRowIndex + ", got " + index);
         }
         nextRowIndex++;
     }
@@ -71,7 +103,7 @@ public class ConfigForgeBinaryRuntimeDataReader {
 
     public void beginRecord(int optionalSlotCount) {
         if (optionalSlotCount < 0) {
-            throw new IllegalStateException("optional slot count must be non-negative");
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.InvalidPath, "optional slot count must be non-negative");
         }
         int byteCount = (optionalSlotCount + 7) / 8;
         byte[] bitmap = readExact(byteCount);
@@ -81,7 +113,7 @@ public class ConfigForgeBinaryRuntimeDataReader {
 
     public void endRecord() {
         if (records.isEmpty()) {
-            throw new IllegalStateException("binary reader record stack underflow");
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "binary reader record stack underflow");
         }
         records.remove(records.size() - 1);
     }
@@ -89,14 +121,14 @@ public class ConfigForgeBinaryRuntimeDataReader {
     public int readEnumIndex(String[] variants) {
         int ordinal = checkedInt(readVaruint(), "enum ordinal");
         if (ordinal < 0 || ordinal >= variants.length) {
-            throw new IllegalStateException("enum ordinal is out of range");
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "enum ordinal is out of range");
         }
         return ordinal;
     }
 
     public void ensureExhausted() {
         if (offset != bytes.length) {
-            throw new IllegalStateException("trailing bytes in binary runtime data: " + (bytes.length - offset) + " bytes remaining");
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "trailing bytes in binary runtime data: " + (bytes.length - offset) + " bytes remaining");
         }
     }
 
@@ -108,7 +140,7 @@ public class ConfigForgeBinaryRuntimeDataReader {
     public double readFloat() {
         double value = Double.longBitsToDouble(readLe64(readExact(8), 0));
         if (!Double.isFinite(value)) {
-            throw new IllegalStateException("non-finite float in binary runtime data");
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.TypeMismatch, "non-finite float in binary runtime data");
         }
         return value;
     }
@@ -121,7 +153,7 @@ public class ConfigForgeBinaryRuntimeDataReader {
         if (value == 1) {
             return true;
         }
-        throw new IllegalStateException("invalid bool byte " + value);
+        throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "invalid bool byte " + value);
     }
 
     public String readString() {
@@ -129,19 +161,19 @@ public class ConfigForgeBinaryRuntimeDataReader {
         try {
             return StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(readExact(length))).toString();
         } catch (CharacterCodingException error) {
-            throw new IllegalStateException("invalid UTF-8 string in binary runtime data", error);
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "invalid UTF-8 string in binary runtime data", error);
         }
     }
 
     private boolean readOptionalPresent() {
         if (records.isEmpty()) {
-            throw new IllegalStateException("binary reader is not inside a record");
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.InvalidPath, "binary reader is not inside a record");
         }
         RecordState record = records.get(records.size() - 1);
         int slotIndex = record.nextOptionalSlot++;
         int byteIndex = slotIndex / 8;
         if (byteIndex >= record.bitmap.length) {
-            throw new IllegalStateException("optional slot is out of current record bitmap");
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "optional slot is out of current record bitmap");
         }
         return (record.bitmap[byteIndex] & (1 << (slotIndex % 8))) != 0;
     }
@@ -153,24 +185,24 @@ public class ConfigForgeBinaryRuntimeDataReader {
         }
         int unusedMask = 0xff << usedBitsInLastByte;
         if ((bitmap[bitmap.length - 1] & unusedMask) != 0) {
-            throw new IllegalStateException("invalid optional bitmap padding bits");
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "invalid optional bitmap padding bits");
         }
     }
 
     private void parseHeader() {
         if (bytes.length < 16) {
-            throw new IllegalStateException("truncated binary runtime data header");
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "truncated binary runtime data header");
         }
         if (bytes[0] != 'C' || bytes[1] != 'F' || bytes[2] != 'G' || bytes[3] != 'B') {
-            throw new IllegalStateException("invalid binary runtime data magic");
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "invalid binary runtime data magic");
         }
         int version = readLe16(4);
         if (version != 1) {
-            throw new IllegalStateException("unsupported binary runtime data version " + version);
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.SchemaMismatch, "unsupported binary runtime data version " + version);
         }
         int headerSize = readLe16(6);
         if (headerSize != 16) {
-            throw new IllegalStateException("unsupported binary runtime data header size " + headerSize);
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.SchemaMismatch, "unsupported binary runtime data header size " + headerSize);
         }
         schemaRevision = readLe64(bytes, 8);
     }
@@ -193,7 +225,7 @@ public class ConfigForgeBinaryRuntimeDataReader {
         for (int index = 0; index < 10; index++) {
             int valueByte = readExact(1)[0] & 0xff;
             if (index == 9 && (valueByte & 0x7f) > 1) {
-                throw new IllegalStateException("varuint exceeds u64");
+                throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "varuint exceeds u64");
             }
             value |= ((long) (valueByte & 0x7f)) << shift;
             if ((valueByte & 0x80) == 0) {
@@ -201,13 +233,13 @@ public class ConfigForgeBinaryRuntimeDataReader {
             }
             shift += 7;
         }
-        throw new IllegalStateException("malformed varuint");
+        throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "malformed varuint");
     }
 
     private byte[] readExact(int length) {
         int end = offset + length;
         if (length < 0 || end < offset || end > bytes.length) {
-            throw new IllegalStateException("truncated binary runtime data");
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, "truncated binary runtime data");
         }
         byte[] value = Arrays.copyOfRange(bytes, offset, end);
         offset = end;
@@ -216,7 +248,7 @@ public class ConfigForgeBinaryRuntimeDataReader {
 
     private int checkedInt(long value, String label) {
         if (Long.compareUnsigned(value, Integer.MAX_VALUE) > 0) {
-            throw new IllegalStateException(label + " exceeds int range");
+            throw new ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Decode, label + " exceeds int range");
         }
         return (int) value;
     }

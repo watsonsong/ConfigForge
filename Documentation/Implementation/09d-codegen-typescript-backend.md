@@ -12,6 +12,8 @@
 
 TypeScript backend 已实现 MVP：生成 interface/class、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`linkAll`、`text` translation helper，并提供 `loadSync`、lazy sync accessor、`preloadAllSync` 与 `linkAllSync`。当前 backend 已覆盖 `generate_to_sink()`，production build 通过 `ArtifactSink` 打开 `generated.ts` 并使用 streaming writer 写出；`generate()` 仅在 `#[cfg(test)]` 下保留给单元测试做 String-backed 快照和 streaming equivalence 校验。
 
+Generated TypeScript 当前保持 inline structural reader contract，输出 `CONFIG_FORGE_READER_CONTRACT_VERSION = "1.0"` 与 `REQUIRED_CONFIG_FORGE_READER_CONTRACT = "^1.0"`。`runtime_interface_emit` 选项已进入通用 option 模型；TypeScript external package import 形态尚未稳定，因此 `runtime_interface_emit = "reference"` 当前会产生 unsupported diagnostic，推荐继续使用 inline contract 配合 workspace/npm runtime packages 或业务自定义 loader。
+
 ## TypeScript sync loading contract
 
 - `RuntimeDataLoader.open(path)` 可以返回 `RuntimeDataReader` 或 `Promise<RuntimeDataReader>`。

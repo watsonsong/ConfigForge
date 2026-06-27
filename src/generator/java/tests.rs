@@ -8,7 +8,8 @@ use tempfile::tempdir;
 use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
     code_artifact::{
-        CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, RuntimeInterfaceMode,
+        CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, RuntimeInterfaceEmit,
+        RuntimeInterfaceMode,
         tests::{
             assert_duplicate_generated_identifier, expect_single_diagnostic, input_for,
             linked_fixture,
@@ -41,6 +42,7 @@ fn export_target_from_task_reads_java_options() {
             access_modifier = "package"
             emit_final = false
             runtime_interface = "external"
+            runtime_interface_emit = "none"
             runtime_package = "configforge.runtime"
             emit_runtime_adapters = true
 
@@ -73,6 +75,7 @@ fn export_target_from_task_reads_java_options() {
     assert_eq!(options.access_modifier, "package");
     assert!(!options.emit_final);
     assert_eq!(options.runtime_interface, RuntimeInterfaceMode::External);
+    assert_eq!(options.runtime_interface_emit, RuntimeInterfaceEmit::None);
     assert_eq!(
         options.runtime_package.as_deref(),
         Some("configforge.runtime")
@@ -85,6 +88,29 @@ fn export_target_from_task_reads_java_options() {
     assert_eq!(
         options.type_mappings.vector3.as_deref(),
         Some("com.badlogic.gdx.math.Vector3")
+    );
+}
+
+#[test]
+fn java_reference_runtime_emit_reports_unsupported() {
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str(
+            r#"
+                runtime_interface_emit = "reference"
+            "#,
+        )
+        .expect("toml value"),
+    );
+
+    let error = JavaCodeGenerator.generate(&input).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert!(
+        diagnostic.message.contains("not supported for Java"),
+        "unexpected error: {}",
+        diagnostic.message
     );
 }
 
@@ -393,6 +419,15 @@ fn emits_runtime_reader_contract_and_game_data_load() {
 
     assert!(content.contains("public interface ConfigForgeRuntimeDataReader"));
     assert!(content.contains("public interface ConfigForgeRuntimeDataLoader"));
+    assert!(
+        content
+            .contains("public static final String CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";")
+    );
+    assert!(
+        content.contains(
+            "public static final String REQUIRED_CONFIG_FORGE_READER_CONTRACT = \"^1.0\";"
+        )
+    );
     assert!(content.contains("void enterRequiredField(String name);"));
     assert!(content.contains("boolean enterOptionalField(String name);"));
     assert!(content.contains("int readRowCount();"));

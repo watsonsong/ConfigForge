@@ -11,7 +11,8 @@ use super::{
     ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeModel, CodeTableKind, CodeWriterConfig, CodeWriterLike,
     GeneratorCommonInput, GeneratorRequirements, I18nFunctionReturn, I18nMode, I18nOptions,
-    NamingConfig, RuntimeInterfaceMode, build_code_model, ir::require_non_empty_index_fields,
+    NamingConfig, RuntimeInterfaceEmit, RuntimeInterfaceMode, build_code_model,
+    ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -46,6 +47,8 @@ pub struct CppCodegenOptions {
     pub namespace: Option<String>,
     #[serde(default)]
     pub runtime_interface: RuntimeInterfaceMode,
+    #[serde(default)]
+    pub runtime_interface_emit: RuntimeInterfaceEmit,
     #[serde(default)]
     pub runtime_core_header: Option<String>,
     #[serde(default)]
@@ -132,7 +135,7 @@ impl CodeGenerator for CppCodeGenerator {
             &header_file_name,
         )?;
 
-        Ok(vec![
+        let mut files = vec![
             super::GeneratedFile {
                 path: input.target.out_dir.join(header_file_name),
                 content: header.finish(),
@@ -141,7 +144,17 @@ impl CodeGenerator for CppCodeGenerator {
                 path: input.target.out_dir.join(source_file_name),
                 content: source.finish(),
             },
-        ])
+        ];
+        if matches!(
+            cpp_options.runtime_interface_emit,
+            RuntimeInterfaceEmit::Reference
+        ) {
+            files.push(super::GeneratedFile {
+                path: runtime_interface_manifest_path(input),
+                content: cpp_runtime_interface_manifest(&cpp_options),
+            });
+        }
+        Ok(files)
     }
 
     fn generate_to_sink(&self, input: &CodeExportInput<'_>, sink: &ArtifactSink) -> Result<()> {
@@ -202,7 +215,30 @@ impl CodeGenerator for CppCodeGenerator {
                 path: source_path,
                 source,
             })?;
-        source_stream.finish().map(|_| ())
+        source_stream.finish()?;
+
+        if matches!(
+            cpp_options.runtime_interface_emit,
+            RuntimeInterfaceEmit::Reference
+        ) {
+            let manifest_path = runtime_interface_manifest_path(input);
+            let manifest_stream = sink.create(manifest_path.clone())?;
+            let mut manifest = CheckedStreamingCodeWriter::new(
+                manifest_stream,
+                CodeWriterConfig::default().with_indent_width(2),
+            );
+            manifest.raw(cpp_runtime_interface_manifest(&cpp_options));
+            let manifest_stream =
+                manifest
+                    .finish()
+                    .map_err(|source| ConfigForgeError::WriteFile {
+                        path: manifest_path,
+                        source,
+                    })?;
+            manifest_stream.finish()?;
+        }
+
+        Ok(())
     }
 }
 
@@ -233,8 +269,55 @@ fn validate_runtime_interface_options(options: &CppCodegenOptions) -> Result<()>
         validate_optional_single_line("runtime_core_header", &options.runtime_core_header)?;
         validate_optional_single_line("runtime_core_namespace", &options.runtime_core_namespace)?;
     }
+    if matches!(
+        options.runtime_interface_emit,
+        RuntimeInterfaceEmit::Reference
+    ) && !matches!(options.runtime_interface, RuntimeInterfaceMode::External)
+    {
+        return Err(crate::code_artifact::generator_option_error(
+            CF_GENERATOR_INVALID_OPTION,
+            "generator.cpp.options",
+            "cpp runtime_interface_emit=reference requires runtime_interface=external".to_owned(),
+            "runtime_interface_emit=reference",
+            "runtime_interface=external",
+            "Set cpp.runtime_interface to external when referencing a packaged runtime reader contract.",
+        ));
+    }
     validate_type_mappings(&options.type_mappings)?;
     Ok(())
+}
+
+fn runtime_interface_manifest_path(input: &CodeExportInput<'_>) -> std::path::PathBuf {
+    input
+        .target
+        .out_dir
+        .join("config_forge_runtime_interface.json")
+}
+
+fn cpp_runtime_interface_manifest(options: &CppCodegenOptions) -> String {
+    let runtime_core_header = options
+        .runtime_core_header
+        .as_deref()
+        .unwrap_or("config_forge/runtime/reader.hpp");
+    let runtime_core_namespace = options
+        .runtime_core_namespace
+        .as_deref()
+        .unwrap_or("config_forge_runtime");
+    format!(
+        concat!(
+            "{{\n",
+            "  \"contract\": \"config_forge_runtime_reader\",\n",
+            "  \"contract_version\": \"1.0\",\n",
+            "  \"required_contract\": \"^1.0\",\n",
+            "  \"language\": \"cpp\",\n",
+            "  \"emit\": \"reference\",\n",
+            "  \"runtime_interface\": \"external\",\n",
+            "  \"runtime_core_header\": {:?},\n",
+            "  \"runtime_core_namespace\": {:?}\n",
+            "}}\n"
+        ),
+        runtime_core_header, runtime_core_namespace
+    )
 }
 
 fn validate_type_mappings(mappings: &CppTypeMappings) -> Result<()> {

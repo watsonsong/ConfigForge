@@ -215,7 +215,7 @@ fn runner_source() -> &'static str {
 import { decodeJsonValue } from "./json_reader";
 import { decodeMessagePackValue } from "./messagepack_reader";
 import { BinaryRuntimeDataReader } from "./binary_reader";
-import { RuntimeDataReaderLike } from "./reader_core";
+import { RuntimeDataError, RuntimeDataReaderLike } from "./reader_core";
 import { payloads, expected, errorCases } from "./compliance_data";
 
 type Step = { kind: "field"; name: string } | { kind: "index"; index: number };
@@ -375,11 +375,19 @@ function runCollectionObjectNestedAndFragmentCases(adapter: Adapter): void {
   assertEqual(readInt(fragmentReader, [field("rows"), index(0), field("effect"), field("amount")]), fragment.fragment_amount as number, `${adapter.name} fragment amount`);
 }
 
-function expectFailure(label: string, operation: () => void, keyword: string): void {
+function expectFailure(label: string, operation: () => void, keyword: string, expectedKind?: string): void {
   try {
     operation();
   } catch (error) {
     assertMessageContains(error, keyword, label);
+    if (expectedKind !== undefined) {
+      if (!(error instanceof RuntimeDataError)) {
+        throw new Error(`${label}: expected RuntimeDataError kind ${expectedKind}, got ${error instanceof Error ? error.name : typeof error}`);
+      }
+      if (error.kind !== expectedKind) {
+        throw new Error(`${label}: expected RuntimeDataError kind ${expectedKind}, got ${error.kind}`);
+      }
+    }
     return;
   }
   throw new Error(`${label}: expected failure`);
@@ -601,7 +609,7 @@ function runErrorCases(adapter: Adapter): void {
       case "missing_field": {
         const entered = enterPath(reader, [field("rows"), index(0)]);
         try {
-          expectFailure(testCase.name, () => reader.enterRequiredField("missing"), keyword);
+          expectFailure(testCase.name, () => reader.enterRequiredField("missing"), keyword, testCase.expected_kind);
         } finally {
           exitPath(reader, entered);
         }
@@ -610,7 +618,7 @@ function runErrorCases(adapter: Adapter): void {
       case "explicit_null_required_field": {
         const entered = enterPath(reader, [field("rows"), index(0)]);
         try {
-          expectFailure(testCase.name, () => reader.enterRequiredField("explicit_null"), keyword);
+          expectFailure(testCase.name, () => reader.enterRequiredField("explicit_null"), keyword, testCase.expected_kind);
         } finally {
           exitPath(reader, entered);
         }
@@ -619,7 +627,7 @@ function runErrorCases(adapter: Adapter): void {
       case "array_index_out_of_bounds": {
         const entered = enterPath(reader, [field("rows")]);
         try {
-          expectFailure(testCase.name, () => reader.enterIndex(99), keyword);
+          expectFailure(testCase.name, () => reader.enterIndex(99), keyword, testCase.expected_kind);
         } finally {
           exitPath(reader, entered);
         }
@@ -628,24 +636,39 @@ function runErrorCases(adapter: Adapter): void {
       case "int_overflow":
         expectFailure(testCase.name, () => {
           withPath(reader, [field("rows"), index(0), field("overflow_int")], () => reader.asInt64());
-        }, keyword);
+        }, keyword, testCase.expected_kind);
         break;
       case "invalid_bool_string":
         expectFailure(testCase.name, () => {
           withPath(reader, [field("rows"), index(0), field("invalid_bool")], () => reader.asBool());
-        }, keyword);
+        }, keyword, testCase.expected_kind);
         break;
       case "non_finite_float_string":
         expectFailure(testCase.name, () => {
           withPath(reader, [field("rows"), index(0), field("non_finite_float")], () => reader.asFloat64());
-        }, keyword);
+        }, keyword, testCase.expected_kind);
+        break;
+      case "list_length_on_scalar":
+        expectFailure(testCase.name, () => {
+          withPath(reader, [field("rows"), index(0), field("id")], () => reader.readListLength());
+        }, keyword, testCase.expected_kind);
+        break;
+      case "string_type_mismatch":
+        expectFailure(testCase.name, () => {
+          withPath(reader, [field("rows"), index(0), field("enabled_bool")], () => reader.asString());
+        }, keyword, testCase.expected_kind);
+        break;
+      case "unknown_enum_value":
+        expectFailure(testCase.name, () => {
+          withPath(reader, [field("rows"), index(0), field("name")], () => reader.readEnumIndex(["Sword", "Shield"]));
+        }, keyword, testCase.expected_kind);
         break;
       default:
         throw new Error(`unhandled ${adapter.name} compliance error case ${testCase.name}`);
     }
     executed += 1;
   }
-  assertEqual(executed, adapter.name === "typescript-messagepack" ? 8 : 6, `${adapter.name} error case count`);
+  assertEqual(executed, adapter.name === "typescript-messagepack" ? 11 : 9, `${adapter.name} error case count`);
 }
 
 function encodeMessagePack(value: unknown): Uint8Array {

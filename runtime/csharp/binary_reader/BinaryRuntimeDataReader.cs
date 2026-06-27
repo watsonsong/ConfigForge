@@ -8,6 +8,35 @@ using System.Text;
 
 namespace ConfigForge.Runtime.BinaryReader;
 
+public enum RuntimeDataErrorKind
+{
+    Io,
+    Decode,
+    SchemaMismatch,
+    TypeMismatch,
+    NotFound,
+    Unsupported,
+    InvalidPath,
+}
+
+public sealed class ConfigForgeRuntimeException : Exception
+{
+    public ConfigForgeRuntimeException(RuntimeDataErrorKind kind, string message) : base(message)
+    {
+        Kind = kind;
+    }
+
+    public ConfigForgeRuntimeException(RuntimeDataErrorKind kind, string message, Exception innerException) : base(message, innerException)
+    {
+        Kind = kind;
+    }
+
+    public RuntimeDataErrorKind Kind { get; }
+    public string Code => $"CF_RT_{Kind.ToString().ToUpperInvariant()}";
+    public string? Path { get; init; }
+}
+
+
 public class BinaryRuntimeDataFileLoader
 {
     private readonly string _root;
@@ -69,7 +98,7 @@ public class BinaryRuntimeDataReader
     {
         if (index != _nextRowIndex)
         {
-            throw new InvalidOperationException($"binary reader rows must be read sequentially: expected {_nextRowIndex}, got {index}");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.InvalidPath, $"binary reader rows must be read sequentially: expected {_nextRowIndex}, got {index}");
         }
         _nextRowIndex++;
     }
@@ -92,7 +121,7 @@ public class BinaryRuntimeDataReader
     {
         if (optionalSlotCount < 0)
         {
-            throw new InvalidOperationException("optional slot count must be non-negative");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.InvalidPath, "optional slot count must be non-negative");
         }
         var byteCount = (optionalSlotCount + 7) / 8;
         var bitmap = ReadExact(byteCount);
@@ -104,7 +133,7 @@ public class BinaryRuntimeDataReader
     {
         if (_records.Count == 0)
         {
-            throw new InvalidOperationException("binary reader record stack underflow");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, "binary reader record stack underflow");
         }
         _records.RemoveAt(_records.Count - 1);
     }
@@ -114,7 +143,7 @@ public class BinaryRuntimeDataReader
         var ordinal = CheckedInt(ReadVaruint(), "enum ordinal");
         if (ordinal < 0 || ordinal >= variants.Count)
         {
-            throw new InvalidOperationException("enum ordinal is out of range");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, "enum ordinal is out of range");
         }
         return ordinal;
     }
@@ -123,7 +152,7 @@ public class BinaryRuntimeDataReader
     {
         if (_offset != _bytes.Length)
         {
-            throw new InvalidOperationException($"trailing bytes in binary runtime data: {_bytes.Length - _offset} bytes remaining");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, $"trailing bytes in binary runtime data: {_bytes.Length - _offset} bytes remaining");
         }
     }
 
@@ -139,7 +168,7 @@ public class BinaryRuntimeDataReader
         var value = BitConverter.Int64BitsToDouble(unchecked((long)ReadLe64(ReadExact(8))));
         if (!double.IsFinite(value))
         {
-            throw new InvalidOperationException("non-finite float in binary runtime data");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.TypeMismatch, "non-finite float in binary runtime data");
         }
         return value;
     }
@@ -151,7 +180,7 @@ public class BinaryRuntimeDataReader
         {
             0 => false,
             1 => true,
-            _ => throw new InvalidOperationException($"invalid bool byte {value}"),
+            _ => throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, $"invalid bool byte {value}"),
         };
     }
 
@@ -165,7 +194,7 @@ public class BinaryRuntimeDataReader
     {
         if (_records.Count == 0)
         {
-            throw new InvalidOperationException("binary reader is not inside a record");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.InvalidPath, "binary reader is not inside a record");
         }
         var record = _records[^1];
         var slotIndex = record.NextOptionalSlot++;
@@ -173,7 +202,7 @@ public class BinaryRuntimeDataReader
         var byteIndex = slotIndex / 8;
         if (byteIndex >= record.Bitmap.Length)
         {
-            throw new InvalidOperationException("optional slot is out of current record bitmap");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, "optional slot is out of current record bitmap");
         }
         return (record.Bitmap[byteIndex] & (1 << (slotIndex % 8))) != 0;
     }
@@ -188,7 +217,7 @@ public class BinaryRuntimeDataReader
         var unusedMask = 0xff << usedBitsInLastByte;
         if ((bitmap[^1] & unusedMask) != 0)
         {
-            throw new InvalidOperationException("invalid optional bitmap padding bits");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, "invalid optional bitmap padding bits");
         }
     }
 
@@ -196,21 +225,21 @@ public class BinaryRuntimeDataReader
     {
         if (_bytes.Length < 16)
         {
-            throw new InvalidOperationException("truncated binary runtime data header");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, "truncated binary runtime data header");
         }
         if (_bytes[0] != 'C' || _bytes[1] != 'F' || _bytes[2] != 'G' || _bytes[3] != 'B')
         {
-            throw new InvalidOperationException("invalid binary runtime data magic");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, "invalid binary runtime data magic");
         }
         var version = ReadLe16(4);
         if (version != 1)
         {
-            throw new InvalidOperationException($"unsupported binary runtime data version {version}");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.SchemaMismatch, $"unsupported binary runtime data version {version}");
         }
         var headerSize = ReadLe16(6);
         if (headerSize != 16)
         {
-            throw new InvalidOperationException($"unsupported binary runtime data header size {headerSize}");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.SchemaMismatch, $"unsupported binary runtime data header size {headerSize}");
         }
         _schemaRevision = ReadLe64(8);
     }
@@ -249,7 +278,7 @@ public class BinaryRuntimeDataReader
             var valueByte = ReadExact(1)[0];
             if (index == 9 && (valueByte & 0x7f) > 1)
             {
-                throw new InvalidOperationException("varuint exceeds u64");
+                throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, "varuint exceeds u64");
             }
             value |= (ulong)(valueByte & 0x7f) << shift;
             if ((valueByte & 0x80) == 0)
@@ -258,14 +287,14 @@ public class BinaryRuntimeDataReader
             }
             shift += 7;
         }
-        throw new InvalidOperationException("malformed varuint");
+        throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, "malformed varuint");
     }
 
     private byte[] ReadExact(int length)
     {
         if (length < 0 || _offset + length < _offset || _offset + length > _bytes.Length)
         {
-            throw new InvalidOperationException("truncated binary runtime data");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, "truncated binary runtime data");
         }
         var result = new byte[length];
         Array.Copy(_bytes, _offset, result, 0, length);
@@ -277,7 +306,7 @@ public class BinaryRuntimeDataReader
     {
         if (value > int.MaxValue)
         {
-            throw new InvalidOperationException($"{label} exceeds int range");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, $"{label} exceeds int range");
         }
         return (int)value;
     }

@@ -50,6 +50,30 @@ expected_kind = "TypeMismatch"
 expected_message_contains = "finite"
 
 [[cases]]
+name = "list_length_on_scalar"
+payload = "scalar_compat.json"
+path = "rows[0].id"
+operation = "read_list_length"
+expected_kind = "TypeMismatch"
+expected_message_contains = "array"
+
+[[cases]]
+name = "string_type_mismatch"
+payload = "scalar_compat.json"
+path = "rows[0].enabled_bool"
+operation = "as_string"
+expected_kind = "TypeMismatch"
+expected_message_contains = "string"
+
+[[cases]]
+name = "unknown_enum_value"
+payload = "scalar_compat.json"
+path = "rows[0].name"
+operation = "read_enum_index"
+expected_kind = "Decode"
+expected_message_contains = "unknown enum"
+
+[[cases]]
 name = "messagepack_non_string_map_key"
 format = "messagepack"
 operation = "decode"

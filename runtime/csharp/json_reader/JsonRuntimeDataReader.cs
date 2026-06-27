@@ -9,6 +9,35 @@ using System.Text.Json;
 
 namespace ConfigForge.Runtime.JsonReader;
 
+public enum RuntimeDataErrorKind
+{
+    Io,
+    Decode,
+    SchemaMismatch,
+    TypeMismatch,
+    NotFound,
+    Unsupported,
+    InvalidPath,
+}
+
+public sealed class ConfigForgeRuntimeException : Exception
+{
+    public ConfigForgeRuntimeException(RuntimeDataErrorKind kind, string message) : base(message)
+    {
+        Kind = kind;
+    }
+
+    public ConfigForgeRuntimeException(RuntimeDataErrorKind kind, string message, Exception innerException) : base(message, innerException)
+    {
+        Kind = kind;
+    }
+
+    public RuntimeDataErrorKind Kind { get; }
+    public string Code => $"CF_RT_{Kind.ToString().ToUpperInvariant()}";
+    public string? Path { get; init; }
+}
+
+
 public class JsonRuntimeDataFileLoader
 {
     private readonly string _root;
@@ -58,7 +87,7 @@ public class JsonRuntimeDataReader
             _stack.Push(value);
             return;
         }
-        throw new InvalidOperationException($"missing required field {name}");
+        throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.NotFound, $"missing required field {name}");
     }
 
     public bool EnterOptionalField(string name)
@@ -105,7 +134,7 @@ public class JsonRuntimeDataReader
         var current = _stack.Peek();
         if (current.ValueKind != JsonValueKind.Array)
         {
-            throw new InvalidOperationException($"expected JSON array, got {current.ValueKind}");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.TypeMismatch, $"expected JSON array, got {current.ValueKind}");
         }
         return current.GetArrayLength();
     }
@@ -132,7 +161,7 @@ public class JsonRuntimeDataReader
                 return index;
             }
         }
-        throw new InvalidOperationException($"unknown enum value: {value}");
+        throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, $"unknown enum value: {value}");
     }
 
     public void EnsureExhausted()
@@ -161,7 +190,7 @@ public class JsonRuntimeDataReader
         };
         if (!double.IsFinite(value))
         {
-            throw new InvalidOperationException("expected finite float-like value");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.TypeMismatch, "expected finite float-like value");
         }
         return value;
     }
@@ -196,7 +225,7 @@ public class JsonRuntimeDataReader
             "0" => false,
             "true" => true,
             "false" => false,
-            _ => throw new FormatException($"invalid boolean string: {value}"),
+            _ => throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, $"invalid boolean string: {value}"),
         };
     }
 }

@@ -245,6 +245,9 @@ static void RunNamedCompliance(string adapter, Func<string, dynamic> readerFor) 
     ExpectFailure(adapter + " overflow", () => WithPath<long>((object)scalar, r => r.ReadInt(), "rows", 0, "overflow_int"), "");
     ExpectFailure(adapter + " invalid bool", () => WithPath<bool>((object)scalar, r => r.ReadBool(), "rows", 0, "invalid_bool"), "");
     ExpectFailure(adapter + " non finite", () => WithPath<double>((object)scalar, r => r.ReadFloat(), "rows", 0, "non_finite_float"), "finite");
+    ExpectFailure(adapter + " list length on scalar", () => WithPath<int>((object)scalar, r => r.ReadListLength(), "rows", 0, "id"), "array");
+    ExpectFailure(adapter + " string type mismatch", () => WithPath<string>((object)scalar, r => r.ReadString(), "rows", 0, "enabled_bool"), "string");
+    ExpectFailure(adapter + " unknown enum", () => WithPath<int>((object)scalar, r => r.ReadEnumIndex(new[] { "Sword", "Shield" }), "rows", 0, "name"), "unknown enum");
 }
 
 static void AssertCSharpTemplateMetadata(string adapter) {
@@ -372,6 +375,9 @@ public class RuntimeCompliance {
     expectFailure(adapter + " overflow", () -> withPath(scalar, r -> readInt(r), "rows", 0, "overflow_int"), "");
     expectFailure(adapter + " invalid bool", () -> withPath(scalar, r -> readBool(r), "rows", 0, "invalid_bool"), "");
     expectFailure(adapter + " non finite", () -> withPath(scalar, r -> readFloat(r), "rows", 0, "non_finite_float"), "finite");
+    expectFailure(adapter + " list length on scalar", () -> withPath(scalar, r -> readListLength(r), "rows", 0, "id"), "array");
+    expectFailure(adapter + " string type mismatch", () -> withPath(scalar, r -> readString(r), "rows", 0, "enabled_bool"), "string");
+    expectFailure(adapter + " unknown enum", () -> withPath(scalar, r -> call(r, "readEnumIndex", new Class[]{String[].class}, (Object)new String[]{"Sword", "Shield"}), "rows", 0, "name"), "unknown enum");
   }
 
   static void assertJavaTemplateMetadata(String adapter) {

@@ -7,6 +7,7 @@ import {
   checkRuntimeDecodeLimit,
   RuntimeDecodeLimits,
   RuntimeDecodeLimitsInput,
+  RuntimeDataError,
   RuntimeDataLoaderLike,
   RuntimeDataReaderLike,
   RuntimeReaderDecoder,
@@ -81,12 +82,12 @@ function withExtension(logicalPath: string, extension?: string): string {
 
 function safeJoin(resolvedRoot: string, logicalPath: string): string {
   if (pathModule.isAbsolute(logicalPath)) {
-    throw new Error(`runtime data path must be relative: ${logicalPath}`);
+    throw RuntimeDataError.invalidPath(`runtime data path must be relative: ${logicalPath}`, { logicalPath });
   }
   const resolvedPath = pathModule.resolve(resolvedRoot, logicalPath);
   const relative = pathModule.relative(resolvedRoot, resolvedPath);
   if (relative.startsWith("..") || pathModule.isAbsolute(relative)) {
-    throw new Error(`runtime data path escapes data root: ${logicalPath}`);
+    throw RuntimeDataError.invalidPath(`runtime data path escapes data root: ${logicalPath}`, { logicalPath, resourcePath: resolvedPath });
   }
   return resolvedPath;
 }

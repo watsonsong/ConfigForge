@@ -117,6 +117,15 @@ pub enum RuntimeInterfaceMode {
     External,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeInterfaceEmit {
+    None,
+    #[default]
+    Copy,
+    Reference,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KeywordConflictPolicy {

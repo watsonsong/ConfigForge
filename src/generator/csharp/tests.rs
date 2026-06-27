@@ -9,7 +9,7 @@ use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
     code_artifact::{
         CodeExportTarget, CodeGenerator, CodegenOptions, CodegenTaskConfig, I18nFunctionReturn,
-        I18nMode, RuntimeInterfaceMode,
+        I18nMode, RuntimeInterfaceEmit, RuntimeInterfaceMode,
         tests::{
             assert_duplicate_generated_identifier, expect_single_diagnostic, input_for,
             linked_fixture,
@@ -43,6 +43,7 @@ fn export_target_from_task_reads_csharp_options() {
             lazy_class_name = "ReferenceLazyGameData"
             emit_partial = false
             runtime_interface = "external"
+            runtime_interface_emit = "none"
             runtime_namespace = "ConfigForge.Runtime"
             emit_runtime_adapters = true
         "#,
@@ -66,11 +67,35 @@ fn export_target_from_task_reads_csharp_options() {
     );
     assert!(!options.emit_partial);
     assert_eq!(options.runtime_interface, RuntimeInterfaceMode::External);
+    assert_eq!(options.runtime_interface_emit, RuntimeInterfaceEmit::None);
     assert_eq!(
         options.runtime_namespace.as_deref(),
         Some("ConfigForge.Runtime")
     );
     assert!(options.emit_runtime_adapters);
+}
+
+#[test]
+fn csharp_reference_runtime_emit_reports_unsupported() {
+    let meta = linked_fixture();
+    let mut input = input_for(&meta, LANGUAGE);
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str(
+            r#"
+                runtime_interface_emit = "reference"
+            "#,
+        )
+        .expect("toml value"),
+    );
+
+    let error = CSharpCodeGenerator.generate(&input).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert!(
+        diagnostic.message.contains("not supported for C#"),
+        "unexpected error: {}",
+        diagnostic.message
+    );
 }
 
 #[test]
@@ -280,6 +305,9 @@ fn emits_runtime_reader_contract_and_game_data_load() {
 
     assert!(content.contains("public interface IConfigForgeRuntimeDataReader"));
     assert!(content.contains("public interface IConfigForgeRuntimeDataLoader"));
+    assert!(content.contains("public static class ConfigForgeRuntimeContract"));
+    assert!(content.contains("public const string ConfigForgeReaderContractVersion = \"1.0\";"));
+    assert!(content.contains("public const string RequiredConfigForgeReaderContract = \"^1.0\";"));
     assert!(content.contains("void EnterRequiredField(string name);"));
     assert!(content.contains("bool EnterOptionalField(string name);"));
     assert!(content.contains("int ReadRowCount();"));

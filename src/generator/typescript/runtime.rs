@@ -5,7 +5,47 @@ use crate::code_artifact::CodeWriterLike;
 
 pub(super) fn render_runtime_reader_interfaces(content: &mut impl CodeWriterLike) {
     content.raw(
-        r#"export interface RuntimeDataReader {
+        r#"export type RuntimeDataErrorKind =
+  | "Io"
+  | "Decode"
+  | "SchemaMismatch"
+  | "TypeMismatch"
+  | "NotFound"
+  | "Unsupported"
+  | "InvalidPath";
+
+export interface RuntimeDataErrorContext {
+  path?: string;
+  logicalPath?: string;
+  resourcePath?: string;
+  expected?: string;
+  actual?: string;
+}
+
+export class RuntimeDataError extends Error {
+  readonly kind: RuntimeDataErrorKind;
+  readonly context: RuntimeDataErrorContext;
+
+  constructor(kind: RuntimeDataErrorKind, message: string, context: RuntimeDataErrorContext = {}, options?: { cause?: unknown }) {
+    super(message);
+    this.name = "RuntimeDataError";
+    this.kind = kind;
+    this.context = context;
+    if (options && "cause" in options) {
+      (this as Error & { cause?: unknown }).cause = options.cause;
+    }
+  }
+
+  static io(message: string, cause?: unknown, context: RuntimeDataErrorContext = {}): RuntimeDataError { return new RuntimeDataError("Io", message, context, { cause }); }
+  static decode(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError { return new RuntimeDataError("Decode", message, context); }
+  static schemaMismatch(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError { return new RuntimeDataError("SchemaMismatch", message, context); }
+  static typeMismatch(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError { return new RuntimeDataError("TypeMismatch", message, context); }
+  static notFound(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError { return new RuntimeDataError("NotFound", message, context); }
+  static unsupported(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError { return new RuntimeDataError("Unsupported", message, context); }
+  static invalidPath(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError { return new RuntimeDataError("InvalidPath", message, context); }
+}
+
+export interface RuntimeDataReader {
   enterRequiredField(name: string): void;
   enterOptionalField(name: string): boolean;
   exitField(): void;
@@ -79,7 +119,7 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
 function openRuntimeDataSync(loader: RuntimeDataLoader, path: string): RuntimeDataReader {
   const reader = loader.open(path);
   if (isPromiseLike(reader)) {
-    throw new Error(`runtime loader returned a Promise while synchronously opening ${path}`);
+    throw RuntimeDataError.invalidPath(`runtime loader returned a Promise while synchronously opening ${path}`, { logicalPath: path });
   }
   return reader;
 }

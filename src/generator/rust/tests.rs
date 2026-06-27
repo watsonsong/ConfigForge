@@ -8,7 +8,7 @@ use tempfile::tempdir;
 use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
     code_artifact::{
-        CaseStyle, CodeExportInput, CodeGenerator, RuntimeInterfaceMode,
+        CaseStyle, CodeExportInput, CodeGenerator, RuntimeInterfaceEmit, RuntimeInterfaceMode,
         tests::{
             assert_duplicate_generated_identifier, expect_single_diagnostic,
             indexed_source_order_fixture, input_for, linked_fixture, source_order_fixture,
@@ -42,6 +42,7 @@ fn emits_loader_table_and_index_helpers() {
     assert!(content.contains("pub struct RuntimeDataError"));
     assert!(content.contains("pub type RuntimeDataResult<T> = Result<T, RuntimeDataError>;"));
     assert!(content.contains("pub const CONFIG_FORGE_READER_CONTRACT_VERSION: &str = \"1.0\";"));
+    assert!(content.contains("pub const REQUIRED_CONFIG_FORGE_READER_CONTRACT: &str = \"^1.0\";"));
     assert!(content.contains("pub const DATA_FILE: &'static str = \"items\";"));
     assert!(!content.contains("RuntimeDataFormat"));
     assert!(!content.contains("RuntimeDataDecoder"));
@@ -79,6 +80,7 @@ fn parses_and_validates_rust_runtime_interface_options() {
         toml::from_str(
             r#"
                 runtime_interface = "external"
+                runtime_interface_emit = "reference"
                 runtime_core_path = "crate::runtime"
             "#,
         )
@@ -91,17 +93,53 @@ fn parses_and_validates_rust_runtime_interface_options() {
         .language_options::<RustCodegenOptions>(LANGUAGE)
         .expect("rust options");
     assert_eq!(options.runtime_interface, RuntimeInterfaceMode::External);
+    assert_eq!(
+        options.runtime_interface_emit,
+        RuntimeInterfaceEmit::Reference
+    );
     assert_eq!(options.runtime_core_path.as_deref(), Some("crate::runtime"));
 
     RustCodeGenerator
         .generate(&input)
         .expect("external runtime options should generate");
-    let external_content = &RustCodeGenerator
+    let external_files = RustCodeGenerator
         .generate(&input)
-        .expect("external runtime options should generate")[0]
-        .content;
+        .expect("external runtime options should generate");
+    assert_eq!(external_files.len(), 2);
+    let external_content = &external_files[0].content;
     assert!(external_content.contains("pub use crate::runtime::{"));
     assert!(!external_content.contains("pub trait RuntimeDataReader"));
+    assert_eq!(
+        external_files[1]
+            .path
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some("config_forge_runtime_interface.json")
+    );
+    assert!(
+        external_files[1]
+            .content
+            .contains("\"runtime_core_path\": \"crate::runtime\"")
+    );
+
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str(
+            r#"
+                runtime_interface_emit = "reference"
+            "#,
+        )
+        .expect("toml value"),
+    );
+    let error = RustCodeGenerator.generate(&input).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert!(
+        diagnostic
+            .message
+            .contains("requires runtime_interface=external"),
+        "unexpected error: {}",
+        diagnostic.message
+    );
 
     input.target.options.language_options.insert(
         LANGUAGE.to_owned(),

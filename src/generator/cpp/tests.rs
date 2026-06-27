@@ -8,7 +8,7 @@ use tempfile::tempdir;
 use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
     code_artifact::{
-        CodeExportInput, CodeGenerator, GeneratedFile, RuntimeInterfaceMode,
+        CodeExportInput, CodeGenerator, GeneratedFile, RuntimeInterfaceEmit, RuntimeInterfaceMode,
         tests::{
             assert_duplicate_generated_identifier, expect_single_diagnostic,
             indexed_source_order_fixture, input_for, linked_fixture, source_order_fixture,
@@ -48,6 +48,9 @@ fn emits_loader_and_repository_declarations() {
             "inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";"
         )
     );
+    assert!(content.contains(
+        "inline constexpr const char* REQUIRED_CONFIG_FORGE_READER_CONTRACT = \"^1.0\";"
+    ));
     assert!(!content.contains("CONFIG_FORGE_RUNTIME_CPP_READER_HAS_READ_LIST_LENGTH"));
     assert!(!content.contains("ReadOptionalPresent"));
     assert!(!content.contains("ReadNextInt64"));
@@ -105,6 +108,7 @@ fn parses_and_validates_cpp_runtime_interface_options() {
         toml::from_str(
             r#"
                 runtime_interface = "external"
+                runtime_interface_emit = "reference"
                 runtime_core_header = "config_forge/runtime/reader.hpp"
                 runtime_core_namespace = "config_forge_runtime"
             "#,
@@ -119,6 +123,10 @@ fn parses_and_validates_cpp_runtime_interface_options() {
         .expect("cpp options");
     assert_eq!(options.runtime_interface, RuntimeInterfaceMode::External);
     assert_eq!(
+        options.runtime_interface_emit,
+        RuntimeInterfaceEmit::Reference
+    );
+    assert_eq!(
         options.runtime_core_header.as_deref(),
         Some("config_forge/runtime/reader.hpp")
     );
@@ -129,10 +137,33 @@ fn parses_and_validates_cpp_runtime_interface_options() {
     let files = CppCodeGenerator
         .generate(&input)
         .expect("external runtime options should generate");
+    assert_eq!(files.len(), 3);
     let content = generated_content(&files, "generated.hpp");
     assert!(content.contains("#include \"config_forge/runtime/reader.hpp\""));
     assert!(content.contains("using config_forge_runtime::IRuntimeDataReader;"));
     assert!(!content.contains("class IRuntimeDataReader"));
+    let manifest = generated_content(&files, "config_forge_runtime_interface.json");
+    assert!(manifest.contains("\"emit\": \"reference\""));
+    assert!(manifest.contains("\"runtime_core_header\": \"config_forge/runtime/reader.hpp\""));
+
+    input.target.options.language_options.insert(
+        LANGUAGE.to_owned(),
+        toml::from_str(
+            r#"
+                runtime_interface_emit = "reference"
+            "#,
+        )
+        .expect("toml value"),
+    );
+    let error = CppCodeGenerator.generate(&input).unwrap_err();
+    let diagnostic = expect_single_diagnostic(error);
+    assert!(
+        diagnostic
+            .message
+            .contains("requires runtime_interface=external"),
+        "unexpected error: {}",
+        diagnostic.message
+    );
 
     input.target.options.language_options.insert(
         LANGUAGE.to_owned(),

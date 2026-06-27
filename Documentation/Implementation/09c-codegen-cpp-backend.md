@@ -12,6 +12,8 @@
 
 C++ backend 已实现 MVP：生成 header/source、enum、struct、row/object、repository、`GameData`、`LazyGameData`、index lookup、`linked_field` relation helper、`LinkAll` 与 `text` translation helper。当前 backend 已覆盖 `generate_to_sink()`，production build 分别通过 `ArtifactSink` 打开 `generated.hpp` 和 `generated.cpp` 并使用 streaming writer 写出；`generate()` 仅在 `#[cfg(test)]` 下保留给单元测试做 String-backed 快照和 header/source streaming equivalence 校验。
 
+Runtime interface 默认 `inline`，generated header 自带 `IRuntimeDataReader` / `IRuntimeDataLoader`、`RuntimeDataError`、contract version 和 required contract range。可选 `runtime_interface = "external"` 会 include `config_forge/runtime/reader.hpp` 并使用 `config_forge_runtime` core header 中的 nominal interface；`runtime_core_header` / `runtime_core_namespace` 可覆盖 include 与 namespace。`runtime_interface_emit = "reference"` 要求 external interface，并额外输出 `config_forge_runtime_interface.json` manifest，记录 `contract_version = "1.0"`、`required_contract = "^1.0"`、core header 与 namespace，供 CMake / package 接入脚本消费。
+
 ## C++ 生成内容
 
 当前实现采用单文件头输出：`generated.hpp`。以下多文件布局仍是后续拆分方向：
@@ -83,7 +85,7 @@ private:
 C++ 约束：
 
 - 第一阶段目标 C++17。
-- 运行时 JSON / MessagePack 解析库不强绑定。生成代码只定义通用 `IRuntimeDataLoader` / `IRuntimeDataReader`，由业务实现；标准 runtime support 层可提供基于 RapidJSON、msgpack-c 或引擎序列化系统的可选 adapter。按表读取、字段转换和 typed row 构造由生成的 `Load` / `ReadRow` 实现完成。
+- 运行时 JSON / MessagePack 解析库不强绑定。生成代码只定义或引用通用 `IRuntimeDataLoader` / `IRuntimeDataReader`，由业务实现；标准 runtime support 层可提供基于 RapidJSON、msgpack-c、binary reader 或引擎序列化系统的可选 adapter。按表读取、字段转换和 typed row 构造由生成的 `Load` / `ReadRow` 实现完成。生产项目推荐 `runtime_interface = "external"` 并链接 CMake `config_forge_runtime::core` / reader targets；需要依赖提示时启用 `runtime_interface_emit = "reference"`。
 - `Rows()` / `Size()` 等 public source-order API 应成为 `preserve_source_order = true` 的 opt-in 行为；普通 indexed table 默认只生成 `GetBy*` / `FindBy*`。底层 `std::vector<Row> rows_` 可以继续作为 private owner storage，多个 index 保存 `std::size_t` row handle，以避免行数据被每个索引复制；未 opt-in 时不得暴露 source-order API。
 - unordered index 应优先使用 `std::unordered_map`；单字段和复合 key 都应走 hash-based storage，复合 key 需要生成 `struct Key`、`operator==` 和 hash，不能因为复合 key 缺标准库 hash 而退回 `std::map`。当前 `class_levels.by_class_level` 之所以生成 `std::map`，只是现有实现以“复合 key 无 hash”为条件选择了树形 map；这不是目标设计。
 - `ordered = true` 的 index 不使用 `std::map` 作为默认结构，而使用 `std::vector<std::pair<Key, std::size_t>>` 排序数组：Load 阶段收集全部 `(key, row_index)`，按 key 字典序稳定排序；exact lookup 通过 `std::lower_bound` 找 equal range；范围查询通过 `lower_bound(lower)` 到 `lower_bound(upper)` 的半开区间实现。生成代码应额外提供 `LowerBoundBy*`、`UpperBoundBy*`、`RangeBy*` 或等价 range view API。

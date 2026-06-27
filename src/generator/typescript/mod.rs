@@ -9,7 +9,7 @@ use super::{
     ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeTableKind, CodeWriterConfig, CodeWriterLike,
     GeneratorCommonInput, GeneratorRequirements, I18nFunctionReturn, I18nMode, I18nOptions,
-    NamingConfig, build_code_model, ir::require_non_empty_index_fields,
+    NamingConfig, RuntimeInterfaceEmit, build_code_model, ir::require_non_empty_index_fields,
 };
 
 mod reader;
@@ -42,6 +42,8 @@ pub struct TypeScriptCodegenOptions {
     pub profile: TypeScriptProfile,
     #[serde(default)]
     pub readonly_fields: bool,
+    #[serde(default)]
+    pub runtime_interface_emit: RuntimeInterfaceEmit,
     #[serde(default)]
     pub cocos_import: Option<String>,
 }
@@ -175,6 +177,7 @@ fn render_typescript_code(
         .target
         .options
         .language_options::<TypeScriptCodegenOptions>(LANGUAGE)?;
+    validate_runtime_interface_options(&typescript_options)?;
     let names = TypeScriptNames::new(&input.target.options, typescript_options.profile);
     validate_generated_symbols(&model, &names)?;
     write_file_header(generator, content, input);
@@ -182,6 +185,7 @@ fn render_typescript_code(
     render_ts_i18n_import(&mut content, &input.target.options.i18n);
     render_typescript_profile_imports(&mut content, &typescript_options);
     content.raw("export const CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\" as const;\n\n");
+    content.raw("export const REQUIRED_CONFIG_FORGE_READER_CONTRACT = \"^1.0\" as const;\n\n");
     render_runtime_reader_interfaces(&mut content);
     render_runtime_reader_helpers(&mut content);
     render_ts_i18n_prelude(&mut content, &input.target.options.i18n);
@@ -609,6 +613,23 @@ fn render_typescript_code(
         render_row_relation_methods(&mut content, &model, table, &names)?;
     }
 
+    Ok(())
+}
+
+fn validate_runtime_interface_options(options: &TypeScriptCodegenOptions) -> Result<()> {
+    if matches!(
+        options.runtime_interface_emit,
+        RuntimeInterfaceEmit::Reference
+    ) {
+        return Err(crate::code_artifact::generator_option_error(
+            crate::diagnostic::code::CF_GENERATOR_INVALID_OPTION,
+            "generator.typescript.options",
+            "typescript runtime_interface_emit=reference is not supported yet".to_owned(),
+            "runtime_interface_emit=reference",
+            "runtime_interface_emit=copy or none",
+            "Use the inline TypeScript runtime contract until external TypeScript runtime imports are implemented.",
+        ));
+    }
     Ok(())
 }
 

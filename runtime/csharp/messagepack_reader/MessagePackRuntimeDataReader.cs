@@ -9,6 +9,35 @@ using System.Text;
 
 namespace ConfigForge.Runtime.MessagePackReader;
 
+public enum RuntimeDataErrorKind
+{
+    Io,
+    Decode,
+    SchemaMismatch,
+    TypeMismatch,
+    NotFound,
+    Unsupported,
+    InvalidPath,
+}
+
+public sealed class ConfigForgeRuntimeException : Exception
+{
+    public ConfigForgeRuntimeException(RuntimeDataErrorKind kind, string message) : base(message)
+    {
+        Kind = kind;
+    }
+
+    public ConfigForgeRuntimeException(RuntimeDataErrorKind kind, string message, Exception innerException) : base(message, innerException)
+    {
+        Kind = kind;
+    }
+
+    public RuntimeDataErrorKind Kind { get; }
+    public string Code => $"CF_RT_{Kind.ToString().ToUpperInvariant()}";
+    public string? Path { get; init; }
+}
+
+
 public class MessagePackRuntimeDataFileLoader
 {
     private readonly string _root;
@@ -53,7 +82,7 @@ public class MessagePackRuntimeDataReader
             _stack.Push(value);
             return;
         }
-        throw new InvalidOperationException($"missing required field {name}");
+        throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.NotFound, $"missing required field {name}");
     }
 
     public bool EnterOptionalField(string name)
@@ -88,7 +117,7 @@ public class MessagePackRuntimeDataReader
         var current = _stack.Peek();
         if (current is not Dictionary<string, object?> map || !map.TryGetValue("rows", out var rows) || rows is not List<object?> list)
         {
-            throw new InvalidOperationException("expected MessagePack object with rows array");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.TypeMismatch, "expected MessagePack object with rows array");
         }
         _stack.Push(list[index]);
     }
@@ -100,7 +129,7 @@ public class MessagePackRuntimeDataReader
         var current = _stack.Peek();
         if (current is not List<object?> list)
         {
-            throw new InvalidOperationException($"expected MessagePack array, got {TypeName(current)}");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.TypeMismatch, $"expected MessagePack array, got {TypeName(current)}");
         }
         return list.Count;
     }
@@ -109,7 +138,7 @@ public class MessagePackRuntimeDataReader
     {
         if (_stack.Peek() is not List<object?> list)
         {
-            throw new InvalidOperationException("expected MessagePack array");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.TypeMismatch, "expected MessagePack array");
         }
         _stack.Push(list[index]);
     }
@@ -134,7 +163,7 @@ public class MessagePackRuntimeDataReader
                 return index;
             }
         }
-        throw new InvalidOperationException($"unknown enum value: {value}");
+        throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, $"unknown enum value: {value}");
     }
 
     public void EnsureExhausted()
@@ -171,7 +200,7 @@ public class MessagePackRuntimeDataReader
         };
         if (!double.IsFinite(parsed))
         {
-            throw new InvalidOperationException("expected finite float-like value");
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.TypeMismatch, "expected finite float-like value");
         }
         return parsed;
     }
@@ -205,7 +234,7 @@ public class MessagePackRuntimeDataReader
             "0" => false,
             "true" => true,
             "false" => false,
-            _ => throw new FormatException($"invalid boolean string: {value}"),
+            _ => throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Decode, $"invalid boolean string: {value}"),
         };
     }
 

@@ -109,6 +109,8 @@ public static final class ItemsRow {
 
 Java generated code 定义轻量同步接口：
 
+生成 root class 同时声明 `CONFIG_FORGE_READER_CONTRACT_VERSION = "1.0"` 与 `REQUIRED_CONFIG_FORGE_READER_CONTRACT = "^1.0"`。Java 标准 JSON / MessagePack / binary reader 当前作为 JDK-only copyable template 分发，并声明 template version、supported contract range 与 distribution mode；`runtime_interface_emit = "reference"` 当前不支持，会产生 diagnostic 提示使用 `copy` / template 形态。
+
 ```java
 public interface ConfigForgeRuntimeDataReader {
     void enterRequiredField(String name);
@@ -136,14 +138,16 @@ public interface ConfigForgeRuntimeDataLoader {
 }
 
 public static final class ConfigForgeRuntimeException extends RuntimeException {
-    public ConfigForgeRuntimeException(String message) { super(message); }
-    public ConfigForgeRuntimeException(String message, Throwable cause) { super(message, cause); }
+    public ConfigForgeRuntimeException(String message) { this(ConfigForgeRuntimeErrorKind.Decode, message); }
+    public ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, String message) { ... }
+    public ConfigForgeRuntimeErrorKind kind() { ... }
+    public String code() { ... }
 }
 ```
 
 `beginRecord` / `endRecord`、`schemaRevision`、`readEnumIndex` 与 `ensureExhausted` 是 generated parser 直接调用的 schema-driven API：JSON / MessagePack reader 可在这些方法中保持轻量 no-op 或 string enum 映射，binary reader 则用它们消费 positional record、校验 schema revision、读取 enum ordinal 并确认 payload 已消费完毕。`readNext*`、optional bitmap 等低层 helper 不进入 generated inline contract，只保留在 concrete reader 或薄 adapter 内。
 
-错误模型使用 unchecked exception：
+错误模型使用 unchecked exception，并带有结构化 `kind()`、`code()`、`path()` 信息：
 
 - Java 调用方常规使用 `RuntimeException` 处理 decode / schema / data-code mismatch，避免每个 generated API 强制声明 `throws`。
 - 避免为每个 generated API 引入 `Result<T>` 或 checked exception 导致业务调用噪音过高。

@@ -33,6 +33,27 @@ pub(super) fn render_runtime_interfaces(
     }
 
     content.raw("inline constexpr const char* CONFIG_FORGE_READER_CONTRACT_VERSION = \"1.0\";\n\n");
+    content
+        .raw("inline constexpr const char* REQUIRED_CONFIG_FORGE_READER_CONTRACT = \"^1.0\";\n\n");
+    content.raw(concat!(
+        "enum class RuntimeDataErrorKind {\n",
+        "    Io,\n",
+        "    Decode,\n",
+        "    SchemaMismatch,\n",
+        "    TypeMismatch,\n",
+        "    NotFound,\n",
+        "    Unsupported,\n",
+        "    InvalidPath,\n",
+        "};\n\n",
+        "class RuntimeDataError : public std::runtime_error {\n",
+        "public:\n",
+        "    RuntimeDataError(RuntimeDataErrorKind kind, const std::string& message)\n",
+        "        : std::runtime_error(message), kind_(kind) {}\n",
+        "    RuntimeDataErrorKind Kind() const noexcept { return kind_; }\n",
+        "private:\n",
+        "    RuntimeDataErrorKind kind_;\n",
+        "};\n\n",
+    ));
     content.raw(concat!(
         "class IRuntimeDataReader {\n",
         "public:\n",
@@ -51,10 +72,10 @@ pub(super) fn render_runtime_interfaces(
         "        for (std::size_t index = 0; index < variants.size(); ++index) {\n",
         "            if (variants[index] == value) { return index; }\n",
         "        }\n",
-        "        throw std::runtime_error(\"unknown enum value `\" + value + \"`\");\n",
+        "        throw RuntimeDataError(RuntimeDataErrorKind::Decode, \"unknown enum value `\" + value + \"`\");\n",
         "    }\n",
         "    virtual std::size_t ReadRowCount() = 0;\n",
-        "    virtual std::size_t ReadListLength() { throw std::runtime_error(\"runtime reader does not support list length\"); }\n",
+        "    virtual std::size_t ReadListLength() { throw RuntimeDataError(RuntimeDataErrorKind::Unsupported, \"runtime reader does not support list length\"); }\n",
         "    virtual bool ArrayElementsArePositional() const { return false; }\n",
         "    virtual void BeginRecord(std::size_t) {}\n",
         "    virtual void EndRecord() {}\n",
@@ -97,6 +118,9 @@ fn render_external_runtime_interfaces(
     content.raw_fmt(format_args!(
         "using {namespace}::CONFIG_FORGE_READER_CONTRACT_VERSION;\n"
     ));
+    content.raw("inline constexpr const char* REQUIRED_CONFIG_FORGE_READER_CONTRACT = \"^1.0\";\n");
+    content.raw_fmt(format_args!("using {namespace}::RuntimeDataError;\n"));
+    content.raw_fmt(format_args!("using {namespace}::RuntimeDataErrorKind;\n"));
     content.raw_fmt(format_args!("using {namespace}::IRuntimeDataLoader;\n"));
     content.raw_fmt(format_args!("using {namespace}::IRuntimeDataReader;\n\n"));
 }

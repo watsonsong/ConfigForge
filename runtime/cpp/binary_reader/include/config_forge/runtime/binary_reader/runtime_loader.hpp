@@ -25,6 +25,28 @@
 
 namespace config_forge_runtime {
 
+#ifndef CONFIG_FORGE_RUNTIME_CPP_ERROR_DEFINED
+#define CONFIG_FORGE_RUNTIME_CPP_ERROR_DEFINED
+enum class RuntimeDataErrorKind {
+    Io,
+    Decode,
+    SchemaMismatch,
+    TypeMismatch,
+    NotFound,
+    Unsupported,
+    InvalidPath,
+};
+
+class RuntimeDataError : public std::runtime_error {
+public:
+    RuntimeDataError(RuntimeDataErrorKind kind, const std::string& message)
+        : std::runtime_error(message), kind_(kind) {}
+    RuntimeDataErrorKind Kind() const noexcept { return kind_; }
+private:
+    RuntimeDataErrorKind kind_;
+};
+#endif
+
 // Tight binary adapter for generated ConfigForge C++ runtime interfaces.
 // Override these macros before including this header when generated code uses a
 // different namespace or global-scope runtime interfaces.
@@ -45,8 +67,8 @@ struct RuntimeDecodeLimits {
 
 inline void CheckRuntimeDecodeLimit(const char* label, std::size_t actual, std::size_t limit) {
     if (actual > limit) {
-        throw std::runtime_error(std::string(label) + " " + std::to_string(actual) +
-                                 " exceeds decode limit " + std::to_string(limit));
+        throw RuntimeDataError(RuntimeDataErrorKind::Decode, std::string(label) + " " + std::to_string(actual) +
+                               " exceeds decode limit " + std::to_string(limit));
     }
 }
 #endif
@@ -55,11 +77,11 @@ inline void CheckRuntimeDecodeLimit(const char* label, std::size_t actual, std::
 #define CONFIG_FORGE_RUNTIME_CPP_SAFE_JOIN_PATH_DEFINED
 inline std::string SafeJoinPath(const std::string& root, const std::string& logical_path) {
     if (logical_path.empty()) {
-        throw std::runtime_error("runtime data path must not be empty");
+        throw RuntimeDataError(RuntimeDataErrorKind::InvalidPath, "runtime data path must not be empty");
     }
     if (logical_path.front() == '/' || logical_path.front() == '\\' ||
         (logical_path.size() >= 2 && logical_path[1] == ':')) {
-        throw std::runtime_error("runtime data path must be relative: " + logical_path);
+        throw RuntimeDataError(RuntimeDataErrorKind::InvalidPath, "runtime data path must be relative: " + logical_path);
     }
 
     std::vector<std::string> parts;
@@ -71,7 +93,7 @@ inline std::string SafeJoinPath(const std::string& root, const std::string& logi
             // Skip redundant separators and current-directory segments.
         } else if (part == "..") {
             if (parts.empty()) {
-                throw std::runtime_error("runtime data path escapes data root: " + logical_path);
+                throw RuntimeDataError(RuntimeDataErrorKind::InvalidPath, "runtime data path escapes data root: " + logical_path);
             }
             parts.pop_back();
         } else {
@@ -121,7 +143,8 @@ public:
 
     void EnterIndex(std::size_t index) override {
         if (index != state_->next_row_index) {
-            throw std::runtime_error(
+            throw RuntimeDataError(
+                RuntimeDataErrorKind::InvalidPath,
                 "binary reader rows must be read sequentially: expected index " +
                 std::to_string(state_->next_row_index) + ", got " + std::to_string(index));
         }
@@ -147,7 +170,7 @@ public:
     std::size_t ReadEnumIndex(const std::vector<std::string>& variants) override {
         const std::size_t ordinal = CheckedSize(ReadEnumOrdinal(), "enum ordinal");
         if (ordinal >= variants.size()) {
-            throw std::runtime_error("enum ordinal is out of range");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, "enum ordinal is out of range");
         }
         return ordinal;
     }
@@ -186,20 +209,20 @@ public:
 
     void EndRecord() override {
         if (state_->records.empty()) {
-            throw std::runtime_error("binary reader record stack underflow");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, "binary reader record stack underflow");
         }
         state_->records.pop_back();
     }
 
     bool ReadOptionalPresent() {
         if (state_->records.empty()) {
-            throw std::runtime_error("binary reader is not inside a record");
+            throw RuntimeDataError(RuntimeDataErrorKind::InvalidPath, "binary reader is not inside a record");
         }
         auto& record = state_->records.back();
         const std::size_t slot_index = record.next_optional_slot++;
         const std::size_t byte_index = slot_index / 8;
         if (byte_index >= record.bitmap.size()) {
-            throw std::runtime_error("optional slot is out of current record bitmap");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, "optional slot is out of current record bitmap");
         }
         return (record.bitmap[byte_index] & (1u << (slot_index % 8))) != 0;
     }
@@ -216,7 +239,7 @@ public:
 
     void EnsureExhausted() override {
         if (state_->offset != state_->bytes.size()) {
-            throw std::runtime_error("trailing bytes in binary runtime data");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, "trailing bytes in binary runtime data");
         }
     }
 
@@ -245,7 +268,7 @@ private:
         }
         const auto unused_mask = static_cast<std::uint8_t>(0xffu & ~((1u << used_bits_in_last_byte) - 1u));
         if ((bitmap.back() & unused_mask) != 0) {
-            throw std::runtime_error("invalid optional bitmap padding bits");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, "invalid optional bitmap padding bits");
         }
     }
 
@@ -259,7 +282,7 @@ private:
         double value = 0.0;
         std::memcpy(&value, &raw, sizeof(value));
         if (!std::isfinite(value)) {
-            throw std::runtime_error("non-finite float in binary runtime data");
+            throw RuntimeDataError(RuntimeDataErrorKind::TypeMismatch, "non-finite float in binary runtime data");
         }
         return value;
     }
@@ -272,7 +295,7 @@ private:
         if (byte == 1) {
             return true;
         }
-        throw std::runtime_error("invalid bool byte in binary runtime data");
+        throw RuntimeDataError(RuntimeDataErrorKind::Decode, "invalid bool byte in binary runtime data");
     }
 
     std::string ReadNextStringValue() const {
@@ -280,25 +303,25 @@ private:
         CheckRuntimeDecodeLimit("string byte length", len, state_->limits.max_string_bytes);
         const std::uint8_t* bytes = ReadExact(len);
         if (!IsValidUtf8(bytes, len)) {
-            throw std::runtime_error("invalid UTF-8 string in binary runtime data");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, "invalid UTF-8 string in binary runtime data");
         }
         return std::string(reinterpret_cast<const char*>(bytes), len);
     }
 
     void ParseHeader() {
         if (state_->bytes.size() < 16) {
-            throw std::runtime_error("truncated binary runtime data header");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, "truncated binary runtime data header");
         }
         if (state_->bytes[0] != 'C' || state_->bytes[1] != 'F' || state_->bytes[2] != 'G' || state_->bytes[3] != 'B') {
-            throw std::runtime_error("invalid binary runtime data magic");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, "invalid binary runtime data magic");
         }
         const std::uint16_t version = ReadLe16At(4);
         if (version != 1) {
-            throw std::runtime_error("unsupported binary runtime data version");
+            throw RuntimeDataError(RuntimeDataErrorKind::SchemaMismatch, "unsupported binary runtime data version");
         }
         const std::uint16_t header_size = ReadLe16At(6);
         if (header_size != 16) {
-            throw std::runtime_error("unsupported binary runtime data header size");
+            throw RuntimeDataError(RuntimeDataErrorKind::SchemaMismatch, "unsupported binary runtime data header size");
         }
         state_->schema_revision = ReadLe64(state_->bytes.data() + 8);
     }
@@ -322,7 +345,7 @@ private:
         for (int index = 0; index < 10; ++index) {
             const std::uint8_t byte = *ReadExact(1);
             if (index == 9 && (byte & 0x7f) > 1) {
-                throw std::runtime_error("varuint exceeds u64");
+                throw RuntimeDataError(RuntimeDataErrorKind::Decode, "varuint exceeds u64");
             }
             value |= static_cast<std::uint64_t>(byte & 0x7f) << shift;
             if ((byte & 0x80) == 0) {
@@ -330,13 +353,13 @@ private:
             }
             shift += 7;
         }
-        throw std::runtime_error("malformed varuint");
+        throw RuntimeDataError(RuntimeDataErrorKind::Decode, "malformed varuint");
     }
 
     const std::uint8_t* ReadExact(std::size_t len) const {
         const std::size_t end = state_->offset + len;
         if (end < state_->offset || end > state_->bytes.size()) {
-            throw std::runtime_error("truncated binary runtime data");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, "truncated binary runtime data");
         }
         const std::uint8_t* result = state_->bytes.data() + state_->offset;
         state_->offset = end;
@@ -345,7 +368,7 @@ private:
 
     std::size_t CheckedSize(std::uint64_t value, const char* label) const {
         if (value > static_cast<std::uint64_t>(static_cast<std::size_t>(-1))) {
-            throw std::runtime_error(std::string(label) + " exceeds size_t");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, std::string(label) + " exceeds size_t");
         }
         return static_cast<std::size_t>(value);
     }
@@ -408,11 +431,11 @@ public:
     std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Open(const std::string& path) override {
         std::ifstream file(SafeJoinPath(data_dir_, WithExtension(path, ".bin")), std::ios::binary | std::ios::ate);
         if (!file) {
-            throw std::runtime_error("failed to open runtime data: " + path);
+            throw RuntimeDataError(RuntimeDataErrorKind::Io, "failed to open runtime data: " + path);
         }
         const std::streamoff size = file.tellg();
         if (size < 0) {
-            throw std::runtime_error("failed to read runtime data size: " + path);
+            throw RuntimeDataError(RuntimeDataErrorKind::Io, "failed to read runtime data size: " + path);
         }
         CheckRuntimeDecodeLimit("runtime file bytes", static_cast<std::size_t>(size), limits_.max_file_bytes);
         file.seekg(0, std::ios::beg);

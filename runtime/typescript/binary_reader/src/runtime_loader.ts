@@ -5,6 +5,7 @@ import {
   checkRuntimeDecodeLimit,
   RuntimeDecodeLimits,
   RuntimeDecodeLimitsInput,
+  RuntimeDataError,
   RuntimeDataReaderLike,
   normalizeRuntimeDecodeLimits,
   SUPPORTED_CONFIG_FORGE_READER_CONTRACT,
@@ -27,31 +28,31 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     checkRuntimeDecodeLimit("runtime file bytes", bytes.byteLength, this.limits.maxFileBytes);
     this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     if (bytes.length < 16) {
-      throw new Error("truncated binary runtime data header");
+      throw RuntimeDataError.decode("truncated binary runtime data header");
     }
     if (bytes[0] !== 0x43 || bytes[1] !== 0x46 || bytes[2] !== 0x47 || bytes[3] !== 0x42) {
-      throw new Error("invalid binary runtime data magic");
+      throw RuntimeDataError.decode("invalid binary runtime data magic");
     }
     const version = this.view.getUint16(4, true);
     if (version !== 1) {
-      throw new Error(`unsupported binary runtime data version ${version}`);
+      throw RuntimeDataError.schemaMismatch(`unsupported binary runtime data version ${version}`, { expected: "1", actual: String(version) });
     }
     const headerSize = this.view.getUint16(6, true);
     if (headerSize !== 16) {
-      throw new Error(`unsupported binary runtime data header size ${headerSize}`);
+      throw RuntimeDataError.schemaMismatch(`unsupported binary runtime data header size ${headerSize}`, { expected: "16", actual: String(headerSize) });
     }
     this.revision = this.view.getBigUint64(8, true);
   }
 
   enterIndex(index: number): void {
     if (index !== this.nextRowIndex) {
-      throw new Error(`binary reader rows must be read sequentially: expected index ${this.nextRowIndex}, got ${index}`);
+      throw RuntimeDataError.invalidPath(`binary reader rows must be read sequentially: expected index ${this.nextRowIndex}, got ${index}`);
     }
     this.nextRowIndex++;
   }
 
   exit(): void {
-    throw new Error("binary reader does not support nested named readers");
+    throw RuntimeDataError.unsupported("binary reader does not support nested named readers");
   }
 
   asInt64(): number {
@@ -87,7 +88,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   readEnumIndex(variants: readonly string[]): number {
     const ordinal = this.readEnumOrdinal();
     if (ordinal >= variants.length) {
-      throw new Error(`enum ordinal ${ordinal} is out of range`);
+      throw RuntimeDataError.decode(`enum ordinal ${ordinal} is out of range`, { expected: `< ${variants.length}`, actual: String(ordinal) });
     }
     return ordinal;
   }
@@ -120,22 +121,22 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   endRecord(): void {
     const record = this.records.pop();
     if (!record) {
-      throw new Error("binary reader record stack underflow");
+      throw RuntimeDataError.decode("binary reader record stack underflow");
     }
     if (record.nextOptionalSlot > record.bitmap.length * 8) {
-      throw new Error("binary reader consumed more optional slots than current record bitmap");
+      throw RuntimeDataError.decode("binary reader consumed more optional slots than current record bitmap");
     }
   }
 
   readOptionalPresent(): boolean {
     const record = this.records[this.records.length - 1];
     if (!record) {
-      throw new Error("binary reader is not inside a record");
+      throw RuntimeDataError.invalidPath("binary reader is not inside a record");
     }
     const slotIndex = record.nextOptionalSlot++;
     const byte = record.bitmap[Math.floor(slotIndex / 8)];
     if (byte === undefined) {
-      throw new Error(`optional slot ${slotIndex} is out of current record bitmap`);
+      throw RuntimeDataError.decode(`optional slot ${slotIndex} is out of current record bitmap`);
     }
     return (byte & (1 << (slotIndex % 8))) !== 0;
   }
@@ -148,7 +149,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     const encoded = this.readVaruint();
     const signed = Number((encoded >> 1n) ^ (-(encoded & 1n)));
     if (!Number.isSafeInteger(signed)) {
-      throw new Error("int64 value exceeds safe JavaScript integer range");
+      throw RuntimeDataError.decode("int64 value exceeds safe JavaScript integer range");
     }
     return signed;
   }
@@ -158,7 +159,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     const value = this.view.getFloat64(this.offset, true);
     this.offset += 8;
     if (!Number.isFinite(value)) {
-      throw new Error("non-finite float in binary runtime data");
+      throw RuntimeDataError.typeMismatch("non-finite float in binary runtime data", { expected: "finite float", actual: String(value) });
     }
     return value;
   }
@@ -171,7 +172,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     if (byte === 1) {
       return true;
     }
-    throw new Error(`invalid bool byte ${byte}`);
+    throw RuntimeDataError.decode(`invalid bool byte ${byte}`, { expected: "0 or 1", actual: String(byte) });
   }
 
   readNextString(): string {
@@ -186,7 +187,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
 
   ensureExhausted(): void {
     if (this.offset !== this.bytes.length) {
-      throw new Error(`trailing bytes in binary runtime data: ${this.bytes.length - this.offset} bytes remaining`);
+      throw RuntimeDataError.decode(`trailing bytes in binary runtime data: ${this.bytes.length - this.offset} bytes remaining`);
     }
   }
 
@@ -194,7 +195,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     const value = this.readVaruint();
     const number = Number(value);
     if (!Number.isSafeInteger(number)) {
-      throw new Error(`${label} exceeds safe JavaScript integer range`);
+      throw RuntimeDataError.decode(`${label} exceeds safe JavaScript integer range`);
     }
     return number;
   }
@@ -205,7 +206,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
     for (let index = 0; index < 10; index += 1) {
       const byte = this.readExact(1)[0];
       if (index === 9 && (byte & 0x7f) > 1) {
-        throw new Error("varuint exceeds u64");
+        throw RuntimeDataError.decode("varuint exceeds u64");
       }
       value |= BigInt(byte & 0x7f) << shift;
       if ((byte & 0x80) === 0) {
@@ -213,7 +214,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
       }
       shift += 7n;
     }
-    throw new Error("malformed varuint");
+    throw RuntimeDataError.decode("malformed varuint");
   }
 
   private readExact(len: number): Uint8Array<ArrayBufferLike> {
@@ -227,7 +228,7 @@ export class BinaryRuntimeDataReader implements RuntimeDataReaderLike {
   private ensureAvailable(len: number): void {
     const end = this.offset + len;
     if (end > this.bytes.length) {
-      throw new Error("truncated binary runtime data");
+      throw RuntimeDataError.decode("truncated binary runtime data");
     }
   }
 }
@@ -239,7 +240,7 @@ function validateOptionalBitmap(bitmap: Uint8Array<ArrayBufferLike>, optionalSlo
   }
   const unusedMask = 0xff & ~((1 << usedBitsInLastByte) - 1);
   if ((bitmap[bitmap.length - 1] & unusedMask) !== 0) {
-    throw new Error("invalid optional bitmap padding bits");
+    throw RuntimeDataError.decode("invalid optional bitmap padding bits");
   }
 }
 

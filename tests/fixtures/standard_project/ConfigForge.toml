@@ -128,6 +128,7 @@ module_name = "reference_game_config"
 
 [targets.exports.rust]
 runtime_interface = "external"
+runtime_interface_emit = "reference"
 
 [[targets.exports]]
 type = "typescript"
@@ -164,6 +165,7 @@ namespace = "reference::game::config"
 
 [targets.exports.cpp]
 runtime_interface = "external"
+runtime_interface_emit = "reference"
 
 [targets.exports.i18n]
 mode = "global_function"

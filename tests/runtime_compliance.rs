@@ -1023,6 +1023,33 @@ fn run_json_compatible_error_cases<R: RuntimeDataReader>(adapter: ReaderAdapter<
                 ],
                 |reader| reader.as_f64().map(|_| ()),
             ),
+            "list_length_on_scalar" => run_scalar_error(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("id"),
+                ],
+                |reader| reader.read_list_len().map(|_| ()),
+            ),
+            "string_type_mismatch" => run_scalar_error(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("enabled_bool"),
+                ],
+                |reader| reader.as_string().map(|_| ()),
+            ),
+            "unknown_enum_value" => run_scalar_error(
+                &reader,
+                &[
+                    PathStep::Field("rows"),
+                    PathStep::Index(0),
+                    PathStep::Field("name"),
+                ],
+                |reader| reader.read_enum_index(&["Sword", "Shield"]).map(|_| ()),
+            ),
             other => panic!("unhandled compliance error case `{other}`"),
         };
         assert_eq!(
@@ -1040,7 +1067,7 @@ fn run_json_compatible_error_cases<R: RuntimeDataReader>(adapter: ReaderAdapter<
         executed_cases += 1;
     }
     assert_eq!(
-        executed_cases, 6,
+        executed_cases, 9,
         "{} should execute JSON-compatible errors",
         adapter.name
     );

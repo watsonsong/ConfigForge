@@ -143,6 +143,8 @@ vector3_int = "Vector3Int"
 
 C# generated code 定义轻量同步接口：
 
+生成文件还包含 `ConfigForgeRuntimeContract` 常量类，声明 `ConfigForgeReaderContractVersion = "1.0"` 与 `RequiredConfigForgeReaderContract = "^1.0"`。C# 标准 JSON / MessagePack / binary reader 当前作为 copyable template 分发，并声明 template version、supported contract range 与 distribution mode；`runtime_interface_emit = "reference"` 当前不支持，会产生 diagnostic 提示使用 `copy` / template 形态。
+
 ```csharp
 public interface IConfigForgeRuntimeDataReader
 {
@@ -174,7 +176,7 @@ public interface IConfigForgeRuntimeDataLoader
 
 `BeginRecord` / `EndRecord`、`SchemaRevision`、`ReadEnumIndex` 与 `EnsureExhausted` 是 generated parser 直接调用的 schema-driven API：JSON / MessagePack reader 可在这些方法中保持轻量 no-op 或 string enum 映射，binary reader 则用它们消费 positional record、校验 schema revision、读取 enum ordinal 并确认 payload 已消费完毕。`ReadNext*`、optional bitmap 等低层 helper 不进入 generated inline contract，只保留在 concrete reader 或薄 adapter 内。
 
-错误模型使用异常还是 Result 需要和 C# 生态习惯权衡。第一阶段推荐生成 `ConfigForgeRuntimeException : Exception` 并在 generated reader / repository 中抛出：
+错误模型使用异常还是 Result 需要和 C# 生态习惯权衡。当前生成 `ConfigForgeRuntimeException : Exception`，并带有 `Kind`、`Code`、`Path` 字段；generated reader / repository 与标准 template 均使用该结构化错误模型：
 
 - C# 调用方常规使用 exception 处理 decode / schema / data-code mismatch。
 - 避免为每个 generated API 引入自定义 `Result<T>` 包装导致业务调用噪音过高。

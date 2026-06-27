@@ -27,6 +27,28 @@
 
 namespace config_forge_runtime {
 
+#ifndef CONFIG_FORGE_RUNTIME_CPP_ERROR_DEFINED
+#define CONFIG_FORGE_RUNTIME_CPP_ERROR_DEFINED
+enum class RuntimeDataErrorKind {
+    Io,
+    Decode,
+    SchemaMismatch,
+    TypeMismatch,
+    NotFound,
+    Unsupported,
+    InvalidPath,
+};
+
+class RuntimeDataError : public std::runtime_error {
+public:
+    RuntimeDataError(RuntimeDataErrorKind kind, const std::string& message)
+        : std::runtime_error(message), kind_(kind) {}
+    RuntimeDataErrorKind Kind() const noexcept { return kind_; }
+private:
+    RuntimeDataErrorKind kind_;
+};
+#endif
+
 // msgpack-cxx-backed adapter for generated ConfigForge C++ runtime interfaces.
 // Override these macros before including this header when generated code uses a
 // different namespace or global-scope runtime interfaces.
@@ -47,8 +69,8 @@ struct RuntimeDecodeLimits {
 
 inline void CheckRuntimeDecodeLimit(const char* label, std::size_t actual, std::size_t limit) {
     if (actual > limit) {
-        throw std::runtime_error(std::string(label) + " " + std::to_string(actual) +
-                                 " exceeds decode limit " + std::to_string(limit));
+        throw RuntimeDataError(RuntimeDataErrorKind::Decode, std::string(label) + " " + std::to_string(actual) +
+                               " exceeds decode limit " + std::to_string(limit));
     }
 }
 #endif
@@ -57,11 +79,11 @@ inline void CheckRuntimeDecodeLimit(const char* label, std::size_t actual, std::
 #define CONFIG_FORGE_RUNTIME_CPP_SAFE_JOIN_PATH_DEFINED
 inline std::string SafeJoinPath(const std::string& root, const std::string& logical_path) {
     if (logical_path.empty()) {
-        throw std::runtime_error("runtime data path must not be empty");
+        throw RuntimeDataError(RuntimeDataErrorKind::InvalidPath, "runtime data path must not be empty");
     }
     if (logical_path.front() == '/' || logical_path.front() == '\\' ||
         (logical_path.size() >= 2 && logical_path[1] == ':')) {
-        throw std::runtime_error("runtime data path must be relative: " + logical_path);
+        throw RuntimeDataError(RuntimeDataErrorKind::InvalidPath, "runtime data path must be relative: " + logical_path);
     }
 
     std::vector<std::string> parts;
@@ -73,7 +95,7 @@ inline std::string SafeJoinPath(const std::string& root, const std::string& logi
             // Skip redundant separators and current-directory segments.
         } else if (part == "..") {
             if (parts.empty()) {
-                throw std::runtime_error("runtime data path escapes data root: " + logical_path);
+                throw RuntimeDataError(RuntimeDataErrorKind::InvalidPath, "runtime data path escapes data root: " + logical_path);
             }
             parts.pop_back();
         } else {
@@ -129,7 +151,7 @@ public:
     void EnterIndex(std::size_t index) override {
         const msgpack::object& value = Current();
         if (value.type != msgpack::type::ARRAY || index >= value.via.array.size) {
-            throw std::runtime_error("missing array index " + std::to_string(index));
+            throw RuntimeDataError(RuntimeDataErrorKind::NotFound, "missing array index " + std::to_string(index));
         }
         CheckRuntimeDecodeLimit("nesting depth", stack_.size(), limits_.max_nesting_depth);
         stack_.push_back(&value.via.array.ptr[index]);
@@ -137,7 +159,7 @@ public:
 
     void ExitField() override {
         if (stack_.size() <= 1) {
-            throw std::runtime_error("MessagePack reader cursor stack underflow");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, "MessagePack reader cursor stack underflow");
         }
         stack_.pop_back();
     }
@@ -149,7 +171,7 @@ public:
             CheckRuntimeDecodeLimit("row count", rows, limits_.max_rows);
             return rows;
         }
-        throw std::runtime_error("reader value is not an array");
+        throw RuntimeDataError(RuntimeDataErrorKind::TypeMismatch, "reader value is not an array");
     }
 
     std::size_t ReadListLength() override {
@@ -159,7 +181,7 @@ public:
             CheckRuntimeDecodeLimit("list length", length, limits_.max_array_length);
             return length;
         }
-        throw std::runtime_error("reader value is not an array");
+        throw RuntimeDataError(RuntimeDataErrorKind::TypeMismatch, "reader value is not an array");
     }
 
     std::size_t ReadArrayLength()
@@ -179,13 +201,13 @@ public:
             if (value.via.u64 <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
                 return static_cast<std::int64_t>(value.via.u64);
             }
-            throw std::runtime_error("MessagePack positive integer exceeds int64 range");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, "MessagePack positive integer exceeds int64 range");
         }
         const std::string text = ScalarText();
         std::size_t consumed = 0;
         const std::int64_t parsed = std::stoll(text, &consumed);
         if (consumed != text.size()) {
-            throw std::runtime_error("expected int64-like value, got `" + text + "`");
+            throw RuntimeDataError(RuntimeDataErrorKind::Decode, "expected int64-like value, got `" + text + "`");
         }
         return parsed;
     }
@@ -194,7 +216,7 @@ public:
         const msgpack::object& value = Current();
         if (value.type == msgpack::type::FLOAT32 || value.type == msgpack::type::FLOAT64) {
             if (!std::isfinite(value.via.f64)) {
-                throw std::runtime_error("expected finite double-like value");
+                throw RuntimeDataError(RuntimeDataErrorKind::TypeMismatch, "expected finite double-like value");
             }
             return value.via.f64;
         }
@@ -208,7 +230,7 @@ public:
         std::size_t consumed = 0;
         const double parsed = std::stod(text, &consumed);
         if (consumed != text.size() || !std::isfinite(parsed)) {
-            throw std::runtime_error("expected finite double-like value, got `" + text + "`");
+            throw RuntimeDataError(RuntimeDataErrorKind::TypeMismatch, "expected finite double-like value, got `" + text + "`");
         }
         return parsed;
     }
@@ -236,13 +258,13 @@ public:
         if (text == "false" || text == "0") {
             return false;
         }
-        throw std::runtime_error("expected bool-like value, got `" + text + "`");
+        throw RuntimeDataError(RuntimeDataErrorKind::Decode, "expected bool-like value, got `" + text + "`");
     }
 
     std::string AsString() const override {
         const msgpack::object& value = Current();
         if (value.type != msgpack::type::STR) {
-            throw std::runtime_error("expected string value");
+            throw RuntimeDataError(RuntimeDataErrorKind::TypeMismatch, "expected string value");
         }
         CheckRuntimeDecodeLimit("string byte length", value.via.str.size, limits_.max_string_bytes);
         return std::string(value.via.str.ptr, value.via.str.size);
@@ -250,11 +272,11 @@ public:
 
     void EnterRequiredField(const std::string& name) override {
         if (!EnterNamedField(name)) {
-            throw std::runtime_error("missing required field `" + name + "`");
+            throw RuntimeDataError(RuntimeDataErrorKind::NotFound, "missing required field `" + name + "`");
         }
         if (Current().type == msgpack::type::NIL) {
             ExitField();
-            throw std::runtime_error("missing required field `" + name + "`");
+            throw RuntimeDataError(RuntimeDataErrorKind::NotFound, "missing required field `" + name + "`");
         }
     }
 
@@ -287,7 +309,7 @@ private:
         for (std::uint32_t index = 0; index < map.size; ++index) {
             const msgpack::object& key = map.ptr[index].key;
             if (key.type != msgpack::type::STR) {
-                throw std::runtime_error("MessagePack map key is not a string");
+                throw RuntimeDataError(RuntimeDataErrorKind::Unsupported, "MessagePack map key is not a string");
             }
             if (key.via.str.size == name.size() &&
                 std::memcmp(key.via.str.ptr, name.data(), name.size()) == 0) {
@@ -316,7 +338,7 @@ private:
             case msgpack::type::NIL:
                 return "null";
             default:
-                throw std::runtime_error("expected scalar MessagePack value");
+                throw RuntimeDataError(RuntimeDataErrorKind::TypeMismatch, "expected scalar MessagePack value");
         }
     }
 
@@ -337,11 +359,11 @@ public:
     std::unique_ptr<CONFIG_FORGE_RUNTIME_CPP_READER> Open(const std::string& path) override {
         std::ifstream file(SafeJoinPath(data_dir_, WithExtension(path, ".msgpack")), std::ios::binary | std::ios::ate);
         if (!file) {
-            throw std::runtime_error("failed to open runtime data: " + path);
+            throw RuntimeDataError(RuntimeDataErrorKind::Io, "failed to open runtime data: " + path);
         }
         const std::streamoff size = file.tellg();
         if (size < 0) {
-            throw std::runtime_error("failed to read runtime data size: " + path);
+            throw RuntimeDataError(RuntimeDataErrorKind::Io, "failed to read runtime data size: " + path);
         }
         CheckRuntimeDecodeLimit("runtime file bytes", static_cast<std::size_t>(size), limits_.max_file_bytes);
         file.seekg(0, std::ios::beg);

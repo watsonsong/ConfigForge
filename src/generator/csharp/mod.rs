@@ -11,7 +11,7 @@ use super::{
     ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField,
     CodeFragmentPayload, CodeGenerator, CodeModel, CodeTableKind, CodeWriterConfig, CodeWriterLike,
     GeneratorCommonInput, GeneratorRequirements, I18nFunctionReturn, I18nMode, I18nOptions,
-    NamingConfig, ReaderShapePlan, RuntimeInterfaceMode, build_code_model,
+    NamingConfig, ReaderShapePlan, RuntimeInterfaceEmit, RuntimeInterfaceMode, build_code_model,
     ir::CodeRelationCardinality, ir::require_non_empty_index_fields,
 };
 
@@ -44,6 +44,8 @@ pub struct CSharpCodegenOptions {
     pub emit_partial: bool,
     #[serde(default)]
     pub runtime_interface: RuntimeInterfaceMode,
+    #[serde(default)]
+    pub runtime_interface_emit: RuntimeInterfaceEmit,
     #[serde(default)]
     pub runtime_namespace: Option<String>,
     #[serde(default)]
@@ -92,6 +94,7 @@ impl Default for CSharpCodegenOptions {
             lazy_class_name: None,
             emit_partial: default_emit_partial(),
             runtime_interface: RuntimeInterfaceMode::Inline,
+            runtime_interface_emit: RuntimeInterfaceEmit::Copy,
             runtime_namespace: None,
             emit_runtime_adapters: false,
             type_mappings: CSharpTypeMappings::default(),
@@ -459,6 +462,14 @@ fn render_csharp_code(
 }
 
 fn validate_runtime_interface_options(options: &CSharpCodegenOptions) -> Result<()> {
+    if matches!(
+        options.runtime_interface_emit,
+        RuntimeInterfaceEmit::Reference
+    ) {
+        return Err(validation_error(
+            "runtime_interface_emit=reference is not supported for C# yet; use copy or none",
+        ));
+    }
     if matches!(options.runtime_interface, RuntimeInterfaceMode::External) {
         if let Some(namespace) = &options.runtime_namespace {
             validate_csharp_namespace(namespace)?;
@@ -582,6 +593,10 @@ fn render_runtime_contract(
     enums: &[super::CodeEnum],
     names: &CSharpNames,
 ) -> Result<()> {
+    content.raw("    public static class ConfigForgeRuntimeContract\n    {\n");
+    content.raw("        public const string ConfigForgeReaderContractVersion = \"1.0\";\n");
+    content.raw("        public const string RequiredConfigForgeReaderContract = \"^1.0\";\n");
+    content.raw("    }\n\n");
     content.raw("    public interface IConfigForgeRuntimeDataLoader\n    {\n");
     content.raw("        IConfigForgeRuntimeDataReader Open(string path);\n");
     content.raw("    }\n\n");
@@ -605,8 +620,13 @@ fn render_runtime_contract(
     content.raw("        bool ReadBool();\n");
     content.raw("        string ReadString();\n");
     content.raw("    }\n\n");
+    content.raw("    public enum ConfigForgeRuntimeErrorKind\n    {\n        Io,\n        Decode,\n        SchemaMismatch,\n        TypeMismatch,\n        NotFound,\n        Unsupported,\n        InvalidPath,\n    }\n\n");
     content.raw("    public sealed class ConfigForgeRuntimeException : Exception\n    {\n");
-    content.raw("        public ConfigForgeRuntimeException(string message) : base(message) { }\n");
+    content.raw("        public ConfigForgeRuntimeException(string message) : this(ConfigForgeRuntimeErrorKind.Decode, message) { }\n");
+    content.raw("        public ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, string message) : base(message) { Kind = kind; }\n");
+    content.raw("        public ConfigForgeRuntimeErrorKind Kind { get; }\n");
+    content.raw("        public string Code => $\"CF_RT_{Kind.ToString().ToUpperInvariant()}\";\n");
+    content.raw("        public string? Path { get; init; }\n");
     content.raw("    }\n\n");
     render_builtin_value_types(content);
     content.raw("    internal static class ConfigForgeRuntimeReader\n    {\n");

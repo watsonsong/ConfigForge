@@ -745,6 +745,12 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
             .expect("standard fixture external Rust code should be readable");
     assert!(external_rust_code.contains("pub use config_forge_runtime_reader_core::{"));
     assert!(!external_rust_code.contains("pub trait RuntimeDataReader"));
+    let external_rust_manifest = fs::read_to_string(
+        output_root.join("client_code/rust_external/config_forge_runtime_interface.json"),
+    )
+    .expect("standard fixture external Rust runtime manifest should be readable");
+    assert!(external_rust_manifest.contains("\"language\": \"rust\""));
+    assert!(external_rust_manifest.contains("\"emit\": \"reference\""));
 
     let cpp_external_code =
         fs::read_to_string(output_root.join("client_code/cpp_external/reference_game_config.hpp"))
@@ -752,6 +758,15 @@ fn standard_project_generated_code_loads_exported_runtime_data() {
     assert!(cpp_external_code.contains("#include \"config_forge/runtime/reader.hpp\""));
     assert!(cpp_external_code.contains("using config_forge_runtime::IRuntimeDataReader;"));
     assert!(!cpp_external_code.contains("class IRuntimeDataReader"));
+    let cpp_external_manifest = fs::read_to_string(
+        output_root.join("client_code/cpp_external/config_forge_runtime_interface.json"),
+    )
+    .expect("standard fixture external C++ runtime manifest should be readable");
+    assert!(cpp_external_manifest.contains("\"language\": \"cpp\""));
+    assert!(
+        cpp_external_manifest
+            .contains("\"runtime_core_header\": \"config_forge/runtime/reader.hpp\"")
+    );
 
     let java_code =
         fs::read_to_string(output_root.join("client_code/java/ReferenceGameConfig.java"))
