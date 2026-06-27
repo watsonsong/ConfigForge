@@ -17,10 +17,8 @@ pub(crate) use self::ir::{
 pub(crate) use reader_plan::ReaderShapePlan;
 #[cfg(test)]
 pub(crate) use writer::CodeWriter;
-pub use writer::{
-    CheckedStreamingCodeWriter, CodeWriterConfig, CodeWriterLike, IndentStyle,
-    PartialCodeWriterConfig, StreamingCodeWriter,
-};
+pub(crate) use writer::{CheckedStreamingCodeWriter, CodeWriterLike};
+pub use writer::{CodeWriterConfig, IndentStyle, PartialCodeWriterConfig};
 
 use std::{collections::BTreeMap, collections::HashMap, path::PathBuf};
 
@@ -38,20 +36,20 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CodeExportTarget {
-    pub language: String,
-    pub out_dir: PathBuf,
-    pub file_name: Option<String>,
-    pub module_name: String,
-    pub namespace: Option<String>,
-    pub options: CodegenOptions,
+pub(crate) struct CodeExportTarget {
+    pub(crate) language: String,
+    pub(crate) out_dir: PathBuf,
+    pub(crate) file_name: Option<String>,
+    pub(crate) module_name: String,
+    pub(crate) namespace: Option<String>,
+    pub(crate) options: CodegenOptions,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CodeExportProject {
-    pub name: Option<String>,
-    pub desc: Option<String>,
-    pub copyright: Option<String>,
+pub(crate) struct CodeExportProject {
+    pub(crate) name: Option<String>,
+    pub(crate) desc: Option<String>,
+    pub(crate) copyright: Option<String>,
 }
 
 impl From<&ArtifactProjectInfo> for CodeExportProject {
@@ -74,7 +72,7 @@ pub struct CodeArtifactOptions {
     pub language_options: HashMap<String, toml::Value>,
 }
 
-pub type CodegenOptions = CodeArtifactOptions;
+pub(crate) type CodegenOptions = CodeArtifactOptions;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct I18nOptions {
@@ -155,49 +153,32 @@ pub enum CaseStyle {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
-pub struct CodegenTaskConfig {
-    pub language: String,
-    pub output: PathBuf,
+pub(crate) struct CodegenTaskConfig {
+    pub(crate) language: String,
+    pub(crate) output: PathBuf,
     #[serde(default)]
-    pub file_name: Option<String>,
+    pub(crate) file_name: Option<String>,
     #[serde(default)]
-    pub data: Option<String>,
+    pub(crate) data: Option<String>,
     #[serde(default)]
-    pub module_name: Option<String>,
+    pub(crate) module_name: Option<String>,
     #[serde(default)]
-    pub namespace: Option<String>,
+    pub(crate) namespace: Option<String>,
     #[serde(default)]
-    pub file_header: Option<String>,
+    pub(crate) file_header: Option<String>,
     #[serde(default)]
-    pub keyword_conflict: Option<KeywordConflictPolicy>,
+    pub(crate) keyword_conflict: Option<KeywordConflictPolicy>,
     #[serde(default)]
-    pub i18n: I18nOptions,
+    pub(crate) i18n: I18nOptions,
     #[serde(default)]
-    pub naming: PartialNamingConfig,
+    pub(crate) naming: PartialNamingConfig,
     #[serde(default)]
-    pub formatting: PartialCodeWriterConfig,
+    pub(crate) formatting: PartialCodeWriterConfig,
     #[serde(flatten)]
-    pub language_options: HashMap<String, toml::Value>,
+    pub(crate) language_options: HashMap<String, toml::Value>,
 }
 
 impl CodegenTaskConfig {
-    pub fn for_language(language: &str) -> Self {
-        Self {
-            language: language.to_owned(),
-            output: PathBuf::new(),
-            file_name: None,
-            data: None,
-            module_name: None,
-            namespace: None,
-            file_header: None,
-            keyword_conflict: None,
-            i18n: I18nOptions::default(),
-            naming: PartialNamingConfig::default(),
-            formatting: PartialCodeWriterConfig::default(),
-            language_options: HashMap::new(),
-        }
-    }
-
     pub(crate) fn from_export_task_parts(
         language: String,
         output: PathBuf,
@@ -571,15 +552,13 @@ fn language_defaults(language: &str) -> Option<(&'static str, NamingConfig, Code
     Some((canonical, naming, formatting))
 }
 
-pub struct CodeExportInput<'meta> {
-    pub meta: &'meta LinkedMetaModel<'meta>,
-    pub target_tags: TargetTags,
-    pub project: CodeExportProject,
-    pub project_root: PathBuf,
-    pub target_name: String,
-    pub target: CodeExportTarget,
-    pub runtime_data_files: Vec<RuntimeDataFile>,
-    pub generated_at: String,
+pub(crate) struct CodeExportInput<'meta> {
+    pub(crate) meta: &'meta LinkedMetaModel<'meta>,
+    pub(crate) target_tags: TargetTags,
+    pub(crate) project: CodeExportProject,
+    pub(crate) target: CodeExportTarget,
+    pub(crate) runtime_data_files: Vec<RuntimeDataFile>,
+    pub(crate) generated_at: String,
 }
 
 /// Target-language code generator.

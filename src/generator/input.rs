@@ -97,8 +97,6 @@ impl<'meta> GeneratorCommonInput<'meta> {
             meta: self.meta,
             target_tags: self.target_tags.clone(),
             project: CodeExportProject::from(&self.project),
-            project_root: self.project_root.clone(),
-            target_name: self.target_name.clone(),
             target: code_target,
             runtime_data_files: Vec::new(),
             generated_at: self.generated_at.clone(),

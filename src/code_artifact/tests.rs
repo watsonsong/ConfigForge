@@ -214,8 +214,6 @@ pub(crate) fn input_for<'a>(meta: &'a MetaModel, language: &str) -> CodeExportIn
             desc: Some("Demo config".to_owned()),
             copyright: Some("Copyright Demo".to_owned()),
         },
-        project_root: PathBuf::from("."),
-        target_name: "test".to_owned(),
         target: CodeExportTarget {
             language: language.to_owned(),
             out_dir: PathBuf::from("out"),

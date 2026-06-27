@@ -231,6 +231,7 @@ pub struct StreamingCodeWriter<W> {
     has_content: bool,
 }
 
+#[allow(dead_code)]
 pub trait CodeWriterLike {
     fn raw(&mut self, text: impl AsRef<str>);
     fn raw_fmt(&mut self, args: fmt::Arguments<'_>);
@@ -383,6 +384,7 @@ impl<W: Write> CodeWriterLike for CheckedStreamingCodeWriter<W> {
     }
 }
 
+#[allow(dead_code)]
 impl<W: Write> StreamingCodeWriter<W> {
     pub fn new(output: W, config: CodeWriterConfig) -> Self {
         Self {

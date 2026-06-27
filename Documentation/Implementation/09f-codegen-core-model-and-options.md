@@ -292,17 +292,19 @@ impl<W: std::io::Write> StreamingCodeWriter<W> {
 ### 9.4.3 `CodeExportInput`
 
 ```rust
-pub struct CodeExportInput<'meta> {
-    pub meta: &'meta LinkedMetaModel<'meta>,
-    pub target_tags: TargetTags,
-    pub project: CodeExportProject,
-    pub target: CodeExportTarget,
-    pub runtime_data_files: Vec<RuntimeDataFile>,
-    pub generated_at: String,
+pub(crate) struct CodeExportInput<'meta> {
+    pub(crate) meta: &'meta LinkedMetaModel<'meta>,
+    pub(crate) target_tags: TargetTags,
+    pub(crate) project: CodeExportProject,
+    pub(crate) target: CodeExportTarget,
+    pub(crate) runtime_data_files: Vec<RuntimeDataFile>,
+    pub(crate) generated_at: String,
 }
 ```
 
 `project` 来自 Project Config，用于渲染文件头模板；`target_tags` 来自 Build 归一化后的 effective target tags（Project target tags 与 CLI extra tags 的并集），用于构造目标相关的 CodeModel；`runtime_data_files` 当前由 build 传入空列表，保留为未来 manifest / 兼容扩展入口，不参与默认资源名决策。生成代码中的默认资源名始终是逻辑表名，例如 `ItemsTable::DATA_FILE = "items"`。`generated_at` 由 exporter 注入，用于渲染文件头中的 `{{datetime}}`。
+
+`CodeExportInput`、`CodeExportTarget`、`CodeExportProject`、`CodegenTaskConfig`、`CodeWriterLike` 和 streaming writer 实现均是 crate-internal generator execution 协议，不从 crate root re-export。稳定外部 API 只保留 `CodeArtifactOptions`、命名 / i18n / formatting 配置类型、语言 options，以及 build / project / diagnostic / artifact facade。
 
 ### 9.4.4 `GeneratedFile`（测试专用）
 

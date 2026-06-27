@@ -151,7 +151,7 @@ src/artifact/
   writer.rs           # dry-run / direct / temp-commit 写入策略
 ```
 
-`CodeGenerator` 的 crate-internal API 是 `generate_to_sink(input, sink)`：language `ArtifactGenerator` 从 `GeneratorCommonInput` 构造 `CodeExportInput` 并传入 shared `ArtifactSink`，Build 本身不再区分 language codegen、direct generator 或 data exporter，也不再遍历 `Vec<GeneratedFile>` 或了解生成文件的 materialization 方式。该 trait 不是稳定外部 generator plugin API，因此可以依赖内部 `ArtifactSink`；crate root 不 re-export `CodeGenerator`、builtin registry 或具体 generator 类型。`generate()` / `GeneratedFile` 仅在测试构建中存在，用于 String-backed snapshot 与 sink-backed streaming 输出等价性校验。每个 language generator 直接实现 `ArtifactGenerator`，内部继续复用 `CodeExportInput` / `CodeModel` / writer helper。
+`CodeGenerator` 的 crate-internal API 是 `generate_to_sink(input, sink)`：language `ArtifactGenerator` 从 `GeneratorCommonInput` 构造 `CodeExportInput` 并传入 shared `ArtifactSink`，Build 本身不再区分 language codegen、direct generator 或 data exporter，也不再遍历 `Vec<GeneratedFile>` 或了解生成文件的 materialization 方式。该 trait 不是稳定外部 generator plugin API，因此可以依赖内部 `ArtifactSink`；crate root 不 re-export `CodeGenerator`、`CodeExportInput` / `CodeExportTarget`、streaming writer 实现、builtin registry 或具体 generator 类型。`generate()` / `GeneratedFile` 仅在测试构建中存在，用于 String-backed snapshot 与 sink-backed streaming 输出等价性校验。每个 language generator 直接实现 `ArtifactGenerator`，内部继续复用 `CodeExportInput` / `CodeModel` / writer helper。
 
 ### 9.3.1 ObjectTable code artifact 边界
 
@@ -182,7 +182,7 @@ ObjectTable 的 code artifact 语义并入 code artifact toolkit：
 | Unreal C++ backend | [`09j-codegen-cpp-unreal-backend.md`](09j-codegen-cpp-unreal-backend.md) | 已实现的 `cpp_unreal` 独立生成器、Unreal 容器模式、Blueprint 反射模式、公共 access interface，以及与标准 C++ backend 的复用边界。 |
 | TypeScript backend | [`09d-codegen-typescript-backend.md`](09d-codegen-typescript-backend.md) | TypeScript interface/class、async/sync loading、`LazyGameData`、relation helper 与 text helper。 |
 | Runtime adapters | [`09e-codegen-runtime-adapters.md`](09e-codegen-runtime-adapters.md) | `runtime/` 标准 adapters、C++ CMake、TS packages、Rust templates、compliance fixtures。 |
-| Core model / IR / options | [`09f-codegen-core-model-and-options.md`](09f-codegen-core-model-and-options.md) | `CodeExportTarget` / `CodeExportInput`、测试专用 `GeneratedFile`、CodeModel IR、命名策略、类型映射和 string-backed / streaming 通用 writer。 |
+| Core model / IR / options | [`09f-codegen-core-model-and-options.md`](09f-codegen-core-model-and-options.md) | crate-internal `CodeExportTarget` / `CodeExportInput`、测试专用 `GeneratedFile`、CodeModel IR、命名策略、类型映射和 string-backed / streaming 通用 writer。 |
 | Index and relation helpers | [`09g-codegen-index-and-relation-helpers.md`](09g-codegen-index-and-relation-helpers.md) | CollectionTable index lookup、`linked_field` relation helper、row-index cache、`link` / `link_all`。 |
 | Generator API and tests | [`09h-codegen-generator-api-and-tests.md`](09h-codegen-generator-api-and-tests.md) | `CodeGenerator` renderer facet、build-facing `ArtifactGenerator` 接入步骤、文件组织、诊断和测试计划。 |
 | Lua embedded data generator | [`09i-lua-embedded-data-generator.md`](09i-lua-embedded-data-generator.md) | 已实现的 Lua data+code 合一导出、每表 `.lua`、lazy require、row array + metatable、索引和实现说明。 |

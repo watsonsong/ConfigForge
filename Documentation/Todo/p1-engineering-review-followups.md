@@ -29,18 +29,18 @@
 
 ### TODO
 
-- [ ] 审计 `src/lib.rs` 所有 `pub use code_artifact::{...}` 条目，区分稳定 public API 与内部实现细节。
-- [ ] 将 `CodeExportInput`、`CodeExportProject`、`CodeExportTarget`、`CodegenTaskConfig` 从 crate root re-export 移除；如无外部稳定需求，进一步将其可见性收窄为 `pub(crate)`。
-- [ ] 审计 `CodeWriterLike`、`CheckedStreamingCodeWriter`、`StreamingCodeWriter` 是否确实需要作为 public API；若只供 generator 内部使用，移出 crate root re-export。
-- [ ] 保留必要的用户配置类型，例如 `CodeArtifactOptions`、`NamingConfig`、语言 options、`I18nOptions` 等。
-- [ ] 补充或调整单元测试，确保内部 generator 仍可正常访问收窄后的类型。
-- [ ] 若 public API 收敛影响文档，更新 `Documentation/Implementation/09-codegen-module-detail-design.md` 与 `Documentation/Implementation/01-module-outline.md` 中的 public API 说明。
+- [x] 审计 `src/lib.rs` 所有 `pub use code_artifact::{...}` 条目，区分稳定 public API 与内部实现细节。
+- [x] 将 `CodeExportInput`、`CodeExportProject`、`CodeExportTarget`、`CodegenTaskConfig` 从 crate root re-export 移除；如无外部稳定需求，进一步将其可见性收窄为 `pub(crate)`。
+- [x] 审计 `CodeWriterLike`、`CheckedStreamingCodeWriter`、`StreamingCodeWriter` 是否确实需要作为 public API；若只供 generator 内部使用，移出 crate root re-export。
+- [x] 保留必要的用户配置类型，例如 `CodeArtifactOptions`、`NamingConfig`、语言 options、`I18nOptions` 等。
+- [x] 补充或调整单元测试，确保内部 generator 仍可正常访问收窄后的类型。
+- [x] 若 public API 收敛影响文档，更新 `Documentation/Implementation/09-codegen-module-detail-design.md` 与 `Documentation/Implementation/01-module-outline.md` 中的 public API 说明。
 
 ### 验收
 
-- [ ] `cargo test` 通过。
-- [ ] crate root 不再公开内部 generator execution input。
-- [ ] 文档中的“最小公开 API”原则与实现一致。
+- [x] `cargo test` 通过。
+- [x] crate root 不再公开内部 generator execution input。
+- [x] 文档中的“最小公开 API”原则与实现一致。
 
 ## P1-2：补强 architecture module boundary guard
 
