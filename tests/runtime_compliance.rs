@@ -1058,6 +1058,12 @@ fn run_json_compatible_error_cases<R: RuntimeDataReader>(adapter: ReaderAdapter<
             "{} case `{name}` operation `{operation}` should fail with expected kind",
             adapter.name
         );
+        assert_eq!(
+            error.code(),
+            expected_error_code(expected_kind),
+            "{} case `{name}` operation `{operation}` should expose expected code",
+            adapter.name
+        );
         assert!(
             error.message.contains(expected_message_contains),
             "{} case `{name}` error `{}` should contain `{expected_message_contains}`",
@@ -1071,6 +1077,19 @@ fn run_json_compatible_error_cases<R: RuntimeDataReader>(adapter: ReaderAdapter<
         "{} should execute JSON-compatible errors",
         adapter.name
     );
+}
+
+fn expected_error_code(kind: &str) -> &'static str {
+    match kind {
+        "Io" => "CF_RT_IO",
+        "Decode" => "CF_RT_DECODE",
+        "SchemaMismatch" => "CF_RT_SCHEMA_MISMATCH",
+        "TypeMismatch" => "CF_RT_TYPE_MISMATCH",
+        "NotFound" => "CF_RT_NOT_FOUND",
+        "Unsupported" => "CF_RT_UNSUPPORTED",
+        "InvalidPath" => "CF_RT_INVALID_PATH",
+        other => panic!("unknown expected error kind `{other}`"),
+    }
 }
 
 fn run_scalar_error<R: RuntimeDataReader>(

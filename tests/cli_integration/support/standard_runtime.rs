@@ -979,6 +979,8 @@ pub(crate) fn verify_standard_generated_java_runtime(
         "ConfigForgeJsonRuntimeDataLoader.java",
         "ConfigForgeJsonRuntimeDataReader.java",
         "ConfigForgeJsonParser.java",
+        "ConfigForgeRuntimeErrorKind.java",
+        "ConfigForgeRuntimeException.java",
     ] {
         fs::copy(
             runtime_java_dir.join(file_name),
@@ -992,6 +994,8 @@ pub(crate) fn verify_standard_generated_java_runtime(
         "ConfigForgeMessagePackRuntimeDataLoader.java",
         "ConfigForgeMessagePackRuntimeDataReader.java",
         "ConfigForgeMessagePackParser.java",
+        "ConfigForgeRuntimeErrorKind.java",
+        "ConfigForgeRuntimeException.java",
     ] {
         fs::copy(
             msgpack_runtime_java_dir.join(file_name),
@@ -1004,6 +1008,8 @@ pub(crate) fn verify_standard_generated_java_runtime(
     for file_name in [
         "ConfigForgeBinaryRuntimeDataLoader.java",
         "ConfigForgeBinaryRuntimeDataReader.java",
+        "ConfigForgeRuntimeErrorKind.java",
+        "ConfigForgeRuntimeException.java",
     ] {
         fs::copy(
             binary_runtime_java_dir.join(file_name),
@@ -1252,11 +1258,17 @@ public final class RuntimeCheck {
         .arg(runtime_package_dir.join("ConfigForgeJsonRuntimeDataLoader.java"))
         .arg(runtime_package_dir.join("ConfigForgeJsonRuntimeDataReader.java"))
         .arg(runtime_package_dir.join("ConfigForgeJsonParser.java"))
+        .arg(runtime_package_dir.join("ConfigForgeRuntimeErrorKind.java"))
+        .arg(runtime_package_dir.join("ConfigForgeRuntimeException.java"))
         .arg(msgpack_runtime_package_dir.join("ConfigForgeMessagePackRuntimeDataLoader.java"))
         .arg(msgpack_runtime_package_dir.join("ConfigForgeMessagePackRuntimeDataReader.java"))
         .arg(msgpack_runtime_package_dir.join("ConfigForgeMessagePackParser.java"))
+        .arg(msgpack_runtime_package_dir.join("ConfigForgeRuntimeErrorKind.java"))
+        .arg(msgpack_runtime_package_dir.join("ConfigForgeRuntimeException.java"))
         .arg(binary_runtime_package_dir.join("ConfigForgeBinaryRuntimeDataLoader.java"))
         .arg(binary_runtime_package_dir.join("ConfigForgeBinaryRuntimeDataReader.java"))
+        .arg(binary_runtime_package_dir.join("ConfigForgeRuntimeErrorKind.java"))
+        .arg(binary_runtime_package_dir.join("ConfigForgeRuntimeException.java"))
         .output()
         .expect("standard generated Java javac should run");
     assert_command_success(output, "standard generated Java javac");

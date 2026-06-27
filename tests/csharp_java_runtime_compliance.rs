@@ -100,7 +100,10 @@ fn run_java_runtime_compliance_cases() {
 
     for file in [
         "ConfigForgeJsonParser.java",
+        "ConfigForgeJsonRuntimeDataLoader.java",
         "ConfigForgeJsonRuntimeDataReader.java",
+        "ConfigForgeRuntimeErrorKind.java",
+        "ConfigForgeRuntimeException.java",
     ] {
         fs::copy(
             root.join("runtime/java/json_reader/src/configforge/runtime/json")
@@ -111,7 +114,10 @@ fn run_java_runtime_compliance_cases() {
     }
     for file in [
         "ConfigForgeMessagePackParser.java",
+        "ConfigForgeMessagePackRuntimeDataLoader.java",
         "ConfigForgeMessagePackRuntimeDataReader.java",
+        "ConfigForgeRuntimeErrorKind.java",
+        "ConfigForgeRuntimeException.java",
     ] {
         fs::copy(
             root.join("runtime/java/messagepack_reader/src/configforge/runtime/messagepack")
@@ -120,13 +126,19 @@ fn run_java_runtime_compliance_cases() {
         )
         .expect("Java MessagePack source should be copied");
     }
-    fs::copy(
-        root.join(
-            "runtime/java/binary_reader/src/configforge/runtime/binary/ConfigForgeBinaryRuntimeDataReader.java",
-        ),
-        binary_dir.join("ConfigForgeBinaryRuntimeDataReader.java"),
-    )
-    .expect("Java binary source should be copied");
+    for file in [
+        "ConfigForgeBinaryRuntimeDataLoader.java",
+        "ConfigForgeBinaryRuntimeDataReader.java",
+        "ConfigForgeRuntimeErrorKind.java",
+        "ConfigForgeRuntimeException.java",
+    ] {
+        fs::copy(
+            root.join("runtime/java/binary_reader/src/configforge/runtime/binary")
+                .join(file),
+            binary_dir.join(file),
+        )
+        .expect("Java binary source should be copied");
+    }
     fs::write(
         source_root.join("RuntimeCompliance.java"),
         java_runner_source(),
@@ -138,10 +150,19 @@ fn run_java_runtime_compliance_cases() {
         .arg(&class_dir)
         .arg(source_root.join("RuntimeCompliance.java"))
         .arg(json_dir.join("ConfigForgeJsonParser.java"))
+        .arg(json_dir.join("ConfigForgeJsonRuntimeDataLoader.java"))
         .arg(json_dir.join("ConfigForgeJsonRuntimeDataReader.java"))
+        .arg(json_dir.join("ConfigForgeRuntimeErrorKind.java"))
+        .arg(json_dir.join("ConfigForgeRuntimeException.java"))
         .arg(msgpack_dir.join("ConfigForgeMessagePackParser.java"))
+        .arg(msgpack_dir.join("ConfigForgeMessagePackRuntimeDataLoader.java"))
         .arg(msgpack_dir.join("ConfigForgeMessagePackRuntimeDataReader.java"))
+        .arg(msgpack_dir.join("ConfigForgeRuntimeErrorKind.java"))
+        .arg(msgpack_dir.join("ConfigForgeRuntimeException.java"))
+        .arg(binary_dir.join("ConfigForgeBinaryRuntimeDataLoader.java"))
         .arg(binary_dir.join("ConfigForgeBinaryRuntimeDataReader.java"))
+        .arg(binary_dir.join("ConfigForgeRuntimeErrorKind.java"))
+        .arg(binary_dir.join("ConfigForgeRuntimeException.java"))
         .output()
         .expect("Java compliance javac should run");
     assert_command_success(output, "Java runtime compliance javac");
@@ -208,10 +229,12 @@ foreach (var adapter in adapters) {
     RunNamedCompliance(adapter.Name, adapter.ReaderFor);
 }
 RunBinaryCompliance();
+RunLoaderIoCompliance(fixtureDir);
 
 static void Check(bool condition, string label) { if (!condition) throw new Exception(label); }
 static void Equal<T>(T actual, T expected, string label) { if (!EqualityComparer<T>.Default.Equals(actual, expected)) throw new Exception($"{label}: expected {expected}, got {actual}"); }
 static void ExpectFailure(string label, Action operation, string keyword) { try { operation(); } catch (Exception error) { if (keyword.Length == 0 || error.Message.Contains(keyword)) return; throw new Exception($"{label}: expected {keyword}, got {error.Message}"); } throw new Exception(label + ": expected failure"); }
+static void ExpectStructuredFailure(string label, Action operation, string keyword, string kind, string code, string? pathContains = null) { try { operation(); } catch (Exception error) { if (keyword.Length != 0 && !error.Message.Contains(keyword)) throw new Exception($"{label}: expected {keyword}, got {error.Message}"); var kindProp = error.GetType().GetProperty("Kind") ?? throw new Exception(label + ": missing Kind"); var codeProp = error.GetType().GetProperty("Code") ?? throw new Exception(label + ": missing Code"); Equal(kindProp.GetValue(error)?.ToString(), kind, label + " kind"); Equal(codeProp.GetValue(error)?.ToString(), code, label + " code"); if (pathContains != null) { var pathProp = error.GetType().GetProperty("Path") ?? throw new Exception(label + ": missing Path"); var path = pathProp.GetValue(error)?.ToString() ?? ""; if (!path.Contains(pathContains)) throw new Exception($"{label}: expected path containing {pathContains}, got {path}"); } return; } throw new Exception(label + ": expected failure"); }
 static void Enter(dynamic reader, params object[] steps) { foreach (var step in steps) { if (step is string field) reader.EnterRequiredField(field); else reader.EnterListElement((int)step); } }
 static void Exit(dynamic reader, params object[] steps) { for (var i = steps.Length - 1; i >= 0; i--) { if (steps[i] is string) reader.ExitField(); else reader.ExitListElement(); } }
 static T WithPath<T>(dynamic reader, Func<dynamic, T> read, params object[] steps) { Enter(reader, steps); try { return read(reader); } finally { Exit(reader, steps); } }
@@ -241,13 +264,19 @@ static void RunNamedCompliance(string adapter, Func<string, dynamic> readerFor) 
     Equal(WithPath<string>((object)fragment, r => r.ReadString(), "rows", 0, "effect", "kind"), "fixed", adapter + " fragment kind");
 
     dynamic missing = readerFor("missing_vs_null.json");
-    Enter(missing, "rows", 0); try { ExpectFailure(adapter + " missing", () => missing.EnterRequiredField("missing"), "missing required field"); } finally { Exit(missing, "rows", 0); }
+    Enter(missing, "rows", 0); try { ExpectStructuredFailure(adapter + " missing", () => missing.EnterRequiredField("missing"), "missing required field", "NotFound", "CF_RT_NOT_FOUND"); } finally { Exit(missing, "rows", 0); }
     ExpectFailure(adapter + " overflow", () => WithPath<long>((object)scalar, r => r.ReadInt(), "rows", 0, "overflow_int"), "");
     ExpectFailure(adapter + " invalid bool", () => WithPath<bool>((object)scalar, r => r.ReadBool(), "rows", 0, "invalid_bool"), "");
     ExpectFailure(adapter + " non finite", () => WithPath<double>((object)scalar, r => r.ReadFloat(), "rows", 0, "non_finite_float"), "finite");
     ExpectFailure(adapter + " list length on scalar", () => WithPath<int>((object)scalar, r => r.ReadListLength(), "rows", 0, "id"), "array");
-    ExpectFailure(adapter + " string type mismatch", () => WithPath<string>((object)scalar, r => r.ReadString(), "rows", 0, "enabled_bool"), "string");
+    ExpectStructuredFailure(adapter + " string type mismatch", () => WithPath<string>((object)scalar, r => r.ReadString(), "rows", 0, "enabled_bool"), "string", "TypeMismatch", "CF_RT_TYPE_MISMATCH");
     ExpectFailure(adapter + " unknown enum", () => WithPath<int>((object)scalar, r => r.ReadEnumIndex(new[] { "Sword", "Shield" }), "rows", 0, "name"), "unknown enum");
+}
+
+static void RunLoaderIoCompliance(string fixtureDir) {
+    ExpectStructuredFailure("csharp json loader missing file", () => new JsonRuntimeDataFileLoader(fixtureDir).OpenReader("missing_runtime_file"), "failed to read runtime data", "Io", "CF_RT_IO", "missing_runtime_file.json");
+    ExpectStructuredFailure("csharp messagepack loader missing file", () => new MessagePackRuntimeDataFileLoader(fixtureDir).OpenReader("missing_runtime_file"), "failed to read runtime data", "Io", "CF_RT_IO", "missing_runtime_file.msgpack");
+    ExpectStructuredFailure("csharp binary loader missing file", () => new BinaryRuntimeDataFileLoader(fixtureDir).OpenReader("missing_runtime_file"), "failed to read runtime data", "Io", "CF_RT_IO", "missing_runtime_file.bin");
 }
 
 static void AssertCSharpTemplateMetadata(string adapter) {
@@ -321,6 +350,7 @@ import java.lang.reflect.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
+import configforge.runtime.binary.ConfigForgeBinaryRuntimeDataLoader;
 import configforge.runtime.binary.ConfigForgeBinaryRuntimeDataReader;
 import configforge.runtime.json.*;
 import configforge.runtime.messagepack.*;
@@ -333,6 +363,7 @@ public class RuntimeCompliance {
     runNamed("java-json", name -> new ConfigForgeJsonRuntimeDataReader(ConfigForgeJsonParser.parse(readFixture(name))));
     runNamed("java-messagepack", name -> new ConfigForgeMessagePackRuntimeDataReader(ConfigForgeMessagePackParser.parse(encodeMessagePack(ConfigForgeJsonParser.parse(readFixture(name))))));
     runBinary();
+    runLoaderIoCompliance();
   }
   static String readFixture(String name) throws Exception { return new String(Files.readAllBytes(Paths.get(fixtureDir, name)), StandardCharsets.UTF_8); }
   static Object call(Object reader, String name, Class<?>[] types, Object... args) throws Exception { try { return reader.getClass().getMethod(name, types).invoke(reader, args); } catch (InvocationTargetException e) { throw (Exception)e.getCause(); } }
@@ -343,6 +374,8 @@ public class RuntimeCompliance {
   static void check(boolean condition, String label) { if (!condition) throw new RuntimeException(label); }
   static void equal(Object actual, Object expected, String label) { if (!Objects.equals(actual, expected)) throw new RuntimeException(label + ": expected " + expected + ", got " + actual); }
   static void expectFailure(String label, ThrowingRunnable op, String keyword) throws Exception { try { op.run(); } catch (Exception e) { if (keyword.isEmpty() || e.getMessage().contains(keyword)) return; throw new RuntimeException(label + ": expected " + keyword + ", got " + e.getMessage()); } throw new RuntimeException(label + ": expected failure"); }
+  static void expectStructuredFailure(String label, ThrowingRunnable op, String keyword, String kind, String code) throws Exception { expectStructuredFailure(label, op, keyword, kind, code, null); }
+  static void expectStructuredFailure(String label, ThrowingRunnable op, String keyword, String kind, String code, String pathContains) throws Exception { try { op.run(); } catch (Exception e) { if (!keyword.isEmpty() && !e.getMessage().contains(keyword)) throw new RuntimeException(label + ": expected " + keyword + ", got " + e.getMessage()); Object actualKind = e.getClass().getMethod("kind").invoke(e); Object actualCode = e.getClass().getMethod("code").invoke(e); equal(String.valueOf(actualKind), kind, label + " kind"); equal(String.valueOf(actualCode), code, label + " code"); if (pathContains != null) { Object actualPath = e.getClass().getMethod("path").invoke(e); String path = String.valueOf(actualPath); if (!path.contains(pathContains)) throw new RuntimeException(label + ": expected path containing " + pathContains + ", got " + path); } return; } throw new RuntimeException(label + ": expected failure"); }
   interface ThrowingRunnable { void run() throws Exception; }
   interface ReadOp { Object run(Object reader) throws Exception; }
   static Object withPath(Object r, ReadOp op, Object... steps) throws Exception { for (Object step: steps) { if (step instanceof String) field(r, (String)step); else index(r, (Integer)step); } try { return op.run(r); } finally { for (int i = steps.length - 1; i >= 0; i--) { if (steps[i] instanceof String) exitField(r); else exitIndex(r); } } }
@@ -371,13 +404,20 @@ public class RuntimeCompliance {
     Object escaped = readerFor.create("escaped_string.json"); equal(withPath(escaped, r -> readString(r), "rows", 0, "text"), "line\nnext\t\"quoted\"", adapter + " escaped");
     Object nested = readerFor.create("nested_struct.json"); equal(withPath(nested, r -> readInt(r), "rows", 0, "reward", "count"), Long.valueOf(3), adapter + " nested");
     Object fragment = readerFor.create("fragment.json"); equal(withPath(fragment, r -> readString(r), "rows", 0, "effect", "kind"), "fixed", adapter + " fragment");
-    Object missing = readerFor.create("missing_vs_null.json"); field(missing, "rows"); index(missing, 0); try { expectFailure(adapter + " missing", () -> field(missing, "missing"), "missing required field"); } finally { exitIndex(missing); exitField(missing); }
+    Object missing = readerFor.create("missing_vs_null.json"); field(missing, "rows"); index(missing, 0); try { expectStructuredFailure(adapter + " missing", () -> field(missing, "missing"), "missing required field", "NotFound", "CF_RT_NOT_FOUND"); } finally { exitIndex(missing); exitField(missing); }
     expectFailure(adapter + " overflow", () -> withPath(scalar, r -> readInt(r), "rows", 0, "overflow_int"), "");
     expectFailure(adapter + " invalid bool", () -> withPath(scalar, r -> readBool(r), "rows", 0, "invalid_bool"), "");
     expectFailure(adapter + " non finite", () -> withPath(scalar, r -> readFloat(r), "rows", 0, "non_finite_float"), "finite");
     expectFailure(adapter + " list length on scalar", () -> withPath(scalar, r -> readListLength(r), "rows", 0, "id"), "array");
-    expectFailure(adapter + " string type mismatch", () -> withPath(scalar, r -> readString(r), "rows", 0, "enabled_bool"), "string");
+    expectStructuredFailure(adapter + " string type mismatch", () -> withPath(scalar, r -> readString(r), "rows", 0, "enabled_bool"), "string", "TypeMismatch", "CF_RT_TYPE_MISMATCH");
     expectFailure(adapter + " unknown enum", () -> withPath(scalar, r -> call(r, "readEnumIndex", new Class[]{String[].class}, (Object)new String[]{"Sword", "Shield"}), "rows", 0, "name"), "unknown enum");
+  }
+
+  static void runLoaderIoCompliance() throws Exception {
+    Path root = Paths.get(fixtureDir);
+    expectStructuredFailure("java json loader missing file", () -> new ConfigForgeJsonRuntimeDataLoader(root).openReader("missing_runtime_file"), "failed to read runtime data", "Io", "CF_RT_IO", "missing_runtime_file.json");
+    expectStructuredFailure("java messagepack loader missing file", () -> new ConfigForgeMessagePackRuntimeDataLoader(root).openReader("missing_runtime_file"), "failed to read runtime data", "Io", "CF_RT_IO", "missing_runtime_file.msgpack");
+    expectStructuredFailure("java binary loader missing file", () -> new ConfigForgeBinaryRuntimeDataLoader(root).openReader("missing_runtime_file"), "failed to read runtime data", "Io", "CF_RT_IO", "missing_runtime_file.bin");
   }
 
   static void assertJavaTemplateMetadata(String adapter) {

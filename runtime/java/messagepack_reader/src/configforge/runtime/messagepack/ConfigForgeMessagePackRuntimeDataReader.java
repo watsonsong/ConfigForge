@@ -7,38 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 
-
-
-enum ConfigForgeRuntimeErrorKind {
-    Io,
-    Decode,
-    SchemaMismatch,
-    TypeMismatch,
-    NotFound,
-    Unsupported,
-    InvalidPath
-}
-
-class ConfigForgeRuntimeException extends RuntimeException {
-    private final ConfigForgeRuntimeErrorKind kind;
-    private final String path;
-
-    ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, String message) {
-        super(message);
-        this.kind = kind;
-        this.path = null;
-    }
-
-    ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, String message, Throwable cause) {
-        super(message, cause);
-        this.kind = kind;
-        this.path = null;
-    }
-
-    ConfigForgeRuntimeErrorKind kind() { return kind; }
-    String code() { return "CF_RT_" + kind.name().toUpperCase(java.util.Locale.ROOT); }
-    String path() { return path; }
-}
 public class ConfigForgeMessagePackRuntimeDataReader {
     public static final String TEMPLATE_VERSION = "0.1.0";
     public static final String SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0";

@@ -33,7 +33,17 @@ public sealed class ConfigForgeRuntimeException : Exception
     }
 
     public RuntimeDataErrorKind Kind { get; }
-    public string Code => $"CF_RT_{Kind.ToString().ToUpperInvariant()}";
+    public string Code => Kind switch
+    {
+        RuntimeDataErrorKind.Io => "CF_RT_IO",
+        RuntimeDataErrorKind.Decode => "CF_RT_DECODE",
+        RuntimeDataErrorKind.SchemaMismatch => "CF_RT_SCHEMA_MISMATCH",
+        RuntimeDataErrorKind.TypeMismatch => "CF_RT_TYPE_MISMATCH",
+        RuntimeDataErrorKind.NotFound => "CF_RT_NOT_FOUND",
+        RuntimeDataErrorKind.Unsupported => "CF_RT_UNSUPPORTED",
+        RuntimeDataErrorKind.InvalidPath => "CF_RT_INVALID_PATH",
+        _ => "CF_RT_INTERNAL",
+    };
     public string? Path { get; init; }
 }
 
@@ -52,7 +62,27 @@ public class MessagePackRuntimeDataFileLoader
     public MessagePackRuntimeDataReader OpenReader(string path)
     {
         OpenCount++;
-        return new MessagePackRuntimeDataReader(File.ReadAllBytes(Path.Combine(_root, path + ".msgpack")));
+        var resourcePath = Path.Combine(_root, path + ".msgpack");
+        try
+        {
+            return new MessagePackRuntimeDataReader(File.ReadAllBytes(resourcePath));
+        }
+        catch (IOException error)
+        {
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Io, "failed to read runtime data", error) { Path = resourcePath };
+        }
+        catch (UnauthorizedAccessException error)
+        {
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Io, "failed to read runtime data", error) { Path = resourcePath };
+        }
+        catch (ArgumentException error)
+        {
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Io, "failed to read runtime data", error) { Path = resourcePath };
+        }
+        catch (NotSupportedException error)
+        {
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Io, "failed to read runtime data", error) { Path = resourcePath };
+        }
     }
 }
 
@@ -222,7 +252,7 @@ public class MessagePackRuntimeDataReader
         return current switch
         {
             string value => value,
-            _ => throw new InvalidOperationException($"expected string value, got {TypeName(current)}"),
+            _ => throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.TypeMismatch, $"expected string value, got {TypeName(current)}"),
         };
     }
 

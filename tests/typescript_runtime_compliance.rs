@@ -387,10 +387,27 @@ function expectFailure(label: string, operation: () => void, keyword: string, ex
       if (error.kind !== expectedKind) {
         throw new Error(`${label}: expected RuntimeDataError kind ${expectedKind}, got ${error.kind}`);
       }
+      const expectedCode = expectedErrorCode(expectedKind);
+      if (error.code !== expectedCode) {
+        throw new Error(`${label}: expected RuntimeDataError code ${expectedCode}, got ${error.code}`);
+      }
     }
     return;
   }
   throw new Error(`${label}: expected failure`);
+}
+
+function expectedErrorCode(kind: string): string {
+  switch (kind) {
+    case "Io": return "CF_RT_IO";
+    case "Decode": return "CF_RT_DECODE";
+    case "SchemaMismatch": return "CF_RT_SCHEMA_MISMATCH";
+    case "TypeMismatch": return "CF_RT_TYPE_MISMATCH";
+    case "NotFound": return "CF_RT_NOT_FOUND";
+    case "Unsupported": return "CF_RT_UNSUPPORTED";
+    case "InvalidPath": return "CF_RT_INVALID_PATH";
+    default: throw new Error(`unknown RuntimeDataError kind ${kind}`);
+  }
 }
 
 function writeLe64(bytes: number[], value: bigint): void {
@@ -594,9 +611,9 @@ function runErrorCases(adapter: Adapter): void {
   for (const testCase of cases) {
     if (testCase.operation === "decode") {
       if (testCase.name === "messagepack_non_string_map_key") {
-        expectFailure(`${adapter.name} ${testCase.name}`, () => decodeMessagePackValue(new Uint8Array([0x81, 0x01, 0x01]), decodeMessagePack), testCase.expected_message_contains);
+        expectFailure(`${adapter.name} ${testCase.name}`, () => decodeMessagePackValue(new Uint8Array([0x81, 0x01, 0x01]), decodeMessagePack), testCase.expected_message_contains, testCase.expected_kind);
       } else if (testCase.name === "messagepack_binary_ext") {
-        expectFailure(`${adapter.name} ${testCase.name}`, () => decodeMessagePackValue(new Uint8Array([0xc4, 0x01, 0x00]), decodeMessagePack), testCase.expected_message_contains);
+        expectFailure(`${adapter.name} ${testCase.name}`, () => decodeMessagePackValue(new Uint8Array([0xc4, 0x01, 0x00]), decodeMessagePack), testCase.expected_message_contains, testCase.expected_kind);
       } else {
         throw new Error(`unhandled ${adapter.name} compliance decode error case ${testCase.name}`);
       }

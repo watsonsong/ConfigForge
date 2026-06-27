@@ -32,7 +32,17 @@ public sealed class ConfigForgeRuntimeException : Exception
     }
 
     public RuntimeDataErrorKind Kind { get; }
-    public string Code => $"CF_RT_{Kind.ToString().ToUpperInvariant()}";
+    public string Code => Kind switch
+    {
+        RuntimeDataErrorKind.Io => "CF_RT_IO",
+        RuntimeDataErrorKind.Decode => "CF_RT_DECODE",
+        RuntimeDataErrorKind.SchemaMismatch => "CF_RT_SCHEMA_MISMATCH",
+        RuntimeDataErrorKind.TypeMismatch => "CF_RT_TYPE_MISMATCH",
+        RuntimeDataErrorKind.NotFound => "CF_RT_NOT_FOUND",
+        RuntimeDataErrorKind.Unsupported => "CF_RT_UNSUPPORTED",
+        RuntimeDataErrorKind.InvalidPath => "CF_RT_INVALID_PATH",
+        _ => "CF_RT_INTERNAL",
+    };
     public string? Path { get; init; }
 }
 
@@ -51,7 +61,27 @@ public class BinaryRuntimeDataFileLoader
     public BinaryRuntimeDataReader OpenReader(string path)
     {
         OpenCount++;
-        return new BinaryRuntimeDataReader(File.ReadAllBytes(Path.Combine(_root, path + ".bin")));
+        var resourcePath = Path.Combine(_root, path + ".bin");
+        try
+        {
+            return new BinaryRuntimeDataReader(File.ReadAllBytes(resourcePath));
+        }
+        catch (IOException error)
+        {
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Io, "failed to read runtime data", error) { Path = resourcePath };
+        }
+        catch (UnauthorizedAccessException error)
+        {
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Io, "failed to read runtime data", error) { Path = resourcePath };
+        }
+        catch (ArgumentException error)
+        {
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Io, "failed to read runtime data", error) { Path = resourcePath };
+        }
+        catch (NotSupportedException error)
+        {
+            throw new ConfigForgeRuntimeException(RuntimeDataErrorKind.Io, "failed to read runtime data", error) { Path = resourcePath };
+        }
     }
 }
 

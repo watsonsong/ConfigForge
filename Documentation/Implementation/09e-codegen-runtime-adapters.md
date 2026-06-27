@@ -371,6 +371,7 @@ runtime/
 对 stable runtime data export type，应覆盖官方 target language；对 experimental type 可以先只支持部分语言。Transport loader 不进入语言 × 格式矩阵，而是与 format reader 组合。每个 adapter 单元必须明确：
 
 - 支持的 generated reader contract 版本；
+- structured error 的 `kind/code/path` API，其中 `kind` 到 `CF_RT_*` code 的映射必须与 `09a-codegen-runtime-reader-contract.md` 保持一致；transport loader 的 IO/path 失败必须包装为 `Io` / `CF_RT_IO`，不能泄漏普通 `IOException` / `RuntimeException` / `FileNotFoundException`；
 - 支持的 data payload shape（当前至少 `{ meta, rows }` collection envelope 与 object table root object）；
 - 依赖的三方库与启用方式；
 - 是否提供 transport loader；

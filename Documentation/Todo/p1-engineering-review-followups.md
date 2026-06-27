@@ -93,20 +93,20 @@
 
 ### TODO
 
-- [ ] Rust `RuntimeDataError` 增加 `code()` 或等价 accessor，返回 `CF_RT_*`。
-- [ ] TypeScript `RuntimeDataError` 增加 `readonly code` 或 `code()`，返回 `CF_RT_*`。
-- [ ] C++ `RuntimeDataError` 增加 `Code()`，返回稳定 `const char*` 或 `std::string`。
-- [ ] 同步 generated inline runtime contract 中的 Rust/TS/C++ error 类型，避免 inline/external 漂移。
-- [ ] C# / Java 保持已有 `Code` / `code()`，并确认所有 adapter/template 一致。
-- [ ] 扩展 compliance tests，断言至少 `missing field`、`type mismatch`、`invalid path`、`decode` 的 `code`。
-- [ ] 更新 `Documentation/Implementation/09a-codegen-runtime-reader-contract.md` 与 `09e-codegen-runtime-adapters.md`，明确 `kind` 与 `code` 的映射表。
+- [x] Rust `RuntimeDataError` 增加 `code()` 或等价 accessor，返回 `CF_RT_*`。
+- [x] TypeScript `RuntimeDataError` 增加 `readonly code` 或 `code()`，返回 `CF_RT_*`。
+- [x] C++ `RuntimeDataError` 增加 `Code()`，返回稳定 `const char*` 或 `std::string`。
+- [x] 同步 generated inline runtime contract 中的 Rust/TS/C++ error 类型，避免 inline/external 漂移。
+- [x] C# / Java 保持已有 `Code` / `code()`，并确认所有 adapter/template 一致。
+- [x] 扩展 compliance tests，断言至少 `missing field`、`type mismatch`、`invalid path`、`decode` 的 `code`。
+- [x] 更新 `Documentation/Implementation/09a-codegen-runtime-reader-contract.md` 与 `09e-codegen-runtime-adapters.md`，明确 `kind` 与 `code` 的映射表。
 
 ### 验收
 
-- [ ] `cargo test --test runtime_compliance` 通过，并覆盖 Rust code 断言。
-- [ ] `cargo test --test typescript_runtime_compliance` 通过，并覆盖 TS code 断言。
-- [ ] C++ CTest compliance 通过，并覆盖 C++ code 断言。
-- [ ] `cargo test --test csharp_java_runtime_compliance` 通过，并覆盖 C# / Java code 断言。
+- [x] `cargo test --test runtime_compliance` 通过，并覆盖 Rust code 断言。
+- [x] `cargo test --test typescript_runtime_compliance` 通过，并覆盖 TS code 断言。
+- [x] C++ CTest compliance 通过，并覆盖 C++ code 断言。
+- [x] `cargo test --test csharp_java_runtime_compliance` 通过，并覆盖 C# / Java code 断言。
 
 ## P1-6：修正 Java runtime error API 可见性与 C# / Java loader IO structured error
 
@@ -127,18 +127,18 @@
 
 ### TODO
 
-- [ ] Java JSON / MessagePack / Binary reader 中的 `ConfigForgeRuntimeErrorKind`、`ConfigForgeRuntimeException` 及 `kind()` / `code()` / `path()` 改为 public 可见；如受 Java 单 public top-level class 限制，考虑拆文件或嵌套 public static 类型。
-- [ ] Java JSON / MessagePack / Binary loader 捕获 `IOException` 并包装为 `ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Io, ..., cause)`。
-- [ ] Java loader 的 logical path / resource path 尽量写入 exception path/context。
-- [ ] C# JSON / MessagePack / Binary loader 捕获 `IOException`、`UnauthorizedAccessException`、path 相关异常，并包装为 `ConfigForgeRuntimeException(RuntimeDataErrorKind.Io, ..., innerException)`。
-- [ ] 补 C# / Java compliance：在包外测试代码中捕获 structured exception 并断言 `Kind` / `Code` / `Path`。
-- [ ] 补 missing file / path traversal / unreadable file 的 loader-level negative cases。
+- [x] Java JSON / MessagePack / Binary reader 中的 `ConfigForgeRuntimeErrorKind`、`ConfigForgeRuntimeException` 及 `kind()` / `code()` / `path()` 改为 public 可见；如受 Java 单 public top-level class 限制，考虑拆文件或嵌套 public static 类型。
+- [x] Java JSON / MessagePack / Binary loader 捕获 `IOException` 并包装为 `ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind.Io, ..., cause)`。
+- [x] Java loader 的 logical path / resource path 尽量写入 exception path/context。
+- [x] C# JSON / MessagePack / Binary loader 捕获 `IOException`、`UnauthorizedAccessException`、path 相关异常，并包装为 `ConfigForgeRuntimeException(RuntimeDataErrorKind.Io, ..., innerException)`。
+- [x] 补 C# / Java compliance：在包外测试代码中捕获 structured exception 并断言 `Kind` / `Code` / `Path`。
+- [x] 补 missing file / path traversal / unreadable file 的 loader-level negative cases。
 
 ### 验收
 
-- [ ] `cargo test --test csharp_java_runtime_compliance` 通过。
-- [ ] C# / Java 包外业务代码可读取 runtime error kind/code/path。
-- [ ] loader IO 错误不再落到普通 `RuntimeException` / `IOException` / `FileNotFoundException`。
+- [x] `cargo test --test csharp_java_runtime_compliance` 通过。
+- [x] C# / Java 包外业务代码可读取 runtime error kind/code/path。
+- [x] loader IO 错误不再落到普通 `RuntimeException` / `IOException` / `FileNotFoundException`。
 
 ## 推荐执行顺序
 

@@ -87,6 +87,20 @@ pub enum RuntimeDataErrorKind {
     InvalidPath,
 }
 
+impl RuntimeDataErrorKind {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Io => "CF_RT_IO",
+            Self::Decode => "CF_RT_DECODE",
+            Self::SchemaMismatch => "CF_RT_SCHEMA_MISMATCH",
+            Self::TypeMismatch => "CF_RT_TYPE_MISMATCH",
+            Self::NotFound => "CF_RT_NOT_FOUND",
+            Self::Unsupported => "CF_RT_UNSUPPORTED",
+            Self::InvalidPath => "CF_RT_INVALID_PATH",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeDataError {
     pub kind: RuntimeDataErrorKind,
@@ -136,6 +150,10 @@ impl RuntimeDataError {
 
     pub fn invalid_path(message: impl Into<String>) -> Self {
         Self::new(RuntimeDataErrorKind::InvalidPath, message)
+    }
+
+    pub fn code(&self) -> &'static str {
+        self.kind.code()
     }
 }
 
@@ -376,6 +394,12 @@ mod tests {
                 .unwrap_err()
                 .message
                 .contains("escapes")
+        );
+        assert_eq!(
+            safe_join_runtime_path(root, "../items.json")
+                .unwrap_err()
+                .code(),
+            "CF_RT_INVALID_PATH"
         );
         assert!(
             safe_join_runtime_path(root, "/tmp/items.json")

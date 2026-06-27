@@ -634,7 +634,7 @@ fn render_runtime_contract(
     content.raw("        public ConfigForgeRuntimeException(string message) : this(ConfigForgeRuntimeErrorKind.Decode, message) { }\n");
     content.raw("        public ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, string message) : base(message) { Kind = kind; }\n");
     content.raw("        public ConfigForgeRuntimeErrorKind Kind { get; }\n");
-    content.raw("        public string Code => $\"CF_RT_{Kind.ToString().ToUpperInvariant()}\";\n");
+    content.raw("        public string Code => Kind switch\n        {\n            ConfigForgeRuntimeErrorKind.Io => \"CF_RT_IO\",\n            ConfigForgeRuntimeErrorKind.Decode => \"CF_RT_DECODE\",\n            ConfigForgeRuntimeErrorKind.SchemaMismatch => \"CF_RT_SCHEMA_MISMATCH\",\n            ConfigForgeRuntimeErrorKind.TypeMismatch => \"CF_RT_TYPE_MISMATCH\",\n            ConfigForgeRuntimeErrorKind.NotFound => \"CF_RT_NOT_FOUND\",\n            ConfigForgeRuntimeErrorKind.Unsupported => \"CF_RT_UNSUPPORTED\",\n            ConfigForgeRuntimeErrorKind.InvalidPath => \"CF_RT_INVALID_PATH\",\n            _ => \"CF_RT_INTERNAL\",\n        };\n");
     content.raw("        public string? Path { get; init; }\n");
     content.raw("    }\n\n");
     render_builtin_value_types(content);

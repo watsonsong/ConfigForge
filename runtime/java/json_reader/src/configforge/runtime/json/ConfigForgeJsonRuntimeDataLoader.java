@@ -22,11 +22,16 @@ public class ConfigForgeJsonRuntimeDataLoader {
 
     public ConfigForgeJsonRuntimeDataReader openReader(String path) {
         openCount++;
+        Path resourcePath = root.resolve(path + ".json");
         try {
-            String text = new String(Files.readAllBytes(root.resolve(path + ".json")), StandardCharsets.UTF_8);
+            String text = new String(Files.readAllBytes(resourcePath), StandardCharsets.UTF_8);
             return new ConfigForgeJsonRuntimeDataReader(ConfigForgeJsonParser.parse(text));
         } catch (IOException error) {
-            throw new RuntimeException(error);
+            throw new ConfigForgeRuntimeException(
+                ConfigForgeRuntimeErrorKind.Io,
+                "failed to read runtime data: " + path,
+                resourcePath.toString(),
+                error);
         }
     }
 }

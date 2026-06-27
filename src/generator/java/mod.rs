@@ -492,7 +492,7 @@ fn render_runtime_contract(
     content.raw("        public ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, String message) { super(message); this.kind = kind; }\n");
     content.raw("        public ConfigForgeRuntimeException(ConfigForgeRuntimeErrorKind kind, String message, Throwable cause) { super(message, cause); this.kind = kind; }\n");
     content.raw("        public ConfigForgeRuntimeErrorKind kind() { return kind; }\n");
-    content.raw("        public String code() { return \"CF_RT_\" + kind.name().toUpperCase(java.util.Locale.ROOT); }\n");
+    content.raw("        public String code() {\n            switch (kind) {\n                case Io: return \"CF_RT_IO\";\n                case Decode: return \"CF_RT_DECODE\";\n                case SchemaMismatch: return \"CF_RT_SCHEMA_MISMATCH\";\n                case TypeMismatch: return \"CF_RT_TYPE_MISMATCH\";\n                case NotFound: return \"CF_RT_NOT_FOUND\";\n                case Unsupported: return \"CF_RT_UNSUPPORTED\";\n                case InvalidPath: return \"CF_RT_INVALID_PATH\";\n                default: return \"CF_RT_INTERNAL\";\n            }\n        }\n");
     content.raw("    }\n\n");
     content.raw("    private interface ConfigForgeValueReader<T> {\n");
     content.raw("        T read(ConfigForgeRuntimeDataReader reader);\n");

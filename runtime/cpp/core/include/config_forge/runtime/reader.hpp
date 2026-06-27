@@ -32,6 +32,8 @@ enum class RuntimeDataErrorKind {
     InvalidPath,
 };
 
+inline const char* RuntimeDataErrorCode(RuntimeDataErrorKind kind) noexcept;
+
 class RuntimeDataError : public std::runtime_error {
 public:
     RuntimeDataError(RuntimeDataErrorKind kind, const std::string& message)
@@ -41,12 +43,26 @@ public:
         : std::runtime_error(message), kind_(kind), path_(std::move(path)) {}
 
     RuntimeDataErrorKind Kind() const noexcept { return kind_; }
+    const char* Code() const noexcept { return RuntimeDataErrorCode(kind_); }
     const std::string& Path() const noexcept { return path_; }
 
 private:
     RuntimeDataErrorKind kind_;
     std::string path_;
 };
+
+inline const char* RuntimeDataErrorCode(RuntimeDataErrorKind kind) noexcept {
+    switch (kind) {
+        case RuntimeDataErrorKind::Io: return "CF_RT_IO";
+        case RuntimeDataErrorKind::Decode: return "CF_RT_DECODE";
+        case RuntimeDataErrorKind::SchemaMismatch: return "CF_RT_SCHEMA_MISMATCH";
+        case RuntimeDataErrorKind::TypeMismatch: return "CF_RT_TYPE_MISMATCH";
+        case RuntimeDataErrorKind::NotFound: return "CF_RT_NOT_FOUND";
+        case RuntimeDataErrorKind::Unsupported: return "CF_RT_UNSUPPORTED";
+        case RuntimeDataErrorKind::InvalidPath: return "CF_RT_INVALID_PATH";
+    }
+    return "CF_RT_INTERNAL";
+}
 
 inline const char* RuntimeDataErrorKindName(RuntimeDataErrorKind kind) noexcept {
     switch (kind) {

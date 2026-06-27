@@ -21,11 +21,16 @@ public class ConfigForgeMessagePackRuntimeDataLoader {
 
     public ConfigForgeMessagePackRuntimeDataReader openReader(String path) {
         openCount++;
+        Path resourcePath = root.resolve(path + ".msgpack");
         try {
             return new ConfigForgeMessagePackRuntimeDataReader(
-                ConfigForgeMessagePackParser.parse(Files.readAllBytes(root.resolve(path + ".msgpack"))));
+                ConfigForgeMessagePackParser.parse(Files.readAllBytes(resourcePath)));
         } catch (IOException error) {
-            throw new RuntimeException(error);
+            throw new ConfigForgeRuntimeException(
+                ConfigForgeRuntimeErrorKind.Io,
+                "failed to read runtime data: " + path,
+                resourcePath.toString(),
+                error);
         }
     }
 }

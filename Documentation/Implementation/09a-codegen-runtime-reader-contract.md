@@ -73,13 +73,25 @@ Runtime reader contract 与具体 runtime helper package/template 版本分离�
 
 标准 runtime error 必须具备稳定机器可读分类：
 
-- Rust：`RuntimeDataError { kind: RuntimeDataErrorKind, ... }`，实现 `std::error::Error`。
-- TypeScript：`RuntimeDataError extends Error`，包含 `kind` 和 context。
-- C++：`RuntimeDataError : std::runtime_error`，包含 `RuntimeDataErrorKind`。
+- Rust：`RuntimeDataError { kind: RuntimeDataErrorKind, ... }`，实现 `std::error::Error`，并通过 `code()` 暴露稳定机器码。
+- TypeScript：`RuntimeDataError extends Error`，包含 `kind`、`code` 和 context。
+- C++：`RuntimeDataError : std::runtime_error`，包含 `RuntimeDataErrorKind`，并通过 `Code()` 暴露稳定机器码。
 - C#：`ConfigForgeRuntimeException : Exception`，包含 `Kind`、`Code`、`Path`。
 - Java：`ConfigForgeRuntimeException extends RuntimeException`，包含 `kind()`、`code()`、`path()`。
 
-跨语言 baseline kind 为 `Io`、`Decode`、`SchemaMismatch`、`TypeMismatch`、`NotFound`、`Unsupported`、`InvalidPath`。Reader/loader adapter 应在 transport、decode、schema、type conversion 和 cursor path 错误处抛结构化错误；generated parser 后续可继续补充 table、row index、field path 等业务上下文。Compliance negative corpus 断言 `kind/code/path`，错误 message 只作为辅助 keyword。
+跨语言 baseline kind 与 code 映射为：
+
+| kind | code | 典型场景 |
+| --- | --- | --- |
+| `Io` | `CF_RT_IO` | transport / filesystem / permission 读取失败 |
+| `Decode` | `CF_RT_DECODE` | JSON / MessagePack / binary 格式解码失败或 payload 非法 |
+| `SchemaMismatch` | `CF_RT_SCHEMA_MISMATCH` | binary schema revision、format version 或 reader contract 不兼容 |
+| `TypeMismatch` | `CF_RT_TYPE_MISMATCH` | 标量类型不匹配、非 finite float、collection/scalar 边界错误 |
+| `NotFound` | `CF_RT_NOT_FOUND` | required field 缺失、数组下标越界 |
+| `Unsupported` | `CF_RT_UNSUPPORTED` | adapter 不支持的操作或 payload 特性 |
+| `InvalidPath` | `CF_RT_INVALID_PATH` | logical path 非法、绝对路径或 escaping root |
+
+Reader/loader adapter 应在 transport、decode、schema、type conversion 和 cursor path 错误处抛结构化错误；generated parser 后续可继续补充 table、row index、field path 等业务上下文。Compliance negative corpus 断言 `kind/code/path`，错误 message 只作为辅助 keyword。
 
 ## 抽象加载器设计
 

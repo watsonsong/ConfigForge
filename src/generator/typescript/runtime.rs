@@ -24,12 +24,14 @@ export interface RuntimeDataErrorContext {
 
 export class RuntimeDataError extends Error {
   readonly kind: RuntimeDataErrorKind;
+  readonly code: string;
   readonly context: RuntimeDataErrorContext;
 
   constructor(kind: RuntimeDataErrorKind, message: string, context: RuntimeDataErrorContext = {}, options?: { cause?: unknown }) {
     super(message);
     this.name = "RuntimeDataError";
     this.kind = kind;
+    this.code = runtimeDataErrorCode(kind);
     this.context = context;
     if (options && "cause" in options) {
       (this as Error & { cause?: unknown }).cause = options.cause;
@@ -43,6 +45,18 @@ export class RuntimeDataError extends Error {
   static notFound(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError { return new RuntimeDataError("NotFound", message, context); }
   static unsupported(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError { return new RuntimeDataError("Unsupported", message, context); }
   static invalidPath(message: string, context: RuntimeDataErrorContext = {}): RuntimeDataError { return new RuntimeDataError("InvalidPath", message, context); }
+}
+
+export function runtimeDataErrorCode(kind: RuntimeDataErrorKind): string {
+  switch (kind) {
+    case "Io": return "CF_RT_IO";
+    case "Decode": return "CF_RT_DECODE";
+    case "SchemaMismatch": return "CF_RT_SCHEMA_MISMATCH";
+    case "TypeMismatch": return "CF_RT_TYPE_MISMATCH";
+    case "NotFound": return "CF_RT_NOT_FOUND";
+    case "Unsupported": return "CF_RT_UNSUPPORTED";
+    case "InvalidPath": return "CF_RT_INVALID_PATH";
+  }
 }
 
 export interface RuntimeDataReader {

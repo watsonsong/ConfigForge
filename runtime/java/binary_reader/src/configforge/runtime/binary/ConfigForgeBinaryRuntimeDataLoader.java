@@ -21,10 +21,15 @@ public class ConfigForgeBinaryRuntimeDataLoader {
 
     public ConfigForgeBinaryRuntimeDataReader openReader(String path) {
         openCount++;
+        Path resourcePath = root.resolve(path + ".bin");
         try {
-            return new ConfigForgeBinaryRuntimeDataReader(Files.readAllBytes(root.resolve(path + ".bin")));
+            return new ConfigForgeBinaryRuntimeDataReader(Files.readAllBytes(resourcePath));
         } catch (IOException error) {
-            throw new RuntimeException(error);
+            throw new ConfigForgeRuntimeException(
+                ConfigForgeRuntimeErrorKind.Io,
+                "failed to read runtime data: " + path,
+                resourcePath.toString(),
+                error);
         }
     }
 }
