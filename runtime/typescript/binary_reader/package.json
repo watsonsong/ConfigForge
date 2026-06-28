@@ -19,7 +19,10 @@
     "directory": "runtime/typescript/binary_reader"
   },
   "configForge": {
-    "runtimeReaderContract": "^1.0"
+    "runtimeReaderContract": "^1.0",
+    "parserBackend": "configforge-binary",
+    "parserBackendVersion": "0.1",
+    "adapterSupportLevel": "stable"
   },
   "dependencies": {
     "@config-forge/runtime-reader-core": "0.1.0"

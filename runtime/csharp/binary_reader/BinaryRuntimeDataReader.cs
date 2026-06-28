@@ -90,6 +90,9 @@ public class BinaryRuntimeDataReader
     public const string TemplateVersion = "0.1.0";
     public const string SupportedConfigForgeReaderContract = "^1.0";
     public const string DistributionMode = "copyable-template";
+    public const string ParserBackend = "configforge-binary";
+    public const string ParserBackendVersion = "0.1";
+    public const string AdapterSupportLevel = "stable";
 
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 

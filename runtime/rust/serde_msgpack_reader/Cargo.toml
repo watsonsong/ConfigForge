@@ -12,6 +12,11 @@ keywords = ["configforge", "runtime", "reader", "msgpack"]
 categories = ["encoding", "game-development"]
 repository = "https://github.com/ConfigForge/ConfigForge"
 
+[package.metadata.config-forge]
+parser-backend = "rmp-serde"
+parser-backend-version = "1.3"
+adapter-support-level = "stable"
+
 [lib]
 name = "config_forge_runtime_serde_msgpack_reader"
 path = "src/runtime_reader.rs"

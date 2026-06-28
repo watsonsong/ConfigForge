@@ -12,6 +12,11 @@ keywords = ["configforge", "runtime", "reader", "binary"]
 categories = ["encoding", "game-development"]
 repository = "https://github.com/ConfigForge/ConfigForge"
 
+[package.metadata.config-forge]
+parser-backend = "configforge-binary"
+parser-backend-version = "0.1"
+adapter-support-level = "stable"
+
 [lib]
 name = "config_forge_runtime_binary_reader"
 path = "src/lib.rs"

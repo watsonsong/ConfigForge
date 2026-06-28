@@ -91,6 +91,9 @@ public class JsonRuntimeDataReader
     public const string TemplateVersion = "0.1.0";
     public const string SupportedConfigForgeReaderContract = "^1.0";
     public const string DistributionMode = "copyable-template";
+    public const string ParserBackend = "System.Text.Json";
+    public const string ParserBackendVersion = "net6.0";
+    public const string AdapterSupportLevel = "stable";
 
     private readonly JsonDocument _document;
     private readonly JsonDocument _nullDocument = JsonDocument.Parse("null");

@@ -91,6 +91,9 @@ public class MessagePackRuntimeDataReader
     public const string TemplateVersion = "0.1.0";
     public const string SupportedConfigForgeReaderContract = "^1.0";
     public const string DistributionMode = "copyable-template";
+    public const string ParserBackend = "configforge-dependency-free-messagepack-subset";
+    public const string ParserBackendVersion = "0.1";
+    public const string AdapterSupportLevel = "legacy-bootstrap";
 
     private readonly Stack<object?> _stack = new();
 

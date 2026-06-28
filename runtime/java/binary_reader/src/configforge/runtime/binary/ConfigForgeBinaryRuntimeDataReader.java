@@ -14,6 +14,9 @@ public class ConfigForgeBinaryRuntimeDataReader {
     public static final String TEMPLATE_VERSION = "0.1.0";
     public static final String SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0";
     public static final String DISTRIBUTION_MODE = "copyable-template";
+    public static final String PARSER_BACKEND = "configforge-binary";
+    public static final String PARSER_BACKEND_VERSION = "0.1";
+    public static final String ADAPTER_SUPPORT_LEVEL = "stable";
 
     private final byte[] bytes;
     private final List<RecordState> records = new ArrayList<RecordState>();

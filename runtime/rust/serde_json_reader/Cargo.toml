@@ -12,6 +12,11 @@ keywords = ["configforge", "runtime", "reader", "json"]
 categories = ["encoding", "game-development"]
 repository = "https://github.com/ConfigForge/ConfigForge"
 
+[package.metadata.config-forge]
+parser-backend = "serde_json"
+parser-backend-version = "1.0"
+adapter-support-level = "stable"
+
 [lib]
 name = "config_forge_runtime_serde_json_reader"
 path = "src/runtime_reader.rs"
