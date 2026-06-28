@@ -28,6 +28,8 @@
 
 Core purity 原则：要么某语言暂时不提供独立 core library，让 generated code 自带 inline / nominal contract；要么 core library 只包含 generated parser 直接调用的最小 reader / loader 形状、error、decode limits 和 contract version。JSON / MessagePack / BSON named reader 的 `enter_field`、`length`，binary reader 的 `read_next_*`、optional bitmap、enum ordinal，transport loader 的文件系统 / HTTP / 资源包逻辑，都应留在 concrete adapter 的固有方法或 utility 模块中。少量 reader 间重复实现优先接受，以换取用户引用 core 的最低成本；只有重复逻辑足够大且与 generated contract 无关时，才考虑单独 helper / utility 包，不能污染 core contract。
 
+标准格式 parser 边界：JSON / MessagePack 是成熟标准格式，标准 reader adapter 应优先绑定明确的生态 parser backend，而不是由 ConfigForge 长期维护手写 parser。adapter 命名应体现 backend identity，例如 Rust `serde_json_reader` / `serde_msgpack_reader`、C++ `rapidjson_reader` / `msgpackc_reader`；未来 C# / Java / TypeScript 的标准 MessagePack / JSON adapter 也应按 `system_text_json_reader`、`jackson_reader`、`msgpack_core_reader`、`@msgpack/msgpack` backend 等方式明确依赖来源。Generated code 仍只依赖 ConfigForge reader contract；parser 库依赖只存在于 adapter package/template。当前 C# / Java 的 dependency-free JSON / MessagePack reader、TypeScript injectable MessagePack decoder 存在依赖策略不一致的问题，后续按 [`../Todo/runtime-reader-parser-adapter-alignment.md`](../Todo/runtime-reader-parser-adapter-alignment.md) 收敛为 library-bound 标准 adapter；手写 parser 若保留，应降级为 custom/example/bootstrap，不作为标准格式主推荐。
+
 ### Reader contract 可执行规范
 
 标准 adapter 不能只对齐接口形状，还必须对齐 reader contract 版本、value model、missing/null、scalar conversion 和错误上下文。当前 contract 版本定义为 `1.0`；后续所有 generated code 与 adapter 都应声明支持的 contract version。
