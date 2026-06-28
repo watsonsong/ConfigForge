@@ -43,12 +43,12 @@ runtime/<language>/<parser_or_backend>[_<format>]_reader
 
 ### P1-1：确定每个语言的推荐 parser backend
 
-- [ ] C# JSON：将当前 `runtime/csharp/json_reader` 定位为 `System.Text.Json` adapter；推荐重命名或新增 `runtime/csharp/system_text_json_reader`。
-- [ ] C# MessagePack：采用成熟生态库作为标准 adapter，优先评估 `MessagePack-CSharp`；新增 `runtime/csharp/messagepack_csharp_reader`。
-- [ ] Java JSON：采用成熟生态库作为标准 adapter，优先评估 Jackson（广泛、stream/tree API 成熟）；新增 `runtime/java/jackson_reader`。Gson 可作为后续可选 adapter。
-- [ ] Java MessagePack：采用成熟生态库作为标准 adapter，优先评估 `msgpack-core` / `jackson-dataformat-msgpack` 的可维护性、Android/服务器兼容性和 license；新增明确命名的 adapter，例如 `runtime/java/msgpack_core_reader`。
-- [ ] TypeScript MessagePack：标准 package 应提供直接可用的 `@msgpack/msgpack` backend；当前 injectable decoder 保留为 lower-level/custom hook，但标准 reader/loader 不应要求用户每次手动传入 decode。
-- [ ] TypeScript JSON：`JSON.parse` 是语言内建能力，`json_reader` 命名可接受；若未来提供 streaming/large-payload adapter，应以具体库命名另建 package。
+- [x] C# JSON：推荐 backend 固定为 .NET BCL `System.Text.Json`；当前 `runtime/csharp/json_reader` 先作为 compatibility path，metadata 标注 `parser_backend = "System.Text.Json"`，后续可新增或改名为 `runtime/csharp/system_text_json_reader`。
+- [x] C# MessagePack：推荐 backend 固定为 `MessagePack-CSharp`；新增/迁移目标为 `runtime/csharp/messagepack_csharp_reader`。
+- [x] Java JSON：推荐 backend 固定为 Jackson Databind（tree/value model 成熟，服务器生态广泛）；新增目标为 `runtime/java/jackson_reader`。Gson 保留为 P2 可选 adapter。
+- [x] Java MessagePack：推荐 backend 固定为 Jackson Dataformat MessagePack（复用 Jackson `JsonNode` tree adapter，避免同时维护两套 Java named-reader cursor）；新增目标为 `runtime/java/jackson_messagepack_reader`。`msgpack-core` 可作为 P2 低层 streaming adapter 另行评估。
+- [x] TypeScript MessagePack：推荐 backend 固定为 `@msgpack/msgpack`；当前 injectable decoder 保留为 lower-level/custom hook，但标准 reader/loader 应提供默认 backend。
+- [x] TypeScript JSON：`JSON.parse` 是语言内建能力，`json_reader` 命名可接受；若未来提供 streaming/large-payload adapter，应以具体库命名另建 package。
 
 ### P1-2：调整 runtime 目录与 package/template 形态
 
