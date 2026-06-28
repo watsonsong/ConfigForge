@@ -7,7 +7,7 @@ use crate::{
     ConfigForgeError, Result,
     artifact::ArtifactSink,
     code_artifact::runtime_interface::{
-        RuntimeInterfaceManifest,
+        RuntimeInterfaceManifest, recommended_runtime_reader_adapters,
         runtime_interface_manifest_path as shared_runtime_interface_manifest_path,
     },
     diagnostic::code::CF_GENERATOR_INVALID_OPTION,
@@ -92,7 +92,7 @@ impl CodeGenerator for RustCodeGenerator {
         ) {
             files.push(super::GeneratedFile {
                 path: runtime_interface_manifest_path(input),
-                content: rust_runtime_interface_manifest(&rust_options)?,
+                content: rust_runtime_interface_manifest(input, &rust_options)?,
             });
         }
         Ok(files)
@@ -129,7 +129,7 @@ impl CodeGenerator for RustCodeGenerator {
                 manifest_stream,
                 CodeWriterConfig::default().with_indent_width(2),
             );
-            let manifest_content = rust_runtime_interface_manifest(&rust_options)?;
+            let manifest_content = rust_runtime_interface_manifest(input, &rust_options)?;
             manifest.raw(&manifest_content);
             let manifest_stream =
                 manifest
@@ -174,12 +174,19 @@ fn runtime_interface_manifest_path(input: &CodeExportInput<'_>) -> std::path::Pa
     shared_runtime_interface_manifest_path(&input.target.out_dir)
 }
 
-fn rust_runtime_interface_manifest(options: &RustCodegenOptions) -> Result<String> {
+fn rust_runtime_interface_manifest(
+    input: &CodeExportInput<'_>,
+    options: &RustCodegenOptions,
+) -> Result<String> {
     let runtime_core_path = options
         .runtime_core_path
         .as_deref()
         .unwrap_or("config_forge_runtime_reader_core");
     RuntimeInterfaceManifest::reference(LANGUAGE)
+        .with_runtime_readers(recommended_runtime_reader_adapters(
+            LANGUAGE,
+            &input.runtime_data_files,
+        ))
         .with_language_field("runtime_core_path", runtime_core_path)
         .to_json_pretty()
 }

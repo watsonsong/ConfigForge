@@ -265,6 +265,10 @@ fn emits_csharp_standard_runtime_adapters_when_requested() {
     assert!(content.contains("public sealed class ConfigForgeMessagePackRuntimeDataLoaderAdapter : IConfigForgeRuntimeDataLoader"));
     assert!(content.contains("ConfigForge.Runtime.JsonReader.JsonRuntimeDataFileLoader"));
     assert!(content.contains("ConfigForge.Runtime.MessagePackReader.MessagePackRuntimeDataReader"));
+    assert!(
+        content.contains("Json runtime adapter backend: System.Text.Json; support level: stable.")
+    );
+    assert!(content.contains("MessagePack runtime adapter backend: configforge-dependency-free-messagepack-subset; support level: legacy-bootstrap."));
 }
 
 #[test]

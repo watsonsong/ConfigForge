@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-`runtime/` 下标准 adapters 是 generated code 的辅助接入层，不是每次 codegen 的必然输出。核心 generated code 只依赖 loader/reader contract；标准 adapters 提供可复用的 JSON / MessagePack / `bin` reader 和常用 transport loader。当前 Rust 已有 `runtime/rust/reader_core` / JSON / MessagePack / binary Cargo packages，TypeScript 已有 core / JSON / MessagePack / binary / node-fs workspace packages，C++ runtime helper 已有 core header、adapter interface targets、install/export config 与 `find_package` smoke；C# / Java 保持 JSON / MessagePack / binary copyable templates。它们均声明 package/template version、reader contract version / supported range 和 distribution mode，并由 release metadata drift test、runtime compliance runner、TypeScript package dry-run、C++ install smoke 和 Rust package file-list/verification gate 覆盖。标准 runtime helpers 当前状态为 Stable；正式 crates.io / npm / NuGet / Maven 发布仍按各生态 release 流程执行，不改变 generated code 对三方 adapter 的零强依赖原则。C++ 三方依赖与 CMake 策略以 [`../Tech/cpp-runtime-dependencies.md`](../Tech/cpp-runtime-dependencies.md) 为准。
+`runtime/` 下标准 adapters 是 generated code 的辅助接入层，不是每次 codegen 的必然输出。核心 generated code 只依赖 loader/reader contract；标准 adapters 提供可复用的 JSON / MessagePack / `bin` reader 和常用 transport loader。当前 Rust 已有 `runtime/rust/reader_core` / JSON / MessagePack / binary Cargo packages，TypeScript 已有 core / JSON / MessagePack / binary / node-fs workspace packages，C++ runtime helper 已有 core header、adapter interface targets、install/export config 与 `find_package` smoke；C# / Java 保持 JSON / MessagePack / binary copyable templates。它们均声明 package/template version、reader contract version / supported range、distribution mode、parser backend identity 与 support level，并由 release metadata drift test、runtime compliance runner、TypeScript package dry-run、C++ install smoke 和 Rust package file-list/verification gate 覆盖。标准 runtime helpers 当前状态为 Stable；正式 crates.io / npm / NuGet / Maven 发布仍按各生态 release 流程执行，不改变 generated code 对三方 adapter 的零强依赖原则。C++ 三方依赖与 CMake 策略以 [`../Tech/cpp-runtime-dependencies.md`](../Tech/cpp-runtime-dependencies.md) 为准。
 
 ## 标准 runtime helper 工程结构
 
@@ -312,7 +312,7 @@ emit = "none"       # none / copy / reference
 loader = "node-fs"  # fs / fetch / none / custom
 ```
 
-默认仍为 `emit = "none"`，即只生成核心 generated code。`copy` 和 `reference` 只是接入便利功能，不能让核心 generated code 直接依赖某个 JSON / MessagePack 库。
+默认仍为 `emit = "none"`，即只生成核心 generated code。`copy` 和 `reference` 只是接入便利功能，不能让核心 generated code 直接依赖某个 JSON / MessagePack 库。`runtime_interface_emit = "reference"` 生成的 `config_forge_runtime_interface.json` 必须包含所需 runtime data format 对应的 `runtime_readers` 条目，声明 `format`、`adapter`、`parser_backend`、`parser_backend_version` 与 `adapter_support_level`；这样 manifest 中的依赖 identity 与 runtime package/template metadata 保持一致。C# / Java 在 library-bound package 尚未稳定前继续拒绝 `reference`，诊断需明确当前 copy adapter 的 backend 与 legacy-bootstrap 状态。
 
 ### 目录布局
 
@@ -378,28 +378,28 @@ runtime/
 - 依赖的三方库与启用方式；
 - 是否提供 transport loader；
 - 是否用于 CI / integration harness；
-- 支持等级：`stable`、`preview`、`custom/example`；
+- 支持等级：`stable`、`legacy-bootstrap`、`custom/example`；
 - 形态：`standalone_package`、`copyable_template`、`generated_header_bound`。
 
 首批矩阵：
 
 | 语言 | 格式 | adapter 单元 | 支持等级 | 形态 | 依赖与启用方式 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
-| Rust | JSON | `runtime/rust/serde_json_reader` | `preview package` | `standalone_package` + copyable module | `serde_json` | 已有 Cargo metadata 和 package-level tests；暂未发布 crates.io，业务可用 path/git dependency 或复制模块。 |
-| Rust | MessagePack | `runtime/rust/serde_msgpack_reader` | `preview package` | `standalone_package` + copyable module | `rmp-serde` + `serde_json::Value` 作为中间 value | 已有 Cargo metadata 和 package-level tests；中期可收敛到真正的 ConfigForge Runtime Value。 |
-| Rust | Binary | `runtime/rust/binary_reader` | `preview package` | `standalone_package` | 无第三方依赖 | 已有 Cargo metadata、crate tests 和 shared compliance coverage，可用 path/git dependency 引用。 |
-| TypeScript | JSON | `runtime/typescript/json_reader` | `preview package` | `standalone_package` | 原生 `JSON.parse`；CommonJS workspace package | 不依赖 generated.ts，Node fs/fetch loader 分离；已声明 `exports` / `types` / contract range，尚未发布 npm。 |
-| TypeScript | MessagePack | `runtime/typescript/messagepack_reader` | `preview package` | `standalone_package` | `@msgpack/msgpack` 作为 peer dependency；CommonJS workspace package | 解码后的 unknown value 复用 core reader 语义；已声明 `exports` / `types` / contract range，尚未发布 npm。 |
-| TypeScript | Binary | `runtime/typescript/binary_reader` | `preview package` | `standalone_package` | 无第三方依赖 | 已声明 `exports` / `types` / contract range，并由 TS compliance runner 覆盖 success / malformed cases。 |
+| Rust | JSON | `runtime/rust/serde_json_reader` | `stable` | `standalone_package` + copyable module | `serde_json` | Cargo metadata 声明 `parser-backend = "serde_json"` / `adapter-support-level = "stable"`；暂未发布 crates.io，业务可用 path/git dependency 或复制模块。 |
+| Rust | MessagePack | `runtime/rust/serde_msgpack_reader` | `stable` | `standalone_package` + copyable module | `rmp-serde` + `serde_json::Value` 作为中间 value | Cargo metadata 声明 `parser-backend = "rmp-serde"` / `adapter-support-level = "stable"`；中期可收敛到真正的 ConfigForge Runtime Value。 |
+| Rust | Binary | `runtime/rust/binary_reader` | `stable` | `standalone_package` | 无第三方依赖 | Cargo metadata 声明 `parser-backend = "configforge-binary"` / `adapter-support-level = "stable"`，由 crate tests 和 shared compliance coverage 覆盖。 |
+| TypeScript | JSON | `runtime/typescript/json_reader` | `stable` | `standalone_package` | 原生 `JSON.parse`；CommonJS workspace package | package metadata 声明 `parserBackend = "JSON.parse"` / `adapterSupportLevel = "stable"`；Node fs/fetch loader 分离。 |
+| TypeScript | MessagePack | `runtime/typescript/messagepack_reader` | `stable` | `standalone_package` | `@msgpack/msgpack` 作为标准 backend；injectable decoder 仅作为 advanced/custom hook | package metadata 声明 `parserBackend = "@msgpack/msgpack"` / `adapterSupportLevel = "stable"`；解码后的 unknown value 复用 core reader 语义。 |
+| TypeScript | Binary | `runtime/typescript/binary_reader` | `stable` | `standalone_package` | 无第三方依赖 | package metadata 声明 `parserBackend = "configforge-binary"` / `adapterSupportLevel = "stable"`，并由 TS compliance runner 覆盖 success / malformed cases。 |
 | C++ | JSON | `runtime/cpp/rapidjson_reader` | `stable target` | `external_interface` + generated-header-bound 兼容 | CMake option + `find_package(RapidJSON CONFIG)` / package manager / optional `FetchContent` | 用 RapidJSON 完整处理转义、Unicode、数字和 parse error；可通过 CMake target 引入。 |
 | C++ | MessagePack | `runtime/cpp/msgpackc_reader` | `stable target` | `external_interface` + generated-header-bound 兼容 | CMake option + `find_package(msgpack-cxx CONFIG)` / package manager / `FetchContent` 固定 `cpp-6.1.1` | 不手写二进制 parser；解码到 msgpack object/value 后适配 reader，可通过 CMake target 引入。 |
 | C++ | Binary | `runtime/cpp/binary_reader` | `stable target` | `external_interface` + generated-header-bound 兼容 | 无第三方依赖 | 通过 `config_forge_runtime::binary_reader` target 引入；install + `find_package` smoke 已覆盖。 |
-| C# | JSON | `runtime/csharp/json_reader` | `copyable template` | `copyable_template` | .NET BCL `System.Text.Json` | template 声明 `0.1.0` / `^1.0` / `copyable-template`；不承诺 NuGet。 |
-| C# | MessagePack | `runtime/csharp/messagepack_reader` | `copyable template` | `copyable_template` | 无第三方依赖，内置 MessagePack subset parser | template 声明 `0.1.0` / `^1.0` / `copyable-template`；当前 baseline 不含第三方 MessagePack adapter。 |
-| C# | Binary | `runtime/csharp/binary_reader` | `copyable template` | `copyable_template` | 无第三方依赖 | template 声明 `0.1.0` / `^1.0` / `copyable-template`；standard_project 和 compliance runner 均覆盖。 |
-| Java | JSON | `runtime/java/json_reader` | `copyable template` | `copyable_template` | JDK-only JSON parser | template 声明 `0.1.0` / `^1.0` / `copyable-template`；不承诺 Maven / Jackson / Gson / Android baseline。 |
-| Java | MessagePack | `runtime/java/messagepack_reader` | `copyable template` | `copyable_template` | JDK-only MessagePack subset parser | template 声明 `0.1.0` / `^1.0` / `copyable-template`；standard_project 和 compliance runner 均覆盖。 |
-| Java | Binary | `runtime/java/binary_reader` | `copyable template` | `copyable_template` | JDK-only，无第三方依赖 | template 声明 `0.1.0` / `^1.0` / `copyable-template`；standard_project 和 compliance runner 均覆盖。 |
+| C# | JSON | `runtime/csharp/json_reader` | `stable` | `copyable_template` | .NET BCL `System.Text.Json` | template 声明 `ParserBackend = "System.Text.Json"` / `AdapterSupportLevel = "stable"`；当前泛化目录作为 compatibility path，后续可迁到 `system_text_json_reader`。 |
+| C# | MessagePack | `runtime/csharp/messagepack_reader` | `legacy-bootstrap` | `copyable_template` | 无第三方依赖，内置 MessagePack subset parser | template 声明 `ParserBackend = "configforge-dependency-free-messagepack-subset"` / `AdapterSupportLevel = "legacy-bootstrap"`；推荐目标为 `runtime/csharp/messagepack_csharp_reader`。 |
+| C# | Binary | `runtime/csharp/binary_reader` | `stable` | `copyable_template` | 无第三方依赖 | template 声明 `ParserBackend = "configforge-binary"` / `AdapterSupportLevel = "stable"`；standard_project 和 compliance runner 均覆盖。 |
+| Java | JSON | `runtime/java/json_reader` | `legacy-bootstrap` | `copyable_template` | JDK-only JSON parser | template 声明 `PARSER_BACKEND = "configforge-jdk-json-bootstrap"` / `ADAPTER_SUPPORT_LEVEL = "legacy-bootstrap"`；推荐目标为 `runtime/java/jackson_reader`。 |
+| Java | MessagePack | `runtime/java/messagepack_reader` | `legacy-bootstrap` | `copyable_template` | JDK-only MessagePack subset parser | template 声明 `PARSER_BACKEND = "configforge-jdk-messagepack-subset"` / `ADAPTER_SUPPORT_LEVEL = "legacy-bootstrap"`；推荐目标为 `runtime/java/jackson_messagepack_reader`。 |
+| Java | Binary | `runtime/java/binary_reader` | `stable` | `copyable_template` | JDK-only，无第三方依赖 | template 声明 `PARSER_BACKEND = "configforge-binary"` / `ADAPTER_SUPPORT_LEVEL = "stable"`；standard_project 和 compliance runner 均覆盖。 |
 
 依赖策略：
 

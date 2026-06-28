@@ -472,7 +472,7 @@ fn validate_runtime_interface_options(options: &CSharpCodegenOptions) -> Result<
         RuntimeInterfaceEmit::Reference
     ) {
         return Err(validation_error(
-            "runtime_interface_emit=reference is not supported for C# yet; use copy or none",
+            "runtime_interface_emit=reference is not supported for C# yet; use copy or none. C# JSON copy adapters target System.Text.Json; MessagePack copy adapters are legacy-bootstrap until runtime/csharp/messagepack_csharp_reader lands.",
         ));
     }
     if matches!(options.runtime_interface, RuntimeInterfaceMode::External) {
@@ -761,18 +761,24 @@ fn render_standard_runtime_adapters(content: &mut impl CodeWriterLike) {
         "Json",
         "ConfigForge.Runtime.JsonReader.JsonRuntimeDataFileLoader",
         "ConfigForge.Runtime.JsonReader.JsonRuntimeDataReader",
+        "System.Text.Json",
+        "stable",
     );
     render_csharp_standard_runtime_adapter(
         content,
         "MessagePack",
         "ConfigForge.Runtime.MessagePackReader.MessagePackRuntimeDataFileLoader",
         "ConfigForge.Runtime.MessagePackReader.MessagePackRuntimeDataReader",
+        "configforge-dependency-free-messagepack-subset",
+        "legacy-bootstrap",
     );
     render_csharp_standard_runtime_adapter(
         content,
         "Binary",
         "ConfigForge.Runtime.BinaryReader.BinaryRuntimeDataFileLoader",
         "ConfigForge.Runtime.BinaryReader.BinaryRuntimeDataReader",
+        "configforge-binary",
+        "stable",
     );
 }
 
@@ -781,7 +787,12 @@ fn render_csharp_standard_runtime_adapter(
     format_name: &str,
     loader_type: &str,
     reader_type: &str,
+    parser_backend: &str,
+    support_level: &str,
 ) {
+    content.raw_fmt(format_args!(
+        "    // {format_name} runtime adapter backend: {parser_backend}; support level: {support_level}.\n"
+    ));
     content.raw_fmt(format_args!(
         "    public sealed class ConfigForge{format_name}RuntimeDataLoaderAdapter : IConfigForgeRuntimeDataLoader\n    {{\n"
     ));

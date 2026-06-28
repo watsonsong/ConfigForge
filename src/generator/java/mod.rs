@@ -302,7 +302,7 @@ fn validate_runtime_interface_options(options: &JavaCodegenOptions) -> Result<()
         RuntimeInterfaceEmit::Reference
     ) {
         return Err(validation_error(
-            "runtime_interface_emit=reference is not supported for Java yet; use copy or none"
+            "runtime_interface_emit=reference is not supported for Java yet; use copy or none. Java JSON and MessagePack copy adapters are legacy-bootstrap until runtime/java/jackson_reader and runtime/java/jackson_messagepack_reader land."
                 .to_owned(),
         ));
     }
@@ -578,18 +578,24 @@ fn render_standard_runtime_adapters(content: &mut impl CodeWriterLike) {
         "Json",
         "configforge.runtime.json.ConfigForgeJsonRuntimeDataLoader",
         "configforge.runtime.json.ConfigForgeJsonRuntimeDataReader",
+        "configforge-jdk-json-bootstrap",
+        "legacy-bootstrap",
     );
     render_java_standard_runtime_adapter(
         content,
         "MessagePack",
         "configforge.runtime.messagepack.ConfigForgeMessagePackRuntimeDataLoader",
         "configforge.runtime.messagepack.ConfigForgeMessagePackRuntimeDataReader",
+        "configforge-jdk-messagepack-subset",
+        "legacy-bootstrap",
     );
     render_java_standard_runtime_adapter(
         content,
         "Binary",
         "configforge.runtime.binary.ConfigForgeBinaryRuntimeDataLoader",
         "configforge.runtime.binary.ConfigForgeBinaryRuntimeDataReader",
+        "configforge-binary",
+        "stable",
     );
 }
 
@@ -598,7 +604,12 @@ fn render_java_standard_runtime_adapter(
     format_name: &str,
     loader_type: &str,
     reader_type: &str,
+    parser_backend: &str,
+    support_level: &str,
 ) {
+    content.raw_fmt(format_args!(
+        "    // {format_name} runtime adapter backend: {parser_backend}; support level: {support_level}.\n"
+    ));
     content.raw_fmt(format_args!(
         "    public static final class ConfigForge{format_name}RuntimeDataLoaderAdapter implements ConfigForgeRuntimeDataLoader {{\n"
     ));

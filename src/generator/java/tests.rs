@@ -246,6 +246,8 @@ fn emits_java_standard_runtime_adapters_when_requested() {
     assert!(
         content.contains("configforge.runtime.messagepack.ConfigForgeMessagePackRuntimeDataReader")
     );
+    assert!(content.contains("Json runtime adapter backend: configforge-jdk-json-bootstrap; support level: legacy-bootstrap."));
+    assert!(content.contains("MessagePack runtime adapter backend: configforge-jdk-messagepack-subset; support level: legacy-bootstrap."));
 }
 
 #[test]

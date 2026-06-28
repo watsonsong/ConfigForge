@@ -196,6 +196,88 @@ fn package_and_template_versions_stay_in_sync() {
     }
 }
 
+#[test]
+fn runtime_reader_parser_backend_metadata_stays_in_sync() {
+    assert_rust_parser_backend(
+        "runtime/rust/serde_json_reader/Cargo.toml",
+        "serde_json",
+        "1.0",
+        "stable",
+    );
+    assert_rust_parser_backend(
+        "runtime/rust/serde_msgpack_reader/Cargo.toml",
+        "rmp-serde",
+        "1.3",
+        "stable",
+    );
+    assert_rust_parser_backend(
+        "runtime/rust/binary_reader/Cargo.toml",
+        "configforge-binary",
+        "0.1",
+        "stable",
+    );
+
+    assert_typescript_parser_backend(
+        "runtime/typescript/json_reader/package.json",
+        "JSON.parse",
+        "ECMAScript",
+        "stable",
+    );
+    assert_typescript_parser_backend(
+        "runtime/typescript/messagepack_reader/package.json",
+        "@msgpack/msgpack",
+        "^3.0.0",
+        "stable",
+    );
+    assert_typescript_parser_backend(
+        "runtime/typescript/binary_reader/package.json",
+        "configforge-binary",
+        "0.1",
+        "stable",
+    );
+
+    assert_csharp_parser_backend(
+        "runtime/csharp/json_reader/JsonRuntimeDataReader.cs",
+        "System.Text.Json",
+        "net6.0",
+        "stable",
+    );
+    assert_csharp_parser_backend(
+        "runtime/csharp/messagepack_reader/MessagePackRuntimeDataReader.cs",
+        "configforge-dependency-free-messagepack-subset",
+        "0.1",
+        "legacy-bootstrap",
+    );
+    assert_csharp_parser_backend(
+        "runtime/csharp/binary_reader/BinaryRuntimeDataReader.cs",
+        "configforge-binary",
+        "0.1",
+        "stable",
+    );
+
+    assert_java_parser_backend(
+        "runtime/java/json_reader/src/configforge/runtime/json/ConfigForgeJsonRuntimeDataReader.java",
+        "configforge-jdk-json-bootstrap",
+        "0.1",
+        "legacy-bootstrap",
+    );
+    assert_java_parser_backend(
+        "runtime/java/messagepack_reader/src/configforge/runtime/messagepack/ConfigForgeMessagePackRuntimeDataReader.java",
+        "configforge-jdk-messagepack-subset",
+        "0.1",
+        "legacy-bootstrap",
+    );
+    assert_java_parser_backend(
+        "runtime/java/binary_reader/src/configforge/runtime/binary/ConfigForgeBinaryRuntimeDataReader.java",
+        "configforge-binary",
+        "0.1",
+        "stable",
+    );
+
+    assert_exact_declaration("src/code_artifact/runtime_interface.rs", "parser_backend");
+    assert_exact_declaration("src/code_artifact/runtime_interface.rs", "runtime_readers");
+}
+
 fn assert_rust_package(relative: &str, expected_name: &str) {
     let manifest = read_toml(relative);
     let package = package(relative, &manifest);
@@ -255,6 +337,79 @@ fn assert_typescript_package(
     assert_eq!(
         package["configForge"]["runtimeReaderContract"], REQUIRED_CONTRACT,
         "{relative} contract"
+    );
+}
+
+fn assert_rust_parser_backend(
+    relative: &str,
+    parser_backend: &str,
+    parser_backend_version: &str,
+    support_level: &str,
+) {
+    let manifest = read_toml(relative);
+    let metadata = manifest
+        .get("package")
+        .and_then(|value| value.get("metadata"))
+        .and_then(|value| value.get("config-forge"))
+        .and_then(toml::Value::as_table)
+        .unwrap_or_else(|| panic!("{relative}: missing [package.metadata.config-forge]"));
+    assert_eq!(metadata["parser-backend"].as_str(), Some(parser_backend));
+    assert_eq!(
+        metadata["parser-backend-version"].as_str(),
+        Some(parser_backend_version)
+    );
+    assert_eq!(
+        metadata["adapter-support-level"].as_str(),
+        Some(support_level)
+    );
+}
+
+fn assert_typescript_parser_backend(
+    relative: &str,
+    parser_backend: &str,
+    parser_backend_version: &str,
+    support_level: &str,
+) {
+    let package = read_json(relative);
+    assert_eq!(package["configForge"]["parserBackend"], parser_backend);
+    assert_eq!(
+        package["configForge"]["parserBackendVersion"],
+        parser_backend_version
+    );
+    assert_eq!(package["configForge"]["adapterSupportLevel"], support_level);
+}
+
+fn assert_csharp_parser_backend(
+    relative: &str,
+    parser_backend: &str,
+    parser_backend_version: &str,
+    support_level: &str,
+) {
+    assert_exact_declaration(relative, &format!("ParserBackend = \"{parser_backend}\""));
+    assert_exact_declaration(
+        relative,
+        &format!("ParserBackendVersion = \"{parser_backend_version}\""),
+    );
+    assert_exact_declaration(
+        relative,
+        &format!("AdapterSupportLevel = \"{support_level}\""),
+    );
+}
+
+fn assert_java_parser_backend(
+    relative: &str,
+    parser_backend: &str,
+    parser_backend_version: &str,
+    support_level: &str,
+) {
+    assert_exact_declaration(relative, &format!("PARSER_BACKEND = \"{parser_backend}\""));
+    assert_exact_declaration(
+        relative,
+        &format!("PARSER_BACKEND_VERSION = \"{parser_backend_version}\""),
+    );
+    assert_exact_declaration(
+        relative,
+        &format!("ADAPTER_SUPPORT_LEVEL = \"{support_level}\""),
     );
 }
 

@@ -151,6 +151,12 @@ fn parses_and_validates_cpp_runtime_interface_options() {
             ("runtime_core_header", "config_forge/runtime/reader.hpp"),
             ("runtime_core_namespace", "config_forge_runtime"),
         ],
+        &[(
+            "json",
+            "runtime/cpp/rapidjson_reader",
+            "RapidJSON",
+            "stable",
+        )],
     );
 
     input.target.options.language_options.insert(
@@ -191,7 +197,12 @@ fn parses_and_validates_cpp_runtime_interface_options() {
     );
 }
 
-fn assert_runtime_manifest(content: &str, language: &str, fields: &[(&str, &str)]) {
+fn assert_runtime_manifest(
+    content: &str,
+    language: &str,
+    fields: &[(&str, &str)],
+    runtime_readers: &[(&str, &str, &str, &str)],
+) {
     let manifest: Value = serde_json::from_str(content).expect("runtime manifest should be JSON");
     assert_eq!(
         manifest["contract"],
@@ -210,6 +221,18 @@ fn assert_runtime_manifest(content: &str, language: &str, fields: &[(&str, &str)
     assert_eq!(manifest["runtime_interface"], "external");
     for (key, value) in fields {
         assert_eq!(manifest[*key], *value, "manifest field {key}");
+    }
+    let readers = manifest["runtime_readers"]
+        .as_array()
+        .expect("runtime_readers should be an array");
+    assert_eq!(readers.len(), runtime_readers.len());
+    for (reader, (format, adapter, parser_backend, support_level)) in
+        readers.iter().zip(runtime_readers)
+    {
+        assert_eq!(reader["format"], *format);
+        assert_eq!(reader["adapter"], *adapter);
+        assert_eq!(reader["parser_backend"], *parser_backend);
+        assert_eq!(reader["adapter_support_level"], *support_level);
     }
 }
 

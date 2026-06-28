@@ -7,7 +7,7 @@ use crate::{
     ConfigForgeError, Result,
     artifact::ArtifactSink,
     code_artifact::runtime_interface::{
-        RuntimeInterfaceManifest,
+        RuntimeInterfaceManifest, recommended_runtime_reader_adapters,
         runtime_interface_manifest_path as shared_runtime_interface_manifest_path,
     },
     diagnostic::code::CF_GENERATOR_INVALID_OPTION,
@@ -157,7 +157,7 @@ impl CodeGenerator for CppCodeGenerator {
         ) {
             files.push(super::GeneratedFile {
                 path: runtime_interface_manifest_path(input),
-                content: cpp_runtime_interface_manifest(&cpp_options)?,
+                content: cpp_runtime_interface_manifest(input, &cpp_options)?,
             });
         }
         Ok(files)
@@ -233,7 +233,7 @@ impl CodeGenerator for CppCodeGenerator {
                 manifest_stream,
                 CodeWriterConfig::default().with_indent_width(2),
             );
-            let manifest_content = cpp_runtime_interface_manifest(&cpp_options)?;
+            let manifest_content = cpp_runtime_interface_manifest(input, &cpp_options)?;
             manifest.raw(&manifest_content);
             let manifest_stream =
                 manifest
@@ -298,7 +298,10 @@ fn runtime_interface_manifest_path(input: &CodeExportInput<'_>) -> std::path::Pa
     shared_runtime_interface_manifest_path(&input.target.out_dir)
 }
 
-fn cpp_runtime_interface_manifest(options: &CppCodegenOptions) -> Result<String> {
+fn cpp_runtime_interface_manifest(
+    input: &CodeExportInput<'_>,
+    options: &CppCodegenOptions,
+) -> Result<String> {
     let runtime_core_header = options
         .runtime_core_header
         .as_deref()
@@ -308,6 +311,10 @@ fn cpp_runtime_interface_manifest(options: &CppCodegenOptions) -> Result<String>
         .as_deref()
         .unwrap_or("config_forge_runtime");
     RuntimeInterfaceManifest::reference(LANGUAGE)
+        .with_runtime_readers(recommended_runtime_reader_adapters(
+            LANGUAGE,
+            &input.runtime_data_files,
+        ))
         .with_language_field("runtime_core_header", runtime_core_header)
         .with_language_field("runtime_core_namespace", runtime_core_namespace)
         .to_json_pretty()
