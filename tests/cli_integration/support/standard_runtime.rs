@@ -566,6 +566,22 @@ pub(crate) fn verify_standard_generated_typescript_runtime(
     )
     .expect("generated TypeScript code should be copied into harness");
 
+    let msgpack_package_dir = temp_dir.path().join("node_modules/@msgpack/msgpack");
+    fs::create_dir_all(&msgpack_package_dir)
+        .expect("TypeScript MessagePack backend package dir should be created");
+    fs::write(
+        msgpack_package_dir.join("package.json"),
+        r#"{"type":"commonjs","main":"index.js","types":"index.d.ts"}"#,
+    )
+    .expect("TypeScript MessagePack backend package metadata should be written");
+    fs::write(msgpack_package_dir.join("index.js"), msgpack_backend_shim())
+        .expect("TypeScript MessagePack backend shim should be written");
+    fs::write(
+        msgpack_package_dir.join("index.d.ts"),
+        "export function decode(bytes: Uint8Array): unknown;\n",
+    )
+    .expect("TypeScript MessagePack backend types should be written");
+
     if command_exists("tsc") {
         assert_command_success(
             StdCommand::new("tsc")
@@ -616,10 +632,10 @@ pub(crate) fn verify_standard_generated_typescript_runtime(
         r#"module.exports = require("../../../dist/runtime_reader_core.js");"#,
     )
     .expect("TypeScript core runtime package entry should be written");
-
     let output = StdCommand::new("node")
         .arg(temp_dir.path().join("dist/runtime_check.js"))
         .env("DATA_DIR", output_root.join("client_data/json"))
+        .env("MSGPACK_DATA_DIR", output_root.join("client_data/msgpack"))
         .env("BIN_DATA_DIR", output_root.join("client_data/binary"))
         .env(
             "I18N_MO",
@@ -628,6 +644,104 @@ pub(crate) fn verify_standard_generated_typescript_runtime(
         .output()
         .expect("standard generated TypeScript runtime test should run");
     assert_command_success(output, "standard generated TypeScript runtime test");
+}
+
+fn msgpack_backend_shim() -> &'static str {
+    r#"
+exports.decode = function decode(bytes) {
+  const decoder = new MessagePackDecoder(bytes);
+  const value = decoder.readValue();
+  decoder.ensureExhausted();
+  return value;
+};
+
+class MessagePackDecoder {
+  constructor(bytes) {
+    this.bytes = bytes;
+    this.offset = 0;
+    this.textDecoder = new TextDecoder("utf-8", { fatal: true });
+  }
+
+  readValue() {
+    const tag = this.readU8();
+    if (tag <= 0x7f) return tag;
+    if (tag >= 0xe0) return tag - 0x100;
+    if ((tag & 0xe0) === 0xa0) return this.readString(tag & 0x1f);
+    if ((tag & 0xf0) === 0x90) return this.readArray(tag & 0x0f);
+    if ((tag & 0xf0) === 0x80) return this.readMap(tag & 0x0f);
+    switch (tag) {
+      case 0xc0: return null;
+      case 0xc2: return false;
+      case 0xc3: return true;
+      case 0xca: return this.readFloat32();
+      case 0xcb: return this.readFloat64();
+      case 0xcc: return this.readU8();
+      case 0xcd: return this.readU16();
+      case 0xce: return this.readU32();
+      case 0xd0: return this.readI8();
+      case 0xd1: return this.readI16();
+      case 0xd2: return this.readI32();
+      case 0xd9: return this.readString(this.readU8());
+      case 0xda: return this.readString(this.readU16());
+      case 0xdc: return this.readArray(this.readU16());
+      case 0xde: return this.readMap(this.readU16());
+      default: throw new Error(`unsupported MessagePack tag 0x${tag.toString(16)}`);
+    }
+  }
+
+  ensureExhausted() {
+    if (this.offset !== this.bytes.length) {
+      throw new Error("trailing MessagePack bytes");
+    }
+  }
+
+  readArray(length) {
+    return Array.from({ length }, () => this.readValue());
+  }
+
+  readMap(length) {
+    const value = {};
+    for (let index = 0; index < length; index += 1) {
+      const key = this.readValue();
+      if (typeof key !== "string") {
+        throw new Error("unsupported non-string map key");
+      }
+      value[key] = this.readValue();
+    }
+    return value;
+  }
+
+  readString(length) {
+    return this.textDecoder.decode(this.readExact(length));
+  }
+
+  readFloat32() {
+    const bytes = this.readExact(4);
+    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat32(0, false);
+  }
+
+  readFloat64() {
+    const bytes = this.readExact(8);
+    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat64(0, false);
+  }
+
+  readU8() { return this.readExact(1)[0]; }
+  readU16() { const bytes = this.readExact(2); return (bytes[0] << 8) | bytes[1]; }
+  readU32() { const bytes = this.readExact(4); return bytes[0] * 0x1000000 + ((bytes[1] << 16) | (bytes[2] << 8) | bytes[3]); }
+  readI8() { const value = this.readU8(); return value & 0x80 ? value - 0x100 : value; }
+  readI16() { const value = this.readU16(); return value & 0x8000 ? value - 0x10000 : value; }
+  readI32() { const value = this.readU32(); return value > 0x7fffffff ? value - 0x100000000 : value; }
+
+  readExact(length) {
+    if (this.offset + length > this.bytes.length) {
+      throw new Error("truncated MessagePack payload");
+    }
+    const value = this.bytes.subarray(this.offset, this.offset + length);
+    this.offset += length;
+    return value;
+  }
+}
+"#
 }
 pub(crate) fn verify_standard_generated_lua_runtime(
     fixture_root: &std::path::Path,

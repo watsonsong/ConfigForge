@@ -69,6 +69,7 @@ fn run_typescript_runtime_compliance_cases() {
 
     copy_runtime_sources(&src_dir);
     write_compliance_data(&src_dir);
+    write_msgpack_backend_shim(temp_dir.path());
     fs::write(src_dir.join("runner.ts"), runner_source())
         .expect("typescript compliance runner should be written");
     fs::write(temp_dir.path().join("tsconfig.json"), tsconfig_source())
@@ -94,6 +95,24 @@ fn run_typescript_runtime_compliance_cases() {
         .output()
         .expect("typescript compliance node runner should run");
     assert_command_success(node_output, "TypeScript runtime compliance node runner");
+}
+
+fn write_msgpack_backend_shim(project_dir: &Path) {
+    let package_dir = project_dir.join("node_modules/@msgpack/msgpack");
+    fs::create_dir_all(&package_dir)
+        .expect("TypeScript MessagePack backend package dir should be created");
+    fs::write(
+        package_dir.join("package.json"),
+        r#"{"type":"commonjs","main":"index.js","types":"index.d.ts"}"#,
+    )
+    .expect("TypeScript MessagePack backend package metadata should be written");
+    fs::write(package_dir.join("index.js"), msgpack_backend_shim())
+        .expect("TypeScript MessagePack backend shim should be written");
+    fs::write(
+        package_dir.join("index.d.ts"),
+        "export function decode(bytes: Uint8Array): unknown;\n",
+    )
+    .expect("TypeScript MessagePack backend types should be written");
 }
 
 fn copy_runtime_sources(src_dir: &Path) {
@@ -230,7 +249,7 @@ const adapters: readonly Adapter[] = [
   { name: "typescript-json", readerFor: (payload) => decodeJsonValue(payloads[payload]) },
   {
     name: "typescript-messagepack",
-    readerFor: (payload) => decodeMessagePackValue(encodeMessagePack(JSON.parse(payloads[payload])), decodeMessagePack),
+    readerFor: (payload) => decodeMessagePackValue(encodeMessagePack(JSON.parse(payloads[payload]))),
   },
 ];
 
@@ -611,9 +630,9 @@ function runErrorCases(adapter: Adapter): void {
   for (const testCase of cases) {
     if (testCase.operation === "decode") {
       if (testCase.name === "messagepack_non_string_map_key") {
-        expectFailure(`${adapter.name} ${testCase.name}`, () => decodeMessagePackValue(new Uint8Array([0x81, 0x01, 0x01]), decodeMessagePack), testCase.expected_message_contains, testCase.expected_kind);
+        expectFailure(`${adapter.name} ${testCase.name}`, () => decodeMessagePackValue(new Uint8Array([0x81, 0x01, 0x01])), testCase.expected_message_contains, testCase.expected_kind);
       } else if (testCase.name === "messagepack_binary_ext") {
-        expectFailure(`${adapter.name} ${testCase.name}`, () => decodeMessagePackValue(new Uint8Array([0xc4, 0x01, 0x00]), decodeMessagePack), testCase.expected_message_contains, testCase.expected_kind);
+        expectFailure(`${adapter.name} ${testCase.name}`, () => decodeMessagePackValue(new Uint8Array([0xc4, 0x01, 0x00])), testCase.expected_message_contains, testCase.expected_kind);
       } else {
         throw new Error(`unhandled ${adapter.name} compliance decode error case ${testCase.name}`);
       }
@@ -889,5 +908,92 @@ for (const adapter of adapters) {
 }
 runBinarySuccessCases();
 runBinaryMalformedCases();
+"#
+}
+
+fn msgpack_backend_shim() -> &'static str {
+    r#"
+exports.decode = function decode(bytes) {
+  const decoder = new MessagePackDecoder(bytes);
+  const value = decoder.readValue();
+  decoder.ensureExhausted();
+  return value;
+};
+
+class MessagePackDecoder {
+  constructor(bytes) {
+    this.bytes = bytes;
+    this.offset = 0;
+    this.textDecoder = new TextDecoder("utf-8", { fatal: true });
+  }
+
+  readValue() {
+    const tag = this.readU8();
+    if (tag <= 0x7f) return tag;
+    if (tag >= 0xe0) return tag - 0x100;
+    if ((tag & 0xe0) === 0xa0) return this.readString(tag & 0x1f);
+    if ((tag & 0xf0) === 0x90) return this.readArray(tag & 0x0f);
+    if ((tag & 0xf0) === 0x80) return this.readMap(tag & 0x0f);
+    switch (tag) {
+      case 0xc0: return null;
+      case 0xc2: return false;
+      case 0xc3: return true;
+      case 0xc4:
+      case 0xc5:
+      case 0xc6:
+      case 0xc7:
+      case 0xc8:
+      case 0xc9:
+        throw new Error("unsupported binary/ext value");
+      case 0xca: return this.readFloat32();
+      case 0xcb: return this.readFloat64();
+      case 0xcc: return this.readU8();
+      case 0xcd: return this.readU16();
+      case 0xce: return this.readU32();
+      case 0xd0: return this.readI8();
+      case 0xd1: return this.readI16();
+      case 0xd9: return this.readString(this.readU8());
+      case 0xda: return this.readString(this.readU16());
+      case 0xdc: return this.readArray(this.readU16());
+      case 0xde: return this.readMap(this.readU16());
+      default: throw new Error(`unsupported MessagePack tag 0x${tag.toString(16)}`);
+    }
+  }
+
+  ensureExhausted() {
+    if (this.offset !== this.bytes.length) {
+      throw new Error("trailing MessagePack bytes");
+    }
+  }
+
+  readArray(length) { return Array.from({ length }, () => this.readValue()); }
+  readMap(length) {
+    const value = {};
+    for (let index = 0; index < length; index += 1) {
+      const key = this.readValue();
+      if (typeof key !== "string") {
+        throw new Error("unsupported non-string map key");
+      }
+      value[key] = this.readValue();
+    }
+    return value;
+  }
+  readString(length) { return this.textDecoder.decode(this.readExact(length)); }
+  readFloat32() { const bytes = this.readExact(4); return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat32(0, false); }
+  readFloat64() { const bytes = this.readExact(8); return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat64(0, false); }
+  readU8() { return this.readExact(1)[0]; }
+  readU16() { const bytes = this.readExact(2); return (bytes[0] << 8) | bytes[1]; }
+  readU32() { const bytes = this.readExact(4); return bytes[0] * 0x1000000 + ((bytes[1] << 16) | (bytes[2] << 8) | bytes[3]); }
+  readI8() { const value = this.readU8(); return value & 0x80 ? value - 0x100 : value; }
+  readI16() { const value = this.readU16(); return value & 0x8000 ? value - 0x10000 : value; }
+  readExact(length) {
+    if (this.offset + length > this.bytes.length) {
+      throw new Error("truncated MessagePack payload");
+    }
+    const value = this.bytes.subarray(this.offset, this.offset + length);
+    this.offset += length;
+    return value;
+  }
+}
 "#
 }

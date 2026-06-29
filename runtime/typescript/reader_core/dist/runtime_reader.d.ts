@@ -9,6 +9,7 @@ export interface RuntimeDataErrorContext {
 }
 export declare class RuntimeDataError extends Error {
     readonly kind: RuntimeDataErrorKind;
+    readonly code: string;
     readonly context: RuntimeDataErrorContext;
     constructor(kind: RuntimeDataErrorKind, message: string, context?: RuntimeDataErrorContext, options?: {
         cause?: unknown;
@@ -21,6 +22,7 @@ export declare class RuntimeDataError extends Error {
     static unsupported(message: string, context?: RuntimeDataErrorContext): RuntimeDataError;
     static invalidPath(message: string, context?: RuntimeDataErrorContext): RuntimeDataError;
 }
+export declare function runtimeDataErrorCode(kind: RuntimeDataErrorKind): string;
 export interface RuntimeDataReaderLike {
     enterRequiredField(name: string): void;
     enterOptionalField(name: string): boolean;

@@ -112,6 +112,53 @@ run_typescript_harness() {
   cp "${REPO_ROOT}/runtime/typescript/messagepack_reader/src/runtime_loader.ts" \
     "${work_dir}/runtime_loader_messagepack.ts"
 
+  mkdir -p "${work_dir}/node_modules/@msgpack/msgpack"
+  printf '{"type":"commonjs","main":"index.js","types":"index.d.ts"}\n' \
+    > "${work_dir}/node_modules/@msgpack/msgpack/package.json"
+  printf 'export function decode(bytes: Uint8Array): unknown;\n' \
+    > "${work_dir}/node_modules/@msgpack/msgpack/index.d.ts"
+  cat > "${work_dir}/node_modules/@msgpack/msgpack/index.js" <<'EOF'
+exports.decode = function decode(bytes) {
+  const decoder = new MessagePackDecoder(bytes);
+  const value = decoder.readValue();
+  decoder.ensureExhausted();
+  return value;
+};
+class MessagePackDecoder {
+  constructor(bytes) { this.bytes = bytes; this.offset = 0; this.textDecoder = new TextDecoder("utf-8", { fatal: true }); }
+  readValue() {
+    const tag = this.readU8();
+    if (tag <= 0x7f) return tag;
+    if (tag >= 0xe0) return tag - 0x100;
+    if ((tag & 0xe0) === 0xa0) return this.readString(tag & 0x1f);
+    if ((tag & 0xf0) === 0x90) return this.readArray(tag & 0x0f);
+    if ((tag & 0xf0) === 0x80) return this.readMap(tag & 0x0f);
+    switch (tag) {
+      case 0xc0: return null; case 0xc2: return false; case 0xc3: return true;
+      case 0xca: return this.readFloat32(); case 0xcb: return this.readFloat64();
+      case 0xcc: return this.readU8(); case 0xcd: return this.readU16(); case 0xce: return this.readU32();
+      case 0xd0: return this.readI8(); case 0xd1: return this.readI16(); case 0xd2: return this.readI32();
+      case 0xd9: return this.readString(this.readU8()); case 0xda: return this.readString(this.readU16());
+      case 0xdc: return this.readArray(this.readU16()); case 0xde: return this.readMap(this.readU16());
+      default: throw new Error(`unsupported MessagePack tag 0x${tag.toString(16)}`);
+    }
+  }
+  ensureExhausted() { if (this.offset !== this.bytes.length) throw new Error("trailing MessagePack bytes"); }
+  readArray(length) { return Array.from({ length }, () => this.readValue()); }
+  readMap(length) { const value = {}; for (let i = 0; i < length; i += 1) { const key = this.readValue(); if (typeof key !== "string") throw new Error("unsupported non-string map key"); value[key] = this.readValue(); } return value; }
+  readString(length) { return this.textDecoder.decode(this.readExact(length)); }
+  readFloat32() { const b = this.readExact(4); return new DataView(b.buffer, b.byteOffset, b.byteLength).getFloat32(0, false); }
+  readFloat64() { const b = this.readExact(8); return new DataView(b.buffer, b.byteOffset, b.byteLength).getFloat64(0, false); }
+  readU8() { return this.readExact(1)[0]; }
+  readU16() { const b = this.readExact(2); return (b[0] << 8) | b[1]; }
+  readU32() { const b = this.readExact(4); return b[0] * 0x1000000 + ((b[1] << 16) | (b[2] << 8) | b[3]); }
+  readI8() { const v = this.readU8(); return v & 0x80 ? v - 0x100 : v; }
+  readI16() { const v = this.readU16(); return v & 0x8000 ? v - 0x10000 : v; }
+  readI32() { const v = this.readU32(); return v > 0x7fffffff ? v - 0x100000000 : v; }
+  readExact(length) { if (this.offset + length > this.bytes.length) throw new Error("truncated MessagePack payload"); const value = this.bytes.subarray(this.offset, this.offset + length); this.offset += length; return value; }
+}
+EOF
+
   "${TSC_CMD[@]}" --project "${work_dir}/tsconfig.json"
 
   mkdir -p "${work_dir}/node_modules/@config-forge/runtime-reader-core"
@@ -119,8 +166,53 @@ run_typescript_harness() {
     > "${work_dir}/node_modules/@config-forge/runtime-reader-core/package.json"
   printf 'module.exports = require("../../../dist/runtime_reader_core.js");\n' \
     > "${work_dir}/node_modules/@config-forge/runtime-reader-core/index.js"
+  mkdir -p "${work_dir}/node_modules/@msgpack/msgpack"
+  printf '{"type":"commonjs","main":"index.js"}\n' \
+    > "${work_dir}/node_modules/@msgpack/msgpack/package.json"
+  cat > "${work_dir}/node_modules/@msgpack/msgpack/index.js" <<'EOF'
+exports.decode = function decode(bytes) {
+  const decoder = new MessagePackDecoder(bytes);
+  const value = decoder.readValue();
+  decoder.ensureExhausted();
+  return value;
+};
+class MessagePackDecoder {
+  constructor(bytes) { this.bytes = bytes; this.offset = 0; this.textDecoder = new TextDecoder("utf-8", { fatal: true }); }
+  readValue() {
+    const tag = this.readU8();
+    if (tag <= 0x7f) return tag;
+    if (tag >= 0xe0) return tag - 0x100;
+    if ((tag & 0xe0) === 0xa0) return this.readString(tag & 0x1f);
+    if ((tag & 0xf0) === 0x90) return this.readArray(tag & 0x0f);
+    if ((tag & 0xf0) === 0x80) return this.readMap(tag & 0x0f);
+    switch (tag) {
+      case 0xc0: return null; case 0xc2: return false; case 0xc3: return true;
+      case 0xca: return this.readFloat32(); case 0xcb: return this.readFloat64();
+      case 0xcc: return this.readU8(); case 0xcd: return this.readU16(); case 0xce: return this.readU32();
+      case 0xd0: return this.readI8(); case 0xd1: return this.readI16(); case 0xd2: return this.readI32();
+      case 0xd9: return this.readString(this.readU8()); case 0xda: return this.readString(this.readU16());
+      case 0xdc: return this.readArray(this.readU16()); case 0xde: return this.readMap(this.readU16());
+      default: throw new Error(`unsupported MessagePack tag 0x${tag.toString(16)}`);
+    }
+  }
+  ensureExhausted() { if (this.offset !== this.bytes.length) throw new Error("trailing MessagePack bytes"); }
+  readArray(length) { return Array.from({ length }, () => this.readValue()); }
+  readMap(length) { const value = {}; for (let i = 0; i < length; i += 1) { const key = this.readValue(); if (typeof key !== "string") throw new Error("unsupported non-string map key"); value[key] = this.readValue(); } return value; }
+  readString(length) { return this.textDecoder.decode(this.readExact(length)); }
+  readFloat32() { const b = this.readExact(4); return new DataView(b.buffer, b.byteOffset, b.byteLength).getFloat32(0, false); }
+  readFloat64() { const b = this.readExact(8); return new DataView(b.buffer, b.byteOffset, b.byteLength).getFloat64(0, false); }
+  readU8() { return this.readExact(1)[0]; }
+  readU16() { const b = this.readExact(2); return (b[0] << 8) | b[1]; }
+  readU32() { const b = this.readExact(4); return b[0] * 0x1000000 + ((b[1] << 16) | (b[2] << 8) | b[3]); }
+  readI8() { const v = this.readU8(); return v & 0x80 ? v - 0x100 : v; }
+  readI16() { const v = this.readU16(); return v & 0x8000 ? v - 0x10000 : v; }
+  readI32() { const v = this.readU32(); return v > 0x7fffffff ? v - 0x100000000 : v; }
+  readExact(length) { if (this.offset + length > this.bytes.length) throw new Error("truncated MessagePack payload"); const value = this.bytes.subarray(this.offset, this.offset + length); this.offset += length; return value; }
+}
+EOF
 
   DATA_DIR="${FIXTURE_ROOT}/out/client_data/json" \
+    MSGPACK_DATA_DIR="${FIXTURE_ROOT}/out/client_data/msgpack" \
     I18N_MO="${FIXTURE_ROOT}/i18n/zh_CN/reference_game_config.mo" \
     node "${work_dir}/dist/runtime_check.js"
   BIN_DATA_DIR="${FIXTURE_ROOT}/out/client_data/binary" \

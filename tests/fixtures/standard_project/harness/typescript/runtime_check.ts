@@ -15,12 +15,13 @@ import { setGlobalTextCatalog } from "./i18n";
 import { SyncFsRuntimeDataLoader } from "./runtime_loader_node_fs";
 import { decodeBinaryRuntimeData } from "./runtime_loader_binary";
 import { decodeJsonValue, JsonValueReader } from "./runtime_loader_json";
-import { createMessagePackRuntimeDecoder } from "./runtime_loader_messagepack";
+import { createMessagePackRuntimeDecoder, MessagePackValueReader } from "./runtime_loader_messagepack";
 
 const process = require("process");
 const fs = require("fs");
 
 const dataDir = process.env.DATA_DIR;
+const messagePackDataDir = process.env.MSGPACK_DATA_DIR;
 const binaryDataDir = process.env.BIN_DATA_DIR;
 const i18nMo = process.env.I18N_MO;
 if (!dataDir && !binaryDataDir) {
@@ -77,10 +78,20 @@ const loader: RuntimeDataLoader | undefined = dataDir
 if (dataDir) {
   const messagePackLoader: RuntimeDataLoader = new SyncFsRuntimeDataLoader(
     dataDir,
-    createMessagePackRuntimeDecoder(() => ({ rows: [] })),
+    createMessagePackRuntimeDecoder((bytes) => {
+      void bytes;
+      return { rows: [] };
+    }),
     "msgpack",
   );
   void messagePackLoader;
+}
+const messagePackLoader: RuntimeDataLoader | undefined = messagePackDataDir
+  ? new SyncFsRuntimeDataLoader(messagePackDataDir, createMessagePackRuntimeDecoder(), "msgpack")
+  : undefined;
+
+if (new MessagePackValueReader("1").asInt64() !== 1) {
+  throw new Error("MessagePack value reader scalar conversion failed");
 }
 
 if (!new JsonValueReader("1").asBool() || new JsonValueReader("0").asBool()) {
@@ -88,6 +99,35 @@ if (!new JsonValueReader("1").asBool() || new JsonValueReader("0").asBool()) {
 }
 
 async function main(): Promise<void> {
+  if (messagePackLoader) {
+    const messagePackData = await GameData.load(messagePackLoader);
+    const messagePackItem = messagePackData.items.getById(2001);
+    if (!messagePackItem || messagePackItem.name !== "Iron Ore" || messagePackItem.rarityId !== 2 || messagePackItem.stack?.maxStack !== 999) {
+      throw new Error("messagepack single-field item index query failed");
+    }
+    const messagePackItemRarity = messagePackItem.rarity(messagePackData);
+    if (messagePackItemRarity.rarityId !== 2 || messagePackItemRarity.standardColor.r !== 255 || messagePackItemRarity.backgroundIcon !== "assets/icons/rarity/common.png") {
+      throw new Error("messagepack item rarity relation failed");
+    }
+    if (messagePackData.rarityLevels.getById(5)?.rarityId !== 5) {
+      throw new Error("messagepack rarity id index failed");
+    }
+    if (messagePackData.gameRules.defaultClass(messagePackData).classId !== 1) {
+      throw new Error("messagepack object table single relation failed");
+    }
+    messagePackData.linkAll();
+    const lazyMessagePackData = GameData.loadLazy(messagePackLoader);
+    const lazyMessagePackItem = await lazyMessagePackData.items().then((items) => items.getById(2001));
+    if (!lazyMessagePackItem || lazyMessagePackItem.id !== 2001) {
+      throw new Error("messagepack lazy item table load failed");
+    }
+    const syncMessagePackData = GameData.loadSync(messagePackLoader);
+    if (syncMessagePackData.items.getById(2001)?.id !== 2001) {
+      throw new Error("messagepack sync eager item table load failed");
+    }
+    assertTranslatedText(messagePackData);
+  }
+
   if (binaryLoader) {
     const binaryData = await GameData.load(binaryLoader);
     const binaryItem = binaryData.items.getById(2001);

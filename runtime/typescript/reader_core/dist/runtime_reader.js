@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RuntimeValueReader = exports.DEFAULT_RUNTIME_DECODE_LIMITS = exports.RuntimeDataError = exports.SUPPORTED_CONFIG_FORGE_READER_CONTRACT = void 0;
+exports.runtimeDataErrorCode = runtimeDataErrorCode;
 exports.normalizeRuntimeDecodeLimits = normalizeRuntimeDecodeLimits;
 exports.checkRuntimeDecodeLimit = checkRuntimeDecodeLimit;
 exports.SUPPORTED_CONFIG_FORGE_READER_CONTRACT = "^1.0";
@@ -11,6 +12,7 @@ class RuntimeDataError extends Error {
         super(message);
         this.name = "RuntimeDataError";
         this.kind = kind;
+        this.code = runtimeDataErrorCode(kind);
         this.context = context;
         if (options && "cause" in options) {
             this.cause = options.cause;
@@ -39,6 +41,17 @@ class RuntimeDataError extends Error {
     }
 }
 exports.RuntimeDataError = RuntimeDataError;
+function runtimeDataErrorCode(kind) {
+    switch (kind) {
+        case "Io": return "CF_RT_IO";
+        case "Decode": return "CF_RT_DECODE";
+        case "SchemaMismatch": return "CF_RT_SCHEMA_MISMATCH";
+        case "TypeMismatch": return "CF_RT_TYPE_MISMATCH";
+        case "NotFound": return "CF_RT_NOT_FOUND";
+        case "Unsupported": return "CF_RT_UNSUPPORTED";
+        case "InvalidPath": return "CF_RT_INVALID_PATH";
+    }
+}
 exports.DEFAULT_RUNTIME_DECODE_LIMITS = Object.freeze({
     maxFileBytes: 64 * 1024 * 1024,
     maxRows: 1000000,

@@ -59,7 +59,7 @@ runtime/<language>/<parser_or_backend>[_<format>]_reader
   - `runtime/csharp/messagepack_reader`：降级为 `custom/example` 或 `legacy_dependency_free_messagepack_reader`，不作为推荐 Stable adapter。
   - `runtime/java/json_reader`：降级为 `custom/example` / compliance bootstrap，不作为推荐 Stable adapter。
   - `runtime/java/messagepack_reader`：降级为 `custom/example` / compliance bootstrap，不作为推荐 Stable adapter。
-  - `runtime/typescript/messagepack_reader`：保留 package 名也可以，但必须在 package 层明确绑定 `@msgpack/msgpack` 默认 backend；可把 injectable decoder API 标注为 advanced/custom。
+  - `runtime/typescript/messagepack_reader`：已保留 package 名并在 package metadata / 默认 decode 入口中绑定 `@msgpack/msgpack`；injectable decoder API 保留为 advanced/custom hook。
 
 ### P1-3：更新 generated code copy/reference 选项
 
@@ -70,8 +70,8 @@ runtime/<language>/<parser_or_backend>[_<format>]_reader
 ### P1-4：同步 compliance 与 integration harness
 
 - [ ] `tests/csharp_java_runtime_compliance.rs` 增加 library-bound C# / Java adapter runner；旧 hand-written reader runner 可保留为 custom/example 覆盖，但不能作为唯一 Stable 标准。
-- [ ] `tests/typescript_runtime_compliance.rs` 对 MessagePack runner 使用标准 `@msgpack/msgpack` decode 路径；injectable test decoder 只用于单测或 custom hook 覆盖。
-- [ ] `tests/cli_integration/support/standard_runtime.rs` 的 standard_project harness 迁移到推荐 adapter，确保用户样例就是推荐接入方式。
+- [x] `tests/typescript_runtime_compliance.rs` 对 MessagePack runner 使用标准 `@msgpack/msgpack` decode 路径；测试中通过本地 shim 保持离线和确定性，injectable decoder 只保留为 advanced/custom hook。
+- [x] `tests/cli_integration/support/standard_runtime.rs` 的 TypeScript standard_project harness 迁移到推荐 adapter，确保用户样例使用默认 `@msgpack/msgpack` 接入路径。
 - [ ] release metadata drift test 增加 parser backend / dependency policy 校验，避免 package 名称、文档和实际依赖漂移。
 
 ## P2：补充可选生态 adapter
