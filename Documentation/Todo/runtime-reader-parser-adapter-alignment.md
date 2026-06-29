@@ -63,9 +63,9 @@ runtime/<language>/<parser_or_backend>[_<format>]_reader
 
 ### P1-3：更新 generated code copy/reference 选项
 
-- [ ] C# / Java 的 `runtime_interface = copy` 不应默认复制手写 JSON / MessagePack parser 作为“标准推荐”；应改为复制 / 引用 library-bound adapter，或在诊断中明确提示需要添加对应包依赖。
-- [ ] `runtime_interface_emit = "reference"` manifest 对 library-bound adapter 增加 backend identity，例如 `parser_backend = "jackson"` / `"System.Text.Json"` / `"@msgpack/msgpack"`。
-- [ ] 文档中明确：generated code 只依赖 ConfigForge reader contract；parser 库依赖只存在于 adapter package/template，不进入 generated core。
+- [x] C# / Java 的 `runtime_interface = copy` 不应默认复制手写 JSON / MessagePack parser 作为“标准推荐”；当前 generated adapter 注释和 unsupported `reference` 诊断均显式标出 C# JSON 的 `System.Text.Json` backend、C# / Java legacy-bootstrap 状态，以及后续 library-bound adapter 目标。
+- [x] `runtime_interface_emit = "reference"` manifest 对 library-bound adapter 增加 backend identity，例如 `parser_backend = "jackson"` / `"System.Text.Json"` / `"@msgpack/msgpack"`。当前 Rust / C++ reference manifest 已输出 `runtime_readers[].parser_backend` / `parser_backend_version` / `adapter_support_level`；C# / Java 在 library-bound package 稳定前继续拒绝 `reference` 并在诊断中说明 backend 状态。
+- [x] 文档中明确：generated code 只依赖 ConfigForge reader contract；parser 库依赖只存在于 adapter package/template，不进入 generated core。
 
 ### P1-4：同步 compliance 与 integration harness
 
