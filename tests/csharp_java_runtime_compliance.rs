@@ -34,6 +34,10 @@ fn run_csharp_runtime_compliance_cases() {
             "JsonRuntimeDataReader.cs",
         ),
         (
+            "runtime/csharp/system_text_json_reader/SystemTextJsonRuntimeDataReader.cs",
+            "SystemTextJsonRuntimeDataReader.cs",
+        ),
+        (
             "runtime/csharp/messagepack_reader/MessagePackRuntimeDataReader.cs",
             "MessagePackRuntimeDataReader.cs",
         ),
@@ -219,10 +223,12 @@ using System.Text.Json;
 using ConfigForge.Runtime.BinaryReader;
 using ConfigForge.Runtime.JsonReader;
 using ConfigForge.Runtime.MessagePackReader;
+using ConfigForge.Runtime.SystemTextJsonReader;
 
 var fixtureDir = Environment.GetEnvironmentVariable("FIXTURE_DIR") ?? throw new Exception("FIXTURE_DIR missing");
 var adapters = new (string Name, Func<string, dynamic> ReaderFor)[] {
     ("csharp-json", name => new JsonRuntimeDataReader(JsonDocument.Parse(File.ReadAllText(Path.Combine(fixtureDir, name))))),
+    ("csharp-system-text-json", name => new SystemTextJsonRuntimeDataReader(JsonDocument.Parse(File.ReadAllText(Path.Combine(fixtureDir, name))))),
     ("csharp-messagepack", name => new MessagePackRuntimeDataReader(EncodeMessagePack(JsonDocument.Parse(File.ReadAllText(Path.Combine(fixtureDir, name))).RootElement))),
 };
 foreach (var adapter in adapters) {
@@ -283,6 +289,11 @@ static void AssertCSharpTemplateMetadata(string adapter) {
     Equal(JsonRuntimeDataReader.TemplateVersion, "0.1.0", adapter + " JSON template version");
     Equal(JsonRuntimeDataReader.SupportedConfigForgeReaderContract, "^1.0", adapter + " JSON contract range");
     Equal(JsonRuntimeDataReader.DistributionMode, "copyable-template", adapter + " JSON distribution");
+    Equal(SystemTextJsonRuntimeDataReader.TemplateVersion, "0.1.0", adapter + " System.Text.Json template version");
+    Equal(SystemTextJsonRuntimeDataReader.SupportedConfigForgeReaderContract, "^1.0", adapter + " System.Text.Json contract range");
+    Equal(SystemTextJsonRuntimeDataReader.DistributionMode, "copyable-template", adapter + " System.Text.Json distribution");
+    Equal(SystemTextJsonRuntimeDataReader.ParserBackend, "System.Text.Json", adapter + " System.Text.Json parser backend");
+    Equal(SystemTextJsonRuntimeDataReader.AdapterSupportLevel, "stable", adapter + " System.Text.Json support level");
     Equal(MessagePackRuntimeDataReader.TemplateVersion, "0.1.0", adapter + " MessagePack template version");
     Equal(MessagePackRuntimeDataReader.SupportedConfigForgeReaderContract, "^1.0", adapter + " MessagePack contract range");
     Equal(MessagePackRuntimeDataReader.DistributionMode, "copyable-template", adapter + " MessagePack distribution");

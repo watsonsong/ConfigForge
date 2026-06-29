@@ -357,7 +357,8 @@ runtime/
       ConfigForgeRuntimeConfig.cmake.in
     CMakeLists.txt        # options、find_package、adapter targets、tests
   csharp/
-    json_reader/          # System.Text.Json reader + fs loader
+    json_reader/          # compatibility System.Text.Json reader + fs loader
+    system_text_json_reader/ # backend-named System.Text.Json wrapper + fs loader
     messagepack_reader/   # dependency-free MessagePack subset reader + fs loader
     binary_reader/        # schema-aware bin reader + fs loader
   java/
@@ -394,7 +395,7 @@ runtime/
 | C++ | JSON | `runtime/cpp/rapidjson_reader` | `stable target` | `external_interface` + generated-header-bound 兼容 | CMake option + `find_package(RapidJSON CONFIG)` / package manager / optional `FetchContent` | 用 RapidJSON 完整处理转义、Unicode、数字和 parse error；可通过 CMake target 引入。 |
 | C++ | MessagePack | `runtime/cpp/msgpackc_reader` | `stable target` | `external_interface` + generated-header-bound 兼容 | CMake option + `find_package(msgpack-cxx CONFIG)` / package manager / `FetchContent` 固定 `cpp-6.1.1` | 不手写二进制 parser；解码到 msgpack object/value 后适配 reader，可通过 CMake target 引入。 |
 | C++ | Binary | `runtime/cpp/binary_reader` | `stable target` | `external_interface` + generated-header-bound 兼容 | 无第三方依赖 | 通过 `config_forge_runtime::binary_reader` target 引入；install + `find_package` smoke 已覆盖。 |
-| C# | JSON | `runtime/csharp/json_reader` | `stable` | `copyable_template` | .NET BCL `System.Text.Json` | template 声明 `ParserBackend = "System.Text.Json"` / `AdapterSupportLevel = "stable"`；当前泛化目录作为 compatibility path，后续可迁到 `system_text_json_reader`。 |
+| C# | JSON | `runtime/csharp/system_text_json_reader` | `stable` | `copyable_template` | .NET BCL `System.Text.Json` | template 声明 `ParserBackend = "System.Text.Json"` / `AdapterSupportLevel = "stable"`；`runtime/csharp/json_reader` 保留为 compatibility path。 |
 | C# | MessagePack | `runtime/csharp/messagepack_reader` | `legacy-bootstrap` | `copyable_template` | 无第三方依赖，内置 MessagePack subset parser | template 声明 `ParserBackend = "configforge-dependency-free-messagepack-subset"` / `AdapterSupportLevel = "legacy-bootstrap"`；推荐目标为 `runtime/csharp/messagepack_csharp_reader`。 |
 | C# | Binary | `runtime/csharp/binary_reader` | `stable` | `copyable_template` | 无第三方依赖 | template 声明 `ParserBackend = "configforge-binary"` / `AdapterSupportLevel = "stable"`；standard_project 和 compliance runner 均覆盖。 |
 | Java | JSON | `runtime/java/json_reader` | `legacy-bootstrap` | `copyable_template` | JDK-only JSON parser | template 声明 `PARSER_BACKEND = "configforge-jdk-json-bootstrap"` / `ADAPTER_SUPPORT_LEVEL = "legacy-bootstrap"`；推荐目标为 `runtime/java/jackson_reader`。 |

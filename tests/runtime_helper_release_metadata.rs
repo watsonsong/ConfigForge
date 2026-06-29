@@ -71,6 +71,7 @@ fn runtime_helper_packages_declare_supported_contract_range() {
 
     for relative in [
         "runtime/csharp/json_reader/JsonRuntimeDataReader.cs",
+        "runtime/csharp/system_text_json_reader/SystemTextJsonRuntimeDataReader.cs",
         "runtime/csharp/messagepack_reader/MessagePackRuntimeDataReader.cs",
         "runtime/csharp/binary_reader/BinaryRuntimeDataReader.cs",
     ] {
@@ -238,6 +239,12 @@ fn runtime_reader_parser_backend_metadata_stays_in_sync() {
 
     assert_csharp_parser_backend(
         "runtime/csharp/json_reader/JsonRuntimeDataReader.cs",
+        "System.Text.Json",
+        "net6.0",
+        "stable",
+    );
+    assert_csharp_parser_backend(
+        "runtime/csharp/system_text_json_reader/SystemTextJsonRuntimeDataReader.cs",
         "System.Text.Json",
         "net6.0",
         "stable",

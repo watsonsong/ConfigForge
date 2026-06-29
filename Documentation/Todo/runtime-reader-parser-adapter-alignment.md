@@ -55,7 +55,7 @@ runtime/<language>/<parser_or_backend>[_<format>]_reader
 - [ ] 新增 library-bound adapter 目录，不在第一步直接删除旧目录，避免破坏现有 compliance 和 standard_project harness。
 - [ ] 每个新 adapter 的 README/package metadata/Cargo/CMake/NuGet/Maven/npm 信息必须声明：parser backend、backend version range、reader contract range、distribution mode。
 - [ ] 对现有泛化目录制定迁移策略：
-  - `runtime/csharp/json_reader`：迁移为 wrapper / compatibility alias，或在下一次 breaking release 后改名为 `system_text_json_reader`。
+  - `runtime/csharp/json_reader`：已保留为 compatibility path，并新增 backend-named `runtime/csharp/system_text_json_reader` wrapper 作为 generated adapter 推荐入口。
   - `runtime/csharp/messagepack_reader`：降级为 `custom/example` 或 `legacy_dependency_free_messagepack_reader`，不作为推荐 Stable adapter。
   - `runtime/java/json_reader`：降级为 `custom/example` / compliance bootstrap，不作为推荐 Stable adapter。
   - `runtime/java/messagepack_reader`：降级为 `custom/example` / compliance bootstrap，不作为推荐 Stable adapter。

@@ -759,8 +759,8 @@ fn render_standard_runtime_adapters(content: &mut impl CodeWriterLike) {
     render_csharp_standard_runtime_adapter(
         content,
         "Json",
-        "ConfigForge.Runtime.JsonReader.JsonRuntimeDataFileLoader",
-        "ConfigForge.Runtime.JsonReader.JsonRuntimeDataReader",
+        "ConfigForge.Runtime.SystemTextJsonReader.SystemTextJsonRuntimeDataFileLoader",
+        "ConfigForge.Runtime.SystemTextJsonReader.SystemTextJsonRuntimeDataReader",
         "System.Text.Json",
         "stable",
     );

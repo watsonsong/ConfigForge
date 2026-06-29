@@ -789,6 +789,13 @@ pub(crate) fn verify_standard_generated_csharp_runtime(
     )
     .expect("C# JSON runtime reader should be copied into harness");
     fs::copy(
+        fixture_root.join(
+            "../../../runtime/csharp/system_text_json_reader/SystemTextJsonRuntimeDataReader.cs",
+        ),
+        project_dir.join("SystemTextJsonRuntimeDataReader.cs"),
+    )
+    .expect("C# System.Text.Json runtime reader should be copied into harness");
+    fs::copy(
         fixture_root
             .join("../../../runtime/csharp/messagepack_reader/MessagePackRuntimeDataReader.cs"),
         project_dir.join("MessagePackRuntimeDataReader.cs"),
