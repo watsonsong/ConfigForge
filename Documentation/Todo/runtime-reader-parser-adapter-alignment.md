@@ -72,7 +72,7 @@ runtime/<language>/<parser_or_backend>[_<format>]_reader
 - [ ] `tests/csharp_java_runtime_compliance.rs` 增加 library-bound C# / Java adapter runner；旧 hand-written reader runner 可保留为 custom/example 覆盖，但不能作为唯一 Stable 标准。
 - [x] `tests/typescript_runtime_compliance.rs` 对 MessagePack runner 使用标准 `@msgpack/msgpack` decode 路径；测试中通过本地 shim 保持离线和确定性，injectable decoder 只保留为 advanced/custom hook。
 - [x] `tests/cli_integration/support/standard_runtime.rs` 的 TypeScript standard_project harness 迁移到推荐 adapter，确保用户样例使用默认 `@msgpack/msgpack` 接入路径。
-- [ ] release metadata drift test 增加 parser backend / dependency policy 校验，避免 package 名称、文档和实际依赖漂移。
+- [x] release metadata drift test 增加 parser backend / dependency policy 校验，避免 package 名称、文档和实际依赖漂移。
 
 ## P2：补充可选生态 adapter
 
