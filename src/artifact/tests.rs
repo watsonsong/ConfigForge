@@ -1,16 +1,14 @@
-use std::{
-    env, fs,
-    io::Write as _,
-    path::{Path, PathBuf},
-    sync::Mutex,
-};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::path::{Path, PathBuf};
+use std::{env, fs, io::Write as _, sync::Mutex};
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use crate::diagnostic::code::CF_ARTIFACT_CASE_INSENSITIVE_COLLISION;
 use crate::{
     ConfigForgeError, Result,
     diagnostic::code::{
-        CF_ARTIFACT_CASE_INSENSITIVE_COLLISION, CF_ARTIFACT_HARDLINK_ALIAS_COLLISION,
-        CF_ARTIFACT_PATH_COLLISION, CF_ARTIFACT_PATH_ESCAPE, CF_ARTIFACT_SYMLINK_ALIAS_COLLISION,
-        CF_ARTIFACT_WRITE_STATE,
+        CF_ARTIFACT_HARDLINK_ALIAS_COLLISION, CF_ARTIFACT_PATH_COLLISION, CF_ARTIFACT_PATH_ESCAPE,
+        CF_ARTIFACT_SYMLINK_ALIAS_COLLISION, CF_ARTIFACT_WRITE_STATE,
     },
 };
 
