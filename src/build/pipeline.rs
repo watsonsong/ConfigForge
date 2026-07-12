@@ -242,6 +242,7 @@ fn source_reader_for_target<'a>(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_runtime_export_nodes(
     raw_sources: Option<&RawSourceData>,
     export_tasks: &[(usize, &NormalizedExportTask)],

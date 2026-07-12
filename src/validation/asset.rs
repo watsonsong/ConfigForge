@@ -225,6 +225,7 @@ fn row_number(table: &DataTable, row_index: usize) -> usize {
         .unwrap_or(row_index + 1)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_struct_asset_fields(
     resolver: &AssetResolver,
     target_tags: &TargetTags,
@@ -268,6 +269,7 @@ fn validate_struct_asset_fields(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_asset_field_path(
     resolver: &AssetResolver,
     target_tags: &TargetTags,

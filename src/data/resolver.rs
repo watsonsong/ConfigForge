@@ -1198,6 +1198,7 @@ fn resolver_value_error(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolver_schema_error(
     table_name: &str,
     row_number: usize,

@@ -74,6 +74,7 @@ pub(super) fn extract_table_asset_references(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn extract_row_asset_references(
     references: &mut Vec<AssetManifestEntry>,
     table_meta: &LinkedTableMeta<'_>,
@@ -189,6 +190,7 @@ fn extract_struct_asset_fields(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn extract_asset_field_path(
     references: &mut Vec<AssetManifestEntry>,
     table_name: &str,

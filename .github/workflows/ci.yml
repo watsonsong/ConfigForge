@@ -6,7 +6,7 @@ on:
     branches: [ main ]
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: "1.85" # 与Cargo.toml中rust-version保持一致
+  RUST_VERSION: "stable" # 使用最新稳定版Rust，保证对2024 edition的完整支持
 jobs:
   quality-check:
     name: Quality checks (fmt, clippy, test)

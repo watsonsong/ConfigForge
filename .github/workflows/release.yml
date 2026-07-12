@@ -5,7 +5,7 @@ on:
       - 'v*.*.*' # 匹配v开头的语义化版本tag
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: "1.85"
+  RUST_VERSION: "stable" # 使用最新稳定版Rust，保证对2024 edition的完整支持
   BINARY_NAME: "config-forge"
 jobs:
   build-release:

@@ -26,6 +26,7 @@ use crate::{
     },
 };
 
+#[allow(clippy::too_many_arguments)]
 fn struct_value_error(
     code: &'static str,
     source: &'static str,

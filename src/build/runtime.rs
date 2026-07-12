@@ -38,6 +38,7 @@ pub(super) struct RuntimeExportTaskOutput {
     pub(super) export_name: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn export_meta_and_data_tasks(
     raw_sources: Option<&RawSourceData>,
     export_tasks: &[&NormalizedExportTask],
@@ -68,6 +69,7 @@ pub(super) fn export_meta_and_data_tasks(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn export_meta_and_data_tasks_with_generator_registry(
     raw_sources: Option<&RawSourceData>,
     export_tasks: &[&NormalizedExportTask],
@@ -185,6 +187,7 @@ fn export_meta_and_data_tasks_with_generator_registry(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn export_validation_report_tasks(
     export_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
@@ -366,6 +369,7 @@ fn canonicalize_asset_field_path(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn export_meta_and_data_task(
     export_task: &NormalizedExportTask,
     linked_meta: &LinkedMetaModel<'_>,
@@ -419,6 +423,7 @@ fn export_meta_and_data_task(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ensure_planned_runtime_output_paths(
     export_tasks: &[&NormalizedExportTask],
     linked_meta: &LinkedMetaModel<'_>,
@@ -471,6 +476,7 @@ fn ensure_planned_runtime_output_paths(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn plan_runtime_output_paths_for_task(
     export_task: &NormalizedExportTask,
     linked_meta: &LinkedMetaModel<'_>,
