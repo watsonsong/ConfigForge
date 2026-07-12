@@ -6,8 +6,22 @@ name = "config-forge"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "ConfigForge is a schema-driven game configuration export tool that validates designer-authored data and generates runtime-ready artifacts."
+description = "ConfigForge is an AI-driven, schema-first game configuration export tool that validates designer-authored data and generates runtime-ready artifacts for multiple languages and platforms."
 license = "Apache-2.0"
+repository = "https://github.com/watsonsong/ConfigForge"
+homepage = "https://github.com/watsonsong/ConfigForge"
+readme = "README.md"
+keywords = ["game-development", "configuration", "code-generation", "ai-driven", "schema-validation"]
+categories = ["game-development", "config", "development-tools::build-utils", "encoding"]
+exclude = [
+  "/Documentation",
+  "/tests",
+  "/.github",
+  "/runtime",
+  "/examples",
+  "AGENTS.md",
+  ".cargo/config.toml"
+]
 
 [lib]
 name = "config_forge"
