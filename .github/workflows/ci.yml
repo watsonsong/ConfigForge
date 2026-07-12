@@ -19,7 +19,7 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt, clippy
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v4
+        uses: Swatinem/rust-cache@v2
       - name: Check code formatting
         run: cargo fmt --all --check
       - name: Run clippy lints
@@ -54,6 +54,6 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ matrix.target }}
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v4
+        uses: Swatinem/rust-cache@v2
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}

@@ -47,7 +47,7 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ matrix.target }}
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v4
+        uses: Swatinem/rust-cache@v2
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
       - name: Prepare artifact directory
