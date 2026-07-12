@@ -1,0 +1,59 @@
+name: CI
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: "1.85" # 与Cargo.toml中rust-version保持一致
+jobs:
+  quality-check:
+    name: Quality checks (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v4
+      - name: Check code formatting
+        run: cargo fmt --all --check
+      - name: Run clippy lints
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Run core unit tests
+        run: cargo test --lib
+  build-cross-platform:
+    name: Build on ${{ matrix.os }}
+    needs: quality-check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: linux-x64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            suffix: macos-arm64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            suffix: macos-x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: windows-x64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v4
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}

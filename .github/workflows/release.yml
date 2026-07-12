@@ -1,0 +1,132 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*.*.*' # 匹配v开头的语义化版本tag
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: "1.85"
+  BINARY_NAME: "config-forge"
+jobs:
+  build-release:
+    name: Build release for ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: linux-x64-gnu
+            archive: tar.gz
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            suffix: linux-x64-musl
+            archive: tar.gz
+            musl: true
+          - os: macos-14
+            target: aarch64-apple-darwin
+            suffix: macos-arm64
+            archive: tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            suffix: macos-x64
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: windows-x64
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies (musl)
+        if: matrix.musl == true
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v4
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Prepare artifact directory
+        id: prep
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          ARTIFACT_NAME="${BINARY_NAME}-${VERSION}-${{ matrix.suffix }}"
+          mkdir -p release/${ARTIFACT_NAME}
+          # Copy binary
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp target/${{ matrix.target }}/release/${BINARY_NAME}.exe release/${ARTIFACT_NAME}/
+          else
+            cp target/${{ matrix.target }}/release/${BINARY_NAME} release/${ARTIFACT_NAME}/
+          fi
+          # Copy accompanying files
+          cp LICENSE release/${ARTIFACT_NAME}/
+          cp README.md release/${ARTIFACT_NAME}/
+          cp README.zh-CN.md release/${ARTIFACT_NAME}/
+          echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+      - name: Archive artifact (unix)
+        if: matrix.archive == 'tar.gz'
+        run: tar -czf ${{ steps.prep.outputs.artifact_name }}.tar.gz -C release ${{ steps.prep.outputs.artifact_name }}
+      - name: Archive artifact (windows)
+        if: matrix.archive == 'zip'
+        run: Compress-Archive -Path release/${{ steps.prep.outputs.artifact_name }}/* -DestinationPath ${{ steps.prep.outputs.artifact_name }}.zip
+      - name: Generate SHA256 checksum
+        shell: bash
+        run: |
+          ARTIFACT=${{ steps.prep.outputs.artifact_name }}
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            powershell -Command "(Get-FileHash ${ARTIFACT}.zip -Algorithm SHA256).Hash" | tr -d '\n' > ${ARTIFACT}.zip.sha256
+          else
+            shasum -a 256 ${ARTIFACT}.tar.gz | awk '{print $1}' | tr -d '\n' > ${ARTIFACT}.tar.gz.sha256
+          fi
+      - name: Upload artifact to workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.prep.outputs.artifact_name }}
+          path: |
+            ${{ steps.prep.outputs.artifact_name }}.${{ matrix.archive }}
+            ${{ steps.prep.outputs.artifact_name }}.${{ matrix.archive }}.sha256
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+      - name: Generate total SHA256SUMS
+        run: |
+          : > SHA256SUMS
+          for dir in */; do
+            dir=${dir%/}
+            for file in "$dir"/*.sha256; do
+              hash=$(cat "$file")
+              filename=$(basename "$file" .sha256)
+              echo "$hash  $filename" >> SHA256SUMS
+            done
+          done
+      - name: Create Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            */*.tar.gz
+            */*.zip
+            SHA256SUMS
+          generate_release_notes: true
+          body: |
+            ## ConfigForge ${{ github.ref_name }} Release
+            ### Verify downloads
+            SHA256 checksums for all artifacts are in the `SHA256SUMS` file.
+            ### Installation
+            - macOS/Linux: Download the archive for your architecture, extract it, and move the binary to a directory in your PATH.
+            - Windows: Download the zip, extract it, and add `config-forge.exe` to your PATH.
+            You can also install via cargo: `cargo install config-forge --version ${{ github.ref_name#v }}`
+      # Uncomment to enable auto-publish to crates.io (add CARGO_REGISTRY_TOKEN in repo secrets first)
+      # - name: Publish to crates.io
+      #   uses: katyo/publish-crates@v2
+      #   with:
+      #     registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
