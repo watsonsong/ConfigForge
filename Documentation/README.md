@@ -93,6 +93,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 - [`DevLogs/phase-0004.md`](DevLogs/phase-0004.md) — fourth raw phase log covering sink-first artifacts/codegen, Unreal C++ / C# / Java backend expansion, C# / Java runtime readers, and cross-language testing guidance through 2026-06-07.
 - [`DevLogs/phase-0005.md`](DevLogs/phase-0005.md) — fifth raw phase log covering schema docs stabilization and builtin Color / Vector value types through 2026-06-14.
 - [`DevLogs/phase-0006.md`](DevLogs/phase-0006.md) — sixth raw phase log covering ObjectTable multi-source / override source stabilization through 2026-06-14.
+- [`DevLogs/phase-0007.md`](DevLogs/phase-0007.md) — 2026-10-30 artifact planning fix and architecture simplification review snapshot; recommendations are not implementation contracts.
 
 ## Todo / Task Lists
 
