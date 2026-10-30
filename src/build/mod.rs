@@ -294,7 +294,7 @@ mod tests {
         ExportBranchOutput, MetaOnlyGeneratorContext, generate_and_write_meta_only_task,
         join_link_meta_only_and_source_read, prepare_build_inputs,
     };
-    use super::plan::{DataDependencyKey, TargetBuildPlan, build_execution_view_detail};
+    use super::plan::{TargetBuildPlan, build_execution_view_detail};
     use super::trace::civil_from_unix_days;
     use super::*;
 
@@ -356,22 +356,11 @@ mod tests {
                 },
             ],
         };
-        let plan = TargetBuildPlan::new(
-            &target,
-            Some(Path::new("Data")),
-            &TargetTags::new(["client", "shipping"]),
-        );
+        let plan = TargetBuildPlan::new(&target);
 
         assert!(plan.requires_data());
         assert_eq!(plan.meta_only_exports, vec![0]);
         assert_eq!(plan.meta_and_data_exports, vec![1, 2]);
-        assert_eq!(
-            plan.data_dependency,
-            Some(DataDependencyKey {
-                input: Some(PathBuf::from("Data")),
-                effective_tags: vec!["client".to_owned(), "shipping".to_owned()],
-            })
-        );
     }
 
     #[test]
@@ -387,10 +376,9 @@ mod tests {
                 options: BTreeMap::new(),
             }],
         };
-        let plan = TargetBuildPlan::new(&target, None, &TargetTags::new(["client"]));
+        let plan = TargetBuildPlan::new(&target);
 
         assert!(!plan.requires_data());
-        assert!(plan.data_dependency.is_none());
         assert_eq!(plan.meta_only_exports, vec![0]);
         assert!(plan.meta_and_data_exports.is_empty());
     }
@@ -403,19 +391,11 @@ mod tests {
             exports: vec![export_task("rust", false)],
         };
 
-        let plan = TargetBuildPlan::new(
-            &target,
-            Some(Path::new("missing_data")),
-            &TargetTags::new(["client", "shipping"]),
-        );
+        let plan = TargetBuildPlan::new(&target);
 
-        assert!(plan.requires_meta);
         assert!(!plan.requires_data());
-        assert_eq!(plan.effective_tags, vec!["client", "shipping"]);
         assert_eq!(plan.meta_only_exports, vec![0]);
         assert!(plan.meta_and_data_exports.is_empty());
-        assert!(plan.data_dependency.is_none());
-        assert_eq!(plan.export_indices_in_declaration_order(), vec![0]);
     }
 
     #[test]
@@ -426,23 +406,11 @@ mod tests {
             exports: vec![export_task("json", true)],
         };
 
-        let plan = TargetBuildPlan::new(
-            &target,
-            Some(Path::new("Data")),
-            &TargetTags::new(["client"]),
-        );
+        let plan = TargetBuildPlan::new(&target);
 
-        assert!(plan.requires_meta);
         assert!(plan.requires_data());
         assert!(plan.meta_only_exports.is_empty());
         assert_eq!(plan.meta_and_data_exports, vec![0]);
-        assert_eq!(
-            plan.data_dependency,
-            Some(DataDependencyKey {
-                input: Some(PathBuf::from("Data")),
-                effective_tags: vec!["client".to_owned()],
-            })
-        );
     }
 
     #[test]
@@ -457,15 +425,10 @@ mod tests {
             ],
         };
 
-        let plan = TargetBuildPlan::new(
-            &target,
-            Some(Path::new("Data")),
-            &TargetTags::new(["client"]),
-        );
+        let plan = TargetBuildPlan::new(&target);
 
         assert_eq!(plan.meta_only_exports, vec![1]);
         assert_eq!(plan.meta_and_data_exports, vec![0, 2]);
-        assert_eq!(plan.export_indices_in_declaration_order(), vec![0, 1, 2]);
         assert_eq!(
             plan.meta_only_export_tasks(&target)
                 .into_iter()
@@ -493,11 +456,7 @@ mod tests {
                 export_task("lua", true),
             ],
         };
-        let plan = TargetBuildPlan::new(
-            &target,
-            Some(Path::new("Data")),
-            &TargetTags::new(["client"]),
-        );
+        let plan = TargetBuildPlan::new(&target);
 
         let detail = build_execution_view_detail(&target, &plan);
 
@@ -645,7 +604,7 @@ mod tests {
             tags: vec!["client".to_owned()],
             exports: vec![export_task("rust", false)],
         };
-        let plan = TargetBuildPlan::new(&target, None, &TargetTags::new(["client"]));
+        let plan = TargetBuildPlan::new(&target);
 
         let prepared =
             prepare_build_inputs(&meta, &plan, &TargetTags::new(["client"]), None, &pool)

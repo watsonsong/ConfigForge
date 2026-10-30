@@ -20,7 +20,7 @@ use crate::{
 use super::{
     artifact_plan::plan_target_artifacts,
     build_diagnostic_error, input_required_error,
-    plan::{BuildDependencyPlan, TargetBuildPlan, build_execution_view_detail},
+    plan::{TargetBuildPlan, build_execution_view_detail},
     runtime::export_meta_and_data_tasks,
     target::{NormalizedExportTask, NormalizedTargetConfig},
     trace::{BuildTraceRecorder, generated_at},
@@ -54,15 +54,10 @@ pub(super) struct ExportBranchOutput {
 pub(super) fn execute_target_pipeline(
     context: TargetPipelineExecutionContext<'_, '_>,
 ) -> Result<TargetPipelineOutput> {
-    let dependency_plan = context.trace.record("plan_dependencies", None, || {
-        Ok(BuildDependencyPlan::for_target(
-            context.target,
-            context.data_root,
-            context.target_tags,
-        ))
+    let target_plan = context.trace.record("plan_dependencies", None, || {
+        Ok(TargetBuildPlan::new(context.target))
     })?;
-    let target_plan = dependency_plan.single_target_plan()?;
-    let execution_view_detail = build_execution_view_detail(context.target, target_plan);
+    let execution_view_detail = build_execution_view_detail(context.target, &target_plan);
     context
         .trace
         .record("build_execution_view", Some(execution_view_detail), || {
@@ -73,7 +68,7 @@ pub(super) fn execute_target_pipeline(
     let mut prepared_inputs = context.trace.record("prepare_build_inputs", None, || {
         prepare_build_inputs(
             context.raw_meta,
-            target_plan,
+            &target_plan,
             context.target_tags,
             context.data_root,
             context.pool,

@@ -80,7 +80,7 @@ pub(crate) struct NormalizedExportTask {
 | 分支 / 阶段 | 输入 | 产出 | 说明 |
 | --- | --- | --- | --- |
 | effective target tags | target config + CLI extra tags | `TargetTags` | 在 `build_target()` 中计算，作为后续 context 注入。 |
-| dependency plan | normalized target + effective tags | `TargetBuildPlan` | 记录 MetaOnly / MetaAndData export indices、是否需要 data、共享 data dependency。 |
+| dependency plan | normalized target | `TargetBuildPlan` | 只记录 MetaOnly / MetaAndData export indices；由 Data 分支是否为空判断是否需要加载数据。target tags 与 input 仍由执行 context 提供，不复制到计划或构造未消费的 cache key。 |
 | build execution view | `TargetBuildPlan` | trace detail string | 仅用于 `--trace-tasks` debug，不作为调度或缓存权威。 |
 | artifact planning barrier | linked Meta + target tags + all export task options | shared sink path reservations | 并行调用所有 generator 的 `plan_artifacts(common)`，按声明顺序合并；任何冲突或规划错误均在写文件前失败。 |
 | MetaOnly branch | linked Meta + target tags + artifact reservations | codegen / doc / manifest artifacts / warnings | `LinkMeta` 和全局产物规划完成后运行不需要 Data 的 generator，不等待 source read / normalize / validation。 |
