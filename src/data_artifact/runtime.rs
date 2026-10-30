@@ -25,19 +25,12 @@ pub(crate) fn export_runtime_data_to_sink(
     pool: &rayon::ThreadPool,
     sink: &ArtifactSink,
 ) -> Result<Vec<RuntimeDataFile>> {
-    let mut plans = Vec::new();
-    for table_meta in &linked_meta.tables {
-        if table_meta.meta.is_exported_for(target_tags) {
-            plans.push(exporter.plan_table_artifact(table_meta)?);
-        }
-    }
-    ensure_unique_runtime_artifact_paths(&plans)?;
+    let plans = runtime_table_plans(linked_meta, target_tags, exporter)?;
 
-    let mut generated_results = pool.install(|| {
+    let generated_results = pool.install(|| {
         plans
             .par_iter()
-            .enumerate()
-            .map(|(index, plan)| {
+            .map(|plan| {
                 let result: Result<RuntimeDataFile> = (|| {
                     let table_meta = linked_meta.table(&plan.table_name).ok_or_else(|| {
                         runtime_input_error(
@@ -72,14 +65,13 @@ pub(crate) fn export_runtime_data_to_sink(
                     stream.finish()?;
                     Ok(file)
                 })();
-                (index, result)
+                result
             })
             .collect::<Vec<_>>()
     });
-    generated_results.sort_by_key(|(index, _)| *index);
 
     let mut files = Vec::with_capacity(generated_results.len());
-    for (_, artifact) in generated_results {
+    for artifact in generated_results {
         files.push(artifact?);
     }
     Ok(files)
@@ -91,16 +83,25 @@ pub(crate) fn runtime_table_artifacts(
     target_tags: &TargetTags,
     exporter: &dyn RuntimeTableFormat,
 ) -> Result<Vec<std::path::PathBuf>> {
-    linked_meta
+    Ok(runtime_table_plans(linked_meta, target_tags, exporter)?
+        .into_iter()
+        .map(|plan| out_dir.join(plan.path))
+        .collect())
+}
+
+fn runtime_table_plans(
+    linked_meta: &LinkedMetaModel<'_>,
+    target_tags: &TargetTags,
+    exporter: &dyn RuntimeTableFormat,
+) -> Result<Vec<RuntimeArtifactPlan>> {
+    let plans = linked_meta
         .tables
         .iter()
-        .filter(|table_meta| table_meta.meta.is_exported_for(target_tags))
-        .map(|table_meta| {
-            exporter
-                .plan_table_artifact(table_meta)
-                .map(|plan| out_dir.join(plan.path))
-        })
-        .collect()
+        .filter(|table| table.meta.is_exported_for(target_tags))
+        .map(|table| exporter.plan_table_artifact(table))
+        .collect::<Result<Vec<_>>>()?;
+    ensure_unique_runtime_artifact_paths(&plans)?;
+    Ok(plans)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

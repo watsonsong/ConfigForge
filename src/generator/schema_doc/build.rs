@@ -23,10 +23,11 @@ pub(super) fn table_doc(
     options: &SchemaDocOptions,
 ) -> Option<SchemaTableDoc> {
     let table_visible = table.meta.is_exported_for(&options.target_tags);
-    if !is_documented_exportable(
-        table.meta.export,
-        table.meta.export_when.matches(&options.target_tags),
-        options,
+    if !is_documented_table(
+        table,
+        &options.target_tags,
+        options.include_internal,
+        options.include_hidden,
     ) {
         return None;
     }
@@ -89,6 +90,19 @@ pub(super) fn table_doc(
         text_fields,
         validators,
     })
+}
+
+pub(super) fn is_documented_table(
+    table: &LinkedTableMeta<'_>,
+    tags: &crate::meta::TargetTags,
+    include_internal: bool,
+    include_hidden: bool,
+) -> bool {
+    if !table.meta.export {
+        include_internal
+    } else {
+        table.meta.export_when.matches(tags) || include_hidden
+    }
 }
 
 fn fragment_graph_doc(

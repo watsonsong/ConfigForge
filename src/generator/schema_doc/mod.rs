@@ -19,7 +19,7 @@ use crate::{
 };
 
 use format::{
-    schema_doc_export_config_from_options, schema_doc_output_paths, write_schema_doc_to_sink,
+    schema_doc_export_config_from_options, schema_doc_paths_for_tables, write_schema_doc_to_sink,
 };
 
 pub use format::{SchemaDocExportConfig, SchemaDocFormat};
@@ -53,8 +53,20 @@ impl ArtifactGenerator for SchemaDocGenerator {
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
         let config =
             schema_doc_export_config_from_options(input.output.clone(), input.options.clone())?;
-        let doc = schema_doc_from_input(input, &config);
-        let paths = schema_doc_output_paths(&doc, &config)?;
+        let names = input
+            .meta
+            .tables
+            .iter()
+            .filter(|table| {
+                build::is_documented_table(
+                    table,
+                    &input.target_tags,
+                    config.include_internal,
+                    config.include_hidden,
+                )
+            })
+            .map(|table| table.meta.name.as_str());
+        let paths = schema_doc_paths_for_tables(names, &config)?;
         Ok(std::iter::once(paths.index_path)
             .chain(paths.table_paths)
             .collect())

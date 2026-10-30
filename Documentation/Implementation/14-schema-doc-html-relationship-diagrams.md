@@ -6,6 +6,8 @@ Related docs：[`../Design/11-schema-doc-generator.md`](../Design/11-schema-doc-
 
 ## 14.1 当前实现基线
 
+产物规划只遍历 linked Meta 的表名，与 doc builder 共用 table 可见性规则，直接调用公共 path helper；不构造字段、关系图或 source graph。生成时才建立完整 `SchemaDoc`。路径 helper 在 planning 与 rendering 两侧共用，`include_hidden` / `include_internal` 与 Markdown / HTML 的路径集合由严格 sink reservation 测试保持一致。
+
 `schema_doc` 当前是 `MetaOnly` artifact generator，位于 `src/generator/schema_doc/`，直接实现 build-facing `ArtifactGenerator`，不读取 source data，也不依赖 validation / data artifact / code artifact toolkit。模块边界由 `01-module-outline.md` 定义。
 
 当前核心结构：

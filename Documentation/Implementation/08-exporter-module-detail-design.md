@@ -1,5 +1,7 @@
 # 08. Data Artifact Toolkit 详细设计（历史文件名：Exporter）
 
+Runtime table planning 与生成共用同一可见表 / format plan helper，保留写出前的重复路径检查；逐表并行结果使用 indexed Rayon collect 保持声明顺序，不再额外携带 index 并排序。不缓存整个产物或改变 streaming serializer。
+
 本文档描述当前 `src/data_artifact/` 的 data artifact toolkit 实现边界。`exporter` 这个名称在历史上同时承载“具体 export type 实现”和“共享数据产物 helper”，在统一 `ArtifactGenerator` 模型下容易误导为与 `generator` 平级的产物归属地；当前 JSON / MessagePack / `bin` / POT / Lua / Asset Manifest 等具体 export type 已迁入 `src/generator/<type_id>/`，`src/data_artifact/` 只保留可复用的 payload、runtime table serialization、binary layout 和聚合数据产物 facet。
 
 在更抽象的 artifact generator 模型中，`RuntimeTableFormat` / `AggregateDataExporter` 是 data artifact toolkit 的领域 facet，而不是所有 data-backed generator 的顶层基类或 build-facing registry 输入。是否需要 Data 由 generator requirements 声明；Lua 这类 data-backed code-like artifact 直接作为 `type = "lua_table"` / alias `lua` 的 concrete `ArtifactGenerator` 注册，并复用 code artifact toolkit 中的 `CodeArtifactOptions`。

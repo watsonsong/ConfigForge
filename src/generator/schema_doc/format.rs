@@ -135,16 +135,23 @@ pub fn schema_doc_output_paths(
     doc: &SchemaDoc,
     config: &SchemaDocExportConfig,
 ) -> Result<SchemaDocOutputPaths> {
+    schema_doc_paths_for_tables(doc.tables.iter().map(|table| table.name.as_str()), config)
+}
+
+pub(super) fn schema_doc_paths_for_tables<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+    config: &SchemaDocExportConfig,
+) -> Result<SchemaDocOutputPaths> {
     validate_index_file_name(&config.index_file, config.format)?;
     let index_path = lexical_normalize_path(&config.output.join(&config.index_file));
     let mut seen = std::collections::BTreeSet::new();
     if !seen.insert(index_path.clone()) {
         return Err(schema_doc_path_collision_error(&index_path));
     }
-    let mut table_paths = Vec::with_capacity(doc.tables.len());
-    let mut table_file_names = Vec::with_capacity(doc.tables.len());
-    for table in &doc.tables {
-        let file_name = table_file_name(table, config.format);
+    let mut table_paths = Vec::new();
+    let mut table_file_names = Vec::new();
+    for name in names {
+        let file_name = format!("{}.{}", name, config.format.extension());
         validate_file_name(&file_name, "schema_doc table file")?;
         let path = lexical_normalize_path(&config.output.join(&file_name));
         if !seen.insert(path.clone()) {

@@ -1304,6 +1304,58 @@ fn schema_doc_generator_plans_markdown_and_html_artifacts() {
             PathBuf::from("out/docs/items.html")
         ]
     );
+
+    for format in ["markdown", "html"] {
+        for include_hidden in [false, true] {
+            for include_internal in [false, true] {
+                let meta = linked_meta(
+                    r#"
+                    [[tables]]
+                    name = "visible"
+                    [[tables]]
+                    name = "hidden"
+                    export_when = { any = ["server"] }
+                    [[tables]]
+                    name = "internal"
+                    export = false
+                "#,
+                );
+                let mut input = base_input.clone();
+                input.meta = &meta;
+                input.options = BTreeMap::from([
+                    ("format".into(), toml::Value::String(format.into())),
+                    (
+                        "include_hidden".into(),
+                        toml::Value::Boolean(include_hidden),
+                    ),
+                    (
+                        "include_internal".into(),
+                        toml::Value::Boolean(include_internal),
+                    ),
+                ]);
+                let paths = SchemaDocGenerator.plan_artifacts(&input).unwrap();
+                assert_eq!(
+                    paths.len(),
+                    2 + usize::from(include_hidden) + usize::from(include_internal)
+                );
+                let sink = crate::artifact::ArtifactWriter::new(
+                    crate::artifact::ArtifactWriteMode::DryRun,
+                )
+                .open_sink();
+                sink.reserve_paths(paths).unwrap();
+                SchemaDocGenerator
+                    .generate(
+                        &crate::generator::GeneratorTaskInput {
+                            common: input,
+                            prepared: crate::generator::PreparedGeneratorInputs::MetaOnly,
+                        },
+                        &sink,
+                    )
+                    .unwrap();
+                sink.finish().unwrap();
+            }
+        }
+    }
 }
 
 #[test]
