@@ -45,9 +45,9 @@ fn rejects_meta_only_export_data_binding() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            temp_dir.path().join("out/json").display(),
-            temp_dir.path().join("out/messagepack").display(),
-            temp_dir.path().join("out/rust").display()
+            toml_path(temp_dir.path().join("out/json")),
+            toml_path(temp_dir.path().join("out/messagepack")),
+            toml_path(temp_dir.path().join("out/rust"))
         ),
     )
     .expect("project config should be written");
@@ -94,8 +94,8 @@ fn rejects_runtime_data_path_conflict_before_writing_files() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            data_out_dir.display(),
-            data_out_dir.display()
+            toml_path(&data_out_dir),
+            toml_path(&data_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -139,7 +139,7 @@ fn rejects_artifact_output_that_escapes_project_root() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            outside_out_dir.display()
+            toml_path(&outside_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -183,7 +183,7 @@ fn artifact_path_escape_json_diagnostic_has_stable_code_and_paths() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            outside_out_dir.display()
+            toml_path(&outside_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -247,8 +247,8 @@ fn rejects_lexically_equivalent_runtime_data_path_conflict_before_writing_files(
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            data_out_dir.display(),
-            equivalent_data_out_dir.display()
+            toml_path(&data_out_dir),
+            toml_path(&equivalent_data_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -298,8 +298,8 @@ fn rejects_unknown_second_export_type_before_writing_first_export() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            json_out_dir.display(),
-            bad_out_dir.display()
+            toml_path(&json_out_dir),
+            toml_path(&bad_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -343,7 +343,7 @@ fn unknown_generator_json_diagnostic_has_stable_code_and_target() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            bad_out_dir.display()
+            toml_path(&bad_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -435,8 +435,8 @@ fn duplicate_export_task_json_diagnostic_has_stable_code_and_task_context() {
                 type = "messagepack"
             "#,
             standard_core_meta_imports(),
-            temp_dir.path().join("out/json").display(),
-            temp_dir.path().join("out/messagepack").display()
+            toml_path(temp_dir.path().join("out/json")),
+            toml_path(temp_dir.path().join("out/messagepack"))
         ),
     )
     .expect("project config should be written");

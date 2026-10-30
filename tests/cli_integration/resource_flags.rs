@@ -31,7 +31,7 @@ fn builds_target_with_execution_resource_flags() {
                 output = "{}"
             "#,
             standard_core_meta_imports(),
-            out_dir.display()
+            toml_path(&out_dir)
         ),
     )
     .expect("project config should be written");
@@ -75,7 +75,7 @@ fn builds_target_with_serial_overriding_resource_flags() {
                 output = "{}"
             "#,
             standard_core_meta_imports(),
-            out_dir.display()
+            toml_path(&out_dir)
         ),
     )
     .expect("project config should be written");

@@ -48,10 +48,10 @@ fn builds_target_from_project_config() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            data_out_dir.display(),
-            rust_out_dir.display(),
-            cpp_out_dir.display(),
-            ts_out_dir.display()
+            toml_path(&data_out_dir),
+            toml_path(&rust_out_dir),
+            toml_path(&cpp_out_dir),
+            toml_path(&ts_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -199,10 +199,10 @@ fn gettext_pot_export_and_generated_text_translation_helpers_work() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            pot_out_dir.display(),
-            rust_out_dir.display(),
-            cpp_out_dir.display(),
-            ts_out_dir.display()
+            toml_path(&pot_out_dir),
+            toml_path(&rust_out_dir),
+            toml_path(&cpp_out_dir),
+            toml_path(&ts_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -286,9 +286,9 @@ fn generated_text_helpers_can_call_global_i18n_functions() {
                 typescript_import = "import {{ globalTranslate }} from './i18n'"
             "#,
             standard_core_meta_imports(),
-            rust_out_dir.display(),
-            cpp_out_dir.display(),
-            ts_out_dir.display()
+            toml_path(&rust_out_dir),
+            toml_path(&cpp_out_dir),
+            toml_path(&ts_out_dir)
         ),
     )
     .expect("project config should be written");

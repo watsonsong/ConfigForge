@@ -20,6 +20,8 @@
 
 ## Test profiles
 
+测试 fixture 的路径断言使用 `Path` 语义；嵌入 TOML 的临时路径通过统一 helper 使用正斜杠，不能直接插入 Windows `display()`。从工作区读取后需要按多行块匹配的文本应统一 CRLF / LF。Java harness 显式使用 `javac -encoding UTF-8`，避免系统默认编码影响中文测试数据。绝对路径拒绝测试使用平台实际的绝对路径，不用 Unix-only `/tmp` 假定。
+
 | Profile | 目标 | 必需工具 | 可选工具缺失策略 | 默认联网 |
 | --- | --- | --- | --- | --- |
 | `local` | 普通 Rust 开发的默认路径，快速发现核心回归。 | Rust 1.85+、Cargo、rustfmt。 | 目标语言工具缺失时明确 skip。 | 关闭。 |

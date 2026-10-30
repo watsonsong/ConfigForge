@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::support::toml_path;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
@@ -94,7 +95,7 @@ fn schema_doc_export_writes_index_and_table_markdown_without_data_input() {
                 format = "markdown"
                 title = "Client Schema"
             "#,
-            docs_dir.display()
+            toml_path(&docs_dir)
         ),
     )
     .expect("project config should be written");
@@ -198,7 +199,7 @@ fn schema_doc_export_writes_html_docs_and_dry_run_plan_without_data_input() {
                 format = "html"
                 title = "Client Schema"
             "#,
-            docs_dir.display()
+            toml_path(&docs_dir)
         ),
     )
     .expect("project config should be written");
@@ -307,8 +308,8 @@ fn schema_doc_include_options_expose_hidden_internal_content() {
                 include_hidden = true
                 include_internal = true
             "#,
-            default_dir.display(),
-            full_dir.display()
+            toml_path(&default_dir),
+            toml_path(&full_dir)
         ),
     )
     .expect("project config should be written");
@@ -363,7 +364,7 @@ fn schema_doc_rejects_unknown_format() {
                 type = "schema_doc"
                 format = "pdf"
             "#,
-            temp_dir.path().join("out/docs").display()
+            toml_path(temp_dir.path().join("out/docs"))
         ),
     )
     .expect("project config should be written");
@@ -409,7 +410,7 @@ fn schema_doc_path_conflict_fails_before_writing_files() {
                 type = "schema_doc"
                 format = "markdown"
             "#,
-            out_dir.display(),
+            toml_path(&out_dir),
         ),
     )
     .expect("project config should be written");

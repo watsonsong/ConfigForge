@@ -427,7 +427,7 @@ mod tests {
             .expect("path traversal should be rejected");
         assert!(traversal_error.message.contains("escapes"));
         let absolute_error = loader
-            .open("/tmp/secret.bin")
+            .open(std::env::temp_dir().join("secret.bin").to_str().unwrap())
             .err()
             .expect("absolute path should be rejected");
         assert!(absolute_error.message.contains("relative"));

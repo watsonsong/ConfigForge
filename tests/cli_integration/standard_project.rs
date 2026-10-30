@@ -57,9 +57,9 @@ fn builds_reference_game_fixture_with_fragments_structs_and_composite_indexes() 
             "#,
             standard_reference_game_meta_imports(),
             absolute_fixture_path("data"),
-            client_out_dir.display(),
-            server_out_dir.display(),
-            schema_doc_out_dir.display(),
+            toml_path(&client_out_dir),
+            toml_path(&server_out_dir),
+            toml_path(&schema_doc_out_dir),
         ),
     )
     .expect("project config should be written");
@@ -255,9 +255,9 @@ fn cli_extra_tag_enables_s1_material_override_source() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            json_out_dir.display(),
-            msgpack_out_dir.display(),
-            binary_out_dir.display(),
+            toml_path(&json_out_dir),
+            toml_path(&msgpack_out_dir),
+            toml_path(&binary_out_dir),
         ),
     )
     .expect("project config should be written");
@@ -367,9 +367,9 @@ fn source_order_ordinals_follow_target_visible_rows() {
                 type = "string"
                 export = false
             "#,
-            data_dir.display(),
-            client_out_dir.display(),
-            server_out_dir.display(),
+            toml_path(&data_dir),
+            toml_path(&client_out_dir),
+            toml_path(&server_out_dir),
         ),
     )
     .expect("project config should be written");

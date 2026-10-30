@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::support::toml_path;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
@@ -50,8 +51,8 @@ fn range_validator_blocks_invalid_data_before_export() {
                 output = "{}"
                 type = "json"
             "#,
-            data_dir.display(),
-            data_out_dir.display()
+            toml_path(&data_dir),
+            toml_path(&data_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -104,8 +105,8 @@ fn cli_diagnostic_format_json_emits_machine_readable_diagnostics() {
                 output = "{}"
                 type = "json"
             "#,
-            data_dir.display(),
-            data_out_dir.display()
+            toml_path(&data_dir),
+            toml_path(&data_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -174,8 +175,8 @@ fn duplicate_csv_header_json_diagnostic_has_stable_code_and_source_context() {
                 output = "{}"
                 type = "json"
             "#,
-            data_dir.display(),
-            data_out_dir.display()
+            toml_path(&data_dir),
+            toml_path(&data_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -238,8 +239,8 @@ fn source_path_escape_json_diagnostic_has_stable_code_and_table_context() {
                 output = "{}"
                 type = "json"
             "#,
-            data_dir.display(),
-            data_out_dir.display()
+            toml_path(&data_dir),
+            toml_path(&data_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -324,9 +325,9 @@ fn asset_missing_json_diagnostic_has_stable_code_and_value_context() {
                 output = "{}"
                 type = "json"
             "#,
-            data_dir.display(),
-            asset_dir.display(),
-            data_out_dir.display()
+            toml_path(&data_dir),
+            toml_path(&asset_dir),
+            toml_path(&data_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -401,8 +402,8 @@ fn warning_validator_is_visible_but_does_not_block_export() {
                 output = "{}"
                 type = "json"
             "#,
-            data_dir.display(),
-            data_out_dir.display()
+            toml_path(&data_dir),
+            toml_path(&data_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -462,8 +463,8 @@ fn cli_report_json_is_written_when_validation_fails() {
                 output = "{}"
                 type = "json"
             "#,
-            data_dir.display(),
-            data_out_dir.display()
+            toml_path(&data_dir),
+            toml_path(&data_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -536,8 +537,8 @@ fn cli_report_json_is_written_when_validation_succeeds() {
                 output = "{}"
                 type = "json"
             "#,
-            data_dir.display(),
-            data_out_dir.display()
+            toml_path(&data_dir),
+            toml_path(&data_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -618,9 +619,9 @@ fn build_validation_report_export_writes_html_artifact() {
                 file_name = "client-validation.html"
                 title = "Client Validation"
             "#,
-            data_dir.display(),
-            data_out_dir.display(),
-            report_dir.display()
+            toml_path(&data_dir),
+            toml_path(&data_out_dir),
+            toml_path(&report_dir)
         ),
     )
     .expect("project config should be written");
@@ -691,9 +692,9 @@ fn build_validation_report_export_writes_json_artifact_when_validation_fails() {
                 format = "json"
                 file_name = "client-validation.json"
             "#,
-            data_dir.display(),
-            data_out_dir.display(),
-            report_dir.display()
+            toml_path(&data_dir),
+            toml_path(&data_out_dir),
+            toml_path(&report_dir)
         ),
     )
     .expect("project config should be written");

@@ -243,8 +243,8 @@ fn dry_run_serial_and_parallel_outputs_match() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            data_out_dir.display(),
-            rust_out_dir.display()
+            toml_path(&data_out_dir),
+            toml_path(&rust_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -399,8 +399,8 @@ fn dry_run_builds_plan_without_writing_artifacts() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            data_out_dir.display(),
-            rust_out_dir.display()
+            toml_path(&data_out_dir),
+            toml_path(&rust_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -454,7 +454,7 @@ fn trace_tasks_flag_writes_build_metrics_json() {
                 output = "{}"
             "#,
             standard_core_meta_imports(),
-            out_dir.display()
+            toml_path(&out_dir)
         ),
     )
     .expect("project config should be written");
@@ -521,7 +521,7 @@ fn trace_tasks_flag_writes_build_metrics_json_on_build_failure() {
                 output = "{}"
             "#,
             standard_core_meta_imports(),
-            out_dir.display()
+            toml_path(&out_dir)
         ),
     )
     .expect("project config should be written");
@@ -592,8 +592,8 @@ fn temp_commit_write_mode_builds_artifacts() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            data_out_dir.display(),
-            rust_out_dir.display()
+            toml_path(&data_out_dir),
+            toml_path(&rust_out_dir)
         ),
     )
     .expect("project config should be written");

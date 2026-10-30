@@ -38,9 +38,9 @@ fn codegen_task_can_override_generated_file_name() {
                 file_name = "game_config.hpp"
             "#,
             standard_core_meta_imports(),
-            rust_out_dir.display(),
-            ts_out_dir.display(),
-            cpp_out_dir.display(),
+            toml_path(&rust_out_dir),
+            toml_path(&ts_out_dir),
+            toml_path(&cpp_out_dir),
         ),
     )
     .expect("project config should be written");
@@ -98,8 +98,8 @@ fn builds_messagepack_target_and_codegen_uses_messagepack_files() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            data_out_dir.display(),
-            rust_out_dir.display()
+            toml_path(&data_out_dir),
+            toml_path(&rust_out_dir)
         ),
     )
     .expect("project config should be written");
@@ -181,10 +181,10 @@ fn codegen_is_format_agnostic_with_multiple_runtime_exports() {
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            json_data_dir.display(),
-            messagepack_data_dir.display(),
-            ts_out_dir.display(),
-            rust_out_dir.display()
+            toml_path(&json_data_dir),
+            toml_path(&messagepack_data_dir),
+            toml_path(&ts_out_dir),
+            toml_path(&rust_out_dir)
         ),
     )
     .expect("project config should be written");

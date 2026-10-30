@@ -126,8 +126,8 @@ pub(crate) fn verify_standard_generated_rust_runtime(
         "../../../../../runtime/rust/reader_core",
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("runtime/rust/reader_core")
-            .display()
-            .to_string(),
+            .to_string_lossy()
+            .replace('\\', "/"),
     );
     let harness_cargo_toml = format!(
         "{harness_cargo_toml}config-forge-runtime-binary-reader = {{ path = {:?} }}\n",
@@ -1372,6 +1372,7 @@ public final class RuntimeCheck {
     let generated = package_dir.join("ReferenceGameConfig.java");
     let runtime_check = source_root.join("RuntimeCheck.java");
     let output = StdCommand::new("javac")
+        .args(["-encoding", "UTF-8"])
         .arg("-d")
         .arg(&class_dir)
         .arg(&generated)

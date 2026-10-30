@@ -3,6 +3,10 @@
 
 use std::{fs, path::PathBuf};
 
+pub(crate) fn toml_path(path: impl AsRef<std::path::Path>) -> String {
+    path.as_ref().to_string_lossy().replace('\\', "/")
+}
+
 pub(crate) struct TempStandardProjectConfig {
     pub(crate) fixture_root: PathBuf,
     pub(crate) output_root: PathBuf,
@@ -10,12 +14,12 @@ pub(crate) struct TempStandardProjectConfig {
 }
 
 pub(crate) fn absolute_fixture_path(relative_path: &str) -> String {
-    std::env::current_dir()
-        .expect("current dir")
-        .join("tests/fixtures/standard_project")
-        .join(relative_path)
-        .display()
-        .to_string()
+    toml_path(
+        std::env::current_dir()
+            .expect("current dir")
+            .join("tests/fixtures/standard_project")
+            .join(relative_path),
+    )
 }
 
 pub(crate) fn write_temp_standard_project_config(
@@ -25,7 +29,8 @@ pub(crate) fn write_temp_standard_project_config(
     let output_root = temp_dir.join("out");
     let project_path = temp_dir.join("ConfigForge.toml");
     let original_config = fs::read_to_string(fixture_root.join("ConfigForge.toml"))
-        .expect("standard fixture project config should be readable");
+        .expect("standard fixture project config should be readable")
+        .replace("\r\n", "\n");
     let config = original_config
         .replace(
             r#"imports = [
@@ -39,11 +44,11 @@ pub(crate) fn write_temp_standard_project_config(
         )
         .replace(
             r#"input = "data""#,
-            &format!(r#"input = "{}""#, fixture_root.join("data").display()),
+            &format!(r#"input = "{}""#, toml_path(fixture_root.join("data"))),
         )
         .replace(
             r#"output = "out/"#,
-            &format!(r#"output = "{}/"#, output_root.display()),
+            &format!(r#"output = "{}/"#, toml_path(&output_root)),
         );
     fs::write(&project_path, config).expect("temporary standard project config should be written");
     TempStandardProjectConfig {

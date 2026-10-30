@@ -150,6 +150,7 @@ fn run_java_runtime_compliance_cases() {
     .expect("Java compliance source should be written");
 
     let output = Command::new("javac")
+        .args(["-encoding", "UTF-8"])
         .arg("-d")
         .arg(&class_dir)
         .arg(source_root.join("RuntimeCompliance.java"))

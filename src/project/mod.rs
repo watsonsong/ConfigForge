@@ -607,6 +607,8 @@ mod tests {
         assert_eq!(
             java.output,
             Path::new(env!("CARGO_MANIFEST_DIR"))
+                .canonicalize()
+                .expect("canonical manifest directory")
                 .join("tests/fixtures/standard_project/out/client_code/java")
         );
         assert_eq!(

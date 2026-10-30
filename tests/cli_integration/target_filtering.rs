@@ -49,7 +49,7 @@ fn builds_target_from_imported_project_config_fragments() {
                 type = "rust"
                 output = "{}"
             "#,
-            out_dir.display()
+            toml_path(&out_dir)
         ),
     )
     .expect("target config fragment should be written");
@@ -148,9 +148,9 @@ fn target_tags_filter_validation_export_and_codegen() {
                 type = "rust"
                 output = "{}"
             "#,
-            data_dir.display(),
-            data_out_dir.display(),
-            rust_out_dir.display()
+            toml_path(&data_dir),
+            toml_path(&data_out_dir),
+            toml_path(&rust_out_dir)
         ),
     )
     .expect("project config should be written");

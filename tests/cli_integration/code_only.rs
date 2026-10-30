@@ -28,7 +28,7 @@ fn builds_code_only_target_without_loading_data() {
                 output = "{}"
             "#,
             standard_core_meta_imports(),
-            out_dir.display()
+            toml_path(&out_dir)
         ),
     )
     .expect("project config should be written");
@@ -73,7 +73,7 @@ fn builds_csharp_code_only_target() {
                 namespace = "ReferenceGame.Config"
             "#,
             standard_core_meta_imports(),
-            out_dir.display()
+            toml_path(&out_dir)
         ),
     )
     .expect("project config should be written");
@@ -121,7 +121,7 @@ fn builds_java_code_only_target() {
                 namespace = "referencegame.config"
             "#,
             standard_core_meta_imports(),
-            out_dir.display()
+            toml_path(&out_dir)
         ),
     )
     .expect("project config should be written");
@@ -173,7 +173,7 @@ fn builds_cpp_unreal_code_only_target() {
                 api_macro = "REFERENCE_GAME_CONFIG_API"
             "#,
             standard_core_meta_imports(),
-            out_dir.display()
+            toml_path(&out_dir)
         ),
     )
     .expect("project config should be written");
@@ -244,7 +244,7 @@ fn builds_cpp_unreal_blueprint_code_only_target() {
                 type_name_prefix = "Reference"
             "#,
             standard_core_meta_imports(),
-            out_dir.display()
+            toml_path(&out_dir)
         ),
     )
     .expect("project config should be written");
@@ -311,8 +311,8 @@ fn code_only_target_ignores_missing_project_input_and_sources() {
                 output = "{}"
             "#,
             standard_core_meta_imports(),
-            missing_input_dir.display(),
-            out_dir.display()
+            toml_path(&missing_input_dir),
+            toml_path(&out_dir)
         ),
     )
     .expect("project config should be written");

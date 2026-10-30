@@ -320,7 +320,12 @@ mod tests {
         );
         assert!(
             loader
-                .open_reader("/tmp/secret.msgpack")
+                .open_reader(
+                    std::env::temp_dir()
+                        .join("secret.msgpack")
+                        .to_str()
+                        .unwrap()
+                )
                 .unwrap_err()
                 .message
                 .contains("relative")

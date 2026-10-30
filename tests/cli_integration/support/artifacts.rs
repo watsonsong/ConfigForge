@@ -3,7 +3,7 @@
 
 use std::{collections::BTreeMap, fs, path::Path};
 
-use super::{absolute_fixture_path, standard_core_meta_imports};
+use super::{absolute_fixture_path, standard_core_meta_imports, toml_path};
 
 pub(crate) fn write_stability_project(
     temp_root: &Path,
@@ -35,8 +35,8 @@ pub(crate) fn write_stability_project(
             "#,
             standard_core_meta_imports(),
             absolute_fixture_path("data"),
-            output_root.join("data").display(),
-            output_root.join("code/rust").display()
+            toml_path(output_root.join("data")),
+            toml_path(output_root.join("code/rust"))
         ),
     )
     .expect("project config should be written");

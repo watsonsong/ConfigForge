@@ -110,10 +110,10 @@ fn render_reader_function_body(
             let reader_function = names.reader_function_name(&payload_type)?;
             content.raw_fmt(format_args!(
                 concat!(
-                    "    {field_name}: optionalField(reader, {source_name}, (value) => {reader_function}(value)),\n",
+                    "    {field_name}: optionalField(reader, {source_name:?}, (value) => {reader_function}(value)),\n",
                 ),
                 field_name = field_name,
-                source_name = format!("{:?}", fragment.name),
+                source_name = fragment.name,
                 reader_function = reader_function,
             ));
         }

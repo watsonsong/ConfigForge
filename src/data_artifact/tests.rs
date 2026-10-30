@@ -1,7 +1,12 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 use tempfile::tempdir;
 
@@ -220,7 +225,7 @@ fn export_runtime_data_uses_registered_exporter() {
     )
     .expect("runtime data should export");
 
-    assert_eq!(files[0].path, "custom/items.custom");
+    assert_eq!(Path::new(&files[0].path), Path::new("custom/items.custom"));
     assert_eq!(
         exporter
             .seen_tables
@@ -652,9 +657,9 @@ fn export_runtime_data_preserves_plan_order_for_multiple_artifacts() {
     assert_eq!(files[0].table_name, "items");
     assert_eq!(files[1].table_name, "levels");
     assert_eq!(files[2].table_name, "quests");
-    assert_eq!(files[0].path, "custom/items.custom");
-    assert_eq!(files[1].path, "custom/levels.custom");
-    assert_eq!(files[2].path, "custom/quests.custom");
+    assert_eq!(Path::new(&files[0].path), Path::new("custom/items.custom"));
+    assert_eq!(Path::new(&files[1].path), Path::new("custom/levels.custom"));
+    assert_eq!(Path::new(&files[2].path), Path::new("custom/quests.custom"));
 }
 
 #[test]

@@ -15,7 +15,9 @@ fn repo_path(relative: impl AsRef<Path>) -> PathBuf {
 
 fn read(relative: impl AsRef<Path>) -> String {
     let path = repo_path(relative.as_ref());
-    fs::read_to_string(&path).unwrap_or_else(|error| panic!("failed to read {path:?}: {error}"))
+    fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("failed to read {path:?}: {error}"))
+        .replace("\r\n", "\n")
 }
 
 fn read_json(relative: &str) -> Value {
