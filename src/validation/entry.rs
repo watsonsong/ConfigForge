@@ -57,26 +57,13 @@ pub fn validate_normalized_data_set_with_report(
     meta: &LinkedMetaModel<'_>,
     data_set: &DataSet,
 ) -> Result<ValidationReport> {
-    let mut report = ValidationReport::new();
-    for table_meta in &meta.tables {
-        let Some(table) = data_set.table(&table_meta.meta.name) else {
-            report.push(error_issue_from_message(
-                "table.missing",
-                "required",
-                format!("data set is missing table `{}`", table_meta.meta.name),
-                DiagnosticLocation {
-                    table: Some(table_meta.meta.name.clone()),
-                    ..DiagnosticLocation::default()
-                },
-            ));
-            continue;
-        };
-        report.append(&mut validate_normalized_table_with_report(
-            table_meta, table,
-        ));
-    }
-
-    finish_full_data_set_validation(meta, data_set, report)
+    validate_full_data_set(
+        meta,
+        data_set,
+        None,
+        None,
+        validate_normalized_table_with_report,
+    )
 }
 
 pub fn validate_normalized_data_set_with_assets_and_report(
@@ -84,26 +71,13 @@ pub fn validate_normalized_data_set_with_assets_and_report(
     assets: &AssetsConfig,
     data_set: &DataSet,
 ) -> Result<ValidationReport> {
-    let mut report = ValidationReport::new();
-    for table_meta in &meta.tables {
-        let Some(table) = data_set.table(&table_meta.meta.name) else {
-            report.push(error_issue_from_message(
-                "table.missing",
-                "required",
-                format!("data set is missing table `{}`", table_meta.meta.name),
-                DiagnosticLocation {
-                    table: Some(table_meta.meta.name.clone()),
-                    ..DiagnosticLocation::default()
-                },
-            ));
-            continue;
-        };
-        report.append(&mut validate_normalized_table_with_report(
-            table_meta, table,
-        ));
-    }
-
-    finish_full_data_set_validation_with_assets(meta, assets, data_set, report)
+    validate_full_data_set(
+        meta,
+        data_set,
+        Some(assets),
+        None,
+        validate_normalized_table_with_report,
+    )
 }
 
 pub fn validate_normalized_data_set_with_report_and_pool(
@@ -125,73 +99,56 @@ pub(crate) fn validate_normalized_data_set_with_table_validator_and_pool(
     pool: &rayon::ThreadPool,
     table_validator: impl Fn(&LinkedTableMeta<'_>, &DataTable) -> ValidationReport + Sync,
 ) -> Result<ValidationReport> {
-    let mut table_reports = pool.install(|| {
-        meta.tables
-            .par_iter()
-            .enumerate()
-            .map(|(index, table_meta)| {
-                let mut report = ValidationReport::new();
-                let Some(table) = data_set.table(&table_meta.meta.name) else {
-                    report.push(missing_table_issue(table_meta));
-                    return (index, report);
-                };
-                report.append(&mut table_validator(table_meta, table));
-                (index, report)
-            })
-            .collect::<Vec<_>>()
-    });
-    table_reports.sort_by_key(|(index, _)| *index);
+    validate_full_data_set(meta, data_set, None, Some(pool), table_validator)
+}
 
+fn collect_table_reports<T: Sync>(
+    tables: &[T],
+    pool: Option<&rayon::ThreadPool>,
+    validate: impl Fn(&T) -> ValidationReport + Sync,
+) -> ValidationReport {
     let mut report = ValidationReport::new();
-    for (_, mut table_report) in table_reports {
-        report.append(&mut table_report);
+    if let Some(pool) = pool {
+        let reports = pool.install(|| tables.par_iter().map(&validate).collect::<Vec<_>>());
+        for mut table_report in reports {
+            report.append(&mut table_report);
+        }
+    } else {
+        for table in tables {
+            report.append(&mut validate(table));
+        }
     }
-
-    finish_full_data_set_validation(meta, data_set, report)
+    report
 }
 
-fn finish_full_data_set_validation(
+fn validate_full_data_set(
     meta: &LinkedMetaModel<'_>,
     data_set: &DataSet,
-    mut report: ValidationReport,
+    assets: Option<&AssetsConfig>,
+    pool: Option<&rayon::ThreadPool>,
+    table_validator: impl Fn(&LinkedTableMeta<'_>, &DataTable) -> ValidationReport + Sync,
 ) -> Result<ValidationReport> {
+    let mut report = collect_table_reports(&meta.tables, pool, |table_meta| {
+        match data_set.table(&table_meta.meta.name) {
+            Some(table) => table_validator(table_meta, table),
+            None => {
+                let mut report = ValidationReport::new();
+                report.push(missing_table_issue(table_meta));
+                report
+            }
+        }
+    });
     report.extend(super::diagnostic::error_issues_from_result(
         "foreign_key.integrity",
         "foreign_key",
         super::foreign_key::validate_foreign_keys_full(meta, data_set),
         DiagnosticLocation::default(),
     ));
-
-    let registry = ValidatorRegistry::with_builtin_validators();
-    let plan = CompiledValidationPlan::compile(meta, &registry)?;
-    let context = ValidationContext::new(
-        meta,
-        None,
-        data_set,
-        ExportValidationView::full(meta, data_set),
-    );
-    report.append(&mut plan.run(&context));
-    report.sort_by_stable_key();
-    report_into_result(report)
-}
-
-fn finish_full_data_set_validation_with_assets(
-    meta: &LinkedMetaModel<'_>,
-    assets: &AssetsConfig,
-    data_set: &DataSet,
-    mut report: ValidationReport,
-) -> Result<ValidationReport> {
-    report.extend(super::diagnostic::error_issues_from_result(
-        "foreign_key.integrity",
-        "foreign_key",
-        super::foreign_key::validate_foreign_keys_full(meta, data_set),
-        DiagnosticLocation::default(),
-    ));
-
-    report.append(&mut super::asset::validate_assets_full(
-        meta, assets, data_set,
-    ));
-
+    if let Some(assets) = assets {
+        report.append(&mut super::asset::validate_assets_full(
+            meta, assets, data_set,
+        ));
+    }
     let registry = ValidatorRegistry::with_builtin_validators();
     let plan = CompiledValidationPlan::compile(meta, &registry)?;
     let context = ValidationContext::new(
@@ -230,16 +187,10 @@ pub fn validate_normalized_data_set_for_target_with_report(
     target_tags: &TargetTags,
     data_set: &DataSet,
 ) -> Result<ValidationReport> {
-    let export_view = ExportValidationView::for_target(meta, data_set, target_tags)?;
-    let mut report = ValidationReport::new();
-    for table_view in &export_view.tables {
-        report.append(&mut validate_normalized_table_view_with_report(
-            table_view,
-            Some(target_tags),
-        ));
-    }
-
-    finish_target_data_set_validation(meta, target_tags, data_set, export_view, None, report)
+    validate_target_data_set(meta, target_tags, data_set, None, None, |view| {
+        validate_normalized_table_view_with_report(view, Some(target_tags))
+    })
+    .and_then(ValidationOutcome::into_result)
 }
 
 pub fn validate_normalized_data_set_for_target_with_assets_and_report(
@@ -248,23 +199,10 @@ pub fn validate_normalized_data_set_for_target_with_assets_and_report(
     target_tags: &TargetTags,
     data_set: &DataSet,
 ) -> Result<ValidationReport> {
-    let export_view = ExportValidationView::for_target(meta, data_set, target_tags)?;
-    let mut report = ValidationReport::new();
-    for table_view in &export_view.tables {
-        report.append(&mut validate_normalized_table_view_with_report(
-            table_view,
-            Some(target_tags),
-        ));
-    }
-
-    finish_target_data_set_validation(
-        meta,
-        target_tags,
-        data_set,
-        export_view,
-        Some(assets),
-        report,
-    )
+    validate_target_data_set(meta, target_tags, data_set, Some(assets), None, |view| {
+        validate_normalized_table_view_with_report(view, Some(target_tags))
+    })
+    .and_then(ValidationOutcome::into_result)
 }
 
 pub fn validate_normalized_data_set_for_target_with_report_and_pool(
@@ -323,24 +261,15 @@ pub(crate) fn validate_normalized_data_set_for_target_with_table_view_validator_
     pool: &rayon::ThreadPool,
     table_view_validator: impl Fn(&super::ExportTableView<'_, '_>) -> ValidationReport + Sync,
 ) -> Result<ValidationReport> {
-    let export_view =
-        ExportValidationView::for_target_with_pool(meta, data_set, target_tags, pool)?;
-    let mut table_reports = pool.install(|| {
-        export_view
-            .tables
-            .par_iter()
-            .enumerate()
-            .map(|(index, table_view)| (index, table_view_validator(table_view)))
-            .collect::<Vec<_>>()
-    });
-    table_reports.sort_by_key(|(index, _)| *index);
-
-    let mut report = ValidationReport::new();
-    for (_, mut table_report) in table_reports {
-        report.append(&mut table_report);
-    }
-
-    finish_target_data_set_validation(meta, target_tags, data_set, export_view, None, report)
+    validate_target_data_set(
+        meta,
+        target_tags,
+        data_set,
+        None,
+        Some(pool),
+        table_view_validator,
+    )
+    .and_then(ValidationOutcome::into_result)
 }
 
 pub(crate) fn validate_normalized_data_set_for_target_with_table_view_validator_assets_outcome_and_pool(
@@ -351,41 +280,31 @@ pub(crate) fn validate_normalized_data_set_for_target_with_table_view_validator_
     pool: &rayon::ThreadPool,
     table_view_validator: impl Fn(&super::ExportTableView<'_, '_>) -> ValidationReport + Sync,
 ) -> Result<ValidationOutcome> {
-    let export_view =
-        ExportValidationView::for_target_with_pool(meta, data_set, target_tags, pool)?;
-    let mut table_reports = pool.install(|| {
-        export_view
-            .tables
-            .par_iter()
-            .enumerate()
-            .map(|(index, table_view)| (index, table_view_validator(table_view)))
-            .collect::<Vec<_>>()
-    });
-    table_reports.sort_by_key(|(index, _)| *index);
-
-    let mut report = ValidationReport::new();
-    for (_, mut table_report) in table_reports {
-        report.append(&mut table_report);
-    }
-
-    finish_target_data_set_validation_outcome(
+    validate_target_data_set(
         meta,
         target_tags,
         data_set,
-        export_view,
         Some(assets),
-        report,
+        Some(pool),
+        table_view_validator,
     )
 }
 
-fn finish_target_data_set_validation(
+fn validate_target_data_set(
     meta: &LinkedMetaModel<'_>,
     target_tags: &TargetTags,
     data_set: &DataSet,
-    export_view: ExportValidationView<'_, '_>,
     assets: Option<&AssetsConfig>,
-    report: ValidationReport,
-) -> Result<ValidationReport> {
+    pool: Option<&rayon::ThreadPool>,
+    table_view_validator: impl Fn(&super::ExportTableView<'_, '_>) -> ValidationReport + Sync,
+) -> Result<ValidationOutcome> {
+    let export_view = match pool {
+        Some(pool) => {
+            ExportValidationView::for_target_with_pool(meta, data_set, target_tags, pool)?
+        }
+        None => ExportValidationView::for_target(meta, data_set, target_tags)?,
+    };
+    let report = collect_table_reports(&export_view.tables, pool, table_view_validator);
     finish_target_data_set_validation_outcome(
         meta,
         target_tags,
@@ -394,7 +313,6 @@ fn finish_target_data_set_validation(
         assets,
         report,
     )
-    .and_then(ValidationOutcome::into_result)
 }
 
 fn finish_target_data_set_validation_outcome(

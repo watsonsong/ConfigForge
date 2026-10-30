@@ -21,6 +21,8 @@ Related docs：[`../Design/05-data-validation.md`](../Design/05-data-validation.
 
 ## 6.0 模块职责与当前结构
 
+`entry.rs` 的 public 入口保持兼容，内部使用 full 与 target 两个校验核心；assets 和 Rayon pool 是可选上下文。表级报告由同一个 helper 收集，串行直接遍历，parallel 使用 indexed `par_iter` 按输入顺序 collect，不额外包装 index 再排序。FK、asset、registered validator 与最终稳定排序仍按原阶段执行；target outcome 保留 blocking report，`Result` 兼容入口再执行 error gate，供 build 在失败时导出 validation report。
+
 Validation 模块负责对已加载并归一化的数据执行结构化校验。它可以依赖 `meta`、`data` 和 `diagnostic`，但不能依赖 `exporter`、`codegen` 或 `build`。
 
 当前目录结构：

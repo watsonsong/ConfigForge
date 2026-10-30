@@ -2156,6 +2156,55 @@ fn target_asset_validation_checks_visible_asset_fields() {
         &data_set,
     )
     .expect("server target should skip client-only asset field");
+
+    super::entry::validate_normalized_data_set_with_report(&linked_meta, &data_set)
+        .expect("assets must remain opt-in for full validation");
+    let full = validation_report_error(
+        super::entry::validate_normalized_data_set_with_assets_and_report(
+            &linked_meta,
+            &assets,
+            &data_set,
+        ),
+    );
+    assert!(
+        full.issues
+            .iter()
+            .any(|issue| issue.code == CF_DATA_INVALID_ASSET_REF)
+    );
+    for jobs in [1, 3] {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(jobs)
+            .build()
+            .unwrap();
+        let parallel = validation_report_error(
+            super::entry::validate_normalized_data_set_for_target_with_assets_report_and_pool(
+                &linked_meta,
+                &assets,
+                &TargetTags::new(["client"]),
+                &data_set,
+                &pool,
+            ),
+        );
+        assert_eq!(parallel, report);
+        super::entry::validate_normalized_data_set_for_target_with_assets_report_and_pool(
+            &linked_meta,
+            &assets,
+            &TargetTags::new(["server"]),
+            &data_set,
+            &pool,
+        )
+        .expect("parallel validation should skip target-hidden assets");
+        assert_eq!(
+            super::entry::validate_normalized_data_set_with_report(&linked_meta, &data_set)
+                .unwrap(),
+            super::entry::validate_normalized_data_set_with_report_and_pool(
+                &linked_meta,
+                &data_set,
+                &pool
+            )
+            .unwrap(),
+        );
+    }
 }
 
 #[test]
