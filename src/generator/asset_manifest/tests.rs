@@ -11,9 +11,7 @@ use crate::{
     code_artifact::tests::expect_single_diagnostic,
     data::{DataSet, DataTable},
     data_artifact::{AggregateDataExporter, TargetDataConfig},
-    diagnostic::code::{
-        CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH, CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
-    },
+    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{MetaModel, TargetTags},
 };
 
@@ -191,15 +189,15 @@ fn generate_to_sink_reports_structured_contract_error() {
         generated_at: "now".to_owned(),
     };
     let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
-    let error =
-        <AssetManifestExporter as ArtifactGenerator>::generate_to_sink(&exporter, &input, &sink)
-            .unwrap_err();
+    let input = crate::generator::GeneratorTaskInput {
+        common: input,
+        prepared: crate::generator::PreparedGeneratorInputs::MetaOnly,
+    };
+    let error = <AssetManifestExporter as ArtifactGenerator>::generate(&exporter, &input, &sink)
+        .unwrap_err();
     let diagnostic = expect_single_diagnostic(error);
-    assert_eq!(diagnostic.code, CF_GENERATOR_RUNTIME_CONTRACT_MISMATCH);
-    assert_eq!(
-        diagnostic.source.as_deref(),
-        Some("generator.asset_manifest.contract")
-    );
+    assert_eq!(diagnostic.code, CF_GENERATOR_UNSUPPORTED_DATA_INPUT);
+    assert_eq!(diagnostic.source.as_deref(), Some("generator.input"));
 }
 
 #[test]

@@ -187,7 +187,7 @@ fn add_cli_validation_report_task(
     target.exports.push(NormalizedExportTask {
         name: "cli-validation-report".to_owned(),
         type_id: "validation_report".to_owned(),
-        requirements: GeneratorRequirements::meta_and_data().with_validation_report(),
+        requirements: GeneratorRequirements::meta_and_data().with_report_only(),
         output: output_dir,
         options,
     });
@@ -772,11 +772,12 @@ mod tests {
                 GeneratorRequirements::meta_only()
             }
 
-            fn generate_to_sink(
+            fn generate(
                 &self,
-                input: &GeneratorCommonInput<'_>,
+                input: &crate::generator::GeneratorTaskInput<'_, '_>,
                 sink: &ArtifactSink,
             ) -> Result<()> {
+                let input = &input.common;
                 self.called.store(true, Ordering::SeqCst);
                 sink.write_text(input.output.join("generated.txt"), "sink-first")
             }

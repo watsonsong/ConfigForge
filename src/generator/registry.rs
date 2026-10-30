@@ -229,16 +229,12 @@ mod tests {
                     options,
                     generated_at: "2026-10-28T00:00:00Z".to_owned(),
                 };
-                let task_input = GeneratorTaskInput {
-                    common: input,
-                    prepared: PreparedGeneratorInputs::Planning,
-                };
-                let mut planned = generator.plan_task_artifacts(&task_input).expect(type_id);
+                let mut planned = generator.plan_artifacts(&input).expect(type_id);
                 assert!(!planned.is_empty(), "{type_id} must declare its artifacts");
                 let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
                 sink.reserve_paths(planned.clone()).expect(type_id);
                 let task_input = GeneratorTaskInput {
-                    common: task_input.common,
+                    common: input,
                     prepared: if generator.requirements().needs_data {
                         PreparedGeneratorInputs::MetaAndData {
                             data_set: &data_set,
@@ -259,6 +255,29 @@ mod tests {
                     .collect::<Vec<_>>();
                 planned.sort();
                 assert_eq!(planned, actual, "{type_id}, custom={custom}");
+                if generator.requirements().needs_data {
+                    let input = GeneratorTaskInput {
+                        common: task_input.common,
+                        prepared: PreparedGeneratorInputs::ValidationReportOnly {
+                            validation_report: &report,
+                        },
+                    };
+                    let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+                    sink.reserve_paths(planned.clone()).unwrap();
+                    if generator.requirements().supports_report_only {
+                        generator.generate(&input, &sink).unwrap();
+                        assert_eq!(sink.finish().unwrap().entries.len(), planned.len());
+                    } else {
+                        let error = generator.generate(&input, &sink).unwrap_err();
+                        let ConfigForgeError::ValidationReport(report) = error else {
+                            panic!("expected structured unsupported input diagnostic");
+                        };
+                        assert_eq!(
+                            report.diagnostics[0].code,
+                            crate::diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT
+                        );
+                    }
+                }
             }
         }
     }
@@ -287,9 +306,9 @@ mod tests {
             self.descriptor
         }
 
-        fn generate_to_sink(
+        fn generate(
             &self,
-            _input: &crate::generator::GeneratorCommonInput<'_>,
+            _input: &crate::generator::GeneratorTaskInput<'_, '_>,
             _sink: &crate::artifact::ArtifactSink,
         ) -> Result<()> {
             Ok(())

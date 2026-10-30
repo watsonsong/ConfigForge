@@ -288,11 +288,12 @@ impl ArtifactGenerator for CppCodeGenerator {
         Ok(paths)
     }
 
-    fn generate_to_sink(
+    fn generate(
         &self,
-        input: &GeneratorCommonInput<'_>,
+        input: &crate::generator::GeneratorTaskInput<'_, '_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
+        let input = &input.common;
         super::generate_code_artifact_to_sink(self, input, sink)
     }
 }

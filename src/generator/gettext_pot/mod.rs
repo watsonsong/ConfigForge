@@ -12,10 +12,7 @@ use crate::{
     meta::{LinkedMetaModel, TargetTags},
 };
 
-use super::{
-    ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements,
-    artifact_generator::generator_contract_error,
-};
+use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorRequirements};
 
 mod extract;
 mod options;
@@ -102,20 +99,6 @@ impl ArtifactGenerator for GettextPotExporter {
         GeneratorRequirements::meta_and_data()
     }
 
-    fn generate_to_sink(
-        &self,
-        _input: &GeneratorCommonInput<'_>,
-        _sink: &ArtifactSink,
-    ) -> Result<()> {
-        Err(generator_contract_error(
-            FORMAT,
-            format!("generator `{FORMAT}` requires Data-backed artifact input"),
-            "meta-only generation call",
-            "data-backed generation input",
-            "Use the generator registry data-backed pipeline for gettext_pot exports.",
-        ))
-    }
-
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
         let task = input.target_data_config();
         <Self as AggregateDataExporter>::plan_artifacts(
@@ -127,11 +110,12 @@ impl ArtifactGenerator for GettextPotExporter {
         )
     }
 
-    fn generate_with_data_to_sink(
+    fn generate(
         &self,
-        input: &GeneratorDataInput<'_, '_>,
+        input: &crate::generator::GeneratorTaskInput<'_, '_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
+        let input = input.data_input(self.type_id())?;
         let task = input.common.target_data_config();
         <Self as AggregateDataExporter>::export_to_sink(
             self,

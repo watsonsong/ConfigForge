@@ -16,10 +16,7 @@ use crate::{
     meta::{LinkedMetaModel, TargetTags},
 };
 
-use super::{
-    ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements,
-    artifact_generator::generator_contract_error,
-};
+use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorRequirements};
 
 mod extract;
 mod options;
@@ -108,21 +105,7 @@ impl ArtifactGenerator for AssetManifestExporter {
     }
 
     fn requirements(&self) -> GeneratorRequirements {
-        GeneratorRequirements::meta_and_data().with_assets()
-    }
-
-    fn generate_to_sink(
-        &self,
-        _input: &GeneratorCommonInput<'_>,
-        _sink: &ArtifactSink,
-    ) -> Result<()> {
-        Err(generator_contract_error(
-            FORMAT,
-            format!("generator `{FORMAT}` requires Data-backed artifact input"),
-            "meta-only generation call",
-            "data-backed generation input",
-            "Use the generator registry data-backed pipeline for asset_manifest exports.",
-        ))
+        GeneratorRequirements::meta_and_data()
     }
 
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
@@ -136,11 +119,12 @@ impl ArtifactGenerator for AssetManifestExporter {
         )
     }
 
-    fn generate_with_data_to_sink(
+    fn generate(
         &self,
-        input: &GeneratorDataInput<'_, '_>,
+        input: &crate::generator::GeneratorTaskInput<'_, '_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
+        let input = input.data_input(self.type_id())?;
         let task = input.common.target_data_config();
         <Self as AggregateDataExporter>::export_to_sink(
             self,

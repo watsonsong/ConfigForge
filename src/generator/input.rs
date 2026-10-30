@@ -18,13 +18,8 @@ use crate::{
     validation::ValidationReport,
 };
 
-/// Shared, task-local context for artifact generators.
-///
-/// This is the common subset of information needed by current codegen,
-/// schema-doc, and data-backed exporters. Stepwise refactors will adapt this
-/// into concrete execution inputs without changing the public Project Config
-/// shape.
-#[derive(Clone)]
+/// Task-local schema, target and options shared by planning and execution.
+#[cfg_attr(test, derive(Clone))]
 pub(crate) struct GeneratorCommonInput<'meta> {
     pub(crate) meta: &'meta LinkedMetaModel<'meta>,
     pub(crate) target_tags: TargetTags,
@@ -39,15 +34,9 @@ pub(crate) struct GeneratorCommonInput<'meta> {
 }
 
 pub(crate) struct GeneratorDataInput<'a, 'meta> {
-    pub(crate) common: GeneratorCommonInput<'meta>,
+    pub(crate) common: &'a GeneratorCommonInput<'meta>,
     pub(crate) data_set: &'a DataSet,
-    pub(crate) validation_report: &'a ValidationReport,
     pub(crate) pool: &'a ThreadPool,
-}
-
-pub(crate) struct GeneratorValidationReportInput<'a, 'meta> {
-    pub(crate) common: GeneratorCommonInput<'meta>,
-    pub(crate) validation_report: &'a ValidationReport,
 }
 
 impl GeneratorCommonInput<'_> {
@@ -119,8 +108,17 @@ pub(crate) struct GeneratorTaskInput<'a, 'meta> {
     pub(crate) prepared: PreparedGeneratorInputs<'a>,
 }
 
+impl<'meta> GeneratorTaskInput<'_, 'meta> {
+    pub(crate) fn data_input(&self, generator_type: &str) -> Result<GeneratorDataInput<'_, 'meta>> {
+        Ok(GeneratorDataInput {
+            common: &self.common,
+            data_set: self.prepared.data_set(generator_type)?,
+            pool: self.prepared.pool(generator_type)?,
+        })
+    }
+}
+
 pub(crate) enum PreparedGeneratorInputs<'a> {
-    Planning,
     MetaOnly,
     MetaAndData {
         data_set: &'a DataSet,
@@ -136,7 +134,7 @@ impl<'a> PreparedGeneratorInputs<'a> {
     pub(crate) fn data_set(&self, generator_type: &str) -> Result<&'a DataSet> {
         match self {
             Self::MetaAndData { data_set, .. } => Ok(*data_set),
-            Self::Planning | Self::MetaOnly | Self::ValidationReportOnly { .. } => {
+            Self::MetaOnly | Self::ValidationReportOnly { .. } => {
                 Err(unsupported_data_input_error(
                     generator_type,
                     self.kind_label(),
@@ -152,7 +150,7 @@ impl<'a> PreparedGeneratorInputs<'a> {
                 validation_report, ..
             } => Ok(*validation_report),
             Self::ValidationReportOnly { validation_report } => Ok(*validation_report),
-            Self::Planning | Self::MetaOnly => Err(unsupported_data_input_error(
+            Self::MetaOnly => Err(unsupported_data_input_error(
                 generator_type,
                 self.kind_label(),
                 "validation report input",
@@ -163,7 +161,7 @@ impl<'a> PreparedGeneratorInputs<'a> {
     pub(crate) fn pool(&self, generator_type: &str) -> Result<&'a ThreadPool> {
         match self {
             Self::MetaAndData { pool, .. } => Ok(*pool),
-            Self::Planning | Self::MetaOnly | Self::ValidationReportOnly { .. } => {
+            Self::MetaOnly | Self::ValidationReportOnly { .. } => {
                 Err(unsupported_data_input_error(
                     generator_type,
                     self.kind_label(),
@@ -173,13 +171,8 @@ impl<'a> PreparedGeneratorInputs<'a> {
         }
     }
 
-    pub(crate) fn is_validation_report_only(&self) -> bool {
-        matches!(self, Self::ValidationReportOnly { .. })
-    }
-
     fn kind_label(&self) -> &'static str {
         match self {
-            Self::Planning => "Planning",
             Self::MetaOnly => "MetaOnly",
             Self::MetaAndData { .. } => "MetaAndData",
             Self::ValidationReportOnly { .. } => "ValidationReportOnly",

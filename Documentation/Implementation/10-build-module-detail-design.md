@@ -82,7 +82,7 @@ pub(crate) struct NormalizedExportTask {
 | effective target tags | target config + CLI extra tags | `TargetTags` | 在 `build_target()` 中计算，作为后续 context 注入。 |
 | dependency plan | normalized target + effective tags | `TargetBuildPlan` | 记录 MetaOnly / MetaAndData export indices、是否需要 data、共享 data dependency。 |
 | build execution view | `TargetBuildPlan` | trace detail string | 仅用于 `--trace-tasks` debug，不作为调度或缓存权威。 |
-| artifact planning barrier | linked Meta + target tags + all export task options | shared sink path reservations | 并行调用所有 generator 的 `plan_task_artifacts(Planning)`，按声明顺序合并；任何冲突或规划错误均在写文件前失败。 |
+| artifact planning barrier | linked Meta + target tags + all export task options | shared sink path reservations | 并行调用所有 generator 的 `plan_artifacts(common)`，按声明顺序合并；任何冲突或规划错误均在写文件前失败。 |
 | MetaOnly branch | linked Meta + target tags + artifact reservations | codegen / doc / manifest artifacts / warnings | `LinkMeta` 和全局产物规划完成后运行不需要 Data 的 generator，不等待 source read / normalize / validation。 |
 | MetaAndData branch | linked Meta + raw sources + target tags | runtime / aggregate / mixed artifacts / warnings | 共享一次 source read、normalize 和 validation；validation 成功后执行 requirements 包含 Data 的 generator。 |
 | finish artifacts | shared `ArtifactSink` | `BuildOutput` | 由 `ArtifactSink::finish()` 完成 dry-run / direct / temp-commit。 |
@@ -214,10 +214,10 @@ pub struct BuildTraceStage {
 
 - 内置 language codegen 已迁入 `src/generator/<language>/`，并由各 concrete language module 直接实现 build-facing `ArtifactGenerator` 后注册到 `GeneratorRegistry`。Build 不直接查询 `CodeGenerator`，`codegen` 只保留 code artifact toolkit；`CodeGenerator` 不再通过 `CodeArtifactGenerator` adapter 暴露为 registry entry。`schema_doc` 直接实现 doc artifact generator 并由 `GeneratorRegistry` 注册，而不是实现 code-specific `CodeGenerator`。
 - code-like / schema_doc export task 不选择数据 export task，也不消费 `RuntimeDataFile`。
-- Build 从 `ProjectConfigMeta` 构造共享 `ArtifactProjectInfo`，并为每个 export task 构造统一 `GeneratorCommonInput`；如果 requirements 包含 Data，则在 validation 成功后补充 `GeneratorDataInput`。
+- Build 从 `ProjectConfigMeta` 构造共享 `ArtifactProjectInfo`，并为每个 export task 构造统一 `GeneratorCommonInput`；执行时将 prepared inputs 放入 `GeneratorTaskInput`，由具体 generator 借用所需输入。
 - language generator 从 `GeneratorCommonInput` 派生 `CodeExportInput`，包含 linked meta、target tags、project 信息、project root、target name、target generator config、空 runtime data file list、generated_at；这个转换属于 generator / code artifact toolkit 细节，不属于 Build 调度分支逻辑。
 - 传给 CodeModel 的 target tags 必须是 effective target tags，而不是仅 Project Config 中的 target tags；否则 CLI `--tag s1` 影响了 runtime data override，却没有同步影响 table/field/index codegen 过滤，会造成 schema 与数据不一致。
-- MetaOnly generator export task 可以并行生成，并统一通过 `ArtifactGenerator::generate_to_sink()` 直接写入 shared `ArtifactSink`；全局路径冲突由 artifact 模块在 `create()` / convenience write API 中统一检查，dry-run / finish entries 由 sink 按 normalized path 稳定输出。
+- MetaOnly generator export task 可以并行生成，并统一通过 `ArtifactGenerator::generate()` 直接写入 shared `ArtifactSink`；全局路径冲突由 artifact 模块在 `create()` / convenience write API 中统一检查，dry-run / finish entries 由 sink 按 normalized path 稳定输出。
 - `schema_doc` 的 generator language/type id 为 `schema_doc`，当前稳定支持 `format = "markdown"` / `format = "html"`、`index_file`、`title`、`include_hidden`、`include_internal`、`include_struct_details`、`include_asset_rules`、`include_i18n`，未知格式或未知选项显式报错；它基于 linked Meta 构建 `SchemaDoc` normalized model，并通过 Markdown renderer 写出 `index.md` 和每表 `<table>.md`，或通过 HTML renderer 写出 `index.html` 和每表 `<table>.html`。
 - 未来 JSON Schema、Mermaid ER 等如果仍是“只读 Meta 并输出 artifact”，优先按统一 artifact generator + requirements + doc facet 扩展，而不是在 build 中增加特殊分支，也不要继续把非代码文档任务塞进 code-specific `CodeGenerator` trait。
 
@@ -225,19 +225,16 @@ pub struct BuildTraceStage {
 
 ```rust
 pub(crate) struct GeneratorRequirements {
-    pub(crate) needs_meta: bool,
     pub(crate) needs_data: bool,
-    pub(crate) needs_assets: bool,
-    pub(crate) needs_validation_report: bool,
+    pub(crate) supports_report_only: bool,
 }
 
 pub(crate) trait ArtifactGenerator: Send + Sync {
     fn type_id(&self) -> &'static str;
     fn aliases(&self) -> &'static [&'static str] { &[] }
     fn requirements(&self) -> GeneratorRequirements;
-    fn generate_to_sink(&self, input: &GeneratorCommonInput<'_>, sink: &ArtifactSink) -> Result<()>;
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>>;
-    fn generate_with_data_to_sink(&self, input: &GeneratorDataInput<'_, '_>, sink: &ArtifactSink) -> Result<()>;
+    fn generate(&self, input: &GeneratorTaskInput<'_, '_>, sink: &ArtifactSink) -> Result<()>;
 }
 ```
 
@@ -254,38 +251,9 @@ Lua 是该模型的关键校验用例：它 requirements 包含 Meta + Data，�
 
 当前收口状态：production `GeneratorRegistry` 构造只接受 direct `ArtifactGenerator` 列表；内置 data-backed generators 和内置 language generators 均已直接注册。`CodeArtifactGenerator`、`DataArtifactGenerator` 和 `from_compat_parts()` 已删除；`CodeGenerator` 缩小为 renderer / naming / formatting / file header 等 code artifact facet，`RuntimeTableFormat` / `AggregateDataExporter` 保留为 data artifact toolkit facet，不参与 registry 构造。
 
-建议的长期 build-facing trait 形态：
+执行输入使用当前的 `GeneratorTaskInput`：owned common context 加借用的 `PreparedGeneratorInputs`，后者只有 `MetaOnly`、`MetaAndData`、`ValidationReportOnly` 三种有效状态。规划直接接收 common context，没有 `Planning` 执行状态或另一层规划转发。Data generator 通过 `data_input()` 借用 common、DataSet 与 pool，不克隆 common/options；report generator 从 prepared input 读取报告。
 
-```rust
-pub(crate) struct GeneratorDescriptor {
-    pub(crate) type_id: &'static str,
-    pub(crate) aliases: &'static [&'static str],
-    pub(crate) requirements: GeneratorRequirements,
-}
-
-pub(crate) struct GeneratorTaskInput<'a, 'meta> {
-    pub(crate) task: &'a NormalizedExportTask,
-    pub(crate) common: GeneratorCommonInput<'meta>,
-    pub(crate) prepared: PreparedGeneratorInputs<'a>,
-}
-
-pub(crate) enum PreparedGeneratorInputs<'a> {
-    MetaOnly,
-    MetaAndData {
-        data_set: &'a DataSet,
-        validation_report: &'a ValidationReport,
-        pool: &'a ThreadPool,
-    },
-}
-
-pub(crate) trait TaskGenerator: Send + Sync {
-    fn descriptor(&self) -> GeneratorDescriptor;
-    fn plan_artifacts(&self, input: &GeneratorTaskInput<'_, '_>) -> Result<Vec<PathBuf>>;
-    fn generate(&self, input: &GeneratorTaskInput<'_, '_>, sink: &ArtifactSink) -> Result<()>;
-}
-```
-
-这里的 “task name” 属于 export task instance（`[[targets.exports]].name`），不是 generator 类型本身的全局名字；同一个 generator type 可以被同一 target 以不同 task name / output / options 声明多次。scheduler 需要知道的是 generator descriptor 中的 requirements，而不是 generator 内部属于 code、table data、aggregate data 还是 doc。`MetaOnly` / `MetaAndData` 只是当前 branch pipeline 对 `requirements.needs_data` 的执行分组名称；未来若出现 assets-only、validation-report-only 或更细粒度缓存，也应继续由 requirements 扩展，而不是新增调度侧 generator 子类。
+所有 generator 都需要 linked Meta，因此不保留恒真的 `needs_meta`。Assets 由 data validation 准备，不保留没有调度消费者的 `needs_assets`。`needs_data` 决定正常执行分支；`supports_report_only` 明确表示 validation 失败时仍允许执行的策略，当前仅报告生成器启用。task name 属于 export task instance；generator 不能反向依赖 build 的 normalized task 类型。只有新的真实输入需求出现时才扩展输入状态，不提前维护另一套 `TaskGenerator` 接口。
 
 ## 10.6a 稳定性与回归基线
 

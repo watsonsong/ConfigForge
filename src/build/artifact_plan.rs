@@ -6,10 +6,7 @@ use rayon::{ThreadPool, prelude::*};
 use crate::{
     Result,
     artifact::ArtifactSink,
-    generator::{
-        GeneratorCommonInput, GeneratorCommonInputContext, GeneratorRegistry, GeneratorTaskInput,
-        PreparedGeneratorInputs,
-    },
+    generator::{GeneratorCommonInput, GeneratorCommonInputContext, GeneratorRegistry},
 };
 
 use super::target::NormalizedExportTask;
@@ -25,18 +22,15 @@ pub(super) fn plan_target_artifacts(
         export_tasks
             .par_iter()
             .map(|task| {
-                registry
-                    .require_generator(&task.type_id)?
-                    .plan_task_artifacts(&GeneratorTaskInput {
-                        common: GeneratorCommonInput::from_task_context(
-                            context,
-                            &task.name,
-                            &task.type_id,
-                            &task.output,
-                            &task.options,
-                        ),
-                        prepared: PreparedGeneratorInputs::Planning,
-                    })
+                registry.require_generator(&task.type_id)?.plan_artifacts(
+                    &GeneratorCommonInput::from_task_context(
+                        context,
+                        &task.name,
+                        &task.type_id,
+                        &task.output,
+                        &task.options,
+                    ),
+                )
             })
             .collect::<Vec<_>>()
     });

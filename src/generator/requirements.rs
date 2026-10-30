@@ -9,38 +9,28 @@
 /// and a Meta-only generator may produce docs or manifests rather than code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GeneratorRequirements {
-    pub(crate) needs_meta: bool,
     pub(crate) needs_data: bool,
-    pub(crate) needs_assets: bool,
-    pub(crate) needs_validation_report: bool,
+    /// Allows execution with only a report after data validation fails.
+    pub(crate) supports_report_only: bool,
 }
 
 impl GeneratorRequirements {
     pub(crate) const fn meta_only() -> Self {
         Self {
-            needs_meta: true,
             needs_data: false,
-            needs_assets: false,
-            needs_validation_report: false,
+            supports_report_only: false,
         }
     }
 
     pub(crate) const fn meta_and_data() -> Self {
         Self {
-            needs_meta: true,
             needs_data: true,
-            needs_assets: false,
-            needs_validation_report: false,
+            supports_report_only: false,
         }
     }
 
-    pub(crate) const fn with_assets(mut self) -> Self {
-        self.needs_assets = true;
-        self
-    }
-
-    pub(crate) const fn with_validation_report(mut self) -> Self {
-        self.needs_validation_report = true;
+    pub(crate) const fn with_report_only(mut self) -> Self {
+        self.supports_report_only = true;
         self
     }
 }
@@ -78,7 +68,6 @@ mod tests {
     fn requirements_without_data_do_not_need_data() {
         let requirements = GeneratorRequirements::meta_only();
 
-        assert!(requirements.needs_meta);
         assert!(!requirements.needs_data);
     }
 
@@ -86,19 +75,15 @@ mod tests {
     fn requirements_with_data_need_data() {
         let requirements = GeneratorRequirements::meta_and_data();
 
-        assert!(requirements.needs_meta);
         assert!(requirements.needs_data);
     }
 
     #[test]
-    fn auxiliary_requirements_do_not_force_data_dependency() {
-        let meta_with_assets = GeneratorRequirements::meta_only().with_assets();
-        let meta_with_report = GeneratorRequirements::meta_only().with_validation_report();
+    fn report_only_support_does_not_force_data_dependency() {
+        let meta_with_report = GeneratorRequirements::meta_only().with_report_only();
 
-        assert!(!meta_with_assets.needs_data);
-        assert!(meta_with_assets.needs_assets);
         assert!(!meta_with_report.needs_data);
-        assert!(meta_with_report.needs_validation_report);
+        assert!(meta_with_report.supports_report_only);
     }
 
     #[test]

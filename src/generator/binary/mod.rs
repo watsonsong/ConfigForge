@@ -2,15 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
+    Result,
     artifact::{ArtifactSink, ArtifactWriteStream},
     data::DataTable,
     data_artifact::{RuntimeTableFormat, export_runtime_data_to_sink, runtime_table_artifacts},
-    diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{LinkedTableMeta, TargetTags},
 };
 
-use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements};
+use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorRequirements};
 
 mod encoder;
 mod wire;
@@ -73,37 +72,16 @@ impl ArtifactGenerator for BinaryDataExporter {
         GeneratorRequirements::meta_and_data()
     }
 
-    fn generate_to_sink(
-        &self,
-        _input: &GeneratorCommonInput<'_>,
-        _sink: &ArtifactSink,
-    ) -> Result<()> {
-        Err(ConfigForgeError::from_diagnostic(
-            Diagnostic::new(
-                CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
-                DiagnosticSeverity::Error,
-                format!("generator `{}` requires Data-backed artifact input", FORMAT),
-                DiagnosticLocation::default(),
-            )
-            .with_source("generator.binary")
-            .with_domain("generator")
-            .with_current_value("meta-only generator input")
-            .with_expected("meta and data generator input")
-            .with_hint(
-                "Configure the binary export task as a data-backed export with loaded source data.",
-            ),
-        ))
-    }
-
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<std::path::PathBuf>> {
         runtime_table_artifacts(&input.output, input.meta, &input.target_tags, self)
     }
 
-    fn generate_with_data_to_sink(
+    fn generate(
         &self,
-        input: &GeneratorDataInput<'_, '_>,
+        input: &crate::generator::GeneratorTaskInput<'_, '_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
+        let input = input.data_input(self.type_id())?;
         export_runtime_data_to_sink(
             &input.common.output,
             input.common.meta,

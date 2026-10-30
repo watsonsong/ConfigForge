@@ -38,11 +38,12 @@ impl ArtifactGenerator for SchemaDocGenerator {
         GeneratorRequirements::meta_only()
     }
 
-    fn generate_to_sink(
+    fn generate(
         &self,
-        input: &GeneratorCommonInput<'_>,
+        input: &crate::generator::GeneratorTaskInput<'_, '_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
+        let input = &input.common;
         let config =
             schema_doc_export_config_from_options(input.output.clone(), input.options.clone())?;
         let doc = schema_doc_from_input(input, &config);

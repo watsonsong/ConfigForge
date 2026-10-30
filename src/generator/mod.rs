@@ -41,8 +41,7 @@ pub use cpp_unreal::{CppUnrealCodegenOptions, CppUnrealSupportLevel};
 pub(crate) use csharp::CSharpCodeGenerator;
 pub use csharp::CSharpCodegenOptions;
 pub(crate) use input::{
-    GeneratorCommonInput, GeneratorCommonInputContext, GeneratorDataInput, GeneratorTaskInput,
-    GeneratorValidationReportInput, PreparedGeneratorInputs,
+    GeneratorCommonInput, GeneratorCommonInputContext, GeneratorTaskInput, PreparedGeneratorInputs,
 };
 pub use java::JavaCodegenOptions;
 pub(crate) use options::GeneratorOptionParser;

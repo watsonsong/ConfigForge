@@ -19,10 +19,7 @@ use crate::{
     meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
 };
 
-use super::{
-    ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRequirements,
-    artifact_generator::generator_contract_error,
-};
+use super::{ArtifactGenerator, GeneratorCommonInput, GeneratorRequirements};
 use naming::{root_path, table_file_name, table_path};
 use options::{LuaTableOptions, options_from_task, validate_options};
 use render::{field_bindings, render_root, render_table_file, row_helper_names};
@@ -133,20 +130,6 @@ impl ArtifactGenerator for LuaTableExporter {
         GeneratorRequirements::meta_and_data()
     }
 
-    fn generate_to_sink(
-        &self,
-        _input: &GeneratorCommonInput<'_>,
-        _sink: &ArtifactSink,
-    ) -> Result<()> {
-        Err(generator_contract_error(
-            FORMAT,
-            format!("generator `{}` requires Data-backed artifact input", FORMAT),
-            "meta-only generation call",
-            "data-backed generation pipeline",
-            "Route lua_table through generate_with_data_to_sink so it can access exported table data.",
-        ))
-    }
-
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
         let task = input.target_data_config();
         <Self as AggregateDataExporter>::plan_artifacts(
@@ -158,11 +141,12 @@ impl ArtifactGenerator for LuaTableExporter {
         )
     }
 
-    fn generate_with_data_to_sink(
+    fn generate(
         &self,
-        input: &GeneratorDataInput<'_, '_>,
+        input: &crate::generator::GeneratorTaskInput<'_, '_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
+        let input = input.data_input(self.type_id())?;
         let task = input.common.target_data_config();
         <Self as AggregateDataExporter>::export_to_sink(
             self,

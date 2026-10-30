@@ -156,7 +156,7 @@ fn export_validation_report_tasks(
     for task in export_tasks
         .iter()
         .copied()
-        .filter(|task| task.requirements.needs_validation_report)
+        .filter(|task| task.requirements.supports_report_only)
     {
         let generator = generator_registry.require_generator(&task.type_id)?;
         generator.generate(
@@ -419,8 +419,7 @@ mod tests {
         artifact::{ArtifactWriteMode, ArtifactWriter},
         data::{DataSet, DataTable, RawSourceData},
         generator::{
-            ArtifactGenerator, GeneratorCommonInput, GeneratorDataInput, GeneratorRegistry,
-            GeneratorRequirements,
+            ArtifactGenerator, GeneratorCommonInput, GeneratorRegistry, GeneratorRequirements,
         },
         meta::{MetaModel, TargetTags},
     };
@@ -446,21 +445,6 @@ mod tests {
             GeneratorRequirements::meta_and_data()
         }
 
-        fn generate_to_sink(
-            &self,
-            _input: &GeneratorCommonInput<'_>,
-            _sink: &ArtifactSink,
-        ) -> Result<()> {
-            Err(build_diagnostic_error(
-                CF_BUILD_EXPORT_TASK_FAILED,
-                "build.test.generator",
-                "instrumented aggregate test generator requires data input".to_owned(),
-                "meta-only generation call",
-                "data-backed generation call",
-                "test failure",
-            ))
-        }
-
         fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
             let active_now = self.active_plans.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_active_plans
@@ -474,11 +458,12 @@ mod tests {
             ))])
         }
 
-        fn generate_with_data_to_sink(
+        fn generate(
             &self,
-            input: &GeneratorDataInput<'_, '_>,
+            input: &crate::generator::GeneratorTaskInput<'_, '_>,
             sink: &ArtifactSink,
         ) -> Result<()> {
+            let input = input.data_input(self.type_id())?;
             let active_now = self.active_exports.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_active_exports
                 .fetch_max(active_now, Ordering::SeqCst);
@@ -589,21 +574,6 @@ mod tests {
             GeneratorRequirements::meta_and_data()
         }
 
-        fn generate_to_sink(
-            &self,
-            _input: &GeneratorCommonInput<'_>,
-            _sink: &ArtifactSink,
-        ) -> Result<()> {
-            Err(build_diagnostic_error(
-                CF_BUILD_EXPORT_TASK_FAILED,
-                "build.test.generator",
-                "duplicate path test generator requires data input".to_owned(),
-                "meta-only generation call",
-                "data-backed generation call",
-                "test failure",
-            ))
-        }
-
         fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
             input
                 .meta
@@ -614,11 +584,12 @@ mod tests {
                 .collect()
         }
 
-        fn generate_with_data_to_sink(
+        fn generate(
             &self,
-            _input: &GeneratorDataInput<'_, '_>,
+            _input: &crate::generator::GeneratorTaskInput<'_, '_>,
             _sink: &ArtifactSink,
         ) -> Result<()> {
+            let _input = _input.data_input(self.type_id())?;
             panic!("duplicate path planning should fail before serialization");
         }
     }
