@@ -331,19 +331,13 @@ fn execute_meta_only_generator_nodes(
     export_tasks: &[(usize, &NormalizedExportTask)],
     pool: &ThreadPool,
 ) -> Result<ExportBranchOutput> {
-    let mut generated_by_task = pool.install(|| {
+    let generated_by_task = pool.install(|| {
         export_tasks
             .par_iter()
-            .map(|(index, export_task)| {
-                (
-                    *index,
-                    generate_and_write_meta_only_task(context, export_task),
-                )
-            })
+            .map(|(_, export_task)| generate_and_write_meta_only_task(context, export_task))
             .collect::<Vec<_>>()
     });
-    generated_by_task.sort_by_key(|(index, _)| *index);
-    for (_, result) in generated_by_task {
+    for result in generated_by_task {
         result?;
     }
 

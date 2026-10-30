@@ -96,34 +96,29 @@ pub(super) fn export_meta_and_data_tasks(
     let mut warnings = Vec::new();
     warnings.extend(validation_report.warning_messages());
     let export_data_set = canonicalize_asset_refs(linked_meta, assets, target_tags, &data_set)?;
-    let mut task_outputs = pool.install(|| {
+    let task_outputs = pool.install(|| {
         export_tasks
             .par_iter()
-            .enumerate()
-            .map(|(index, export_task)| {
-                (
-                    index,
-                    export_meta_and_data_task(
-                        export_task,
-                        linked_meta,
-                        target_tags,
-                        project_root,
-                        project_info,
-                        target_name,
-                        generated_at,
-                        &export_data_set,
-                        &validation_report,
-                        pool,
-                        sink,
-                        generator_registry,
-                    ),
+            .map(|export_task| {
+                export_meta_and_data_task(
+                    export_task,
+                    linked_meta,
+                    target_tags,
+                    project_root,
+                    project_info,
+                    target_name,
+                    generated_at,
+                    &export_data_set,
+                    &validation_report,
+                    pool,
+                    sink,
+                    generator_registry,
                 )
             })
             .collect::<Vec<_>>()
     });
-    task_outputs.sort_by_key(|(index, _)| *index);
 
-    for (_, task_output) in task_outputs {
+    for task_output in task_outputs {
         task_output?;
     }
 

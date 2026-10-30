@@ -579,7 +579,7 @@ impl DataLoader {
 - `DataLoader` 不持有 Meta 引用。
 - `read_sources()` / `read_sources_with_pool()` 读取 `SourceReadPlan` 并返回 `RawSourceData`，这是后续 typed normalize 的输入。
 - `load()` / `load_with_pool()` 是兼容入口，内部委托 `read_sources*()` 并解包为旧的 `DataSet` 返回值。
-- `read_sources_with_pool()` 可并行加载多个 source，但组装 DataSet 时必须保持 `SourceReadPlan.sources()` 声明顺序；即使 source 完成顺序不同，merge 和错误选择也按 plan index 稳定处理。
+- `read_sources_with_pool()` 可并行加载多个 source，但组装 DataSet 时必须保持 `SourceReadPlan.sources()` 声明顺序；即使 source 完成顺序不同，merge 和错误选择也按 plan index 稳定处理。indexed Rayon iterator 收集为 Vec 保持输入顺序，不再重复排序；source index 仍保留用于来源定位。
 - 当前本地同步 provider 的并发度由调用方传入的 Rayon pool 决定；build 主流程用 `ExecutionOptions.jobs` 创建该 pool，`--serial` 已在 options normalize 阶段退化为 `jobs = 1`。
 - `load_source()` 根据 `DataProvider` 分发到 `CsvDataReader`。
 - 对同一 `table_name` 的多个 `DataSourcePlan`，DataLoader 需要把 rows append 到同一个 `DataTable`，并同步 append 对应 `RowSourceInfo`。

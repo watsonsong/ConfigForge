@@ -75,14 +75,13 @@ impl DataLoader {
         pool: &rayon::ThreadPool,
         reader: impl Fn(&DataSourcePlan) -> Result<DataTable> + Sync,
     ) -> Result<RawSourceData> {
-        let mut loaded = pool.install(|| {
+        let loaded = pool.install(|| {
             plan.sources()
                 .par_iter()
                 .enumerate()
                 .map(|(index, source)| (index, source, reader(source)))
                 .collect::<Vec<_>>()
         });
-        loaded.sort_by_key(|(index, _, _)| *index);
 
         let mut resolved = Vec::with_capacity(loaded.len());
         for (source_index, source, table) in loaded {

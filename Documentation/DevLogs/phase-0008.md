@@ -17,7 +17,8 @@
 | 23568a7 | 共享代码文件头与 streaming 写出 | 语言模型有实际差异，只提取相同的写入操作，不引入模板 DSL |
 | 376d36a | SchemaDoc 仅按可见表名规划路径；共享 runtime table plan | 路径 helper 已能消除主要重复，无需通用 prepared-result cache；文件系统复查继续保留 |
 | 8c49196 | 移除 AggregateDataExporter 重复 trait | 统一 generator 已足够；旧 aggregate trait 无共享算法且不是公开扩展入口，保留逐表 RuntimeTableFormat |
-| 本文所在提交 | 收敛任务技术文档、修正文档与源码偏差 | 前述简化已落地，删除另一套未来 API 草案，保留约束、扩展触发条件与历史证据 |
+| ca0cf79 | 收敛任务技术文档、修正文档与源码偏差 | 前述简化已落地，删除另一套未来 API 草案，保留约束、扩展触发条件与历史证据 |
+| 后续排序清理提交 | 去掉 source read、MetaOnly 与 Data generator indexed collect 后的重复排序 | 文档收敛后回查发现三处遗漏；输入有序且 indexed collect 保序，跨分支重新合并与无序结果排序仍保留 |
 
 每一项均在前一项测试通过并提交之后开始，分别运行 cargo fmt、完整 cargo test 与 cargo lint。未把所有实现合并为一次提交。
 
@@ -45,7 +46,9 @@
 
 ## 验证快照与限制
 
-本次文档清理后的 cargo fmt、完整 cargo test、cargo lint 与 cargo clippy --all-targets -- -D warnings 均通过；相对链接与 git diff --check 也通过。
+文档清理与后续排序清理各自的 cargo fmt、完整 cargo test、cargo lint 与 cargo clippy --all-targets -- -D warnings 均通过；相对链接与 git diff --check 也通过。
+
+排序清理复用现有 source 乱序完成 / 首个计划错误测试、target 分支顺序测试与 CLI 串并行一致性测试，不为标准库和 Rayon 的保序契约新增镜像测试。
 
 最终测试集包含 555 项 lib 单元测试、4 项架构测试、64 项 CLI integration，以及 runtime compliance / metadata 等测试。相对上一项减少的一项 lib 测试只验证已删除 aggregate trait 的默认 legacy fallback；POT / Lua / Asset Manifest 内容、sink 和全 generator 写入模式测试继续保留。
 
