@@ -41,7 +41,7 @@
 - `data` owns source loading, CSV readers, raw `DataSet`, row source trace, and Meta-aware resolving.
 - `validation` owns correctness checks, target-aware validation views, `ValidationReport`, and validator registry.
 - `generator` owns the build-facing artifact generator registry, generator requirements, concrete built-in generators, and dispatch facade. Concrete runtime data, aggregate data, report, doc, and code-like outputs live under `src/generator/<type_id>/`.
-- `data_artifact` owns the data artifact toolkit: runtime payload models, table serialization helpers, binary layout helpers, aggregate data artifact facets, and data-backed generator support utilities. It is not the build-facing registry.
+- `data_artifact` owns the data artifact toolkit: runtime payload models, table serialization helpers, binary layout helpers, and shared data-backed generator support utilities. It is not the build-facing registry.
 - `code_artifact` owns the code artifact toolkit: language-neutral CodeModel IR, code writer, naming / formatting / keyword handling, and reusable code-like artifact options. Concrete language generators live under `src/generator/<type_id>/`; backend list and capabilities are tracked in `Documentation/Implementation/09-codegen-module-detail-design.md`.
 - `build` owns project build orchestration, target normalization, generator requirements branch pipeline execution, and artifact scheduling/writes.
 - `cli` owns command-line parsing and user-facing messages. It should call `build` rather than orchestrating lower-level modules directly.

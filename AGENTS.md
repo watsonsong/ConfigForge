@@ -72,7 +72,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
 - `src/validation/` — schema, target-aware data validation, diagnostics, and validator registry.
 - `src/project/` — ConfigForge project TOML schema, import merging, path normalization, and Meta extraction.
 - `src/build/` — project build orchestration, target normalization, generator requirements planning, branch pipeline execution, and artifact generation scheduling through `GeneratorRegistry`.
-- `src/data_artifact/` — current data artifact toolkit: runtime payload model, runtime table serialization helper, binary layout helper, and aggregate data artifact facets; concrete data-backed generators such as JSON / MessagePack / bin / POT / Lua / Asset Manifest live under `src/generator/<type_id>/`.
+- `src/data_artifact/` — current data artifact toolkit: runtime payload model, runtime table serialization helper, binary layout helper, and shared payload utilities; concrete data-backed generators such as JSON / MessagePack / bin / POT / Lua / Asset Manifest live under `src/generator/<type_id>/`.
 - `src/diagnostic/` — shared diagnostic foundations and crate error model.
 - `runtime/` — standard runtime helpers/templates and compliance fixtures.
 - `tests/cli_integration.rs` — end-to-end CLI integration tests.

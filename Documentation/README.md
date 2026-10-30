@@ -9,7 +9,7 @@ This directory contains durable project knowledge for ConfigForge.
 - [`Design/`](Design/) stores the consolidated canonical design set for product behavior, execution stages, configuration, Meta model, validation/export semantics, CLI, user workflows, and QA input.
 - [`Implementation/`](Implementation/) stores program implementation design, module boundaries, detailed module plans, and test organization guidance.
 - [`Tech/`](Tech/) stores technical practice documents, including test coverage evaluation and engineering workflow notes.
-- [`Todo/`](Todo/) stores short-lived implementation task lists and step plans before they are promoted into canonical design documents.
+- `Todo/` is the optional home for short-lived implementation task lists and step plans before they are promoted into canonical design documents.
 - [`DevLogs/`](DevLogs/) stores raw phase-by-phase development logs for historical decision context, temporary decisions, and source material references.
 
 ## How AI Agents Should Use These Docs
@@ -55,7 +55,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 - [`Implementation/05-data-module-detail-design.md`](Implementation/05-data-module-detail-design.md) — Data load/model/resolver flow, CSV readers, ObjectTable source layout, and DataSet design.
 - [`Implementation/06-validation-module-detail-design.md`](Implementation/06-validation-module-detail-design.md) — Validation flow, registered validator framework, diagnostics, ExportValidationView, and test plan.
 - [`Implementation/07-artifact-module-detail-design.md`](Implementation/07-artifact-module-detail-design.md) — Artifact model, writer, dry-run, direct/temp-commit strategy, and write result design.
-- [`Implementation/08-exporter-module-detail-design.md`](Implementation/08-exporter-module-detail-design.md) — Current data artifact toolkit boundaries, runtime table serialization / aggregate artifact facets, JSON / MessagePack / bin / POT payload helpers, and ObjectTable payload shape. The filename keeps the historical `exporter` label for link stability; it is not a build-facing exporter registry design.
+- [`Implementation/08-exporter-module-detail-design.md`](Implementation/08-exporter-module-detail-design.md) — Current data artifact toolkit boundaries, runtime table serialization, shared payload / binary helpers and concrete data generator boundaries, and ObjectTable payload shape. The filename keeps the historical `exporter` label for link stability; it is not a build-facing exporter registry design.
 - [`Implementation/09-codegen-module-detail-design.md`](Implementation/09-codegen-module-detail-design.md) — Current code artifact toolkit boundaries, concrete language generator layout, split-topic index, and current status summary. The filename keeps the historical `codegen` label for link stability; concrete language generators are build-facing `ArtifactGenerator`s under `src/generator/<type_id>/`.
   - [`Implementation/09a-codegen-runtime-reader-contract.md`](Implementation/09a-codegen-runtime-reader-contract.md) — Runtime loader/reader contract, eager/lazy loading, TypeScript sync API, logical table names, and schema revision coordination.
   - [`Implementation/09b-codegen-rust-backend.md`](Implementation/09b-codegen-rust-backend.md) — Rust backend generated API and lazy loading.
@@ -80,7 +80,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 - [`Tech/development-environment.md`](Tech/development-environment.md) — Required Rust core toolchain, optional cross-language harness tools, runtime adapter dependencies, and local/full-CI environment guidance.
 - [`Tech/test-ci-matrix.md`](Tech/test-ci-matrix.md) — Local / quick / full / nightly test profiles, generated-code runtime harness matrix, runtime adapter compliance matrix, and skip / fail-fast policy.
 - [`Tech/unit-test-coverage.md`](Tech/unit-test-coverage.md) — Rust unit test coverage tooling, commands, evaluation criteria, and current coverage baseline.
-- [`Tech/task-system-design.md`](Tech/task-system-design.md) — Task system, async I/O, CPU worker pool, resource limits, and phased migration design.
+- [`Tech/task-system-design.md`](Tech/task-system-design.md) — Current CPU pool and resource policy, provider compatibility boundaries, determinism, validation requirements, and extension triggers.
 - [`Tech/cpp-runtime-dependencies.md`](Tech/cpp-runtime-dependencies.md) — C++ runtime reader 三方依赖的 CMake 查找、自动下载、target 接入与新增 reader checklist。
 - [`Tech/platform-filesystem-semantics.md`](Tech/platform-filesystem-semantics.md) — macOS / Linux / Windows 文件系统大小写、symlink / junction 与 artifact path conflict key 策略。
 
@@ -94,6 +94,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 - [`DevLogs/phase-0005.md`](DevLogs/phase-0005.md) — fifth raw phase log covering schema docs stabilization and builtin Color / Vector value types through 2026-06-14.
 - [`DevLogs/phase-0006.md`](DevLogs/phase-0006.md) — sixth raw phase log covering ObjectTable multi-source / override source stabilization through 2026-06-14.
 - [`DevLogs/phase-0007.md`](DevLogs/phase-0007.md) — 2026-10-30 artifact planning fix and architecture simplification review snapshot; recommendations are not implementation contracts.
+- [`DevLogs/phase-0008.md`](DevLogs/phase-0008.md) — incremental simplification commits, revised decisions, validation results, and retirement of duplicate executor drafts.
 
 ## Todo / Task Lists
 

@@ -18,21 +18,22 @@ Artifact 模块需要解决：
 - 不决定哪些 runtime data / code-like / report / doc task 应该执行；task 编排属于 `build`。
 - 不理解 Meta、DataSet、TargetTags 或运行时格式；语义生成属于 artifact generator 及其 data_artifact / code_artifact toolkit。
 - 不负责 CLI 参数解析；CLI 只把 dry-run / write mode 传给 build options。
-- 第一阶段不实现远端上传、增量缓存、分布式 artifact store。
+- 当前不实现远端上传、增量缓存、分布式 artifact store。
 
 ## 7.2 模块结构
 
-建议新增目录模块：
+当前目录结构：
 
 ```text
 src/artifact/
   mod.rs          # 对外 API 与 re-export
-  model.rs        # Artifact / ArtifactContent / ArtifactPath
+  model.rs        # Artifact / ArtifactPlan / write mode 与结果模型
+  path.rs         # 路径归一化、文件系统别名、root containment 与文件操作 helper
   writer.rs       # ArtifactWriter / ArtifactSink / ArtifactWriteMode / dry-run / direct / temp-commit
   tests.rs        # 路径冲突、dry-run、写入策略单元测试
 ```
 
-第一阶段可以先合并在 `mod.rs` 中实现，待类型膨胀后再拆文件；但公开 API 应按上述边界命名，避免后续迁移影响调用方。
+`mod.rs` 是窄 facade；路径与文件操作在 `path.rs`，sink / stream 状态与生命周期在 `writer.rs`。平台路径语义以 [平台文件系统语义](../Tech/platform-filesystem-semantics.md) 为准。
 
 ## 7.3 核心类型
 
@@ -351,16 +352,17 @@ CLI dry-run 不应跳过 validation 或 serialization/codegen，因为用户需�
 
 ## 7.8 错误边界
 
-第一阶段可复用 `ConfigForgeError`：
+当前使用共享 `ConfigForgeError` 与结构化 diagnostic：
 
 | 场景 | 错误 |
 | --- | --- |
-| 重复 artifact path | `ConfigForgeError::Validation` |
+| 路径冲突、越界、别名冲突 | `ConfigForgeError::ValidationReport`，携带对应 `CF_ARTIFACT_*` diagnostic |
+| 未规划输出、流未完成、sink 状态错误 | `ConfigForgeError::ValidationReport`，携带 `CF_ARTIFACT_WRITE_STATE` |
 | 创建目录失败 | `ConfigForgeError::WriteFile` |
 | 写最终文件失败 | `ConfigForgeError::WriteFile` |
 | temp commit rename 失败 | `ConfigForgeError::WriteFile`；已 rename 成功的文件可能保留在最终路径 |
 
-后续如果 artifact 诊断增多，可新增 `ArtifactDiagnostic`，但不应让各类 artifact generator 为写入错误各自包装一套错误类型。
+diagnostic code 与定位由 artifact 层统一产生，各类 generator 不再各自包装另一套写入错误类型。
 
 ## 7.9 测试计划
 

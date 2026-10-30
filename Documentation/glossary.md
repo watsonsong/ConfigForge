@@ -218,7 +218,7 @@
 | MessagePack 导出 | MessagePack Export | `MessagePackDataExporter` | 第一阶段支持的紧凑二进制 runtime data exporter，配置规范名为 `messagepack`。 |
 | SQLite 导出 | SQLite Export | `SqliteDataExporter` | 可扩展数据库 exporter。 |
 | Protobuf 导出 | Protobuf Export | `ProtobufDataExporter` | 未来扩展；需要显式 `field_number`。 |
-| 聚合数据导出器 | Aggregate Data Exporter | `AggregateDataExporter` | Data artifact toolkit facet，供 POT、asset manifest 等跨表辅助数据产物复用 planning / sink 写出逻辑；具体聚合产物以 data-backed `ArtifactGenerator` 注册。 |
+| 聚合数据生成器 | Aggregate Data Generator | `ArtifactGenerator` | POT、Lua、Asset Manifest 等跨表聚合产物的具体 generator；在各自模块中组织路径与渲染 helper，通过统一 planning / sink 接口执行。 |
 | POT 导出器 | Gettext POT Exporter | `GettextPotExporter` | `type = "gettext_pot"`；从 ExportView 中的 `text` 字段导出 POT。 |
 | 翻译注释 | Translator Comment | `TranslatorComment` | POT 中给翻译人员的注释，可来自 text 字段、`desc` 或 source 中额外映射的注释列/行。 |
 | 资源清单导出器 | Asset Manifest Exporter | `AssetManifestExporter` | 从 ExportView 中的 `asset` 字段导出资源清单。 |
