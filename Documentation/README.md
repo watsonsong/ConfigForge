@@ -95,6 +95,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 - [`DevLogs/phase-0006.md`](DevLogs/phase-0006.md) — sixth raw phase log covering ObjectTable multi-source / override source stabilization through 2026-06-14.
 - [`DevLogs/phase-0007.md`](DevLogs/phase-0007.md) — 2026-10-30 artifact planning fix and architecture simplification review snapshot; recommendations are not implementation contracts.
 - [`DevLogs/phase-0008.md`](DevLogs/phase-0008.md) — incremental simplification commits, revised decisions, validation results, and retirement of duplicate executor drafts.
+- [`DevLogs/phase-0009.md`](DevLogs/phase-0009.md) — CLI 参数命名调研、精简建议与实施决策。
 
 ## Todo / Task Lists
 

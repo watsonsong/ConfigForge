@@ -306,8 +306,10 @@ pub const DIAGNOSTIC_CODE_METADATA: &[DiagnosticCodeMetadata] = &[
         CF_BUILD_INVALID_OPTION,
         "build",
         "构建执行选项无效",
-        "CLI 或构建调用传入的执行资源选项超出允许范围。",
-        Some("检查 --jobs、--io-concurrency、--network-concurrency 或 --serial 参数。"),
+        "CLI 或构建调用传入的资源选项或报告参数不满足构建约束。",
+        Some(
+            "检查 --jobs、--serial、--report、--report-output、--report-title 或构建 API 执行选项。",
+        ),
         "0.1.0",
     ),
     DiagnosticCodeMetadata::error(

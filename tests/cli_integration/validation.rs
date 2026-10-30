@@ -13,6 +13,105 @@ fn stderr_json(output: std::process::Output) -> serde_json::Value {
 }
 
 #[test]
+fn report_option_dependencies_preserve_human_and_json_diagnostics() {
+    let cases: &[(&[&str], &str)] = &[
+        (&["--report", "json"], "--report-output must be set"),
+        (&["--report-output", "report.json"], "require --report"),
+        (&["--report-title", "QA report"], "require --report"),
+    ];
+    for (args, expected) in cases {
+        for format in ["human", "json"] {
+            let output = Command::cargo_bin("config-forge")
+                .expect("binary should build")
+                .args(["--project", "unused.toml", "--target", "client"])
+                .args(*args)
+                .args(["--diagnostic-format", format])
+                .output()
+                .expect("config-forge should run");
+            assert!(!output.status.success());
+            if format == "json" {
+                let json = stderr_json(output);
+                assert_eq!(json["diagnostics"][0]["code"], "CF_BUILD_INVALID_OPTION");
+                assert_eq!(json["diagnostics"][0]["source"], "cli.options");
+                assert!(json["message"].as_str().unwrap().contains(expected));
+            } else {
+                let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+                assert!(stderr.contains(expected), "{stderr}");
+            }
+        }
+    }
+}
+
+#[test]
+fn cli_report_formats_respect_write_modes_and_project_output() {
+    for format in ["html", "markdown", "json", "csv"] {
+        for mode in ["direct", "temp-commit", "dry-run"] {
+            let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+            let data_dir = temp_dir.path().join("data");
+            let project_path = temp_dir.path().join("ConfigForge.toml");
+            let report_path = temp_dir.path().join("reports/validation.result");
+            let trace_path = temp_dir.path().join("trace.json");
+            let data_out_dir = temp_dir.path().join("artifacts");
+            fs::create_dir(&data_dir).expect("data dir should be created");
+            fs::write(data_dir.join("items.csv"), "level\n等级\n10\n")
+                .expect("data should be written");
+            fs::write(
+                &project_path,
+                r#"
+                    [project]
+                    input = "data"
+
+                    [[tables]]
+                    name = "items"
+                    source = "items.csv"
+
+                    [[tables.fields]]
+                    name = "level"
+                    type = "int"
+
+                    [[targets]]
+                    name = "client"
+
+                    [[targets.exports]]
+                    type = "json"
+                    output = "artifacts"
+                "#,
+            )
+            .expect("project config should be written");
+            let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
+            cmd.arg("--project")
+                .arg(&project_path)
+                .args(["--target", "client", "--report", format, "--report-output"])
+                .arg(&report_path)
+                .args(["--report-title", "QA report", "--trace-tasks"])
+                .arg(&trace_path);
+            if mode == "dry-run" {
+                cmd.arg("--dry-run");
+            } else {
+                cmd.args(["--write-mode", mode]);
+            }
+            cmd.assert().success();
+            assert!(
+                trace_path.is_file(),
+                "explicit trace must also be written in dry-run"
+            );
+            if mode == "dry-run" {
+                assert!(!report_path.parent().unwrap().exists());
+                assert!(!data_out_dir.exists());
+            } else {
+                assert!(data_out_dir.join("items.json").is_file());
+                assert!(!report_path.parent().unwrap().join("items.json").exists());
+                let report = fs::read_to_string(&report_path).expect("report should be readable");
+                assert!(!report.is_empty());
+                if format != "csv" {
+                    assert!(report.contains("QA report"));
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn range_validator_blocks_invalid_data_before_export() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let data_dir = temp_dir.path().join("data");
@@ -477,7 +576,7 @@ fn cli_report_json_is_written_when_validation_fails() {
         "client",
         "--report",
         "json",
-        "--output",
+        "--report-output",
         report_path.to_str().expect("path should be utf8"),
     ]);
 
@@ -551,7 +650,7 @@ fn cli_report_json_is_written_when_validation_succeeds() {
         "client",
         "--report",
         "json",
-        "--output",
+        "--report-output",
         report_path.to_str().expect("path should be utf8"),
     ]);
 

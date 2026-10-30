@@ -31,14 +31,12 @@
 | 参数 | 默认值 | 当前作用与合法范围 |
 | --- | --- | --- |
 | --jobs | available_parallelism 限制到 1..=4；查询失败取 1 | 局部 CPU pool worker 数；显式值须在 1..=128 |
-| --io-concurrency | 默认 jobs × 2，再限制到 4..=16 | 保留参数，须为正数；解析、保存、校验并写入 trace，尚未约束生产 I/O 调度 |
-| --network-concurrency | 默认 io_concurrency 与 8 的较小值 | 保留参数，须为正数；尚无生产网络 provider 调度消费者 |
-| --serial | false | 先把 jobs、io_concurrency、network_concurrency 都归一化为 1，再执行数值校验 |
+| --serial | false | 使用单 worker，覆盖显式 --jobs；归一化后执行数值校验 |
 | --trace-tasks | 不输出 | 写出阶段级 JSON trace；具体字段与失败行为见 Build 实现 |
 
-默认值先作为一组计算，再应用用户显式覆盖。因此只设置 --jobs 不会重新计算另外两个默认值；只设置 --io-concurrency 也不会重新计算 network_concurrency。--serial 会覆盖同时传入的资源数值。
+CLI 只暴露实际生效的 worker 控制。--io-concurrency / --network-concurrency 已删除，旧调用会报未知参数。公开 Rust ExecutionOptions::from_cli 仍保留两个可选资源参数；默认值先按默认 jobs 计算，再应用库调用的显式覆盖。--serial 仍将三个库资源字段归一化为 1，以保持兼容。
 
-本地 CSV 并发实际由 jobs 控制。当前不能依据 trace 中的 io_concurrency / network_concurrency 推断存在独立 I/O semaphore 或 network lane。
+BuildTrace 保留 io_concurrency / network_concurrency 字段，普通 CLI 调用使用库默认值，--serial 时为 1。本地 CSV 并发实际由 jobs 控制。当前不能依据 trace 中的 io_concurrency / network_concurrency 推断存在独立 I/O semaphore 或 network lane。
 
 ## 3. 并行执行与资源约束
 

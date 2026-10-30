@@ -603,7 +603,7 @@ Artifact 内容类型：
 
 ## 6.6 CLI 总体形式
 
-当前 CLI 只保留构建一个 target 所需的最小参数：Project Config 路径和 target 名称。Meta、Data、输出目录和代码生成语言都从 target 配置中读取，不在命令行重复声明。
+当前 CLI 构建一个 target，必需参数为 Project Config 路径和 target 名称；另提供本次运行的 tags、资源控制、写入模式、诊断、trace 和验证报告选项。Meta、Data 输入、各 export task 的产物目录和生成语言由 Project / Target 配置决定。CLI 的 `--report-output` 专指额外验证报告的文件路径，不覆盖工程产物目录。
 
 ```bash
 config-forge --project ConfigForge.toml --target client
@@ -615,9 +615,16 @@ config-forge --project ConfigForge.toml --target client
 | --- | --- |
 | `--project <FILE>` | Project Config 路径。 |
 | `--target <NAME>` | 要构建的 target 名称。 |
-| `--dry-run` | 执行完整构建计划和 artifact 路径冲突检查，输出 artifact plan，但不创建目录、不写出文件。 |
-| `--write-mode <direct\|temp-commit>` | 非 dry-run 构建使用的 artifact 写入模式；默认 `direct`。如果同时传入 `--dry-run`，以 dry-run 行为为准。 |
-| `--trace-tasks <FILE>` | 将本次 build 的轻量 tracing / metrics 以 JSON 写入指定文件，包含阶段名、开始时间、耗时、状态和执行资源参数；build 成功或进入阶段式 build 后失败时都会尽量写出，不改变 stdout 的稳定构建输出。 |
+| `--tag <TAG>` | 可重复，追加到 target tags，影响可见性及 override source selection。 |
+| `--jobs <N>` | 本次运行的局部 Rayon worker 数；范围 1..=128。 |
+| `--serial` | 使用一个局部 worker；覆盖显式 jobs 数值。 |
+| `--dry-run` | 执行完整构建计划和路径冲突检查，返回 artifact plan，但不写 artifact。显式指定的 trace 文件仍会写出。 |
+| `--write-mode <direct\|temp-commit>` | 非 dry-run 构建使用的写入模式，默认 direct；同时传入 dry-run 时，以 dry-run 为准。 |
+| `--trace-tasks <FILE>` | 将阶段级 BuildTrace 以 JSON 写入文件；成功或进入阶段式 build 后失败时均尽量写出。 |
+| `--report <html\|markdown\|json\|csv>` | 启用额外的 Designer Validation Report，并显式选择格式。 |
+| `--report-output <FILE>` | 仅指定上述额外验证报告的文件路径，必须与 report 配套；不是工程产物目录覆盖。当前 CSV 也生成单个文件。 |
+| `--report-title <TITLE>` | 覆盖本次额外报告的标题，须配合 report。 |
+| `--diagnostic-format <human\|json>` | 顶层 CLI 失败诊断的 stderr 格式，默认 human；不等于报告文件格式。 |
 
 执行行为：
 
@@ -630,6 +637,24 @@ config-forge --project ConfigForge.toml --target client
 7. 按 `--dry-run` / `--write-mode` 写出 artifact，或在 dry-run 模式下只返回写入计划；artifact writer 通过 shared `ArtifactSink` 管理 path reservation、Direct / TempCommit / DryRun 生命周期与 result entries。当前 runtime table / aggregate / code-like generator 已走 sink-first streaming 输出；设计上接受 Meta/DataSet 全量驻留内存，避免为了大表额外引入 out-of-core DataSet 或按 target 重读 source 的复杂机制。
 8. 如果传入 `--trace-tasks`，在构建成功或阶段式 build 失败后写出 trace JSON，用于分析 Project load、input preparation、exporter、artifact write 等阶段耗时；失败阶段会标记为 `failed`，未开始的后续阶段不会出现在 trace 中。
 9. 未声明的任务不产生对应输出。例如 MetaOnly-only target 不读取 Data。
+
+### 6.6.1 命名与兼容边界
+
+报告参数统一使用用途明确的名称：
+
+```bash
+config-forge --project ConfigForge.toml --target client \
+  --report html --report-output out/report/client-validation.html
+```
+
+- `--report` 负责启用附加验证报告并显式选择格式；`--report-output` 指定文件路径，不根据扩展名推断格式，不覆盖工程 export task 的 `output`。
+- `--report-output` 和 `--report-title` 依赖 `--report`；`--report` 必须同时指定 `--report-output`。无效组合支持现有 human / JSON 失败诊断。
+- 旧 `--output` 拼写已删除，不保留 alias；脚本应迁移到 `--report-output`。
+- `--io-concurrency` / `--network-concurrency` 已从 CLI 删除，旧调用明确报未知参数。本地 CSV 读取和 CPU 任务使用 `--jobs` 控制的同一局部 worker pool。
+- `--serial` 保留为单 worker 入口并覆盖 `--jobs`；`--report-title`、`--trace-tasks`、`--diagnostic-format`、`--dry-run` 和 `--write-mode` 保留现有职责。
+- 公开 Rust `ExecutionOptions` API 与 `BuildTrace` 的保留资源字段继续兼容；CLI 不提供这些尚无生产调度消费者的数值入口。详见 [资源控制设计](../Tech/task-system-design.md#2-cli-资源控制)。
+
+调研依据与实施前方案保留于 [CLI 参数命名与精简记录](../DevLogs/phase-0009.md)。
 
 ## 6.7 退出码
 

@@ -31,16 +31,11 @@ struct Cli {
     /// CPU worker count for parsing, validation, codegen and serialization.
     #[arg(long)]
     jobs: Option<usize>,
-    /// Reserved for future async providers/writers; currently parsed but not applied.
-    #[arg(long)]
-    io_concurrency: Option<usize>,
-    /// Reserved for future remote source providers; currently parsed but not applied.
-    #[arg(long)]
-    network_concurrency: Option<usize>,
-    /// Run with one CPU worker and one I/O/network slot for reproducibility.
+    /// Run with one CPU worker, overriding --jobs.
     #[arg(long)]
     serial: bool,
-    /// Execute the full build plan without writing artifacts.
+    /// Execute the full build plan without writing artifacts (including reports).
+    /// Explicit trace output is still written.
     #[arg(long)]
     dry_run: bool,
     /// Artifact write mode to use when not running with --dry-run.
@@ -49,12 +44,12 @@ struct Cli {
     /// Write build tracing / metrics as JSON to this path.
     #[arg(long)]
     trace_tasks: Option<PathBuf>,
-    /// Export a human-readable validation report in the selected format.
+    /// Export an additional validation report in the selected format.
     #[arg(long, value_enum)]
     report: Option<CliReportFormat>,
-    /// Output path for --report.
-    #[arg(long)]
-    output: Option<PathBuf>,
+    /// Validation report file path; does not override project artifact directories.
+    #[arg(long, value_name = "FILE")]
+    report_output: Option<PathBuf>,
     /// Optional title for the exported validation report.
     #[arg(long)]
     report_title: Option<String>,
@@ -120,12 +115,7 @@ pub fn run_main() -> ExitCode {
 }
 
 fn run_with_args(cli: Cli) -> anyhow::Result<()> {
-    let execution = ExecutionOptions::from_cli(
-        cli.jobs,
-        cli.io_concurrency,
-        cli.network_concurrency,
-        cli.serial,
-    )?;
+    let execution = ExecutionOptions::from_cli(cli.jobs, None, None, cli.serial)?;
     let artifact_write_mode = if cli.dry_run {
         ArtifactWriteMode::DryRun
     } else {
@@ -134,20 +124,20 @@ fn run_with_args(cli: Cli) -> anyhow::Result<()> {
     let validation_report = match cli.report {
         Some(format) => Some(ValidationReportExportConfig {
             format: format.into(),
-            output: cli.output.clone().ok_or_else(|| {
+            output: cli.report_output.clone().ok_or_else(|| {
                 cli_option_error(
-                    "--output must be set when --report is used".to_owned(),
-                    "--report without --output",
-                    "--output path when --report is used",
+                    "--report-output must be set when --report is used".to_owned(),
+                    "--report without --report-output",
+                    "--report-output file when --report is used",
                 )
             })?,
             title: cli.report_title.clone(),
         }),
         None => {
-            if cli.output.is_some() || cli.report_title.is_some() {
+            if cli.report_output.is_some() || cli.report_title.is_some() {
                 return Err(cli_option_error(
-                    "--output and --report-title require --report".to_owned(),
-                    "--output/--report-title without --report",
+                    "--report-output and --report-title require --report".to_owned(),
+                    "--report-output/--report-title without --report",
                     "--report format when report output options are provided",
                 )
                 .into());

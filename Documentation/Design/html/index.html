@@ -594,7 +594,7 @@ override_sources = [
         <table>
           <thead><tr><th>入口</th><th>示例</th><th>行为</th></tr></thead>
           <tbody>
-            <tr><td>CLI 参数</td><td><code>config-forge --project ConfigForge.toml --target client --report html --output out/report/validation.html</code></td><td>维持现有 CLI 摘要，同时把完整报告写入指定路径；存在 error 时仍返回失败退出码，但报告应尽量写出。</td></tr>
+            <tr><td>CLI 参数</td><td><code>config-forge --project ConfigForge.toml --target client --report html --report-output out/report/validation.html</code></td><td>维持现有 CLI 摘要，同时把完整报告写入指定路径；存在 error 时仍返回失败退出码，但报告应尽量写出。</td></tr>
             <tr><td>Build 附加产物</td><td><code>[[targets.exports]] type = "validation_report"</code></td><td>作为聚合 export task 消费 validation 阶段已有的结构化结果；不重复执行另一套校验逻辑。</td></tr>
           </tbody>
         </table>

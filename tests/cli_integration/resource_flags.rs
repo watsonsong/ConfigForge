@@ -44,10 +44,6 @@ fn builds_target_with_execution_resource_flags() {
         "code_only",
         "--jobs",
         "2",
-        "--io-concurrency",
-        "3",
-        "--network-concurrency",
-        "2",
     ]);
 
     cmd.assert()
@@ -57,10 +53,11 @@ fn builds_target_with_execution_resource_flags() {
 }
 
 #[test]
-fn builds_target_with_serial_overriding_resource_flags() {
+fn builds_target_with_serial_overriding_jobs() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let out_dir = temp_dir.path().join("generated_code");
     let project_path = temp_dir.path().join("ConfigForge.toml");
+    let trace_path = temp_dir.path().join("trace.json");
     fs::write(
         &project_path,
         format!(
@@ -88,17 +85,22 @@ fn builds_target_with_serial_overriding_resource_flags() {
         "code_only",
         "--serial",
         "--jobs",
-        "8",
-        "--io-concurrency",
-        "8",
-        "--network-concurrency",
-        "8",
+        "0",
+        "--trace-tasks",
+        trace_path.to_str().expect("path should be utf8"),
     ]);
 
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("target `code_only` built"));
     assert!(out_dir.join("generated.rs").exists());
+    let trace: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(trace_path).expect("trace should be readable"))
+            .expect("trace should be valid JSON");
+    assert_eq!(trace["jobs"], 1);
+    assert_eq!(trace["serial"], true);
+    assert_eq!(trace["io_concurrency"], 1);
+    assert_eq!(trace["network_concurrency"], 1);
 }
 
 #[test]
@@ -167,42 +169,33 @@ fn zero_jobs_json_diagnostic_has_stable_code_and_option_context() {
 }
 
 #[test]
-fn rejects_zero_io_and_network_concurrency_flags() {
-    let cases = [
-        (
-            "--io-concurrency",
-            "--io-concurrency must be greater than 0",
-        ),
-        (
-            "--network-concurrency",
-            "--network-concurrency must be greater than 0",
-        ),
-    ];
-
-    for (flag, expected) in cases {
-        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-        let project_path = temp_dir.path().join("ConfigForge.toml");
-        fs::write(
-            &project_path,
-            r#"
-                [[targets]]
-                name = "empty"
-            "#,
-        )
-        .expect("project config should be written");
-
-        let mut cmd = Command::cargo_bin("config-forge").expect("binary should build");
-        cmd.args([
-            "--project",
-            project_path.to_str().expect("path should be utf8"),
-            "--target",
-            "empty",
-            flag,
-            "0",
-        ]);
-
-        cmd.assert()
-            .failure()
-            .stderr(predicate::str::contains(expected));
+fn removed_cli_options_are_rejected() {
+    for flag in ["--output", "--io-concurrency", "--network-concurrency"] {
+        Command::cargo_bin("config-forge")
+            .expect("binary should build")
+            .args(["--project", "unused.toml", "--target", "client", flag, "1"])
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains(format!(
+                "unexpected argument '{flag}'"
+            )));
     }
+}
+
+#[test]
+fn help_describes_report_output_and_effective_resource_controls() {
+    Command::cargo_bin("config-forge")
+        .expect("binary should build")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--report-output <FILE>"))
+        .stdout(predicate::str::contains(
+            "does not override project artifact directories",
+        ))
+        .stdout(predicate::str::contains("--jobs"))
+        .stdout(predicate::str::contains("--serial"))
+        .stdout(predicate::str::contains("--output").not())
+        .stdout(predicate::str::contains("--io-concurrency").not())
+        .stdout(predicate::str::contains("--network-concurrency").not());
 }

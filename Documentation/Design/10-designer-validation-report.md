@@ -34,7 +34,7 @@ config-forge \
   --project ConfigForge.toml \
   --target client \
   --report html \
-  --output out/report/validation.html
+  --report-output out/report/validation.html
 ```
 
 - 支持作为 build 的附加产物：
@@ -63,19 +63,19 @@ format = "html"
 
 ### 10.3.1 CLI 报告参数
 
-当前已为 CLI 增加：
+CLI 提供以下报告参数。报告路径使用 report-output，与工程产物目录区分；命名和兼容边界见 [CLI 设计](06-export-cli.md#661-命名与兼容边界)。
 
 | 参数 | 说明 |
 | --- | --- |
 | `--report <format>` | 可选。启用报告导出，取值 `html` / `markdown` / `json` / `csv`。 |
-| `--output <path>` | 报告输出路径。`html` / `markdown` / `json` 推荐为文件路径；`csv` 可为单文件或目录，见 10.8。 |
+| `--report-output <path>` | 当前为额外验证报告的文件路径，四种格式均输出单个文件；不覆盖工程 export task 的输出目录。 |
 | `--report-title <title>` | 可选。覆盖报告标题，默认使用 project name + target + timestamp。 |
 | `--include-passed` | 未实现。默认只输出 warning/error；未来可输出通过项统计。 |
 
 行为：
 
 - `--report` 未设置时，维持当前 CLI 输出。
-- `--report` 设置时，仍正常输出 CLI 摘要；同时把完整 report 写入 `--output`。
+- `--report` 设置时，仍正常输出 CLI 摘要；同时把完整 report 写入 `--report-output`。
 - 如果 validation 有 error：
   - 报告文件仍应尽量写出；
   - CLI 退出码仍为失败；
@@ -87,9 +87,9 @@ format = "html"
 示例：
 
 ```bash
-config-forge --project ConfigForge.toml --target client --report markdown --output out/report/validation.md
-config-forge --project ConfigForge.toml --target client --report json --output out/report/client-validation.json
-config-forge --project ConfigForge.toml --target client --report csv --output out/report/client-validation.csv
+config-forge --project ConfigForge.toml --target client --report markdown --report-output out/report/validation.md
+config-forge --project ConfigForge.toml --target client --report json --report-output out/report/client-validation.json
+config-forge --project ConfigForge.toml --target client --report csv --report-output out/report/client-validation.csv
 ```
 
 ### 10.3.2 Build 附加产物
@@ -441,7 +441,7 @@ ValidationReport / DiagnosticReport
 
 - 新增 report model 和 renderer trait。
 - 从 `ValidationReport` 生成 `DesignerValidationReport`。
-- 支持 `config-forge --project ... --target ... --report html|markdown|json|csv --output ...`。
+- 支持 `config-forge --project ... --target ... --report html|markdown|json|csv --report-output ...`。
 - HTML/Markdown/CSV/JSON 都输出 summary + issue list。
 - 补 source path / row number / source column / current value / expected 的 structured enrichment 通道。
 - 建立最小 code catalog，覆盖现有 validators。
@@ -489,8 +489,8 @@ ValidationReport / DiagnosticReport
 
 集成测试：
 
-- `config-forge --report html --output ...` 在有 error 时写出文件且返回失败。
-- `config-forge --report json --output ...` 在只有 warning 时写出 warning 且返回成功。
+- `config-forge --report html --report-output ...` 在有 error 时写出文件且返回失败。
+- `config-forge --report json --report-output ...` 在只有 warning 时写出 warning 且返回成功。
 - target validation report 包含 target tags。
 - build `validation_report` export task 生成 artifact。
 - 并发 build 下报告顺序稳定。
@@ -510,7 +510,7 @@ ValidationReport / DiagnosticReport
 - 报告模型可从 `ValidationReport` / `DiagnosticReport` enrichment 生成，保留 stable code、severity、table、field、row/source row/source column、target、hint、current_value、expected、explanation、owner 和 domain，并生成稳定 issue id（如 `E0001` / `W0001`）。
 - 内置 code catalog 已覆盖当前常用 validator code 和基础 required/type/enum/unique/FK/asset code；未知 code fallback 到原始 message/hint。
 - 支持 HTML / Markdown / JSON / CSV 四种 renderer，输出共享同一个 normalized report model；Markdown/CSV/HTML 已展示 source_column、current_value、expected 等结构化字段，JSON 保留完整字段。
-- CLI 支持 `--report <html|markdown|json|csv>`、`--output <path>`、`--report-title <title>`；validation error 时仍尽量写出报告，再保持失败退出码。
+- CLI 支持 `--report <html|markdown|json|csv>`、`--report-output <path>`、`--report-title <title>`；validation error 时仍尽量写出报告，再保持失败退出码。
 - Build 支持 `[[targets.exports]] type = "validation_report"`，作为 data-backed 附加产物消费 validation 结果；validation error 阻塞 runtime/codegen 时仍尽量写出 report artifact。
 - 已有单元测试和 CLI integration tests 覆盖 report model、renderer enrichment、CLI 失败写报告、CLI machine-readable diagnostic JSON、build HTML report artifact。
 

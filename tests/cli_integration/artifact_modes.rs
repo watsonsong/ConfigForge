@@ -265,10 +265,6 @@ fn dry_run_serial_and_parallel_outputs_match() {
         "--dry-run",
         "--jobs",
         "2",
-        "--io-concurrency",
-        "4",
-        "--network-concurrency",
-        "2",
     ]);
 
     assert_eq!(serial_stdout, parallel_stdout);
@@ -299,10 +295,6 @@ fn serial_and_parallel_writes_match_for_mixed_target() {
         "client",
         "--jobs",
         "4",
-        "--io-concurrency",
-        "4",
-        "--network-concurrency",
-        "2",
     ]);
 
     let serial_files = collect_file_tree(&serial_root);
@@ -341,10 +333,6 @@ fn write_modes_share_artifact_plan_and_written_content() {
         "temp-commit",
         "--jobs",
         "4",
-        "--io-concurrency",
-        "4",
-        "--network-concurrency",
-        "2",
     ]);
     let dry_run_stdout = run_config_forge_stdout(&[
         "--project",
@@ -354,10 +342,6 @@ fn write_modes_share_artifact_plan_and_written_content() {
         "--dry-run",
         "--jobs",
         "4",
-        "--io-concurrency",
-        "4",
-        "--network-concurrency",
-        "2",
     ]);
 
     let direct_files = collect_file_tree(&direct_root);
