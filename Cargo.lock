@@ -172,6 +172,7 @@ dependencies = [
  "rmp-serde",
  "serde",
  "serde_json",
+ "syn",
  "tempfile",
  "thiserror",
  "toml",

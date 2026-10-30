@@ -7,6 +7,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: "stable" # 使用最新稳定版Rust，保证对2024 edition的完整支持
+  CONFIG_FORGE_TEST_PROFILE: quick
 jobs:
   quality-check:
     name: Quality checks (fmt, clippy, test)
@@ -24,8 +25,8 @@ jobs:
         run: cargo fmt --all --check
       - name: Run clippy lints
         run: cargo clippy --all-targets -- -D warnings
-      - name: Run core unit tests
-        run: cargo test --lib
+      - name: Run unit, integration, and runtime tests
+        run: cargo test --locked
   build-cross-platform:
     name: Build on ${{ matrix.os }}
     needs: quality-check
@@ -57,3 +58,5 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
+      - name: Test platform behavior and core integrations
+        run: cargo test --locked --target ${{ matrix.target }} --lib --test architecture --test cli_integration --test runtime_compliance --test runtime_helper_release_metadata

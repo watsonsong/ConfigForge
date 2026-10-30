@@ -6,7 +6,7 @@
 
 当前仓库配置的 workflow：
 
-- [CI](../../.github/workflows/ci.yml)：在 `main` 的 push / pull request 上运行 Ubuntu 格式检查、Clippy 和 `cargo test --lib`，通过后构建 Linux x64 GNU、Windows x64 和 macOS 15 的 ARM64 / Intel 两种 release binary。
+- [CI](../../.github/workflows/ci.yml)：在 `main` 的 push / pull request 上运行 Ubuntu 格式检查、Clippy 和 `cargo test --locked`，通过后构建 Linux x64 GNU、Windows x64 和 macOS 15 的 ARM64 / Intel 两种 release binary，并运行各平台的核心测试。
 - [Release](../../.github/workflows/release.yml)：在 `v*.*.*` tag push 上构建上述平台，并额外构建 Linux x64 musl；打包后生成 SHA256 校验文件并发布 GitHub Release。默认 token 权限为 `contents: read`，仅发布 job 提升为 `contents: write`。发布 job 在 Bash 中通过 `${GITHUB_REF_NAME#v}` 去除 tag 的 `v` 前缀，再通过 step output 传给 Release 正文。
 
 两个 workflow 的 macOS runner / Rust target 必须保持一致：
@@ -16,7 +16,7 @@
 | `macos-15` | ARM64 | `aarch64-apple-darwin` | `macos-arm64` |
 | `macos-15-intel` | Intel x64 | `x86_64-apple-darwin` | `macos-x64` |
 
-当前 CI 的跨平台 job 只构建，不执行测试；Ubuntu quality job 只运行 library unit tests。因此下文的 quick / full / nightly profiles 是测试执行策略，尚未由当前 workflow 完整接入；`tests/` 集成测试、runtime harness 和其他平台专属单元测试仍需单独运行。
+CI 使用 `quick` profile。Ubuntu quality job 执行完整 crate 测试入口；跨平台 job 执行 library unit tests、architecture guard、CLI integration、Rust runtime compliance 与 runtime metadata tests。可选语言工具仍遵循下文的明确 skip 策略；当前 workflow 不等同于要求安装所有语言工具的 full / nightly 矩阵。
 
 ## Test profiles
 

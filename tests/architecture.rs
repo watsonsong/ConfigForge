@@ -1,7 +1,9 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{fs, path::Path};
+use std::{collections::BTreeSet, fs, path::Path};
+
+use syn::visit::{self, Visit};
 
 #[test]
 fn architecture_module_boundaries_match_outline() {
@@ -218,9 +220,9 @@ fn assert_module_does_not_depend_on(module_root: &Path, forbidden_modules: &[&st
     for file in rust_files(module_root) {
         let content = fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("failed to read `{}`: {error}", file.display()));
-        let production_source = production_source(&content);
+        let dependencies = production_dependencies(&content);
         for module in forbidden_modules {
-            if contains_crate_module_reference(production_source, module) {
+            if dependencies.contains(*module) {
                 violations.push(format!("{} -> crate::{module}", file.display()));
             }
         }
@@ -256,22 +258,155 @@ fn collect_rust_files(path: &Path, files: &mut Vec<std::path::PathBuf>) {
     }
 }
 
-fn production_source(content: &str) -> &str {
-    content.split("#[cfg(test)]").next().unwrap_or(content)
+fn production_dependencies(content: &str) -> BTreeSet<String> {
+    let file = syn::parse_file(content).expect("source should be valid Rust syntax");
+    let mut visitor = DependencyVisitor::default();
+    visitor.visit_file(&file);
+    visitor.dependencies
 }
 
-fn contains_crate_module_reference(source: &str, module: &str) -> bool {
-    source.contains(&format!("crate::{module}"))
-        || source
-            .match_indices("crate::{")
-            .any(|(start, _)| grouped_import_contains(&source[start..], module))
+#[derive(Default)]
+struct DependencyVisitor {
+    dependencies: BTreeSet<String>,
 }
 
-fn grouped_import_contains(source: &str, module: &str) -> bool {
-    let Some(end) = source.find("};") else {
-        return false;
-    };
-    source[..end]
-        .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
-        .any(|token| token == module)
+fn test_only(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("cfg")
+            && attr
+                .parse_args::<syn::Path>()
+                .is_ok_and(|path| path.is_ident("test"))
+    })
+}
+
+impl<'ast> Visit<'ast> for DependencyVisitor {
+    fn visit_item(&mut self, item: &'ast syn::Item) {
+        let attrs = match item {
+            syn::Item::Const(item) => &item.attrs,
+            syn::Item::Enum(item) => &item.attrs,
+            syn::Item::ExternCrate(item) => &item.attrs,
+            syn::Item::Fn(item) => &item.attrs,
+            syn::Item::ForeignMod(item) => &item.attrs,
+            syn::Item::Impl(item) => &item.attrs,
+            syn::Item::Macro(item) => &item.attrs,
+            syn::Item::Mod(item) => &item.attrs,
+            syn::Item::Static(item) => &item.attrs,
+            syn::Item::Struct(item) => &item.attrs,
+            syn::Item::Trait(item) => &item.attrs,
+            syn::Item::TraitAlias(item) => &item.attrs,
+            syn::Item::Type(item) => &item.attrs,
+            syn::Item::Union(item) => &item.attrs,
+            syn::Item::Use(item) => &item.attrs,
+            _ => return,
+        };
+        if !test_only(attrs) {
+            visit::visit_item(self, item);
+        }
+    }
+
+    fn visit_impl_item(&mut self, item: &'ast syn::ImplItem) {
+        let attrs = match item {
+            syn::ImplItem::Const(item) => &item.attrs,
+            syn::ImplItem::Fn(item) => &item.attrs,
+            syn::ImplItem::Type(item) => &item.attrs,
+            syn::ImplItem::Macro(item) => &item.attrs,
+            _ => return,
+        };
+        if !test_only(attrs) {
+            visit::visit_impl_item(self, item);
+        }
+    }
+
+    fn visit_trait_item(&mut self, item: &'ast syn::TraitItem) {
+        let attrs = match item {
+            syn::TraitItem::Const(item) => &item.attrs,
+            syn::TraitItem::Fn(item) => &item.attrs,
+            syn::TraitItem::Type(item) => &item.attrs,
+            syn::TraitItem::Macro(item) => &item.attrs,
+            _ => return,
+        };
+        if !test_only(attrs) {
+            visit::visit_trait_item(self, item);
+        }
+    }
+
+    fn visit_path(&mut self, path: &'ast syn::Path) {
+        let mut segments = path.segments.iter();
+        if segments
+            .next()
+            .is_some_and(|segment| segment.ident == "crate")
+        {
+            if let Some(module) = segments.next() {
+                self.dependencies.insert(module.ident.to_string());
+            }
+        }
+        visit::visit_path(self, path);
+    }
+
+    fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
+        self.record_use(&item.tree, false);
+    }
+}
+
+impl DependencyVisitor {
+    fn record_use(&mut self, tree: &syn::UseTree, in_crate: bool) {
+        match tree {
+            syn::UseTree::Group(group) => {
+                for item in &group.items {
+                    self.record_use(item, in_crate);
+                }
+            }
+            syn::UseTree::Path(path) if !in_crate && path.ident == "crate" => {
+                self.record_use(&path.tree, true);
+            }
+            syn::UseTree::Path(path) if in_crate => {
+                self.dependencies.insert(path.ident.to_string());
+            }
+            syn::UseTree::Name(name) if in_crate => {
+                self.dependencies.insert(name.ident.to_string());
+            }
+            syn::UseTree::Rename(rename) if in_crate => {
+                self.dependencies.insert(rename.ident.to_string());
+            }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn production_after_test_module_is_checked() {
+    let dependencies =
+        production_dependencies("#[cfg(test)] mod tests; use crate::build::BuildOptions;");
+    assert!(dependencies.contains("build"));
+}
+
+#[test]
+fn test_items_and_strings_do_not_create_dependencies() {
+    let dependencies = production_dependencies(
+        r#"
+        #[cfg(test)] mod tests { use crate::build::BuildOptions; }
+        #[cfg(test)] use crate::generator::GeneratorRegistry;
+        const EXAMPLE: &str = "crate::validation";
+        // crate::data
+        struct Example;
+        impl Example {
+            #[cfg(test)] fn example() { crate::project::example(); }
+        }
+    "#,
+    );
+    assert!(dependencies.is_empty());
+}
+
+#[test]
+fn grouped_imports_and_paths_only_record_root_modules() {
+    let dependencies = production_dependencies(
+        r#"
+        use crate::{meta::{data, MetaModel}, data as source};
+        fn example() { crate::validation::example(); }
+    "#,
+    );
+    assert_eq!(
+        dependencies,
+        BTreeSet::from(["data".into(), "meta".into(), "validation".into()])
+    );
 }

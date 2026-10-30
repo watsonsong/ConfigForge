@@ -43,4 +43,5 @@ toml = "1.1"
 assert_cmd = "2.2"
 config-forge-runtime-reader-core = { path = "runtime/rust/reader_core" }
 predicates = "3.1"
+syn = { version = "2", features = ["full", "visit"] }
 tempfile = "3.27"
