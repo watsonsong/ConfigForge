@@ -19,6 +19,10 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt, clippy
+      - name: Install .NET SDK for C# runtime tests
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
       - name: Check code formatting
@@ -54,6 +58,10 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ matrix.target }}
+      - name: Install .NET SDK for C# runtime tests
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
       - name: Build release binary

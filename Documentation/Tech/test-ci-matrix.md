@@ -16,6 +16,8 @@
 | `macos-15` | ARM64 | `aarch64-apple-darwin` | `macos-arm64` |
 | `macos-15-intel` | Intel x64 | `x86_64-apple-darwin` | `macos-x64` |
 
+C# generated-code 与 runtime compliance harness 统一使用 `net8.0`；CI quality 与跨平台 job 显式安装 .NET 8 SDK，确保对应 targeting pack 和 runtime 存在，而不是仅依赖 runner 上任意版本的 dotnet。更高 major 的 runtime 不保证能直接启动较低 major 的程序。
+
 CI 使用 `quick` profile。Ubuntu quality job 执行完整 crate 测试入口；跨平台 job 执行 library unit tests、architecture guard、CLI integration、Rust runtime compliance 与 runtime metadata tests。可选语言工具仍遵循下文的明确 skip 策略；当前 workflow 不等同于要求安装所有语言工具的 full / nightly 矩阵。
 
 ## Test profiles
@@ -49,7 +51,7 @@ Profile 控制变量：
 | C++ | `out/client_code/cpp/generated.hpp/.cpp` + client runtime data | CMake、C++17 compiler、RapidJSON / msgpack-cxx / binary reader target | 已有 standard_project smoke，覆盖 RapidJSON / binary 代表路径与 external interface smoke。 | 缺 CMake / compiler 时明确 skip。 | fail-fast；三方依赖必须显式安装或显式允许 FetchContent。 |
 | Unreal C++ | `out/client_code/cpp_unreal/generated.h/.cpp` | C++17 compiler + lightweight Unreal shim | 当前是语法 smoke，不代表真实 UHT / Editor。 | 缺 compiler 时明确 skip。 | fail-fast 或由引擎侧 CI 补真实验证。 |
 | TypeScript | `out/client_code/typescript/generated.ts` + JSON runtime data | Node、`tsc` 或受控 `npx` fallback | 已有 typecheck + Node runtime smoke；MessagePack package 主要由 adapter compliance 覆盖。 | 缺 Node / TypeScript 时明确 skip。 | fail-fast；`npx` 仅在 `CONFIG_FORGE_ALLOW_NETWORK=1` 时允许。 |
-| C# | `out/client_code/csharp/reference_game_config.cs` + JSON / MessagePack / Binary runtime data | .NET SDK | 已复制 `runtime/csharp/json_reader`、`messagepack_reader`、`binary_reader`，覆盖手写 adapter 与 generated adapter smoke。 | 缺 `dotnet` 时明确 skip。 | fail-fast。 |
+| C# | `out/client_code/csharp/reference_game_config.cs` + JSON / MessagePack / Binary runtime data | .NET 8 SDK / runtime | 已复制 `runtime/csharp/json_reader`、`messagepack_reader`、`binary_reader`，覆盖手写 adapter 与 generated adapter smoke。 | 缺 `dotnet` 时明确 skip。 | fail-fast。 |
 | Java | `out/client_code/java/ReferenceGameConfig.java` + JSON / MessagePack / Binary runtime data | JDK (`javac` + `java`) | 已复制 JDK-only JSON / MessagePack / Binary reader，覆盖手写 adapter 与 generated adapter smoke。 | 缺 JDK 时明确 skip。 | fail-fast。 |
 | Lua | generated Lua output | `lua5.4` / `lua5.3` / `lua` / `luajit` 任一 | 已有 interpreter smoke。 | 缺 interpreter 时明确 skip。 | fail-fast 或按发布目标显式声明 optional。 |
 

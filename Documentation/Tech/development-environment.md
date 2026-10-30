@@ -65,7 +65,7 @@ cargo coverage-lcov
 | C++ backend / runtime adapter | C++17 compiler、CMake 3.16+ | C++ generated-code compile/run、`runtime/cpp` CMake smoke | 显式 skip C++ harness。 |
 | Unreal C++ backend | C++17 compiler；真实 Unreal Engine 仅用于项目侧完整验证 | 仓库内使用 lightweight shim 做 `c++ -fsyntax-only` syntax smoke | 显式 skip Unreal C++ syntax smoke。 |
 | TypeScript backend / runtime | Node.js、npm、TypeScript compiler (`tsc`) | TypeScript generated-code typecheck、Node runtime harness、runtime package build | 显式 skip TypeScript harness；full / nightly 或显式 require 时 fail-fast。 |
-| C# backend | .NET SDK（当前 harness 使用 `net6.0`） | C# generated-code compile/run | 显式 skip C# harness。 |
+| C# backend | .NET 8 SDK / runtime（generated-code 与 compliance harness 使用 `net8.0`） | C# generated-code compile/run | 显式 skip C# harness。 |
 | Java backend | JDK，包含 `javac` 和 `java` | Java generated-code compile/run | 显式 skip Java harness。 |
 | Lua data+code export | `lua5.4` / `lua5.3` / `lua` / `luajit` 之一 | Lua runtime smoke | 显式 skip Lua harness。 |
 
