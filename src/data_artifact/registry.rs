@@ -5,9 +5,8 @@ use std::path::PathBuf;
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
-    artifact::{Artifact, ArtifactSink, ArtifactWriteStream},
-    data::{DataSet, DataTable},
-    data_artifact::TargetDataConfig,
+    artifact::ArtifactWriteStream,
+    data::DataTable,
     diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{LinkedTableMeta, TargetTags},
 };
@@ -74,54 +73,6 @@ pub trait RuntimeTableFormat: Send + Sync {
     fn matches(&self, format: &str) -> bool {
         self.name() == format || self.aliases().contains(&format)
     }
-}
-
-pub trait AggregateDataExporter: Send + Sync {
-    fn name(&self) -> &'static str;
-
-    #[allow(dead_code)]
-    fn aliases(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    fn plan_artifacts(
-        &self,
-        out_dir: &std::path::Path,
-        task: &TargetDataConfig,
-        linked_meta: &crate::meta::LinkedMetaModel<'_>,
-        target_tags: &TargetTags,
-    ) -> Result<Vec<PathBuf>>;
-
-    #[allow(dead_code)]
-    fn export(
-        &self,
-        out_dir: &std::path::Path,
-        task: &TargetDataConfig,
-        linked_meta: &crate::meta::LinkedMetaModel<'_>,
-        target_tags: &TargetTags,
-        data_set: &DataSet,
-    ) -> Result<Vec<Artifact>> {
-        let _ = (out_dir, task, linked_meta, target_tags, data_set);
-        Err(data_exporter_contract_error(
-            self.name(),
-            format!(
-                "exporter `{}` does not implement legacy aggregate export fallback",
-                self.name()
-            ),
-            "legacy aggregate export fallback missing",
-            "export or export_to_sink implementation",
-        ))
-    }
-
-    fn export_to_sink(
-        &self,
-        out_dir: &std::path::Path,
-        task: &TargetDataConfig,
-        linked_meta: &crate::meta::LinkedMetaModel<'_>,
-        target_tags: &TargetTags,
-        data_set: &DataSet,
-        sink: &ArtifactSink,
-    ) -> Result<()>;
 }
 
 fn data_exporter_contract_error(

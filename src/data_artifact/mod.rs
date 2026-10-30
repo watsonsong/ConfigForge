@@ -13,7 +13,7 @@ mod tests;
 pub(crate) use config::TargetDataConfig;
 pub use model::{ExportedTable, ExportedTablePayload, ExportedValue};
 pub(crate) use payload::build_exported_table_payload;
-pub(crate) use registry::{AggregateDataExporter, RuntimeTableFormat};
+pub(crate) use registry::RuntimeTableFormat;
 pub use runtime::RuntimeArtifactPlan;
 
 pub(crate) use runtime::{export_runtime_data_to_sink, runtime_table_artifacts};

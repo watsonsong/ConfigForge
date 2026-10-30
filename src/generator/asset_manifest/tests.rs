@@ -10,7 +10,7 @@ use crate::{
     artifact::{ArtifactWriteMode, ArtifactWriter},
     code_artifact::tests::expect_single_diagnostic,
     data::{DataSet, DataTable},
-    data_artifact::{AggregateDataExporter, TargetDataConfig},
+    data_artifact::TargetDataConfig,
     diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{MetaModel, TargetTags},
 };
@@ -158,14 +158,14 @@ fn exporter_plans_format_specific_default_file_name() {
         "format".to_owned(),
         toml::Value::String("csv".to_owned()),
     )]));
-    let paths = AggregateDataExporter::plan_artifacts(
-        &exporter,
-        Path::new("Generated/Assets"),
-        &task,
-        &linked_meta(),
-        &TargetTags::empty(),
-    )
-    .unwrap();
+    let paths = exporter
+        .plan_paths(
+            Path::new("Generated/Assets"),
+            &task,
+            &linked_meta(),
+            &TargetTags::empty(),
+        )
+        .unwrap();
     assert_eq!(
         paths,
         [PathBuf::from("Generated/Assets/asset_manifest.csv")]

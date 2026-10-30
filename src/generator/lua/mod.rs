@@ -1,6 +1,8 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(test)]
+use crate::artifact::Artifact;
 mod naming;
 mod options;
 mod render;
@@ -12,9 +14,9 @@ use std::{collections::BTreeSet, path::PathBuf};
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
-    artifact::{Artifact, ArtifactSink},
+    artifact::ArtifactSink,
     data::DataSet,
-    data_artifact::{AggregateDataExporter, TargetDataConfig, build_exported_table_payload},
+    data_artifact::{TargetDataConfig, build_exported_table_payload},
     diagnostic::code::{CF_ARTIFACT_PATH_COLLISION, CF_GENERATOR_UNSUPPORTED_DATA_INPUT},
     meta::{LinkedMetaModel, LinkedTableMeta, TargetTags},
 };
@@ -28,16 +30,8 @@ pub const FORMAT: &str = "lua_table";
 
 pub(crate) struct LuaTableExporter;
 
-impl AggregateDataExporter for LuaTableExporter {
-    fn name(&self) -> &'static str {
-        FORMAT
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        &["lua"]
-    }
-
-    fn plan_artifacts(
+impl LuaTableExporter {
+    fn plan_paths(
         &self,
         out_dir: &std::path::Path,
         task: &TargetDataConfig,
@@ -55,6 +49,7 @@ impl AggregateDataExporter for LuaTableExporter {
         Ok(paths)
     }
 
+    #[cfg(test)]
     fn export(
         &self,
         out_dir: &std::path::Path,
@@ -132,13 +127,7 @@ impl ArtifactGenerator for LuaTableExporter {
 
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
         let task = input.target_data_config();
-        <Self as AggregateDataExporter>::plan_artifacts(
-            self,
-            &input.output,
-            &task,
-            input.meta,
-            &input.target_tags,
-        )
+        self.plan_paths(&input.output, &task, input.meta, &input.target_tags)
     }
 
     fn generate(
@@ -148,8 +137,7 @@ impl ArtifactGenerator for LuaTableExporter {
     ) -> Result<()> {
         let input = input.data_input(self.type_id())?;
         let task = input.common.target_data_config();
-        <Self as AggregateDataExporter>::export_to_sink(
-            self,
+        self.export_to_sink(
             &input.common.output,
             &task,
             input.common.meta,

@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity, Result,
-    artifact::{Artifact, ArtifactSink},
+    artifact::ArtifactSink,
     data::DataSet,
-    data_artifact::{AggregateDataExporter, TargetDataConfig},
+    data_artifact::TargetDataConfig,
     diagnostic::code::CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
     meta::{LinkedMetaModel, TargetTags},
 };
@@ -40,16 +40,8 @@ pub(super) struct TextExtractionEntry {
     pub(super) translator_comments: Vec<String>,
 }
 
-impl AggregateDataExporter for GettextPotExporter {
-    fn name(&self) -> &'static str {
-        FORMAT
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        &["pot"]
-    }
-
-    fn plan_artifacts(
+impl GettextPotExporter {
+    fn plan_paths(
         &self,
         out_dir: &Path,
         task: &TargetDataConfig,
@@ -58,18 +50,6 @@ impl AggregateDataExporter for GettextPotExporter {
     ) -> Result<Vec<PathBuf>> {
         let options = options_from_task(task)?;
         Ok(vec![out_dir.join(options.file_name())])
-    }
-
-    fn export(
-        &self,
-        out_dir: &Path,
-        task: &TargetDataConfig,
-        linked_meta: &LinkedMetaModel<'_>,
-        target_tags: &TargetTags,
-        data_set: &DataSet,
-    ) -> Result<Vec<Artifact>> {
-        let (file_name, content) = render_pot_export(task, linked_meta, target_tags, data_set)?;
-        Ok(vec![Artifact::text(out_dir.join(file_name), content)])
     }
 
     fn export_to_sink(
@@ -101,13 +81,7 @@ impl ArtifactGenerator for GettextPotExporter {
 
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
         let task = input.target_data_config();
-        <Self as AggregateDataExporter>::plan_artifacts(
-            self,
-            &input.output,
-            &task,
-            input.meta,
-            &input.target_tags,
-        )
+        self.plan_paths(&input.output, &task, input.meta, &input.target_tags)
     }
 
     fn generate(
@@ -117,8 +91,7 @@ impl ArtifactGenerator for GettextPotExporter {
     ) -> Result<()> {
         let input = input.data_input(self.type_id())?;
         let task = input.common.target_data_config();
-        <Self as AggregateDataExporter>::export_to_sink(
-            self,
+        self.export_to_sink(
             &input.common.output,
             &task,
             input.common.meta,

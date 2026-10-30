@@ -9,7 +9,7 @@ use crate::{
     artifact::{ArtifactContent, ArtifactWriteMode, ArtifactWriter},
     code_artifact::{I18nMode, tests::expect_single_diagnostic},
     data::{DataSet, DataTable},
-    data_artifact::{AggregateDataExporter, TargetDataConfig},
+    data_artifact::TargetDataConfig,
     diagnostic::code::{CF_ARTIFACT_PATH_COLLISION, CF_GENERATOR_UNSUPPORTED_DATA_INPUT},
     meta::{MetaModel, PrimitiveFieldType, TargetTags},
 };
@@ -68,14 +68,14 @@ fn plans_root_and_table_module_artifacts() {
     )
     .expect("meta should load");
     let linked = meta.link().expect("meta should link");
-    let paths = AggregateDataExporter::plan_artifacts(
-        &LuaTableExporter,
-        PathBuf::from("out").as_path(),
-        &lua_task(),
-        &linked,
-        &TargetTags::empty(),
-    )
-    .expect("paths should plan");
+    let paths = LuaTableExporter
+        .plan_paths(
+            PathBuf::from("out").as_path(),
+            &lua_task(),
+            &linked,
+            &TargetTags::empty(),
+        )
+        .expect("paths should plan");
     assert_eq!(
         paths,
         vec![
@@ -446,14 +446,14 @@ fn rejects_duplicate_generated_table_files() {
     .expect("meta should load");
     let linked = meta.link().expect("meta should link");
 
-    let error = AggregateDataExporter::plan_artifacts(
-        &LuaTableExporter,
-        PathBuf::from("out").as_path(),
-        &lua_task(),
-        &linked,
-        &TargetTags::empty(),
-    )
-    .unwrap_err();
+    let error = LuaTableExporter
+        .plan_paths(
+            PathBuf::from("out").as_path(),
+            &lua_task(),
+            &linked,
+            &TargetTags::empty(),
+        )
+        .unwrap_err();
     let diagnostic = expect_single_diagnostic(error);
 
     assert_eq!(diagnostic.code, CF_ARTIFACT_PATH_COLLISION);

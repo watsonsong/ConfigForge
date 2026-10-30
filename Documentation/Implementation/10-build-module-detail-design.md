@@ -247,9 +247,9 @@ Build-facing registry 只暴露 `require_generator(type_id) -> &dyn ArtifactGene
 
 Lua 是该模型的关键校验用例：它 requirements 包含 Meta + Data，但输出形态明显是 code-like artifact，因此应复用 code artifact options，而不应因为需要 Data 就被排除在 code 能力之外。
 
-当前已收敛为单一 task generator 模型：从任务调度角度看，`RuntimeTableFormat`、`AggregateDataExporter`、`CodeGenerator` 都不是调度对象，而只是 toolkit 内部的实现复用方式。Build 只面向一种对象：根据 export task 的 `type_id` 匹配到 generator，读取其 requirements，准备满足 requirements 的上下文，然后把 task instance 输入交给 generator 执行。generator 内部可以再把输入转换成 `CodeExportInput`、`TargetDataConfig`、table payload、doc model 或 report renderer 所需的形态；这些转换不应回流到 Build 分支逻辑。
+当前已收敛为单一 task generator 模型：从任务调度角度看，`RuntimeTableFormat`、聚合 generator 私有 helpers、`CodeGenerator` 都不是调度对象，而只是 toolkit 内部的实现复用方式。Build 只面向一种对象：根据 export task 的 `type_id` 匹配到 generator，读取其 requirements，准备满足 requirements 的上下文，然后把 task instance 输入交给 generator 执行。generator 内部可以再把输入转换成 `CodeExportInput`、`TargetDataConfig`、table payload、doc model 或 report renderer 所需的形态；这些转换不应回流到 Build 分支逻辑。
 
-当前收口状态：production `GeneratorRegistry` 构造只接受 direct `ArtifactGenerator` 列表；内置 data-backed generators 和内置 language generators 均已直接注册。`CodeArtifactGenerator`、`DataArtifactGenerator` 和 `from_compat_parts()` 已删除；`CodeGenerator` 缩小为 renderer / naming / formatting / file header 等 code artifact facet，`RuntimeTableFormat` / `AggregateDataExporter` 保留为 data artifact toolkit facet，不参与 registry 构造。
+当前收口状态：production `GeneratorRegistry` 构造只接受 direct `ArtifactGenerator` 列表；内置 data-backed generators 和内置 language generators 均已直接注册。`CodeArtifactGenerator`、`DataArtifactGenerator` 和 `from_compat_parts()` 已删除；`CodeGenerator` 缩小为 renderer / naming / formatting / file header 等 code artifact facet，`RuntimeTableFormat` 保留为逐表序列化接口；聚合 generator 的私有 helpers 位于各自模块，两者均不参与 registry 构造。
 
 执行输入使用当前的 `GeneratorTaskInput`：owned common context 加借用的 `PreparedGeneratorInputs`，后者只有 `MetaOnly`、`MetaAndData`、`ValidationReportOnly` 三种有效状态。规划直接接收 common context，没有 `Planning` 执行状态或另一层规划转发。Data generator 通过 `data_input()` 借用 common、DataSet 与 pool，不克隆 common/options；report generator 从 prepared input 读取报告。
 

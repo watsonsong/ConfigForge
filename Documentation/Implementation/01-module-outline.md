@@ -132,7 +132,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `05-data-module-detail-design.md` | 模块 | Data load、CSV reader、DataSet、RowSourceInfo、DataResolver、ObjectTable source layout。 |
 | `06-validation-module-detail-design.md` | 模块 | Validation 主流程、ExportValidationView、ValidationReport、validator registry。 |
 | `07-artifact-module-detail-design.md` | 模块 | Artifact model、writer、dry-run、direct/temp-commit 策略和写入结果。 |
-| `08-exporter-module-detail-design.md` | toolkit 说明 | 当前 data artifact toolkit 边界、runtime payload、`RuntimeTableFormat` / `AggregateDataExporter` facet、JSON / MessagePack / `bin` helper、ObjectTable payload。文件名保留历史 `exporter` 标签以维持链接稳定。 |
+| `08-exporter-module-detail-design.md` | toolkit 说明 | 当前 data artifact toolkit 边界、runtime payload、`RuntimeTableFormat` 逐表序列化接口、JSON / MessagePack / `bin` helper、ObjectTable payload。文件名保留历史 `exporter` 标签以维持链接稳定。 |
 | `09-codegen-module-detail-design.md` | toolkit 总览 | 当前 code artifact toolkit 边界、concrete language generator 布局、CodeModel / CodeWriter / options、专题索引和 backend capability matrix；详细设计见 `09a`~`09l`。文件名保留历史 `codegen` 标签以维持链接稳定。 |
 | `09a-codegen-runtime-reader-contract.md` | Codegen 专题 | Runtime reader contract、eager/lazy loading、TypeScript sync API、逻辑 table name 与 schema revision。 |
 | `09b-codegen-rust-backend.md` | Codegen 专题 | Rust backend generated API 与 lazy loading。 |
