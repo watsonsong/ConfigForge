@@ -6,6 +6,8 @@
 
 ## 9.1 设计目标
 
+`src/code_artifact/output.rs` 集中实现文件头模板与默认 header，以及 `write_code_to_sink()` 的 stream 创建、checked writer、写入错误路径和 finish。六种语言后端（包括 C++ / Unreal 的 header/source 与 Rust/C++ manifest）复用这些操作，具体 render 通过静态 closure 调用；不 materialize 整个代码文件，不统一语言专属模型。测试用内存 writer 与生产 streaming writer 共用同一份文件头实现。
+
 当前已落地第一阶段 code artifact toolkit 与 language generators 需要达成：
 
 1. 基于 `LinkedMetaModel<'meta>` 生成完整类型代码，而不是只为每张表生成简单 stub。

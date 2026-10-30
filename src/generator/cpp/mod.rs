@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use super::write_file_header;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -14,10 +15,10 @@ use crate::{
 };
 
 use super::{
-    ArtifactGenerator, CaseStyle, CheckedStreamingCodeWriter, CodeExportInput, CodeField,
-    CodeFragmentPayload, CodeGenerator, CodeModel, CodeTableKind, CodeWriterConfig, CodeWriterLike,
-    GeneratorCommonInput, GeneratorRequirements, I18nFunctionReturn, I18nMode, I18nOptions,
-    NamingConfig, RuntimeInterfaceEmit, RuntimeInterfaceMode, build_code_model,
+    ArtifactGenerator, CaseStyle, CodeExportInput, CodeField, CodeFragmentPayload, CodeGenerator,
+    CodeModel, CodeTableKind, CodeWriterConfig, CodeWriterLike, GeneratorCommonInput,
+    GeneratorRequirements, I18nFunctionReturn, I18nMode, I18nOptions, NamingConfig,
+    RuntimeInterfaceEmit, RuntimeInterfaceMode, build_code_model,
     ir::require_non_empty_index_fields,
 };
 
@@ -183,66 +184,49 @@ impl CodeGenerator for CppCodeGenerator {
         let header_path = input.target.out_dir.join(&header_file_name);
         let source_path = input.target.out_dir.join(source_file_name);
 
-        let header_stream = sink.create(header_path.clone())?;
-        let mut header =
-            CheckedStreamingCodeWriter::new(header_stream, input.target.options.formatting);
-        render_header_file(
-            self,
-            &mut header,
-            input,
-            &model,
-            namespace,
-            &names,
-            &cpp_options,
+        super::write_code_to_sink(
+            sink,
+            header_path,
+            input.target.options.formatting,
+            |header| {
+                render_header_file(self, header, input, &model, namespace, &names, &cpp_options)?;
+                Ok(())
+            },
         )?;
-        let header_stream = header
-            .finish()
-            .map_err(|source| ConfigForgeError::WriteFile {
-                path: header_path,
-                source,
-            })?;
-        header_stream.finish()?;
 
-        let source_stream = sink.create(source_path.clone())?;
-        let mut source =
-            CheckedStreamingCodeWriter::new(source_stream, input.target.options.formatting);
-        render_source_file(
-            self,
-            &mut source,
-            input,
-            &model,
-            namespace,
-            &names,
-            &header_file_name,
+        super::write_code_to_sink(
+            sink,
+            source_path,
+            input.target.options.formatting,
+            |source| {
+                render_source_file(
+                    self,
+                    source,
+                    input,
+                    &model,
+                    namespace,
+                    &names,
+                    &header_file_name,
+                )?;
+                Ok(())
+            },
         )?;
-        let source_stream = source
-            .finish()
-            .map_err(|source| ConfigForgeError::WriteFile {
-                path: source_path,
-                source,
-            })?;
-        source_stream.finish()?;
 
         if matches!(
             cpp_options.runtime_interface_emit,
             RuntimeInterfaceEmit::Reference
         ) {
             let manifest_path = runtime_interface_manifest_path(input);
-            let manifest_stream = sink.create(manifest_path.clone())?;
-            let mut manifest = CheckedStreamingCodeWriter::new(
-                manifest_stream,
+            super::write_code_to_sink(
+                sink,
+                manifest_path,
                 CodeWriterConfig::default().with_indent_width(2),
-            );
-            let manifest_content = cpp_runtime_interface_manifest(input, &cpp_options)?;
-            manifest.raw(&manifest_content);
-            let manifest_stream =
-                manifest
-                    .finish()
-                    .map_err(|source| ConfigForgeError::WriteFile {
-                        path: manifest_path,
-                        source,
-                    })?;
-            manifest_stream.finish()?;
+                |manifest| {
+                    let manifest_content = cpp_runtime_interface_manifest(input, &cpp_options)?;
+                    manifest.raw(&manifest_content);
+                    Ok(())
+                },
+            )?;
         }
 
         Ok(())
@@ -638,37 +622,6 @@ fn render_header_file(
         header.raw_fmt(format_args!("\n}} // namespace {namespace}\n"));
     }
     Ok(())
-}
-
-fn write_file_header(
-    generator: &dyn CodeGenerator,
-    content: &mut impl CodeWriterLike,
-    input: &CodeExportInput<'_>,
-) {
-    if let Some(template) = &input.target.options.file_header {
-        let project = &input.project;
-        let mut output = template.to_owned();
-        output = output.replace("{{project.name}}", project.name.as_deref().unwrap_or(""));
-        output = output.replace("{{project.desc}}", project.desc.as_deref().unwrap_or(""));
-        output = output.replace(
-            "{{project.copyright}}",
-            project.copyright.as_deref().unwrap_or(""),
-        );
-        output = output.replace("{{datetime}}", &input.generated_at);
-        if !output.ends_with('\n') {
-            output.push('\n');
-        }
-        content.raw(output);
-        return;
-    }
-
-    let prefix = generator.line_comment_prefix();
-    content.line(format!(
-        "{prefix} Copyright (c) 2026 ConfigForge contributors"
-    ));
-    content.line(format!("{prefix} SPDX-License-Identifier: Apache-2.0"));
-    content.blank_line();
-    content.line(format!("{prefix} Generated by config-forge. Do not edit."));
 }
 
 fn render_cpp_text_helper_declarations(
