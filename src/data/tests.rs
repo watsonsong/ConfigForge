@@ -1750,6 +1750,52 @@ fn async_source_read_shell_limits_network_concurrency() {
 }
 
 #[test]
+fn local_csv_provider_reads_both_layouts_with_source_positions() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("items.csv"), "id,name\n1,Sword\n").unwrap();
+    fs::write(
+        dir.path().join("settings.csv"),
+        "key,title,value\nmax_level,Level,60\n",
+    )
+    .unwrap();
+    let provider = LocalCsvSourceProvider::new(dir.path());
+    let collection = DataSourcePlan {
+        data_start_row: 2,
+        ..plan_source("items", "items.csv")
+    };
+    let table = provider.read_source(&collection).unwrap();
+    assert_eq!(table.rows[0].get("name").map(String::as_str), Some("Sword"));
+    assert_eq!(table.row_sources[0].source_row_number, 2);
+
+    let object = object_plan_source("settings", "settings.csv");
+    let table = provider.read_source(&object).unwrap();
+    assert_eq!(
+        table.rows[0].get("max_level").map(String::as_str),
+        Some("60")
+    );
+}
+
+#[test]
+fn local_csv_provider_rejects_sources_outside_its_root() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("data");
+    fs::create_dir(&root).unwrap();
+    fs::write(dir.path().join("outside.csv"), "id\n1\n").unwrap();
+    let provider = LocalCsvSourceProvider::new(&root);
+    for path in [
+        PathBuf::from("../outside.csv"),
+        dir.path().join("outside.csv"),
+    ] {
+        let source = DataSourcePlan {
+            path,
+            ..plan_source("items", "unused.csv")
+        };
+        let diagnostic = expect_single_diagnostic(provider.read_source(&source).unwrap_err());
+        assert_eq!(diagnostic.code, CF_DATA_SOURCE_PATH_ESCAPE);
+    }
+}
+
+#[test]
 fn async_source_read_shell_reports_first_plan_error_not_completion_order() {
     let plan = SourceReadPlan::new(vec![
         plan_source("items", "slow-first.csv"),

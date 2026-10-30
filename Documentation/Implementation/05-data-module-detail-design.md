@@ -626,7 +626,9 @@ S1 Oak 覆盖示例在 DataLoader 中的 materialization 结果：
 
 ### 5.7.2 Async provider shell 与 resource lane
 
-Phase 4 引入 `SourceProvider` / `AsyncSourceReadShell` 作为远端 provider 的调度外壳，但不改变本地 CSV 主路径，也不强制引入 Tokio：
+当前 build 使用 `DataLoader` 与既有 Rayon pool 读取本地 CSV。`LocalCsvSourceProvider` 是它的薄适配，委托同一个 `load_source()` 实现，复用 source root containment、文件系统路径检查、layout 分派和 CSV diagnostics，不维护第二套读取流程。
+
+`SourceProvider` / `AsyncSourceReadShell` 为兼容已有 public API 保留，未接入 build。shell 使用受 resource lane 数量限制的 scoped blocking threads，不是 async runtime；远端 provider 尚未实现，`RemoteProviderPolicy` 也尚未执行 retry / backoff / rate-limit。只有实际接入远端 source 时才设计异步执行，不扩展当前兼容 shell：
 
 ```rust
 pub enum SourceProviderResource {
@@ -654,7 +656,7 @@ pub struct AsyncSourceReadShell { ... }
 - `SourceReadPlan` 仍是 provider-independent 输入；provider 不允许隐式读取 `LinkedMetaModel`。
 - resource lane 用于区分本地阻塞 I/O、未来 async I/O、远端网络 source。Google Sheet / 飞书 provider 应声明为 `Network`，并使用 `network` concurrency lane。
 - shell 按 plan index 稳定合并结果和选择错误；即使后面的 source 更早失败，也应返回最早 plan index 的错误。
-- 当前 shell 在遇到错误后停止调度尚未启动的 source，并等待已启动 source 完成；Phase 5 可在此基础上扩展 cancellation token。
+- 当前 shell 在遇到错误后停止调度尚未启动的 source，并等待已启动 source 完成。
 - 远端 provider 策略由 `RemoteProviderPolicy` 预留，包括 retry、base backoff 与 rate-limit。认证错误、source location diagnostics、cell/bytes 下载后的 CPU parse 切换，应在正式 provider 实现时落地。
 - 本阶段不在 async worker 上做 typed normalize；normalize 仍在 raw source read 完成后进入 CPU 阶段。
 

@@ -7,10 +7,7 @@ use crate::{ConfigForgeError, Result, diagnostic::code::CF_BUILD_INVALID_OPTION}
 
 use super::data_diagnostic_error;
 
-use super::{
-    CsvDataReader, DataProvider, DataSourceLayout, DataSourcePlan, DataTable, RawSourceData,
-    SourceReadPlan,
-};
+use super::{DataLoader, DataSourcePlan, DataTable, RawSourceData, SourceReadPlan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SourceProviderResource {
@@ -28,6 +25,7 @@ pub struct SourceProviderConcurrency {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Reserved policy metadata; the compatibility shell does not apply retries or rate limits.
 pub struct RemoteProviderPolicy {
     pub max_retries: usize,
     pub base_backoff_ms: u64,
@@ -42,10 +40,12 @@ pub trait SourceProvider: Sync {
 
 #[derive(Debug, Clone)]
 pub struct LocalCsvSourceProvider {
-    data_root: PathBuf,
+    loader: DataLoader,
 }
 
 #[derive(Debug, Clone)]
+/// Compatibility resource-lane scheduler using blocking scoped threads.
+/// The build pipeline uses its existing Rayon pool instead of this shell.
 pub struct AsyncSourceReadShell {
     concurrency: SourceProviderConcurrency,
 }
@@ -137,7 +137,7 @@ impl Default for RemoteProviderPolicy {
 impl LocalCsvSourceProvider {
     pub fn new(data_root: impl Into<PathBuf>) -> Self {
         Self {
-            data_root: data_root.into(),
+            loader: DataLoader::new(data_root),
         }
     }
 }
@@ -148,25 +148,7 @@ impl SourceProvider for LocalCsvSourceProvider {
     }
 
     fn read_source(&self, source: &DataSourcePlan) -> Result<DataTable> {
-        match source.provider {
-            DataProvider::Csv => match source.layout {
-                DataSourceLayout::CollectionRecords => CsvDataReader::read_table_with_layout(
-                    &source.table_name,
-                    &self.data_root.join(&source.path),
-                    source.header_row,
-                    source.data_start_row,
-                ),
-                DataSourceLayout::ObjectKeyValueRows => {
-                    CsvDataReader::read_object_table_with_layout(
-                        &source.table_name,
-                        &self.data_root.join(&source.path),
-                        &source.fields,
-                        source.header_row,
-                        source.data_start_row,
-                    )
-                }
-            },
-        }
+        self.loader.load_source(source)
     }
 }
 
