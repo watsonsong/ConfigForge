@@ -9,6 +9,7 @@ import {
   GameData,
   itemsNameText,
   LazyGameData,
+  rarityLevelsNameText,
   RuntimeDataLoader,
 } from "./generated";
 import { setGlobalTextCatalog } from "./i18n";
@@ -219,7 +220,7 @@ async function main(): Promise<void> {
     throw new Error("single-field item index query failed");
   }
   const itemRarity = item.rarity(data);
-  if (itemRarity.rarityId !== 2 || itemRarity.nameText() !== "普通" || itemRarity.standardColor.r !== 255 || itemRarity.backgroundIcon !== "assets/icons/rarity/common.png") {
+  if (itemRarity.rarityId !== 2 || rarityLevelsNameText(itemRarity) !== "普通" || itemRarity.standardColor.r !== 255 || itemRarity.backgroundIcon !== "assets/icons/rarity/common.png") {
     throw new Error("item rarity relation failed");
   }
   if (data.rarityLevels.getById(5)?.rarityId !== 5) {

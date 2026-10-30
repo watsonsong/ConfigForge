@@ -106,17 +106,17 @@ TypeScript `linked_field` 生成规则：
 
 TypeScript `text` 翻译 helper 生成规则：
 
-- Interface 中保留 raw 字段，例如 `displayName: string`；helper 可以作为 row object method 生成，也可以生成模块级函数。为了与现有 relation helper 的 plain object 策略一致，推荐在需要 helper 时给 object literal 绑定模块级函数引用，避免每条 row 创建闭包。
+- Interface 中保留 raw 字段，例如 `displayName: string`；翻译 helper 生成模块级函数，接收包含该字段的对象，不向 row object 绑定 method，也不为每条 row 创建闭包。关系查询返回的 row 同样通过独立 helper 翻译，例如 `rarityLevelsNameText(item.rarity(data))`。
 - 默认 `targets.exports.i18n.mode = "generic"` 时生成 translator function type：
 
 ```ts
-export interface TextTranslator {
-  translate(context: string | undefined, msgid: string): string | undefined;
-}
+export type TextTranslator = (msgctxt: string | undefined, msgid: string) => string | undefined;
 
-export interface ItemRow {
-  displayName: string;
-  displayNameText(translator: TextTranslator): string;
+export function itemsDisplayNameText(
+  value: { displayName: string },
+  translator: TextTranslator,
+): string {
+  return translator("items.display_name", value.displayName) ?? value.displayName;
 }
 ```
 
@@ -136,9 +136,9 @@ export function itemsDisplayNameText(value: { displayName: string }): string {
 
 `returns = "string"` 表示全局函数总是返回最终文案；`returns = "optional"` 表示返回 `string | undefined`，helper 会 fallback 到 raw text。
 
-- helper 默认同步返回 string。异步远程翻译不应混入基础 row helper；业务应在 translator 内预加载 catalog，或未来通过单独 option 生成 `displayNameTextAsync`。
+- helper 同步返回 string；可选字段的 raw 值为 `undefined` 时直接返回 `undefined`，不调用 translator。异步远程翻译不应混入基础 row helper；业务应在 translator 内预加载 catalog。
 - helper fallback 到 raw text，不抛出翻译缺失错误；若 translator 抛错，错误按普通业务异常传播。
-- helper method、relation method、`link(data)` 和 cache slot 同属 row/object object literal scope；命名冲突必须在生成前发现。
+- 翻译 helper 名称包含所属 table/object 与字段名，并在模块作用域检查冲突；relation method、`link(data)` 和 cache slot 则在 row/object 作用域检查冲突。
 
 ## TypeScript LazyGameData 生成方案
 
