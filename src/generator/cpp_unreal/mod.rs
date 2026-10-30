@@ -158,6 +158,21 @@ impl ArtifactGenerator for CppUnrealCodeGenerator {
         GeneratorRequirements::meta_only()
     }
 
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<std::path::PathBuf>> {
+        let input = input.code_export_input(self)?;
+        cpp_unreal_options(&input)?;
+        Ok(vec![
+            input
+                .target
+                .out_dir
+                .join(input.target.single_file_name("generated", "h")),
+            input
+                .target
+                .out_dir
+                .join(format!("{}.cpp", input.target.file_stem("generated"))),
+        ])
+    }
+
     fn generate_to_sink(
         &self,
         input: &GeneratorCommonInput<'_>,

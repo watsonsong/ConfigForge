@@ -156,7 +156,121 @@ mod tests {
         descriptor: GeneratorDescriptor,
     }
 
+    #[test]
+    fn every_builtin_generator_writes_exactly_its_planned_artifacts() {
+        use crate::{
+            ArtifactProjectInfo,
+            artifact::{ArtifactWriteMode, ArtifactWriter},
+            data::{DataSet, DataTable},
+            generator::{GeneratorCommonInput, GeneratorTaskInput, PreparedGeneratorInputs},
+            meta::{MetaModel, TargetTags},
+        };
+        let meta = MetaModel::from_toml_str(
+            r#"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+        )
+        .expect("meta");
+        let linked = meta.link().expect("linked meta");
+        let data_set = DataSet::new(vec![DataTable::new(
+            "items",
+            vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+        )]);
+        let report = crate::validation::ValidationReport::default();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .expect("pool");
+        let registry = GeneratorRegistry::with_builtin_generators();
+        for generator in &registry.generators {
+            for custom in [false, true] {
+                let type_id = generator.type_id();
+                let mut options = BTreeMap::new();
+                if custom {
+                    if matches!(type_id, "rust" | "cpp") {
+                        options.insert(
+                            type_id.to_owned(),
+                            toml::Value::Table(toml::map::Map::from_iter([
+                                (
+                                    "runtime_interface".to_owned(),
+                                    toml::Value::String("external".to_owned()),
+                                ),
+                                (
+                                    "runtime_interface_emit".to_owned(),
+                                    toml::Value::String("reference".to_owned()),
+                                ),
+                            ])),
+                        );
+                    }
+                    if matches!(
+                        type_id,
+                        "rust" | "cpp" | "cpp_unreal" | "java" | "csharp" | "typescript"
+                    ) {
+                        options.insert(
+                            "file_name".to_owned(),
+                            toml::Value::String("CustomConfig".to_owned()),
+                        );
+                    }
+                }
+                let input = GeneratorCommonInput {
+                    meta: &linked,
+                    target_tags: TargetTags::empty(),
+                    project: ArtifactProjectInfo::default(),
+                    project_root: ".".into(),
+                    target_name: "test".to_owned(),
+                    task_name: type_id.to_owned(),
+                    type_id: type_id.to_owned(),
+                    output: "out".into(),
+                    options,
+                    generated_at: "2026-10-28T00:00:00Z".to_owned(),
+                };
+                let task_input = GeneratorTaskInput {
+                    common: input,
+                    prepared: PreparedGeneratorInputs::Planning,
+                };
+                let mut planned = generator.plan_task_artifacts(&task_input).expect(type_id);
+                assert!(!planned.is_empty(), "{type_id} must declare its artifacts");
+                let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+                sink.reserve_paths(planned.clone()).expect(type_id);
+                let task_input = GeneratorTaskInput {
+                    common: task_input.common,
+                    prepared: if generator.requirements().needs_data {
+                        PreparedGeneratorInputs::MetaAndData {
+                            data_set: &data_set,
+                            validation_report: &report,
+                            pool: &pool,
+                        }
+                    } else {
+                        PreparedGeneratorInputs::MetaOnly
+                    },
+                };
+                generator.generate(&task_input, &sink).expect(type_id);
+                let actual = sink
+                    .finish()
+                    .expect(type_id)
+                    .entries
+                    .into_iter()
+                    .map(|entry| entry.path)
+                    .collect::<Vec<_>>();
+                planned.sort();
+                assert_eq!(planned, actual, "{type_id}, custom={custom}");
+            }
+        }
+    }
+
     impl ArtifactGenerator for StubGenerator {
+        fn plan_artifacts(
+            &self,
+            _input: &crate::generator::GeneratorCommonInput<'_>,
+        ) -> Result<Vec<std::path::PathBuf>> {
+            Ok(Vec::new())
+        }
+
         fn type_id(&self) -> &'static str {
             self.descriptor.type_id
         }

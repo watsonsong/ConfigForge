@@ -183,6 +183,11 @@ impl ArtifactGenerator for CSharpCodeGenerator {
         GeneratorRequirements::meta_only()
     }
 
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<std::path::PathBuf>> {
+        let input = input.code_export_input(self)?;
+        Ok(vec![csharp_output_path(&input)])
+    }
+
     fn generate_to_sink(
         &self,
         input: &GeneratorCommonInput<'_>,

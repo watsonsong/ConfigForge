@@ -624,9 +624,9 @@ config-forge --project ConfigForge.toml --target client
 1. 解析 Project Config，并递归加载其顶层 `imports` 指向的工程配置片段。
 2. 按 `--target` 找到目标 target。
 3. 合并所有配置片段中的 `enums`、`structs`、`tables` 并完成 link/validate。
-4. 根据 `[[targets.exports]]` 与 generator requirements 构造 target-local execution summary；当前实现按 MetaAndData / MetaOnly 两类输入需求执行，而不是完整通用 DAG 调度器。若 target 同时包含两类任务，source read 会与 Meta link 并行；Meta link 完成后，MetaOnly 分支立即运行格式无关 codegen / schema docs 等不需要 Data 的 generator，不等待 source read、归一化、校验或数据相关 generator。MetaAndData 分支继续读取 `project.input`、归一化、校验并运行数据相关 generator。
+4. 根据 `[[targets.exports]]` 与 generator requirements 构造 target-local execution summary；当前实现按 MetaAndData / MetaOnly 两类输入需求执行，而不是完整通用 DAG 调度器。若 target 同时包含两类任务，source read 会与 Meta link 并行。Meta link 完成后，先规划所有 export task 的输出路径（包含配套源文件、manifest、report/doc），按声明顺序交给共享 `ArtifactSink` 统一检查并预留；规划失败时任何 generator 都不写文件，Direct 模式也保留已有产物。规划成功后 MetaOnly 分支运行格式无关 codegen / schema docs 等不需要 Data 的 generator，不等待 source read、归一化、校验或数据相关 generator。MetaAndData 分支继续读取 `project.input`、归一化、校验并运行数据相关 generator。
 5. 同 `(project.input, effective_tags)` 且 requirements 包含 Data 的 export task 复用加载、归一化和校验结果。
-6. 汇总所有 export artifacts，按 export task 声明顺序稳定排序，并统一完成路径归一化和冲突检查。
+6. 生成器只能向计划内的路径写出，每个路径只允许打开一次；成功完成构建时，预留路径必须全部生成。
 7. 按 `--dry-run` / `--write-mode` 写出 artifact，或在 dry-run 模式下只返回写入计划；artifact writer 通过 shared `ArtifactSink` 管理 path reservation、Direct / TempCommit / DryRun 生命周期与 result entries。当前 runtime table / aggregate / code-like generator 已走 sink-first streaming 输出；设计上接受 Meta/DataSet 全量驻留内存，避免为了大表额外引入 out-of-core DataSet 或按 target 重读 source 的复杂机制。
 8. 如果传入 `--trace-tasks`，在构建成功或阶段式 build 失败后写出 trace JSON，用于分析 Project load、input preparation、exporter、artifact write 等阶段耗时；失败阶段会标记为 `failed`，未开始的后续阶段不会出现在 trace 中。
 9. 未声明的任务不产生对应输出。例如 MetaOnly-only target 不读取 Data。

@@ -101,6 +101,7 @@ streaming 化的主入口是中心协调器 `ArtifactSink`，而不是让 genera
 pub struct ArtifactSink { /* private */ }
 
 impl ArtifactSink {
+    pub(crate) fn reserve_paths(&self, paths: impl IntoIterator<Item = PathBuf>) -> Result<()>;
     pub fn create(&self, path: impl Into<PathBuf>) -> Result<ArtifactWriteStream>;
     pub fn write_text(&self, path: impl Into<PathBuf>, content: impl AsRef<str>) -> Result<()>;
     pub fn write_binary(&self, path: impl Into<PathBuf>, content: impl AsRef<[u8]>) -> Result<()>;
@@ -118,10 +119,11 @@ impl ArtifactWriteStream {
 
 语义：
 
-- `create(path)` 是唯一打开 artifact 写入流的入口。它会规范化 final path，在协调器的全局 registry 中原子占用该 path，并根据 `ArtifactWriteMode` 返回 direct / temp / counting writer。
+- Build 在任何 generator 执行前调用 `reserve_paths(paths)`，一次性检查并预留整个 target 的输出路径；只读取文件系统 metadata，不创建目录或文件。预留成功后 sink 进入严格计划模式。
+- `create(path)` 是唯一打开 artifact 写入流的入口。严格计划模式下只允许打开 `Reserved` 路径一次，并再次检查 filesystem conflict key；未声明路径或重复打开都会失败。独立调用 `open_sink()` 的低层调用方仍可使用动态路径模式。
 - `write_text()` / `write_binary()` 是 convenience API，内部等价于 `create(path) -> write_all(...) -> finish()`；它们不是另一套写入机制。
 - `ArtifactWriteStream` 实现 `std::io::Write`，使 JSON / MessagePack / bin / Lua / codegen 都可以使用同一套 `write_all()` / serializer-to-writer 接口。
-- `finish()` 关闭当前 stream，记录 bytes 与临时文件路径；`ArtifactSink::finish()` 等待所有 stream 完成，并在 `TempCommit` 模式执行统一 commit。
+- `finish()` 关闭当前 stream，记录 bytes 与临时文件路径；`ArtifactSink::finish()` 检查所有预留路径均已生成且所有 stream 已完成，并在 `TempCommit` 模式执行统一 commit。
 - `ArtifactWriter::write(Vec<Artifact>)` 保留为兼容入口，但实现上应转调 `ArtifactSink`，避免长期维护两套写入路径。
 
 中心协调器内部维护的状态建议为：
@@ -135,20 +137,23 @@ struct ArtifactSinkState {
 }
 
 enum ArtifactPathState {
+    Reserved,
     Open,
     Finished,
     Failed,
 }
 ```
 
-`paths` 的 key 必须使用 artifact 模块统一的 path normalization 结果；后续 filesystem-aware key 也应只在 artifact 模块中实现，不能让 build / artifact generator 各自维护不同规则。
+`paths` 的 key 必须使用 artifact 模块统一的 path normalization 结果；filesystem-aware conflict key 也只在 artifact 模块中实现，不能让 build / artifact generator 各自维护不同规则。
 
 ## 7.4 Artifact Writer 流程
 
 ```text
 Build creates ArtifactSink
+  -> all generators plan paths after Meta link
+  -> sink.reserve_paths checks and reserves all target paths
   -> artifact generator asks sink.create(path)
-  -> sink normalizes and reserves final path atomically
+  -> sink claims a Reserved path atomically
   -> task writes bytes through ArtifactWriteStream::write_all / serializer.write_to
   -> stream.finish records bytes and stream status
   -> sink.finish returns stable ArtifactWriteResult
@@ -157,9 +162,9 @@ Build creates ArtifactSink
      -> if TempCommit: all temp files replace final paths in stable order
 ```
 
-路径冲突检查不要求 build 一开始预判所有 artifact path；但所有写入都必须经过同一个 `ArtifactSink`。`create(path)` 在写入流打开前完成 path normalization 与 registry 占用：如果 normalized final path 已经处于 `Open` / `Finished` / `Failed` 任一状态，立即返回 duplicate artifact path 错误。这样可以在生成过程中动态发现跨 task 冲突，同时避免多个任务绕过协调器直接写同一 final path。
+Build 必须在生成开始前收集所有 export task 的完整输出清单，包括 MetaOnly、MetaAndData、report/doc 与附属 manifest。`ArtifactGenerator::plan_artifacts()` 是必需方法，没有默认空清单；具体 generator 负责根据 Meta、target tags 与 options 计算路径，不依赖 Data 内容或执行 serialization。Build 按 export task 声明顺序把所有路径交给同一个 `ArtifactSink::reserve_paths()`，存在冲突时任何 generator 都不得写文件，Direct 模式下已有文件内容也必须保留。
 
-当前 Artifact Writer 的 final authority 使用 lexical-normalized path 作为冲突 key：它能消除 `.` / `..` 造成的字符串差异，但不会解析 symlink，也不会在 macOS / Windows 上做大小写折叠。因此 `Out/items.json` 与 `out/items.json` 在大小写不敏感文件系统上可能实际冲突但当前不会提前报 duplicate path；通过 symlink 指向同一目录的两个输出 root 也可能绕过 lexical check。中期方案是在 `ArtifactSink::create()` 对已存在的父目录做 canonicalize，并在 macOS / Windows 或探测到大小写不敏感卷时引入可选 case-fold key；不存在的路径继续保留 lexical fallback，避免要求输出目录预先存在。平台细节见 [`../Tech/platform-filesystem-semantics.md`](../Tech/platform-filesystem-semantics.md)。
+`reserve_paths()` 与 `create()` 共用 artifact 模块的 path normalization、output-root containment 与 filesystem-aware conflict key：解析已存在 ancestor 的 symlink / junction，macOS / Windows 使用 ASCII case-fold，Unix 对已存在文件使用 inode identity 检测 hardlink alias。不存在的 suffix 保留 lexical fallback，避免要求输出目录预先存在。`create()` 重新计算 conflict key，保留预留时的 key，并检查路径是否已被其他制品占用；路径从 `Reserved` 转为 `Open` 后不能再次打开。平台细节见 [`../Tech/platform-filesystem-semantics.md`](../Tech/platform-filesystem-semantics.md)。
 
 ### 7.4.1 中心协调式 ArtifactSink pipeline
 
@@ -168,7 +173,7 @@ runtime table exporter、aggregate exporter 和 codegen 可以并行生成 artif
 设计目标：
 
 1. 用一个中心协调器统一 path reservation、dry-run、direct、temp-commit、byte accounting 和 result entry 生成，避免 `Vec<Artifact>` writer 与 streaming writer 长期并存。
-2. 不强制 build 一开始预判所有 artifact path；path 冲突可以在 `ArtifactSink::create(path)` 时动态发现，但发现冲突后必须阻断当前 stream，并使最终 `finish()` 返回稳定错误。
+2. Build 在生成前统一规划并预留整个 target 的 artifact path；`create(path)` 校验计划契约并防止重复写入。路径规划只收集 metadata，不 materialize artifact 内容。
 3. ArtifactSink 只负责返回标准同步 `std::io::Write` 流和管理文件生命周期，不承担全局资源调度职责。
 4. 保持 `DryRun`、`Direct`、`TempCommit` 语义稳定；dry-run 不创建目录、不写临时文件，但仍执行内容生成并通过 counting writer 获得准确 bytes。
 5. 保持 result entries、commit 顺序与错误优先级稳定。
@@ -213,6 +218,7 @@ Build / generators
   -> generate and collect Vec<Artifact> in declaration order
   -> ArtifactWriter::new(mode).write(artifacts)
      -> create ArtifactSink
+     -> sink.reserve_paths(all artifact paths)
      -> for artifact in artifacts: sink.write_text/write_binary(...)
      -> sink.finish()
 ```
@@ -222,6 +228,7 @@ Build 主流程：
 ```text
 build_target()
   -> ArtifactWriter::new(mode).open_sink()
+  -> Meta link, then plan all task artifacts and reserve_paths
   -> run generator branches with shared sink
   -> sink.finish()
 ```
@@ -231,9 +238,10 @@ streaming generator 流程：
 ```text
 Build / generators
   -> ArtifactWriter::new(mode).open_sink()
+  -> plan all artifact paths and sink.reserve_paths(paths)
   -> tasks run in parallel
      -> stream = sink.create(path)
-        -> normalize final path and reserve it in registry atomically
+        -> normalize final path and claim its reservation atomically
         -> create CountingWriter / final file / temp file stream
      -> serializer.write_to(&mut stream) or stream.write_all(bytes)
         -> stream writes directly to counting writer / final file / temp file
@@ -265,7 +273,8 @@ Build / generators
 `ArtifactWriteStream` 的生命周期必须显式结束：
 
 ```text
-create(path) -> Open
+reserve_paths(paths) -> Reserved
+  -> create(path) -> Open
   -> write(...)*
   -> finish() -> Finished
 ```
@@ -357,7 +366,7 @@ CLI dry-run 不应跳过 validation 或 serialization/codegen，因为用户需�
 
 Artifact 模块单元测试应覆盖：
 
-1. 相同 path 的 artifact 在第二次 `ArtifactSink::create()` 时立即报错。
+1. 跨 MetaOnly / MetaAndData task 的路径冲突在 `reserve_paths()` 时失败，Direct 模式下已有文件保持原样；计划内路径重复 `create()` 也会失败。
 2. dry-run 不创建父目录、不写文件，但返回稳定排序 entries。
 3. direct 模式通过 `ArtifactWriteStream` 创建父目录并写入 text/binary 内容。
 4. write entries 按 path 稳定排序。
@@ -389,5 +398,5 @@ Artifact 模块单元测试应覆盖：
 
 - 继续压缩兼容 API 的使用面：`ArtifactWriter::write(Vec<Artifact>)`、table exporter `serialize_table()` 和 aggregate exporter `export()` 只应作为测试 / 兼容 helper，不应回到 Build 主路径。
 - 短期使用同步 file writer 与标准 `std::io::Write` 接口；远端 source provider 落地时再评估是否引入 async runtime。
-- filesystem-aware path key 可在跨平台大小写不敏感冲突或 symlink alias 成为实际问题时接入，当前 lexical-normalized key 继续作为默认 authority。
+- filesystem-aware path key 已用于全局规划与写入；后续可改进卷级大小写策略与 canonicalize 失败诊断。
 - summary manifest、远端上传、增量缓存或分布式 artifact store 应作为独立 writer / exporter 扩展，不改变当前 Artifact Writer 的基础语义。

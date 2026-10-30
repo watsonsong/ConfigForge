@@ -154,6 +154,23 @@ impl ArtifactGenerator for RustCodeGenerator {
         GeneratorRequirements::meta_only()
     }
 
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<std::path::PathBuf>> {
+        let input = input.code_export_input(self)?;
+        let options = input
+            .target
+            .options
+            .language_options::<RustCodegenOptions>(LANGUAGE)?;
+        validate_runtime_interface_options(&options)?;
+        let mut paths = vec![rust_output_path(&input)];
+        if matches!(
+            options.runtime_interface_emit,
+            RuntimeInterfaceEmit::Reference
+        ) {
+            paths.push(runtime_interface_manifest_path(&input));
+        }
+        Ok(paths)
+    }
+
     fn generate_to_sink(
         &self,
         input: &GeneratorCommonInput<'_>,

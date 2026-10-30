@@ -7,14 +7,130 @@ use crate::diagnostic::code::CF_ARTIFACT_CASE_INSENSITIVE_COLLISION;
 use crate::{
     ConfigForgeError, Result,
     diagnostic::code::{
-        CF_ARTIFACT_HARDLINK_ALIAS_COLLISION, CF_ARTIFACT_PATH_COLLISION, CF_ARTIFACT_PATH_ESCAPE,
-        CF_ARTIFACT_SYMLINK_ALIAS_COLLISION, CF_ARTIFACT_WRITE_STATE,
+        CF_ARTIFACT_PATH_COLLISION, CF_ARTIFACT_PATH_ESCAPE, CF_ARTIFACT_SYMLINK_ALIAS_COLLISION,
+        CF_ARTIFACT_WRITE_STATE,
     },
 };
 
 use super::{path::temp_path_for, writer::ArtifactWriteTarget, *};
 
+#[cfg(unix)]
+use crate::diagnostic::code::CF_ARTIFACT_HARDLINK_ALIAS_COLLISION;
+
 static CURRENT_DIR_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(target_os = "windows")]
+use crate::path_util::lexical_normalize_path;
+
+#[test]
+fn reserved_paths_are_checked_before_any_direct_write() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let existing = temp.path().join("existing.txt");
+    fs::write(&existing, "original").expect("existing artifact");
+    let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+    let error = sink
+        .reserve_paths(vec![existing.clone(), temp.path().join("./existing.txt")])
+        .expect_err("duplicate reservation");
+    assert!(error.to_string().contains("multiple artifacts"));
+    assert!(sink.write_text(&existing, "replacement").is_err());
+    assert_eq!(fs::read_to_string(existing).unwrap(), "original");
+}
+
+#[test]
+fn reserved_sink_rejects_unplanned_and_unfinished_artifacts() {
+    for mode in [
+        ArtifactWriteMode::Direct,
+        ArtifactWriteMode::TempCommit,
+        ArtifactWriteMode::DryRun,
+    ] {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let planned = temp.path().join("out/planned.txt");
+        let sink = ArtifactWriter::new(mode).open_sink();
+        sink.reserve_paths(vec![planned.clone()]).expect("reserve");
+        assert!(!planned.parent().unwrap().exists());
+        let error = sink
+            .create(temp.path().join("out/unplanned.txt"))
+            .expect_err("unplanned path");
+        assert_artifact_state_diagnostic(error, "unplanned.txt");
+        assert!(!planned.parent().unwrap().exists());
+        assert!(sink.finish().is_err());
+
+        let sink = ArtifactWriter::new(mode).open_sink();
+        sink.reserve_paths(vec![planned]).expect("reserve");
+        assert_artifact_state_diagnostic(
+            sink.finish().expect_err("unused reservation"),
+            "planned.txt",
+        );
+    }
+}
+
+#[test]
+fn reserved_paths_can_be_written_once_in_all_modes() {
+    for mode in [
+        ArtifactWriteMode::Direct,
+        ArtifactWriteMode::TempCommit,
+        ArtifactWriteMode::DryRun,
+    ] {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("out/file.txt");
+        let sink = ArtifactWriter::new(mode).open_sink();
+        sink.reserve_paths(vec![path.clone()]).expect("reserve");
+        sink.write_text(&path, "content").expect("planned write");
+        assert_eq!(sink.finish().expect("finish").entries.len(), 1);
+        assert_eq!(path.exists(), mode != ArtifactWriteMode::DryRun);
+
+        let sink = ArtifactWriter::new(mode).open_sink();
+        sink.reserve_paths(vec![path.clone()]).expect("reserve");
+        sink.write_text(&path, "content")
+            .expect("planned overwrite");
+        assert!(sink.create(&path).is_err());
+        assert!(sink.finish().is_err());
+    }
+}
+
+#[test]
+fn failed_path_reservation_cannot_be_ignored() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let root = temp.path().join("project");
+    let sink = ArtifactWriter::new(ArtifactWriteMode::Direct)
+        .with_output_root(&root)
+        .open_sink();
+    assert!(
+        sink.reserve_paths(vec!["valid.txt".into(), "../escape.txt".into()])
+            .is_err()
+    );
+    assert!(sink.write_text("valid.txt", "content").is_err());
+    assert!(sink.finish().is_err());
+    assert!(!root.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn reservations_reject_filesystem_aliases_without_overwriting() {
+    use std::os::unix::fs::symlink;
+    let temp = tempfile::tempdir().expect("temp dir");
+    let real = temp.path().join("real");
+    fs::create_dir(&real).unwrap();
+    let alias = temp.path().join("alias");
+    symlink(&real, &alias).unwrap();
+    let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+    let error = sink
+        .reserve_paths(vec![real.join("new.txt"), alias.join("new.txt")])
+        .expect_err("symlink alias");
+    assert_artifact_diagnostic(error, CF_ARTIFACT_SYMLINK_ALIAS_COLLISION, "new.txt");
+    assert!(!real.join("new.txt").exists());
+
+    let first = real.join("first.txt");
+    let second = real.join("second.txt");
+    fs::write(&first, "original").unwrap();
+    fs::hard_link(&first, &second).unwrap();
+    let sink = ArtifactWriter::new(ArtifactWriteMode::Direct).open_sink();
+    let error = sink
+        .reserve_paths(vec![first.clone(), second])
+        .expect_err("hardlink alias");
+    assert_artifact_diagnostic(error, CF_ARTIFACT_HARDLINK_ALIAS_COLLISION, "second.txt");
+    assert_eq!(fs::read_to_string(first).unwrap(), "original");
+}
 
 fn assert_artifact_diagnostic(error: ConfigForgeError, code: &str, current_contains: &str) {
     let ConfigForgeError::ValidationReport(report) = error else {
@@ -27,7 +143,7 @@ fn assert_artifact_diagnostic(error: ConfigForgeError, code: &str, current_conta
         diagnostic
             .current_value
             .as_deref()
-            .is_some_and(|current| current.contains(current_contains)),
+            .is_some_and(|current| current.replace('\\', "/").contains(current_contains)),
         "expected current_value to contain `{current_contains}`, got {:?}",
         diagnostic.current_value
     );
@@ -578,6 +694,14 @@ fn output_root_detects_case_insensitive_collision_on_windows() {
 
 #[cfg(any(target_os = "macos", windows))]
 fn assert_case_alias_conflict(root: PathBuf) {
+    let reserved_sink = ArtifactWriter::new(ArtifactWriteMode::Direct)
+        .with_output_root(&root)
+        .open_sink();
+    let error = reserved_sink
+        .reserve_paths(vec!["Out/items.json".into(), "out/items.json".into()])
+        .expect_err("case alias reservation");
+    assert_artifact_diagnostic(error, CF_ARTIFACT_CASE_INSENSITIVE_COLLISION, "items.json");
+    assert!(!root.exists());
     let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun)
         .with_output_root(&root)
         .open_sink();

@@ -2,19 +2,19 @@
 
 本文档记录 ConfigForge 在不同平台文件系统上处理 path、大小写、symlink 与写入冲突时需要遵守的工程策略。它补充 `Implementation/03-project-module-detail-design.md`、`Implementation/07-artifact-module-detail-design.md` 和 `Tech/task-system-design.md`，不替代各模块文档中的职责划分。
 
-## 1. 当前状态：lexical path level
+## 1. 当前状态：统一产物规划与 filesystem-aware key
 
 当前实现中，Project path normalization 使用 `lexical_normalize_path()` 这一类词法归一化；Artifact Writer 在配置 output root 后会额外做 root containment、已存在 ancestor canonicalize、macOS / Windows case-fold conflict key、Unix hardlink inode key 与 symlink escape 检查：
 
 - 折叠 `.`；
 - 在不越过 root / prefix 的前提下折叠可安全处理的 `..`；
 - 不要求目标路径存在；
-- 不访问文件系统；
+- Project path normalization 不访问文件系统；artifact conflict check 只读取现有 metadata；
 - Project config 归一化不解析 symlink；
 - Artifact conflict key 对已存在 ancestor 解析 symlink / filesystem alias；
 - Artifact conflict key 在 macOS / Windows 采用 ASCII case-fold 的平台启发式。
 
-这保证 dry-run、未创建输出目录、首次构建等场景都可以稳定规划 artifact path，但它不是 filesystem-aware conflict detection。
+Build 在 Meta link 后、任何 generator 写入前收集全部路径，并通过共享 `ArtifactSink::reserve_paths()` 检查与预留。该入口与 `create()` 使用同一套 filesystem-aware key，覆盖 MetaOnly 与 MetaAndData 之间的冲突，同时支持 dry-run、未创建输出目录与首次构建。
 
 ## 2. 平台差异
 
@@ -27,24 +27,25 @@
 
 ## 3. 风险边界
 
-当前 lexical conflict detection 可以发现以下问题：
+当前统一 conflict detection 可以在写入前发现以下问题：
 
 - `out/./items.json` 与 `out/items.json`；
 - `out/a/../items.json` 与 `out/items.json`；
-- 两个 export task 规划出完全相同的 lexical-normalized path。
+- 两个 export task（包括跨 MetaOnly / MetaAndData 分支）规划出相同的 normalized path；
+- 已存在 ancestor 可解析的 symlink / junction alias、macOS / Windows ASCII case alias，以及 Unix 已存在文件的 hardlink alias。
 
 当前仍不能保证提前发现以下问题：
 
-- Windows junction / mount point alias；
+- canonicalize 因权限或特殊文件系统行为失败时的 junction / mount point alias；
 - 网络盘或虚拟文件系统暴露的特殊 alias。
 
 最终写入仍可能被操作系统拒绝、覆盖或表现为同一路径。后续增强的目标是在写入前更早、更稳定地诊断这些问题，而不是依赖 write error 或 platform-specific 覆盖行为。
 
-## 4. 中期 path conflict key 方案
+## 4. 当前 path conflict key 规则
 
-建议新增统一的 artifact/path key builder，供 build/runtime 的早期 planned path check 与 Artifact Writer final check 共用，避免各层实现不同规则。
+artifact 模块提供统一的 path normalization 与 conflict key builder，由 sink 的全局预留和创建流阶段共用；Build 不再维护独立的 lexical planned path check。
 
-建议算法：
+当前算法：
 
 1. 先计算 lexical-normalized path，作为稳定 fallback key 和用户可读诊断路径。
 2. 拆分为已存在父目录与尚不存在 suffix：
@@ -52,7 +53,7 @@
    - 对存在 ancestor 调用 canonicalize，解析 symlink / junction / mount alias；
    - 对不存在 suffix 保留 lexical component，不能要求输出目录预先存在。
 3. 组合 `canonicalized_existing_ancestor + lexical_suffix` 得到 filesystem-aware key。
-4. 在 macOS / Windows，或探测到所在卷大小写不敏感时，对 key 做 case-fold：
+4. 在 macOS / Windows 使用 ASCII case-fold 的平台启发式；Unix 已存在文件优先使用 inode identity key：
    - case-fold 只用于 conflict key；
    - 写入路径和 dry-run 输出仍保留用户配置的原始大小写 / lexical-normalized 展示路径。
 5. 如果 canonicalize 因权限、竞态删除、网络盘错误等失败：
@@ -103,6 +104,5 @@ Dry-run 必须执行与真实写入一致的 artifact planning 和 conflict chec
 
 ## 9. 当前开放事项
 
-- 将 build/runtime 早期 planned path conflict check 和 artifact final check 进一步收敛到同一 filesystem-aware key builder。
 - 决定大小写敏感性探测方式：当前 Artifact Writer 使用平台启发式，长期可升级为目录探测或卷 metadata。
 - 决定 canonicalize 失败时是否输出 warning，以及 warning 是否进入 `BuildOutput.warnings`。

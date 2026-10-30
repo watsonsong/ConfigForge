@@ -175,6 +175,15 @@ impl ArtifactGenerator for JavaCodeGenerator {
         GeneratorRequirements::meta_only()
     }
 
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<std::path::PathBuf>> {
+        let input = input.code_export_input(self)?;
+        let options = input
+            .target
+            .options
+            .language_options::<JavaCodegenOptions>(LANGUAGE)?;
+        Ok(vec![java_output_path(&input, &options)?])
+    }
+
     fn generate_to_sink(
         &self,
         input: &GeneratorCommonInput<'_>,

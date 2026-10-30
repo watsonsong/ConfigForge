@@ -117,7 +117,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 7. **Target-aware Validation**：`validation` 派生 `ExportValidationView`，执行 required/type/enum/index/FK/validator/asset reference 等规则并输出 `ValidationReport`。
 8. **Data-backed Generators**：`build` 在 validation 通过后复用 `AssetResolver` 将 target-visible asset 字段物化为 canonical export ref，再由 requirements 包含 Data 的 generator 生成 JSON / MessagePack / `bin` runtime data，以及 POT / Lua / Asset Manifest 等聚合或 mixed artifact；这些 generator 可复用 data artifact toolkit 的 payload / serialization helper。
 9. **Meta-only Generators**：requirements 只含 Meta 的 generator 在 MetaOnly 分支基于 `LinkedMetaModel<'meta>`、Project info 与 target tags 生成代码、Schema Docs 或其他结构产物；不触发 data load / validation。
-10. **Artifact Write**：`artifact` 统一检查制品路径冲突并执行 dry-run / direct / temp-commit 写入；由 build 创建共享 sink 并传给 generator。
+10. **Artifact Write**：build 在任何 generator 生成前统一收集所有任务的输出路径，由共享 sink 检查并预留；`artifact` 是路径规则的唯一 authority，执行 dry-run / direct / temp-commit 写入并检查计划与实际输出一致。
 
 ## 1.5 当前 Implementation 文档目录
 

@@ -7,6 +7,214 @@ use predicates::prelude::*;
 use std::fs;
 
 #[test]
+fn all_builtin_generators_share_a_complete_target_plan_in_all_modes() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    fs::create_dir(temp.path().join("data")).unwrap();
+    fs::write(temp.path().join("data/items.csv"), "id\n1\n").unwrap();
+    let mut config = String::from(
+        r#"
+        [project]
+        input = "data"
+        [[tables]]
+        name = "items"
+        source = "items.csv"
+        [[tables.fields]]
+        name = "id"
+        type = "int"
+        [[targets]]
+        name = "all"
+    "#,
+    );
+    for type_id in [
+        "rust",
+        "cpp",
+        "cpp_unreal",
+        "typescript",
+        "csharp",
+        "java",
+        "json",
+        "messagepack",
+        "bin",
+        "gettext_pot",
+        "lua_table",
+        "asset_manifest",
+        "schema_doc",
+        "validation_report",
+    ] {
+        config.push_str(&format!(
+            r#"
+            [[targets.exports]]
+            type = "{type_id}"
+            output = "out/{type_id}"
+        "#
+        ));
+        if matches!(type_id, "rust" | "cpp") {
+            config.push_str(&format!(r#"
+                {type_id} = {{ runtime_interface = "external", runtime_interface_emit = "reference" }}
+            "#));
+        }
+    }
+    let project = temp.path().join("ConfigForge.toml");
+    fs::write(&project, config).unwrap();
+    let project = project.to_str().unwrap();
+    let out = temp
+        .path()
+        .canonicalize()
+        .expect("canonical project root")
+        .join("out");
+    let dry_run = run_config_forge_stdout(&[
+        "--project",
+        project,
+        "--target",
+        "all",
+        "--dry-run",
+        "--jobs",
+        "4",
+    ]);
+    assert!(!out.exists());
+    let planned_paths = dry_run_artifact_entries(&dry_run, &out)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect::<Vec<_>>();
+    for mode in ["direct", "temp-commit"] {
+        run_config_forge_success(&[
+            "--project",
+            project,
+            "--target",
+            "all",
+            "--write-mode",
+            mode,
+            "--jobs",
+            "4",
+        ]);
+        let actual = collect_file_tree(&out);
+        assert_eq!(actual.keys().cloned().collect::<Vec<_>>(), planned_paths);
+        assert!(actual.contains_key("rust/config_forge_runtime_interface.json"));
+        assert!(actual.contains_key("cpp/generated.cpp"));
+        assert!(actual.contains_key("cpp_unreal/generated.cpp"));
+        assert!(actual.contains_key("json/items.json"));
+    }
+}
+
+#[test]
+fn target_planning_rejects_cross_branch_and_auxiliary_collisions_before_writing() {
+    let cases = [
+        (
+            "items.json",
+            r#"
+            [[targets.exports]]
+            type = "json"
+            output = "out/collision"
+            [[targets.exports]]
+            type = "rust"
+            output = "out/collision"
+            file_name = "items.json"
+        "#,
+        ),
+        (
+            "generated.rs",
+            r#"
+            [[targets.exports]]
+            name = "first-rust"
+            type = "rust"
+            output = "out/collision"
+            [[targets.exports]]
+            name = "second-rust"
+            type = "rust"
+            output = "out/collision"
+        "#,
+        ),
+        (
+            "generated.cpp",
+            r#"
+            [[targets.exports]]
+            type = "cpp"
+            output = "out/collision"
+            [[targets.exports]]
+            type = "rust"
+            output = "out/collision"
+            file_name = "generated.cpp"
+        "#,
+        ),
+        (
+            "config_forge_runtime_interface.json",
+            r#"
+            [[targets.exports]]
+            type = "rust"
+            output = "out/collision"
+            rust = { runtime_interface = "external", runtime_interface_emit = "reference" }
+            [[targets.exports]]
+            type = "cpp"
+            output = "out/collision"
+            cpp = { runtime_interface = "external", runtime_interface_emit = "reference" }
+        "#,
+        ),
+    ];
+    for (file_name, exports) in cases {
+        for mode in ["direct", "temp-commit", "dry-run"] {
+            for jobs in ["1", "4"] {
+                let temp = tempfile::tempdir().expect("temp dir");
+                let out = temp.path().join("out");
+                fs::create_dir(temp.path().join("data")).unwrap();
+                fs::write(temp.path().join("data/items.csv"), "id\n1\n").unwrap();
+                fs::create_dir_all(out.join("collision")).unwrap();
+                let existing = out.join("collision").join(file_name);
+                fs::write(&existing, "original artifact").unwrap();
+                let before = collect_file_tree(&out);
+                let project = temp.path().join("ConfigForge.toml");
+                fs::write(
+                    &project,
+                    format!(
+                        r#"
+                    [project]
+                    input = "data"
+                    [[tables]]
+                    name = "items"
+                    source = "items.csv"
+                    [[tables.fields]]
+                    name = "id"
+                    type = "int"
+                    [[targets]]
+                    name = "client"
+                    tags = ["client"]
+                    [[targets.exports]]
+                    type = "typescript"
+                    output = "out/unrelated"
+                    {exports}
+                "#
+                    ),
+                )
+                .unwrap();
+                let mut command = Command::cargo_bin("config-forge").unwrap();
+                command.args([
+                    "--project",
+                    project.to_str().unwrap(),
+                    "--target",
+                    "client",
+                    "--jobs",
+                    jobs,
+                ]);
+                if mode == "dry-run" {
+                    command.arg("--dry-run");
+                } else {
+                    command.args(["--write-mode", mode]);
+                }
+                command
+                    .assert()
+                    .failure()
+                    .stderr(predicate::str::contains("multiple artifacts"));
+                assert_eq!(
+                    collect_file_tree(&out),
+                    before,
+                    "{file_name}, {mode}, jobs={jobs}"
+                );
+                assert!(!out.join("unrelated").exists());
+            }
+        }
+    }
+}
+
+#[test]
 fn dry_run_serial_and_parallel_outputs_match() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let data_out_dir = temp_dir.path().join("out/data");

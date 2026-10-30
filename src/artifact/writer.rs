@@ -56,6 +56,7 @@ impl ArtifactWriter {
     pub fn write(self, artifacts: Vec<Artifact>) -> Result<ArtifactWriteResult> {
         let planned = super::path::plan_artifacts(artifacts)?;
         let sink = self.open_sink();
+        sink.reserve_paths(planned.iter().map(|artifact| artifact.path.clone()))?;
         for artifact in planned {
             match artifact.content {
                 ArtifactContent::Text(content) => sink.write_text(artifact.path, &content)?,
@@ -84,6 +85,53 @@ impl ArtifactSink {
         }
     }
 
+    pub(crate) fn reserve_paths(&self, paths: impl IntoIterator<Item = PathBuf>) -> Result<()> {
+        let mut state = self.inner.lock_state();
+        if state.closed || state.planned || !state.paths.is_empty() || state.first_error.is_some() {
+            return Err(artifact_state_error(
+                "artifact paths must be reserved before writing".to_owned(),
+                "artifact sink already used",
+                "unused artifact sink",
+            ));
+        }
+        state.planned = true;
+        state.first_error = Some(artifact_state_error(
+            "artifact path reservation did not complete".to_owned(),
+            "incomplete artifact plan",
+            "all artifact paths successfully reserved",
+        ));
+        let mut reserved = BTreeMap::<PathBuf, ArtifactPathState>::new();
+        let mut conflict_keys = BTreeMap::<PathBuf, PathBuf>::new();
+        for path in paths {
+            let path = normalize_artifact_path(self.output_root.as_deref(), &path)?;
+            let key = artifact_conflict_key(self.output_root.as_deref(), &path)?;
+            if let Some(existing) = conflict_keys
+                .get(&key)
+                .or_else(|| reserved.get_key_value(&path).map(|(path, _)| path))
+            {
+                let error = artifact_collision_error(
+                    artifact_collision_code(&path, existing, &key),
+                    &artifact_collision_message(&path, existing),
+                    &path,
+                    existing,
+                );
+                state.first_error = Some(artifact_collision_error(
+                    artifact_collision_code(&path, existing, &key),
+                    &artifact_collision_message(&path, existing),
+                    &path,
+                    existing,
+                ));
+                return Err(error);
+            }
+            reserved.insert(path.clone(), ArtifactPathState::Reserved);
+            conflict_keys.insert(key, path);
+        }
+        state.paths = reserved;
+        state.conflict_keys = conflict_keys;
+        state.first_error = None;
+        Ok(())
+    }
+
     pub fn create(&self, path: impl Into<PathBuf>) -> Result<ArtifactWriteStream> {
         let path = path.into();
         let normalized_path = normalize_artifact_path(self.output_root.as_deref(), &path)?;
@@ -97,8 +145,12 @@ impl ArtifactSink {
                     "open artifact sink",
                 ));
             }
-            if state.paths.contains_key(&normalized_path)
-                || state.conflict_keys.contains_key(&conflict_key)
+            let reserved = state.paths.get(&normalized_path) == Some(&ArtifactPathState::Reserved);
+            if (state.paths.contains_key(&normalized_path) && !reserved)
+                || state
+                    .conflict_keys
+                    .get(&conflict_key)
+                    .is_some_and(|existing| !reserved || existing != &normalized_path)
             {
                 let existing = state
                     .conflict_keys
@@ -128,6 +180,20 @@ impl ArtifactSink {
                     normalized_path.display().to_string(),
                     "artifact sink without prior write failure",
                 ));
+            }
+
+            if state.planned && !reserved {
+                let error = artifact_state_error(
+                    "generator attempted to write an unplanned artifact".to_owned(),
+                    normalized_path.display().to_string(),
+                    "artifact path declared during planning",
+                );
+                state.first_error = Some(artifact_state_error(
+                    "generator attempted to write an unplanned artifact".to_owned(),
+                    normalized_path.display().to_string(),
+                    "artifact path declared during planning",
+                ));
+                return Err(error);
             }
 
             let index = state.next_index;
@@ -220,12 +286,17 @@ impl ArtifactSink {
             let open_paths = state
                 .paths
                 .iter()
-                .filter(|(_, status)| **status == ArtifactPathState::Open)
+                .filter(|(_, status)| {
+                    matches!(
+                        status,
+                        ArtifactPathState::Open | ArtifactPathState::Reserved
+                    )
+                })
                 .map(|(path, _)| path.display().to_string())
                 .collect::<Vec<_>>();
             if !open_paths.is_empty() && state.first_error.is_none() {
                 state.first_error = Some(artifact_state_error(
-                    format!("artifact stream `{}` was not finished", open_paths[0]),
+                    format!("planned artifact `{}` was not finished", open_paths[0]),
                     &open_paths[0],
                     "all artifact streams finished before sink.finish",
                 ));
@@ -464,6 +535,7 @@ impl ArtifactSinkInner {
 struct ArtifactSinkState {
     next_index: usize,
     closed: bool,
+    planned: bool,
     paths: BTreeMap<PathBuf, ArtifactPathState>,
     conflict_keys: BTreeMap<PathBuf, PathBuf>,
     entries: BTreeMap<PathBuf, ArtifactWriteEntry>,
@@ -473,6 +545,7 @@ struct ArtifactSinkState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArtifactPathState {
+    Reserved,
     Open,
     Finished,
     Failed,

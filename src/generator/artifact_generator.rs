@@ -38,10 +38,9 @@ pub(crate) trait ArtifactGenerator: Send + Sync {
     fn generate_to_sink(&self, input: &GeneratorCommonInput<'_>, sink: &ArtifactSink)
     -> Result<()>;
 
-    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
-        let _ = input;
-        Ok(Vec::new())
-    }
+    /// Declares every output path, including auxiliary files, without writing artifacts.
+    /// Paths must depend only on schema, target tags and task options, never row contents.
+    fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>>;
 
     fn generate_with_data_to_sink(
         &self,

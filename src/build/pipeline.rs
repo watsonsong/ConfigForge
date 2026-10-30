@@ -18,6 +18,7 @@ use crate::{
 };
 
 use super::{
+    artifact_plan::plan_target_artifacts,
     build_diagnostic_error, input_required_error,
     plan::{BuildDependencyPlan, TargetBuildPlan, build_execution_view_detail},
     runtime::export_meta_and_data_tasks,
@@ -164,6 +165,29 @@ fn execute_export_pipeline<'meta>(
                 .link()
                 .map_err(crate::meta::meta_diagnostics_to_report)
                 .map_err(ConfigForgeError::MetaValidation)?;
+            let mut all_exports = runtime_exports
+                .iter()
+                .chain(meta_only_exports)
+                .copied()
+                .collect::<Vec<_>>();
+            all_exports.sort_by_key(|(index, _)| *index);
+            plan_target_artifacts(
+                &all_exports
+                    .into_iter()
+                    .map(|(_, task)| task)
+                    .collect::<Vec<_>>(),
+                GeneratorCommonInputContext {
+                    linked_meta: &linked_meta,
+                    target_tags,
+                    project_root,
+                    project_info,
+                    target_name,
+                    generated_at,
+                },
+                generator_registry,
+                pool,
+                sink,
+            )?;
             let meta_only_context = MetaOnlyGeneratorContext {
                 project_root,
                 project_info,

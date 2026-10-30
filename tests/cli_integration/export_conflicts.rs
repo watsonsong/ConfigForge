@@ -110,7 +110,7 @@ fn rejects_runtime_data_path_conflict_before_writing_files() {
 
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("multiple data artifacts target"));
+        .stderr(predicate::str::contains("multiple artifacts target"));
     assert!(!data_out_dir.join("items.json").exists());
     assert!(!data_out_dir.join("game_rules.json").exists());
 }
@@ -263,7 +263,7 @@ fn rejects_lexically_equivalent_runtime_data_path_conflict_before_writing_files(
 
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("multiple data artifacts target"));
+        .stderr(predicate::str::contains("multiple artifacts target"));
     assert!(!data_out_dir.join("items.json").exists());
     assert!(!data_out_dir.join("game_rules.json").exists());
 }

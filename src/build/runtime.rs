@@ -2,22 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use rayon::{ThreadPool, prelude::*};
-use std::collections::BTreeSet;
 
 use crate::{
     ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::ArtifactSink,
     asset::AssetResolver,
     data::{DataRow, DataSet, DataTable, RawSourceData},
-    diagnostic::code::{
-        CF_ARTIFACT_PATH_COLLISION, CF_BUILD_EXPORT_TASK_FAILED, CF_BUILD_INPUT_REQUIRED,
-    },
+    diagnostic::code::{CF_BUILD_EXPORT_TASK_FAILED, CF_BUILD_INPUT_REQUIRED},
     generator::{
         GeneratorCommonInput, GeneratorCommonInputContext, GeneratorRegistry, GeneratorTaskInput,
         PreparedGeneratorInputs,
     },
     meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags},
-    path_util::lexical_normalize_path,
     project::AssetsConfig,
     validation::{
         normalize_data_set_with_pool,
@@ -53,37 +49,6 @@ pub(super) fn export_meta_and_data_tasks(
     pool: &ThreadPool,
     sink: &ArtifactSink,
 ) -> Result<RuntimeExportOutput> {
-    export_meta_and_data_tasks_with_generator_registry(
-        raw_sources,
-        export_tasks,
-        linked_meta,
-        assets,
-        target_tags,
-        project_root,
-        project_info,
-        target_name,
-        generated_at,
-        generator_registry,
-        pool,
-        sink,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn export_meta_and_data_tasks_with_generator_registry(
-    raw_sources: Option<&RawSourceData>,
-    export_tasks: &[&NormalizedExportTask],
-    linked_meta: &LinkedMetaModel<'_>,
-    assets: &AssetsConfig,
-    target_tags: &TargetTags,
-    project_root: &std::path::Path,
-    project_info: &ArtifactProjectInfo,
-    target_name: &str,
-    generated_at: &str,
-    generator_registry: &GeneratorRegistry,
-    pool: &ThreadPool,
-    sink: &ArtifactSink,
-) -> Result<RuntimeExportOutput> {
     if export_tasks.is_empty() {
         return Ok(RuntimeExportOutput {
             warnings: Vec::new(),
@@ -101,18 +66,6 @@ fn export_meta_and_data_tasks_with_generator_registry(
             "Check build input preparation and generator requirements before runtime export.",
         )
     })?;
-
-    ensure_planned_runtime_output_paths(
-        export_tasks,
-        linked_meta,
-        target_tags,
-        project_root,
-        project_info,
-        target_name,
-        generated_at,
-        generator_registry,
-        pool,
-    )?;
 
     let data_set = normalize_data_set_with_pool(linked_meta, raw_sources.as_data_set(), pool)?;
     let validation_outcome = validate_normalized_data_set_for_target_with_assets_outcome_and_pool(
@@ -423,89 +376,6 @@ fn export_meta_and_data_task(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn ensure_planned_runtime_output_paths(
-    export_tasks: &[&NormalizedExportTask],
-    linked_meta: &LinkedMetaModel<'_>,
-    target_tags: &TargetTags,
-    project_root: &std::path::Path,
-    project_info: &ArtifactProjectInfo,
-    target_name: &str,
-    generated_at: &str,
-    generator_registry: &GeneratorRegistry,
-    pool: &ThreadPool,
-) -> Result<()> {
-    let mut paths = BTreeSet::new();
-    let mut planned_by_task = pool.install(|| {
-        export_tasks
-            .par_iter()
-            .enumerate()
-            .map(|(index, export_task)| {
-                (
-                    index,
-                    plan_runtime_output_paths_for_task(
-                        export_task,
-                        linked_meta,
-                        target_tags,
-                        project_root,
-                        project_info,
-                        target_name,
-                        generated_at,
-                        generator_registry,
-                    ),
-                )
-            })
-            .collect::<Vec<_>>()
-    });
-    planned_by_task.sort_by_key(|(index, _)| *index);
-
-    for (_, task_paths) in planned_by_task {
-        for path in task_paths? {
-            if !paths.insert(path.clone()) {
-                return Err(build_diagnostic_error(
-                    CF_ARTIFACT_PATH_COLLISION,
-                    "build.runtime.output",
-                    format!("multiple data artifacts target `{}`", path.display()),
-                    path.display().to_string(),
-                    "unique planned data artifact output path",
-                    "Adjust export task output or file_name so runtime data artifacts do not collide.",
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn plan_runtime_output_paths_for_task(
-    export_task: &NormalizedExportTask,
-    linked_meta: &LinkedMetaModel<'_>,
-    target_tags: &TargetTags,
-    project_root: &std::path::Path,
-    project_info: &ArtifactProjectInfo,
-    target_name: &str,
-    generated_at: &str,
-    generator_registry: &GeneratorRegistry,
-) -> Result<Vec<std::path::PathBuf>> {
-    generator_registry
-        .require_generator(&export_task.type_id)?
-        .plan_task_artifacts(&GeneratorTaskInput {
-            common: generator_common_input(
-                export_task,
-                linked_meta,
-                target_tags,
-                project_root,
-                project_info,
-                target_name,
-                generated_at,
-            ),
-            prepared: PreparedGeneratorInputs::Planning,
-        })?
-        .into_iter()
-        .map(|path| Ok(lexical_normalize_path(&path)))
-        .collect()
-}
-
 fn generator_common_input<'meta>(
     export_task: &NormalizedExportTask,
     linked_meta: &'meta LinkedMetaModel<'meta>,
@@ -556,6 +426,9 @@ mod tests {
     };
 
     use super::*;
+    use crate::{
+        build::artifact_plan::plan_target_artifacts, diagnostic::code::CF_ARTIFACT_PATH_COLLISION,
+    };
 
     struct InstrumentedAggregateGenerator {
         active_plans: Arc<AtomicUsize>,
@@ -649,7 +522,23 @@ mod tests {
             .expect("pool should build");
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
 
-        let output = export_meta_and_data_tasks_with_generator_registry(
+        plan_target_artifacts(
+            &export_tasks,
+            GeneratorCommonInputContext {
+                linked_meta: &linked_meta,
+                target_tags: &TargetTags::empty(),
+                project_root: std::path::Path::new(""),
+                project_info: &ArtifactProjectInfo::default(),
+                target_name: "",
+                generated_at: &crate::build::generated_at(),
+            },
+            &generator_registry,
+            &pool,
+            &sink,
+        )
+        .expect("target artifacts should be planned");
+
+        let output = export_meta_and_data_tasks(
             Some(&raw_sources),
             &export_tasks,
             &linked_meta,
@@ -756,16 +645,6 @@ mod tests {
         )
         .expect("meta should load");
         let linked_meta = meta.link().expect("meta should link");
-        let raw_sources = RawSourceData::new(DataSet::new(vec![
-            DataTable::new(
-                "items",
-                vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
-            ),
-            DataTable::new(
-                "levels",
-                vec![BTreeMap::from([("id".to_owned(), "2".to_owned())])],
-            ),
-        ]));
         let task = NormalizedExportTask {
             name: "dup".to_owned(),
             type_id: "duplicate_path".to_owned(),
@@ -780,16 +659,16 @@ mod tests {
             .expect("pool should build");
         let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
 
-        let error = export_meta_and_data_tasks_with_generator_registry(
-            Some(&raw_sources),
+        let error = plan_target_artifacts(
             &export_tasks,
-            &linked_meta,
-            &AssetsConfig::default(),
-            &TargetTags::empty(),
-            std::path::Path::new(""),
-            &ArtifactProjectInfo::default(),
-            "",
-            &crate::build::generated_at(),
+            GeneratorCommonInputContext {
+                linked_meta: &linked_meta,
+                target_tags: &TargetTags::empty(),
+                project_root: std::path::Path::new(""),
+                project_info: &ArtifactProjectInfo::default(),
+                target_name: "",
+                generated_at: &crate::build::generated_at(),
+            },
             &generator_registry,
             &pool,
             &sink,
@@ -799,8 +678,8 @@ mod tests {
 
         assert_eq!(diagnostic.code, CF_ARTIFACT_PATH_COLLISION);
         assert_eq!(
-            diagnostic.current_value.as_deref(),
-            Some("out/same-file.dup")
+            std::path::Path::new(diagnostic.current_value.as_deref().expect("collision path")),
+            std::path::Path::new("out/same-file.dup")
         );
     }
 

@@ -3,6 +3,7 @@
 
 use std::{collections::BTreeMap, fs, path::Path, path::PathBuf};
 
+mod artifact_plan;
 mod options;
 mod pipeline;
 mod plan;
@@ -756,6 +757,13 @@ mod tests {
         }
 
         impl ArtifactGenerator for SinkOnlyGenerator {
+            fn plan_artifacts(
+                &self,
+                input: &GeneratorCommonInput<'_>,
+            ) -> Result<Vec<std::path::PathBuf>> {
+                Ok(vec![input.output.join("generated.txt")])
+            }
+
             fn type_id(&self) -> &'static str {
                 "sink_only"
             }

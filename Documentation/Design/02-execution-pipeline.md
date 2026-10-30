@@ -213,7 +213,7 @@ ConfigForge 的功能性校验在 source 读取、组合、过滤后执行。对
 
 要求：
 
-- 输出路径冲突必须在写文件前发现。
+- Meta link 后必须规划所有 export task 的完整输出路径，通过共享 ArtifactSink 统一检查并预留；输出路径冲突必须在任何 generator 写文件前发现，覆盖 MetaOnly / MetaAndData 跨分支及附属文件。
 - 独立 artifact 可并行生成。
 - 写文件应通过统一 Artifact Writer，支持临时文件和确定性 commit。
 - 最终 manifest 按路径稳定排序。
