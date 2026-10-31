@@ -174,6 +174,47 @@ mod tests {
     const LEGACY_VALIDATION_FALLBACK_BASELINE: usize = 3;
 
     #[test]
+    fn parser_and_serialization_errors_have_machine_codes_and_available_positions() {
+        use crate::diagnostic::code::{
+            CF_DATA_PARSE_CSV_FAILED, CF_META_PARSE_FAILED, CF_OUTPUT_SERIALIZE_FAILED,
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("meta.toml");
+        fs::write(&path, "[[tables]]\nname = @\n").unwrap();
+        let source =
+            toml::from_str::<toml::Table>(&fs::read_to_string(&path).unwrap()).unwrap_err();
+        let error = ConfigForgeError::ParseMeta {
+            path: path.clone(),
+            source,
+        };
+        let diagnostics = error.diagnostics();
+        assert_eq!(diagnostics[0].code, CF_META_PARSE_FAILED);
+        assert_eq!(diagnostics[0].location.source_row_number, Some(2));
+        assert!(diagnostics[0].location.source_column_number.is_some());
+        let source = toml::from_str::<toml::Table>("[[tables]").unwrap_err();
+        let error = ConfigForgeError::ParseMetaString(source);
+        let diagnostics = error.diagnostics();
+        assert_eq!(diagnostics[0].code, CF_META_PARSE_FAILED);
+        assert!(diagnostics[0].location.source_path.is_none());
+
+        let mut reader = csv::Reader::from_reader("id,value\n1\n".as_bytes());
+        let source = reader.records().next().unwrap().unwrap_err();
+        let error = ConfigForgeError::ParseCsv {
+            path: path.clone(),
+            source,
+        };
+        let diagnostics = error.diagnostics();
+        assert_eq!(diagnostics[0].code, CF_DATA_PARSE_CSV_FAILED);
+        assert_eq!(diagnostics[0].location.source_path.as_ref(), Some(&path));
+        assert_eq!(diagnostics[0].location.source_row_number, Some(2));
+
+        let source = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
+        let diagnostics = ConfigForgeError::Serialize(source).diagnostics();
+        assert_eq!(diagnostics[0].code, CF_OUTPUT_SERIALIZE_FAILED);
+        assert_eq!(diagnostics[0].domain.as_deref(), Some("artifact"));
+    }
+
+    #[test]
     fn structured_error_helpers_create_validation_report_errors() {
         let diagnostic = Diagnostic::new(
             "custom.code",

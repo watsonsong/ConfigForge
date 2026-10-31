@@ -113,6 +113,65 @@ fn visibility_resolves_nested_fields_and_does_not_guess_unknown_paths() {
     }
 }
 
+#[test]
+fn visibility_uses_target_and_fragment_conditions_without_assuming_missing_context() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+        [[tables]]
+        name = "hidden"
+        source = "hidden.csv"
+        export_when = { any = ["server"] }
+        [[tables]]
+        name = "items"
+        source = "items.csv"
+        polymorphic = true
+        [[tables.fragments]]
+        name = "detail"
+        [[tables.fragments.fields]]
+        name = "value"
+        type = "int"
+        [[tables.fragments]]
+        name = "private"
+        export_when = { any = ["server"] }
+        [[tables.fragments.fields]]
+        name = "value"
+        type = "int"
+    "#,
+    )
+    .unwrap();
+    let linked = meta.link().unwrap();
+    for (table, field, target, expected) in [
+        ("hidden", "value", Some("client"), "table_filtered"),
+        ("items", "detail.value", Some("client"), "visible"),
+        ("items", "private.value", Some("client"), "field_filtered"),
+        ("items", "detail.missing", Some("client"), "not_applicable"),
+        (
+            "items",
+            "detail.value.child",
+            Some("client"),
+            "not_applicable",
+        ),
+        ("unknown", "value", Some("client"), "not_applicable"),
+        ("items", "detail.value", None, "not_applicable"),
+    ] {
+        let mut source = issue("custom.code", ValidationSeverity::Error, table, 3);
+        source.location.field = Some(field.to_owned());
+        let mut validation = ValidationReport::new();
+        validation.push(source);
+        let mut options = options();
+        options.target = target.map(str::to_owned);
+        let report = DesignerValidationReport::from_validation_report_with_schema(
+            &validation,
+            &linked,
+            options,
+        );
+        assert_eq!(
+            report.issues[0].export_visibility, expected,
+            "{table}.{field}"
+        );
+    }
+}
+
 fn issue(code: &str, severity: ValidationSeverity, table: &str, row: usize) -> ValidationIssue {
     ValidationIssue::new(
         code,
