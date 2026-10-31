@@ -144,10 +144,12 @@ build
 
 - `project` 不能依赖 `build`。
 - `project` 不调用 `DataLoader`，不创建线程池。
-- `project.raw_meta_model()` 只把合并后的 `enums` / `structs` / `tables` / `asset_kinds` 克隆为 raw `MetaModel`，不调用 `link_meta_model()`、`validate_meta_model()` 或 `MetaModel::link()`。
+- `project.raw_meta_model()` 把合并后的 `enums` / `structs` / `tables` / `asset_kinds` 和声明来源 sidecar 克隆为 raw `MetaModel`，不调用 `link_meta_model()`、`validate_meta_model()` 或 `MetaModel::link()`。
 - Meta link / validate 的唯一业务入口属于 Meta 模块：standalone loader 通过 `MetaModel::finish_loading()` 完成加载后校验，Build 对 Project 抽取出的 raw model 直接调用 `MetaModel::link()` 获取当前执行阶段使用的 borrowed view。
 
 ## 3.7 测试边界
+
+递归读取文件时用 `toml::Spanned<String>` 提取 Meta 声明 name 的文件和 1-based 行列，保存在 `ProjectConfig.declaration_sources`（`#[serde(skip)]`，不增加 TOML 配置字段）。imports 合并按声明顺序追加来源，供 Meta 重复定义和语义诊断使用；来源模型和粒度见 [Meta 声明来源](04-meta-module-detail-design.md#415-声明来源与语义诊断定位)。
 
 Project 模块测试应覆盖：
 

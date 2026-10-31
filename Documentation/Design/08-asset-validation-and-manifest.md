@@ -255,7 +255,7 @@ message = "私有引擎资源引用必须符合 pkg://package/path#ObjectName �
 | `name` | 必填 | 正则规则 ID，用于诊断、日志和测试定位。 |
 | `target` | `logical_ref` | 匹配对象。可选 `raw_input`、`logical_ref`、`search_path_relative`、`file_name`、`stem`、`object_name`、`export_ref`。 |
 | `pattern` | 必填 | Rust `regex` 语义的正则表达式。Meta load/link 阶段预编译，失败直接报 Meta 配置错误。 |
-| `severity` | `error` | schema 可声明 error/warning；当前 resolver 只把 error 规则失败报告为错误，warning 不产生 issue，此部分为 Partial。 |
+| `severity` | `error` | 支持 error/warning；error 阻塞导出，warning 通过 resolver 的诊断收集 API 进入 validation、CLI 和报告，不阻塞导出。 |
 | `message` | 自动生成 | 失败时的用户可读说明。 |
 | `when_tags` | `[]` | 非空时只在当前 target tags 命中时启用。 |
 | `invert` | `false` | `true` 表示反向匹配，适合表达 deny rule。 |

@@ -125,16 +125,18 @@ Build 语义：
 
 - `validation_report` 不应绕过 validation 阶段；它消费 validation 阶段产生的结构化 report。
 - 如果同一 target 有多个 export task，且 validation 出现 error，则 runtime 和其他 data-backed generator 阻塞；MetaOnly codegen/docs 可能已经生成，不回滚；`validation_report` 应尽量作为失败产物写出，便于用户定位问题。
+- 失败报告逐个尝试；report 写入失败附加到原始 validation 错误，不替换主错误。所有报告仍通过共享 ArtifactSink，sink 进入失败状态后可能拒绝后续写入。
 - 如果 build 还没进入 Data validation（例如 Project/Meta parse 失败），后续可以扩展为 “diagnostic report exporter” 覆盖 Meta/Data/Build diagnostics；当前报告聚焦 Validation Report，Meta parse 失败可先保持 CLI 输出。
 
 ## 10.4 报告数据模型
 
-报告层建议引入一个面向导出的 normalized model，例如 `DesignerValidationReport`。它由现有 `ValidationReport`、Project/Target 上下文、Meta 信息和 Data source trace 补充而来。
+报告层使用面向导出的 normalized model `DesignerValidationReport`，由 `ValidationReport`、Project/Target 上下文、Meta 信息和 Data source trace 补充而来。
 
 ### 10.4.1 顶层结构
 
 ```text
 DesignerValidationReport
+  schema_version = 1
   metadata
   summary
   groups
@@ -162,7 +164,7 @@ DesignerValidationReport
 | `blocking` | 是否阻塞当前 validate/build。存在 error 时为 true。 |
 | `tables_with_issues` | 涉及表数量。 |
 | `owners_with_issues` | 涉及 owner 数量；无法解析 owner 时归入 `<unassigned>`。 |
-| `filtered_context_count` | 与 export_when / row_export 过滤相关的 issue 数量；当前仅基于 issue 上已有的过滤上下文统计，不是被过滤 row 总数。 |
+| `filtered_context_count` | `table_filtered` / `field_filtered` issue 数量；不计 `not_applicable`，不是被过滤 row 总数或已检查记录数。 |
 
 ### 10.4.2 Issue 字段
 
@@ -183,14 +185,17 @@ DesignerValidationReport
 | `field` | location | 字段或 field path。 |
 | `row_index` | location | 0-based internal row index。 |
 | `source_row_number` | location | 用户可见源文件行号。 |
-| `source_path` | location / RowSourceInfo | 源 CSV / XLSX 文件路径。 |
+| `source_path` | location / RowSourceInfo | 源 CSV / XLSX 文件路径；project root 内相对化，根外保留原路径。关联位置采用同一规则。 |
 | `source_sheet` | location / cell source | XLSX 工作表名称；CSV 缺省省略。 |
 | `source_column` | source trace | 可选。CSV/XLSX-backed data validation 高价值错误已可从 cell source trace 补齐；其他 producer 可留空。 |
 | `current_value` | producer structured context | 可选。required/type/duplicate/FK/artifact/generator 等已迁移路径由 producer 显式填充；尚未迁移 producer 可留空。 |
 | `schema_metadata` | linked Meta enrichment | builtin 类型和字段选项等 schema 提示。 |
 | `expected` | producer structured context / code catalog | 可选。期望规则，例如 `int`、`target table/index key`、`output root 内唯一路径`。 |
 | `target` | Diagnostic target | 当前 target tags 字符串。 |
-| `export_visibility` | ExportView context | `visible` / `table_filtered` / `row_filtered` / `field_filtered` / `not_applicable`。当前输出 visible / not_applicable，其他值为后续扩展。 |
+| `export_visibility` | linked Meta + target tags | 当前使用 `visible` / `table_filtered` / `field_filtered` / `not_applicable`。检查表、字段及可解析的 struct / fragment 点分路径；缺失 schema/target 或路径无法解析时为 `not_applicable`。`visible` 表示 schema 可见，不保证 row 可见；`row_filtered` 尚未实现。 |
+| `record_key` | producer / raw key policy | 主位置所在记录的 raw key，没有可用 key 时为空。 |
+| `context` | producer | 有序 map，保留 group、asset_kind、asset_ref、target_index 等上下文。 |
+| `related_locations` | producer / 声明来源 | 关联记录或声明位置；JSON 保留结构，HTML/Markdown/CSV 展示位置文本。 |
 | `owner` | producer diagnostic | 当前由 producer 提供，缺失为 `<unassigned>`；Meta/Project 映射为 Planned。 |
 | `domain` | producer diagnostic | 例如 combat/economy/ui，缺失为 `<uncategorized>`；Meta/Project 映射为 Planned。 |
 
@@ -272,7 +277,7 @@ Generated at: 2026-06-07T12:34:56Z
 当前要求：
 
 - 报告 metadata 输出 target_tags，issue 的 target 字段保留 producer 上下文。
-- 每条 issue 输出其 location 是否来自当前 ExportView 的 visible table/row/field。
+- 每条 issue 从 linked schema 与 target tags 判断表和字段可见性；当前未把 row_export 的行可见性纳入报告模型，不把 `visible` 当成“该行已检查”的证明。
 - 对由 target visibility 造成的配置错误（例如 `required_when` 目标字段在当前 target hidden）必须在 message/hint 中明确建议用户对齐 `export_when`。
 
 后续增强：
@@ -333,9 +338,10 @@ Generated at: 2026-06-07T12:34:56Z
 - 字段稳定、snake_case。
 - 保留完整 `metadata`、`summary`、`issues`。
 - `issues` 顺序与 ValidationReport stable order 一致。
-- 所有可选字段用 `null`，不要省略，便于平台 schema 固定。
+- 可选字段使用 `null`；为兼容 CSV，缺失的 `source_sheet` 省略。`context` / `related_locations` 缺省为空对象 / 数组。
+- 顶层 `schema_version = 1`；消费者应忽略兼容新增字段，破坏性结构变更提升版本。issue ID 是单份报告确定排序后的序号，不是跨构建固定标识。
 
-建议 schema：
+schema 示例（省略部分字段）：
 
 ```json
 {
@@ -376,14 +382,14 @@ Generated at: 2026-06-07T12:34:56Z
 默认单文件 CSV，列固定：
 
 ```text
-id,severity,blocking,code,friendly_title,message,hint,table,field,row_index,source_row_number,source_column,source_path,source_sheet,current_value,expected,explanation,target,owner,domain
+id,severity,blocking,code,friendly_title,message,hint,table,field,row_index,source_row_number,source_column,source_path,source_sheet,current_value,expected,schema_metadata,explanation,target,owner,domain,record_key,context,related_locations
 ```
 
 规则：
 
 - 所有字段按 RFC4180 转义。
 - `current_value`、`expected` 中的换行应转义为单行展示文本，避免破坏表格。
-- source path 使用相对 project root 的路径，便于策划定位。
+- source path 在 project root 内使用相对路径，外部文件保留原路径；context 和 related locations 在 CSV 中合并为可读文本，需要无损结构时使用 JSON。
 - 如果未来需要多文件 CSV，可按 `issues.csv`、`summary_by_table.csv`、`summary_by_owner.csv` 拆分；当前输出单文件。
 
 ## 10.8 Code Catalog 与修复建议
@@ -475,6 +481,7 @@ Owner/domain 的项目映射、剩余 producer enrichment 和可配置分组仍�
 
 - `src/validation/report.rs` 提供 `DesignerValidationReport`、`ReportMetadata`、`ReportSummary`、`DesignerValidationIssue`、`IssueGroup` 和 `DesignerReportFormat`。
 - 报告模型可从 `ValidationReport` / `DiagnosticReport` enrichment 生成，保留 stable code、severity、table、field、row/source row/source column、target、hint、current_value、expected、explanation、owner 和 domain，并生成稳定 issue id（如 `E0001` / `W0001`）。
+- 顶层提供 `schema_version = 1`，保留 record_key、context、related_locations；四种格式共用字段，source path 按 project root 归一化。
 - 内置 code catalog 已覆盖当前常用 validator code 和基础 required/type/enum/unique/FK/asset code；未知 code fallback 到原始 message/hint。
 - 支持 HTML / Markdown / JSON / CSV 四种 renderer，输出共享同一个 normalized report model；Markdown/CSV/HTML 已展示 source_column、current_value、expected 等结构化字段，JSON 保留完整字段。
 - CLI 支持 `--report <html|markdown|json|csv>`、`--report-output <path>`、`--report-title <title>`；validation error 时仍尽量写出报告，再保持失败退出码。
@@ -487,3 +494,5 @@ Owner/domain 的项目映射、剩余 producer enrichment 和可配置分组仍�
 - owner/domain 当前主要依赖 producer 字段；未提供时使用 `<unassigned>` / `<uncategorized>` fallback，Project 级 owner/domain 映射未实现。
 - `current_value`、`expected`、`source_column` 已在核心 data validation、generator/artifact 结构化诊断和 report renderer 中贯通；asset、部分 builtin validator、code artifact 等尚未迁移 producer 仍可能为空字段。
 - Build export task 当前支持 `format`、`file_name`、`title`；`include_warnings`、`include_errors`、`group_by` 尚未实现，当前始终输出全部 issue 并使用固定分组。
+- `export_visibility` 基于 schema + target tags 判断；未统计 row_filtered、已检查数量和全部未参与检查的记录，无法解析的路径为 not_applicable。issue ID 只在单份报告内稳定。
+- validation 和报告写入同时失败时保留两者，但不保证所有报告都写入成功；共享 sink 失败约束、声明定位和 producer 的剩余边界见 [Diagnostic 契约](../Implementation/02-diagnostic-module-detail-design.md#29-当前实现缺口与演进约束)。

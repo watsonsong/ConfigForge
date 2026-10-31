@@ -634,7 +634,7 @@ config-forge --project ConfigForge.toml --target client
 | `--report <html\|markdown\|json\|csv>` | 启用额外的 Designer Validation Report，并显式选择格式。 |
 | `--report-output <FILE>` | 仅指定上述额外验证报告的文件路径，必须与 report 配套；不是工程产物目录覆盖。当前 CSV 也生成单个文件。 |
 | `--report-title <TITLE>` | 覆盖本次额外报告的标题，须配合 report。 |
-| `--diagnostic-format <human\|json>` | 顶层 CLI 失败诊断的 stderr 格式，默认 human；不等于报告文件格式。 |
+| `--diagnostic-format <human\|json>` | 顶层 CLI 诊断的 stderr 格式，默认 human。JSON 在成功（含 warning）、业务失败和参数解析失败时均输出 `schema_version = 1`、`status`、`message`、`diagnostics`；stdout 仍是运行信息，不等于报告文件格式。 |
 
 执行行为：
 

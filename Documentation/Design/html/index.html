@@ -139,7 +139,7 @@
 <tr>
 <td>asset validation / completion / manifest</td>
 <td>Implemented MVP</td>
-<td>已实现 <code>asset</code> 字段强制声明 <code>asset_kind</code>、Project <code>[assets]</code> / <code>[[assets.search_paths]]</code>、Meta <code>[[asset_kinds]]</code> + <code>extends</code>、filesystem resolver、target ExportView 可见 asset 校验、存在性 / sidecar / 命名 / prefix / regex / 基础大小写检查、runtime export canonical asset string 补齐，以及 <code>type = &quot;asset_manifest&quot;</code> 聚合 exporter。Asset Manifest 支持 deterministic JSON 和 Unreal DataTable 兼容 CSV；当前 validation 诊断使用 <code>CF_DATA_INVALID_ASSET_REF</code> code；当前使用 CF_DATA_INVALID_ASSET_REF；resolution cache 和 provider 扩展后续推进。</td>
+<td>已实现 <code>asset</code> 字段强制声明 <code>asset_kind</code>、Project <code>[assets]</code> / <code>[[assets.search_paths]]</code>、Meta <code>[[asset_kinds]]</code> + <code>extends</code>、filesystem resolver、target ExportView 可见 asset 校验、存在性 / sidecar / 命名 / prefix / regex / 基础大小写检查、runtime export canonical asset string 补齐，以及 <code>type = &quot;asset_manifest&quot;</code> 聚合 exporter。Asset Manifest 支持 deterministic JSON 和 Unreal DataTable 兼容 CSV；validation 使用 <code>CF_DATA_INVALID_ASSET_REF</code>，regex 支持 error/warning 收集；resolution cache 和 provider 扩展后续推进。</td>
 </tr>
 <tr>
 <td>validators</td>
@@ -184,12 +184,12 @@
 <tr>
 <td>diagnostics</td>
 <td>Stable</td>
-<td><code>src/diagnostic/</code> 已提供 severity、location（含 source column）、entry formatting、report aggregation、code catalog、crate error facade、CLI <code>--diagnostic-format json</code> 机器输出和 legacy fallback 债务护栏。Project / Build / CLI、Data loading / resolver / validation、Asset resolver、Artifact writer、Generator registry / option / code artifact / data artifact 等用户可触发高价值错误已迁移为结构化 code/source/location/current/expected/hint；剩余 <code>ConfigForgeError::Validation</code> 匹配仅用于兼容旧错误解包或转译，不再作为 ConfigForge-produced 业务错误生成入口。</td>
+<td><code>src/diagnostic/</code> 已提供 severity、location（含 source column）、entry formatting、report aggregation、code catalog、crate error facade、CLI 成功 / 失败 / 参数错误的 version 1 JSON 输出和 legacy fallback 债务护栏；保留 warning、主错误与附加写入失败，支持声明来源、record key、related locations 与 context。Project / Build / CLI、Data loading / resolver / validation、Asset resolver、Artifact writer、Generator registry / option / code artifact / data artifact 等用户可触发高价值错误已迁移为结构化 code/source/location/current/expected/hint；剩余 <code>ConfigForgeError::Validation</code> 匹配仅用于兼容旧错误解包或转译，不再作为 ConfigForge-produced 业务错误生成入口。</td>
 </tr>
 <tr>
 <td>designer validation report</td>
 <td>Implemented MVP</td>
-<td>已在 <code>ValidationReport</code> / <code>DiagnosticReport</code> 基础上实现 <code>DesignerValidationReport</code> enrichment、code catalog、HTML / Markdown / JSON / CSV renderer、CLI <code>--report/--report-output/--report-title</code> 导出，以及 build <code>type = &quot;validation_report&quot;</code> 附加产物。核心 data validation 与 generator/artifact 结构化诊断的 <code>current_value</code> / <code>expected</code> / <code>source_column</code> 已贯通到 report；当前 owner/domain 主要仍是 fallback，部分 producer 尚未补齐 enrichment，build task 尚未支持 <code>include_warnings</code> / <code>include_errors</code> / <code>group_by</code>。设计见 <a href="#design-10"><code>10-designer-validation-report.md</code></a>。</td>
+<td>已在 <code>ValidationReport</code> / <code>DiagnosticReport</code> 基础上实现 <code>DesignerValidationReport</code> enrichment、code catalog、HTML / Markdown / JSON / CSV renderer、CLI <code>--report/--report-output/--report-title</code> 导出，以及 build <code>type = &quot;validation_report&quot;</code> 附加产物。版本 1 模型保留 record key / context / related locations，根内 source path 相对化，并基于 schema + target tags 判断表与字段可见性；尚未统计行过滤或已检查数量。核心 data validation 与 generator/artifact 结构化诊断的 <code>current_value</code> / <code>expected</code> / <code>source_column</code> 已贯通到 report；当前 owner/domain 主要仍是 fallback，部分 producer 尚未补齐 enrichment，build task 尚未支持 <code>include_warnings</code> / <code>include_errors</code> / <code>group_by</code>。设计见 <a href="#design-10"><code>10-designer-validation-report.md</code></a>。</td>
 </tr>
 <tr>
 <td>schema / table docs</td>
@@ -3428,6 +3428,10 @@ default = 1
 <li>多位置错误应提供 related locations。</li>
 <li>并行执行不影响诊断顺序。</li>
 </ul>
+<h3 id="design-5-当前能力与待补齐边界">当前能力与待补齐边界</h3>
+<p>共享 severity、code catalog、source path/sheet/row/column、enrichment 和稳定排序已实现。<code>Diagnostic</code> / <code>ValidationIssue</code> 保留 <code>record_key</code>、<code>related_locations</code> 和有序 <code>context</code>；record key 沿用 raw key policy。重复 key 关联首次出现记录，FK 关联 source 字段与 target 表声明，sum 关联参与该组的记录，group label 不混入 field path。</p>
+<p>validation 失败后 report / trace 写入失败同时保留主错误和附加错误；后续 export / finish 失败携带已收集 warning。失败报告逐个尝试，但共享 ArtifactSink 的失败状态仍可能拒绝后续报告。CLI JSON 的成功、业务失败和参数错误统一使用 schema version 1，文件与 TOML/CSV parse 错误也提供稳定 code 和可提取位置。Asset regex warning 正常进入 validation；regex/sum 补充 current/expected。</p>
+<p>Project imports 和 standalone Meta 合并保留 table/field、struct/field、enum、asset kind 的 name 声明来源。当前只提供声明起始行列，不保存完整配置 token span；部分 index / validator / fragment 问题回退到所属声明。Designer report 从 linked schema 与 target tags 推导 table/field 可见性，无法判定的路径标记 <code>not_applicable</code>；尚不统计被过滤行总数。详细契约和剩余边界见 <a href="../../Implementation/02-diagnostic-module-detail-design.md#29-当前实现缺口与演进约束">Diagnostic 设计</a>。</p>
 </article>
 <article id="design-6"><p class="source"><a href="../06-export-cli.md">Markdown 源文档：06-export-cli.md</a></p><h1 id="design-6-06-导出与-cli-设计">06. 导出与 CLI 设计</h1>
 <h2 id="design-6-文档导航">文档导航</h2>
@@ -4313,7 +4317,7 @@ msgstr &quot;&quot;
 </tr>
 <tr>
 <td><code>--diagnostic-format &lt;human|json&gt;</code></td>
-<td>顶层 CLI 失败诊断的 stderr 格式，默认 human；不等于报告文件格式。</td>
+<td>顶层 CLI 诊断的 stderr 格式，默认 human。JSON 在成功（含 warning）、业务失败和参数解析失败时均输出 <code>schema_version = 1</code>、<code>status</code>、<code>message</code>、<code>diagnostics</code>；stdout 仍是运行信息，不等于报告文件格式。</td>
 </tr>
 </tbody></table>
 <p>执行行为：</p>
@@ -5073,7 +5077,7 @@ message = &quot;私有引擎资源引用必须符合 pkg://package/path#ObjectNa
 <tr>
 <td><code>severity</code></td>
 <td><code>error</code></td>
-<td>schema 可声明 error/warning；当前 resolver 只把 error 规则失败报告为错误，warning 不产生 issue，此部分为 Partial。</td>
+<td>支持 error/warning；error 阻塞导出，warning 通过 resolver 的诊断收集 API 进入 validation、CLI 和报告，不阻塞导出。</td>
 </tr>
 <tr>
 <td><code>message</code></td>
@@ -6565,12 +6569,14 @@ file_name = &quot;client-validation.html&quot;
 <ul>
 <li><code>validation_report</code> 不应绕过 validation 阶段；它消费 validation 阶段产生的结构化 report。</li>
 <li>如果同一 target 有多个 export task，且 validation 出现 error，则 runtime 和其他 data-backed generator 阻塞；MetaOnly codegen/docs 可能已经生成，不回滚；<code>validation_report</code> 应尽量作为失败产物写出，便于用户定位问题。</li>
+<li>失败报告逐个尝试；report 写入失败附加到原始 validation 错误，不替换主错误。所有报告仍通过共享 ArtifactSink，sink 进入失败状态后可能拒绝后续写入。</li>
 <li>如果 build 还没进入 Data validation（例如 Project/Meta parse 失败），后续可以扩展为 “diagnostic report exporter” 覆盖 Meta/Data/Build diagnostics；当前报告聚焦 Validation Report，Meta parse 失败可先保持 CLI 输出。</li>
 </ul>
 <h2 id="design-10-104-报告数据模型">10.4 报告数据模型</h2>
-<p>报告层建议引入一个面向导出的 normalized model，例如 <code>DesignerValidationReport</code>。它由现有 <code>ValidationReport</code>、Project/Target 上下文、Meta 信息和 Data source trace 补充而来。</p>
+<p>报告层使用面向导出的 normalized model <code>DesignerValidationReport</code>，由 <code>ValidationReport</code>、Project/Target 上下文、Meta 信息和 Data source trace 补充而来。</p>
 <h3 id="design-10-1041-顶层结构">10.4.1 顶层结构</h3>
 <pre><code class="language-text">DesignerValidationReport
+  schema_version = 1
   metadata
   summary
   groups
@@ -6643,7 +6649,7 @@ file_name = &quot;client-validation.html&quot;
 </tr>
 <tr>
 <td><code>filtered_context_count</code></td>
-<td>与 export_when / row_export 过滤相关的 issue 数量；当前仅基于 issue 上已有的过滤上下文统计，不是被过滤 row 总数。</td>
+<td><code>table_filtered</code> / <code>field_filtered</code> issue 数量；不计 <code>not_applicable</code>，不是被过滤 row 总数或已检查记录数。</td>
 </tr>
 </tbody></table>
 <h3 id="design-10-1042-issue-字段">10.4.2 Issue 字段</h3>
@@ -6724,7 +6730,7 @@ file_name = &quot;client-validation.html&quot;
 <tr>
 <td><code>source_path</code></td>
 <td>location / RowSourceInfo</td>
-<td>源 CSV / XLSX 文件路径。</td>
+<td>源 CSV / XLSX 文件路径；project root 内相对化，根外保留原路径。关联位置采用同一规则。</td>
 </tr>
 <tr>
 <td><code>source_sheet</code></td>
@@ -6758,8 +6764,23 @@ file_name = &quot;client-validation.html&quot;
 </tr>
 <tr>
 <td><code>export_visibility</code></td>
-<td>ExportView context</td>
-<td><code>visible</code> / <code>table_filtered</code> / <code>row_filtered</code> / <code>field_filtered</code> / <code>not_applicable</code>。当前输出 visible / not_applicable，其他值为后续扩展。</td>
+<td>linked Meta + target tags</td>
+<td>当前使用 <code>visible</code> / <code>table_filtered</code> / <code>field_filtered</code> / <code>not_applicable</code>。检查表、字段及可解析的 struct / fragment 点分路径；缺失 schema/target 或路径无法解析时为 <code>not_applicable</code>。<code>visible</code> 表示 schema 可见，不保证 row 可见；<code>row_filtered</code> 尚未实现。</td>
+</tr>
+<tr>
+<td><code>record_key</code></td>
+<td>producer / raw key policy</td>
+<td>主位置所在记录的 raw key，没有可用 key 时为空。</td>
+</tr>
+<tr>
+<td><code>context</code></td>
+<td>producer</td>
+<td>有序 map，保留 group、asset_kind、asset_ref、target_index 等上下文。</td>
+</tr>
+<tr>
+<td><code>related_locations</code></td>
+<td>producer / 声明来源</td>
+<td>关联记录或声明位置；JSON 保留结构，HTML/Markdown/CSV 展示位置文本。</td>
 </tr>
 <tr>
 <td><code>owner</code></td>
@@ -6833,7 +6854,7 @@ Generated at: 2026-06-07T12:34:56Z
 <p>当前要求：</p>
 <ul>
 <li>报告 metadata 输出 target_tags，issue 的 target 字段保留 producer 上下文。</li>
-<li>每条 issue 输出其 location 是否来自当前 ExportView 的 visible table/row/field。</li>
+<li>每条 issue 从 linked schema 与 target tags 判断表和字段可见性；当前未把 row_export 的行可见性纳入报告模型，不把 <code>visible</code> 当成“该行已检查”的证明。</li>
 <li>对由 target visibility 造成的配置错误（例如 <code>required_when</code> 目标字段在当前 target hidden）必须在 message/hint 中明确建议用户对齐 <code>export_when</code>。</li>
 </ul>
 <p>后续增强：</p>
@@ -6885,9 +6906,10 @@ Generated at: 2026-06-07T12:34:56Z
 <li>字段稳定、snake_case。</li>
 <li>保留完整 <code>metadata</code>、<code>summary</code>、<code>issues</code>。</li>
 <li><code>issues</code> 顺序与 ValidationReport stable order 一致。</li>
-<li>所有可选字段用 <code>null</code>，不要省略，便于平台 schema 固定。</li>
+<li>可选字段使用 <code>null</code>；为兼容 CSV，缺失的 <code>source_sheet</code> 省略。<code>context</code> / <code>related_locations</code> 缺省为空对象 / 数组。</li>
+<li>顶层 <code>schema_version = 1</code>；消费者应忽略兼容新增字段，破坏性结构变更提升版本。issue ID 是单份报告确定排序后的序号，不是跨构建固定标识。</li>
 </ul>
-<p>建议 schema：</p>
+<p>schema 示例（省略部分字段）：</p>
 <pre><code class="language-json">{
   &quot;schema_version&quot;: 1,
   &quot;metadata&quot;: {
@@ -6921,13 +6943,13 @@ Generated at: 2026-06-07T12:34:56Z
 <h3 id="design-10-1074-csv">10.7.4 CSV</h3>
 <p>面向表格工具回填、QA 批量筛选。</p>
 <p>默认单文件 CSV，列固定：</p>
-<pre><code class="language-text">id,severity,blocking,code,friendly_title,message,hint,table,field,row_index,source_row_number,source_column,source_path,source_sheet,current_value,expected,explanation,target,owner,domain
+<pre><code class="language-text">id,severity,blocking,code,friendly_title,message,hint,table,field,row_index,source_row_number,source_column,source_path,source_sheet,current_value,expected,schema_metadata,explanation,target,owner,domain,record_key,context,related_locations
 </code></pre>
 <p>规则：</p>
 <ul>
 <li>所有字段按 RFC4180 转义。</li>
 <li><code>current_value</code>、<code>expected</code> 中的换行应转义为单行展示文本，避免破坏表格。</li>
-<li>source path 使用相对 project root 的路径，便于策划定位。</li>
+<li>source path 在 project root 内使用相对路径，外部文件保留原路径；context 和 related locations 在 CSV 中合并为可读文本，需要无损结构时使用 JSON。</li>
 <li>如果未来需要多文件 CSV，可按 <code>issues.csv</code>、<code>summary_by_table.csv</code>、<code>summary_by_owner.csv</code> 拆分；当前输出单文件。</li>
 </ul>
 <h2 id="design-10-108-code-catalog-与修复建议">10.8 Code Catalog 与修复建议</h2>
@@ -7028,6 +7050,7 @@ Generated at: 2026-06-07T12:34:56Z
 <ul>
 <li><code>src/validation/report.rs</code> 提供 <code>DesignerValidationReport</code>、<code>ReportMetadata</code>、<code>ReportSummary</code>、<code>DesignerValidationIssue</code>、<code>IssueGroup</code> 和 <code>DesignerReportFormat</code>。</li>
 <li>报告模型可从 <code>ValidationReport</code> / <code>DiagnosticReport</code> enrichment 生成，保留 stable code、severity、table、field、row/source row/source column、target、hint、current_value、expected、explanation、owner 和 domain，并生成稳定 issue id（如 <code>E0001</code> / <code>W0001</code>）。</li>
+<li>顶层提供 <code>schema_version = 1</code>，保留 record_key、context、related_locations；四种格式共用字段，source path 按 project root 归一化。</li>
 <li>内置 code catalog 已覆盖当前常用 validator code 和基础 required/type/enum/unique/FK/asset code；未知 code fallback 到原始 message/hint。</li>
 <li>支持 HTML / Markdown / JSON / CSV 四种 renderer，输出共享同一个 normalized report model；Markdown/CSV/HTML 已展示 source_column、current_value、expected 等结构化字段，JSON 保留完整字段。</li>
 <li>CLI 支持 <code>--report &lt;html|markdown|json|csv&gt;</code>、<code>--report-output &lt;path&gt;</code>、<code>--report-title &lt;title&gt;</code>；validation error 时仍尽量写出报告，再保持失败退出码。</li>
@@ -7040,6 +7063,8 @@ Generated at: 2026-06-07T12:34:56Z
 <li>owner/domain 当前主要依赖 producer 字段；未提供时使用 <code>&lt;unassigned&gt;</code> / <code>&lt;uncategorized&gt;</code> fallback，Project 级 owner/domain 映射未实现。</li>
 <li><code>current_value</code>、<code>expected</code>、<code>source_column</code> 已在核心 data validation、generator/artifact 结构化诊断和 report renderer 中贯通；asset、部分 builtin validator、code artifact 等尚未迁移 producer 仍可能为空字段。</li>
 <li>Build export task 当前支持 <code>format</code>、<code>file_name</code>、<code>title</code>；<code>include_warnings</code>、<code>include_errors</code>、<code>group_by</code> 尚未实现，当前始终输出全部 issue 并使用固定分组。</li>
+<li><code>export_visibility</code> 基于 schema + target tags 判断；未统计 row_filtered、已检查数量和全部未参与检查的记录，无法解析的路径为 not_applicable。issue ID 只在单份报告内稳定。</li>
+<li>validation 和报告写入同时失败时保留两者，但不保证所有报告都写入成功；共享 sink 失败约束、声明定位和 producer 的剩余边界见 <a href="../../Implementation/02-diagnostic-module-detail-design.md#29-当前实现缺口与演进约束">Diagnostic 契约</a>。</li>
 </ul>
 </article>
 <article id="design-11"><p class="source"><a href="../11-schema-doc-generator.md">Markdown 源文档：11-schema-doc-generator.md</a></p><h1 id="design-11-11-schema--table-文档生成器设计">11. Schema / Table 文档生成器设计</h1>

@@ -53,6 +53,7 @@ Object table 与 collection table 通过 `TableKind` 区分，不拆成继承体
 ```text
 src/meta/
   mod.rs              # 对外 API 与 re-export
+  provenance.rs       # 声明 name 来源提取与语义诊断定位补充
   model.rs            # model 子模块声明与 re-export
   model/
     raw.rs            # serde-owned raw Meta 配置模型
@@ -1021,3 +1022,11 @@ Meta 模块回归约束：
 - primary index 从 table/index 声明 Link 为 `LinkedTableMeta` 上可查询的 selected linked index。
 - Link 和 validate diagnostics 会在加载完成前合并返回，避免下游使用不完整模型。
 - 单元测试覆盖基础加载、primitive 兼容、自定义类型、显式多路径合并、未知类型、重复命名和 primary index 校验；ProjectConfig imports 由 exporter / CLI 相关测试覆盖。
+
+## 4.15 声明来源与语义诊断定位
+
+`MetaModel.declaration_sources` 是 `#[serde(skip)]` 的 `DeclarationSources` sidecar，不改变用户 TOML schema。独立 Meta loader 和 Project loader 复用 `provenance.rs`，读取 table / field、struct / field、enum、asset kind 的 name token span，并保存文件、1-based 行列。每份文档预计算换行起点，通过二分查找定位声明，避免为每个 name 重扫文件前缀。
+
+sidecar 使用 `tables/<name>/fields/<field>` 等路径映射到按声明顺序保存的位置列表。`from_paths` / Project imports 合并时同时合并来源；重复声明以最后声明为主位置，其余为 related locations。Link / validate 优先使用具体字段位置，再回退到所属声明。`MetaDiagnostic.related_locations` 经 `DiagnosticEntry` 保留到通用诊断。
+
+当前粒度是 name 声明起始位置，不是所有属性的完整 token span；fragment / index / validator 的独立属性位置仍可能回退。程序构造模型没有来源时保持逻辑定位，内存字符串可有行列而没有文件路径。诊断消费方不得假设每条问题都有完整物理坐标。

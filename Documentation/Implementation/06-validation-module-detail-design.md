@@ -28,7 +28,7 @@ Target 主路径：
 2. 收集各表基础报告，pool 版本稳定合并。
 3. 在同一 target view 上执行 FK，有 assets 配置时继续 asset validation。
 4. 编译并执行 registry validators，合并 report。
-5. 稳定排序，再执行 warning/error gate。
+5. 补充 source trace、raw record key 和关联声明位置，稳定排序，再执行 warning/error gate。
 
 `validate_normalized_data_set_for_target_with_assets_outcome_and_pool` 返回携带 blocking report 的 ValidationOutcome；build 可以先导出报告，再由 `into_result` 阻断数据产物。兼容的 Result 入口直接执行 error gate。前置配置/source/resolver 错误不保证形成完整报告。
 
@@ -73,6 +73,8 @@ ObjectTable 不支持 index、primary_index、row_export 或 fragments；其 CSV
 ## 6.6 诊断与报告
 
 基础 producer 使用 catalog 的 CF_DATA_* 等 stable code；业务 validator 使用专属 validator.* code。旧 code 的 deprecated metadata 用于兼容。新 producer 提供 current/expected/hint 和 source path/sheet/row/column；规则见 [Diagnostic 设计](02-diagnostic-module-detail-design.md)。
+
+`ValidationIssue` 保留 `related_locations`、`record_key` 和有序 `context`，与 `Diagnostic` 双向转换时不丢失 enrichment；缺失的 location 字段按字段回退，不覆盖 producer 坐标。unique/index 使用 key 到首条 row index 的映射，重复时附首条 cell source；FK 附 source 字段 / target 表声明和 target_index；sum 保持真实 field path，将 group 写入 context，并关联当前组记录。Asset resolver 的 `resolve_for_target_with_diagnostics()` 返回规范化值及 warning，validation 将 warning 合并入报告；旧值返回 API 保持兼容。
 
 ValidationReport 是原始 issue 集合；DesignerValidationReport::from_validation_report_with_schema 是 generator 主入口，负责 enrichment、summary/grouping 和报告模型，四种 renderer 共用。from_validation_report 可不带 schema enrichment；from_diagnostic_report 仅为通用 adapter/测试入口。
 

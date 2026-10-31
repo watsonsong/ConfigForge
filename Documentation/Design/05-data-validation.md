@@ -359,3 +359,11 @@ error[CF_DATA_MISSING_REQUIRED_FIELD]: items.name is required but missing
 - 错误码稳定，可用于 QA 断言和 CI 分析。
 - 多位置错误应提供 related locations。
 - 并行执行不影响诊断顺序。
+
+### 当前能力与待补齐边界
+
+共享 severity、code catalog、source path/sheet/row/column、enrichment 和稳定排序已实现。`Diagnostic` / `ValidationIssue` 保留 `record_key`、`related_locations` 和有序 `context`；record key 沿用 raw key policy。重复 key 关联首次出现记录，FK 关联 source 字段与 target 表声明，sum 关联参与该组的记录，group label 不混入 field path。
+
+validation 失败后 report / trace 写入失败同时保留主错误和附加错误；后续 export / finish 失败携带已收集 warning。失败报告逐个尝试，但共享 ArtifactSink 的失败状态仍可能拒绝后续报告。CLI JSON 的成功、业务失败和参数错误统一使用 schema version 1，文件与 TOML/CSV parse 错误也提供稳定 code 和可提取位置。Asset regex warning 正常进入 validation；regex/sum 补充 current/expected。
+
+Project imports 和 standalone Meta 合并保留 table/field、struct/field、enum、asset kind 的 name 声明来源。当前只提供声明起始行列，不保存完整配置 token span；部分 index / validator / fragment 问题回退到所属声明。Designer report 从 linked schema 与 target tags 推导 table/field 可见性，无法判定的路径标记 `not_applicable`；尚不统计被过滤行总数。详细契约和剩余边界见 [Diagnostic 设计](../Implementation/02-diagnostic-module-detail-design.md#29-当前实现缺口与演进约束)。

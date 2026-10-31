@@ -77,6 +77,9 @@ pub struct DiagnosticLocation {
 
 ```rust
 pub struct Diagnostic {
+    pub related_locations: Vec<DiagnosticLocation>,
+    pub record_key: Option<String>,
+    pub context: BTreeMap<String, String>,
     pub code: String,
     pub severity: DiagnosticSeverity,
     pub message: String,
@@ -102,11 +105,17 @@ pub struct Diagnostic {
 - `current_value` / `expected`：机器可读或短文本形式的当前值与期望规则，优先供 CLI JSON、Designer Report、CI annotation 消费。
 - `explanation` / `hint`：原因说明与修复建议；缺失时上层 report 可从 code catalog fallback。
 - `owner` / `domain`：用于 QA 分派和分组；当前主要由 producer 显式传入或 report fallback。
+- `related_locations`：关联声明或记录位置。重复 key 指向首次出现的记录，FK 指向 source 字段声明和 target 表声明，sum 指向参与该组的记录。
+- `record_key`：主位置所在记录的 raw key；沿用显式 key policy，不做 typed canonicalization。
+- `context`：独立于 field path 的结构化上下文，使用有序 map，例如 sum 的 `group`、FK 的 `target_index`、Asset 的 `asset_kind` / `asset_ref`。
 
 ### 2.3.4 `DiagnosticEntry`
 
 ```rust
 pub trait DiagnosticEntry {
+    fn related_locations(&self) -> &[DiagnosticLocation];
+    fn record_key(&self) -> Option<&str>;
+    fn context(&self) -> Option<&BTreeMap<String, String>>;
     fn code(&self) -> String;
     fn severity(&self) -> DiagnosticSeverity;
     fn message(&self) -> &str;
@@ -169,6 +178,8 @@ pub type Result<T> = std::result::Result<T, ConfigForgeError>;
 | Legacy 裸业务错误 | `Validation(String)`，仅作为尚未迁移边界的 fallback |
 | 结构化业务诊断 | `ValidationReport(DiagnosticReport<Diagnostic>)` |
 
+`ConfigForgeError::diagnostics()` 覆盖全部错误变体，文件、解析、序列化和 legacy 错误也有稳定 code。TOML 文件解析失败使用 parser span 的起始位置补充 1-based 行列，CSV 使用 parser 的物理行号；内存 Meta 字符串解析失败没有文件位置。`with_diagnostics()` 保留主错误后追加诊断，报告 / trace 写入失败不得覆盖原始 validation 错误。`BuildOutput.diagnostics` 保留结构化 warning，`warnings` 保持兼容的 human 字符串；后续 export、sink finish 或 trace 失败继续携带已收集诊断。
+
 后续演进方向：
 
 1. 保持 `ConfigForgeError` 作为 public error facade。
@@ -188,6 +199,7 @@ pub type Result<T> = std::result::Result<T, ConfigForgeError>;
 - Meta 结构诊断：`CF_META_*` stable codes 覆盖 `MetaDiagnosticCode` 的所有当前变体；Meta 内部仍保留 `MetaDiagnosticCode` enum，边界输出通过 `stable_code()` 转为 catalog code，并使用 `source = "meta.validate"`、`domain = "meta"`、catalog explanation / hint enrich JSON payload。
 - Data high-value validation：invalid type、missing required field、invalid enum、invalid foreign key、invalid asset ref、duplicate key。
 - Build：target not found、input required、export task failed。
+- 文件与解析：`CF_IO_READ_FAILED`、`CF_IO_WRITE_FAILED`、`CF_PROJECT_PARSE_FAILED`、`CF_META_PARSE_FAILED`、`CF_DATA_PARSE_CSV_FAILED`、`CF_OUTPUT_SERIALIZE_FAILED`。
 - Legacy validator/data code：`field.range_violation`、`validator.*`、`field.*`、`foreign_key.*`、`asset.reference` 等以 deprecated metadata 形式保留，保证报告层能继续给出 title/explanation/hint fallback。
 
 新增内置 code 的规则：优先复用已有 code；只有语义不同才新增。新增 code 必须补 metadata，并至少有 catalog test 或 producer test 覆盖。
@@ -215,10 +227,11 @@ worker task
 
 默认 CLI human 输出保持简洁：`error: validation failed: <formatted diagnostics>`，每条 formatted diagnostic 优先展示 source、severity、code、message、location、target、hint。
 
-`--diagnostic-format json` 面向 CI / IDE / 平台消费，在失败时向 stderr 输出稳定顶层结构：
+`--diagnostic-format json` 面向 CI / IDE / 平台消费，在成功、业务失败和参数解析失败时均向 stderr 输出同一顶层结构。成功使用 `status = "success"` 并保留 warning；失败使用 `status = "error"`。stdout 的成功 / dry-run 信息仍是人类可读文本：
 
 ```json
 {
+  "schema_version": 1,
   "status": "error",
   "message": "validation failed: ...",
   "diagnostics": [
@@ -245,7 +258,7 @@ worker task
 }
 ```
 
-当错误不是 `ConfigForgeError::ValidationReport` / `MetaValidation` 时，`diagnostics` 可以为空，但 `status` 与 `message` 仍稳定输出。
+全部 `ConfigForgeError` 变体都会产出结构化诊断。参数解析失败在原始 argv 中识别 `--diagnostic-format json` 或 `--diagnostic-format=json`，输出 `CF_BUILD_INVALID_OPTION` 并保持退出码 2；help/version 保持正常文本与退出码 0。解析后的无效参数组合和业务错误保持退出码 1。JSON 新增字段采用兼容扩展，消费者应忽略未知字段；破坏性变更需提升 `schema_version`。
 
 ## 2.8 测试边界
 
@@ -259,3 +272,17 @@ Diagnostic 模块测试应覆盖：
 - 高价值 producer 测试优先断言 code / severity / location / current_value / expected / hint，再断言 message 片段。
 
 XLSX 的 `DiagnosticLocation.source_sheet` 独立于 source_path，缺省时序列化省略以兼容 CSV。物理行列采用 1-based，human 输出显示 sheet；DesignerValidationIssue 同步保留 source_sheet，四种 renderer 展示工作表定位。禁止把 sheet 拼入真实文件路径。
+
+## 2.9 当前实现缺口与演进约束
+
+当前契约与真实边界：
+
+| 能力 | 已实现 | 仍有限制 |
+| --- | --- | --- |
+| 错误聚合 | 主错误与 report / trace 错误并存；失败报告逐个尝试；export / finish 失败保留已有 warning。 | 共享 ArtifactSink 失败后拒绝后续写入，报告不能绕过路径规划和 sink 状态。 |
+| 机器输出 | CLI 成功、业务失败、参数错误使用 schema version 1；I/O 与 parse 错误有 code / 可提取位置。 | stdout 仍保留 human 运行信息；JSON 从 stderr 读取。 |
+| Producer | Asset regex warning 进入 validation；regex/sum 提供 current/expected；asset ref/kind、group 独立放入 context。 | 旧 `resolve_for_target()` 只返回值；需要 warning 的调用者使用 `resolve_for_target_with_diagnostics()`。 |
+| 来源与关联 | Project imports / standalone Meta merge 保留声明 name 的文件、行列；duplicate、FK、sum 有关联位置，行级 issue 可补 raw record key。 | 不是完整 TOML token span；index / validator / fragment 的独立属性位置仍可能回退到所属声明。程序构造模型可无物理来源。 |
+| Designer report | schema version 1，四格式传递新增上下文；根内 source path 相对化；基于 linked schema 与 target tags 判断 table/field 可见性。 | 不统计 row_filtered 或已检查行数；无法解析的路径标记 not_applicable。E/W ID 只在单份报告内稳定。 |
+
+回归覆盖主错误与附加失败并存、warning 后 export 失败、I/O/parse/argv JSON、Asset warning、多文件声明、重复记录、FK/sum 上下文、四格式和可见性。诊断转换逐字段补充缺失 location，保留 producer 已提供的坐标。新增测试优先断言结构化字段，不仅检查 message。
