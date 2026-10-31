@@ -393,7 +393,7 @@ runtime/
 | TypeScript | MessagePack | `runtime/typescript/messagepack_reader` | `stable` | `standalone_package` | `@msgpack/msgpack` 作为标准 backend；injectable decoder 仅作为 advanced/custom hook | package metadata 声明 `parserBackend = "@msgpack/msgpack"` / `adapterSupportLevel = "stable"`；解码后的 unknown value 复用 core reader 语义。 |
 | TypeScript | Binary | `runtime/typescript/binary_reader` | `stable` | `standalone_package` | 无第三方依赖 | package metadata 声明 `parserBackend = "configforge-binary"` / `adapterSupportLevel = "stable"`，并由 TS compliance runner 覆盖 success / malformed cases。 |
 | C++ | JSON | `runtime/cpp/rapidjson_reader` | `stable target` | `external_interface` + generated-header-bound 兼容 | CMake option + `find_package(RapidJSON CONFIG)` / package manager / optional `FetchContent` | 用 RapidJSON 完整处理转义、Unicode、数字和 parse error；可通过 CMake target 引入。 |
-| C++ | MessagePack | `runtime/cpp/msgpackc_reader` | `stable target` | `external_interface` + generated-header-bound 兼容 | CMake option + `find_package(msgpack-cxx CONFIG)` / package manager / `FetchContent` 固定 `cpp-6.1.1` | 不手写二进制 parser；解码到 msgpack object/value 后适配 reader，可通过 CMake target 引入。 |
+| C++ | MessagePack | `runtime/cpp/msgpackc_reader` | `stable target` | `external_interface` + generated-header-bound 兼容 | CMake option + `find_package(msgpack-cxx CONFIG)` / package manager / `FetchContent` 固定 `cpp-9.0.0` | 不手写二进制 parser；解码到 msgpack object/value 后适配 reader，可通过 CMake target 引入。 |
 | C++ | Binary | `runtime/cpp/binary_reader` | `stable target` | `external_interface` + generated-header-bound 兼容 | 无第三方依赖 | 通过 `config_forge_runtime::binary_reader` target 引入；install + `find_package` smoke 已覆盖。 |
 | C# | JSON | `runtime/csharp/system_text_json_reader` | `stable` | `copyable_template` | .NET BCL `System.Text.Json` | template 声明 `ParserBackend = "System.Text.Json"` / `AdapterSupportLevel = "stable"`；`runtime/csharp/json_reader` 保留为 compatibility path。 |
 | C# | MessagePack | `runtime/csharp/messagepack_reader` | `legacy-bootstrap` | `copyable_template` | 无第三方依赖，内置 MessagePack subset parser | template 声明 `ParserBackend = "configforge-dependency-free-messagepack-subset"` / `AdapterSupportLevel = "legacy-bootstrap"`；推荐目标为 `runtime/csharp/messagepack_csharp_reader`。 |
@@ -452,7 +452,7 @@ target_include_directories(game_config_runtime PRIVATE
 #### 三方依赖解析
 
 - `rapidjson_reader` 优先 `find_package(RapidJSON CONFIG QUIET)`；找不到时，如果 `CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON`，可用 `FetchContent` 拉取 RapidJSON；否则给出明确 CMake error，提示通过 vcpkg/Conan/system package 安装。
-- `msgpackc_reader` 优先 `find_package(msgpack-cxx CONFIG QUIET)` 或项目约定的 `find_package(msgpack CONFIG QUIET)`；找不到时，如果 `CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON`，可用 `FetchContent` 拉取 `msgpack/msgpack-c` 的 `cpp-6.1.1` tag；否则给出明确 CMake error。
+- `msgpackc_reader` 优先 `find_package(msgpack-cxx CONFIG QUIET)` 或项目约定的 `find_package(msgpack CONFIG QUIET)`；找不到时，如果 `CONFIG_FORGE_RUNTIME_FETCH_DEPS=ON`，可用 `FetchContent` 拉取 `msgpack/msgpack-c` 的 `cpp-9.0.0` tag；否则给出明确 CMake error。
 - 三方库只链接到 adapter target，不出现在 generated code target 的 public API 中。业务可替换为引擎内置 JSON / MessagePack 实现，只要实现同一 `IRuntimeDataReader` contract。
 
 #### generated header / stable interface 绑定

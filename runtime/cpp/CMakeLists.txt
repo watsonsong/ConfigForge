@@ -112,7 +112,7 @@ if(CONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER)
             FetchContent_Declare(
                 msgpack_cxx
                 GIT_REPOSITORY https://github.com/msgpack/msgpack-c.git
-                GIT_TAG        cpp-6.1.1
+                GIT_TAG        cpp-9.0.0
                 GIT_SHALLOW    TRUE)
             FetchContent_GetProperties(msgpack_cxx)
             if(NOT msgpack_cxx_POPULATED)

@@ -18,7 +18,7 @@ if(NOT msgpack-cxx_FOUND AND NOT msgpack_FOUND AND NOT MSGPACK_CXX_INCLUDE_DIR)
     FetchContent_Declare(
         msgpack_cxx
         GIT_REPOSITORY https://github.com/msgpack/msgpack-c.git
-        GIT_TAG        cpp-6.1.1
+        GIT_TAG        cpp-9.0.0
         GIT_SHALLOW    TRUE)
     FetchContent_MakeAvailable(msgpack_cxx)
     set(MSGPACK_CXX_INCLUDE_DIR "${msgpack_cxx_SOURCE_DIR}/include")

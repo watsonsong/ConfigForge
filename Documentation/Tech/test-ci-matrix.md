@@ -4,6 +4,8 @@
 
 ## Current GitHub Actions workflows
 
+CI quality job 还通过 CMake 拉取固定版本的 RapidJSON / msgpack-cxx，编译 C++17 runtime adapters 并运行 CTest 的 smoke、compliance 和 install/find_package 检查。
+
 CI quality job 安装 Node.js 24，使用 npm ci --include=dev 安装 TypeScript workspace 锁定依赖，运行五个 package 的 typecheck/build 与真实 MessagePack backend 测试，并将本地 tsc 提供给生成代码和 compliance harness。
 
 CI quality job 额外逐包执行 runtime/rust 下四个独立 crate 的 fmt、严格 Clippy 和单元测试；这些 crate 不属于根 workspace，根 cargo test 不会执行它们自己的单元测试。

@@ -54,6 +54,18 @@ jobs:
             cargo clippy --manifest-path "$manifest" --all-targets -- -D warnings
             cargo test --manifest-path "$manifest"
           done
+      - name: Configure C++ runtime adapters with pinned dependencies
+        run: >-
+          cmake -S runtime/cpp -B target/cpp-runtime
+          -DCMAKE_BUILD_TYPE=Release
+          -DCONFIG_FORGE_RUNTIME_BUILD_TESTS=ON
+          -DCONFIG_FORGE_RUNTIME_WITH_RAPIDJSON_READER=ON
+          -DCONFIG_FORGE_RUNTIME_WITH_MSGPACKC_READER=ON
+          -DCONFIG_FORGE_RUNTIME_FETCH_DEPS=ON
+      - name: Build and test C++ runtime adapters
+        run: |
+          cmake --build target/cpp-runtime --parallel 2
+          ctest --test-dir target/cpp-runtime --output-on-failure
   build-cross-platform:
     name: Build on ${{ matrix.os }}
     needs: quality-check

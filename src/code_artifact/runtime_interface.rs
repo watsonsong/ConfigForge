@@ -136,7 +136,7 @@ fn recommended_runtime_reader_adapter(
             format: "messagepack",
             adapter: "runtime/cpp/msgpackc_reader",
             parser_backend: "msgpack-cxx",
-            parser_backend_version: "cpp-6.1.1",
+            parser_backend_version: "cpp-9.0.0",
             adapter_support_level: "stable",
         }),
         ("cpp", "binary") => Some(RuntimeReaderAdapterReference {

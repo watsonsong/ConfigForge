@@ -235,7 +235,7 @@ endif()
 
 ## msgpack-cxx 指导
 
-MessagePack C++ adapter 选择 `msgpack-cxx`，即 `msgpack/msgpack-c` 仓库的 C++ API。它提供 `<msgpack.hpp>`、`msgpack::unpack` 和 `msgpack::object_handle`，适合实现 header-only reader；自动下载时固定使用 `cpp-6.1.1` tag，不跟随主分支。不同包管理器导出的 CMake target 名称可能不同，`runtime/cpp/msgpackc_reader` 应同时兼容：
+MessagePack C++ adapter 选择 `msgpack-cxx`，即 `msgpack/msgpack-c` 仓库的 C++ API。它提供 `<msgpack.hpp>`、`msgpack::unpack` 和 `msgpack::object_handle`，适合实现 header-only reader；自动下载时固定使用 `cpp-9.0.0` tag，不跟随主分支。该版本保持当前 C++17、无 Boost 的 reader 接入方式；升级时需同时更新生成器 reference metadata 和两个 CMake 入口，并验证 smoke、compliance 与 install/find_package。RapidJSON 的最新稳定版仍为 v1.1.0，继续固定该版本。不同包管理器导出的 CMake target 名称可能不同，`runtime/cpp/msgpackc_reader` 应同时兼容：
 
 ```cmake
 find_package(msgpack-cxx CONFIG QUIET)
@@ -353,4 +353,4 @@ Header-only 且通过 include path 使用的依赖，如果没有随 ConfigForge
 
 - C++ API 可直接把 MessagePack bytes 解码为 `msgpack::object_handle`，reader cursor 可以共享 owner，满足 generated reader contract 的生命周期要求；
 - 通过 `<msgpack.hpp>` 暴露 map / array / string / integer / float / bool / nil 类型，能完整覆盖当前 ConfigForge payload shape；
-- 常见包管理器支持 `find_package(msgpack-cxx CONFIG)` 或 `find_package(msgpack CONFIG)`，缺失时可显式 FetchContent 固定 `cpp-6.1.1`。
+- 常见包管理器支持 `find_package(msgpack-cxx CONFIG)` 或 `find_package(msgpack CONFIG)`，缺失时可显式 FetchContent 固定 `cpp-9.0.0`。
