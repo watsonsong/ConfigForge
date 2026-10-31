@@ -160,6 +160,16 @@ impl<'meta> RegexValidator<'meta> {
             },
         );
         issue.target = ctx.target_tags.as_ref().map(format_target_tags);
+        if let Some(table) = ctx.export_view.table(self.table_name) {
+            let visible_index = table
+                .visible_rows
+                .iter()
+                .position(|row| row.row_index == row_index);
+            if let Some(index) = visible_index {
+                issue.current_value = Some(field_value(table, index, self.field_name));
+            }
+        }
+        issue.expected = Some(format!("regex `{}`", self.config.pattern));
         issue
     }
 }

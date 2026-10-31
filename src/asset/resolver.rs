@@ -64,6 +64,16 @@ impl AssetResolver {
         raw_input: &str,
         target_tags: &TargetTags,
     ) -> Result<ResolvedAssetRef> {
+        self.resolve_for_target_with_diagnostics(asset_kind, raw_input, target_tags)
+            .map(|(resolved, _)| resolved)
+    }
+
+    pub fn resolve_for_target_with_diagnostics(
+        &self,
+        asset_kind: &str,
+        raw_input: &str,
+        target_tags: &TargetTags,
+    ) -> Result<(ResolvedAssetRef, Vec<Diagnostic>)> {
         let kind = self.effective_kind(asset_kind).ok_or_else(|| {
             asset_error(
                 format!("unknown asset kind `{asset_kind}`"),
@@ -74,7 +84,8 @@ impl AssetResolver {
         })?;
         let resolved = self.resolve_with_kind(kind, raw_input)?;
         self.validate_resolved(kind, &resolved, target_tags)?;
-        Ok(resolved)
+        let diagnostics = validate_regex_rules(kind, &resolved, target_tags)?;
+        Ok((resolved, diagnostics))
     }
 
     fn resolve_with_kind(
@@ -473,7 +484,6 @@ impl AssetResolver {
         } else {
             validate_allow_patterns(kind, resolved)?;
         }
-        validate_regex_rules(kind, resolved, target_tags)?;
 
         let case_sensitive = kind.case_sensitive.or(self.case_sensitive).unwrap_or(false);
         if case_sensitive && resolved.resolved_filesystem_path.exists() {
@@ -907,7 +917,8 @@ fn validate_regex_rules(
     kind: &EffectiveAssetKind,
     resolved: &ResolvedAssetRef,
     target_tags: &TargetTags,
-) -> Result<()> {
+) -> Result<Vec<Diagnostic>> {
+    let mut diagnostics = Vec::new();
     for rule in &kind.regex_rules {
         if !rule.when_tags.is_empty() && !rule.when_tags.iter().any(|tag| target_tags.contains(tag))
         {
@@ -936,8 +947,8 @@ fn validate_regex_rules(
         );
         let matched = regex.is_match(&value);
         let passes = if rule.invert { !matched } else { matched };
-        if !passes && rule.severity == ValidationSeverity::Error {
-            return Err(resolved_asset_error(
+        if !passes {
+            let error = resolved_asset_error(
                 kind,
                 resolved,
                 rule.message.clone().unwrap_or_else(|| {
@@ -949,10 +960,23 @@ fn validate_regex_rules(
                 value,
                 format!("regex rule `{}` passes", rule.name),
                 "Update the asset reference or relax the regex rule.",
-            ));
+            );
+            let mut rule_diagnostics = error.diagnostics();
+            for diagnostic in &mut rule_diagnostics {
+                diagnostic.severity = rule.severity;
+                diagnostic.target = Some(target_tags.iter().collect::<Vec<_>>().join(","));
+            }
+            diagnostics.extend(rule_diagnostics);
         }
     }
-    Ok(())
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == ValidationSeverity::Error)
+    {
+        Err(ConfigForgeError::from_diagnostics(diagnostics))
+    } else {
+        Ok(diagnostics)
+    }
 }
 
 fn regex_target_value(target: AssetRegexTarget, resolved: &ResolvedAssetRef) -> String {
@@ -1052,7 +1076,7 @@ fn asset_error(
 fn asset_diagnostic_error(
     message: String,
     _asset_kind: Option<&str>,
-    target: Option<&str>,
+    _asset_ref: Option<&str>,
     current_value: impl Into<String>,
     expected: impl Into<String>,
     hint: impl Into<String>,
@@ -1068,11 +1092,6 @@ fn asset_diagnostic_error(
     .with_current_value(current_value)
     .with_expected(expected)
     .with_hint(hint);
-    let diagnostic = if let Some(target) = target {
-        diagnostic.with_target(target)
-    } else {
-        diagnostic
-    };
     ConfigForgeError::from_diagnostic(diagnostic)
 }
 

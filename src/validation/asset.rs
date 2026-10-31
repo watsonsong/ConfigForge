@@ -313,7 +313,13 @@ fn validate_asset_field_path(
     if value.trim().is_empty() {
         return;
     }
-    if let Err(error) = resolver.resolve_for_target(asset_kind, &value, target_tags) {
+    let result = resolver.resolve_for_target_with_diagnostics(asset_kind, &value, target_tags);
+    let error = match result {
+        Ok((_, diagnostics)) if diagnostics.is_empty() => return,
+        Ok((_, diagnostics)) => ConfigForgeError::from_diagnostics(diagnostics),
+        Err(error) => error,
+    };
+    {
         report.extend(asset_issues_from_error(
             error,
             DiagnosticLocation {

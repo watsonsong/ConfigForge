@@ -156,3 +156,68 @@ fn diagnostic_io_parse_and_argument_errors_are_structured() {
     let result: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(result["diagnostics"][0]["code"], "CF_BUILD_INVALID_OPTION");
 }
+
+#[test]
+fn diagnostic_asset_regex_warning_reaches_cli_and_report() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = diagnostic_project(temp.path(), "warning", false);
+    let config = fs::read_to_string(&project).unwrap();
+    let config = config
+        .replace(
+            "name = \"level\"\n        type = \"int\"",
+            "name = \"level\"\n        type = \"asset\"\n        asset_kind = \"icon\"",
+        )
+        .replace(
+            "kind = \"range\"\n        max = 10",
+            "kind = \"regex\"\n        pattern = \"Icon_.*\"",
+        );
+    fs::write(
+        &project,
+        format!(
+            r#"
+        [assets]
+        require_existing = false
+        [[assets.search_paths]]
+        name = "local"
+        root = "."
+        [[asset_kinds]]
+        name = "icon"
+        search_paths = ["local"]
+        [[asset_kinds.regex_rules]]
+        name = "preferred_name"
+        pattern = "Icon_.*"
+        severity = "warning"
+        {config}
+    "#
+        ),
+    )
+    .unwrap();
+    let report_path = temp.path().join("report.json");
+    let result = diagnostic_run(
+        &project,
+        &[
+            "--report",
+            "json",
+            "--report-output",
+            report_path.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(result["status"], "success", "{result}");
+    let issues = result["diagnostics"].as_array().unwrap();
+    let asset = issues
+        .iter()
+        .find(|issue| issue["source"] == "asset.resolver")
+        .unwrap();
+    assert_eq!(asset["severity"], "warning");
+    assert_eq!(asset["location"]["source_row_number"], 3);
+    assert_ne!(asset["target"], "11");
+    let regex = issues
+        .iter()
+        .find(|issue| issue["code"] == "validator.regex_mismatch")
+        .unwrap();
+    assert_eq!(regex["current_value"], "11");
+    assert!(regex["expected"].as_str().unwrap().contains("Icon_"));
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
+    assert_eq!(report["summary"]["warning_count"], 2);
+}

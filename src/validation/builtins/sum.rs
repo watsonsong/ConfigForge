@@ -173,11 +173,14 @@ impl<'meta> SumValidator<'meta> {
             message,
             ValidationIssueLocation {
                 table: Some(self.table_name.to_owned()),
-                field: Some(format!("{} group {}", self.config.field, group_label)),
+                field: Some(self.config.field.clone()),
                 ..Default::default()
             },
         );
         issue.target = ctx.target_tags.as_ref().map(format_target_tags);
+        issue.current_value = Some(actual.to_string());
+        issue.expected = Some(violation);
+        issue.explanation = Some(format!("group: {group_label}"));
         issue
     }
 }
