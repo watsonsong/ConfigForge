@@ -759,18 +759,17 @@ fn validate_field_layout(
 ) {
     let is_struct = model.struct_meta(&field.field_type).is_some();
     let list_element_type = list_element_type_name(&field.field_type);
-    if let Some(element_type) = list_element_type {
-        if list_element_type_name(element_type).is_some()
-            || model.struct_meta(element_type).is_some()
-        {
-            diagnostics.push(MetaDiagnostic::new(
+    if let Some(element_type) = list_element_type
+        && (list_element_type_name(element_type).is_some()
+            || model.struct_meta(element_type).is_some())
+    {
+        diagnostics.push(MetaDiagnostic::new(
                 MetaDiagnosticCode::UnsupportedFeature,
                 format!(
                     "{} field `{}` uses unsupported list element type `{}`; list fields currently support only primitive or enum elements",
                     owner, field.name, element_type
                 ),
             ));
-        }
     }
     let is_list = list_element_type.is_some();
     match (is_struct, is_list, field.layout) {
@@ -905,13 +904,13 @@ fn validate_fragment_meta(
             ),
         ));
     }
-    if let Some(type_name) = fragment.type_name.as_deref() {
-        if model.struct_meta(type_name).is_none() {
-            diagnostics.push(MetaDiagnostic::new(
-                MetaDiagnosticCode::UnknownFieldType,
-                format!("{} references unknown struct type `{}`", owner, type_name),
-            ));
-        }
+    if let Some(type_name) = fragment.type_name.as_deref()
+        && model.struct_meta(type_name).is_none()
+    {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::UnknownFieldType,
+            format!("{} references unknown struct type `{}`", owner, type_name),
+        ));
     }
     validate_field_names(
         &owner,
@@ -1126,32 +1125,32 @@ fn validate_builtin_value_field_options(
         }
     }
 
-    if let Some(dimension) = field.vector_dimension() {
-        if let Some(components) = &field.vector_components {
-            if components.len() != dimension {
+    if let Some(dimension) = field.vector_dimension()
+        && let Some(components) = &field.vector_components
+    {
+        if components.len() != dimension {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::UnsupportedFeature,
+                format!(
+                    "{owner} field `{}` declares {} vector components but type `{}` requires {}",
+                    field.name,
+                    components.len(),
+                    field.field_type,
+                    dimension
+                ),
+            ));
+        }
+        let mut seen = BTreeSet::new();
+        for component in components {
+            if component.trim().is_empty() || !seen.insert(component.as_str()) {
                 diagnostics.push(MetaDiagnostic::new(
-                    MetaDiagnosticCode::UnsupportedFeature,
-                    format!(
-                        "{owner} field `{}` declares {} vector components but type `{}` requires {}",
-                        field.name,
-                        components.len(),
-                        field.field_type,
-                        dimension
-                    ),
-                ));
-            }
-            let mut seen = BTreeSet::new();
-            for component in components {
-                if component.trim().is_empty() || !seen.insert(component.as_str()) {
-                    diagnostics.push(MetaDiagnostic::new(
                         MetaDiagnosticCode::UnsupportedFeature,
                         format!(
                             "{owner} field `{}` declares invalid vector_components; component names must be non-empty and unique",
                             field.name
                         ),
                     ));
-                    break;
-                }
+                break;
             }
         }
     }
@@ -1451,15 +1450,15 @@ fn validate_primary_index(
         ));
     }
 
-    if let Some(marked_primary) = primary_indexes.first() {
-        if *marked_primary != primary_index_name {
-            diagnostics.push(MetaDiagnostic::new(
-                MetaDiagnosticCode::PrimaryIndexMismatch,
-                format!(
-                    "table `{}` primary_index `{}` conflicts with primary index `{}`",
-                    table.name, primary_index_name, marked_primary
-                ),
-            ));
-        }
+    if let Some(marked_primary) = primary_indexes.first()
+        && *marked_primary != primary_index_name
+    {
+        diagnostics.push(MetaDiagnostic::new(
+            MetaDiagnosticCode::PrimaryIndexMismatch,
+            format!(
+                "table `{}` primary_index `{}` conflicts with primary index `{}`",
+                table.name, primary_index_name, marked_primary
+            ),
+        ));
     }
 }

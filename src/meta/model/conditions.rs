@@ -53,13 +53,12 @@ impl RowExportPolicy {
         target: &TargetTags,
         value_of: impl Fn(&str) -> Option<&'a str>,
     ) -> bool {
-        if let Some(field) = &self.excluded_tags_field {
-            if parse_tag_list(value_of(field))
+        if let Some(field) = &self.excluded_tags_field
+            && parse_tag_list(value_of(field))
                 .iter()
                 .any(|tag| target.contains(tag))
-            {
-                return false;
-            }
+        {
+            return false;
         }
 
         let required_tags = self

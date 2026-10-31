@@ -6,7 +6,7 @@ on:
     branches: [ main ]
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: "stable" # 使用最新稳定版Rust，保证对2024 edition的完整支持
+  RUST_VERSION: "1.99.1"
   CONFIG_FORGE_TEST_PROFILE: quick
 jobs:
   quality-check:
@@ -28,9 +28,18 @@ jobs:
       - name: Check code formatting
         run: cargo fmt --all --check
       - name: Run clippy lints
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
       - name: Run unit, integration, and runtime tests
         run: cargo test --locked
+      - name: Check standalone Rust runtime crates
+        shell: bash
+        run: |
+          for crate in reader_core binary_reader serde_json_reader serde_msgpack_reader; do
+            manifest="runtime/rust/$crate/Cargo.toml"
+            cargo fmt --manifest-path "$manifest" --check
+            cargo clippy --manifest-path "$manifest" --all-targets -- -D warnings
+            cargo test --manifest-path "$manifest"
+          done
   build-cross-platform:
     name: Build on ${{ matrix.os }}
     needs: quality-check
@@ -65,6 +74,6 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
       - name: Test platform behavior and core integrations
         run: cargo test --locked --target ${{ matrix.target }} --lib --test architecture --test cli_integration --test runtime_compliance --test runtime_helper_release_metadata

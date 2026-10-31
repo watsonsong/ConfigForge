@@ -150,10 +150,10 @@ fn extract_field_entry(
         PotSourceReferenceMode::RecordKey | PotSourceReferenceMode::None => None,
     };
     let mut translator_comments = Vec::new();
-    if options.include_translator_comments {
-        if let Some(desc) = field.meta.desc.as_deref() {
-            translator_comments.push(desc.to_owned());
-        }
+    if options.include_translator_comments
+        && let Some(desc) = field.meta.desc.as_deref()
+    {
+        translator_comments.push(desc.to_owned());
     }
     translator_comments.push(format!(
         "table={} field={}{}",

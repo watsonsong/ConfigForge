@@ -184,10 +184,10 @@ pub(super) fn optional_number(meta: &ValidatorMeta, kind: &str, key: &str) -> Re
     if let Some(value) = value.as_integer() {
         return Ok(Some(value as f64));
     }
-    if let Some(value) = value.as_float() {
-        if value.is_finite() {
-            return Ok(Some(value));
-        }
+    if let Some(value) = value.as_float()
+        && value.is_finite()
+    {
+        return Ok(Some(value));
     }
     Err(validator_config_error(
         kind,
@@ -286,10 +286,10 @@ pub(super) fn literal_to_string(kind: &str, key: &str, value: &toml::Value) -> R
     if let Some(value) = value.as_integer() {
         return Ok(value.to_string());
     }
-    if let Some(value) = value.as_float() {
-        if value.is_finite() {
-            return Ok(value.to_string());
-        }
+    if let Some(value) = value.as_float()
+        && value.is_finite()
+    {
+        return Ok(value.to_string());
     }
     if let Some(value) = value.as_bool() {
         return Ok(value.to_string());

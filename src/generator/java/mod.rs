@@ -285,10 +285,10 @@ fn validate_runtime_interface_options(options: &JavaCodegenOptions) -> Result<()
                 .to_owned(),
         ));
     }
-    if matches!(options.runtime_interface, RuntimeInterfaceMode::External) {
-        if let Some(package) = &options.runtime_package {
-            validate_java_package(package)?;
-        }
+    if matches!(options.runtime_interface, RuntimeInterfaceMode::External)
+        && let Some(package) = &options.runtime_package
+    {
+        validate_java_package(package)?;
     }
     validate_type_mappings(&options.type_mappings)?;
     Ok(())

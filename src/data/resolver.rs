@@ -418,13 +418,13 @@ fn resolve_vector_cell_value(
         return Ok(Some(context.explicit(DataValue::Vector(vector), raw)));
     }
 
-    if field.meta.vector_format == Some(VectorFormat::Expanded) {
-        if let Some((raw, paths)) = expanded_vector_raw_value(context, field)? {
-            let vector = context.parse_vector_field(field, &raw)?;
-            return Ok(Some(
-                context.explicit(DataValue::Vector(vector), paths.join(",")),
-            ));
-        }
+    if field.meta.vector_format == Some(VectorFormat::Expanded)
+        && let Some((raw, paths)) = expanded_vector_raw_value(context, field)?
+    {
+        let vector = context.parse_vector_field(field, &raw)?;
+        return Ok(Some(
+            context.explicit(DataValue::Vector(vector), paths.join(",")),
+        ));
     }
 
     let Some(default) = field.meta.default.as_ref() else {
@@ -1024,12 +1024,11 @@ fn validate_struct_child_path(
         if struct_child(struct_type, path).is_some() {
             return Ok(());
         }
-        if let Some((list_field_name, _)) = parse_list_element_path(path) {
-            if struct_child(struct_type, list_field_name)
+        if let Some((list_field_name, _)) = parse_list_element_path(path)
+            && struct_child(struct_type, list_field_name)
                 .is_some_and(|field| matches!(field.linked_field, LinkedField::List(_)))
-            {
-                return Ok(());
-            }
+        {
+            return Ok(());
         }
         return Err(resolver_schema_error(
             table_name,

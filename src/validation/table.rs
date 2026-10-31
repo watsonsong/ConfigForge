@@ -225,10 +225,10 @@ pub(super) fn validate_normalized_table_view_with_report(
 
     let primary_index_name = meta.primary_index().map(|index| index.meta.name.as_str());
     for index in &meta.indexes {
-        if let Some(target_tags) = target_tags {
-            if !index.meta.is_exported_for(target_tags) {
-                continue;
-            }
+        if let Some(target_tags) = target_tags
+            && !index.meta.is_exported_for(target_tags)
+        {
+            continue;
         }
         let is_primary_index =
             index.meta.primary || primary_index_name == Some(index.meta.name.as_str());
@@ -1040,10 +1040,10 @@ fn validate_fragment_values_for_row(
         let Some(fragment) = meta.fragment(fragment_name) else {
             continue;
         };
-        if let Some(target_tags) = target_tags {
-            if !fragment.meta.is_exported_for(target_tags) {
-                continue;
-            }
+        if let Some(target_tags) = target_tags
+            && !fragment.meta.is_exported_for(target_tags)
+        {
+            continue;
         }
         if let Some(struct_type) = fragment.struct_type() {
             let has_effective_value = validate_struct_occurrence_value(
@@ -1074,10 +1074,10 @@ fn validate_fragment_values_for_row(
             continue;
         }
         for field in &fragment.fields {
-            if let Some(target_tags) = target_tags {
-                if !field.meta.is_exported_for(target_tags) {
-                    continue;
-                }
+            if let Some(target_tags) = target_tags
+                && !field.meta.is_exported_for(target_tags)
+            {
+                continue;
             }
             validate_supported_field_type(meta, field)?;
             let field_path =

@@ -382,16 +382,16 @@ fn validate_bound_pair(
     max_key: &str,
     max: Option<f64>,
 ) -> Result<()> {
-    if let (Some(min), Some(max)) = (min, max) {
-        if min > max {
-            return Err(validator_config_error(
-                kind,
-                format!("validator `{kind}` has {min_key} greater than {max_key}"),
-                format!("{min_key}={min}, {max_key}={max}"),
-                format!("{min_key} less than or equal to {max_key}"),
-                "Adjust validator bounds so they are satisfiable.",
-            ));
-        }
+    if let (Some(min), Some(max)) = (min, max)
+        && min > max
+    {
+        return Err(validator_config_error(
+            kind,
+            format!("validator `{kind}` has {min_key} greater than {max_key}"),
+            format!("{min_key}={min}, {max_key}={max}"),
+            format!("{min_key} less than or equal to {max_key}"),
+            "Adjust validator bounds so they are satisfiable.",
+        ));
     }
     Ok(())
 }

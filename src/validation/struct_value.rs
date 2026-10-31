@@ -508,12 +508,11 @@ pub(super) fn validate_struct_child_path(
         if struct_child(struct_type, path).is_some() {
             return Ok(());
         }
-        if let Some((list_field_name, _)) = parse_list_element_path(path) {
-            if struct_child(struct_type, list_field_name)
+        if let Some((list_field_name, _)) = parse_list_element_path(path)
+            && struct_child(struct_type, list_field_name)
                 .is_some_and(|field| matches!(field.linked_field, LinkedField::List(_)))
-            {
-                return Ok(());
-            }
+        {
+            return Ok(());
         }
         return Err(struct_type_error(
             table_name,
@@ -746,10 +745,10 @@ fn validate_struct_json_cell(
     }
 
     for child in &struct_type.fields {
-        if let Some(target_tags) = target_tags {
-            if !child.meta.is_exported_for(target_tags) {
-                continue;
-            }
+        if let Some(target_tags) = target_tags
+            && !child.meta.is_exported_for(target_tags)
+        {
+            continue;
         }
         let child_path = format!("{field_path}.{}", child.meta.name);
         let child_value = object.get(&child.meta.name);

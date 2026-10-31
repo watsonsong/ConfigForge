@@ -376,19 +376,19 @@ fn validation_error(message: String) -> ConfigForgeError {
 }
 
 fn validate_optional_single_line(kind: &str, value: &Option<String>) -> Result<()> {
-    if let Some(value) = value {
-        if value.trim().is_empty() || value.chars().any(char::is_control) {
-            let message =
-                format!("invalid C++ {kind} `{value}`; value must be non-empty and single-line");
-            return Err(crate::code_artifact::generator_option_error(
-                CF_GENERATOR_INVALID_OPTION,
-                "generator.cpp.options",
-                message.clone(),
-                value,
-                format!("non-empty single-line C++ {kind}"),
-                "Check the cpp external runtime interface options.",
-            ));
-        }
+    if let Some(value) = value
+        && (value.trim().is_empty() || value.chars().any(char::is_control))
+    {
+        let message =
+            format!("invalid C++ {kind} `{value}`; value must be non-empty and single-line");
+        return Err(crate::code_artifact::generator_option_error(
+            CF_GENERATOR_INVALID_OPTION,
+            "generator.cpp.options",
+            message.clone(),
+            value,
+            format!("non-empty single-line C++ {kind}"),
+            "Check the cpp external runtime interface options.",
+        ));
     }
     Ok(())
 }

@@ -450,10 +450,10 @@ fn validate_runtime_interface_options(options: &CSharpCodegenOptions) -> Result<
             "runtime_interface_emit=reference is not supported for C# yet; use copy or none. C# JSON copy adapters target System.Text.Json; MessagePack copy adapters are legacy-bootstrap until runtime/csharp/messagepack_csharp_reader lands.",
         ));
     }
-    if matches!(options.runtime_interface, RuntimeInterfaceMode::External) {
-        if let Some(namespace) = &options.runtime_namespace {
-            validate_csharp_namespace(namespace)?;
-        }
+    if matches!(options.runtime_interface, RuntimeInterfaceMode::External)
+        && let Some(namespace) = &options.runtime_namespace
+    {
+        validate_csharp_namespace(namespace)?;
     }
     validate_type_mappings(&options.type_mappings)?;
     for using in &options.using {

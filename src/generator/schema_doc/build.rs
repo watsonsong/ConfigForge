@@ -183,11 +183,11 @@ fn collect_fragment_field_doc(
         visibility: export_visibility(field.meta.export, &field.meta.export_when, field_visible),
         description: field.meta.desc.clone(),
     });
-    if options.include_struct_details {
-        if let LinkedField::Struct(struct_type) = &field.linked_field {
-            for child in &struct_type.fields {
-                collect_fragment_field_doc(fields, child, Some(&path), options);
-            }
+    if options.include_struct_details
+        && let LinkedField::Struct(struct_type) = &field.linked_field
+    {
+        for child in &struct_type.fields {
+            collect_fragment_field_doc(fields, child, Some(&path), options);
         }
     }
 }
@@ -323,10 +323,10 @@ fn collect_field_doc(
             .map(|validator| validator_doc(&path, validator))
             .collect(),
     });
-    if options.include_struct_details {
-        if let LinkedField::Struct(struct_type) = &field.linked_field {
-            collect_struct_children(fields, struct_type, &path, options);
-        }
+    if options.include_struct_details
+        && let LinkedField::Struct(struct_type) = &field.linked_field
+    {
+        collect_struct_children(fields, struct_type, &path, options);
     }
 }
 
@@ -691,10 +691,9 @@ fn field_type_display(field: &LinkedFieldMeta<'_>) -> String {
     if matches!(
         field.linked_field.primitive_type(),
         Some(PrimitiveFieldType::Asset)
-    ) {
-        if let Some(asset_kind) = &field.meta.asset_kind {
-            return format!("asset({asset_kind})");
-        }
+    ) && let Some(asset_kind) = &field.meta.asset_kind
+    {
+        return format!("asset({asset_kind})");
     }
     if matches!(
         field.linked_field.primitive_type(),

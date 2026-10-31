@@ -7,7 +7,7 @@ permissions:
   contents: read
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: "stable" # 使用最新稳定版Rust，保证对2024 edition的完整支持
+  RUST_VERSION: "1.99.1"
   BINARY_NAME: "config-forge"
 jobs:
   build-release:
@@ -51,7 +51,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
       - name: Prepare artifact directory
         id: prep
         shell: bash

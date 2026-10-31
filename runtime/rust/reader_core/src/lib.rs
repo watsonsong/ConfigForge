@@ -402,7 +402,7 @@ mod tests {
             "CF_RT_INVALID_PATH"
         );
         assert!(
-            safe_join_runtime_path(root, "/tmp/items.json")
+            safe_join_runtime_path(root, &env::temp_dir().join("items.json").to_string_lossy())
                 .unwrap_err()
                 .message
                 .contains("relative")
@@ -1109,6 +1109,33 @@ mod tests {
                     ],
                     |reader| reader.as_f64().map(|_| ()),
                 ),
+                "list_length_on_scalar" => run_scalar_error(
+                    &reader,
+                    &[
+                        PathStep::Field("rows"),
+                        PathStep::Index(0),
+                        PathStep::Field("id"),
+                    ],
+                    |reader| reader.read_list_len().map(|_| ()),
+                ),
+                "string_type_mismatch" => run_scalar_error(
+                    &reader,
+                    &[
+                        PathStep::Field("rows"),
+                        PathStep::Index(0),
+                        PathStep::Field("enabled_bool"),
+                    ],
+                    |reader| reader.as_string().map(|_| ()),
+                ),
+                "unknown_enum_value" => run_scalar_error(
+                    &reader,
+                    &[
+                        PathStep::Field("rows"),
+                        PathStep::Index(0),
+                        PathStep::Field("name"),
+                    ],
+                    |reader| reader.read_enum_index(&["unknown"]).map(|_| ()),
+                ),
                 other => panic!("unhandled JSON compliance error case `{other}`"),
             };
             assert_eq!(
@@ -1123,7 +1150,7 @@ mod tests {
             );
             executed_json_cases += 1;
         }
-        assert_eq!(executed_json_cases, 6);
+        assert_eq!(executed_json_cases, 9);
     }
 
     fn run_scalar_error(

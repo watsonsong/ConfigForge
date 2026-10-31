@@ -16,7 +16,7 @@
 
 | 工具 | 要求 | 用途 |
 | --- | --- | --- |
-| Rust / Cargo | Rust 1.85+ | ConfigForge crate 使用 Rust 2024 edition，`Cargo.toml` 声明 `rust-version = "1.85"`。 |
+| Rust / Cargo | Rust 1.99.1+ | ConfigForge crate 使用 Rust 2024 edition，`Cargo.toml` 声明 `rust-version = "1.99.1"`。 |
 | rustfmt | 随 Rust toolchain 安装，或通过 rustup component 安装 | 运行 `cargo fmt` / `cargo fmt --check`。 |
 | Clippy | `rustup component add clippy` | 运行 `.cargo/config.toml` 中的 `cargo lint` alias。 |
 
@@ -35,6 +35,15 @@ rustup component add clippy
 ```
 
 `cargo lint` 是项目默认 lint profile，等价于对 workspace 的 all targets / all features 运行 Clippy，并禁止 `unsafe_code`。更严格的 `cargo lint-strict` 只用于评估 API / design cleanup 候选，不要求每次提交都无条件应用 pedantic 建议。
+
+## Rust 工具链与依赖升级策略
+
+- `rust-toolchain.toml` 将本地开发固定为已验证的 Rust 1.99.1（当前稳定版），包含 rustfmt / Clippy；CI 和 Release 的 RUST_VERSION 与之同步。工具 crate 的 rust-version 同为 1.99.1，升级工具链时应一起维护三处声明。
+- 独立 runtime/rust crates 继续声明 Rust 1.85；它们的编译器要求与工具分开管理。生成代码默认保持 Rust 2021 兼容，不把工具内部的 let chains 等 Rust 2024 新语法写进默认产物。
+- Cargo.toml 使用当前直接依赖的稳定版本作为兼容范围下限，Cargo.lock 固定已验证的完整依赖图。工具 crate 的 CI 检查、测试与 release build 均使用 --locked，避免构建期间悄悄解析到新版本。
+- Rust 1.88 起稳定的 let chains 可用于合并共享作用域的嵌套条件，保留原有求值顺序和短路语义；不为采用新 API 改变诊断、排序、锁生命周期或错误处理。syn 3 的 AST visitor 继续负责架构 guard，回归覆盖 let-chain 中的模块引用。
+- 独立 runtime crates 不属于根 workspace；CI 额外逐包执行 fmt、严格 Clippy 和单元测试，不能用根 cargo test 代替。
+- 库/API 升级先运行编译和对应 contract 回归，再运行 cargo fmt、cargo test --locked、cargo lint 和严格 Clippy；依赖升级本身不代表 runtime 格式或 public API 版本必须改变。
 
 ## 可选：覆盖率工具
 
@@ -96,7 +105,7 @@ Generated core 不应直接依赖具体 JSON / MessagePack / engine / framework 
 
 ### Rust core developer
 
-安装：Rust 1.85+、rustfmt、Clippy；可选安装 `cargo-llvm-cov`。
+安装：Rust 1.99.1+、rustfmt、Clippy；可选安装 `cargo-llvm-cov`。
 
 常用验证：
 

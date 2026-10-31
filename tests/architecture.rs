@@ -335,10 +335,9 @@ impl<'ast> Visit<'ast> for DependencyVisitor {
         if segments
             .next()
             .is_some_and(|segment| segment.ident == "crate")
+            && let Some(module) = segments.next()
         {
-            if let Some(module) = segments.next() {
-                self.dependencies.insert(module.ident.to_string());
-            }
+            self.dependencies.insert(module.ident.to_string());
         }
         visit::visit_path(self, path);
     }
@@ -403,6 +402,24 @@ fn grouped_imports_and_paths_only_record_root_modules() {
         r#"
         use crate::{meta::{data, MetaModel}, data as source};
         fn example() { crate::validation::example(); }
+    "#,
+    );
+    assert_eq!(
+        dependencies,
+        BTreeSet::from(["data".into(), "meta".into(), "validation".into()])
+    );
+}
+
+#[test]
+fn let_chain_conditions_preserve_dependency_checks() {
+    let dependencies = production_dependencies(
+        r#"
+        fn example() {
+            if let Some(value) = crate::meta::example()
+                && let Some(other) = crate::data::example(value)
+                && crate::validation::example(other)
+            {}
+        }
     "#,
     );
     assert_eq!(

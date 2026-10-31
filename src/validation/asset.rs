@@ -345,15 +345,15 @@ fn asset_issues_from_error(
             if !target.is_empty() {
                 issue = issue.with_target(target.clone());
             }
-            if issue.current_value.is_none() {
-                if let Some(current_value) = &current_value {
-                    issue = issue.with_current_value(current_value.clone());
-                }
+            if issue.current_value.is_none()
+                && let Some(current_value) = &current_value
+            {
+                issue = issue.with_current_value(current_value.clone());
             }
-            if issue.expected.is_none() {
-                if let Some(expected) = &expected {
-                    issue = issue.with_expected(expected.clone());
-                }
+            if issue.expected.is_none()
+                && let Some(expected) = &expected
+            {
+                issue = issue.with_expected(expected.clone());
             }
             if issue.domain.is_none() {
                 issue = issue.with_domain("data");

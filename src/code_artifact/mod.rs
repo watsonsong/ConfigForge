@@ -287,19 +287,17 @@ impl CodeExportTarget {
 
 fn validate_i18n_options(options: I18nOptions) -> Result<I18nOptions> {
     fn validate_optional_code_snippet(kind: &str, value: &Option<String>) -> Result<()> {
-        if let Some(value) = value {
-            if value.trim().is_empty() || value.chars().any(char::is_control) {
-                return Err(generator_option_error(
-                    CF_GENERATOR_INVALID_OPTION,
-                    "generator.codegen",
-                    format!(
-                        "invalid i18n {kind} `{value}`; value must be non-empty and single-line"
-                    ),
-                    value,
-                    "non-empty single-line code snippet",
-                    "Remove control characters and provide a valid i18n code snippet.",
-                ));
-            }
+        if let Some(value) = value
+            && (value.trim().is_empty() || value.chars().any(char::is_control))
+        {
+            return Err(generator_option_error(
+                CF_GENERATOR_INVALID_OPTION,
+                "generator.codegen",
+                format!("invalid i18n {kind} `{value}`; value must be non-empty and single-line"),
+                value,
+                "non-empty single-line code snippet",
+                "Remove control characters and provide a valid i18n code snippet.",
+            ));
         }
         Ok(())
     }

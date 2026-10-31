@@ -348,35 +348,35 @@ impl ColorValidatorConfig {
         actual_channel: Option<ColorChannel>,
         actual_space: ColorSpace,
     ) -> Result<()> {
-        if let Some(expected_channel) = self.expected_channel {
-            if actual_channel != Some(expected_channel) {
-                return Err(validator_config_error(
-                    "color",
-                    format!(
-                        "table `{table_name}` field `{field_name}` validator `color` expects color_channel `{}`",
-                        expected_channel.as_str()
-                    ),
-                    actual_channel
-                        .map(ColorChannel::as_str)
-                        .unwrap_or("<missing>"),
-                    expected_channel.as_str(),
-                    "Update field color_channel or the validator channel constraint.",
-                ));
-            }
+        if let Some(expected_channel) = self.expected_channel
+            && actual_channel != Some(expected_channel)
+        {
+            return Err(validator_config_error(
+                "color",
+                format!(
+                    "table `{table_name}` field `{field_name}` validator `color` expects color_channel `{}`",
+                    expected_channel.as_str()
+                ),
+                actual_channel
+                    .map(ColorChannel::as_str)
+                    .unwrap_or("<missing>"),
+                expected_channel.as_str(),
+                "Update field color_channel or the validator channel constraint.",
+            ));
         }
-        if let Some(expected_space) = self.expected_space {
-            if actual_space != expected_space {
-                return Err(validator_config_error(
-                    "color",
-                    format!(
-                        "table `{table_name}` field `{field_name}` validator `color` expects color_space `{}`",
-                        expected_space.as_str()
-                    ),
-                    actual_space.as_str(),
-                    expected_space.as_str(),
-                    "Update field color_space or the validator space constraint.",
-                ));
-            }
+        if let Some(expected_space) = self.expected_space
+            && actual_space != expected_space
+        {
+            return Err(validator_config_error(
+                "color",
+                format!(
+                    "table `{table_name}` field `{field_name}` validator `color` expects color_space `{}`",
+                    expected_space.as_str()
+                ),
+                actual_space.as_str(),
+                expected_space.as_str(),
+                "Update field color_space or the validator space constraint.",
+            ));
         }
         Ok(())
     }
@@ -391,36 +391,36 @@ impl ColorValidatorConfig {
     fn channel_violation(&self, color: &ColorValue) -> Option<String> {
         for channel in &self.channels {
             let value = channel.value(color);
-            if let Some(min) = self.min {
-                if value < min {
-                    return Some(format!(
-                        "channel `{}` is below min `{min}`",
-                        channel.as_str()
-                    ));
-                }
+            if let Some(min) = self.min
+                && value < min
+            {
+                return Some(format!(
+                    "channel `{}` is below min `{min}`",
+                    channel.as_str()
+                ));
             }
-            if let Some(max) = self.max {
-                if value > max {
-                    return Some(format!(
-                        "channel `{}` exceeds max `{max}`",
-                        channel.as_str()
-                    ));
-                }
+            if let Some(max) = self.max
+                && value > max
+            {
+                return Some(format!(
+                    "channel `{}` exceeds max `{max}`",
+                    channel.as_str()
+                ));
             }
         }
         None
     }
 
     fn alpha_violation(&self, color: &ColorValue) -> Option<String> {
-        if let Some(min) = self.alpha_min {
-            if color.a < min {
-                return Some(format!("alpha is below min `{min}`"));
-            }
+        if let Some(min) = self.alpha_min
+            && color.a < min
+        {
+            return Some(format!("alpha is below min `{min}`"));
         }
-        if let Some(max) = self.alpha_max {
-            if color.a > max {
-                return Some(format!("alpha exceeds max `{max}`"));
-            }
+        if let Some(max) = self.alpha_max
+            && color.a > max
+        {
+            return Some(format!("alpha exceeds max `{max}`"));
         }
         None
     }
@@ -461,16 +461,16 @@ fn validate_bound_pair(
     max_key: &str,
     max: Option<f64>,
 ) -> Result<()> {
-    if let (Some(min), Some(max)) = (min, max) {
-        if min > max {
-            return Err(validator_config_error(
-                kind,
-                format!("validator `{kind}` has {min_key} greater than {max_key}"),
-                format!("{min_key}={min}, {max_key}={max}"),
-                format!("{min_key} less than or equal to {max_key}"),
-                "Adjust validator bounds so they are satisfiable.",
-            ));
-        }
+    if let (Some(min), Some(max)) = (min, max)
+        && min > max
+    {
+        return Err(validator_config_error(
+            kind,
+            format!("validator `{kind}` has {min_key} greater than {max_key}"),
+            format!("{min_key}={min}, {max_key}={max}"),
+            format!("{min_key} less than or equal to {max_key}"),
+            "Adjust validator bounds so they are satisfiable.",
+        ));
     }
     Ok(())
 }

@@ -76,18 +76,18 @@ impl ValidatorFactory for RangeValidatorFactory {
                 "Configure at least one numeric bound.",
             ));
         }
-        if let (Some(min), Some(max)) = (config.min, config.max) {
-            if min > max {
-                return Err(validator_config_error(
-                    "range",
-                    format!(
-                        "table `{table_name}` field `{field_name}` validator `range` has min greater than max"
-                    ),
-                    format!("min={min}, max={max}"),
-                    "min less than or equal to max",
-                    "Lower min or raise max so the bounds are satisfiable.",
-                ));
-            }
+        if let (Some(min), Some(max)) = (config.min, config.max)
+            && min > max
+        {
+            return Err(validator_config_error(
+                "range",
+                format!(
+                    "table `{table_name}` field `{field_name}` validator `range` has min greater than max"
+                ),
+                format!("min={min}, max={max}"),
+                "min less than or equal to max",
+                "Lower min or raise max so the bounds are satisfiable.",
+            ));
         }
 
         Ok(Box::new(RangeValidator {

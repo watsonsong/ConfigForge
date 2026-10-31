@@ -3,7 +3,9 @@
 ## Rust Conventions
 
 - Use Rust 2024 edition for ConfigForge tool code.
-- Require Rust 1.85+ as the minimum supported toolchain for the ConfigForge crate.
+- Require Rust 1.99.1+ for the ConfigForge tool crate; pin development and CI to
+  the verified version in `rust-toolchain.toml`. Standalone runtime crates keep
+  their separately declared minimum Rust versions.
 - Keep generated Rust code Rust 2021-compatible by default unless a target option explicitly selects Rust 2024-only output.
 - Keep domain logic in `src/lib.rs` modules; keep `src/main.rs` as a thin entry point.
 - Prefer explicit domain errors through `ConfigForgeError` for library code.

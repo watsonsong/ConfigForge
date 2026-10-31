@@ -123,28 +123,28 @@ impl<'meta> CompiledValidator<'meta> for SumValidator<'meta> {
                 }
                 continue;
             }
-            if let Some(min) = self.config.min {
-                if actual + self.config.epsilon < min {
-                    issues.push(self.issue(
-                        ctx,
-                        group_key,
-                        "validator.sum_too_small",
-                        actual,
-                        format!("expected sum at least `{min}`"),
-                    ));
-                    continue;
-                }
+            if let Some(min) = self.config.min
+                && actual + self.config.epsilon < min
+            {
+                issues.push(self.issue(
+                    ctx,
+                    group_key,
+                    "validator.sum_too_small",
+                    actual,
+                    format!("expected sum at least `{min}`"),
+                ));
+                continue;
             }
-            if let Some(max) = self.config.max {
-                if actual - self.config.epsilon > max {
-                    issues.push(self.issue(
-                        ctx,
-                        group_key,
-                        "validator.sum_too_large",
-                        actual,
-                        format!("expected sum at most `{max}`"),
-                    ));
-                }
+            if let Some(max) = self.config.max
+                && actual - self.config.epsilon > max
+            {
+                issues.push(self.issue(
+                    ctx,
+                    group_key,
+                    "validator.sum_too_large",
+                    actual,
+                    format!("expected sum at most `{max}`"),
+                ));
             }
         }
     }
@@ -256,17 +256,16 @@ impl SumConfig {
                 "Configure a target sum or an allowed sum range.",
             ));
         }
-        if let (Some(min), Some(max)) = (min, max) {
-            if min > max {
-                return Err(validator_config_error(
-                    "sum",
-                    "validator `sum` parameter `min` must be less than or equal to `max`"
-                        .to_owned(),
-                    format!("min={min}, max={max}"),
-                    "min less than or equal to max",
-                    "Lower min or raise max so the bounds are satisfiable.",
-                ));
-            }
+        if let (Some(min), Some(max)) = (min, max)
+            && min > max
+        {
+            return Err(validator_config_error(
+                "sum",
+                "validator `sum` parameter `min` must be less than or equal to `max`".to_owned(),
+                format!("min={min}, max={max}"),
+                "min less than or equal to max",
+                "Lower min or raise max so the bounds are satisfiable.",
+            ));
         }
         let epsilon = optional_number(meta, "sum", "epsilon")?.unwrap_or(0.0);
         if epsilon < 0.0 {

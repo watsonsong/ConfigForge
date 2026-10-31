@@ -4,6 +4,8 @@
 
 ## Current GitHub Actions workflows
 
+CI quality job 额外逐包执行 runtime/rust 下四个独立 crate 的 fmt、严格 Clippy 和单元测试；这些 crate 不属于根 workspace，根 cargo test 不会执行它们自己的单元测试。
+
 当前仓库配置的 workflow：
 
 - [CI](../../.github/workflows/ci.yml)：在 `main` 的 push / pull request 上运行 Ubuntu 格式检查、Clippy 和 `cargo test --locked`，通过后构建 Linux x64 GNU、Windows x64 和 macOS 15 的 ARM64 / Intel 两种 release binary，并运行各平台的核心测试。
@@ -28,7 +30,7 @@ CI 使用 `quick` profile。Ubuntu quality job 执行完整 crate 测试入口�
 
 | Profile | 目标 | 必需工具 | 可选工具缺失策略 | 默认联网 |
 | --- | --- | --- | --- | --- |
-| `local` | 普通 Rust 开发的默认路径，快速发现核心回归。 | Rust 1.85+、Cargo、rustfmt。 | 目标语言工具缺失时明确 skip。 | 关闭。 |
+| `local` | 普通 Rust 开发的默认路径，快速发现核心回归。 | Rust 1.99.1+、Cargo、rustfmt。 | 目标语言工具缺失时明确 skip。 | 关闭。 |
 | `quick` | PR 基础门禁，覆盖 Rust core、关键 integration 与不需要额外三方安装的 runner。 | Rust toolchain；CI 镜像可额外安装 Node / C++ / .NET / JDK。 | 未声明必需的工具仍明确 skip。 | 关闭。 |
 | `full` | 跨语言 generated-code harness 与 runtime adapter 主要回归。 | Rust、C++17/CMake、Node/TypeScript、.NET SDK、JDK、Lua；按启用项安装 RapidJSON / msgpack-cxx。 | 声明必需的工具缺失时 fail-fast。 | 关闭，除非显式允许。 |
 | `nightly` | 最完整矩阵、慢速和依赖丰富的 adapter 验证。 | full profile 的工具集合，加上可选三方 adapter 依赖。 | 声明必需的工具缺失时 fail-fast。 | 关闭，除非显式允许。 |

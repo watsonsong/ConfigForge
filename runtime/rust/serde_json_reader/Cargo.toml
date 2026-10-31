@@ -23,4 +23,4 @@ path = "src/runtime_reader.rs"
 
 [dependencies]
 config-forge-runtime-reader-core = { version = "0.1.0", path = "../reader_core" }
-serde_json = "1.0"
+serde_json = "1.0.154"

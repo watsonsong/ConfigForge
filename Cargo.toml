@@ -5,7 +5,7 @@
 name = "config-forge"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.99.1"
 description = "ConfigForge is an AI-driven, schema-first game configuration export tool that validates designer-authored data and generates runtime-ready artifacts for multiple languages and platforms."
 license = "Apache-2.0"
 repository = "https://github.com/watsonsong/ConfigForge"
@@ -28,20 +28,20 @@ name = "config_forge"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0"
-clap = { version = "4.6", features = ["derive"] }
-csv = "1.4"
-rayon = "1.12"
-regex = "1.12"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-rmp-serde = "1.3"
-thiserror = "2.0"
-toml = "1.1"
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+csv = "1.4.0"
+rayon = "1.12.0"
+regex = "1.13.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+rmp-serde = "1.3.1"
+thiserror = "2.0.21"
+toml = "1.1.8"
 
 [dev-dependencies]
-assert_cmd = "2.2"
+assert_cmd = "2.2.2"
 config-forge-runtime-reader-core = { path = "runtime/rust/reader_core" }
-predicates = "3.1"
-syn = { version = "2", features = ["full", "visit"] }
-tempfile = "3.27"
+predicates = "3.1.4"
+syn = { version = "3.0.9", features = ["full", "visit"] }
+tempfile = "3.27.0"

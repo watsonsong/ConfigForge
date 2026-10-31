@@ -54,21 +54,21 @@ pub(super) fn extract_table_asset_references(
             }
         }
         TableKind::Object => {
-            if !visible_row_indices.is_empty() {
-                if let Some(row) = table.rows.first() {
-                    extract_row_asset_references(
-                        references,
-                        table_meta,
-                        table,
-                        0,
-                        row,
-                        resolved_table
-                            .as_ref()
-                            .and_then(|resolved_table| resolved_table.rows.first()),
-                        target_tags,
-                        options,
-                    );
-                }
+            if !visible_row_indices.is_empty()
+                && let Some(row) = table.rows.first()
+            {
+                extract_row_asset_references(
+                    references,
+                    table_meta,
+                    table,
+                    0,
+                    row,
+                    resolved_table
+                        .as_ref()
+                        .and_then(|resolved_table| resolved_table.rows.first()),
+                    target_tags,
+                    options,
+                );
             }
         }
     }

@@ -408,23 +408,23 @@ impl AssetResolver {
             ));
         }
 
-        if let Some(template) = kind.object_name.as_deref() {
-            if let Some(object_name) = resolved.object_name.as_deref() {
-                let stem = asset_stem(resolved);
-                let expected = render_object_name(Some(template), &stem);
-                if object_name != expected {
-                    return Err(resolved_asset_error(
-                        kind,
-                        resolved,
-                        format!(
-                            "asset kind `{}` object name `{object_name}` must be `{expected}`",
-                            kind.name
-                        ),
-                        object_name,
-                        expected,
-                        "Use the configured object_name template output.",
-                    ));
-                }
+        if let Some(template) = kind.object_name.as_deref()
+            && let Some(object_name) = resolved.object_name.as_deref()
+        {
+            let stem = asset_stem(resolved);
+            let expected = render_object_name(Some(template), &stem);
+            if object_name != expected {
+                return Err(resolved_asset_error(
+                    kind,
+                    resolved,
+                    format!(
+                        "asset kind `{}` object name `{object_name}` must be `{expected}`",
+                        kind.name
+                    ),
+                    object_name,
+                    expected,
+                    "Use the configured object_name template output.",
+                ));
             }
         }
 

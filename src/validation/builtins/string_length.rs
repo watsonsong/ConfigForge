@@ -141,28 +141,28 @@ impl<'meta> CompiledValidator<'meta> for StringLengthValidator<'meta> {
                 }
                 continue;
             }
-            if let Some(min) = self.config.min {
-                if actual < min {
-                    issues.push(self.issue(
-                        ctx,
-                        visible_row.row_index,
-                        visible_row.source_row_number,
-                        "validator.string_too_short",
-                        format!("length is `{actual}`, below min `{min}`"),
-                    ));
-                    continue;
-                }
+            if let Some(min) = self.config.min
+                && actual < min
+            {
+                issues.push(self.issue(
+                    ctx,
+                    visible_row.row_index,
+                    visible_row.source_row_number,
+                    "validator.string_too_short",
+                    format!("length is `{actual}`, below min `{min}`"),
+                ));
+                continue;
             }
-            if let Some(max) = self.config.max {
-                if actual > max {
-                    issues.push(self.issue(
-                        ctx,
-                        visible_row.row_index,
-                        visible_row.source_row_number,
-                        "validator.string_too_long",
-                        format!("length is `{actual}`, exceeds max `{max}`"),
-                    ));
-                }
+            if let Some(max) = self.config.max
+                && actual > max
+            {
+                issues.push(self.issue(
+                    ctx,
+                    visible_row.row_index,
+                    visible_row.source_row_number,
+                    "validator.string_too_long",
+                    format!("length is `{actual}`, exceeds max `{max}`"),
+                ));
             }
         }
     }
@@ -263,16 +263,16 @@ impl StringLengthValidatorConfig {
                 "Configure at least one length bound.",
             ));
         }
-        if let (Some(min), Some(max)) = (min, max) {
-            if min > max {
-                return Err(validator_config_error(
-                    "string_length",
-                    "validator `string_length` has min greater than max".to_owned(),
-                    format!("min={min}, max={max}"),
-                    "min less than or equal to max",
-                    "Lower min or raise max so the bounds are satisfiable.",
-                ));
-            }
+        if let (Some(min), Some(max)) = (min, max)
+            && min > max
+        {
+            return Err(validator_config_error(
+                "string_length",
+                "validator `string_length` has min greater than max".to_owned(),
+                format!("min={min}, max={max}"),
+                "min less than or equal to max",
+                "Lower min or raise max so the bounds are satisfiable.",
+            ));
         }
         let unit = match optional_string(meta, "string_length", "unit")?
             .unwrap_or_else(|| "unicode_scalar".to_owned())

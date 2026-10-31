@@ -73,6 +73,10 @@ impl MessagePackValueReader {
         Ok(found)
     }
 
+    pub fn is_empty(&self) -> RuntimeDataResult<bool> {
+        self.len().map(|length| length == 0)
+    }
+
     pub fn len(&self) -> RuntimeDataResult<usize> {
         self.with_current(|value| {
             value
@@ -272,6 +276,30 @@ impl RuntimeDataLoader for FsMessagePackRuntimeDataLoader {
 mod tests {
     use super::*;
     use std::{env, fs, process};
+
+    #[test]
+    fn collection_emptiness_rejects_scalars() {
+        for value in [serde_json::json!([]), serde_json::json!({})] {
+            assert!(MessagePackValueReader::new(value).is_empty().unwrap());
+        }
+        assert!(
+            !MessagePackValueReader::new(serde_json::json!([1]))
+                .is_empty()
+                .unwrap()
+        );
+        assert!(
+            !MessagePackValueReader::new(serde_json::json!({"id": 1}))
+                .is_empty()
+                .unwrap()
+        );
+        assert_eq!(
+            MessagePackValueReader::new(serde_json::json!(1))
+                .is_empty()
+                .unwrap_err()
+                .code(),
+            "CF_RT_TYPE_MISMATCH"
+        );
+    }
 
     #[test]
     fn fs_messagepack_loader_opens_payload() {
