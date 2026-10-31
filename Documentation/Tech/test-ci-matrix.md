@@ -17,12 +17,19 @@ CI quality job 额外逐包执行 runtime/rust 下四个独立 crate 的 fmt、�
 - [CI](../../.github/workflows/ci.yml)：在 `main` 的 push / pull request 上运行 Ubuntu 格式检查、Clippy 和 `cargo test --locked`，通过后构建 Linux x64 GNU、Windows x64 和 macOS 15 的 ARM64 / Intel 两种 release binary，并运行各平台的核心测试。
 - [Release](../../.github/workflows/release.yml)：在 `v*.*.*` tag push 上构建上述平台，并额外构建 Linux x64 musl；打包后生成 SHA256 校验文件并发布 GitHub Release。默认 token 权限为 `contents: read`，仅发布 job 提升为 `contents: write`。发布 job 在 Bash 中通过 `${GITHUB_REF_NAME#v}` 去除 tag 的 `v` 前缀，再通过 step output 传给 Release 正文。
 
-两个 workflow 的 macOS runner / Rust target 必须保持一致：
+CI / Release 的 Linux job 固定 `ubuntu-24.04`，避免 `ubuntu-latest` 自动迁移改变
+系统库和工具；quality 与 publish job 也使用该镜像。两个 workflow 的构建 runner /
+Rust target 必须保持一致；Release 另提供 Linux musl target：
 
 | Runner | 架构 | Rust target | Artifact suffix |
 | --- | --- | --- | --- |
+| `ubuntu-24.04` | x64 | `x86_64-unknown-linux-gnu` | CI: `linux-x64` / Release: `linux-x64-gnu` |
 | `macos-15` | ARM64 | `aarch64-apple-darwin` | `macos-arm64` |
 | `macos-15-intel` | Intel x64 | `x86_64-apple-darwin` | `macos-x64` |
+
+CI / Release 的 JavaScript Actions 使用原生 Node 24 的版本，独立于项目的 Node 安装。
+具体版本、runner 最低要求及迁移检查见
+[`ci-troubleshooting.md`](ci-troubleshooting.md#actions-runtime-与-runner-镜像告警)。
 
 C# generated-code 与 runtime compliance harness 统一使用 `net8.0`；CI quality 与跨平台 job 显式安装 .NET 8 SDK，确保对应 targeting pack 和 runtime 存在，而不是仅依赖 runner 上任意版本的 dotnet。更高 major 的 runtime 不保证能直接启动较低 major 的程序。
 

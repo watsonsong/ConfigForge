@@ -23,6 +23,48 @@
 不能把这类策略失败当成 harness 本身运行失败，更不能放宽必需工具检查来掩盖缺失环境。
 Action 自身的 Node 弃用 warning 与项目测试失败分开处理，先修复实际阻断步骤。
 
+## Actions runtime 与 runner 镜像告警
+
+[run 41168923791](https://github.com/watsonsong/ConfigForge/actions/runs/41168923791)
+的五个 job 均成功，5 条 warning 是同一类 Node 20 弃用提示：quality job 引用了
+`actions/checkout@v4` / `actions/setup-node@v4`，四个构建 job 各引用了 `checkout@v4`。
+它们在 `action.yml` 中声明 Node 20，由 GitHub 强制切换到 Node 24；这不是 Rust 编译告警，
+也不是项目通过 `setup-node` 安装的 Node 版本错误。
+
+处理方式与维护规则：
+
+- 检查被引用版本的官方 `action.yml` 中 `runs.using`，以及 release notes 的迁移约束。
+  项目 `node-version: "24"` 只影响后续 shell 命令，不能替换 Action 自身的 runtime。
+  不用屏蔽告警或设置强制 runtime 环境变量代替 Action 升级。
+- CI / Release 的 checkout 统一使用 `actions/checkout@v7`，Node 安装使用
+  `actions/setup-node@v7`。这两者原生使用 Node 24；当前仅使用普通 checkout、显式 npm cache，
+  没有使用 v7 迁移涉及的 fork privileged checkout 或 registry token fallback。
+- 同时检查较少运行的 Release：`upload-artifact@v7`、`download-artifact@v8` 和
+  `softprops/action-gh-release@v3` 均原生使用 Node 24，避免发布 tag 时才遇到同类告警。
+  产物上传显式 `archive: true`，下载显式 `merge-multiple: false`，保留每个 artifact
+  一个目录、目录内包含 release archive / checksum 的布局，供后续 SHA256SUMS 和发布步骤使用。
+- Node 24 Action 至少要求 Actions Runner 2.327.1；checkout 的跨 Docker 认证还要求
+  2.329.0。该 run 的 hosted runner 为 2.338.2，满足要求；未来使用 self-hosted runner
+  时须先核实 runner 版本。Action major、项目 Node major 和 runner agent 是三个独立版本。
+- 该 run 另外有 **3 条 notice**：两个 Ubuntu job 的镜像迁移通知，以及 macOS ARM64
+  容量通知。它们不是上述 5 条 warning，也不是失败信号。
+  Linux job 固定 `ubuntu-24.04`，延续该次成功运行实际使用的 Ubuntu 24.04，避免
+  `ubuntu-latest` 自动迁移至 Ubuntu 26 改变系统库和预装工具。固定 OS label 不会冻结
+  镜像的每周软件更新；升级 OS 时仍要运行整个目标矩阵，并同步 CI / Release。
+- macOS ARM64 排队容量由 GitHub 管理；不通过删除 ARM64 job、替换 Intel 架构或关闭检查
+  消除提示。只有持续影响交付时，才评估服务容量或 runner 方案。
+
+workflow 修改先运行 actionlint，并核对 Action 输入及 artifact 布局的兼容性。
+Action runtime、缓存服务、上传下载和 hosted image 的最终接入需由 push 后的 CI / tag workflow
+验证；已有 run 的告警是历史记录，不会因本地修改消失。
+
+升级时参考官方 [checkout 迁移说明](https://github.com/actions/checkout/tree/v7)、
+[setup-node 迁移说明](https://github.com/actions/setup-node/tree/v7)、
+[upload-artifact](https://github.com/actions/upload-artifact/tree/v7)、
+[download-artifact](https://github.com/actions/download-artifact/tree/v8) 与
+[Release Action](https://github.com/softprops/action-gh-release/tree/v3)，
+不要仅根据 major 数字推断 runtime 或输入兼容性。
+
 ## 已验证的失败模式与预防规则
 
 | 症状 | 原因 | 后续开发注意事项 |

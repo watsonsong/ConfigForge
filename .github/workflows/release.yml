@@ -17,11 +17,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             suffix: linux-x64-gnu
             archive: tar.gz
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
             suffix: linux-x64-musl
             archive: tar.gz
@@ -39,7 +39,7 @@ jobs:
             suffix: windows-x64
             archive: zip
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install system dependencies (musl)
         if: matrix.musl == true
         run: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -87,16 +87,17 @@ jobs:
             shasum -a 256 ${ARTIFACT}.tar.gz | awk '{print $1}' | tr -d '\n' > ${ARTIFACT}.tar.gz.sha256
           fi
       - name: Upload artifact to workflow
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.prep.outputs.artifact_name }}
+          archive: true
           path: |
             ${{ steps.prep.outputs.artifact_name }}.${{ matrix.archive }}
             ${{ steps.prep.outputs.artifact_name }}.${{ matrix.archive }}.sha256
   publish-release:
     name: Publish GitHub Release
     needs: build-release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -105,7 +106,9 @@ jobs:
         shell: bash
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
+        with:
+          merge-multiple: false
       - name: Generate total SHA256SUMS
         run: |
           : > SHA256SUMS
@@ -118,7 +121,7 @@ jobs:
             done
           done
       - name: Create Release and upload assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             */*.tar.gz
