@@ -14,10 +14,12 @@ use super::SourceRole;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataProvider {
     Csv,
+    Xlsx,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataSourcePlan {
+    pub sheet: Option<String>,
     pub table_name: String,
     pub provider: DataProvider,
     pub path: PathBuf,
@@ -50,6 +52,7 @@ impl DataProvider {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "csv" => Some(Self::Csv),
+            "xlsx" => Some(Self::Xlsx),
             _ => None,
         }
     }
@@ -57,6 +60,7 @@ impl DataProvider {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Csv => "csv",
+            Self::Xlsx => "xlsx",
         }
     }
 }
@@ -202,6 +206,7 @@ impl DataSourcePlan {
                     unsupported_provider_error(&table.name, &source.path, &source.provider)
                 })?,
                 path: PathBuf::from(&source.path),
+                sheet: source.sheet.clone(),
                 header_row: source.header_row,
                 data_start_row,
                 fragments: Vec::new(),
@@ -253,6 +258,7 @@ impl DataSourcePlan {
             table_name: table.name.clone(),
             provider,
             path: PathBuf::from(&source.path),
+            sheet: source.sheet.clone(),
             header_row: source.header_row,
             data_start_row,
             fragments: source.fragments.clone(),
@@ -341,7 +347,7 @@ fn unsupported_provider_error(
             CF_DATA_SOURCE_SCHEMA_INVALID,
             DiagnosticSeverity::Error,
             format!(
-                "table `{table_name}` source `{source_path}` uses unsupported provider `{provider}`; only `csv` is supported"
+                "table `{table_name}` source `{source_path}` uses unsupported provider `{provider}`; `csv` or `xlsx` is supported"
             ),
             DiagnosticLocation {
                 table: Some(table_name.to_owned()),

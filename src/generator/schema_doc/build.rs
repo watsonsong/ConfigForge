@@ -239,7 +239,7 @@ fn fragment_source_hints(
         {
             continue;
         }
-        hints.push(format!("{} ({role})", source.path));
+        hints.push(format!("{} ({role})", source_display(source)));
     }
     hints
 }
@@ -581,7 +581,7 @@ fn source_edge_doc(
         export_visibility(true, &source.export_when, source_visible)
     };
     SchemaSourceTableEdgeDoc {
-        source_path: source.path.clone(),
+        source_path: source_display(source),
         provider: source.provider.clone(),
         table: table.meta.name.clone(),
         role: role.to_owned(),
@@ -674,10 +674,9 @@ fn validator_summary(validator: &ValidatorMeta) -> String {
 }
 
 fn source_summary(table: &LinkedTableMeta<'_>) -> Option<String> {
-    let sources = table
-        .meta
-        .source_paths()
-        .map(str::to_owned)
+    let sources = source_refs_for_table(table)
+        .into_iter()
+        .map(|(_, source)| source_display(source))
         .collect::<Vec<_>>();
     if sources.is_empty() {
         None
@@ -831,5 +830,12 @@ fn toml_value_display(value: &toml::Value) -> String {
     match value {
         toml::Value::String(value) => value.clone(),
         _ => value.to_string(),
+    }
+}
+
+fn source_display(source: &SourceRef) -> String {
+    match &source.sheet {
+        Some(sheet) => format!("{} [sheet: {sheet}]", source.path),
+        None => source.path.clone(),
     }
 }

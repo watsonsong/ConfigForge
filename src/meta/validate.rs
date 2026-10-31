@@ -1239,13 +1239,23 @@ fn validate_source_declaration(table: &TableMeta, diagnostics: &mut Vec<MetaDiag
         .chain(table.sources.iter())
         .chain(table.override_sources.iter())
     {
-        if source.provider != "csv" {
+        if !matches!(source.provider.as_str(), "csv" | "xlsx") {
             diagnostics.push(MetaDiagnostic::new(
                 MetaDiagnosticCode::InvalidSourceDeclaration,
                 format!(
-                    "table `{}` source `{}` uses unsupported provider `{}`; only `csv` is supported",
+                    "table `{}` source `{}` uses unsupported provider `{}`; supported providers are `csv` and `xlsx`",
                     table.name, source.path, source.provider
                 ),
+            ));
+        }
+        if source
+            .sheet
+            .as_ref()
+            .is_some_and(|sheet| source.provider != "xlsx" || sheet.trim().is_empty())
+        {
+            diagnostics.push(MetaDiagnostic::new(
+                MetaDiagnosticCode::InvalidSourceDeclaration,
+                format!("table `{}` source `{}` requires a non-empty sheet name and provider = xlsx when sheet is set", table.name, source.path),
             ));
         }
         validate_source_row_layout(table, source, diagnostics);

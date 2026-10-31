@@ -8,6 +8,7 @@ ConfigForge is an **AI-driven, schema-first game configuration export tool** bui
 Designed for AI-assisted development, you can build custom validators, exporters, code generators, or runtime adapters in minutes with the provided architecture context and AI tooling.
 ## ✨ Core Features
 - 📋 **Schema-Driven Workflow**: Define tables, fields, types, indexes, foreign keys, and constraints using declarative TOML meta files as a single source of truth.
+- **CSV and XLSX Inputs**: Read local Excel workbooks without Excel installed; select worksheets explicitly and mix CSV/XLSX sources using the existing table and override rules. See [XLSX configuration](Documentation/Design/03-configuration.md#341-本地-xlsx-输入).
 - ✅ **Deterministic Validation**: Catch data errors (type mismatches, missing references, invalid values, broken asset paths) before export, never ship malformed configurations to production.
 - 📦 **Multi-Format Data Export**: Supports JSON, MessagePack, optimized binary, Lua embedded tables, CSV, POT (i18n), and validation reports out of the box; easily extend to custom formats.
 - 🔌 **Multi-Language Code Generation**: Generates type-safe, IDE-friendly data access code for Rust, C++ (including Unreal Engine), C#, Java, TypeScript, Lua, with more languages coming soon.

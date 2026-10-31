@@ -233,6 +233,8 @@ pub struct FragmentMeta {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SourceRef {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet: Option<String>,
     #[serde(default = "default_source_provider")]
     pub provider: String,
     pub path: String,
@@ -250,6 +252,7 @@ impl SourceRef {
     pub fn csv(path: impl Into<String>) -> Self {
         Self {
             provider: default_source_provider(),
+            sheet: None,
             path: path.into(),
             header_row: default_source_header_row(),
             data_start_row: default_source_data_start_row(),

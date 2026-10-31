@@ -303,17 +303,7 @@ fn field_location(
     };
     if let Some((table, row_index)) = row {
         location.row_index = Some(row_index);
-        if let Some(row_source) = table.row_source(row_index) {
-            location.source_path = Some(row_source.source_path.clone());
-            location.source_row_number = Some(row_source.source_row_number);
-        }
-        if let Some(cell_source) = table.cell_source(row_index, &field.meta.name) {
-            location.source_path = Some(cell_source.source_path.clone());
-            location.source_row_number = Some(cell_source.source_row_number);
-            location.source_column_number = Some(cell_source.source_column_number);
-            location.source_column_name = Some(cell_source.source_column_name.clone());
-            location.column_index = Some(cell_source.column_index);
-        }
+        table.enrich_location(row_index, &mut location);
     }
     location
 }

@@ -5,7 +5,7 @@ ConfigForge is a schema-driven game configuration export tool that validates des
 ## Project Goals
 
 - Define exported data structures through Meta files: tables, fields, field types, indexes, and constraints.
-- Load designer-authored data from CSV first, with room for additional Sheet providers later.
+- Load designer-authored data from CSV and XLSX, with room for remote Sheet providers later.
 - Validate data deterministically before export so game projects never consume malformed configuration.
 - Generate game-facing artifacts from the same source of truth:
   - data files suitable for runtime loading;
@@ -68,7 +68,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
 - `src/main.rs` — binary entry point.
 - `src/cli.rs` — CLI command definitions.
 - `src/meta/` — Meta schema loading, parsing, linking, validation, and tests.
-- `src/data/` — CSV data source loading, data load planning, normalization, and resolved row models.
+- `src/data/` — CSV/XLSX data source loading, data load planning, normalization, and resolved row models.
 - `src/code_artifact/` — current code artifact toolkit: language-neutral CodeModel IR, CodeWriter, naming / formatting / keyword conflict, and code artifact options helpers; concrete language generators live under `src/generator/<type_id>/`.
 - `src/validation/` — schema, target-aware data validation, diagnostics, and validator registry.
 - `src/project/` — ConfigForge project TOML schema, import merging, path normalization, and Meta extraction.

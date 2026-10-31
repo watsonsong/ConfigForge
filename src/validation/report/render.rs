@@ -77,15 +77,16 @@ fn render_markdown(report: &DesignerValidationReport) -> String {
     }
 
     output.push_str("\n## Issues\n\n");
-    output.push_str("| ID | Severity | Code | Table | Field | Source row | Source column | Current | Expected | Schema | Message | Hint |\n| --- | --- | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- |\n");
+    output.push_str("| ID | Severity | Code | Table | Field | Source | Source row | Source column | Current | Expected | Schema | Message | Hint |\n| --- | --- | --- | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- |\n");
     for issue in &report.issues {
         output.push_str(&format!(
-            "| {} | {} | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| {} | {} | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             issue.id,
             severity_label(issue.severity),
             escape_markdown(&issue.code),
             escape_markdown(issue.table.as_deref().unwrap_or("")),
             escape_markdown(issue.field.as_deref().unwrap_or("")),
+            escape_markdown(&format_issue_location(issue)),
             issue
                 .source_row_number
                 .map(|value| value.to_string())
@@ -117,6 +118,7 @@ fn render_csv(report: &DesignerValidationReport) -> String {
         "source_row_number",
         "source_column",
         "source_path",
+        "source_sheet",
         "current_value",
         "expected",
         "schema_metadata",
@@ -148,6 +150,7 @@ fn render_csv(report: &DesignerValidationReport) -> String {
                 .unwrap_or_default(),
             issue.source_column.clone().unwrap_or_default(),
             issue.source_path.clone().unwrap_or_default(),
+            issue.source_sheet.clone().unwrap_or_default(),
             issue.current_value.clone().unwrap_or_default(),
             issue.expected.clone().unwrap_or_default(),
             issue.schema_metadata.join("; "),
@@ -245,6 +248,9 @@ fn render_html(report: &DesignerValidationReport) -> String {
 
 fn format_issue_location(issue: &DesignerValidationIssue) -> String {
     let mut parts = Vec::new();
+    if let Some(sheet) = &issue.source_sheet {
+        parts.push(format!("sheet `{sheet}`"));
+    }
     if let Some(source_path) = &issue.source_path {
         parts.push(source_path.clone());
     }

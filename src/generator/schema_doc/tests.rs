@@ -69,6 +69,32 @@ fn build_doc(input: &str, tags: &[&str]) -> SchemaDoc {
     )
 }
 
+#[test]
+fn xlsx_sources_in_schema_docs_distinguish_sheets_without_reading_workbooks() {
+    let doc = build_doc(
+        r#"
+[[tables]]
+name = "settings"
+kind = "object"
+sources = [
+  { provider = "xlsx", path = "missing.xlsx", sheet = "first" },
+  { provider = "xlsx", path = "missing.xlsx", sheet = "second" },
+]
+[[tables.fields]]
+name = "limit"
+type = "int"
+"#,
+        &["client"],
+    );
+    assert_eq!(doc.source_graph.nodes.len(), 2);
+    let markdown = render_schema_doc_index_markdown(&doc);
+    let html = render_schema_doc_index_html(&doc, &[]);
+    for output in [markdown, html] {
+        assert!(output.contains("missing.xlsx [sheet: first]"));
+        assert!(output.contains("missing.xlsx [sheet: second]"));
+    }
+}
+
 fn build_doc_with_options(input: &str, options: SchemaDocOptions) -> SchemaDoc {
     let meta = MetaModel::from_toml_str(input).expect("meta should parse");
     let linked = meta.link().expect("meta should link");

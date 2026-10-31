@@ -312,7 +312,7 @@ pub struct SourceRef {
 
 说明：
 
-- `provider` / `path` 描述物理 source；当前只支持 `csv`。
+- `provider` / `path` 描述物理 source；当前支持 `csv` / `xlsx`；可选 `sheet` 仅用于 XLSX，省略时由读取器要求工作簿只有唯一 sheet。
 - `fragments` 表示该 source 中每行激活的 polymorphic fragments；override source 覆盖一条 variant row 时也必须声明与覆盖行语义一致的 fragments，例如 S1 的 `materials_s1.csv` 覆盖材料行时继续声明 `fragments = ["stack"]`。
 - `export_when` 是 source-level target 条件，默认匹配所有 target。该字段主要用于 `override_sources`，也允许后续扩展到 base `sources` 的 target-specific source selection；实现第一阶段可以只在 override source 上启用，base source 若声明 `export_when` 可先报 unsupported 或按同一规则处理，但不能静默忽略。
 - `export_when` 匹配 Build 传入的 effective target tags，即 Project target tags 与 CLI extra tags 的并集。

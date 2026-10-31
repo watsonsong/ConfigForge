@@ -7,7 +7,7 @@
 Diagnostic 模块为 Meta、Data、Validation、Exporter、Build 等工作模块提供统一诊断基础，并集中承载 crate 级错误 facade：
 
 1. 统一严重级别：Error / Warning。
-2. 统一定位信息：source path、table、field、row index、source row number、source column。
+2. 统一定位信息：source path、可选 source sheet、table、field、row index、source row number、source column。
 3. 统一 enrichment 字段：source、target、hint、current value、expected、explanation、owner、domain。
 4. 统一格式化：不同模块保留自己的 code 和上下文字段，但输出规则一致。
 5. 统一报告聚合：支持在多线程任务中收集诊断，并在上层按 error / warning 分流。
@@ -255,3 +255,5 @@ Diagnostic 模块测试应覆盖：
 - `ConfigForgeError::MetaValidation` 使用统一格式化输出诊断列表。
 - CLI JSON 输出保留 code、severity、location、source、target、current_value、expected、hint 等字段。
 - 高价值 producer 测试优先断言 code / severity / location / current_value / expected / hint，再断言 message 片段。
+
+XLSX 的 `DiagnosticLocation.source_sheet` 独立于 source_path，缺省时序列化省略以兼容 CSV。物理行列采用 1-based，human 输出显示 sheet；DesignerValidationIssue 同步保留 source_sheet，四种 renderer 展示工作表定位。禁止把 sheet 拼入真实文件路径。

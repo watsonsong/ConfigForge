@@ -278,3 +278,24 @@ error[index.unique_duplicate]: duplicate key "1001" for unique index items.by_id
   second: Data/items_event.csv:8:1
   hint: keep item IDs unique across all base sources, or move replacement rows to override_sources
 ```
+
+## 使用 XLSX 工作簿
+
+将工作簿放入 project.input 目录，Meta 显式选择 provider 和 sheet：
+
+```toml
+[[tables]]
+name = "items"
+source = { provider = "xlsx", path = "game.xlsx", sheet = "物品", header_row = 1, data_start_row = 3 }
+
+[[tables.fields]]
+name = "id"
+type = "int"
+required = true
+```
+
+第一行填字段名，第二行可填中文说明，第三行起填数据；可用 header_row/data_start_row 改位置。单 sheet 可省略 sheet，多 sheet 必须指定名称。其他表继续用 CSV；同表混用仍须满足既有 variant / ObjectTable / override 规则。
+
+字符串 ID（如 0012）在 Excel 中保存为文本；日期/时长也以约定文本填写。公式在保存前重算，工具只读缓存。空 header 列及整行空数据跳过；诊断和报告保留原始 Excel 行列，不因空行列压缩而改变位置。
+
+QA 应验证：中文 sheet、多 sheet 未指定/名称不存在、偏移表头、空行列、文本前导零、布尔和数字、公式有效缓存/空字符串/缺失缓存/错误值、ObjectTable value 单元格定位、CSV/XLSX 双向覆盖、inactive override、source 路径逃逸、并行与串行输出一致。

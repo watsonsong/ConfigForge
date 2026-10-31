@@ -183,8 +183,9 @@ DesignerValidationReport
 | `field` | location | 字段或 field path。 |
 | `row_index` | location | 0-based internal row index。 |
 | `source_row_number` | location | 用户可见源文件行号。 |
-| `source_path` | location / RowSourceInfo | 源 CSV / source 文件。 |
-| `source_column` | source trace | 可选。CSV-backed data validation 高价值错误已可从 cell source trace 补齐；其他 producer 可留空。 |
+| `source_path` | location / RowSourceInfo | 源 CSV / XLSX 文件路径。 |
+| `source_sheet` | location / cell source | XLSX 工作表名称；CSV 缺省省略。 |
+| `source_column` | source trace | 可选。CSV/XLSX-backed data validation 高价值错误已可从 cell source trace 补齐；其他 producer 可留空。 |
 | `current_value` | producer structured context | 可选。required/type/duplicate/FK/artifact/generator 等已迁移路径由 producer 显式填充；尚未迁移 producer 可留空。 |
 | `expected` | producer structured context / code catalog | 可选。期望规则，例如 `int`、`target table/index key`、`output root 内唯一路径`。 |
 | `target` | Diagnostic target | 当前 target tags 字符串。 |
@@ -374,7 +375,7 @@ P1-1 可以先生成静态 HTML，不做复杂 JS；如需要搜索/过滤，可
 默认单文件 CSV，列固定：
 
 ```text
-id,severity,blocking,code,friendly_title,message,hint,table,field,row_index,source_row_number,source_column,source_path,current_value,expected,explanation,target,owner,domain
+id,severity,blocking,code,friendly_title,message,hint,table,field,row_index,source_row_number,source_column,source_path,source_sheet,current_value,expected,explanation,target,owner,domain
 ```
 
 规则：

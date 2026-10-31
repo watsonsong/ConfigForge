@@ -45,6 +45,18 @@ rustup component add clippy
 - 独立 runtime crates 不属于根 workspace；CI 额外逐包执行 fmt、严格 Clippy 和单元测试，不能用根 cargo test 代替。
 - 库/API 升级先运行编译和对应 contract 回归，再运行 cargo fmt、cargo test --locked、cargo lint 和严格 Clippy；依赖升级本身不代表 runtime 格式或 public API 版本必须改变。
 
+## XLSX 读取库
+
+使用 [calamine](https://github.com/tafia/calamine) 0.37.0（MIT），以 `default-features = false` 引入。它是纯 Rust 读取库，无需 Excel / COM / Python；不启用 chrono、图片或公式计算引擎。工具的 Rust 1.99.1 基线满足该依赖要求；完整传递版本由 Cargo.lock 固定，更新时必须检查 ZIP/XML 依赖和跨平台回归。库支持其他格式不代表 ConfigForge 开放 xls/xlsb/ods。
+
+通过 `Xlsx::worksheet_cells_reader` 和 `next_cell_with_formula_metadata` 同时读取缓存值、公式元数据与绝对坐标。使用稀疏行列存储，不根据格式化后的巨大 worksheet dimension 分配稠密矩阵，也不展开共享公式字符串。缺少缓存（Empty）和有效空字符串（String）由 API 区分，真实 XLSX fixture 验证这两个分支。
+
+ConfigForge 负责 raw string 归一化和业务诊断；Meta/resolver 继续解释业务类型。日期/时长要求文本，错误值拒绝，公式只读取保存后的缓存。详细行为见 [XLSX 输入](../Design/03-configuration.md#341-本地-xlsx-输入)。
+
+工作簿缓存限定在一次 source read 内，按规范化物理路径复用共享字符串/样式和 ZIP 句柄；缓存条目受读取计划文件数量约束，不跨 build 保留。同文件读取互斥、不同文件并行，文件打开不占用全局 map 锁。选用 calamine 而非 umya-spreadsheet 是因为当前无需编辑或回写；rust_xlsxwriter 是写入库，不能承担 source 解析。
+
+测试 fixture 可通过 `node tests/fixtures/xlsx/generate.mjs` 确定性重建；生成脚本仅用于维护测试文件，不是工具或 cargo test 的运行依赖。新增边界时同时维护 fixtures、读取单测、CLI 混合 source 与诊断/report 回归。
+
 ## 可选：覆盖率工具
 
 功能开发或测试补强后，应按 [`unit-test-coverage.md`](unit-test-coverage.md) 评估覆盖率。首次使用需要：

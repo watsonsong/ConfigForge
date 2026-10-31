@@ -73,6 +73,7 @@ pub(super) fn validate_assets_full(
         };
         let resolved_table = DataResolver::resolve_table(table_meta, table, None).ok();
         for (row_index, row) in table.rows.iter().enumerate() {
+            let issue_start = report.issues.len();
             let row_number = row_number(table, row_index);
             let resolved_row = resolved_table
                 .as_ref()
@@ -130,6 +131,7 @@ pub(super) fn validate_assets_full(
                     }
                 }
             }
+            enrich_asset_row_issues(&mut report, issue_start, table, row_index);
         }
     }
     report.sort_by_stable_key();
@@ -146,6 +148,7 @@ fn validate_table_assets(
         let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
             continue;
         };
+        let issue_start = report.issues.len();
         let resolved_row = table_view.visible_resolved_row(visible_row_index);
         let row_number = visible_row
             .source_row_number
@@ -215,6 +218,19 @@ fn validate_table_assets(
                 }
             }
         }
+        enrich_asset_row_issues(report, issue_start, table_view.table, visible_row.row_index);
+    }
+}
+
+fn enrich_asset_row_issues(
+    report: &mut ValidationReport,
+    start: usize,
+    table: &DataTable,
+    row_index: usize,
+) {
+    for issue in &mut report.issues[start..] {
+        issue.location.row_index = Some(row_index);
+        table.enrich_location(row_index, &mut issue.location);
     }
 }
 

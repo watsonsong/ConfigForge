@@ -295,7 +295,7 @@
         <p class="lead">ConfigForge 的核心是让 <strong>Meta 成为配置数据的结构真相</strong>，再从同一份 Meta 和源数据生成多个目标产物。</p>
         <div class="grid grid-4">
           <div class="card"><span class="tag blue">Meta</span><h3>结构真相</h3><p>定义表、字段、类型、默认值、索引、外键、target tags 过滤和描述信息。</p></div>
-          <div class="card"><span class="tag green">Source</span><h3>表格输入</h3><p>当前稳定支持 CSV；XLSX、Lark Sheet、Google Sheet 是明确 provider 方向，但尚未实现。</p></div>
+          <div class="card"><span class="tag green">Source</span><h3>表格输入</h3><p>当前支持 CSV 和 XLSX（含 sheet 选择、混合来源与公式缓存）；Lark Sheet、Google Sheet 尚未实现。</p></div>
           <div class="card"><span class="tag orange">Validation</span><h3>导出前发现错误</h3><p>检查 required、type、index、foreign key、target filtering、validator 和 source schema。</p></div>
           <div class="card"><span class="tag purple">Export</span><h3>运行时产物</h3><p>当前支持 JSON、MessagePack runtime data，以及 Rust / TypeScript / C++ 类型代码生成。</p></div>
         </div>
@@ -375,7 +375,7 @@
           <thead><tr><th>能力</th><th>状态</th><th>当前边界</th></tr></thead>
           <tbody>
             <tr><td>Project / Meta loading</td><td><span class="tag green">Stable</span></td><td>支持 Project imports、Meta merge、link + validate；XML 仅为历史/目标态示例，当前未实现。</td></tr>
-            <tr><td>CSV source provider</td><td><span class="tag green">Stable</span></td><td>当前唯一可执行 provider；XLSX、Lark Sheet、Google Sheet 是 planned。</td></tr>
+            <tr><td>CSV source provider</td><td><span class="tag green">Stable</span></td><td>CSV / XLSX 均已实现；远程 Lark Sheet、Google Sheet 是 planned。</td></tr>
             <tr><td><code>sources</code> / <code>override_sources</code></td><td><span class="tag green">Stable</span></td><td>CSV CollectionTable 支持 variant source append 与 primary-index override；CSV ObjectTable 支持 base source field-path split merge 与 override exact field-path patch。base source <code>export_when</code>、override insert/upsert、非 CSV provider 仍未实现。</td></tr>
             <tr><td>ObjectTable</td><td><span class="tag green">Stable</span></td><td>支持 CSV <code>key,value</code> 常量表、单 object runtime payload、多个 CSV base source 按 field path split merge、CSV override source 按 exact field path patch，并可作为 FK source 引用 CollectionTable unique / primary index；作为 FK target 暂不支持。</td></tr>
             <tr><td>Struct fields / expanded value</td><td><span class="tag green">Stable</span></td><td>支持 named struct、JSON cell、source-driven expanded value、recursive nested struct、target-aware child filtering 和 child default；map 与 struct child validators 待后续。</td></tr>
@@ -612,7 +612,7 @@ override_sources = [
         <p class="lead">QA 测试应优先断言结构化输出和产物内容，而不是只断言人类可读 message。</p>
         <div class="grid grid-3">
           <div class="card"><h3>配置解析</h3><p>Project/Meta 路径不存在、import 循环、TOML/XML 语法、等价语义。</p></div>
-          <div class="card"><h3>Source Provider</h3><p>CSV 正常读取、header 缺失/重复、ObjectTable <code>key,value</code>、variant source fragments；XLSX/远程 provider 作为未实现能力应显式失败。</p></div>
+          <div class="card"><h3>Source Provider</h3><p>CSV 正常读取、header 缺失/重复、ObjectTable <code>key,value</code>、variant source fragments；XLSX sheet、空行列、公式缓存、混合 source 与物理坐标；未实现远程 provider 应显式失败。</p></div>
           <div class="card"><h3>Field Type</h3><p>required、default、color channel、vector3、datetime timezone。</p></div>
           <div class="card"><h3>Multi-source</h3><p>variant source append、fragment presence、跨 source unique 冲突；CollectionTable override 应断言 primary-index 覆盖、missing base row 和 tag-gated 生效。</p></div>
           <div class="card"><h3>Export Filtering</h3><p>target tags、<code>export_when</code>、<code>row_export</code>、<code>export = false</code> 和过滤后集合级校验。</p></div>
@@ -627,7 +627,7 @@ override_sources = [
         <h2>12. 当前关键设计决策</h2>
         <div class="grid grid-2">
           <div class="card"><h3>Project imports</h3><p>Project Config 支持顶层 <code>imports</code> 递归导入配置片段；Meta 文件本身不再声明 imports。</p></div>
-          <div class="card"><h3>Source provider</h3><p><code>csv</code> 是当前稳定 provider；<code>xlsx</code>、<code>lark_sheet</code>、<code>google_sheet</code> 是明确 planned provider，不再设计 <code>local_file</code>。</p></div>
+          <div class="card"><h3>Source provider</h3><p><code>csv</code> 和 <code>xlsx</code> 是当前支持的 provider；<code>lark_sheet</code>、<code>google_sheet</code> 是 planned provider，不再设计 <code>local_file</code>。</p></div>
           <div class="card"><h3>Override 顺序</h3><p><code>override_sources</code> 不定义 priority，按列表顺序应用；当前已支持 CollectionTable CSV 整行覆盖与 ObjectTable CSV field-path patch，后声明的 override 覆盖先声明的结果。</p></div>
           <div class="card"><h3>Primary Index</h3><p>取消 primary_key，仅保留 primary_index 或 <code>primary = true</code>。</p></div>
           <div class="card"><h3>Default / Required</h3><p>缺值时先用 default；required 且无值、无 default 才报错。</p></div>

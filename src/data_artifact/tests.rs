@@ -1088,6 +1088,7 @@ fn fragment_export_uses_nested_objects_and_presence() {
         ],
         vec![
             crate::data::RowSourceInfo {
+                source_sheet: None,
                 source_index: 0,
                 source_path: PathBuf::from("weapons.csv"),
                 source_row_number: 1,
@@ -1096,6 +1097,7 @@ fn fragment_export_uses_nested_objects_and_presence() {
                 replaces: None,
             },
             crate::data::RowSourceInfo {
+                source_sheet: None,
                 source_index: 1,
                 source_path: PathBuf::from("armors.csv"),
                 source_row_number: 1,
@@ -1174,6 +1176,7 @@ fn fragment_export_locks_empty_and_hidden_fragment_presence() {
             ("server_marker.value".to_owned(), "10".to_owned()),
         ])],
         vec![crate::data::RowSourceInfo {
+            source_sheet: None,
             source_index: 0,
             source_path: PathBuf::from("items.csv"),
             source_row_number: 1,

@@ -36,6 +36,7 @@ use super::*;
 
 fn memory_cell_source(column_index: usize, column_name: &str) -> CellSourceInfo {
     CellSourceInfo {
+        source_sheet: None,
         source_path: PathBuf::from("<memory>"),
         source_row_number: 1,
         source_column_number: column_index + 1,
@@ -458,6 +459,7 @@ fn error_issues_from_result_preserves_all_report_diagnostics() {
 
 fn fragment_row_source(source_row_number: usize, fragments: &[&str]) -> RowSourceInfo {
     RowSourceInfo {
+        source_sheet: None,
         source_index: 0,
         source_path: PathBuf::from("items.csv"),
         source_row_number,
@@ -674,6 +676,7 @@ fn validates_builtin_values_through_resolver_and_report_trace() {
             ("tint".to_owned(), "#336699".to_owned()),
         ])],
         vec![RowSourceInfo {
+            source_sheet: None,
             source_index: 0,
             source_path: PathBuf::from("effects.csv"),
             source_row_number: 7,
@@ -865,6 +868,7 @@ fn validates_fragment_scoped_fields_and_defaults() {
         ],
         vec![
             RowSourceInfo {
+                source_sheet: None,
                 source_index: 0,
                 source_path: PathBuf::from("weapons.csv"),
                 source_row_number: 1,
@@ -873,6 +877,7 @@ fn validates_fragment_scoped_fields_and_defaults() {
                 replaces: None,
             },
             RowSourceInfo {
+                source_sheet: None,
                 source_index: 1,
                 source_path: PathBuf::from("armors.csv"),
                 source_row_number: 1,
@@ -898,6 +903,7 @@ fn validates_fragment_scoped_fields_and_defaults() {
             ("armor.power".to_owned(), "10".to_owned()),
         ])],
         vec![RowSourceInfo {
+            source_sheet: None,
             source_index: 0,
             source_path: PathBuf::from("weapons.csv"),
             source_row_number: 1,
@@ -3030,6 +3036,7 @@ fn object_table_validation_uses_override_cell_source_location() {
             "oops".to_owned(),
         )])],
         vec![RowSourceInfo {
+            source_sheet: None,
             source_index: 0,
             source_path: PathBuf::from("gameplay.csv"),
             source_row_number: 2,
@@ -3040,6 +3047,7 @@ fn object_table_validation_uses_override_cell_source_location() {
         vec![BTreeMap::from([(
             "max_level".to_owned(),
             CellSourceInfo {
+                source_sheet: None,
                 source_path: PathBuf::from("game_s1.csv"),
                 source_row_number: 4,
                 source_column_number: 3,

@@ -81,6 +81,7 @@ impl CsvDataReader {
                 row_cell_sources.insert(
                     header.clone(),
                     CellSourceInfo {
+                        source_sheet: None,
                         source_path: path.to_path_buf(),
                         source_row_number,
                         source_column_number: column_index + 1,
@@ -225,6 +226,7 @@ impl CsvDataReader {
             row_cell_sources.insert(
                 key.to_owned(),
                 CellSourceInfo {
+                    source_sheet: None,
                     source_path: path.to_path_buf(),
                     source_row_number: row_number,
                     source_column_number: value_column_index + 1,
@@ -308,6 +310,7 @@ fn validate_csv_row_layout(path: &Path, header_row: usize, data_start_row: usize
 
 fn default_csv_row_source(path: &Path, source_row_number: usize) -> RowSourceInfo {
     RowSourceInfo {
+        source_sheet: None,
         source_index: 0,
         source_path: path.to_path_buf(),
         source_row_number,

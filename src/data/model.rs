@@ -34,6 +34,7 @@ pub struct RawSourceData {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowSourceInfo {
     pub source_index: usize,
+    pub source_sheet: Option<String>,
     pub source_path: PathBuf,
     pub source_row_number: usize,
     pub fragments: Vec<String>,
@@ -43,6 +44,7 @@ pub struct RowSourceInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellSourceInfo {
+    pub source_sheet: Option<String>,
     pub source_path: PathBuf,
     pub source_row_number: usize,
     pub source_column_number: usize,
@@ -59,6 +61,7 @@ pub enum SourceRole {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowSourceTrace {
     pub source_index: usize,
+    pub source_sheet: Option<String>,
     pub source_path: PathBuf,
     pub source_row_number: usize,
 }
@@ -66,6 +69,7 @@ pub struct RowSourceTrace {
 impl RowSourceInfo {
     pub fn trace(&self) -> RowSourceTrace {
         RowSourceTrace {
+            source_sheet: self.source_sheet.clone(),
             source_index: self.source_index,
             source_path: self.source_path.clone(),
             source_row_number: self.source_row_number,
@@ -200,6 +204,48 @@ impl DataTable {
             .and_then(|sources| sources.get(field))
     }
 
+    pub(crate) fn enrich_location(
+        &self,
+        row_index: usize,
+        location: &mut crate::DiagnosticLocation,
+    ) {
+        if let Some(source) = self.row_source(row_index) {
+            location.source_path = Some(source.source_path.clone());
+            location.source_sheet = source.source_sheet.clone();
+            location.source_row_number = Some(source.source_row_number);
+        }
+        let cell = location.field.as_deref().and_then(|field| {
+            let sources = self.cell_sources.get(row_index)?;
+            sources.get(field).or_else(|| {
+                field
+                    .rmatch_indices(['.', '['])
+                    .find_map(|(end, _)| sources.get(&field[..end]))
+            })
+        });
+        if let Some(source) = cell {
+            location.source_path = Some(source.source_path.clone());
+            location.source_sheet = source.source_sheet.clone();
+            location.source_row_number = Some(source.source_row_number);
+            location.source_column_number = Some(source.source_column_number);
+            location.source_column_name = Some(source.source_column_name.clone());
+            location.column_index = Some(source.column_index);
+        }
+    }
+
+    pub(crate) fn enrich_error_location(
+        &self,
+        row_index: usize,
+        mut error: ConfigForgeError,
+    ) -> ConfigForgeError {
+        if let ConfigForgeError::ValidationReport(report) = &mut error {
+            for diagnostic in &mut report.diagnostics {
+                diagnostic.location.row_index = Some(row_index);
+                self.enrich_location(row_index, &mut diagnostic.location);
+            }
+        }
+        error
+    }
+
     pub fn row_count(&self) -> usize {
         self.rows.len()
     }
@@ -212,6 +258,7 @@ impl DataTable {
 fn default_row_sources(row_count: usize) -> Vec<RowSourceInfo> {
     (0..row_count)
         .map(|row_index| RowSourceInfo {
+            source_sheet: None,
             source_index: 0,
             source_path: PathBuf::from("<memory>"),
             source_row_number: row_index + 1,

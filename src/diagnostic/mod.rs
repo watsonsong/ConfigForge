@@ -20,6 +20,8 @@ pub enum DiagnosticSeverity {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct DiagnosticLocation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_sheet: Option<String>,
     pub source_path: Option<PathBuf>,
     pub table: Option<String>,
     pub field: Option<String>,
@@ -32,7 +34,8 @@ pub struct DiagnosticLocation {
 
 impl DiagnosticLocation {
     pub fn is_empty(&self) -> bool {
-        self.source_path.is_none()
+        self.source_sheet.is_none()
+            && self.source_path.is_none()
             && self.table.is_none()
             && self.field.is_none()
             && self.row_index.is_none()
@@ -48,6 +51,9 @@ impl fmt::Display for DiagnosticLocation {
         let mut parts = Vec::new();
         if let Some(source_path) = &self.source_path {
             parts.push(format!("source `{}`", source_path.display()));
+        }
+        if let Some(sheet) = &self.source_sheet {
+            parts.push(format!("sheet `{sheet}`"));
         }
         if let Some(table) = &self.table {
             parts.push(format!("table `{table}`"));
@@ -441,6 +447,7 @@ mod tests {
     #[test]
     fn diagnostic_location_display_includes_column_context() {
         let location = DiagnosticLocation {
+            source_sheet: None,
             source_path: Some(PathBuf::from("items.csv")),
             table: Some("items".to_owned()),
             field: Some("name".to_owned()),

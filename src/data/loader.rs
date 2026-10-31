@@ -46,7 +46,8 @@ impl DataLoader {
     }
 
     pub fn read_sources(&self, plan: &SourceReadPlan) -> Result<RawSourceData> {
-        self.read_sources_with_reader(plan, |source| self.load_source(source))
+        let cache = super::xlsx::WorkbookCache::default();
+        self.read_sources_with_reader(plan, |source| self.load_source_with_cache(source, &cache))
     }
 
     pub fn read_sources_with_pool(
@@ -54,7 +55,10 @@ impl DataLoader {
         plan: &SourceReadPlan,
         pool: &rayon::ThreadPool,
     ) -> Result<RawSourceData> {
-        self.read_sources_with_reader_and_pool(plan, pool, |source| self.load_source(source))
+        let cache = super::xlsx::WorkbookCache::default();
+        self.read_sources_with_reader_and_pool(plan, pool, |source| {
+            self.load_source_with_cache(source, &cache)
+        })
     }
 
     pub(crate) fn read_sources_with_reader(
@@ -91,8 +95,17 @@ impl DataLoader {
     }
 
     pub fn load_source(&self, source: &DataSourcePlan) -> Result<DataTable> {
+        self.load_source_with_cache(source, &super::xlsx::WorkbookCache::default())
+    }
+
+    fn load_source_with_cache(
+        &self,
+        source: &DataSourcePlan,
+        cache: &super::xlsx::WorkbookCache,
+    ) -> Result<DataTable> {
         let source_path = resolve_source_path(&self.data_root, source)?;
         match source.provider {
+            DataProvider::Xlsx => cache.read(source, &source_path),
             DataProvider::Csv => match source.layout {
                 DataSourceLayout::CollectionRecords => CsvDataReader::read_table_with_layout(
                     &source.table_name,
@@ -197,6 +210,13 @@ impl PendingTable {
         source: &DataSourcePlan,
         table: DataTable,
     ) -> Result<()> {
+        let mut source = source.clone();
+        source.sheet = table
+            .row_sources
+            .first()
+            .and_then(|row| row.source_sheet.clone())
+            .or(source.sheet);
+        let source = &source;
         match (source.layout, source.role) {
             (DataSourceLayout::CollectionRecords, SourceRole::Base) => {
                 self.append_base_rows(source_index, source, table)
@@ -254,6 +274,7 @@ impl PendingTable {
             self.row_sources.push(RowSourceInfo {
                 source_index,
                 source_path: source.path.clone(),
+                source_sheet: source.sheet.clone(),
                 source_row_number,
                 fragments: source.fragments.clone(),
                 source_role: SourceRole::Base,
@@ -316,6 +337,7 @@ impl PendingTable {
             self.row_sources[target_row] = RowSourceInfo {
                 source_index,
                 source_path: source.path.clone(),
+                source_sheet: source.sheet.clone(),
                 source_row_number,
                 fragments: source.fragments.clone(),
                 source_role: SourceRole::Override,
@@ -339,6 +361,7 @@ impl PendingTable {
             self.row_sources.push(RowSourceInfo {
                 source_index,
                 source_path: source.path.clone(),
+                source_sheet: source.sheet.clone(),
                 source_row_number,
                 fragments: source.fragments.clone(),
                 source_role: SourceRole::Base,
@@ -380,6 +403,7 @@ impl PendingTable {
             self.row_sources.push(RowSourceInfo {
                 source_index,
                 source_path: source.path.clone(),
+                source_sheet: source.sheet.clone(),
                 source_row_number,
                 fragments: source.fragments.clone(),
                 source_role: SourceRole::Override,
@@ -537,6 +561,7 @@ fn source_path_escape_error(
             message,
             DiagnosticLocation {
                 source_path: Some(source.path.clone()),
+                source_sheet: source.sheet.clone(),
                 table: Some(source.table_name.clone()),
                 ..DiagnosticLocation::default()
             },
@@ -566,6 +591,7 @@ fn source_schema_error(
             message,
             DiagnosticLocation {
                 source_path: Some(source.path.clone()),
+                source_sheet: source.sheet.clone(),
                 table: Some(source.table_name.clone()),
                 source_row_number,
                 ..DiagnosticLocation::default()
@@ -594,6 +620,7 @@ fn object_source_schema_error(
             message,
             DiagnosticLocation {
                 source_path: Some(source.path.clone()),
+                source_sheet: source.sheet.clone(),
                 table: Some(source.table_name.clone()),
                 source_row_number,
                 ..DiagnosticLocation::default()
@@ -620,6 +647,7 @@ fn source_duplicate_key_error(
             message,
             DiagnosticLocation {
                 source_path: Some(source.path.clone()),
+                source_sheet: source.sheet.clone(),
                 table: Some(source.table_name.clone()),
                 source_row_number: Some(source_row_number),
                 ..DiagnosticLocation::default()
@@ -651,6 +679,7 @@ fn object_duplicate_key_error(
             ),
             DiagnosticLocation {
                 source_path: Some(source.path.clone()),
+                source_sheet: source.sheet.clone(),
                 table: Some(source.table_name.clone()),
                 source_row_number: Some(source_row_number),
                 ..DiagnosticLocation::default()

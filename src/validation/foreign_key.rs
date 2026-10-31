@@ -475,7 +475,10 @@ fn validate_foreign_key_source_rows(
                     row_number,
                     foreign_key,
                     target_keys,
-                )?;
+                )
+                .map_err(|error| {
+                    source_table.enrich_error_location(visible_row.row_index, error)
+                })?;
             }
         }
         None => {
@@ -490,7 +493,8 @@ fn validate_foreign_key_source_rows(
                     row_number,
                     foreign_key,
                     target_keys,
-                )?;
+                )
+                .map_err(|error| source_table.enrich_error_location(row_index, error))?;
             }
         }
     }

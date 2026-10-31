@@ -158,6 +158,7 @@ fn validate_full_data_set(
         ExportValidationView::full(meta, data_set),
     );
     report.append(&mut plan.run(&context));
+    enrich_source_locations(&mut report, data_set);
     report.sort_by_stable_key();
     report_into_result(report)
 }
@@ -347,6 +348,7 @@ fn finish_target_data_set_validation_outcome(
     let plan = CompiledValidationPlan::compile(meta, &registry)?;
     let context = ValidationContext::new(meta, Some(target_tags.clone()), data_set, export_view);
     report.append(&mut plan.run(&context));
+    enrich_source_locations(&mut report, data_set);
     report.sort_by_stable_key();
     Ok(report.into_outcome())
 }
@@ -359,4 +361,43 @@ fn report_into_result(report: ValidationReport) -> Result<ValidationReport> {
 pub(crate) fn validate_table(meta: &LinkedTableMeta<'_>, table: &DataTable) -> Result<()> {
     let table = super::defaults::normalize_table(meta, table)?;
     super::table::validate_normalized_table(meta, &table)
+}
+
+fn enrich_source_locations(report: &mut ValidationReport, data_set: &DataSet) {
+    for issue in &mut report.issues {
+        let location = &mut issue.location;
+        let Some(table) = location
+            .table
+            .as_deref()
+            .and_then(|name| data_set.table(name))
+        else {
+            continue;
+        };
+        let row_index = location.row_index.or_else(|| {
+            location.source_row_number.and_then(|number| {
+                let mut matches = table
+                    .row_sources
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, source)| {
+                        source.source_row_number == number
+                            && location
+                                .source_path
+                                .as_ref()
+                                .is_none_or(|path| path == &source.source_path)
+                            && location
+                                .source_sheet
+                                .as_ref()
+                                .is_none_or(|sheet| Some(sheet) == source.source_sheet.as_ref())
+                    })
+                    .map(|(index, _)| index);
+                let first = matches.next();
+                first.filter(|_| matches.next().is_none())
+            })
+        });
+        let Some(row_index) = row_index else {
+            continue;
+        };
+        table.enrich_location(row_index, location);
+    }
 }

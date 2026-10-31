@@ -154,6 +154,8 @@ pub struct DesignerValidationIssue {
     pub field: Option<String>,
     pub row_index: Option<usize>,
     pub source_row_number: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_sheet: Option<String>,
     pub source_path: Option<String>,
     pub source_column: Option<String>,
     pub current_value: Option<String>,
@@ -331,6 +333,7 @@ fn enrich_issues(
                 field: issue.location.field,
                 row_index: issue.location.row_index,
                 source_row_number: issue.location.source_row_number,
+                source_sheet: issue.location.source_sheet,
                 source_path: issue
                     .location
                     .source_path
@@ -509,6 +512,7 @@ fn compare_validation_issues_for_report(
             .source_path
             .as_ref()
             .map(|path| path.as_os_str()),
+        left.location.source_sheet.as_deref(),
         left.location.source_row_number,
         left.location.row_index,
         left.location.field.as_deref(),
@@ -523,6 +527,7 @@ fn compare_validation_issues_for_report(
                 .source_path
                 .as_ref()
                 .map(|path| path.as_os_str()),
+            right.location.source_sheet.as_deref(),
             right.location.source_row_number,
             right.location.row_index,
             right.location.field.as_deref(),

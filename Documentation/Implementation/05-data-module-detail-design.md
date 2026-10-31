@@ -19,7 +19,7 @@ Related docs：[`../Design/05-data-validation.md`](../Design/05-data-validation.
 
 Data 模块负责把外部数据源读取为 ConfigForge 内部统一的数据模型，并在 Data Load 后提供 Meta-aware resolver。核心分层结论：**Reader 保持 source-neutral；Resolver 负责 Meta-aware 结构化；Validation 和 Exporter 应逐步只消费结构化后的统一数据模型。**
 
-当前已覆盖 CSV raw load，并已在不破坏 raw `DataSet` 的前提下引入 `ResolvedDataSet` / `DataResolver` MVP。后续目标是在 Validation / Exporter 中进一步收敛到 resolved view：
+当前已覆盖 CSV/XLSX raw load，并已在不破坏 raw `DataSet` 的前提下引入 `ResolvedDataSet` / `DataResolver` MVP。后续目标是在 Validation / Exporter 中进一步收敛到 resolved view：
 
 1. 支持从 `TableMeta.source` / `TableMeta.sources` 中解析单个 CSV source。
 2. 支持按表加载 CSV，得到与 Meta 生命周期无关的 owned `DataSet`。
@@ -62,7 +62,7 @@ Rust 不使用传统 OO class。本文档中的“类”对应 Rust 的 `struct`
 | DataLoadPlan | `struct DataLoadPlan` | 兼容层计划，当前包装 `SourceReadPlan`，便于旧 `DataLoader::load()` 调用继续返回 `DataSet`。 |
 | SourceFragmentSet | `struct SourceFragmentSet` / `Vec<String>` | 某个 source 声明的 fragment 名称集合。 |
 | RowSourceInfo | `struct RowSourceInfo` | 行来源元数据，记录 source ordinal/path/fragments/source row number。 |
-| DataProvider | `enum DataProvider` | 当前支持的 provider，第一阶段只有 `Csv`。 |
+| DataProvider | `enum DataProvider` | 当前支持的 provider，当前为 `Csv` / `Xlsx`。 |
 | DataLoader | `struct DataLoader` | 根据 `SourceReadPlan` 读取 `RawSourceData`，并通过兼容入口支持 `DataLoadPlan -> DataSet`。 |
 | SourceProviderResource | `enum SourceProviderResource` | provider 调度资源类型：`BlockingLocal` / `AsyncIo` / `Network`。 |
 | AsyncSourceReadShell | `struct AsyncSourceReadShell` | 远端 provider 准备阶段的 source read shell，按 resource lane 限流并稳定合并结果。 |
@@ -82,6 +82,7 @@ src/data/
   resolved.rs     # ResolvedDataSet / ResolvedTable / DataValue / SourceTrace
   resolver.rs     # DataResolver / StructOccurrenceEvaluator
   plan.rs         # SourceReadPlan / DataLoadPlan / DataSourcePlan / DataProvider
+  xlsx.rs         # calamine 稀疏 XLSX 读取、公式缓存检查、scoped WorkbookCache
   loader.rs       # DataLoader，编排按计划加载各表
   provider.rs     # SourceProvider / AsyncSourceReadShell / provider resource lane
   csv.rs          # CsvDataReader，CSV 文件读取实现
@@ -107,7 +108,7 @@ pub struct DataSet {
 
 - `DataSet` 是 Data Load 的 owned 输出，不借用 `MetaModel` 或 `LinkedMetaModel<'meta>`。
 - `table_index` 是运行期查询索引，便于按 table name 快速取得数据。
-- 第一阶段 `DataSet` 不保存 typed value，只保存 CSV cell 原始字符串。
+- 第一阶段 `DataSet` 不保存 typed value，保存 CSV 原始文本或 XLSX 归一化 cell 文本。
 
 主要方法：
 
@@ -881,3 +882,13 @@ Data 模块第一阶段完成时应满足：
 - 当前已支持的 validation 行为不回退：required/default、primitive type、enum value、unique field/index。
 - `cargo fmt`、`cargo lint`、`cargo test` 通过。
 - 修改后按代码规范运行覆盖率评估，确认 Data / Validation 新增分支有合理测试覆盖。
+
+## XLSX provider 实现
+
+`SourceRef.sheet -> DataSourcePlan.sheet` 传递 sheet 选择。DataLoader 在 path containment 检查后分发 CsvDataReader / XLSX reader；每次 read_sources/read_sources_with_pool 创建 WorkbookCache，独立 load_source 使用一次性 cache。同一文件的 calamine Workbook 受单独 Mutex 保护，不同文件打开/解析可并行。读取阶段按 header/data 起点过滤稀疏坐标，归一化为现有 DataTable，不经过临时 CSV。
+
+CSV 保持既有 record/header 行为；XLSX 的稀疏布局解析位于独立 reader，二者在 DataTable 边界汇合，复用 PendingTable 多源合并、override、resolver、validation 和所有 generator。不会为了新增 provider 引入另一套业务模型或 provider registry。
+
+RowSourceInfo / CellSourceInfo / RowSourceTrace 增加可选 source_sheet，单 sheet 自动选择后的真实名称同样保留；merge 重标记配置相对 path 时保留 sheet 和物理列。DataTable::enrich_location 将 row/cell 来源写入 DiagnosticLocation，嵌套路径优先采用最长匹配的源单元格；resolver 错误与 validation 报告统一补齐，ObjectTable 以每个 field path 的 value 单元格为准。schema_doc 的展示来源附带 sheet 名，区分同一文件的不同工作表。
+
+测试：`src/data/xlsx/tests.rs` 覆盖读取/选择/单元格错误/混合 merge/override/构建间刷新；`tests/cli_integration/xlsx.rs` 覆盖等价 CSV payload、写入模式、混合 variant、target 过滤和四种 report。

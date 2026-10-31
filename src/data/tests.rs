@@ -28,6 +28,7 @@ use super::*;
 
 fn fragment_row_source(source_row_number: usize, fragments: &[&str]) -> RowSourceInfo {
     RowSourceInfo {
+        source_sheet: None,
         source_index: 0,
         source_path: PathBuf::from("weapons.csv"),
         source_row_number,
@@ -42,6 +43,7 @@ fn fragment_row_source(source_row_number: usize, fragments: &[&str]) -> RowSourc
 
 fn plan_source(table_name: &str, path: &str) -> DataSourcePlan {
     DataSourcePlan {
+        sheet: None,
         table_name: table_name.to_owned(),
         provider: DataProvider::Csv,
         path: PathBuf::from(path),
@@ -75,7 +77,7 @@ fn expect_single_diagnostic(error: ConfigForgeError) -> Diagnostic {
 #[test]
 fn data_provider_parses_supported_values() {
     assert_eq!(DataProvider::parse("csv"), Some(DataProvider::Csv));
-    assert_eq!(DataProvider::parse("xlsx"), None);
+    assert_eq!(DataProvider::parse("xlsx"), Some(DataProvider::Xlsx));
     assert_eq!(DataProvider::Csv.as_str(), "csv");
 }
 
@@ -846,6 +848,7 @@ fn data_resolver_full_mode_includes_active_fragments() {
             ("weapon.power".to_owned(), "10".to_owned()),
         ])],
         vec![RowSourceInfo {
+            source_sheet: None,
             source_index: 0,
             source_path: PathBuf::from("weapons.csv"),
             source_row_number: 1,
@@ -909,6 +912,7 @@ fn data_resolver_resolves_typed_fragment_payload_as_struct_occurrence() {
             ("attributes.attack".to_owned(), "10".to_owned()),
         ])],
         vec![RowSourceInfo {
+            source_sheet: None,
             source_index: 0,
             source_path: PathBuf::from("weapons.csv"),
             source_row_number: 1,
@@ -968,6 +972,7 @@ fn data_resolver_preserves_empty_active_typed_fragment_presence() {
         "items",
         vec![DataRow::from([("id".to_owned(), "1".to_owned())])],
         vec![RowSourceInfo {
+            source_sheet: None,
             source_index: 0,
             source_path: PathBuf::from("weapons.csv"),
             source_row_number: 1,
@@ -1471,7 +1476,7 @@ fn data_load_plan_rejects_unsupported_source_features() {
             r#"
                 [[tables]]
                 name = "items"
-                sources = [{ provider = "xlsx", path = "items.xlsx" }]
+                sources = [{ provider = "ods", path = "items.ods" }]
 
                 [[tables.fields]]
                 name = "id"

@@ -10,6 +10,7 @@ mod resolved;
 mod resolver;
 pub(crate) mod typed_value;
 pub(crate) mod value_conversion;
+mod xlsx;
 
 use crate::{ConfigForgeError, Diagnostic, DiagnosticLocation, DiagnosticSeverity};
 

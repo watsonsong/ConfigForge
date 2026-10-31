@@ -92,7 +92,10 @@ impl<'meta> DataResolver<'meta> {
         let mut rows = Vec::with_capacity(row_indices.len());
         let mut row_sources = Vec::with_capacity(row_indices.len());
         for row_index in row_indices {
-            rows.push(resolve_row(table_meta, table, target_tags, row_index)?);
+            rows.push(
+                resolve_row(table_meta, table, target_tags, row_index)
+                    .map_err(|error| table.enrich_error_location(row_index, error))?,
+            );
             let row_source = table.row_source(row_index).cloned().ok_or_else(|| {
                 resolver_row_error(
                     table.name.as_str(),
@@ -1244,6 +1247,7 @@ fn resolver_location(
 ) -> DiagnosticLocation {
     DiagnosticLocation {
         source_path: row_source.map(|source| source.source_path.clone()),
+        source_sheet: row_source.and_then(|source| source.source_sheet.clone()),
         table: Some(table_name.to_owned()),
         field: field_path.map(str::to_owned),
         source_row_number: row_source

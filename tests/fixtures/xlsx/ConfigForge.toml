@@ -1,0 +1,54 @@
+# Copyright (c) 2026 ConfigForge contributors
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+input = "."
+
+[[tables]]
+name = "items"
+source = { provider = "xlsx", path = "sources.xlsx", sheet = "物品", header_row = 3, data_start_row = 5 }
+
+[[tables.fields]]
+name = "id"
+type = "int"
+required = true
+
+[[tables.fields]]
+name = "name"
+type = "string"
+
+[[tables.fields]]
+name = "enabled"
+type = "bool"
+
+[[tables.fields]]
+name = "amount"
+type = "float"
+
+[[tables.fields]]
+name = "computed"
+type = "int"
+
+[[tables.fields]]
+name = "empty"
+type = "string"
+
+[[tables]]
+name = "settings"
+kind = "object"
+source = { provider = "xlsx", path = "sources.xlsx", sheet = "settings", header_row = 2, data_start_row = 4 }
+
+[[tables.fields]]
+name = "limit"
+type = "int"
+
+[[tables.fields]]
+name = "title"
+type = "string"
+
+[[targets]]
+name = "client"
+
+[[targets.exports]]
+type = "json"
+output = "out"

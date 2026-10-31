@@ -157,11 +157,13 @@ Source declaration 描述 provider 和定位信息。
 | Provider | 用途 | 必填字段 |
 | --- | --- | --- |
 | `csv` | 本地 CSV 文件 | `path` |
-| `xlsx` | Planned / Not implemented，本地 Excel 文件 | `path`，多 sheet 时需要 `sheet` |
+| `xlsx` | 已实现，本地 Excel 文件 | `path`，多 sheet 时需要 `sheet` |
 | `lark_sheet` | Planned / Not implemented，Lark/飞书表格 | `uri` 或 provider-specific id，通常需要 `auth_ref` |
 | `google_sheet` | Planned / Not implemented，Google Sheet | `uri` 或 sheet id，通常需要 `auth_ref` |
 
-当前实现状态以 `Documentation/Design/README.md` 的状态矩阵为准：CSV provider 已稳定支持；同一逻辑表的多 CSV source 已稳定支持 CollectionTable variant source append 与 ObjectTable field-path split merge；`override_sources` 已支持 CollectionTable CSV 整行覆盖和 ObjectTable CSV exact field path patch，并允许通过 source-level `export_when` 绑定到 effective target tags，用于赛季、热修或灰度包的临时覆盖。非 CSV provider、通用 CollectionTable split merge 和 base source `export_when` 仍会显式拒绝或不提供入口。
+当前实现状态以 `Documentation/Design/README.md` 的状态矩阵为准：CSV/XLSX provider 已支持；同一逻辑表的多 source 支持 CollectionTable variant source append 与 ObjectTable field-path split merge；`override_sources` 已支持 CollectionTable 整行覆盖和 ObjectTable exact field path patch，并允许通过 source-level `export_when` 绑定到 effective target tags，用于赛季、热修或灰度包的临时覆盖。尚未实现的远程 provider、通用 CollectionTable split merge 和 base source `export_when` 仍会显式拒绝或不提供入口。
+
+provider 声明属于每个 source，而不是 Project 的全局模式，因此配置模型允许不同表、同一表的不同 source 分别描述 provider；当前实现支持 CSV 与 XLSX 混用。多 source 的组合语义独立于 provider：CollectionTable 多 base source 目前仅允许带 fragments 的 polymorphic variant source mode，按记录追加；ObjectTable 多 base source 按互斥 field path 合并；override_sources 按已有记录或字段覆盖。不支持把不同 source 的部分列按 ID join 成同一条 CollectionTable 记录，也不支持 override insert/upsert。
 
 CollectionTable CSV source 使用 source-level 行布局参数决定哪一行是机器可读 header、哪一行开始进入数据。`header_row` 和 `data_start_row` 都是 **1-based** 行号，默认值为 `header_row = 1`、`data_start_row = 3`；因此第 2 行默认保留给策划标题、字段说明或其它可读提示，不进入导出数据。`data_start_row` 必须大于 `header_row`。ObjectTable 是按行组织的 `key,value` 常量表，因此标题说明默认使用额外列而不是额外行：可写成 `key,title,value`，其中 `title` 列仅供策划阅读，实际值仍来自 `value` 列。Source sheet 允许出现空行和空列。未映射到 field path 的行/列不会进入导出结果，可用于策划注释、公式中间结果或视觉分隔。
 
@@ -183,7 +185,7 @@ source = { provider = "csv", path = "items.csv", header_row = 1, data_start_row 
 source = "items.csv"
 ```
 
-语义：根据文件后缀推断为 `{ provider = "csv", path = "items.csv", header_row = 1, data_start_row = 3 }`。
+语义：字符串简写固定解释为 `{ provider = "csv", path = "items.csv", header_row = 1, data_start_row = 3 }`。
 
 多 source（Stable，限 CSV provider；CollectionTable variant source mode 按声明顺序 append records，ObjectTable 按互斥 field path split merge 为 singleton object）：
 
@@ -236,6 +238,27 @@ override_sources = [
 当 effective target tags 包含 `s1` 时，`materials_s1.csv` 中 `id = 2002` 的完整 row 覆盖 base `materials.csv` 中相同 primary index 的 row；未包含 `s1` 时该 override source 完全不生效，Oak 仍使用 base 售价 3。
 
 ObjectTable 的多个 base source 使用相同 `key,value` / `key,title,value` CSV 布局，并合并为一个 singleton object；不同 base source 中的 field path 必须互斥。ObjectTable override source 是 patch：只替换 override source 中出现的 exact field path，且只能覆盖 base materialized object 已存在的 field path；找不到目标 field path 时失败，避免把 override source 误用为 append/upsert source。
+
+### 3.4.1 本地 XLSX 输入
+
+XLSX 使用显式 provider，不根据扩展名自动选择读取器。字符串简写仍表示 CSV；工作簿应声明为：
+
+```toml
+source = { provider = "xlsx", path = "game.xlsx", sheet = "items", header_row = 1, data_start_row = 3 }
+```
+
+- `sheet` 按名称精确匹配，支持中文名称。只有一个 sheet 时可省略；有多个 sheet 时必须指定，不静默采用第一张。空白 sheet 名非法，CSV 不接受 sheet 参数。
+- 行号和诊断列号均为 Excel 物理位置、从 1 开始；CollectionTable 默认 header 1 / data 3，ObjectTable 默认 header 1 / data 2。自定义布局不因非 A1 起始区域、空行或空列而重新编号。
+- CollectionTable 的非空 header 是字段名；空 header 列不参与读取，非空 header 不允许重复。仅在已命名列中含数据或公式的行生成记录，整行为空或只有格式时跳过。不存在的单元格和普通空单元格归一化为空字符串。
+- ObjectTable 支持 `key,value` / `key,title,value`，允许列之间有空列；key 去除首尾空白且必须非空、唯一，value 保留原始文本。title 仅供阅读。
+- 文本保持原值（含前导零）；bool 转为 `true/false`；有限数值使用与区域设置无关的十进制文本，再由 Meta 解释类型。Excel 显示格式不参与转换：数值 12 即使显示为 0012 仍读为 12；字符串 ID 应保存为文本。数值精度以工作簿实际保存值为准。
+- 日期/时间/时长类型和 Excel 错误值阻止导出，要求日期/时长以业务约定文本填写，不把日期序列号隐式当作整数。
+- 公式只读缓存、不重算：有效缓存值按以上类型处理；缓存为空字符串是有效空值；缺少缓存和错误结果必须诊断。缓存新鲜程度无法从文件可靠保证，保存前必须重算。
+- 支持不同表混用 CSV/XLSX，以及同一表在合法多源或 override 模式下混用。CollectionTable 多 base 仍仅限 polymorphic fragment variant append；ObjectTable 多 base 仍是互斥 field-path merge；override 仍只能覆盖已有记录或 exact field path，不引入 join/upsert。
+- 继续应用 target filtering 和 data root containment。未匹配 target 的 override 不读取文件。来源追踪保留独立的文件路径、sheet、物理行列，覆盖链保留被替换 source 的 sheet；human/JSON 诊断及 HTML/Markdown/JSON/CSV 报告均可定位工作表。
+- 同一次 source read 复用工作簿，锁只串行化同一文件的读取；不同文件可并行。缓存随本次读取结束释放，下次 build 重新打开文件。无需 Excel、COM、Python 或新的 async runtime。
+
+读取库和公式缓存 API 见 [XLSX 读取库](../Tech/development-environment.md#xlsx-读取库)。真实工作簿测试位于 `tests/fixtures/xlsx/`。
 
 ## 3.5 Target Config
 
