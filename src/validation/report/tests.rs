@@ -6,6 +6,62 @@ use crate::{
 };
 use std::path::PathBuf;
 
+#[test]
+fn report_visibility_paths_and_related_context_are_structured() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+        [[tables]]
+        name = "items"
+        source = "items.csv"
+        [[tables.fields]]
+        name = "value"
+        type = "int"
+        export = false
+    "#,
+    )
+    .unwrap();
+    let linked = meta.link().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let mut options = options();
+    options.project_path = Some(temp.path().join("ConfigForge.toml"));
+    let mut source = issue("custom.code", ValidationSeverity::Error, "items", 3);
+    source.location.source_path = Some(temp.path().join("items.csv"));
+    source.related_locations.push(source.location.clone());
+    source.record_key = Some("id=7".to_owned());
+    source
+        .context
+        .insert("group".to_owned(), "pool=common".to_owned());
+    let mut validation = ValidationReport::new();
+    validation.push(source);
+    let report = DesignerValidationReport::from_validation_report_with_schema(
+        &validation,
+        &linked,
+        options.clone(),
+    );
+    assert_eq!(report.schema_version, 1);
+    assert_eq!(report.issues[0].export_visibility, "field_filtered");
+    assert_eq!(report.summary.filtered_context_count, 1);
+    assert_eq!(report.issues[0].source_path.as_deref(), Some("items.csv"));
+    assert_eq!(
+        report.issues[0].related_locations[0].source_path.as_deref(),
+        Some(std::path::Path::new("items.csv"))
+    );
+    for format in [
+        DesignerReportFormat::Html,
+        DesignerReportFormat::Markdown,
+        DesignerReportFormat::Csv,
+        DesignerReportFormat::Json,
+    ] {
+        let rendered = render_designer_validation_report(&report, format).unwrap();
+        assert!(rendered.contains("id=7"));
+        assert!(rendered.contains("pool=common"));
+        assert!(rendered.contains("items.csv"));
+    }
+    let report = DesignerValidationReport::from_validation_report(&validation, options);
+    assert_eq!(report.issues[0].export_visibility, "not_applicable");
+    assert_eq!(report.summary.filtered_context_count, 0);
+}
+
 fn options() -> DesignerReportOptions {
     DesignerReportOptions {
         title: None,
@@ -15,6 +71,45 @@ fn options() -> DesignerReportOptions {
         target_tags: TargetTags::new(["client".to_owned(), "shipping".to_owned()]),
         generated_at: "2026-06-07T00:00:00Z".to_owned(),
         input_root: Some(PathBuf::from("Data")),
+    }
+}
+
+#[test]
+fn visibility_resolves_nested_fields_and_does_not_guess_unknown_paths() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+        [[structs]]
+        name = "Stats"
+        [[structs.fields]]
+        name = "secret"
+        type = "int"
+        export = false
+        [[tables]]
+        name = "items"
+        source = "items.csv"
+        [[tables.fields]]
+        name = "stats"
+        type = "Stats"
+    "#,
+    )
+    .unwrap();
+    let linked = meta.link().unwrap();
+    for (path, expected) in [
+        ("stats.secret", "field_filtered"),
+        ("stats.missing", "not_applicable"),
+        ("missing", "not_applicable"),
+        ("stats", "visible"),
+    ] {
+        let mut validation = ValidationReport::new();
+        let mut source = issue("custom.code", ValidationSeverity::Error, "items", 3);
+        source.location.field = Some(path.to_owned());
+        validation.push(source);
+        let report = DesignerValidationReport::from_validation_report_with_schema(
+            &validation,
+            &linked,
+            options(),
+        );
+        assert_eq!(report.issues[0].export_visibility, expected, "{path}");
     }
 }
 

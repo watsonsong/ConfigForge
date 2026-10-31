@@ -22,5 +22,8 @@ pub use model::{
     VectorFormat, list_element_type_name,
 };
 
+mod provenance;
 #[cfg(test)]
 mod tests;
+pub use provenance::DeclarationSources;
+pub(crate) use provenance::{declaration_sources, enrich_diagnostics};

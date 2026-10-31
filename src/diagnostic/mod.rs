@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{fmt, path::PathBuf};
+use std::{collections::BTreeMap, fmt, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -79,6 +79,9 @@ impl fmt::Display for DiagnosticLocation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Diagnostic {
+    pub related_locations: Vec<DiagnosticLocation>,
+    pub record_key: Option<String>,
+    pub context: BTreeMap<String, String>,
     pub code: String,
     pub severity: DiagnosticSeverity,
     pub message: String,
@@ -101,6 +104,9 @@ impl Diagnostic {
         location: DiagnosticLocation,
     ) -> Self {
         Self {
+            related_locations: Vec::new(),
+            record_key: None,
+            context: BTreeMap::new(),
             code: code.into(),
             severity,
             message: message.into(),
@@ -118,6 +124,9 @@ impl Diagnostic {
 
     pub fn from_entry(entry: &impl DiagnosticEntry) -> Self {
         Self {
+            related_locations: entry.related_locations().to_vec(),
+            record_key: entry.record_key().map(str::to_owned),
+            context: entry.context().cloned().unwrap_or_default(),
             code: entry.code(),
             severity: entry.severity(),
             message: entry.message().to_owned(),
@@ -181,6 +190,15 @@ impl fmt::Display for Diagnostic {
 }
 
 pub trait DiagnosticEntry {
+    fn related_locations(&self) -> &[DiagnosticLocation] {
+        &[]
+    }
+    fn record_key(&self) -> Option<&str> {
+        None
+    }
+    fn context(&self) -> Option<&BTreeMap<String, String>> {
+        None
+    }
     fn code(&self) -> String;
     fn severity(&self) -> DiagnosticSeverity;
     fn message(&self) -> &str;
@@ -216,6 +234,15 @@ pub fn format_diagnostic(entry: &impl DiagnosticEntry) -> String {
 }
 
 impl<T: DiagnosticEntry + ?Sized> DiagnosticEntry for &T {
+    fn related_locations(&self) -> &[DiagnosticLocation] {
+        (*self).related_locations()
+    }
+    fn record_key(&self) -> Option<&str> {
+        (*self).record_key()
+    }
+    fn context(&self) -> Option<&BTreeMap<String, String>> {
+        (*self).context()
+    }
     fn code(&self) -> String {
         (*self).code()
     }
@@ -266,6 +293,15 @@ impl<T: DiagnosticEntry + ?Sized> DiagnosticEntry for &T {
 }
 
 impl DiagnosticEntry for Diagnostic {
+    fn related_locations(&self) -> &[DiagnosticLocation] {
+        &self.related_locations
+    }
+    fn record_key(&self) -> Option<&str> {
+        self.record_key.as_deref()
+    }
+    fn context(&self) -> Option<&BTreeMap<String, String>> {
+        Some(&self.context)
+    }
     fn code(&self) -> String {
         self.code.clone()
     }
@@ -403,6 +439,9 @@ fn format_diagnostic_parts(
     }
     if let Some(hint) = diagnostic.hint() {
         write!(formatter, " [{hint}]")?;
+    }
+    for related in diagnostic.related_locations() {
+        write!(formatter, " [related: {related}]")?;
     }
     Ok(())
 }

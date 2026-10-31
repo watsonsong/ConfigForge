@@ -210,6 +210,7 @@ fn diagnostic_asset_regex_warning_reaches_cli_and_report() {
         .unwrap();
     assert_eq!(asset["severity"], "warning");
     assert_eq!(asset["location"]["source_row_number"], 3);
+    assert_eq!(asset["context"]["asset_kind"], "icon");
     assert_ne!(asset["target"], "11");
     let regex = issues
         .iter()
@@ -220,4 +221,84 @@ fn diagnostic_asset_regex_warning_reaches_cli_and_report() {
     let report: serde_json::Value =
         serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
     assert_eq!(report["summary"]["warning_count"], 2);
+}
+
+#[test]
+fn diagnostic_imported_duplicate_declarations_have_both_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let source = "[[tables]]\nname = 'items'\nsource = 'items.csv'\n";
+    fs::write(root.join("a.toml"), source).unwrap();
+    fs::write(root.join("b.toml"), source).unwrap();
+    let project = root.join("ConfigForge.toml");
+    fs::write(&project, "imports = ['a.toml', 'b.toml']\n[[targets]]\nname = 'client'\n[[targets.exports]]\ntype = 'rust'\noutput = 'out'\n").unwrap();
+    let result = diagnostic_run(&project, &[]);
+    let issue = result["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|issue| issue["code"] == "CF_META_DUPLICATE_TABLE_NAME")
+        .unwrap();
+    assert!(
+        issue["location"]["source_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("b.toml")
+    );
+    assert_eq!(issue["location"]["source_row_number"], 2);
+    assert!(
+        issue["related_locations"][0]["source_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("a.toml")
+    );
+}
+
+#[test]
+fn diagnostic_duplicate_rows_have_related_cell_and_record_key() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = diagnostic_project(temp.path(), "warning", false);
+    let config = fs::read_to_string(&project)
+        .unwrap()
+        .replace("type = \"int\"", "type = \"int\"\n        unique = true");
+    let config = config.replace("source = \"items.csv\"", "source = \"items.csv\"\n        primary_index = \"by_level\"\n        [[tables.indexes]]\n        name = \"by_level\"\n        fields = [\"level\"]\n        unique = true");
+    fs::write(&project, config).unwrap();
+    fs::write(temp.path().join("items.csv"), "level\n等级\n11\n11\n").unwrap();
+    let result = diagnostic_run(&project, &[]);
+    let issue = result["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|issue| issue["code"] == "CF_DATA_DUPLICATE_KEY")
+        .unwrap();
+    assert_eq!(issue["location"]["source_row_number"], 4);
+    assert_eq!(issue["related_locations"][0]["source_row_number"], 3);
+    assert_eq!(issue["related_locations"][0]["source_column_name"], "level");
+    assert_eq!(issue["record_key"], "level=11");
+}
+
+#[test]
+fn diagnostic_invalid_imported_field_points_to_its_declaration() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = diagnostic_project(temp.path(), "warning", false);
+    let config = fs::read_to_string(&project)
+        .unwrap()
+        .replace("type = \"int\"", "type = \"missing_type\"");
+    fs::write(&project, config).unwrap();
+    let result = diagnostic_run(&project, &[]);
+    let issue = result["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|issue| issue["code"] == "CF_META_UNKNOWN_FIELD_TYPE")
+        .unwrap();
+    assert_eq!(issue["location"]["table"], "items");
+    assert_eq!(issue["location"]["field"], "level");
+    assert!(issue["location"]["source_row_number"].as_u64().unwrap() > 5);
+    assert!(
+        issue["location"]["source_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("ConfigForge.toml")
+    );
 }

@@ -102,6 +102,7 @@ pub struct ValidationReportExportConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DesignerValidationReport {
+    pub schema_version: u32,
     pub metadata: ReportMetadata,
     pub summary: ReportSummary,
     pub groups: Vec<IssueGroup>,
@@ -141,6 +142,9 @@ pub struct IssueGroup {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DesignerValidationIssue {
+    pub related_locations: Vec<DiagnosticLocation>,
+    pub record_key: Option<String>,
+    pub context: BTreeMap<String, String>,
     pub id: String,
     pub severity: DiagnosticSeverity,
     pub blocking: bool,
@@ -176,10 +180,11 @@ impl DesignerValidationReport {
         source_issues.sort_by(compare_validation_issues_for_report);
 
         let metadata = ReportMetadata::from_options(options);
-        let issues = enrich_issues(source_issues, None);
+        let issues = enrich_issues(source_issues, None, &metadata);
         let summary = summarize_issues(&issues);
         let groups = build_groups(&issues);
         Self {
+            schema_version: 1,
             metadata,
             summary,
             groups,
@@ -196,10 +201,11 @@ impl DesignerValidationReport {
         source_issues.sort_by(compare_validation_issues_for_report);
 
         let metadata = ReportMetadata::from_options(options);
-        let issues = enrich_issues(source_issues, Some(linked_meta));
+        let issues = enrich_issues(source_issues, Some(linked_meta), &metadata);
         let summary = summarize_issues(&issues);
         let groups = build_groups(&issues);
         Self {
+            schema_version: 1,
             metadata,
             summary,
             groups,
@@ -217,6 +223,9 @@ impl DesignerValidationReport {
                 .diagnostics
                 .iter()
                 .map(|diagnostic| ValidationIssue {
+                    related_locations: diagnostic.related_locations.clone(),
+                    record_key: diagnostic.record_key.clone(),
+                    context: diagnostic.context.clone(),
                     code: diagnostic.code.clone(),
                     severity: diagnostic.severity,
                     message: diagnostic.message.clone(),
@@ -278,7 +287,31 @@ impl ReportMetadata {
 fn enrich_issues(
     source_issues: Vec<ValidationIssue>,
     linked_meta: Option<&LinkedMetaModel<'_>>,
+    metadata: &ReportMetadata,
 ) -> Vec<DesignerValidationIssue> {
+    let roots = metadata
+        .project_path
+        .as_deref()
+        .map(std::path::Path::new)
+        .map(|project| {
+            let root = if project
+                .extension()
+                .is_some_and(|extension| extension == "toml")
+            {
+                project.parent().unwrap_or(project)
+            } else {
+                project
+            };
+            let absolute = if root.is_absolute() {
+                root.to_path_buf()
+            } else {
+                std::env::current_dir().unwrap_or_default().join(root)
+            };
+            let absolute = crate::path_util::lexical_normalize_path(&absolute);
+            let canonical = std::fs::canonicalize(&absolute).unwrap_or_else(|_| absolute.clone());
+            vec![absolute, canonical]
+        })
+        .unwrap_or_default();
     let mut error_index = 0usize;
     let mut warning_index = 0usize;
     source_issues
@@ -318,8 +351,19 @@ fn enrich_issues(
                 .unwrap_or_else(|| UNCATEGORIZED_DOMAIN.to_owned());
             let source_column = source_column_label(&issue.location);
             let schema_metadata = schema_metadata_for_issue(&issue, linked_meta);
+            let export_visibility = visibility_for_issue(&issue, linked_meta, metadata);
+            let mut related_locations = issue.related_locations;
+            for related in &mut related_locations {
+                related.source_path = related
+                    .source_path
+                    .as_ref()
+                    .map(|path| report_path(path, &roots));
+            }
 
             DesignerValidationIssue {
+                related_locations,
+                record_key: issue.record_key,
+                context: issue.context,
                 id,
                 severity,
                 blocking: severity == DiagnosticSeverity::Error,
@@ -338,18 +382,87 @@ fn enrich_issues(
                     .location
                     .source_path
                     .as_ref()
-                    .map(|path| path.display().to_string()),
+                    .map(|path| report_path(path, &roots).display().to_string()),
                 source_column,
                 current_value: issue.current_value,
                 expected: issue.expected,
                 schema_metadata,
                 target: issue.target,
-                export_visibility: "visible".to_owned(),
+                export_visibility,
                 owner,
                 domain,
             }
         })
         .collect()
+}
+
+fn report_path(path: &std::path::Path, roots: &[PathBuf]) -> PathBuf {
+    roots
+        .iter()
+        .find_map(|root| path.strip_prefix(root).ok())
+        .unwrap_or(path)
+        .to_path_buf()
+}
+
+fn visibility_for_issue(
+    issue: &ValidationIssue,
+    meta: Option<&LinkedMetaModel<'_>>,
+    metadata: &ReportMetadata,
+) -> String {
+    let Some(meta) = meta else {
+        return "not_applicable".to_owned();
+    };
+    let Some(table) = issue
+        .location
+        .table
+        .as_deref()
+        .and_then(|name| meta.table(name))
+    else {
+        return "not_applicable".to_owned();
+    };
+    if metadata.target.is_none() {
+        return "not_applicable".to_owned();
+    }
+    let tags = TargetTags::new(metadata.target_tags.iter().map(String::as_str));
+    if !table.meta.is_exported_for(&tags) {
+        return "table_filtered".to_owned();
+    }
+    if let Some(path) = issue.location.field.as_deref() {
+        let mut segments = path.split('.');
+        let name = segments.next().unwrap_or(path);
+        let mut field = table.field(name);
+        if field.is_none()
+            && let Some(fragment) = table.fragment(name)
+        {
+            if !fragment.meta.is_exported_for(&tags) {
+                return "field_filtered".to_owned();
+            }
+            field = segments.next().and_then(|name| fragment.field(name));
+        }
+        let Some(mut field) = field else {
+            return "not_applicable".to_owned();
+        };
+        loop {
+            if !field.meta.is_exported_for(&tags) {
+                return "field_filtered".to_owned();
+            }
+            let Some(segment) = segments.next() else {
+                break;
+            };
+            let crate::meta::LinkedField::Struct(structure) = &field.linked_field else {
+                return "not_applicable".to_owned();
+            };
+            let Some(child) = structure
+                .fields
+                .iter()
+                .find(|child| child.meta.name == segment)
+            else {
+                return "not_applicable".to_owned();
+            };
+            field = child;
+        }
+    }
+    "visible".to_owned()
 }
 
 fn schema_metadata_for_issue(
@@ -452,7 +565,7 @@ fn summarize_issues(issues: &[DesignerValidationIssue]) -> ReportSummary {
         owners_with_issues: owners.len(),
         filtered_context_count: issues
             .iter()
-            .filter(|issue| issue.export_visibility != "visible")
+            .filter(|issue| issue.export_visibility.ends_with("_filtered"))
             .count(),
     }
 }

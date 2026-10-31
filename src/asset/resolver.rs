@@ -1075,13 +1075,13 @@ fn asset_error(
 
 fn asset_diagnostic_error(
     message: String,
-    _asset_kind: Option<&str>,
-    _asset_ref: Option<&str>,
+    asset_kind: Option<&str>,
+    asset_ref: Option<&str>,
     current_value: impl Into<String>,
     expected: impl Into<String>,
     hint: impl Into<String>,
 ) -> ConfigForgeError {
-    let diagnostic = Diagnostic::new(
+    let mut diagnostic = Diagnostic::new(
         CF_DATA_INVALID_ASSET_REF,
         DiagnosticSeverity::Error,
         message,
@@ -1092,6 +1092,16 @@ fn asset_diagnostic_error(
     .with_current_value(current_value)
     .with_expected(expected)
     .with_hint(hint);
+    if let Some(kind) = asset_kind {
+        diagnostic
+            .context
+            .insert("asset_kind".to_owned(), kind.to_owned());
+    }
+    if let Some(reference) = asset_ref {
+        diagnostic
+            .context
+            .insert("asset_ref".to_owned(), reference.to_owned());
+    }
     ConfigForgeError::from_diagnostic(diagnostic)
 }
 

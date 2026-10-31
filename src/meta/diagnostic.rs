@@ -11,6 +11,7 @@ use crate::diagnostic::{
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MetaDiagnostic {
+    pub related_locations: Vec<DiagnosticLocation>,
     pub code: MetaDiagnosticCode,
     pub severity: DiagnosticSeverity,
     pub message: String,
@@ -20,6 +21,7 @@ pub struct MetaDiagnostic {
 impl MetaDiagnostic {
     pub fn new(code: MetaDiagnosticCode, message: impl Into<String>) -> Self {
         Self {
+            related_locations: Vec::new(),
             code,
             severity: DiagnosticSeverity::Error,
             message: message.into(),
@@ -46,6 +48,9 @@ impl fmt::Display for MetaDiagnostic {
 }
 
 impl DiagnosticEntry for MetaDiagnostic {
+    fn related_locations(&self) -> &[DiagnosticLocation] {
+        &self.related_locations
+    }
     fn code(&self) -> String {
         self.code.stable_code().to_owned()
     }

@@ -12,6 +12,32 @@ fn parse(input: &str) -> MetaModel {
     MetaModel::from_toml_str(input).expect("meta should parse")
 }
 
+#[test]
+fn standalone_struct_link_error_preserves_declaration_source() {
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("structs.toml");
+    fs::write(
+        &path,
+        "[[structs]]\nname = 'Stats'\n[[structs.fields]]\nname = 'value'\ntype = 'Missing'\n",
+    )
+    .unwrap();
+    let ConfigForgeError::MetaValidation(errors) = MetaModel::from_paths([&path]).unwrap_err()
+    else {
+        panic!("expected meta validation diagnostics");
+    };
+    let error = errors
+        .diagnostics
+        .iter()
+        .find(|error| error.code == CF_META_UNKNOWN_FIELD_TYPE)
+        .unwrap();
+    assert_eq!(
+        error.location.source_path.as_deref(),
+        Some(fs::canonicalize(path).unwrap().as_path())
+    );
+    assert_eq!(error.location.source_row_number, Some(4));
+    assert_eq!(error.location.field.as_deref(), Some("value"));
+}
+
 fn diagnostics(input: &str) -> Vec<MetaDiagnostic> {
     match MetaModel::from_toml_str(input) {
         Ok(model) => validate_meta_model(&model),
@@ -49,6 +75,7 @@ fn meta_diagnostic_from_diagnostic(diagnostic: Diagnostic) -> MetaDiagnostic {
         code => panic!("unknown meta diagnostic code `{code}`"),
     };
     MetaDiagnostic {
+        related_locations: diagnostic.related_locations,
         code,
         severity: diagnostic.severity,
         message: diagnostic.message,

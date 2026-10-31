@@ -159,6 +159,7 @@ fn validate_full_data_set(
     );
     report.append(&mut plan.run(&context));
     enrich_source_locations(&mut report, data_set);
+    enrich_record_keys(&mut report, meta, data_set);
     report.sort_by_stable_key();
     report_into_result(report)
 }
@@ -349,6 +350,7 @@ fn finish_target_data_set_validation_outcome(
     let context = ValidationContext::new(meta, Some(target_tags.clone()), data_set, export_view);
     report.append(&mut plan.run(&context));
     enrich_source_locations(&mut report, data_set);
+    enrich_record_keys(&mut report, meta, data_set);
     report.sort_by_stable_key();
     Ok(report.into_outcome())
 }
@@ -399,5 +401,53 @@ fn enrich_source_locations(report: &mut ValidationReport, data_set: &DataSet) {
             continue;
         };
         table.enrich_location(row_index, location);
+    }
+}
+
+fn enrich_record_keys(report: &mut ValidationReport, meta: &LinkedMetaModel<'_>, data: &DataSet) {
+    for issue in &mut report.issues {
+        if issue.code == crate::diagnostic::code::CF_DATA_INVALID_FOREIGN_KEY
+            && let Some(table) = &issue.location.table
+        {
+            let key = if let Some(field) = &issue.location.field {
+                format!("tables/{table}/fields/{field}")
+            } else {
+                format!("tables/{table}")
+            };
+            if let Some(source) = meta
+                .model
+                .declaration_sources
+                .get(&key)
+                .and_then(|sources| sources.first())
+            {
+                let mut source = source.clone();
+                source.table = issue.location.table.clone();
+                source.field = issue.location.field.clone();
+                issue.related_locations.push(source);
+            }
+        }
+        for related in &mut issue.related_locations {
+            if related.source_path.is_none()
+                && let Some(name) = related.table.as_deref()
+                && let Some(source) = meta
+                    .model
+                    .declaration_sources
+                    .get(&format!("tables/{name}"))
+                    .and_then(|sources| sources.first())
+            {
+                related.source_path = source.source_path.clone();
+                related.source_row_number = source.source_row_number;
+                related.source_column_number = source.source_column_number;
+            }
+        }
+        let Some(name) = issue.location.table.as_deref() else {
+            continue;
+        };
+        let (Some(table), Some(schema)) = (data.table(name), meta.table(name)) else {
+            continue;
+        };
+        if let Some(index) = issue.location.row_index {
+            issue.record_key = super::key_policy::raw_record_key(schema, table.rows.get(index));
+        }
     }
 }

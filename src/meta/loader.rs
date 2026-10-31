@@ -15,7 +15,8 @@ impl MetaModel {
     /// already have a raw model from another source should use [`MetaModel::finish_loading`]
     /// to apply the same contract, or [`MetaModel::link`] when they need a borrowed linked view.
     pub fn from_toml_str(input: &str) -> Result<Self> {
-        let model: Self = toml::from_str(input).map_err(ConfigForgeError::ParseMetaString)?;
+        let mut model: Self = toml::from_str(input).map_err(ConfigForgeError::ParseMetaString)?;
+        model.declaration_sources = super::declaration_sources(input, None);
         finish_loading_model(model)
     }
 
@@ -66,16 +67,18 @@ fn read_meta_file(path: &Path) -> Result<MetaModel> {
             path: canonical_path.clone(),
             source,
         })?;
-    let model: MetaModel =
+    let mut model: MetaModel =
         toml::from_str(&content).map_err(|source| ConfigForgeError::ParseMeta {
             path: canonical_path.clone(),
             source,
         })?;
+    model.declaration_sources = super::declaration_sources(&content, Some(&canonical_path));
     Ok(model)
 }
 
 fn merge_models(models: Vec<MetaModel>) -> MetaModel {
     let mut merged = MetaModel {
+        declaration_sources: Default::default(),
         enums: Vec::new(),
         structs: Vec::new(),
         tables: Vec::new(),
@@ -83,6 +86,13 @@ fn merge_models(models: Vec<MetaModel>) -> MetaModel {
     };
 
     for mut model in models {
+        for (key, locations) in model.declaration_sources {
+            merged
+                .declaration_sources
+                .entry(key)
+                .or_default()
+                .extend(locations);
+        }
         merged.enums.append(&mut model.enums);
         merged.structs.append(&mut model.structs);
         merged.tables.append(&mut model.tables);

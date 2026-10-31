@@ -15,10 +15,36 @@ pub fn validate_meta_model(model: &MetaModel) -> Vec<MetaDiagnostic> {
     validate_asset_kinds(model, &mut diagnostics);
     validate_enums(model, &mut diagnostics);
     for struct_meta in &model.structs {
+        let start = diagnostics.len();
         validate_struct_meta(model, struct_meta, &mut diagnostics);
+        super::enrich_diagnostics(
+            &model.declaration_sources,
+            &format!("structs/{}", struct_meta.name),
+            &mut diagnostics[start..],
+        );
     }
     for table in &model.tables {
+        let start = diagnostics.len();
         validate_table_meta(model, table, &mut diagnostics);
+        for diagnostic in &mut diagnostics[start..] {
+            if let Some(field) = &diagnostic.location.field {
+                let key = format!("tables/{}/fields/{field}", table.name);
+                super::enrich_diagnostics(
+                    &model.declaration_sources,
+                    &key,
+                    std::slice::from_mut(diagnostic),
+                );
+            }
+            diagnostic
+                .location
+                .table
+                .get_or_insert_with(|| table.name.clone());
+        }
+        super::enrich_diagnostics(
+            &model.declaration_sources,
+            &format!("tables/{}", table.name),
+            &mut diagnostics[start..],
+        );
     }
     diagnostics.sort();
     diagnostics
@@ -70,12 +96,14 @@ fn validate_unique_names(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic
         model.tables.iter().map(|table| table.name.as_str()),
         MetaDiagnosticCode::DuplicateTableName,
         "table",
+        Some((&model.declaration_sources, "tables")),
         diagnostics,
     );
     validate_names(
         model.enums.iter().map(|enum_meta| enum_meta.name.as_str()),
         MetaDiagnosticCode::DuplicateEnumName,
         "enum",
+        Some((&model.declaration_sources, "enums")),
         diagnostics,
     );
     validate_names(
@@ -85,6 +113,7 @@ fn validate_unique_names(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic
             .map(|struct_meta| struct_meta.name.as_str()),
         MetaDiagnosticCode::DuplicateStructName,
         "struct",
+        Some((&model.declaration_sources, "structs")),
         diagnostics,
     );
     validate_names(
@@ -94,6 +123,7 @@ fn validate_unique_names(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic
             .map(|asset_kind| asset_kind.name.as_str()),
         MetaDiagnosticCode::DuplicateAssetKindName,
         "asset kind",
+        Some((&model.declaration_sources, "asset_kinds")),
         diagnostics,
     );
     validate_type_namespace_names(model, diagnostics);
@@ -101,7 +131,13 @@ fn validate_unique_names(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic
 
 fn validate_asset_kinds(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic>) {
     for asset_kind in &model.asset_kinds {
+        let start = diagnostics.len();
         validate_asset_kind_meta(model, asset_kind, diagnostics);
+        super::enrich_diagnostics(
+            &model.declaration_sources,
+            &format!("asset_kinds/{}", asset_kind.name),
+            &mut diagnostics[start..],
+        );
     }
     validate_asset_kind_extends_cycles(model, diagnostics);
 }
@@ -299,26 +335,45 @@ fn validate_names<'a>(
     names: impl Iterator<Item = &'a str>,
     code: MetaDiagnosticCode,
     kind: &str,
+    sources: Option<(&super::DeclarationSources, &str)>,
     diagnostics: &mut Vec<MetaDiagnostic>,
 ) {
     let mut seen = BTreeSet::new();
     for name in names {
         if !seen.insert(name) {
-            diagnostics.push(MetaDiagnostic::new(
+            let mut diagnostic = MetaDiagnostic::new(
                 code,
                 format!("{} `{}` is defined more than once", kind, name),
-            ));
+            );
+            if kind == "table" {
+                diagnostic.location.table = Some(name.to_owned());
+            }
+            if let Some((sources, category)) = sources {
+                super::enrich_diagnostics(
+                    sources,
+                    &format!("{category}/{name}"),
+                    std::slice::from_mut(&mut diagnostic),
+                );
+            }
+            diagnostics.push(diagnostic);
         }
     }
 }
 
 fn validate_enums(model: &MetaModel, diagnostics: &mut Vec<MetaDiagnostic>) {
     for enum_meta in &model.enums {
+        let start = diagnostics.len();
         validate_names(
             enum_meta.values.iter().map(|value| value.name.as_str()),
             MetaDiagnosticCode::DuplicateEnumValueName,
             &format!("enum `{}` value", enum_meta.name),
+            None,
             diagnostics,
+        );
+        super::enrich_diagnostics(
+            &model.declaration_sources,
+            &format!("enums/{}", enum_meta.name),
+            &mut diagnostics[start..],
         );
     }
 }
@@ -353,6 +408,7 @@ fn validate_table_meta(
     validate_fragments(model, table, &field_names, diagnostics);
 
     for field in &table.fields {
+        let field_start = diagnostics.len();
         for validator in &field.validators {
             validate_validator_meta(
                 &format!("table `{}` field `{}` validator", table.name, field.name),
@@ -393,6 +449,15 @@ fn validate_table_meta(
             &format!("table `{}`", table.name),
             field,
             diagnostics,
+        );
+        for diagnostic in &mut diagnostics[field_start..] {
+            diagnostic.location.table = Some(table.name.clone());
+            diagnostic.location.field = Some(field.name.clone());
+        }
+        super::enrich_diagnostics(
+            &model.declaration_sources,
+            &format!("tables/{}/fields/{}", table.name, field.name),
+            &mut diagnostics[field_start..],
         );
     }
 
@@ -1397,6 +1462,7 @@ fn validate_field_names<'a>(
 ) -> BTreeSet<&'a str> {
     let mut seen = BTreeSet::new();
     for name in names {
+        let start = diagnostics.len();
         if !seen.insert(name) {
             diagnostics.push(MetaDiagnostic::new(
                 MetaDiagnosticCode::DuplicateFieldName,
@@ -1411,6 +1477,9 @@ fn validate_field_names<'a>(
                     owner, name
                 ),
             ));
+        }
+        for diagnostic in &mut diagnostics[start..] {
+            diagnostic.location.field = Some(name.to_owned());
         }
     }
     seen

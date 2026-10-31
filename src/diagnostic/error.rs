@@ -155,7 +155,12 @@ impl ConfigForgeError {
 }
 
 fn format_diagnostic_report(report: &DiagnosticReport<Diagnostic>) -> String {
-    report.error_messages().join("; ")
+    report
+        .diagnostics
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 #[cfg(test)]

@@ -35,6 +35,7 @@ pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<M
         .map(|table| (table.name.as_str(), table))
         .collect::<HashMap<_, _>>();
     for table in &model.tables {
+        let start = diagnostics.len();
         let linked_fields = link_fields(
             &enum_index,
             &struct_index,
@@ -66,18 +67,52 @@ pub fn link_meta_model(model: &MetaModel) -> (Option<LinkedMetaModel<'_>>, Vec<M
             linked_indexes,
             linked_foreign_keys,
         ));
+        for diagnostic in &mut diagnostics[start..] {
+            if let Some(field) = &diagnostic.location.field {
+                let key = format!("tables/{}/fields/{field}", table.name);
+                super::enrich_diagnostics(
+                    &model.declaration_sources,
+                    &key,
+                    std::slice::from_mut(diagnostic),
+                );
+            }
+            diagnostic
+                .location
+                .table
+                .get_or_insert_with(|| table.name.clone());
+        }
+        super::enrich_diagnostics(
+            &model.declaration_sources,
+            &format!("tables/{}", table.name),
+            &mut diagnostics[start..],
+        );
     }
 
     let linked_structs = model
         .structs
         .iter()
         .map(|struct_meta| {
+            let start = diagnostics.len();
             let linked_fields = link_fields(
                 &enum_index,
                 &struct_index,
                 &struct_meta.fields,
                 &mut vec![struct_meta.name.as_str()],
                 &mut diagnostics,
+            );
+            for diagnostic in &mut diagnostics[start..] {
+                if let Some(field) = &diagnostic.location.field {
+                    super::enrich_diagnostics(
+                        &model.declaration_sources,
+                        &format!("structs/{}/fields/{field}", struct_meta.name),
+                        std::slice::from_mut(diagnostic),
+                    );
+                }
+            }
+            super::enrich_diagnostics(
+                &model.declaration_sources,
+                &format!("structs/{}", struct_meta.name),
+                &mut diagnostics[start..],
             );
             LinkedStructMeta::new(struct_meta, linked_fields)
         })
@@ -178,7 +213,16 @@ fn link_fields<'meta>(
     fields
         .iter()
         .filter_map(|field| {
-            link_field_type(enum_index, struct_index, field, struct_stack, diagnostics)
+            let start = diagnostics.len();
+            let linked =
+                link_field_type(enum_index, struct_index, field, struct_stack, diagnostics);
+            for diagnostic in &mut diagnostics[start..] {
+                diagnostic
+                    .location
+                    .field
+                    .get_or_insert_with(|| field.name.clone());
+            }
+            linked
         })
         .collect()
 }

@@ -21,6 +21,8 @@ pub use crate::meta::{AssetSearchPathConfig, AssetsConfig};
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ProjectConfig {
+    #[serde(skip)]
+    pub declaration_sources: crate::meta::DeclarationSources,
     #[serde(default)]
     pub imports: Vec<PathBuf>,
     #[serde(default)]
@@ -98,6 +100,7 @@ impl ProjectConfig {
     /// exporter, or codegen modules.
     pub(crate) fn raw_meta_model(&self) -> MetaModel {
         MetaModel {
+            declaration_sources: self.declaration_sources.clone(),
             enums: self.enums.clone(),
             structs: self.structs.clone(),
             tables: self.tables.clone(),
@@ -130,6 +133,8 @@ fn load_project_config_recursive(
             source,
         })?;
     let base_dir = canonical_path.parent().unwrap_or_else(|| Path::new("."));
+    fragment.declaration_sources =
+        crate::meta::declaration_sources(&content, Some(&canonical_path));
     for import in &fragment.imports {
         load_project_config_recursive(&base_dir.join(import), visited, fragments)?;
     }
@@ -179,6 +184,7 @@ fn normalize_config_path(base_dir: &Path, path: &Path) -> PathBuf {
 
 fn merge_project_configs(fragments: Vec<ProjectConfig>) -> ProjectConfig {
     let mut merged = ProjectConfig {
+        declaration_sources: Default::default(),
         imports: Vec::new(),
         project: ProjectConfigMeta::default(),
         assets: AssetsConfig::default(),
@@ -190,6 +196,13 @@ fn merge_project_configs(fragments: Vec<ProjectConfig>) -> ProjectConfig {
     };
 
     for mut fragment in fragments {
+        for (key, locations) in fragment.declaration_sources {
+            merged
+                .declaration_sources
+                .entry(key)
+                .or_default()
+                .extend(locations);
+        }
         if fragment.project.name.is_some() {
             merged.project.name = fragment.project.name.take();
         }

@@ -126,6 +126,9 @@ fn render_csv(report: &DesignerValidationReport) -> String {
         "target",
         "owner",
         "domain",
+        "record_key",
+        "context",
+        "related_locations",
     ];
     output.push_str(&header.join(","));
     output.push('\n');
@@ -158,6 +161,19 @@ fn render_csv(report: &DesignerValidationReport) -> String {
             issue.target.clone().unwrap_or_default(),
             issue.owner.clone(),
             issue.domain.clone(),
+            issue.record_key.clone().unwrap_or_default(),
+            issue
+                .context
+                .iter()
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect::<Vec<_>>()
+                .join("; "),
+            issue
+                .related_locations
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; "),
         ];
         output.push_str(
             &row.iter()
@@ -267,6 +283,15 @@ fn format_issue_location(issue: &DesignerValidationIssue) -> String {
     }
     if let Some(field) = &issue.field {
         parts.push(format!("field {field}"));
+    }
+    if let Some(key) = &issue.record_key {
+        parts.push(format!("record {key}"));
+    }
+    for (key, value) in &issue.context {
+        parts.push(format!("{key}={value}"));
+    }
+    for related in &issue.related_locations {
+        parts.push(format!("related: {related}"));
     }
     parts.join(", ")
 }

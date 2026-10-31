@@ -1,8 +1,6 @@
 // Copyright (c) 2026 ConfigForge contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashSet;
-
 use crate::{
     ConfigForgeError, Diagnostic, DiagnosticSeverity, Result,
     data::{DataResolver, DataRow, DataTable, ResolvedRow, ResolvedTable},
@@ -394,15 +392,21 @@ fn duplicate_key_error(
     message: String,
     location: DiagnosticLocation,
     current_value: String,
+    related: DiagnosticLocation,
 ) -> ConfigForgeError {
-    data_validation_error(
+    let error = data_validation_error(
         CF_DATA_DUPLICATE_KEY,
         "validation.unique",
         message,
         location,
         Some(current_value),
         "unique field/index key value",
-    )
+    );
+    let mut diagnostics = error.diagnostics();
+    for diagnostic in &mut diagnostics {
+        diagnostic.related_locations.push(related.clone());
+    }
+    ConfigForgeError::from_diagnostics(diagnostics)
 }
 
 fn expected_field_value(field: &LinkedFieldMeta<'_>) -> String {
@@ -500,10 +504,10 @@ fn validate_index_uniqueness(
 
     validate_index_key_fields(meta, index)?;
 
-    let mut seen = HashSet::new();
+    let mut seen = std::collections::HashMap::new();
     for (row_index, row) in table.rows.iter().enumerate() {
         let key = raw_cell_key(row, &index.fields);
-        if !seen.insert(key.clone()) {
+        if let Some(first) = seen.insert(key.clone(), row_index) {
             let message = format!(
                 "table `{}` row {} index `{}` duplicates unique key `{:?}`",
                 meta.meta.name,
@@ -522,6 +526,11 @@ fn validate_index_uniqueness(
                     ..DiagnosticLocation::default()
                 },
                 format!("{}={:?}", index.meta.name, key),
+                related_row_location(
+                    table,
+                    first,
+                    index.fields.first().map(|field| field.meta.name.as_str()),
+                ),
             ));
         }
     }
@@ -540,13 +549,13 @@ fn validate_index_uniqueness_view(
 
     validate_index_key_fields(meta, index)?;
 
-    let mut seen = HashSet::new();
+    let mut seen = std::collections::HashMap::new();
     for visible_row in &table_view.visible_rows {
         let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
             continue;
         };
         let key = raw_cell_key(row, &index.fields);
-        if !seen.insert(key.clone()) {
+        if let Some(first) = seen.insert(key.clone(), visible_row.row_index) {
             let row_number = visible_row
                 .source_row_number
                 .unwrap_or(visible_row.row_index + 1);
@@ -563,6 +572,11 @@ fn validate_index_uniqueness_view(
                     ..DiagnosticLocation::default()
                 },
                 format!("{}={:?}", index.meta.name, key),
+                related_row_location(
+                    table_view.table,
+                    first,
+                    index.fields.first().map(|field| field.meta.name.as_str()),
+                ),
             ));
         }
     }
@@ -1115,13 +1129,13 @@ fn validate_field_uniqueness(
         return Ok(());
     }
 
-    let mut seen = HashSet::new();
+    let mut seen = std::collections::HashMap::new();
     for (row_index, row) in table.rows.iter().enumerate() {
         let value = row
             .get(&field.meta.name)
             .map(String::as_str)
             .unwrap_or_default();
-        if !seen.insert(value) {
+        if let Some(first) = seen.insert(value, row_index) {
             let message = format!(
                 "table `{}` row {} field `{}` duplicates unique value `{}`",
                 meta.meta.name,
@@ -1133,6 +1147,7 @@ fn validate_field_uniqueness(
                 message,
                 field_location(meta, field, Some((table, row_index))),
                 value.to_owned(),
+                related_row_location(table, first, Some(&field.meta.name)),
             ));
         }
     }
@@ -1149,7 +1164,7 @@ fn validate_field_uniqueness_view(
         return Ok(());
     }
 
-    let mut seen = HashSet::new();
+    let mut seen = std::collections::HashMap::new();
     for visible_row in &table_view.visible_rows {
         let Some(row) = table_view.table.rows.get(visible_row.row_index) else {
             continue;
@@ -1158,7 +1173,7 @@ fn validate_field_uniqueness_view(
             .get(&field.meta.name)
             .map(String::as_str)
             .unwrap_or_default();
-        if !seen.insert(value) {
+        if let Some(first) = seen.insert(value, visible_row.row_index) {
             let row_number = visible_row
                 .source_row_number
                 .unwrap_or(visible_row.row_index + 1);
@@ -1170,9 +1185,25 @@ fn validate_field_uniqueness_view(
                 message,
                 field_location(meta, field, Some((table_view.table, visible_row.row_index))),
                 value.to_owned(),
+                related_row_location(table_view.table, first, Some(&field.meta.name)),
             ));
         }
     }
 
     Ok(())
+}
+
+fn related_row_location(
+    table: &DataTable,
+    index: usize,
+    field: Option<&str>,
+) -> DiagnosticLocation {
+    let mut location = DiagnosticLocation {
+        table: Some(table.name.clone()),
+        row_index: Some(index),
+        field: field.map(str::to_owned),
+        ..Default::default()
+    };
+    table.enrich_location(index, &mut location);
+    location
 }

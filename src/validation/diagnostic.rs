@@ -13,6 +13,9 @@ use std::cmp::Ordering;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationIssue {
+    pub related_locations: Vec<DiagnosticLocation>,
+    pub record_key: Option<String>,
+    pub context: std::collections::BTreeMap<String, String>,
     pub code: String,
     pub severity: ValidationSeverity,
     pub message: String,
@@ -159,6 +162,9 @@ impl ValidationIssue {
         location: ValidationIssueLocation,
     ) -> Self {
         Self {
+            related_locations: Vec::new(),
+            record_key: None,
+            context: Default::default(),
             code: code.into(),
             severity,
             message: message.into(),
@@ -265,10 +271,27 @@ fn validation_issue_from_diagnostic(
     fallback_validator: &str,
     fallback_location: &ValidationIssueLocation,
 ) -> ValidationIssue {
-    let location = if diagnostic.location.is_empty() {
-        fallback_location.clone()
-    } else {
-        diagnostic.location
+    let primary = diagnostic.location;
+    let location = DiagnosticLocation {
+        source_path: primary
+            .source_path
+            .or_else(|| fallback_location.source_path.clone()),
+        source_sheet: primary
+            .source_sheet
+            .or_else(|| fallback_location.source_sheet.clone()),
+        table: primary.table.or_else(|| fallback_location.table.clone()),
+        field: primary.field.or_else(|| fallback_location.field.clone()),
+        row_index: primary.row_index.or(fallback_location.row_index),
+        source_row_number: primary
+            .source_row_number
+            .or(fallback_location.source_row_number),
+        source_column_number: primary
+            .source_column_number
+            .or(fallback_location.source_column_number),
+        source_column_name: primary
+            .source_column_name
+            .or_else(|| fallback_location.source_column_name.clone()),
+        column_index: primary.column_index.or(fallback_location.column_index),
     };
     let mut issue = ValidationIssue::new(
         diagnostic.code,
@@ -286,6 +309,9 @@ fn validation_issue_from_diagnostic(
     issue.explanation = diagnostic.explanation;
     issue.domain = diagnostic.domain;
     issue.owner = diagnostic.owner;
+    issue.related_locations = diagnostic.related_locations;
+    issue.record_key = diagnostic.record_key;
+    issue.context = diagnostic.context;
     issue
 }
 
@@ -298,6 +324,15 @@ pub(super) fn validation_error_message(error: ConfigForgeError) -> String {
 }
 
 impl DiagnosticEntry for ValidationIssue {
+    fn related_locations(&self) -> &[DiagnosticLocation] {
+        &self.related_locations
+    }
+    fn record_key(&self) -> Option<&str> {
+        self.record_key.as_deref()
+    }
+    fn context(&self) -> Option<&std::collections::BTreeMap<String, String>> {
+        Some(&self.context)
+    }
     fn code(&self) -> String {
         self.code.clone()
     }
@@ -344,5 +379,36 @@ impl DiagnosticEntry for ValidationIssue {
 
     fn owner(&self) -> Option<&str> {
         self.owner.as_deref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partial_diagnostic_keeps_primary_coordinates_and_fills_logical_context() {
+        let diagnostic = Diagnostic::new(
+            "custom.code",
+            DiagnosticSeverity::Warning,
+            "invalid value",
+            DiagnosticLocation {
+                source_row_number: Some(42),
+                ..Default::default()
+            },
+        );
+        let fallback = DiagnosticLocation {
+            table: Some("items".to_owned()),
+            field: Some("weight".to_owned()),
+            row_index: Some(7),
+            source_row_number: Some(9),
+            ..Default::default()
+        };
+        let issue = validation_issue_from_diagnostic(diagnostic, "custom", &fallback);
+        assert_eq!(issue.location.source_row_number, Some(42));
+        assert_eq!(issue.location.row_index, Some(7));
+        assert_eq!(issue.location.table.as_deref(), Some("items"));
+        assert_eq!(issue.location.field.as_deref(), Some("weight"));
+        assert_eq!(issue.severity, DiagnosticSeverity::Warning);
     }
 }

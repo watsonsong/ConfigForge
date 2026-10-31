@@ -12,6 +12,8 @@ use super::{
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct MetaModel {
+    #[serde(skip)]
+    pub declaration_sources: super::super::DeclarationSources,
     #[serde(default)]
     pub enums: Vec<EnumMeta>,
     #[serde(default)]

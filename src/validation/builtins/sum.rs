@@ -10,7 +10,7 @@ use super::common::{
     field_value, linked_field, optional_bool, optional_number, required_string, scalar_field_kind,
     validate_allowed_params, validator_config_error,
 };
-use super::table_common::{GroupByConfig, GroupKey, GroupedRows, parse_numeric_value};
+use super::table_common::{GroupByConfig, GroupKey, GroupedRow, GroupedRows, parse_numeric_value};
 use crate::validation::diagnostic::ValidationIssueLocation;
 use crate::validation::registry::{
     CompiledValidator, ValidatorFactory, ValidatorLocation, ValidatorScope,
@@ -102,6 +102,7 @@ impl<'meta> CompiledValidator<'meta> for SumValidator<'meta> {
                         issues.push(self.issue(
                             ctx,
                             group_key,
+                            rows,
                             "validator.sum_mismatch",
                             actual,
                             error.to_string(),
@@ -116,6 +117,7 @@ impl<'meta> CompiledValidator<'meta> for SumValidator<'meta> {
                     issues.push(self.issue(
                         ctx,
                         group_key,
+                        rows,
                         "validator.sum_mismatch",
                         actual,
                         format!("expected sum `{equals}`"),
@@ -129,6 +131,7 @@ impl<'meta> CompiledValidator<'meta> for SumValidator<'meta> {
                 issues.push(self.issue(
                     ctx,
                     group_key,
+                    rows,
                     "validator.sum_too_small",
                     actual,
                     format!("expected sum at least `{min}`"),
@@ -141,6 +144,7 @@ impl<'meta> CompiledValidator<'meta> for SumValidator<'meta> {
                 issues.push(self.issue(
                     ctx,
                     group_key,
+                    rows,
                     "validator.sum_too_large",
                     actual,
                     format!("expected sum at most `{max}`"),
@@ -155,6 +159,7 @@ impl<'meta> SumValidator<'meta> {
         &self,
         ctx: &ValidationContext<'meta, '_>,
         group_key: &GroupKey,
+        rows: &[GroupedRow],
         code: &'static str,
         actual: f64,
         violation: String,
@@ -181,6 +186,19 @@ impl<'meta> SumValidator<'meta> {
         issue.current_value = Some(actual.to_string());
         issue.expected = Some(violation);
         issue.explanation = Some(format!("group: {group_label}"));
+        issue.context.insert("group".to_owned(), group_label);
+        if let Some(table) = ctx.export_view.table(self.table_name) {
+            for row in rows {
+                let mut location = ValidationIssueLocation {
+                    table: Some(self.table_name.to_owned()),
+                    field: Some(self.config.field.clone()),
+                    row_index: Some(row.row_index),
+                    ..Default::default()
+                };
+                table.table.enrich_location(row.row_index, &mut location);
+                issue.related_locations.push(location);
+            }
+        }
         issue
     }
 }

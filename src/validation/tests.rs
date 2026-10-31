@@ -60,6 +60,9 @@ fn validation_report_error<T>(result: Result<T>) -> ValidationReport {
                 .diagnostics
                 .into_iter()
                 .map(|diagnostic| ValidationIssue {
+                    related_locations: diagnostic.related_locations,
+                    record_key: diagnostic.record_key,
+                    context: diagnostic.context,
                     code: diagnostic.code,
                     severity: diagnostic.severity,
                     message: diagnostic.message,
@@ -990,6 +993,24 @@ fn validates_foreign_key_reference_integrity() {
     assert_eq!(issue.location.table.as_deref(), Some("monsters"));
     assert_eq!(issue.location.field.as_deref(), Some("drop_item_id"));
     assert_eq!(issue.current_value.as_deref(), Some("[\"2\"]"));
+    assert_eq!(
+        issue.context.get("target_index").map(String::as_str),
+        Some("by_id")
+    );
+    assert!(
+        issue
+            .related_locations
+            .iter()
+            .any(|location| location.table.as_deref() == Some("items")
+                && location.source_row_number.is_some())
+    );
+    assert!(
+        issue
+            .related_locations
+            .iter()
+            .any(|location| location.field.as_deref() == Some("drop_item_id")
+                && location.source_row_number.is_some())
+    );
     assert!(
         issue
             .expected
@@ -4769,6 +4790,21 @@ fn sum_validator_checks_grouped_int_totals() {
     let message = validate_error(validate_data_set(&linked_meta, &invalid));
     assert!(message.contains("validator.sum_mismatch"));
     assert!(message.contains("group `pool=common`"));
+    let report = validation_report_error(validate_data_set(&linked_meta, &invalid));
+    let issue = report
+        .issues
+        .iter()
+        .find(|issue| issue.code == "validator.sum_mismatch")
+        .unwrap();
+    assert_eq!(issue.location.field.as_deref(), Some("weight"));
+    assert_eq!(issue.current_value.as_deref(), Some("99"));
+    assert_eq!(
+        issue.context.get("group").map(String::as_str),
+        Some("pool=common")
+    );
+    assert_eq!(issue.related_locations.len(), 2);
+    assert_eq!(issue.related_locations[0].row_index, Some(0));
+    assert_eq!(issue.related_locations[1].row_index, Some(1));
 }
 
 #[test]

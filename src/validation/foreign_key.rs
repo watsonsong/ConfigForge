@@ -31,28 +31,35 @@ fn foreign_key_error(
     message: String,
     current_value: impl Into<String>,
 ) -> ConfigForgeError {
-    ConfigForgeError::from_diagnostic(
-        Diagnostic::new(
-            CF_DATA_INVALID_FOREIGN_KEY,
-            DiagnosticSeverity::Error,
-            message,
-            DiagnosticLocation {
-                table: Some(source_table_meta.meta.name.clone()),
-                field: foreign_key
-                    .fields
-                    .first()
-                    .map(|field| field.meta.name.clone()),
-                source_row_number: Some(row_number),
-                ..DiagnosticLocation::default()
-            },
-        )
-        .with_source("validation.foreign_key")
-        .with_current_value(current_value)
-        .with_expected(format!(
-            "existing `{}`.`{}` key; allow_empty = {}",
-            foreign_key.target_table_name, foreign_key.target_index_name, foreign_key.allow_empty
-        )),
+    let mut diagnostic = Diagnostic::new(
+        CF_DATA_INVALID_FOREIGN_KEY,
+        DiagnosticSeverity::Error,
+        message,
+        DiagnosticLocation {
+            table: Some(source_table_meta.meta.name.clone()),
+            field: foreign_key
+                .fields
+                .first()
+                .map(|field| field.meta.name.clone()),
+            source_row_number: Some(row_number),
+            ..DiagnosticLocation::default()
+        },
     )
+    .with_source("validation.foreign_key")
+    .with_current_value(current_value)
+    .with_expected(format!(
+        "existing `{}`.`{}` key; allow_empty = {}",
+        foreign_key.target_table_name, foreign_key.target_index_name, foreign_key.allow_empty
+    ));
+    diagnostic.related_locations.push(DiagnosticLocation {
+        table: Some(foreign_key.target_table_name.to_owned()),
+        ..Default::default()
+    });
+    diagnostic.context.insert(
+        "target_index".to_owned(),
+        foreign_key.target_index_name.to_owned(),
+    );
+    ConfigForgeError::from_diagnostic(diagnostic)
 }
 
 fn foreign_key_config_error(
