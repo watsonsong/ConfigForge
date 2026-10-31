@@ -6,14 +6,14 @@ Related docs：[`../Design/04-meta-model.md`](../Design/04-meta-model.md)、[`11
 
 - [4.1 设计目标](#41-设计目标)
 - [4.3 当前模块结构](#43-当前模块结构)
-- [4.4 Load-Link 架构](#44-loadlink-架构)
+- [4.4 Load-then-Link 架构](#44-load-then-link-架构)
 - [4.5 纯配置数据结构](#45-纯配置数据结构)
 - [4.6 Linked 数据结构](#46-linked-数据结构)
 - [4.9 校验与诊断](#49-校验与诊断)
 - [4.11 TOML 输入格式](#411-toml-输入格式)
 
 
-本文档描述当前 Meta 模块的实际实现设计，用于指导后续继续扩展 Meta 能力。产品语义以 `Documentation/Design/04-meta-model.md` 为准；本文档聚焦 Rust 类型边界、生命周期表达、Load-then-Link 策略、主要方法和测试组织。
+本文档描述当前 Meta 模块的实现设计。下方类型片段用于解释关系和职责，不是完整可复制的 API 声明；新增字段和完整 enum 以 [model/](../../src/meta/model/) 与 [diagnostic.rs](../../src/meta/diagnostic.rs) 为准。产品语义以 `Documentation/Design/04-meta-model.md` 为准；本文档聚焦 Rust 类型边界、生命周期表达、Load-then-Link 策略、主要方法和测试组织。
 
 ## 4.1 设计目标
 
@@ -314,7 +314,7 @@ pub struct SourceRef {
 
 - `provider` / `path` 描述物理 source；当前支持 `csv` / `xlsx`；可选 `sheet` 仅用于 XLSX，省略时由读取器要求工作簿只有唯一 sheet。
 - `fragments` 表示该 source 中每行激活的 polymorphic fragments；override source 覆盖一条 variant row 时也必须声明与覆盖行语义一致的 fragments，例如 S1 的 `materials_s1.csv` 覆盖材料行时继续声明 `fragments = ["stack"]`。
-- `export_when` 是 source-level target 条件，默认匹配所有 target。该字段主要用于 `override_sources`，也允许后续扩展到 base `sources` 的 target-specific source selection；实现第一阶段可以只在 override source 上启用，base source 若声明 `export_when` 可先报 unsupported 或按同一规则处理，但不能静默忽略。
+- `export_when` 是 source-level target 条件，默认匹配所有 target。该字段主要用于 `override_sources`，也允许后续扩展到 base `sources` 的 target-specific source selection；当前只在 override source 启用，base source 声明 `export_when` 会显式拒绝。
 - `export_when` 匹配 Build 传入的 effective target tags，即 Project target tags 与 CLI extra tags 的并集。
 
 ### 4.5.5 `FragmentMeta`
@@ -336,8 +336,8 @@ pub struct FragmentMeta {
 - `type_name` 对应 TOML 中的 `type`，可引用已定义 `StructMeta` 作为 typed fragment payload；未设置时使用 inline fields。
 - `export = false` 是 fragment 级运行时导出硬关闭；默认 `true`。
 - `export_when` 根据 target tags 判断整个 fragment 是否进入当前 ExportView。
-- `fields` 复用 `FieldMeta`，但 Phase 1 只支持基础字段语义：required、default、type、export、export_when。
-- Phase 1 不支持 fragment-level validators、fragment field validators、fragment indexes、fragment row_export，也不支持 fragment fields 作为 table index key。
+- `fields` 复用 `FieldMeta`，但 当前 只支持基础字段语义：required、default、type、export、export_when。
+- 当前 不支持 fragment-level validators、fragment field validators、fragment indexes、fragment row_export，也不支持 fragment fields 作为 table index key。
 - fragment names 在 table scope 内唯一，且不能与 table common field names 冲突。
 - fragment field names 只要求在所属 fragment 内唯一；不同 fragments 可以复用相同 field name，fragment field 也可以与 common field 同名。
 - CSV header 使用 `fragment.field` 表达 fragment field，例如 `stats.attack`；common field 使用裸字段名，例如 `attack`。
@@ -1008,9 +1008,9 @@ Meta 模块测试集中在 `src/meta/tests.rs`，使用内联 TOML 字符串和�
 - validation/exporter 不应再自行解析 `FieldMeta.field_type` 字符串；应读取 `LinkedFieldMeta.linked_field` 或 `primitive_type()`。
 - 对 index 逻辑，应优先使用 `LinkedIndexMeta.fields`，避免重复做 field name 查找。
 
-## 4.14 当前完成标准
+## 4.14 回归约束
 
-Meta 模块当前阶段完成的判断标准：
+Meta 模块回归约束：
 
 - `MetaModel` 可从 TOML 字符串、路径、多路径加载。
 - standalone Meta loader 支持显式多路径合并；ProjectConfig imports 能递归加载，重复 canonical path 只加载一次。

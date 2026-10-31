@@ -1,8 +1,23 @@
 # 11. Schema / Table 文档生成器设计
 
+## 文档导航
+
+- [11.1 背景与问题](#111-背景与问题)
+- [11.2 目标与非目标](#112-目标与非目标)
+- [11.3 Export Task 设计](#113-export-task-设计)
+- [11.4 输出结构](#114-输出结构)
+- [11.5 Markdown 渲染规则](#115-markdown-渲染规则)
+- [11.6 数据模型建议](#116-数据模型建议)
+- [11.7 与现有模块的关系](#117-与现有模块的关系)
+- [11.8 错误处理与确定性](#118-错误处理与确定性)
+- [11.9 示例](#119-示例)
+- [11.10 当前契约与扩展](#1110-当前契约与扩展)
+- [11.11 测试计划](#1111-测试计划)
+- [11.12 当前状态](#1112-当前状态)
+
 Related docs：[`04-meta-model.md`](04-meta-model.md)、[`05-data-validation.md`](05-data-validation.md)、[`06-export-cli.md`](06-export-cli.md)、[`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)、[`10-designer-validation-report.md`](10-designer-validation-report.md)、[`../Implementation/08-exporter-module-detail-design.md`](../Implementation/08-exporter-module-detail-design.md)、[`../Implementation/10-build-module-detail-design.md`](../Implementation/10-build-module-detail-design.md)。
 
-本文定义 P1-3 **Schema / Table 文档生成器**。它面向策划、QA、服务端、客户端和平台协作场景，把 Project / Meta / Target 中已有的表结构、字段说明、索引、外键、导出可见性、资产和国际化信息导出为稳定、可审阅、可归档的表结构说明。
+本文定义 **Schema / Table 文档生成器**。它面向策划、QA、服务端、客户端和平台协作场景，把 Project / Meta / Target 中已有的表结构、字段说明、索引、外键、导出可见性、资产和国际化信息导出为稳定、可审阅、可归档的表结构说明。
 
 ## 11.1 背景与问题
 
@@ -63,11 +78,11 @@ out/docs/
 
 ### 11.2.2 非目标
 
-- P1-3 不生成 runtime data，不读取或扫描数据行；它是 schema / metadata 文档，不是数据内容预览。
-- P1-3 不替代 Designer Validation Report。Validation Report 展示当前数据问题；Schema Doc 展示表结构契约。
-- P1-3 不要求在线发布、权限管理、Lark / Confluence API 写入或数据库存储；Markdown 产物可由外部 CI 上传。
-- P1-3 不强制引入新的 Meta schema。已有 `desc`、`required`、`default`、`export_when`、`asset_kind`、FK/index 配置应先被完整利用。
-- P1-3 不保证生成语言级 API 文档；多语言 codegen 注释仍由 codegen backend 控制。
+- 不生成 runtime data，不读取或扫描数据行；它是 schema / metadata 文档，不是数据内容预览。
+- 不替代 Designer Validation Report。Validation Report 展示当前数据问题；Schema Doc 展示表结构契约。
+- 不要求在线发布、权限管理、Lark / Confluence API 写入或数据库存储；Markdown 产物可由外部 CI 上传。
+- 不强制引入新的 Meta schema。已有 `desc`、`required`、`default`、`export_when`、`asset_kind`、FK/index 配置应先被完整利用。
+- 不保证生成语言级 API 文档；多语言 codegen 注释仍由 codegen backend 控制。
 - 本生成器当前只维护 Markdown 与 HTML 两类文档 renderer；其它输出格式不属于当前 schema / table docs 契约。
 
 ## 11.3 Export Task 设计
@@ -269,7 +284,7 @@ Schema Doc 后续应提供一组“可读图例”（legend / diagram），帮�
    - 边：source feeds table；边标签展示 fragments / override source / export_when。
    - 支持展示 polymorphic table：例如 `materials.csv`、`weapons.csv`、`armors.csv` 都汇入 `items`，并在边上标记 active fragments：`stack`、`attributes`、`skill`。
    - ObjectTable source 使用独立样式，提示它是 key/value rows，不是普通 collection rows。
-   - 用途：快速回答“这张表由哪些 CSV 组成”“某个 fragment 来源在哪个文件”。
+   - 用途：快速回答“这张表由哪些 CSV/XLSX 组成”“某个 fragment 来源在哪个文件”。
 
 4. **Fragment Composition 图**
    - 节点：base table、fragment、fragment fields。
@@ -289,8 +304,8 @@ Schema Doc 后续应提供一组“可读图例”（legend / diagram），帮�
 
 图形渲染建议分层推进：
 
-- **Phase 1：HTML/CSS 图例**。不引入 graph layout，只用卡片、箭头、两列/三列布局表达一跳关系和 source composition；实现成本低且 deterministic。
-- **Phase 2：内联 SVG 图（可选增强）**。如果 HTML/CSS card 在大型项目中可读性不足，可由 SchemaDoc model 生成节点/边并使用简单稳定布局（按 table order 分层或网格排列）输出内联 SVG；仍保持自包含、可复制、无外部依赖。该能力不作为进入 Stable 的前置条件。
+- **当前：HTML/CSS 图例（已实现）**。不引入 graph layout，只用卡片、箭头、两列/三列布局表达一跳关系和 source composition；实现成本低且 deterministic。
+- **未来：内联 SVG 图（可选增强）**。如果 HTML/CSS card 在大型项目中可读性不足，可由 SchemaDoc model 生成节点/边并使用简单稳定布局（按 table order 分层或网格排列）输出内联 SVG；仍保持自包含、可复制、无外部依赖。该能力不作为进入 Stable 的前置条件。
 
 图例的数据模型不应由 renderer 直接扫描 `SchemaTableDoc` 字符串拼接，建议在 builder 层补充结构化视图：
 
@@ -378,7 +393,7 @@ Relations 区域展示 FK 和生成 helper 相关信息：
 | name | client | yes |
 ```
 
-P1-3 可先只标记字段是否为 `asset` / `text`，asset kind 与 POT 是否进入当前聚合 exporter 的精确判定可按现有设计逐步增强：
+可先只标记字段是否为 `asset` / `text`，asset kind 与 POT 是否进入当前聚合 exporter 的精确判定可按现有设计逐步增强：
 
 - `text` 字段在当前 target 可见时，默认认为可被 `gettext_pot` 聚合 exporter 抽取；
 - `asset` 字段在当前 target 可见时，展示 `asset_kind` 和 Project/Meta 中可静态解析的规则摘要；
@@ -386,7 +401,7 @@ P1-3 可先只标记字段是否为 `asset` / `text`，asset kind 与 POT 是否
 
 ## 11.5 Markdown 渲染规则
 
-Markdown 是 P1-3 默认格式。
+Markdown 是 默认格式。
 
 要求：
 
@@ -451,7 +466,7 @@ Builder 输入：
 
 ## 11.7 与现有模块的关系
 
-### 11.7.1 与 Exporter Registry
+### 11.7.1 与 Generator Registry
 
 `schema_doc` 是 requirements 只包含 Meta 的 doc artifact generator。当前实现已直接实现 `ArtifactGenerator` 并由 `GeneratorRegistry` 注册；它不再注册到 `codegen::builtin_generators()`，也不再实现 code-specific `CodeGenerator` API。registry 行为如下：
 
@@ -581,40 +596,11 @@ title = "Client Config Schema"
 | name | client | yes |
 ```
 
-## 11.10 实现分期建议
+## 11.10 当前契约与扩展
 
-### Phase A：Markdown 输出（已稳定）
+Markdown、HTML、复杂类型/asset/POT/validator 摘要、target-aware 可见性与关系/source/fragment 图例均属于当前 Stable 契约，见 [11.12 当前状态](#1112-当前状态)。
 
-- 新增 `schema_doc` export type，dependency 为 MetaOnly。
-- 构建 `SchemaDoc` normalized model。
-- 输出 `index.md` 和每张可见 table 的 `*.md`。
-- 覆盖 Fields / Indexes / Relations 基础表格。
-- 支持 target-aware table/field/index visibility。
-- 单元测试覆盖 Markdown escape、文件名冲突、docs-only target、target filtering、hidden/internal include 口径与 deterministic order。
-
-### Phase B：资产、POT 与复杂类型增强（已稳定）
-
-- 展示 asset kind 规则摘要。
-- 标记 text 字段是否会进入 POT。
-- 展开 struct / fragment / list 字段结构。
-- 展示 built-in validators 摘要。
-- 增加 relation overview、source map、fragment composition 和跨表 FK 索引页。
-
-### Phase C：HTML 输出格式（已稳定）
-
-- 多页静态 HTML：`index.html` 与每表 `<table>.html`。
-- 与 Markdown 共享 `SchemaDoc` normalized model 和 artifact path planning。
-- 内联 CSS、自包含页面、无外部 JS/CSS/CDN。
-- Index 页包含 summary cards、Tables 总览、Asset fields、Text / POT fields、Relation overview。
-- 单表页包含 Fields / Indexes / Relations / Assets / Text-POT / Validators，以及 table neighborhood、source map、fragment composition、Index/FK Contract、Asset/Text Flow legend。
-- 对用户可控文本统一 HTML escape。
-- CLI integration 覆盖 docs-only target、dry-run artifact plan、temp-commit/direct 写入、path conflict 和实际写入。
-
-### Phase D：更多平台集成
-
-- HTML 单页 bundle、搜索、过滤、排序等增强交互。
-- 生成适配 Lark / Confluence 的 Markdown 方言。
-- 支持 owner/domain 或表负责人映射后，在 index 中按负责人分组。
+JSON Schema、Mermaid/DOT、搜索过滤、Lark / Confluence 发布和 owner/domain 分组为后续扩展；它们不属于当前 export task 的可配置选项。
 
 ## 11.11 测试计划
 

@@ -48,6 +48,7 @@ pub enum DiagnosticSeverity {
 ```rust
 pub struct DiagnosticLocation {
     pub source_path: Option<PathBuf>,
+    pub source_sheet: Option<String>,
     pub table: Option<String>,
     pub field: Option<String>,
     pub row_index: Option<usize>,
@@ -60,7 +61,8 @@ pub struct DiagnosticLocation {
 
 定位字段含义：
 
-- `source_path`：物理 source 文件路径，例如 CSV。
+- `source_path`：物理 source 文件路径，例如 CSV/XLSX。
+- `source_sheet`：XLSX 工作表名；独立于路径，CSV 不提供。
 - `table`：逻辑表名。
 - `field`：字段或 field path。
 - `row_index`：内部 0-based row index。

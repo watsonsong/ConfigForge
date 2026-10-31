@@ -98,7 +98,7 @@ Generated core 不应直接依赖具体 JSON / MessagePack / engine / framework 
 
 | Adapter 范围 | 依赖 | 说明 |
 | --- | --- | --- |
-| Rust JSON / MessagePack reader templates | Cargo dependencies | 当前以 copyable runtime template 形式存在，随对应 Rust crate 测试解析。 |
+| Rust JSON / MessagePack reader packages | Cargo dependencies | 独立 Cargo packages，使用共享 reader_core；由 package tests/compliance 验证。 |
 | TypeScript JSON reader | Node.js / TypeScript | JSON reader 不需要 MessagePack peer dependency。 |
 | TypeScript MessagePack reader | `@msgpack/msgpack` peer dependency | 只在 MessagePack reader package / full matrix 中需要。 |
 | C++ RapidJSON reader | RapidJSON | 详见 [`cpp-runtime-dependencies.md`](cpp-runtime-dependencies.md)。 |

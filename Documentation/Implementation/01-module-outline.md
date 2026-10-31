@@ -22,7 +22,7 @@
 | Project | `src/project/` | 加载 `ConfigForge.toml`、解析工程级配置、合并 imports、归一化路径、抽取 Meta。 | Project Config TOML。 | `ProjectConfig`、`TargetConfig`、`MetaModel`。 | `03-project-module-detail-design.md` |
 | Meta | `src/meta/` | Meta schema 加载、纯配置模型、link 借用视图、结构校验；模型定义按 raw / linked / types / conditions 拆分。 | Meta TOML 片段。 | `MetaModel`、`LinkedMetaModel<'meta>`、`MetaDiagnostic`。 | `04-meta-module-detail-design.md` |
 | Runtime Contract | `src/runtime_contract.rs` | data artifact toolkit / code artifact toolkit / generator / build 共享的底层运行时契约，包括 runtime data file metadata 和 binary schema revision 计算。 | `LinkedTableMeta<'meta>`、`TargetTags`。 | `RuntimeDataFile`、schema revision。 | 本文档总览。 |
-| Data | `src/data/` | 根据加载计划读取 CSV 等数据源，形成 raw `DataSet`，并提供 Meta-aware resolver。 | `DataLoadPlan`、source files、`LinkedMetaModel<'meta>`。 | `DataSet`、`ResolvedDataSet` / resolved view。 | `05-data-module-detail-design.md` |
+| Data | `src/data/` | 根据加载计划读取 CSV/XLSX 数据源，形成 raw `DataSet`，并提供 Meta-aware resolver。 | `DataLoadPlan`、source files、`LinkedMetaModel<'meta>`。 | `DataSet`、`ResolvedTable` / resolved view。 | `05-data-module-detail-design.md` |
 | Asset Resolver | `src/asset.rs` | 根据 Meta `asset_kind` 与 Project asset search paths 解析资源引用，生成 canonical export ref，并执行存在性、sidecar、命名、prefix / regex、target-gated deny 等检查。 | `LinkedMetaModel<'meta>`、`AssetsConfig`、`TargetTags`、raw asset ref。 | `ResolvedAssetRef` / validation error。 | `08-asset-validation-and-manifest.md` |
 | Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、asset reference validation、注册式 validator；入口、table、FK、struct value、default、asset 逻辑分文件维护。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`、可选 `AssetsConfig`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
 | Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 兼容列表或 `ArtifactSink` stream 写入请求、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
@@ -129,7 +129,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `02-diagnostic-module-detail-design.md` | 模块 | 统一诊断与 crate 错误桥接。 |
 | `03-project-module-detail-design.md` | 模块 | Project Config schema、imports、路径归一化和 Meta 抽取。 |
 | `04-meta-module-detail-design.md` | 模块 | Meta 模型、Load-then-Link、结构校验和 Meta 诊断。 |
-| `05-data-module-detail-design.md` | 模块 | Data load、CSV reader、DataSet、RowSourceInfo、DataResolver、ObjectTable source layout。 |
+| `05-data-module-detail-design.md` | 模块 | Data load、CSV/XLSX reader、DataSet、RowSourceInfo、DataResolver、ObjectTable source layout。 |
 | `06-validation-module-detail-design.md` | 模块 | Validation 主流程、ExportValidationView、ValidationReport、validator registry。 |
 | `07-artifact-module-detail-design.md` | 模块 | Artifact model、writer、dry-run、direct/temp-commit 策略和写入结果。 |
 | `08-exporter-module-detail-design.md` | toolkit 说明 | 当前 data artifact toolkit 边界、runtime payload、`RuntimeTableFormat` 逐表序列化接口、JSON / MessagePack / `bin` helper、ObjectTable payload。文件名保留历史 `exporter` 标签以维持链接稳定。 |
@@ -148,7 +148,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | `09l-codegen-java-backend.md` | Codegen 专题 | Java backend generated API、单文件嵌套 public API、runtime reader contract、index/relation/text/lazy 设计和测试策略。 |
 | `10-build-module-detail-design.md` | 模块 | 构建编排、target/task binding、并行执行边界和 artifact 写入策略。 |
 | `11-foreign-key-detail-design.md` | 专项 | 外键 raw/link model、引用完整性校验、target 语义、codegen staging。 |
-| `12-struct-expanded-value-detail-design.md` | 专项 | Struct source layout 自动判定和 expanded CSV field-path。 |
+| `12-struct-expanded-value-detail-design.md` | 专项 | Struct source layout 自动判定和 expanded source field-path。 |
 | `13-runtime-binary-format-detail-design.md` | 专项 | `bin` runtime data 紧密二进制格式、schema revision、编码规则和 reader 方案。 |
 | `14-schema-doc-html-relationship-diagrams.md` | 专项 | Schema Doc HTML 阅读体验、meta bar、关系图例、source map、fragment composition 与 normalized graph model 实现设计。 |
 

@@ -4,6 +4,8 @@
 
 ### 1. 编写数据表
 
+此示例不预留第 2 行说明，因此下方显式设置 data_start_row = 2。
+
 `Data/items.csv`：
 
 ```csv
@@ -17,11 +19,18 @@ id,name,icon,export_tags,exclude_tags
 `Meta/items.toml`：
 
 ```toml
+[[asset_kinds]]
+name = "texture"
+search_paths = ["game"]
+extensions = [".png"]
+path_style = "relative"
+extension_policy = "required"
+
 [[tables]]
 name = "items"
 kind = "collection"
 desc = "所有可获得物品的基础配置。"
-source = "items.csv"
+source = { provider = "csv", path = "items.csv", data_start_row = 2 }
 primary_index = "by_id"
 
 [[tables.fields]]
@@ -79,6 +88,14 @@ imports = ["Meta/items.toml"]
 name = "sample"
 input = "Data"
 
+[assets]
+require_existing = true
+
+[[assets.search_paths]]
+name = "game"
+root = "."
+kind = "filesystem"
+
 [[targets]]
 name = "client_json_shipping"
 tags = ["client", "shipping"]
@@ -93,10 +110,14 @@ output = "Generated/Client"
 
 ```
 
-### 4. 校验
+在工程根目录放置示例引用的 assets/icons/iron_sword.png。该文件用于存在性校验；shipping 过滤的 Debug Sword 无需提供对应资源。
+
+### 4. 校验与产物预览
+
+`--dry-run` 仍执行生成和序列化，但不写产物，也不写报告文件：
 
 ```bash
-config-forge --project ConfigForge.toml --target client_json_shipping
+config-forge --project ConfigForge.toml --target client_json_shipping --dry-run
 ```
 
 ### 5. 导出
@@ -119,19 +140,19 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 2. 在 Meta 中添加 field。
 3. 为 field 添加 `desc`，说明字段业务含义和使用限制。
 4. 如旧数据未填写，配置 `default` 或保持 `required = false`。
-5. 运行 validate。
+5. 运行对应 target 的 `--dry-run` 构建。
 
 ### 添加描述
 
 1. 在 enum、enum value、struct、struct field、table、field、fragment、index 等定义上添加 `desc`。
 2. 生成目标语言代码或辅助文档，检查合并后的 MetaModel 描述是否被保留。
-3. 运行 `export` 检查生成代码中的注释是否符合目标语言风格。
+3. 运行目标构建检查生成代码中的注释是否符合目标语言风格。
 
 ### 添加索引
 
 1. 在 CollectionTable 添加 `[[tables.indexes]]`。
 2. 如果作为主索引，声明 `primary = true` 或 table-level `primary_index`。
-3. 运行 validate 检查重复 key。
+3. 运行目标的 --dry-run 构建检查重复 key。
 
 ### 添加 override source
 
@@ -228,8 +249,8 @@ config-forge --project ConfigForge.toml --target client_json_shipping
 
 ### CLI
 
-- `validate` 成功退出码 0。
-- `validate` 有 error 退出码 1。
+- 构建或 dry-run 成功退出码 0。
+- 构建或 dry-run 有 error 退出码 1。
 - CLI 参数错误退出码 2。
 - `--diagnostic-format json` 输出可解析 JSON。
 - `--target` 多 target 选择。
@@ -279,7 +300,7 @@ error[index.unique_duplicate]: duplicate key "1001" for unique index items.by_id
   hint: keep item IDs unique across all base sources, or move replacement rows to override_sources
 ```
 
-## 使用 XLSX 工作簿
+## 7.6 使用 XLSX 工作簿
 
 将工作簿放入 project.input 目录，Meta 显式选择 provider 和 sheet：
 

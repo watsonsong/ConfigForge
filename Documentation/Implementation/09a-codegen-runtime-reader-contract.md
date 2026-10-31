@@ -39,7 +39,7 @@ Unloaded
 ## 与现有生成器模块的落地关系
 
 - `repository.rs` 继续负责 table/object `load`、index 构建和 lazy accessor 渲染；lazy accessor 应复用现有 table `load` 函数，避免生成第二套 parser。
-- `mod.rs` / facade 渲染增加 eager `GameData` 与 lazy `LazyGameData` 两套 facade。默认仍生成 eager；lazy 可无条件生成，也可由 codegen option 控制。为了 API 稳定，建议先无条件生成 lazy facade，除非代码体积成为问题。
+- `mod.rs` / facade 渲染增加 eager `GameData` 与 lazy `LazyGameData` 两套 facade。默认仍生成 eager；当前同步生成 lazy facade，具体形态以 backend 专题为准。
 - `symbols.rs` 需要把 lazy facade 类型名、`loadLazy` / `preloadAll` / async relation helper 等纳入冲突检测。
 - 测试需要覆盖：eager load 不持有 loader；lazy 构造不调用 loader；首次访问某 table 只打开该 table；重复访问不重复打开；`preloadAll` 打开全部 table；lazy relation helper 会触发 target table 加载；TypeScript 并发访问共享同一个 Promise。
 
@@ -54,9 +54,9 @@ Reader 基础语义：
 - 分层命名约定：Meta / IR / generated helper 层使用 `List` 表示 schema 字段类型；runtime value / wire payload 中的 `Array` 只表示 JSON / MessagePack / binary 的物理容器 shape。`row_count` / `ReadRowCount()` / `readRowCount()` / `read_row_count()` 只表示 CollectionTable 顶层记录数；`list length` / `ReadListLength()` / `readListLength()` / `read_list_len()` 只表示 Meta list 字段元素数。二者必须是不同语义，互不 fallback。
 - `len` / `length` 只对 payload array / object / map 有意义；对 scalar 调用应报错。Rust / TypeScript named reader 可把 `len` / `length` 作为固有 helper，并在 `read_row_count` / `readRowCount` / `read_list_len` / `readListLength` 中复用它，但 generated parser 不直接用通用长度 API 读取 list；C++ runtime contract 不暴露通用 `Size()` 或 `ReadArrayLength()`。若旧 adapter 为兼容历史仍保留 `readArrayLength` / `ReadArrayLength` 固有 helper，其语义必须委托给 list length，不得 fallback 到 row count；Rust stable trait 不再保留 `read_array_len`。
 - `read_next_*` / `ReadNext*`、`read_optional_present` / `ReadOptionalPresent`、`read_enum_ordinal` / `ReadEnumOrdinal` 是 schema-aware binary / positional reader 的内部或固有 helper。Generated parser 只调用统一的 `as_*` / `As*`、`enter_optional_field` / `EnterOptionalField` 和 `read_enum_index` / `ReadEnumIndex`，由 binary reader 在这些 contract 方法内部消费顺序 payload。它们不应进入 core trait / interface。
-- 最小 scalar API 包含 int、float/number、bool、string。`text`、`asset` 按 string 读取；enum 先按 string 读取，再由 generated parser 校验枚举值。
-- 当 exporter 输出字符串 cell 时，推荐 generated parser helper 兼容 string-to-int、string-to-float、string-to-bool；reader 也可以直接在 `as_*` 中兼容字符串，但跨语言一致性以 generated parser 规则为准。
-- missing 与 null 必须区分：missing 表示字段不存在；null 表示字段存在但值为空。required 字段 missing 或 null 都应由 generated parser 报错；optional field / optional fragment missing 时得到 `None` / `undefined`；null 是否允许作为 optional empty value 由生成器策略统一决定，第一阶段建议将 null 等价为 optional empty，但对 required 字段仍报错。
+- 最小 scalar API 包含 int、float/number、bool、string。`text`、`asset` 按 string 读取；enum 通过 read_enum_index(variants) 读取，由 generated parser 构造枚举。
+- 当 exporter 输出字符串 cell 时，推荐 generated parser helper 兼容 string-to-int、string-to-float、string-to-bool；reader 也可以直接在 `as_*` 中兼容字符串，跨语言兼容语义以 compliance contract 为准。
+- missing 与 null 必须区分：missing 表示字段不存在；null 表示字段存在但值为空。required 字段 missing 或 null 都应由 generated parser 报错；optional field / optional fragment missing 时得到 `None` / `undefined`；optional null 按 absent 处理，required null 仍报错。
 - 错误上下文由 generated parser 包装 table、file、row index、field path；reader 只需要报告底层类型/格式错误。
 
 ## Contract version 与 structured runtime error
@@ -153,9 +153,9 @@ loader.open("items")
 
 | Language | 默认实现 |
 | --- | --- |
-| Rust | `FsJsonRuntimeDataLoader` + `JsonValueReader` 或 `FsMessagePackRuntimeDataLoader` + `MessagePackValueReader`，可选生成/复制 |
-| C++ | `FileSystemDataFileLoader { root }` + JSON/MessagePack value reader，依赖可选生成 |
-| TypeScript | `FetchDataFileLoader` / `NodeFsDataFileLoader` + JS value reader，二选一或都不默认生成 |
+| Rust | `FsJsonRuntimeDataLoader` + `JsonValueReader` 或 `FsMessagePackRuntimeDataLoader` + `MessagePackValueReader`，由 runtime packages 提供，不默认随 codegen 输出 |
+| C++ | `FileSystemDataFileLoader { root }` + JSON/MessagePack value reader，由 runtime CMake targets 提供，不默认随 codegen 输出 |
+| TypeScript | 现有 node-fs loader + reader；fetch transport 为未来扩展 |
 | Unreal C++ | Unreal module 内实现 `IConfigForgeRuntimeDataLoader` / `IConfigForgeRuntimeDataReader`，当前仓库只提供测试 shim，不提供生产 adapter |
 | C# | `runtime/csharp/json_reader` 中的 `System.Text.Json` value reader + filesystem loader、`runtime/csharp/messagepack_reader` 中的 dependency-free MessagePack named reader，以及 `runtime/csharp/binary_reader` 中的 dependency-free schema-aware `bin` reader；standard_project harness 通过薄 adapter 接入 generated interface |
 | Java | `runtime/java/json_reader` 中的 JDK-only value reader + filesystem loader、`runtime/java/messagepack_reader` 中的 JDK-only MessagePack named reader，以及 `runtime/java/binary_reader` 中的 JDK-only schema-aware `bin` reader；standard_project harness 通过薄 adapter 接入 generated interface，后续可补 Jackson / Gson adapter |
@@ -186,26 +186,9 @@ loader.open("items")
 }
 ```
 
-未来也可以支持更轻量的：
+当前 JSON/MessagePack CollectionTable 使用上述 envelope；ObjectTable 输出 root object。Scalar string contract、nested object、typed list 和 color/vector shape 见 [Data Artifact Toolkit](08-exporter-module-detail-design.md)。生成 parser 与标准 reader 按当前 contract 兼容 scalar string，不以未实现的 typed export 迁移为前提。bin 使用 schema-aware positional layout，不套用 named-field envelope。
 
-```json
-[
-  { "id": 1, "name": "Sword" }
-]
-```
-
-第一阶段推荐导出 runtime data 时同步调整为 typed payload：
-
-- int/float/bool 输出 number/bool；
-- string/text/asset/enum 输出 string；
-- struct 后续输出 object。
-
-如果短期仍输出字符串 cell，生成代码必须在加载时做类型转换。这会导致各语言生成重复 parse helper，但不会要求业务 loader 按表/字段重复实现转换逻辑。
-
-建议分两步：
-
-1. Codegen 第一阶段先兼容当前 `{ meta, rows }`，由通用 reader 暴露 runtime value，并由生成代码把字段 parse 为目标类型。
-2. Data typed export 落地后，生成代码的 parse helper 可以减少 string parsing；loader / reader 接口仍保持不变。
+未来若改变 payload shape，必须明确兼容范围并同步 compliance；当前不支持任意省略 envelope。
 
 ### Exporter 写出实现方案
 
@@ -228,7 +211,7 @@ pub enum RuntimeTableDataFormat {
 5. 每个 MetaAndData export task 根据自身 `type` 通过 `GeneratorRegistry` 选择 direct `ArtifactGenerator`，根据自身 `output` 写出一套数据产物。runtime table generator 写出每表 runtime data artifact；aggregate / mixed generator 写出 POT / manifest / Lua 等聚合 artifact。
 6. `Json` 使用 `serde_json::to_writer_pretty` 通过 shared `ArtifactSink` 写出 `<table>.json`。
 7. `MessagePack` 使用 `rmp_serde::encode::write_named` 或等价 named-field 编码通过 shared `ArtifactSink` 写出 `<table>.msgpack`。
-8. Runtime table data export task 在 exporter 内部生成 `RuntimeDataFile` metadata 用于保持规划顺序和未来 manifest 扩展；Build DAG 当前只保留 task 名称用于稳定校验，不再向上聚合 runtime result struct。聚合 exporter 通过 `export_to_sink()` 直接写入 shared sink。
+8. Runtime table data export task 在 exporter 内部生成 `RuntimeDataFile` metadata 用于保持规划顺序和未来 manifest 扩展；Build pipeline 当前只保留 task 名称用于稳定校验，不再向上聚合 runtime result struct。聚合 exporter 通过 `export_to_sink()` 直接写入 shared sink。
 9. MetaOnly codegen export task 不选择 runtime data export task，统一向 `CodeExportInput` 传入空 `runtime_data_files`，让 CodeModel 使用逻辑表名。
 10. Artifact path 规划必须跨所有 export task 统一检查，不能只在 codegen 内检查 generated code 的重复路径。
 

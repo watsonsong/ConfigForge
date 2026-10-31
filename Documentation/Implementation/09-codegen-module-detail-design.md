@@ -1,6 +1,6 @@
 # 09. Code Artifact Toolkit 详细设计（历史文件名：Codegen）
 
-本文档描述 ConfigForge 的代码导出任务设计。目标是在已加载、已链接并通过校验的 Meta 与 Data 基础上，生成 Rust、C++、TypeScript、Unreal C++、C# 和 Java 等语言的运行时代码，覆盖枚举、结构体、数据表、索引辅助查找函数，并提供抽象的数据文件加载器接口，让接入方可以从本地文件、包内资源、网络或引擎资源系统中加载实际数据。加载器接口必须与具体 Meta、表和字段解耦；所有按表/字段解析和 typed row/object 构造职责属于生成代码。
+本文档描述 ConfigForge 的代码导出任务设计。目标是基于 linked Meta 与 effective target tags，生成 Rust、C++、TypeScript、Unreal C++、C# 和 Java 等语言的运行时代码，覆盖枚举、结构体、数据表、索引辅助查找函数，并提供抽象的数据文件加载器接口，让接入方可以从本地文件、包内资源、网络或引擎资源系统中加载实际数据。加载器接口必须与具体 Meta、表和字段解耦；所有按表/字段解析和 typed row/object 构造职责属于生成代码。
 
 产品层语义仍以 `Documentation/Design/` 为准；本文档聚焦程序实现模块、生成代码形态、跨语言约束、运行时加载抽象和测试策略。
 
@@ -8,7 +8,7 @@
 
 `src/code_artifact/output.rs` 集中实现文件头模板与默认 header，以及 `write_code_to_sink()` 的 stream 创建、checked writer、写入错误路径和 finish。六种语言后端（包括 C++ / Unreal 的 header/source 与 Rust/C++ manifest）复用这些操作，具体 render 通过静态 closure 调用；不 materialize 整个代码文件，不统一语言专属模型。测试用内存 writer 与生产 streaming writer 共用同一份文件头实现。
 
-当前已落地第一阶段 code artifact toolkit 与 language generators 需要达成：
+当前 code artifact toolkit 与 language generators 的职责：
 
 1. 基于 `LinkedMetaModel<'meta>` 生成完整类型代码，而不是只为每张表生成简单 stub。
 2. 支持多种目标语言：Rust、C++、TypeScript、Unreal C++、C#、Java。
@@ -26,7 +26,7 @@
 
 当前 loader contract 使用 Meta-agnostic reader loader：生成抽象 `RuntimeDataLoader` / `RuntimeDataReader`，由接入方负责打开资源并提供通用 object / array / scalar 读取能力；生成代码负责读取 payload envelope `{ meta, rows }`、按 Meta 字段映射到 typed rows / typed objects。loader 不能按表生成方法，也不能返回具体 `TableRow` 类型。
 
-第一阶段不实现：
+当前不实现：
 
 - 生成代码的插件化动态加载；
 - `bin` v1 之外的复杂二进制数据格式、schema evolution 和随机访问；
@@ -34,7 +34,7 @@
 - 未声明 `linked_field` 的 foreign key 自动跳转接口；
 - 增量代码生成。
 
-这些能力应在生成器 API 上预留扩展点，但不阻塞第一阶段落地。
+扩展能力按实际需求设计，不预留未消费的通用框架。
 
 ## 9.2 与现有流程的关系
 
@@ -72,9 +72,9 @@ Data Load / Normalize / Validate
 - Code Export 只依赖已 linked 的 Meta，不直接读取 TOML。
 - Code Export 不重新读取 CSV，不直接依赖 `DataLoader`。
 - Runtime data 文件和 generated code 文件都应进入同一套 Artifact Plan，统一检查路径冲突。
-- Data 文件格式第一阶段支持 JSON、MessagePack 与 `bin`。`bin` 使用 positional packed layout，并通过 runtime data generator 与 CodeModel 共享的 schema revision 保证 generated reader 与数据文件布局一致。生成代码只约束通用 `RuntimeDataLoader` / reader 协议。loader 实现负责打开具体文件并暴露格式无关的读取 cursor，生成代码本身不绑定文件系统、引擎资源系统、JSON 库、MessagePack 库或 binary decoder，但负责所有 table / field 级解析逻辑。
+- Data 文件格式当前支持 JSON、MessagePack 与 `bin`。`bin` 使用 positional packed layout，并通过 runtime data generator 与 CodeModel 共享的 schema revision 保证 generated reader 与数据文件布局一致。生成代码只约束通用 `RuntimeDataLoader` / reader 协议。loader 实现负责打开具体文件并暴露格式无关的读取 cursor，生成代码本身不绑定文件系统、引擎资源系统、JSON 库、MessagePack 库或 binary decoder，但负责所有 table / field 级解析逻辑。
 
-## 9.3 模块结构建议
+## 9.3 当前模块结构
 
 当前 `src/code_artifact/` 是 code artifact toolkit；具体语言 backend 已迁入 `src/generator/<type_id>/`：
 

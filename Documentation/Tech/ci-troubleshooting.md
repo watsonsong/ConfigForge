@@ -25,34 +25,14 @@ Action 自身的 Node 弃用 warning 与项目测试失败分开处理，先修�
 
 ## Actions runtime 与 runner 镜像告警
 
-[run 41168923791](https://github.com/watsonsong/ConfigForge/actions/runs/41168923791)
-的五个 job 均成功，5 条 warning 是同一类 Node 20 弃用提示：quality job 引用了
-`actions/checkout@v4` / `actions/setup-node@v4`，四个构建 job 各引用了 `checkout@v4`。
-它们在 `action.yml` 中声明 Node 20，由 GitHub 强制切换到 Node 24；这不是 Rust 编译告警，
-也不是项目通过 `setup-node` 安装的 Node 版本错误。
+Action 自身的 Node runtime、项目 setup-node 提供的 Node 版本和 Actions Runner 版本分别管理。某次 run 的 warning/notice 数量与环境快照保留在 [文档审查日志](../DevLogs/phase-0010.md)，本节只维护当前约束。
 
-处理方式与维护规则：
-
-- 检查被引用版本的官方 `action.yml` 中 `runs.using`，以及 release notes 的迁移约束。
-  项目 `node-version: "24"` 只影响后续 shell 命令，不能替换 Action 自身的 runtime。
-  不用屏蔽告警或设置强制 runtime 环境变量代替 Action 升级。
-- CI / Release 的 checkout 统一使用 `actions/checkout@v7`，Node 安装使用
-  `actions/setup-node@v7`。这两者原生使用 Node 24；当前仅使用普通 checkout、显式 npm cache，
-  没有使用 v7 迁移涉及的 fork privileged checkout 或 registry token fallback。
-- 同时检查较少运行的 Release：`upload-artifact@v7`、`download-artifact@v8` 和
-  `softprops/action-gh-release@v3` 均原生使用 Node 24，避免发布 tag 时才遇到同类告警。
-  产物上传显式 `archive: true`，下载显式 `merge-multiple: false`，保留每个 artifact
-  一个目录、目录内包含 release archive / checksum 的布局，供后续 SHA256SUMS 和发布步骤使用。
-- Node 24 Action 至少要求 Actions Runner 2.327.1；checkout 的跨 Docker 认证还要求
-  2.329.0。该 run 的 hosted runner 为 2.338.2，满足要求；未来使用 self-hosted runner
-  时须先核实 runner 版本。Action major、项目 Node major 和 runner agent 是三个独立版本。
-- 该 run 另外有 **3 条 notice**：两个 Ubuntu job 的镜像迁移通知，以及 macOS ARM64
-  容量通知。它们不是上述 5 条 warning，也不是失败信号。
-  Linux job 固定 `ubuntu-24.04`，延续该次成功运行实际使用的 Ubuntu 24.04，避免
-  `ubuntu-latest` 自动迁移至 Ubuntu 26 改变系统库和预装工具。固定 OS label 不会冻结
-  镜像的每周软件更新；升级 OS 时仍要运行整个目标矩阵，并同步 CI / Release。
-- macOS ARM64 排队容量由 GitHub 管理；不通过删除 ARM64 job、替换 Intel 架构或关闭检查
-  消除提示。只有持续影响交付时，才评估服务容量或 runner 方案。
+- 查官方 action.yml 的 runs.using 和 release notes，不用项目 node-version 或强制 runtime 环境变量掩盖 Action 弃用。
+- 当前 CI/Release 使用 checkout@v7、setup-node@v7、upload-artifact@v7、download-artifact@v8 和 action-gh-release@v3；这些版本使用 Node 24。升级时核对实际输入与权限约束。
+- 上传使用 archive: true，下载使用 merge-multiple: false，保持每个 artifact 独立目录及 archive/checksum 布局；发布步骤依赖此布局。
+- Node 24 Action 至少要求 Actions Runner 2.327.1；checkout 跨 Docker 认证还要求 2.329.0。Self-hosted runner 升级 Action 前先核对 runner 版本。
+- Linux CI/Release 固定 ubuntu-24.04；OS label 仍会接收镜像每周更新。升级 OS 需验证完整矩阵并同步两个 workflow。
+- macOS ARM64 排队容量是 GitHub 服务问题，不能通过删除架构或关闭检查消除；持续影响交付时再评估服务容量或 runner 方案。
 
 workflow 修改先运行 actionlint，并核对 Action 输入及 artifact 布局的兼容性。
 Action runtime、缓存服务、上传下载和 hosted image 的最终接入需由 push 后的 CI / tag workflow

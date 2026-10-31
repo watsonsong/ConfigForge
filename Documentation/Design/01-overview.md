@@ -31,7 +31,7 @@ ConfigForge 是面向游戏配置生产流程的命令行工具。它把策划�
 
 ### 表格拆分与多人协作冲突
 
-大型配置表往往需要按功能、活动、版本拆分。ConfigForge 的目标态支持一个逻辑表读取多个 `sources`，按声明顺序组合为最终逻辑表；同时通过 `override_sources` 对已有行或对象字段进行覆盖，便于版本分支和热修。当前实现状态以 `Design/README.md` 中的状态矩阵为准：已稳定支持 CSV CollectionTable variant source append、CSV CollectionTable `override_sources` 按 primary index 整行覆盖，以及 CSV ObjectTable base split merge / field-path-level override patch；通用 CollectionTable split merge、base source `export_when` 与非 CSV provider 仍未实现。
+大型配置表往往需要按功能、活动、版本拆分。ConfigForge 的目标态支持一个逻辑表读取多个 `sources`，按声明顺序组合为最终逻辑表；同时通过 `override_sources` 对已有行或对象字段进行覆盖，便于版本分支和热修。当前实现状态以 `Design/README.md` 中的状态矩阵为准：已稳定支持 CSV/XLSX CollectionTable variant source append、CSV CollectionTable `override_sources` 按 primary index 整行覆盖，以及 CSV/XLSX ObjectTable base split merge / field-path-level override patch；通用 CollectionTable split merge、base source `export_when` 与远端 provider 仍未实现。
 
 ### 发布包按上下文裁剪数据
 
@@ -65,16 +65,16 @@ ConfigForge 支持 required/default、类型解析、枚举、索引唯一性、
 
 ## 1.5 当前范围
 
-当前目标态设计应覆盖；各项已实现状态以 `Design/README.md` 的状态矩阵为准：
+以下为当前功能范围；具体边界以 [实现状态矩阵](README.md#当前实现状态矩阵) 为准：
 
-- TOML / XML Meta 配置和多文件 import。
-- CSV、XLSX、本地和远程表格的 source provider 模型。
+- TOML Project / Meta 配置与 Project 顶层多文件 imports。
+- 本地 CSV/XLSX source；远端 Sheet provider 为未来扩展。
 - ObjectTable、CollectionTable、字段类型、默认值、必填、索引、外键。
-- 多 source split merge 和 override source 覆盖。
+- CollectionTable variant append、ObjectTable field-path split merge，以及二者的 override。
 - 多态 fragment 的 variant source mode。
 - 导出上下文 tag、记录/字段/fragment 过滤。
 - 常规 runtime data export，以及 POT / asset manifest 等聚合 data export。
-- CLI validate/build/export 等命令的用户级参数。
+- 单 target CLI 构建、dry-run、附加验证报告和 trace；不提供子命令。
 - 结构化诊断、确定性输出、可用于 CI 的报告格式。
 
 ## 1.6 暂不纳入当前范围
@@ -83,4 +83,4 @@ ConfigForge 支持 required/default、类型解析、枚举、索引唯一性、
 - 不把“独立子表式明细布局”作为当前必须支持的 field layout；当前只要求支持复合值在同一张 source 表中的聚合书写或展开书写。
 - 不把 Protobuf 作为当前必须实现的导出格式；未来如支持，需要字段级 `field_number`。
 - 不支持不明确的 `custom` runtime format。扩展格式必须通过明确 exporter ID 和 format ID 注册。
-- 不设计不可信插件沙箱；动态库插件默认视为受信任代码。
+- 动态库插件、通用 CollectionTable split merge 和 base source `export_when` 均未实现；未来插件若引入，应另行定义信任与版本边界。

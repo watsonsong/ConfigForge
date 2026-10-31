@@ -1,8 +1,27 @@
 # 09. 游戏常用内置 Validators 设计
 
+## 文档导航
+
+- [9.1 当前状态](#91-当前状态)
+- [9.2 设计目标](#92-设计目标)
+- [9.3 总体设计原则](#93-总体设计原则)
+- [9.4 当前规则分层](#94-当前规则分层)
+- [9.5 通用配置约定](#95-通用配置约定)
+- [9.6 共享条件模型：`when`](#96-共享条件模型when)
+- [9.7 `regex` validator](#97-regex-validator)
+- [9.8 `string_length` validator](#98-string_length-validator)
+- [9.9 `sum` validator](#99-sum-validator)
+- [9.10 `monotonic` validator](#910-monotonic-validator)
+- [9.11 `required_when` validator](#911-required_when-validator)
+- [9.12 `compare` validator](#912-compare-validator)
+- [9.13 `range` 的增强建议](#913-range-的增强建议)
+- [9.14 诊断与可测试性要求](#914-诊断与可测试性要求)
+- [9.15 测试关注点](#915-测试关注点)
+- [9.16 当前决策与后续边界](#916-当前决策与后续边界)
+
 Related docs：[`05-data-validation.md`](05-data-validation.md)、[`04-meta-model.md`](04-meta-model.md)、[`../Implementation/06-validation-module-detail-design.md`](../Implementation/06-validation-module-detail-design.md)。
 
-本文聚焦 P1-2 阶段扩展的**游戏常用内置 validators**。目标不是替代 `05-data-validation.md` 的通用校验语义，而是在 validator registry 与既有 `range` validator 基础上，为 ConfigForge 提供一组更贴近游戏配置场景的内置规则，并明确它们的配置模型、作用域、目标视图语义、诊断口径和落地状态。
+本文聚焦 当前支持的**游戏常用内置 validators**。目标不是替代 `05-data-validation.md` 的通用校验语义，而是在 validator registry 与既有 `range` validator 基础上，为 ConfigForge 提供一组更贴近游戏配置场景的内置规则，并明确它们的配置模型、作用域、目标视图语义、诊断口径和落地状态。
 
 ## 9.1 当前状态
 
@@ -11,9 +30,9 @@ Related docs：[`05-data-validation.md`](05-data-validation.md)、[`04-meta-mode
 - validator registry、`ValidatorMeta`、field/table validator TOML 承载方式已实现。
 - registry 已注册游戏常用内置 validators：field-scope `range`、`regex`、`string_length`；record-scope `required_when`、`compare`；table-scope `sum`、`monotonic`。
 - required / type / enum / unique / foreign key integrity 仍主要由 validation 主流程或专门模块承担，不是完整的 registry built-in 集合。
-- 因此 validator 能力的当前状态是 **Implemented MVP**：显式 built-in validator 已覆盖 P1-2 高频规则，基础 required/type/enum/unique/FK 仍保留在原有校验路径中。
+- 因此 validator 能力的当前状态是 **Implemented MVP**：显式 built-in validator 已覆盖 常见规则，基础 required/type/enum/unique/FK 仍保留在原有校验路径中。
 
-P1-2 已把最常见、最稳定、最不依赖表达式语言的游戏规则沉淀为内置 validators，覆盖：
+当前已把最常见、最稳定、最不依赖表达式语言的游戏规则沉淀为内置 validators，覆盖：
 
 1. `range` 增强；
 2. `regex`；
@@ -38,7 +57,7 @@ P1-2 已把最常见、最稳定、最不依赖表达式语言的游戏规则沉
 
 ### 9.2.2 非目标
 
-P1-2 不做以下事情：
+当前不做以下事情：
 
 - 不引入通用表达式语言。
 - 不支持任意 SQL/脚本式 group/aggregate/filter。
@@ -57,7 +76,7 @@ P1-2 不做以下事情：
 kind = "range"
 ```
 
-因此 P1-2 文档中的 canonical 配置统一继续使用 `kind`，不改为 `type`。如果后续为了兼容用户习惯考虑给 `type` 增加 alias，应作为**解析兼容层**讨论，而不是改变设计文档主口径。
+因此 本文中的 canonical 配置统一继续使用 `kind`，不改为 `type`。如果后续为了兼容用户习惯考虑给 `type` 增加 alias，应作为**解析兼容层**讨论，而不是改变设计文档主口径。
 
 ### 9.3.2 默认仍运行在当前 target ExportView 上
 
@@ -92,7 +111,7 @@ kind = "range"
 
 ### 9.3.4 优先做“少而硬”的结构化能力
 
-P1-2 不追求一下子覆盖所有业务规则，而是优先提供：
+当前不追求一下子覆盖所有业务规则，而是优先提供：
 
 - 语义稳定；
 - 需求高频；
@@ -100,42 +119,15 @@ P1-2 不追求一下子覆盖所有业务规则，而是优先提供：
 - 不需要脚本解释器；
 - 可在 code review 中看懂。
 
-## 9.4 推荐分阶段落地顺序
+## 9.4 当前规则分层
 
-### P1-2a：低风险 field validators
+| 作用域 | 已注册规则 |
+| --- | --- |
+| Field | `range`、`regex`、`string_length` |
+| Record | `required_when`、`compare` |
+| Table | `sum`、`monotonic` |
 
-1. `regex`
-2. `string_length`
-3. `range` 增强
-
-特点：
-
-- 不需要 group/order；
-- 只作用单字段；
-- 最容易测试和推广；
-- 与现有 registry 结构最一致。
-
-### P1-2b：record validators
-
-4. `required_when`
-5. `compare`
-
-特点：
-
-- 需要 row 内多字段读取；
-- 要明确 support field / hidden field 语义；
-- 但还不涉及表级排序或聚合。
-
-### P1-2c：table validators
-
-6. `sum`
-7. `monotonic`
-
-特点：
-
-- 需要 group_by / order_by；
-- 需要更强的 deterministic 排序与分组定义；
-- 更容易引入“歧义配置”与性能问题，因此放在最后。
+后续新增规则应复用 typed compile、target view 与结构化诊断，不引入通用表达式语言。
 
 ## 9.5 通用配置约定
 
@@ -168,7 +160,7 @@ pattern = "^[a-z0-9_]+$"
 
 ## 9.6 共享条件模型：`when`
 
-`required_when` 不是唯一需要条件表达式的 validator。未来很多 record-level 规则也会复用条件判断，因此建议在 P1-2 同时收敛一个**受限的行内条件模型**，供 `required_when` 和后续 built-in 共享。
+`required_when` 不是唯一需要条件表达式的 validator。未来很多 record-level 规则也会复用条件判断，当前已使用一个**受限的行内条件模型**，供 `required_when` 和后续 built-in 共享。
 
 ### 9.6.1 叶子条件
 
@@ -338,7 +330,7 @@ unit = "unicode_scalar"
 这意味着：
 
 - `string_length` 主要用于**配置层稳定校验**；
-- 如果项目需要严格面向“用户感知字符数”的 UI 规则，可在后续扩展 `grapheme_cluster`，但不作为 P1-2 必备项。
+- 如果项目需要严格面向“用户感知字符数”的 UI 规则，可在后续扩展 `grapheme_cluster`，但不属于当前能力。
 
 ### 9.8.5 支持类型
 
@@ -617,7 +609,7 @@ right = "max_level"
 
 ## 9.13 `range` 的增强建议
 
-`range` 已经存在，因此 P1-2 不需要重新设计其基本语义，但建议顺手明确以下增强方向：
+range 当前支持边界和空值检查；后续扩展须保持以下规则：
 
 1. 保持当前 `min` / `max` / `exclusive_min` / `exclusive_max` / `allow_empty` 设计。
 2. 允许更清晰的默认消息模板，便于 QA 与用户定位。
@@ -631,7 +623,7 @@ right = "max_level"
    - `non_zero`
    - 百分比/概率专用 alias
 
-P1-2 不建议把这些增强拆成新的 validator 名称，避免用户面对多个高度重叠的 numeric validators。
+不建议把这些增强拆成新的 validator 名称，避免用户面对多个高度重叠的 numeric validators。
 
 ## 9.14 诊断与可测试性要求
 
@@ -713,35 +705,9 @@ P1-2 不建议把这些增强拆成新的 validator 名称，避免用户面对�
 - 空值处理；
 - 类型不兼容错误。
 
-## 9.16 需要讨论确认的开放问题
+## 9.16 当前决策与后续边界
 
-建议在进入实现前先确认以下几点：
-
-1. **是否为 `ValidatorMeta.kind` 提供 `type` TOML alias？**
-   - 当前文档建议：canonical 仍用 `kind`，alias 可选。
-
-2. **`string_length` 默认长度单位是否用 `unicode_scalar`？**
-   - 当前文档建议：是；避免引入 grapheme 级复杂度。
-
-3. **`monotonic.strict` 默认值是否为 `true`？**
-   - 当前文档建议：是；更符合成长曲线常见需求。
-
-4. **`sum` 是否只提供通用名 `sum`，不再单独引入 `weight_sum`？**
-   - 当前文档建议：是；必要时可加 alias。
-
-5. **record/table validator 是否允许显式读取 hidden support fields？**
-   - 当前文档建议：允许，但只限显式引用字段，且不改变 export 行为。
-
-6. **`compare` 首版是否只支持 field-vs-field，不支持 field-vs-literal？**
-   - 当前文档建议：是；保持配置简单，先覆盖最常见区间关系。
-
-## 9.17 推荐讨论结论模板
-
-为方便从设计讨论进入实现，建议按以下顺序确认：
-
-1. 先确认 **P1-2a / P1-2b / P1-2c** 的实现顺序；
-2. 再确认共享 `when` 条件模型是否接受；
-3. 再确认 hidden support field 是否允许；
-4. 最后再确认各 validator 的默认值和别名策略。
-
-这样可以避免在实现前把所有边角参数一次性定死。
+- 配置标识使用 `kind`；当前不提供 `type` 或 `weight_sum` alias。
+- `string_length` 默认采用 `unicode_scalar`，`monotonic.strict` 默认为 `true`。
+- record/table validator 可以显式引用 hidden support fields，但不改变导出可见性。
+- `compare` 当前比较 field-vs-field；literal operand、grapheme 长度和跨表聚合均为未来扩展，需独立定义配置和测试契约。

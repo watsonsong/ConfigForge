@@ -140,7 +140,7 @@ ObjectTable runtime payload 语义已并入 data artifact toolkit：ObjectTable 
 - JSON / MessagePack 的 scalar runtime contract 当前仍为 string-compatible；如果未来改为 typed scalar，必须作为 named payload 的全局 runtime data contract change 同时影响 CollectionTable。`bin` 是 schema-aware typed binary encoding，按 Meta type 写 int/float/bool/enum bytes，不改变 JSON / MessagePack 的 named payload contract。
 - ObjectTable 中的 list 字段输出为 array，例如 `"starter_item_ids": ["2001", "2002"]`。
 
-ObjectTable source layout、校验限制和 code artifact 表达分别记录在 Data / Validation / Code Artifact 文档，不再保留单独的 Step 1 过程文档。
+ObjectTable source layout、校验限制和 code artifact 表达分别记录在 Data / Validation / Code Artifact 文档。
 
 ## 8.5 DataResolver 使用原则
 
@@ -207,7 +207,7 @@ pub struct TextExtractionEntry {
 3. 首版遍历可见 top-level field，筛选 Meta primitive type 为 `text` 的字段；不把 `string` 自动纳入 POT。fragment / struct child text 深度抽取保留为后续扩展。
 4. 从 resolved scalar value 读取 raw text 作为 `msgid`；optional empty text 不产出 entry。
 5. 构造 `msgctxt`：默认 `table.field_path`，如果未来 Meta/source/target policy 提供 context，则使用显式 context。
-6. 构造 source reference：当前优先使用 DataResolver 保留的 source path / row；CSV 列坐标尚未保留时不输出列号。`source_reference = "record_key"` 当前不生成 gettext `#:` 行，而是将 primary index record key 写入 translator comment（例如 `record=id=2001`）；`both` 当前只合并 source location，record key 仍作为 translator comment 输出。
+6. 构造 source reference：当前优先使用 DataResolver 保留的 source path / row；cell 来源已保留 CSV/XLSX 物理列；当前 POT reference 只按既有 source location 格式输出，不承诺包含所有 provenance 字段。`source_reference = "record_key"` 当前不生成 gettext `#:` 行，而是将 primary index record key 写入 translator comment（例如 `record=id=2001`）；`both` 当前只合并 source location，record key 仍作为 translator comment 输出。
 7. 合并 translator comments：field `desc`、未来 text option、source comment column/row、自动生成的 `table/field/record` 描述。
 8. 当 `deduplicate = true` 时，以 `(msgctxt, msgid)` 做稳定分组，合并 references/comments；当 `deduplicate = false` 时，按抽取顺序原样渲染 entries。
 9. 渲染 gettext `.pot` 文本 artifact。

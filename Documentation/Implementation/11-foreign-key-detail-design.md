@@ -1,6 +1,6 @@
 # 11. Foreign Key 专项实现详细设计
 
-本文档描述 ConfigForge 外键（Foreign Key / FK）能力的实现方案。产品语义以 `Documentation/Design/04-meta-model.md` 与 `Documentation/Design/05-data-validation.md` 为准；本文档聚焦 Rust 类型、模块边界、Link/Validation/Codegen 接入点、阶段拆分和测试计划。
+本文档描述 ConfigForge 外键（Foreign Key / FK）能力的实现方案。产品语义以 `Documentation/Design/04-meta-model.md` 与 `Documentation/Design/05-data-validation.md` 为准；本文档聚焦 Rust 类型、模块边界、Link/Validation/Codegen 接入点、当前边界和测试策略。
 
 ## 11.1 背景与目标
 
@@ -41,13 +41,13 @@ allow_empty = true
 2. 在 Link 阶段解析 source fields、target table、target index，并复用现有 field/index 类型信息。
 3. 在 Validation 阶段自动执行 referential integrity 校验。
 4. 与 target tags、`export_when`、`row_export` 和 ExportView 语义保持一致。
-5. 为后续 codegen 生成关联查询 helper 预留 IR 和类型结构。
+5. CodeModel 与语言 backend 生成关联查询及 link helper。
 
 ## 11.2 非目标与阶段边界
 
-Phase 1 只实现外键关系的 Meta / Link / Validation 闭环，暂不一次性实现所有关系型能力。
+当前已实现 Meta / Link / Validation 与 generated relation helpers；并非通用关系数据库模型。
 
-Phase 1 支持：
+当前支持：
 
 - 单字段 FK；
 - 复合 FK；
@@ -60,7 +60,7 @@ Phase 1 支持：
 - target table 为 CollectionTable unique / primary index。
 - 标量数组字段作为 FK source，逐元素引用单字段 target key。
 
-Phase 1 不支持：
+当前不支持：
 
 - fragment field 作为 FK source field 或 target index field；
 - struct child path，例如 `reward.item_id`；
@@ -76,7 +76,7 @@ Phase 1 不支持：
 
 ### 11.3.1 字段级单键语法糖
 
-单字段外键是最常见场景，Phase 1 应直接支持字段级语法糖，避免用户为了一个 `item_id -> items.by_id` 关系额外编写 table-level `[[tables.foreign_keys]]`。
+单字段外键是最常见场景，当前支持字段级语法糖，避免用户为了一个 `item_id -> items.by_id` 关系额外编写 table-level `[[tables.foreign_keys]]`。
 
 推荐写法：
 
@@ -243,7 +243,7 @@ pub enum ForeignKeyDeclarationSite<'meta> {
 
 该视图可以只作为 link/validate 内部 helper，不一定进入 public API。核心目标是让后续逻辑处理统一的 `fields / target_table / target_index / allow_empty`，并在诊断中保留声明来源。
 
-`name` 必须借用 raw meta 中已有字符串：table-level FK 借用 `ForeignKeyMeta.name`，field-level 显式 `name` 借用 `FieldForeignKeyMeta.name`，field-level 默认 `name` 借用 `FieldMeta.name`。Phase 1 不为默认 name 构造 owned string，以便 `foreign_key_index: HashMap<&'meta str, usize>` 与现有 table/index lookup 生命周期策略一致。
+`name` 必须借用 raw meta 中已有字符串：table-level FK 借用 `ForeignKeyMeta.name`，field-level 显式 `name` 借用 `FieldForeignKeyMeta.name`，field-level 默认 `name` 借用 `FieldMeta.name`。当前 不为默认 name 构造 owned string，以便 `foreign_key_index: HashMap<&'meta str, usize>` 与现有 table/index lookup 生命周期策略一致。
 
 字段语义：
 
@@ -251,7 +251,7 @@ pub enum ForeignKeyDeclarationSite<'meta> {
 | --- | --- |
 | `name` | table scope 内唯一的关系名，用于诊断、文档和未来 codegen helper 命名。 |
 | `desc` | 关系说明，未来可用于文档 / inspect / 代码注释。 |
-| `export` | 是否进入 runtime-facing relation model；默认 `true`。Phase 1 validation 也按该字段过滤 target relation。 |
+| `export` | 是否进入 runtime-facing relation model；默认 `true`。当前 validation 也按该字段过滤 target relation。 |
 | `export_when` | target tags 条件；不匹配时当前 target 不校验该 FK。 |
 | `fields` | source table 中参与 FK key 的 common field 名称列表。 |
 | `target_table` | 被引用 table 名称。 |
@@ -299,7 +299,7 @@ pub struct LinkedForeignKeyMeta<'meta> {
 }
 ```
 
-但当前 `LinkedMetaModel<'meta>` 内部持有 `Vec<LinkedTableMeta<'meta>>`，直接让 `LinkedForeignKeyMeta` 引用 `LinkedTableMeta` 会形成 self-referential 结构风险。因此 Phase 1 推荐采用 index-based linked 表达：
+但当前 `LinkedMetaModel<'meta>` 内部持有 `Vec<LinkedTableMeta<'meta>>`，直接让 `LinkedForeignKeyMeta` 引用 `LinkedTableMeta` 会形成 self-referential 结构风险。因此 当前采用 index-based linked 表达：
 
 ```rust
 pub struct LinkedForeignKeyMeta<'meta> {
@@ -365,7 +365,7 @@ pub fn foreign_key(&self, name: &str) -> Option<&LinkedForeignKeyMeta<'meta>>;
 3. `fields` 非空。字段级 FK 展开后固定为单字段。
 4. `fields` 内字段名不重复。
 5. source fields 必须存在于当前 table common fields。
-6. source fields 不允许使用 dotted fragment path；Phase 1 不支持 fragment field FK。
+6. source fields 不允许使用 dotted fragment path；当前不支持 fragment field FK。
 7. `target_table` 非空且存在。
 8. source table 可以是 CollectionTable 或 ObjectTable；target table 必须是 CollectionTable，ObjectTable 作为 target 报 unsupported。
 9. `target_index`：
@@ -377,7 +377,7 @@ pub fn foreign_key(&self, name: &str) -> Option<&LinkedForeignKeyMeta<'meta>>;
 13. `export_when` tag 合法。
 14. 字段级 FK 展开后 target index fields 数量必须为 1；若目标是复合 primary/unique index，应提示“字段级 FK 只能引用单字段 index；请改用 table-level `[[tables.foreign_keys]]` 并列出多个 source fields”。
 
-类型兼容规则 Phase 1：
+当前类型兼容规则：
 
 | source / target | 兼容规则 |
 | --- | --- |
@@ -400,27 +400,9 @@ pub fn foreign_key(&self, name: &str) -> Option<&LinkedForeignKeyMeta<'meta>>;
 
 ### 11.7.1 接入位置
 
-当前已在 `src/validation/foreign_key.rs` 中实现 hardcoded FK 校验，并由 `src/validation/entry.rs` 的 full / target-aware validation 入口调用；这种方式与当前 required/type/unique 基础规则保持一致：
+FK 由 validation::foreign_key 的专门逻辑执行，不通过 Registry 编译为 CompiledValidator。Entry 在基础 table report 后调用 full/target FK 校验，并把返回错误桥接为结构化 ValidationIssue，合并到 ValidationReport；当前不要求先把 FK 迁移到 registry 才能输出报告。
 
-```rust
-pub fn validate_normalized_data_set_with_report(...) -> Result<ValidationReport> {
-    ...
-    validate_foreign_keys(meta, &context)?;
-    ...
-}
-```
-
-或在 `validate_normalized_data_set*` 内，在基础 table validation 后、registry validators 前执行。
-
-后续迁移路径：
-
-- 新增 `src/validation/builtins/referential_integrity.rs`；
-- 将 FK 关系编译为 implicit `CompiledValidator`；
-- 统一进入 `CompiledValidationPlan`。
-
-Phase 1 为降低改动范围，可以先 hardcoded，文档和命名上保留“implicit validator”的概念。
-
-Phase 1 的 hardcoded FK 校验暂不进入 `ValidationReport` 聚合：发现第一个 FK 错误时直接返回 `ConfigForgeError::Validation(String)`，与当前 required/type/unique 基础校验保持一致。后续迁移为 implicit `CompiledValidator` 后，再产出结构化 `ValidationIssue` 并进入 `validate_*_with_report` 的聚合结果。
+FK 内部仍可能在首个引用错误处返回；entry 会继续合并 asset / registered validator 报告，再统一执行 error gate。不要把基础规则的报告聚合能力与是否 registry 化混为一谈。
 
 ### 11.7.2 Full validation 与 target validation
 
@@ -473,7 +455,7 @@ let mut target_keys = HashSet<Vec<String>>;
 
 target index 已保证 unique，因此如果目标数据本身重复，会由现有 unique index validation 先报错；FK 校验不需要重复诊断 target duplicate。
 
-Phase 1 不做 primitive typed canonicalization，FK resolution 使用与 unique index 相同的 raw cell key 语义。例如 int 字段中 raw cell `"01"` 与 `"1"` 是两个不同 key，即使两者都能通过 int 类型校验。若未来引入 typed key canonicalization，必须同步升级 unique index、codegen index 与 FK，否则同一 key 在不同模块会出现不一致语义。
+当前不做 primitive typed canonicalization，FK resolution 使用与 unique index 相同的 raw cell key 语义。例如 int 字段中 raw cell `"01"` 与 `"1"` 是两个不同 key，即使两者都能通过 int 类型校验。若未来引入 typed key canonicalization，必须同步升级 unique index、codegen index 与 FK，否则同一 key 在不同模块会出现不一致语义。
 
 ### 11.7.4 诊断信息
 
@@ -519,11 +501,11 @@ row number 优先使用 `RowSourceInfo.source_row_number`，与当前 fragment /
 
 ### 11.7.5 与现有 validation 顺序
 
-推荐顺序：
+当前主路径：
 
 1. normalize defaults；
 2. table-level基础校验：required / type / enum / fragment / unique；
-3. foreign key referential integrity；
+3. foreign key referential integrity 与可选 asset validation；
 4. registry validators。
 
 理由：
@@ -533,40 +515,15 @@ row number 优先使用 `RowSourceInfo.source_row_number`，与当前 fragment /
 - target unique index 冲突应优先报告；
 - 业务 validator 可以依赖外键已经通过的前提。
 
-## 11.8 Codegen 与 IR 预留
+## 11.8 Codegen 与关系 helper
 
-Phase 1 不生成语言 helper，但建议在 CodeModel 中预留结构，便于后续演进。
+CodeModel 已包含 CodeForeignKey，并由语言生成器生成关联查询、linked_field 与 eager/lazy link helper。当前 API、ownership/lifetime 和语言差异以 [关系 helper 专题](09g-codegen-index-and-relation-helpers.md)和 [backend 能力矩阵](09-codegen-module-detail-design.md#941-codegen-backend-capability-matrix)为准，不在 FK 校验文档维护另一套假想 API。
 
-```rust
-pub struct CodeForeignKey {
-    pub name: String,
-    pub desc: Option<String>,
-    pub fields: Vec<CodeField>,
-    pub target_table: String,
-    pub target_index: String,
-    pub allow_empty: bool,
-}
-```
-
-如果 Phase 1 想进一步降低范围，也可以暂不改 CodeModel，只保证 Meta / Validation 闭环。推荐策略：
-
-- Phase 1a：只做 Meta + Validation，不动 codegen；
-- Phase 1b：CodeModel 暴露 `CodeForeignKey`，但语言生成器不使用；其中 `allow_empty` 表示 helper 返回值是否天然 optional；
-- Phase 2：生成关联查询 helper。
-
-未来语言 helper 形态：
-
-| 语言 | 可能生成 API |
-| --- | --- |
-| Rust | `pub fn drop_item<'a>(&self, row: &MonsterRow, data: &'a GameData) -> Option<&'a ItemsRow>` |
-| TypeScript | `dropItem(row: MonstersRow, data: GameData): ItemsRow | undefined` |
-| C++ | `const ItemsRow* GetDropItem(const MonstersRow& row, const GameData& data) const` |
-
-具体 API 需要结合 repository ownership、lifetime 和 GameData 聚合结构另行设计。
+普通 FK、复合 FK、标量 list FK 与 target visibility 共享同一 linked relation；runtime data 保留 key 值，不序列化目标记录副本。
 
 ## 11.9 与 Fragment 的关系
 
-Phase 1 FK 只允许 common fields / ObjectTable top-level fields：
+当前 FK 只允许 common fields / ObjectTable top-level fields：
 
 - source `fields` 不能写 `fragment.field`；
 - target index 不能引用 fragment fields；
@@ -586,43 +543,9 @@ Phase 1 FK 只允许 common fields / ObjectTable top-level fields：
 - fragment target visibility 与 relation visibility；
 - codegen 中 optional fragment relation helper 的返回策略。
 
-## 11.10 实施步骤
+## 11.10 当前接入点
 
-建议拆成小提交：
-
-### Step 1：Meta raw model
-
-- 新增 `ForeignKeyMeta`。
-- 新增 `FieldForeignKeyMeta`。
-- `TableMeta` 增加 `foreign_keys`。
-- `FieldMeta` 增加 `foreign_key`。
-- public re-export 增加 `ForeignKeyMeta` / `FieldForeignKeyMeta`。
-- TOML parse 测试覆盖字段级语法糖、table-level 单字段、复合、默认 `allow_empty`、默认 `target_index`。
-
-### Step 2：Meta validation
-
-- 新增 `validate_foreign_keys()`。
-- 新增或复用 diagnostic code。
-- 测试：重复 FK name、字段级派生 name 与 table-level name 冲突、空 fields、未知 source field、unknown target table/index、target index 非 unique、target table 无 primary index 但省略 `target_index`、字段数量不一致、字段级 FK 指向复合 index、类型不兼容、fragment path 被拒绝、ObjectTable 作为 source 通过、ObjectTable 作为 target 被拒绝。
-
-### Step 3：Link
-
-- 新增 `LinkedForeignKeyMeta`。
-- `LinkedTableMeta` 增加 `foreign_keys` 与 lookup。
-- `link.rs` 解析 source fields / target names / target index name。
-- 测试 linked lookup。
-
-### Step 4：Validation
-
-- 在 full dataset validation 中执行 FK。
-- 在 target validation 中基于 `ExportValidationView` 执行 FK。
-- 测试：有效引用、缺引用、allow_empty、部分空复合 key、ObjectTable source 有效引用/缺引用/allow_empty、target row 被 `row_export` 排除、FK `export_when` 跳过、FK 可见但 target table/index 不可见时报错。
-
-### Step 5：文档与 fixture
-
-- 更新 `Documentation/Design/04-meta-model.md` 当前状态。
-- 更新 `Documentation/Design/05-data-validation.md` FK validation 语义。
-- 在 standard project fixture 中增加一个小型 FK 示例。
+Meta raw/link/validate、validation::foreign_key、CodeModel 与 backend helpers 已接通。新增关系能力需同时检查结构约束、target view、raw key policy、helper 和 schema docs，避免只修改 validation 一端。
 
 ## 11.11 测试计划
 
@@ -678,32 +601,10 @@ Phase 1 FK 只允许 common fields / ObjectTable top-level fields：
 2. 修复数据后 JSON / MessagePack export 成功。
 3. target tags 下 FK 与 row_export 行为一致。
 
-## 11.12 风险与开放问题
+## 11.12 当前边界与扩展
 
-1. **Full validation 是否受 `export` / `export_when` 影响**  
-   建议 full validation 检查全部 FK；target validation 才按 target 过滤。若 CLI 的默认 validate 已经绑定 target，则以 target 语义为准。
-
-2. **ObjectTable 外键语义**  
-   ObjectTable 已可作为 FK source：其 `key,value` source 会归一化为 singleton logical row，外键 source fields 与 CollectionTable rows 使用同一套 raw string key 语义。ObjectTable 仍不能作为 FK target，因为 target 需要 unique / primary index，而 ObjectTable 当前不支持 index / primary index；若未来需要 singleton target 关系，需要单独设计“引用对象字段”或 ObjectTable virtual index 语义。
-
-3. **Codegen helper 的 ownership / lifetime**  
-   不在 Phase 1 解决，避免阻塞 validation 能力落地。
-
-4. **诊断结构化程度**  
-   当前很多校验仍桥接到 `ConfigForgeError::Validation(String)`。Phase 1 可保持一致；后续可把 FK 错误迁移到结构化 `ValidationIssueLocation`。
-
-5. **target visibility 下字段不可见时的行为**  
-   推荐严格报错：一个当前 target 可见的 FK，不应引用当前 target 不可见的 target table、target index、source field 或 target index field。否则 codegen / runtime relation helper 会缺少必要目标或字段。
-
-## 11.13 完成标准
-
-外键 Phase 1 完成时应满足：
-
-- `ForeignKeyMeta` 可从 TOML 加载。
-- `FieldForeignKeyMeta` 字段级语法糖可从 TOML 加载，并能规范化为单字段 FK。
-- Meta validation 能稳定报告所有结构错误。
-- Link 后可从 `LinkedTableMeta` 查询外键关系。
-- Full validation 能发现缺引用、空 key、partial composite key。
-- Target validation 与 ExportView / row_export / export_when 一致。
-- 不支持 fragment/nested field FK 时有明确错误。
-- `cargo fmt`、`cargo test`、`cargo clippy --all-targets --all-features` 通过。
+- Full validation 检查完整 FK；target validation 使用 ExportView。可见 FK 引用不可见 table/index/field 时严格报错。
+- ObjectTable 只作 FK source；singleton target 需要另行设计索引/引用语义。
+- Fragment/nested path FK 尚未支持；未来需要同步定义 presence、visibility、key 与 optional relation helper。
+- FK 错误已走结构化 CF_DATA_* producer 和来源 enrichment；更完整的关联位置仍可逐步补齐。
+- typed key canonicalization 若引入，必须同步升级 unique/FK/codegen index，不能局部改变 raw key 语义。

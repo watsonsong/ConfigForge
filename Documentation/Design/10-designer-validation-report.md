@@ -21,7 +21,7 @@ Related docs：[`05-data-validation.md`](05-data-validation.md)、[`06-export-cl
 4. **不知道是否阻塞上线**：warning 与 error 的业务含义需要在报告顶部明确，并展示是否阻塞当前 target 构建。
 5. **QA 需要留档与追踪**：本次构建所有 warning/error 需要可下载、可上传平台、可贴 MR comment、可导入表格工具。
 
-P1-1 的目标是把现有结构化 diagnostics 转换为可读、可筛选、可归档的多格式报告。
+报告的目标是把现有结构化 diagnostics 转换为可读、可筛选、可归档的多格式报告。
 
 ## 10.2 目标与非目标
 
@@ -53,7 +53,7 @@ format = "html"
 
 ### 10.2.2 非目标
 
-- 不在 P1-1 引入在线协作平台、Web 服务或数据库存储。
+- 当前不引入在线协作平台、Web 服务或数据库存储。
 - 不实现表格回写修改；CSV 输出只用于外部表格工具导入/过滤。
 - 不要求所有现有 diagnostics 一次性补齐 span/column/current value/hint；报告模型需要允许字段缺失并明确展示“未提供”。
 - 不改变 validation 失败阻塞 build 的语义。报告导出只是展示和归档；error 是否阻塞仍由 validation result 决定。
@@ -124,8 +124,8 @@ file_name = "client-validation.html"
 Build 语义：
 
 - `validation_report` 不应绕过 validation 阶段；它消费 validation 阶段产生的结构化 report。
-- 如果同一 target 有 runtime data/codegen export，且 validation 出现 error，则 runtime/codegen 仍阻塞；但 `validation_report` 应尽量作为失败产物写出，便于用户定位问题。
-- 如果 build 还没进入 Data validation（例如 Project/Meta parse 失败），后续可以扩展为 “diagnostic report exporter” 覆盖 Meta/Data/Build diagnostics；P1-1 聚焦 Validation Report，Meta parse 失败可先保持 CLI 输出。
+- 如果同一 target 有多个 export task，且 validation 出现 error，则 runtime 和其他 data-backed generator 阻塞；MetaOnly codegen/docs 可能已经生成，不回滚；`validation_report` 应尽量作为失败产物写出，便于用户定位问题。
+- 如果 build 还没进入 Data validation（例如 Project/Meta parse 失败），后续可以扩展为 “diagnostic report exporter” 覆盖 Meta/Data/Build diagnostics；当前报告聚焦 Validation Report，Meta parse 失败可先保持 CLI 输出。
 
 ## 10.4 报告数据模型
 
@@ -162,7 +162,7 @@ DesignerValidationReport
 | `blocking` | 是否阻塞当前 validate/build。存在 error 时为 true。 |
 | `tables_with_issues` | 涉及表数量。 |
 | `owners_with_issues` | 涉及 owner 数量；无法解析 owner 时归入 `<unassigned>`。 |
-| `filtered_context_count` | 与 export_when / row_export 过滤相关的 issue 数量；P1-1 可先只记录 issue 自身 target。 |
+| `filtered_context_count` | 与 export_when / row_export 过滤相关的 issue 数量；当前仅基于 issue 上已有的过滤上下文统计，不是被过滤 row 总数。 |
 
 ### 10.4.2 Issue 字段
 
@@ -174,10 +174,10 @@ DesignerValidationReport
 | `severity` | `DiagnosticSeverity` | `error` / `warning`。 |
 | `blocking` | severity 推导 | error 为 true，warning 为 false。 |
 | `code` | Diagnostic code | 例如 `validator.sum_mismatch`。 |
-| `validator` / `source` | `ValidationIssue.validator` / `Diagnostic.source` | validator kind/name 或领域 source。 |
+| `validator` | `ValidationIssue.validator` | validator kind/name 或领域 source；JSON issue 没有独立 source 字段。 |
 | `message` | Diagnostic message | 面向 CLI 的原始消息。 |
-| `friendly_title` | 报告层生成 | 简短人类标题，例如“掉落池权重总和不等于 100”。P1-1 可从 code 映射或 fallback message。 |
-| `explanation` | code catalog | 错误原因说明。P1-1 可先对内置 validators 建立 catalog。 |
+| `friendly_title` | 报告层生成 | 简短人类标题，例如“掉落池权重总和不等于 100”。由 code 映射或 fallback message。 |
+| `explanation` | code catalog | 错误原因说明。使用现有 code catalog。 |
 | `hint` | Diagnostic hint + code catalog | 修复建议；现有 hint 缺失时由 code catalog 兜底。 |
 | `table` | location | 逻辑表名。 |
 | `field` | location | 字段或 field path。 |
@@ -187,15 +187,16 @@ DesignerValidationReport
 | `source_sheet` | location / cell source | XLSX 工作表名称；CSV 缺省省略。 |
 | `source_column` | source trace | 可选。CSV/XLSX-backed data validation 高价值错误已可从 cell source trace 补齐；其他 producer 可留空。 |
 | `current_value` | producer structured context | 可选。required/type/duplicate/FK/artifact/generator 等已迁移路径由 producer 显式填充；尚未迁移 producer 可留空。 |
+| `schema_metadata` | linked Meta enrichment | builtin 类型和字段选项等 schema 提示。 |
 | `expected` | producer structured context / code catalog | 可选。期望规则，例如 `int`、`target table/index key`、`output root 内唯一路径`。 |
 | `target` | Diagnostic target | 当前 target tags 字符串。 |
-| `export_visibility` | ExportView context | `visible` / `table_filtered` / `row_filtered` / `field_filtered` / `not_applicable`。P1-1 可先输出 `visible` / `not_applicable`，后续补细。 |
-| `owner` | Meta annotation / mapping | 表或字段 owner。缺失为 `<unassigned>`。 |
-| `domain` | Meta annotation / mapping | 玩法域，例如 combat/economy/ui。缺失为 `<uncategorized>`。 |
+| `export_visibility` | ExportView context | `visible` / `table_filtered` / `row_filtered` / `field_filtered` / `not_applicable`。当前输出 visible / not_applicable，其他值为后续扩展。 |
+| `owner` | producer diagnostic | 当前由 producer 提供，缺失为 `<unassigned>`；Meta/Project 映射为 Planned。 |
+| `domain` | producer diagnostic | 例如 combat/economy/ui，缺失为 `<uncategorized>`；Meta/Project 映射为 Planned。 |
 
 ### 10.4.3 Owner / Domain 来源
 
-P1-1 可先不修改 Meta schema，采用以下优先级：
+当前 owner/domain 来自 producer 并提供 fallback；以下 Meta/Project 映射仅为 Planned，不是当前配置：
 
 1. 未来显式字段：`tables.owner`、`tables.domain`、`tables.fields.owner`、`tables.fields.domain`。
 2. 现有 `desc` 中不解析 owner，只用于展示。
@@ -210,7 +211,7 @@ items = "economy-design"
 
 4. 未配置时归入 `<unassigned>` / `<uncategorized>`。
 
-建议实现顺序：先在报告层支持 owner/domain 字段和 fallback；Meta schema 扩展作为后续小步实现。
+报告层 owner/domain 字段和 fallback 已存在；Meta schema / Project 映射为后续扩展。
 
 ## 10.5 分组与阅读体验
 
@@ -268,9 +269,9 @@ Generated at: 2026-06-07T12:34:56Z
 
 报告需要解释 target-aware validation 中“为什么这条数据参与或不参与”。
 
-P1-1 的最小要求：
+当前要求：
 
-- 每条 issue 输出 `target_tags`。
+- 报告 metadata 输出 target_tags，issue 的 target 字段保留 producer 上下文。
 - 每条 issue 输出其 location 是否来自当前 ExportView 的 visible table/row/field。
 - 对由 target visibility 造成的配置错误（例如 `required_when` 目标字段在当前 target hidden）必须在 message/hint 中明确建议用户对齐 `export_when`。
 
@@ -296,7 +297,7 @@ P1-1 的最小要求：
 - issue 详情包含 source、row、field、current value、expected、hint、target tags。
 - 不依赖外网 CDN。
 
-P1-1 可以先生成静态 HTML，不做复杂 JS；如需要搜索/过滤，可使用纯 HTML details/summary 或极少量内联 JS。
+当前生成静态 HTML，不做复杂 JS；如需要搜索/过滤，可使用纯 HTML details/summary 或极少量内联 JS。
 
 ### 10.7.2 Markdown
 
@@ -383,7 +384,7 @@ id,severity,blocking,code,friendly_title,message,hint,table,field,row_index,sour
 - 所有字段按 RFC4180 转义。
 - `current_value`、`expected` 中的换行应转义为单行展示文本，避免破坏表格。
 - source path 使用相对 project root 的路径，便于策划定位。
-- 如果未来需要多文件 CSV，可按 `issues.csv`、`summary_by_table.csv`、`summary_by_owner.csv` 拆分；P1-1 先实现单文件即可。
+- 如果未来需要多文件 CSV，可按 `issues.csv`、`summary_by_table.csv`、`summary_by_owner.csv` 拆分；当前输出单文件。
 
 ## 10.8 Code Catalog 与修复建议
 
@@ -400,7 +401,7 @@ Catalog 条目：
 | `blocking_by_default` | 是否默认阻塞；通常 error=true。 |
 | `docs_url` | 可选，指向相关设计或用户手册章节。 |
 
-P1-1 优先覆盖：
+当前 code catalog 覆盖：
 
 - required/type/enum/unique/FK 基础规则；
 - `field.range_violation`；
@@ -436,46 +437,11 @@ ValidationReport / DiagnosticReport
 4. **owner / domain**：producer 字段优先；当前缺失时 fallback 到 `<unassigned>` / `<uncategorized>`。
 5. **未迁移 producer**：字段保持空值/null，报告仍保留稳定 schema。
 
-## 10.10 实现分期建议
+## 10.10 实现边界
 
-### Phase A：最小可用报告（已实现 MVP）
+CLI 附加报告与 `validation_report` export task 均已实现；同一 normalized model 渲染 HTML / Markdown / JSON / CSV。validation error 时尽量写出报告后返回失败；配置、source 或 resolver 等前置失败不保证形成 Designer Validation Report。
 
-- 新增 report model 和 renderer trait。
-- 从 `ValidationReport` 生成 `DesignerValidationReport`。
-- 支持 `config-forge --project ... --target ... --report html|markdown|json|csv --report-output ...`。
-- HTML/Markdown/CSV/JSON 都输出 summary + issue list。
-- 补 source path / row number / source column / current value / expected 的 structured enrichment 通道。
-- 建立最小 code catalog，覆盖现有 validators。
-
-验收：
-
-- 有 error 时仍写报告，CLI 退出失败。
-- 只有 warning 时报告显示 non-blocking，CLI 成功。
-- target validation 下报告包含 target tags。
-- 输出顺序稳定。
-
-### Phase B：Build export task（已实现 MVP）
-
-- 新增 `type = "validation_report"` export task。
-- 让 build 在 validation 失败时也尽量输出 validation report artifact。
-- 支持 `format`、`file_name`、`title` 等配置；`include_warnings` / `include_errors` / `group_by` 暂未实现，当前始终输出所有 issue 并使用固定分组。
-- 标准工程增加 HTML report target 或附加 export task。
-
-验收：
-
-- `config-forge build --target client` 可生成 validation report。
-- runtime/codegen 因 validation error 阻塞时，report artifact 仍可用于定位。
-
-### Phase C：Owner/domain 与剩余 producer enrichment（Partial）
-
-- 支持 owner/domain 配置或映射。
-- 继续迁移 asset、builtin validators、code artifact 等尚未结构化的 producer，补齐 current/expected/hint。
-- HTML 增加 owner/domain/code 多视角交互式聚合。
-
-验收：
-
-- QA 可按 owner/domain 分派问题。
-- CSV 可回填到表格工具。
+Owner/domain 的项目映射、剩余 producer enrichment 和可配置分组仍为后续扩展。完整边界见 [10.12 当前状态](#1012-当前状态)。
 
 ## 10.11 测试计划
 

@@ -30,9 +30,10 @@ Use this file as the short entry index. For any non-trivial change, follow the l
    - [`Documentation/Design/08-asset-validation-and-manifest.md`](Documentation/Design/08-asset-validation-and-manifest.md) — Asset 引用校验、asset kind、target-aware 资源策略、导出补齐和 Asset Manifest。
    - [`Documentation/Design/09-builtin-validators.md`](Documentation/Design/09-builtin-validators.md) — 游戏常用内置 validators 设计，包括 regex、string_length、sum、monotonic、required_when、compare 与 range 增强方向。
    - [`Documentation/Design/10-designer-validation-report.md`](Documentation/Design/10-designer-validation-report.md) — 面向策划 / QA / CI 平台的 Designer Validation Report 设计与当前实现边界，包括 CLI/build 报告导出入口、HTML/Markdown/JSON/CSV 输出和 issue enrichment。
-   - [`Documentation/Design/11-schema-doc-generator.md`](Documentation/Design/11-schema-doc-generator.md) — 面向策划 / QA / 服务端 / 客户端协作的 Schema / Table 文档生成器提案，包括 `schema_doc` export task、Markdown / HTML 文档、target-aware 可见性、index/FK/asset/POT 摘要。
+   - [`Documentation/Design/11-schema-doc-generator.md`](Documentation/Design/11-schema-doc-generator.md) — 面向策划 / QA / 服务端 / 客户端协作的 Schema / Table 文档生成器设计，包括 `schema_doc` export task、Markdown / HTML 文档、target-aware 可见性、index/FK/asset/POT 摘要。
 5. For implementation changes, read [`Documentation/Implementation/01-module-outline.md`](Documentation/Implementation/01-module-outline.md) first, then the module document that matches the source area being changed.
-6. For engineering practice, use [`Documentation/Tech/`](Documentation/Tech/):
+6. For documentation edits, use [`Documentation/Tech/documentation-maintenance.md`](Documentation/Tech/documentation-maintenance.md) for link checks and Design HTML generation.
+7. For engineering practice, use [`Documentation/Tech/`](Documentation/Tech/):
    - [`Documentation/Tech/development-environment.md`](Documentation/Tech/development-environment.md) — required Rust core toolchain, optional cross-language harness tools, runtime adapter dependencies, and local/full-CI environment guidance.
    - [`Documentation/Tech/test-ci-matrix.md`](Documentation/Tech/test-ci-matrix.md) — local / quick / full / nightly profile policy, generated-code runtime harness matrix, runtime adapter compliance matrix, and skip / fail-fast rules.
    - [`Documentation/Tech/ci-troubleshooting.md`](Documentation/Tech/ci-troubleshooting.md) — CI 排错、工具版本差异、跨平台测试与已验证失败模式的开发注意事项。
@@ -40,7 +41,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
    - [`Documentation/Tech/unit-test-coverage.md`](Documentation/Tech/unit-test-coverage.md) — coverage tooling and evaluation workflow.
    - [`Documentation/Tech/cpp-runtime-dependencies.md`](Documentation/Tech/cpp-runtime-dependencies.md) — C++ runtime adapter dependency and CMake policy.
    - [`Documentation/Tech/platform-filesystem-semantics.md`](Documentation/Tech/platform-filesystem-semantics.md) — platform filesystem semantics, case sensitivity, symlink / junction handling, and artifact path conflict key strategy.
-7. Use [`Documentation/DevLogs/`](Documentation/DevLogs/) only as historical evidence. Do not treat DevLogs as current canonical design when they conflict with `Design/` or `Implementation/`.
+8. Use [`Documentation/DevLogs/`](Documentation/DevLogs/) only as historical evidence. Do not treat DevLogs as current canonical design when they conflict with `Design/` or `Implementation/`.
 
 ### Documentation Selection Guide
 
@@ -70,6 +71,7 @@ Use this file as the short entry index. For any non-trivial change, follow the l
 - `src/meta/` — Meta schema loading, parsing, linking, validation, and tests.
 - `src/data/` — CSV/XLSX data source loading, data load planning, normalization, and resolved row models.
 - `src/code_artifact/` — current code artifact toolkit: language-neutral CodeModel IR, CodeWriter, naming / formatting / keyword conflict, and code artifact options helpers; concrete language generators live under `src/generator/<type_id>/`.
+- `src/generator/` — unified artifact generator registry and concrete built-in generators.
 - `src/validation/` — schema, target-aware data validation, diagnostics, and validator registry.
 - `src/project/` — ConfigForge project TOML schema, import merging, path normalization, and Meta extraction.
 - `src/build/` — project build orchestration, target normalization, generator requirements planning, branch pipeline execution, and artifact generation scheduling through `GeneratorRegistry`.

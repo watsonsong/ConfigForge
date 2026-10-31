@@ -1,5 +1,15 @@
 # 06. 导出与 CLI 设计
 
+## 文档导航
+
+- [6.1 Export Target](#61-export-target)
+- [6.2 Data Export Format](#62-data-export-format)
+- [6.3 非运行时数据导出格式](#63-非运行时数据导出格式)
+- [6.4 Code Generation Comments](#64-code-generation-comments)
+- [6.5 Artifact Model](#65-artifact-model)
+- [6.6 CLI 总体形式](#66-cli-总体形式)
+- [6.7 退出码](#67-退出码)
+
 ## 6.1 Export Target
 
 一个 target 描述一次逻辑导出。
@@ -157,7 +167,7 @@ Unreal C++ 不作为 `[targets.exports.cpp]` 的一个开关，而是独立 `typ
 
 ## 6.2 Data Export Format
 
-当前第一阶段支持以下 runtime data export type：
+当前支持以下 runtime data export type：
 
 | Type | 说明 |
 | --- | --- |
@@ -650,7 +660,7 @@ config-forge --project ConfigForge.toml --target client \
 - `--report` 负责启用附加验证报告并显式选择格式；`--report-output` 指定文件路径，不根据扩展名推断格式，不覆盖工程 export task 的 `output`。
 - `--report-output` 和 `--report-title` 依赖 `--report`；`--report` 必须同时指定 `--report-output`。无效组合支持现有 human / JSON 失败诊断。
 - 旧 `--output` 拼写已删除，不保留 alias；脚本应迁移到 `--report-output`。
-- `--io-concurrency` / `--network-concurrency` 已从 CLI 删除，旧调用明确报未知参数。本地 CSV 读取和 CPU 任务使用 `--jobs` 控制的同一局部 worker pool。
+- `--io-concurrency` / `--network-concurrency` 已从 CLI 删除，旧调用明确报未知参数。本地 CSV/XLSX 读取和 CPU 任务使用 `--jobs` 控制的同一局部 worker pool。
 - `--serial` 保留为单 worker 入口并覆盖 `--jobs`；`--report-title`、`--trace-tasks`、`--diagnostic-format`、`--dry-run` 和 `--write-mode` 保留现有职责。
 - 公开 Rust `ExecutionOptions` API 与 `BuildTrace` 的保留资源字段继续兼容；CLI 不提供这些尚无生产调度消费者的数值入口。详见 [资源控制设计](../Tech/task-system-design.md#2-cli-资源控制)。
 
@@ -660,10 +670,8 @@ config-forge --project ConfigForge.toml --target client \
 
 | Exit Code | 含义 |
 | --- | --- |
-| `0` | 成功，无 error。 |
-| `1` | 构建、校验或导出失败。 |
-| `2` | CLI 参数错误。 |
-| `3` | Project/Meta 配置解析失败。 |
-| `4` | Source 加载失败。 |
+| `0` | 构建成功；warning 不导致失败。 |
+| `1` | 构建、配置加载、Meta、source、validation、artifact 或报告选项组合校验失败。 |
+| `2` | clap 参数解析失败，例如缺少必需参数、未知参数或枚举值非法。 |
 
-如果存在多个错误，退出码取最主要失败类别，但诊断中应保留全部错误。
+`--help` 正常显示帮助并退出 `0`。报告参数的组合约束在解析后检查，因此组合无效返回 `1`。具体错误类型通过诊断 code 和 `--diagnostic-format json` 区分，不分配额外的配置/source 专用退出码。

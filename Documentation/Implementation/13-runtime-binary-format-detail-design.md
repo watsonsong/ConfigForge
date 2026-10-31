@@ -455,7 +455,7 @@ Codegen / runtime helper 测试：
 - Binary exporter 已注册为 runtime data export type，可与 JSON / MessagePack 并存。
 - CodeModel 已传播 optional 字段语义，Rust / TypeScript / C++ 分别生成 `Option<T>`、optional property、`std::optional<T>`。
 - TypeScript `int` contract 固定为 `number`，`bin` exporter 会拒绝超出 JavaScript safe integer 范围的值。
-- Rust runtime reader contract 使用共享 core crate：`runtime/rust/reader_core` 定义 `RuntimeDataReader` / `RuntimeDataLoader`，generated Rust 通过 `config_forge_runtime_reader_core` 复用同一套 trait。
+- Rust runtime reader contract 支持默认 inline 与 opt-in external；external 通过 runtime/rust/reader_core 复用共享 RuntimeDataReader / RuntimeDataLoader。
 - Rust / TypeScript / C++ binary reader 均支持默认 decode limits 与业务覆盖；C# / Java binary template 覆盖 dependency-free baseline。
 - Rust、TypeScript、C++、C#、Java compliance runner 已覆盖 `.bin` logical success cases；standard_project harness 覆盖各语言代表性 `.bin` runtime helper 端到端加载。
 

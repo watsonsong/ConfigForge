@@ -1,6 +1,6 @@
 # Glossary
 
-本文档记录 ConfigForge 当前设计中的核心术语、中英文命名和推荐代码符号。术语以 `Documentation/Design/` 下的收敛版设计为准。
+本文档记录 ConfigForge 当前设计中的核心术语、中英文命名和推荐代码符号。术语以 [当前 Design](Design/README.md) 为准。代码符号用于对应现有实现或说明概念，不意味着每个名词都有同名 Rust 类型；未来能力明确标记 Planned，不作为可用配置。
 
 ## 命名原则
 
@@ -18,9 +18,9 @@
 - 使用 `sources` 表示基础 source，使用 `override_sources` 表示覆盖 source；覆盖顺序由列表顺序决定，不再使用 `priority`。
 - 使用 `desc` 表示进入 MetaModel 的结构化描述，可用于 inspect、代码注释和辅助文档。
 - 使用 `text` 表示国际化文本，使用 `string` 表示普通非本地化字符串。
-- `text` 的 POT source reference 默认使用 source 表名和行列号；额外映射列/行可提供 translator comment。
+- `text` 的 POT source reference 默认使用 source 表名和行列号；当前 translator comment 来自 desc/record 元信息；额外 source comment 映射为未来扩展。
 - 使用 `asset` 表示资源引用。
-- 常见数学/游戏值优先使用 builtin value type，例如 `color_rgba`、`vector3`、`rotation`、`datetime`。
+- 常见数学/游戏值优先使用 builtin value type，当前为 `color`、`vector3` 等；rotation/datetime 为 Planned。
 - 颜色通道策略只允许明确值，例如 `byte` 或 `normalized`；不使用 `auto`。
 - 目标语言或引擎类型名属于 target type mapping，不写入逻辑 Meta。
 - 诊断输出必须使用稳定 diagnostic code，并保持确定性排序。
@@ -29,11 +29,11 @@
 
 | 中文名词 | Recommended English | Recommended Code Symbol | 含义 / 说明 |
 | --- | --- | --- | --- |
-| 工程 | Project | `Project`, `ProjectConfig` | 一个 ConfigForge 工程，包含 Meta、Source、Target、Plugin 等配置。 |
+| 工程 | Project | `Project`, `ProjectConfig` | 一个 ConfigForge 工程，包含 Meta、Source、Target；Plugin 为 Planned。 |
 | 工程配置 | Project Config | `ProjectConfig` | ConfigForge 工程入口配置，通常是 `ConfigForge.toml`。 |
 | 版权信息 | Copyright | `copyright` | Project-level 文本元信息，可用于生成代码、schema、manifest 等文件头。 |
 | Meta / 元定义 | Meta | `Meta` | 数据结构定义，包含 table、field、type、index、foreign key、validator 等。 |
-| Meta 文件 | Meta File | `MetaFile` | 物理 Meta 文件，格式可以是 TOML 或 XML。 |
+| Meta 文件 | Meta File | `MetaFile` | 当前为 TOML 物理 Meta 文件；XML 未实现。 |
 | Meta 文档 | Meta Document | `MetaDocument` | 一个解析前的 Meta 文档单元。 |
 | Meta 模型 | Meta Model | `MetaModel` | 多个 Meta 片段 parse、merge、link 后的 canonical 内存模型。 |
 | 配置导入 | Config Import | `ProjectConfig.imports` | 一个 Project Config 片段引用其他工程配置片段；用于统一组合 Meta 定义和 target 定义。 |
@@ -44,15 +44,11 @@
 | 集合表 | Collection Table | `CollectionTable`, `TableKind::Collection` | 导出多条记录；常用于 item、level、quest 等配置。 |
 | 字段 | Field | `Field`, `FieldMeta` | Meta 中的基础值定义单元。 |
 | 字段名 | Field Name | `FieldName`, `name` | 字段稳定标识。 |
-| 字段路径 | Field Path | `FieldPath`, `field_path` | 嵌套字段路径，例如 `reward.item_id` 或 `rewards[0].count`。 |
-| 字段类型 | Field Type | `FieldType` | 字段逻辑值类型，例如 `int`、`text`、`vector3`、`struct`、`array`。 |
+| 字段路径 | Field Path | `FieldPath`, `field_path` | 嵌套字段路径，例如 `reward.item_id` 或标量列表 `reward.item_ids[0]`。 |
+| 字段类型 | Field Type | `FieldType` | 字段逻辑值类型，例如 `int`、`text`、`vector3`、named struct、`int[]` / `list<int>`。 |
 | 字段默认值 | Default Value | `default` | source 未提供值时使用的默认值。 |
 | 必填 | Required | `required` | 当前验证视图中必须有值；无值且无 default 时报错。 |
 | 导出字段 | Runtime Field | `RuntimeField` | 会进入常规 runtime data 的字段。 |
-| 工具字段 | Tool-Only Field | `tool_only`, `ToolOnlyField` | 仅用于工具流程，默认不进入 runtime data。 |
-| 过滤字段 | Filter Field | `filter_field`, `FilterField` | 允许被 export filter 引用的字段。 |
-| 仅校验字段 | Validator-Only Field | `validator_only`, `ValidatorOnlyField` | 仅用于 validator，默认不进入 runtime data。 |
-| 聚合数据导出策略 | Aggregate Data Export Policy | `data_exports` | 字段是否可被 POT、asset manifest 等聚合 data exporter 作为辅助字段读取。 |
 
 ## 字段类型术语
 
@@ -66,8 +62,7 @@
 | 国际化文本 | Text | `FieldType::Text`, `text` | 参与 i18n / POT 流程的文本。 |
 | 资源引用 | Asset Reference | `FieldType::Asset`, `AssetRef`, `asset` | 资源路径或资源 ID，可被 asset manifest 使用。 |
 | 内置值类型 | Builtin Value Type | `BuiltinValueType` | 常用游戏值类型，不需要项目自定义 struct。 |
-| RGB 颜色 | Color RGB | `ColorRgb`, `color_rgb` | 三通道逻辑颜色。 |
-| RGBA 颜色 | Color RGBA | `ColorRgba`, `color_rgba` | 四通道逻辑颜色。 |
+| 颜色 | Color | `PrimitiveFieldType::Color`, `color` | 逻辑 RGBA；RGB/RGBA 是 color_format 输入方式，不是 color_rgb/color_rgba 类型名。 |
 | 颜色通道策略 | Color Channel Policy | `ColorChannelPolicy`, `color_channel` | 颜色通道解释方式，例如 `byte` 或 `normalized`。 |
 | 颜色空间 | Color Space | `ColorSpace`, `color_space` | 颜色空间元信息，例如 `srgb` 或 `linear`。 |
 | 二维向量 | Vector2 | `Vector2`, `vector2` | 二维浮点向量。 |
@@ -75,26 +70,34 @@
 | 四维向量 | Vector4 | `Vector4`, `vector4` | 四维浮点向量。 |
 | 整数二维向量 | Vector2Int | `Vector2Int`, `vector2_int` | 二维整数向量。 |
 | 整数三维向量 | Vector3Int | `Vector3Int`, `vector3_int` | 三维整数向量。 |
-| 欧拉旋转 | Rotation | `Rotation`, `rotation` | Euler 旋转值。 |
-| 旋转单位 | Rotation Unit | `RotationUnit`, `rotation_unit` | `degrees` 或 `radians`。 |
-| 旋转顺序 | Rotation Order | `RotationOrder`, `rotation_order` | Euler 旋转顺序。 |
-| 日期时间 | DateTime | `DateTimeValue`, `datetime` | 日期时间值，可带 pattern 和 timezone。 |
-| 日期 | Date | `DateValue`, `date` | 只有日期。 |
-| 时间 | Time | `TimeValue`, `time` | 只有时间。 |
-| 持续时间 | Duration | `DurationValue`, `duration` | 时间跨度。 |
-| 整数区间 | Integer Range | `IntRange`, `int_range` | 整数范围。 |
-| 浮点区间 | Float Range | `FloatRange`, `float_range` | 浮点范围。 |
-| 矩形 | Rect | `Rect`, `rect` | 二维矩形。 |
-| 三维包围盒 | Bounds3 | `Bounds3`, `bounds3` | 三维包围盒。 |
+| 整数四维向量 | Vector4Int | `Vector4Int`, `vector4_int` | 四维整数向量。 |
 | 枚举 | Enum | `EnumDef`, `FieldType::Enum` | Meta 中声明的有限值集合。 |
 | 枚举值 | Enum Value | `EnumValue`, `EnumVariant` | 枚举中的单个可用值，可带 `desc`。 |
 | 命名结构体 | Named Struct | `NamedStruct`, `StructDef` | 可复用结构体定义。 |
-| 内联结构体 | Inline Struct | `InlineStruct` | 字段内部直接定义的一次性结构。 |
 | 结构体字段 | Struct Field | `StructField`, `FieldMeta` | struct 内部字段。 |
 | 列表 | List | `LinkedField::List`, `read_list_len`, `readListLength`, `ReadListLength` | Schema / Meta / IR / generated helper 层的重复值集合 canonical 术语。`T[]` 是输入语法别名；生成代码读取字段列表长度时必须使用 list length 契约，不使用 row count。 |
 | 数组 / payload array | Array / Payload Array | `enter_index`, `enterIndex`, `EnterIndex`, `max_array_length` | Runtime value 或 wire payload 中的物理容器形态。JSON / MessagePack 中 list 通常表现为 array；binary 中 list 表现为 length prefix 后跟 positional elements。`Array` 在 runtime 层只描述 payload shape，不代表 Meta 类型名。 |
 | 结构体列表 | Struct List | `list<Struct>` | 元素为 struct 的列表；当前还不是稳定能力。 |
 | 结构体依赖图 | Struct Dependency Graph | `StructDependencyGraph` | 用于检测 named struct 循环引用。 |
+
+### 未来值类型术语
+
+以下仅为扩展方向，不是当前可写入 Meta 的 builtin type 或配置选项：
+
+| 中文名词 | Recommended English | 概念符号 | 含义 / 状态 |
+| --- | --- | --- | --- |
+| 欧拉旋转 | Rotation | `Rotation`, `rotation` | Euler 旋转值。 **Planned / Not implemented**。 |
+| 旋转单位 | Rotation Unit | `RotationUnit`, `rotation_unit` | `degrees` 或 `radians`。 **Planned / Not implemented**。 |
+| 旋转顺序 | Rotation Order | `RotationOrder`, `rotation_order` | Euler 旋转顺序。 **Planned / Not implemented**。 |
+| 日期时间 | DateTime | `DateTimeValue`, `datetime` | 日期时间值，可带 pattern 和 timezone。 **Planned / Not implemented**。 |
+| 日期 | Date | `DateValue`, `date` | 只有日期。 **Planned / Not implemented**。 |
+| 时间 | Time | `TimeValue`, `time` | 只有时间。 **Planned / Not implemented**。 |
+| 持续时间 | Duration | `DurationValue`, `duration` | 时间跨度。 **Planned / Not implemented**。 |
+| 整数区间 | Integer Range | `IntRange`, `int_range` | 整数范围。 **Planned / Not implemented**。 |
+| 浮点区间 | Float Range | `FloatRange`, `float_range` | 浮点范围。 **Planned / Not implemented**。 |
+| 矩形 | Rect | `Rect`, `rect` | 二维矩形。 **Planned / Not implemented**。 |
+| 三维包围盒 | Bounds3 | `Bounds3`, `bounds3` | 三维包围盒。 **Planned / Not implemented**。 |
+| 内联结构体 | Inline Struct | `InlineStruct` | 字段内部直接定义的一次性结构。 **Planned / Not implemented**。 |
 
 ## Source 与数据读取术语
 
@@ -104,21 +107,24 @@
 | Source Provider | Source Provider | `SourceProvider`, `provider` | 读取 Source 并归一化为二维 Sheet 的加载器。 |
 | CSV Source | CSV Source | `CsvSource`, `provider = "csv"` | 本地 CSV 文件 source。 |
 | XLSX Source | XLSX Source | `XlsxSource`, `provider = "xlsx"` | 本地 Excel workbook source。 |
-| 飞书表格 Source | Lark Sheet Source | `LarkSheetSource`, `provider = "lark_sheet"` | 远程飞书表格 source。 |
-| Google Sheet Source | Google Sheet Source | `GoogleSheetSource`, `provider = "google_sheet"` | 远程 Google Sheet source。 |
-| Source URI | Source URI | `SourceUri`, `uri` | provider-specific 定位信息。 |
-| Source 认证引用 | Source Auth Reference | `SourceAuthRef`, `auth_ref` | 外部凭证引用，不在 Meta 中存放 secret。 |
-| Source 范围 | Source Range | `SourceRange`, `range` | 可选表格范围，例如 `A1:K200`。 |
-| 二维 Sheet | Source Sheet | `SourceSheet` | provider 输出的统一二维表结构。 |
+| 飞书表格 Source | Lark Sheet Source | `LarkSheetSource`, `provider = "lark_sheet"` | Planned：远程飞书表格 source。 |
+| Google Sheet Source | Google Sheet Source | `GoogleSheetSource`, `provider = "google_sheet"` | Planned：远程 Google Sheet source。 |
+| Source URI | Source URI | `SourceUri`, `uri` | Planned：provider-specific 定位信息。 |
+| Source 认证引用 | Source Auth Reference | `SourceAuthRef`, `auth_ref` | Planned：外部凭证引用，不在 Meta 中存放 secret。 |
+| Source 范围 | Source Range | `SourceRange`, `range` | Planned：range 选择，当前本地 source 使用 header/data 起点。 |
+| 二维 Sheet | Source Sheet | `SourceSheet` | 概念上的二维输入；当前 reader 直接归一化为 DataTable，没有独立 SourceSheet 类型。 |
 | Sheet 行 | Sheet Row | `SheetRow` | SourceSheet 中的一行。 |
 | Sheet 列 | Sheet Column | `SheetColumn` | SourceSheet 中的一列。 |
 | Sheet 单元格 | Sheet Cell | `SheetCell` | 一个 raw cell，包含 row/column/source location。 |
-| Source 位置 | Source Location | `SourceLocation` | 源表定位信息，至少包含 source 名称和 row/column 坐标。 |
+| Source 位置 | Source Location | `RowSourceInfo`, `CellSourceInfo`, `DiagnosticLocation` | 文件路径、可选 source_sheet 与物理行列；logical row index 单独保存。 |
+| 工作表 | Worksheet | `sheet`, `source_sheet` | XLSX sheet 选择与来源，不拼入真实文件路径。 |
+| 原始数据 | Raw Source Data | `RawSourceData`, `DataSet` | 读取/组合后的文本与来源。 |
+| 解析值 | Resolved Value | `ResolvedTable`, `ResolvedValue` | Meta-aware typed companion，与 target 可见 raw rows 对齐。 |
 | 未映射行/列 | Unmapped Row / Column | `UnmappedRow`, `UnmappedColumn` | 没有关联 field path 的空行、空列、注释行或中间数据列，不进入 DataSet。 |
 | 表头 | Header | `Header`, `SheetHeader` | 映射 field path 的 header。 |
 | 表头映射 | Header Mapping | `HeaderMapping` | 从 header 到 field path 的映射。 |
 | Sheet Mapping | Sheet Mapping | `SheetMapping` | table-level source 解释规则。 |
-| 复合值书写方式 | Value Layout | `ValueLayout`, `layout` | `scalar_cell`、`json_cell`、`expanded_value`；struct source layout 第一阶段推荐由 CSV/source 中出现 parent path 还是 child paths 自动判定。 |
+| 复合值书写方式 | Value Layout | `ValueLayout`, `layout` | `scalar_cell`、`json_cell`、`expanded_value`；struct source layout 已由 CSV/XLSX parent/child path 自动判定，struct 不显式配置 layout。 |
 | 标量单元格 | Scalar Cell | `ValueLayout::ScalarCell`, `scalar_cell` | 简单值写在一个 cell 中。 |
 | JSON 单元格 | JSON Cell | `ValueLayout::JsonCell`, `json_cell` | struct/array 等聚合写入一个 JSON cell。 |
 | 展开值 | Expanded Value | `ValueLayout::ExpandedValue`, `expanded_value` | 复合值按 field path 展开；物理方向由表类型决定，struct 字段可由 CSV/source path 自动选择该写法。 |
@@ -188,10 +194,10 @@
 | 导出级校验 | Export Validation | `ExportValidator` | 检查 target mapping、artifact 路径等。 |
 | 校验视图 | Validation View | `ValidationView` | 当前校验使用的 DataSet 或 ExportView。 |
 | 诊断 | Diagnostic | `Diagnostic` | 面向用户和机器的错误/警告/信息。 |
-| 诊断码 | Diagnostic Code | `DiagnosticCode` | 稳定机器可读错误码，例如 `field.required_missing`。 |
+| 诊断码 | Diagnostic Code | `DiagnosticCode` | 稳定机器可读错误码，例如 `CF_DATA_MISSING_REQUIRED_FIELD`。 |
 | 诊断严重级别 | Diagnostic Severity | `DiagnosticSeverity` | `error`、`warning`、`info`。 |
 | 诊断收集器 | Diagnostic Collector | `DiagnosticCollector` | 收集各阶段 diagnostics 并稳定合并。 |
-| 诊断报告器 | Diagnostic Reporter | `DiagnosticReporter` | 输出 human、json、jsonl、summary 格式。 |
+| 诊断报告器 | Diagnostic Reporter | `DiagnosticReporter` | 当前 CLI 失败输出 human/JSON；文件报告为 HTML/Markdown/JSON/CSV，jsonl/summary 未实现。 |
 | 相关位置 | Related Location | `RelatedLocation` | 多位置错误中的关联 source location。 |
 
 ## 导出、CLI 与产物术语
@@ -214,13 +220,13 @@
 | JSON 导出 | JSON Export | `JsonDataExporter` | 输出 JSON runtime data。 |
 | Lua Table 导出 | Lua Table Export | `LuaTableExporter` | 输出 Lua table；Lua 中代码和数据可合一。 |
 | Lua 内嵌数据生成器 | Lua Embedded Data Generator | `LuaTableGenerator` / `LuaEmbeddedDataExporter` | `type = "lua_table"` 的 data-backed mixed generator；requirements 包含 Meta + Data，输出 code-like Lua artifact，生成 root facade 与每表 `.lua` 文件。 |
-| YAML 导出 | YAML Export | `YamlDataExporter` | 可扩展 runtime data exporter。 |
-| MessagePack 导出 | MessagePack Export | `MessagePackDataExporter` | 第一阶段支持的紧凑二进制 runtime data exporter，配置规范名为 `messagepack`。 |
-| SQLite 导出 | SQLite Export | `SqliteDataExporter` | 可扩展数据库 exporter。 |
+| YAML 导出 | YAML Export | `YamlDataExporter` | Planned：可扩展 runtime data exporter。 |
+| MessagePack 导出 | MessagePack Export | `MessagePackDataExporter` | 当前支持的紧凑二进制 runtime data exporter，配置规范名为 `messagepack`。 |
+| SQLite 导出 | SQLite Export | `SqliteDataExporter` | Planned：可扩展数据库 exporter。 |
 | Protobuf 导出 | Protobuf Export | `ProtobufDataExporter` | 未来扩展；需要显式 `field_number`。 |
 | 聚合数据生成器 | Aggregate Data Generator | `ArtifactGenerator` | POT、Lua、Asset Manifest 等跨表聚合产物的具体 generator；在各自模块中组织路径与渲染 helper，通过统一 planning / sink 接口执行。 |
 | POT 导出器 | Gettext POT Exporter | `GettextPotExporter` | `type = "gettext_pot"`；从 ExportView 中的 `text` 字段导出 POT。 |
-| 翻译注释 | Translator Comment | `TranslatorComment` | POT 中给翻译人员的注释，可来自 text 字段、`desc` 或 source 中额外映射的注释列/行。 |
+| 翻译注释 | Translator Comment | `TranslatorComment` | POT 中给翻译人员的注释，当前来自 desc 与 record 元信息；额外 source 注释映射为未来扩展。 |
 | 资源清单导出器 | Asset Manifest Exporter | `AssetManifestExporter` | 从 ExportView 中的 `asset` 字段导出资源清单。 |
 | 代码生成器 | Code Generator | `CodeGenerator` | Code artifact toolkit renderer facet，描述 language id、默认 module name、naming / formatting、文件头约定和代码写出入口；不是 build-facing generator trait。当前具体语言生成器位于 `src/generator/<language>/` 并直接实现 `ArtifactGenerator`。 |
 | 类型映射 | Type Mapping | `TypeMapping` | 逻辑类型到目标语言/引擎类型的映射。 |
@@ -231,35 +237,36 @@
 | 产物写入策略 | Artifact Write Mode | `ArtifactWriteMode` | `dry-run`、`direct` 或 `temp-commit`。 |
 | 临时提交写入 | Temp Commit Write | `ArtifactWriteMode::TempCommit`, `temp-commit` | 先写临时文件，成功后统一提交到最终路径。 |
 | 直接写入 | Direct Write | `ArtifactWriteMode::Direct`, `direct` | 直接写最终路径。 |
-| CLI 命令 | CLI Command | `CliCommand` | `validate`、`export`、`inspect`、`debug`。 |
-| 校验命令 | Validate Command | `validate` | 只读取、组合、过滤和校验，不写正式产物。 |
-| 导出命令 | Export Command | `export` | 校验通过后生成产物。 |
-| 检查命令 | Inspect Command | `inspect` | 查看合并后的 MetaModel、source、target、desc 等。 |
-| 调试命令 | Debug Command | `debug` | 输出插件、export plan、diagnostics schema 等排障信息。 |
+| CLI 构建 | CLI Build | `--project`, `--target` | 无子命令，一次构建一个 target。 |
+| 产物预览 | Dry Run | `--dry-run` | 执行完整验证/生成，不写 artifact；显式 trace 仍写入。 |
+| 附加报告路径 | Report Output | `--report-output` | 仅附加验证报告的文件，不是工程 output 覆盖。 |
 
 ## 插件与执行基础设施术语
 
 | 中文名词 | Recommended English | Recommended Code Symbol | 含义 / 说明 |
 | --- | --- | --- | --- |
-| 插件 | Plugin | `Plugin` | 内置或动态加载的能力扩展。 |
-| 动态库插件 | Dynamic Library Plugin | `DynamicPlugin`, `PluginLibrary` | `.dylib`、`.so`、`.dll` 等动态库插件。 |
-| 插件清单 | Plugin Manifest | `PluginManifest` | 插件 ID、版本、API 版本和能力声明。 |
+| 插件 | Plugin | `Plugin` | 泛指扩展；当前为内置 registry，动态加载为 Planned。 |
+| 动态库插件 | Dynamic Library Plugin | `DynamicPlugin`, `PluginLibrary` | Planned：`.dylib`、`.so`、`.dll` 动态插件。 |
+| 插件清单 | Plugin Manifest | `PluginManifest` | Planned：插件 ID、版本、API 版本和能力声明。 |
 | 插件能力 | Plugin Capability | `PluginCapability` | SourceProvider、ArtifactGenerator、Validator、BuiltinType 等能力。 |
 | Generator Registry | Generator Registry | `GeneratorRegistry` | build-facing artifact generator 注册表 / facade；根据 export type 查询 concrete `ArtifactGenerator` 及其 requirements。当前直接注册 `src/generator/<type_id>/` 下的 concrete generator，不再适配 data exporter registry 或 code generator registry。 |
-| Source Provider Registry | Source Provider Registry | `SourceProviderRegistry` | provider ID 到 provider factory 的注册表。 |
+| Source Provider Registry | Source Provider Registry | `SourceProviderRegistry` | Planned；当前 CSV/XLSX 在 DataProvider 分发。 |
 | Validator Registry | Validator Registry | `ValidatorRegistry` | validator kind 到 validator factory 的注册表。 |
-| Builtin Type Registry | Builtin Type Registry | `BuiltinTypeRegistry` | builtin value type 到 parser/validator 的注册表。 |
-| 任务执行器 | Task Executor | `TaskExecutor` | 执行校验和导出任务，可并行。 |
+| Builtin Type Registry | Builtin Type Registry | `BuiltinTypeRegistry` | Planned；当前使用内置 enum 与 parser。 |
+| 任务执行器 | Task Executor | `TaskExecutor` | 概念术语；当前用 branch pipeline 与局部 Rayon pool，无通用 DAG executor。 |
 | 执行计划 | Execution Plan | `ExecutionPlan` | 并行执行前解析出的确定性任务计划。 |
 | 导出计划 | Export Plan | `ExportPlan` | artifact 生成前的计划，包含路径冲突检查。 |
-| 异步 Source Provider | Async Source Provider | `AsyncSourceProvider` | 可进行网络或文件 I/O 的 source provider API。 |
+| 异步 Source Provider | Async Source Provider | `AsyncSourceProvider` | Planned；现有 AsyncSourceReadShell 为未接入 build 的 blocking 兼容 shell。 |
 | 计算任务 | CPU-Bound Task | `CpuBoundTask` | 应使用线程池调度的解析、校验或生成任务。 |
-| I/O 任务 | I/O-Bound Task | `IoBoundTask` | 应优先使用异步接口或操作系统 I/O 机制调度的文件/网络任务。 |
+| I/O 任务 | I/O-Bound Task | `IoBoundTask` | 本地读取复用 Rayon pool；远端异步/网络限流是 Planned。 |
 
 ## 不再推荐或已取消的旧术语
 
 | 旧术语 | 当前处理 |
 | --- | --- |
+| `tool_only` / `filter_field` / `validator_only` | 已取消；使用 export / export_when / row_export。 |
+| `color_rgb` / `color_rgba` | 非 Meta 类型名；统一用 color + color_format。 |
+| CLI `validate` / `export` / `inspect` / `debug` | 当前无子命令，使用 --project / --target，预览使用 --dry-run。 |
 | `ExportDataset` | 改用 `ExportView`。 |
 | `primary_key` / Primary Key | 取消；改用 `primary_index` 或 index 上 `primary = true`。 |
 | `local_file` provider | 取消；本地 CSV/XLSX 分别使用 `provider = "csv"` / `provider = "xlsx"`。 |

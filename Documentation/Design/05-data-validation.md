@@ -95,7 +95,7 @@ fragment presence 的 target 判断顺序固定为：
 
 游戏常用 built-in validators 的专题设计见 [`09-builtin-validators.md`](09-builtin-validators.md)。其中 `regex`、`string_length` 属于 field-level validators；`required_when`、`compare` 属于 record-level validators；`sum`、`monotonic` 属于 table-level validators。它们默认仍运行在当前 target ExportView 上，但 record/table validators 可以显式引用 hidden support fields，不因此改变 runtime export 可见性。
 
-ObjectTable 的输入视图不是多行 records，而是由一个或多个 CSV `key,value` / `key,title,value` source 归一化并 materialize 出的单个 object row。多个 base source 按互斥 field path split merge；匹配 effective target tags 的 override source 按 exact field path patch 已存在字段。即使 source 只有 header、没有数据行，也必须归一化为一个 empty logical row `{}`，使 required/default/type/enum/struct JSON cell 等字段级规则复用现有 field validation；index、row_export、fragment-scoped validation 不适用于 ObjectTable。ObjectTable 可以作为 foreign key source：其 singleton logical row 中的 FK source fields 按普通 raw cell key 引用 CollectionTable unique / primary index；ObjectTable 仍不能作为 FK target。ObjectTable 的 table-level `export/export_when` 与 field-level `export/export_when` 仍生效；table 可见但字段都被过滤时，导出 empty object。
+ObjectTable 的输入视图不是多行 records，而是由一个或多个 CSV/XLSX `key,value` / `key,title,value` source 归一化并 materialize 出的单个 object row。多个 base source 按互斥 field path split merge；匹配 effective target tags 的 override source 按 exact field path patch 已存在字段。即使 source 只有 header、没有数据行，也必须归一化为一个 empty logical row `{}`，使 required/default/type/enum/struct JSON cell 等字段级规则复用现有 field validation；index、row_export、fragment-scoped validation 不适用于 ObjectTable。ObjectTable 可以作为 foreign key source：其 singleton logical row 中的 FK source fields 按普通 raw cell key 引用 CollectionTable unique / primary index；ObjectTable 仍不能作为 FK target。ObjectTable 的 table-level `export/export_when` 与 field-level `export/export_when` 仍生效；table 可见但字段都被过滤时，导出 empty object。
 
 Struct source layout 自动判定落地后，Full DataSet 与 ExportView 中的 logical row 仍保持 row-oriented map，但 source key 可以是 nested field path。CollectionTable 的 CSV header 使用 `field.child` 多列表达；ObjectTable 的 `key,value` source 使用多行 `field.child` 表达。Validation 需要按当前 row/source 的 key 集合扫描每个 struct field occurrence：只出现 parent path 时按 JSON cell 解析；只出现 child paths 时按 expanded value 解析；两者同时出现应视为同一 occurrence 混用 JSON cell 与 expanded cells 并报错。该规则递归作用于 nested struct：如果某一级 occurrence 选择 JSON cell，则该级以下不能再出现展开子项；如果某一级选择 expanded value，则其内部 struct child 可以继续独立选择 JSON cell 或 expanded value。Meta `layout` 不参与 named struct 的 source layout 判定。
 
@@ -159,7 +159,7 @@ Data validation 的高频错误应输出稳定 diagnostic code，而不是只依
 | 唯一字段 / index 重复 | `CF_DATA_DUPLICATE_KEY` | table、field/index、row、current_value、expected |
 | 外键引用无效 | `CF_DATA_INVALID_FOREIGN_KEY` | source table、source field、row、current_value、expected target table/index |
 
-CSV reader 在 `DataTable.cell_sources` 中保存 per-cell source trace：`source_row_number`、`source_column_number`、`source_column_name` 与 `column_index`。Validation 构造 `DiagnosticLocation` 时应优先使用该 cell trace，因此 Designer Validation Report 和 CLI JSON 可以直接定位到“源文件 / 源行 / 源列 / 逻辑表 / 字段”。
+CSV/XLSX reader 在 `DataTable.cell_sources` 中保存 per-cell source trace：`source_row_number`、`source_column_number`、`source_column_name`、`column_index` 与可选 `source_sheet`。Validation 构造 `DiagnosticLocation` 时应优先使用该 cell trace，因此 Designer Validation Report 和 CLI JSON 可以直接定位到“源文件 / 源行 / 源列 / 逻辑表 / 字段”。
 
 Resolved value 通过 `ValueSourceTrace` 保存 raw field path、source kind（explicit cell / default / computed empty object）、source path、source row 与 raw value。`ExportTableView::field_source()` 负责把 resolved trace 与 raw cell source 统一暴露给 validation；Designer Validation Report enrichment 不再回查 raw row，而是展示 `ValidationIssue.location` 中已经填充的 source path / row / column / field 信息。ObjectTable 的 key-level cell source 和 override source trace 也遵循同一策略：字段级诊断优先使用具体 cell source，logical singleton row source 仅作为 fallback。
 
@@ -293,7 +293,7 @@ Asset 字段当前由 `asset_kind` + Project `[assets]` 驱动校验，至少检
 
 Asset existence 默认对 ExportView 执行。被 target filter 排除的记录，其 asset 不阻塞该 target 导出，也不进入 asset manifest。asset ref 的读取使用 resolved scalar export string，并以 raw cell fallback 兼容旧输入；因此 default asset ref、ObjectTable override cell 和 struct/fragment expanded asset field 与普通 runtime payload 使用同一套解析语义。Asset Manifest 的引用路径使用同样的 resolved asset value，record key 则继续走显式 raw record-key policy。
 
-当前实现状态：P0-1 已实现 asset ref 校验、导出补齐和 Asset Manifest。`asset` 字段必须声明 `asset_kind`；Meta 顶层 `[[asset_kinds]]` 支持 `extends` 继承；Project `[assets]` / `[[assets.search_paths]]` 提供 filesystem search path；validation 只检查当前 target ExportView 中可见且非空的 asset 字段；runtime JSON / MessagePack / bin 导出前会通过同一 resolver 把可补齐引用物化为 canonical asset string。标准参考工程已用 `meta/common.toml` 存放公共 Unreal 基础规则，并用伪造 `.uasset` fixture 覆盖存在性校验，同时在 client target 中导出 `asset_manifest` JSON 与 CSV 清单。Asset Manifest exporter 作为同级聚合 data exporter 接入，支持 deterministic JSON 与 Unreal DataTable 兼容 CSV，并复用 target visible-row helper、resolved asset value helper 和 raw record-key policy。目标态细节见 [`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)。
+当前实现已支持 asset ref 校验、导出补齐和 Asset Manifest。`asset` 字段必须声明 `asset_kind`；Meta 顶层 `[[asset_kinds]]` 支持 `extends` 继承；Project `[assets]` / `[[assets.search_paths]]` 提供 filesystem search path；validation 只检查当前 target ExportView 中可见且非空的 asset 字段；runtime JSON / MessagePack / bin 导出前会通过同一 resolver 把可补齐引用物化为 canonical asset string。标准参考工程已用 `meta/common.toml` 存放公共 Unreal 基础规则，并用伪造 `.uasset` fixture 覆盖存在性校验，同时在 client target 中导出 `asset_manifest` JSON 与 CSV 清单。Asset Manifest exporter 作为同级聚合 data exporter 接入，支持 deterministic JSON 与 Unreal DataTable 兼容 CSV，并复用 target visible-row helper、resolved asset value helper 和 raw record-key policy。目标态细节见 [`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)。
 
 ### Text
 
@@ -347,7 +347,7 @@ data-backed 产物的输入策略如下：runtime JSON / MessagePack / Lua / bin
 示例：
 
 ```text
-error[field.required_missing]: items.name is required but missing
+error[CF_DATA_MISSING_REQUIRED_FIELD]: items.name is required but missing
   table: items
   record: id=1001
   source: Data/items.csv:12:3

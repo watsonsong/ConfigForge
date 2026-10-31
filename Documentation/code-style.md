@@ -11,13 +11,13 @@
 - Prefer explicit domain errors through `ConfigForgeError` for library code.
 - Use `anyhow` at CLI boundaries where human-facing error propagation is sufficient.
 - Keep structs serializable/deserializable when they represent configuration or exportable data.
-- Keep plugin-facing APIs behind explicit registries and stable capability IDs.
+- Use the existing GeneratorRegistry and ValidatorRegistry for extension IDs; dynamic plugins and additional registries are future capabilities.
 - Prefer the smallest practical public API. Use private `mod` plus explicit `pub use` facades
   instead of `pub mod` when submodules are implementation organization. Do not expose struct
   fields, helper functions, concrete modules, or nested namespaces unless callers need them for a
   stable contract, configuration schema, plugin extension point, or testable cross-module result.
   Start with private visibility, widen to `pub(crate)` or `pub` only when a real caller requires it.
-- Prefer async-capable boundaries for source loading and artifact writing.
+- Use the current bounded Rayon pool for local source loading and synchronous artifact sinks. Introduce async boundaries only when a concrete remote provider requires them.
 - Keep parallel execution deterministic by sorting diagnostics and artifact manifests before reporting.
 
 ## General Code Size Rules
@@ -40,7 +40,7 @@
 - `diagnostic` owns shared diagnostic foundations and the crate error facade.
 - `project` owns Project Config loading, imports, path normalization, target aggregation, and Meta extraction.
 - `meta` owns schema definitions, Load-then-Link, linked views, and Meta structural diagnostics.
-- `data` owns source loading, CSV readers, raw `DataSet`, row source trace, and Meta-aware resolving.
+- `data` owns source loading, CSV/XLSX readers, raw `DataSet`, row source trace, and Meta-aware resolving.
 - `validation` owns correctness checks, target-aware validation views, `ValidationReport`, and validator registry.
 - `generator` owns the build-facing artifact generator registry, generator requirements, concrete built-in generators, and dispatch facade. Concrete runtime data, aggregate data, report, doc, and code-like outputs live under `src/generator/<type_id>/`.
 - `data_artifact` owns the data artifact toolkit: runtime payload models, table serialization helpers, binary layout helpers, and shared data-backed generator support utilities. It is not the build-facing registry.
@@ -71,10 +71,12 @@
 - Add CLI-level tests under `tests/` for workflows that cross module boundaries.
 - Keep a canonical integration fixture under `tests/fixtures/standard_project/`.
 - Keep integration-test generated outputs under fixture-local `out/` directories and ignore them through `.gitignore` (for example `tests/fixtures/**/out/`). Future integration fixtures that write exported artifacts should follow the same convention instead of committing generated outputs by accident.
-- Run `cargo fmt`, `cargo lint`, and `cargo test` before handoff. `cargo lint` uses Clippy with all targets and all features; the project forbids `unsafe_code` and treats the default Clippy lint set as warnings.
+- For Rust code changes, run `cargo fmt`, `cargo lint`, and `cargo test` before handoff. `cargo lint` uses Clippy with all targets and all features; the project forbids `unsafe_code` and treats the default Clippy lint set as warnings.
 - Use `cargo lint-strict` when evaluating broader API/design cleanup candidates. Treat strict/pedantic findings as review input rather than automatic rewrite requirements, especially for domain naming such as `MetaModel` and TOML schema structs with multiple boolean flags.
 - After adding or changing features and tests, run unit test coverage evaluation as part of judging whether tests are complete. Use `cargo coverage` for summary and `cargo coverage-html` to inspect uncovered lines in changed modules. Treat coverage as design evidence for normal and error branch completeness, not only as a percentage target.
 - Use `Documentation/Tech/development-environment.md` for required Rust tools, optional cross-language harness tools, runtime adapter dependencies, and the rule that local Rust development must not require every target-language environment. Use `Documentation/Tech/test-ci-matrix.md` for local / quick / full / nightly profile policy, generated-code runtime harness coverage, runtime adapter compliance coverage, and skip / fail-fast rules.
+
+For documentation-only changes, follow [documentation maintenance](Tech/documentation-maintenance.md), including local links, executable examples, and Design HTML synchronization.
 
 ## Git Commit Message Rules
 

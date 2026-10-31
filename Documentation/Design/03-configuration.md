@@ -1,5 +1,16 @@
 # 03. 配置文件设计
 
+## 文档导航
+
+- [3.1 配置层次](#31-配置层次)
+- [3.2 Project Config](#32-project-config)
+- [3.3 Meta 文件](#33-meta-文件)
+- [3.4 Source Declaration](#34-source-declaration)
+- [3.5 Target Config](#35-target-config)
+- [3.6 Target Tags 与导出条件配置](#36-target-tags-与导出条件配置)
+- [3.7 Row Export Policy 配置](#37-row-export-policy-配置)
+- [3.8 Field 基础配置](#38-field-基础配置)
+
 ## 3.1 配置层次
 
 ConfigForge 推荐使用以下配置层次：
@@ -12,7 +23,7 @@ Project Config
   -> Target Config
       -> Data Export
       -> Code Generation
-  -> Plugin Config
+  -> Plugin Config（未来扩展，当前不可配置）
   -> CLI Overrides
 ```
 
@@ -120,33 +131,19 @@ unique = true
 primary = true
 ```
 
-XML 示例：
-
-```xml
-<meta>
-  <table name="items" kind="collection" primaryIndex="by_id" desc="所有可获得物品的基础配置。">
-    <source provider="csv" path="items.csv" />
-    <field name="id" type="int" required="true" desc="物品唯一 ID。" />
-    <field name="name" type="text" required="true" desc="物品展示名称。" />
-    <index name="by_id" unique="true" primary="true">
-      <fieldRef path="id" />
-    </index>
-  </table>
-</meta>
-```
+当前仅支持 TOML。XML 示例和命名映射草案不属于当前配置契约。
 
 命名约定：
 
 - MetaModel canonical 字段名使用 snake_case。
 - TOML 使用 snake_case。
-- XML 使用 lowerCamelCase。
 - 诊断中应尽量同时保留 source spelling 和 canonical spelling。
 
 描述约定：
 
 - Meta 中各层级定义可声明 `desc`，用于说明业务含义。
 - `desc` 会进入 canonical MetaModel，可被代码生成器和辅助文档生成器使用。
-- 普通 TOML/XML 注释不会进入 MetaModel；需要生成代码注释时应使用 `desc`。
+- 普通 TOML 注释不会进入 MetaModel；需要生成代码注释时应使用 `desc`。
 
 ## 3.4 Source Declaration
 
@@ -196,7 +193,7 @@ sources = [
 ]
 ```
 
-Override sources（Stable，限 CSV provider；CollectionTable 按 primary index 整行覆盖，ObjectTable 按 exact field path patch 已存在字段）：
+Override sources（Stable，支持 CSV/XLSX 混用；CollectionTable 按 primary index 整行覆盖，ObjectTable 按 exact field path patch 已存在字段）：
 
 ```toml
 override_sources = [
@@ -540,7 +537,7 @@ Lua table 必须读取 `project.input` 中的数据，基于 Meta 与 target-awa
 | `raw_identifier` | 使用目标语言原生转义方式，例如 Rust `r#type`；不支持该能力的语言应报错。 |
 | `error` | 直接报错，要求修改 Meta 名称或显式配置命名覆盖。 |
 
-`targets.exports.naming` 是语言生成器的可扩展配置。第一阶段统一支持以下 key：
+`targets.exports.naming` 是语言生成器的可扩展配置。当前统一支持以下 key：
 
 | Key | 适用符号 | 常用值 |
 | --- | --- | --- |
@@ -582,11 +579,11 @@ Lua table 必须读取 `project.input` 中的数据，基于 Meta 与 target-awa
 
 | Type | 状态 | 说明 |
 | --- | --- | --- |
-| `json` | 第一阶段默认 | 易调试，适合 Web/TS 和通用场景。 |
-| `messagepack` | 第一阶段支持 | 紧凑二进制格式，适合包体和加载性能更敏感的 runtime。 |
-| `bin` | 第一阶段支持 | ConfigForge 私有紧密二进制 runtime data export type。 |
-| `gettext_pot` / `pot` | 第一阶段支持 | 聚合 data-backed generator，从 target 可见 `text` 字段抽取 POT。 |
-| `lua_table` / `lua` | 第一阶段支持 | 内嵌数据 generator；Lua 中代码和数据合一，作为 MetaAndData export task 生成 root facade 和每表 `.lua` 文件。 |
+| `json` | Stable | 易调试，适合 Web/TS 和通用场景。 |
+| `messagepack` | Stable | 紧凑二进制格式，适合包体和加载性能更敏感的 runtime。 |
+| `bin` | Stable | ConfigForge 私有紧密二进制 runtime data export type。 |
+| `gettext_pot` / `pot` | Stable | 聚合 data-backed generator，从 target 可见 `text` 字段抽取 POT。 |
+| `lua_table` / `lua` | Stable | 内嵌数据 generator；Lua 中代码和数据合一，作为 MetaAndData export task 生成 root facade 和每表 `.lua` 文件。 |
 | `yaml` | 可扩展 | 可读性高，但运行时解析成本需谨慎。 |
 | `sqlite` | 可扩展 | 适合查询型运行时。 |
 | `protobuf` | 未来设计 | 当前不要求实现；未来需要字段级 `field_number`。 |

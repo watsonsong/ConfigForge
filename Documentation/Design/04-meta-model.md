@@ -124,7 +124,7 @@ ObjectTable 表示一个整体配置对象，例如全局游戏规则、经济�
 - 多 source 时，不同 source 可提供不同 field path。
 - override source 以 field path 为单位覆盖。
 
-Step 1 目标：ObjectTable 先支持 CSV `key,value` 行式常量表。ObjectTable 的一行就是一个 field path，因此策划标题/说明默认使用额外列而不是额外行；当前支持 `key,value` 和 `key,title,value` 两种 header，其中 `title` 列被读取器忽略。每个数据行表示一个 field path，而不是一条 record。默认约定如下：
+当前 ObjectTable 支持 CSV/XLSX `key,value` 行式常量表。ObjectTable 的一行就是一个 field path，因此策划标题/说明默认使用额外列而不是额外行；当前支持 `key,value` 和 `key,title,value` 两种 header，其中 `title` 列被读取器忽略。每个数据行表示一个 field path，而不是一条 record。默认约定如下：
 
 ```csv
 key,title,value
@@ -137,16 +137,16 @@ start_item,初始物品,"{""id"":""1"",""count"":""10""}"
 当前语义：
 
 - `key` 列保存 Meta field path；既可以是 top-level field name，也可以是 struct expanded value 的 dotted path，list child 也可以使用 `field[0]` / `field[1]` 这类 element-level path。
-- `value` 列保存该 field 的 raw cell value；scalar runtime export Step 1 保持与 CollectionTable 一致，仍输出 string。
-- named struct 字段可写当前已支持的 JSON object；后续也可由 CSV/source 形态决定写成 field path 展开；array/map schema 留到后续类型系统扩展。
+- `value` 列保存该 field 的 raw cell value；scalar runtime export 保持与 CollectionTable 一致，仍输出 string。
+- named struct 可写 JSON object 或按 CSV/XLSX field path 展开；标量 list 支持 JSON array 与 element-level path；map 尚未实现。
 - 同一个 ObjectTable source 归一化为一个逻辑 object row，runtime data 导出为单个 object，而不是 records array。
 - 即使 source 只有 header、没有数据行，也必须归一化为一个 empty logical row `{}`，确保 required/default 在单对象上执行。
 - table-level `export/export_when` 和 field-level `export/export_when` 对 ObjectTable 生效；table 可见但所有字段被过滤时导出 `{}`。
-- ObjectTable Step 1 不支持 index、primary index、row_export、作为 foreign key target、variant source fragments；可以作为 foreign key source，字段值引用 CollectionTable 的 unique / primary index。
-- ObjectTable 支持 `source = "...csv"` 的兼容单 source 写法，也支持 CSV `sources` 以互斥 field path split merge 为一个 singleton object，并支持 CSV `override_sources` 按 exact field path patch 已存在字段。
+- ObjectTable 当前 不支持 index、primary index、row_export、作为 foreign key target、variant source fragments；可以作为 foreign key source，字段值引用 CollectionTable 的 unique / primary index。
+- ObjectTable 支持 `source = "...csv"` 的兼容单 source 写法，也支持 CSV/XLSX `sources` 以互斥 field path split merge 为一个 singleton object，并支持 CSV/XLSX `override_sources` 按 exact field path patch 已存在字段。
 - ObjectTable 当前支持 struct field path 展开和标量 list element-level path 展开；仍不支持独立明细子表或跨格区域式展开。
 
-Step 1 推荐 Meta：
+示例 Meta：
 
 ```toml
 [[tables]]
@@ -542,15 +542,15 @@ Meta 导出机制使用 `export`、`export_when` 与 `row_export`；以下字段
 
 优先使用 builtin value type 表达通用游戏值：
 
-| 类型 | 含义 |
+| 类型 | 含义 / 状态 |
 | --- | --- |
 | `color` | 颜色值。逻辑通道固定为 RGBA；是否允许省略 alpha、source channel 范围与默认 alpha 由字段选项决定。 |
 | `vector2` / `vector3` / `vector4` | 浮点向量。 |
 | `vector2_int` / `vector3_int` / `vector4_int` | 整数向量。 |
-| `rotation` | Euler 旋转。 |
-| `datetime` / `date` / `time` / `duration` | 时间相关值。 |
-| `int_range` / `float_range` | 范围。 |
-| `rect` / `bounds3` | 区域和包围盒。 |
+| `rotation` | Planned / Not implemented：Euler 旋转。 |
+| `datetime` / `date` / `time` / `duration` | Planned / Not implemented：时间相关值。 |
+| `int_range` / `float_range` | Planned / Not implemented：范围。 |
+| `rect` / `bounds3` | Planned / Not implemented：区域和包围盒。 |
 
 > 当前实现状态：Implemented MVP。当前代码已支持 `color`、`vector2`、`vector3`、`vector4` 及其 int 变体的 Meta 声明、数据解析、runtime artifact 输出、schema doc 展示、validation report schema metadata、builtin validator 与主流 codegen mapping。项目仍不应把 `Color`、`Vector3` 等引擎类型名直接写入 Meta；目标语言 / 引擎类型属于 codegen target mapping。
 
@@ -559,8 +559,8 @@ Meta 导出机制使用 `export`、`export_when` 与 `row_export`；以下字段
 - `vector3` 等数学类型优先作为 builtin value type。
 - 项目不应使用 named struct 重新定义同名 builtin 类型。
 - `color_channel` 必须显式为 `byte` 或 `normalized`，禁止 `auto`。`byte` 表示 source 中数值通道范围为 `0..255`；`normalized` 表示 source 中数值通道范围为 `0.0..1.0`。
-- `rotation_unit` 推荐默认 `degrees`，可字段级或项目级配置。
-- local datetime 如果要表示 instant，必须声明 timezone policy。
+- 未来 rotation 若引入，再定义 rotation_unit、单位与项目覆盖；当前不存在该配置。
+- 未来 datetime 若表示 instant，必须定义 timezone policy；当前不是 builtin 类型。
 
 ### 4.9.1 Color 原始数据表达
 
@@ -971,9 +971,9 @@ linked_field = "item"
 
 ## 4.13 Multi-source 与 Override
 
-> 实现状态：Stable（限 CSV provider 的已定义子集）。当前版本已支持 fragment variant source mode 这一受限多源能力：polymorphic CollectionTable 可声明多个 CSV `sources`，但至少一个 source 必须声明 `fragments`；同时已支持 CollectionTable CSV `override_sources` 按 primary index 匹配整行覆盖，并支持 source-level `export_when` 按 effective target tags 启用。ObjectTable CSV multi-source / override 已稳定支持 base split merge + field-path-level override patch。base source `export_when`、通用 CollectionTable split merge 与非 `csv` provider 仍会在 Meta 校验或 DataLoadPlan 构造阶段报错，避免静默忽略。
+> 实现状态：Stable（CSV/XLSX 的已定义组合规则）。当前版本已支持 fragment variant source mode 这一受限多源能力：polymorphic CollectionTable 可声明多个 CSV/XLSX `sources`，但至少一个 source 必须声明 `fragments`；同时已支持 CollectionTable CSV/XLSX `override_sources` 按 primary index 匹配整行覆盖，并支持 source-level `export_when` 按 effective target tags 启用。ObjectTable CSV/XLSX multi-source / override 已稳定支持 base split merge + field-path-level override patch。base source `export_when`、通用 CollectionTable split merge 与远端 provider 仍会在 Meta 校验或 DataLoadPlan 构造阶段报错，避免静默忽略。
 
-本节的 multi-source split merge / override 已稳定落地 CSV ObjectTable 与 CollectionTable primary-index override 这两个子集。通用 CollectionTable split merge 仍为 Reserved；下一节的 polymorphic variant source mode 是 CollectionTable 多源能力的受限子集：仅允许 `polymorphic = true` 的 CollectionTable 声明多个 variant sources，且每个 source 追加完整 records。
+本节的 multi-source split merge / override 已稳定落地 CSV/XLSX ObjectTable 与 CollectionTable primary-index override 这两个子集。通用 CollectionTable split merge 仍为 Planned / Not implemented；下一节的 polymorphic variant source mode 是 CollectionTable 多源能力的受限子集：仅允许 `polymorphic = true` 的 CollectionTable 声明多个 variant sources，且每个 source 追加完整 records。
 
 Base `sources` 用于 split merge：
 
@@ -1097,7 +1097,7 @@ pub struct FragmentMeta {
 }
 ```
 
-Phase 1 中 fragment 只表达一组可 target-filter 的字段，不引入完整 table 能力：
+当前 fragment 只表达一组可 target-filter 的字段，不引入完整 table 能力：
 
 - 不支持 fragment-level validators。
 - 不支持 fragment field validators，直到 validator framework 支持 fragment/nested field scope。
@@ -1109,7 +1109,7 @@ Phase 1 中 fragment 只表达一组可 target-filter 的字段，不引入完�
 
 规则：
 
-- variant source mode 只允许 `polymorphic = true` 的 CollectionTable 使用多个 sources，且至少一个 source 必须声明非空 `fragments`，避免把无 fragment 的多 CSV append 与未来通用 multi-source merge 语义混淆。
+- variant source mode 只允许 `polymorphic = true` 的 CollectionTable 使用多个 sources，且至少一个 source 必须声明非空 `fragments`，避免把无 fragment 的多 source append 与未来通用 multi-source merge 语义混淆。
 - 每个 source 贡献完整 record 加声明的 fragments。
 - base sources 中同 ID 冲突，即使 fragments 不同也冲突。
 - 不支持多个 source 按 ID 拼接 fragment。

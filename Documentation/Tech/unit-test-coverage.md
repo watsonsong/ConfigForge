@@ -45,11 +45,7 @@ rustup component add llvm-tools-preview
 cargo install cargo-llvm-cov --locked
 ```
 
-如果本机 Rust/Cargo 版本较旧，最新 `cargo-llvm-cov` 可能无法编译。当前项目已验证可在旧工具链上安装：
-
-```bash
-cargo install cargo-llvm-cov --version 0.4.14 --locked
-```
+使用仓库 `rust-toolchain.toml` 固定的工具链；安装失败时先检查工具链和 `cargo-llvm-cov` 的 MSRV，不推荐降级到旧版本以绕过工程要求。
 
 安装完成后检查：
 
@@ -167,41 +163,8 @@ cargo coverage-html
 4. 如果新增分支未覆盖，优先补充单元测试。
 5. 如果未覆盖合理，记录原因。
 
-## 8. 当前项目覆盖率基线
+## 8. 测量记录要求
 
-最近一次覆盖率运行结果：
+覆盖率是某个 commit、工具链、profile 和执行范围的结果，不在当前规范中维护固定百分比或长期补测清单。评估时记录 commit、Rust / cargo-llvm-cov 版本、命令、test profile、可选工具 skip、覆盖文件和未覆盖分支原因；报告留在 `target/llvm-cov/`。需要保留评审快照或临时补测计划时写入 `DevLogs/`，不得把旧数字当作当前基线。
 
-```text
-TOTAL:
-Regions   91.17%
-Functions 90.60%
-Lines     92.92%
-Branches  -
-```
-
-重点文件：
-
-| 文件 | 行覆盖率 | 说明 |
-| --- | ---: | --- |
-| `meta/link.rs` | 93.96% | Link 主流程覆盖较充分，仍有少量异常分支可补。 |
-| `meta/validate.rs` | 95.63% | duplicate、primary index、export condition、validator meta 等主要校验路径已覆盖。 |
-| `meta/loader.rs` | 93.55% | 正常加载、imports、I/O/parse 异常路径已有覆盖。 |
-| `meta/model.rs` | 98.36% | 查询 helper、target tags、row export policy 等模型行为覆盖较充分。 |
-| `validation/mod.rs` | 64.63% | 基础 required/type/enum/unique 与 target-aware validation 已覆盖；仍有 helper/边界分支未完全覆盖。 |
-| `validation/builtins/range.rs` | 81.31% | range validator 的参数解析、target 过滤、warning/error、空值和边界比较已有覆盖。 |
-| `validation/context.rs` | 93.58% | ExportValidationView / ExportTableView 主要路径已覆盖。 |
-| `validation/diagnostic.rs` | 71.76% | Error/Warning 报告路径已覆盖，格式化分支仍可补充。 |
-| `validation/registry.rs` | 88.46% | registry require、scope 校验、compile/run 主要路径已覆盖。 |
-
-该基线不作为长期目标，只用于后续迭代比较。后续新增 Meta、Validation、Exporter 功能时，应逐步提高核心模块覆盖率。
-
-## 9. 当前已识别的补测方向
-
-优先补充：
-
-1. Meta validate 异常分支：duplicate enum / struct / enum value / index、empty index fields、missing primary index、多 primary index。
-2. Loader 异常分支：invalid import TOML、更多 import cycle / canonicalize 边界。
-3. Data validation 异常分支：更多 target-aware unique/index 边界、ValidationReport warning 格式化分支。
-4. Source / Exporter 错误路径：write output failure、重复 output path、重复 target 与 warning 输出组合场景。
-
-这些补测项应结合后续功能迭代逐步完成。
+覆盖率命令会运行测试，跨语言工具缺失与 profile 策略遵守 [测试矩阵](test-ci-matrix.md)。覆盖率评审优先关注本次改动，避免用历史文件名或未经重跑的待办指导当前补测。

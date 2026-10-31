@@ -8,7 +8,7 @@
 | --- | --- |
 | 产品执行阶段与输入依赖 | [执行流程](../Design/02-execution-pipeline.md)、[导出与 CLI](../Design/06-export-cli.md) |
 | 当前模块、分支拓扑、规划屏障、错误顺序、trace 字段 | [Build 实现](../Implementation/10-build-module-detail-design.md) |
-| SourceReadPlan、CSV、RawSourceData、DataSet | [Data 实现](../Implementation/05-data-module-detail-design.md) |
+| SourceReadPlan、CSV/XLSX、RawSourceData、DataSet | [Data 实现](../Implementation/05-data-module-detail-design.md) |
 | report 收集、target view、validator 与 error gate | [Validation 实现](../Implementation/06-validation-module-detail-design.md) |
 | sink 状态、stream 生命周期与提交 | [Artifact 实现](../Implementation/07-artifact-module-detail-design.md) |
 | 大小写、symlink / junction、路径别名与 root containment | [平台文件系统语义](platform-filesystem-semantics.md) |
@@ -19,7 +19,7 @@
 当前实现边界：
 
 - 一次 build 处理一个 target；同一 target 的 data-backed generators 共享一次 source read、normalize 和 validation。
-- 生产本地 CSV 通过 DataLoader 在同一个局部 Rayon pool 中读取，后续 CPU 工作复用该 pool。
+- 生产本地 CSV/XLSX 通过 DataLoader 在同一个局部 Rayon pool 中读取，后续 CPU 工作复用该 pool。
 - MetaOnly 分支与 source read 可以重叠执行；任何 generator 写出前，所有 export task 必须完成全 target 路径规划与预留。
 - generator 统一使用 ArtifactGenerator，按 needs_data 分组；validation_report 可在 validation error 时通过 report-only 输入写出。
 - Meta 与 DataSet 当前驻留内存；产物使用 streaming 写出，不代表输入已支持分页或 out-of-core 处理。
@@ -46,7 +46,7 @@ BuildTrace 保留 io_concurrency / network_concurrency 字段，普通 CLI 调�
 
 CPU 工作主要以 source、table、export task 为粒度：包括本地读取、normalize、target view、table validation、路径规划与生成。任务由局部 pool 调度；嵌套并行继续使用同一个 pool，不把每行、每字段默认变成独立任务。
 
-生产 CSV 路径不为每个 source 创建 OS thread。未来若引入网络 I/O，应使用独立、受限的 I/O 执行边界，避免 CPU worker 阻塞等待远端请求或在 CPU worker 内创建额外 runtime。
+生产 CSV/XLSX 路径不为每个 source 创建 OS thread。未来若引入网络 I/O，应使用独立、受限的 I/O 执行边界，避免 CPU worker 阻塞等待远端请求或在 CPU worker 内创建额外 runtime。
 
 是否改变并发粒度应由小表、多表、大表的耗时与峰值内存测量决定。不能只以任务数量更多作为优化依据。
 
@@ -60,7 +60,7 @@ CPU 工作主要以 source、table、export task 为粒度：包括本地读取�
 
 ### 3.3 Provider 兼容边界
 
-LocalCsvSourceProvider 委托 DataLoader，共用 CSV layout 和 root/path 检查。公开的 SourceProvider、AsyncSourceReadShell、RemoteProviderPolicy 入口继续保留。
+生产 DataLoader 按 DataProvider 分发 CSV/XLSX reader，共用 plan、合并和 root/path 检查；XLSX cache 生命周期和工作簿锁见 Data 实现。LocalCsvSourceProvider 仅为 CSV 兼容入口。公开的 SourceProvider、AsyncSourceReadShell、RemoteProviderPolicy 入口继续保留。
 
 AsyncSourceReadShell 当前是 blocking scoped-thread 兼容 shell，未接入生产 build；名称不表示已运行 async runtime。RemoteProviderPolicy 当前只定义配置与默认值，尚无 retry / backoff / rate-limit 执行消费者。
 
