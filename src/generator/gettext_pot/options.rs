@@ -8,7 +8,7 @@ use crate::{Result, data_artifact::TargetDataConfig};
 use super::FORMAT;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub(super) struct GettextPotOptions {
     pub(super) domain: Option<String>,
     pub(super) file_name: Option<String>,

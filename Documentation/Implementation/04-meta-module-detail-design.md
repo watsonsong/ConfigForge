@@ -24,7 +24,7 @@ Meta 模块负责把一个或多个 Meta 文件转换为可被后续模块使用
 
 当前已实现的基础能力：
 
-- TOML Meta 加载。
+- TOML Meta 加载；封闭 schema 拒绝未知字段。`ValidatorMeta.params` 保留 flatten map，由注册 factory 消费和校验，不使用封闭结构策略。
 - standalone Meta loader 支持单文件加载和显式 `from_paths` 合并；Project Config 层支持 `imports` 多文件递归加载和 canonical path 去重。
 - project / enum / struct / table / field / index 建模。
 - `FieldMeta.field_type` 以字符串保存，Link 后解析为 primitive / enum / struct。

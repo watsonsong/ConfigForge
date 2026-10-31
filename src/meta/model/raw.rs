@@ -11,6 +11,7 @@ use super::{
 };
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct MetaModel {
     #[serde(skip)]
     pub declaration_sources: super::super::DeclarationSources,
@@ -25,6 +26,7 @@ pub struct MetaModel {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct AssetsConfig {
     #[serde(default)]
     pub case_sensitive: Option<bool>,
@@ -37,6 +39,7 @@ pub struct AssetsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct AssetSearchPathConfig {
     pub name: String,
     pub root: PathBuf,
@@ -51,6 +54,7 @@ fn default_asset_search_path_kind() -> String {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct AssetKindMeta {
     pub name: String,
     #[serde(default)]
@@ -123,6 +127,7 @@ pub enum AssetExtensionPolicy {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct AssetRegexRuleMeta {
     pub name: String,
     #[serde(default)]
@@ -153,6 +158,7 @@ pub enum AssetRegexTarget {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct EnumMeta {
     pub name: String,
     #[serde(default)]
@@ -162,6 +168,7 @@ pub struct EnumMeta {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct EnumValueMeta {
     pub name: String,
     #[serde(default)]
@@ -169,6 +176,7 @@ pub struct EnumValueMeta {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct StructMeta {
     pub name: String,
     #[serde(default)]
@@ -178,6 +186,7 @@ pub struct StructMeta {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct TableMeta {
     pub name: String,
     #[serde(default)]
@@ -219,6 +228,7 @@ pub struct TableMeta {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct FragmentMeta {
     pub name: String,
     #[serde(default)]
@@ -234,6 +244,7 @@ pub struct FragmentMeta {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct SourceRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sheet: Option<String>,
@@ -272,6 +283,7 @@ enum SourceRefInput {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct FieldMeta {
     pub name: String,
     #[serde(default)]
@@ -415,6 +427,7 @@ impl VectorFormat {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct FieldForeignKeyMeta {
     #[serde(default)]
     pub name: Option<String>,
@@ -434,6 +447,7 @@ pub struct FieldForeignKeyMeta {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ForeignKeyMeta {
     pub name: String,
     #[serde(default)]
@@ -491,6 +505,7 @@ pub struct ValidatorMeta {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct IndexMeta {
     pub name: String,
     #[serde(default)]

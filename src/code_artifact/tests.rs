@@ -1412,6 +1412,27 @@ fn codegen_options_report_structured_language_and_option_errors() {
 }
 
 #[test]
+fn codegen_rejects_unconsumed_task_options_in_stable_key_order() {
+    let config = CodegenTaskConfig::from_export_task_parts(
+        "rust".to_owned(),
+        PathBuf::from("out"),
+        BTreeMap::from([
+            ("z_typo".to_owned(), toml::Value::Boolean(true)),
+            ("a_typo".to_owned(), toml::Value::Boolean(true)),
+        ]),
+    )
+    .unwrap();
+    let diagnostic = expect_single_diagnostic(
+        CodeExportTarget::from_task(config, &RustCodeGenerator).unwrap_err(),
+    );
+    assert_eq!(
+        diagnostic.code,
+        crate::diagnostic::code::CF_GENERATOR_UNSUPPORTED_OPTION
+    );
+    assert_eq!(diagnostic.current_value.as_deref(), Some("a_typo"));
+}
+
+#[test]
 fn builtin_generators_use_language_specific_formatting_defaults() {
     fn accepts_code_artifact_options(_: &crate::code_artifact::CodeArtifactOptions) {}
 

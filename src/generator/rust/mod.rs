@@ -42,6 +42,7 @@ mod tests;
 pub const LANGUAGE: &str = "rust";
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RustCodegenOptions {
     #[serde(default)]
     pub derive_serde: bool,

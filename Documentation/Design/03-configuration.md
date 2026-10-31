@@ -50,7 +50,7 @@ data/
 
 Project Config 定义工程元信息、Meta 定义和可构建的 targets。CLI 只接收 Project Config 路径和 target 名称；Data 输入、runtime data 输出、代码生成语言和代码输出目录都由 target 配置决定。
 
-当前未知字段检查尚不统一：TargetConfig 和部分 generator option 会拒绝未知键，但 Project / Meta 的部分结构及 codegen option 外层仍可能静默忽略拼写错误。例如 field 的 `requird = true` 不会成为 required 约束，Rust task 的 `ruts = { derive_serde = true }` 不会生效且可能构建成功。后续应对封闭配置严格拒绝未知键，并仅在显式的 generator / validator 扩展区域保留动态参数；不能把整个配置视为任意扩展字典。审查证据见 [整体设计评估](../DevLogs/2026-10-31-architecture-review.md)。
+Project / Meta 的封闭配置结构严格拒绝未知字段，包括导入片段、source、field、index、foreign key、asset policy 与 target 条件。`requird = true` 等拼写错误会产生带文件 / 行列的解析诊断。export task 的动态选项由当前 generator 解释：codegen 只接受共用选项及当前语言的 canonical 配置表（例如 `type = "ts"` 配 `typescript = {...}`），未知外层键和语言子键均报错；JSON / MessagePack / bin 当前没有专属 option，额外键会报错。POT / Lua / Asset Manifest 支持原有 flat 或 nested options，但不能混用两种形式而静默忽略其中一部分。validator 的 `params` 保留动态扩展，由注册 factory 检查；不把扩展参数当作 Project 未知字段。已有合法字段和 generator type alias 保持兼容，过去被忽略的无效配置需要移除或改正。
 
 示例：
 

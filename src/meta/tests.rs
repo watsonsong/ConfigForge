@@ -4,6 +4,40 @@
 use std::fs;
 
 use super::*;
+
+#[test]
+fn standalone_meta_rejects_unknown_keys_in_closed_schema() {
+    for input in [
+        "tablse = []",
+        "[[enums]]\nname = 'Mode'\nvaluess = []",
+        "[[enums]]\nname = 'Mode'\n[[enums.values]]\nname = 'one'\nvaluee = 1",
+        "[[structs]]\nname = 'Value'\nfileds = []",
+        "[[asset_kinds]]\nname = 'icon'\nrequire_exising = true",
+        "[[asset_kinds]]\nname = 'icon'\n[[asset_kinds.regex_rules]]\nname = 'path'\npattern = 'x'\nwhen_tag = []",
+        "[[tables]]\nname = 'items'\nsource = 'items.csv'\n[[tables.fields]]\nname = 'id'\ntype = 'int'\nrequird = true",
+        "[[tables]]\nname = 'items'\nsources = [{path = 'items.csv', provder = 'csv'}]",
+        "[[tables]]\nname = 'items'\nsource = {path = 'items.csv', provder = 'csv'}",
+        "[[tables]]\nname = 'items'\n[[tables.fragments]]\nname = 'value'\nwhen_field = 'id'",
+        "[[tables]]\nname = 'items'\n[[tables.indexes]]\nname = 'by_id'\nuniqe = true",
+        "[[tables]]\nname = 'items'\n[[tables.foreign_keys]]\nname = 'other'\ntarget_table = 'other'\nallow_emtpy = true",
+        "[[tables]]\nname = 'items'\nrow_export = { excluded_tag_field = 'exclude' }",
+    ] {
+        let error = MetaModel::from_toml_str(input).expect_err(input);
+        assert!(
+            matches!(error, ConfigForgeError::ParseMetaString(_)),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn validator_meta_preserves_extension_params_for_registered_factories() {
+    let validator: ValidatorMeta =
+        toml::from_str("kind = 'custom'\nproject_threshold = 7\nconfig = { rule = 'game' }")
+            .unwrap();
+    assert_eq!(validator.params["project_threshold"].as_integer(), Some(7));
+    assert_eq!(validator.params["config"]["rule"].as_str(), Some("game"));
+}
 use super::{link::link_meta_model, validate::validate_meta_model};
 use crate::{ConfigForgeError, Diagnostic, diagnostic::code::*};
 use tempfile::tempdir;
@@ -774,8 +808,6 @@ fn rejects_invalid_linked_field_declarations() {
 
             [[tables.fragments]]
             name = "conflicting_fragment"
-            when_field = "item_id"
-            cases = []
 
             [[tables.fields]]
             name = "fragment_conflict_id"

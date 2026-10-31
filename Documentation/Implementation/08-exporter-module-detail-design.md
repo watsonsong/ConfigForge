@@ -53,6 +53,8 @@ src/generator/
 
 ## 8.3 配置与 registry
 
+JSON / MessagePack / bin 没有专属 task option；规划和生成都拒绝额外键。POT / Lua / Asset Manifest 的 options 使用 `deny_unknown_fields`；`TargetDataConfig::parse_options` 保留 flat 与 nested 两种输入形式，但 nested table 旁的其他选项会明确报错，不再忽略。动态外层 map 仍保留，具体语义由 generator 解释。
+
 ```rust
 pub struct TargetDataConfig {
     pub name: Option<String>,

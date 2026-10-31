@@ -31,7 +31,8 @@ use crate::{
     Result,
     artifact::ArtifactSink,
     diagnostic::code::{
-        CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNKNOWN_TYPE, CF_GENERATOR_UNSUPPORTED_DATA_INPUT,
+        CF_GENERATOR_INVALID_OPTION, CF_GENERATOR_UNKNOWN_TYPE,
+        CF_GENERATOR_UNSUPPORTED_DATA_INPUT, CF_GENERATOR_UNSUPPORTED_OPTION,
     },
     meta::{LinkedMetaModel, TargetTags},
     runtime_contract::RuntimeDataFile,
@@ -77,6 +78,7 @@ pub struct CodeArtifactOptions {
 pub(crate) type CodegenOptions = CodeArtifactOptions;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct I18nOptions {
     #[serde(default)]
     pub mode: I18nMode,
@@ -240,6 +242,7 @@ where
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct PartialNamingConfig {
     #[serde(rename = "type", default)]
     pub type_name: Option<CaseStyle>,
@@ -259,6 +262,21 @@ impl CodeExportTarget {
         generator: &dyn CodeGenerator,
     ) -> Result<Self> {
         let language = generator.language().to_owned();
+        if let Some(key) = task
+            .language_options
+            .keys()
+            .filter(|key| **key != language)
+            .min()
+        {
+            return Err(generator_option_error(
+                CF_GENERATOR_UNSUPPORTED_OPTION,
+                format!("generator.{language}"),
+                format!("unknown {language} export task option `{key}`"),
+                key,
+                format!("shared codegen options or `{language}` language options"),
+                "Check the option spelling and use the current generator's language table.",
+            ));
+        }
         let file_name = match task.file_name {
             Some(file_name) => Some(validate_generated_file_name(&file_name)?),
             None => None,

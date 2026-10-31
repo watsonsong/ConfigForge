@@ -44,6 +44,7 @@ mod tests;
 pub const LANGUAGE: &str = "typescript";
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct TypeScriptCodegenOptions {
     #[serde(default)]
     pub profile: TypeScriptProfile,

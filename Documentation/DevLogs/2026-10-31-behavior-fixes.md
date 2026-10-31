@@ -17,3 +17,20 @@
 - Design HTML 已刷新；docs build/check 与 diff check 通过。
 
 下一步仍应独立修复未知配置键。Asset 遍历收敛没有改变配置解析边界，因此不需要更换该项方案，也不应把 build 解析缓存等较大重构混入行为修复。
+
+## 第二步：拒绝未知配置字段与未消费的选项
+
+- Project / Meta 的封闭配置、target 条件与语言 options 使用 `deny_unknown_fields`；保持 `TargetExportConfig.options`、`ValidatorMeta.params` 等明确动态区域，不对 flatten map 添加封闭结构属性。
+- codegen 消费共用参数后，只接受当前 generator 的 canonical language table；未知外层键按稳定顺序报错。别名 `c++` / `ts` / `cs` 仍配对应 `cpp` / `typescript` / `csharp` 表。
+- JSON / MessagePack / bin 规划与生成拒绝额外选项。POT / Lua / Asset Manifest 检查未知子键，并拒绝 nested table 旁被旧实现忽略的其他选项；flat / nested 的合法单一形式保持支持。
+- validator 参数仍由注册 factory 解释；自定义 factory 的扩展参数可以加载，内置 validator 的拼写错误仍由该 validator 报错。
+- 严格解析暴露一个旧外键测试中已被忽略的 `when_field` / `cases`；删除这两个废弃字段，保留原测试的 linked_field / fragment 名称冲突断言。
+
+验证：
+
+- 新增 3 个单元测试与 4 个 CLI 测试，包含 standalone Meta、import 文件定位、`requird` / `ruts`、共用及语言子配置、全部内置 generator 的未知参数、合法别名与扩展参数。
+- `cargo fmt --check`、`cargo lint`、`cargo test --locked` 通过；local profile 共 714 个测试（576 lib、88 CLI、5 architecture、45 其他 integration）。
+- 对全部 lib / CLI tests 运行 LLVM coverage 并生成 / 检查 HTML。`code_artifact/mod.rs` 行覆盖 92.35%，`data_artifact/config.rs` 94.74%，`generator/input.rs` 89.68%，`meta/model/raw.rs` 93.84%，`project/mod.rs` 97.92%。本次新增的未知键拒绝和 nested sibling 拒绝分支均被执行；未覆盖行主要属于既有的 i18n snippet 错误、默认构造与 prepared input 防御分支，不作为此次行为修复扩展范围。
+- 配置 Design、Project / Meta / codegen / data toolkit Implementation 已同步，Design HTML 已刷新；docs build/check 与 diff check 通过。
+
+两项行为修复完成后，其余评估建议仍是独立的结构 / 性能优化。本轮不引入 cache、validation API 重构或兼容接口删除，避免扩大行为变更范围。

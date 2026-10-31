@@ -53,6 +53,7 @@ pub enum IndentStyle {
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct PartialCodeWriterConfig {
     #[serde(default)]
     pub indent_style: Option<IndentStyle>,

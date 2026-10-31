@@ -12,6 +12,8 @@ mod asset_refs;
 mod code_only;
 #[path = "cli_integration/codegen_tasks.rs"]
 mod codegen_tasks;
+#[path = "cli_integration/config_options.rs"]
+mod config_options;
 #[path = "cli_integration/export_conflicts.rs"]
 mod export_conflicts;
 #[path = "cli_integration/fixture_exports.rs"]

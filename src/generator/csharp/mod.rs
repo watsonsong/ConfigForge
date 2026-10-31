@@ -33,6 +33,7 @@ mod tests;
 pub const LANGUAGE: &str = "csharp";
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct CSharpCodegenOptions {
     #[serde(default)]
     pub profile: CSharpProfile,
@@ -63,6 +64,7 @@ pub struct CSharpCodegenOptions {
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct CSharpTypeMappings {
     #[serde(default)]
     pub color: Option<String>,

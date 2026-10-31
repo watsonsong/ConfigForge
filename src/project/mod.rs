@@ -20,6 +20,7 @@ use crate::{
 pub use crate::meta::{AssetSearchPathConfig, AssetsConfig};
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectConfig {
     #[serde(skip)]
     pub declaration_sources: crate::meta::DeclarationSources,
@@ -42,6 +43,7 @@ pub struct ProjectConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectConfigMeta {
     #[serde(default)]
     pub name: Option<String>,

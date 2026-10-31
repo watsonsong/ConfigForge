@@ -27,6 +27,15 @@ impl TargetDataConfig {
         T: Default + DeserializeOwned,
     {
         if let Some(value) = self.options.get(nested_key) {
+            if let Some(key) = self.options.keys().find(|key| key.as_str() != nested_key) {
+                return Err(data_generator_option_error(
+                    label,
+                    format!("unexpected option `{key}` beside nested `{nested_key}` options"),
+                    key,
+                    format!("only `{nested_key}` when using nested options"),
+                    "Use either flat options or one nested options table; do not mix the two forms.",
+                ));
+            }
             return value.clone().try_into().map_err(|error| {
                 data_generator_option_error(
                     label,

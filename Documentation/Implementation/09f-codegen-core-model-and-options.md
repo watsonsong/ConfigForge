@@ -32,7 +32,7 @@ pub(crate) trait CodeGenerator: Send + Sync {
 - `CodeGenerator::language()` 返回规范语言名，例如 `rust`、`cpp`、`typescript`。
 - alias 是 build-facing `ArtifactGenerator` descriptor 的职责，例如 C++ 支持 `c++`，TypeScript 支持 `ts`；`CodeGenerator` 不再承载 alias / requirements。
 - 每个语言模块维护自己的 `LANGUAGE` 常量，例如 `src/generator/rust/mod.rs` 中的 `LANGUAGE = "rust"`。核心 `src/code_artifact/mod.rs` 不定义 `pub mod languages`，避免新增语言时回到核心模块增加常量。
-- `CodeExportTarget::from_task` 接收已查找到的 `&dyn CodeGenerator`，由 generator 提供默认模块名和默认命名规则。
+- `CodeExportTarget::from_task` 接收已查找到的 `&dyn CodeGenerator`，由 generator 提供默认模块名和默认命名规则。共用选项消费后，只接受该 generator 的 canonical language key；剩余未知键按稳定顺序报 `CF_GENERATOR_UNSUPPORTED_OPTION`。语言 options、type mappings、naming / formatting / i18n 都使用封闭 serde schema 拒绝未知子键，避免配置不生效却构建成功。
 - `src/build/` 只通过 `GeneratorRegistry` 查找 build-facing artifact generator；找不到时报告“未注册生成器”，不感知具体语言集合。
 - 内置语言的集中注册点是 `GeneratorRegistry::with_builtin_generators()`。当前 `CodeGenerator` 是 crate 内部 code artifact renderer facet，不作为稳定外部 generator plugin API 暴露；外部用户通过 Project Config 选择内置语言，而不是实现该 trait。
 

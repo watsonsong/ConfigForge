@@ -35,6 +35,7 @@ mod tests;
 pub const LANGUAGE: &str = "java";
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct JavaCodegenOptions {
     #[serde(default)]
     pub package: Option<String>,
@@ -61,6 +62,7 @@ pub struct JavaCodegenOptions {
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct JavaTypeMappings {
     #[serde(default)]
     pub color: Option<String>,

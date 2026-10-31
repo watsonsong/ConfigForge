@@ -60,6 +60,7 @@ impl ArtifactGenerator for JsonDataExporter {
     }
 
     fn plan_artifacts(&self, input: &GeneratorCommonInput<'_>) -> Result<Vec<std::path::PathBuf>> {
+        input.reject_options("generator.json")?;
         runtime_table_artifacts(&input.output, input.meta, &input.target_tags, self)
     }
 
@@ -68,6 +69,7 @@ impl ArtifactGenerator for JsonDataExporter {
         input: &crate::generator::GeneratorTaskInput<'_, '_>,
         sink: &ArtifactSink,
     ) -> Result<()> {
+        input.common.reject_options("generator.json")?;
         let input = input.data_input(self.type_id())?;
         export_runtime_data_to_sink(
             &input.common.output,

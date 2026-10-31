@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ExportCondition {
     #[serde(default)]
     pub any: Vec<String>,
@@ -16,6 +17,7 @@ pub struct ExportCondition {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RowExportPolicy {
     #[serde(default)]
     pub required_tags_field: Option<String>,

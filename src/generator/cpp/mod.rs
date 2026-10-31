@@ -49,6 +49,7 @@ mod tests;
 pub const LANGUAGE: &str = "cpp";
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct CppCodegenOptions {
     #[serde(default)]
     pub namespace: Option<String>,
@@ -65,6 +66,7 @@ pub struct CppCodegenOptions {
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct CppTypeMappings {
     #[serde(default)]
     pub color: Option<String>,

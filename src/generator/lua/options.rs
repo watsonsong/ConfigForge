@@ -16,7 +16,7 @@ use crate::{
 use super::FORMAT;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub(super) struct LuaTableOptions {
     pub(super) file_header: Option<String>,
     pub(super) module_name: String,

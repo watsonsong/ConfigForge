@@ -40,6 +40,21 @@ pub(crate) struct GeneratorDataInput<'a, 'meta> {
 }
 
 impl GeneratorCommonInput<'_> {
+    pub(crate) fn reject_options(&self, source: &'static str) -> Result<()> {
+        super::options::GeneratorOptionParser::new(self.options.clone(), source)
+            .with_target(&self.target_name)
+            .reject_unknown(
+                |key| {
+                    format!(
+                        "export type `{}` does not support option `{key}`",
+                        self.type_id
+                    )
+                },
+                "no generator options for this runtime data format",
+                Some("Remove the unsupported option from the export task.".to_owned()),
+            )
+    }
+
     pub(crate) fn target_data_config(&self) -> TargetDataConfig {
         TargetDataConfig {
             name: Some(self.task_name.clone()),
