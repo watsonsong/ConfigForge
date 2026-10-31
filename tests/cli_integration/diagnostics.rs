@@ -132,3 +132,27 @@ fn diagnostic_warning_survives_export_failure_and_is_json_on_success() {
             .any(|issue| issue["code"] == "CF_IO_WRITE_FAILED")
     );
 }
+
+#[test]
+fn diagnostic_io_parse_and_argument_errors_are_structured() {
+    let temp = tempfile::tempdir().unwrap();
+    let missing = temp.path().join("missing.toml");
+    let result = diagnostic_run(&missing, &[]);
+    assert_eq!(result["diagnostics"][0]["code"], "CF_IO_READ_FAILED");
+    assert_eq!(
+        result["diagnostics"][0]["location"]["source_path"],
+        missing.to_str().unwrap()
+    );
+    fs::write(&missing, "[project]\nname = @\n").unwrap();
+    let result = diagnostic_run(&missing, &[]);
+    assert_eq!(result["diagnostics"][0]["code"], "CF_PROJECT_PARSE_FAILED");
+    assert_eq!(result["diagnostics"][0]["location"]["source_row_number"], 2);
+    let output = Command::cargo_bin("config-forge")
+        .unwrap()
+        .args(["--diagnostic-format=json", "--unknown"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let result: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(result["diagnostics"][0]["code"], "CF_BUILD_INVALID_OPTION");
+}

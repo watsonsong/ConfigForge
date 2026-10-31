@@ -97,6 +97,29 @@ impl ConfigForgeError {
         {
             location.source_row_number = usize::try_from(position.line()).ok();
         }
+        let parse_error = match self {
+            Self::ParseProject { source, .. }
+            | Self::ParseMeta { source, .. }
+            | Self::ParseMetaString(source) => Some(source),
+            _ => None,
+        };
+        if let Some(source) = parse_error
+            && let Some(span) = source.span()
+            && let Some(content) = path.and_then(|path| std::fs::read_to_string(path).ok())
+            && let Some(prefix) = content.get(..span.start)
+        {
+            location.source_row_number =
+                Some(prefix.bytes().filter(|byte| *byte == b'\n').count() + 1);
+            location.source_column_number = Some(
+                prefix
+                    .rsplit('\n')
+                    .next()
+                    .unwrap_or_default()
+                    .chars()
+                    .count()
+                    + 1,
+            );
+        }
         let metadata = metadata_for(code).expect("built-in error code metadata");
         let mut diagnostic =
             Diagnostic::new(code, DiagnosticSeverity::Error, self.to_string(), location)

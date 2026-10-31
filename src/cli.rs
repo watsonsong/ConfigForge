@@ -103,7 +103,27 @@ pub fn run() -> anyhow::Result<()> {
 }
 
 pub fn run_main() -> ExitCode {
-    let cli = Cli::parse();
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let cli = match Cli::try_parse_from(&args) {
+        Ok(cli) => cli,
+        Err(error) => {
+            let json = args
+                .windows(2)
+                .any(|pair| pair[0] == "--diagnostic-format" && pair[1] == "json")
+                || args.iter().any(|arg| arg == "--diagnostic-format=json");
+            if error.use_stderr() && json {
+                let diagnostic = cli_option_error(
+                    error.to_string(),
+                    "invalid CLI arguments",
+                    "valid CLI arguments",
+                );
+                render_cli_error(&diagnostic.into(), CliDiagnosticFormat::Json);
+            } else {
+                let _ = error.print();
+            }
+            return ExitCode::from(error.exit_code() as u8);
+        }
+    };
     let diagnostic_format = cli.diagnostic_format;
     match run_with_args(cli) {
         Ok(()) => ExitCode::SUCCESS,
