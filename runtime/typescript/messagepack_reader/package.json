@@ -21,20 +21,20 @@
   "configForge": {
     "runtimeReaderContract": "^1.0",
     "parserBackend": "@msgpack/msgpack",
-    "parserBackendVersion": "^3.0.0",
+    "parserBackendVersion": "^3.1.3",
     "adapterSupportLevel": "stable"
   },
   "dependencies": {
     "@config-forge/runtime-reader-core": "0.1.0"
   },
   "peerDependencies": {
-    "@msgpack/msgpack": "^3.0.0"
+    "@msgpack/msgpack": "^3.1.3"
   },
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^7.0.2"
   }
 }

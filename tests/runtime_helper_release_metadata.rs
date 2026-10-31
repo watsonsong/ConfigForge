@@ -229,7 +229,7 @@ fn runtime_reader_parser_backend_metadata_stays_in_sync() {
     assert_typescript_parser_backend(
         "runtime/typescript/messagepack_reader/package.json",
         "@msgpack/msgpack",
-        "^3.0.0",
+        "^3.1.3",
         "stable",
     );
     assert_typescript_parser_backend(

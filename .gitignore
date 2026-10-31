@@ -3,6 +3,7 @@ target/
 /runtime/cpp/build/
 /runtime/rust/*/Cargo.lock
 /runtime/typescript/**/dist/
+/runtime/typescript/**/node_modules/
 tests/fixtures/**/out/
 tarpaulin-report.html
 cobertura.xml

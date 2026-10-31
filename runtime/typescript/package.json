@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspace @config-forge/runtime-reader-core && npm run build --workspace @config-forge/runtime-reader-json && npm run build --workspace @config-forge/runtime-reader-binary && npm run build --workspace @config-forge/runtime-reader-messagepack && npm run build --workspace @config-forge/runtime-loader-node-fs",
-    "typecheck": "npm run typecheck --workspace @config-forge/runtime-reader-core && npm run typecheck --workspace @config-forge/runtime-reader-json && npm run typecheck --workspace @config-forge/runtime-reader-binary && npm run typecheck --workspace @config-forge/runtime-reader-messagepack && npm run typecheck --workspace @config-forge/runtime-loader-node-fs"
+    "typecheck": "npm run typecheck --workspace @config-forge/runtime-reader-core && npm run typecheck --workspace @config-forge/runtime-reader-json && npm run typecheck --workspace @config-forge/runtime-reader-binary && npm run typecheck --workspace @config-forge/runtime-reader-messagepack && npm run typecheck --workspace @config-forge/runtime-loader-node-fs",
+    "test": "npm run build && node --test tests"
   }
 }

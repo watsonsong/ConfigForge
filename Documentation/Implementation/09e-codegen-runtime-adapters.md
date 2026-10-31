@@ -269,7 +269,7 @@ TypeScript 可以最早形成稳定 npm 包，因为 generated interface 是结�
 | `@config-forge/runtime-reader-binary` | `bin` reader。 | 依赖 core。 |
 | `@config-forge/runtime-loader-node-fs` | Node fs transport，可注入 decoder。 | 依赖 core，不依赖具体格式。 |
 
-当前状态：使用 TypeScript 5.9.3 对五个 workspace package 逐 package typecheck + build 验证通过；compliance runner 覆盖 JSON、MessagePack、binary。package `exports` 明确当前只支持 CommonJS `require`，未来如增加 ESM 应作为显式 package boundary 变更处理。`runtime_interface_emit = "reference"` 当前诊断为 unsupported，避免在 external import 形态稳定前生成不可执行依赖提示；正式发布前只剩 npm publish / README/API docs polish。
+当前状态：使用 TypeScript 7.0.2 对五个 workspace package 逐 package typecheck + build 验证通过；compliance runner 覆盖 JSON、MessagePack、binary。workspace 的 package-lock.json 固定 TypeScript 和 @msgpack/msgpack 的已验证版本；使用 npm ci --include=dev 安装，并用 npm test 验证真实 MessagePack backend 的默认解码、错误归一化和大小限制。package `exports` 明确当前只支持 CommonJS `require`，未来如增加 ESM 应作为显式 package boundary 变更处理。`runtime_interface_emit = "reference"` 当前诊断为 unsupported，避免在 external import 形态稳定前生成不可执行依赖提示；正式发布前只剩 npm publish / README/API docs polish。
 
 #### Phase R4：C++ stable interface header
 

@@ -25,6 +25,20 @@ jobs:
           dotnet-version: "8.0.x"
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+      - name: Install Node.js for TypeScript runtime tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: runtime/typescript/package-lock.json
+      - name: Check TypeScript runtime packages and backend integration
+        working-directory: runtime/typescript
+        run: |
+          npm ci --include=dev
+          npm run typecheck
+          npm test
+      - name: Enable TypeScript compiler for generated-code tests
+        run: echo "$GITHUB_WORKSPACE/runtime/typescript/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Check code formatting
         run: cargo fmt --all --check
       - name: Run clippy lints
