@@ -45,10 +45,12 @@ pub(super) struct BuildInputPreparation<'a> {
 
 pub(super) struct TargetPipelineOutput {
     pub(super) warnings: Vec<String>,
+    pub(super) diagnostics: Vec<crate::Diagnostic>,
 }
 
 pub(super) struct ExportBranchOutput {
     pub(super) warnings: Vec<String>,
+    pub(super) diagnostics: Vec<crate::Diagnostic>,
 }
 
 pub(super) fn execute_target_pipeline(
@@ -103,7 +105,10 @@ pub(super) fn execute_target_pipeline(
             Ok(warnings)
         })?;
 
-    Ok(TargetPipelineOutput { warnings })
+    Ok(TargetPipelineOutput {
+        warnings,
+        diagnostics: runtime_output.diagnostics,
+    })
 }
 
 pub(super) fn prepare_build_inputs<'a>(
@@ -323,6 +328,7 @@ fn execute_runtime_export_nodes(
 
     Ok(ExportBranchOutput {
         warnings: output.warnings,
+        diagnostics: output.diagnostics,
     })
 }
 
@@ -343,6 +349,7 @@ fn execute_meta_only_generator_nodes(
 
     Ok(ExportBranchOutput {
         warnings: Vec::new(),
+        diagnostics: Vec::new(),
     })
 }
 

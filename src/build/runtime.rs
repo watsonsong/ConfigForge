@@ -26,6 +26,7 @@ use super::{build_diagnostic_error, target::NormalizedExportTask};
 #[derive(Debug)]
 pub(super) struct RuntimeExportOutput {
     pub(super) warnings: Vec<String>,
+    pub(super) diagnostics: Vec<crate::Diagnostic>,
     pub(super) task_outputs: Vec<RuntimeExportTaskOutput>,
 }
 
@@ -52,6 +53,7 @@ pub(super) fn export_meta_and_data_tasks(
     if export_tasks.is_empty() {
         return Ok(RuntimeExportOutput {
             warnings: Vec::new(),
+            diagnostics: Vec::new(),
             task_outputs: Vec::new(),
         });
     }
@@ -76,7 +78,7 @@ pub(super) fn export_meta_and_data_tasks(
         pool,
     )?;
     if validation_outcome.is_blocking() {
-        export_validation_report_tasks(
+        let report_result = export_validation_report_tasks(
             export_tasks,
             linked_meta,
             target_tags,
@@ -87,15 +89,24 @@ pub(super) fn export_meta_and_data_tasks(
             validation_outcome.report(),
             sink,
             generator_registry,
-        )?;
-        return Err(ConfigForgeError::ValidationReport(
+        );
+        let error = ConfigForgeError::ValidationReport(
             validation_outcome.into_report().into_diagnostic_report(),
-        ));
+        );
+        return Err(match report_result {
+            Ok(()) => error,
+            Err(report_error) => error.with_diagnostics(report_error.diagnostics()),
+        });
     }
     let validation_report = validation_outcome.into_report();
     let mut warnings = Vec::new();
     warnings.extend(validation_report.warning_messages());
-    let export_data_set = canonicalize_asset_refs(linked_meta, assets, target_tags, &data_set)?;
+    let diagnostics = validation_report
+        .clone()
+        .into_diagnostic_report()
+        .diagnostics;
+    let export_data_set = canonicalize_asset_refs(linked_meta, assets, target_tags, &data_set)
+        .map_err(|error| error.with_diagnostics(diagnostics.clone()))?;
     let task_outputs = pool.install(|| {
         export_tasks
             .par_iter()
@@ -119,7 +130,7 @@ pub(super) fn export_meta_and_data_tasks(
     });
 
     for task_output in task_outputs {
-        task_output?;
+        task_output.map_err(|error| error.with_diagnostics(diagnostics.clone()))?;
     }
 
     let stable_task_outputs = export_tasks
@@ -131,6 +142,7 @@ pub(super) fn export_meta_and_data_tasks(
 
     Ok(RuntimeExportOutput {
         warnings,
+        diagnostics,
         task_outputs: stable_task_outputs,
     })
 }
@@ -148,13 +160,14 @@ fn export_validation_report_tasks(
     sink: &ArtifactSink,
     generator_registry: &GeneratorRegistry,
 ) -> Result<()> {
+    let mut errors = Vec::new();
     for task in export_tasks
         .iter()
         .copied()
         .filter(|task| task.requirements.supports_report_only)
     {
         let generator = generator_registry.require_generator(&task.type_id)?;
-        generator.generate(
+        if let Err(error) = generator.generate(
             &GeneratorTaskInput {
                 common: generator_common_input(
                     task,
@@ -168,9 +181,15 @@ fn export_validation_report_tasks(
                 prepared: PreparedGeneratorInputs::ValidationReportOnly { validation_report },
             },
             sink,
-        )?;
+        ) {
+            errors.extend(error.diagnostics());
+        }
     }
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(ConfigForgeError::from_diagnostics(errors))
+    }
 }
 
 fn canonicalize_asset_refs(

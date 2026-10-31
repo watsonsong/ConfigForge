@@ -25,5 +25,7 @@ mod target_filtering;
 #[path = "cli_integration/validation.rs"]
 mod validation;
 
+#[path = "cli_integration/diagnostics.rs"]
+mod diagnostics;
 #[path = "cli_integration/xlsx.rs"]
 mod xlsx;

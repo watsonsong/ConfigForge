@@ -3,6 +3,13 @@
 
 use super::DiagnosticSeverity;
 
+pub const CF_IO_READ_FAILED: &str = "CF_IO_READ_FAILED";
+pub const CF_IO_WRITE_FAILED: &str = "CF_IO_WRITE_FAILED";
+pub const CF_PROJECT_PARSE_FAILED: &str = "CF_PROJECT_PARSE_FAILED";
+pub const CF_META_PARSE_FAILED: &str = "CF_META_PARSE_FAILED";
+pub const CF_DATA_PARSE_CSV_FAILED: &str = "CF_DATA_PARSE_CSV_FAILED";
+pub const CF_OUTPUT_SERIALIZE_FAILED: &str = "CF_OUTPUT_SERIALIZE_FAILED";
+
 pub const CF_GENERATOR_UNKNOWN_TYPE: &str = "CF_GENERATOR_UNKNOWN_TYPE";
 pub const CF_GENERATOR_AMBIGUOUS_TYPE: &str = "CF_GENERATOR_AMBIGUOUS_TYPE";
 pub const CF_GENERATOR_INVALID_OPTION: &str = "CF_GENERATOR_INVALID_OPTION";
@@ -108,6 +115,54 @@ impl DiagnosticCodeMetadata {
 }
 
 pub const DIAGNOSTIC_CODE_METADATA: &[DiagnosticCodeMetadata] = &[
+    DiagnosticCodeMetadata::error(
+        CF_IO_READ_FAILED,
+        "io",
+        "文件读取失败",
+        "无法读取输入文件。",
+        Some("检查路径、文件是否存在及读取权限。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_IO_WRITE_FAILED,
+        "io",
+        "文件写入失败",
+        "无法写入输出文件。",
+        Some("检查输出路径、父目录和写入权限。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_PROJECT_PARSE_FAILED,
+        "project",
+        "工程配置解析失败",
+        "工程配置不是有效的 TOML 或不符合配置结构。",
+        Some("按解析错误位置修正工程配置。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_META_PARSE_FAILED,
+        "meta",
+        "Meta 解析失败",
+        "Meta 不是有效的 TOML 或不符合 schema。",
+        Some("按解析错误位置修正 Meta。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_DATA_PARSE_CSV_FAILED,
+        "data",
+        "CSV 解析失败",
+        "CSV 记录无法读取或不符合输入结构。",
+        Some("检查 CSV 分隔符、引号和列数。"),
+        "0.1.0",
+    ),
+    DiagnosticCodeMetadata::error(
+        CF_OUTPUT_SERIALIZE_FAILED,
+        "artifact",
+        "产物序列化失败",
+        "无法将产物序列化为目标格式。",
+        Some("检查输入值和目标格式约束。"),
+        "0.1.0",
+    ),
     DiagnosticCodeMetadata::error(
         CF_GENERATOR_UNKNOWN_TYPE,
         "generator",
@@ -699,6 +754,7 @@ mod tests {
     use super::*;
 
     const VALID_DOMAINS: &[&str] = &[
+        "io",
         "artifact",
         "build",
         "data",

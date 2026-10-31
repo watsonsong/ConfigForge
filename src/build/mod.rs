@@ -111,10 +111,13 @@ fn build_target_inner(
         trace,
     })?;
 
-    let artifacts = trace.record("finish_artifacts", None, || sink.finish())?;
+    let artifacts = trace
+        .record("finish_artifacts", None, || sink.finish())
+        .map_err(|error| error.with_diagnostics(pipeline_output.diagnostics.clone()))?;
 
     Ok(BuildOutputWithoutTrace {
         warnings: pipeline_output.warnings,
+        diagnostics: pipeline_output.diagnostics,
         artifacts,
     })
 }
@@ -196,6 +199,7 @@ fn add_cli_validation_report_task(
 
 struct BuildOutputWithoutTrace {
     warnings: Vec<String>,
+    diagnostics: Vec<Diagnostic>,
     artifacts: crate::artifact::ArtifactWriteResult,
 }
 
@@ -203,6 +207,7 @@ impl BuildOutputWithoutTrace {
     fn with_trace(self, trace: BuildTrace) -> BuildOutput {
         BuildOutput {
             warnings: self.warnings,
+            diagnostics: self.diagnostics,
             artifacts: self.artifacts,
             trace,
         }
@@ -819,6 +824,7 @@ mod tests {
     fn empty_branch_output() -> ExportBranchOutput {
         ExportBranchOutput {
             warnings: Vec::new(),
+            diagnostics: Vec::new(),
         }
     }
 }

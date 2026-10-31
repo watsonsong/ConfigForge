@@ -35,6 +35,7 @@ pub(crate) const MAX_JOBS: usize = 128;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildOutput {
     pub warnings: Vec<String>,
+    pub diagnostics: Vec<Diagnostic>,
     pub artifacts: ArtifactWriteResult,
     pub trace: BuildTrace,
 }

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::diagnostic::{Diagnostic, DiagnosticReport};
+use crate::diagnostic::{Diagnostic, DiagnosticLocation, DiagnosticReport, DiagnosticSeverity};
 
 pub type Result<T> = std::result::Result<T, ConfigForgeError>;
 
@@ -71,6 +71,53 @@ pub enum ConfigForgeError {
 }
 
 impl ConfigForgeError {
+    pub fn diagnostics(&self) -> Vec<Diagnostic> {
+        use super::code::*;
+        let (code, path, domain) = match self {
+            Self::MetaValidation(report) | Self::ValidationReport(report) => {
+                return report.diagnostics.clone();
+            }
+            Self::ReadFile { path, .. } => (CF_IO_READ_FAILED, Some(path), "io"),
+            Self::WriteFile { path, .. } => (CF_IO_WRITE_FAILED, Some(path), "io"),
+            Self::ParseProject { path, .. } => (CF_PROJECT_PARSE_FAILED, Some(path), "project"),
+            Self::ParseMeta { path, .. } => (CF_META_PARSE_FAILED, Some(path), "meta"),
+            Self::ParseMetaString(_) => (CF_META_PARSE_FAILED, None, "meta"),
+            Self::ParseCsv { path, .. } => (CF_DATA_PARSE_CSV_FAILED, Some(path), "data"),
+            Self::Serialize(_) | Self::SerializeMessagePack { .. } => {
+                (CF_OUTPUT_SERIALIZE_FAILED, None, "artifact")
+            }
+            Self::Validation(_) => (CF_BUILD_INVALID_CONFIG, None, "validation"),
+        };
+        let mut location = DiagnosticLocation {
+            source_path: path.cloned(),
+            ..Default::default()
+        };
+        if let Self::ParseCsv { source, .. } = self
+            && let Some(position) = source.position()
+        {
+            location.source_row_number = usize::try_from(position.line()).ok();
+        }
+        let metadata = metadata_for(code).expect("built-in error code metadata");
+        let mut diagnostic =
+            Diagnostic::new(code, DiagnosticSeverity::Error, self.to_string(), location)
+                .with_source("error")
+                .with_domain(domain)
+                .with_explanation(metadata.explanation);
+        if let Some(hint) = metadata.default_hint {
+            diagnostic = diagnostic.with_hint(hint);
+        }
+        vec![diagnostic]
+    }
+
+    pub(crate) fn with_diagnostics(
+        self,
+        diagnostics: impl IntoIterator<Item = Diagnostic>,
+    ) -> Self {
+        let mut report = self.diagnostics();
+        report.extend(diagnostics);
+        Self::from_diagnostics(report)
+    }
+
     pub fn from_diagnostic(diagnostic: Diagnostic) -> Self {
         Self::ValidationReport(DiagnosticReport::from_one(diagnostic))
     }

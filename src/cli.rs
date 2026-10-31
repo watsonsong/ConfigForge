@@ -156,13 +156,30 @@ fn run_with_args(cli: Cli) -> anyhow::Result<()> {
     let output = match build_result {
         Ok(output) => output,
         Err(error) => {
-            write_trace_if_requested(cli.trace_tasks.as_ref(), &error.trace)?;
-            return Err(error.error.into());
+            let trace_result = write_trace_if_requested(cli.trace_tasks.as_ref(), &error.trace);
+            return Err(match trace_result {
+                Ok(()) => error.error,
+                Err(trace_error) => error.error.with_diagnostics(trace_error.diagnostics()),
+            }
+            .into());
         }
     };
-    write_trace_if_requested(cli.trace_tasks.as_ref(), &output.trace)?;
-    for warning in output.warnings {
-        eprintln!("warning: {warning}");
+    write_trace_if_requested(cli.trace_tasks.as_ref(), &output.trace)
+        .map_err(|error| error.with_diagnostics(output.diagnostics.clone()))?;
+    if cli.diagnostic_format == CliDiagnosticFormat::Json {
+        eprintln!(
+            "{}",
+            serde_json::to_string_pretty(&CliDiagnosticOutput {
+                schema_version: 1,
+                status: "success",
+                message: format!("target `{}` succeeded", cli.target),
+                diagnostics: output.diagnostics,
+            })?
+        );
+    } else {
+        for warning in output.warnings {
+            eprintln!("warning: {warning}");
+        }
     }
     if cli.dry_run {
         println!(
@@ -207,10 +224,13 @@ fn cli_option_error(
 fn write_trace_if_requested(
     trace_path: Option<&PathBuf>,
     trace: &crate::BuildTrace,
-) -> anyhow::Result<()> {
+) -> crate::Result<()> {
     if let Some(trace_path) = trace_path {
         let trace_json = serde_json::to_string_pretty(trace)?;
-        fs::write(trace_path, trace_json)?;
+        fs::write(trace_path, trace_json).map_err(|source| ConfigForgeError::WriteFile {
+            path: trace_path.clone(),
+            source,
+        })?;
     }
     Ok(())
 }
@@ -233,6 +253,7 @@ fn render_error_json(error: &anyhow::Error) -> serde_json::Result<String> {
         .map(diagnostics_from_config_error)
         .unwrap_or_default();
     serde_json::to_string_pretty(&CliDiagnosticOutput {
+        schema_version: 1,
         status: "error",
         message: error.to_string(),
         diagnostics,
@@ -240,15 +261,12 @@ fn render_error_json(error: &anyhow::Error) -> serde_json::Result<String> {
 }
 
 fn diagnostics_from_config_error(error: &ConfigForgeError) -> Vec<Diagnostic> {
-    match error {
-        ConfigForgeError::MetaValidation(report) => report.diagnostics.clone(),
-        ConfigForgeError::ValidationReport(report) => report.diagnostics.clone(),
-        _ => Vec::new(),
-    }
+    error.diagnostics()
 }
 
 #[derive(Debug, Serialize)]
 struct CliDiagnosticOutput {
+    schema_version: u32,
     status: &'static str,
     message: String,
     diagnostics: Vec<Diagnostic>,
