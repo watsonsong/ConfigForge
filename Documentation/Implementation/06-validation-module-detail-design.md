@@ -13,7 +13,7 @@ validation 依赖 meta、data、diagnostic 和 asset resolver，不依赖 genera
 | [defaults.rs](../../src/validation/defaults.rs) | table-local default 与 normalize，pool 版本稳定合并。 |
 | [table.rs](../../src/validation/table.rs)、[struct_value.rs](../../src/validation/struct_value.rs) | required/type/enum、struct/fragment、unique/index 与 source schema。 |
 | [foreign_key.rs](../../src/validation/foreign_key.rs)、[key_policy.rs](../../src/validation/key_policy.rs) | 引用完整性、raw/resolved key 策略。 |
-| [asset.rs](../../src/validation/asset.rs) | 可见 asset 校验与来源。 |
+| [asset.rs](../../src/validation/asset.rs) | 使用 `asset::asset_field_paths` 遍历普通 struct / active fragment 的 Asset；target 模式过滤祖先与 child，full 模式检查全部字段，来源由 DataTable 补齐。 |
 | [registry.rs](../../src/validation/registry.rs)、[builtins/](../../src/validation/builtins/) | factory、compiled plan、typed config 和规则执行。 |
 | [diagnostic.rs](../../src/validation/diagnostic.rs) | ValidationIssue / ValidationReport / ValidationOutcome。 |
 | [report/](../../src/validation/report/) | Designer report model、enrichment 与四种格式 render。 |

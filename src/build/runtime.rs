@@ -6,14 +6,13 @@ use rayon::{ThreadPool, prelude::*};
 use crate::{
     ArtifactProjectInfo, ConfigForgeError, Result,
     artifact::ArtifactSink,
-    asset::AssetResolver,
-    data::{DataRow, DataSet, DataTable, RawSourceData},
+    data::RawSourceData,
     diagnostic::code::{CF_BUILD_EXPORT_TASK_FAILED, CF_BUILD_INPUT_REQUIRED},
     generator::{
         GeneratorCommonInput, GeneratorCommonInputContext, GeneratorRegistry, GeneratorTaskInput,
         PreparedGeneratorInputs,
     },
-    meta::{LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags},
+    meta::{LinkedMetaModel, TargetTags},
     project::AssetsConfig,
     validation::{
         normalize_data_set_with_pool,
@@ -21,7 +20,9 @@ use crate::{
     },
 };
 
-use super::{build_diagnostic_error, target::NormalizedExportTask};
+use super::{
+    asset_refs::canonicalize_asset_refs, build_diagnostic_error, target::NormalizedExportTask,
+};
 
 #[derive(Debug)]
 pub(super) struct RuntimeExportOutput {
@@ -190,150 +191,6 @@ fn export_validation_report_tasks(
     } else {
         Err(ConfigForgeError::from_diagnostics(errors))
     }
-}
-
-fn canonicalize_asset_refs(
-    meta: &LinkedMetaModel<'_>,
-    assets: &AssetsConfig,
-    target_tags: &TargetTags,
-    data_set: &DataSet,
-) -> Result<DataSet> {
-    if meta.model.asset_kinds.is_empty() {
-        return Ok(data_set.clone());
-    }
-
-    let resolver = AssetResolver::new(meta, assets)?;
-    let mut tables = Vec::with_capacity(data_set.tables.len());
-    for table in &data_set.tables {
-        let Some(table_meta) = meta.table(&table.name) else {
-            tables.push(table.clone());
-            continue;
-        };
-        let mut rows = Vec::with_capacity(table.rows.len());
-        for (row_index, row) in table.rows.iter().enumerate() {
-            let mut row = row.clone();
-            if table_meta
-                .meta
-                .is_row_exported_for(target_tags, |field| row.get(field).map(String::as_str))
-            {
-                for field in table_meta
-                    .fields
-                    .iter()
-                    .filter(|field| field.meta.is_exported_for(target_tags))
-                {
-                    canonicalize_asset_field_path(
-                        &resolver,
-                        target_tags,
-                        field.meta.name.as_str(),
-                        field,
-                        &mut row,
-                    )?;
-                }
-
-                let active_fragments = table
-                    .row_source(row_index)
-                    .map(|source| source.fragments.as_slice())
-                    .unwrap_or(&[]);
-                for fragment_name in active_fragments {
-                    let Some(fragment) = table_meta.fragment(fragment_name) else {
-                        continue;
-                    };
-                    if !fragment.meta.is_exported_for(target_tags) {
-                        continue;
-                    }
-                    if let Some(struct_type) = fragment.struct_type() {
-                        canonicalize_struct_asset_fields(
-                            &resolver,
-                            target_tags,
-                            fragment.meta.name.as_str(),
-                            struct_type,
-                            &mut row,
-                        )?;
-                    } else {
-                        for field in &fragment.fields {
-                            if !field.meta.is_exported_for(target_tags) {
-                                continue;
-                            }
-                            let field_path = format!(
-                                "{}.{}",
-                                fragment.meta.name.as_str(),
-                                field.meta.name.as_str()
-                            );
-                            canonicalize_asset_field_path(
-                                &resolver,
-                                target_tags,
-                                &field_path,
-                                field,
-                                &mut row,
-                            )?;
-                        }
-                    }
-                }
-            }
-            rows.push(row);
-        }
-        tables.push(DataTable::new_with_sources_and_cells(
-            table.name.clone(),
-            rows,
-            table.row_sources.clone(),
-            table.cell_sources.clone(),
-        )?);
-    }
-
-    DataSet::try_new(tables)
-}
-
-fn canonicalize_struct_asset_fields(
-    resolver: &AssetResolver,
-    target_tags: &TargetTags,
-    parent_path: &str,
-    struct_type: &LinkedStructType<'_>,
-    row: &mut DataRow,
-) -> Result<()> {
-    for field in &struct_type.fields {
-        if !field.meta.is_exported_for(target_tags) {
-            continue;
-        }
-        let field_path = format!("{parent_path}.{}", field.meta.name);
-        match &field.linked_field {
-            LinkedField::Struct(child_struct) => canonicalize_struct_asset_fields(
-                resolver,
-                target_tags,
-                &field_path,
-                child_struct,
-                row,
-            )?,
-            _ => canonicalize_asset_field_path(resolver, target_tags, &field_path, field, row)?,
-        }
-    }
-    Ok(())
-}
-
-fn canonicalize_asset_field_path(
-    resolver: &AssetResolver,
-    target_tags: &TargetTags,
-    field_path: &str,
-    field: &LinkedFieldMeta<'_>,
-    row: &mut DataRow,
-) -> Result<()> {
-    if !matches!(
-        field.linked_field,
-        LinkedField::Primitive(crate::meta::PrimitiveFieldType::Asset)
-    ) {
-        return Ok(());
-    }
-    let Some(asset_kind) = field.meta.asset_kind.as_deref() else {
-        return Ok(());
-    };
-    let Some(value) = row.get(field_path).cloned() else {
-        return Ok(());
-    };
-    if value.trim().is_empty() {
-        return Ok(());
-    }
-    let resolved = resolver.resolve_for_target(asset_kind, &value, target_tags)?;
-    row.insert(field_path.to_owned(), resolved.canonical_export_ref);
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

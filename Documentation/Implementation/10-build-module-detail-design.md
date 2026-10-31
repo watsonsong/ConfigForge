@@ -43,6 +43,7 @@ src/build/
 | --- | --- |
 | `options.rs` | CLI 传入 build 的稳定参数对象；执行资源限制默认值与合法性；BuildTrace / stage metrics 输出模型。 |
 | `target.rs` | target tags、export task 默认命名、export task 名称校验、requirements 与禁止 task-level input/data 的字段校验。 |
+| `asset_refs.rs` | Asset 导出副本补齐；读取 resolved scalar/default，按原 expanded / JSON layout 写回 canonical ref。 |
 | `runtime.rs` | MetaAndData export task 执行：消费已准备的 `RawSourceData`、复用 normalized DataSet、收集 validation warning、调用 data-backed generator。 |
 | `artifact_plan.rs` | 在任何 generator 执行前并行收集整个 target 的输出路径，按 export task 声明顺序交给共享 `ArtifactSink` 一次性检查并预留。 |
 | `plan.rs` | 保存两类任务 indices；从原始 exports 声明顺序生成 trace summary。 |

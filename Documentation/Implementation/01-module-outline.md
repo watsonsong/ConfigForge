@@ -23,7 +23,7 @@
 | Meta | `src/meta/` | Meta schema 加载、纯配置模型、link 借用视图、结构校验；模型定义按 raw / linked / types / conditions 拆分。 | Meta TOML 片段。 | `MetaModel`、`LinkedMetaModel<'meta>`、`MetaDiagnostic`。 | `04-meta-module-detail-design.md` |
 | Runtime Contract | `src/runtime_contract.rs` | data artifact toolkit / code artifact toolkit / generator / build 共享的底层运行时契约，包括 runtime data file metadata 和 binary schema revision 计算。 | `LinkedTableMeta<'meta>`、`TargetTags`。 | `RuntimeDataFile`、schema revision。 | 本文档总览。 |
 | Data | `src/data/` | 根据加载计划读取 CSV/XLSX 数据源，形成 raw `DataSet`，并提供 Meta-aware resolver。 | `DataLoadPlan`、source files、`LinkedMetaModel<'meta>`。 | `DataSet`、`ResolvedTable` / resolved view。 | `05-data-module-detail-design.md` |
-| Asset Resolver | `src/asset.rs` | 根据 Meta `asset_kind` 与 Project asset search paths 解析资源引用，生成 canonical export ref，并执行存在性、sidecar、命名、prefix / regex、target-gated deny 等检查。 | `LinkedMetaModel<'meta>`、`AssetsConfig`、`TargetTags`、raw asset ref。 | `ResolvedAssetRef` / validation error。 | `08-asset-validation-and-manifest.md` |
+| Asset Resolver | `src/asset/` | 共享 Asset 字段路径遍历；根据 Meta `asset_kind` 与 Project asset search paths 解析资源引用，生成 canonical export ref，并执行存在性、sidecar、命名、prefix / regex、target-gated deny 等检查。 | `LinkedMetaModel<'meta>`、`AssetsConfig`、`TargetTags`、raw asset ref。 | `ResolvedAssetRef` / validation error。 | `08-asset-validation-and-manifest.md` |
 | Validation | `src/validation/` | 数据归一化、基础规则校验、target-aware ExportValidationView、asset reference validation、注册式 validator；入口、table、FK、struct value、default、asset 逻辑分文件维护。 | `LinkedMetaModel<'meta>`、`DataSet`、`TargetTags`、可选 `AssetsConfig`。 | `ValidationReport` / `ValidationIssue`。 | `06-validation-module-detail-design.md` |
 | Artifact | `src/artifact/` | 统一制品模型、路径冲突检查、dry-run、direct/temp-commit 写入策略和写入结果。 | `Artifact` 兼容列表或 `ArtifactSink` stream 写入请求、写入模式。 | `ArtifactWriteResult` / write entries / 文件系统产物。 | `07-artifact-module-detail-design.md` |
 | Artifact Info | `src/artifact_info.rs` | 跨 codegen、schema_doc、validation report / manifest 等 artifact 生成器共享的轻量 Project 信息 facade，避免文档/导出模块依赖 codegen 专属类型。 | `ProjectConfigMeta`。 | `ArtifactProjectInfo`。 | 本文档总览。 |
@@ -169,7 +169,7 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 
 | 顺序 | 目标 | 实施边界 |
 | --- | --- | --- |
-| 优先修复 | 统一可见 Asset 值遍历，覆盖普通 struct child。 | 同步校验、canonical ref 补齐和 Manifest；先验证 expanded / JSON cell、fragment、default、override 与 target 过滤，保持 raw key / source trace。 |
+| 已完成 | 统一可见 Asset 字段路径遍历，覆盖普通 struct child。 | 校验、canonical ref 补齐和 Manifest 共用 `asset::asset_field_paths`；expanded / JSON cell、fragment、default、override 与 target 过滤有回归覆盖，保持 raw key / cell source trace。 |
 | 优先修复 | 统一未知配置字段处理。 | 封闭 schema 拒绝未知键，generator / validator 的动态区域由各自 parser 消费并检查剩余项；保持现有合法配置与明确扩展能力。 |
 | 随后简化 | 减少 build 中无实际结果的 task output 包装和重复 context 转交。 | 任务仅返回 export_name 再与输入比对的环节可删除；保留并行重叠、声明顺序、路径规划屏障与错误优先级。 |
 | 随后收敛 | 复用 target-scoped resolved data 和 Asset 解析结果。 | 从重复消费者最多的路径逐步迁移，不增加全局缓存或另一份通用 IR；保留 hidden support fields、raw key 与失败诊断，测量耗时和峰值内存。 |

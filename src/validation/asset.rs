@@ -3,18 +3,15 @@
 
 use crate::{
     ConfigForgeError,
-    asset::AssetResolver,
+    asset::{AssetResolver, asset_field_paths},
     data::{DataResolver, DataRow, DataTable, ResolvedRow},
     diagnostic::{DiagnosticLocation, code},
-    meta::{
-        AssetsConfig, LinkedField, LinkedFieldMeta, LinkedMetaModel, LinkedStructType, TargetTags,
-    },
+    meta::{AssetsConfig, LinkedField, LinkedFieldMeta, LinkedMetaModel, TargetTags},
 };
 
 use super::{
     ExportTableView, ValidationIssue, ValidationReport,
     diagnostic::error_issues_from_result,
-    fragment_field_key,
     key_policy::{resolved_path_value, scalar_export_value},
 };
 
@@ -78,7 +75,11 @@ pub(super) fn validate_assets_full(
             let resolved_row = resolved_table
                 .as_ref()
                 .and_then(|resolved_table| resolved_table.rows.get(row_index));
-            for field in &table_meta.fields {
+            let active_fragments = table
+                .row_source(row_index)
+                .map(|source| source.fragments.as_slice())
+                .unwrap_or(&[]);
+            for (field_path, field) in asset_field_paths(table_meta, active_fragments, None) {
                 validate_asset_field_path(
                     &resolver,
                     &target_tags,
@@ -86,50 +87,10 @@ pub(super) fn validate_assets_full(
                     row,
                     resolved_row,
                     row_number,
-                    field.meta.name.as_str(),
+                    &field_path,
                     field,
                     &mut report,
                 );
-            }
-            let active_fragments = table
-                .row_source(row_index)
-                .map(|source| source.fragments.as_slice())
-                .unwrap_or(&[]);
-            for fragment_name in active_fragments {
-                let Some(fragment) = table_meta.fragment(fragment_name) else {
-                    continue;
-                };
-                if let Some(struct_type) = fragment.struct_type() {
-                    validate_struct_asset_fields(
-                        &resolver,
-                        &target_tags,
-                        table_meta.meta.name.as_str(),
-                        row,
-                        resolved_row,
-                        row_number,
-                        fragment.meta.name.as_str(),
-                        struct_type,
-                        &mut report,
-                    );
-                } else {
-                    for field in &fragment.fields {
-                        let field_path = fragment_field_key(
-                            fragment.meta.name.as_str(),
-                            field.meta.name.as_str(),
-                        );
-                        validate_asset_field_path(
-                            &resolver,
-                            &target_tags,
-                            table_meta.meta.name.as_str(),
-                            row,
-                            resolved_row,
-                            row_number,
-                            &field_path,
-                            field,
-                            &mut report,
-                        );
-                    }
-                }
             }
             enrich_asset_row_issues(&mut report, issue_start, table, row_index);
         }
@@ -154,11 +115,13 @@ fn validate_table_assets(
             .source_row_number
             .unwrap_or(visible_row.row_index + 1);
 
-        for field in table_view
-            .meta
-            .fields
-            .iter()
-            .filter(|field| table_view.is_field_visible(field.meta.name.as_str()))
+        let active_fragments = table_view
+            .table
+            .row_source(visible_row.row_index)
+            .map(|source| source.fragments.as_slice())
+            .unwrap_or(&[]);
+        for (field_path, field) in
+            asset_field_paths(table_view.meta, active_fragments, Some(target_tags))
         {
             validate_asset_field_path(
                 resolver,
@@ -167,56 +130,10 @@ fn validate_table_assets(
                 row,
                 resolved_row,
                 row_number,
-                field.meta.name.as_str(),
+                &field_path,
                 field,
                 report,
             );
-        }
-
-        let active_fragments = table_view
-            .table
-            .row_source(visible_row.row_index)
-            .map(|source| source.fragments.as_slice())
-            .unwrap_or(&[]);
-        for fragment_name in active_fragments {
-            let Some(fragment) = table_view.meta.fragment(fragment_name) else {
-                continue;
-            };
-            if !fragment.meta.is_exported_for(target_tags) {
-                continue;
-            }
-            if let Some(struct_type) = fragment.struct_type() {
-                validate_struct_asset_fields(
-                    resolver,
-                    target_tags,
-                    table_view.meta.meta.name.as_str(),
-                    row,
-                    resolved_row,
-                    row_number,
-                    fragment.meta.name.as_str(),
-                    struct_type,
-                    report,
-                );
-            } else {
-                for field in &fragment.fields {
-                    if !field.meta.is_exported_for(target_tags) {
-                        continue;
-                    }
-                    let field_path =
-                        fragment_field_key(fragment.meta.name.as_str(), field.meta.name.as_str());
-                    validate_asset_field_path(
-                        resolver,
-                        target_tags,
-                        table_view.meta.meta.name.as_str(),
-                        row,
-                        resolved_row,
-                        row_number,
-                        &field_path,
-                        field,
-                        report,
-                    );
-                }
-            }
         }
         enrich_asset_row_issues(report, issue_start, table_view.table, visible_row.row_index);
     }
@@ -239,50 +156,6 @@ fn row_number(table: &DataTable, row_index: usize) -> usize {
         .row_source(row_index)
         .map(|source| source.source_row_number)
         .unwrap_or(row_index + 1)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn validate_struct_asset_fields(
-    resolver: &AssetResolver,
-    target_tags: &TargetTags,
-    table_name: &str,
-    row: &DataRow,
-    resolved_row: Option<&ResolvedRow>,
-    row_number: usize,
-    parent_path: &str,
-    struct_type: &LinkedStructType<'_>,
-    report: &mut ValidationReport,
-) {
-    for field in &struct_type.fields {
-        if !field.meta.is_exported_for(target_tags) {
-            continue;
-        }
-        let field_path = format!("{parent_path}.{}", field.meta.name);
-        match &field.linked_field {
-            LinkedField::Struct(child_struct) => validate_struct_asset_fields(
-                resolver,
-                target_tags,
-                table_name,
-                row,
-                resolved_row,
-                row_number,
-                &field_path,
-                child_struct,
-                report,
-            ),
-            _ => validate_asset_field_path(
-                resolver,
-                target_tags,
-                table_name,
-                row,
-                resolved_row,
-                row_number,
-                &field_path,
-                field,
-                report,
-            ),
-        }
-    }
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -4,6 +4,7 @@
 use std::{collections::BTreeMap, fs, path::Path, path::PathBuf};
 
 mod artifact_plan;
+mod asset_refs;
 mod options;
 mod pipeline;
 mod plan;

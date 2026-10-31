@@ -6,6 +6,8 @@ mod support;
 
 #[path = "cli_integration/artifact_modes.rs"]
 mod artifact_modes;
+#[path = "cli_integration/asset_refs.rs"]
+mod asset_refs;
 #[path = "cli_integration/code_only.rs"]
 mod code_only;
 #[path = "cli_integration/codegen_tasks.rs"]
