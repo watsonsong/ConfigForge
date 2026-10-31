@@ -79,6 +79,7 @@ Use the implementation documents after product behavior has been confirmed in `D
 
 - [`Tech/development-environment.md`](Tech/development-environment.md) — Required Rust core toolchain, optional cross-language harness tools, runtime adapter dependencies, and local/full-CI environment guidance.
 - [`Tech/test-ci-matrix.md`](Tech/test-ci-matrix.md) — Local / quick / full / nightly test profiles, generated-code runtime harness matrix, runtime adapter compliance matrix, and skip / fail-fast policy.
+- [`Tech/ci-troubleshooting.md`](Tech/ci-troubleshooting.md) — CI 排错顺序、已验证的跨版本 / 跨平台失败模式与开发注意事项。
 - [`Tech/unit-test-coverage.md`](Tech/unit-test-coverage.md) — Rust unit test coverage tooling, commands, evaluation criteria, and current coverage baseline.
 - [`Tech/task-system-design.md`](Tech/task-system-design.md) — Current CPU pool and resource policy, provider compatibility boundaries, determinism, validation requirements, and extension triggers.
 - [`Tech/cpp-runtime-dependencies.md`](Tech/cpp-runtime-dependencies.md) — C++ runtime reader 三方依赖的 CMake 查找、自动下载、target 接入与新增 reader checklist。

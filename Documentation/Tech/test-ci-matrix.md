@@ -2,6 +2,8 @@
 
 本文定义 ConfigForge 本地测试、quick CI、full CI / nightly 的工具链要求、skip / fail-fast 策略，以及 generated-code runtime harness 与 runtime adapter compliance runner 的覆盖矩阵。详细环境安装见 [`development-environment.md`](development-environment.md)。
 
+排错顺序与历次失败提炼出的开发注意事项见 [`ci-troubleshooting.md`](ci-troubleshooting.md)。
+
 ## Current GitHub Actions workflows
 
 CI quality job 还通过 CMake 拉取固定版本的 RapidJSON / msgpack-cxx，编译 C++17 runtime adapters 并运行 CTest 的 smoke、compliance 和 install/find_package 检查。
