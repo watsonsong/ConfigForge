@@ -279,9 +279,9 @@ mod tests {
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
+        mpsc,
     };
-    use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     use crate::artifact::{ArtifactSink, ArtifactWriteMode, ArtifactWriter};
     use crate::data::{DataSet, RawSourceData};
@@ -474,20 +474,18 @@ mod tests {
             .build()
             .expect("pool should build");
         let meta = minimal_meta_model();
-        let source_started = Arc::new(AtomicBool::new(false));
-        let link_observed_source = Arc::new(AtomicBool::new(false));
-        let source_started_for_link = source_started.clone();
-        let link_observed_source_for_link = link_observed_source.clone();
-        let source_started_for_source = source_started.clone();
-        let started_at = Instant::now();
+        let (link_started_tx, link_started_rx) = mpsc::channel();
+        let (source_started_tx, source_started_rx) = mpsc::channel();
+        let meta = &meta;
 
         let ((linked_meta, meta_only_output), raw_sources) = join_link_meta_only_and_source_read(
-            || {
-                thread::sleep(Duration::from_millis(40));
-                if source_started_for_link.load(Ordering::SeqCst) {
-                    link_observed_source_for_link.store(true, Ordering::SeqCst);
-                }
-                thread::sleep(Duration::from_millis(40));
+            move || {
+                link_started_tx
+                    .send(())
+                    .expect("source branch should be alive");
+                source_started_rx
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("source read should start before the link branch returns");
                 Ok((
                     meta.link()
                         .map_err(crate::meta::meta_diagnostics_to_report)
@@ -495,9 +493,13 @@ mod tests {
                     empty_branch_output(),
                 ))
             },
-            Some(|| {
-                source_started_for_source.store(true, Ordering::SeqCst);
-                thread::sleep(Duration::from_millis(80));
+            Some(move || {
+                source_started_tx
+                    .send(())
+                    .expect("link branch should be alive");
+                link_started_rx
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("link branch should start before source read returns");
                 Ok(empty_raw_sources())
             }),
             &pool,
@@ -507,8 +509,6 @@ mod tests {
         assert!(linked_meta.table("items").is_some());
         assert!(meta_only_output.warnings.is_empty());
         assert!(raw_sources.is_some());
-        assert!(link_observed_source.load(Ordering::SeqCst));
-        assert!(started_at.elapsed() < Duration::from_millis(140));
     }
 
     #[test]
@@ -518,29 +518,31 @@ mod tests {
             .build()
             .expect("pool should build");
         let meta = minimal_meta_model();
-        let source_finished = Arc::new(AtomicBool::new(false));
-        let meta_only_observed_source_unfinished = Arc::new(AtomicBool::new(false));
-        let source_finished_for_meta_only = source_finished.clone();
-        let meta_only_observed_source_unfinished_for_meta_only =
-            meta_only_observed_source_unfinished.clone();
-        let source_finished_for_source = source_finished.clone();
+        let (source_started_tx, source_started_rx) = mpsc::channel();
+        let (meta_only_started_tx, meta_only_started_rx) = mpsc::channel();
+        let meta = &meta;
 
         let ((linked_meta, _meta_only_output), raw_sources) = join_link_meta_only_and_source_read(
-            || {
-                thread::sleep(Duration::from_millis(20));
+            move || {
                 let linked_meta = meta
                     .link()
                     .map_err(crate::meta::meta_diagnostics_to_report)
                     .map_err(ConfigForgeError::MetaValidation)?;
-                if !source_finished_for_meta_only.load(Ordering::SeqCst) {
-                    meta_only_observed_source_unfinished_for_meta_only
-                        .store(true, Ordering::SeqCst);
-                }
+                source_started_rx
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("source read should start concurrently");
+                meta_only_started_tx
+                    .send(())
+                    .expect("source read should still be waiting for MetaOnly generation");
                 Ok((linked_meta, empty_branch_output()))
             },
-            Some(|| {
-                thread::sleep(Duration::from_millis(100));
-                source_finished_for_source.store(true, Ordering::SeqCst);
+            Some(move || {
+                source_started_tx
+                    .send(())
+                    .expect("MetaOnly branch should be alive");
+                meta_only_started_rx
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("MetaOnly generation should start before source read finishes");
                 Ok(empty_raw_sources())
             }),
             &pool,
@@ -549,8 +551,6 @@ mod tests {
 
         assert!(linked_meta.table("items").is_some());
         assert!(raw_sources.is_some());
-        assert!(source_finished.load(Ordering::SeqCst));
-        assert!(meta_only_observed_source_unfinished.load(Ordering::SeqCst));
     }
 
     #[test]

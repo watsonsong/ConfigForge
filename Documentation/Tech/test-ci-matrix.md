@@ -20,6 +20,8 @@ C# generated-code 与 runtime compliance harness 统一使用 `net8.0`；CI qual
 
 CI 使用 `quick` profile。Ubuntu quality job 执行完整 crate 测试入口；跨平台 job 执行 library unit tests、architecture guard、CLI integration、Rust runtime compliance 与 runtime metadata tests。可选语言工具仍遵循下文的明确 skip 策略；当前 workflow 不等同于要求安装所有语言工具的 full / nightly 矩阵。
 
+并发正确性测试通过 channel 等同步信号验证分支重叠与先后依赖，不通过固定 sleep 或严格的总耗时上限推断并行。同步等待应设置宽松超时以便调度回归及时失败；该超时仅用于防止测试挂起，不作为性能指标。耗时与吞吐回归应在单独的受控性能评估中判断，避免共享 CI runner 的调度延迟导致正确性测试误报。
+
 ## Test profiles
 
 测试 fixture 的路径断言使用 `Path` 语义；嵌入 TOML 的临时路径通过统一 helper 使用正斜杠，不能直接插入 Windows `display()`。从工作区读取后需要按多行块匹配的文本应统一 CRLF / LF。Java harness 显式使用 `javac -encoding UTF-8`，避免系统默认编码影响中文测试数据。绝对路径拒绝测试使用平台实际的绝对路径，不用 Unix-only `/tmp` 假定。
