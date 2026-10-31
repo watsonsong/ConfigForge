@@ -39,6 +39,8 @@
 
 当前实现已支持 asset validation/completion 与 Asset Manifest：`asset` 字段必须声明 `asset_kind`，Meta 支持顶层 `[[asset_kinds]]` 和 `extends` 继承；Project Config 支持 `[assets]` / `[[assets.search_paths]]`；runtime build 会对当前 target ExportView 中可见的 asset 字段执行 resolver 校验，并在导出 JSON / MessagePack / bin 等 runtime data 前把可补齐引用写成 canonical export ref。已实现的 resolver 覆盖 local filesystem search path、relative / mounted / mounted_object、extension policy、wrapper stripping、object name 模板、存在性、sidecar、命名前后缀、prefix / pattern / regex、target-gated deny 和基础大小写检查。`type = "asset_manifest"` 已作为聚合 data exporter 接入，读取同一 canonicalized DataSet，输出 deterministic JSON 或 Unreal DataTable 兼容 CSV。当前 validation 诊断使用 `CF_DATA_INVALID_ASSET_REF` code 并携带 table / field / row / target 定位；resolution cache 和 provider 扩展仍为后续方向。
 
+当前已确认的覆盖缺口：普通 table struct 字段中的 Asset child 尚未完整进入资源校验、canonical ref 补齐和 Asset Manifest 提取；不能把 top-level Asset 的支持等同于所有 nested Asset。该问题同时影响 expanded 与 JSON cell 值路径的设计一致性，修复目标是让三条消费路径复用一致的可见字段 / 值遍历，而不是分别补充另一套递归逻辑。复现证据见 [整体设计评估](../DevLogs/2026-10-31-architecture-review.md)。
+
 当前语义：
 
 - Asset existence 默认对 ExportView 执行。

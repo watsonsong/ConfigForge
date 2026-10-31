@@ -293,6 +293,8 @@ Asset 字段当前由 `asset_kind` + Project `[assets]` 驱动校验，至少检
 
 Asset existence 默认对 ExportView 执行。被 target filter 排除的记录，其 asset 不阻塞该 target 导出，也不进入 asset manifest。asset ref 的读取使用 resolved scalar export string，并以 raw cell fallback 兼容旧输入；因此 default asset ref、ObjectTable override cell 和 struct/fragment expanded asset field 与普通 runtime payload 使用同一套解析语义。Asset Manifest 的引用路径使用同样的 resolved asset value，record key 则继续走显式 raw record-key policy。
 
+上述 resolved value 读取规则不代表所有字段形状都已经遍历到：普通 table struct 内 Asset child 的校验 / 补齐 / Manifest 目前存在覆盖缺口，具体边界见 [Asset 当前状态](08-asset-validation-and-manifest.md#82-当前状态)。修复时应保持原始值、raw key 与来源定位，不能通过改写 raw key 语义来复用 typed value。
+
 当前实现已支持 asset ref 校验、导出补齐和 Asset Manifest。`asset` 字段必须声明 `asset_kind`；Meta 顶层 `[[asset_kinds]]` 支持 `extends` 继承；Project `[assets]` / `[[assets.search_paths]]` 提供 filesystem search path；validation 只检查当前 target ExportView 中可见且非空的 asset 字段；runtime JSON / MessagePack / bin 导出前会通过同一 resolver 把可补齐引用物化为 canonical asset string。标准参考工程已用 `meta/common.toml` 存放公共 Unreal 基础规则，并用伪造 `.uasset` fixture 覆盖存在性校验，同时在 client target 中导出 `asset_manifest` JSON 与 CSV 清单。Asset Manifest exporter 作为同级聚合 data exporter 接入，支持 deterministic JSON 与 Unreal DataTable 兼容 CSV，并复用 target visible-row helper、resolved asset value helper 和 raw record-key policy。目标态细节见 [`08-asset-validation-and-manifest.md`](08-asset-validation-and-manifest.md)。
 
 ### Text

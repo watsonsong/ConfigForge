@@ -50,6 +50,8 @@ data/
 
 Project Config 定义工程元信息、Meta 定义和可构建的 targets。CLI 只接收 Project Config 路径和 target 名称；Data 输入、runtime data 输出、代码生成语言和代码输出目录都由 target 配置决定。
 
+当前未知字段检查尚不统一：TargetConfig 和部分 generator option 会拒绝未知键，但 Project / Meta 的部分结构及 codegen option 外层仍可能静默忽略拼写错误。例如 field 的 `requird = true` 不会成为 required 约束，Rust task 的 `ruts = { derive_serde = true }` 不会生效且可能构建成功。后续应对封闭配置严格拒绝未知键，并仅在显式的 generator / validator 扩展区域保留动态参数；不能把整个配置视为任意扩展字典。审查证据见 [整体设计评估](../DevLogs/2026-10-31-architecture-review.md)。
+
 示例：
 
 ```toml

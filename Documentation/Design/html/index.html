@@ -138,8 +138,8 @@
 </tr>
 <tr>
 <td>asset validation / completion / manifest</td>
-<td>Implemented MVP</td>
-<td>已实现 <code>asset</code> 字段强制声明 <code>asset_kind</code>、Project <code>[assets]</code> / <code>[[assets.search_paths]]</code>、Meta <code>[[asset_kinds]]</code> + <code>extends</code>、filesystem resolver、target ExportView 可见 asset 校验、存在性 / sidecar / 命名 / prefix / regex / 基础大小写检查、runtime export canonical asset string 补齐，以及 <code>type = &quot;asset_manifest&quot;</code> 聚合 exporter。Asset Manifest 支持 deterministic JSON 和 Unreal DataTable 兼容 CSV；validation 使用 <code>CF_DATA_INVALID_ASSET_REF</code>，regex 支持 error/warning 收集；resolution cache 和 provider 扩展后续推进。</td>
+<td>Implemented MVP（nested 覆盖 Partial）</td>
+<td>已实现 <code>asset</code> 字段强制声明 <code>asset_kind</code>、Project <code>[assets]</code> / <code>[[assets.search_paths]]</code>、Meta <code>[[asset_kinds]]</code> + <code>extends</code>、filesystem resolver、target ExportView 可见 asset 校验、存在性 / sidecar / 命名 / prefix / regex / 基础大小写检查、runtime export canonical asset string 补齐，以及 <code>type = &quot;asset_manifest&quot;</code> 聚合 exporter。Asset Manifest 支持 deterministic JSON 和 Unreal DataTable 兼容 CSV；validation 使用 <code>CF_DATA_INVALID_ASSET_REF</code>，regex 支持 error/warning 收集；普通 table struct 内 Asset child 的校验 / 补齐 / Manifest 存在已确认缺口，见 Asset 专题；resolution cache 和 provider 扩展后续推进。</td>
 </tr>
 <tr>
 <td>validators</td>
@@ -518,6 +518,7 @@ data/
 <p>拆分时使用 Project Config 顶层 <code>imports</code> 统一导入其他工程配置片段。被导入的文件与根配置使用同一套格式：可以直接声明 <code>[[enums]]</code>、<code>[[structs]]</code>、<code>[[tables]]</code>、<code>[[asset_kinds]]</code>、<code>[[targets]]</code>，也可以继续声明 <code>imports</code>。不再需要单独的 <code>meta = [...]</code> 列表；所有导入片段中的 Meta 定义和 target 定义最终合并为一次构建使用的工程配置。标准参考游戏 fixture 采用 <code>ConfigForge.toml</code> 作为总控入口，按 <code>meta/common.toml</code>、<code>meta/characters.toml</code>、<code>meta/items.toml</code>、<code>meta/misc.toml</code> 拆分公共规则、角色、道具、杂项定义，并在总控文件中声明 client/server 构建 target。</p>
 <h2 id="design-3-32-project-config">3.2 Project Config</h2>
 <p>Project Config 定义工程元信息、Meta 定义和可构建的 targets。CLI 只接收 Project Config 路径和 target 名称；Data 输入、runtime data 输出、代码生成语言和代码输出目录都由 target 配置决定。</p>
+<p>当前未知字段检查尚不统一：TargetConfig 和部分 generator option 会拒绝未知键，但 Project / Meta 的部分结构及 codegen option 外层仍可能静默忽略拼写错误。例如 field 的 <code>requird = true</code> 不会成为 required 约束，Rust task 的 <code>ruts = { derive_serde = true }</code> 不会生效且可能构建成功。后续应对封闭配置严格拒绝未知键，并仅在显式的 generator / validator 扩展区域保留动态参数；不能把整个配置视为任意扩展字典。审查证据见 <a href="../../DevLogs/2026-10-31-architecture-review.md">整体设计评估</a>。</p>
 <p>示例：</p>
 <pre><code class="language-toml">imports = [
   &quot;meta/common.toml&quot;,
@@ -3371,6 +3372,7 @@ default = 1
 <li>如果 Project 配置了 filesystem search path 且全局 / kind 未关闭存在性校验，则检查资源存在。</li>
 </ul>
 <p>Asset existence 默认对 ExportView 执行。被 target filter 排除的记录，其 asset 不阻塞该 target 导出，也不进入 asset manifest。asset ref 的读取使用 resolved scalar export string，并以 raw cell fallback 兼容旧输入；因此 default asset ref、ObjectTable override cell 和 struct/fragment expanded asset field 与普通 runtime payload 使用同一套解析语义。Asset Manifest 的引用路径使用同样的 resolved asset value，record key 则继续走显式 raw record-key policy。</p>
+<p>上述 resolved value 读取规则不代表所有字段形状都已经遍历到：普通 table struct 内 Asset child 的校验 / 补齐 / Manifest 目前存在覆盖缺口，具体边界见 <a href="#design-8-82-当前状态">Asset 当前状态</a>。修复时应保持原始值、raw key 与来源定位，不能通过改写 raw key 语义来复用 typed value。</p>
 <p>当前实现已支持 asset ref 校验、导出补齐和 Asset Manifest。<code>asset</code> 字段必须声明 <code>asset_kind</code>；Meta 顶层 <code>[[asset_kinds]]</code> 支持 <code>extends</code> 继承；Project <code>[assets]</code> / <code>[[assets.search_paths]]</code> 提供 filesystem search path；validation 只检查当前 target ExportView 中可见且非空的 asset 字段；runtime JSON / MessagePack / bin 导出前会通过同一 resolver 把可补齐引用物化为 canonical asset string。标准参考工程已用 <code>meta/common.toml</code> 存放公共 Unreal 基础规则，并用伪造 <code>.uasset</code> fixture 覆盖存在性校验，同时在 client target 中导出 <code>asset_manifest</code> JSON 与 CSV 清单。Asset Manifest exporter 作为同级聚合 data exporter 接入，支持 deterministic JSON 与 Unreal DataTable 兼容 CSV，并复用 target visible-row helper、resolved asset value helper 和 raw record-key policy。目标态细节见 <a href="#design-8"><code>08-asset-validation-and-manifest.md</code></a>。</p>
 <h3 id="design-5-text">Text</h3>
 <p>Text 字段第一阶段推荐使用原文驱动模型：</p>
@@ -4689,6 +4691,7 @@ required = true
 </ul>
 <h2 id="design-8-82-当前状态">8.2 当前状态</h2>
 <p>当前实现已支持 asset validation/completion 与 Asset Manifest：<code>asset</code> 字段必须声明 <code>asset_kind</code>，Meta 支持顶层 <code>[[asset_kinds]]</code> 和 <code>extends</code> 继承；Project Config 支持 <code>[assets]</code> / <code>[[assets.search_paths]]</code>；runtime build 会对当前 target ExportView 中可见的 asset 字段执行 resolver 校验，并在导出 JSON / MessagePack / bin 等 runtime data 前把可补齐引用写成 canonical export ref。已实现的 resolver 覆盖 local filesystem search path、relative / mounted / mounted_object、extension policy、wrapper stripping、object name 模板、存在性、sidecar、命名前后缀、prefix / pattern / regex、target-gated deny 和基础大小写检查。<code>type = &quot;asset_manifest&quot;</code> 已作为聚合 data exporter 接入，读取同一 canonicalized DataSet，输出 deterministic JSON 或 Unreal DataTable 兼容 CSV。当前 validation 诊断使用 <code>CF_DATA_INVALID_ASSET_REF</code> code 并携带 table / field / row / target 定位；resolution cache 和 provider 扩展仍为后续方向。</p>
+<p>当前已确认的覆盖缺口：普通 table struct 字段中的 Asset child 尚未完整进入资源校验、canonical ref 补齐和 Asset Manifest 提取；不能把 top-level Asset 的支持等同于所有 nested Asset。该问题同时影响 expanded 与 JSON cell 值路径的设计一致性，修复目标是让三条消费路径复用一致的可见字段 / 值遍历，而不是分别补充另一套递归逻辑。复现证据见 <a href="../../DevLogs/2026-10-31-architecture-review.md">整体设计评估</a>。</p>
 <p>当前语义：</p>
 <ul>
 <li>Asset existence 默认对 ExportView 执行。</li>
