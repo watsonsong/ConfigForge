@@ -16,9 +16,8 @@ pub(super) fn canonicalize_asset_refs(
     meta: &LinkedMetaModel<'_>,
     assets: &AssetsConfig,
     target_tags: &TargetTags,
-    data_set: &DataSet,
+    mut data_set: DataSet,
 ) -> Result<DataSet> {
-    let mut data_set = data_set.clone();
     if meta.model.asset_kinds.is_empty() {
         return Ok(data_set);
     }

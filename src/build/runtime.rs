@@ -99,7 +99,7 @@ pub(super) fn export_meta_and_data_tasks(
         .clone()
         .into_diagnostic_report()
         .diagnostics;
-    let export_data_set = canonicalize_asset_refs(linked_meta, assets, target_tags, &data_set)
+    let export_data_set = canonicalize_asset_refs(linked_meta, assets, target_tags, data_set)
         .map_err(|error| error.with_diagnostics(diagnostics.clone()))?;
     let task_results = pool.install(|| {
         export_tasks
