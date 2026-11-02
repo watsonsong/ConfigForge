@@ -86,43 +86,9 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
     ) -> Result<Self> {
         let mut tables = Vec::new();
         for table_meta in &meta.tables {
-            if !table_meta.meta.is_exported_for(target_tags) {
-                continue;
+            if let Some(table_view) = target_table_view(table_meta, data_set, target_tags)? {
+                tables.push(table_view);
             }
-
-            let table = data_set
-                .table(&table_meta.meta.name)
-                .ok_or_else(|| missing_export_table_error(table_meta))?;
-            let visible_fields = table_meta
-                .fields
-                .iter()
-                .filter(|field| field.meta.is_exported_for(target_tags))
-                .map(|field| field.meta.name.as_str())
-                .collect();
-            let visible_rows: Vec<VisibleRow> = table
-                .rows
-                .iter()
-                .enumerate()
-                .filter(|(_, row)| {
-                    table_meta.meta.is_row_exported_for(target_tags, |field| {
-                        row.get(field).map(String::as_str)
-                    })
-                })
-                .map(|(row_index, _)| visible_row_for(table, row_index))
-                .collect();
-            let resolved_table = resolved_table_for(
-                table_meta,
-                table,
-                Some(target_tags),
-                visible_rows.iter().map(|row| row.row_index),
-            );
-            tables.push(ExportTableView::new(
-                table_meta,
-                table,
-                visible_fields,
-                visible_rows,
-                resolved_table,
-            ));
         }
 
         Ok(Self { tables })
@@ -134,22 +100,15 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
         target_tags: &TargetTags,
         pool: &rayon::ThreadPool,
     ) -> Result<Self> {
-        let mut table_views = pool.install(|| {
+        let table_views = pool.install(|| {
             meta.tables
                 .par_iter()
-                .enumerate()
-                .map(|(index, table_meta)| {
-                    (
-                        index,
-                        target_table_view(meta, table_meta, data_set, target_tags),
-                    )
-                })
+                .map(|table_meta| target_table_view(table_meta, data_set, target_tags))
                 .collect::<Vec<_>>()
         });
-        table_views.sort_by_key(|(index, _)| *index);
 
         let mut tables = Vec::new();
-        for (_, table_view) in table_views {
+        for table_view in table_views {
             if let Some(table_view) = table_view? {
                 tables.push(table_view);
             }
@@ -166,7 +125,6 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
 }
 
 fn target_table_view<'meta, 'data>(
-    _meta: &'meta LinkedMetaModel<'meta>,
     table_meta: &'meta LinkedTableMeta<'meta>,
     data_set: &'data DataSet,
     target_tags: &TargetTags,

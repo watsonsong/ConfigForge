@@ -217,46 +217,127 @@ fn export_validation_view_caches_resolved_rows_and_bridges_cell_sources() {
         .expect("table should be built");
     let data_set = DataSet::new(vec![table]);
 
-    let view =
-        ExportValidationView::for_target(&linked_meta, &data_set, &TargetTags::new(["client"]))
-            .expect("target view should build");
-    let table_view = view.table("items").expect("items view should exist");
+    let tags = TargetTags::new(["client"]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    for view in [
+        ExportValidationView::for_target(&linked_meta, &data_set, &tags),
+        ExportValidationView::for_target_with_pool(&linked_meta, &data_set, &tags, &pool),
+    ] {
+        let view = view.expect("target view should build");
+        let table_view = view.table("items").expect("items view should exist");
 
-    assert_eq!(table_view.visible_rows.len(), 1);
-    assert!(table_view.is_field_visible("id"));
-    assert!(table_view.is_field_visible("name"));
-    assert!(!table_view.is_field_visible("server_note"));
-    assert_eq!(table_view.raw_cell(0, "id"), Some("1"));
-    assert_eq!(
-        table_view
-            .visible_resolved_row(0)
-            .expect("resolved row should exist")
-            .len(),
-        2
+        assert_eq!(table_view.visible_rows.len(), 1);
+        assert!(table_view.is_field_visible("id"));
+        assert!(table_view.is_field_visible("name"));
+        assert!(!table_view.is_field_visible("server_note"));
+        assert_eq!(table_view.raw_cell(0, "id"), Some("1"));
+        assert_eq!(
+            table_view
+                .visible_resolved_row(0)
+                .expect("resolved row should exist")
+                .len(),
+            2
+        );
+        assert_eq!(
+            table_view
+                .resolved_value(0, "name")
+                .and_then(|value| value.scalar_export_string())
+                .as_deref(),
+            Some("Unknown")
+        );
+        let id_source = table_view.field_source(0, "id").expect("id source");
+        assert_eq!(
+            id_source
+                .resolved_trace
+                .expect("resolved source trace")
+                .raw_value
+                .as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            id_source
+                .cell_source
+                .expect("cell source should be bridged")
+                .source_column_name,
+            "id"
+        );
+    }
+}
+
+#[test]
+fn target_view_construction_preserves_declaration_and_missing_table_order() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "server_only"
+            source = "server.csv"
+            export_when = { any = ["server"] }
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables]]
+            name = "z_first"
+            source = "first.csv"
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+
+            [[tables]]
+            name = "a_second"
+            source = "second.csv"
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+        "#,
+    )
+    .unwrap();
+    let linked_meta = meta.link().unwrap();
+    let tags = TargetTags::new(["client"]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    let data_set = DataSet::new(
+        ["a_second", "z_first"]
+            .map(|name| {
+                DataTable::new(
+                    name,
+                    vec![BTreeMap::from([("id".to_owned(), "1".to_owned())])],
+                )
+            })
+            .into(),
     );
-    assert_eq!(
-        table_view
-            .resolved_value(0, "name")
-            .and_then(|value| value.scalar_export_string())
-            .as_deref(),
-        Some("Unknown")
-    );
-    let id_source = table_view.field_source(0, "id").expect("id source");
-    assert_eq!(
-        id_source
-            .resolved_trace
-            .expect("resolved source trace")
-            .raw_value
-            .as_deref(),
-        Some("1")
-    );
-    assert_eq!(
-        id_source
-            .cell_source
-            .expect("cell source should be bridged")
-            .source_column_name,
-        "id"
-    );
+    for view in [
+        ExportValidationView::for_target(&linked_meta, &data_set, &tags),
+        ExportValidationView::for_target_with_pool(&linked_meta, &data_set, &tags, &pool),
+    ] {
+        let view = view.unwrap();
+        assert_eq!(
+            view.tables
+                .iter()
+                .map(|table| table.meta.meta.name.as_str())
+                .collect::<Vec<_>>(),
+            ["z_first", "a_second"]
+        );
+    }
+    let empty = DataSet::new(Vec::new());
+    for result in [
+        ExportValidationView::for_target(&linked_meta, &empty, &tags),
+        ExportValidationView::for_target_with_pool(&linked_meta, &empty, &tags, &pool),
+    ] {
+        let error = result.err().expect("missing visible tables should fail");
+        let diagnostics = error.diagnostics();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].location.table.as_deref(), Some("z_first"));
+        assert_eq!(
+            diagnostics[0].code,
+            crate::diagnostic::code::CF_DATA_SOURCE_SCHEMA_INVALID
+        );
+    }
 }
 
 #[test]

@@ -22,6 +22,8 @@ validation 依赖 meta、data、diagnostic 和 asset resolver，不依赖 genera
 
 `validate_data_set*` 接受 raw data 并 normalize；`validate_normalized_data_set*` 接受已 normalized data。入口以 full/target、report、assets、pool 区分；签名以 [mod.rs](../../src/validation/mod.rs) 为准。
 
+串行 `for_target` 与并行 `for_target_with_pool` 共用 `target_table_view` 构造单表视图，统一 table / field / row 过滤、resolved companion 与来源信息。并行入口的 indexed Rayon collect 保持 Meta 声明顺序，无需附加 index 排序；缺失可见表时，两种入口均按声明顺序报告首个错误。
+
 Target 主路径：
 
 1. 建立 ExportValidationView，按 tags/export_when/row_export 过滤 table、field、row，构建 resolved companion。

@@ -173,7 +173,8 @@ diagnostic foundation 位于底层共享层；`diagnostic::error` 是 crate API 
 | 已完成 | 统一未知配置字段处理。 | 封闭 schema 拒绝未知键，generator / validator 的动态区域由各自 parser 消费并检查剩余项；保持现有合法配置与明确扩展能力。 |
 | 已完成 | 删除 build 中无实际验证作用的 task output 包装。 | 单任务直接返回 `Result<()>`，分支只聚合 warnings / diagnostics；实际产物由 `ArtifactSink` 验证，保留并行重叠、声明顺序、路径规划屏障与错误优先级。 |
 | 已完成 | 消除 Asset 补齐前的全量 DataSet 复制。 | `runtime.rs` 在校验完成后将 normalized DataSet 的所有权移交 `canonicalize_asset_refs`，直接修改 owned 数据并返回；无 asset kind 时直接返回原数据。保留 RawSourceData、来源信息、JSON / expanded 写回和失败诊断，不引入 `Cow` 或缓存。 |
-| 随后收敛 | 明确 validation 的 resolve 失败状态，再收敛内部入口。 | 串并行复用 table view 构造；显式保留解析失败，不能将 `.ok()` 简单改为提前 `?` 而削弱多错误收集。保留公开入口作为兼容 facade，内部请求统一单独评估，避免只为减少函数数量引入新抽象。 |
+| 已完成 | 统一 validation 串并行 target table view 构造。 | 共用 `target_table_view`；indexed Rayon collect 保持声明顺序，无需附加 index 排序，来源信息和缺失表的错误顺序一致。 |
+| 随后收敛 | 明确 validation 的 resolve 失败状态，再收敛内部入口。 | 显式保留解析失败，不能将 `.ok()` 简单改为提前 `?` 而削弱多错误收集。保留公开入口作为兼容 facade，内部请求统一单独评估，避免只为减少函数数量引入新抽象。 |
 | 随后优化 | 复用 target-scoped resolved data 和 Asset 解析结果。 | 在 resolve 失败状态明确后，从重复消费者最多的路径逐步迁移；Asset 补齐会改变后续导出值，不能直接复用补齐前的 resolved rows。保留 hidden support fields、raw key 与失败诊断，不增加全局缓存或另一份通用 IR，并测量耗时和峰值内存。 |
 | 按调用需求整理 | 隔离未接入生产 build 的 provider scheduler / resource policy，收敛 codegen 默认值、准备逻辑和 build 中重复的 context 转交。 | 公开 API 先审计再弃用；planning 和 generation 共用已解析选项，仍分别执行必要的路径安全检查；context 仅在具体调用确有复用收益时合并。 |
 
