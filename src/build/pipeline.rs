@@ -299,33 +299,6 @@ fn execute_runtime_export_nodes(
         pool,
         sink,
     )?;
-    if output.task_outputs.len() != export_tasks.len() {
-        return Err(build_diagnostic_error(
-            CF_BUILD_EXPORT_TASK_FAILED,
-            "build.runtime.output",
-            "runtime exporter returned an unexpected number of task outputs".to_owned(),
-            output.task_outputs.len().to_string(),
-            format!("{} runtime export task outputs", export_tasks.len()),
-            "Check runtime export task scheduling and output aggregation.",
-        ));
-    }
-
-    for ((_, task), task_output) in export_tasks.iter().copied().zip(output.task_outputs) {
-        if task_output.export_name != task.name {
-            return Err(build_diagnostic_error(
-                CF_BUILD_EXPORT_TASK_FAILED,
-                "build.runtime.output",
-                format!(
-                    "runtime exporter returned output for `{}` while `{}` was expected",
-                    task_output.export_name, task.name
-                ),
-                task_output.export_name,
-                task.name.clone(),
-                "Check runtime export task output ordering and names.",
-            ));
-        }
-    }
-
     Ok(ExportBranchOutput {
         warnings: output.warnings,
         diagnostics: output.diagnostics,

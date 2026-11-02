@@ -28,12 +28,6 @@ use super::{
 pub(super) struct RuntimeExportOutput {
     pub(super) warnings: Vec<String>,
     pub(super) diagnostics: Vec<crate::Diagnostic>,
-    pub(super) task_outputs: Vec<RuntimeExportTaskOutput>,
-}
-
-#[derive(Debug)]
-pub(super) struct RuntimeExportTaskOutput {
-    pub(super) export_name: String,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -55,7 +49,6 @@ pub(super) fn export_meta_and_data_tasks(
         return Ok(RuntimeExportOutput {
             warnings: Vec::new(),
             diagnostics: Vec::new(),
-            task_outputs: Vec::new(),
         });
     }
     let raw_sources = raw_sources.ok_or_else(|| {
@@ -108,7 +101,7 @@ pub(super) fn export_meta_and_data_tasks(
         .diagnostics;
     let export_data_set = canonicalize_asset_refs(linked_meta, assets, target_tags, &data_set)
         .map_err(|error| error.with_diagnostics(diagnostics.clone()))?;
-    let task_outputs = pool.install(|| {
+    let task_results = pool.install(|| {
         export_tasks
             .par_iter()
             .map(|export_task| {
@@ -130,21 +123,13 @@ pub(super) fn export_meta_and_data_tasks(
             .collect::<Vec<_>>()
     });
 
-    for task_output in task_outputs {
-        task_output.map_err(|error| error.with_diagnostics(diagnostics.clone()))?;
+    for task_result in task_results {
+        task_result.map_err(|error| error.with_diagnostics(diagnostics.clone()))?;
     }
-
-    let stable_task_outputs = export_tasks
-        .iter()
-        .map(|task| RuntimeExportTaskOutput {
-            export_name: task.name.clone(),
-        })
-        .collect();
 
     Ok(RuntimeExportOutput {
         warnings,
         diagnostics,
-        task_outputs: stable_task_outputs,
     })
 }
 
@@ -207,7 +192,7 @@ fn export_meta_and_data_task(
     pool: &ThreadPool,
     sink: &ArtifactSink,
     generator_registry: &GeneratorRegistry,
-) -> Result<RuntimeExportTaskOutput> {
+) -> Result<()> {
     let generator = generator_registry.require_generator(&export_task.type_id)?;
     if !generator.requirements().needs_data {
         return Err(build_diagnostic_error(
@@ -241,10 +226,7 @@ fn export_meta_and_data_task(
             },
         },
         sink,
-    )?;
-    Ok(RuntimeExportTaskOutput {
-        export_name: export_task.name.clone(),
-    })
+    )
 }
 
 fn generator_common_input<'meta>(
@@ -278,8 +260,9 @@ mod tests {
         collections::BTreeMap,
         path::PathBuf,
         sync::{
-            Arc,
+            Arc, Mutex,
             atomic::{AtomicUsize, Ordering},
+            mpsc,
         },
         thread,
         time::Duration,
@@ -412,26 +395,110 @@ mod tests {
 
         assert!(max_active_plans.load(Ordering::SeqCst) > 1);
         assert!(max_active_exports.load(Ordering::SeqCst) > 1);
-        assert_eq!(
-            output
-                .task_outputs
-                .iter()
-                .map(|output| output.export_name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["slow", "fast"]
-        );
+        assert!(output.warnings.is_empty());
+        assert!(output.diagnostics.is_empty());
         let artifact_result = sink.finish().expect("sink should finish");
         assert_eq!(
             artifact_result
                 .entries
                 .into_iter()
-                .map(|entry| entry.path)
+                .map(|entry| (entry.path, entry.bytes, entry.written))
                 .collect::<Vec<_>>(),
             vec![
-                PathBuf::from("out/fast/fast.txt"),
-                PathBuf::from("out/slow/slow.txt")
+                (PathBuf::from("out/fast/fast.txt"), 4, false),
+                (PathBuf::from("out/slow/slow.txt"), 4, false)
             ]
         );
+    }
+
+    struct FailingGenerator {
+        second_failed: Mutex<mpsc::Receiver<()>>,
+        notify_second_failed: mpsc::Sender<()>,
+        completed: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl ArtifactGenerator for FailingGenerator {
+        fn type_id(&self) -> &'static str {
+            "failing"
+        }
+
+        fn requirements(&self) -> GeneratorRequirements {
+            GeneratorRequirements::meta_and_data()
+        }
+
+        fn plan_artifacts(&self, _input: &GeneratorCommonInput<'_>) -> Result<Vec<PathBuf>> {
+            Ok(Vec::new())
+        }
+
+        fn generate(&self, input: &GeneratorTaskInput<'_, '_>, _sink: &ArtifactSink) -> Result<()> {
+            let task_name = input.common.task_name.as_str();
+            if task_name == "first" {
+                self.second_failed
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("second task should fail before first task");
+            }
+            self.completed.lock().unwrap().push(task_name.to_owned());
+            if task_name == "second" {
+                self.notify_second_failed.send(()).unwrap();
+            }
+            Err(build_diagnostic_error(
+                CF_BUILD_EXPORT_TASK_FAILED,
+                "test.generator",
+                format!("{task_name} failed"),
+                task_name,
+                "successful generation",
+                "Test generator failure propagation.",
+            ))
+        }
+    }
+
+    #[test]
+    fn runtime_export_waits_for_all_tasks_and_returns_first_declared_failure() {
+        let (sender, receiver) = mpsc::channel();
+        let completed = Arc::new(Mutex::new(Vec::new()));
+        let registry = GeneratorRegistry::new(vec![Box::new(FailingGenerator {
+            second_failed: Mutex::new(receiver),
+            notify_second_failed: sender,
+            completed: completed.clone(),
+        })]);
+        let meta = minimal_meta_model();
+        let linked_meta = meta.link().unwrap();
+        let tasks = ["first", "second", "third"].map(|name| NormalizedExportTask {
+            type_id: "failing".to_owned(),
+            ..export_task(name, PathBuf::from("out"))
+        });
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap();
+        let sink = ArtifactWriter::new(ArtifactWriteMode::DryRun).open_sink();
+
+        let error = export_meta_and_data_tasks(
+            Some(&raw_sources()),
+            &tasks.iter().collect::<Vec<_>>(),
+            &linked_meta,
+            &AssetsConfig::default(),
+            &TargetTags::empty(),
+            std::path::Path::new(""),
+            &ArtifactProjectInfo::default(),
+            "",
+            &crate::build::generated_at(),
+            &registry,
+            &pool,
+            &sink,
+        )
+        .expect_err("generator failures should propagate");
+
+        let diagnostic = expect_single_diagnostic(error);
+        assert_eq!(diagnostic.code, CF_BUILD_EXPORT_TASK_FAILED);
+        assert_eq!(diagnostic.message, "first failed");
+        let completed = completed.lock().unwrap();
+        assert_eq!(completed.len(), 3);
+        let position = |name| completed.iter().position(|task| task == name).unwrap();
+        assert!(position("second") < position("first"));
+        assert!(completed.iter().any(|task| task == "third"));
     }
 
     struct DuplicatePathGenerator;
