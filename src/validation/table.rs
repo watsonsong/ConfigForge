@@ -171,23 +171,12 @@ pub(super) fn validate_normalized_table_view_with_report(
         );
     }
 
-    if !report.has_error() && table_view.resolved_table().is_none() {
-        let visible_row_indices = table_view
-            .visible_rows
-            .iter()
-            .map(|row| row.row_index)
-            .collect::<Vec<_>>();
+    if !report.has_error() {
         collect_table_check(
             &mut report,
             "table.resolve",
             "type",
-            DataResolver::resolve_table_rows(
-                meta,
-                table_view.table,
-                target_tags,
-                visible_row_indices.iter().copied(),
-            )
-            .map(|_| ()),
+            table_view.check_resolution(target_tags),
             DiagnosticLocation {
                 table: Some(meta.meta.name.clone()),
                 ..DiagnosticLocation::default()

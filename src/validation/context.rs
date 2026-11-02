@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    Result,
+    ConfigForgeError, Result,
     data::{
         CellSourceInfo, DataResolver, DataSet, DataTable, ResolvedRow, ResolvedTable,
         ResolvedValue, ValueSourceTrace,
@@ -60,18 +60,12 @@ impl<'meta, 'data> ExportValidationView<'meta, 'data> {
                         let visible_rows: Vec<VisibleRow> = (0..table.rows.len())
                             .map(|row_index| visible_row_for(table, row_index))
                             .collect();
-                        let resolved_table = resolved_table_for(
-                            table_meta,
-                            table,
-                            None,
-                            visible_rows.iter().map(|row| row.row_index),
-                        );
-                        ExportTableView::new(
+                        ExportTableView::resolve(
                             table_meta,
                             table,
                             visible_fields,
                             visible_rows,
-                            resolved_table,
+                            None,
                         )
                     })
                 })
@@ -153,18 +147,12 @@ fn target_table_view<'meta, 'data>(
         })
         .map(|(row_index, _)| visible_row_for(table, row_index))
         .collect();
-    let resolved_table = resolved_table_for(
-        table_meta,
-        table,
-        Some(target_tags),
-        visible_rows.iter().map(|row| row.row_index),
-    );
-    Ok(Some(ExportTableView::new(
+    Ok(Some(ExportTableView::resolve(
         table_meta,
         table,
         visible_fields,
         visible_rows,
-        resolved_table,
+        Some(target_tags),
     )))
 }
 
@@ -188,7 +176,13 @@ pub struct ExportTableView<'meta, 'data> {
     pub table: &'data DataTable,
     pub visible_fields: BTreeSet<&'meta str>,
     pub visible_rows: Vec<VisibleRow>,
-    resolved_table: Option<ResolvedTable>,
+    resolution: TableResolution,
+}
+
+enum TableResolution {
+    Unprepared,
+    Resolved(ResolvedTable),
+    Failed(ConfigForgeError),
 }
 
 impl<'meta, 'data> ExportTableView<'meta, 'data> {
@@ -204,7 +198,51 @@ impl<'meta, 'data> ExportTableView<'meta, 'data> {
             table,
             visible_fields,
             visible_rows,
-            resolved_table,
+            resolution: match resolved_table {
+                Some(table) => TableResolution::Resolved(table),
+                None => TableResolution::Unprepared,
+            },
+        }
+    }
+
+    fn resolve(
+        meta: &'meta LinkedTableMeta<'meta>,
+        table: &'data DataTable,
+        visible_fields: BTreeSet<&'meta str>,
+        visible_rows: Vec<VisibleRow>,
+        target_tags: Option<&TargetTags>,
+    ) -> Self {
+        let resolution = match DataResolver::resolve_table_rows(
+            meta,
+            table,
+            target_tags,
+            visible_rows.iter().map(|row| row.row_index),
+        ) {
+            Ok(table) => TableResolution::Resolved(table),
+            Err(error) => TableResolution::Failed(error),
+        };
+        Self {
+            meta,
+            table,
+            visible_fields,
+            visible_rows,
+            resolution,
+        }
+    }
+
+    pub(super) fn check_resolution(&self, target_tags: Option<&TargetTags>) -> Result<()> {
+        match &self.resolution {
+            TableResolution::Resolved(_) => Ok(()),
+            TableResolution::Failed(error) => {
+                Err(ConfigForgeError::from_diagnostics(error.diagnostics()))
+            }
+            TableResolution::Unprepared => DataResolver::resolve_table_rows(
+                self.meta,
+                self.table,
+                target_tags,
+                self.visible_rows.iter().map(|row| row.row_index),
+            )
+            .map(|_| ()),
         }
     }
 
@@ -213,7 +251,10 @@ impl<'meta, 'data> ExportTableView<'meta, 'data> {
     }
 
     pub fn resolved_table(&self) -> Option<&ResolvedTable> {
-        self.resolved_table.as_ref()
+        match &self.resolution {
+            TableResolution::Resolved(table) => Some(table),
+            TableResolution::Unprepared | TableResolution::Failed(_) => None,
+        }
     }
 
     pub fn visible_raw_row(&self, visible_row_index: usize) -> Option<&'data crate::data::DataRow> {
@@ -223,8 +264,7 @@ impl<'meta, 'data> ExportTableView<'meta, 'data> {
     }
 
     pub fn visible_resolved_row(&self, visible_row_index: usize) -> Option<&ResolvedRow> {
-        self.resolved_table
-            .as_ref()
+        self.resolved_table()
             .and_then(|resolved_table| resolved_table.rows.get(visible_row_index))
     }
 
@@ -273,15 +313,6 @@ impl<'meta, 'data> ExportTableView<'meta, 'data> {
 pub struct ResolvedFieldSource<'data> {
     pub resolved_trace: Option<&'data ValueSourceTrace>,
     pub cell_source: Option<&'data CellSourceInfo>,
-}
-
-fn resolved_table_for(
-    table_meta: &LinkedTableMeta<'_>,
-    table: &DataTable,
-    target_tags: Option<&TargetTags>,
-    row_indices: impl IntoIterator<Item = usize>,
-) -> Option<ResolvedTable> {
-    DataResolver::resolve_table_rows(table_meta, table, target_tags, row_indices).ok()
 }
 
 pub fn visible_row_for(table: &DataTable, row_index: usize) -> VisibleRow {

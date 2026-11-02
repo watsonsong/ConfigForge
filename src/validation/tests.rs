@@ -784,6 +784,203 @@ fn validates_builtin_values_through_resolver_and_report_trace() {
 }
 
 #[test]
+fn validation_views_preserve_resolution_diagnostics_and_legacy_fallback() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[tables]]
+            name = "effects"
+            source = "effects.csv"
+            [[tables.fields]]
+            name = "tint"
+            type = "color"
+            color_format = "hex_rgb"
+            color_channel = "byte"
+            alpha = "default_opaque"
+        "#,
+    )
+    .unwrap();
+    let linked = meta.link().unwrap();
+    let tags = TargetTags::new(["client"]);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    for raw in ["invalid", "#336699"] {
+        let source = RowSourceInfo {
+            source_path: PathBuf::from("effects.xlsx"),
+            source_sheet: Some("Effects".to_owned()),
+            source_row_number: 7,
+            ..fragment_row_source(7, &[])
+        };
+        let cell = CellSourceInfo {
+            source_path: source.source_path.clone(),
+            source_sheet: source.source_sheet.clone(),
+            source_row_number: 7,
+            ..memory_cell_source(3, "tint")
+        };
+        let data_set = DataSet::new(vec![
+            DataTable::new_with_sources_and_cells(
+                "effects",
+                vec![BTreeMap::from([("tint".to_owned(), raw.to_owned())])],
+                vec![source],
+                vec![BTreeMap::from([("tint".to_owned(), cell)])],
+            )
+            .unwrap(),
+        ]);
+        for (view, scope) in [
+            (ExportValidationView::full(&linked, &data_set), None),
+            (
+                ExportValidationView::for_target(&linked, &data_set, &tags).unwrap(),
+                Some(&tags),
+            ),
+            (
+                ExportValidationView::for_target_with_pool(&linked, &data_set, &tags, &pool)
+                    .unwrap(),
+                Some(&tags),
+            ),
+        ] {
+            let table = view.table("effects").unwrap();
+            let legacy = ExportTableView::new(
+                table.meta,
+                table.table,
+                table.visible_fields.clone(),
+                table.visible_rows.clone(),
+                None,
+            );
+            let report = super::table::validate_normalized_table_view_with_report(table, scope);
+            let legacy_report =
+                super::table::validate_normalized_table_view_with_report(&legacy, scope);
+            assert_eq!(report, legacy_report);
+            assert_eq!(report.issues.len(), usize::from(raw == "invalid"));
+            if raw == "invalid" {
+                assert!(table.resolved_table().is_none());
+                let original =
+                    crate::data::DataResolver::resolve_table(table.meta, table.table, scope)
+                        .unwrap_err()
+                        .diagnostics();
+                assert_eq!(
+                    table.check_resolution(scope).unwrap_err().diagnostics(),
+                    original
+                );
+                let issue = &report.issues[0];
+                assert_eq!(issue.code, CF_DATA_INVALID_TYPE);
+                assert_eq!(
+                    issue.location.source_path.as_deref(),
+                    Some(std::path::Path::new("effects.xlsx"))
+                );
+                assert_eq!(issue.location.source_sheet.as_deref(), Some("Effects"));
+                assert_eq!(issue.location.source_row_number, Some(7));
+                assert_eq!(issue.location.source_column_number, Some(4));
+            } else {
+                assert!(table.resolved_table().is_some());
+                table.check_resolution(scope).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn target_resolution_failures_keep_other_field_table_errors_and_warnings() {
+    let meta = MetaModel::from_toml_str(
+        r#"
+            [[structs]]
+            name = "Payload"
+            [[structs.fields]]
+            name = "quantity"
+            type = "int"
+            [[tables]]
+            name = "items"
+            source = "items.csv"
+            [[tables.fields]]
+            name = "id"
+            type = "int"
+            unique = true
+            [[tables.fields]]
+            name = "level"
+            type = "int"
+            [[tables.fields]]
+            name = "title"
+            type = "string"
+            required = true
+            [[tables.fields]]
+            name = "payload"
+            type = "Payload"
+            [[tables]]
+            name = "limits"
+            source = "limits.csv"
+            [[tables.fields]]
+            name = "count"
+            type = "int"
+            [[tables.fields.validators]]
+            kind = "range"
+            max = 10
+            severity = "warning"
+        "#,
+    )
+    .unwrap();
+    let linked = meta.link().unwrap();
+    let tags = TargetTags::new(["client"]);
+    let rows = vec![
+        BTreeMap::from([
+            ("id".to_owned(), "bad-id".to_owned()),
+            ("level".to_owned(), "bad-level".to_owned()),
+            ("payload.quantity".to_owned(), "bad-quantity".to_owned()),
+        ]);
+        2
+    ];
+    let data_set = DataSet::new(vec![
+        DataTable::new("items", rows),
+        DataTable::new(
+            "limits",
+            vec![BTreeMap::from([("count".to_owned(), "11".to_owned())])],
+        ),
+    ]);
+    let serial = validation_report_error(validate_normalized_data_set_for_target_with_report(
+        &linked, &tags, &data_set,
+    ));
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    let parallel = validation_report_error(
+        validate_normalized_data_set_for_target_with_report_and_pool(
+            &linked, &tags, &data_set, &pool,
+        ),
+    );
+    assert_eq!(serial, parallel);
+    for (field, code) in [
+        ("id", CF_DATA_INVALID_TYPE),
+        ("id", CF_DATA_DUPLICATE_KEY),
+        ("level", CF_DATA_INVALID_TYPE),
+        ("title", CF_DATA_MISSING_REQUIRED_FIELD),
+        ("payload.quantity", CF_DATA_INVALID_TYPE),
+    ] {
+        assert!(
+            serial
+                .issues
+                .iter()
+                .any(|issue| issue.code == code && issue.location.field.as_deref() == Some(field))
+        );
+    }
+    assert_eq!(
+        serial
+            .issues
+            .iter()
+            .filter(|issue| issue.code == CF_DATA_INVALID_TYPE
+                && issue.location.field.as_deref() == Some("id"))
+            .count(),
+        1
+    );
+    assert!(
+        serial
+            .issues
+            .iter()
+            .any(|issue| issue.location.table.as_deref() == Some("limits")
+                && issue.severity == ValidationSeverity::Warning)
+    );
+}
+
+#[test]
 fn rejects_builtin_value_fields_as_unique_index_keys() {
     let meta = MetaModel::from_toml_str(
         r#"

@@ -74,6 +74,82 @@ fn diagnostic_run(project: &Path, args: &[&str]) -> serde_json::Value {
 }
 
 #[test]
+fn diagnostic_resolution_failure_keeps_warning_and_report_in_serial_and_parallel() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    fs::write(
+        root.join("effects.csv"),
+        "tint,count\nTint,Count\ninvalid,11\n",
+    )
+    .unwrap();
+    let project = root.join("ConfigForge.toml");
+    fs::write(
+        &project,
+        r#"
+        [project]
+        input = "."
+        [[tables]]
+        name = "effects"
+        source = "effects.csv"
+        [[tables.fields]]
+        name = "tint"
+        type = "color"
+        color_format = "hex_rgb"
+        color_channel = "byte"
+        alpha = "default_opaque"
+        [[tables.fields]]
+        name = "count"
+        type = "int"
+        [[tables.fields.validators]]
+        kind = "range"
+        max = 10
+        severity = "warning"
+        [[targets]]
+        name = "client"
+        [[targets.exports]]
+        type = "json"
+        output = "out"
+    "#,
+    )
+    .unwrap();
+    let mut previous = None;
+    for execution in [&["--serial"][..], &["--jobs", "2"][..]] {
+        let report_path = root.join("report.json");
+        let mut args = execution.to_vec();
+        args.extend([
+            "--report",
+            "json",
+            "--report-output",
+            report_path.to_str().unwrap(),
+        ]);
+        let result = diagnostic_run(&project, &args);
+        assert_eq!(result["status"], "error");
+        let issues = result["diagnostics"].as_array().unwrap();
+        assert_eq!(issues.len(), 2);
+        let error = issues
+            .iter()
+            .find(|issue| issue["code"] == "CF_DATA_INVALID_TYPE")
+            .unwrap();
+        assert_eq!(error["location"]["field"], "tint");
+        assert_eq!(error["location"]["source_row_number"], 3);
+        assert_eq!(error["location"]["source_column_number"], 1);
+        assert!(
+            issues.iter().any(
+                |issue| issue["severity"] == "warning" && issue["location"]["field"] == "count"
+            )
+        );
+        let report: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&report_path).unwrap()).unwrap();
+        assert_eq!(report["issues"].as_array().unwrap().len(), 2);
+        assert!(!root.join("out/effects.json").exists());
+        if let Some(previous) = previous {
+            assert_eq!(result, previous);
+        }
+        previous = Some(result);
+    }
+}
+
+#[test]
 fn diagnostic_report_failure_preserves_validation_and_attempts_other_reports() {
     let temp = tempfile::tempdir().unwrap();
     let project = diagnostic_project(temp.path(), "error", true);

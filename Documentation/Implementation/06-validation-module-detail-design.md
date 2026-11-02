@@ -47,6 +47,10 @@ ExportTableView 保留 raw table，并缓存与 visible rows 对齐的 ResolvedT
 - resolved_path_value：fragment / nested struct path。
 - field_source：关联 resolved trace 和 raw cell location。
 
+视图内部的 `TableResolution` 明确区分 `Unprepared`、`Resolved` 与 `Failed`。full / target 构造保留首次 resolve 的成功结果或原始错误，不再通过 `.ok()` 丢弃失败。表级校验仍先收集基础字段错误；仅在这些检查无 error 时补充保存的 resolve 错误，避免同一失败被重复报告，并继续执行后续 table / FK / Asset / registry 检查。解析失败时仍允许 raw fallback 收集其他问题，不改成提前 `?` 阻断。
+
+公开的 `ExportTableView::new(..., Option<ResolvedTable>)` 与 resolved accessors 保持兼容：`Some` 表示已准备，`None` 表示尚未准备；只有这类显式未准备视图在表级检查需要时调用 resolver，生产构造出的失败视图不会再次解析。对外的 `resolved_table()` 仍返回 `Option<&ResolvedTable>`，内部不再依靠这个 accessor 推断失败原因。
+
 VisibleRow.row_index 指向原始 DataTable 下标，source row/sheet/column 取自 raw provenance，不是过滤后的行号。typed parse 复用 data::typed_value，不在 validator、struct 或 FK element 校验中维护另一套转换规则。
 
 ## 6.4 Registry 编译与执行
